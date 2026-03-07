@@ -1,0 +1,15 @@
+{
+  "name": "howler-looker-dashboard-tool",
+  "version": "1.0.0",
+  "description": "Looker dashboard recreation tool for Howler event management platform",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "node-fetch": "^2.7.0"
+  }
+}
