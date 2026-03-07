@@ -120,6 +120,8 @@ async function recreateDashboard(source, newTitle, folderId) {
   // 2b. Recreate each tile
   for (const el of elements) {
     try {
+      // DEBUG: log what fields this element has
+      console.log(`[debug] Element "${el.title}" type=${el.type} look_id=${el.look_id} query_id=${el.query_id} result_maker_id=${el.result_maker_id} has_query=${!!el.query} has_result_maker=${!!el.result_maker} result_maker_query=${!!(el.result_maker && el.result_maker.query)}`);
       const payload = buildElementPayload(el, newDashboard.id);
       const newEl = await lookerRequest('POST', '/dashboard_elements', payload);
       elementIdMap[el.id] = newEl.id;
