@@ -153,26 +153,6 @@ async function recreateDashboard(source, newTitle, folderId) {
   return results;
 }
 
-function buildQueryBody(q) {
-  return {
-    model: q.model,
-    view: q.view,
-    fields: q.fields || [],
-    pivots: q.pivots || null,
-    fill_fields: q.fill_fields || null,
-    filters: q.filters || null,
-    filter_expression: q.filter_expression || null,
-    sorts: q.sorts || null,
-    limit: q.limit || null,
-    column_limit: q.column_limit || null,
-    total: q.total ?? null,
-    row_total: q.row_total || null,
-    subtotals: q.subtotals || null,
-    vis_config: q.vis_config || null,
-    dynamic_fields: q.dynamic_fields || null,
-    query_timezone: q.query_timezone || null,
-  };
-}
 
 function buildElementPayload(el, newDashboardId) {
   const payload = {
@@ -201,22 +181,16 @@ function buildElementPayload(el, newDashboardId) {
     return payload;
   }
 
-  // Inline query (modern dashboards embed query inside result_maker)
-  const query = el.query || el.result_maker?.query;
-  if (query) {
-    payload.query = buildQueryBody(query);
-    return payload;
-  }
-
-  // Fallback: reuse existing query_id
-  if (el.query_id) {
-    payload.query_id = el.query_id;
-    return payload;
-  }
-
-  // Fallback: reuse existing result_maker_id
+  // result_maker_id — most reliable for modern dashboards (numeric ID)
   if (el.result_maker_id) {
     payload.result_maker_id = el.result_maker_id;
+    return payload;
+  }
+
+  // Fallback: use the numeric query id (el.query.id, not the slug)
+  const queryId = el.result_maker?.query?.id || el.query?.id;
+  if (queryId) {
+    payload.query_id = queryId;
     return payload;
   }
 
