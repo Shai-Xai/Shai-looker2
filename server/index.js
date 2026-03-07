@@ -2,10 +2,16 @@ require('dotenv').config();
 const express = require('express');
 const fetch = require('node-fetch');
 const path = require('path');
+const fs = require('fs');
 
 const app = express();
 app.use(express.json());
-app.use(express.static(path.join(__dirname, '../client')));
+
+// Serve built React app (client/dist) if it exists, otherwise raw client/
+const clientDist = path.join(__dirname, '../client/dist');
+const clientFallback = path.join(__dirname, '../client');
+const staticDir = fs.existsSync(clientDist) ? clientDist : clientFallback;
+app.use(express.static(staticDir));
 
 const LOOKER_BASE_URL = process.env.LOOKER_BASE_URL?.replace(/\/$/, '');
 const API_BASE = `${LOOKER_BASE_URL}/api/4.0`;
@@ -280,6 +286,124 @@ app.post('/api/recreate', async (req, res) => {
     console.error('[POST /api/recreate]', err.message);
     res.status(500).json({ error: err.message });
   }
+});
+
+// ─── Dashboard Viewer API ──────────────────────────────────────────────────────
+
+// Extract query body from a dashboard element's result_maker or query field
+function extractQueryFromElement(el) {
+  if (el.type === 'text') return null;
+  const q = el.result_maker?.query || el.query;
+  if (!q) return null;
+  return {
+    model: q.model,
+    view: q.view,
+    fields: q.fields || [],
+    pivots: q.pivots || null,
+    fill_fields: q.fill_fields || null,
+    filters: q.filters || null,
+    filter_expression: q.filter_expression || null,
+    sorts: q.sorts || null,
+    limit: q.limit || '500',
+    column_limit: q.column_limit || null,
+    total: q.total ?? null,
+    row_total: q.row_total || null,
+    dynamic_fields: q.dynamic_fields || null,
+    query_timezone: q.query_timezone || null,
+  };
+}
+
+// Full dashboard definition for the viewer (layout + queries + filters)
+app.get('/api/dashboard/:id/view', async (req, res) => {
+  try {
+    const { dashboard, elements, filters } = await fetchDashboard(req.params.id);
+
+    // Build per-element filter map: elementId -> { filterName -> queryField }
+    const elementFilterMap = {};
+    for (const filter of filters) {
+      for (const link of filter.listens_to_filters || []) {
+        if (!elementFilterMap[link.dashboard_element_id]) {
+          elementFilterMap[link.dashboard_element_id] = {};
+        }
+        elementFilterMap[link.dashboard_element_id][filter.name] =
+          link.field || filter.dimension;
+      }
+    }
+
+    const tiles = elements.map((el) => ({
+      id: el.id,
+      type: el.type,
+      title: el.title || '',
+      body_text: el.body_text || '',
+      vis_config: el.vis_config || {},
+      row: el.row ?? 0,
+      col: el.col ?? 0,
+      width: el.width ?? 8,
+      height: el.height ?? 4,
+      query: extractQueryFromElement(el),
+      filterMap: elementFilterMap[el.id] || {},
+    }));
+
+    res.json({
+      id: dashboard.id,
+      title: dashboard.title,
+      tiles,
+      filters: filters.map((f) => ({
+        id: f.id,
+        name: f.name,
+        title: f.title || f.name,
+        type: f.type,
+        default_value: f.default_value || '',
+        model: f.model,
+        explore: f.explore,
+        dimension: f.dimension,
+        ui_config: f.ui_config || {},
+        allow_multiple_values: f.allow_multiple_values ?? false,
+      })),
+    });
+  } catch (err) {
+    console.error('[GET /api/dashboard/view]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Run a Looker query with optional filter overrides, returns json_detail format
+app.post('/api/run-query', async (req, res) => {
+  try {
+    const { query, filterOverrides = {} } = req.body;
+    if (!query) return res.status(400).json({ error: 'query is required' });
+
+    const queryBody = {
+      ...query,
+      filters: { ...(query.filters || {}), ...filterOverrides },
+    };
+
+    const data = await lookerRequest('POST', '/queries/run/json_detail', queryBody);
+    res.json(data);
+  } catch (err) {
+    console.error('[POST /api/run-query]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Filter value suggestions from Looker
+app.post('/api/filter-suggest', async (req, res) => {
+  try {
+    const { model, explore, field } = req.body;
+    const data = await lookerRequest(
+      'GET',
+      `/looks/model/explore/fields?model_name=${encodeURIComponent(model)}&explore_name=${encodeURIComponent(explore)}&field_names=${encodeURIComponent(field)}&limit=100`
+    );
+    // Fall back to empty — suggest endpoint varies by Looker version
+    res.json({ suggestions: data?.suggest_dimension?.suggestions || [] });
+  } catch (_) {
+    res.json({ suggestions: [] });
+  }
+});
+
+// SPA fallback — must be after all API routes
+app.get('*', (_req, res) => {
+  res.sendFile(path.join(staticDir, 'index.html'));
 });
 
 // ─── Start ─────────────────────────────────────────────────────────────────────
