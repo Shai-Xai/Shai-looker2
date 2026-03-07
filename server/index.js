@@ -151,6 +151,27 @@ async function recreateDashboard(source, newTitle, folderId) {
   return results;
 }
 
+function buildQueryBody(q) {
+  return {
+    model: q.model,
+    view: q.view,
+    fields: q.fields || [],
+    pivots: q.pivots || null,
+    fill_fields: q.fill_fields || null,
+    filters: q.filters || null,
+    filter_expression: q.filter_expression || null,
+    sorts: q.sorts || null,
+    limit: q.limit || null,
+    column_limit: q.column_limit || null,
+    total: q.total ?? null,
+    row_total: q.row_total || null,
+    subtotals: q.subtotals || null,
+    vis_config: q.vis_config || null,
+    dynamic_fields: q.dynamic_fields || null,
+    query_timezone: q.query_timezone || null,
+  };
+}
+
 function buildElementPayload(el, newDashboardId) {
   const payload = {
     dashboard_id: newDashboardId,
@@ -160,42 +181,44 @@ function buildElementPayload(el, newDashboardId) {
     note_text: el.note_text || null,
     note_display: el.note_display || null,
     note_state: el.note_state || null,
-    // Dashboard layout positioning is handled separately via dashboard_layouts;
-    // include row/col if the API accepts them at creation time
     row: el.row ?? null,
     col: el.col ?? null,
     width: el.width ?? null,
     height: el.height ?? null,
   };
 
-  // Tile backed by a saved Look
+  // Text/markdown tile — no query needed
+  if (el.type === 'text') {
+    payload.body_text = el.body_text || '';
+    return payload;
+  }
+
+  // Look-backed tile
   if (el.look_id) {
     payload.look_id = el.look_id;
+    return payload;
   }
 
-  // Tile backed by an inline query
-  if (el.query) {
-    payload.query = {
-      model: el.query.model,
-      view: el.query.view,
-      fields: el.query.fields || [],
-      pivots: el.query.pivots || null,
-      fill_fields: el.query.fill_fields || null,
-      filters: el.query.filters || null,
-      filter_expression: el.query.filter_expression || null,
-      sorts: el.query.sorts || null,
-      limit: el.query.limit || null,
-      column_limit: el.query.column_limit || null,
-      total: el.query.total ?? null,
-      row_total: el.query.row_total || null,
-      subtotals: el.query.subtotals || null,
-      vis_config: el.query.vis_config || null,
-      dynamic_fields: el.query.dynamic_fields || null,
-      query_timezone: el.query.query_timezone || null,
-    };
+  // Inline query (modern dashboards embed query inside result_maker)
+  const query = el.query || el.result_maker?.query;
+  if (query) {
+    payload.query = buildQueryBody(query);
+    return payload;
   }
 
-  // Merge tile (text/markdown)
+  // Fallback: reuse existing query_id
+  if (el.query_id) {
+    payload.query_id = el.query_id;
+    return payload;
+  }
+
+  // Fallback: reuse existing result_maker_id
+  if (el.result_maker_id) {
+    payload.result_maker_id = el.result_maker_id;
+    return payload;
+  }
+
+  // Plain text body (non-type=text tiles with body content)
   if (el.body_text !== undefined) {
     payload.body_text = el.body_text;
   }
