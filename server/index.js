@@ -84,13 +84,55 @@ async function lookerRequest(method, path, body = null, retry = true) {
 
 // ─── Step 1: Fetch Dashboard ───────────────────────────────────────────────────
 
+// Fields to request when fetching elements — includes nested query for viewer
+const ELEMENT_FIELDS = [
+  'id', 'type', 'title', 'body_text', 'vis_config',
+  'row', 'col', 'width', 'height',
+  'look_id', 'query_id', 'result_maker_id',
+  'result_maker(query(id,model,view,fields,pivots,fill_fields,filters,filter_expression,sorts,limit,column_limit,total,row_total,dynamic_fields,query_timezone))',
+  'query(id,model,view,fields,pivots,fill_fields,filters,filter_expression,sorts,limit,column_limit,total,row_total,dynamic_fields,query_timezone)',
+  'note_text', 'note_display', 'note_state',
+].join(',');
+
 async function fetchDashboard(dashboardId) {
   const [dashboard, elements, filters] = await Promise.all([
     lookerRequest('GET', `/dashboards/${dashboardId}`),
-    lookerRequest('GET', `/dashboards/${dashboardId}/dashboard_elements`),
+    lookerRequest('GET', `/dashboards/${dashboardId}/dashboard_elements?fields=${encodeURIComponent(ELEMENT_FIELDS)}`),
     lookerRequest('GET', `/dashboards/${dashboardId}/dashboard_filters`),
   ]);
   return { dashboard, elements, filters };
+}
+
+// Resolve the full query body for elements that don't have it inline.
+// Handles result_maker_id, query_id, and look_id tiles.
+async function resolveElementQueries(elements) {
+  await Promise.all(elements.map(async (el) => {
+    if (el.type === 'text') return;
+
+    // Already have a full query inline
+    const q = el.result_maker?.query || el.query;
+    if (q?.model) return;
+
+    try {
+      if (el.result_maker_id) {
+        // Fetch the result_maker to get its query
+        const rm = await lookerRequest('GET', `/result_makers/${el.result_maker_id}`);
+        el._resolvedQuery = rm.query;
+      } else if (el.query_id) {
+        el._resolvedQuery = await lookerRequest('GET', `/queries/${el.query_id}`);
+      } else if (el.look_id) {
+        // Look → query_id → query
+        const look = await lookerRequest('GET', `/looks/${el.look_id}`);
+        if (look.query_id) {
+          el._resolvedQuery = await lookerRequest('GET', `/queries/${look.query_id}`);
+        } else if (look.query) {
+          el._resolvedQuery = look.query;
+        }
+      }
+    } catch (err) {
+      console.warn(`[view] Could not resolve query for element "${el.title}" (${el.id}): ${err.message}`);
+    }
+  }));
 }
 
 // ─── Step 2: Recreate Dashboard ───────────────────────────────────────────────
@@ -290,11 +332,12 @@ app.post('/api/recreate', async (req, res) => {
 
 // ─── Dashboard Viewer API ──────────────────────────────────────────────────────
 
-// Extract query body from a dashboard element's result_maker or query field
+// Extract query body from a dashboard element's result_maker or query field.
+// Falls back to el._resolvedQuery set by resolveElementQueries().
 function extractQueryFromElement(el) {
   if (el.type === 'text') return null;
-  const q = el.result_maker?.query || el.query;
-  if (!q) return null;
+  const q = el._resolvedQuery || el.result_maker?.query || el.query;
+  if (!q?.model) return null; // unusable without at least model+view
   return {
     model: q.model,
     view: q.view,
@@ -317,6 +360,16 @@ function extractQueryFromElement(el) {
 app.get('/api/dashboard/:id/view', async (req, res) => {
   try {
     const { dashboard, elements, filters } = await fetchDashboard(req.params.id);
+
+    // Ensure every vis tile has a full query body (fetches missing ones from API)
+    await resolveElementQueries(elements);
+
+    const withQuery = elements.filter(el => el.type === 'text' || extractQueryFromElement(el));
+    const missing = elements.length - withQuery.length;
+    if (missing > 0) {
+      console.warn(`[view] ${missing}/${elements.length} tiles have no resolvable query`);
+    }
+    console.log(`[view] Dashboard ${dashboard.id}: ${elements.length} tiles, ${filters.length} filters, ${missing} without query`);
 
     // Build per-element filter map: elementId -> { filterName -> queryField }
     const elementFilterMap = {};

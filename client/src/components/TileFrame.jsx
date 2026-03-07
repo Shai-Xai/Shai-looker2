@@ -6,7 +6,7 @@ import TextTile from './tiles/TextTile.jsx';
 
 export default function TileFrame({ tile, filterValues }) {
   const [queryResult, setQueryResult] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(tile.type !== 'text' && !!tile.query);
   const [error, setError] = useState(null);
   const abortRef = useRef(null);
 
@@ -23,7 +23,10 @@ export default function TileFrame({ tile, filterValues }) {
   }
 
   useEffect(() => {
-    if (tile.type === 'text' || !tile.query) return;
+    if (tile.type === 'text' || !tile.query) {
+      setLoading(false);
+      return;
+    }
 
     // Abort any in-flight request
     if (abortRef.current) abortRef.current.abort();
@@ -92,6 +95,8 @@ export default function TileFrame({ tile, filterValues }) {
           <ErrorState message={error} />
         ) : queryResult ? (
           <TileContent tile={tile} data={queryResult} />
+        ) : !tile.query && tile.type !== 'text' ? (
+          <NoQuery />
         ) : null}
       </div>
     </div>
@@ -132,7 +137,15 @@ function LoadingState() {
 function ErrorState({ message }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', padding: 12 }}>
-      <p style={{ color: 'var(--error)', fontSize: 11, textAlign: 'center', lineHeight: 1.4 }}>{message}</p>
+      <p style={{ color: 'var(--error)', fontSize: 11, textAlign: 'center', lineHeight: 1.4 }}>⚠ {message}</p>
+    </div>
+  );
+}
+
+function NoQuery() {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#ccc', fontSize: 11 }}>
+      No query
     </div>
   );
 }
