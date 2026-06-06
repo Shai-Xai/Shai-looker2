@@ -1,5 +1,6 @@
 import { cellText, formatNumber } from '../../lib/format.js';
 import { useDrill } from '../../lib/DrillContext.jsx';
+import AutoFitText from '../AutoFitText.jsx';
 
 // Single value / KPI tile. Mirrors Looker's single_value visualization:
 // big rendered value, optional custom color, optional comparison to a second
@@ -61,15 +62,17 @@ export default function SingleValueTile({ data, visConfig = {} }) {
 
   return (
     <div style={wrap}>
-      <div
+      <AutoFitText
+        max={40}
+        min={14}
         onClick={drillable ? () => openDrill(primaryCell.links, primaryField.label_short || primaryField.label) : undefined}
-        style={{
-          fontSize: 'clamp(22px, 4.5vw, 40px)', fontWeight: 700, color, lineHeight: 1.05, letterSpacing: '-0.5px',
-          ...(drillable ? { cursor: 'pointer', textDecoration: 'underline', textDecorationStyle: 'dotted', textUnderlineOffset: 4 } : null),
+        spanStyle={{
+          fontWeight: 700, color, letterSpacing: '-0.5px',
+          ...(drillable ? { textDecoration: 'underline', textDecorationStyle: 'dotted', textUnderlineOffset: 4 } : null),
         }}
       >
         {primaryValue}
-      </div>
+      </AutoFitText>
       {comparison && (
         <div style={{ fontSize: 13, marginTop: 8, fontWeight: 600, color: comparison.color }}>
           {comparison.text}

@@ -1,5 +1,6 @@
 import { cellText, formatNumber } from '../../lib/format.js';
 import { useDrill } from '../../lib/DrillContext.jsx';
+import AutoFitText from '../AutoFitText.jsx';
 
 // Horizontal bar gauge — mirrors the Looker marketplace "bar_gauge" viz in
 // its horizontal style: a track from range_min→range_max, a coloured fill for
@@ -43,15 +44,17 @@ export default function BarGaugeTile({ data, visConfig = {} }) {
 
   return (
     <div style={wrap}>
-      <div
+      <AutoFitText
+        max={30}
+        min={13}
         onClick={drillable ? () => openDrill(cell.links, measure.label_short || measure.label) : undefined}
-        style={{
-          fontSize: 'clamp(18px, 3.5vw, 30px)', fontWeight: 700, color: '#222', letterSpacing: '-0.4px',
-          ...(drillable ? { cursor: 'pointer', textDecoration: 'underline', textDecorationStyle: 'dotted', textUnderlineOffset: 4 } : null),
+        spanStyle={{
+          fontWeight: 700, color: '#222', letterSpacing: '-0.4px',
+          ...(drillable ? { textDecoration: 'underline', textDecorationStyle: 'dotted', textUnderlineOffset: 4 } : null),
         }}
       >
         {valueLabel}
-      </div>
+      </AutoFitText>
 
       {/* Track */}
       <div style={{ position: 'relative', width: '100%', height: 22, background: bgColor, borderRadius: 4, marginTop: 14 }}>
