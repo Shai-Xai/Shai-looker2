@@ -3,22 +3,10 @@
 // own editable dashboard definition. After import there is no link back to
 // Looker's dashboard object — the definition is fully owned and editable here.
 
-const { extractQueryFromElement } = require('./looker');
+const { extractQueryFromElement, extractVisFromElement } = require('./looker');
 const { defaultTheme } = require('./store');
 
 function convertDashboard({ dashboard, elements, filters }) {
-  // Per-element filter wiring: elementId -> { filterName -> queryField }
-  const elementFilterMap = {};
-  for (const filter of filters) {
-    for (const link of filter.listens_to_filters || []) {
-      if (!elementFilterMap[link.dashboard_element_id]) {
-        elementFilterMap[link.dashboard_element_id] = {};
-      }
-      elementFilterMap[link.dashboard_element_id][filter.name] =
-        link.field || filter.dimension;
-    }
-  }
-
   const tiles = elements.map((el) => {
     const isText = el.type === 'text';
     return {
@@ -33,8 +21,8 @@ function convertDashboard({ dashboard, elements, filters }) {
         h: el.height ?? 6,
       },
       query: isText ? null : extractQueryFromElement(el),
-      vis: el.vis_config || { type: 'looker_column' },
-      listenTo: elementFilterMap[el.id] || {},
+      vis: isText ? {} : extractVisFromElement(el),
+      listenTo: extractListenTo(el),
     };
   });
 
@@ -59,6 +47,21 @@ function convertDashboard({ dashboard, elements, filters }) {
     tiles,
     source: { lookerDashboardId: String(dashboard.id) },
   };
+}
+
+// Build a tile's filter wiring ({ dashboardFilterName -> queryField }) from the
+// result_maker's filterables. This is how Looker maps dashboard filters onto
+// each tile's underlying query.
+function extractListenTo(el) {
+  const listenTo = {};
+  for (const fb of el.result_maker?.filterables || []) {
+    for (const l of fb.listen || []) {
+      if (l.dashboard_filter_name && l.field) {
+        listenTo[l.dashboard_filter_name] = l.field;
+      }
+    }
+  }
+  return listenTo;
 }
 
 function cryptoId() {

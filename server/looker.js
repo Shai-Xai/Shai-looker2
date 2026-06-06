@@ -77,8 +77,8 @@ const ELEMENT_FIELDS = [
   'id', 'type', 'title', 'body_text', 'vis_config',
   'row', 'col', 'width', 'height',
   'look_id', 'query_id', 'result_maker_id',
-  'result_maker(query(id,model,view,fields,pivots,fill_fields,filters,filter_expression,sorts,limit,column_limit,total,row_total,dynamic_fields,query_timezone))',
-  'query(id,model,view,fields,pivots,fill_fields,filters,filter_expression,sorts,limit,column_limit,total,row_total,dynamic_fields,query_timezone)',
+  'result_maker(vis_config,filterables(listen(dashboard_filter_name,field)),query(id,model,view,fields,pivots,fill_fields,filters,filter_expression,sorts,limit,column_limit,total,row_total,dynamic_fields,query_timezone,vis_config))',
+  'query(id,model,view,fields,pivots,fill_fields,filters,filter_expression,sorts,limit,column_limit,total,row_total,dynamic_fields,query_timezone,vis_config)',
   'note_text', 'note_display', 'note_state',
 ].join(',');
 
@@ -123,6 +123,19 @@ function extractQueryFromElement(el) {
   if (el.type === 'text') return null;
   const q = el._resolvedQuery || el.result_maker?.query || el.query;
   return normalizeQuery(q);
+}
+
+// Find a tile's visualization config. On this Looker version it lives on the
+// result_maker (or its query), not on the dashboard element itself.
+function extractVisFromElement(el) {
+  return (
+    el.vis_config ||
+    el.result_maker?.vis_config ||
+    el.result_maker?.query?.vis_config ||
+    el.query?.vis_config ||
+    el._resolvedQuery?.vis_config ||
+    { type: 'looker_column' }
+  );
 }
 
 function normalizeQuery(q) {
@@ -186,6 +199,7 @@ module.exports = {
   fetchDashboard,
   resolveElementQueries,
   extractQueryFromElement,
+  extractVisFromElement,
   normalizeQuery,
   listModels,
   getExploreFields,
