@@ -12,8 +12,11 @@
     "postbuild": "echo 'Build complete — run npm start to serve'"
   },
   "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cookie-parser": "^1.4.7",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.3",
     "node-fetch": "^2.7.0"
   },
   "devDependencies": {

@@ -7,6 +7,28 @@ async function json(res) {
 }
 
 export const api = {
+  // Auth
+  me: () => fetch('/api/auth/me').then(json),
+  login: (email, password) =>
+    fetch('/api/auth/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    }).then(json),
+  logout: () => fetch('/api/auth/logout', { method: 'POST' }).then(json),
+
+  // Tenants (admin manages; clients can read their own)
+  listTenants: () => fetch('/api/tenants').then(json),
+  adminListTenants: () => fetch('/api/admin/tenants').then(json),
+  adminCreateTenant: (t) => fetch('/api/admin/tenants', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(t) }).then(json),
+  adminUpdateTenant: (id, t) => fetch(`/api/admin/tenants/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(t) }).then(json),
+  adminDeleteTenant: (id) => fetch(`/api/admin/tenants/${id}`, { method: 'DELETE' }),
+
+  // Users (admin)
+  adminListUsers: () => fetch('/api/admin/users').then(json),
+  adminCreateUser: (u) => fetch('/api/admin/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(u) }).then(json),
+  adminUpdateUser: (id, u) => fetch(`/api/admin/users/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(u) }).then(json),
+  adminDeleteUser: (id) => fetch(`/api/admin/users/${id}`, { method: 'DELETE' }),
+
   // Saved dashboards
   listDashboards: () => fetch('/api/dashboards').then(json),
   getDashboard: (id) => fetch(`/api/dashboards/${id}`).then(json),

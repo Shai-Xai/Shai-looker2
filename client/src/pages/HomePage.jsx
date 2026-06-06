@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { api } from '../lib/api.js';
+import { useAuth } from '../lib/auth.jsx';
 
 export default function HomePage() {
   const navigate = useNavigate();
+  const { isAdmin } = useAuth();
   const [dashboards, setDashboards] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -52,7 +54,8 @@ export default function HomePage() {
 
   return (
     <main style={{ flex: 1, padding: '32px 24px', maxWidth: 1100, margin: '0 auto', width: '100%' }}>
-      {/* Actions */}
+      {/* Actions — admin only */}
+      {isAdmin && (
       <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 28 }}>
         <div style={cardStyle}>
           <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>Build from scratch</div>
@@ -79,8 +82,9 @@ export default function HomePage() {
           </div>
         </div>
       </div>
+      )}
 
-      <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 14 }}>Your dashboards</h2>
+      <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 14 }}>{isAdmin ? 'Your dashboards' : 'Dashboards'}</h2>
 
       {loading ? (
         <p style={{ color: 'var(--muted)' }}>Loading…</p>
@@ -94,7 +98,7 @@ export default function HomePage() {
             <div key={d.id} style={listCardStyle} onClick={() => navigate(`/d/${d.id}`)}>
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
                 <div style={{ flex: 1, fontSize: 15, fontWeight: 700, lineHeight: 1.3 }}>{d.title}</div>
-                <button style={deleteBtn} title="Delete" onClick={(e) => handleDelete(d.id, e)}>✕</button>
+                {isAdmin && <button style={deleteBtn} title="Delete" onClick={(e) => handleDelete(d.id, e)}>✕</button>}
               </div>
               {d.description && <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>{d.description}</div>}
               <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 12, display: 'flex', gap: 10, alignItems: 'center' }}>
@@ -103,7 +107,7 @@ export default function HomePage() {
               </div>
               <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
                 <button style={miniBtn} onClick={(e) => { e.stopPropagation(); navigate(`/d/${d.id}`); }}>View</button>
-                <button style={miniBtnOutline} onClick={(e) => { e.stopPropagation(); navigate(`/d/${d.id}/edit`); }}>Edit</button>
+                {isAdmin && <button style={miniBtnOutline} onClick={(e) => { e.stopPropagation(); navigate(`/d/${d.id}/edit`); }}>Edit</button>}
               </div>
             </div>
           ))}

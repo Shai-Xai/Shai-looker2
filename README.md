@@ -7,6 +7,15 @@ You can:
 - **Build dashboards from scratch** — pick a Looker model → explore → fields/measures, choose a visualization, drag & resize tiles on a 24-column grid.
 - **Replicate any Looker dashboard** — import an existing Looker dashboard; it's converted into a fully editable definition owned by this app.
 - **Clone inside Looker** — the original workflow that copies a dashboard into a new *Looker* dashboard (still available under `/clone`).
+- **Drill into any value** — click a KPI, table cell, or chart point to see the underlying rows (parses Looker's drill links).
+- **Serve multiple clients (multi-tenant)** — clients log in and see only their dashboards, with every query **scoped server-side** to their organiser name(s) and (optionally) specific events. Admins build dashboards and manage client accounts.
+
+## Roles & multi-tenancy
+
+- **Admin** (Howler internal): builds/imports/edits dashboards, manages clients & logins (`/admin`), assigns each dashboard to "all clients (shared)" or a specific client, and sees all data unscoped.
+- **Client**: logs in, sees shared dashboards + any assigned to them, read-only, with data **forced** to their organiser/events. The scope filter is injected on the server before the query reaches Looker, so it can't be bypassed from the browser.
+
+On first run an admin is seeded from `ADMIN_EMAIL` / `ADMIN_PASSWORD` (see `.env`). Because the app talks to Looker via a single API service account, scoping is enforced by this app (not Looker user attributes) — it fails closed if a client has no organiser configured.
 
 Dashboards are stored as JSON in this app's own store (file-backed by default). Looker is only ever called to **run queries** and to **browse metadata** — it never renders UI.
 

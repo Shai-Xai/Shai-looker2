@@ -3,11 +3,13 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import FilterBar from '../components/FilterBar.jsx';
 import EditableGrid from '../components/EditableGrid.jsx';
 import { api } from '../lib/api.js';
+import { useAuth } from '../lib/auth.jsx';
 
 // Read-only render of a saved dashboard.
 export default function ViewPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { isAdmin } = useAuth();
   const [def, setDef] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -50,7 +52,7 @@ export default function ViewPage() {
       <div style={{ background: '#fff', borderBottom: '1px solid #e0e0e0', padding: '14px 24px', display: 'flex', alignItems: 'center', gap: 16 }}>
         <Link to="/" style={{ color: 'var(--muted)', fontSize: 13, textDecoration: 'none' }}>← Back</Link>
         <h2 style={{ fontSize: 18, fontWeight: 700, flex: 1 }}>{def.title}</h2>
-        <button style={editBtn} onClick={() => navigate(`/d/${id}/edit`)}>Edit</button>
+        {isAdmin && <button style={editBtn} onClick={() => navigate(`/d/${id}/edit`)}>Edit</button>}
       </div>
 
       {def.filters?.length > 0 && (

@@ -35,12 +35,13 @@ function list() {
     .filter((f) => f.endsWith('.json'))
     .map((f) => readFile(path.basename(f, '.json')))
     .filter(Boolean)
-    .map(({ id, title, description, updatedAt, createdAt, source, tiles }) => ({
+    .map(({ id, title, description, updatedAt, createdAt, source, tiles, tenantId }) => ({
       id,
       title,
       description: description || '',
       tileCount: (tiles || []).length,
       source: source || null,
+      tenantId: tenantId || null,
       createdAt,
       updatedAt,
     }))
@@ -63,6 +64,7 @@ function create(def) {
     filters: def.filters || [],
     tiles: def.tiles || [],
     source: def.source || null,
+    tenantId: def.tenantId || null,
     createdAt: now,
     updatedAt: now,
   };
