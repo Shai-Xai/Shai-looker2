@@ -8,7 +8,7 @@ export default function SingleValueTile({ data, visConfig = {} }) {
   const rows = data.data || [];
   if (!rows.length) return <Empty />;
 
-  const measures = fields.measures || [];
+  const measures = [...(fields.measures || []), ...(fields.table_calculations || [])];
   const dimensions = fields.dimensions || [];
   const allFields = [...measures, ...dimensions];
 

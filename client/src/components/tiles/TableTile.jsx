@@ -6,7 +6,7 @@ export default function TableTile({ data }) {
   const fields = data.fields || {};
   const rows = data.data || [];
   const dimensions = fields.dimensions || [];
-  const measures = fields.measures || [];
+  const measures = [...(fields.measures || []), ...(fields.table_calculations || [])];
   const allFields = [...dimensions, ...measures];
 
   if (!rows.length || !allFields.length) return <Empty />;

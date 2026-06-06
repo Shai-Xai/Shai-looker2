@@ -34,7 +34,8 @@ export default function ChartTile({ data, visConfig = {} }) {
   const fields = data.fields || {};
   const rows = data.data || [];
   const dimensions = fields.dimensions || [];
-  const measures = fields.measures || [];
+  // Table calculations (running totals, % change, etc.) are plottable series too.
+  const measures = [...(fields.measures || []), ...(fields.table_calculations || [])];
   const pivots = data.pivots || [];
   const visType = visConfig?.type || 'looker_column';
 
@@ -57,19 +58,23 @@ export default function ChartTile({ data, visConfig = {} }) {
     const primaryDim = dimensions[0];
     const labels = rows.map((row) => (primaryDim ? cellText(row[primaryDim.name]) : ''));
 
+    const num = (v) => (v == null || v === '' ? null : Number(v));
+
     let datasets;
     if (pivots.length > 0) {
+      // Pivoted: measure values are nested by pivot key →
+      // row[measureName][pivot.key].value
       datasets = [];
+      const multiMeasure = measures.length > 1;
       pivots.forEach((pivot, pi) => {
-        const pivotKey = Object.values(pivot.data || pivot).join(' | ');
+        const plabel = pivot.data ? Object.values(pivot.data).join(' / ') : pivot.key;
         measures.forEach((measure, mi) => {
           const idx = pi * measures.length + mi;
-          const key = `${pivotKey}|${measure.name}`;
-          const label = `${pivotKey} — ${measure.label_short || measure.label}`;
+          const label = multiMeasure ? `${plabel} — ${measure.label_short || measure.label}` : plabel;
           datasets.push({
             label,
             _fmt: measure.value_format,
-            data: rows.map((row) => row[key]?.value ?? row[`${measure.name}_${pi}`]?.value ?? null),
+            data: rows.map((row) => num(row[measure.name]?.[pivot.key]?.value)),
             backgroundColor: colorFor(label, idx, isPie ? 0.85 : 0.78),
             borderColor: colorFor(label, idx, 1),
             borderWidth: 1.5,
