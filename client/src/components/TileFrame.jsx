@@ -29,6 +29,12 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
 
   const canInsight = insightsEnabled && tile.type !== 'text' && data && !loading && !error;
 
+  // Metric-style tiles (single value, gauge) show their label *below* the
+  // number (Looker convention), so they don't get a top title bar in view mode.
+  const visType = tile.vis?.type;
+  const isMetric = visType === 'single_value' || visType === 'single_value_period_over_period' || (visType || '').includes('bar_gauge');
+  const showHeader = editable || (!!tile.title && !isMetric);
+
   return (
     <div
       className="howler-tile"
@@ -43,7 +49,7 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
         boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
       }}
     >
-      {(tile.title || editable) && (
+      {showHeader && (
         <div
           className={editable ? 'tile-drag-handle' : undefined}
           style={{
@@ -60,7 +66,7 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
           }}
         >
           <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {tile.title || <em style={{ color: '#bbb', fontWeight: 400 }}>Untitled</em>}
+            {isMetric ? null : (tile.title || <em style={{ color: '#bbb', fontWeight: 400 }}>Untitled</em>)}
           </span>
           {editable && (
             <span style={{ display: 'flex', gap: 4 }} onMouseDown={(e) => e.stopPropagation()}>
@@ -112,10 +118,10 @@ function TileContent({ tile, data }) {
   const visType = tile.vis?.type;
 
   if (visType === 'single_value' || visType === 'single_value_period_over_period') {
-    return <SingleValueTile data={data} visConfig={tile.vis} />;
+    return <SingleValueTile data={data} visConfig={tile.vis} label={tile.title} />;
   }
   if (visType && visType.includes('bar_gauge')) {
-    return <BarGaugeTile data={data} visConfig={tile.vis} />;
+    return <BarGaugeTile data={data} visConfig={tile.vis} label={tile.title} />;
   }
   if (visType === 'looker_grid' || visType === 'table' || visType === 'looker_legacy_table') {
     return <TableTile data={data} visConfig={tile.vis} />;

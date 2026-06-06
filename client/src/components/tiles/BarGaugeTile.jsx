@@ -5,7 +5,7 @@ import AutoFitText from '../AutoFitText.jsx';
 // Horizontal bar gauge — mirrors the Looker marketplace "bar_gauge" viz in
 // its horizontal style: a track from range_min→range_max, a coloured fill for
 // the current value, and an optional target marker with a label.
-export default function BarGaugeTile({ data, visConfig = {} }) {
+export default function BarGaugeTile({ data, visConfig = {}, label }) {
   const { openDrill, canDrill } = useDrill();
   const fields = data.fields || {};
   const rows = data.data || [];
@@ -75,6 +75,10 @@ export default function BarGaugeTile({ data, visConfig = {} }) {
           </span>
         )}
       </div>
+
+      {label && (
+        <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 8, fontWeight: 500, textAlign: 'center' }}>{label}</div>
+      )}
     </div>
   );
 }

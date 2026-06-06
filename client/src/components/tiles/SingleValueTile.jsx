@@ -5,7 +5,7 @@ import AutoFitText from '../AutoFitText.jsx';
 // Single value / KPI tile. Mirrors Looker's single_value visualization:
 // big rendered value, optional custom color, optional comparison to a second
 // measure (value or % change) with a coloured up/down indicator.
-export default function SingleValueTile({ data, visConfig = {} }) {
+export default function SingleValueTile({ data, visConfig = {}, label }) {
   const { openDrill, canDrill } = useDrill();
   const fields = data.fields || {};
   const rows = data.data || [];
@@ -52,10 +52,10 @@ export default function SingleValueTile({ data, visConfig = {} }) {
     ? visConfig.custom_color
     : visConfig.value_color || '#222';
 
-  // Only show an explicit custom title — the tile header already shows the
-  // tile name, so echoing the raw field name underneath is just noise.
-  const title = visConfig.show_single_value_title !== false
-    ? (visConfig.single_value_title || null)
+  // Looker shows the label *below* the number. Use the tile title (passed in)
+  // or an explicit single_value_title override.
+  const labelText = visConfig.show_single_value_title !== false
+    ? (visConfig.single_value_title || label || null)
     : null;
 
   const drillable = canDrill(primaryCell?.links);
@@ -75,12 +75,16 @@ export default function SingleValueTile({ data, visConfig = {} }) {
         {primaryValue}
       </AutoFitText>
       {comparison && (
-        <div style={{ fontSize: 13, marginTop: 8, fontWeight: 600, color: comparison.color }}>
+        <div style={{ fontSize: 13, marginTop: 6, fontWeight: 600, color: comparison.color }}>
           {comparison.text}
           <span style={{ color: 'var(--muted)', fontWeight: 400, marginLeft: 6 }}>{comparison.label}</span>
         </div>
       )}
-      {title && <div style={{ fontSize: 11, color: '#aaa', marginTop: 6, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{title}</div>}
+      {labelText && (
+        <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 6, fontWeight: 500, lineHeight: 1.25, textAlign: 'center', overflow: 'hidden' }}>
+          {labelText}
+        </div>
+      )}
     </div>
   );
 }
