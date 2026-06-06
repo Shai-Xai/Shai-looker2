@@ -11,33 +11,40 @@ const API_BASE = `${LOOKER_BASE_URL}/api/4.0`;
 // ─── Token Cache ────────────────────────────────────────────────────────────
 
 let tokenCache = { token: null, expiresAt: 0 };
+let tokenPromise = null; // shared in-flight login so concurrent requests don't stampede
 
 async function getAccessToken() {
   if (tokenCache.token && Date.now() < tokenCache.expiresAt) {
     return tokenCache.token;
   }
+  if (tokenPromise) return tokenPromise; // a login is already underway — reuse it
 
-  const res = await fetch(`${API_BASE}/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      client_id: process.env.LOOKER_CLIENT_ID,
-      client_secret: process.env.LOOKER_CLIENT_SECRET,
-    }),
-  });
+  tokenPromise = (async () => {
+    const res = await fetch(`${API_BASE}/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: process.env.LOOKER_CLIENT_ID,
+        client_secret: process.env.LOOKER_CLIENT_SECRET,
+      }),
+      timeout: 30000,
+    });
 
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Looker auth failed (${res.status}): ${text}`);
-  }
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Looker auth failed (${res.status}): ${text}`);
+    }
 
-  const data = await res.json();
-  tokenCache = {
-    token: data.access_token,
-    expiresAt: Date.now() + (data.expires_in - 30) * 1000,
-  };
-  console.log('[auth] Obtained new Looker access token');
-  return tokenCache.token;
+    const data = await res.json();
+    tokenCache = {
+      token: data.access_token,
+      expiresAt: Date.now() + (data.expires_in - 30) * 1000,
+    };
+    console.log('[auth] Obtained new Looker access token');
+    return tokenCache.token;
+  })().finally(() => { tokenPromise = null; });
+
+  return tokenPromise;
 }
 
 // ─── Generic request helper (auto-refresh on 401) ────────────────────────────
@@ -51,10 +58,19 @@ async function lookerRequest(method, path, body = null, retry = true) {
       Authorization: `token ${token}`,
       'Content-Type': 'application/json',
     },
+    timeout: 120000, // fail a stuck query after 2 min instead of hanging forever
   };
   if (body) options.body = JSON.stringify(body);
 
-  const res = await fetch(`${API_BASE}${path}`, options);
+  let res;
+  try {
+    res = await fetch(`${API_BASE}${path}`, options);
+  } catch (err) {
+    if (err.type === 'request-timeout') {
+      throw new Error(`Looker request timed out after 120s (${method} ${path}) — the query may be too slow or Looker is overloaded.`);
+    }
+    throw err;
+  }
 
   if (res.status === 401 && retry) {
     console.log('[auth] Token expired, refreshing...');

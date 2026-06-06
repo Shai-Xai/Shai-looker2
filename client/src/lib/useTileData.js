@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { api } from './api.js';
+import { withLimit } from './limit.js';
 
 // A query is only worth running once it has a model, an explore (view) and at
 // least one field — otherwise Looker returns a validation error.
@@ -42,8 +43,7 @@ export function useTileData(tile, filterValues) {
     setLoading(true);
     setError(null);
 
-    api
-      .runQuery(tile.query, overrides, controller.signal)
+    withLimit(() => api.runQuery(tile.query, overrides, controller.signal))
       .then((d) => setData(d))
       .catch((err) => {
         if (err.name !== 'AbortError') setError(err.message);
