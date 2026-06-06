@@ -52,6 +52,11 @@ export default function SingleValueTile({ data, visConfig = {}, label }) {
     ? visConfig.custom_color
     : visConfig.value_color || '#222';
 
+  // Looker conditional formatting → colour the whole tile + text.
+  const cf = evalConditionalFormatting(visConfig.conditional_formatting, primaryField, primaryCell);
+  const valueColor = cf?.font || color;
+  const labelColor = cf?.font || 'var(--muted)';
+
   // Looker shows the label *below* the number. Use the tile title (passed in)
   // or an explicit single_value_title override.
   const labelText = visConfig.show_single_value_title !== false
@@ -61,14 +66,14 @@ export default function SingleValueTile({ data, visConfig = {}, label }) {
   const drillable = canDrill(primaryCell?.links);
 
   return (
-    <div style={wrap}>
+    <div style={{ ...wrap, ...(cf?.background ? { background: cf.background } : null) }}>
       <AutoFitText
         max={40}
         min={12}
         style={{ flex: 1, minHeight: 0 }}
         onClick={drillable ? () => openDrill(primaryCell.links, primaryField.label_short || primaryField.label) : undefined}
         spanStyle={{
-          fontWeight: 700, color, letterSpacing: '-0.5px',
+          fontWeight: cf?.bold ? 800 : 700, color: valueColor, letterSpacing: '-0.5px',
           ...(drillable ? { textDecoration: 'underline', textDecorationStyle: 'dotted', textUnderlineOffset: 4 } : null),
         }}
       >
@@ -81,12 +86,48 @@ export default function SingleValueTile({ data, visConfig = {}, label }) {
         </div>
       )}
       {labelText && (
-        <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 6, fontWeight: 500, lineHeight: 1.25, textAlign: 'center', overflow: 'hidden' }}>
+        <div style={{ fontSize: 13, color: labelColor, marginTop: 6, fontWeight: 500, lineHeight: 1.25, textAlign: 'center', overflow: 'hidden' }}>
           {labelText}
         </div>
       )}
     </div>
   );
+}
+
+// Evaluate Looker conditional_formatting rules against the primary value.
+// Rules apply in order; the last matching rule wins (matches Looker).
+function evalConditionalFormatting(rules, field, cell) {
+  if (!Array.isArray(rules) || !cell) return null;
+  const raw = cell.value;
+  const v = Number(raw);
+  let out = null;
+  for (const r of rules) {
+    if (r.fields && field && !r.fields.includes(field.name)) continue;
+    if (ruleMatches(r, v, raw)) {
+      out = { background: r.background_color || undefined, font: r.font_color || undefined, bold: r.bold };
+    }
+  }
+  return out;
+}
+
+function ruleMatches(r, v, raw) {
+  switch (r.type) {
+    case 'null': return raw == null;
+    case 'not null': return raw != null;
+    default: break;
+  }
+  if (Number.isNaN(v)) return false;
+  switch (r.type) {
+    case 'greater than': return v > r.value;
+    case 'greater than or equal to': return v >= r.value;
+    case 'less than': return v < r.value;
+    case 'less than or equal to': return v <= r.value;
+    case 'equal to': return v === r.value;
+    case 'not equal to': return v !== r.value;
+    case 'between': return Array.isArray(r.value) && v >= r.value[0] && v <= r.value[1];
+    case 'not between': return Array.isArray(r.value) && !(v >= r.value[0] && v <= r.value[1]);
+    default: return false;
+  }
 }
 
 const wrap = { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', padding: '12px 16px', textAlign: 'center' };
