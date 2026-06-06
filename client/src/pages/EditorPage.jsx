@@ -1,0 +1,166 @@
+import { useState, useEffect, useCallback } from 'react';
+import { useParams, useNavigate, Link } from 'react-router-dom';
+import EditableGrid from '../components/EditableGrid.jsx';
+import FilterBar from '../components/FilterBar.jsx';
+import TileEditorPanel from '../components/editor/TileEditorPanel.jsx';
+import FilterManager from '../components/editor/FilterManager.jsx';
+import { api } from '../lib/api.js';
+
+export default function EditorPage() {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const [def, setDef] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [selectedTileId, setSelectedTileId] = useState(null);
+  const [showFilters, setShowFilters] = useState(false);
+  const [filterValues, setFilterValues] = useState({});
+
+  useEffect(() => {
+    api.getDashboard(id)
+      .then((data) => {
+        setDef(data);
+        const defaults = {};
+        for (const f of data.filters || []) defaults[f.name] = f.default_value || '';
+        setFilterValues(defaults);
+      })
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, [id]);
+
+  // Mutate the definition locally and mark dirty.
+  const mutate = useCallback((updater) => {
+    setDef((prev) => (prev ? updater(prev) : prev));
+    setDirty(true);
+  }, []);
+
+  async function save() {
+    setSaving(true);
+    try {
+      const saved = await api.updateDashboard(id, def);
+      setDef(saved);
+      setDirty(false);
+    } catch (e) {
+      alert('Save failed: ' + e.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function addTile(type) {
+    const nextY = def.tiles.reduce((max, t) => Math.max(max, (t.layout?.y ?? 0) + (t.layout?.h ?? 6)), 0);
+    const tile = type === 'text'
+      ? { id: crypto.randomUUID(), type: 'text', title: '', body_text: '## New text tile', layout: { x: 0, y: nextY, w: 24, h: 3 }, query: null, vis: {}, listenTo: {} }
+      : { id: crypto.randomUUID(), type: 'vis', title: 'New tile', body_text: '', layout: { x: 0, y: nextY, w: 8, h: 6 }, query: null, vis: { type: 'looker_column' }, listenTo: {} };
+    mutate((d) => ({ ...d, tiles: [...d.tiles, tile] }));
+    setSelectedTileId(tile.id);
+  }
+
+  function updateTile(updated) {
+    mutate((d) => ({ ...d, tiles: d.tiles.map((t) => (t.id === updated.id ? updated : t)) }));
+  }
+  function removeTile(tileId) {
+    mutate((d) => ({ ...d, tiles: d.tiles.filter((t) => t.id !== tileId) }));
+    if (selectedTileId === tileId) setSelectedTileId(null);
+  }
+  function duplicateTile(tileId) {
+    const src = def.tiles.find((t) => t.id === tileId);
+    if (!src) return;
+    const copy = { ...structuredClone(src), id: crypto.randomUUID(), layout: { ...src.layout, y: (src.layout?.y ?? 0) + (src.layout?.h ?? 6) } };
+    mutate((d) => ({ ...d, tiles: [...d.tiles, copy] }));
+  }
+  function applyLayout(layoutMap) {
+    mutate((d) => ({
+      ...d,
+      tiles: d.tiles.map((t) => (layoutMap[t.id] ? { ...t, layout: layoutMap[t.id] } : t)),
+    }));
+  }
+
+  if (loading) return <Centered>Loading…</Centered>;
+  if (error) return <Centered error>Error: {error}</Centered>;
+  if (!def) return null;
+
+  const selectedTile = def.tiles.find((t) => t.id === selectedTileId) || null;
+  const theme = def.theme || {};
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+      {/* Toolbar */}
+      <div style={toolbar}>
+        <Link to="/" style={{ color: 'var(--muted)', fontSize: 13, textDecoration: 'none' }}>← Back</Link>
+        <input
+          style={titleInput}
+          value={def.title}
+          onChange={(e) => mutate((d) => ({ ...d, title: e.target.value }))}
+        />
+        <button style={btn} onClick={() => addTile('vis')}>+ Visualization</button>
+        <button style={btn} onClick={() => addTile('text')}>+ Text</button>
+        <button style={btn} onClick={() => setShowFilters(true)}>Filters ({def.filters?.length || 0})</button>
+        <div style={{ flex: 1 }} />
+        <span style={{ fontSize: 12, color: dirty ? 'var(--warn)' : 'var(--muted)' }}>
+          {dirty ? '● Unsaved changes' : '✓ Saved'}
+        </span>
+        <button style={viewBtn} onClick={() => navigate(`/d/${id}`)}>View</button>
+        <button style={saveBtn} onClick={save} disabled={saving || !dirty}>{saving ? 'Saving…' : 'Save'}</button>
+      </div>
+
+      {/* Filter bar preview */}
+      {def.filters?.length > 0 && (
+        <FilterBar filters={def.filters} values={filterValues} onChange={(name, value) => setFilterValues((p) => ({ ...p, [name]: value }))} />
+      )}
+
+      {/* Canvas + side panel */}
+      <div style={{ flex: 1, display: 'flex', minHeight: 0, background: theme.background || '#f5f6f8' }}>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '16px 24px', '--tile-bg': theme.tileBackground || '#fff' }}>
+          {def.tiles.length === 0 ? (
+            <Centered>Empty dashboard — add a visualization or text tile to begin.</Centered>
+          ) : (
+            <EditableGrid
+              tiles={def.tiles}
+              filterValues={filterValues}
+              editable
+              onLayoutChange={applyLayout}
+              onEditTile={setSelectedTileId}
+              onDuplicateTile={duplicateTile}
+              onRemoveTile={removeTile}
+            />
+          )}
+        </div>
+
+        {selectedTile && (
+          <TileEditorPanel
+            key={selectedTile.id}
+            tile={selectedTile}
+            dashboardFilters={def.filters}
+            onChange={updateTile}
+            onClose={() => setSelectedTileId(null)}
+          />
+        )}
+      </div>
+
+      {showFilters && (
+        <FilterManager
+          filters={def.filters || []}
+          onChange={(filters) => mutate((d) => ({ ...d, filters }))}
+          onClose={() => setShowFilters(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+function Centered({ children, error }) {
+  return (
+    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 48 }}>
+      <p style={{ fontSize: 15, color: error ? 'var(--error)' : 'var(--muted)' }}>{children}</p>
+    </div>
+  );
+}
+
+const toolbar = { background: '#fff', borderBottom: '1px solid #e0e0e0', padding: '10px 20px', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' };
+const titleInput = { fontSize: 16, fontWeight: 700, border: '1.5px solid transparent', borderRadius: 6, padding: '5px 8px', outline: 'none', minWidth: 200, background: '#fafafa' };
+const btn = { padding: '7px 12px', background: '#fff', border: '1.5px solid #e0e0e0', borderRadius: 7, fontSize: 13, fontWeight: 600, cursor: 'pointer' };
+const viewBtn = { padding: '7px 14px', background: '#fff', border: '1.5px solid #e0e0e0', borderRadius: 7, fontSize: 13, fontWeight: 600, cursor: 'pointer' };
+const saveBtn = { padding: '7px 18px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 7, fontSize: 13, fontWeight: 700, cursor: 'pointer' };

@@ -1,102 +1,67 @@
-import { useState, useEffect, useRef } from 'react';
 import SingleValueTile from './tiles/SingleValueTile.jsx';
 import ChartTile from './tiles/ChartTile.jsx';
 import TableTile from './tiles/TableTile.jsx';
 import TextTile from './tiles/TextTile.jsx';
+import { useTileData } from '../lib/useTileData.js';
 
-export default function TileFrame({ tile, filterValues }) {
-  const [queryResult, setQueryResult] = useState(null);
-  const [loading, setLoading] = useState(tile.type !== 'text' && !!tile.query);
-  const [error, setError] = useState(null);
-  const abortRef = useRef(null);
-
-  // Build filter overrides for this tile from global filter values
-  function buildFilterOverrides() {
-    const overrides = {};
-    for (const [filterName, queryField] of Object.entries(tile.filterMap || {})) {
-      const val = filterValues[filterName];
-      if (val && val.trim()) {
-        overrides[queryField] = val.trim();
-      }
-    }
-    return overrides;
-  }
-
-  useEffect(() => {
-    if (tile.type === 'text' || !tile.query) {
-      setLoading(false);
-      return;
-    }
-
-    // Abort any in-flight request
-    if (abortRef.current) abortRef.current.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
-
-    setLoading(true);
-    setError(null);
-
-    fetch('/api/run-query', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: tile.query, filterOverrides: buildFilterOverrides() }),
-      signal: controller.signal,
-    })
-      .then(r => r.json())
-      .then(data => {
-        if (data.error) throw new Error(data.error);
-        setQueryResult(data);
-      })
-      .catch(err => {
-        if (err.name !== 'AbortError') setError(err.message);
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
-      });
-
-    return () => controller.abort();
-  }, [tile.id, JSON.stringify(filterValues)]);
+// Renders a single tile (vis or text). In edit mode it shows hover controls
+// (edit / duplicate / delete) and a drag handle on the title bar.
+export default function TileFrame({ tile, filterValues, editable, onEdit, onDuplicate, onRemove }) {
+  const { data, loading, error } = useTileData(tile, filterValues);
 
   return (
-    <div style={{
-      background: '#fff',
-      border: '1px solid #e0e0e0',
-      borderRadius: 8,
-      height: '100%',
-      display: 'flex',
-      flexDirection: 'column',
-      overflow: 'hidden',
-      boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
-    }}>
-      {/* Tile header */}
-      {tile.title && (
-        <div style={{
-          padding: '8px 12px',
-          fontSize: 12,
-          fontWeight: 600,
-          color: '#555',
-          borderBottom: '1px solid #f0f0f0',
-          flexShrink: 0,
-          whiteSpace: 'nowrap',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-        }}>
-          {tile.title}
+    <div
+      style={{
+        background: 'var(--tile-bg, #fff)',
+        border: '1px solid #e0e0e0',
+        borderRadius: 8,
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+        boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
+      }}
+    >
+      {(tile.title || editable) && (
+        <div
+          className={editable ? 'tile-drag-handle' : undefined}
+          style={{
+            padding: '8px 12px',
+            fontSize: 12,
+            fontWeight: 600,
+            color: '#555',
+            borderBottom: '1px solid #f0f0f0',
+            flexShrink: 0,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            cursor: editable ? 'move' : 'default',
+          }}
+        >
+          <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {tile.title || <em style={{ color: '#bbb', fontWeight: 400 }}>Untitled</em>}
+          </span>
+          {editable && (
+            <span style={{ display: 'flex', gap: 4 }} onMouseDown={(e) => e.stopPropagation()}>
+              <IconBtn title="Edit" onClick={onEdit}>✎</IconBtn>
+              <IconBtn title="Duplicate" onClick={onDuplicate}>⧉</IconBtn>
+              <IconBtn title="Delete" onClick={onRemove} danger>✕</IconBtn>
+            </span>
+          )}
         </div>
       )}
 
-      {/* Tile content */}
       <div style={{ flex: 1, minHeight: 0, position: 'relative', padding: tile.type === 'text' ? 12 : 0 }}>
         {tile.type === 'text' ? (
           <TextTile tile={tile} />
+        ) : !tile.query ? (
+          <Centered faint>No query configured</Centered>
         ) : loading ? (
-          <LoadingState />
+          <Centered faint>Loading…</Centered>
         ) : error ? (
-          <ErrorState message={error} />
-        ) : queryResult ? (
-          <TileContent tile={tile} data={queryResult} />
-        ) : !tile.query && tile.type !== 'text' ? (
-          <NoQuery />
+          <Centered error>⚠ {error}</Centered>
+        ) : data ? (
+          <TileContent tile={tile} data={data} />
         ) : null}
       </div>
     </div>
@@ -104,48 +69,63 @@ export default function TileFrame({ tile, filterValues }) {
 }
 
 function TileContent({ tile, data }) {
-  const visType = tile.vis_config?.type;
+  const visType = tile.vis?.type;
 
   if (visType === 'single_value' || visType === 'single_value_period_over_period') {
-    return <SingleValueTile data={data} visConfig={tile.vis_config} />;
+    return <SingleValueTile data={data} visConfig={tile.vis} />;
   }
-
   if (visType === 'looker_grid' || visType === 'table' || visType === 'looker_legacy_table') {
-    return <TableTile data={data} visConfig={tile.vis_config} />;
+    return <TableTile data={data} visConfig={tile.vis} />;
   }
-
-  if (visType === 'looker_column' || visType === 'looker_bar' || visType === 'looker_line' ||
-      visType === 'looker_area' || visType === 'looker_scatter' || visType === 'looker_pie' ||
-      visType === 'looker_donut_multiples') {
-    return <ChartTile data={data} visConfig={tile.vis_config} />;
+  if (
+    visType === 'looker_column' || visType === 'looker_bar' || visType === 'looker_line' ||
+    visType === 'looker_area' || visType === 'looker_scatter' || visType === 'looker_pie' ||
+    visType === 'looker_donut_multiples'
+  ) {
+    return <ChartTile data={data} visConfig={tile.vis} />;
   }
-
-  // Fallback: render as table so data is always visible
-  return <TableTile data={data} visConfig={tile.vis_config} />;
+  // Fallback: always show the data.
+  return <TableTile data={data} visConfig={tile.vis} />;
 }
 
-function LoadingState() {
+function IconBtn({ children, onClick, title, danger }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#aaa', fontSize: 12 }}>
-      <span style={{ animation: 'spin 1s linear infinite', display: 'inline-block', marginRight: 6, fontSize: 16 }}>⏳</span>
-      Loading…
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-    </div>
+    <button
+      title={title}
+      onClick={onClick}
+      style={{
+        border: 'none',
+        background: 'transparent',
+        cursor: 'pointer',
+        fontSize: 13,
+        lineHeight: 1,
+        padding: 2,
+        color: danger ? 'var(--error)' : '#888',
+        borderRadius: 4,
+      }}
+      onMouseEnter={(e) => (e.currentTarget.style.background = '#f0f0f0')}
+      onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+    >
+      {children}
+    </button>
   );
 }
 
-function ErrorState({ message }) {
+function Centered({ children, faint, error }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', padding: 12 }}>
-      <p style={{ color: 'var(--error)', fontSize: 11, textAlign: 'center', lineHeight: 1.4 }}>⚠ {message}</p>
-    </div>
-  );
-}
-
-function NoQuery() {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#ccc', fontSize: 11 }}>
-      No query
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: '100%',
+        padding: 12,
+        textAlign: 'center',
+        fontSize: 12,
+        color: error ? 'var(--error)' : faint ? '#bbb' : '#555',
+      }}
+    >
+      {children}
     </div>
   );
 }

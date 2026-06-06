@@ -1,7 +1,7 @@
 {
   "name": "howler-looker-dashboard-tool",
   "version": "1.0.0",
-  "description": "Looker dashboard recreation and viewer for Howler event management platform",
+  "description": "Custom analytics studio for Howler — build & edit dashboards backed by Looker as a headless calculation engine",
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",

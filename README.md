@@ -1,118 +1,100 @@
-# Howler — Looker Dashboard Recreator
+# Howler — Analytics Studio
 
-A lightweight Node.js tool that connects to Looker via the REST API, fetches an existing dashboard (tiles + filters), and recreates it programmatically. Built for Howler's event management workflow — spin up a fresh analytics dashboard per event in seconds.
+A custom analytics front-end for Howler that uses **Looker as a headless calculation engine**. Your LookML defines the metrics and joins; this app owns 100% of the interface. No Looker embeds, no iframe — every tile is rendered by our own React components.
 
-## Features
+You can:
 
-- OAuth2 client credentials auth with automatic token refresh on 401
-- Fetches dashboard shell, all tiles (look-backed, inline-query, and text), and all filters
-- Recreates everything via `POST` — no LookML dependency
-- Remaps filter→tile links to the new element IDs automatically
-- Returns a summary: _X tiles created, Y failed_ with per-item error messages
-- Simple, zero-framework UI with a live "Preview" before committing
+- **Build dashboards from scratch** — pick a Looker model → explore → fields/measures, choose a visualization, drag & resize tiles on a 24-column grid.
+- **Replicate any Looker dashboard** — import an existing Looker dashboard; it's converted into a fully editable definition owned by this app.
+- **Clone inside Looker** — the original workflow that copies a dashboard into a new *Looker* dashboard (still available under `/clone`).
 
-## Project Structure
+Dashboards are stored as JSON in this app's own store (file-backed by default). Looker is only ever called to **run queries** and to **browse metadata** — it never renders UI.
+
+## How it works
+
+```
+Browser (React)  ──run-query──▶  Express server  ──/queries/run──▶  Looker API
+   custom tiles  ◀──json rows──   (looker.js)     ◀──calculated────   (your LookML)
+```
+
+1. A dashboard definition lists **tiles**, each with its own Looker **query** (model / explore / fields / filters / sorts) and **vis config**.
+2. The browser asks the server to run each tile's query (`POST /api/run-query`). Looker computes; raw JSON rows come back.
+3. React renders the rows as a KPI card, table, or chart — entirely under our control.
+
+## Project structure
 
 ```
 .
-├── client/
-│   └── index.html       # Single-page UI
 ├── server/
-│   └── index.js         # Express API + Looker auth/fetch/recreate logic
-├── .env.example         # Required environment variables
-├── package.json
-└── README.md
+│   ├── index.js      # Express app + route wiring
+│   ├── looker.js     # Looker REST client: auth, query run, metadata, dashboard fetch
+│   ├── store.js      # File-backed persistence for dashboard definitions
+│   ├── convert.js    # Looker dashboard → editable definition (the "import" path)
+│   └── recreate.js   # Clone a dashboard inside Looker (original feature)
+├── client/
+│   └── src/
+│       ├── pages/         # HomePage, ViewPage, EditorPage, ClonePage
+│       ├── components/     # EditableGrid, TileFrame, FilterBar, tiles/, editor/
+│       └── lib/            # api.js, useTileData.js
+├── .env.example
+└── package.json
 ```
 
-## Quick Start
-
-### 1. Install dependencies
+## Quick start
 
 ```bash
-npm install
+npm install            # server deps
+cp .env.example .env   # fill in Looker credentials
+npm run build          # installs + builds the React client into client/dist
+npm start              # serves API + client on PORT (default 3000)
 ```
 
-### 2. Configure environment
+For development with hot reload:
 
 ```bash
-cp .env.example .env
+npm run dev            # server (watch) + vite dev server on :5173 (proxies /api → :3000)
 ```
 
-Edit `.env`:
+### Environment
 
 ```env
 LOOKER_BASE_URL=https://your-company.looker.com
-LOOKER_CLIENT_ID=your_client_id_here
-LOOKER_CLIENT_SECRET=your_client_secret_here
+LOOKER_CLIENT_ID=your_client_id
+LOOKER_CLIENT_SECRET=your_client_secret
 PORT=3000
+# DATA_DIR=/var/data/howler-dashboards   # optional: where dashboard JSON is stored
 ```
 
-To obtain API credentials in Looker: **Admin → Users → [your user] → Edit API Keys** (or ask your Looker admin to create a dedicated service account).
+API credentials: **Looker Admin → Users → [user] → Edit API Keys** (a dedicated service account is recommended).
 
-### 3. Run
-
-```bash
-# Production
-npm start
-
-# Development (auto-restarts on file changes, requires Node 18+)
-npm run dev
-```
-
-Open [http://localhost:3000](http://localhost:3000) in your browser.
-
-## Usage
-
-1. **Source Dashboard ID** — paste the numeric ID from the Looker URL (e.g. `/dashboards/42` → `42`). Hit **Preview** to confirm it exists and see the tile/filter count.
-2. **New Dashboard Title** — the name for the recreated copy (e.g. `Howler — Glastonbury 2025`).
-3. **Target Folder ID** — the Looker folder where the new dashboard will be saved. Find the ID in Looker under **Folders → [folder name]** in the URL.
-4. Click **Recreate Dashboard**. A link to the new dashboard in Looker is returned on success.
-
-## API Endpoints
+## API endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/health` | Health check |
-| `GET` | `/api/dashboard/:id` | Fetch dashboard metadata (title, tile count, filter count) |
-| `POST` | `/api/recreate` | Recreate a dashboard |
+| `GET` | `/api/dashboards` | List saved dashboards |
+| `POST` | `/api/dashboards` | Create a dashboard |
+| `GET` | `/api/dashboards/:id` | Get a dashboard definition |
+| `PUT` | `/api/dashboards/:id` | Update a dashboard |
+| `DELETE` | `/api/dashboards/:id` | Delete a dashboard |
+| `POST` | `/api/dashboards/import` | Import a Looker dashboard → editable definition |
+| `GET` | `/api/looker/models` | List LookML models + explores |
+| `GET` | `/api/looker/explores/:model/:explore` | List an explore's dimensions & measures |
+| `POST` | `/api/run-query` | Run a Looker query (with filter overrides) → rows |
+| `POST` | `/api/filter-suggest` | Filter value suggestions |
+| `GET` | `/api/looker-dashboard/:id` | Preview a live Looker dashboard's metadata |
+| `POST` | `/api/recreate` | Clone a dashboard inside Looker |
 
-### `POST /api/recreate`
+## Roadmap / next steps
 
-**Request body:**
+- More visualization types and per-vis formatting controls (axes, colors, number formats)
+- Authentication + per-client (multi-tenant) dashboard separation
+- Swap the file store for a real database (interface in `store.js` is ready)
+- Scheduled refresh / caching of query results
+- Themeing controls in the editor (brand color, fonts, backgrounds)
 
-```json
-{
-  "sourceDashboardId": "42",
-  "newTitle": "Howler — Glastonbury 2025",
-  "targetFolderId": "7"
-}
-```
+## Looker API reference
 
-**Response:**
-
-```json
-{
-  "dashboardId": "99",
-  "dashboardUrl": "https://your-company.looker.com/dashboards/99",
-  "tilesCreated": 8,
-  "tilesFailed": 1,
-  "filtersCreated": 3,
-  "filtersFailed": 0,
-  "errors": [
-    "Tile \"Revenue by Channel\" failed: ..."
-  ]
-}
-```
-
-## Error Handling
-
-- Partial failures are non-fatal — the new dashboard is still created with all tiles/filters that succeeded.
-- Each failure includes the tile or filter name and the Looker API error message.
-- Auth errors (401) trigger an automatic token refresh and a single retry.
-
-## Looker API Reference
-
-- [Dashboard object](https://developers.looker.com/api/explorer/4.0/methods/Dashboard/dashboard)
+- [Run query](https://developers.looker.com/api/explorer/4.0/methods/Query/run_inline_query)
+- [LookML models](https://developers.looker.com/api/explorer/4.0/methods/LookmlModel)
 - [Dashboard elements](https://developers.looker.com/api/explorer/4.0/methods/Dashboard/dashboard_dashboard_elements)
-- [Dashboard filters](https://developers.looker.com/api/explorer/4.0/methods/Dashboard/dashboard_dashboard_filters)
-- [Create dashboard](https://developers.looker.com/api/explorer/4.0/methods/Dashboard/create_dashboard)

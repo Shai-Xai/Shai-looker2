@@ -76,13 +76,14 @@ function FilterAutocomplete({ filter, value, onChange }) {
 
   async function loadSuggestions() {
     if (suggestions.length > 0 || fetching) { setOpen(true); return; }
-    if (!filter.model || !filter.explore || !filter.dimension) { setOpen(true); return; }
+    const field = filter.field || filter.dimension;
+    if (!filter.model || !filter.explore || !field) { setOpen(true); return; }
     setFetching(true);
     try {
       const res = await fetch('/api/filter-suggest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: filter.model, explore: filter.explore, field: filter.dimension }),
+        body: JSON.stringify({ model: filter.model, explore: filter.explore, field }),
       });
       const data = await res.json();
       setSuggestions(data.suggestions || []);

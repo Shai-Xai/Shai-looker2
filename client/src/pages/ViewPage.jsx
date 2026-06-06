@@ -1,0 +1,79 @@
+import { useState, useEffect, useCallback } from 'react';
+import { useParams, Link, useNavigate } from 'react-router-dom';
+import FilterBar from '../components/FilterBar.jsx';
+import EditableGrid from '../components/EditableGrid.jsx';
+import { api } from '../lib/api.js';
+
+// Read-only render of a saved dashboard.
+export default function ViewPage() {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const [def, setDef] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [filterValues, setFilterValues] = useState({});
+
+  useEffect(() => {
+    setLoading(true);
+    setError(null);
+    api.getDashboard(id)
+      .then((data) => {
+        setDef(data);
+        const defaults = {};
+        for (const f of data.filters || []) defaults[f.name] = f.default_value || '';
+        setFilterValues(defaults);
+      })
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, [id]);
+
+  const handleFilterChange = useCallback((name, value) => {
+    setFilterValues((prev) => ({ ...prev, [name]: value }));
+  }, []);
+
+  if (loading) return <Centered>Loading dashboard…</Centered>;
+  if (error) return <Centered error>Error: {error}</Centered>;
+  if (!def) return null;
+
+  const theme = def.theme || {};
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        flex: 1,
+        background: theme.background || '#f5f6f8',
+        '--tile-bg': theme.tileBackground || '#fff',
+      }}
+    >
+      <div style={{ background: '#fff', borderBottom: '1px solid #e0e0e0', padding: '14px 24px', display: 'flex', alignItems: 'center', gap: 16 }}>
+        <Link to="/" style={{ color: 'var(--muted)', fontSize: 13, textDecoration: 'none' }}>← Back</Link>
+        <h2 style={{ fontSize: 18, fontWeight: 700, flex: 1 }}>{def.title}</h2>
+        <button style={editBtn} onClick={() => navigate(`/d/${id}/edit`)}>Edit</button>
+      </div>
+
+      {def.filters?.length > 0 && (
+        <FilterBar filters={def.filters} values={filterValues} onChange={handleFilterChange} />
+      )}
+
+      <div style={{ flex: 1, padding: '16px 24px', overflowY: 'auto' }}>
+        {def.tiles?.length ? (
+          <EditableGrid tiles={def.tiles} filterValues={filterValues} editable={false} />
+        ) : (
+          <Centered>This dashboard has no tiles yet. <Link to={`/d/${id}/edit`} style={{ marginLeft: 6 }}>Add some →</Link></Centered>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const editBtn = { padding: '7px 16px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 7, fontSize: 13, fontWeight: 600, cursor: 'pointer' };
+
+function Centered({ children, error }) {
+  return (
+    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 48 }}>
+      <p style={{ fontSize: 15, color: error ? 'var(--error)' : 'var(--muted)' }}>{children}</p>
+    </div>
+  );
+}
