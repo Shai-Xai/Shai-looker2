@@ -15,7 +15,7 @@ export default function TableTile({ data, visConfig = {} }) {
 
   if (!rows.length || (!dimensions.length && !measures.length)) return <Empty />;
 
-  const mLabel = (m) => m.label_short || m.label || m.name;
+  const mLabel = (m) => visConfig.series_labels?.[m.name] || m.label_short || m.label || m.name;
   const pLabel = (p) => (p.data ? Object.values(p.data).join(' / ') : p.key);
 
   const drillCell = (cell, titleParts) => {
@@ -28,6 +28,25 @@ export default function TableTile({ data, visConfig = {} }) {
 
   // ─── Pivoted table: dimension columns + (pivot × measure) column groups ──────
   if (pivots.length > 0 && measures.length > 0) {
+    // Order pivots by Looker's column_order, and hide per-pivot measures that
+    // Looker hides (hidden_pivots) — so a calc only shown for one pivot column
+    // (e.g. "% change" under KFF26 only) isn't duplicated.
+    const colOrder = Array.isArray(visConfig.column_order) ? visConfig.column_order : null;
+    const rank = (key) => {
+      if (!colOrder) return 0;
+      const i = colOrder.findIndex((c) => c.startsWith(`${key}_`));
+      return i < 0 ? 999 : i;
+    };
+    const hiddenPivots = visConfig.hidden_pivots || {};
+    const visMeasures = (pkey) => {
+      const hide = hiddenPivots[pkey]?.measure_names || [];
+      return measures.filter((m) => !hide.includes(m.name));
+    };
+    const groups = [...pivots]
+      .sort((a, b) => rank(a.key) - rank(b.key))
+      .map((p) => ({ p, ms: visMeasures(p.key) }))
+      .filter((g) => g.ms.length > 0);
+
     return (
       <Scroll>
         <table style={tableStyle}>
@@ -36,15 +55,15 @@ export default function TableTile({ data, visConfig = {} }) {
               {dimensions.map((d) => (
                 <th key={d.name} rowSpan={2} style={{ ...thStyle, textAlign: 'left' }}>{d.label_short || d.label}</th>
               ))}
-              {pivots.map((p, pi) => (
-                <th key={p.key} colSpan={measures.length} style={{ ...thStyle, textAlign: 'center', borderLeft: pi ? '1px solid #e6e6e6' : undefined }}>
-                  {pLabel(p)}
+              {groups.map((g, gi) => (
+                <th key={g.p.key} colSpan={g.ms.length} style={{ ...thStyle, textAlign: 'center', borderLeft: gi ? '1px solid #e6e6e6' : undefined }}>
+                  {pLabel(g.p)}
                 </th>
               ))}
             </tr>
             <tr>
-              {pivots.map((p, pi) => measures.map((m, mi) => (
-                <th key={`${p.key}.${m.name}`} style={{ ...thStyle, top: 28, textAlign: 'right', borderLeft: (pi && mi === 0) ? '1px solid #e6e6e6' : undefined }}>
+              {groups.map((g, gi) => g.ms.map((m, mi) => (
+                <th key={`${g.p.key}.${m.name}`} style={{ ...thStyle, top: 28, textAlign: 'right', borderLeft: (gi && mi === 0) ? '1px solid #e6e6e6' : undefined }}>
                   {mLabel(m)}
                 </th>
               )))}
@@ -56,12 +75,12 @@ export default function TableTile({ data, visConfig = {} }) {
                 {dimensions.map((d) => (
                   <td key={d.name} style={{ ...tdStyle, textAlign: 'left' }}>{cellText(row[d.name])}</td>
                 ))}
-                {pivots.map((p, pi) => measures.map((m, mi) => {
-                  const cell = row[m.name]?.[p.key];
-                  const dr = drillCell(cell, [...dimensions.map((d) => cellText(row[d.name])), pLabel(p), mLabel(m)]);
+                {groups.map((g, gi) => g.ms.map((m, mi) => {
+                  const cell = row[m.name]?.[g.p.key];
+                  const dr = drillCell(cell, [...dimensions.map((d) => cellText(row[d.name])), pLabel(g.p), mLabel(m)]);
                   return (
-                    <td key={`${p.key}.${m.name}`} {...dr}
-                      style={{ ...tdStyle, textAlign: 'right', fontVariantNumeric: 'tabular-nums', borderLeft: (pi && mi === 0) ? '1px solid #f0f0f0' : undefined, ...(dr.style || null) }}>
+                    <td key={`${g.p.key}.${m.name}`} {...dr}
+                      style={{ ...tdStyle, textAlign: 'right', fontVariantNumeric: 'tabular-nums', borderLeft: (gi && mi === 0) ? '1px solid #f0f0f0' : undefined, ...(dr.style || null) }}>
                       {cellText(cell)}
                     </td>
                   );
