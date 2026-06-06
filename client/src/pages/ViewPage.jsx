@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import FilterBar from '../components/FilterBar.jsx';
 import EditableGrid from '../components/EditableGrid.jsx';
+import Carousel from '../components/Carousel.jsx';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/auth.jsx';
 
@@ -81,8 +82,16 @@ export default function ViewPage() {
       <div style={{ flex: 1, padding: '16px 24px', overflowY: 'auto' }}>
         {def.tiles?.length ? (
           <EditableGrid tiles={def.tiles} filterValues={filterValues} editable={false} />
-        ) : (
+        ) : (!def.carousels?.length && (
           <Centered>This dashboard has no tiles yet. <Link to={`/d/${id}/edit`} style={{ marginLeft: 6 }}>Add some →</Link></Centered>
+        ))}
+
+        {def.carousels?.length > 0 && (
+          <div style={{ marginTop: def.tiles?.length ? 16 : 0 }}>
+            {def.carousels.map((c) => (
+              <Carousel key={c.id} carousel={c} filterValues={filterValues} editable={false} />
+            ))}
+          </div>
         )}
       </div>
     </div>

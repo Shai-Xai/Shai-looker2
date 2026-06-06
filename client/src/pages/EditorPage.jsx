@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import EditableGrid from '../components/EditableGrid.jsx';
+import Carousel from '../components/Carousel.jsx';
 import FilterBar from '../components/FilterBar.jsx';
 import TileEditorPanel from '../components/editor/TileEditorPanel.jsx';
 import FilterManager from '../components/editor/FilterManager.jsx';
@@ -60,8 +61,13 @@ export default function EditorPage() {
     setSelectedTileId(tile.id);
   }
 
+  // Update a tile wherever it lives — main grid or any carousel.
   function updateTile(updated) {
-    mutate((d) => ({ ...d, tiles: d.tiles.map((t) => (t.id === updated.id ? updated : t)) }));
+    mutate((d) => ({
+      ...d,
+      tiles: d.tiles.map((t) => (t.id === updated.id ? updated : t)),
+      carousels: (d.carousels || []).map((c) => ({ ...c, tiles: c.tiles.map((t) => (t.id === updated.id ? updated : t)) })),
+    }));
   }
   function removeTile(tileId) {
     mutate((d) => ({ ...d, tiles: d.tiles.filter((t) => t.id !== tileId) }));
@@ -80,11 +86,49 @@ export default function EditorPage() {
     }));
   }
 
+  // ─── Carousels ───────────────────────────────────────────────────────────────
+  function addCarousel() {
+    const c = { id: crypto.randomUUID(), title: 'New row', cardW: 320, cardH: 200, tiles: [] };
+    mutate((d) => ({ ...d, carousels: [...(d.carousels || []), c] }));
+  }
+  function removeCarousel(cid) {
+    mutate((d) => ({ ...d, carousels: (d.carousels || []).filter((c) => c.id !== cid) }));
+  }
+  function changeCarouselTitle(cid, title) {
+    mutate((d) => ({ ...d, carousels: (d.carousels || []).map((c) => (c.id === cid ? { ...c, title } : c)) }));
+  }
+  function addTileToCarousel(cid, type) {
+    const tile = type === 'text'
+      ? { id: crypto.randomUUID(), type: 'text', title: '', body_text: '## New text tile', query: null, vis: {}, listenTo: {} }
+      : { id: crypto.randomUUID(), type: 'vis', title: 'New tile', body_text: '', query: null, vis: { type: 'looker_column' }, listenTo: {} };
+    mutate((d) => ({ ...d, carousels: (d.carousels || []).map((c) => (c.id === cid ? { ...c, tiles: [...c.tiles, tile] } : c)) }));
+    setSelectedTileId(tile.id);
+  }
+  function removeTileFromCarousel(cid, tileId) {
+    mutate((d) => ({ ...d, carousels: (d.carousels || []).map((c) => (c.id === cid ? { ...c, tiles: c.tiles.filter((t) => t.id !== tileId) } : c)) }));
+    if (selectedTileId === tileId) setSelectedTileId(null);
+  }
+  function duplicateTileInCarousel(cid, tileId) {
+    mutate((d) => ({
+      ...d,
+      carousels: (d.carousels || []).map((c) => {
+        if (c.id !== cid) return c;
+        const src = c.tiles.find((t) => t.id === tileId);
+        if (!src) return c;
+        return { ...c, tiles: [...c.tiles, { ...structuredClone(src), id: crypto.randomUUID() }] };
+      }),
+    }));
+  }
+
   if (loading) return <Centered>Loading…</Centered>;
   if (error) return <Centered error>Error: {error}</Centered>;
   if (!def) return null;
 
-  const selectedTile = def.tiles.find((t) => t.id === selectedTileId) || null;
+  const selectedTile = selectedTileId
+    ? (def.tiles.find((t) => t.id === selectedTileId)
+       || (def.carousels || []).flatMap((c) => c.tiles).find((t) => t.id === selectedTileId)
+       || null)
+    : null;
   const theme = def.theme || {};
 
   return (
@@ -99,6 +143,7 @@ export default function EditorPage() {
         />
         <button style={btn} onClick={() => addTile('vis')}>+ Visualization</button>
         <button style={btn} onClick={() => addTile('text')}>+ Text</button>
+        <button style={btn} onClick={addCarousel}>+ Carousel</button>
         <button style={btn} onClick={() => setShowFilters(true)}>Filters ({def.filters?.length || 0})</button>
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--muted)' }}>
           Visible to:
@@ -127,9 +172,7 @@ export default function EditorPage() {
       {/* Canvas + side panel */}
       <div style={{ flex: 1, display: 'flex', minHeight: 0, background: theme.background || '#f5f6f8' }}>
         <div style={{ flex: 1, overflowY: 'auto', padding: '16px 24px', '--tile-bg': theme.tileBackground || '#fff' }}>
-          {def.tiles.length === 0 ? (
-            <Centered>Empty dashboard — add a visualization or text tile to begin.</Centered>
-          ) : (
+          {def.tiles.length > 0 && (
             <EditableGrid
               tiles={def.tiles}
               filterValues={filterValues}
@@ -139,6 +182,29 @@ export default function EditorPage() {
               onDuplicateTile={duplicateTile}
               onRemoveTile={removeTile}
             />
+          )}
+
+          {(def.carousels || []).length > 0 && (
+            <div style={{ marginTop: def.tiles.length ? 16 : 0 }}>
+              {def.carousels.map((c) => (
+                <Carousel
+                  key={c.id}
+                  carousel={c}
+                  filterValues={filterValues}
+                  editable
+                  onEditTile={setSelectedTileId}
+                  onRemoveTile={(tid) => removeTileFromCarousel(c.id, tid)}
+                  onDuplicateTile={(tid) => duplicateTileInCarousel(c.id, tid)}
+                  onAddTile={(type) => addTileToCarousel(c.id, type)}
+                  onChangeTitle={(t) => changeCarouselTitle(c.id, t)}
+                  onRemove={() => removeCarousel(c.id)}
+                />
+              ))}
+            </div>
+          )}
+
+          {def.tiles.length === 0 && (def.carousels || []).length === 0 && (
+            <Centered>Empty dashboard — add a visualization, text tile, or carousel to begin.</Centered>
           )}
         </div>
 

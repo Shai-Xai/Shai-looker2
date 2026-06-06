@@ -63,6 +63,7 @@ function create(def) {
     theme: def.theme || defaultTheme(),
     filters: def.filters || [],
     tiles: def.tiles || [],
+    carousels: def.carousels || [],
     source: def.source || null,
     tenantId: def.tenantId || null,
     createdAt: now,
