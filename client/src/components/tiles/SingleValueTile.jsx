@@ -1,64 +1,75 @@
-// Single value / KPI tile
-export default function SingleValueTile({ data, visConfig }) {
+import { cellText, formatNumber } from '../../lib/format.js';
+
+// Single value / KPI tile. Mirrors Looker's single_value visualization:
+// big rendered value, optional custom color, optional comparison to a second
+// measure (value or % change) with a coloured up/down indicator.
+export default function SingleValueTile({ data, visConfig = {} }) {
   const fields = data.fields || {};
   const rows = data.data || [];
   if (!rows.length) return <Empty />;
 
   const measures = fields.measures || [];
   const dimensions = fields.dimensions || [];
-  const allFields = [...dimensions, ...measures];
+  const allFields = [...measures, ...dimensions];
 
-  // Primary value: first measure, or first field
   const primaryField = measures[0] || allFields[0];
   if (!primaryField) return <Empty />;
 
   const primaryCell = rows[0][primaryField.name];
-  const primaryValue = primaryCell?.rendered ?? fmt(primaryCell?.value);
+  const primaryValue = cellText(primaryCell);
 
-  // Comparison value (second measure or dimension)
+  // Comparison against a second measure, when present and not disabled.
   const compField = measures[1] || null;
-  const compCell = compField ? rows[0][compField.name] : null;
-  const compValue = compCell ? (compCell.rendered ?? fmt(compCell.value)) : null;
+  const showComparison = compField && visConfig.show_comparison !== false;
+  let comparison = null;
+  if (showComparison) {
+    const compCell = rows[0][compField.name];
+    const a = Number(primaryCell?.value);
+    const b = Number(compCell?.value);
+    const type = visConfig.comparison_type || 'change';
+    if (type === 'change' && !Number.isNaN(a) && !Number.isNaN(b) && b !== 0) {
+      const pct = (a - b) / Math.abs(b);
+      const up = pct >= 0;
+      const good = visConfig.comparison_reverse_colors ? !up : up;
+      comparison = {
+        text: `${up ? '▲' : '▼'} ${formatNumber(Math.abs(pct), '0.0%')}`,
+        color: good ? '#10b981' : '#ef4444',
+        label: visConfig.comparison_label || `vs ${compField.label_short || compField.label}`,
+      };
+    } else {
+      comparison = {
+        text: cellText(rows[0][compField.name]),
+        color: 'var(--muted)',
+        label: visConfig.comparison_label || `vs ${compField.label_short || compField.label}`,
+      };
+    }
+  }
 
-  // Value format colour from vis_config
-  const color = visConfig?.value_colors?.[0] || '#222';
+  const color = visConfig.custom_color_enabled && visConfig.custom_color
+    ? visConfig.custom_color
+    : visConfig.value_color || '#222';
+
+  const title = visConfig.show_single_value_title !== false
+    ? (visConfig.single_value_title || primaryField.label_short || primaryField.label)
+    : null;
 
   return (
-    <div style={{
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      justifyContent: 'center',
-      height: '100%',
-      padding: '12px 16px',
-      textAlign: 'center',
-    }}>
-      <div style={{
-        fontSize: 'clamp(20px, 4vw, 36px)',
-        fontWeight: 700,
-        color,
-        lineHeight: 1.1,
-        letterSpacing: '-0.5px',
-      }}>
+    <div style={wrap}>
+      <div style={{ fontSize: 'clamp(22px, 4.5vw, 40px)', fontWeight: 700, color, lineHeight: 1.05, letterSpacing: '-0.5px' }}>
         {primaryValue}
       </div>
-      {compValue && (
-        <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 6 }}>
-          vs {compValue}
+      {comparison && (
+        <div style={{ fontSize: 13, marginTop: 8, fontWeight: 600, color: comparison.color }}>
+          {comparison.text}
+          <span style={{ color: 'var(--muted)', fontWeight: 400, marginLeft: 6 }}>{comparison.label}</span>
         </div>
       )}
-      {visConfig?.value_format && (
-        <div style={{ fontSize: 11, color: '#bbb', marginTop: 4 }}>{primaryField.label_short || primaryField.label}</div>
-      )}
+      {title && <div style={{ fontSize: 11, color: '#aaa', marginTop: 6, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{title}</div>}
     </div>
   );
 }
 
-function fmt(val) {
-  if (val == null) return '—';
-  if (typeof val === 'number') return val.toLocaleString();
-  return String(val);
-}
+const wrap = { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', padding: '12px 16px', textAlign: 'center' };
 
 function Empty() {
   return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#ccc', fontSize: 12 }}>No data</div>;
