@@ -8,6 +8,7 @@ You can:
 - **Replicate any Looker dashboard** — import an existing Looker dashboard; it's converted into a fully editable definition owned by this app.
 - **Clone inside Looker** — the original workflow that copies a dashboard into a new *Looker* dashboard (still available under `/clone`).
 - **Drill into any value** — click a KPI, table cell, or chart point to see the underlying rows (parses Looker's drill links).
+- **AI insights** — a ✨ button on each tile sends its data to Claude (`claude-opus-4-8`) for a concise, business-focused read. Server-side only; appears when `ANTHROPIC_API_KEY` is set. Insights run on the client's already-scoped data.
 - **Serve multiple clients (multi-tenant)** — clients log in and see only their dashboards, with every query **scoped server-side** to their organiser name(s) and (optionally) specific events. Admins build dashboards and manage client accounts.
 
 ## Roles & multi-tenancy

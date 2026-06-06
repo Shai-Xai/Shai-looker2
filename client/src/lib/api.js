@@ -57,6 +57,15 @@ export const api = {
   getExploreFields: (model, explore) =>
     fetch(`/api/looker/explores/${encodeURIComponent(model)}/${encodeURIComponent(explore)}`).then(json),
 
+  // AI insights
+  insightStatus: () => fetch('/api/insight/status').then(json),
+  insight: (payload) =>
+    fetch('/api/insight', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).then(json),
+
   // Drill-down: run a Looker drill link
   drill: (url) =>
     fetch('/api/drill', {

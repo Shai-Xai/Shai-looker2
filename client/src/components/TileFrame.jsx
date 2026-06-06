@@ -2,14 +2,32 @@ import SingleValueTile from './tiles/SingleValueTile.jsx';
 import ChartTile from './tiles/ChartTile.jsx';
 import TableTile from './tiles/TableTile.jsx';
 import BarGaugeTile from './tiles/BarGaugeTile.jsx';
+import { useState } from 'react';
 import TextTile from './tiles/TextTile.jsx';
 import ErrorBoundary from './ErrorBoundary.jsx';
+import InsightModal from './InsightModal.jsx';
 import { useTileData, isRunnableQuery } from '../lib/useTileData.js';
+import { useAuth } from '../lib/auth.jsx';
 
 // Renders a single tile (vis or text). In edit mode it shows hover controls
 // (edit / duplicate / delete) and a drag handle on the title bar.
 export default function TileFrame({ tile, filterValues, editable, onEdit, onDuplicate, onRemove }) {
   const { data, loading, error } = useTileData(tile, filterValues);
+  const { insightsEnabled } = useAuth();
+  const [showInsight, setShowInsight] = useState(false);
+
+  // The filters in effect for this tile (its own query filters + the dashboard
+  // filters it listens to) — passed to the AI for context.
+  function appliedFilters() {
+    const f = { ...(tile.query?.filters || {}) };
+    for (const [filterName, queryField] of Object.entries(tile.listenTo || {})) {
+      const val = filterValues?.[filterName];
+      if (val && String(val).trim()) f[queryField] = String(val).trim();
+    }
+    return f;
+  }
+
+  const canInsight = insightsEnabled && tile.type !== 'text' && data && !loading && !error;
 
   return (
     <div
@@ -54,6 +72,19 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
       )}
 
       <div style={{ flex: 1, minHeight: 0, position: 'relative', padding: tile.type === 'text' ? 12 : 0 }}>
+        {canInsight && (
+          <button
+            title="AI insight"
+            onClick={() => setShowInsight(true)}
+            className="insight-btn"
+            style={{
+              position: 'absolute', top: 6, right: 6, zIndex: 5,
+              border: '1px solid #eadfff', background: '#f6f1ff', color: '#6d28d9',
+              borderRadius: 6, cursor: 'pointer', fontSize: 12, lineHeight: 1,
+              padding: '4px 7px', fontWeight: 600,
+            }}
+          >✨</button>
+        )}
         {tile.type === 'text' ? (
           <TextTile tile={tile} />
         ) : !isRunnableQuery(tile.query) ? (
@@ -68,6 +99,10 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
           </ErrorBoundary>
         ) : null}
       </div>
+
+      {showInsight && (
+        <InsightModal tile={tile} data={data} filters={appliedFilters()} onClose={() => setShowInsight(false)} />
+      )}
     </div>
   );
 }

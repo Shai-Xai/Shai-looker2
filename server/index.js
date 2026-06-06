@@ -10,6 +10,7 @@ const auth = require('./auth');
 const { convertDashboard } = require('./convert');
 const { recreateDashboard, fetchDashboard } = require('./recreate');
 const { parseDrillUrl } = require('./drill');
+const insights = require('./insights');
 
 const app = express();
 app.use(express.json({ limit: '5mb' }));
@@ -180,6 +181,23 @@ app.post('/api/filter-suggest', auth.requireAuth, async (req, res) => {
     res.json({ suggestions: data?.suggest_dimension?.suggestions || [] });
   } catch (_) {
     res.json({ suggestions: [] });
+  }
+});
+
+// ─── AI insight for a tile ─────────────────────────────────────────────────────
+app.get('/api/insight/status', auth.requireAuth, (_req, res) => {
+  res.json({ enabled: insights.isConfigured() });
+});
+
+app.post('/api/insight', auth.requireAuth, async (req, res) => {
+  try {
+    const { title, visType, fields, rows, filters } = req.body || {};
+    if (!fields || !rows) return res.status(400).json({ error: 'fields and rows are required' });
+    const result = await insights.generateInsight({ title, visType, fields, rows, filters });
+    res.json(result);
+  } catch (err) {
+    console.error('[POST /api/insight]', err.message);
+    res.status(err.code === 'NO_API_KEY' ? 400 : 500).json({ error: err.message });
   }
 });
 

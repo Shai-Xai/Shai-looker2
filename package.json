@@ -12,6 +12,7 @@
     "postbuild": "echo 'Build complete — run npm start to serve'"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.102.0",
     "bcryptjs": "^3.0.3",
     "cookie-parser": "^1.4.7",
     "dotenv": "^16.4.5",
