@@ -108,6 +108,25 @@ export default function EditorPage() {
     mutate((d) => ({ ...d, carousels: (d.carousels || []).map((c) => (c.id === cid ? { ...c, tiles: c.tiles.filter((t) => t.id !== tileId) } : c)) }));
     if (selectedTileId === tileId) setSelectedTileId(null);
   }
+  // Move an existing tile (from the grid or another carousel) into a carousel.
+  function moveTileToCarousel(tileId, targetId) {
+    mutate((d) => {
+      let moved = null;
+      const tiles = d.tiles.filter((t) => { if (t.id === tileId) { moved = { ...t }; return false; } return true; });
+      const carousels = (d.carousels || []).map((c) => ({
+        ...c,
+        tiles: c.tiles.filter((t) => { if (t.id === tileId) { moved = { ...t }; return false; } return true; }),
+      }));
+      if (!moved) return d;
+      delete moved.layout; // carousel tiles are fixed-size cards
+      return {
+        ...d,
+        tiles,
+        carousels: carousels.map((c) => (c.id === targetId ? { ...c, tiles: [...c.tiles, moved] } : c)),
+      };
+    });
+  }
+
   function duplicateTileInCarousel(cid, tileId) {
     mutate((d) => ({
       ...d,
@@ -198,6 +217,7 @@ export default function EditorPage() {
                   onAddTile={(type) => addTileToCarousel(c.id, type)}
                   onChangeTitle={(t) => changeCarouselTitle(c.id, t)}
                   onRemove={() => removeCarousel(c.id)}
+                  onDropTile={(tileId) => moveTileToCarousel(tileId, c.id)}
                 />
               ))}
             </div>

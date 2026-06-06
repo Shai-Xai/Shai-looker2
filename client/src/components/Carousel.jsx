@@ -1,11 +1,13 @@
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import TileFrame from './TileFrame.jsx';
 
 // A horizontal, scrollable row of tiles. When the tiles overflow the screen
 // width, the left/right arrows scroll the track. Reuses TileFrame so every
 // tile type (KPI, table, chart, gauge) renders exactly as in the grid.
-export default function Carousel({ carousel, filterValues, editable, onEditTile, onRemoveTile, onDuplicateTile, onAddTile, onChangeTitle, onRemove }) {
+// In edit mode it's also a drop target — drag any tile here to move it in.
+export default function Carousel({ carousel, filterValues, editable, onEditTile, onRemoveTile, onDuplicateTile, onAddTile, onChangeTitle, onRemove, onDropTile }) {
   const trackRef = useRef(null);
+  const [dragOver, setDragOver] = useState(false);
   const cardW = carousel.cardW || 320;
   const cardH = carousel.cardH || 200;
   const tiles = carousel.tiles || [];
@@ -37,10 +39,28 @@ export default function Carousel({ carousel, filterValues, editable, onEditTile,
         <button style={arrowBtn} onClick={() => scroll(1)} title="Scroll right">›</button>
       </div>
 
-      <div ref={trackRef} style={{ display: 'flex', gap: GAP, overflowX: 'auto', paddingBottom: 8, scrollSnapType: 'x proximity' }}>
+      <div
+        ref={trackRef}
+        onDragOver={editable && onDropTile ? (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (!dragOver) setDragOver(true); } : undefined}
+        onDragLeave={editable && onDropTile ? () => setDragOver(false) : undefined}
+        onDrop={editable && onDropTile ? (e) => {
+          e.preventDefault();
+          setDragOver(false);
+          const tileId = e.dataTransfer.getData('text/plain');
+          if (tileId) onDropTile(tileId);
+        } : undefined}
+        style={{
+          display: 'flex', gap: GAP, overflowX: 'auto', paddingBottom: 8, scrollSnapType: 'x proximity',
+          borderRadius: 8,
+          outline: dragOver ? '2px dashed var(--brand)' : 'none',
+          outlineOffset: 2,
+          background: dragOver ? 'rgba(255,56,92,0.04)' : 'transparent',
+          minHeight: editable ? Math.max(60, (carousel.cardH || 200) / 2) : undefined,
+        }}
+      >
         {tiles.length === 0 ? (
           <div style={{ color: '#bbb', fontSize: 13, padding: '28px 12px' }}>
-            {editable ? 'Empty row — add tiles with the buttons above →' : 'No tiles'}
+            {editable ? 'Empty row — add tiles above, or drag a tile here →' : 'No tiles'}
           </div>
         ) : (
           tiles.map((t) => (

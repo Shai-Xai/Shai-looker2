@@ -79,6 +79,14 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
       )}
 
       <div style={{ flex: 1, minHeight: 0, position: 'relative', padding: tile.type === 'text' ? 12 : 0 }}>
+        {editable && (
+          <span
+            draggable
+            onDragStart={(e) => { e.dataTransfer.setData('text/plain', tile.id); e.dataTransfer.effectAllowed = 'move'; }}
+            title="Drag into a carousel"
+            style={{ position: 'absolute', top: 6, left: 6, zIndex: 6, cursor: 'grab', fontSize: 12, color: '#999', background: '#fff', border: '1px solid #eee', borderRadius: 5, padding: '1px 5px', lineHeight: 1.3 }}
+          >⠿</span>
+        )}
         {canInsight && (
           <button
             title="AI insight"
