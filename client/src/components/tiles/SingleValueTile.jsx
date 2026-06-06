@@ -22,7 +22,8 @@ export default function SingleValueTile({ data, visConfig = {}, label }) {
   const primaryField = measures[0] || allFields[0];
   if (!primaryField) return <Empty />;
 
-  const primaryCell = rows[0][primaryField.name];
+  const pivots = data.pivots || [];
+  const primaryCell = resolvePivotCell(rows[0][primaryField.name], pivots);
   const primaryValue = cellText(primaryCell);
 
   // Comparison against a second measure, when present and not disabled.
@@ -30,7 +31,7 @@ export default function SingleValueTile({ data, visConfig = {}, label }) {
   const showComparison = compField && visConfig.show_comparison !== false;
   let comparison = null;
   if (showComparison) {
-    const compCell = rows[0][compField.name];
+    const compCell = resolvePivotCell(rows[0][compField.name], pivots);
     const a = Number(primaryCell?.value);
     const b = Number(compCell?.value);
     const type = visConfig.comparison_type || 'change';
@@ -112,6 +113,19 @@ function evalConditionalFormatting(rules, field, cell) {
     }
   }
   return out;
+}
+
+// For pivoted single-value tiles the value is nested by pivot key
+// (row[field][pivotKey]). Resolve to the most recent non-null pivot column
+// (e.g. the latest year's "% change vs previous") instead of showing ∅.
+function resolvePivotCell(cell, pivots) {
+  if (!cell || cell.value !== undefined || cell.rendered !== undefined) return cell;
+  const keys = (pivots && pivots.length) ? pivots.map((p) => p.key) : Object.keys(cell);
+  for (let i = keys.length - 1; i >= 0; i--) {
+    const c = cell[keys[i]];
+    if (c && (c.value != null || (c.rendered != null && c.rendered !== ''))) return c;
+  }
+  return cell[keys[keys.length - 1]] || null;
 }
 
 function ruleMatches(r, v, raw) {
