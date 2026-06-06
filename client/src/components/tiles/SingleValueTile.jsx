@@ -11,8 +11,12 @@ export default function SingleValueTile({ data, visConfig = {}, label }) {
   const rows = data.data || [];
   if (!rows.length) return <Empty />;
 
-  const measures = [...(fields.measures || []), ...(fields.table_calculations || [])];
-  const dimensions = fields.dimensions || [];
+  // Looker hides some fields (e.g. a raw measure) and displays only the visible
+  // one (often a table calculation like "% change"). Honour hidden_fields so we
+  // show the field the tile is actually configured to display.
+  const hidden = new Set(visConfig.hidden_fields || []);
+  const measures = [...(fields.measures || []), ...(fields.table_calculations || [])].filter((f) => !hidden.has(f.name));
+  const dimensions = (fields.dimensions || []).filter((f) => !hidden.has(f.name));
   const allFields = [...measures, ...dimensions];
 
   const primaryField = measures[0] || allFields[0];

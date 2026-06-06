@@ -9,7 +9,8 @@ export default function BarGaugeTile({ data, visConfig = {}, label }) {
   const { openDrill, canDrill } = useDrill();
   const fields = data.fields || {};
   const rows = data.data || [];
-  const measures = [...(fields.measures || []), ...(fields.table_calculations || [])];
+  const hidden = new Set(visConfig.hidden_fields || []);
+  const measures = [...(fields.measures || []), ...(fields.table_calculations || [])].filter((f) => !hidden.has(f.name));
   const measure = measures[0];
   if (!rows.length || !measure) return <Empty />;
 

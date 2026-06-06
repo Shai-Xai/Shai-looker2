@@ -4,12 +4,13 @@ import { useDrill } from '../../lib/DrillContext.jsx';
 // Data table. Uses Looker's per-field `align` and `rendered` strings so
 // numbers, currency, and percentages match the source dashboard exactly.
 // Measure cells that carry Looker drill links are clickable.
-export default function TableTile({ data }) {
+export default function TableTile({ data, visConfig = {} }) {
   const { openDrill, canDrill } = useDrill();
   const fields = data.fields || {};
   const rows = data.data || [];
-  const dimensions = fields.dimensions || [];
-  const measures = [...(fields.measures || []), ...(fields.table_calculations || [])];
+  const hidden = new Set(visConfig.hidden_fields || []);
+  const dimensions = (fields.dimensions || []).filter((f) => !hidden.has(f.name));
+  const measures = [...(fields.measures || []), ...(fields.table_calculations || [])].filter((f) => !hidden.has(f.name));
   const allFields = [...dimensions, ...measures];
 
   if (!rows.length || !allFields.length) return <Empty />;
