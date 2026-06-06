@@ -25,3 +25,17 @@ body {
 a { color: inherit; }
 
 button { font-family: inherit; }
+
+/* AI insight button: hidden until the tile is hovered (or focused) */
+.howler-tile .insight-btn {
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.howler-tile:hover .insight-btn,
+.howler-tile:focus-within .insight-btn {
+  opacity: 1;
+}
+/* Touch devices have no hover — keep it visible there */
+@media (hover: none) {
+  .howler-tile .insight-btn { opacity: 1; }
+}

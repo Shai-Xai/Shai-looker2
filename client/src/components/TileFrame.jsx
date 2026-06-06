@@ -31,6 +31,7 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
 
   return (
     <div
+      className="howler-tile"
       style={{
         background: 'var(--tile-bg, #fff)',
         border: '1px solid #e0e0e0',
