@@ -1,6 +1,7 @@
 import SingleValueTile from './tiles/SingleValueTile.jsx';
 import ChartTile from './tiles/ChartTile.jsx';
 import TableTile from './tiles/TableTile.jsx';
+import BarGaugeTile from './tiles/BarGaugeTile.jsx';
 import TextTile from './tiles/TextTile.jsx';
 import ErrorBoundary from './ErrorBoundary.jsx';
 import { useTileData } from '../lib/useTileData.js';
@@ -76,6 +77,9 @@ function TileContent({ tile, data }) {
 
   if (visType === 'single_value' || visType === 'single_value_period_over_period') {
     return <SingleValueTile data={data} visConfig={tile.vis} />;
+  }
+  if (visType && visType.includes('bar_gauge')) {
+    return <BarGaugeTile data={data} visConfig={tile.vis} />;
   }
   if (visType === 'looker_grid' || visType === 'table' || visType === 'looker_legacy_table') {
     return <TableTile data={data} visConfig={tile.vis} />;

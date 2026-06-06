@@ -8,6 +8,7 @@ const VIS_TYPES = [
   { value: 'looker_line', label: 'Line chart' },
   { value: 'looker_area', label: 'Area chart' },
   { value: 'looker_pie', label: 'Pie chart' },
+  { value: 'bar_gauge', label: 'Bar gauge' },
 ];
 
 // Configuration panel for a single tile. Mutations are applied immutably and
