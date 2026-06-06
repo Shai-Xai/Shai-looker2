@@ -74,7 +74,7 @@ async function lookerRequest(method, path, body = null, retry = true) {
 // ─── Dashboard fetch + query resolution ──────────────────────────────────────
 
 const ELEMENT_FIELDS = [
-  'id', 'type', 'title', 'body_text', 'vis_config',
+  'id', 'type', 'title', 'body_text', 'rich_content_json', 'vis_config',
   'row', 'col', 'width', 'height',
   'look_id', 'query_id', 'result_maker_id',
   'result_maker(vis_config,filterables(listen(dashboard_filter_name,field)),query(id,model,view,fields,pivots,fill_fields,filters,filter_expression,sorts,limit,column_limit,total,row_total,dynamic_fields,query_timezone,vis_config))',
@@ -83,12 +83,13 @@ const ELEMENT_FIELDS = [
 ].join(',');
 
 async function fetchDashboard(dashboardId) {
-  const [dashboard, elements, filters] = await Promise.all([
+  const [dashboard, elements, filters, layouts] = await Promise.all([
     lookerRequest('GET', `/dashboards/${dashboardId}`),
     lookerRequest('GET', `/dashboards/${dashboardId}/dashboard_elements?fields=${encodeURIComponent(ELEMENT_FIELDS)}`),
     lookerRequest('GET', `/dashboards/${dashboardId}/dashboard_filters`),
+    lookerRequest('GET', `/dashboards/${dashboardId}/dashboard_layouts`).catch(() => []),
   ]);
-  return { dashboard, elements, filters };
+  return { dashboard, elements, filters, layouts };
 }
 
 // Resolve the full query body for elements that don't carry it inline.

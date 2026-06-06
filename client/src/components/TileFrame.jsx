@@ -2,6 +2,7 @@ import SingleValueTile from './tiles/SingleValueTile.jsx';
 import ChartTile from './tiles/ChartTile.jsx';
 import TableTile from './tiles/TableTile.jsx';
 import TextTile from './tiles/TextTile.jsx';
+import ErrorBoundary from './ErrorBoundary.jsx';
 import { useTileData } from '../lib/useTileData.js';
 
 // Renders a single tile (vis or text). In edit mode it shows hover controls
@@ -61,7 +62,9 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
         ) : error ? (
           <Centered error>⚠ {error}</Centered>
         ) : data ? (
-          <TileContent tile={tile} data={data} />
+          <ErrorBoundary resetKey={data}>
+            <TileContent tile={tile} data={data} />
+          </ErrorBoundary>
         ) : null}
       </div>
     </div>

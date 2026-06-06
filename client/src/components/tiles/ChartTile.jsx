@@ -1,12 +1,17 @@
 import { useRef, useEffect } from 'react';
 import {
   Chart,
+  BarController, LineController, PieController, DoughnutController,
   CategoryScale, LinearScale, BarElement, LineElement, PointElement, ArcElement,
   Tooltip, Legend, Filler,
 } from 'chart.js';
 import { cellText, formatNumber, formatAxis } from '../../lib/format.js';
 
-Chart.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, ArcElement, Tooltip, Legend, Filler);
+Chart.register(
+  BarController, LineController, PieController, DoughnutController,
+  CategoryScale, LinearScale, BarElement, LineElement, PointElement, ArcElement,
+  Tooltip, Legend, Filler,
+);
 
 const PALETTE = [
   '#ff385c', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6',

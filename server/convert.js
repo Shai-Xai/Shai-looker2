@@ -6,19 +6,30 @@
 const { extractQueryFromElement, extractVisFromElement } = require('./looker');
 const { defaultTheme } = require('./store');
 
-function convertDashboard({ dashboard, elements, filters }) {
+function convertDashboard({ dashboard, elements, filters, layouts }) {
+  // Modern Looker dashboards store tile positions in a separate layout object
+  // (dashboard_layouts[].dashboard_layout_components), not on the element.
+  // Build a map: elementId -> { row, column, width, height }.
+  const activeLayout = (layouts || []).find((l) => l.active) || (layouts || [])[0];
+  const posByElement = {};
+  for (const c of activeLayout?.dashboard_layout_components || []) {
+    posByElement[String(c.dashboard_element_id)] = c;
+  }
+
   const tiles = elements.map((el) => {
     const isText = el.type === 'text';
+    const pos = posByElement[String(el.id)];
     return {
       id: cryptoId(),
       type: isText ? 'text' : 'vis',
       title: el.title || '',
       body_text: el.body_text || '',
+      rich: isText ? (el.rich_content_json || null) : null,
       layout: {
-        x: el.col ?? 0,
-        y: el.row ?? 0,
-        w: el.width ?? 8,
-        h: el.height ?? 6,
+        x: pos?.column ?? el.col ?? 0,
+        y: pos?.row ?? el.row ?? 0,
+        w: pos?.width ?? el.width ?? 8,
+        h: pos?.height ?? el.height ?? 6,
       },
       query: isText ? null : extractQueryFromElement(el),
       vis: isText ? {} : extractVisFromElement(el),

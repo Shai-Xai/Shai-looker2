@@ -5,3 +5,7 @@ node_modules/
 # Runtime data
 server/data/
 client/dist/
+
+# Dev screenshot helper (throwaway)
+shot.mjs
+dbg.mjs

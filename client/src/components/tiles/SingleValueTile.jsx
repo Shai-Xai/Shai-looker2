@@ -49,8 +49,10 @@ export default function SingleValueTile({ data, visConfig = {} }) {
     ? visConfig.custom_color
     : visConfig.value_color || '#222';
 
+  // Only show an explicit custom title — the tile header already shows the
+  // tile name, so echoing the raw field name underneath is just noise.
   const title = visConfig.show_single_value_title !== false
-    ? (visConfig.single_value_title || primaryField.label_short || primaryField.label)
+    ? (visConfig.single_value_title || null)
     : null;
 
   return (
