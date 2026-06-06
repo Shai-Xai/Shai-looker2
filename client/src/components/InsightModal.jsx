@@ -1,32 +1,62 @@
 import { useState, useEffect } from 'react';
-import { api } from '../lib/api.js';
+import { createPortal } from 'react-dom';
 
-// Slide-over panel showing an AI-generated insight for a tile's data.
+// Full-height side panel showing an AI insight that streams in live as Claude
+// writes it. Rendered via a portal to document.body so it escapes the
+// dashboard grid's CSS transform (otherwise position:fixed clamps to the tile).
 export default function InsightModal({ tile, data, filters, onClose }) {
-  const [insight, setInsight] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [insight, setInsight] = useState('');
+  const [loading, setLoading] = useState(true); // true until first text arrives
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
+    setInsight('');
     setLoading(true);
     setError(null);
-    api.insight({
-      title: tile.title,
-      visType: tile.vis?.type,
-      fields: data.fields,
-      rows: data.data,
-      filters,
-    })
-      .then((r) => { if (!cancelled) setInsight(r.insight); })
-      .catch((e) => { if (!cancelled) setError(e.message); })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
+
+    (async () => {
+      try {
+        const res = await fetch('/api/insight', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: tile.title,
+            visType: tile.vis?.type,
+            fields: data.fields,
+            rows: data.data,
+            filters,
+          }),
+          signal: controller.signal,
+        });
+        if (!res.ok) {
+          const j = await res.json().catch(() => ({}));
+          throw new Error(j.error || `Request failed (${res.status})`);
+        }
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let acc = '';
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          acc += decoder.decode(value, { stream: true });
+          setInsight(acc);
+          setLoading(false); // first chunk → swap spinner for text
+        }
+      } catch (e) {
+        if (e.name !== 'AbortError') setError(e.message);
+      } finally {
+        setLoading(false);
+      }
+    })();
+
+    return () => controller.abort();
   }, [tile.id]);
 
-  return (
+  const node = (
     <div style={overlay} onClick={onClose}>
       <div style={panel} onClick={(e) => e.stopPropagation()}>
+        <style>{`@keyframes blink { 50% { opacity: 0; } }`}</style>
         <div style={header}>
           <span style={{ fontSize: 18 }}>✨</span>
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -37,16 +67,19 @@ export default function InsightModal({ tile, data, filters, onClose }) {
         </div>
 
         <div style={body}>
-          {loading ? (
+          {error ? (
+            <div style={{ color: 'var(--error)', fontSize: 14, lineHeight: 1.5 }}>⚠ {error}</div>
+          ) : loading && !insight ? (
             <div style={{ color: 'var(--muted)', fontSize: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>⏳</span>
               Analysing this tile…
               <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
             </div>
-          ) : error ? (
-            <div style={{ color: 'var(--error)', fontSize: 14, lineHeight: 1.5 }}>⚠ {error}</div>
           ) : (
-            <div style={{ fontSize: 14, lineHeight: 1.65, color: 'var(--text)', whiteSpace: 'pre-wrap' }}>{renderMarkdownish(insight)}</div>
+            <div style={{ fontSize: 14, lineHeight: 1.65, color: 'var(--text)' }}>
+              {renderMarkdownish(insight)}
+              {loading && <span style={cursor} />}
+            </div>
           )}
         </div>
 
@@ -56,9 +89,11 @@ export default function InsightModal({ tile, data, filters, onClose }) {
       </div>
     </div>
   );
+
+  return createPortal(node, document.body);
 }
 
-// Light rendering: turn "- " bullets and **bold** into elements.
+// Light rendering: "- " bullets and **bold**.
 function renderMarkdownish(text) {
   if (!text) return null;
   return text.split('\n').filter((l) => l.trim()).map((line, i) => {
@@ -76,8 +111,9 @@ function renderMarkdownish(text) {
   });
 }
 
-const overlay = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', justifyContent: 'flex-end', zIndex: 300 };
+const overlay = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', justifyContent: 'flex-end', zIndex: 400 };
 const panel = { width: 'min(460px, 92vw)', height: '100%', background: '#fff', boxShadow: '-4px 0 24px rgba(0,0,0,0.15)', display: 'flex', flexDirection: 'column' };
 const header = { display: 'flex', alignItems: 'center', gap: 12, padding: '16px 18px', borderBottom: '1px solid #e0e0e0' };
 const body = { flex: 1, minHeight: 0, overflowY: 'auto', padding: 18 };
 const closeBtn = { border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 17, color: '#888' };
+const cursor = { display: 'inline-block', width: 7, height: 15, background: 'var(--brand)', marginLeft: 2, verticalAlign: 'text-bottom', animation: 'blink 1s step-end infinite' };

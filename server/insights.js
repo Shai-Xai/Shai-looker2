@@ -64,32 +64,39 @@ function buildPrompt({ title, visType, fields, rows, filters }) {
   return lines.join('\n');
 }
 
-async function generateInsight(tileContext) {
+function requireClient() {
   const c = getClient();
   if (!c) {
     const err = new Error('AI insights are not configured. Set ANTHROPIC_API_KEY in your .env to enable them.');
     err.code = 'NO_API_KEY';
     throw err;
   }
+  return c;
+}
 
-  const prompt = buildPrompt(tileContext);
+const REQUEST = (prompt) => ({
+  model: MODEL,
+  max_tokens: 1024,
+  thinking: { type: 'adaptive' },
+  output_config: { effort: 'low' }, // keep insights snappy
+  system: SYSTEM,
+  messages: [{ role: 'user', content: prompt }],
+});
 
-  const resp = await c.messages.create({
-    model: MODEL,
-    max_tokens: 1024,
-    thinking: { type: 'adaptive' },
-    output_config: { effort: 'medium' },
-    system: SYSTEM,
-    messages: [{ role: 'user', content: prompt }],
-  });
-
-  const text = (resp.content || [])
-    .filter((b) => b.type === 'text')
-    .map((b) => b.text)
-    .join('')
-    .trim();
-
+// Non-streaming (kept for completeness / non-stream callers).
+async function generateInsight(tileContext) {
+  const c = requireClient();
+  const resp = await c.messages.create(REQUEST(buildPrompt(tileContext)));
+  const text = (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
   return { insight: text, model: resp.model, usage: resp.usage };
 }
 
-module.exports = { generateInsight, isConfigured: () => !!process.env.ANTHROPIC_API_KEY };
+// Streaming: invokes onText(deltaString) as the model produces text.
+async function streamInsight(tileContext, onText) {
+  const c = requireClient();
+  const stream = c.messages.stream(REQUEST(buildPrompt(tileContext)));
+  stream.on('text', (delta) => onText(delta));
+  await stream.finalMessage();
+}
+
+module.exports = { generateInsight, streamInsight, isConfigured: () => !!process.env.ANTHROPIC_API_KEY };
