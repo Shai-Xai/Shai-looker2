@@ -64,7 +64,8 @@ export default function SingleValueTile({ data, visConfig = {} }) {
     <div style={wrap}>
       <AutoFitText
         max={40}
-        min={14}
+        min={12}
+        style={{ flex: 1, minHeight: 0 }}
         onClick={drillable ? () => openDrill(primaryCell.links, primaryField.label_short || primaryField.label) : undefined}
         spanStyle={{
           fontWeight: 700, color, letterSpacing: '-0.5px',

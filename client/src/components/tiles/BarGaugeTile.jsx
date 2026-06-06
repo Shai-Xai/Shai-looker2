@@ -46,7 +46,8 @@ export default function BarGaugeTile({ data, visConfig = {} }) {
     <div style={wrap}>
       <AutoFitText
         max={30}
-        min={13}
+        min={12}
+        style={{ height: 40 }}
         onClick={drillable ? () => openDrill(cell.links, measure.label_short || measure.label) : undefined}
         spanStyle={{
           fontWeight: 700, color: '#222', letterSpacing: '-0.4px',

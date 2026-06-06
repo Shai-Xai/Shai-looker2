@@ -1,11 +1,14 @@
 import { useRef, useLayoutEffect } from 'react';
 
-// Shrinks its text to fit the tile's width. KPI values vary wildly in length
-// (38,947 vs 5,320,481.76), so a fixed font size either overflows narrow tiles
-// or wastes space in wide ones. This measures the container and binary-searches
-// the largest font (between min and max) whose text fits on one line, and
-// re-fits when the tile resizes.
-export default function AutoFitText({ children, max = 40, min = 13, spanStyle, onClick, title }) {
+// Shrinks its text to fit the tile — on BOTH width and height. KPI values vary
+// wildly in length (38,947 vs 5,320,481.76), so a fixed font size either
+// overflows narrow tiles or grows too tall for short/wide ones. This measures
+// the box and binary-searches the largest font whose text fits within both
+// dimensions, re-fitting when the tile resizes.
+//
+// The box must have a real height — callers pass `style` to give it one
+// (e.g. flex:1 to fill remaining space, or a fixed height).
+export default function AutoFitText({ children, max = 40, min = 12, spanStyle, style, onClick, title }) {
   const boxRef = useRef(null);
   const spanRef = useRef(null);
 
@@ -15,13 +18,14 @@ export default function AutoFitText({ children, max = 40, min = 13, spanStyle, o
     if (!box || !span) return;
 
     const fit = () => {
-      const avail = box.clientWidth;
-      if (!avail) return;
+      const w = box.clientWidth;
+      const h = box.clientHeight;
+      if (!w || !h) return;
       let lo = min, hi = max, best = min;
       for (let i = 0; i < 12; i++) {
         const mid = (lo + hi) / 2;
         span.style.fontSize = `${mid}px`;
-        if (span.scrollWidth <= avail) { best = mid; lo = mid; } else { hi = mid; }
+        if (span.scrollWidth <= w && span.scrollHeight <= h) { best = mid; lo = mid; } else { hi = mid; }
       }
       span.style.fontSize = `${best}px`;
     };
@@ -40,7 +44,7 @@ export default function AutoFitText({ children, max = 40, min = 13, spanStyle, o
       ref={boxRef}
       onClick={onClick}
       title={title}
-      style={{ width: '100%', overflow: 'hidden', textAlign: 'center', cursor: onClick ? 'pointer' : undefined }}
+      style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', cursor: onClick ? 'pointer' : undefined, ...style }}
     >
       <span ref={spanRef} style={{ display: 'inline-block', whiteSpace: 'nowrap', lineHeight: 1.1, ...spanStyle }}>
         {children}
