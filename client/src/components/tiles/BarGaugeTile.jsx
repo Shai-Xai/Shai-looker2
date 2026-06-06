@@ -1,9 +1,11 @@
 import { cellText, formatNumber } from '../../lib/format.js';
+import { useDrill } from '../../lib/DrillContext.jsx';
 
 // Horizontal bar gauge — mirrors the Looker marketplace "bar_gauge" viz in
 // its horizontal style: a track from range_min→range_max, a coloured fill for
 // the current value, and an optional target marker with a label.
 export default function BarGaugeTile({ data, visConfig = {} }) {
+  const { openDrill, canDrill } = useDrill();
   const fields = data.fields || {};
   const rows = data.data || [];
   const measures = [...(fields.measures || []), ...(fields.table_calculations || [])];
@@ -37,10 +39,17 @@ export default function BarGaugeTile({ data, visConfig = {} }) {
     || (target != null ? formatNumber(target, fmt) : '');
 
   const valueLabel = cellText(cell);
+  const drillable = canDrill(cell?.links);
 
   return (
     <div style={wrap}>
-      <div style={{ fontSize: 'clamp(18px, 3.5vw, 30px)', fontWeight: 700, color: '#222', letterSpacing: '-0.4px' }}>
+      <div
+        onClick={drillable ? () => openDrill(cell.links, measure.label_short || measure.label) : undefined}
+        style={{
+          fontSize: 'clamp(18px, 3.5vw, 30px)', fontWeight: 700, color: '#222', letterSpacing: '-0.4px',
+          ...(drillable ? { cursor: 'pointer', textDecoration: 'underline', textDecorationStyle: 'dotted', textUnderlineOffset: 4 } : null),
+        }}
+      >
         {valueLabel}
       </div>
 

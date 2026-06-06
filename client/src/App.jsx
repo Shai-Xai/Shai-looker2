@@ -3,6 +3,7 @@ import HomePage from './pages/HomePage.jsx';
 import ViewPage from './pages/ViewPage.jsx';
 import EditorPage from './pages/EditorPage.jsx';
 import ClonePage from './pages/ClonePage.jsx';
+import { DrillProvider } from './lib/DrillContext.jsx';
 
 function Header() {
   const navigate = useNavigate();
@@ -41,15 +42,17 @@ function Header() {
 export default function App() {
   return (
     <BrowserRouter>
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
-        <Header />
-        <Routes>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/d/:id" element={<ViewPage />} />
-          <Route path="/d/:id/edit" element={<EditorPage />} />
-          <Route path="/clone" element={<ClonePage />} />
-        </Routes>
-      </div>
+      <DrillProvider>
+        <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+          <Header />
+          <Routes>
+            <Route path="/" element={<HomePage />} />
+            <Route path="/d/:id" element={<ViewPage />} />
+            <Route path="/d/:id/edit" element={<EditorPage />} />
+            <Route path="/clone" element={<ClonePage />} />
+          </Routes>
+        </div>
+      </DrillProvider>
     </BrowserRouter>
   );
 }

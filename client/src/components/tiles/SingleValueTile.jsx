@@ -1,9 +1,11 @@
 import { cellText, formatNumber } from '../../lib/format.js';
+import { useDrill } from '../../lib/DrillContext.jsx';
 
 // Single value / KPI tile. Mirrors Looker's single_value visualization:
 // big rendered value, optional custom color, optional comparison to a second
 // measure (value or % change) with a coloured up/down indicator.
 export default function SingleValueTile({ data, visConfig = {} }) {
+  const { openDrill, canDrill } = useDrill();
   const fields = data.fields || {};
   const rows = data.data || [];
   if (!rows.length) return <Empty />;
@@ -55,9 +57,17 @@ export default function SingleValueTile({ data, visConfig = {} }) {
     ? (visConfig.single_value_title || null)
     : null;
 
+  const drillable = canDrill(primaryCell?.links);
+
   return (
     <div style={wrap}>
-      <div style={{ fontSize: 'clamp(22px, 4.5vw, 40px)', fontWeight: 700, color, lineHeight: 1.05, letterSpacing: '-0.5px' }}>
+      <div
+        onClick={drillable ? () => openDrill(primaryCell.links, primaryField.label_short || primaryField.label) : undefined}
+        style={{
+          fontSize: 'clamp(22px, 4.5vw, 40px)', fontWeight: 700, color, lineHeight: 1.05, letterSpacing: '-0.5px',
+          ...(drillable ? { cursor: 'pointer', textDecoration: 'underline', textDecorationStyle: 'dotted', textUnderlineOffset: 4 } : null),
+        }}
+      >
         {primaryValue}
       </div>
       {comparison && (

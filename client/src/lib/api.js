@@ -35,6 +35,14 @@ export const api = {
   getExploreFields: (model, explore) =>
     fetch(`/api/looker/explores/${encodeURIComponent(model)}/${encodeURIComponent(explore)}`).then(json),
 
+  // Drill-down: run a Looker drill link
+  drill: (url) =>
+    fetch('/api/drill', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    }).then(json),
+
   // Query execution
   runQuery: (query, filterOverrides, signal) =>
     fetch('/api/run-query', {

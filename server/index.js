@@ -7,6 +7,7 @@ const looker = require('./looker');
 const store = require('./store');
 const { convertDashboard } = require('./convert');
 const { recreateDashboard, fetchDashboard } = require('./recreate');
+const { parseDrillUrl } = require('./drill');
 
 const app = express();
 app.use(express.json({ limit: '5mb' }));
@@ -102,6 +103,19 @@ app.post('/api/run-query', async (req, res) => {
     res.json(data);
   } catch (err) {
     console.error('[POST /api/run-query]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Run a drill query from a Looker drill link URL.
+app.post('/api/drill', async (req, res) => {
+  try {
+    const query = parseDrillUrl(req.body?.url);
+    if (!query) return res.status(400).json({ error: 'Could not parse drill link' });
+    const data = await looker.lookerRequest('POST', '/queries/run/json_detail', query);
+    res.json({ query, data });
+  } catch (err) {
+    console.error('[POST /api/drill]', err.message);
     res.status(500).json({ error: err.message });
   }
 });

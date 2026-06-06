@@ -6,6 +6,7 @@ import {
   Tooltip, Legend, Filler,
 } from 'chart.js';
 import { cellText, formatNumber, formatAxis } from '../../lib/format.js';
+import { useDrill } from '../../lib/DrillContext.jsx';
 
 Chart.register(
   BarController, LineController, PieController, DoughnutController,
@@ -30,6 +31,9 @@ function hexToRgba(hex, alpha) {
 export default function ChartTile({ data, visConfig = {} }) {
   const canvasRef = useRef(null);
   const chartRef = useRef(null);
+  const { openDrill } = useDrill();
+  const drillRef = useRef(openDrill);
+  drillRef.current = openDrill;
 
   const fields = data.fields || {};
   const rows = data.data || [];
@@ -74,6 +78,8 @@ export default function ChartTile({ data, visConfig = {} }) {
           datasets.push({
             label,
             _fmt: measure.value_format,
+            _measure: measure.name,
+            _pivotKey: pivot.key,
             data: rows.map((row) => num(row[measure.name]?.[pivot.key]?.value)),
             backgroundColor: colorFor(label, idx, isPie ? 0.85 : 0.78),
             borderColor: colorFor(label, idx, 1),
@@ -87,6 +93,7 @@ export default function ChartTile({ data, visConfig = {} }) {
       const measure = measures[0];
       datasets = [{
         _fmt: measure?.value_format,
+        _measure: measure?.name,
         data: rows.map((row) => row[measure?.name]?.value ?? null),
         backgroundColor: labels.map((_, i) => colorFor(labels[i], i, 0.85)),
         borderColor: '#fff',
@@ -96,6 +103,7 @@ export default function ChartTile({ data, visConfig = {} }) {
       datasets = measures.map((measure, i) => ({
         label: measure.label_short || measure.label,
         _fmt: measure.value_format,
+        _measure: measure.name,
         data: rows.map((row) => row[measure.name]?.value ?? null),
         backgroundColor: colorFor(measure.label_short || measure.label, i, isArea ? 0.25 : 0.78),
         borderColor: colorFor(measure.label_short || measure.label, i, 1),
@@ -116,6 +124,24 @@ export default function ChartTile({ data, visConfig = {} }) {
         responsive: true,
         maintainAspectRatio: false,
         indexAxis: isBar ? 'y' : 'x',
+        onHover: (evt, els) => {
+          const t = evt?.native?.target;
+          if (t) t.style.cursor = els.length ? 'pointer' : 'default';
+        },
+        onClick: (evt, els, chart) => {
+          if (!els.length) return;
+          const { datasetIndex, index } = els[0];
+          const ds = chart.data.datasets[datasetIndex];
+          const row = rows[index];
+          if (!row || !ds?._measure) return;
+          const cell = ds._pivotKey ? row[ds._measure]?.[ds._pivotKey] : row[ds._measure];
+          const links = cell?.links;
+          if (links && links.length) {
+            const dim = dimensions[0] ? cellText(row[dimensions[0].name]) : '';
+            const title = [dim, ds.label].filter(Boolean).join(' · ');
+            drillRef.current(links, title);
+          }
+        },
         plugins: {
           legend: {
             display: datasets.length > 1 || isPie,
