@@ -59,7 +59,7 @@ export default function ExploreBrowser({ query, onChange }) {
       ) : (
         <select style={select} value={model} onChange={(e) => setModel(e.target.value)}>
           <option value="">Select a model…</option>
-          {models.map((m) => (
+          {models.filter((m) => m.explores.length > 0).map((m) => (
             <option key={m.name} value={m.name}>{m.label}</option>
           ))}
         </select>

@@ -4,7 +4,7 @@ import TableTile from './tiles/TableTile.jsx';
 import BarGaugeTile from './tiles/BarGaugeTile.jsx';
 import TextTile from './tiles/TextTile.jsx';
 import ErrorBoundary from './ErrorBoundary.jsx';
-import { useTileData } from '../lib/useTileData.js';
+import { useTileData, isRunnableQuery } from '../lib/useTileData.js';
 
 // Renders a single tile (vis or text). In edit mode it shows hover controls
 // (edit / duplicate / delete) and a drag handle on the title bar.
@@ -56,8 +56,8 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
       <div style={{ flex: 1, minHeight: 0, position: 'relative', padding: tile.type === 'text' ? 12 : 0 }}>
         {tile.type === 'text' ? (
           <TextTile tile={tile} />
-        ) : !tile.query ? (
-          <Centered faint>No query configured</Centered>
+        ) : !isRunnableQuery(tile.query) ? (
+          <Centered faint>{editable ? 'Pick an explore and at least one field →' : 'Not configured'}</Centered>
         ) : loading ? (
           <Centered faint>Loading…</Centered>
         ) : error ? (
