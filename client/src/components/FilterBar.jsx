@@ -1,6 +1,6 @@
 import { useState } from 'react';
 
-export default function FilterBar({ filters, values, onChange }) {
+export default function FilterBar({ filters, values, onChange, locked = {} }) {
   return (
     <div style={{
       background: '#fff',
@@ -17,13 +17,29 @@ export default function FilterBar({ filters, values, onChange }) {
           filter={filter}
           value={values[filter.name] ?? ''}
           onChange={val => onChange(filter.name, val)}
+          locked={!!locked[filter.name]}
         />
       ))}
     </div>
   );
 }
 
-function FilterControl({ filter, value, onChange }) {
+// A scoped, non-editable filter (the client's organiser/event). Shows the
+// value with a lock so it's clear it's fixed to their account.
+function LockedField({ filter, value }) {
+  return (
+    <div style={fieldStyle}>
+      <label style={labelStyle}>{filter.title}</label>
+      <div style={{ ...inputStyle, background: '#f3f4f6', color: '#555', display: 'flex', alignItems: 'center', gap: 6, cursor: 'not-allowed' }} title="Locked to your account">
+        <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{value || '—'}</span>
+        <span style={{ fontSize: 12 }}>🔒</span>
+      </div>
+    </div>
+  );
+}
+
+function FilterControl({ filter, value, onChange, locked }) {
+  if (locked) return <LockedField filter={filter} value={value} />;
   const uiType = filter.ui_config?.type;
 
   // Date range picker

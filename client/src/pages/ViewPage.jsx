@@ -14,20 +14,39 @@ export default function ViewPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [filterValues, setFilterValues] = useState({});
+  const [locked, setLocked] = useState({});
 
   useEffect(() => {
     setLoading(true);
     setError(null);
-    api.getDashboard(id)
-      .then((data) => {
+    // Clients: fetch their tenant so we can pre-fill + lock the organiser/event
+    // filters to their scope. Admins see normal, editable filters.
+    const tenantP = isAdmin ? Promise.resolve(null) : api.listTenants().then((ts) => ts[0] || null).catch(() => null);
+    Promise.all([api.getDashboard(id), tenantP])
+      .then(([data, tenant]) => {
         setDef(data);
+        const sf = tenant?.scopeFields || {};
+        const orgVals = (tenant?.organiserNames || []);
+        const evVals = (tenant?.eventNames || []);
         const defaults = {};
-        for (const f of data.filters || []) defaults[f.name] = f.default_value || '';
+        const lockedMap = {};
+        for (const f of data.filters || []) {
+          defaults[f.name] = f.default_value || '';
+          const field = f.field || f.dimension;
+          if (tenant && field && field === sf.organiser && orgVals.length) {
+            defaults[f.name] = orgVals.join(',');
+            lockedMap[f.name] = true;
+          } else if (tenant && field && field === sf.event && evVals.length) {
+            defaults[f.name] = evVals.join(',');
+            lockedMap[f.name] = true;
+          }
+        }
         setFilterValues(defaults);
+        setLocked(lockedMap);
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [id]);
+  }, [id, isAdmin]);
 
   const handleFilterChange = useCallback((name, value) => {
     setFilterValues((prev) => ({ ...prev, [name]: value }));
@@ -56,7 +75,7 @@ export default function ViewPage() {
       </div>
 
       {def.filters?.length > 0 && (
-        <FilterBar filters={def.filters} values={filterValues} onChange={handleFilterChange} />
+        <FilterBar filters={def.filters} values={filterValues} onChange={handleFilterChange} locked={locked} />
       )}
 
       <div style={{ flex: 1, padding: '16px 24px', overflowY: 'auto' }}>
