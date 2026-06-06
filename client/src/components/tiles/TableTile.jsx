@@ -47,6 +47,17 @@ export default function TableTile({ data, visConfig = {} }) {
       .map((p) => ({ p, ms: visMeasures(p.key) }))
       .filter((g) => g.ms.length > 0);
 
+    // In-cell data bars (Looker series_cell_visualizations) — precompute each
+    // active column's max so bar widths are relative to the column.
+    const cellViz = visConfig.series_cell_visualizations || {};
+    const colMax = {};
+    for (const g of groups) for (const m of g.ms) {
+      if (!cellViz[m.name]?.is_active) continue;
+      let mx = 0;
+      for (const row of rows) { const v = Math.abs(Number(row[m.name]?.[g.p.key]?.value)); if (Number.isFinite(v)) mx = Math.max(mx, v); }
+      colMax[`${g.p.key}.${m.name}`] = mx;
+    }
+
     return (
       <Scroll>
         <table style={tableStyle}>
@@ -78,10 +89,11 @@ export default function TableTile({ data, visConfig = {} }) {
                 {groups.map((g, gi) => g.ms.map((m, mi) => {
                   const cell = row[m.name]?.[g.p.key];
                   const dr = drillCell(cell, [...dimensions.map((d) => cellText(row[d.name])), pLabel(g.p), mLabel(m)]);
+                  const mx = colMax[`${g.p.key}.${m.name}`];
                   return (
                     <td key={`${g.p.key}.${m.name}`} {...dr}
                       style={{ ...tdStyle, textAlign: 'right', fontVariantNumeric: 'tabular-nums', borderLeft: (gi && mi === 0) ? '1px solid #f0f0f0' : undefined, ...(dr.style || null) }}>
-                      {cellText(cell)}
+                      {mx ? <Bar value={Number(cell?.value)} max={mx}>{cellText(cell)}</Bar> : cellText(cell)}
                     </td>
                   );
                 }))}
@@ -147,6 +159,20 @@ const thStyle = {
 };
 const tdStyle = { padding: '5px 10px', borderBottom: '1px solid #f0f0f0', whiteSpace: 'nowrap' };
 const drillStyle = { cursor: 'pointer', color: 'var(--brand)', textDecoration: 'underline', textDecorationStyle: 'dotted', textUnderlineOffset: 2 };
+
+// In-cell data bar (Looker cell visualization): a proportional bar behind the
+// value, growing from the left, with the number on top.
+function Bar({ value, max, children }) {
+  const pct = max > 0 && Number.isFinite(value) ? Math.max(0, Math.min(100, (Math.abs(value) / max) * 100)) : 0;
+  return (
+    <div style={{ position: 'relative', minHeight: 15 }}>
+      {pct > 0 && (
+        <div style={{ position: 'absolute', left: 0, top: 1, bottom: 1, width: `${pct}%`, background: 'rgba(66,133,244,0.22)', borderRadius: 2 }} />
+      )}
+      <div style={{ position: 'relative' }}>{children}</div>
+    </div>
+  );
+}
 
 function Empty() {
   return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#ccc', fontSize: 12 }}>No data</div>;
