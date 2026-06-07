@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useRef, useState, useLayoutEffect } from 'react';
 import ReactECharts from 'echarts-for-react';
 import * as echarts from 'echarts';
 import { cellText, formatNumber, formatAxis } from '../../lib/format.js';
@@ -36,6 +36,18 @@ function areaGradient(c) {
 
 export default function ChartTile({ data, visConfig = {} }) {
   const { openDrill } = useDrill();
+  // Measure the available height so we can truncate rotated axis names to fit
+  // the plot area (short tiles can't show a long vertical title).
+  const boxRef = useRef(null);
+  const [boxH, setBoxH] = useState(280);
+  useLayoutEffect(() => {
+    if (!boxRef.current) return;
+    const el = boxRef.current;
+    const ro = new ResizeObserver(() => setBoxH(el.clientHeight || 280));
+    ro.observe(el);
+    setBoxH(el.clientHeight || 280);
+    return () => ro.disconnect();
+  }, []);
   const fields = data.fields || {};
   const rows = data.data || [];
   const dimensions = fields.dimensions || [];
@@ -49,8 +61,8 @@ export default function ChartTile({ data, visConfig = {} }) {
   // seriesMeta[seriesIndex] = { measure, pivotKey, fmt } for tooltip + drill.
   const stacked = visConfig.stacking === 'normal' || visConfig.stacking === 'percent';
   const { option, seriesMeta } = useMemo(
-    () => buildOption({ rows, dimensions, measures, pivots, visType, stacked, visConfig }),
-    [data, visType, stacked]
+    () => buildOption({ rows, dimensions, measures, pivots, visType, stacked, visConfig, boxH }),
+    [data, visType, stacked, boxH]
   );
 
   if (!rows.length || !measures.length) return <Empty />;
@@ -71,7 +83,7 @@ export default function ChartTile({ data, visConfig = {} }) {
   };
 
   return (
-    <div style={{ width: '100%', height: '100%', padding: 6 }}>
+    <div ref={boxRef} style={{ width: '100%', height: '100%', padding: 6 }}>
       <ReactECharts
         option={option}
         notMerge
@@ -83,7 +95,7 @@ export default function ChartTile({ data, visConfig = {} }) {
   );
 }
 
-function buildOption({ rows, dimensions, measures, pivots, visType, stacked, visConfig = {} }) {
+function buildOption({ rows, dimensions, measures, pivots, visType, stacked, visConfig = {}, boxH = 280 }) {
   const isPie = visType === 'looker_pie' || visType === 'looker_donut_multiples';
   const isDonut = visType === 'looker_donut_multiples';
   const isBar = visType === 'looker_bar';       // horizontal
@@ -159,14 +171,34 @@ function buildOption({ rows, dimensions, measures, pivots, visType, stacked, vis
   }
 
   const fmtFor = (axisIdx) => (measures.find((m) => yIndexOf(m) === axisIdx) || measures[0])?.value_format;
+  // Axis titles — match Looker: y_axes[].label (or the measure label), and
+  // x_axis_label (or the dimension label).
+  // Truncate rotated y-axis names to the available plot height (short tiles
+  // can't fit a long vertical title) — ~5.6px per char at fontSize 10.
+  const clip = (s, max) => (s && s.length > max ? s.slice(0, Math.max(1, max - 1)).trimEnd() + '…' : (s || ''));
+  const yBudget = Math.max(8, Math.floor((boxH - 80) / 5.6));
+  const yNameRaw = (axisIdx) => {
+    const cfg = (visConfig.y_axes || []).find((ax) => (ax.orientation === 'right') === (axisIdx === 1));
+    if (cfg && cfg.label) return cfg.label;
+    const m = measures.find((mm) => yIndexOf(mm) === axisIdx);
+    return m ? (m.label_short || m.label || '') : '';
+  };
+  const yName = (axisIdx) => clip(yNameRaw(axisIdx), yBudget);
+  const xNameRaw = visConfig.show_x_axis_label === false ? '' : (visConfig.x_axis_label || primaryDim?.label || primaryDim?.label_short || '');
+  const xName = isBar ? clip(xNameRaw, yBudget) : clip(xNameRaw, 70);
+
+  const nameStyle = { fontSize: 10, color: '#9a9a9a', fontWeight: 500 };
   const valueAxis = (axisIdx, position) => ({
     type: 'value', position,
+    name: yName(axisIdx), nameLocation: 'middle', nameGap: 46, nameRotate: position === 'right' ? -90 : 90,
+    nameTextStyle: nameStyle,
     axisLabel: { fontSize: 10, color: '#888', formatter: (v) => formatAxis(v, fmtFor(axisIdx)) },
     splitLine: { lineStyle: { color: '#f2f2f2' } },
     axisLine: { show: false }, axisTick: { show: false },
   });
   const catAxis = {
     type: 'category', data: labels, boundaryGap: true,
+    name: isBar ? '' : xName, nameLocation: 'middle', nameGap: 28, nameTextStyle: nameStyle,
     axisLabel: { fontSize: 10, color: '#888', hideOverlap: true, rotate: labels.length > 8 && !isBar ? 35 : 0 },
     axisLine: { lineStyle: { color: '#e6e6e6' } }, axisTick: { show: false },
   };
@@ -177,12 +209,17 @@ function buildOption({ rows, dimensions, measures, pivots, visType, stacked, vis
     : (dual ? [valueAxis(0, 'left'), valueAxis(1, 'right')] : [valueAxis(0, 'left')]);
 
   const showLegend = series.length > 1;
+  // Reserve room for rotated axis names so they aren't clipped at the edges
+  // (containLabel fits tick labels but not the offset axis name).
+  const leftName = isBar ? 0 : (yName(0) ? 20 : 0);
+  const rightName = (!isBar && dual && yName(1)) ? 20 : 0;
+  const xNameSpace = (isBar ? (yName(0) ? 18 : 0) : (xName ? 18 : 0));
   return {
     seriesMeta,
     option: {
       ...baseAnim,
       color: HOWLER,
-      grid: { left: 6, right: dual ? 6 : 14, top: 12, bottom: showLegend ? 34 : 18, containLabel: true },
+      grid: { left: 6 + leftName, right: (dual ? 6 : 14) + rightName, top: 12, bottom: (showLegend ? 34 : 18) + xNameSpace, containLabel: true },
       tooltip: {
         trigger: isScatter ? 'item' : 'axis',
         ...tooltipStyle,
