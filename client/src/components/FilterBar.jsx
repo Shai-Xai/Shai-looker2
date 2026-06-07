@@ -77,6 +77,9 @@ function LockedField({ filter, value }) {
   );
 }
 
+// Looker UI types that allow selecting several values at once.
+const MULTI_TYPES = new Set(['checkboxes', 'tag_list', 'advanced']);
+
 function FilterControl({ filter, value, onChange, locked }) {
   if (locked) return <LockedField filter={filter} value={value} />;
   const uiType = filter.ui_config?.type;
@@ -97,7 +100,7 @@ function FilterControl({ filter, value, onChange, locked }) {
           title="Looker date filter expression"
         />
       ) : canSuggest ? (
-        <FilterDropdown filter={filter} value={value} onChange={onChange} />
+        <FilterDropdown filter={filter} value={value} onChange={onChange} multi={MULTI_TYPES.has(uiType)} />
       ) : (
         <input type="text" value={value} onChange={e => onChange(e.target.value)} placeholder="Filter value…" style={inputStyle} />
       )}
@@ -106,14 +109,17 @@ function FilterControl({ filter, value, onChange, locked }) {
 }
 
 // A searchable dropdown of a dimension's values (fetched from Looker on open).
-// Type to filter the list; click to select; also accepts free text.
-function FilterDropdown({ filter, value, onChange }) {
+// Type to filter the list; click to select. In multi mode several values can
+// be picked (stored as a comma-separated string, the way Looker expects).
+function FilterDropdown({ filter, value, onChange, multi = false }) {
   const [all, setAll] = useState([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [query, setQuery] = useState('');
   const boxRef = useRef(null);
+
+  const selected = multi ? String(value || '').split(',').map(s => s.trim()).filter(Boolean) : [];
 
   async function load() {
     if (loaded || loading) return;
@@ -144,16 +150,30 @@ function FilterDropdown({ filter, value, onChange }) {
   }, [open]);
 
   const filtered = query ? all.filter(s => s.toLowerCase().includes(query.toLowerCase())) : all;
-  const choose = (s) => { onChange(s); setOpen(false); setQuery(''); };
+
+  // Single-select: pick replaces value and closes. Multi-select: toggle the
+  // value in/out and keep the list open so several can be chosen.
+  const pickSingle = (s) => { onChange(s); setOpen(false); setQuery(''); };
+  const toggleMulti = (s) => {
+    const next = selected.includes(s) ? selected.filter(x => x !== s) : [...selected, s];
+    onChange(next.join(','));
+  };
+
+  const summary = multi
+    ? (selected.length === 0 ? '' : selected.length === 1 ? selected[0] : `${selected.length} selected`)
+    : value;
+  const placeholder = multi
+    ? (selected.length ? `${selected.length} selected` : 'Select…')
+    : (value || 'Select…');
 
   return (
     <div ref={boxRef} style={{ position: 'relative' }}>
       <input
         type="text"
-        value={open ? query : value}
+        value={open ? query : summary}
         onChange={e => { setQuery(e.target.value); if (!open) setOpen(true); }}
         onFocus={openList}
-        placeholder={value ? value : 'Select…'}
+        placeholder={placeholder}
         style={{ ...inputStyle, paddingRight: 28 }}
       />
       <span
@@ -162,23 +182,31 @@ function FilterDropdown({ filter, value, onChange }) {
       >▾</span>
       {open && (
         <ul style={dropdownList}>
-          {value && (
-            <li onMouseDown={() => choose('')} style={{ ...optStyle, color: 'var(--muted)' }}>✕ Clear</li>
+          {(multi ? selected.length > 0 : !!value) && (
+            <li onMouseDown={() => { onChange(''); if (!multi) setOpen(false); }} style={{ ...optStyle, color: 'var(--muted)' }}>
+              ✕ Clear{multi && selected.length > 1 ? ' all' : ''}
+            </li>
           )}
           {loading ? (
             <li style={optMuted}>Loading…</li>
           ) : filtered.length === 0 ? (
             <li style={optMuted}>{query ? 'No matches' : 'No options'}</li>
           ) : (
-            filtered.slice(0, 300).map((s, i) => (
-              <li
-                key={i}
-                onMouseDown={() => choose(s)}
-                style={{ ...optStyle, ...(s === value ? { background: '#fff0f3', fontWeight: 600 } : null) }}
-                onMouseEnter={e => { if (s !== value) e.currentTarget.style.background = '#f7f7f7'; }}
-                onMouseLeave={e => { if (s !== value) e.currentTarget.style.background = 'transparent'; }}
-              >{s}</li>
-            ))
+            filtered.slice(0, 300).map((s, i) => {
+              const isSel = multi ? selected.includes(s) : s === value;
+              return (
+                <li
+                  key={i}
+                  onMouseDown={(e) => { e.preventDefault(); multi ? toggleMulti(s) : pickSingle(s); }}
+                  style={{ ...optStyle, display: 'flex', alignItems: 'center', gap: 8, ...(isSel ? { background: '#fff0f3', fontWeight: 600 } : null) }}
+                  onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = '#f7f7f7'; }}
+                  onMouseLeave={e => { if (!isSel) e.currentTarget.style.background = 'transparent'; }}
+                >
+                  {multi && <span style={{ color: isSel ? 'var(--brand)' : '#bbb' }}>{isSel ? '☑' : '☐'}</span>}
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{s}</span>
+                </li>
+              );
+            })
           )}
         </ul>
       )}
