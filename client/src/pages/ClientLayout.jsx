@@ -15,6 +15,8 @@ export default function ClientLayout() {
   const [openSets, setOpenSets] = useState({});
   const [loading, setLoading] = useState(true);
   const [navOpen, setNavOpen] = useState(false); // mobile drawer
+  const [collapsed, setCollapsed] = useState(() => localStorage.getItem('howler_nav_collapsed') === '1'); // desktop
+  const toggleCollapsed = () => setCollapsed((c) => { localStorage.setItem('howler_nav_collapsed', c ? '0' : '1'); return !c; });
 
   useEffect(() => { api.mySuites().then(setSuites).catch(() => {}).finally(() => setLoading(false)); }, []);
 
@@ -46,7 +48,10 @@ export default function ClientLayout() {
 
   const sidebar = (
     <nav className="howler-sidebar" style={{ ...sidebarStyle, ...(isMobile ? mobileSidebar : null) }}>
-      <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)', padding: '6px 14px 12px' }}>Suites</div>
+      <div style={{ display: 'flex', alignItems: 'center', padding: '6px 8px 12px 14px' }}>
+        <span style={{ flex: 1, fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)' }}>Suites</span>
+        {!isMobile && <button onClick={toggleCollapsed} title="Collapse sidebar" style={iconBtn}>⟨</button>}
+      </div>
       {loading ? (
         <div style={{ padding: 14, color: 'var(--muted)', fontSize: 13 }}>Loading…</div>
       ) : suites.length === 0 ? (
@@ -56,6 +61,7 @@ export default function ClientLayout() {
           <div key={su.id} style={{ marginBottom: 2 }}>
             <button className="nav-row" style={{ ...rowBtn, fontWeight: 600 }} onClick={() => toggleSuite(su.id)}>
               <Caret open={!!openSuites[su.id]} />
+              <Ico v={su.icon} size={17} />
               <span style={ellip}>{su.name}</span>
             </button>
             {openSuites[su.id] && (
@@ -67,8 +73,9 @@ export default function ClientLayout() {
                 ) : (
                   details[su.id].sets.map((set) => (
                     <div key={set.id}>
-                      <button className="nav-row" style={{ ...rowBtn, paddingLeft: 30, fontWeight: 500, fontSize: 13, color: 'var(--muted-2)' }} onClick={() => setOpenSets((p) => ({ ...p, [set.id]: !p[set.id] }))}>
+                      <button className="nav-row" style={{ ...rowBtn, paddingLeft: 28, fontWeight: 500, fontSize: 13, color: 'var(--muted-2)' }} onClick={() => setOpenSets((p) => ({ ...p, [set.id]: !p[set.id] }))}>
                         <Caret open={!!openSets[set.id]} small />
+                        <Ico v={set.icon} size={15} />
                         <span style={ellip}>{set.name}</span>
                       </button>
                       {openSets[set.id] && set.dashboards.map((d) => {
@@ -94,8 +101,8 @@ export default function ClientLayout() {
 
   return (
     <div style={{ display: 'flex', flex: 1, minHeight: 0, position: 'relative' }}>
-      {/* Desktop: sidebar always shown. Mobile: a drawer toggled by a button. */}
-      {!isMobile && sidebar}
+      {/* Desktop: sidebar shown unless collapsed. Mobile: a drawer. */}
+      {!isMobile && !collapsed && sidebar}
       {isMobile && navOpen && (
         <div style={{ position: 'fixed', inset: 0, top: 56, zIndex: 50, display: 'flex' }}>
           <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.35)' }} onClick={() => setNavOpen(false)} />
@@ -103,8 +110,8 @@ export default function ClientLayout() {
         </div>
       )}
       <main style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'auto' }}>
-        {isMobile && (
-          <button style={menuBtn} onClick={() => setNavOpen(true)}>☰ Menu</button>
+        {(isMobile || collapsed) && (
+          <button style={menuBtn} onClick={() => (isMobile ? setNavOpen(true) : toggleCollapsed())}>☰ Suites</button>
         )}
         <Outlet />
       </main>
@@ -112,6 +119,12 @@ export default function ClientLayout() {
   );
 }
 
+function Ico({ v, size = 16 }) {
+  if (!v) return null;
+  return v.startsWith('data:')
+    ? <img src={v} alt="" style={{ width: size, height: size, objectFit: 'contain', borderRadius: 3, flexShrink: 0 }} />
+    : <span style={{ fontSize: size - 1, lineHeight: 1, flexShrink: 0 }}>{v}</span>;
+}
 function Caret({ open, small }) {
   return <span className="nav-caret" style={{ display: 'inline-block', width: 12, fontSize: small ? 8 : 9, color: '#b0b0b6', transform: open ? 'rotate(90deg)' : 'none' }}>▶</span>;
 }
@@ -123,3 +136,4 @@ const subRow = { padding: '7px 12px', fontSize: 13 };
 const ellip = { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' };
 const dot = { flexShrink: 0, width: 5, height: 5, borderRadius: '50%', display: 'inline-block' };
 const menuBtn = { alignSelf: 'flex-start', margin: '12px 0 0 14px', padding: '7px 14px', borderRadius: 980, border: '1px solid var(--hairline)', background: 'rgba(255,255,255,0.8)', backdropFilter: 'blur(8px)', fontSize: 13, fontWeight: 600, cursor: 'pointer' };
+const iconBtn = { width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--hairline)', borderRadius: 7, background: '#fff', color: 'var(--muted-2)', fontSize: 12, cursor: 'pointer' };

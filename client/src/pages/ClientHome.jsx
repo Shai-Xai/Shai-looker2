@@ -31,6 +31,9 @@ export default function ClientHome() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 16 }}>
           {suites.map((su) => (
             <button key={su.id} className="lift" style={card} onClick={() => openSuite(su)}>
+              {su.icon && (su.icon.startsWith('data:')
+                ? <img src={su.icon} alt="" style={{ width: 34, height: 34, objectFit: 'contain', marginBottom: 8 }} />
+                : <div style={{ fontSize: 30, marginBottom: 4 }}>{su.icon}</div>)}
               <div style={{ fontSize: 16, fontWeight: 700 }}>{su.name}</div>
               <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>{su.entityName} · {su.dashboardCount} dashboard{su.dashboardCount === 1 ? '' : 's'}</div>
               <div style={{ marginTop: 14, fontSize: 13, fontWeight: 600, color: 'var(--brand)' }}>Open →</div>

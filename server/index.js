@@ -144,7 +144,7 @@ app.get('/api/admin/filter-fields', auth.requireAdmin, (_req, res) => {
 // The suites this user can open (each carries its entity name).
 app.get('/api/my/suites', auth.requireAuth, (req, res) => {
   res.json(auth.suitesForUser(req.user).map((su) => ({
-    id: su.id, name: su.name, entityId: su.entityId,
+    id: su.id, name: su.name, icon: su.icon || '', entityId: su.entityId,
     entityName: db.getEntity(su.entityId)?.name || '',
     setCount: su.setIds.length, dashboardCount: db.dashboardsInSuite(su.id).length,
   })));
@@ -161,10 +161,10 @@ app.get('/api/my/suites/:id', auth.requireAuth, (req, res) => {
     if (!set) return null;
     const dashboards = set.dashboardIds.map((id) => store.get(id)).filter(Boolean)
       .map((d) => ({ id: d.id, title: d.title, description: d.description || '', tileCount: (d.tiles || []).length }));
-    return { id: set.id, name: set.name, dashboards };
+    return { id: set.id, name: set.name, icon: set.icon || '', dashboards };
   }).filter(Boolean);
   res.json({
-    id: su.id, name: su.name, entityName: db.getEntity(su.entityId)?.name || '',
+    id: su.id, name: su.name, icon: su.icon || '', entityName: db.getEntity(su.entityId)?.name || '',
     lockedFilters: auth.lockedFiltersForSuite(su.id), sets,
   });
 });

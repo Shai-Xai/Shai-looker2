@@ -122,6 +122,14 @@ const migrateLegacy = db.transaction(() => {
 });
 try { migrateLegacy(); } catch (e) { console.error('[db] legacy migration skipped:', e.message); }
 
+// Add columns to existing DBs as the schema grows.
+function addColumn(table, col, decl) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
+  if (!cols.includes(col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${decl}`);
+}
+addColumn('sets', 'icon', "TEXT NOT NULL DEFAULT ''");   // emoji or image data-URL
+addColumn('suites', 'icon', "TEXT NOT NULL DEFAULT ''");
+
 // ─── Entities ─────────────────────────────────────────────────────────────────
 function rowToEntity(r) {
   return r && { id: r.id, name: r.name, lockedFilters: J(r.locked_filters, {}), scopeFields: J(r.scope_fields, {}), createdAt: r.created_at };
@@ -236,7 +244,7 @@ function removeDashboard(id) { return db.prepare('DELETE FROM dashboards WHERE i
 function setDashboardIds(setId) {
   return db.prepare('SELECT dashboard_id FROM set_dashboards WHERE set_id=? ORDER BY position').all(setId).map((r) => r.dashboard_id);
 }
-function rowToSet(r) { return r && { id: r.id, name: r.name, dashboardIds: setDashboardIds(r.id), createdAt: r.created_at }; }
+function rowToSet(r) { return r && { id: r.id, name: r.name, icon: r.icon || '', dashboardIds: setDashboardIds(r.id), createdAt: r.created_at }; }
 function listSets() { return db.prepare('SELECT * FROM sets ORDER BY name').all().map(rowToSet); }
 function getSet(id) { return rowToSet(db.prepare('SELECT * FROM sets WHERE id=?').get(id)); }
 const setSetDashboards = db.transaction((setId, dashboardIds) => {
@@ -244,9 +252,9 @@ const setSetDashboards = db.transaction((setId, dashboardIds) => {
   const ins = db.prepare('INSERT OR IGNORE INTO set_dashboards (set_id, dashboard_id, position) VALUES (?,?,?)');
   (dashboardIds || []).forEach((did, i) => { if (did) ins.run(setId, did, i); });
 });
-function createSet({ name, dashboardIds = [] }) {
+function createSet({ name, icon = '', dashboardIds = [] }) {
   const id = uuid();
-  db.prepare('INSERT INTO sets (id,name,created_at) VALUES (?,?,?)').run(id, name || 'Untitled set', now());
+  db.prepare('INSERT INTO sets (id,name,icon,created_at) VALUES (?,?,?,?)').run(id, name || 'Untitled set', icon || '', now());
   setSetDashboards(id, dashboardIds);
   return getSet(id);
 }
@@ -254,6 +262,7 @@ function updateSet(id, patch) {
   const cur = db.prepare('SELECT * FROM sets WHERE id=?').get(id);
   if (!cur) return null;
   if (patch.name !== undefined) db.prepare('UPDATE sets SET name=? WHERE id=?').run(patch.name, id);
+  if (patch.icon !== undefined) db.prepare('UPDATE sets SET icon=? WHERE id=?').run(patch.icon || '', id);
   if (patch.dashboardIds !== undefined) setSetDashboards(id, patch.dashboardIds);
   return getSet(id);
 }
@@ -265,7 +274,7 @@ function suiteSetIds(suiteId) {
   return db.prepare('SELECT set_id FROM suite_sets WHERE suite_id=? ORDER BY position').all(suiteId).map((r) => r.set_id);
 }
 function rowToSuite(r) {
-  return r && { id: r.id, entityId: r.entity_id, name: r.name, lockedFilters: J(r.locked_filters, {}), setIds: suiteSetIds(r.id), position: r.position, createdAt: r.created_at };
+  return r && { id: r.id, entityId: r.entity_id, name: r.name, icon: r.icon || '', lockedFilters: J(r.locked_filters, {}), setIds: suiteSetIds(r.id), position: r.position, createdAt: r.created_at };
 }
 function listSuites() { return db.prepare('SELECT * FROM suites ORDER BY position, name').all().map(rowToSuite); }
 function listSuitesForEntity(entityId) {
@@ -277,10 +286,10 @@ const setSuiteSets = db.transaction((suiteId, setIds) => {
   const ins = db.prepare('INSERT OR IGNORE INTO suite_sets (suite_id, set_id, position) VALUES (?,?,?)');
   (setIds || []).forEach((sid, i) => { if (sid) ins.run(suiteId, sid, i); });
 });
-function createSuite({ entityId, name, lockedFilters = {}, setIds = [], position = 0 }) {
+function createSuite({ entityId, name, icon = '', lockedFilters = {}, setIds = [], position = 0 }) {
   const id = uuid();
-  db.prepare('INSERT INTO suites (id,entity_id,name,locked_filters,position,created_at) VALUES (?,?,?,?,?,?)')
-    .run(id, entityId, name || 'Untitled suite', JSON.stringify(lockedFilters), position, now());
+  db.prepare('INSERT INTO suites (id,entity_id,name,icon,locked_filters,position,created_at) VALUES (?,?,?,?,?,?,?)')
+    .run(id, entityId, name || 'Untitled suite', icon || '', JSON.stringify(lockedFilters), position, now());
   setSuiteSets(id, setIds);
   return getSuite(id);
 }
@@ -288,10 +297,11 @@ function updateSuite(id, patch) {
   const cur = db.prepare('SELECT * FROM suites WHERE id=?').get(id);
   if (!cur) return null;
   const name = patch.name ?? cur.name;
+  const icon = patch.icon !== undefined ? (patch.icon || '') : cur.icon;
   const lf = patch.lockedFilters !== undefined ? JSON.stringify(patch.lockedFilters) : cur.locked_filters;
   const pos = patch.position ?? cur.position;
   const ent = patch.entityId ?? cur.entity_id;
-  db.prepare('UPDATE suites SET name=?, entity_id=?, locked_filters=?, position=? WHERE id=?').run(name, ent, lf, pos, id);
+  db.prepare('UPDATE suites SET name=?, icon=?, entity_id=?, locked_filters=?, position=? WHERE id=?').run(name, icon, ent, lf, pos, id);
   if (patch.setIds !== undefined) setSuiteSets(id, patch.setIds);
   return getSuite(id);
 }

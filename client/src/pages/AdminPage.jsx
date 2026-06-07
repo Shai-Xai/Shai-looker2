@@ -1,6 +1,40 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api.js';
+
+// Icon control: an emoji, or an uploaded image (downscaled to a small data-URL).
+function IconPicker({ value, onChange }) {
+  const fileRef = useRef(null);
+  const isImg = typeof value === 'string' && value.startsWith('data:');
+  const onFile = (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const max = 64, scale = Math.min(1, max / Math.max(img.width, img.height));
+        const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+        const c = document.createElement('canvas'); c.width = w; c.height = h;
+        c.getContext('2d').drawImage(img, 0, 0, w, h);
+        onChange(c.toDataURL('image/png'));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(f);
+  };
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div style={iconPreview}>
+        {isImg ? <img src={value} alt="" style={{ width: 26, height: 26, objectFit: 'contain' }} /> : (value ? <span style={{ fontSize: 22 }}>{value}</span> : <span style={{ color: '#c8c8cc', fontSize: 18 }}>＋</span>)}
+      </div>
+      <input style={{ ...input, width: 72, minWidth: 0, textAlign: 'center' }} placeholder="emoji" value={isImg ? '' : (value || '')} onChange={(e) => onChange(e.target.value)} maxLength={4} title="Type/paste an emoji" />
+      <button style={miniBtn} onClick={() => fileRef.current?.click()}>Upload image</button>
+      <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={onFile} />
+      {value && <button style={delBtn} onClick={() => onChange('')} title="Clear">✕</button>}
+    </div>
+  );
+}
 
 // Admin console for the multi-tenant model:
 //   Clients (Entities)  – who, with organiser-level locked filters
@@ -84,11 +118,12 @@ function Sets() {
 }
 function SetCard({ set, dashboards, onChange }) {
   const [name, setName] = useState(set.name);
+  const [icon, setIcon] = useState(set.icon || '');
   const [ids, setIds] = useState(set.dashboardIds || []);
   const [folder, setFolder] = useState(''); // '' = all, '__unfiled', else folder name
   const [saved, setSaved] = useState(false);
   const toggle = (id) => setIds((cur) => cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]);
-  const save = async () => { await api.adminUpdateSet(set.id, { name, dashboardIds: ids }); flash(setSaved); onChange(); };
+  const save = async () => { await api.adminUpdateSet(set.id, { name, icon, dashboardIds: ids }); flash(setSaved); onChange(); };
   const remove = async () => { if (confirm(`Delete set "${set.name}"?`)) { await api.adminDeleteSet(set.id); onChange(); } };
 
   const folders = [...new Set(dashboards.map((d) => d.folder).filter(Boolean))].sort((a, b) => a.localeCompare(b));
@@ -101,7 +136,8 @@ function SetCard({ set, dashboards, onChange }) {
         <input style={{ ...input, fontWeight: 700, flex: 1 }} value={name} onChange={(e) => setName(e.target.value)} />
         <button style={delBtn} onClick={remove}>Delete</button>
       </Row>
-      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, flexWrap: 'wrap' }}>
+      <Field label="Icon"><IconPicker value={icon} onChange={setIcon} /></Field>
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
         <Field label="Folder">
           <select style={input} value={folder} onChange={(e) => setFolder(e.target.value)}>
             <option value="">All folders</option>
@@ -151,12 +187,13 @@ function Suites({ fields }) {
 }
 function SuiteCard({ suite, entities, sets, fields, onChange }) {
   const [name, setName] = useState(suite.name);
+  const [icon, setIcon] = useState(suite.icon || '');
   const [entityId, setEntityId] = useState(suite.entityId);
   const [setIds, setSetIds] = useState(suite.setIds || []);
   const [locks, setLocks] = useState(suite.lockedFilters || {});
   const [saved, setSaved] = useState(false);
   const toggleSet = (id) => setSetIds((cur) => cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]);
-  const save = async () => { await api.adminUpdateSuite(suite.id, { name, entityId, setIds, lockedFilters: locks }); flash(setSaved); onChange(); };
+  const save = async () => { await api.adminUpdateSuite(suite.id, { name, icon, entityId, setIds, lockedFilters: locks }); flash(setSaved); onChange(); };
   const remove = async () => { if (confirm(`Delete suite "${suite.name}"?`)) { await api.adminDeleteSuite(suite.id); onChange(); } };
   return (
     <div style={cardStyle}>
@@ -164,7 +201,10 @@ function SuiteCard({ suite, entities, sets, fields, onChange }) {
         <input style={{ ...input, fontWeight: 700, flex: 1 }} value={name} onChange={(e) => setName(e.target.value)} />
         <button style={delBtn} onClick={remove}>Delete</button>
       </Row>
-      <Field label="Client"><select style={input} value={entityId} onChange={(e) => setEntityId(e.target.value)}>{entities.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}</select></Field>
+      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        <Field label="Client"><select style={input} value={entityId} onChange={(e) => setEntityId(e.target.value)}>{entities.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}</select></Field>
+        <Field label="Icon"><IconPicker value={icon} onChange={setIcon} /></Field>
+      </div>
       <L>Sets in this suite ({setIds.length})</L>
       <div style={checkList}>
         {sets.map((s) => (
@@ -421,4 +461,5 @@ const pickBtn = { position: 'absolute', right: 4, top: 4, padding: '4px 8px', fo
 const ddList = { position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50, marginTop: 4, background: '#fff', border: '1px solid #e0e0e0', borderRadius: 8, boxShadow: '0 6px 20px rgba(0,0,0,0.12)', maxHeight: 220, overflowY: 'auto', listStyle: 'none', margin: 0, padding: '4px 0' };
 const ddItem = { display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', fontSize: 13, cursor: 'pointer' };
 const ddMuted = { padding: '7px 12px', fontSize: 13, color: 'var(--muted)' };
+const iconPreview = { width: 38, height: 38, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--hairline)', borderRadius: 10, background: '#fafafa' };
 const chip = { display: 'inline-flex', alignItems: 'center', gap: 2, background: '#fff0f3', color: 'var(--brand)', borderRadius: 980, padding: '3px 10px', fontSize: 12, fontWeight: 600 };
