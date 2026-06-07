@@ -7,6 +7,7 @@ const cookieParser = require('cookie-parser');
 const looker = require('./looker');
 const store = require('./store');
 const auth = require('./auth');
+const migrate = require('./migrate');
 const { convertDashboard } = require('./convert');
 const { recreateDashboard, fetchDashboard } = require('./recreate');
 const { parseDrillUrl } = require('./drill');
@@ -23,6 +24,9 @@ const clientFallback = path.join(__dirname, '../client');
 const staticDir = fs.existsSync(clientDist) ? clientDist : clientFallback;
 app.use(express.static(staticDir));
 
+// Bring legacy JSON data into SQLite on first boot (idempotent), then ensure an
+// admin exists.
+migrate.run();
 auth.seedAdmin();
 
 // ─── Health ───────────────────────────────────────────────────────────────────
@@ -75,8 +79,8 @@ app.delete('/api/admin/users/:id', auth.requireAdmin, (req, res) => {
 // Tenants the current user may assign/see (admins manage; clients can read their own for the UI).
 app.get('/api/tenants', auth.requireAuth, (req, res) => {
   if (req.user.role === 'admin') return res.json(auth.listTenants());
-  const t = auth.getTenant(req.user.tenantId);
-  res.json(t ? [t] : []);
+  // Client: their own entities (presented in the legacy tenant shape).
+  res.json((req.user.entityIds || []).map(auth.getTenant).filter(Boolean));
 });
 
 // ─── Saved (editable) dashboards ───────────────────────────────────────────────

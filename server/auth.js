@@ -1,26 +1,26 @@
-// ─── Authentication, tenants & data scoping ──────────────────────────────────
-// File-backed users + tenants, bcrypt password hashing, JWT session cookies,
-// Express middleware, and the row-level scoping that forces every client's
-// Looker query down to their organiser/events.
+// ─── Authentication, entities & data scoping ─────────────────────────────────
+// Session cookies + middleware live here; persistent data (users, entities,
+// templates, sets) lives in db.js (SQLite). This module also exposes a thin
+// "tenant" compatibility layer so the existing admin/client UI keeps working:
+// an Entity is presented as the old { name, organiserNames, eventNames } shape,
+// with organiser locked at the entity and event locked on its first set.
 
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const db = require('./db');
 
 const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, 'data');
-const USERS_FILE = path.join(DATA_DIR, 'users.json');
-const TENANTS_FILE = path.join(DATA_DIR, 'tenants.json');
 const SECRET_FILE = path.join(DATA_DIR, '.session-secret');
 const COOKIE = 'howler_session';
 const TOKEN_TTL = '7d';
 
-function ensureDir() { fs.mkdirSync(DATA_DIR, { recursive: true }); }
+const ORG_FIELD = 'core_organisers.name';
+const EV_FIELD = 'core_events.name';
 
-function readJson(file, fallback) {
-  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; }
-}
+function ensureDir() { fs.mkdirSync(DATA_DIR, { recursive: true }); }
+function readJson(file, fallback) { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; } }
 function writeJson(file, data) { ensureDir(); fs.writeFileSync(file, JSON.stringify(data, null, 2)); }
 
 // ─── Session secret (env, or a persisted random one) ──────────────────────────
@@ -32,94 +32,96 @@ function getSecret() {
   return s;
 }
 
-// ─── Tenants ──────────────────────────────────────────────────────────────────
-function listTenants() { return readJson(TENANTS_FILE, []); }
-function getTenant(id) { return listTenants().find((t) => t.id === id) || null; }
-function saveTenants(list) { writeJson(TENANTS_FILE, list); }
+// ─── Tenant ⇄ Entity compatibility ────────────────────────────────────────────
+const lines = (csv) => String(csv || '').split(',').map((s) => s.trim()).filter(Boolean);
+
+// Present an Entity (+ its first set's event lock) as the legacy tenant shape.
+function entityToTenant(e) {
+  if (!e) return null;
+  const sf = { organiser: e.scopeFields?.organiser || ORG_FIELD, event: e.scopeFields?.event || EV_FIELD };
+  const sets = db.listSetsForEntity(e.id);
+  const eventNames = sets.length ? lines(sets[0].lockedFilters[sf.event]) : [];
+  return { id: e.id, name: e.name, organiserNames: lines(e.lockedFilters[sf.organiser]), eventNames, scopeFields: sf };
+}
+function listTenants() { return db.listEntities().map(entityToTenant); }
+function getTenant(id) { return entityToTenant(db.getEntity(id)); }
+
+// Dashboards a freshly-created client should see by default = the migration's
+// "Shared dashboards" template, if present.
+function sharedDashboardIds() {
+  const t = db.listTemplates().find((x) => x.name === 'Shared dashboards');
+  return t ? t.dashboardIds : [];
+}
 
 function createTenant({ name, organiserNames = [], eventNames = [] }) {
-  const list = listTenants();
-  const tenant = {
-    id: crypto.randomUUID(),
-    name: name || 'Untitled client',
-    organiserNames: organiserNames.filter(Boolean),
-    eventNames: eventNames.filter(Boolean),
-    scopeFields: { organiser: 'core_organisers.name', event: 'core_events.name' },
-    createdAt: new Date().toISOString(),
-  };
-  list.push(tenant);
-  saveTenants(list);
-  return tenant;
+  const sf = { organiser: ORG_FIELD, event: EV_FIELD };
+  const locks = {};
+  if (organiserNames.filter(Boolean).length) locks[sf.organiser] = organiserNames.filter(Boolean).join(',');
+  const entity = db.createEntity({ name: name || 'Untitled client', lockedFilters: locks, scopeFields: sf });
+  const template = db.createTemplate({ name: `${entity.name} dashboards`, dashboardIds: sharedDashboardIds() });
+  const setLocks = {};
+  if (eventNames.filter(Boolean).length) setLocks[sf.event] = eventNames.filter(Boolean).join(',');
+  db.createSet({ entityId: entity.id, templateId: template.id, name: entity.name, lockedFilters: setLocks });
+  return entityToTenant(db.getEntity(entity.id));
 }
+
 function updateTenant(id, patch) {
-  const list = listTenants();
-  const i = list.findIndex((t) => t.id === id);
-  if (i < 0) return null;
-  list[i] = { ...list[i], ...patch, id, scopeFields: list[i].scopeFields };
-  saveTenants(list);
-  return list[i];
+  const e = db.getEntity(id);
+  if (!e) return null;
+  const sf = { organiser: e.scopeFields?.organiser || ORG_FIELD, event: e.scopeFields?.event || EV_FIELD };
+  if (patch.name !== undefined || patch.organiserNames !== undefined) {
+    const locks = { ...e.lockedFilters };
+    if (patch.organiserNames !== undefined) {
+      const orgs = patch.organiserNames.filter(Boolean);
+      if (orgs.length) locks[sf.organiser] = orgs.join(','); else delete locks[sf.organiser];
+    }
+    db.updateEntity(id, { name: patch.name ?? e.name, lockedFilters: locks });
+  }
+  if (patch.eventNames !== undefined) {
+    const evs = patch.eventNames.filter(Boolean);
+    let set = db.listSetsForEntity(id)[0];
+    if (!set) {
+      const tmpl = db.createTemplate({ name: `${e.name} dashboards`, dashboardIds: sharedDashboardIds() });
+      set = db.createSet({ entityId: id, templateId: tmpl.id, name: e.name, lockedFilters: {} });
+    }
+    const setLocks = { ...set.lockedFilters };
+    if (evs.length) setLocks[sf.event] = evs.join(','); else delete setLocks[sf.event];
+    db.updateSet(set.id, { lockedFilters: setLocks });
+  }
+  return entityToTenant(db.getEntity(id));
 }
-function deleteTenant(id) { saveTenants(listTenants().filter((t) => t.id !== id)); }
+function deleteTenant(id) { db.deleteEntity(id); }
 
-// ─── Users ──────────────────────────────────────────────────────────────────
-function loadUsers() { return readJson(USERS_FILE, []); }
-function saveUsers(list) { writeJson(USERS_FILE, list); }
-
+// ─── Users ────────────────────────────────────────────────────────────────────
+// Public shape keeps a compat `tenantId` (the user's first entity) for the
+// current admin UI, alongside the real `entityIds`.
 function publicUser(u) {
   if (!u) return null;
-  return { id: u.id, email: u.email, role: u.role, tenantId: u.tenantId || null };
+  return { id: u.id, email: u.email, role: u.role, tenantId: (u.entityIds || [])[0] || null, entityIds: u.entityIds || [] };
 }
+function loadUsers() { return db.listUsers(); }
+function getUser(id) { return db.getUser(id); }
+function verifyCredentials(email, password) { return db.verifyCredentials(email, password); }
 
-function findUserByEmail(email) {
-  const e = (email || '').trim().toLowerCase();
-  return loadUsers().find((u) => u.email === e) || null;
-}
-function getUser(id) { return loadUsers().find((u) => u.id === id) || null; }
-
-function createUser({ email, password, role = 'client', tenantId = null }) {
-  const list = loadUsers();
-  const e = (email || '').trim().toLowerCase();
-  if (!e || !password) throw new Error('email and password are required');
-  if (list.some((u) => u.email === e)) throw new Error('A user with that email already exists');
-  const user = {
-    id: crypto.randomUUID(),
-    email: e,
-    passwordHash: bcrypt.hashSync(password, 10),
-    role: role === 'admin' ? 'admin' : 'client',
-    tenantId: role === 'admin' ? null : tenantId,
-    createdAt: new Date().toISOString(),
-  };
-  list.push(user);
-  saveUsers(list);
-  return publicUser(user);
+function createUser({ email, password, role = 'client', tenantId = null, entityIds }) {
+  const ids = entityIds || (tenantId ? [tenantId] : []);
+  const u = db.createUser({ email, password, role, entityIds: role === 'admin' ? [] : ids });
+  return publicUser(u);
 }
 function updateUser(id, patch) {
-  const list = loadUsers();
-  const i = list.findIndex((u) => u.id === id);
-  if (i < 0) return null;
-  const next = { ...list[i] };
-  if (patch.email) next.email = patch.email.trim().toLowerCase();
-  if (patch.password) next.passwordHash = bcrypt.hashSync(patch.password, 10);
-  if (patch.role) next.role = patch.role === 'admin' ? 'admin' : 'client';
-  if ('tenantId' in patch) next.tenantId = next.role === 'admin' ? null : patch.tenantId;
-  list[i] = next;
-  saveUsers(list);
-  return publicUser(next);
+  const p = { ...patch };
+  if ('tenantId' in patch && !('entityIds' in patch)) p.entityIds = patch.tenantId ? [patch.tenantId] : [];
+  const u = db.updateUser(id, p);
+  return u ? publicUser(u) : null;
 }
-function deleteUser(id) { saveUsers(loadUsers().filter((u) => u.id !== id)); }
-
-function verifyCredentials(email, password) {
-  const u = findUserByEmail(email);
-  if (!u) return null;
-  return bcrypt.compareSync(password || '', u.passwordHash) ? u : null;
-}
+function deleteUser(id) { db.deleteUser(id); }
 
 // Seed an admin on first run so the app is usable out of the box.
 function seedAdmin() {
-  if (loadUsers().length > 0) return;
+  if (db.listUsers().length > 0) return;
   const email = process.env.ADMIN_EMAIL || 'admin@howler.local';
   const password = process.env.ADMIN_PASSWORD || 'changeme123';
-  createUser({ email, password, role: 'admin' });
+  db.createUser({ email, password, role: 'admin' });
   console.log('\n  ┌─────────────────────────────────────────────────────────┐');
   console.log('  │  Seeded admin account (change the password after login):  │');
   console.log(`  │   email:    ${email.padEnd(44)}│`);
@@ -130,23 +132,15 @@ function seedAdmin() {
 // ─── JWT cookie helpers ───────────────────────────────────────────────────────
 function issueCookie(res, user) {
   const token = jwt.sign({ sub: user.id }, getSecret(), { expiresIn: TOKEN_TTL });
-  res.cookie(COOKIE, token, {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: false, // set true behind HTTPS in production
-    maxAge: 7 * 24 * 60 * 60 * 1000,
-  });
+  res.cookie(COOKIE, token, { httpOnly: true, sameSite: 'lax', secure: false, maxAge: 7 * 24 * 60 * 60 * 1000 });
 }
 function clearCookie(res) { res.clearCookie(COOKIE); }
 
-// Middleware: attach req.user from the session cookie (no-op if absent/invalid).
 function attachUser(req, _res, next) {
   const token = req.cookies?.[COOKIE];
   if (token) {
-    try {
-      const { sub } = jwt.verify(token, getSecret());
-      req.user = getUser(sub) || null;
-    } catch { req.user = null; }
+    try { const { sub } = jwt.verify(token, getSecret()); req.user = db.getUser(sub) || null; }
+    catch { req.user = null; }
   }
   next();
 }
@@ -161,33 +155,50 @@ function requireAdmin(req, res, next) {
 }
 
 // ─── Data scoping ─────────────────────────────────────────────────────────────
-// Returns the filters to force onto a query for this user:
-//   - admin → null (no scoping; sees everything)
-//   - client with a tenant + organiserNames → { orgField: "A,B", [eventField]: "X,Y"] }
-//   - client with no tenant / no organiser configured → { __block: true } (fail closed)
+// The mandatory filters forced onto every query for this user:
+//   - admin → null (sees everything)
+//   - client → merged locked filters across all their entities + sets
+//              (organiser from the entity, event/other from the sets)
+//   - client with nothing configured → { __block: true } (fail closed)
 function scopeFiltersForUser(user) {
   if (!user || user.role === 'admin') return null;
-  const t = getTenant(user.tenantId);
-  if (!t || !(t.organiserNames || []).length) return { __block: true };
-  const orgField = t.scopeFields?.organiser || 'core_organisers.name';
-  const evField = t.scopeFields?.event || 'core_events.name';
-  const f = { [orgField]: t.organiserNames.join(',') };
-  if ((t.eventNames || []).length) f[evField] = t.eventNames.join(',');
-  return f;
+  const acc = {}; // field -> Set(values)
+  let any = false;
+  const add = (map) => {
+    for (const [f, v] of Object.entries(map || {})) {
+      if (v == null || v === '') continue;
+      acc[f] = acc[f] || new Set();
+      for (const part of String(v).split(',')) { const t = part.trim(); if (t) { acc[f].add(t); any = true; } }
+    }
+  };
+  for (const eid of user.entityIds || []) {
+    const sets = db.listSetsForEntity(eid);
+    if (sets.length) for (const s of sets) add(db.lockedFiltersForSet(s.id));
+    else add(db.getEntity(eid)?.lockedFilters);
+  }
+  if (!any) return { __block: true };
+  const out = {};
+  for (const [f, set] of Object.entries(acc)) out[f] = [...set].join(',');
+  return out;
 }
 
-// Can this user see / open this dashboard? Admin: yes. Client: shared (no
-// tenantId) or assigned to their tenant.
+// Can this user open this dashboard? Admin: any. Client: the dashboard must be
+// in a template attached (via a set) to one of their entities.
 function canAccessDashboard(user, dashboard) {
   if (!dashboard) return false;
   if (user.role === 'admin') return true;
-  return !dashboard.tenantId || dashboard.tenantId === user.tenantId;
+  for (const eid of user.entityIds || []) {
+    for (const s of db.listSetsForEntity(eid)) {
+      if (db.dashboardsInSet(s.id).includes(dashboard.id)) return true;
+    }
+  }
+  return false;
 }
 
 module.exports = {
   COOKIE,
   seedAdmin,
-  // tenants
+  // tenants (compat over entities)
   listTenants, getTenant, createTenant, updateTenant, deleteTenant,
   // users
   loadUsers, publicUser, createUser, updateUser, deleteUser, getUser, verifyCredentials,
