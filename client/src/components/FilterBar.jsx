@@ -3,12 +3,12 @@ import { useState } from 'react';
 export default function FilterBar({ filters, values, onChange, locked = {} }) {
   return (
     <div style={{
-      background: '#fff',
-      borderBottom: '1px solid #e0e0e0',
-      padding: '12px 24px',
+      background: 'var(--card)',
+      borderBottom: '1px solid var(--hairline)',
+      padding: '14px 22px',
       display: 'flex',
       flexWrap: 'wrap',
-      gap: 12,
+      gap: 14,
       alignItems: 'flex-end',
     }}>
       {filters.map(filter => (
@@ -144,6 +144,6 @@ function FilterAutocomplete({ filter, value, onChange }) {
   );
 }
 
-const fieldStyle = { display: 'flex', flexDirection: 'column', gap: 4, minWidth: 180 };
-const labelStyle = { fontSize: 11, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' };
-const inputStyle = { padding: '7px 10px', border: '1.5px solid #e0e0e0', borderRadius: 6, fontSize: 13, outline: 'none', width: '100%' };
+const fieldStyle = { display: 'flex', flexDirection: 'column', gap: 5, minWidth: 180 };
+const labelStyle = { fontSize: 11, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em' };
+const inputStyle = { padding: '9px 12px', border: '1px solid var(--hairline)', borderRadius: 10, fontSize: 13, outline: 'none', width: '100%', background: '#fff' };

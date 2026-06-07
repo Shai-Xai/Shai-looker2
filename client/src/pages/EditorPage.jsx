@@ -261,8 +261,8 @@ function Centered({ children, error }) {
   );
 }
 
-const toolbar = { background: '#fff', borderBottom: '1px solid #e0e0e0', padding: '10px 20px', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' };
-const titleInput = { fontSize: 16, fontWeight: 700, border: '1.5px solid transparent', borderRadius: 6, padding: '5px 8px', outline: 'none', minWidth: 200, background: '#fafafa' };
-const btn = { padding: '7px 12px', background: '#fff', border: '1.5px solid #e0e0e0', borderRadius: 7, fontSize: 13, fontWeight: 600, cursor: 'pointer' };
-const viewBtn = { padding: '7px 14px', background: '#fff', border: '1.5px solid #e0e0e0', borderRadius: 7, fontSize: 13, fontWeight: 600, cursor: 'pointer' };
-const saveBtn = { padding: '7px 18px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 7, fontSize: 13, fontWeight: 700, cursor: 'pointer' };
+const toolbar = { background: 'rgba(255,255,255,0.72)', backdropFilter: 'saturate(180%) blur(20px)', WebkitBackdropFilter: 'saturate(180%) blur(20px)', borderBottom: '1px solid var(--hairline)', padding: '10px 20px', display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' };
+const titleInput = { fontSize: 16, fontWeight: 600, letterSpacing: '-0.01em', border: '1px solid transparent', borderRadius: 8, padding: '6px 10px', outline: 'none', minWidth: 200, background: 'rgba(0,0,0,0.04)' };
+const btn = { padding: '8px 14px', background: 'rgba(0,0,0,0.05)', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer', color: 'var(--text)' };
+const viewBtn = { padding: '8px 16px', background: 'rgba(0,0,0,0.05)', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer', color: 'var(--text)' };
+const saveBtn = { padding: '8px 18px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer' };

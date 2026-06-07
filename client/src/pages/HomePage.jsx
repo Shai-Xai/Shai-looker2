@@ -117,11 +117,11 @@ export default function HomePage() {
   );
 }
 
-const cardStyle = { flex: '1 1 320px', background: '#fff', border: '1px solid #e0e0e0', borderRadius: 12, padding: 20, boxShadow: '0 1px 6px rgba(0,0,0,0.05)' };
-const listCardStyle = { background: '#fff', border: '1px solid #e0e0e0', borderRadius: 12, padding: 18, cursor: 'pointer', boxShadow: '0 1px 6px rgba(0,0,0,0.05)' };
-const primaryBtn = { padding: '9px 16px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: 'pointer' };
-const inputStyle = { flex: '1 1 140px', padding: '8px 12px', border: '1.5px solid #e0e0e0', borderRadius: 8, fontSize: 13, outline: 'none' };
-const miniBtn = { padding: '6px 14px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: 'pointer' };
-const miniBtnOutline = { padding: '6px 14px', background: '#fff', color: 'var(--text)', border: '1.5px solid #e0e0e0', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: 'pointer' };
+const cardStyle = { flex: '1 1 320px', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 22, boxShadow: 'var(--shadow-sm)' };
+const listCardStyle = { background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 18, cursor: 'pointer', boxShadow: 'var(--shadow-sm)' };
+const primaryBtn = { padding: '9px 18px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 980, fontSize: 14, fontWeight: 600, cursor: 'pointer' };
+const inputStyle = { flex: '1 1 140px', padding: '9px 12px', border: '1px solid var(--hairline)', borderRadius: 10, fontSize: 13, outline: 'none', background: '#fff' };
+const miniBtn = { padding: '7px 16px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer' };
+const miniBtnOutline = { padding: '7px 16px', background: 'rgba(0,0,0,0.05)', color: 'var(--text)', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer' };
 const deleteBtn = { border: 'none', background: 'transparent', color: '#bbb', cursor: 'pointer', fontSize: 14, padding: 2 };
 const badge = { fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', background: '#eef2ff', color: '#4f46e5', padding: '2px 6px', borderRadius: 4 };

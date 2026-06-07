@@ -64,13 +64,13 @@ export default function ViewPage() {
         display: 'flex',
         flexDirection: 'column',
         flex: 1,
-        background: theme.background || '#f5f6f8',
+        background: theme.background || 'var(--bg)',
         '--tile-bg': theme.tileBackground || '#fff',
       }}
     >
-      <div style={{ background: '#fff', borderBottom: '1px solid #e0e0e0', padding: '14px 24px', display: 'flex', alignItems: 'center', gap: 16 }}>
+      <div style={{ background: 'rgba(255,255,255,0.72)', backdropFilter: 'saturate(180%) blur(20px)', WebkitBackdropFilter: 'saturate(180%) blur(20px)', borderBottom: '1px solid var(--hairline)', padding: '16px 22px', display: 'flex', alignItems: 'center', gap: 16 }}>
         <Link to="/" style={{ color: 'var(--muted)', fontSize: 13, textDecoration: 'none' }}>← Back</Link>
-        <h2 style={{ fontSize: 18, fontWeight: 700, flex: 1 }}>{def.title}</h2>
+        <h2 style={{ fontSize: 21, fontWeight: 600, letterSpacing: '-0.02em', flex: 1 }}>{def.title}</h2>
         {isAdmin && <button style={editBtn} onClick={() => navigate(`/d/${id}/edit`)}>Edit</button>}
       </div>
 
@@ -78,7 +78,7 @@ export default function ViewPage() {
         <FilterBar filters={def.filters} values={filterValues} onChange={handleFilterChange} locked={locked} />
       )}
 
-      <div style={{ flex: 1, padding: '16px 24px', overflowY: 'auto' }}>
+      <div style={{ flex: 1, padding: '22px', overflowY: 'auto' }}>
         {def.tiles?.length || def.carousels?.length ? (
           <EditableGrid tiles={def.tiles || []} carousels={def.carousels || []} filterValues={filterValues} editable={false} />
         ) : (
@@ -89,7 +89,7 @@ export default function ViewPage() {
   );
 }
 
-const editBtn = { padding: '7px 16px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 7, fontSize: 13, fontWeight: 600, cursor: 'pointer' };
+const editBtn = { padding: '8px 18px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer', boxShadow: '0 1px 2px rgba(0,0,0,0.08)' };
 
 function Centered({ children, error }) {
   return (

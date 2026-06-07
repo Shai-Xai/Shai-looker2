@@ -13,8 +13,9 @@ function Header() {
   const { user, isAdmin, logout } = useAuth();
   return (
     <header style={{
-      background: '#fff', borderBottom: '1px solid #e0e0e0', padding: '0 24px',
-      height: 60, display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0,
+      background: 'rgba(255,255,255,0.72)', backdropFilter: 'saturate(180%) blur(20px)', WebkitBackdropFilter: 'saturate(180%) blur(20px)',
+      borderBottom: '1px solid var(--hairline)', padding: '0 22px',
+      height: 56, display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0, zIndex: 10,
     }}>
       <div style={{ width: 30, height: 30, background: 'var(--brand)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer' }} onClick={() => navigate('/')}>
         <svg width="17" height="17" viewBox="0 0 24 24" fill="white">
@@ -32,7 +33,7 @@ function Header() {
 }
 
 const navLink = { fontSize: 13, fontWeight: 600, color: 'var(--brand)', textDecoration: 'none' };
-const logoutBtn = { fontSize: 12, fontWeight: 600, border: '1.5px solid #e0e0e0', background: '#fff', borderRadius: 7, padding: '6px 12px', cursor: 'pointer' };
+const logoutBtn = { fontSize: 12, fontWeight: 600, border: 'none', background: 'rgba(0,0,0,0.05)', color: 'var(--text)', borderRadius: 980, padding: '7px 14px', cursor: 'pointer' };
 
 function Shell() {
   const { user, loading, isAdmin } = useAuth();

@@ -40,24 +40,25 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
       className="howler-tile"
       style={{
         background: 'var(--tile-bg, #fff)',
-        border: '1px solid #e0e0e0',
-        borderRadius: 8,
+        border: '1px solid var(--border)',
+        borderRadius: 'var(--radius-md)',
         height: '100%',
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
-        boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
+        boxShadow: 'var(--shadow-sm)',
       }}
     >
       {showHeader && (
         <div
           className={editable ? 'tile-drag-handle' : undefined}
           style={{
-            padding: '8px 12px',
-            fontSize: 12,
+            padding: '10px 14px',
+            fontSize: 13,
             fontWeight: 600,
-            color: '#555',
-            borderBottom: '1px solid #f0f0f0',
+            color: 'var(--text)',
+            letterSpacing: '-0.01em',
+            borderBottom: '1px solid var(--border)',
             flexShrink: 0,
             display: 'flex',
             alignItems: 'center',
