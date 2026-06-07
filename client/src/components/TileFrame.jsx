@@ -97,11 +97,13 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
             className="insight-btn"
             style={{
               position: 'absolute', top: 6, right: 6, zIndex: 5,
-              border: '1px solid #eadfff', background: '#f6f1ff', color: '#6d28d9',
-              borderRadius: isMobile ? 10 : 6, cursor: 'pointer', lineHeight: 1, fontWeight: 600,
-              // Larger tap target on touch (≈44px); compact on desktop.
-              fontSize: isMobile ? 16 : 12,
-              padding: isMobile ? '10px 12px' : '4px 7px',
+              border: '1px solid #eadfff', background: 'rgba(246,241,255,0.92)', color: '#6d28d9',
+              borderRadius: isMobile ? 9 : 6, cursor: 'pointer', lineHeight: 1, fontWeight: 600,
+              // Roomy tap target on touch, but compact enough not to cover the
+              // number on small KPI tiles; backdrop keeps it legible over content.
+              fontSize: isMobile ? 13 : 12,
+              padding: isMobile ? '7px 9px' : '4px 7px',
+              backdropFilter: 'blur(2px)', WebkitBackdropFilter: 'blur(2px)',
             }}
           >✨</button>
         )}
