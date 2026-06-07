@@ -41,7 +41,9 @@ function StackedGrid({ tiles = [], carousels = [], filterValues }) {
             <TileFrame tile={it.el} filterValues={filterValues} editable={false} />
           </div>
         ) : (
-          <div key={it.el.id} style={{ gridColumn: '1 / -1', background: '#fff', border: '1px solid #e0e0e0', borderRadius: 12, padding: 10, boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
+          // Carousels need a bounded height here or their height:100% cards
+          // collapse. Give the swipeable band a compact, capped height.
+          <div key={it.el.id} style={{ gridColumn: '1 / -1', height: Math.min(340, Math.max(220, it.h * 22)), background: '#fff', border: '1px solid #e0e0e0', borderRadius: 12, padding: 10, boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
             <Carousel carousel={it.el} filterValues={filterValues} editable={false} />
           </div>
         )

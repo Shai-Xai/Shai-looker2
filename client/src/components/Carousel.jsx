@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import TileFrame from './TileFrame.jsx';
+import { useIsMobile } from '../lib/useIsMobile.js';
 
 // A horizontal, scrollable row of tiles, rendered as a full-width grid item so
 // it can be dragged anywhere on the dashboard and resized with the grid's own
@@ -7,9 +8,13 @@ import TileFrame from './TileFrame.jsx';
 // drag handle. In edit mode it's also a drop target for existing tiles.
 export default function Carousel({ carousel, filterValues, editable, onEditTile, onRemoveTile, onDuplicateTile, onAddTile, onChangeTitle, onRemove, onDropTile, onChangeTileW }) {
   const trackRef = useRef(null);
+  const isMobile = useIsMobile();
   const [dragOver, setDragOver] = useState(false);
   const cardW = carousel.cardW || 300;
   const tiles = carousel.tiles || [];
+  // On phones a card shouldn't exceed the viewport — show one card plus a peek
+  // of the next so it's obviously swipeable.
+  const cardBasis = (w) => (isMobile ? `min(${w}px, 82vw)` : `${w}px`);
 
   const scroll = (dir) => trackRef.current?.scrollBy({ left: dir * (cardW + GAP) * 2, behavior: 'smooth' });
 
@@ -67,6 +72,8 @@ export default function Carousel({ carousel, filterValues, editable, onEditTile,
           style={{
             display: 'flex', gap: GAP, overflowX: 'auto', height: '100%',
             borderRadius: 8,
+            WebkitOverflowScrolling: 'touch',
+            scrollSnapType: isMobile ? 'x mandatory' : undefined,
             outline: dragOver ? '2px dashed var(--brand)' : 'none',
             background: dragOver ? 'rgba(255,56,92,0.04)' : 'transparent',
           }}
@@ -79,7 +86,7 @@ export default function Carousel({ carousel, filterValues, editable, onEditTile,
             tiles.map((t) => {
               const w = t.cw || cardW;
               return (
-                <div key={t.id} style={{ flex: `0 0 ${w}px`, width: w, height: '100%', position: 'relative', scrollSnapAlign: 'start' }}>
+                <div key={t.id} style={{ flex: `0 0 ${cardBasis(w)}`, width: cardBasis(w), height: '100%', position: 'relative', scrollSnapAlign: 'start' }}>
                   <TileFrame
                     tile={t}
                     filterValues={filterValues}
