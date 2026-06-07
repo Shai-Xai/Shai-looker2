@@ -30,15 +30,18 @@ export default function ViewPage() {
       .then(([data, set]) => {
         setDef(data);
         setSetInfo(set);
-        // Lock any filter whose field is in the set's merged locked-filters map.
+        // Lock filters from the set's merged locks. A lock keyed by the filter
+        // NAME (e.g. "Past Event") wins over one keyed by the field, so the
+        // Current/Past/Comparison event filters lock independently.
         const lockMap = set?.lockedFilters || {};
         const defaults = {};
         const lockedMap = {};
         for (const f of data.filters || []) {
           defaults[f.name] = f.default_value || '';
           const field = f.field || f.dimension;
-          if (field && lockMap[field] != null && lockMap[field] !== '') {
-            defaults[f.name] = lockMap[field];
+          const v = lockMap[f.name] != null ? lockMap[f.name] : (field ? lockMap[field] : undefined);
+          if (v != null && v !== '') {
+            defaults[f.name] = v;
             lockedMap[f.name] = true;
           }
         }

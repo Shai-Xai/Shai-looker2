@@ -111,23 +111,40 @@ app.delete('/api/admin/sets/:id', auth.requireAdmin, (req, res) => { db.deleteSe
 // Distinct filter fields across all dashboards (for the locked-filter editor:
 // pick a field → we know its model/explore so values can be suggested).
 app.get('/api/admin/filter-fields', auth.requireAdmin, (_req, res) => {
-  const seen = new Map();
+  // Collect every dashboard filter (name + field). Returned options carry a
+  // `field` (the lock key — a Looker field, or a filter NAME for name-based
+  // locks) and `suggestField` (the Looker dimension to suggest values from).
+  const byField = new Map();        // field -> option
+  const namesByField = new Map();   // field -> Set(distinct filter names)
+  const filters = [];               // { name, field, model, explore }
   for (const d of db.listDashboards()) {
     const full = store.get(d.id);
     for (const f of full?.filters || []) {
       const field = f.field || f.dimension;
-      if (!field || seen.has(field)) continue;
-      seen.set(field, { field, title: f.title || field, model: f.model || null, explore: f.explore || null });
+      if (!field) continue;
+      const name = f.name || f.title || field;
+      filters.push({ name, field, model: f.model || null, explore: f.explore || null });
+      if (!byField.has(field)) byField.set(field, { field, title: f.title || field, suggestField: field, model: f.model || null, explore: f.explore || null });
+      if (!namesByField.has(field)) namesByField.set(field, new Set());
+      namesByField.get(field).add(name);
     }
   }
-  const out = [...seen.values()];
-  // Offer the id sibling for organiser/event so admins can lock by id too
-  // (ids are stable; names can change).
+  const out = [...byField.values()];
+  // Id sibling for organiser/event (ids are stable; names can change).
   for (const f of [...out]) {
     const m = f.field.match(/^(core_organisers|core_events)\.name$/);
     if (!m) continue;
     const idField = `${m[1]}.id`;
-    if (!out.some((x) => x.field === idField)) out.push({ field: idField, title: `${f.title} ID`, model: f.model, explore: f.explore });
+    if (!out.some((x) => x.field === idField)) out.push({ field: idField, title: `${f.title} ID`, suggestField: idField, model: f.model, explore: f.explore });
+  }
+  // Name-based options for fields used by 2+ distinct filter names — e.g. the
+  // Current/Past/Comparison event filters all map to core_events.name, so each
+  // can be locked independently by its filter name.
+  const seenName = new Set();
+  for (const fl of filters) {
+    if ((namesByField.get(fl.field)?.size || 0) < 2 || seenName.has(fl.name)) continue;
+    seenName.add(fl.name);
+    out.push({ field: fl.name, title: fl.name, suggestField: fl.field, model: fl.model, explore: fl.explore, byName: true });
   }
   res.json(out);
 });
@@ -232,12 +249,18 @@ function applyScope(query, user, setId) {
   if (setId) {
     if (!auth.canAccessSet(user, setId)) return false;
     scope = auth.lockedFiltersForSet(setId);
-    if (!scope || !Object.keys(scope).length) return false; // fail closed
   } else {
     scope = auth.scopeFiltersForUser(user);
     if (scope && scope.__block) return false;
   }
-  query.filters = { ...(query.filters || {}), ...(scope || {}) };
+  // Only field-keyed locks (containing '.') are forced as hard query filters —
+  // organiser is the security boundary. Name-keyed locks (e.g. "Past Event")
+  // are dashboard-filter presets applied client-side; they flow to the right
+  // tiles via listenTo and must not clobber per-tile event values here.
+  const hard = {};
+  for (const [k, v] of Object.entries(scope || {})) if (k !== '__block' && k.includes('.')) hard[k] = v;
+  if (!Object.keys(hard).length) return false; // fail closed (need ≥ organiser)
+  query.filters = { ...(query.filters || {}), ...hard };
   return true;
 }
 

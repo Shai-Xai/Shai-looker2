@@ -182,17 +182,21 @@ function LockedFilterEditor({ value, onChange, fields }) {
       {rows.map((r, i) => {
         const known = fields.find((f) => f.field === r.field);
         const isCustom = r.custom || (!!r.field && !known);
-        const meta = known || (r.field ? { field: r.field, model: defModel, explore: defExplore } : null);
+        // meta drives value suggestions — use the option's suggestField (a real
+        // Looker dimension) even when the lock key is a filter name.
+        const meta = known
+          ? { field: known.suggestField || known.field, model: known.model, explore: known.explore }
+          : (r.field ? { field: r.field, model: defModel, explore: defExplore } : null);
         return (
           <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               <select
-                style={{ ...input, minWidth: 220 }}
+                style={{ ...input, minWidth: 240 }}
                 value={isCustom ? '__custom' : r.field}
                 onChange={(e) => (e.target.value === '__custom' ? setRow(i, { custom: true, field: '' }) : setRow(i, { custom: false, field: e.target.value }))}
               >
                 <option value="">Choose a field…</option>
-                {fields.map((f) => <option key={f.field} value={f.field}>{f.title} ({f.field})</option>)}
+                {fields.map((f) => <option key={f.field} value={f.field}>{f.byName ? `${f.title} — filter` : `${f.title} (${f.field})`}</option>)}
                 <option value="__custom">✎ Custom field…</option>
               </select>
               {isCustom && (
