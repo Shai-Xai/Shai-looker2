@@ -8,7 +8,7 @@ import { useScope } from '../lib/ScopeContext.jsx';
 // If the value has multiple drill links, lets the user pick which one.
 export default function DrillModal({ links, title, onClose }) {
   const isMobile = useIsMobile();
-  const { setId } = useScope();
+  const { suiteId } = useScope();
   const [selected, setSelected] = useState(links.length === 1 ? links[0] : null);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -19,7 +19,7 @@ export default function DrillModal({ links, title, onClose }) {
     setLoading(true);
     setError(null);
     setData(null);
-    api.drill(selected.url, setId)
+    api.drill(selected.url, suiteId)
       .then((r) => setData(r.data))
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));

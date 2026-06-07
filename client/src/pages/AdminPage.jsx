@@ -20,13 +20,13 @@ export default function AdminPage() {
       </div>
       <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
         <Tab active={tab === 'entities'} onClick={() => setTab('entities')}>Clients</Tab>
-        <Tab active={tab === 'templates'} onClick={() => setTab('templates')}>Templates</Tab>
-        <Tab active={tab === 'sets'} onClick={() => setTab('sets')}>Dashboard Sets</Tab>
+        <Tab active={tab === 'sets'} onClick={() => setTab('sets')}>Sets</Tab>
+        <Tab active={tab === 'suites'} onClick={() => setTab('suites')}>Suites</Tab>
         <Tab active={tab === 'users'} onClick={() => setTab('users')}>Logins</Tab>
       </div>
       {tab === 'entities' && <Entities fields={fields} />}
-      {tab === 'templates' && <Templates />}
-      {tab === 'sets' && <Sets fields={fields} />}
+      {tab === 'sets' && <Sets />}
+      {tab === 'suites' && <Suites fields={fields} />}
       {tab === 'users' && <Users />}
     </main>
   );
@@ -66,36 +66,36 @@ function EntityCard({ entity, fields, onChange }) {
   );
 }
 
-// ─── Templates ────────────────────────────────────────────────────────────────
-function Templates() {
+// ─── Sets (reusable dashboard collections: Ticketing, Cashless, …) ────────────
+function Sets() {
   const [items, setItems] = useState([]);
   const [dashboards, setDashboards] = useState([]);
   const [loading, setLoading] = useState(true);
-  const load = () => { setLoading(true); Promise.all([api.adminListTemplates(), api.listDashboards()]).then(([t, d]) => { setItems(t); setDashboards(d); }).finally(() => setLoading(false)); };
+  const load = () => { setLoading(true); Promise.all([api.adminListSets(), api.listDashboards()]).then(([t, d]) => { setItems(t); setDashboards(d); }).finally(() => setLoading(false)); };
   useEffect(load, []);
   if (loading) return <Muted>Loading…</Muted>;
   return (
     <div>
-      <p style={hint}>A template is a reusable group of dashboards. Apply it to clients via Dashboard Sets.</p>
-      {items.map((t) => <TemplateCard key={t.id} template={t} dashboards={dashboards} onChange={load} />)}
-      <button style={addBtn} onClick={() => api.adminCreateTemplate({ name: 'New template', dashboardIds: [] }).then(load)}>+ Add template</button>
+      <p style={hint}>A Set is a reusable group of dashboards (e.g. Ticketing, Cashless). Bundle them into a client's Suite.</p>
+      {items.map((t) => <SetCard key={t.id} set={t} dashboards={dashboards} onChange={load} />)}
+      <button style={addBtn} onClick={() => api.adminCreateSet({ name: 'New set', dashboardIds: [] }).then(load)}>+ Add set</button>
     </div>
   );
 }
-function TemplateCard({ template, dashboards, onChange }) {
-  const [name, setName] = useState(template.name);
-  const [ids, setIds] = useState(template.dashboardIds || []);
+function SetCard({ set, dashboards, onChange }) {
+  const [name, setName] = useState(set.name);
+  const [ids, setIds] = useState(set.dashboardIds || []);
   const [saved, setSaved] = useState(false);
   const toggle = (id) => setIds((cur) => cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]);
-  const save = async () => { await api.adminUpdateTemplate(template.id, { name, dashboardIds: ids }); flash(setSaved); onChange(); };
-  const remove = async () => { if (confirm(`Delete template "${template.name}"?`)) { await api.adminDeleteTemplate(template.id); onChange(); } };
+  const save = async () => { await api.adminUpdateSet(set.id, { name, dashboardIds: ids }); flash(setSaved); onChange(); };
+  const remove = async () => { if (confirm(`Delete set "${set.name}"?`)) { await api.adminDeleteSet(set.id); onChange(); } };
   return (
     <div style={cardStyle}>
       <Row>
         <input style={{ ...input, fontWeight: 700, flex: 1 }} value={name} onChange={(e) => setName(e.target.value)} />
         <button style={delBtn} onClick={remove}>Delete</button>
       </Row>
-      <L>Dashboards in this template ({ids.length})</L>
+      <L>Dashboards in this set ({ids.length})</L>
       <div style={checkList}>
         {dashboards.map((d) => (
           <label key={d.id} style={checkItem}>
@@ -105,55 +105,63 @@ function TemplateCard({ template, dashboards, onChange }) {
         ))}
         {dashboards.length === 0 && <Muted>No dashboards yet.</Muted>}
       </div>
-      <SaveRow onSave={save} saved={saved} id={template.id} />
+      <SaveRow onSave={save} saved={saved} id={set.id} />
     </div>
   );
 }
 
-// ─── Dashboard Sets ───────────────────────────────────────────────────────────
-function Sets({ fields }) {
+// ─── Suites (a client's event context: locks + bundled Sets) ──────────────────
+function Suites({ fields }) {
   const [items, setItems] = useState([]);
   const [entities, setEntities] = useState([]);
-  const [templates, setTemplates] = useState([]);
+  const [sets, setSets] = useState([]);
   const [loading, setLoading] = useState(true);
-  const load = () => { setLoading(true); Promise.all([api.adminListSets(), api.adminListEntities(), api.adminListTemplates()]).then(([s, e, t]) => { setItems(s); setEntities(e); setTemplates(t); }).finally(() => setLoading(false)); };
+  const load = () => { setLoading(true); Promise.all([api.adminListSuites(), api.adminListEntities(), api.adminListSets()]).then(([su, e, s]) => { setItems(su); setEntities(e); setSets(s); }).finally(() => setLoading(false)); };
   useEffect(load, []);
 
   async function add() {
-    if (!entities.length || !templates.length) { alert('Create at least one client and one template first.'); return; }
-    await api.adminCreateSet({ entityId: entities[0].id, templateId: templates[0].id, name: 'New set', lockedFilters: {} });
+    if (!entities.length) { alert('Create at least one client first.'); return; }
+    await api.adminCreateSuite({ entityId: entities[0].id, name: 'New suite', lockedFilters: {}, setIds: [] });
     load();
   }
   if (loading) return <Muted>Loading…</Muted>;
   return (
     <div>
-      <p style={hint}>A Dashboard Set applies a template to a client, with the event (and any other) filters locked in. This is what the client opens.</p>
-      {items.map((s) => <SetCard key={s.id} set={s} entities={entities} templates={templates} fields={fields} onChange={load} />)}
-      <button style={addBtn} onClick={add}>+ Add set</button>
+      <p style={hint}>A Suite is what a client opens — an event context. It bundles Sets and locks the event (and any other) filters. Organiser is locked on the Client.</p>
+      {items.map((su) => <SuiteCard key={su.id} suite={su} entities={entities} sets={sets} fields={fields} onChange={load} />)}
+      <button style={addBtn} onClick={add}>+ Add suite</button>
     </div>
   );
 }
-function SetCard({ set, entities, templates, fields, onChange }) {
-  const [name, setName] = useState(set.name);
-  const [entityId, setEntityId] = useState(set.entityId);
-  const [templateId, setTemplateId] = useState(set.templateId);
-  const [locks, setLocks] = useState(set.lockedFilters || {});
+function SuiteCard({ suite, entities, sets, fields, onChange }) {
+  const [name, setName] = useState(suite.name);
+  const [entityId, setEntityId] = useState(suite.entityId);
+  const [setIds, setSetIds] = useState(suite.setIds || []);
+  const [locks, setLocks] = useState(suite.lockedFilters || {});
   const [saved, setSaved] = useState(false);
-  const save = async () => { await api.adminUpdateSet(set.id, { name, entityId, templateId, lockedFilters: locks }); flash(setSaved); onChange(); };
-  const remove = async () => { if (confirm(`Delete set "${set.name}"?`)) { await api.adminDeleteSet(set.id); onChange(); } };
+  const toggleSet = (id) => setSetIds((cur) => cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]);
+  const save = async () => { await api.adminUpdateSuite(suite.id, { name, entityId, setIds, lockedFilters: locks }); flash(setSaved); onChange(); };
+  const remove = async () => { if (confirm(`Delete suite "${suite.name}"?`)) { await api.adminDeleteSuite(suite.id); onChange(); } };
   return (
     <div style={cardStyle}>
       <Row>
         <input style={{ ...input, fontWeight: 700, flex: 1 }} value={name} onChange={(e) => setName(e.target.value)} />
         <button style={delBtn} onClick={remove}>Delete</button>
       </Row>
-      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 10 }}>
-        <Field label="Client"><select style={input} value={entityId} onChange={(e) => setEntityId(e.target.value)}>{entities.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}</select></Field>
-        <Field label="Template"><select style={input} value={templateId} onChange={(e) => setTemplateId(e.target.value)}>{templates.map((t) => <option key={t.id} value={t.id}>{t.name} ({t.dashboardIds.length})</option>)}</select></Field>
+      <Field label="Client"><select style={input} value={entityId} onChange={(e) => setEntityId(e.target.value)}>{entities.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}</select></Field>
+      <L>Sets in this suite ({setIds.length})</L>
+      <div style={checkList}>
+        {sets.map((s) => (
+          <label key={s.id} style={checkItem}>
+            <input type="checkbox" checked={setIds.includes(s.id)} onChange={() => toggleSet(s.id)} />
+            <span>{s.name} <span style={{ color: 'var(--muted)' }}>({s.dashboardIds.length})</span></span>
+          </label>
+        ))}
+        {sets.length === 0 && <Muted>Create a Set first.</Muted>}
       </div>
-      <L>Locked filters for this set (e.g. the event, cashless flags…)</L>
+      <L>Locked filters (the event, cashless events…)</L>
       <LockedFilterEditor value={locks} onChange={setLocks} fields={fields} />
-      <SaveRow onSave={save} saved={saved} id={set.id} />
+      <SaveRow onSave={save} saved={saved} id={suite.id} />
     </div>
   );
 }

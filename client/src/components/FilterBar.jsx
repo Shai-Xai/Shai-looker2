@@ -129,7 +129,7 @@ function FilterControl({ filter, value, onChange, locked }) {
 // Type to filter the list; click to select. In multi mode several values can
 // be picked (stored as a comma-separated string, the way Looker expects).
 function FilterDropdown({ filter, value, onChange, multi = false }) {
-  const { setId } = useScope();
+  const { suiteId } = useScope();
   const [all, setAll] = useState([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -146,7 +146,7 @@ function FilterDropdown({ filter, value, onChange, multi = false }) {
       const res = await fetch('/api/filter-suggest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: filter.model, explore: filter.explore, field: filter.field || filter.dimension, setId }),
+        body: JSON.stringify({ model: filter.model, explore: filter.explore, field: filter.field || filter.dimension, suiteId }),
       });
       const data = await res.json();
       setAll(data.suggestions || []);

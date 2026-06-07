@@ -1,18 +1,18 @@
 // ─── SQLite data layer ───────────────────────────────────────────────────────
 // Durable, relational storage for the multi-tenant model:
 //
-//   Entity ──< user_entities >── User        (a user belongs to many entities)
-//   Entity ──< DashboardSet >── Template      (a set applies a template to an
-//                                              entity, with locked filters)
-//   Template ──< template_dashboards >── Dashboard  (dashboards reused across
-//                                                    many templates)
+//   Entity ──< user_entities >── User      (a user belongs to many entities)
+//   Entity ──< Suite                       (a suite = an event context, holds
+//                                            the event/cashless locked filters)
+//   Suite  ──< suite_sets >── Set          (a suite bundles many reusable Sets:
+//                                            Ticketing, Cashless, Access, …)
+//   Set    ──< set_dashboards >── Dashboard (dashboards reused across many Sets)
 //
-// Scoping = Entity.lockedFilters merged with DashboardSet.lockedFilters, forced
-// onto every Looker query the client runs.
+// Scoping = Entity.lockedFilters (organiser) merged with Suite.lockedFilters
+// (event/cashless), forced onto every Looker query the client runs.
 //
 // Dashboard *content* (tiles, filters, theme…) stays a JSON blob — only the org
-// structure is relational. The exported API is intentionally small so callers
-// (auth/index/store) don't touch SQL.
+// structure is relational.
 
 const fs = require('fs');
 const path = require('path');
@@ -32,8 +32,8 @@ db.exec(`
 CREATE TABLE IF NOT EXISTS entities (
   id            TEXT PRIMARY KEY,
   name          TEXT NOT NULL,
-  locked_filters TEXT NOT NULL DEFAULT '{}',   -- JSON { "field": "v1,v2" }
-  scope_fields  TEXT NOT NULL DEFAULT '{}',     -- JSON, optional legacy hints
+  locked_filters TEXT NOT NULL DEFAULT '{}',
+  scope_fields  TEXT NOT NULL DEFAULT '{}',
   created_at    TEXT NOT NULL
 );
 
@@ -41,7 +41,7 @@ CREATE TABLE IF NOT EXISTS users (
   id            TEXT PRIMARY KEY,
   email         TEXT NOT NULL UNIQUE,
   password_hash TEXT NOT NULL,
-  role          TEXT NOT NULL DEFAULT 'client', -- 'admin' | 'client'
+  role          TEXT NOT NULL DEFAULT 'client',
   created_at    TEXT NOT NULL
 );
 
@@ -54,54 +54,80 @@ CREATE TABLE IF NOT EXISTS user_entities (
 CREATE TABLE IF NOT EXISTS dashboards (
   id         TEXT PRIMARY KEY,
   title      TEXT NOT NULL,
-  def        TEXT NOT NULL,                      -- JSON: full dashboard definition
+  def        TEXT NOT NULL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS templates (
+-- A Set is a reusable collection of dashboards (Ticketing, Cashless, …).
+CREATE TABLE IF NOT EXISTS sets (
   id         TEXT PRIMARY KEY,
   name       TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
-
-CREATE TABLE IF NOT EXISTS template_dashboards (
-  template_id  TEXT NOT NULL REFERENCES templates(id) ON DELETE CASCADE,
+CREATE TABLE IF NOT EXISTS set_dashboards (
+  set_id       TEXT NOT NULL REFERENCES sets(id) ON DELETE CASCADE,
   dashboard_id TEXT NOT NULL REFERENCES dashboards(id) ON DELETE CASCADE,
   position     INTEGER NOT NULL DEFAULT 0,
-  PRIMARY KEY (template_id, dashboard_id)
+  PRIMARY KEY (set_id, dashboard_id)
 );
 
-CREATE TABLE IF NOT EXISTS dashboard_sets (
+-- A Suite is an event context for a client: it holds the event/cashless locks
+-- and bundles several Sets.
+CREATE TABLE IF NOT EXISTS suites (
   id            TEXT PRIMARY KEY,
   entity_id     TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
-  template_id   TEXT NOT NULL REFERENCES templates(id) ON DELETE CASCADE,
   name          TEXT NOT NULL,
-  locked_filters TEXT NOT NULL DEFAULT '{}',     -- JSON { "field": "v1,v2" }
+  locked_filters TEXT NOT NULL DEFAULT '{}',
   position      INTEGER NOT NULL DEFAULT 0,
   created_at    TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS suite_sets (
+  suite_id TEXT NOT NULL REFERENCES suites(id) ON DELETE CASCADE,
+  set_id   TEXT NOT NULL REFERENCES sets(id) ON DELETE CASCADE,
+  position INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (suite_id, set_id)
+);
 
-CREATE INDEX IF NOT EXISTS idx_user_entities_user   ON user_entities(user_id);
-CREATE INDEX IF NOT EXISTS idx_template_dash_tmpl   ON template_dashboards(template_id);
-CREATE INDEX IF NOT EXISTS idx_sets_entity          ON dashboard_sets(entity_id);
-CREATE INDEX IF NOT EXISTS idx_sets_template        ON dashboard_sets(template_id);
+CREATE INDEX IF NOT EXISTS idx_user_entities_user ON user_entities(user_id);
+CREATE INDEX IF NOT EXISTS idx_set_dashboards_set ON set_dashboards(set_id);
+CREATE INDEX IF NOT EXISTS idx_suites_entity      ON suites(entity_id);
+CREATE INDEX IF NOT EXISTS idx_suite_sets_suite   ON suite_sets(suite_id);
 `);
 
 const now = () => new Date().toISOString();
 const uuid = () => crypto.randomUUID();
 const J = (s, fallback) => { try { return JSON.parse(s); } catch { return fallback; } };
+const tableExists = (n) => !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(n);
+
+// ─── Legacy migration: templates → sets, dashboard_sets → suites(+ one set) ───
+const migrateLegacy = db.transaction(() => {
+  if (tableExists('templates') && db.prepare('SELECT COUNT(*) c FROM sets').get().c === 0) {
+    for (const t of db.prepare('SELECT * FROM templates').all()) {
+      db.prepare('INSERT OR IGNORE INTO sets (id,name,created_at) VALUES (?,?,?)').run(t.id, t.name, t.created_at);
+    }
+    if (tableExists('template_dashboards')) {
+      for (const r of db.prepare('SELECT * FROM template_dashboards').all()) {
+        db.prepare('INSERT OR IGNORE INTO set_dashboards (set_id,dashboard_id,position) VALUES (?,?,?)').run(r.template_id, r.dashboard_id, r.position);
+      }
+    }
+  }
+  if (tableExists('dashboard_sets') && db.prepare('SELECT COUNT(*) c FROM suites').get().c === 0) {
+    for (const s of db.prepare('SELECT * FROM dashboard_sets').all()) {
+      db.prepare('INSERT OR IGNORE INTO suites (id,entity_id,name,locked_filters,position,created_at) VALUES (?,?,?,?,?,?)')
+        .run(s.id, s.entity_id, s.name, s.locked_filters, s.position, s.created_at);
+      db.prepare('INSERT OR IGNORE INTO suite_sets (suite_id,set_id,position) VALUES (?,?,0)').run(s.id, s.template_id);
+    }
+  }
+});
+try { migrateLegacy(); } catch (e) { console.error('[db] legacy migration skipped:', e.message); }
 
 // ─── Entities ─────────────────────────────────────────────────────────────────
 function rowToEntity(r) {
   return r && { id: r.id, name: r.name, lockedFilters: J(r.locked_filters, {}), scopeFields: J(r.scope_fields, {}), createdAt: r.created_at };
 }
-function listEntities() {
-  return db.prepare('SELECT * FROM entities ORDER BY name').all().map(rowToEntity);
-}
-function getEntity(id) {
-  return rowToEntity(db.prepare('SELECT * FROM entities WHERE id=?').get(id));
-}
+function listEntities() { return db.prepare('SELECT * FROM entities ORDER BY name').all().map(rowToEntity); }
+function getEntity(id) { return rowToEntity(db.prepare('SELECT * FROM entities WHERE id=?').get(id)); }
 function createEntity({ name, lockedFilters = {}, scopeFields = {} }) {
   const e = { id: uuid(), name: name || 'Untitled entity', lockedFilters, scopeFields, createdAt: now() };
   db.prepare('INSERT INTO entities (id,name,locked_filters,scope_fields,created_at) VALUES (?,?,?,?,?)')
@@ -174,34 +200,23 @@ function defaultTheme() {
 }
 function rowToDashboard(r) {
   if (!r) return null;
-  const def = J(r.def, {});
-  return { ...def, id: r.id, title: r.title, createdAt: r.created_at, updatedAt: r.updated_at };
+  return { ...J(r.def, {}), id: r.id, title: r.title, createdAt: r.created_at, updatedAt: r.updated_at };
 }
 function listDashboards() {
   return db.prepare('SELECT * FROM dashboards ORDER BY updated_at DESC').all().map((r) => {
     const def = J(r.def, {});
-    return {
-      id: r.id, title: r.title, description: def.description || '',
-      tileCount: (def.tiles || []).length, source: def.source || null,
-      createdAt: r.created_at, updatedAt: r.updated_at,
-    };
+    return { id: r.id, title: r.title, description: def.description || '', tileCount: (def.tiles || []).length, source: def.source || null, createdAt: r.created_at, updatedAt: r.updated_at };
   });
 }
 function getDashboard(id) { return rowToDashboard(db.prepare('SELECT * FROM dashboards WHERE id=?').get(id)); }
+function stripMeta(d) { const { id, title, createdAt, updatedAt, ...rest } = d; return rest; }
 function createDashboard(def = {}) {
   const ts = now();
   const dash = {
-    id: uuid(),
-    title: def.title || 'Untitled dashboard',
-    description: def.description || '',
-    theme: def.theme || defaultTheme(),
-    filters: def.filters || [],
-    tiles: def.tiles || [],
-    carousels: def.carousels || [],
-    gridAfter: def.gridAfter || 0,
-    source: def.source || null,
-    createdAt: ts,
-    updatedAt: ts,
+    id: uuid(), title: def.title || 'Untitled dashboard', description: def.description || '',
+    theme: def.theme || defaultTheme(), filters: def.filters || [], tiles: def.tiles || [],
+    carousels: def.carousels || [], gridAfter: def.gridAfter || 0, source: def.source || null,
+    createdAt: ts, updatedAt: ts,
   };
   db.prepare('INSERT INTO dashboards (id,title,def,created_at,updated_at) VALUES (?,?,?,?,?)')
     .run(dash.id, dash.title, JSON.stringify(stripMeta(dash)), ts, ts);
@@ -211,88 +226,86 @@ function updateDashboard(id, patch) {
   const cur = getDashboard(id);
   if (!cur) return null;
   const merged = { ...cur, ...patch, id: cur.id, createdAt: cur.createdAt, updatedAt: now() };
-  db.prepare('UPDATE dashboards SET title=?, def=?, updated_at=? WHERE id=?')
-    .run(merged.title, JSON.stringify(stripMeta(merged)), merged.updatedAt, id);
+  db.prepare('UPDATE dashboards SET title=?, def=?, updated_at=? WHERE id=?').run(merged.title, JSON.stringify(stripMeta(merged)), merged.updatedAt, id);
   return merged;
 }
 function removeDashboard(id) { return db.prepare('DELETE FROM dashboards WHERE id=?').run(id).changes > 0; }
-// Keep id/title/timestamps out of the JSON blob (they live in columns).
-function stripMeta(d) {
-  const { id, title, createdAt, updatedAt, ...rest } = d;
-  return rest;
-}
 
-// ─── Templates ────────────────────────────────────────────────────────────────
-function templateDashboardIds(templateId) {
-  return db.prepare('SELECT dashboard_id FROM template_dashboards WHERE template_id=? ORDER BY position')
-    .all(templateId).map((r) => r.dashboard_id);
+// ─── Sets (reusable dashboard collections) ────────────────────────────────────
+function setDashboardIds(setId) {
+  return db.prepare('SELECT dashboard_id FROM set_dashboards WHERE set_id=? ORDER BY position').all(setId).map((r) => r.dashboard_id);
 }
-function rowToTemplate(r) {
-  return r && { id: r.id, name: r.name, dashboardIds: templateDashboardIds(r.id), createdAt: r.created_at };
-}
-function listTemplates() { return db.prepare('SELECT * FROM templates ORDER BY name').all().map(rowToTemplate); }
-function getTemplate(id) { return rowToTemplate(db.prepare('SELECT * FROM templates WHERE id=?').get(id)); }
-const setTemplateDashboards = db.transaction((templateId, dashboardIds) => {
-  db.prepare('DELETE FROM template_dashboards WHERE template_id=?').run(templateId);
-  const ins = db.prepare('INSERT OR IGNORE INTO template_dashboards (template_id, dashboard_id, position) VALUES (?,?,?)');
-  (dashboardIds || []).forEach((did, i) => { if (did) ins.run(templateId, did, i); });
+function rowToSet(r) { return r && { id: r.id, name: r.name, dashboardIds: setDashboardIds(r.id), createdAt: r.created_at }; }
+function listSets() { return db.prepare('SELECT * FROM sets ORDER BY name').all().map(rowToSet); }
+function getSet(id) { return rowToSet(db.prepare('SELECT * FROM sets WHERE id=?').get(id)); }
+const setSetDashboards = db.transaction((setId, dashboardIds) => {
+  db.prepare('DELETE FROM set_dashboards WHERE set_id=?').run(setId);
+  const ins = db.prepare('INSERT OR IGNORE INTO set_dashboards (set_id, dashboard_id, position) VALUES (?,?,?)');
+  (dashboardIds || []).forEach((did, i) => { if (did) ins.run(setId, did, i); });
 });
-function createTemplate({ name, dashboardIds = [] }) {
+function createSet({ name, dashboardIds = [] }) {
   const id = uuid();
-  db.prepare('INSERT INTO templates (id,name,created_at) VALUES (?,?,?)').run(id, name || 'Untitled template', now());
-  setTemplateDashboards(id, dashboardIds);
-  return getTemplate(id);
-}
-function updateTemplate(id, patch) {
-  const cur = db.prepare('SELECT * FROM templates WHERE id=?').get(id);
-  if (!cur) return null;
-  if (patch.name !== undefined) db.prepare('UPDATE templates SET name=? WHERE id=?').run(patch.name, id);
-  if (patch.dashboardIds !== undefined) setTemplateDashboards(id, patch.dashboardIds);
-  return getTemplate(id);
-}
-function deleteTemplate(id) { db.prepare('DELETE FROM templates WHERE id=?').run(id); }
-
-// ─── Dashboard sets (template applied to an entity, with locked filters) ───────
-function rowToSet(r) {
-  return r && {
-    id: r.id, entityId: r.entity_id, templateId: r.template_id, name: r.name,
-    lockedFilters: J(r.locked_filters, {}), position: r.position, createdAt: r.created_at,
-  };
-}
-function listSets() { return db.prepare('SELECT * FROM dashboard_sets ORDER BY position, name').all().map(rowToSet); }
-function listSetsForEntity(entityId) {
-  return db.prepare('SELECT * FROM dashboard_sets WHERE entity_id=? ORDER BY position, name').all(entityId).map(rowToSet);
-}
-function getSet(id) { return rowToSet(db.prepare('SELECT * FROM dashboard_sets WHERE id=?').get(id)); }
-function createSet({ entityId, templateId, name, lockedFilters = {}, position = 0 }) {
-  const id = uuid();
-  db.prepare('INSERT INTO dashboard_sets (id,entity_id,template_id,name,locked_filters,position,created_at) VALUES (?,?,?,?,?,?,?)')
-    .run(id, entityId, templateId, name || 'Untitled set', JSON.stringify(lockedFilters), position, now());
+  db.prepare('INSERT INTO sets (id,name,created_at) VALUES (?,?,?)').run(id, name || 'Untitled set', now());
+  setSetDashboards(id, dashboardIds);
   return getSet(id);
 }
 function updateSet(id, patch) {
-  const cur = db.prepare('SELECT * FROM dashboard_sets WHERE id=?').get(id);
+  const cur = db.prepare('SELECT * FROM sets WHERE id=?').get(id);
   if (!cur) return null;
-  const name = patch.name ?? cur.name;
-  const tmpl = patch.templateId ?? cur.template_id;
-  const lf = patch.lockedFilters !== undefined ? JSON.stringify(patch.lockedFilters) : cur.locked_filters;
-  const pos = patch.position ?? cur.position;
-  db.prepare('UPDATE dashboard_sets SET name=?, template_id=?, locked_filters=?, position=? WHERE id=?').run(name, tmpl, lf, pos, id);
+  if (patch.name !== undefined) db.prepare('UPDATE sets SET name=? WHERE id=?').run(patch.name, id);
+  if (patch.dashboardIds !== undefined) setSetDashboards(id, patch.dashboardIds);
   return getSet(id);
 }
-function deleteSet(id) { db.prepare('DELETE FROM dashboard_sets WHERE id=?').run(id); }
+function deleteSet(id) { db.prepare('DELETE FROM sets WHERE id=?').run(id); }
+function dashboardsInSet(setId) { return setDashboardIds(setId); }
 
-// Dashboards a user can reach through a given set (template membership).
-function dashboardsInSet(setId) {
-  const s = getSet(setId);
-  if (!s) return [];
-  return templateDashboardIds(s.templateId);
+// ─── Suites (event context: locks + bundled Sets) ─────────────────────────────
+function suiteSetIds(suiteId) {
+  return db.prepare('SELECT set_id FROM suite_sets WHERE suite_id=? ORDER BY position').all(suiteId).map((r) => r.set_id);
 }
+function rowToSuite(r) {
+  return r && { id: r.id, entityId: r.entity_id, name: r.name, lockedFilters: J(r.locked_filters, {}), setIds: suiteSetIds(r.id), position: r.position, createdAt: r.created_at };
+}
+function listSuites() { return db.prepare('SELECT * FROM suites ORDER BY position, name').all().map(rowToSuite); }
+function listSuitesForEntity(entityId) {
+  return db.prepare('SELECT * FROM suites WHERE entity_id=? ORDER BY position, name').all(entityId).map(rowToSuite);
+}
+function getSuite(id) { return rowToSuite(db.prepare('SELECT * FROM suites WHERE id=?').get(id)); }
+const setSuiteSets = db.transaction((suiteId, setIds) => {
+  db.prepare('DELETE FROM suite_sets WHERE suite_id=?').run(suiteId);
+  const ins = db.prepare('INSERT OR IGNORE INTO suite_sets (suite_id, set_id, position) VALUES (?,?,?)');
+  (setIds || []).forEach((sid, i) => { if (sid) ins.run(suiteId, sid, i); });
+});
+function createSuite({ entityId, name, lockedFilters = {}, setIds = [], position = 0 }) {
+  const id = uuid();
+  db.prepare('INSERT INTO suites (id,entity_id,name,locked_filters,position,created_at) VALUES (?,?,?,?,?,?)')
+    .run(id, entityId, name || 'Untitled suite', JSON.stringify(lockedFilters), position, now());
+  setSuiteSets(id, setIds);
+  return getSuite(id);
+}
+function updateSuite(id, patch) {
+  const cur = db.prepare('SELECT * FROM suites WHERE id=?').get(id);
+  if (!cur) return null;
+  const name = patch.name ?? cur.name;
+  const lf = patch.lockedFilters !== undefined ? JSON.stringify(patch.lockedFilters) : cur.locked_filters;
+  const pos = patch.position ?? cur.position;
+  const ent = patch.entityId ?? cur.entity_id;
+  db.prepare('UPDATE suites SET name=?, entity_id=?, locked_filters=?, position=? WHERE id=?').run(name, ent, lf, pos, id);
+  if (patch.setIds !== undefined) setSuiteSets(id, patch.setIds);
+  return getSuite(id);
+}
+function deleteSuite(id) { db.prepare('DELETE FROM suites WHERE id=?').run(id); }
 
-// Merged locked filters for a set = entity locks + set locks (set wins on
-// conflict). This is the map forced onto the user's Looker queries.
-function lockedFiltersForSet(setId) {
-  const s = getSet(setId);
+// All dashboards reachable through a suite (union across its sets).
+function dashboardsInSuite(suiteId) {
+  const out = new Set();
+  for (const sid of suiteSetIds(suiteId)) for (const did of setDashboardIds(sid)) out.add(did);
+  return [...out];
+}
+// Merged locked filters for a suite = entity locks (organiser) + suite locks
+// (event/cashless). The map forced onto the user's Looker queries.
+function lockedFiltersForSuite(suiteId) {
+  const s = getSuite(suiteId);
   if (!s) return {};
   const e = getEntity(s.entityId);
   return { ...(e?.lockedFilters || {}), ...(s.lockedFilters || {}) };
@@ -301,14 +314,11 @@ function lockedFiltersForSet(setId) {
 module.exports = {
   db,
   defaultTheme,
-  // entities
   listEntities, getEntity, createEntity, updateEntity, deleteEntity,
-  // users
   listUsers, getUser, getUserByEmail, createUser, updateUser, deleteUser, verifyCredentials, publicUser, setUserEntities,
-  // dashboards
   listDashboards, getDashboard, createDashboard, updateDashboard, removeDashboard,
-  // templates
-  listTemplates, getTemplate, createTemplate, updateTemplate, deleteTemplate, setTemplateDashboards,
-  // sets
-  listSets, listSetsForEntity, getSet, createSet, updateSet, deleteSet, dashboardsInSet, lockedFiltersForSet,
+  // sets (reusable collections)
+  listSets, getSet, createSet, updateSet, deleteSet, setSetDashboards, dashboardsInSet,
+  // suites (event context)
+  listSuites, listSuitesForEntity, getSuite, createSuite, updateSuite, deleteSuite, setSuiteSets, suiteSetIds, dashboardsInSuite, lockedFiltersForSuite,
 };

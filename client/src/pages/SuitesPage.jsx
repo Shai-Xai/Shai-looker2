@@ -2,24 +2,23 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 
-// Client landing: the Dashboard Sets the user can open, grouped by Entity.
-// (Admins use the flat dashboard list / builder instead.)
-export default function SetsPage() {
+// Client landing: the Suites (event contexts) the user can open, grouped by
+// Client (entity). Admins use the builder/home instead.
+export default function SuitesPage() {
   const navigate = useNavigate();
-  const [sets, setSets] = useState([]);
+  const [suites, setSuites] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    api.mySets().then(setSets).catch((e) => setError(e.message)).finally(() => setLoading(false));
+    api.mySuites().then(setSuites).catch((e) => setError(e.message)).finally(() => setLoading(false));
   }, []);
 
-  // Group by entity so a user who belongs to several entities sees them split.
   const groups = [];
-  for (const s of sets) {
+  for (const s of suites) {
     let g = groups.find((x) => x.entityId === s.entityId);
-    if (!g) { g = { entityId: s.entityId, entityName: s.entityName, sets: [] }; groups.push(g); }
-    g.sets.push(s);
+    if (!g) { g = { entityId: s.entityId, entityName: s.entityName, suites: [] }; groups.push(g); }
+    g.suites.push(s);
   }
 
   return (
@@ -28,8 +27,8 @@ export default function SetsPage() {
         <p style={{ color: 'var(--muted)' }}>Loading…</p>
       ) : error ? (
         <p style={{ color: 'var(--error)' }}>{error}</p>
-      ) : sets.length === 0 ? (
-        <p style={{ color: 'var(--muted)' }}>No dashboard sets have been assigned to your account yet.</p>
+      ) : suites.length === 0 ? (
+        <p style={{ color: 'var(--muted)' }}>No dashboard suites have been assigned to your account yet.</p>
       ) : (
         groups.map((g) => (
           <section key={g.entityId} style={{ marginBottom: 30 }}>
@@ -37,10 +36,10 @@ export default function SetsPage() {
               <h2 style={{ fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)', marginBottom: 14 }}>{g.entityName}</h2>
             )}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 16 }}>
-              {g.sets.map((s) => (
-                <button key={s.id} style={card} onClick={() => navigate(`/s/${s.id}`)}>
+              {g.suites.map((s) => (
+                <button key={s.id} style={card} onClick={() => navigate(`/suite/${s.id}`)}>
                   <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>{s.name}</div>
-                  <div style={{ fontSize: 12, color: 'var(--muted)' }}>{s.dashboardCount} dashboard{s.dashboardCount === 1 ? '' : 's'}</div>
+                  <div style={{ fontSize: 12, color: 'var(--muted)' }}>{s.setCount} set{s.setCount === 1 ? '' : 's'} · {s.dashboardCount} dashboard{s.dashboardCount === 1 ? '' : 's'}</div>
                   <div style={{ marginTop: 14, fontSize: 13, fontWeight: 600, color: 'var(--brand)' }}>Open →</div>
                 </button>
               ))}

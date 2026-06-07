@@ -13,7 +13,7 @@ export function isRunnableQuery(q) {
 // values change. Returns { data, loading, error }. Looker does the calculation;
 // we only receive json_detail rows.
 export function useTileData(tile, filterValues) {
-  const { setId } = useScope();
+  const { suiteId } = useScope();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(tile.type !== 'text' && isRunnableQuery(tile.query));
   const [error, setError] = useState(null);
@@ -45,7 +45,7 @@ export function useTileData(tile, filterValues) {
     setLoading(true);
     setError(null);
 
-    withLimit(() => api.runQuery(tile.query, overrides, controller.signal, setId))
+    withLimit(() => api.runQuery(tile.query, overrides, controller.signal, suiteId))
       .then((d) => setData(d))
       .catch((err) => {
         if (err.name !== 'AbortError') setError(err.message);
@@ -56,7 +56,7 @@ export function useTileData(tile, filterValues) {
 
     return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tile.type, queryKey, overrideKey, setId]);
+  }, [tile.type, queryKey, overrideKey, suiteId]);
 
   return { data, loading, error };
 }

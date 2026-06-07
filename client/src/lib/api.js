@@ -16,26 +16,19 @@ export const api = {
     }).then(json),
   logout: () => fetch('/api/auth/logout', { method: 'POST' }).then(json),
 
-  // Tenants (admin manages; clients can read their own)
-  listTenants: () => fetch('/api/tenants').then(json),
-  adminListTenants: () => fetch('/api/admin/tenants').then(json),
-  adminCreateTenant: (t) => fetch('/api/admin/tenants', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(t) }).then(json),
-  adminUpdateTenant: (id, t) => fetch(`/api/admin/tenants/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(t) }).then(json),
-  adminDeleteTenant: (id) => fetch(`/api/admin/tenants/${id}`, { method: 'DELETE' }),
-
-  // Entities / Templates / Sets (admin — the new model)
+  // Admin — Entities (clients), Sets (reusable collections), Suites (event ctx)
   adminListEntities: () => fetch('/api/admin/entities').then(json),
   adminCreateEntity: (e) => fetch('/api/admin/entities', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(e) }).then(json),
   adminUpdateEntity: (id, e) => fetch(`/api/admin/entities/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(e) }).then(json),
   adminDeleteEntity: (id) => fetch(`/api/admin/entities/${id}`, { method: 'DELETE' }),
-  adminListTemplates: () => fetch('/api/admin/templates').then(json),
-  adminCreateTemplate: (t) => fetch('/api/admin/templates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(t) }).then(json),
-  adminUpdateTemplate: (id, t) => fetch(`/api/admin/templates/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(t) }).then(json),
-  adminDeleteTemplate: (id) => fetch(`/api/admin/templates/${id}`, { method: 'DELETE' }),
   adminListSets: () => fetch('/api/admin/sets').then(json),
   adminCreateSet: (s) => fetch('/api/admin/sets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(s) }).then(json),
   adminUpdateSet: (id, s) => fetch(`/api/admin/sets/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(s) }).then(json),
   adminDeleteSet: (id) => fetch(`/api/admin/sets/${id}`, { method: 'DELETE' }),
+  adminListSuites: () => fetch('/api/admin/suites').then(json),
+  adminCreateSuite: (s) => fetch('/api/admin/suites', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(s) }).then(json),
+  adminUpdateSuite: (id, s) => fetch(`/api/admin/suites/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(s) }).then(json),
+  adminDeleteSuite: (id) => fetch(`/api/admin/suites/${id}`, { method: 'DELETE' }),
   adminFilterFields: () => fetch('/api/admin/filter-fields').then(json),
   filterSuggest: (body) => fetch('/api/filter-suggest', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
 
@@ -61,11 +54,11 @@ export const api = {
       body: JSON.stringify(def),
     }).then(json),
   deleteDashboard: (id) => fetch(`/api/dashboards/${id}`, { method: 'DELETE' }),
-  importDashboard: (lookerDashboardId, title, templateId) =>
+  importDashboard: (lookerDashboardId, title, setId) =>
     fetch('/api/dashboards/import', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ lookerDashboardId, title, templateId }),
+      body: JSON.stringify({ lookerDashboardId, title, setId }),
     }).then(json),
 
   // LookML metadata
@@ -83,23 +76,23 @@ export const api = {
     }).then(json),
 
   // Drill-down: run a Looker drill link
-  drill: (url, setId) =>
+  drill: (url, suiteId) =>
     fetch('/api/drill', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, setId }),
+      body: JSON.stringify({ url, suiteId }),
     }).then(json),
 
-  // Query execution (scoped to the current set, if any)
-  runQuery: (query, filterOverrides, signal, setId) =>
+  // Query execution (scoped to the current suite, if any)
+  runQuery: (query, filterOverrides, signal, suiteId) =>
     fetch('/api/run-query', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query, filterOverrides, setId }),
+      body: JSON.stringify({ query, filterOverrides, suiteId }),
       signal,
     }).then(json),
 
-  // Client navigation: Dashboard Sets
-  mySets: () => fetch('/api/my/sets').then(json),
-  mySet: (id) => fetch(`/api/my/sets/${id}`).then(json),
+  // Client navigation: Suites
+  mySuites: () => fetch('/api/my/suites').then(json),
+  mySuite: (id) => fetch(`/api/my/suites/${id}`).then(json),
 };

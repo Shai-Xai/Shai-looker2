@@ -52,16 +52,7 @@ app.get('/api/auth/me', (req, res) => {
   res.json({ user: auth.publicUser(req.user) });
 });
 
-// ─── Admin: tenants & users ────────────────────────────────────────────────────
-app.get('/api/admin/tenants', auth.requireAdmin, (_req, res) => res.json(auth.listTenants()));
-app.post('/api/admin/tenants', auth.requireAdmin, (req, res) => res.status(201).json(auth.createTenant(req.body || {})));
-app.put('/api/admin/tenants/:id', auth.requireAdmin, (req, res) => {
-  const t = auth.updateTenant(req.params.id, req.body || {});
-  if (!t) return res.status(404).json({ error: 'Tenant not found' });
-  res.json(t);
-});
-app.delete('/api/admin/tenants/:id', auth.requireAdmin, (req, res) => { auth.deleteTenant(req.params.id); res.status(204).end(); });
-
+// ─── Admin: users ──────────────────────────────────────────────────────────────
 app.get('/api/admin/users', auth.requireAdmin, (_req, res) => res.json(auth.loadUsers().map(auth.publicUser)));
 app.post('/api/admin/users', auth.requireAdmin, (req, res) => {
   try { res.status(201).json(auth.createUser(req.body || {})); }
@@ -77,7 +68,7 @@ app.delete('/api/admin/users/:id', auth.requireAdmin, (req, res) => {
   auth.deleteUser(req.params.id); res.status(204).end();
 });
 
-// ─── Admin: entities / templates / sets (the new model) ────────────────────────
+// ─── Admin: entities / sets / suites (the model) ───────────────────────────────
 app.get('/api/admin/entities', auth.requireAdmin, (_req, res) => res.json(db.listEntities()));
 app.post('/api/admin/entities', auth.requireAdmin, (req, res) => res.status(201).json(db.createEntity(req.body || {})));
 app.put('/api/admin/entities/:id', auth.requireAdmin, (req, res) => {
@@ -87,33 +78,31 @@ app.put('/api/admin/entities/:id', auth.requireAdmin, (req, res) => {
 });
 app.delete('/api/admin/entities/:id', auth.requireAdmin, (req, res) => { db.deleteEntity(req.params.id); res.status(204).end(); });
 
-app.get('/api/admin/templates', auth.requireAdmin, (_req, res) => res.json(db.listTemplates()));
-app.post('/api/admin/templates', auth.requireAdmin, (req, res) => res.status(201).json(db.createTemplate(req.body || {})));
-app.put('/api/admin/templates/:id', auth.requireAdmin, (req, res) => {
-  const t = db.updateTemplate(req.params.id, req.body || {});
-  if (!t) return res.status(404).json({ error: 'Template not found' });
-  res.json(t);
-});
-app.delete('/api/admin/templates/:id', auth.requireAdmin, (req, res) => { db.deleteTemplate(req.params.id); res.status(204).end(); });
-
-function enrichSet(s) {
-  return { ...s, entityName: db.getEntity(s.entityId)?.name || '', templateName: db.getTemplate(s.templateId)?.name || '', dashboardCount: db.dashboardsInSet(s.id).length };
-}
-app.get('/api/admin/sets', auth.requireAdmin, (_req, res) => res.json(db.listSets().map(enrichSet)));
-app.post('/api/admin/sets', auth.requireAdmin, (req, res) => res.status(201).json(enrichSet(db.createSet(req.body || {}))));
+// Sets = reusable dashboard collections (Ticketing, Cashless, …).
+app.get('/api/admin/sets', auth.requireAdmin, (_req, res) => res.json(db.listSets()));
+app.post('/api/admin/sets', auth.requireAdmin, (req, res) => res.status(201).json(db.createSet(req.body || {})));
 app.put('/api/admin/sets/:id', auth.requireAdmin, (req, res) => {
   const s = db.updateSet(req.params.id, req.body || {});
   if (!s) return res.status(404).json({ error: 'Set not found' });
-  res.json(enrichSet(s));
+  res.json(s);
 });
 app.delete('/api/admin/sets/:id', auth.requireAdmin, (req, res) => { db.deleteSet(req.params.id); res.status(204).end(); });
 
-// Distinct filter fields across all dashboards (for the locked-filter editor:
-// pick a field → we know its model/explore so values can be suggested).
+// Suites = a client's event context: locks + bundled Sets.
+function enrichSuite(su) {
+  return { ...su, entityName: db.getEntity(su.entityId)?.name || '', dashboardCount: db.dashboardsInSuite(su.id).length };
+}
+app.get('/api/admin/suites', auth.requireAdmin, (_req, res) => res.json(db.listSuites().map(enrichSuite)));
+app.post('/api/admin/suites', auth.requireAdmin, (req, res) => res.status(201).json(enrichSuite(db.createSuite(req.body || {}))));
+app.put('/api/admin/suites/:id', auth.requireAdmin, (req, res) => {
+  const su = db.updateSuite(req.params.id, req.body || {});
+  if (!su) return res.status(404).json({ error: 'Suite not found' });
+  res.json(enrichSuite(su));
+});
+app.delete('/api/admin/suites/:id', auth.requireAdmin, (req, res) => { db.deleteSuite(req.params.id); res.status(204).end(); });
+
+// Distinct filter fields across all dashboards (for the locked-filter editor).
 app.get('/api/admin/filter-fields', auth.requireAdmin, (_req, res) => {
-  // Collect every dashboard filter (name + field). Returned options carry a
-  // `field` (the lock key — a Looker field, or a filter NAME for name-based
-  // locks) and `suggestField` (the Looker dimension to suggest values from).
   const byField = new Map();        // field -> option
   const namesByField = new Map();   // field -> Set(distinct filter names)
   const filters = [];               // { name, field, model, explore }
@@ -129,7 +118,11 @@ app.get('/api/admin/filter-fields', auth.requireAdmin, (_req, res) => {
       namesByField.get(field).add(name);
     }
   }
-  const out = [...byField.values()];
+  const sharedField = (field) => (namesByField.get(field)?.size || 0) >= 2;
+  // Field-based options — but NOT for fields used by several named filters
+  // (those must be locked via the named filters, never the raw field, or the
+  // field lock would clobber per-tile values like current/past/comparison).
+  const out = [...byField.values()].filter((f) => !sharedField(f.field));
   // Id sibling for organiser/event (ids are stable; names can change).
   for (const f of [...out]) {
     const m = f.field.match(/^(core_organisers|core_events)\.name$/);
@@ -137,47 +130,42 @@ app.get('/api/admin/filter-fields', auth.requireAdmin, (_req, res) => {
     const idField = `${m[1]}.id`;
     if (!out.some((x) => x.field === idField)) out.push({ field: idField, title: `${f.title} ID`, suggestField: idField, model: f.model, explore: f.explore });
   }
-  // Name-based options for fields used by 2+ distinct filter names — e.g. the
-  // Current/Past/Comparison event filters all map to core_events.name, so each
-  // can be locked independently by its filter name.
+  // Name-based options for fields used by 2+ distinct filter names.
   const seenName = new Set();
   for (const fl of filters) {
-    if ((namesByField.get(fl.field)?.size || 0) < 2 || seenName.has(fl.name)) continue;
+    if (!sharedField(fl.field) || seenName.has(fl.name)) continue;
     seenName.add(fl.name);
     out.push({ field: fl.name, title: fl.name, suggestField: fl.field, model: fl.model, explore: fl.explore, byName: true });
   }
   res.json(out);
 });
 
-// Tenants the current user may assign/see (admins manage; clients can read their own for the UI).
-app.get('/api/tenants', auth.requireAuth, (req, res) => {
-  if (req.user.role === 'admin') return res.json(auth.listTenants());
-  // Client: their own entities (presented in the legacy tenant shape).
-  res.json((req.user.entityIds || []).map(auth.getTenant).filter(Boolean));
+// ─── Client navigation: Entity → Suite → Set → Dashboards ──────────────────────
+// The suites this user can open (each carries its entity name).
+app.get('/api/my/suites', auth.requireAuth, (req, res) => {
+  res.json(auth.suitesForUser(req.user).map((su) => ({
+    id: su.id, name: su.name, entityId: su.entityId,
+    entityName: db.getEntity(su.entityId)?.name || '',
+    setCount: su.setIds.length, dashboardCount: db.dashboardsInSuite(su.id).length,
+  })));
 });
 
-// ─── Client navigation: Entity → Dashboard Set → Dashboards ────────────────────
-// The sets this user can open, grouped-ready (each carries its entity name).
-app.get('/api/my/sets', auth.requireAuth, (req, res) => {
-  const sets = auth.setsForUser(req.user).map((s) => ({
-    id: s.id, name: s.name, entityId: s.entityId,
-    entityName: db.getEntity(s.entityId)?.name || '',
-    dashboardCount: db.dashboardsInSet(s.id).length,
-  }));
-  res.json(sets);
-});
-
-// One set: its merged locked filters (for pre-fill + lock) and its dashboards.
-app.get('/api/my/sets/:id', auth.requireAuth, (req, res) => {
-  if (!auth.canAccessSet(req.user, req.params.id)) return res.status(403).json({ error: 'Not allowed' });
-  const s = db.getSet(req.params.id);
-  if (!s) return res.status(404).json({ error: 'Set not found' });
-  const dashboards = db.dashboardsInSet(s.id)
-    .map((id) => store.get(id)).filter(Boolean)
-    .map((d) => ({ id: d.id, title: d.title, description: d.description || '', tileCount: (d.tiles || []).length }));
+// One suite: merged locks (for pre-fill + lock) + its Sets, each with its
+// dashboards. This is everything the client needs to navigate the suite.
+app.get('/api/my/suites/:id', auth.requireAuth, (req, res) => {
+  if (!auth.canAccessSuite(req.user, req.params.id)) return res.status(403).json({ error: 'Not allowed' });
+  const su = db.getSuite(req.params.id);
+  if (!su) return res.status(404).json({ error: 'Suite not found' });
+  const sets = su.setIds.map((sid) => {
+    const set = db.getSet(sid);
+    if (!set) return null;
+    const dashboards = set.dashboardIds.map((id) => store.get(id)).filter(Boolean)
+      .map((d) => ({ id: d.id, title: d.title, description: d.description || '', tileCount: (d.tiles || []).length }));
+    return { id: set.id, name: set.name, dashboards };
+  }).filter(Boolean);
   res.json({
-    id: s.id, name: s.name, entityName: db.getEntity(s.entityId)?.name || '',
-    lockedFilters: auth.lockedFiltersForSet(s.id), dashboards,
+    id: su.id, name: su.name, entityName: db.getEntity(su.entityId)?.name || '',
+    lockedFilters: auth.lockedFiltersForSuite(su.id), sets,
   });
 });
 
@@ -207,7 +195,7 @@ app.delete('/api/dashboards/:id', auth.requireAdmin, (req, res) => {
 });
 
 app.post('/api/dashboards/import', auth.requireAdmin, async (req, res) => {
-  const { lookerDashboardId, title, templateId } = req.body || {};
+  const { lookerDashboardId, title, setId } = req.body || {};
   if (!lookerDashboardId) return res.status(400).json({ error: 'lookerDashboardId is required' });
   try {
     const source = await fetchDashboard(lookerDashboardId);
@@ -215,10 +203,10 @@ app.post('/api/dashboards/import', auth.requireAdmin, async (req, res) => {
     const def = convertDashboard(source);
     if (title) def.title = title;
     const created = store.create(def);
-    // Optionally add the new dashboard to a template (folder) on import.
-    if (templateId && db.getTemplate(templateId)) {
-      const t = db.getTemplate(templateId);
-      db.setTemplateDashboards(templateId, [...t.dashboardIds, created.id]);
+    // Optionally add the new dashboard to a Set (folder) on import.
+    if (setId && db.getSet(setId)) {
+      const s = db.getSet(setId);
+      db.setSetDashboards(setId, [...s.dashboardIds, created.id]);
     }
     res.status(201).json(created);
   } catch (err) {
@@ -239,37 +227,32 @@ app.get('/api/looker/explores/:model/:explore', auth.requireAdmin, async (req, r
 
 // ─── Query execution (the calculation engine) — scoped per tenant ──────────────
 
-// Inject the user's mandatory scope filters (overriding any client-supplied
-// value on those fields). When a setId is given (the client is viewing a
-// Dashboard Set), scope to that set's merged locks; otherwise fall back to the
-// user-wide scope. Admins are unscoped. Returns false to deny the request.
-function applyScope(query, user, setId) {
-  if (user.role === 'admin') return true; // unscoped
+// Force the user's ENTITY (organiser) lock onto every query — the hard security
+// boundary. Suite locks (event/cashless) are NOT forced here; they're per-tile
+// presets applied client-side via listenTo, so current/past/comparison don't
+// clobber each other. A suiteId only gates access + picks the right entity.
+// Admins are unscoped. Returns false to deny.
+function applyScope(query, user, suiteId) {
+  if (user.role === 'admin') return true;
   let scope;
-  if (setId) {
-    if (!auth.canAccessSet(user, setId)) return false;
-    scope = auth.lockedFiltersForSet(setId);
+  if (suiteId) {
+    if (!auth.canAccessSuite(user, suiteId)) return false;
+    scope = auth.forcedScopeForSuite(suiteId);
   } else {
     scope = auth.scopeFiltersForUser(user);
     if (scope && scope.__block) return false;
   }
-  // Only field-keyed locks (containing '.') are forced as hard query filters —
-  // organiser is the security boundary. Name-keyed locks (e.g. "Past Event")
-  // are dashboard-filter presets applied client-side; they flow to the right
-  // tiles via listenTo and must not clobber per-tile event values here.
-  const hard = {};
-  for (const [k, v] of Object.entries(scope || {})) if (k !== '__block' && k.includes('.')) hard[k] = v;
-  if (!Object.keys(hard).length) return false; // fail closed (need ≥ organiser)
-  query.filters = { ...(query.filters || {}), ...hard };
+  if (!scope || !Object.keys(scope).length) return false; // fail closed (need organiser)
+  query.filters = { ...(query.filters || {}), ...scope };
   return true;
 }
 
 app.post('/api/run-query', auth.requireAuth, async (req, res) => {
   try {
-    const { query, filterOverrides = {}, setId } = req.body;
+    const { query, filterOverrides = {}, suiteId } = req.body;
     if (!query) return res.status(400).json({ error: 'query is required' });
     const queryBody = { ...query, filters: { ...(query.filters || {}), ...filterOverrides } };
-    if (!applyScope(queryBody, req.user, setId)) {
+    if (!applyScope(queryBody, req.user, suiteId)) {
       return res.status(403).json({ error: 'No data access is configured for your account yet.' });
     }
     const data = await looker.lookerRequest('POST', '/queries/run/json_detail', queryBody);
@@ -284,7 +267,7 @@ app.post('/api/drill', auth.requireAuth, async (req, res) => {
   try {
     const query = parseDrillUrl(req.body?.url);
     if (!query) return res.status(400).json({ error: 'Could not parse drill link' });
-    if (!applyScope(query, req.user, req.body?.setId)) {
+    if (!applyScope(query, req.user, req.body?.suiteId)) {
       return res.status(403).json({ error: 'No data access is configured for your account yet.' });
     }
     const data = await looker.lookerRequest('POST', '/queries/run/json_detail', query);
@@ -297,7 +280,7 @@ app.post('/api/drill', auth.requireAuth, async (req, res) => {
 
 app.post('/api/filter-suggest', auth.requireAuth, async (req, res) => {
   try {
-    const { model, explore, field, setId, q: term, pair } = req.body;
+    const { model, explore, field, suiteId, q: term, pair } = req.body;
     if (!model || !explore || !field) return res.json({ suggestions: [] });
     // Get distinct values by running an inline query for just this dimension.
     // A search term filters server-side (contains for text, exact for numeric
@@ -323,7 +306,7 @@ app.post('/api/filter-suggest', auth.requireAuth, async (req, res) => {
         q.filters = { [field]: variants.map((v) => `%${v}%`).join(',') };
       }
     }
-    if (!applyScope(q, req.user, setId)) return res.json({ suggestions: [] });
+    if (!applyScope(q, req.user, suiteId)) return res.json({ suggestions: [] });
     const rows = await looker.lookerRequest('POST', '/queries/run/json', q);
     const seen = new Set();
     const suggestions = [];

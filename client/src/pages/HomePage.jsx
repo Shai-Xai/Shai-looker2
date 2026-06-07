@@ -24,12 +24,12 @@ export default function HomePage() {
   }
 
   useEffect(load, []);
-  useEffect(() => { if (isAdmin) api.adminListTemplates().then(setTemplates).catch(() => {}); }, [isAdmin]);
+  useEffect(() => { if (isAdmin) api.adminListSets().then(setTemplates).catch(() => {}); }, [isAdmin]);
 
   async function newFolder() {
     const name = prompt('New folder name:');
     if (!name || !name.trim()) return;
-    try { const t = await api.adminCreateTemplate({ name: name.trim(), dashboardIds: [] }); setTemplates((cur) => [...cur, t]); setFolderId(t.id); }
+    try { const t = await api.adminCreateSet({ name: name.trim(), dashboardIds: [] }); setTemplates((cur) => [...cur, t]); setFolderId(t.id); }
     catch (e) { alert(e.message); }
   }
 

@@ -33,65 +33,6 @@ function getSecret() {
 }
 
 // ─── Tenant ⇄ Entity compatibility ────────────────────────────────────────────
-const lines = (csv) => String(csv || '').split(',').map((s) => s.trim()).filter(Boolean);
-
-// Present an Entity (+ its first set's event lock) as the legacy tenant shape.
-function entityToTenant(e) {
-  if (!e) return null;
-  const sf = { organiser: e.scopeFields?.organiser || ORG_FIELD, event: e.scopeFields?.event || EV_FIELD };
-  const sets = db.listSetsForEntity(e.id);
-  const eventNames = sets.length ? lines(sets[0].lockedFilters[sf.event]) : [];
-  return { id: e.id, name: e.name, organiserNames: lines(e.lockedFilters[sf.organiser]), eventNames, scopeFields: sf };
-}
-function listTenants() { return db.listEntities().map(entityToTenant); }
-function getTenant(id) { return entityToTenant(db.getEntity(id)); }
-
-// Dashboards a freshly-created client should see by default = the migration's
-// "Shared dashboards" template, if present.
-function sharedDashboardIds() {
-  const t = db.listTemplates().find((x) => x.name === 'Shared dashboards');
-  return t ? t.dashboardIds : [];
-}
-
-function createTenant({ name, organiserNames = [], eventNames = [] }) {
-  const sf = { organiser: ORG_FIELD, event: EV_FIELD };
-  const locks = {};
-  if (organiserNames.filter(Boolean).length) locks[sf.organiser] = organiserNames.filter(Boolean).join(',');
-  const entity = db.createEntity({ name: name || 'Untitled client', lockedFilters: locks, scopeFields: sf });
-  const template = db.createTemplate({ name: `${entity.name} dashboards`, dashboardIds: sharedDashboardIds() });
-  const setLocks = {};
-  if (eventNames.filter(Boolean).length) setLocks[sf.event] = eventNames.filter(Boolean).join(',');
-  db.createSet({ entityId: entity.id, templateId: template.id, name: entity.name, lockedFilters: setLocks });
-  return entityToTenant(db.getEntity(entity.id));
-}
-
-function updateTenant(id, patch) {
-  const e = db.getEntity(id);
-  if (!e) return null;
-  const sf = { organiser: e.scopeFields?.organiser || ORG_FIELD, event: e.scopeFields?.event || EV_FIELD };
-  if (patch.name !== undefined || patch.organiserNames !== undefined) {
-    const locks = { ...e.lockedFilters };
-    if (patch.organiserNames !== undefined) {
-      const orgs = patch.organiserNames.filter(Boolean);
-      if (orgs.length) locks[sf.organiser] = orgs.join(','); else delete locks[sf.organiser];
-    }
-    db.updateEntity(id, { name: patch.name ?? e.name, lockedFilters: locks });
-  }
-  if (patch.eventNames !== undefined) {
-    const evs = patch.eventNames.filter(Boolean);
-    let set = db.listSetsForEntity(id)[0];
-    if (!set) {
-      const tmpl = db.createTemplate({ name: `${e.name} dashboards`, dashboardIds: sharedDashboardIds() });
-      set = db.createSet({ entityId: id, templateId: tmpl.id, name: e.name, lockedFilters: {} });
-    }
-    const setLocks = { ...set.lockedFilters };
-    if (evs.length) setLocks[sf.event] = evs.join(','); else delete setLocks[sf.event];
-    db.updateSet(set.id, { lockedFilters: setLocks });
-  }
-  return entityToTenant(db.getEntity(id));
-}
-function deleteTenant(id) { db.deleteEntity(id); }
-
 // ─── Users ────────────────────────────────────────────────────────────────────
 // Public shape keeps a compat `tenantId` (the user's first entity) for the
 // current admin UI, alongside the real `entityIds`.
@@ -155,75 +96,79 @@ function requireAdmin(req, res, next) {
 }
 
 // ─── Data scoping ─────────────────────────────────────────────────────────────
-// The mandatory filters forced onto every query for this user:
-//   - admin → null (sees everything)
-//   - client → merged locked filters across all their entities + sets
-//              (organiser from the entity, event/other from the sets)
-//   - client with nothing configured → { __block: true } (fail closed)
-function scopeFiltersForUser(user) {
-  if (!user || user.role === 'admin') return null;
-  const acc = {}; // field -> Set(values)
+// Only ENTITY-level field locks (organiser) are *forced* onto every query —
+// that's the hard security boundary. Suite locks (event/cashless) are per-tile
+// presets applied in the UI + via listenTo, so they never clobber each other
+// (e.g. current vs past vs comparison on the same field).
+const fieldLocksFromEntities = (entityIds) => {
+  const acc = {};
   let any = false;
-  const add = (map) => {
-    for (const [f, v] of Object.entries(map || {})) {
-      if (v == null || v === '') continue;
+  for (const eid of entityIds || []) {
+    const e = db.getEntity(eid);
+    for (const [f, v] of Object.entries(e?.lockedFilters || {})) {
+      if (!f.includes('.') || v == null || v === '') continue; // only real fields
       acc[f] = acc[f] || new Set();
       for (const part of String(v).split(',')) { const t = part.trim(); if (t) { acc[f].add(t); any = true; } }
     }
-  };
-  for (const eid of user.entityIds || []) {
-    const sets = db.listSetsForEntity(eid);
-    if (sets.length) for (const s of sets) add(db.lockedFiltersForSet(s.id));
-    else add(db.getEntity(eid)?.lockedFilters);
   }
-  if (!any) return { __block: true };
+  if (!any) return null;
   const out = {};
   for (const [f, set] of Object.entries(acc)) out[f] = [...set].join(',');
   return out;
+};
+
+// Mandatory filters for a user with no suite context (admin → null; client →
+// their entities' organiser locks; nothing configured → fail closed).
+function scopeFiltersForUser(user) {
+  if (!user || user.role === 'admin') return null;
+  return fieldLocksFromEntities(user.entityIds) || { __block: true };
 }
 
 // Can this user open this dashboard? Admin: any. Client: the dashboard must be
-// in a template attached (via a set) to one of their entities.
+// in a set bundled into one of their entities' suites.
 function canAccessDashboard(user, dashboard) {
   if (!dashboard) return false;
   if (user.role === 'admin') return true;
   for (const eid of user.entityIds || []) {
-    for (const s of db.listSetsForEntity(eid)) {
-      if (db.dashboardsInSet(s.id).includes(dashboard.id)) return true;
+    for (const su of db.listSuitesForEntity(eid)) {
+      if (db.dashboardsInSuite(su.id).includes(dashboard.id)) return true;
     }
   }
   return false;
 }
 
-// ─── Dashboard sets (navigation context) ──────────────────────────────────────
-// Sets this user can open (admin → all; client → their entities' sets).
-function setsForUser(user) {
+// ─── Suites (navigation context) ──────────────────────────────────────────────
+function suitesForUser(user) {
   if (!user) return [];
-  if (user.role === 'admin') return db.listSets();
+  if (user.role === 'admin') return db.listSuites();
   const out = [];
-  for (const eid of user.entityIds || []) out.push(...db.listSetsForEntity(eid));
+  for (const eid of user.entityIds || []) out.push(...db.listSuitesForEntity(eid));
   return out;
 }
-function canAccessSet(user, setId) {
+function canAccessSuite(user, suiteId) {
   if (!user) return false;
   if (user.role === 'admin') return true;
-  const s = db.getSet(setId);
-  return !!s && (user.entityIds || []).includes(s.entityId);
+  const su = db.getSuite(suiteId);
+  return !!su && (user.entityIds || []).includes(su.entityId);
 }
-// Merged locked-filters map for a specific set (entity locks + set locks).
-function lockedFiltersForSet(setId) { return db.lockedFiltersForSet(setId); }
+// Merged locks for a suite (entity organiser + suite event/cashless) — used for
+// the UI pre-fill/lock. Only the entity (organiser) part is force-scoped.
+function lockedFiltersForSuite(suiteId) { return db.lockedFiltersForSuite(suiteId); }
+// The forced (organiser) scope for the suite's entity.
+function forcedScopeForSuite(suiteId) {
+  const su = db.getSuite(suiteId);
+  return su ? fieldLocksFromEntities([su.entityId]) : null;
+}
 
 module.exports = {
   COOKIE,
   seedAdmin,
-  // tenants (compat over entities)
-  listTenants, getTenant, createTenant, updateTenant, deleteTenant,
   // users
   loadUsers, publicUser, createUser, updateUser, deleteUser, getUser, verifyCredentials,
   // session
   issueCookie, clearCookie, attachUser, requireAuth, requireAdmin,
   // scoping
   scopeFiltersForUser, canAccessDashboard,
-  // sets / navigation
-  setsForUser, canAccessSet, lockedFiltersForSet,
+  // suites / navigation
+  suitesForUser, canAccessSuite, lockedFiltersForSuite, forcedScopeForSuite,
 };

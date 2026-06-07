@@ -17,7 +17,6 @@ export default function EditorPage() {
   const [selectedTileId, setSelectedTileId] = useState(null);
   const [showFilters, setShowFilters] = useState(false);
   const [filterValues, setFilterValues] = useState({});
-  const [tenants, setTenants] = useState([]);
 
   useEffect(() => {
     api.getDashboard(id)
@@ -32,7 +31,6 @@ export default function EditorPage() {
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-    api.listTenants().then(setTenants).catch(() => {});
   }, [id]);
 
   // Mutate the definition locally and mark dirty.
@@ -187,17 +185,6 @@ export default function EditorPage() {
         <button style={btn} onClick={() => addTile('text')}>+ Text</button>
         <button style={btn} onClick={addCarousel}>+ Carousel</button>
         <button style={btn} onClick={() => setShowFilters(true)}>Filters ({def.filters?.length || 0})</button>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--muted)' }}>
-          Visible to:
-          <select
-            style={{ ...btn, padding: '7px 10px', cursor: 'pointer' }}
-            value={def.tenantId || ''}
-            onChange={(e) => mutate((d) => ({ ...d, tenantId: e.target.value || null }))}
-          >
-            <option value="">All clients (shared)</option>
-            {tenants.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-          </select>
-        </label>
         <div style={{ flex: 1 }} />
         <span style={{ fontSize: 12, color: dirty ? 'var(--warn)' : 'var(--muted)' }}>
           {dirty ? '● Unsaved changes' : '✓ Saved'}

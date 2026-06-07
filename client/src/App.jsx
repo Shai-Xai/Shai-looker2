@@ -5,8 +5,8 @@ import EditorPage from './pages/EditorPage.jsx';
 import ClonePage from './pages/ClonePage.jsx';
 import AdminPage from './pages/AdminPage.jsx';
 import LoginPage from './pages/LoginPage.jsx';
-import SetsPage from './pages/SetsPage.jsx';
-import SetDashboardsPage from './pages/SetDashboardsPage.jsx';
+import SuitesPage from './pages/SuitesPage.jsx';
+import SuitePage from './pages/SuitePage.jsx';
 import { DrillProvider } from './lib/DrillContext.jsx';
 import { AuthProvider, useAuth } from './lib/auth.jsx';
 import { useIsMobile } from './lib/useIsMobile.js';
@@ -54,10 +54,10 @@ function Shell() {
         <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh' }}>
           <Header />
           <Routes>
-            {/* Admins land on the builder/home; clients land on their sets. */}
-            <Route path="/" element={isAdmin ? <HomePage /> : <SetsPage />} />
-            <Route path="/s/:setId" element={<SetDashboardsPage />} />
-            <Route path="/s/:setId/d/:id" element={<ViewPage />} />
+            {/* Admins land on the builder/home; clients land on their suites. */}
+            <Route path="/" element={isAdmin ? <HomePage /> : <SuitesPage />} />
+            <Route path="/suite/:suiteId" element={<SuitePage />} />
+            <Route path="/suite/:suiteId/d/:id" element={<ViewPage />} />
             <Route path="/d/:id" element={<ViewPage />} />
             <Route path="/d/:id/edit" element={isAdmin ? <EditorPage /> : <Navigate to="/" replace />} />
             <Route path="/clone" element={isAdmin ? <ClonePage /> : <Navigate to="/" replace />} />

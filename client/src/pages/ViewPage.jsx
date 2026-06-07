@@ -7,12 +7,12 @@ import { useAuth } from '../lib/auth.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import { ScopeProvider } from '../lib/ScopeContext.jsx';
 
-// Read-only render of a saved dashboard. When opened inside a Dashboard Set
-// (/s/:setId/d/:id) the set's merged locked filters are pre-filled + locked and
-// every query is scoped to that set. Admins opening /d/:id directly are unscoped.
+// Read-only render of a saved dashboard. When opened inside a Suite
+// (/suite/:suiteId/d/:id) the suite's locked filters are pre-filled + locked and
+// every query is scoped to that suite. Admins opening /d/:id directly are unscoped.
 export default function ViewPage() {
   const isMobile = useIsMobile();
-  const { id, setId } = useParams();
+  const { id, suiteId } = useParams();
   const navigate = useNavigate();
   const { isAdmin } = useAuth();
   const [def, setDef] = useState(null);
@@ -25,15 +25,15 @@ export default function ViewPage() {
   useEffect(() => {
     setLoading(true);
     setError(null);
-    const setP = setId ? api.mySet(setId).catch(() => null) : Promise.resolve(null);
-    Promise.all([api.getDashboard(id), setP])
-      .then(([data, set]) => {
+    const suiteP = suiteId ? api.mySuite(suiteId).catch(() => null) : Promise.resolve(null);
+    Promise.all([api.getDashboard(id), suiteP])
+      .then(([data, suite]) => {
         setDef(data);
-        setSetInfo(set);
-        // Lock filters from the set's merged locks. A lock keyed by the filter
-        // NAME (e.g. "Past Event") wins over one keyed by the field, so the
+        setSetInfo(suite);
+        // Lock filters from the suite's locks. A lock keyed by the filter NAME
+        // (e.g. "Past Event") wins over one keyed by the field, so the
         // Current/Past/Comparison event filters lock independently.
-        const lockMap = set?.lockedFilters || {};
+        const lockMap = suite?.lockedFilters || {};
         const defaults = {};
         const lockedMap = {};
         for (const f of data.filters || []) {
@@ -50,7 +50,7 @@ export default function ViewPage() {
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [id, setId]);
+  }, [id, suiteId]);
 
   const handleFilterChange = useCallback((name, value) => {
     setFilterValues((prev) => ({ ...prev, [name]: value }));
@@ -61,10 +61,10 @@ export default function ViewPage() {
   if (!def) return null;
 
   const theme = def.theme || {};
-  const backTo = setId ? `/s/${setId}` : '/';
+  const backTo = suiteId ? `/suite/${suiteId}` : '/';
 
   return (
-    <ScopeProvider setId={setId || null}>
+    <ScopeProvider suiteId={suiteId || null}>
       <div
         style={{
           display: 'flex', flexDirection: 'column', flex: 1,

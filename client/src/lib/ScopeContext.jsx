@@ -1,12 +1,12 @@
 import { createContext, useContext } from 'react';
 
-// Carries the current Dashboard Set context (setId) so tile queries, drills and
-// filter suggestions are scoped to that set's locked filters server-side.
-// null = no set (admin previewing a dashboard directly → unscoped).
-const ScopeContext = createContext({ setId: null });
+// Carries the current Suite context (suiteId) so tile queries, drills and
+// filter suggestions are scoped (organiser) and pre-filled to that suite.
+// null = no suite (admin previewing a dashboard directly → unscoped).
+const ScopeContext = createContext({ suiteId: null });
 
-export function ScopeProvider({ setId, children }) {
-  return <ScopeContext.Provider value={{ setId: setId || null }}>{children}</ScopeContext.Provider>;
+export function ScopeProvider({ suiteId, children }) {
+  return <ScopeContext.Provider value={{ suiteId: suiteId || null }}>{children}</ScopeContext.Provider>;
 }
 
 export function useScope() {

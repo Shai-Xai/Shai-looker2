@@ -47,7 +47,7 @@ const run = raw.transaction(({ force = false } = {}) => {
   const sharedIds = dashboards.filter((d) => !d.tenantId).map((d) => d.id);
   const ownIds = (tid) => dashboards.filter((d) => d.tenantId === tid).map((d) => d.id);
 
-  // ── Entities (organiser locks) + per-entity Template + default Set (events) ─
+  // ── Entities (organiser) + a Set (dashboards) + a Suite (event locks) ───────
   const tenantToEntity = {};
   for (const t of tenants) {
     const orgField = t.scopeFields?.organiser || 'core_organisers.name';
@@ -58,16 +58,16 @@ const run = raw.transaction(({ force = false } = {}) => {
     const entity = D.createEntity({ name: t.name || 'Untitled entity', lockedFilters: entLocks, scopeFields: t.scopeFields || {} });
     tenantToEntity[t.id] = entity.id;
 
-    const tmplDashIds = [...new Set([...sharedIds, ...ownIds(t.id)])];
-    const template = D.createTemplate({ name: `${entity.name} dashboards`, dashboardIds: tmplDashIds });
+    const dashIds = [...new Set([...sharedIds, ...ownIds(t.id)])];
+    const set = D.createSet({ name: `${entity.name} dashboards`, dashboardIds: dashIds });
 
-    const setLocks = {};
-    if ((t.eventNames || []).length) setLocks[evField] = t.eventNames.join(',');
-    D.createSet({ entityId: entity.id, templateId: template.id, name: entity.name, lockedFilters: setLocks, position: 0 });
+    const suiteLocks = {};
+    if ((t.eventNames || []).length) suiteLocks[evField] = t.eventNames.join(',');
+    D.createSuite({ entityId: entity.id, name: entity.name, lockedFilters: suiteLocks, setIds: [set.id], position: 0 });
   }
 
-  // A "Shared dashboards" template for admin reference / future assignment.
-  if (sharedIds.length) D.createTemplate({ name: 'Shared dashboards', dashboardIds: sharedIds });
+  // A "Shared dashboards" set for admin reference / future assignment.
+  if (sharedIds.length) D.createSet({ name: 'Shared dashboards', dashboardIds: sharedIds });
 
   // ── Users (preserve password hashes) + entity membership ────────────────────
   const insUser = raw.prepare('INSERT OR IGNORE INTO users (id,email,password_hash,role,created_at) VALUES (?,?,?,?,?)');
