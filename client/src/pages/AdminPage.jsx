@@ -173,17 +173,37 @@ function LockedFilterEditor({ value, onChange, fields }) {
   const addRow = () => setRows([...rows, { field: '', vals: '' }]); // empty row → no map change yet
   const removeRow = (i) => push(rows.filter((_, j) => j !== i));
 
+  // Custom (typed) fields get value suggestions from the main explore.
+  const defModel = fields.find((f) => f.model)?.model;
+  const defExplore = fields.find((f) => f.explore)?.explore;
+
   return (
     <div style={{ margin: '6px 0 4px' }}>
       {rows.map((r, i) => {
-        const meta = fields.find((f) => f.field === r.field);
+        const known = fields.find((f) => f.field === r.field);
+        const isCustom = r.custom || (!!r.field && !known);
+        const meta = known || (r.field ? { field: r.field, model: defModel, explore: defExplore } : null);
         return (
           <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-            <select style={{ ...input, minWidth: 220 }} value={r.field} onChange={(e) => setRow(i, { field: e.target.value })}>
-              <option value="">Choose a field…</option>
-              {fields.map((f) => <option key={f.field} value={f.field}>{f.title} ({f.field})</option>)}
-              {r.field && !meta && <option value={r.field}>{r.field}</option>}
-            </select>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <select
+                style={{ ...input, minWidth: 220 }}
+                value={isCustom ? '__custom' : r.field}
+                onChange={(e) => (e.target.value === '__custom' ? setRow(i, { custom: true, field: '' }) : setRow(i, { custom: false, field: e.target.value }))}
+              >
+                <option value="">Choose a field…</option>
+                {fields.map((f) => <option key={f.field} value={f.field}>{f.title} ({f.field})</option>)}
+                <option value="__custom">✎ Custom field…</option>
+              </select>
+              {isCustom && (
+                <input
+                  style={{ ...input, minWidth: 220 }}
+                  value={r.field}
+                  onChange={(e) => setRow(i, { field: e.target.value, custom: true })}
+                  placeholder="Looker field, e.g. core_events.is_past"
+                />
+              )}
+            </div>
             <ValuePicker meta={meta} value={r.vals} onChange={(v) => setRow(i, { vals: v })} />
             <button style={delBtn} onClick={() => removeRow(i)} title="Remove">✕</button>
           </div>
