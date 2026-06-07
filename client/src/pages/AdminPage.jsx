@@ -159,16 +159,19 @@ function SetCard({ set, entities, templates, fields, onChange }) {
 }
 
 // ─── Locked-filter editor (field → value(s)) ──────────────────────────────────
+// Keeps its own row state so in-progress (empty) rows persist; pushes only
+// completed rows (with a field) up to the parent as a { field: "v1,v2" } map.
 function LockedFilterEditor({ value, onChange, fields }) {
-  const rows = Object.entries(value || {}).map(([field, vals]) => ({ field, vals }));
-  const update = (next) => {
+  const [rows, setRows] = useState(() => Object.entries(value || {}).map(([field, vals]) => ({ field, vals })));
+  const push = (next) => {
+    setRows(next);
     const map = {};
     for (const r of next) if (r.field) map[r.field] = r.vals || '';
     onChange(map);
   };
-  const setRow = (i, patch) => { const next = rows.map((r, j) => j === i ? { ...r, ...patch } : r); update(next); };
-  const addRow = () => update([...rows, { field: '', vals: '' }]);
-  const removeRow = (i) => update(rows.filter((_, j) => j !== i));
+  const setRow = (i, patch) => push(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  const addRow = () => setRows([...rows, { field: '', vals: '' }]); // empty row → no map change yet
+  const removeRow = (i) => push(rows.filter((_, j) => j !== i));
 
   return (
     <div style={{ margin: '6px 0 4px' }}>
@@ -182,7 +185,7 @@ function LockedFilterEditor({ value, onChange, fields }) {
               {r.field && !meta && <option value={r.field}>{r.field}</option>}
             </select>
             <ValuePicker meta={meta} value={r.vals} onChange={(v) => setRow(i, { vals: v })} />
-            <button style={delBtn} onClick={() => removeRow(i)}>✕</button>
+            <button style={delBtn} onClick={() => removeRow(i)} title="Remove">✕</button>
           </div>
         );
       })}
@@ -191,36 +194,67 @@ function LockedFilterEditor({ value, onChange, fields }) {
   );
 }
 
-// Value input for a locked filter: a text box (comma-separated) plus a
-// suggestion dropdown when we know the field's model/explore.
+// Value picker for a locked filter: selected values shown as chips, plus a
+// search box that queries Looker server-side (works with thousands of values).
 function ValuePicker({ meta, value, onChange }) {
+  const [q, setQ] = useState('');
   const [open, setOpen] = useState(false);
-  const [opts, setOpts] = useState([]);
+  const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const selected = String(value || '').split(',').map((s) => s.trim()).filter(Boolean);
   const canSuggest = !!(meta && meta.model && meta.explore);
 
-  async function loadOpts() {
-    if (!canSuggest || opts.length) { setOpen((o) => !o); return; }
+  // Debounced server search whenever the box is open and the term changes.
+  useEffect(() => {
+    if (!open || !canSuggest) return;
+    let alive = true;
     setLoading(true);
-    try { const d = await api.filterSuggest({ model: meta.model, explore: meta.explore, field: meta.field }); setOpts(d.suggestions || []); }
-    catch { setOpts([]); }
-    finally { setLoading(false); setOpen(true); }
-  }
-  const toggle = (s) => { const next = selected.includes(s) ? selected.filter((x) => x !== s) : [...selected, s]; onChange(next.join(',')); };
+    const t = setTimeout(async () => {
+      try { const d = await api.filterSuggest({ model: meta.model, explore: meta.explore, field: meta.field, q }); if (alive) setResults(d.suggestions || []); }
+      catch { if (alive) setResults([]); }
+      finally { if (alive) setLoading(false); }
+    }, 300);
+    return () => { alive = false; clearTimeout(t); };
+  }, [q, open, canSuggest, meta]);
+
+  const add = (s) => { if (s && !selected.includes(s)) onChange([...selected, s].join(',')); };
+  const remove = (s) => onChange(selected.filter((x) => x !== s).join(','));
+  const toggle = (s) => (selected.includes(s) ? remove(s) : add(s));
 
   return (
-    <div style={{ position: 'relative', flex: '1 1 260px', minWidth: 220 }}>
-      <input style={{ ...input, width: '100%' }} value={value || ''} onChange={(e) => onChange(e.target.value)} placeholder="value(s), comma-separated" />
-      {canSuggest && <button style={pickBtn} onClick={loadOpts}>{open ? '▴' : 'Pick ▾'}</button>}
-      {open && canSuggest && (
-        <ul style={ddList}>
-          {loading ? <li style={ddMuted}>Loading…</li> : opts.length === 0 ? <li style={ddMuted}>No values</li> : opts.slice(0, 300).map((s, i) => (
-            <li key={i} style={ddItem} onMouseDown={(e) => { e.preventDefault(); toggle(s); }}>
-              <span style={{ color: selected.includes(s) ? 'var(--brand)' : '#bbb' }}>{selected.includes(s) ? '☑' : '☐'}</span>
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{s}</span>
-            </li>
+    <div style={{ position: 'relative', flex: '1 1 280px', minWidth: 240 }}>
+      {selected.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 6 }}>
+          {selected.map((s) => (
+            <span key={s} style={chip}>{s}<span style={{ cursor: 'pointer', fontWeight: 700 }} onClick={() => remove(s)}> ✕</span></span>
           ))}
+        </div>
+      )}
+      <input
+        style={{ ...input, width: '100%' }}
+        value={q}
+        onChange={(e) => { setQ(e.target.value); if (!open) setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        onKeyDown={(e) => { if (e.key === 'Enter' && q.trim()) { add(q.trim()); setQ(''); } }}
+        placeholder={canSuggest ? 'Search values…' : 'Type value(s), Enter to add'}
+      />
+      {open && (
+        <ul style={ddList}>
+          {!canSuggest ? (
+            <li style={ddMuted}>Type a value and press Enter</li>
+          ) : loading ? (
+            <li style={ddMuted}>Searching…</li>
+          ) : results.length === 0 ? (
+            <li style={ddMuted}>{q ? 'No matches — press Enter to use as typed' : 'Type to search…'}</li>
+          ) : (
+            results.map((s, i) => (
+              <li key={i} style={ddItem} onMouseDown={(e) => { e.preventDefault(); toggle(s); }}>
+                <span style={{ color: selected.includes(s) ? 'var(--brand)' : '#bbb' }}>{selected.includes(s) ? '☑' : '☐'}</span>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{s}</span>
+              </li>
+            ))
+          )}
         </ul>
       )}
     </div>
@@ -333,3 +367,4 @@ const pickBtn = { position: 'absolute', right: 4, top: 4, padding: '4px 8px', fo
 const ddList = { position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50, marginTop: 4, background: '#fff', border: '1px solid #e0e0e0', borderRadius: 8, boxShadow: '0 6px 20px rgba(0,0,0,0.12)', maxHeight: 220, overflowY: 'auto', listStyle: 'none', margin: 0, padding: '4px 0' };
 const ddItem = { display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', fontSize: 13, cursor: 'pointer' };
 const ddMuted = { padding: '7px 12px', fontSize: 13, color: 'var(--muted)' };
+const chip = { display: 'inline-flex', alignItems: 'center', gap: 2, background: '#fff0f3', color: 'var(--brand)', borderRadius: 980, padding: '3px 10px', fontSize: 12, fontWeight: 600 };

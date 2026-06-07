@@ -120,7 +120,16 @@ app.get('/api/admin/filter-fields', auth.requireAdmin, (_req, res) => {
       seen.set(field, { field, title: f.title || field, model: f.model || null, explore: f.explore || null });
     }
   }
-  res.json([...seen.values()]);
+  const out = [...seen.values()];
+  // Offer the id sibling for organiser/event so admins can lock by id too
+  // (ids are stable; names can change).
+  for (const f of [...out]) {
+    const m = f.field.match(/^(core_organisers|core_events)\.name$/);
+    if (!m) continue;
+    const idField = `${m[1]}.id`;
+    if (!out.some((x) => x.field === idField)) out.push({ field: idField, title: `${f.title} ID`, model: f.model, explore: f.explore });
+  }
+  res.json(out);
 });
 
 // Tenants the current user may assign/see (admins manage; clients can read their own for the UI).
@@ -259,12 +268,15 @@ app.post('/api/drill', auth.requireAuth, async (req, res) => {
 
 app.post('/api/filter-suggest', auth.requireAuth, async (req, res) => {
   try {
-    const { model, explore, field, setId } = req.body;
+    const { model, explore, field, setId, q: term } = req.body;
     if (!model || !explore || !field) return res.json({ suggestions: [] });
     // Get distinct values by running an inline query for just this dimension.
-    // Scope it so clients only see their own values (e.g. a client never sees
-    // other organisers' event names).
-    const q = { model, view: explore, fields: [field], sorts: [field], limit: 500 };
+    // A search term filters server-side (contains for text, exact for numeric
+    // ids) so this works even with thousands of values. Scope it so clients
+    // only see their own values.
+    const q = { model, view: explore, fields: [field], sorts: [field], limit: 100 };
+    const t = (term || '').trim();
+    if (t) q.filters = { [field]: /^\d+$/.test(t) ? t : `%${t}%` };
     if (!applyScope(q, req.user, setId)) return res.json({ suggestions: [] });
     const rows = await looker.lookerRequest('POST', '/queries/run/json', q);
     const seen = new Set();
