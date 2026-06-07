@@ -149,6 +149,8 @@ function buildOption({ rows, dimensions, measures, pivots, visType, stacked, vis
   const dual = hasRight && hasLeft;
   const yIndexOf = (m) => (dual && orientationOf(m) === 'right' ? 1 : 0);
   const hp = visConfig.hidden_pivots || {};
+  // Looker "Values" data labels printed on each point/bar.
+  const showLabels = visConfig.show_value_labels === true;
 
   let series = [];
   if (pivots.length > 0) {
@@ -160,13 +162,13 @@ function buildOption({ rows, dimensions, measures, pivots, visType, stacked, vis
         const idx = pi * measures.length + mi;
         const name = multi ? `${plabel} — ${m.label_short || m.label}` : plabel;
         seriesMeta[series.length] = { measure: m.name, pivotKey: pivot.key, fmt: m.value_format };
-        series.push(makeSeries(name, rows.map((r) => num(r[m.name]?.[pivot.key]?.value)), idx, { isBar, isLine, isArea, isScatter, stacked, yAxisIndex: yIndexOf(m) }));
+        series.push(makeSeries(name, rows.map((r) => num(r[m.name]?.[pivot.key]?.value)), idx, { isBar, isLine, isArea, isScatter, stacked, yAxisIndex: yIndexOf(m), showLabels, fmt: m.value_format }));
       });
     });
   } else {
     measures.forEach((m, i) => {
       seriesMeta[series.length] = { measure: m.name, fmt: m.value_format };
-      series.push(makeSeries(m.label_short || m.label, rows.map((r) => num(r[m.name]?.value)), i, { isBar, isLine, isArea, isScatter, stacked, yAxisIndex: yIndexOf(m) }));
+      series.push(makeSeries(m.label_short || m.label, rows.map((r) => num(r[m.name]?.value)), i, { isBar, isLine, isArea, isScatter, stacked, yAxisIndex: yIndexOf(m), showLabels, fmt: m.value_format }));
     });
   }
 
@@ -244,17 +246,40 @@ function buildOption({ rows, dimensions, measures, pivots, visType, stacked, vis
   };
 }
 
-function makeSeries(name, vals, idx, { isBar, isLine, isArea, isScatter, stacked, yAxisIndex = 0 }) {
+function makeSeries(name, vals, idx, { isBar, isLine, isArea, isScatter, stacked, yAxisIndex = 0, showLabels = false, fmt }) {
   const c = color(idx);
+  // Value labels on each point/bar (Looker's show_value_labels). For dense
+  // line/area/scatter series, thin the labels so a readable subset shows
+  // (≈ Looker's label_density). Thin by non-null points — series are often
+  // sparse (e.g. 7 values across a 30-day axis).
+  const isPoint = isLine || isScatter;
+  const nonNull = [];
+  vals.forEach((v, i) => { if (v != null) nonNull.push(i); });
+  const lstep = isPoint ? Math.max(1, Math.ceil(nonNull.length / 8)) : 1;
+  const labelSet = new Set(nonNull.filter((_, k) => k % lstep === 0 || k === nonNull.length - 1));
+  const label = showLabels ? {
+    show: true, position: isBar ? 'right' : 'top', distance: 4,
+    fontSize: 9, color: '#5a5a5a', fontWeight: 500,
+    formatter: (p) => {
+      if (!labelSet.has(p.dataIndex)) return '';
+      const v = Array.isArray(p.value) ? p.value[p.value.length - 1] : p.value;
+      return v == null ? '' : formatNumber(v, fmt);
+    },
+  } : undefined;
+  const labelLayout = showLabels && isBar ? { hideOverlap: true } : undefined;
   if (isScatter) {
-    return { name, type: 'scatter', yAxisIndex, data: vals, symbolSize: 10, itemStyle: { color: hexToRgba(c, 0.8) } };
+    return { name, type: 'scatter', yAxisIndex, data: vals, symbolSize: 10, itemStyle: { color: hexToRgba(c, 0.8) }, label, labelLayout };
   }
   if (isLine) {
     return {
-      name, type: 'line', yAxisIndex, data: vals, smooth: true, showSymbol: false,
+      // ECharts line labels only render at shown symbols, so reveal small
+      // symbols when value labels are enabled.
+      name, type: 'line', yAxisIndex, data: vals, smooth: true,
+      showSymbol: showLabels, symbolSize: showLabels ? 4 : 6,
       lineStyle: { width: 3, color: c }, itemStyle: { color: c },
       areaStyle: isArea ? { color: areaGradient(c) } : undefined,
       stack: stacked ? 'total' : undefined,
+      label, labelLayout,
       emphasis: { focus: 'series' },
     };
   }
@@ -267,6 +292,7 @@ function makeSeries(name, vals, idx, { isBar, isLine, isArea, isScatter, stacked
       borderRadius: isBar ? [0, 6, 6, 0] : [6, 6, 0, 0],
     },
     stack: stacked ? 'total' : undefined,
+    label, labelLayout,
     emphasis: { focus: 'series', itemStyle: { shadowBlur: 10, shadowColor: hexToRgba(c, 0.4) } },
   };
 }
