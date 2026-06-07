@@ -210,7 +210,7 @@ function ValuePicker({ meta, value, onChange }) {
     let alive = true;
     setLoading(true);
     const t = setTimeout(async () => {
-      try { const d = await api.filterSuggest({ model: meta.model, explore: meta.explore, field: meta.field, q }); if (alive) setResults(d.suggestions || []); }
+      try { const d = await api.filterSuggest({ model: meta.model, explore: meta.explore, field: meta.field, q, pair: true }); if (alive) setResults(d.suggestions || []); }
       catch { if (alive) setResults([]); }
       finally { if (alive) setLoading(false); }
     }, 300);
@@ -220,6 +220,8 @@ function ValuePicker({ meta, value, onChange }) {
   const add = (s) => { if (s && !selected.includes(s)) onChange([...selected, s].join(',')); };
   const remove = (s) => onChange(selected.filter((x) => x !== s).join(','));
   const toggle = (s) => (selected.includes(s) ? remove(s) : add(s));
+  // Results may be plain strings or { value, label } pairs (organiser/event).
+  const norm = (s) => (typeof s === 'string' ? { value: s, label: s } : s);
 
   return (
     <div style={{ position: 'relative', flex: '1 1 280px', minWidth: 240 }}>
@@ -248,12 +250,16 @@ function ValuePicker({ meta, value, onChange }) {
           ) : results.length === 0 ? (
             <li style={ddMuted}>{q ? 'No matches — press Enter to use as typed' : 'Type to search…'}</li>
           ) : (
-            results.map((s, i) => (
-              <li key={i} style={ddItem} onMouseDown={(e) => { e.preventDefault(); toggle(s); }}>
-                <span style={{ color: selected.includes(s) ? 'var(--brand)' : '#bbb' }}>{selected.includes(s) ? '☑' : '☐'}</span>
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{s}</span>
-              </li>
-            ))
+            results.map((raw, i) => {
+              const o = norm(raw);
+              const on = selected.includes(o.value);
+              return (
+                <li key={i} style={ddItem} onMouseDown={(e) => { e.preventDefault(); toggle(o.value); }}>
+                  <span style={{ color: on ? 'var(--brand)' : '#bbb' }}>{on ? '☑' : '☐'}</span>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{o.label}</span>
+                </li>
+              );
+            })
           )}
         </ul>
       )}

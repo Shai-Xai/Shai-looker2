@@ -268,13 +268,20 @@ app.post('/api/drill', auth.requireAuth, async (req, res) => {
 
 app.post('/api/filter-suggest', auth.requireAuth, async (req, res) => {
   try {
-    const { model, explore, field, setId, q: term } = req.body;
+    const { model, explore, field, setId, q: term, pair } = req.body;
     if (!model || !explore || !field) return res.json({ suggestions: [] });
     // Get distinct values by running an inline query for just this dimension.
     // A search term filters server-side (contains for text, exact for numeric
     // ids) so this works even with thousands of values. Scope it so clients
     // only see their own values.
-    const q = { model, view: explore, fields: [field], sorts: [field], limit: 100 };
+    // For organiser/event, also pull the companion field (id↔name) so each
+    // suggestion can show both, e.g. "Ultra South Africa  (id: 42)".
+    const COMPANION = {
+      'core_organisers.name': 'core_organisers.id', 'core_organisers.id': 'core_organisers.name',
+      'core_events.name': 'core_events.id', 'core_events.id': 'core_events.name',
+    };
+    const comp = pair ? COMPANION[field] : null;
+    const q = { model, view: explore, fields: comp ? [field, comp] : [field], sorts: [field], limit: 100 };
     const t = (term || '').trim();
     if (t) {
       if (/^\d+$/.test(t)) {
@@ -291,11 +298,19 @@ app.post('/api/filter-suggest', auth.requireAuth, async (req, res) => {
     const rows = await looker.lookerRequest('POST', '/queries/run/json', q);
     const seen = new Set();
     const suggestions = [];
+    const isId = field.endsWith('.id');
     for (const r of rows || []) {
       const v = r[field];
       if (v == null || v === '') continue;
       const s = String(v);
-      if (!seen.has(s)) { seen.add(s); suggestions.push(s); }
+      if (seen.has(s)) continue;
+      seen.add(s);
+      if (comp) {
+        const other = r[comp] == null ? '' : String(r[comp]);
+        suggestions.push({ value: s, label: isId ? `${s} — ${other}` : `${s}  (id: ${other})` });
+      } else {
+        suggestions.push(s);
+      }
     }
     res.json({ suggestions });
   } catch (err) {
