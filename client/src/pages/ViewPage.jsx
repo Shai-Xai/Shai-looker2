@@ -61,7 +61,7 @@ export default function ViewPage() {
   if (!def) return null;
 
   const theme = def.theme || {};
-  const backTo = suiteId ? `/suite/${suiteId}` : '/';
+  const backTo = '/';
 
   return (
     <ScopeProvider suiteId={suiteId || null}>

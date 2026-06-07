@@ -5,8 +5,8 @@ import EditorPage from './pages/EditorPage.jsx';
 import ClonePage from './pages/ClonePage.jsx';
 import AdminPage from './pages/AdminPage.jsx';
 import LoginPage from './pages/LoginPage.jsx';
-import SuitesPage from './pages/SuitesPage.jsx';
-import SuitePage from './pages/SuitePage.jsx';
+import ClientLayout from './pages/ClientLayout.jsx';
+import ClientHome from './pages/ClientHome.jsx';
 import { DrillProvider } from './lib/DrillContext.jsx';
 import { AuthProvider, useAuth } from './lib/auth.jsx';
 import { useIsMobile } from './lib/useIsMobile.js';
@@ -53,16 +53,25 @@ function Shell() {
       <DrillProvider>
         <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh' }}>
           <Header />
-          <Routes>
-            {/* Admins land on the builder/home; clients land on their suites. */}
-            <Route path="/" element={isAdmin ? <HomePage /> : <SuitesPage />} />
-            <Route path="/suite/:suiteId" element={<SuitePage />} />
-            <Route path="/suite/:suiteId/d/:id" element={<ViewPage />} />
-            <Route path="/d/:id" element={<ViewPage />} />
-            <Route path="/d/:id/edit" element={isAdmin ? <EditorPage /> : <Navigate to="/" replace />} />
-            <Route path="/clone" element={isAdmin ? <ClonePage /> : <Navigate to="/" replace />} />
-            <Route path="/admin" element={isAdmin ? <AdminPage /> : <Navigate to="/" replace />} />
-          </Routes>
+          {isAdmin ? (
+            <Routes>
+              <Route path="/" element={<HomePage />} />
+              <Route path="/d/:id" element={<ViewPage />} />
+              <Route path="/d/:id/edit" element={<EditorPage />} />
+              <Route path="/clone" element={<ClonePage />} />
+              <Route path="/admin" element={<AdminPage />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          ) : (
+            // Clients get a persistent Suites → Sets → Dashboards sidebar.
+            <Routes>
+              <Route element={<ClientLayout />}>
+                <Route path="/" element={<ClientHome />} />
+                <Route path="/suite/:suiteId/d/:id" element={<ViewPage />} />
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Route>
+            </Routes>
+          )}
         </div>
       </DrillProvider>
     </BrowserRouter>
