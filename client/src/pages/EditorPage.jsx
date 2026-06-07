@@ -97,6 +97,19 @@ export default function EditorPage() {
   function changeCarouselTitle(cid, title) {
     mutate((d) => ({ ...d, carousels: (d.carousels || []).map((c) => (c.id === cid ? { ...c, title } : c)) }));
   }
+  function setCarouselSize(cid, patch) {
+    mutate((d) => ({ ...d, carousels: (d.carousels || []).map((c) => (c.id === cid ? { ...c, ...patch } : c)) }));
+  }
+  function moveCarousel(cid, dir) {
+    mutate((d) => {
+      const cs = [...(d.carousels || [])];
+      const i = cs.findIndex((c) => c.id === cid);
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= cs.length) return d;
+      [cs[i], cs[j]] = [cs[j], cs[i]];
+      return { ...d, carousels: cs };
+    });
+  }
   function addTileToCarousel(cid, type) {
     const tile = type === 'text'
       ? { id: crypto.randomUUID(), type: 'text', title: '', body_text: '## New text tile', query: null, vis: {}, listenTo: {} }
@@ -205,7 +218,7 @@ export default function EditorPage() {
 
           {(def.carousels || []).length > 0 && (
             <div style={{ marginTop: def.tiles.length ? 16 : 0 }}>
-              {def.carousels.map((c) => (
+              {def.carousels.map((c, idx) => (
                 <Carousel
                   key={c.id}
                   carousel={c}
@@ -218,6 +231,11 @@ export default function EditorPage() {
                   onChangeTitle={(t) => changeCarouselTitle(c.id, t)}
                   onRemove={() => removeCarousel(c.id)}
                   onDropTile={(tileId) => moveTileToCarousel(tileId, c.id)}
+                  onChangeSize={(patch) => setCarouselSize(c.id, patch)}
+                  onMoveUp={() => moveCarousel(c.id, -1)}
+                  onMoveDown={() => moveCarousel(c.id, 1)}
+                  canMoveUp={idx > 0}
+                  canMoveDown={idx < def.carousels.length - 1}
                 />
               ))}
             </div>
