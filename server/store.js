@@ -64,6 +64,7 @@ function create(def) {
     filters: def.filters || [],
     tiles: def.tiles || [],
     carousels: def.carousels || [],
+    gridAfter: def.gridAfter || 0, // # of carousels rendered above the grid
     source: def.source || null,
     tenantId: def.tenantId || null,
     createdAt: now,

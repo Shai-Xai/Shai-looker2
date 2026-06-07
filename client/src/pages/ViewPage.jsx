@@ -80,19 +80,19 @@ export default function ViewPage() {
       )}
 
       <div style={{ flex: 1, padding: '16px 24px', overflowY: 'auto' }}>
+        {(def.carousels || []).slice(0, def.gridAfter || 0).map((c) => (
+          <Carousel key={c.id} carousel={c} filterValues={filterValues} editable={false} />
+        ))}
+
         {def.tiles?.length ? (
           <EditableGrid tiles={def.tiles} filterValues={filterValues} editable={false} />
         ) : (!def.carousels?.length && (
           <Centered>This dashboard has no tiles yet. <Link to={`/d/${id}/edit`} style={{ marginLeft: 6 }}>Add some →</Link></Centered>
         ))}
 
-        {def.carousels?.length > 0 && (
-          <div style={{ marginTop: def.tiles?.length ? 16 : 0 }}>
-            {def.carousels.map((c) => (
-              <Carousel key={c.id} carousel={c} filterValues={filterValues} editable={false} />
-            ))}
-          </div>
-        )}
+        {(def.carousels || []).slice(def.gridAfter || 0).map((c) => (
+          <Carousel key={c.id} carousel={c} filterValues={filterValues} editable={false} />
+        ))}
       </div>
     </div>
   );

@@ -100,14 +100,26 @@ export default function EditorPage() {
   function setCarouselSize(cid, patch) {
     mutate((d) => ({ ...d, carousels: (d.carousels || []).map((c) => (c.id === cid ? { ...c, ...patch } : c)) }));
   }
+  // Move a carousel up/down through the combined order of [carousels above the
+  // grid, the GRID, carousels below the grid]. gridAfter = how many carousels
+  // render above the grid. Crossing the grid boundary flips a carousel from
+  // below to above (or vice-versa) without reordering the array.
   function moveCarousel(cid, dir) {
     mutate((d) => {
       const cs = [...(d.carousels || [])];
+      let ga = d.gridAfter ?? 0;
       const i = cs.findIndex((c) => c.id === cid);
-      const j = i + dir;
-      if (i < 0 || j < 0 || j >= cs.length) return d;
-      [cs[i], cs[j]] = [cs[j], cs[i]];
-      return { ...d, carousels: cs };
+      if (i < 0) return d;
+      if (dir === -1) {
+        if (i === ga) ga += 1;                       // first below grid → above grid
+        else if (i > 0) { [cs[i], cs[i - 1]] = [cs[i - 1], cs[i]]; } // swap within section
+        else return d;
+      } else {
+        if (i === ga - 1) ga -= 1;                   // last above grid → below grid
+        else if (i < cs.length - 1) { [cs[i], cs[i + 1]] = [cs[i + 1], cs[i]]; }
+        else return d;
+      }
+      return { ...d, carousels: cs, gridAfter: Math.max(0, Math.min(cs.length, ga)) };
     });
   }
   function addTileToCarousel(cid, type) {
@@ -162,6 +174,30 @@ export default function EditorPage() {
        || null)
     : null;
   const theme = def.theme || {};
+  const ga = def.gridAfter || 0;
+  const renderCarousel = (c, idx) => {
+    const ci = idx < ga ? idx : idx + 1; // index in combined order (grid counts as 1 slot)
+    return (
+      <Carousel
+        key={c.id}
+        carousel={c}
+        filterValues={filterValues}
+        editable
+        onEditTile={setSelectedTileId}
+        onRemoveTile={(tid) => removeTileFromCarousel(c.id, tid)}
+        onDuplicateTile={(tid) => duplicateTileInCarousel(c.id, tid)}
+        onAddTile={(type) => addTileToCarousel(c.id, type)}
+        onChangeTitle={(t) => changeCarouselTitle(c.id, t)}
+        onRemove={() => removeCarousel(c.id)}
+        onDropTile={(tileId) => moveTileToCarousel(tileId, c.id)}
+        onChangeSize={(patch) => setCarouselSize(c.id, patch)}
+        onMoveUp={() => moveCarousel(c.id, -1)}
+        onMoveDown={() => moveCarousel(c.id, 1)}
+        canMoveUp={ci > 0}
+        canMoveDown={ci < def.carousels.length}
+      />
+    );
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
@@ -204,6 +240,8 @@ export default function EditorPage() {
       {/* Canvas + side panel */}
       <div style={{ flex: 1, display: 'flex', minHeight: 0, background: theme.background || '#f5f6f8' }}>
         <div style={{ flex: 1, overflowY: 'auto', padding: '16px 24px', '--tile-bg': theme.tileBackground || '#fff' }}>
+          {def.carousels.slice(0, ga).map((c, i) => renderCarousel(c, i))}
+
           {def.tiles.length > 0 && (
             <EditableGrid
               tiles={def.tiles}
@@ -216,32 +254,9 @@ export default function EditorPage() {
             />
           )}
 
-          {(def.carousels || []).length > 0 && (
-            <div style={{ marginTop: def.tiles.length ? 16 : 0 }}>
-              {def.carousels.map((c, idx) => (
-                <Carousel
-                  key={c.id}
-                  carousel={c}
-                  filterValues={filterValues}
-                  editable
-                  onEditTile={setSelectedTileId}
-                  onRemoveTile={(tid) => removeTileFromCarousel(c.id, tid)}
-                  onDuplicateTile={(tid) => duplicateTileInCarousel(c.id, tid)}
-                  onAddTile={(type) => addTileToCarousel(c.id, type)}
-                  onChangeTitle={(t) => changeCarouselTitle(c.id, t)}
-                  onRemove={() => removeCarousel(c.id)}
-                  onDropTile={(tileId) => moveTileToCarousel(tileId, c.id)}
-                  onChangeSize={(patch) => setCarouselSize(c.id, patch)}
-                  onMoveUp={() => moveCarousel(c.id, -1)}
-                  onMoveDown={() => moveCarousel(c.id, 1)}
-                  canMoveUp={idx > 0}
-                  canMoveDown={idx < def.carousels.length - 1}
-                />
-              ))}
-            </div>
-          )}
+          {def.carousels.slice(ga).map((c, i) => renderCarousel(c, ga + i))}
 
-          {def.tiles.length === 0 && (def.carousels || []).length === 0 && (
+          {def.tiles.length === 0 && def.carousels.length === 0 && (
             <Centered>Empty dashboard — add a visualization, text tile, or carousel to begin.</Centered>
           )}
         </div>

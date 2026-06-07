@@ -13,10 +13,25 @@ export default function Carousel({ carousel, filterValues, editable, onEditTile,
   const tiles = carousel.tiles || [];
 
   const scroll = (dir) => trackRef.current?.scrollBy({ left: dir * (cardW + GAP) * 2, behavior: 'smooth' });
-  const resize = (dw, dh) => onChangeSize?.({
-    cardW: Math.max(160, Math.min(720, cardW + dw)),
-    cardH: Math.max(110, Math.min(440, cardH + dh)),
-  });
+
+  // Drag the corner handle to resize all cards in the row (W from horizontal
+  // movement, H from vertical).
+  const startResize = (e) => {
+    e.preventDefault();
+    const startX = e.clientX, startY = e.clientY, startW = cardW, startH = cardH;
+    const onMove = (ev) => onChangeSize?.({
+      cardW: Math.max(160, Math.min(720, Math.round((startW + (ev.clientX - startX)) / 10) * 10)),
+      cardH: Math.max(110, Math.min(440, Math.round((startH + (ev.clientY - startY)) / 10) * 10)),
+    });
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      document.body.style.userSelect = '';
+    };
+    document.body.style.userSelect = 'none';
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
 
   return (
     <div style={{ marginBottom: 20 }}>
@@ -39,16 +54,6 @@ export default function Carousel({ carousel, filterValues, editable, onEditTile,
         )}
         <div style={{ flex: 1 }} />
         {editable && (
-          <span style={sizeGroup} title="Card size">
-            <span style={sizeLabel}>W</span>
-            <button style={iconBtn} onClick={() => resize(-40, 0)}>−</button>
-            <button style={iconBtn} onClick={() => resize(40, 0)}>+</button>
-            <span style={{ ...sizeLabel, marginLeft: 6 }}>H</span>
-            <button style={iconBtn} onClick={() => resize(0, -20)}>−</button>
-            <button style={iconBtn} onClick={() => resize(0, 20)}>+</button>
-          </span>
-        )}
-        {editable && (
           <>
             <button style={miniBtn} onClick={() => onAddTile('vis')}>+ Visualization</button>
             <button style={miniBtn} onClick={() => onAddTile('text')}>+ Text</button>
@@ -59,6 +64,7 @@ export default function Carousel({ carousel, filterValues, editable, onEditTile,
         <button style={arrowBtn} onClick={() => scroll(1)} title="Scroll right">›</button>
       </div>
 
+      <div style={{ position: 'relative' }}>
       <div
         ref={trackRef}
         onDragOver={editable && onDropTile ? (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (!dragOver) setDragOver(true); } : undefined}
@@ -97,6 +103,10 @@ export default function Carousel({ carousel, filterValues, editable, onEditTile,
           ))
         )}
       </div>
+        {editable && onChangeSize && (
+          <div onMouseDown={startResize} title="Drag to resize cards" style={resizeHandle} />
+        )}
+      </div>
     </div>
   );
 }
@@ -105,5 +115,8 @@ const GAP = 12;
 const miniBtn = { padding: '6px 10px', background: '#fff', border: '1.5px solid #e0e0e0', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer' };
 const arrowBtn = { width: 30, height: 30, borderRadius: '50%', border: '1.5px solid #e0e0e0', background: '#fff', cursor: 'pointer', fontSize: 18, lineHeight: 1, color: '#555', flexShrink: 0 };
 const iconBtn = { width: 26, height: 26, borderRadius: 6, border: '1.5px solid #e0e0e0', background: '#fff', cursor: 'pointer', fontSize: 13, lineHeight: 1, color: '#555' };
-const sizeGroup = { display: 'flex', alignItems: 'center', gap: 2, padding: '2px 6px', background: '#fafafa', borderRadius: 7 };
-const sizeLabel = { fontSize: 11, fontWeight: 700, color: 'var(--muted)' };
+const resizeHandle = {
+  position: 'absolute', right: 2, bottom: 10, width: 18, height: 18,
+  cursor: 'nwse-resize', borderRight: '3px solid #cbd5e1', borderBottom: '3px solid #cbd5e1',
+  borderBottomRightRadius: 4,
+};
