@@ -263,7 +263,11 @@ function makeSeries(name, vals, idx, { isBar, isLine, isArea, isScatter, stacked
     formatter: (p) => {
       if (!labelSet.has(p.dataIndex)) return '';
       const v = Array.isArray(p.value) ? p.value[p.value.length - 1] : p.value;
-      return v == null ? '' : formatNumber(v, fmt);
+      if (v == null) return '';
+      // Abbreviate only wide labels (e.g. 24,114,666.98 → 24.1M) so big
+      // numbers don't overlap, while short values stay exact.
+      const full = formatNumber(v, fmt);
+      return full.replace('-', '').length > 7 ? formatAxis(v, fmt) : full;
     },
   } : undefined;
   const labelLayout = showLabels && isBar ? { hideOverlap: true } : undefined;
