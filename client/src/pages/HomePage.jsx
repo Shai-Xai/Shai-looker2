@@ -14,6 +14,28 @@ export default function HomePage() {
   const [importing, setImporting] = useState(false);
   const [templates, setTemplates] = useState([]);
   const [folderId, setFolderId] = useState('');
+  // Looker-folder import
+  const [lookerFolderId, setLookerFolderId] = useState('');
+  const [folderPreview, setFolderPreview] = useState(null);
+  const [folderBusy, setFolderBusy] = useState(false);
+
+  async function previewFolder() {
+    setFolderPreview(null);
+    if (!lookerFolderId.trim()) return;
+    try { setFolderPreview(await api.lookerFolder(lookerFolderId.trim())); }
+    catch (e) { alert('Could not read folder: ' + e.message); }
+  }
+  async function importFolder() {
+    if (!lookerFolderId.trim()) return;
+    setFolderBusy(true);
+    try {
+      const r = await api.importFolder(lookerFolderId.trim());
+      alert(`Imported ${r.imported} of ${r.total} dashboards into the set "${r.set.name}".` + (r.failed.length ? `\n${r.failed.length} failed.` : ''));
+      setLookerFolderId(''); setFolderPreview(null);
+      load();
+    } catch (e) { alert('Folder import failed: ' + e.message); }
+    finally { setFolderBusy(false); }
+  }
 
   function load() {
     setLoading(true);
@@ -95,6 +117,26 @@ export default function HomePage() {
           <div style={{ marginTop: 10, fontSize: 12 }}>
             <Link to="/clone" style={{ color: 'var(--muted)' }}>Or clone directly inside Looker →</Link>
           </div>
+        </div>
+
+        <div style={cardStyle}>
+          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>Import a Looker folder</div>
+          <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 14 }}>
+            Bring in every dashboard in a Looker folder at once — they become a Set you can add to a Suite.
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <input style={inputStyle} placeholder="Looker folder ID" value={lookerFolderId} onChange={(e) => { setLookerFolderId(e.target.value); setFolderPreview(null); }} onBlur={previewFolder} />
+            <button style={miniBtnOutline} onClick={previewFolder} disabled={!lookerFolderId.trim()}>Preview</button>
+            <button style={primaryBtn} onClick={importFolder} disabled={folderBusy || !lookerFolderId.trim()}>
+              {folderBusy ? 'Importing…' : (folderPreview ? `Import ${folderPreview.dashboards.length}` : 'Import folder')}
+            </button>
+          </div>
+          {folderPreview && (
+            <div style={{ marginTop: 10, fontSize: 12, color: 'var(--muted)' }}>
+              <b style={{ color: 'var(--text)' }}>{folderPreview.name}</b> — {folderPreview.dashboards.length} dashboards
+              {folderBusy && <span> · importing, this can take a minute…</span>}
+            </div>
+          )}
         </div>
       </div>
       )}

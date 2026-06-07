@@ -92,6 +92,14 @@ export const api = {
       signal,
     }).then(json),
 
+  // Looker folder import (brings in all its dashboards as a Set)
+  lookerFolder: (id) => fetch(`/api/looker/folder/${encodeURIComponent(id)}`).then(json),
+  importFolder: (folderId, setName) =>
+    fetch('/api/dashboards/import-folder', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ folderId, setName }),
+    }).then(json),
+
   // Client navigation: Suites
   mySuites: () => fetch('/api/my/suites').then(json),
   mySuite: (id) => fetch(`/api/my/suites/${id}`).then(json),

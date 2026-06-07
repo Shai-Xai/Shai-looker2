@@ -215,6 +215,41 @@ app.post('/api/dashboards/import', auth.requireAdmin, async (req, res) => {
   }
 });
 
+// Preview a Looker folder's dashboards (admin picks before importing).
+app.get('/api/looker/folder/:id', auth.requireAdmin, async (req, res) => {
+  try {
+    const f = await looker.lookerRequest('GET', `/folders/${encodeURIComponent(req.params.id)}?fields=id,name,dashboards(id,title)`);
+    res.json({ id: f.id, name: f.name, dashboards: (f.dashboards || []).map((d) => ({ id: String(d.id), title: d.title })) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Import every dashboard in a Looker folder into a new Set (named after the
+// folder). Sequential — can take a while for big folders.
+app.post('/api/dashboards/import-folder', auth.requireAdmin, async (req, res) => {
+  const { folderId, setName } = req.body || {};
+  if (!folderId) return res.status(400).json({ error: 'folderId is required' });
+  try {
+    const folder = await looker.lookerRequest('GET', `/folders/${encodeURIComponent(folderId)}?fields=id,name,dashboards(id,title)`);
+    const list = folder.dashboards || [];
+    const importedIds = [];
+    const failed = [];
+    for (const d of list) {
+      try {
+        const source = await fetchDashboard(String(d.id));
+        await looker.resolveElementQueries(source.elements);
+        importedIds.push(store.create(convertDashboard(source)).id);
+      } catch (e) {
+        failed.push({ id: d.id, title: d.title, error: e.message });
+      }
+    }
+    const set = db.createSet({ name: setName || folder.name || 'Imported folder', dashboardIds: importedIds });
+    res.json({ set, imported: importedIds.length, total: list.length, failed });
+  } catch (err) {
+    console.error('[POST /api/dashboards/import-folder]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── LookML metadata (admin builds tiles) ──────────────────────────────────────
 app.get('/api/looker/models', auth.requireAdmin, async (_req, res) => {
   try { res.json(await looker.listModels()); }
