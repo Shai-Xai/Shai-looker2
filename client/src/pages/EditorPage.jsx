@@ -23,6 +23,9 @@ export default function EditorPage() {
   useEffect(() => {
     api.getDashboard(id)
       .then((data) => {
+        // Older dashboards predate carousels — normalise so render code is safe.
+        data.carousels = data.carousels || [];
+        data.gridAfter = data.gridAfter || 0;
         setDef(data);
         const defaults = {};
         for (const f of data.filters || []) defaults[f.name] = f.default_value || '';
