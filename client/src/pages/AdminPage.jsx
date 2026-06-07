@@ -2,125 +2,252 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api.js';
 
+// Admin console for the multi-tenant model:
+//   Clients (Entities)  – who, with organiser-level locked filters
+//   Templates           – reusable groups of dashboards
+//   Dashboard Sets      – a template applied to an entity, with event/other locks
+//   Logins (Users)      – credentials, assigned to one or more entities
 export default function AdminPage() {
-  const [tab, setTab] = useState('tenants');
+  const [tab, setTab] = useState('entities');
+  const [fields, setFields] = useState([]);
+  useEffect(() => { api.adminFilterFields().then(setFields).catch(() => setFields([])); }, []);
+
   return (
-    <main style={{ flex: 1, padding: '28px 24px', maxWidth: 1000, margin: '0 auto', width: '100%' }}>
+    <main style={{ flex: 1, padding: '28px 24px', maxWidth: 1040, margin: '0 auto', width: '100%' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20 }}>
         <Link to="/" style={{ color: 'var(--muted)', fontSize: 13, textDecoration: 'none' }}>← Back</Link>
         <h1 style={{ fontSize: 20, fontWeight: 700 }}>Admin</h1>
       </div>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
-        <Tab active={tab === 'tenants'} onClick={() => setTab('tenants')}>Clients</Tab>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
+        <Tab active={tab === 'entities'} onClick={() => setTab('entities')}>Clients</Tab>
+        <Tab active={tab === 'templates'} onClick={() => setTab('templates')}>Templates</Tab>
+        <Tab active={tab === 'sets'} onClick={() => setTab('sets')}>Dashboard Sets</Tab>
         <Tab active={tab === 'users'} onClick={() => setTab('users')}>Logins</Tab>
       </div>
-      {tab === 'tenants' ? <Tenants /> : <Users />}
+      {tab === 'entities' && <Entities fields={fields} />}
+      {tab === 'templates' && <Templates />}
+      {tab === 'sets' && <Sets fields={fields} />}
+      {tab === 'users' && <Users />}
     </main>
   );
 }
 
-// ─── Clients (tenants) ──────────────────────────────────────────────────────
-function Tenants() {
-  const [tenants, setTenants] = useState([]);
+// ─── Clients (Entities) ───────────────────────────────────────────────────────
+function Entities({ fields }) {
+  const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
-
-  const load = () => { setLoading(true); api.adminListTenants().then(setTenants).finally(() => setLoading(false)); };
+  const load = () => { setLoading(true); api.adminListEntities().then(setItems).finally(() => setLoading(false)); };
   useEffect(load, []);
-
-  async function add() {
-    await api.adminCreateTenant({ name: 'New client', organiserNames: [], eventNames: [] });
-    load();
-  }
-
   if (loading) return <Muted>Loading…</Muted>;
   return (
     <div>
-      <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 14 }}>
-        Each client is scoped to their organiser name(s) — and optionally specific events. Every query they run is filtered to these on the server.
-      </p>
-      {tenants.map((t) => <TenantCard key={t.id} tenant={t} onChange={load} />)}
-      <button style={addBtn} onClick={add}>+ Add client</button>
+      <p style={hint}>A client (entity) is locked to its organiser(s). These filters are forced onto every query the client runs.</p>
+      {items.map((e) => <EntityCard key={e.id} entity={e} fields={fields} onChange={load} />)}
+      <button style={addBtn} onClick={() => api.adminCreateEntity({ name: 'New client', lockedFilters: {} }).then(load)}>+ Add client</button>
     </div>
   );
 }
-
-function TenantCard({ tenant, onChange }) {
-  const [name, setName] = useState(tenant.name);
-  const [orgs, setOrgs] = useState((tenant.organiserNames || []).join('\n'));
-  const [events, setEvents] = useState((tenant.eventNames || []).join('\n'));
+function EntityCard({ entity, fields, onChange }) {
+  const [name, setName] = useState(entity.name);
+  const [locks, setLocks] = useState(entity.lockedFilters || {});
   const [saved, setSaved] = useState(false);
-
-  async function save() {
-    await api.adminUpdateTenant(tenant.id, {
-      name,
-      organiserNames: lines(orgs),
-      eventNames: lines(events),
-    });
-    setSaved(true);
-    setTimeout(() => setSaved(false), 1500);
-    onChange();
-  }
-  async function remove() {
-    if (!confirm(`Delete client "${tenant.name}"?`)) return;
-    await api.adminDeleteTenant(tenant.id);
-    onChange();
-  }
-
+  const save = async () => { await api.adminUpdateEntity(entity.id, { name, lockedFilters: locks }); flash(setSaved); onChange(); };
+  const remove = async () => { if (confirm(`Delete client "${entity.name}"? This removes its sets too.`)) { await api.adminDeleteEntity(entity.id); onChange(); } };
   return (
     <div style={cardStyle}>
-      <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 10 }}>
+      <Row>
         <input style={{ ...input, fontWeight: 700, flex: 1 }} value={name} onChange={(e) => setName(e.target.value)} />
         <button style={delBtn} onClick={remove}>Delete</button>
-      </div>
-      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-        <div style={{ flex: '1 1 300px' }}>
-          <L>Organiser name(s) — one per line, must match Looker exactly</L>
-          <textarea style={ta} value={orgs} onChange={(e) => setOrgs(e.target.value)} placeholder="Ultra South Africa" />
-        </div>
-        <div style={{ flex: '1 1 300px' }}>
-          <L>Event name(s) — optional, one per line (blank = all their events)</L>
-          <textarea style={ta} value={events} onChange={(e) => setEvents(e.target.value)} placeholder="Ultra South Africa 2025 - Johannesburg" />
-        </div>
-      </div>
-      <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 10 }}>
-        <button style={saveBtn} onClick={save}>Save</button>
-        {saved && <span style={{ color: 'var(--success)', fontSize: 13 }}>✓ Saved</span>}
-        <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 'auto' }}>id: {tenant.id.slice(0, 8)}</span>
-      </div>
+      </Row>
+      <L>Locked filters (organiser-level — apply across all this client's sets)</L>
+      <LockedFilterEditor value={locks} onChange={setLocks} fields={fields} />
+      <SaveRow onSave={save} saved={saved} id={entity.id} />
     </div>
   );
 }
 
-// ─── Logins (users) ─────────────────────────────────────────────────────────
+// ─── Templates ────────────────────────────────────────────────────────────────
+function Templates() {
+  const [items, setItems] = useState([]);
+  const [dashboards, setDashboards] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const load = () => { setLoading(true); Promise.all([api.adminListTemplates(), api.listDashboards()]).then(([t, d]) => { setItems(t); setDashboards(d); }).finally(() => setLoading(false)); };
+  useEffect(load, []);
+  if (loading) return <Muted>Loading…</Muted>;
+  return (
+    <div>
+      <p style={hint}>A template is a reusable group of dashboards. Apply it to clients via Dashboard Sets.</p>
+      {items.map((t) => <TemplateCard key={t.id} template={t} dashboards={dashboards} onChange={load} />)}
+      <button style={addBtn} onClick={() => api.adminCreateTemplate({ name: 'New template', dashboardIds: [] }).then(load)}>+ Add template</button>
+    </div>
+  );
+}
+function TemplateCard({ template, dashboards, onChange }) {
+  const [name, setName] = useState(template.name);
+  const [ids, setIds] = useState(template.dashboardIds || []);
+  const [saved, setSaved] = useState(false);
+  const toggle = (id) => setIds((cur) => cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]);
+  const save = async () => { await api.adminUpdateTemplate(template.id, { name, dashboardIds: ids }); flash(setSaved); onChange(); };
+  const remove = async () => { if (confirm(`Delete template "${template.name}"?`)) { await api.adminDeleteTemplate(template.id); onChange(); } };
+  return (
+    <div style={cardStyle}>
+      <Row>
+        <input style={{ ...input, fontWeight: 700, flex: 1 }} value={name} onChange={(e) => setName(e.target.value)} />
+        <button style={delBtn} onClick={remove}>Delete</button>
+      </Row>
+      <L>Dashboards in this template ({ids.length})</L>
+      <div style={checkList}>
+        {dashboards.map((d) => (
+          <label key={d.id} style={checkItem}>
+            <input type="checkbox" checked={ids.includes(d.id)} onChange={() => toggle(d.id)} />
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.title}</span>
+          </label>
+        ))}
+        {dashboards.length === 0 && <Muted>No dashboards yet.</Muted>}
+      </div>
+      <SaveRow onSave={save} saved={saved} id={template.id} />
+    </div>
+  );
+}
+
+// ─── Dashboard Sets ───────────────────────────────────────────────────────────
+function Sets({ fields }) {
+  const [items, setItems] = useState([]);
+  const [entities, setEntities] = useState([]);
+  const [templates, setTemplates] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const load = () => { setLoading(true); Promise.all([api.adminListSets(), api.adminListEntities(), api.adminListTemplates()]).then(([s, e, t]) => { setItems(s); setEntities(e); setTemplates(t); }).finally(() => setLoading(false)); };
+  useEffect(load, []);
+
+  async function add() {
+    if (!entities.length || !templates.length) { alert('Create at least one client and one template first.'); return; }
+    await api.adminCreateSet({ entityId: entities[0].id, templateId: templates[0].id, name: 'New set', lockedFilters: {} });
+    load();
+  }
+  if (loading) return <Muted>Loading…</Muted>;
+  return (
+    <div>
+      <p style={hint}>A Dashboard Set applies a template to a client, with the event (and any other) filters locked in. This is what the client opens.</p>
+      {items.map((s) => <SetCard key={s.id} set={s} entities={entities} templates={templates} fields={fields} onChange={load} />)}
+      <button style={addBtn} onClick={add}>+ Add set</button>
+    </div>
+  );
+}
+function SetCard({ set, entities, templates, fields, onChange }) {
+  const [name, setName] = useState(set.name);
+  const [entityId, setEntityId] = useState(set.entityId);
+  const [templateId, setTemplateId] = useState(set.templateId);
+  const [locks, setLocks] = useState(set.lockedFilters || {});
+  const [saved, setSaved] = useState(false);
+  const save = async () => { await api.adminUpdateSet(set.id, { name, entityId, templateId, lockedFilters: locks }); flash(setSaved); onChange(); };
+  const remove = async () => { if (confirm(`Delete set "${set.name}"?`)) { await api.adminDeleteSet(set.id); onChange(); } };
+  return (
+    <div style={cardStyle}>
+      <Row>
+        <input style={{ ...input, fontWeight: 700, flex: 1 }} value={name} onChange={(e) => setName(e.target.value)} />
+        <button style={delBtn} onClick={remove}>Delete</button>
+      </Row>
+      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 10 }}>
+        <Field label="Client"><select style={input} value={entityId} onChange={(e) => setEntityId(e.target.value)}>{entities.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}</select></Field>
+        <Field label="Template"><select style={input} value={templateId} onChange={(e) => setTemplateId(e.target.value)}>{templates.map((t) => <option key={t.id} value={t.id}>{t.name} ({t.dashboardIds.length})</option>)}</select></Field>
+      </div>
+      <L>Locked filters for this set (e.g. the event, cashless flags…)</L>
+      <LockedFilterEditor value={locks} onChange={setLocks} fields={fields} />
+      <SaveRow onSave={save} saved={saved} id={set.id} />
+    </div>
+  );
+}
+
+// ─── Locked-filter editor (field → value(s)) ──────────────────────────────────
+function LockedFilterEditor({ value, onChange, fields }) {
+  const rows = Object.entries(value || {}).map(([field, vals]) => ({ field, vals }));
+  const update = (next) => {
+    const map = {};
+    for (const r of next) if (r.field) map[r.field] = r.vals || '';
+    onChange(map);
+  };
+  const setRow = (i, patch) => { const next = rows.map((r, j) => j === i ? { ...r, ...patch } : r); update(next); };
+  const addRow = () => update([...rows, { field: '', vals: '' }]);
+  const removeRow = (i) => update(rows.filter((_, j) => j !== i));
+
+  return (
+    <div style={{ margin: '6px 0 4px' }}>
+      {rows.map((r, i) => {
+        const meta = fields.find((f) => f.field === r.field);
+        return (
+          <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+            <select style={{ ...input, minWidth: 220 }} value={r.field} onChange={(e) => setRow(i, { field: e.target.value })}>
+              <option value="">Choose a field…</option>
+              {fields.map((f) => <option key={f.field} value={f.field}>{f.title} ({f.field})</option>)}
+              {r.field && !meta && <option value={r.field}>{r.field}</option>}
+            </select>
+            <ValuePicker meta={meta} value={r.vals} onChange={(v) => setRow(i, { vals: v })} />
+            <button style={delBtn} onClick={() => removeRow(i)}>✕</button>
+          </div>
+        );
+      })}
+      <button style={miniBtn} onClick={addRow}>+ Add locked filter</button>
+    </div>
+  );
+}
+
+// Value input for a locked filter: a text box (comma-separated) plus a
+// suggestion dropdown when we know the field's model/explore.
+function ValuePicker({ meta, value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const [opts, setOpts] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const selected = String(value || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const canSuggest = !!(meta && meta.model && meta.explore);
+
+  async function loadOpts() {
+    if (!canSuggest || opts.length) { setOpen((o) => !o); return; }
+    setLoading(true);
+    try { const d = await api.filterSuggest({ model: meta.model, explore: meta.explore, field: meta.field }); setOpts(d.suggestions || []); }
+    catch { setOpts([]); }
+    finally { setLoading(false); setOpen(true); }
+  }
+  const toggle = (s) => { const next = selected.includes(s) ? selected.filter((x) => x !== s) : [...selected, s]; onChange(next.join(',')); };
+
+  return (
+    <div style={{ position: 'relative', flex: '1 1 260px', minWidth: 220 }}>
+      <input style={{ ...input, width: '100%' }} value={value || ''} onChange={(e) => onChange(e.target.value)} placeholder="value(s), comma-separated" />
+      {canSuggest && <button style={pickBtn} onClick={loadOpts}>{open ? '▴' : 'Pick ▾'}</button>}
+      {open && canSuggest && (
+        <ul style={ddList}>
+          {loading ? <li style={ddMuted}>Loading…</li> : opts.length === 0 ? <li style={ddMuted}>No values</li> : opts.slice(0, 300).map((s, i) => (
+            <li key={i} style={ddItem} onMouseDown={(e) => { e.preventDefault(); toggle(s); }}>
+              <span style={{ color: selected.includes(s) ? 'var(--brand)' : '#bbb' }}>{selected.includes(s) ? '☑' : '☐'}</span>
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{s}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// ─── Logins (Users) ───────────────────────────────────────────────────────────
 function Users() {
   const [users, setUsers] = useState([]);
-  const [tenants, setTenants] = useState([]);
+  const [entities, setEntities] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [form, setForm] = useState({ email: '', password: '', role: 'client', tenantId: '' });
+  const [form, setForm] = useState({ email: '', password: '', role: 'client', entityIds: [] });
   const [error, setError] = useState(null);
-
-  const load = () => {
-    setLoading(true);
-    Promise.all([api.adminListUsers(), api.adminListTenants()])
-      .then(([u, t]) => { setUsers(u); setTenants(t); })
-      .finally(() => setLoading(false));
-  };
+  const load = () => { setLoading(true); Promise.all([api.adminListUsers(), api.adminListEntities()]).then(([u, e]) => { setUsers(u); setEntities(e); }).finally(() => setLoading(false)); };
   useEffect(load, []);
 
   async function add() {
     setError(null);
     try {
-      await api.adminCreateUser({
-        email: form.email, password: form.password, role: form.role,
-        tenantId: form.role === 'client' ? form.tenantId || null : null,
-      });
-      setForm({ email: '', password: '', role: 'client', tenantId: '' });
+      await api.adminCreateUser({ email: form.email, password: form.password, role: form.role, entityIds: form.role === 'client' ? form.entityIds : [] });
+      setForm({ email: '', password: '', role: 'client', entityIds: [] });
       load();
     } catch (e) { setError(e.message); }
   }
-  async function del(id) { if (confirm('Delete this login?')) { await api.adminDeleteUser(id); load(); } }
-
-  const tenantName = (id) => tenants.find((t) => t.id === id)?.name || '—';
+  const del = async (id) => { if (confirm('Delete this login?')) { await api.adminDeleteUser(id); load(); } };
+  const toggleEntity = (id) => setForm((f) => ({ ...f, entityIds: f.entityIds.includes(id) ? f.entityIds.filter((x) => x !== id) : [...f.entityIds, id] }));
+  const entityNames = (ids) => (ids || []).map((id) => entities.find((e) => e.id === id)?.name).filter(Boolean).join(', ') || '—';
 
   if (loading) return <Muted>Loading…</Muted>;
   return (
@@ -136,27 +263,33 @@ function Users() {
               <option value="admin">Admin</option>
             </select>
           </Field>
-          {form.role === 'client' && (
-            <Field label="Client">
-              <select style={input} value={form.tenantId} onChange={(e) => setForm({ ...form, tenantId: e.target.value })}>
-                <option value="">Select client…</option>
-                {tenants.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-              </select>
-            </Field>
-          )}
           <button style={saveBtn} onClick={add}>Create</button>
         </div>
+        {form.role === 'client' && (
+          <div style={{ marginTop: 12 }}>
+            <L>Clients this login can access</L>
+            <div style={checkList}>
+              {entities.map((e) => (
+                <label key={e.id} style={checkItem}>
+                  <input type="checkbox" checked={form.entityIds.includes(e.id)} onChange={() => toggleEntity(e.id)} />
+                  <span>{e.name}</span>
+                </label>
+              ))}
+              {entities.length === 0 && <Muted>Create a client first.</Muted>}
+            </div>
+          </div>
+        )}
         {error && <div style={{ color: 'var(--error)', fontSize: 13, marginTop: 8 }}>{error}</div>}
       </div>
 
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, marginTop: 8 }}>
-        <thead><tr>{['Email', 'Role', 'Client', ''].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead>
+        <thead><tr>{['Email', 'Role', 'Clients', ''].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead>
         <tbody>
           {users.map((u) => (
             <tr key={u.id}>
               <td style={td}>{u.email}</td>
               <td style={td}>{u.role}</td>
-              <td style={td}>{u.role === 'admin' ? '—' : tenantName(u.tenantId)}</td>
+              <td style={td}>{u.role === 'admin' ? '—' : entityNames(u.entityIds)}</td>
               <td style={{ ...td, textAlign: 'right' }}><button style={delBtn} onClick={() => del(u.id)}>Delete</button></td>
             </tr>
           ))}
@@ -166,8 +299,18 @@ function Users() {
   );
 }
 
-const lines = (s) => s.split('\n').map((x) => x.trim()).filter(Boolean);
-
+// ─── Small shared bits ────────────────────────────────────────────────────────
+function flash(setSaved) { setSaved(true); setTimeout(() => setSaved(false), 1500); }
+function Row({ children }) { return <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 10 }}>{children}</div>; }
+function SaveRow({ onSave, saved, id }) {
+  return (
+    <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 10 }}>
+      <button style={saveBtn} onClick={onSave}>Save</button>
+      {saved && <span style={{ color: 'var(--success)', fontSize: 13 }}>✓ Saved</span>}
+      <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 'auto' }}>id: {id.slice(0, 8)}</span>
+    </div>
+  );
+}
 function Tab({ active, onClick, children }) {
   return <button onClick={onClick} style={{ padding: '8px 16px', borderRadius: 8, border: active ? '1.5px solid var(--brand)' : '1.5px solid #e0e0e0', background: active ? 'var(--brand)' : '#fff', color: active ? '#fff' : 'var(--text)', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>{children}</button>;
 }
@@ -175,11 +318,18 @@ function Field({ label, children }) { return <div style={{ display: 'flex', flex
 function L({ children }) { return <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{children}</span>; }
 function Muted({ children }) { return <p style={{ color: 'var(--muted)' }}>{children}</p>; }
 
+const hint = { fontSize: 13, color: 'var(--muted)', marginBottom: 14 };
 const cardStyle = { background: '#fff', border: '1px solid #e0e0e0', borderRadius: 12, padding: 18, marginBottom: 14, boxShadow: '0 1px 6px rgba(0,0,0,0.05)' };
 const input = { padding: '8px 10px', border: '1.5px solid #e0e0e0', borderRadius: 7, fontSize: 13, outline: 'none', boxSizing: 'border-box', minWidth: 160 };
-const ta = { width: '100%', minHeight: 70, padding: '8px 10px', border: '1.5px solid #e0e0e0', borderRadius: 7, fontSize: 13, outline: 'none', boxSizing: 'border-box', fontFamily: 'inherit', resize: 'vertical', marginTop: 4 };
 const saveBtn = { padding: '8px 16px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 7, fontWeight: 600, fontSize: 13, cursor: 'pointer' };
 const addBtn = { padding: '9px 16px', background: '#f7f7f7', border: '1.5px solid #e0e0e0', borderRadius: 8, fontWeight: 600, fontSize: 13, cursor: 'pointer' };
+const miniBtn = { padding: '6px 12px', background: '#f7f7f7', border: '1.5px solid #e0e0e0', borderRadius: 6, fontWeight: 600, fontSize: 12, cursor: 'pointer' };
 const delBtn = { padding: '6px 12px', background: '#fff', color: 'var(--error)', border: '1.5px solid #f0c0c0', borderRadius: 6, fontWeight: 600, fontSize: 12, cursor: 'pointer' };
 const th = { textAlign: 'left', padding: '8px 10px', borderBottom: '2px solid #e0e0e0', fontSize: 12, color: 'var(--muted)' };
 const td = { padding: '8px 10px', borderBottom: '1px solid #f0f0f0' };
+const checkList = { display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 200, overflowY: 'auto', border: '1px solid #eee', borderRadius: 8, padding: 10, margin: '6px 0' };
+const checkItem = { display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' };
+const pickBtn = { position: 'absolute', right: 4, top: 4, padding: '4px 8px', fontSize: 11, fontWeight: 600, border: '1px solid #e0e0e0', borderRadius: 5, background: '#fafafa', cursor: 'pointer' };
+const ddList = { position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50, marginTop: 4, background: '#fff', border: '1px solid #e0e0e0', borderRadius: 8, boxShadow: '0 6px 20px rgba(0,0,0,0.12)', maxHeight: 220, overflowY: 'auto', listStyle: 'none', margin: 0, padding: '4px 0' };
+const ddItem = { display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', fontSize: 13, cursor: 'pointer' };
+const ddMuted = { padding: '7px 12px', fontSize: 13, color: 'var(--muted)' };

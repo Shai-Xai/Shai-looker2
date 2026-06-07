@@ -23,6 +23,22 @@ export const api = {
   adminUpdateTenant: (id, t) => fetch(`/api/admin/tenants/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(t) }).then(json),
   adminDeleteTenant: (id) => fetch(`/api/admin/tenants/${id}`, { method: 'DELETE' }),
 
+  // Entities / Templates / Sets (admin — the new model)
+  adminListEntities: () => fetch('/api/admin/entities').then(json),
+  adminCreateEntity: (e) => fetch('/api/admin/entities', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(e) }).then(json),
+  adminUpdateEntity: (id, e) => fetch(`/api/admin/entities/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(e) }).then(json),
+  adminDeleteEntity: (id) => fetch(`/api/admin/entities/${id}`, { method: 'DELETE' }),
+  adminListTemplates: () => fetch('/api/admin/templates').then(json),
+  adminCreateTemplate: (t) => fetch('/api/admin/templates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(t) }).then(json),
+  adminUpdateTemplate: (id, t) => fetch(`/api/admin/templates/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(t) }).then(json),
+  adminDeleteTemplate: (id) => fetch(`/api/admin/templates/${id}`, { method: 'DELETE' }),
+  adminListSets: () => fetch('/api/admin/sets').then(json),
+  adminCreateSet: (s) => fetch('/api/admin/sets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(s) }).then(json),
+  adminUpdateSet: (id, s) => fetch(`/api/admin/sets/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(s) }).then(json),
+  adminDeleteSet: (id) => fetch(`/api/admin/sets/${id}`, { method: 'DELETE' }),
+  adminFilterFields: () => fetch('/api/admin/filter-fields').then(json),
+  filterSuggest: (body) => fetch('/api/filter-suggest', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
+
   // Users (admin)
   adminListUsers: () => fetch('/api/admin/users').then(json),
   adminCreateUser: (u) => fetch('/api/admin/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(u) }).then(json),

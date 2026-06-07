@@ -77,6 +77,52 @@ app.delete('/api/admin/users/:id', auth.requireAdmin, (req, res) => {
   auth.deleteUser(req.params.id); res.status(204).end();
 });
 
+// ─── Admin: entities / templates / sets (the new model) ────────────────────────
+app.get('/api/admin/entities', auth.requireAdmin, (_req, res) => res.json(db.listEntities()));
+app.post('/api/admin/entities', auth.requireAdmin, (req, res) => res.status(201).json(db.createEntity(req.body || {})));
+app.put('/api/admin/entities/:id', auth.requireAdmin, (req, res) => {
+  const e = db.updateEntity(req.params.id, req.body || {});
+  if (!e) return res.status(404).json({ error: 'Entity not found' });
+  res.json(e);
+});
+app.delete('/api/admin/entities/:id', auth.requireAdmin, (req, res) => { db.deleteEntity(req.params.id); res.status(204).end(); });
+
+app.get('/api/admin/templates', auth.requireAdmin, (_req, res) => res.json(db.listTemplates()));
+app.post('/api/admin/templates', auth.requireAdmin, (req, res) => res.status(201).json(db.createTemplate(req.body || {})));
+app.put('/api/admin/templates/:id', auth.requireAdmin, (req, res) => {
+  const t = db.updateTemplate(req.params.id, req.body || {});
+  if (!t) return res.status(404).json({ error: 'Template not found' });
+  res.json(t);
+});
+app.delete('/api/admin/templates/:id', auth.requireAdmin, (req, res) => { db.deleteTemplate(req.params.id); res.status(204).end(); });
+
+function enrichSet(s) {
+  return { ...s, entityName: db.getEntity(s.entityId)?.name || '', templateName: db.getTemplate(s.templateId)?.name || '', dashboardCount: db.dashboardsInSet(s.id).length };
+}
+app.get('/api/admin/sets', auth.requireAdmin, (_req, res) => res.json(db.listSets().map(enrichSet)));
+app.post('/api/admin/sets', auth.requireAdmin, (req, res) => res.status(201).json(enrichSet(db.createSet(req.body || {}))));
+app.put('/api/admin/sets/:id', auth.requireAdmin, (req, res) => {
+  const s = db.updateSet(req.params.id, req.body || {});
+  if (!s) return res.status(404).json({ error: 'Set not found' });
+  res.json(enrichSet(s));
+});
+app.delete('/api/admin/sets/:id', auth.requireAdmin, (req, res) => { db.deleteSet(req.params.id); res.status(204).end(); });
+
+// Distinct filter fields across all dashboards (for the locked-filter editor:
+// pick a field → we know its model/explore so values can be suggested).
+app.get('/api/admin/filter-fields', auth.requireAdmin, (_req, res) => {
+  const seen = new Map();
+  for (const d of db.listDashboards()) {
+    const full = store.get(d.id);
+    for (const f of full?.filters || []) {
+      const field = f.field || f.dimension;
+      if (!field || seen.has(field)) continue;
+      seen.set(field, { field, title: f.title || field, model: f.model || null, explore: f.explore || null });
+    }
+  }
+  res.json([...seen.values()]);
+});
+
 // Tenants the current user may assign/see (admins manage; clients can read their own for the UI).
 app.get('/api/tenants', auth.requireAuth, (req, res) => {
   if (req.user.role === 'admin') return res.json(auth.listTenants());
