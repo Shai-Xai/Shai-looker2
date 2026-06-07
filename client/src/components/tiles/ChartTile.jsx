@@ -1,198 +1,226 @@
-import { useRef, useEffect } from 'react';
-import {
-  Chart,
-  BarController, LineController, PieController, DoughnutController,
-  CategoryScale, LinearScale, BarElement, LineElement, PointElement, ArcElement,
-  Tooltip, Legend, Filler,
-} from 'chart.js';
+import { useMemo } from 'react';
+import ReactECharts from 'echarts-for-react';
+import * as echarts from 'echarts';
 import { cellText, formatNumber, formatAxis } from '../../lib/format.js';
 import { useDrill } from '../../lib/DrillContext.jsx';
 
-Chart.register(
-  BarController, LineController, PieController, DoughnutController,
-  CategoryScale, LinearScale, BarElement, LineElement, PointElement, ArcElement,
-  Tooltip, Legend, Filler,
-);
+// Howler-branded chart renderer (Apache ECharts): gradient fills, rounded bars,
+// staggered load animation, branded tooltips. Always uses the Howler palette
+// (ignores Looker's colours by design). Supports column/bar/line/area/pie/
+// doughnut/scatter, pivoted series, table calculations, and drill-down.
 
-const PALETTE = [
-  '#ff385c', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6',
-  '#ec4899', '#06b6d4', '#84cc16', '#f97316', '#6366f1',
-];
+const HOWLER = ['#FF385C', '#FF6B35', '#FFB020', '#06B6D4', '#7C3AED', '#10B981', '#EC4899', '#3B82F6', '#F97316', '#14B8A6'];
+const color = (i) => HOWLER[i % HOWLER.length];
 
-function hexToRgba(hex, alpha) {
+function hexToRgba(hex, a) {
   const h = hex.replace('#', '');
-  if (h.length !== 6) return hex;
-  const r = parseInt(h.slice(0, 2), 16);
-  const g = parseInt(h.slice(2, 4), 16);
-  const b = parseInt(h.slice(4, 6), 16);
-  return `rgba(${r},${g},${b},${alpha})`;
+  const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+  return `rgba(${r},${g},${b},${a})`;
+}
+const num = (v) => (v == null || v === '' ? null : Number(v));
+
+// Vertical (or horizontal) gradient for bars.
+function barGradient(c, horizontal) {
+  const stops = [{ offset: 0, color: c }, { offset: 1, color: hexToRgba(c, 0.6) }];
+  return horizontal
+    ? new echarts.graphic.LinearGradient(0, 0, 1, 0, stops)
+    : new echarts.graphic.LinearGradient(0, 0, 0, 1, stops);
+}
+// Soft area gradient for line/area fills.
+function areaGradient(c) {
+  return new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+    { offset: 0, color: hexToRgba(c, 0.45) },
+    { offset: 1, color: hexToRgba(c, 0.02) },
+  ]);
 }
 
 export default function ChartTile({ data, visConfig = {} }) {
-  const canvasRef = useRef(null);
-  const chartRef = useRef(null);
   const { openDrill } = useDrill();
-  const drillRef = useRef(openDrill);
-  drillRef.current = openDrill;
-
   const fields = data.fields || {};
   const rows = data.data || [];
   const dimensions = fields.dimensions || [];
-  // Table calculations (running totals, % change, etc.) are plottable series too.
   const measures = [...(fields.measures || []), ...(fields.table_calculations || [])];
   const pivots = data.pivots || [];
   const visType = visConfig?.type || 'looker_column';
 
-  useEffect(() => {
-    if (!canvasRef.current || !rows.length) return;
+  // seriesMeta[seriesIndex] = { measure, pivotKey, fmt } for tooltip + drill.
+  const stacked = visConfig.stacking === 'normal' || visConfig.stacking === 'percent';
+  const { option, seriesMeta } = useMemo(
+    () => buildOption({ rows, dimensions, measures, pivots, visType, stacked }),
+    [data, visType, stacked]
+  );
 
-    const isPie = visType === 'looker_pie' || visType === 'looker_donut_multiples';
-    const isBar = visType === 'looker_bar'; // horizontal
-    const isArea = visType === 'looker_area';
-    const stacked = visConfig.stacking === 'normal' || visConfig.stacking === 'percent';
+  if (!rows.length || !measures.length) return <Empty />;
 
-    // Resolve a series colour: Looker series_colors map → colors array → palette.
-    const seriesColors = visConfig.series_colors || {};
-    const colorsCfg = Array.isArray(visConfig.colors) ? visConfig.colors : null;
-    const colorFor = (label, i, alpha = 1) => {
-      const c = seriesColors[label] || (colorsCfg && colorsCfg[i]) || PALETTE[i % PALETTE.length];
-      return alpha === 1 || !String(c).startsWith('#') ? c : hexToRgba(c, alpha);
-    };
-
-    const primaryDim = dimensions[0];
-    const labels = rows.map((row) => (primaryDim ? cellText(row[primaryDim.name]) : ''));
-
-    const num = (v) => (v == null || v === '' ? null : Number(v));
-
-    let datasets;
-    if (pivots.length > 0) {
-      // Pivoted: measure values are nested by pivot key →
-      // row[measureName][pivot.key].value
-      datasets = [];
-      const multiMeasure = measures.length > 1;
-      pivots.forEach((pivot, pi) => {
-        const plabel = pivot.data ? Object.values(pivot.data).join(' / ') : pivot.key;
-        measures.forEach((measure, mi) => {
-          const idx = pi * measures.length + mi;
-          const label = multiMeasure ? `${plabel} — ${measure.label_short || measure.label}` : plabel;
-          datasets.push({
-            label,
-            _fmt: measure.value_format,
-            _measure: measure.name,
-            _pivotKey: pivot.key,
-            data: rows.map((row) => num(row[measure.name]?.[pivot.key]?.value)),
-            backgroundColor: colorFor(label, idx, isPie ? 0.85 : 0.78),
-            borderColor: colorFor(label, idx, 1),
-            borderWidth: 1.5,
-            fill: isArea,
-            tension: 0.3,
-          });
-        });
-      });
-    } else if (isPie) {
-      const measure = measures[0];
-      datasets = [{
-        _fmt: measure?.value_format,
-        _measure: measure?.name,
-        data: rows.map((row) => row[measure?.name]?.value ?? null),
-        backgroundColor: labels.map((_, i) => colorFor(labels[i], i, 0.85)),
-        borderColor: '#fff',
-        borderWidth: 1.5,
-      }];
-    } else {
-      datasets = measures.map((measure, i) => ({
-        label: measure.label_short || measure.label,
-        _fmt: measure.value_format,
-        _measure: measure.name,
-        data: rows.map((row) => row[measure.name]?.value ?? null),
-        backgroundColor: colorFor(measure.label_short || measure.label, i, isArea ? 0.25 : 0.78),
-        borderColor: colorFor(measure.label_short || measure.label, i, 1),
-        borderWidth: 1.5,
-        fill: isArea,
-        tension: 0.3,
-      }));
+  const onClick = (params) => {
+    const row = rows[params.dataIndex];
+    if (!row) return;
+    const meta = visType.includes('pie') || visType.includes('donut')
+      ? { measure: measures[0]?.name }
+      : seriesMeta[params.seriesIndex];
+    if (!meta?.measure) return;
+    const cell = meta.pivotKey ? row[meta.measure]?.[meta.pivotKey] : row[meta.measure];
+    const links = cell?.links;
+    if (links?.length) {
+      const dim = dimensions[0] ? cellText(row[dimensions[0].name]) : '';
+      openDrill(links, [dim, params.seriesName].filter(Boolean).join(' · '));
     }
-
-    const chartType = isPie ? (visType === 'looker_donut_multiples' ? 'doughnut' : 'pie')
-      : (visType === 'looker_line' || isArea) ? 'line'
-      : 'bar';
-
-    const config = {
-      type: chartType,
-      data: { labels, datasets },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        indexAxis: isBar ? 'y' : 'x',
-        onHover: (evt, els) => {
-          const t = evt?.native?.target;
-          if (t) t.style.cursor = els.length ? 'pointer' : 'default';
-        },
-        onClick: (evt, els, chart) => {
-          if (!els.length) return;
-          const { datasetIndex, index } = els[0];
-          const ds = chart.data.datasets[datasetIndex];
-          const row = rows[index];
-          if (!row || !ds?._measure) return;
-          const cell = ds._pivotKey ? row[ds._measure]?.[ds._pivotKey] : row[ds._measure];
-          const links = cell?.links;
-          if (links && links.length) {
-            const dim = dimensions[0] ? cellText(row[dimensions[0].name]) : '';
-            const title = [dim, ds.label].filter(Boolean).join(' · ');
-            drillRef.current(links, title);
-          }
-        },
-        plugins: {
-          legend: {
-            display: datasets.length > 1 || isPie,
-            position: 'bottom',
-            labels: { boxWidth: 12, font: { size: 11 }, usePointStyle: true },
-          },
-          tooltip: {
-            callbacks: {
-              label: (ctx) => {
-                const raw = ctx.parsed.y ?? ctx.parsed.x ?? ctx.parsed;
-                const formatted = formatNumber(raw, ctx.dataset._fmt);
-                const name = ctx.dataset.label || ctx.label;
-                return name ? ` ${name}: ${formatted}` : ` ${formatted}`;
-              },
-            },
-          },
-        },
-        scales: isPie ? {} : {
-          x: {
-            stacked,
-            ticks: { font: { size: 10 }, maxRotation: 45, autoSkip: true,
-              callback: isBar ? (v) => formatAxis(v, datasets[0]?._fmt) : undefined },
-            grid: { color: '#f2f2f2' },
-          },
-          y: {
-            stacked,
-            ticks: { font: { size: 10 },
-              callback: isBar ? undefined : (v) => formatAxis(v, datasets[0]?._fmt) },
-            grid: { color: '#f2f2f2' },
-          },
-        },
-        animation: { duration: 300 },
-      },
-    };
-
-    if (chartRef.current) chartRef.current.destroy();
-    chartRef.current = new Chart(canvasRef.current, config);
-
-    return () => {
-      if (chartRef.current) { chartRef.current.destroy(); chartRef.current = null; }
-    };
-  }, [data, visConfig]);
-
-  if (!rows.length) return <Empty />;
+  };
 
   return (
-    <div style={{ width: '100%', height: '100%', padding: '8px 12px' }}>
-      <canvas ref={canvasRef} />
+    <div style={{ width: '100%', height: '100%', padding: 6 }}>
+      <ReactECharts
+        option={option}
+        notMerge
+        style={{ width: '100%', height: '100%' }}
+        opts={{ renderer: 'canvas' }}
+        onEvents={{ click: onClick }}
+      />
     </div>
   );
 }
+
+function buildOption({ rows, dimensions, measures, pivots, visType, stacked }) {
+  const isPie = visType === 'looker_pie' || visType === 'looker_donut_multiples';
+  const isDonut = visType === 'looker_donut_multiples';
+  const isBar = visType === 'looker_bar';       // horizontal
+  const isArea = visType === 'looker_area';
+  const isLine = visType === 'looker_line' || isArea;
+  const isScatter = visType === 'looker_scatter';
+
+  const primaryDim = dimensions[0];
+  const labels = rows.map((r) => (primaryDim ? cellText(r[primaryDim.name]) : ''));
+  const seriesMeta = [];
+
+  const baseAnim = { animationDuration: 800, animationEasing: 'cubicOut', animationDelay: (i) => i * 18 };
+
+  // ─── Pie / doughnut ──────────────────────────────────────────────────────────
+  if (isPie) {
+    const m = measures[0];
+    const pieData = rows.map((r, i) => ({ name: labels[i], value: num(r[m?.name]?.value) }));
+    seriesMeta[0] = { measure: m?.name, fmt: m?.value_format };
+    return {
+      seriesMeta,
+      option: {
+        ...baseAnim,
+        color: HOWLER,
+        tooltip: {
+          trigger: 'item',
+          ...tooltipStyle,
+          formatter: (p) => `${p.marker} ${p.name}<b style="margin-left:10px">${formatNumber(p.value, m?.value_format)}</b> <span style="color:#999">(${p.percent}%)</span>`,
+        },
+        legend: { bottom: 0, type: 'scroll', textStyle: { fontSize: 11 }, icon: 'circle' },
+        series: [{
+          type: 'pie',
+          radius: isDonut ? ['42%', '70%'] : '72%',
+          center: ['50%', '46%'],
+          data: pieData,
+          itemStyle: { borderColor: '#fff', borderWidth: 2, borderRadius: 6 },
+          label: { show: false },
+          emphasis: { scale: true, scaleSize: 6, itemStyle: { shadowBlur: 12, shadowColor: 'rgba(0,0,0,0.2)' } },
+        }],
+      },
+    };
+  }
+
+  // ─── Bars / lines / area / scatter ───────────────────────────────────────────
+  let series = [];
+  if (pivots.length > 0) {
+    const multi = measures.length > 1;
+    pivots.forEach((pivot, pi) => {
+      const plabel = pivot.data ? Object.values(pivot.data).join(' / ') : pivot.key;
+      measures.forEach((m, mi) => {
+        const idx = pi * measures.length + mi;
+        const name = multi ? `${plabel} — ${m.label_short || m.label}` : plabel;
+        seriesMeta[series.length] = { measure: m.name, pivotKey: pivot.key, fmt: m.value_format };
+        series.push(makeSeries(name, rows.map((r) => num(r[m.name]?.[pivot.key]?.value)), idx, { isBar, isLine, isArea, isScatter, stacked }));
+      });
+    });
+  } else {
+    measures.forEach((m, i) => {
+      seriesMeta[series.length] = { measure: m.name, fmt: m.value_format };
+      series.push(makeSeries(m.label_short || m.label, rows.map((r) => num(r[m.name]?.value)), i, { isBar, isLine, isArea, isScatter, stacked }));
+    });
+  }
+
+  const valueAxis = {
+    type: 'value',
+    axisLabel: { fontSize: 10, color: '#888', formatter: (v) => formatAxis(v, measures[0]?.value_format) },
+    splitLine: { lineStyle: { color: '#f2f2f2' } },
+    axisLine: { show: false }, axisTick: { show: false },
+  };
+  const catAxis = {
+    type: 'category', data: labels, boundaryGap: !isLine || isBar ? true : true,
+    axisLabel: { fontSize: 10, color: '#888', hideOverlap: true, rotate: labels.length > 8 && !isBar ? 35 : 0 },
+    axisLine: { lineStyle: { color: '#e6e6e6' } }, axisTick: { show: false },
+  };
+
+  const showLegend = series.length > 1;
+  return {
+    seriesMeta,
+    option: {
+      ...baseAnim,
+      color: HOWLER,
+      grid: { left: 6, right: 14, top: 12, bottom: showLegend ? 34 : 18, containLabel: true },
+      tooltip: {
+        trigger: isScatter ? 'item' : 'axis',
+        ...tooltipStyle,
+        axisPointer: { type: isBar ? 'line' : 'shadow', shadowStyle: { color: 'rgba(255,56,92,0.06)' } },
+        formatter: (params) => {
+          const arr = Array.isArray(params) ? params : [params];
+          const title = arr[0]?.axisValueLabel ?? arr[0]?.name ?? '';
+          let s = `<div style="font-weight:700;margin-bottom:4px">${title}</div>`;
+          for (const p of arr) {
+            const fmt = seriesMeta[p.seriesIndex]?.fmt;
+            const raw = Array.isArray(p.value) ? p.value[isBar ? 0 : 1] : p.value;
+            s += `<div style="display:flex;gap:14px;align-items:center"><span>${p.marker} ${p.seriesName}</span><b style="margin-left:auto">${formatNumber(raw, fmt)}</b></div>`;
+          }
+          return s;
+        },
+      },
+      legend: showLegend ? { bottom: 0, type: 'scroll', textStyle: { fontSize: 11 }, icon: 'roundRect' } : undefined,
+      xAxis: isBar ? valueAxis : catAxis,
+      yAxis: isBar ? catAxis : valueAxis,
+      series,
+    },
+  };
+}
+
+function makeSeries(name, vals, idx, { isBar, isLine, isArea, isScatter, stacked }) {
+  const c = color(idx);
+  if (isScatter) {
+    return { name, type: 'scatter', data: vals, symbolSize: 10, itemStyle: { color: hexToRgba(c, 0.8) } };
+  }
+  if (isLine) {
+    return {
+      name, type: 'line', data: vals, smooth: true, showSymbol: false,
+      lineStyle: { width: 3, color: c }, itemStyle: { color: c },
+      areaStyle: isArea ? { color: areaGradient(c) } : undefined,
+      stack: stacked ? 'total' : undefined,
+      emphasis: { focus: 'series' },
+    };
+  }
+  // bar (vertical column or horizontal bar)
+  return {
+    name, type: 'bar', data: vals,
+    barMaxWidth: 38,
+    itemStyle: {
+      color: barGradient(c, isBar),
+      borderRadius: isBar ? [0, 6, 6, 0] : [6, 6, 0, 0],
+    },
+    stack: stacked ? 'total' : undefined,
+    emphasis: { focus: 'series', itemStyle: { shadowBlur: 10, shadowColor: hexToRgba(c, 0.4) } },
+  };
+}
+
+const tooltipStyle = {
+  backgroundColor: '#fff',
+  borderColor: '#eee',
+  borderWidth: 1,
+  padding: [8, 12],
+  textStyle: { color: '#222', fontSize: 12 },
+  extraCssText: 'border-radius:8px; box-shadow:0 4px 16px rgba(0,0,0,0.12);',
+};
 
 function Empty() {
   return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#ccc', fontSize: 12 }}>No data</div>;
