@@ -2,9 +2,18 @@ import { useState, useRef, useEffect } from 'react';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import { useScope } from '../lib/ScopeContext.jsx';
 
-export default function FilterBar({ filters, values, onChange, locked = {} }) {
+// Counts the filters that currently have a value — used for the trigger badge.
+export function activeFilterCount(filters, values) {
+  return filters.filter(f => (values[f.name] ?? '') !== '').length;
+}
+
+// On desktop the trigger button lives in the page header (passed `open` /
+// `onClose`); this component then renders only the panel of controls when open.
+// On mobile it stays self-contained: a "Filters" trigger + bottom sheet, since
+// the suite view hides its header there.
+export default function FilterBar({ filters, values, onChange, locked = {}, open = false, onClose }) {
   const isMobile = useIsMobile();
-  const [open, setOpen] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   const controls = filters.map(filter => (
     <FilterControl
@@ -19,21 +28,21 @@ export default function FilterBar({ filters, values, onChange, locked = {} }) {
   // Mobile: a compact "Filters" trigger that opens a bottom sheet, so filters
   // don't eat half the screen above the dashboard.
   if (isMobile) {
-    const activeCount = filters.filter(f => (values[f.name] ?? '') !== '').length;
+    const activeCount = activeFilterCount(filters, values);
     return (
       <>
-        <div style={{ background: 'var(--card)', borderBottom: '1px solid var(--hairline)', padding: '10px 14px', display: 'flex' }}>
-          <button onClick={() => setOpen(true)} style={filterTrigger}>
+        <div style={{ background: 'var(--card)', borderBottom: '1px solid var(--hairline)', padding: '10px 14px', display: 'flex', justifyContent: 'flex-end' }}>
+          <button onClick={() => setMobileOpen(true)} style={filterTrigger}>
             <span>⚲ Filters</span>
             {activeCount > 0 && <span style={countPill}>{activeCount}</span>}
           </button>
         </div>
-        {open && (
-          <div style={sheetBackdrop} onClick={() => setOpen(false)}>
+        {mobileOpen && (
+          <div style={sheetBackdrop} onClick={() => setMobileOpen(false)}>
             <div style={sheet} onClick={e => e.stopPropagation()}>
               <div style={{ display: 'flex', alignItems: 'center', marginBottom: 14 }}>
                 <h3 style={{ fontSize: 16, fontWeight: 700, flex: 1 }}>Filters</h3>
-                <button onClick={() => setOpen(false)} style={doneBtn}>Done</button>
+                <button onClick={() => setMobileOpen(false)} style={doneBtn}>Done</button>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>{controls}</div>
             </div>
@@ -43,33 +52,18 @@ export default function FilterBar({ filters, values, onChange, locked = {} }) {
     );
   }
 
-  // Desktop: collapsed by default behind a "Filters" toggle, with a summary of
-  // what's currently applied so it's clear without expanding.
-  const activeCount = filters.filter(f => (values[f.name] ?? '') !== '').length;
-  const summary = filters
-    .filter(f => (values[f.name] ?? '') !== '')
-    .map(f => `${f.title}: ${values[f.name]}`)
-    .join('   ·   ');
-
+  // Desktop: the header owns the toggle. Render nothing until opened, then drop
+  // down a panel of the filter controls.
+  if (!open) return null;
   return (
-    <div style={{ background: 'var(--card)', borderBottom: '1px solid var(--hairline)', padding: '12px 22px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 14, minWidth: 0 }}>
-        <button onClick={() => setOpen(v => !v)} style={filterTrigger}>
-          <span>⚲ Filters</span>
-          {activeCount > 0 && <span style={countPill}>{activeCount}</span>}
-          <span style={{ fontSize: 11, color: '#888' }}>{open ? '▴' : '▾'}</span>
-        </button>
-        {!open && summary && (
-          <span style={{ fontSize: 13, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={summary}>
-            {summary}
-          </span>
-        )}
+    <div style={{ background: 'var(--card)', borderBottom: '1px solid var(--hairline)', padding: '14px 22px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+        <h3 style={{ fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', flex: 1 }}>Filters</h3>
+        {onClose && <button onClick={onClose} style={doneBtn}>Done</button>}
       </div>
-      {open && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'flex-end', marginTop: 14 }}>
-          {controls}
-        </div>
-      )}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'flex-end' }}>
+        {controls}
+      </div>
     </div>
   );
 }

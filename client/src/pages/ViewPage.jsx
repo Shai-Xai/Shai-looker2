@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import FilterBar from '../components/FilterBar.jsx';
+import FilterBar, { activeFilterCount } from '../components/FilterBar.jsx';
 import EditableGrid from '../components/EditableGrid.jsx';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/auth.jsx';
@@ -21,6 +21,7 @@ export default function ViewPage() {
   const [error, setError] = useState(null);
   const [filterValues, setFilterValues] = useState({});
   const [locked, setLocked] = useState({});
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -62,6 +63,8 @@ export default function ViewPage() {
 
   const theme = def.theme || {};
   const backTo = '/';
+  const hasFilters = (def.filters?.length || 0) > 0;
+  const activeCount = hasFilters ? activeFilterCount(def.filters, filterValues) : 0;
 
   return (
     <ScopeProvider suiteId={suiteId || null}>
@@ -81,12 +84,19 @@ export default function ViewPage() {
               {setInfo && <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)' }}>{setInfo.name}</div>}
               <h2 style={{ fontSize: isMobile ? 17 : 21, fontWeight: 600, letterSpacing: '-0.02em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{def.title}</h2>
             </div>
+            {hasFilters && !isMobile && (
+              <button style={filtersBtn(filtersOpen)} onClick={() => setFiltersOpen(v => !v)}>
+                <span>⚲ Filters</span>
+                {activeCount > 0 && <span style={countBadge}>{activeCount}</span>}
+                <span style={{ fontSize: 11, opacity: 0.7 }}>{filtersOpen ? '▴' : '▾'}</span>
+              </button>
+            )}
             {isAdmin && !isMobile && <button style={editBtn} onClick={() => navigate(`/d/${id}/edit`)}>Edit</button>}
           </div>
         )}
 
-        {def.filters?.length > 0 && (
-          <FilterBar filters={def.filters} values={filterValues} onChange={handleFilterChange} locked={locked} />
+        {hasFilters && (
+          <FilterBar filters={def.filters} values={filterValues} onChange={handleFilterChange} locked={locked} open={filtersOpen} onClose={() => setFiltersOpen(false)} />
         )}
 
         <div style={{ flex: 1, padding: isMobile ? '12px' : '22px', overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
@@ -102,6 +112,8 @@ export default function ViewPage() {
 }
 
 const editBtn = { padding: '8px 18px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer', boxShadow: '0 1px 2px rgba(0,0,0,0.08)' };
+const filtersBtn = (active) => ({ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '8px 16px', background: active ? 'rgba(0,0,0,0.08)' : 'rgba(0,0,0,0.05)', color: 'var(--text)', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer' });
+const countBadge = { background: 'var(--brand)', color: '#fff', fontSize: 11, fontWeight: 700, borderRadius: 980, minWidth: 18, height: 18, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' };
 
 function Centered({ children, error }) {
   return (
