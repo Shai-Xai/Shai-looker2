@@ -3,6 +3,7 @@ import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
 import TileFrame from './TileFrame.jsx';
 import Carousel from './Carousel.jsx';
+import { useIsMobile } from '../lib/useIsMobile.js';
 
 const Grid = WidthProvider(GridLayout);
 
@@ -12,7 +13,41 @@ const ROW_HEIGHT = 30;
 // Renders tiles AND carousels on a 24-column grid. Carousels are full-width
 // (w=24) grid items, so they can be dragged anywhere (incl. between grid rows)
 // and resized like any tile. Mirrors Looker's grid units.
-export default function EditableGrid({ tiles = [], carousels = [], filterValues, editable, onLayoutChange, onEditTile, onDuplicateTile, onRemoveTile, carouselHandlers }) {
+//
+// On phones (<768px) we drop the pixel grid entirely and stack everything in a
+// single full-width, read-only column ordered by grid position — tiny squished
+// tiles don't work on a 375px screen.
+export default function EditableGrid(props) {
+  const isMobile = useIsMobile();
+  return isMobile ? <StackedGrid {...props} /> : <DesktopGrid {...props} />;
+}
+
+function StackedGrid({ tiles = [], carousels = [], filterValues }) {
+  // Order by grid position (row, then column) so the stack reads the same way
+  // the dashboard looks on desktop.
+  const items = [
+    ...tiles.map((t) => ({ kind: 'tile', el: t, y: t.layout?.y ?? 0, x: t.layout?.x ?? 0, h: t.layout?.h ?? 6 })),
+    ...carousels.map((c, idx) => ({ kind: 'carousel', el: c, y: c.layout?.y ?? (1000 + idx), x: 0, h: c.layout?.h ?? 7 })),
+  ].sort((a, b) => a.y - b.y || a.x - b.x);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {items.map((it) =>
+        it.kind === 'tile' ? (
+          <div key={it.el.id} style={{ height: Math.max(120, it.h * (ROW_HEIGHT + 8)) }}>
+            <TileFrame tile={it.el} filterValues={filterValues} editable={false} />
+          </div>
+        ) : (
+          <div key={it.el.id} style={{ background: '#fff', border: '1px solid #e0e0e0', borderRadius: 12, padding: 10, boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
+            <Carousel carousel={it.el} filterValues={filterValues} editable={false} />
+          </div>
+        )
+      )}
+    </div>
+  );
+}
+
+function DesktopGrid({ tiles = [], carousels = [], filterValues, editable, onLayoutChange, onEditTile, onDuplicateTile, onRemoveTile, carouselHandlers }) {
   const layout = [
     ...tiles.map((t) => ({
       i: t.id,

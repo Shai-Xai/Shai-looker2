@@ -4,9 +4,11 @@ import FilterBar from '../components/FilterBar.jsx';
 import EditableGrid from '../components/EditableGrid.jsx';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/auth.jsx';
+import { useIsMobile } from '../lib/useIsMobile.js';
 
 // Read-only render of a saved dashboard.
 export default function ViewPage() {
+  const isMobile = useIsMobile();
   const { id } = useParams();
   const navigate = useNavigate();
   const { isAdmin } = useAuth();
@@ -68,17 +70,18 @@ export default function ViewPage() {
         '--tile-bg': theme.tileBackground || '#fff',
       }}
     >
-      <div style={{ background: 'rgba(255,255,255,0.72)', backdropFilter: 'saturate(180%) blur(20px)', WebkitBackdropFilter: 'saturate(180%) blur(20px)', borderBottom: '1px solid var(--hairline)', padding: '16px 22px', display: 'flex', alignItems: 'center', gap: 16 }}>
+      <div style={{ background: 'rgba(255,255,255,0.72)', backdropFilter: 'saturate(180%) blur(20px)', WebkitBackdropFilter: 'saturate(180%) blur(20px)', borderBottom: '1px solid var(--hairline)', padding: isMobile ? '12px 14px' : '16px 22px', display: 'flex', alignItems: 'center', gap: isMobile ? 10 : 16 }}>
         <Link to="/" style={{ color: 'var(--muted)', fontSize: 13, textDecoration: 'none' }}>← Back</Link>
-        <h2 style={{ fontSize: 21, fontWeight: 600, letterSpacing: '-0.02em', flex: 1 }}>{def.title}</h2>
-        {isAdmin && <button style={editBtn} onClick={() => navigate(`/d/${id}/edit`)}>Edit</button>}
+        <h2 style={{ fontSize: isMobile ? 17 : 21, fontWeight: 600, letterSpacing: '-0.02em', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{def.title}</h2>
+        {/* Editing is desktop/tablet only */}
+        {isAdmin && !isMobile && <button style={editBtn} onClick={() => navigate(`/d/${id}/edit`)}>Edit</button>}
       </div>
 
       {def.filters?.length > 0 && (
         <FilterBar filters={def.filters} values={filterValues} onChange={handleFilterChange} locked={locked} />
       )}
 
-      <div style={{ flex: 1, padding: '22px', overflowY: 'auto' }}>
+      <div style={{ flex: 1, padding: isMobile ? '12px' : '22px', overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
         {def.tiles?.length || def.carousels?.length ? (
           <EditableGrid tiles={def.tiles || []} carousels={def.carousels || []} filterValues={filterValues} editable={false} />
         ) : (

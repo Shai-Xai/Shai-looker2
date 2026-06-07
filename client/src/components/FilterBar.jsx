@@ -1,6 +1,47 @@
 import { useState } from 'react';
+import { useIsMobile } from '../lib/useIsMobile.js';
 
 export default function FilterBar({ filters, values, onChange, locked = {} }) {
+  const isMobile = useIsMobile();
+  const [open, setOpen] = useState(false);
+
+  const controls = filters.map(filter => (
+    <FilterControl
+      key={filter.id}
+      filter={filter}
+      value={values[filter.name] ?? ''}
+      onChange={val => onChange(filter.name, val)}
+      locked={!!locked[filter.name]}
+    />
+  ));
+
+  // Mobile: a compact "Filters" trigger that opens a bottom sheet, so filters
+  // don't eat half the screen above the dashboard.
+  if (isMobile) {
+    const activeCount = filters.filter(f => (values[f.name] ?? '') !== '').length;
+    return (
+      <>
+        <div style={{ background: 'var(--card)', borderBottom: '1px solid var(--hairline)', padding: '10px 14px', display: 'flex' }}>
+          <button onClick={() => setOpen(true)} style={filterTrigger}>
+            <span>⚲ Filters</span>
+            {activeCount > 0 && <span style={countPill}>{activeCount}</span>}
+          </button>
+        </div>
+        {open && (
+          <div style={sheetBackdrop} onClick={() => setOpen(false)}>
+            <div style={sheet} onClick={e => e.stopPropagation()}>
+              <div style={{ display: 'flex', alignItems: 'center', marginBottom: 14 }}>
+                <h3 style={{ fontSize: 16, fontWeight: 700, flex: 1 }}>Filters</h3>
+                <button onClick={() => setOpen(false)} style={doneBtn}>Done</button>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>{controls}</div>
+            </div>
+          </div>
+        )}
+      </>
+    );
+  }
+
   return (
     <div style={{
       background: 'var(--card)',
@@ -11,18 +52,16 @@ export default function FilterBar({ filters, values, onChange, locked = {} }) {
       gap: 14,
       alignItems: 'flex-end',
     }}>
-      {filters.map(filter => (
-        <FilterControl
-          key={filter.id}
-          filter={filter}
-          value={values[filter.name] ?? ''}
-          onChange={val => onChange(filter.name, val)}
-          locked={!!locked[filter.name]}
-        />
-      ))}
+      {controls}
     </div>
   );
 }
+
+const filterTrigger = { display: 'inline-flex', alignItems: 'center', gap: 8, padding: '9px 16px', background: 'rgba(0,0,0,0.05)', color: 'var(--text)', border: 'none', borderRadius: 980, fontSize: 14, fontWeight: 600, cursor: 'pointer' };
+const countPill = { background: 'var(--brand)', color: '#fff', fontSize: 11, fontWeight: 700, borderRadius: 980, minWidth: 18, height: 18, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' };
+const sheetBackdrop = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 1000, display: 'flex', alignItems: 'flex-end' };
+const sheet = { background: '#fff', width: '100%', maxHeight: '80dvh', overflowY: 'auto', borderRadius: '18px 18px 0 0', padding: '18px 18px calc(18px + env(safe-area-inset-bottom))', boxShadow: '0 -4px 24px rgba(0,0,0,0.2)' };
+const doneBtn = { padding: '7px 16px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer' };
 
 // A scoped, non-editable filter (the client's organiser/event). Shows the
 // value with a lock so it's clear it's fixed to their account.

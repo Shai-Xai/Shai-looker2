@@ -7,15 +7,17 @@ import AdminPage from './pages/AdminPage.jsx';
 import LoginPage from './pages/LoginPage.jsx';
 import { DrillProvider } from './lib/DrillContext.jsx';
 import { AuthProvider, useAuth } from './lib/auth.jsx';
+import { useIsMobile } from './lib/useIsMobile.js';
 
 function Header() {
   const navigate = useNavigate();
   const { user, isAdmin, logout } = useAuth();
+  const isMobile = useIsMobile();
   return (
     <header style={{
       background: 'rgba(255,255,255,0.72)', backdropFilter: 'saturate(180%) blur(20px)', WebkitBackdropFilter: 'saturate(180%) blur(20px)',
-      borderBottom: '1px solid var(--hairline)', padding: '0 22px',
-      height: 56, display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0, zIndex: 10,
+      borderBottom: '1px solid var(--hairline)', padding: isMobile ? '0 14px' : '0 22px',
+      height: 56, display: 'flex', alignItems: 'center', gap: isMobile ? 8 : 12, flexShrink: 0, zIndex: 10,
     }}>
       <div style={{ width: 30, height: 30, background: 'var(--brand)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer' }} onClick={() => navigate('/')}>
         <svg width="17" height="17" viewBox="0 0 24 24" fill="white">
@@ -23,11 +25,12 @@ function Header() {
         </svg>
       </div>
       <Link to="/" style={{ fontSize: 17, fontWeight: 700, letterSpacing: '-0.3px', textDecoration: 'none', color: 'var(--text)' }}>Howler</Link>
-      <span style={{ fontSize: 13, color: 'var(--muted)', borderLeft: '1px solid #e0e0e0', paddingLeft: 12 }}>Analytics Studio</span>
+      {/* Secondary text only fits on tablet+ */}
+      {!isMobile && <span style={{ fontSize: 13, color: 'var(--muted)', borderLeft: '1px solid #e0e0e0', paddingLeft: 12 }}>Analytics Studio</span>}
       <div style={{ flex: 1 }} />
       {isAdmin && <Link to="/admin" style={navLink}>Admin</Link>}
-      <span style={{ fontSize: 13, color: 'var(--muted)' }}>{user?.email}{isAdmin ? ' (admin)' : ''}</span>
-      <button onClick={() => logout()} style={logoutBtn}>Log out</button>
+      {!isMobile && <span style={{ fontSize: 13, color: 'var(--muted)' }}>{user?.email}{isAdmin ? ' (admin)' : ''}</span>}
+      <button onClick={() => logout()} style={logoutBtn}>{isMobile ? 'Exit' : 'Log out'}</button>
     </header>
   );
 }
@@ -46,7 +49,7 @@ function Shell() {
   return (
     <BrowserRouter>
       <DrillProvider>
-        <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh' }}>
           <Header />
           <Routes>
             <Route path="/" element={<HomePage />} />
