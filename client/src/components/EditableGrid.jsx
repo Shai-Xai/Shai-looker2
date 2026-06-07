@@ -106,7 +106,7 @@ function DesktopGrid({ tiles = [], carousels = [], filterValues, editable, onLay
       draggableHandle=".tile-drag-handle"
       onDragStop={handleChange}
       onResizeStop={handleChange}
-      compactType={null}
+      compactType="vertical"
       preventCollision={false}
     >
       {tiles.map((tile) => (

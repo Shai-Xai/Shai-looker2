@@ -42,17 +42,33 @@ export default function FilterBar({ filters, values, onChange, locked = {} }) {
     );
   }
 
+  // Desktop: collapsed by default behind a "Filters" toggle, with a summary of
+  // what's currently applied so it's clear without expanding.
+  const activeCount = filters.filter(f => (values[f.name] ?? '') !== '').length;
+  const summary = filters
+    .filter(f => (values[f.name] ?? '') !== '')
+    .map(f => `${f.title}: ${values[f.name]}`)
+    .join('   ·   ');
+
   return (
-    <div style={{
-      background: 'var(--card)',
-      borderBottom: '1px solid var(--hairline)',
-      padding: '14px 22px',
-      display: 'flex',
-      flexWrap: 'wrap',
-      gap: 14,
-      alignItems: 'flex-end',
-    }}>
-      {controls}
+    <div style={{ background: 'var(--card)', borderBottom: '1px solid var(--hairline)', padding: '12px 22px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, minWidth: 0 }}>
+        <button onClick={() => setOpen(v => !v)} style={filterTrigger}>
+          <span>⚲ Filters</span>
+          {activeCount > 0 && <span style={countPill}>{activeCount}</span>}
+          <span style={{ fontSize: 11, color: '#888' }}>{open ? '▴' : '▾'}</span>
+        </button>
+        {!open && summary && (
+          <span style={{ fontSize: 13, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={summary}>
+            {summary}
+          </span>
+        )}
+      </div>
+      {open && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'flex-end', marginTop: 14 }}>
+          {controls}
+        </div>
+      )}
     </div>
   );
 }
