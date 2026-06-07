@@ -286,6 +286,35 @@ app.get('/api/looker/explores/:model/:explore', auth.requireAdmin, async (req, r
 
 // ─── Query execution (the calculation engine) — scoped per tenant ──────────────
 
+// Slow explores (e.g. cashless) get hammered with identical queries when many
+// tiles or repeat views run. Cache results briefly AND de-duplicate in-flight
+// runs so the same Looker query is never launched twice at once.
+const QCACHE_TTL = (Number(process.env.QUERY_CACHE_TTL) || 60) * 1000;
+const QCACHE_MAX = 300;
+const qCache = new Map();    // key -> { at, data }
+const qInflight = new Map(); // key -> Promise
+function stableKey(obj) {
+  if (Array.isArray(obj)) return '[' + obj.map(stableKey).join(',') + ']';
+  if (obj && typeof obj === 'object') return '{' + Object.keys(obj).sort().map((k) => JSON.stringify(k) + ':' + stableKey(obj[k])).join(',') + '}';
+  return JSON.stringify(obj);
+}
+async function runLookerQuery(path, body) {
+  const key = path + '|' + stableKey(body);
+  const hit = qCache.get(key);
+  if (hit && Date.now() - hit.at < QCACHE_TTL) return hit.data;
+  if (qInflight.has(key)) return qInflight.get(key); // dedup concurrent identical runs
+  const p = looker.lookerRequest('POST', path, body)
+    .then((data) => {
+      qInflight.delete(key);
+      qCache.set(key, { at: Date.now(), data });
+      if (qCache.size > QCACHE_MAX) qCache.delete(qCache.keys().next().value);
+      return data;
+    })
+    .catch((e) => { qInflight.delete(key); throw e; });
+  qInflight.set(key, p);
+  return p;
+}
+
 // Force the user's ENTITY (organiser) lock onto every query — the hard security
 // boundary. Suite locks (event/cashless) are NOT forced here; they're per-tile
 // presets applied client-side via listenTo, so current/past/comparison don't
@@ -314,7 +343,7 @@ app.post('/api/run-query', auth.requireAuth, async (req, res) => {
     if (!applyScope(queryBody, req.user, suiteId)) {
       return res.status(403).json({ error: 'No data access is configured for your account yet.' });
     }
-    const data = await looker.lookerRequest('POST', '/queries/run/json_detail', queryBody);
+    const data = await runLookerQuery('/queries/run/json_detail', queryBody);
     res.json(data);
   } catch (err) {
     console.error('[POST /api/run-query]', err.message);
@@ -329,7 +358,7 @@ app.post('/api/drill', auth.requireAuth, async (req, res) => {
     if (!applyScope(query, req.user, req.body?.suiteId)) {
       return res.status(403).json({ error: 'No data access is configured for your account yet.' });
     }
-    const data = await looker.lookerRequest('POST', '/queries/run/json_detail', query);
+    const data = await runLookerQuery('/queries/run/json_detail', query);
     res.json({ query, data });
   } catch (err) {
     console.error('[POST /api/drill]', err.message);
@@ -366,7 +395,7 @@ app.post('/api/filter-suggest', auth.requireAuth, async (req, res) => {
       }
     }
     if (!applyScope(q, req.user, suiteId)) return res.json({ suggestions: [] });
-    const rows = await looker.lookerRequest('POST', '/queries/run/json', q);
+    const rows = await runLookerQuery('/queries/run/json', q);
     const seen = new Set();
     const suggestions = [];
     const isId = field.endsWith('.id');
