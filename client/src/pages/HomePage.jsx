@@ -12,6 +12,8 @@ export default function HomePage() {
   const [importId, setImportId] = useState('');
   const [importTitle, setImportTitle] = useState('');
   const [importing, setImporting] = useState(false);
+  const [templates, setTemplates] = useState([]);
+  const [folderId, setFolderId] = useState('');
 
   function load() {
     setLoading(true);
@@ -22,6 +24,14 @@ export default function HomePage() {
   }
 
   useEffect(load, []);
+  useEffect(() => { if (isAdmin) api.adminListTemplates().then(setTemplates).catch(() => {}); }, [isAdmin]);
+
+  async function newFolder() {
+    const name = prompt('New folder name:');
+    if (!name || !name.trim()) return;
+    try { const t = await api.adminCreateTemplate({ name: name.trim(), dashboardIds: [] }); setTemplates((cur) => [...cur, t]); setFolderId(t.id); }
+    catch (e) { alert(e.message); }
+  }
 
   async function handleCreate() {
     try {
@@ -36,7 +46,7 @@ export default function HomePage() {
     if (!importId.trim()) return;
     setImporting(true);
     try {
-      const d = await api.importDashboard(importId.trim(), importTitle.trim() || undefined);
+      const d = await api.importDashboard(importId.trim(), importTitle.trim() || undefined, folderId || undefined);
       navigate(`/d/${d.id}/edit`);
     } catch (e) {
       alert('Import failed: ' + e.message);
@@ -73,6 +83,11 @@ export default function HomePage() {
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <input style={inputStyle} placeholder="Looker dashboard ID" value={importId} onChange={(e) => setImportId(e.target.value)} />
             <input style={inputStyle} placeholder="New title (optional)" value={importTitle} onChange={(e) => setImportTitle(e.target.value)} />
+            <select style={inputStyle} value={folderId} onChange={(e) => (e.target.value === '__new' ? newFolder() : setFolderId(e.target.value))}>
+              <option value="">Add to folder… (optional)</option>
+              {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              <option value="__new">+ New folder…</option>
+            </select>
             <button style={primaryBtn} onClick={handleImport} disabled={importing || !importId.trim()}>
               {importing ? 'Importing…' : 'Import'}
             </button>

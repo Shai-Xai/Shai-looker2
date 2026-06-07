@@ -190,14 +190,20 @@ app.delete('/api/dashboards/:id', auth.requireAdmin, (req, res) => {
 });
 
 app.post('/api/dashboards/import', auth.requireAdmin, async (req, res) => {
-  const { lookerDashboardId, title } = req.body || {};
+  const { lookerDashboardId, title, templateId } = req.body || {};
   if (!lookerDashboardId) return res.status(400).json({ error: 'lookerDashboardId is required' });
   try {
     const source = await fetchDashboard(lookerDashboardId);
     await looker.resolveElementQueries(source.elements);
     const def = convertDashboard(source);
     if (title) def.title = title;
-    res.status(201).json(store.create(def));
+    const created = store.create(def);
+    // Optionally add the new dashboard to a template (folder) on import.
+    if (templateId && db.getTemplate(templateId)) {
+      const t = db.getTemplate(templateId);
+      db.setTemplateDashboards(templateId, [...t.dashboardIds, created.id]);
+    }
+    res.status(201).json(created);
   } catch (err) {
     console.error('[POST /api/dashboards/import]', err.message);
     res.status(500).json({ error: err.message });
