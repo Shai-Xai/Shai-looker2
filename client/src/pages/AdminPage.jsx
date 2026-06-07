@@ -85,25 +85,41 @@ function Sets() {
 function SetCard({ set, dashboards, onChange }) {
   const [name, setName] = useState(set.name);
   const [ids, setIds] = useState(set.dashboardIds || []);
+  const [folder, setFolder] = useState(''); // '' = all, '__unfiled', else folder name
   const [saved, setSaved] = useState(false);
   const toggle = (id) => setIds((cur) => cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]);
   const save = async () => { await api.adminUpdateSet(set.id, { name, dashboardIds: ids }); flash(setSaved); onChange(); };
   const remove = async () => { if (confirm(`Delete set "${set.name}"?`)) { await api.adminDeleteSet(set.id); onChange(); } };
+
+  const folders = [...new Set(dashboards.map((d) => d.folder).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  const visible = dashboards.filter((d) => folder === '' || (folder === '__unfiled' ? !d.folder : d.folder === folder));
+  const addAll = () => setIds((cur) => [...new Set([...cur, ...visible.map((d) => d.id)])]);
+
   return (
     <div style={cardStyle}>
       <Row>
         <input style={{ ...input, fontWeight: 700, flex: 1 }} value={name} onChange={(e) => setName(e.target.value)} />
         <button style={delBtn} onClick={remove}>Delete</button>
       </Row>
-      <L>Dashboards in this set ({ids.length})</L>
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, flexWrap: 'wrap' }}>
+        <Field label="Folder">
+          <select style={input} value={folder} onChange={(e) => setFolder(e.target.value)}>
+            <option value="">All folders</option>
+            {folders.map((f) => <option key={f} value={f}>{f}</option>)}
+            <option value="__unfiled">Unfiled</option>
+          </select>
+        </Field>
+        {folder !== '' && visible.length > 0 && <button style={miniBtn} onClick={addAll}>+ Add all in folder</button>}
+        <span style={{ fontSize: 12, color: 'var(--muted)', marginLeft: 'auto' }}>{ids.length} selected</span>
+      </div>
       <div style={checkList}>
-        {dashboards.map((d) => (
+        {visible.map((d) => (
           <label key={d.id} style={checkItem}>
             <input type="checkbox" checked={ids.includes(d.id)} onChange={() => toggle(d.id)} />
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.title}</span>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.title}{!d.folder && <span style={{ color: '#bbb' }}> · unfiled</span>}</span>
           </label>
         ))}
-        {dashboards.length === 0 && <Muted>No dashboards yet.</Muted>}
+        {visible.length === 0 && <Muted>No dashboards{folder ? ' in this folder' : ' yet'}.</Muted>}
       </div>
       <SaveRow onSave={save} saved={saved} id={set.id} />
     </div>

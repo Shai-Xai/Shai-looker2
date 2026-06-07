@@ -195,20 +195,16 @@ app.delete('/api/dashboards/:id', auth.requireAdmin, (req, res) => {
 });
 
 app.post('/api/dashboards/import', auth.requireAdmin, async (req, res) => {
-  const { lookerDashboardId, title, setId } = req.body || {};
+  const { lookerDashboardId, title, folder } = req.body || {};
   if (!lookerDashboardId) return res.status(400).json({ error: 'lookerDashboardId is required' });
   try {
     const source = await fetchDashboard(lookerDashboardId);
     await looker.resolveElementQueries(source.elements);
     const def = convertDashboard(source);
     if (title) def.title = title;
-    const created = store.create(def);
-    // Optionally add the new dashboard to a Set (folder) on import.
-    if (setId && db.getSet(setId)) {
-      const s = db.getSet(setId);
-      db.setSetDashboards(setId, [...s.dashboardIds, created.id]);
-    }
-    res.status(201).json(created);
+    // Folder: explicit choice, else the dashboard's Looker folder.
+    def.folder = (folder || source.dashboard?.folder?.name || '').trim();
+    res.status(201).json(store.create(def));
   } catch (err) {
     console.error('[POST /api/dashboards/import]', err.message);
     res.status(500).json({ error: err.message });
@@ -223,31 +219,41 @@ app.get('/api/looker/folder/:id', auth.requireAdmin, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Import every dashboard in a Looker folder into a new Set (named after the
-// folder). Sequential — can take a while for big folders.
+// Import every dashboard in a Looker folder, filing them under a folder (the
+// Looker folder name by default). Sequential — can take a while for big folders.
 app.post('/api/dashboards/import-folder', auth.requireAdmin, async (req, res) => {
-  const { folderId, setName } = req.body || {};
+  const { folderId, folder: folderName } = req.body || {};
   if (!folderId) return res.status(400).json({ error: 'folderId is required' });
   try {
     const folder = await looker.lookerRequest('GET', `/folders/${encodeURIComponent(folderId)}?fields=id,name,dashboards(id,title)`);
+    const name = (folderName || folder.name || 'Imported folder').trim();
     const list = folder.dashboards || [];
-    const importedIds = [];
+    let imported = 0;
     const failed = [];
     for (const d of list) {
       try {
         const source = await fetchDashboard(String(d.id));
         await looker.resolveElementQueries(source.elements);
-        importedIds.push(store.create(convertDashboard(source)).id);
+        const def = convertDashboard(source);
+        def.folder = name;
+        store.create(def);
+        imported++;
       } catch (e) {
         failed.push({ id: d.id, title: d.title, error: e.message });
       }
     }
-    const set = db.createSet({ name: setName || folder.name || 'Imported folder', dashboardIds: importedIds });
-    res.json({ set, imported: importedIds.length, total: list.length, failed });
+    res.json({ folder: name, imported, total: list.length, failed });
   } catch (err) {
     console.error('[POST /api/dashboards/import-folder]', err.message);
     res.status(500).json({ error: err.message });
   }
+});
+
+// Distinct dashboard folders (for pickers/grouping).
+app.get('/api/admin/folders', auth.requireAdmin, (_req, res) => {
+  const set = new Set();
+  for (const d of db.listDashboards()) if (d.folder) set.add(d.folder);
+  res.json([...set].sort((a, b) => a.localeCompare(b)));
 });
 
 // ─── LookML metadata (admin builds tiles) ──────────────────────────────────────

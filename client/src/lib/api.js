@@ -54,11 +54,11 @@ export const api = {
       body: JSON.stringify(def),
     }).then(json),
   deleteDashboard: (id) => fetch(`/api/dashboards/${id}`, { method: 'DELETE' }),
-  importDashboard: (lookerDashboardId, title, setId) =>
+  importDashboard: (lookerDashboardId, title, folder) =>
     fetch('/api/dashboards/import', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ lookerDashboardId, title, setId }),
+      body: JSON.stringify({ lookerDashboardId, title, folder }),
     }).then(json),
 
   // LookML metadata
@@ -92,12 +92,14 @@ export const api = {
       signal,
     }).then(json),
 
-  // Looker folder import (brings in all its dashboards as a Set)
+  // Dashboard folders (organisational)
+  adminFolders: () => fetch('/api/admin/folders').then(json),
+  // Looker folder import (files all its dashboards under a folder)
   lookerFolder: (id) => fetch(`/api/looker/folder/${encodeURIComponent(id)}`).then(json),
-  importFolder: (folderId, setName) =>
+  importFolder: (folderId, folder) =>
     fetch('/api/dashboards/import-folder', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ folderId, setName }),
+      body: JSON.stringify({ folderId, folder }),
     }).then(json),
 
   // Client navigation: Suites

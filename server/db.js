@@ -205,7 +205,7 @@ function rowToDashboard(r) {
 function listDashboards() {
   return db.prepare('SELECT * FROM dashboards ORDER BY updated_at DESC').all().map((r) => {
     const def = J(r.def, {});
-    return { id: r.id, title: r.title, description: def.description || '', tileCount: (def.tiles || []).length, source: def.source || null, createdAt: r.created_at, updatedAt: r.updated_at };
+    return { id: r.id, title: r.title, description: def.description || '', folder: def.folder || '', tileCount: (def.tiles || []).length, source: def.source || null, createdAt: r.created_at, updatedAt: r.updated_at };
   });
 }
 function getDashboard(id) { return rowToDashboard(db.prepare('SELECT * FROM dashboards WHERE id=?').get(id)); }
@@ -214,6 +214,7 @@ function createDashboard(def = {}) {
   const ts = now();
   const dash = {
     id: uuid(), title: def.title || 'Untitled dashboard', description: def.description || '',
+    folder: def.folder || '', // organisational folder (e.g. the Looker folder it came from)
     theme: def.theme || defaultTheme(), filters: def.filters || [], tiles: def.tiles || [],
     carousels: def.carousels || [], gridAfter: def.gridAfter || 0, source: def.source || null,
     createdAt: ts, updatedAt: ts,
