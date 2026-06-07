@@ -63,8 +63,8 @@ export default function TableTile({ data, visConfig = {} }) {
         <table style={tableStyle}>
           <thead>
             <tr>
-              {dimensions.map((d) => (
-                <th key={d.name} rowSpan={2} style={{ ...thStyle, textAlign: 'left' }}>{d.label_short || d.label}</th>
+              {dimensions.map((d, di) => (
+                <th key={d.name} rowSpan={2} style={{ ...thStyle, textAlign: 'left', ...(di === 0 ? stickyHeadCorner : null) }}>{d.label_short || d.label}</th>
               ))}
               {groups.map((g, gi) => (
                 <th key={g.p.key} colSpan={g.ms.length} style={{ ...thStyle, textAlign: 'center', borderLeft: gi ? '1px solid #e6e6e6' : undefined }}>
@@ -83,8 +83,8 @@ export default function TableTile({ data, visConfig = {} }) {
           <tbody>
             {rows.map((row, i) => (
               <tr key={i} style={{ background: i % 2 ? '#fafafa' : '#fff' }}>
-                {dimensions.map((d) => (
-                  <td key={d.name} style={{ ...tdStyle, textAlign: 'left' }}>{cellText(row[d.name])}</td>
+                {dimensions.map((d, di) => (
+                  <td key={d.name} style={{ ...tdStyle, textAlign: 'left', ...(di === 0 ? stickyCol(i % 2 ? '#fafafa' : '#fff') : null) }}>{cellText(row[d.name])}</td>
                 ))}
                 {groups.map((g, gi) => g.ms.map((m, mi) => {
                   const cell = row[m.name]?.[g.p.key];
@@ -119,8 +119,8 @@ export default function TableTile({ data, visConfig = {} }) {
       <table style={tableStyle}>
         <thead>
           <tr>
-            {allFields.map((f) => (
-              <th key={f.name} style={{ ...thStyle, textAlign: align(f) }} title={f.label || f.name}>
+            {allFields.map((f, fi) => (
+              <th key={f.name} style={{ ...thStyle, textAlign: align(f), ...(fi === 0 ? stickyHeadCorner : null) }} title={f.label || f.name}>
                 {f.label_short || f.label}
               </th>
             ))}
@@ -129,13 +129,13 @@ export default function TableTile({ data, visConfig = {} }) {
         <tbody>
           {rows.map((row, i) => (
             <tr key={i} style={{ background: i % 2 ? '#fafafa' : '#fff' }}>
-              {allFields.map((f) => {
+              {allFields.map((f, fi) => {
                 const cell = row[f.name];
                 const isMeasure = measures.includes(f);
                 const dr = isMeasure ? drillCell(cell, [drillTitle(row, f)]) : {};
                 return (
                   <td key={f.name} {...dr}
-                    style={{ ...tdStyle, textAlign: align(f), fontVariantNumeric: isMeasure ? 'tabular-nums' : 'normal', ...(dr.style || null) }}>
+                    style={{ ...tdStyle, textAlign: align(f), fontVariantNumeric: isMeasure ? 'tabular-nums' : 'normal', ...(fi === 0 ? stickyCol(i % 2 ? '#fafafa' : '#fff') : null), ...(dr.style || null) }}>
                     {cellText(cell)}
                   </td>
                 );
@@ -155,9 +155,13 @@ function Scroll({ children }) {
 const tableStyle = { borderCollapse: 'collapse', width: '100%', fontSize: 12 };
 const thStyle = {
   padding: '6px 10px', background: '#f7f7f7', borderBottom: '2px solid #e0e0e0',
-  fontWeight: 600, whiteSpace: 'nowrap', position: 'sticky', top: 0, zIndex: 1,
+  fontWeight: 600, whiteSpace: 'nowrap', position: 'sticky', top: 0, zIndex: 2,
 };
 const tdStyle = { padding: '5px 10px', borderBottom: '1px solid #f0f0f0', whiteSpace: 'nowrap' };
+// Keep the first (label) column pinned while scrolling wide tables sideways —
+// matters most on narrow/mobile widths. Corner header sits above everything.
+const stickyHeadCorner = { left: 0, zIndex: 3 };
+const stickyCol = (bg) => ({ position: 'sticky', left: 0, zIndex: 1, background: bg });
 const drillStyle = { cursor: 'pointer', color: 'var(--brand)', textDecoration: 'underline', textDecorationStyle: 'dotted', textUnderlineOffset: 2 };
 
 // In-cell data bar (Looker cell visualization): a proportional bar behind the

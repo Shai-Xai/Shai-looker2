@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import { useIsMobile } from '../lib/useIsMobile.js';
 
 // Full-height side panel showing an AI insight that streams in live as Claude
 // writes it. Rendered via a portal to document.body so it escapes the
 // dashboard grid's CSS transform (otherwise position:fixed clamps to the tile).
 export default function InsightModal({ tile, data, filters, onClose }) {
+  const isMobile = useIsMobile();
   const [insight, setInsight] = useState('');
   const [loading, setLoading] = useState(true); // true until first text arrives
   const [error, setError] = useState(null);
@@ -53,9 +55,14 @@ export default function InsightModal({ tile, data, filters, onClose }) {
     return () => controller.abort();
   }, [tile.id]);
 
+  // On phones the panel becomes a full-screen sheet rather than a side panel.
+  const panelStyle = isMobile
+    ? { ...panel, width: '100%', borderRadius: 0, paddingBottom: 'env(safe-area-inset-bottom)' }
+    : panel;
+
   const node = (
-    <div style={overlay} onClick={onClose}>
-      <div style={panel} onClick={(e) => e.stopPropagation()}>
+    <div style={isMobile ? { ...overlay, justifyContent: 'stretch' } : overlay} onClick={onClose}>
+      <div style={panelStyle} onClick={(e) => e.stopPropagation()}>
         <style>{`@keyframes blink { 50% { opacity: 0; } }`}</style>
         <div style={header}>
           <span style={{ fontSize: 18 }}>✨</span>
@@ -63,7 +70,7 @@ export default function InsightModal({ tile, data, filters, onClose }) {
             <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)' }}>AI insight</div>
             <div style={{ fontSize: 15, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{tile.title || 'This tile'}</div>
           </div>
-          <button style={closeBtn} onClick={onClose}>✕</button>
+          <button style={isMobile ? { ...closeBtn, fontSize: 22, padding: '6px 10px' } : closeBtn} onClick={onClose} aria-label="Close">✕</button>
         </div>
 
         <div style={body}>
