@@ -276,7 +276,17 @@ app.post('/api/filter-suggest', auth.requireAuth, async (req, res) => {
     // only see their own values.
     const q = { model, view: explore, fields: [field], sorts: [field], limit: 100 };
     const t = (term || '').trim();
-    if (t) q.filters = { [field]: /^\d+$/.test(t) ? t : `%${t}%` };
+    if (t) {
+      if (/^\d+$/.test(t)) {
+        q.filters = { [field]: t };
+      } else {
+        // Looker's `%x%` LIKE can be case-sensitive (depends on the dialect),
+        // so OR a few case variants to make search effectively case-insensitive.
+        const tc = t.replace(/\b\w/g, (c) => c.toUpperCase());
+        const variants = [...new Set([t, t.toLowerCase(), t.toUpperCase(), tc])];
+        q.filters = { [field]: variants.map((v) => `%${v}%`).join(',') };
+      }
+    }
     if (!applyScope(q, req.user, setId)) return res.json({ suggestions: [] });
     const rows = await looker.lookerRequest('POST', '/queries/run/json', q);
     const seen = new Set();
