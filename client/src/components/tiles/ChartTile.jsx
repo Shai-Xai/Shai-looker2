@@ -152,6 +152,33 @@ function buildOption({ rows, dimensions, measures, pivots, visType, stacked, vis
   // Looker "Values" data labels printed on each point/bar.
   const showLabels = visConfig.show_value_labels === true;
 
+  // Combination charts: Looker's series_types overrides individual series to a
+  // different type (e.g. a column chart where some years render as lines). Keys
+  // are "<pivot value> - <measure name>" (pivoted) or "<measure name>".
+  const baseFlags = { isBar, isLine, isArea, isScatter };
+  const st = visConfig.series_types || {};
+  const flagsFor = (type) => {
+    switch (type) {
+      case 'line': return { isBar: false, isLine: true, isArea: false, isScatter: false };
+      case 'area': return { isBar: false, isLine: true, isArea: true, isScatter: false };
+      case 'column':
+      case 'bar': return { isBar: false, isLine: false, isArea: false, isScatter: false };
+      case 'scatter': return { isBar: false, isLine: false, isArea: false, isScatter: true };
+      default: return baseFlags;
+    }
+  };
+  const typeFor = (pivotKey, mName) => {
+    const key = pivotKey == null ? mName : `${pivotKey} - ${mName}`;
+    if (st[key]) return st[key];
+    if (pivotKey != null) {
+      for (const [k, v] of Object.entries(st)) {
+        const parts = k.split(' - ');
+        if (parts.length >= 2 && parts[parts.length - 1] === mName && parts.slice(0, -1).join(' - ') === String(pivotKey)) return v;
+      }
+    }
+    return null;
+  };
+
   let series = [];
   if (pivots.length > 0) {
     const multi = measures.length > 1;
@@ -162,13 +189,13 @@ function buildOption({ rows, dimensions, measures, pivots, visType, stacked, vis
         const idx = pi * measures.length + mi;
         const name = multi ? `${plabel} — ${m.label_short || m.label}` : plabel;
         seriesMeta[series.length] = { measure: m.name, pivotKey: pivot.key, fmt: m.value_format };
-        series.push(makeSeries(name, rows.map((r) => num(r[m.name]?.[pivot.key]?.value)), idx, { isBar, isLine, isArea, isScatter, stacked, yAxisIndex: yIndexOf(m), showLabels, fmt: m.value_format }));
+        series.push(makeSeries(name, rows.map((r) => num(r[m.name]?.[pivot.key]?.value)), idx, { ...flagsFor(typeFor(pivot.key, m.name)), stacked, yAxisIndex: yIndexOf(m), showLabels, fmt: m.value_format }));
       });
     });
   } else {
     measures.forEach((m, i) => {
       seriesMeta[series.length] = { measure: m.name, fmt: m.value_format };
-      series.push(makeSeries(m.label_short || m.label, rows.map((r) => num(r[m.name]?.value)), i, { isBar, isLine, isArea, isScatter, stacked, yAxisIndex: yIndexOf(m), showLabels, fmt: m.value_format }));
+      series.push(makeSeries(m.label_short || m.label, rows.map((r) => num(r[m.name]?.value)), i, { ...flagsFor(typeFor(null, m.name)), stacked, yAxisIndex: yIndexOf(m), showLabels, fmt: m.value_format }));
     });
   }
 
