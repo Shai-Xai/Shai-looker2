@@ -42,7 +42,7 @@ function Shell() {
   const { user, loading, isAdmin } = useAuth();
 
   if (loading) {
-    return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)' }}>Loading…</div>;
+    return <div style={{ minHeight: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)' }}>Loading…</div>;
   }
   if (!user) return <LoginPage />;
 

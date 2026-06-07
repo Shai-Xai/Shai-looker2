@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
 import { api } from '../lib/api.js';
 import TableTile from './tiles/TableTile.jsx';
+import { useIsMobile } from '../lib/useIsMobile.js';
 
 // Slide-over panel showing the underlying rows behind a clicked value.
 // If the value has multiple drill links, lets the user pick which one.
 export default function DrillModal({ links, title, onClose }) {
+  const isMobile = useIsMobile();
   const [selected, setSelected] = useState(links.length === 1 ? links[0] : null);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -23,9 +25,13 @@ export default function DrillModal({ links, title, onClose }) {
 
   const rowCount = data?.data?.length ?? null;
 
+  const panelStyle = isMobile
+    ? { ...panel, width: '100%', paddingBottom: 'env(safe-area-inset-bottom)' }
+    : panel;
+
   return (
-    <div style={overlay} onClick={onClose}>
-      <div style={panel} onClick={(e) => e.stopPropagation()}>
+    <div style={isMobile ? { ...overlay, justifyContent: 'stretch' } : overlay} onClick={onClose}>
+      <div style={panelStyle} onClick={(e) => e.stopPropagation()}>
         <div style={header}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)' }}>Drill into</div>
@@ -34,7 +40,7 @@ export default function DrillModal({ links, title, onClose }) {
           {selected && links.length > 1 && (
             <button style={backBtn} onClick={() => { setSelected(null); setData(null); }}>‹ Choose drill</button>
           )}
-          <button style={closeBtn} onClick={onClose}>✕</button>
+          <button style={isMobile ? { ...closeBtn, fontSize: 22, padding: '6px 10px' } : closeBtn} onClick={onClose} aria-label="Close">✕</button>
         </div>
 
         <div style={body}>
