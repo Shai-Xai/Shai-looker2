@@ -39,14 +39,17 @@ export default function ChartTile({ data, visConfig = {} }) {
   const fields = data.fields || {};
   const rows = data.data || [];
   const dimensions = fields.dimensions || [];
-  const measures = [...(fields.measures || []), ...(fields.table_calculations || [])];
+  // Honour Looker's hidden fields (e.g. a raw measure hidden in favour of a
+  // running-total / % change calc) — otherwise extra squashed series appear.
+  const hidden = new Set(visConfig.hidden_fields || []);
+  const measures = [...(fields.measures || []), ...(fields.table_calculations || [])].filter((m) => !hidden.has(m.name));
   const pivots = data.pivots || [];
   const visType = visConfig?.type || 'looker_column';
 
   // seriesMeta[seriesIndex] = { measure, pivotKey, fmt } for tooltip + drill.
   const stacked = visConfig.stacking === 'normal' || visConfig.stacking === 'percent';
   const { option, seriesMeta } = useMemo(
-    () => buildOption({ rows, dimensions, measures, pivots, visType, stacked }),
+    () => buildOption({ rows, dimensions, measures, pivots, visType, stacked, visConfig }),
     [data, visType, stacked]
   );
 
@@ -80,7 +83,7 @@ export default function ChartTile({ data, visConfig = {} }) {
   );
 }
 
-function buildOption({ rows, dimensions, measures, pivots, visType, stacked }) {
+function buildOption({ rows, dimensions, measures, pivots, visType, stacked, visConfig = {} }) {
   const isPie = visType === 'looker_pie' || visType === 'looker_donut_multiples';
   const isDonut = visType === 'looker_donut_multiples';
   const isBar = visType === 'looker_bar';       // horizontal
@@ -124,36 +127,54 @@ function buildOption({ rows, dimensions, measures, pivots, visType, stacked }) {
   }
 
   // ─── Bars / lines / area / scatter ───────────────────────────────────────────
+  // Dual y-axis: Looker's y_axes maps each measure (axisId) to a left/right
+  // axis. Only use two axes when visible measures actually span both sides.
+  const yMap = {};
+  for (const ax of (visConfig.y_axes || [])) for (const s of (ax.series || [])) if (s.axisId) yMap[s.axisId] = ax.orientation;
+  const orientationOf = (m) => yMap[m.name] || 'left';
+  const hasRight = !isBar && measures.some((m) => orientationOf(m) === 'right');
+  const hasLeft = measures.some((m) => orientationOf(m) !== 'right');
+  const dual = hasRight && hasLeft;
+  const yIndexOf = (m) => (dual && orientationOf(m) === 'right' ? 1 : 0);
+  const hp = visConfig.hidden_pivots || {};
+
   let series = [];
   if (pivots.length > 0) {
     const multi = measures.length > 1;
     pivots.forEach((pivot, pi) => {
       const plabel = pivot.data ? Object.values(pivot.data).join(' / ') : pivot.key;
       measures.forEach((m, mi) => {
+        if ((hp[pivot.key]?.measure_names || []).includes(m.name)) return; // hidden per-pivot
         const idx = pi * measures.length + mi;
         const name = multi ? `${plabel} — ${m.label_short || m.label}` : plabel;
         seriesMeta[series.length] = { measure: m.name, pivotKey: pivot.key, fmt: m.value_format };
-        series.push(makeSeries(name, rows.map((r) => num(r[m.name]?.[pivot.key]?.value)), idx, { isBar, isLine, isArea, isScatter, stacked }));
+        series.push(makeSeries(name, rows.map((r) => num(r[m.name]?.[pivot.key]?.value)), idx, { isBar, isLine, isArea, isScatter, stacked, yAxisIndex: yIndexOf(m) }));
       });
     });
   } else {
     measures.forEach((m, i) => {
       seriesMeta[series.length] = { measure: m.name, fmt: m.value_format };
-      series.push(makeSeries(m.label_short || m.label, rows.map((r) => num(r[m.name]?.value)), i, { isBar, isLine, isArea, isScatter, stacked }));
+      series.push(makeSeries(m.label_short || m.label, rows.map((r) => num(r[m.name]?.value)), i, { isBar, isLine, isArea, isScatter, stacked, yAxisIndex: yIndexOf(m) }));
     });
   }
 
-  const valueAxis = {
-    type: 'value',
-    axisLabel: { fontSize: 10, color: '#888', formatter: (v) => formatAxis(v, measures[0]?.value_format) },
+  const fmtFor = (axisIdx) => (measures.find((m) => yIndexOf(m) === axisIdx) || measures[0])?.value_format;
+  const valueAxis = (axisIdx, position) => ({
+    type: 'value', position,
+    axisLabel: { fontSize: 10, color: '#888', formatter: (v) => formatAxis(v, fmtFor(axisIdx)) },
     splitLine: { lineStyle: { color: '#f2f2f2' } },
     axisLine: { show: false }, axisTick: { show: false },
-  };
+  });
   const catAxis = {
-    type: 'category', data: labels, boundaryGap: !isLine || isBar ? true : true,
+    type: 'category', data: labels, boundaryGap: true,
     axisLabel: { fontSize: 10, color: '#888', hideOverlap: true, rotate: labels.length > 8 && !isBar ? 35 : 0 },
     axisLine: { lineStyle: { color: '#e6e6e6' } }, axisTick: { show: false },
   };
+
+  const xAxis = isBar ? valueAxis(0, 'bottom') : catAxis;
+  const yAxis = isBar
+    ? catAxis
+    : (dual ? [valueAxis(0, 'left'), valueAxis(1, 'right')] : [valueAxis(0, 'left')]);
 
   const showLegend = series.length > 1;
   return {
@@ -161,7 +182,7 @@ function buildOption({ rows, dimensions, measures, pivots, visType, stacked }) {
     option: {
       ...baseAnim,
       color: HOWLER,
-      grid: { left: 6, right: 14, top: 12, bottom: showLegend ? 34 : 18, containLabel: true },
+      grid: { left: 6, right: dual ? 6 : 14, top: 12, bottom: showLegend ? 34 : 18, containLabel: true },
       tooltip: {
         trigger: isScatter ? 'item' : 'axis',
         ...tooltipStyle,
@@ -179,21 +200,21 @@ function buildOption({ rows, dimensions, measures, pivots, visType, stacked }) {
         },
       },
       legend: showLegend ? { bottom: 0, type: 'scroll', textStyle: { fontSize: 11 }, icon: 'roundRect' } : undefined,
-      xAxis: isBar ? valueAxis : catAxis,
-      yAxis: isBar ? catAxis : valueAxis,
+      xAxis,
+      yAxis,
       series,
     },
   };
 }
 
-function makeSeries(name, vals, idx, { isBar, isLine, isArea, isScatter, stacked }) {
+function makeSeries(name, vals, idx, { isBar, isLine, isArea, isScatter, stacked, yAxisIndex = 0 }) {
   const c = color(idx);
   if (isScatter) {
-    return { name, type: 'scatter', data: vals, symbolSize: 10, itemStyle: { color: hexToRgba(c, 0.8) } };
+    return { name, type: 'scatter', yAxisIndex, data: vals, symbolSize: 10, itemStyle: { color: hexToRgba(c, 0.8) } };
   }
   if (isLine) {
     return {
-      name, type: 'line', data: vals, smooth: true, showSymbol: false,
+      name, type: 'line', yAxisIndex, data: vals, smooth: true, showSymbol: false,
       lineStyle: { width: 3, color: c }, itemStyle: { color: c },
       areaStyle: isArea ? { color: areaGradient(c) } : undefined,
       stack: stacked ? 'total' : undefined,
@@ -202,7 +223,7 @@ function makeSeries(name, vals, idx, { isBar, isLine, isArea, isScatter, stacked
   }
   // bar (vertical column or horizontal bar)
   return {
-    name, type: 'bar', data: vals,
+    name, type: 'bar', yAxisIndex, data: vals,
     barMaxWidth: 38,
     itemStyle: {
       color: barGradient(c, isBar),
