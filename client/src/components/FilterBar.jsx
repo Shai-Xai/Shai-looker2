@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useIsMobile } from '../lib/useIsMobile.js';
 
 export default function FilterBar({ filters, values, onChange, locked = {} }) {
@@ -80,12 +80,14 @@ function LockedField({ filter, value }) {
 function FilterControl({ filter, value, onChange, locked }) {
   if (locked) return <LockedField filter={filter} value={value} />;
   const uiType = filter.ui_config?.type;
+  const isDate = uiType === 'relative_timeframes' || uiType === 'date_range_picker' || filter.type === 'date_filter';
+  const field = filter.field || filter.dimension;
+  const canSuggest = !isDate && !!(filter.model && filter.explore && field);
 
-  // Date range picker
-  if (uiType === 'relative_timeframes' || uiType === 'date_range_picker' || filter.type === 'date_filter') {
-    return (
-      <div style={fieldStyle}>
-        <label style={labelStyle}>{filter.title}</label>
+  return (
+    <div style={fieldStyle}>
+      <label style={labelStyle}>{filter.title}</label>
+      {isDate ? (
         <input
           type="text"
           value={value}
@@ -94,89 +96,90 @@ function FilterControl({ filter, value, onChange, locked }) {
           style={inputStyle}
           title="Looker date filter expression"
         />
-      </div>
-    );
-  }
-
-  // Dropdown (tag_list / button_group / checkboxes with options)
-  if (uiType === 'tag_list' || uiType === 'button_group' || uiType === 'checkboxes') {
-    return (
-      <div style={fieldStyle}>
-        <label style={labelStyle}>{filter.title}</label>
-        <FilterAutocomplete filter={filter} value={value} onChange={onChange} />
-      </div>
-    );
-  }
-
-  // Default: text input
-  return (
-    <div style={fieldStyle}>
-      <label style={labelStyle}>{filter.title}</label>
-      <input
-        type="text"
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        placeholder="Filter value…"
-        style={inputStyle}
-      />
+      ) : canSuggest ? (
+        <FilterDropdown filter={filter} value={value} onChange={onChange} />
+      ) : (
+        <input type="text" value={value} onChange={e => onChange(e.target.value)} placeholder="Filter value…" style={inputStyle} />
+      )}
     </div>
   );
 }
 
-// Text input with a small suggestion list fetched from Looker suggest API
-function FilterAutocomplete({ filter, value, onChange }) {
-  const [suggestions, setSuggestions] = useState([]);
+// A searchable dropdown of a dimension's values (fetched from Looker on open).
+// Type to filter the list; click to select; also accepts free text.
+function FilterDropdown({ filter, value, onChange }) {
+  const [all, setAll] = useState([]);
   const [open, setOpen] = useState(false);
-  const [fetching, setFetching] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [query, setQuery] = useState('');
+  const boxRef = useRef(null);
 
-  async function loadSuggestions() {
-    if (suggestions.length > 0 || fetching) { setOpen(true); return; }
-    const field = filter.field || filter.dimension;
-    if (!filter.model || !filter.explore || !field) { setOpen(true); return; }
-    setFetching(true);
+  async function load() {
+    if (loaded || loading) return;
+    setLoading(true);
     try {
       const res = await fetch('/api/filter-suggest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: filter.model, explore: filter.explore, field }),
+        body: JSON.stringify({ model: filter.model, explore: filter.explore, field: filter.field || filter.dimension }),
       });
       const data = await res.json();
-      setSuggestions(data.suggestions || []);
+      setAll(data.suggestions || []);
     } catch (_) {
-      // silently ignore — still usable as plain text input
+      setAll([]);
     } finally {
-      setFetching(false);
-      setOpen(true);
+      setLoading(false);
+      setLoaded(true);
     }
   }
 
+  function openList() { setOpen(true); load(); }
+
+  useEffect(() => {
+    if (!open) return;
+    const h = (e) => { if (boxRef.current && !boxRef.current.contains(e.target)) { setOpen(false); setQuery(''); } };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, [open]);
+
+  const filtered = query ? all.filter(s => s.toLowerCase().includes(query.toLowerCase())) : all;
+  const choose = (s) => { onChange(s); setOpen(false); setQuery(''); };
+
   return (
-    <div style={{ position: 'relative' }}>
+    <div ref={boxRef} style={{ position: 'relative' }}>
       <input
         type="text"
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        onFocus={loadSuggestions}
-        onBlur={() => setTimeout(() => setOpen(false), 150)}
-        placeholder="Filter value…"
-        style={inputStyle}
+        value={open ? query : value}
+        onChange={e => { setQuery(e.target.value); if (!open) setOpen(true); }}
+        onFocus={openList}
+        placeholder={value ? value : 'Select…'}
+        style={{ ...inputStyle, paddingRight: 28 }}
       />
-      {open && suggestions.length > 0 && (
-        <ul style={{
-          position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 100,
-          background: '#fff', border: '1px solid #e0e0e0', borderRadius: 6,
-          boxShadow: '0 4px 12px rgba(0,0,0,0.1)', maxHeight: 200, overflowY: 'auto',
-          listStyle: 'none', margin: 0, padding: '4px 0',
-        }}>
-          {suggestions.map((s, i) => (
-            <li
-              key={i}
-              onMouseDown={() => { onChange(s); setOpen(false); }}
-              style={{ padding: '8px 12px', cursor: 'pointer', fontSize: 13 }}
-              onMouseEnter={e => e.target.style.background = '#f7f7f7'}
-              onMouseLeave={e => e.target.style.background = 'transparent'}
-            >{s}</li>
-          ))}
+      <span
+        onMouseDown={(e) => { e.preventDefault(); open ? (setOpen(false), setQuery('')) : openList(); }}
+        style={caretStyle}
+      >▾</span>
+      {open && (
+        <ul style={dropdownList}>
+          {value && (
+            <li onMouseDown={() => choose('')} style={{ ...optStyle, color: 'var(--muted)' }}>✕ Clear</li>
+          )}
+          {loading ? (
+            <li style={optMuted}>Loading…</li>
+          ) : filtered.length === 0 ? (
+            <li style={optMuted}>{query ? 'No matches' : 'No options'}</li>
+          ) : (
+            filtered.slice(0, 300).map((s, i) => (
+              <li
+                key={i}
+                onMouseDown={() => choose(s)}
+                style={{ ...optStyle, ...(s === value ? { background: '#fff0f3', fontWeight: 600 } : null) }}
+                onMouseEnter={e => { if (s !== value) e.currentTarget.style.background = '#f7f7f7'; }}
+                onMouseLeave={e => { if (s !== value) e.currentTarget.style.background = 'transparent'; }}
+              >{s}</li>
+            ))
+          )}
         </ul>
       )}
     </div>
@@ -185,4 +188,13 @@ function FilterAutocomplete({ filter, value, onChange }) {
 
 const fieldStyle = { display: 'flex', flexDirection: 'column', gap: 5, minWidth: 180 };
 const labelStyle = { fontSize: 11, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em' };
-const inputStyle = { padding: '9px 12px', border: '1px solid var(--hairline)', borderRadius: 10, fontSize: 13, outline: 'none', width: '100%', background: '#fff' };
+const inputStyle = { padding: '9px 12px', border: '1px solid var(--hairline)', borderRadius: 10, fontSize: 13, outline: 'none', width: '100%', background: '#fff', boxSizing: 'border-box' };
+const caretStyle = { position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 11, color: '#888', pointerEvents: 'auto', cursor: 'pointer' };
+const dropdownList = {
+  position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 100, marginTop: 4,
+  background: '#fff', border: '1px solid #e0e0e0', borderRadius: 10,
+  boxShadow: '0 6px 20px rgba(0,0,0,0.12)', maxHeight: 240, overflowY: 'auto',
+  listStyle: 'none', margin: 0, padding: '4px 0',
+};
+const optStyle = { padding: '9px 12px', cursor: 'pointer', fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
+const optMuted = { padding: '9px 12px', fontSize: 13, color: 'var(--muted)' };

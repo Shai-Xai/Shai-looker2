@@ -174,12 +174,24 @@ app.post('/api/drill', auth.requireAuth, async (req, res) => {
 app.post('/api/filter-suggest', auth.requireAuth, async (req, res) => {
   try {
     const { model, explore, field } = req.body;
-    const data = await looker.lookerRequest(
-      'GET',
-      `/looks/model/explore/fields?model_name=${encodeURIComponent(model)}&explore_name=${encodeURIComponent(explore)}&field_names=${encodeURIComponent(field)}&limit=100`
-    );
-    res.json({ suggestions: data?.suggest_dimension?.suggestions || [] });
-  } catch (_) {
+    if (!model || !explore || !field) return res.json({ suggestions: [] });
+    // Get distinct values by running an inline query for just this dimension.
+    // Scope it to the user's tenant so clients only see their own values
+    // (e.g. a client never sees other organisers' event names).
+    const q = { model, view: explore, fields: [field], sorts: [field], limit: 500 };
+    if (!applyScope(q, req.user)) return res.json({ suggestions: [] });
+    const rows = await looker.lookerRequest('POST', '/queries/run/json', q);
+    const seen = new Set();
+    const suggestions = [];
+    for (const r of rows || []) {
+      const v = r[field];
+      if (v == null || v === '') continue;
+      const s = String(v);
+      if (!seen.has(s)) { seen.add(s); suggestions.push(s); }
+    }
+    res.json({ suggestions });
+  } catch (err) {
+    console.error('[POST /api/filter-suggest]', err.message);
     res.json({ suggestions: [] });
   }
 });
