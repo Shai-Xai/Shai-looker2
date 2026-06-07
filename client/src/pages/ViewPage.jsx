@@ -72,14 +72,18 @@ export default function ViewPage() {
           '--tile-bg': theme.tileBackground || '#fff',
         }}
       >
-        <div style={{ background: 'rgba(255,255,255,0.72)', backdropFilter: 'saturate(180%) blur(20px)', WebkitBackdropFilter: 'saturate(180%) blur(20px)', borderBottom: '1px solid var(--hairline)', padding: isMobile ? '12px 14px' : '16px 22px', display: 'flex', alignItems: 'center', gap: isMobile ? 10 : 16 }}>
-          <Link to={backTo} style={{ color: 'var(--muted)', fontSize: 13, textDecoration: 'none' }}>← Back</Link>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            {setInfo && <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)' }}>{setInfo.name}</div>}
-            <h2 style={{ fontSize: isMobile ? 17 : 21, fontWeight: 600, letterSpacing: '-0.02em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{def.title}</h2>
+        {/* On mobile inside a suite the sticky "☰ Menu" bar already shows the
+            context, so skip this header to avoid stacking two titles. */}
+        {!(isMobile && suiteId) && (
+          <div style={{ background: 'rgba(255,255,255,0.72)', backdropFilter: 'saturate(180%) blur(20px)', WebkitBackdropFilter: 'saturate(180%) blur(20px)', borderBottom: '1px solid var(--hairline)', padding: isMobile ? '12px 14px' : '16px 22px', display: 'flex', alignItems: 'center', gap: isMobile ? 10 : 16 }}>
+            <Link to={backTo} style={{ color: 'var(--muted)', fontSize: 13, textDecoration: 'none' }}>← Back</Link>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              {setInfo && <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)' }}>{setInfo.name}</div>}
+              <h2 style={{ fontSize: isMobile ? 17 : 21, fontWeight: 600, letterSpacing: '-0.02em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{def.title}</h2>
+            </div>
+            {isAdmin && !isMobile && <button style={editBtn} onClick={() => navigate(`/d/${id}/edit`)}>Edit</button>}
           </div>
-          {isAdmin && !isMobile && <button style={editBtn} onClick={() => navigate(`/d/${id}/edit`)}>Edit</button>}
-        </div>
+        )}
 
         {def.filters?.length > 0 && (
           <FilterBar filters={def.filters} values={filterValues} onChange={handleFilterChange} locked={locked} />

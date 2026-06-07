@@ -46,6 +46,11 @@ export default function ClientLayout() {
 
   const go = (sid, did) => { navigate(`/suite/${sid}/d/${did}`); if (isMobile) setNavOpen(false); };
 
+  // Title of the active dashboard (for the mobile menu bar).
+  let activeTitle = '';
+  const cur = details[suiteId];
+  if (cur && id) for (const set of cur.sets) { const dash = set.dashboards.find((x) => x.id === id); if (dash) { activeTitle = dash.title; break; } }
+
   const sidebar = (
     <nav className="howler-sidebar" style={{ ...sidebarStyle, ...(isMobile ? mobileSidebar : null) }}>
       <div style={{ display: 'flex', alignItems: 'center', padding: '6px 8px 12px 14px' }}>
@@ -111,7 +116,10 @@ export default function ClientLayout() {
       )}
       <main style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'auto' }}>
         {(isMobile || collapsed) && (
-          <button style={menuBtn} onClick={() => (isMobile ? setNavOpen(true) : toggleCollapsed())}>☰ Suites</button>
+          <div style={menuBar}>
+            <button style={menuBtn} onClick={() => (isMobile ? setNavOpen(true) : toggleCollapsed())}>☰&nbsp; Menu</button>
+            {activeTitle && <span style={{ fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeTitle}</span>}
+          </div>
         )}
         <Outlet />
       </main>
@@ -130,10 +138,11 @@ function Caret({ open, small }) {
 }
 
 const sidebarStyle = { width: 264, flexShrink: 0, overflowY: 'auto', padding: '16px 10px' };
-const mobileSidebar = { position: 'relative', zIndex: 51, height: '100%', boxShadow: '4px 0 24px rgba(0,0,0,0.15)' };
+const mobileSidebar = { position: 'relative', zIndex: 51, height: '100%', width: 'min(290px, 84vw)', boxShadow: '4px 0 24px rgba(0,0,0,0.15)', WebkitOverflowScrolling: 'touch' };
+const menuBar = { position: 'sticky', top: 0, zIndex: 20, display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderBottom: '1px solid var(--hairline)', background: 'rgba(255,255,255,0.72)', backdropFilter: 'saturate(180%) blur(20px)', WebkitBackdropFilter: 'saturate(180%) blur(20px)' };
 const rowBtn = { display: 'flex', alignItems: 'center', gap: 7, width: '100%', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer', padding: '8px 12px', borderRadius: 9, fontSize: 14, color: 'var(--text)', lineHeight: 1.3 };
 const subRow = { padding: '7px 12px', fontSize: 13 };
 const ellip = { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' };
 const dot = { flexShrink: 0, width: 5, height: 5, borderRadius: '50%', display: 'inline-block' };
-const menuBtn = { alignSelf: 'flex-start', margin: '12px 0 0 14px', padding: '7px 14px', borderRadius: 980, border: '1px solid var(--hairline)', background: 'rgba(255,255,255,0.8)', backdropFilter: 'blur(8px)', fontSize: 13, fontWeight: 600, cursor: 'pointer' };
+const menuBtn = { flexShrink: 0, padding: '8px 16px', borderRadius: 980, border: '1px solid var(--hairline)', background: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer' };
 const iconBtn = { width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--hairline)', borderRadius: 7, background: '#fff', color: 'var(--muted-2)', fontSize: 12, cursor: 'pointer' };
