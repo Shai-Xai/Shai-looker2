@@ -97,12 +97,20 @@ function LockedField({ filter, value }) {
 // Looker UI types that allow selecting several values at once.
 const MULTI_TYPES = new Set(['checkboxes', 'tag_list', 'advanced']);
 
+// Looker numeric range value, e.g. "[26,360]" / "(0,100)" — bracket = inclusive,
+// paren = exclusive. Empty ends are allowed: "[26,]".
+const RANGE_RE = /^\s*([[(])\s*(-?\d+(?:\.\d+)?)?\s*,\s*(-?\d+(?:\.\d+)?)?\s*([\])])\s*$/;
+
 function FilterControl({ filter, value, onChange, locked }) {
   if (locked) return <LockedField filter={filter} value={value} />;
   const uiType = filter.ui_config?.type;
   const isDate = uiType === 'relative_timeframes' || uiType === 'date_range_picker' || filter.type === 'date_filter';
   const field = filter.field || filter.dimension;
-  const canSuggest = !isDate && !!(filter.model && filter.explore && field);
+  const opts = filter.ui_config?.options || {};
+  // Numeric range (Looker "advanced" on a number field): a bracketed range, or
+  // min/max bounds declared on the filter.
+  const isRange = uiType === 'advanced' && (RANGE_RE.test(String(value || filter.default_value || '')) || opts.min != null || opts.max != null);
+  const canSuggest = !isDate && !isRange && !!(filter.model && filter.explore && field);
 
   return (
     <div style={fieldStyle}>
@@ -116,11 +124,32 @@ function FilterControl({ filter, value, onChange, locked }) {
           style={inputStyle}
           title="Looker date filter expression"
         />
+      ) : isRange ? (
+        <RangeFilter value={value || filter.default_value} onChange={onChange} opts={opts} />
       ) : canSuggest ? (
         <FilterDropdown filter={filter} value={value} onChange={onChange} multi={MULTI_TYPES.has(uiType)} />
       ) : (
         <input type="text" value={value} onChange={e => onChange(e.target.value)} placeholder="Filter value…" style={inputStyle} />
       )}
+    </div>
+  );
+}
+
+// Looker-style "is in range" control: two editable number inputs, writing back
+// the bracketed range expression (preserving inclusive/exclusive brackets).
+function RangeFilter({ value, onChange, opts }) {
+  const m = RANGE_RE.exec(String(value || ''));
+  const lb = m ? m[1] : '[';
+  const rb = m ? m[4] : ']';
+  const lo = m ? (m[2] ?? '') : '';
+  const hi = m ? (m[3] ?? '') : '';
+  const write = (nlo, nhi) => onChange(`${lb}${nlo === '' ? '' : nlo},${nhi === '' ? '' : nhi}${rb}`);
+  return (
+    <div style={rangeWrap}>
+      <span style={rangeOp}>is in range</span>
+      <input type="number" value={lo} min={opts.min} max={opts.max} onChange={(e) => write(e.target.value, hi)} style={rangeInput} aria-label="from" />
+      <span style={{ color: 'var(--muted)', fontSize: 12 }}>to</span>
+      <input type="number" value={hi} min={opts.min} max={opts.max} onChange={(e) => write(lo, e.target.value)} style={rangeInput} aria-label="to" />
     </div>
   );
 }
@@ -235,6 +264,9 @@ function FilterDropdown({ filter, value, onChange, multi = false }) {
 const fieldStyle = { display: 'flex', flexDirection: 'column', gap: 5, minWidth: 180 };
 const labelStyle = { fontSize: 11, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em' };
 const inputStyle = { padding: '9px 12px', border: '1px solid var(--hairline)', borderRadius: 10, fontSize: 13, outline: 'none', width: '100%', background: '#fff', boxSizing: 'border-box' };
+const rangeWrap = { display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', border: '1px solid var(--hairline)', borderRadius: 10, background: '#fff' };
+const rangeOp = { fontSize: 12, color: 'var(--muted-2)', fontWeight: 600, whiteSpace: 'nowrap' };
+const rangeInput = { width: 64, padding: '6px 8px', border: '1px solid var(--hairline)', borderRadius: 8, fontSize: 13, outline: 'none', textAlign: 'center', background: '#fff', boxSizing: 'border-box' };
 const caretStyle = { position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 11, color: '#888', pointerEvents: 'auto', cursor: 'pointer' };
 const dropdownList = {
   position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 100, marginTop: 4,
