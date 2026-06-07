@@ -60,6 +60,14 @@ export default function HomePage() {
     } catch (e) { alert('Import failed: ' + e.message); }
     finally { setImporting(false); }
   }
+  async function syncFolders() {
+    try {
+      const r = await api.backfillFolders();
+      alert(`Filed ${r.updated} dashboard(s) under their Looker folder.` + (r.errors?.length ? `\n${r.errors.length} could not be read.` : ''));
+      load();
+    } catch (e) { alert('Sync failed: ' + e.message); }
+  }
+
   async function handleDelete(id, e) {
     e.stopPropagation();
     if (!confirm('Delete this dashboard?')) return;
@@ -116,7 +124,12 @@ export default function HomePage() {
       {/* shared datalist of existing folders for the import input */}
       <datalist id="folder-list">{folders.map((f) => <option key={f} value={f} />)}</datalist>
 
-      <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 14 }}>{isAdmin ? 'Your dashboards' : 'Dashboards'}</h2>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+        <h2 style={{ fontSize: 16, fontWeight: 700 }}>{isAdmin ? 'Your dashboards' : 'Dashboards'}</h2>
+        {isAdmin && dashboards.some((d) => !d.folder) && (
+          <button style={{ ...miniBtnOutline, fontSize: 12 }} onClick={syncFolders} title="Look up each imported dashboard's Looker folder">↻ Sync folders from Looker</button>
+        )}
+      </div>
 
       {/* Folder filter bar */}
       {folders.length > 0 && (

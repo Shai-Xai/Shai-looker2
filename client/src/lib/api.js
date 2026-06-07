@@ -94,6 +94,7 @@ export const api = {
 
   // Dashboard folders (organisational)
   adminFolders: () => fetch('/api/admin/folders').then(json),
+  backfillFolders: () => fetch('/api/admin/backfill-folders', { method: 'POST' }).then(json),
   // Looker folder import (files all its dashboards under a folder)
   lookerFolder: (id) => fetch(`/api/looker/folder/${encodeURIComponent(id)}`).then(json),
   importFolder: (folderId, folder) =>

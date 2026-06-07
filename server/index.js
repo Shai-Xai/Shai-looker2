@@ -249,6 +249,24 @@ app.post('/api/dashboards/import-folder', auth.requireAdmin, async (req, res) =>
   }
 });
 
+// Backfill folders: for already-imported dashboards with no folder, look up
+// their source Looker dashboard's folder name and file them under it.
+app.post('/api/admin/backfill-folders', auth.requireAdmin, async (_req, res) => {
+  let updated = 0;
+  const errors = [];
+  for (const d of db.listDashboards()) {
+    if (d.folder) continue;
+    const lid = db.getDashboard(d.id)?.source?.lookerDashboardId;
+    if (!lid) continue;
+    try {
+      const ld = await looker.lookerRequest('GET', `/dashboards/${encodeURIComponent(lid)}?fields=folder`);
+      const name = ld.folder?.name;
+      if (name) { db.updateDashboard(d.id, { folder: name }); updated++; }
+    } catch (e) { errors.push({ id: d.id, error: e.message }); }
+  }
+  res.json({ updated, errors });
+});
+
 // Distinct dashboard folders (for pickers/grouping).
 app.get('/api/admin/folders', auth.requireAdmin, (_req, res) => {
   const set = new Set();
