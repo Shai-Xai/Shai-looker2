@@ -67,19 +67,23 @@ export const api = {
     }).then(json),
 
   // Drill-down: run a Looker drill link
-  drill: (url) =>
+  drill: (url, setId) =>
     fetch('/api/drill', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url }),
+      body: JSON.stringify({ url, setId }),
     }).then(json),
 
-  // Query execution
-  runQuery: (query, filterOverrides, signal) =>
+  // Query execution (scoped to the current set, if any)
+  runQuery: (query, filterOverrides, signal, setId) =>
     fetch('/api/run-query', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query, filterOverrides }),
+      body: JSON.stringify({ query, filterOverrides, setId }),
       signal,
     }).then(json),
+
+  // Client navigation: Dashboard Sets
+  mySets: () => fetch('/api/my/sets').then(json),
+  mySet: (id) => fetch(`/api/my/sets/${id}`).then(json),
 };

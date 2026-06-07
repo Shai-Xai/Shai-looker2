@@ -7,6 +7,7 @@ const cookieParser = require('cookie-parser');
 const looker = require('./looker');
 const store = require('./store');
 const auth = require('./auth');
+const db = require('./db');
 const migrate = require('./migrate');
 const { convertDashboard } = require('./convert');
 const { recreateDashboard, fetchDashboard } = require('./recreate');
@@ -83,6 +84,31 @@ app.get('/api/tenants', auth.requireAuth, (req, res) => {
   res.json((req.user.entityIds || []).map(auth.getTenant).filter(Boolean));
 });
 
+// ─── Client navigation: Entity → Dashboard Set → Dashboards ────────────────────
+// The sets this user can open, grouped-ready (each carries its entity name).
+app.get('/api/my/sets', auth.requireAuth, (req, res) => {
+  const sets = auth.setsForUser(req.user).map((s) => ({
+    id: s.id, name: s.name, entityId: s.entityId,
+    entityName: db.getEntity(s.entityId)?.name || '',
+    dashboardCount: db.dashboardsInSet(s.id).length,
+  }));
+  res.json(sets);
+});
+
+// One set: its merged locked filters (for pre-fill + lock) and its dashboards.
+app.get('/api/my/sets/:id', auth.requireAuth, (req, res) => {
+  if (!auth.canAccessSet(req.user, req.params.id)) return res.status(403).json({ error: 'Not allowed' });
+  const s = db.getSet(req.params.id);
+  if (!s) return res.status(404).json({ error: 'Set not found' });
+  const dashboards = db.dashboardsInSet(s.id)
+    .map((id) => store.get(id)).filter(Boolean)
+    .map((d) => ({ id: d.id, title: d.title, description: d.description || '', tileCount: (d.tiles || []).length }));
+  res.json({
+    id: s.id, name: s.name, entityName: db.getEntity(s.entityId)?.name || '',
+    lockedFilters: auth.lockedFiltersForSet(s.id), dashboards,
+  });
+});
+
 // ─── Saved (editable) dashboards ───────────────────────────────────────────────
 
 // List — scoped by access (admin sees all; client sees shared + their own).
@@ -136,20 +162,30 @@ app.get('/api/looker/explores/:model/:explore', auth.requireAdmin, async (req, r
 // ─── Query execution (the calculation engine) — scoped per tenant ──────────────
 
 // Inject the user's mandatory scope filters (overriding any client-supplied
-// value on those fields). Returns false if the user has no data access.
-function applyScope(query, user) {
-  const scope = auth.scopeFiltersForUser(user);
-  if (scope && scope.__block) return false;
+// value on those fields). When a setId is given (the client is viewing a
+// Dashboard Set), scope to that set's merged locks; otherwise fall back to the
+// user-wide scope. Admins are unscoped. Returns false to deny the request.
+function applyScope(query, user, setId) {
+  if (user.role === 'admin') return true; // unscoped
+  let scope;
+  if (setId) {
+    if (!auth.canAccessSet(user, setId)) return false;
+    scope = auth.lockedFiltersForSet(setId);
+    if (!scope || !Object.keys(scope).length) return false; // fail closed
+  } else {
+    scope = auth.scopeFiltersForUser(user);
+    if (scope && scope.__block) return false;
+  }
   query.filters = { ...(query.filters || {}), ...(scope || {}) };
   return true;
 }
 
 app.post('/api/run-query', auth.requireAuth, async (req, res) => {
   try {
-    const { query, filterOverrides = {} } = req.body;
+    const { query, filterOverrides = {}, setId } = req.body;
     if (!query) return res.status(400).json({ error: 'query is required' });
     const queryBody = { ...query, filters: { ...(query.filters || {}), ...filterOverrides } };
-    if (!applyScope(queryBody, req.user)) {
+    if (!applyScope(queryBody, req.user, setId)) {
       return res.status(403).json({ error: 'No data access is configured for your account yet.' });
     }
     const data = await looker.lookerRequest('POST', '/queries/run/json_detail', queryBody);
@@ -164,7 +200,7 @@ app.post('/api/drill', auth.requireAuth, async (req, res) => {
   try {
     const query = parseDrillUrl(req.body?.url);
     if (!query) return res.status(400).json({ error: 'Could not parse drill link' });
-    if (!applyScope(query, req.user)) {
+    if (!applyScope(query, req.user, req.body?.setId)) {
       return res.status(403).json({ error: 'No data access is configured for your account yet.' });
     }
     const data = await looker.lookerRequest('POST', '/queries/run/json_detail', query);
@@ -177,13 +213,13 @@ app.post('/api/drill', auth.requireAuth, async (req, res) => {
 
 app.post('/api/filter-suggest', auth.requireAuth, async (req, res) => {
   try {
-    const { model, explore, field } = req.body;
+    const { model, explore, field, setId } = req.body;
     if (!model || !explore || !field) return res.json({ suggestions: [] });
     // Get distinct values by running an inline query for just this dimension.
-    // Scope it to the user's tenant so clients only see their own values
-    // (e.g. a client never sees other organisers' event names).
+    // Scope it so clients only see their own values (e.g. a client never sees
+    // other organisers' event names).
     const q = { model, view: explore, fields: [field], sorts: [field], limit: 500 };
-    if (!applyScope(q, req.user)) return res.json({ suggestions: [] });
+    if (!applyScope(q, req.user, setId)) return res.json({ suggestions: [] });
     const rows = await looker.lookerRequest('POST', '/queries/run/json', q);
     const seen = new Set();
     const suggestions = [];

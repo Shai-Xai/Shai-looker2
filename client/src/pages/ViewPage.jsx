@@ -5,14 +5,18 @@ import EditableGrid from '../components/EditableGrid.jsx';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/auth.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
+import { ScopeProvider } from '../lib/ScopeContext.jsx';
 
-// Read-only render of a saved dashboard.
+// Read-only render of a saved dashboard. When opened inside a Dashboard Set
+// (/s/:setId/d/:id) the set's merged locked filters are pre-filled + locked and
+// every query is scoped to that set. Admins opening /d/:id directly are unscoped.
 export default function ViewPage() {
   const isMobile = useIsMobile();
-  const { id } = useParams();
+  const { id, setId } = useParams();
   const navigate = useNavigate();
   const { isAdmin } = useAuth();
   const [def, setDef] = useState(null);
+  const [setInfo, setSetInfo] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [filterValues, setFilterValues] = useState({});
@@ -21,25 +25,20 @@ export default function ViewPage() {
   useEffect(() => {
     setLoading(true);
     setError(null);
-    // Clients: fetch their tenant so we can pre-fill + lock the organiser/event
-    // filters to their scope. Admins see normal, editable filters.
-    const tenantP = isAdmin ? Promise.resolve(null) : api.listTenants().then((ts) => ts[0] || null).catch(() => null);
-    Promise.all([api.getDashboard(id), tenantP])
-      .then(([data, tenant]) => {
+    const setP = setId ? api.mySet(setId).catch(() => null) : Promise.resolve(null);
+    Promise.all([api.getDashboard(id), setP])
+      .then(([data, set]) => {
         setDef(data);
-        const sf = tenant?.scopeFields || {};
-        const orgVals = (tenant?.organiserNames || []);
-        const evVals = (tenant?.eventNames || []);
+        setSetInfo(set);
+        // Lock any filter whose field is in the set's merged locked-filters map.
+        const lockMap = set?.lockedFilters || {};
         const defaults = {};
         const lockedMap = {};
         for (const f of data.filters || []) {
           defaults[f.name] = f.default_value || '';
           const field = f.field || f.dimension;
-          if (tenant && field && field === sf.organiser && orgVals.length) {
-            defaults[f.name] = orgVals.join(',');
-            lockedMap[f.name] = true;
-          } else if (tenant && field && field === sf.event && evVals.length) {
-            defaults[f.name] = evVals.join(',');
+          if (field && lockMap[field] != null && lockMap[field] !== '') {
+            defaults[f.name] = lockMap[field];
             lockedMap[f.name] = true;
           }
         }
@@ -48,7 +47,7 @@ export default function ViewPage() {
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [id, isAdmin]);
+  }, [id, setId]);
 
   const handleFilterChange = useCallback((name, value) => {
     setFilterValues((prev) => ({ ...prev, [name]: value }));
@@ -59,36 +58,39 @@ export default function ViewPage() {
   if (!def) return null;
 
   const theme = def.theme || {};
+  const backTo = setId ? `/s/${setId}` : '/';
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        flex: 1,
-        background: theme.background || 'var(--bg)',
-        '--tile-bg': theme.tileBackground || '#fff',
-      }}
-    >
-      <div style={{ background: 'rgba(255,255,255,0.72)', backdropFilter: 'saturate(180%) blur(20px)', WebkitBackdropFilter: 'saturate(180%) blur(20px)', borderBottom: '1px solid var(--hairline)', padding: isMobile ? '12px 14px' : '16px 22px', display: 'flex', alignItems: 'center', gap: isMobile ? 10 : 16 }}>
-        <Link to="/" style={{ color: 'var(--muted)', fontSize: 13, textDecoration: 'none' }}>← Back</Link>
-        <h2 style={{ fontSize: isMobile ? 17 : 21, fontWeight: 600, letterSpacing: '-0.02em', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{def.title}</h2>
-        {/* Editing is desktop/tablet only */}
-        {isAdmin && !isMobile && <button style={editBtn} onClick={() => navigate(`/d/${id}/edit`)}>Edit</button>}
-      </div>
+    <ScopeProvider setId={setId || null}>
+      <div
+        style={{
+          display: 'flex', flexDirection: 'column', flex: 1,
+          background: theme.background || 'var(--bg)',
+          '--tile-bg': theme.tileBackground || '#fff',
+        }}
+      >
+        <div style={{ background: 'rgba(255,255,255,0.72)', backdropFilter: 'saturate(180%) blur(20px)', WebkitBackdropFilter: 'saturate(180%) blur(20px)', borderBottom: '1px solid var(--hairline)', padding: isMobile ? '12px 14px' : '16px 22px', display: 'flex', alignItems: 'center', gap: isMobile ? 10 : 16 }}>
+          <Link to={backTo} style={{ color: 'var(--muted)', fontSize: 13, textDecoration: 'none' }}>← Back</Link>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            {setInfo && <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)' }}>{setInfo.name}</div>}
+            <h2 style={{ fontSize: isMobile ? 17 : 21, fontWeight: 600, letterSpacing: '-0.02em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{def.title}</h2>
+          </div>
+          {isAdmin && !isMobile && <button style={editBtn} onClick={() => navigate(`/d/${id}/edit`)}>Edit</button>}
+        </div>
 
-      {def.filters?.length > 0 && (
-        <FilterBar filters={def.filters} values={filterValues} onChange={handleFilterChange} locked={locked} />
-      )}
-
-      <div style={{ flex: 1, padding: isMobile ? '12px' : '22px', overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
-        {def.tiles?.length || def.carousels?.length ? (
-          <EditableGrid tiles={def.tiles || []} carousels={def.carousels || []} filterValues={filterValues} editable={false} />
-        ) : (
-          <Centered>This dashboard has no tiles yet. <Link to={`/d/${id}/edit`} style={{ marginLeft: 6 }}>Add some →</Link></Centered>
+        {def.filters?.length > 0 && (
+          <FilterBar filters={def.filters} values={filterValues} onChange={handleFilterChange} locked={locked} />
         )}
+
+        <div style={{ flex: 1, padding: isMobile ? '12px' : '22px', overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
+          {def.tiles?.length || def.carousels?.length ? (
+            <EditableGrid tiles={def.tiles || []} carousels={def.carousels || []} filterValues={filterValues} editable={false} />
+          ) : (
+            <Centered>This dashboard has no tiles yet.</Centered>
+          )}
+        </div>
       </div>
-    </div>
+    </ScopeProvider>
   );
 }
 

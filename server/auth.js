@@ -195,6 +195,24 @@ function canAccessDashboard(user, dashboard) {
   return false;
 }
 
+// ─── Dashboard sets (navigation context) ──────────────────────────────────────
+// Sets this user can open (admin → all; client → their entities' sets).
+function setsForUser(user) {
+  if (!user) return [];
+  if (user.role === 'admin') return db.listSets();
+  const out = [];
+  for (const eid of user.entityIds || []) out.push(...db.listSetsForEntity(eid));
+  return out;
+}
+function canAccessSet(user, setId) {
+  if (!user) return false;
+  if (user.role === 'admin') return true;
+  const s = db.getSet(setId);
+  return !!s && (user.entityIds || []).includes(s.entityId);
+}
+// Merged locked-filters map for a specific set (entity locks + set locks).
+function lockedFiltersForSet(setId) { return db.lockedFiltersForSet(setId); }
+
 module.exports = {
   COOKIE,
   seedAdmin,
@@ -206,4 +224,6 @@ module.exports = {
   issueCookie, clearCookie, attachUser, requireAuth, requireAdmin,
   // scoping
   scopeFiltersForUser, canAccessDashboard,
+  // sets / navigation
+  setsForUser, canAccessSet, lockedFiltersForSet,
 };

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { api } from './api.js';
 import { withLimit } from './limit.js';
+import { useScope } from './ScopeContext.jsx';
 
 // A query is only worth running once it has a model, an explore (view) and at
 // least one field — otherwise Looker returns a validation error.
@@ -12,6 +13,7 @@ export function isRunnableQuery(q) {
 // values change. Returns { data, loading, error }. Looker does the calculation;
 // we only receive json_detail rows.
 export function useTileData(tile, filterValues) {
+  const { setId } = useScope();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(tile.type !== 'text' && isRunnableQuery(tile.query));
   const [error, setError] = useState(null);
@@ -43,7 +45,7 @@ export function useTileData(tile, filterValues) {
     setLoading(true);
     setError(null);
 
-    withLimit(() => api.runQuery(tile.query, overrides, controller.signal))
+    withLimit(() => api.runQuery(tile.query, overrides, controller.signal, setId))
       .then((d) => setData(d))
       .catch((err) => {
         if (err.name !== 'AbortError') setError(err.message);
@@ -54,7 +56,7 @@ export function useTileData(tile, filterValues) {
 
     return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tile.type, queryKey, overrideKey]);
+  }, [tile.type, queryKey, overrideKey, setId]);
 
   return { data, loading, error };
 }

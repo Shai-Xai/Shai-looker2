@@ -2,11 +2,13 @@ import { useState, useEffect } from 'react';
 import { api } from '../lib/api.js';
 import TableTile from './tiles/TableTile.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
+import { useScope } from '../lib/ScopeContext.jsx';
 
 // Slide-over panel showing the underlying rows behind a clicked value.
 // If the value has multiple drill links, lets the user pick which one.
 export default function DrillModal({ links, title, onClose }) {
   const isMobile = useIsMobile();
+  const { setId } = useScope();
   const [selected, setSelected] = useState(links.length === 1 ? links[0] : null);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -17,7 +19,7 @@ export default function DrillModal({ links, title, onClose }) {
     setLoading(true);
     setError(null);
     setData(null);
-    api.drill(selected.url)
+    api.drill(selected.url, setId)
       .then((r) => setData(r.data))
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
