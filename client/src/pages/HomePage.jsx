@@ -151,7 +151,7 @@ export default function HomePage() {
           {folderNames.map((f) => {
             const count = dashboards.filter((d) => d.folder === f).length;
             return (
-              <button key={f} style={folderCard} onClick={() => setOpenFolder(f)}>
+              <button key={f} className="lift" style={folderCard} onClick={() => setOpenFolder(f)}>
                 <div style={{ fontSize: 28 }}>📁</div>
                 <div style={{ fontSize: 15, fontWeight: 700, marginTop: 6, lineHeight: 1.3 }}>{f}</div>
                 <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>{count} dashboard{count === 1 ? '' : 's'}</div>
@@ -159,7 +159,7 @@ export default function HomePage() {
             );
           })}
           {unfiledCount > 0 && (
-            <button style={folderCard} onClick={() => setOpenFolder('')}>
+            <button className="lift" style={folderCard} onClick={() => setOpenFolder('')}>
               <div style={{ fontSize: 28, opacity: 0.5 }}>🗂️</div>
               <div style={{ fontSize: 15, fontWeight: 700, marginTop: 6 }}>Unfiled</div>
               <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>{unfiledCount} dashboard{unfiledCount === 1 ? '' : 's'}</div>

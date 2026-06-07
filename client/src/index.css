@@ -74,6 +74,24 @@ input::placeholder, textarea::placeholder { color: #b0b0b6; }
 .howler-tile { transition: box-shadow .2s ease, transform .2s ease; }
 .howler-tile:hover { box-shadow: 0 1px 2px rgba(0,0,0,0.05), 0 14px 36px -14px rgba(0,0,0,0.18); }
 
+/* Client sidebar — frosted, Apple-like */
+.howler-sidebar {
+  background: rgba(255,255,255,0.72);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  border-right: 1px solid var(--hairline);
+}
+.nav-row { transition: background .15s ease, color .15s ease; }
+.nav-row:hover { background: rgba(0,0,0,0.045); }
+.nav-row.active { background: rgba(255,56,92,0.10); color: var(--brand); }
+.nav-row.active:hover { background: rgba(255,56,92,0.14); }
+.nav-caret { transition: transform .18s cubic-bezier(.4,0,.2,1); }
+
+/* Soft hover lift for cards (folders, suites) */
+.lift { transition: box-shadow .22s ease, transform .22s ease, border-color .22s ease; }
+.lift:hover { transform: translateY(-2px); box-shadow: 0 10px 30px -12px rgba(0,0,0,0.18); border-color: rgba(0,0,0,0.10); }
+.lift:active { transform: translateY(0); }
+
 /* Mobile: inputs below 16px make iOS zoom in on focus — force 16px so the
    viewport stays put. */
 @media (max-width: 767px) {

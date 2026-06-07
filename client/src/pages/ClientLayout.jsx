@@ -45,21 +45,21 @@ export default function ClientLayout() {
   const go = (sid, did) => { navigate(`/suite/${sid}/d/${did}`); if (isMobile) setNavOpen(false); };
 
   const sidebar = (
-    <nav style={{ ...sidebarStyle, ...(isMobile ? mobileSidebar : null) }}>
-      <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)', padding: '4px 12px 10px' }}>Suites</div>
+    <nav className="howler-sidebar" style={{ ...sidebarStyle, ...(isMobile ? mobileSidebar : null) }}>
+      <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)', padding: '6px 14px 12px' }}>Suites</div>
       {loading ? (
-        <div style={{ padding: 12, color: 'var(--muted)', fontSize: 13 }}>Loading…</div>
+        <div style={{ padding: 14, color: 'var(--muted)', fontSize: 13 }}>Loading…</div>
       ) : suites.length === 0 ? (
-        <div style={{ padding: 12, color: 'var(--muted)', fontSize: 13 }}>No suites assigned.</div>
+        <div style={{ padding: 14, color: 'var(--muted)', fontSize: 13 }}>No suites assigned.</div>
       ) : (
         suites.map((su) => (
-          <div key={su.id}>
-            <button style={{ ...rowBtn, fontWeight: 700 }} onClick={() => toggleSuite(su.id)}>
+          <div key={su.id} style={{ marginBottom: 2 }}>
+            <button className="nav-row" style={{ ...rowBtn, fontWeight: 600 }} onClick={() => toggleSuite(su.id)}>
               <Caret open={!!openSuites[su.id]} />
               <span style={ellip}>{su.name}</span>
             </button>
             {openSuites[su.id] && (
-              <div>
+              <div style={{ marginTop: 1 }}>
                 {!details[su.id] ? (
                   <div style={{ ...subRow, color: 'var(--muted)' }}>Loading…</div>
                 ) : details[su.id].sets.length === 0 ? (
@@ -67,19 +67,20 @@ export default function ClientLayout() {
                 ) : (
                   details[su.id].sets.map((set) => (
                     <div key={set.id}>
-                      <button style={{ ...rowBtn, paddingLeft: 26, fontWeight: 600, fontSize: 13 }} onClick={() => setOpenSets((p) => ({ ...p, [set.id]: !p[set.id] }))}>
-                        <Caret open={!!openSets[set.id]} />
+                      <button className="nav-row" style={{ ...rowBtn, paddingLeft: 30, fontWeight: 500, fontSize: 13, color: 'var(--muted-2)' }} onClick={() => setOpenSets((p) => ({ ...p, [set.id]: !p[set.id] }))}>
+                        <Caret open={!!openSets[set.id]} small />
                         <span style={ellip}>{set.name}</span>
                       </button>
                       {openSets[set.id] && set.dashboards.map((d) => {
                         const active = d.id === id && su.id === suiteId;
                         return (
-                          <button key={d.id} onClick={() => go(su.id, d.id)} style={{ ...rowBtn, paddingLeft: 46, fontSize: 13, color: active ? 'var(--brand)' : 'var(--text)', background: active ? '#fff0f3' : 'transparent', fontWeight: active ? 600 : 400 }}>
+                          <button key={d.id} onClick={() => go(su.id, d.id)} className={`nav-row${active ? ' active' : ''}`} style={{ ...rowBtn, paddingLeft: 52, fontSize: 13, fontWeight: active ? 600 : 450 }}>
+                            <span style={{ ...dot, background: active ? 'var(--brand)' : 'rgba(0,0,0,0.18)' }} />
                             <span style={ellip}>{d.title}</span>
                           </button>
                         );
                       })}
-                      {openSets[set.id] && set.dashboards.length === 0 && <div style={{ ...subRow, paddingLeft: 46, color: 'var(--muted)' }}>No dashboards</div>}
+                      {openSets[set.id] && set.dashboards.length === 0 && <div style={{ ...subRow, paddingLeft: 52, color: 'var(--muted)' }}>No dashboards</div>}
                     </div>
                   ))
                 )}
@@ -111,13 +112,14 @@ export default function ClientLayout() {
   );
 }
 
-function Caret({ open }) {
-  return <span style={{ display: 'inline-block', width: 14, fontSize: 10, color: '#999', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .12s' }}>▶</span>;
+function Caret({ open, small }) {
+  return <span className="nav-caret" style={{ display: 'inline-block', width: 12, fontSize: small ? 8 : 9, color: '#b0b0b6', transform: open ? 'rotate(90deg)' : 'none' }}>▶</span>;
 }
 
-const sidebarStyle = { width: 260, flexShrink: 0, borderRight: '1px solid var(--hairline)', background: 'var(--card)', overflowY: 'auto', padding: '14px 6px' };
+const sidebarStyle = { width: 264, flexShrink: 0, overflowY: 'auto', padding: '16px 10px' };
 const mobileSidebar = { position: 'relative', zIndex: 51, height: '100%', boxShadow: '4px 0 24px rgba(0,0,0,0.15)' };
-const rowBtn = { display: 'flex', alignItems: 'center', gap: 4, width: '100%', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer', padding: '7px 12px', borderRadius: 8, fontSize: 14, color: 'var(--text)', lineHeight: 1.3 };
-const subRow = { padding: '6px 12px', fontSize: 13 };
+const rowBtn = { display: 'flex', alignItems: 'center', gap: 7, width: '100%', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer', padding: '8px 12px', borderRadius: 9, fontSize: 14, color: 'var(--text)', lineHeight: 1.3 };
+const subRow = { padding: '7px 12px', fontSize: 13 };
 const ellip = { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' };
-const menuBtn = { alignSelf: 'flex-start', margin: '12px 0 0 14px', padding: '7px 14px', borderRadius: 980, border: '1px solid var(--hairline)', background: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' };
+const dot = { flexShrink: 0, width: 5, height: 5, borderRadius: '50%', display: 'inline-block' };
+const menuBtn = { alignSelf: 'flex-start', margin: '12px 0 0 14px', padding: '7px 14px', borderRadius: 980, border: '1px solid var(--hairline)', background: 'rgba(255,255,255,0.8)', backdropFilter: 'blur(8px)', fontSize: 13, fontWeight: 600, cursor: 'pointer' };
