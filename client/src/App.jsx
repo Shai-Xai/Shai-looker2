@@ -28,9 +28,29 @@ function Header() {
       <Link to="/" style={{ fontSize: 17, fontWeight: 700, letterSpacing: '-0.3px', textDecoration: 'none', color: 'var(--text)' }}>Howler&nbsp;:&nbsp;Pulse</Link>
       <div style={{ flex: 1 }} />
       {isAdmin && <Link to="/admin" style={navLink}>Admin</Link>}
-      {!isMobile && <span style={{ fontSize: 13, color: 'var(--muted)' }}>{user?.email}{isAdmin ? ' (admin)' : ''}</span>}
+      {!isMobile && <UserBadge user={user} isAdmin={isAdmin} />}
       <button onClick={() => logout()} style={logoutBtn}>{isMobile ? 'Exit' : 'Log out'}</button>
     </header>
+  );
+}
+
+// Top-right identity: the client's logo + name (for client logins) and the
+// signed-in email. Admins just show their email + an "admin" tag.
+function UserBadge({ user, isAdmin }) {
+  const client = !isAdmin ? (user?.entities || [])[0] : null;
+  const extra = !isAdmin && (user?.entities || []).length > 1 ? ` +${user.entities.length - 1}` : '';
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+      {client?.logo && <img src={client.logo} alt="" style={{ height: 26, maxWidth: 70, objectFit: 'contain' }} />}
+      <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.2, alignItems: 'flex-end' }}>
+        {client ? (
+          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{client.name}{extra}</span>
+        ) : (
+          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>Howler{isAdmin ? ' · Admin' : ''}</span>
+        )}
+        <span style={{ fontSize: 12, color: 'var(--muted)' }}>{user?.email}</span>
+      </div>
+    </div>
   );
 }
 

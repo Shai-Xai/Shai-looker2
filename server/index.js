@@ -34,12 +34,19 @@ auth.seedAdmin();
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
 // ─── Auth ───────────────────────────────────────────────────────────────────
+// publicUser + the user's client(s) (name + logo) for header branding.
+function meUser(user) {
+  const pub = auth.publicUser(user);
+  if (!pub) return null;
+  const entities = (pub.entityIds || []).map((id) => { const e = db.getEntity(id); return e ? { id: e.id, name: e.name, logo: e.logo || '' } : null; }).filter(Boolean);
+  return { ...pub, entities };
+}
 app.post('/api/auth/login', (req, res) => {
   const { email, password } = req.body || {};
   const user = auth.verifyCredentials(email, password);
   if (!user) return res.status(401).json({ error: 'Invalid email or password' });
   auth.issueCookie(res, user);
-  res.json({ user: auth.publicUser(user) });
+  res.json({ user: meUser(user) });
 });
 
 app.post('/api/auth/logout', (req, res) => {
@@ -49,7 +56,7 @@ app.post('/api/auth/logout', (req, res) => {
 
 // Current user (200 with null when not logged in, so the client can decide).
 app.get('/api/auth/me', (req, res) => {
-  res.json({ user: auth.publicUser(req.user) });
+  res.json({ user: meUser(req.user) });
 });
 
 // ─── Admin: users ──────────────────────────────────────────────────────────────
