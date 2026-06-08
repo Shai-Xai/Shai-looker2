@@ -110,13 +110,22 @@ export default function EditorPage() {
     }));
   }
 
-  // ─── Carousels ───────────────────────────────────────────────────────────────
-  function addCarousel() {
+  // ─── Carousels & sections ─────────────────────────────────────────────────────
+  // A "section" is the same container as a carousel but with mode 'grid' — its
+  // tiles flow in a wrapping grid instead of a horizontal scroller.
+  function addContainer(mode) {
     const all = [...def.tiles, ...(def.carousels || [])];
     const maxY = all.reduce((m, x) => Math.max(m, (x.layout?.y ?? 0) + (x.layout?.h ?? 6)), 0);
-    const c = { id: crypto.randomUUID(), title: 'New row', cardW: 300, tiles: [], layout: { x: 0, y: maxY, w: 24, h: 7 } };
+    const c = {
+      id: crypto.randomUUID(),
+      title: mode === 'grid' ? 'New section' : 'New row',
+      mode: mode === 'grid' ? 'grid' : undefined,
+      cardW: 300, tiles: [],
+      layout: { x: 0, y: maxY, w: 24, h: mode === 'grid' ? 9 : 7 },
+    };
     mutate((d) => ({ ...d, carousels: [...(d.carousels || []), c] }));
   }
+  function addCarousel() { addContainer('carousel'); }
   function removeCarousel(cid) {
     mutate((d) => ({ ...d, carousels: (d.carousels || []).filter((c) => c.id !== cid) }));
   }
@@ -206,6 +215,7 @@ export default function EditorPage() {
         <button style={btn} onClick={() => addTile('vis')}>+ Visualization</button>
         <button style={btn} onClick={() => setShowLibrary(true)}>+ From library</button>
         <button style={btn} onClick={() => addTile('text')}>+ Text</button>
+        <button style={btn} onClick={() => addContainer('grid')}>+ Section</button>
         <button style={btn} onClick={addCarousel}>+ Carousel</button>
         <button style={btn} onClick={() => setShowFilters(true)}>Filters ({def.filters?.length || 0})</button>
         <button style={btn} onClick={() => setShowAiContext(true)}>✨ AI context</button>

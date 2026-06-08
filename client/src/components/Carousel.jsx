@@ -10,8 +10,10 @@ export default function Carousel({ carousel, filterValues, editable, onEditTile,
   const trackRef = useRef(null);
   const isMobile = useIsMobile();
   const [dragOver, setDragOver] = useState(false);
+  const isGrid = carousel.mode === 'grid'; // a "section": tiles flow in a wrapping grid, not a scroller
   const cardW = carousel.cardW || 300;
   const tiles = carousel.tiles || [];
+  const cardH = carousel.cardH || 220; // fixed card height in grid (section) mode
   // On phones a card shouldn't exceed the viewport — show one card plus a peek
   // of the next so it's obviously swipeable.
   const cardBasis = (w) => (isMobile ? `min(${w}px, 82vw)` : `${w}px`);
@@ -43,7 +45,7 @@ export default function Carousel({ carousel, filterValues, editable, onEditTile,
             value={carousel.title || ''}
             onChange={(e) => onChangeTitle(e.target.value)}
             onMouseDown={(e) => e.stopPropagation()}
-            placeholder="Row title"
+            placeholder={isGrid ? 'Section title' : 'Row title'}
             style={{ fontSize: 15, fontWeight: 700, border: '1.5px solid transparent', background: '#fafafa', borderRadius: 6, padding: '4px 8px', outline: 'none' }}
           />
         ) : (
@@ -54,13 +56,15 @@ export default function Carousel({ carousel, filterValues, editable, onEditTile,
           <span style={{ display: 'flex', gap: 6 }} onMouseDown={(e) => e.stopPropagation()}>
             <button style={miniBtn} onClick={() => onAddTile('vis')}>+ Visualization</button>
             <button style={miniBtn} onClick={() => onAddTile('text')}>+ Text</button>
-            <button style={{ ...miniBtn, color: 'var(--error)', borderColor: '#f0c0c0' }} onClick={onRemove}>Delete row</button>
+            <button style={{ ...miniBtn, color: 'var(--error)', borderColor: '#f0c0c0' }} onClick={onRemove}>{isGrid ? 'Delete section' : 'Delete row'}</button>
           </span>
         )}
-        <span onMouseDown={(e) => e.stopPropagation()} style={{ display: 'flex', gap: 4 }}>
-          <button style={arrowBtn} onClick={() => scroll(-1)} title="Scroll left">‹</button>
-          <button style={arrowBtn} onClick={() => scroll(1)} title="Scroll right">›</button>
-        </span>
+        {!isGrid && (
+          <span onMouseDown={(e) => e.stopPropagation()} style={{ display: 'flex', gap: 4 }}>
+            <button style={arrowBtn} onClick={() => scroll(-1)} title="Scroll left">‹</button>
+            <button style={arrowBtn} onClick={() => scroll(1)} title="Scroll right">›</button>
+          </span>
+        )}
       </div>
 
       <div style={{ position: 'relative', flex: 1, minHeight: 0 }}>
@@ -70,23 +74,23 @@ export default function Carousel({ carousel, filterValues, editable, onEditTile,
           onDragLeave={editable && onDropTile ? () => setDragOver(false) : undefined}
           onDrop={editable && onDropTile ? (e) => { e.preventDefault(); setDragOver(false); const id = e.dataTransfer.getData('text/plain'); if (id) onDropTile(id); } : undefined}
           style={{
-            display: 'flex', gap: GAP, overflowX: 'auto', height: '100%',
-            borderRadius: 8,
-            WebkitOverflowScrolling: 'touch',
-            scrollSnapType: isMobile ? 'x mandatory' : undefined,
+            display: 'flex', gap: GAP, height: '100%', borderRadius: 8,
+            ...(isGrid
+              ? { flexWrap: 'wrap', alignContent: 'flex-start', overflowY: 'auto', overflowX: 'hidden' }
+              : { overflowX: 'auto', WebkitOverflowScrolling: 'touch', scrollSnapType: isMobile ? 'x mandatory' : undefined }),
             outline: dragOver ? '2px dashed var(--brand)' : 'none',
             background: dragOver ? 'rgba(255,56,92,0.04)' : 'transparent',
           }}
         >
           {tiles.length === 0 ? (
             <div style={{ color: '#bbb', fontSize: 13, padding: '20px 12px', alignSelf: 'center' }}>
-              {editable ? 'Empty row — add tiles above, or drag a tile here →' : 'No tiles'}
+              {editable ? (isGrid ? 'Empty section — add tiles above, or drag a tile here' : 'Empty row — add tiles above, or drag a tile here →') : 'No tiles'}
             </div>
           ) : (
             tiles.map((t) => {
               const w = t.cw || cardW;
               return (
-                <div key={t.id} style={{ flex: `0 0 ${cardBasis(w)}`, width: cardBasis(w), height: '100%', position: 'relative', scrollSnapAlign: 'start' }}>
+                <div key={t.id} style={{ flex: `0 0 ${cardBasis(w)}`, width: cardBasis(w), height: isGrid ? cardH : '100%', position: 'relative', scrollSnapAlign: isGrid ? undefined : 'start' }}>
                   <TileFrame
                     tile={t}
                     filterValues={filterValues}
