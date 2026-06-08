@@ -380,15 +380,27 @@ function SetCard({ set, dashboards, onChange }) {
   const [name, setName] = useState(set.name);
   const [icon, setIcon] = useState(set.icon || '');
   const [ids, setIds] = useState(set.dashboardIds || []);
-  const [folder, setFolder] = useState(''); // '' = all, '__unfiled', else folder name
+  const [fpath, setFpath] = useState(''); // current folder path in the picker; '' = top
   const [saved, setSaved] = useState(false);
   const toggle = (id) => setIds((cur) => cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]);
   const save = async () => { await api.adminUpdateSet(set.id, { name, icon, dashboardIds: ids }); flash(setSaved); onChange(); };
   const remove = async () => { if (confirm(`Delete set "${set.name}"?`)) { await api.adminDeleteSet(set.id); onChange(); } };
 
-  const folders = [...new Set(dashboards.map((d) => d.folder).filter(Boolean))].sort((a, b) => a.localeCompare(b));
-  const visible = dashboards.filter((d) => folder === '' || (folder === '__unfiled' ? !d.folder : d.folder === folder));
-  const addAll = () => setIds((cur) => [...new Set([...cur, ...visible.map((d) => d.id)])]);
+  // Folder picker: drill through nested folders (paths are "/"-separated).
+  const allFolders = [...new Set(dashboards.map((d) => d.folder).filter(Boolean))];
+  const fullChild = (seg) => (fpath ? `${fpath}/${seg}` : seg);
+  const childSegs = (() => {
+    const s = new Set();
+    for (const f of allFolders) {
+      if (fpath) { if (f === fpath || !f.startsWith(fpath + '/')) continue; s.add(f.slice(fpath.length + 1).split('/')[0]); }
+      else s.add(f.split('/')[0]);
+    }
+    return [...s].sort((a, b) => a.localeCompare(b));
+  })();
+  const dashHere = dashboards.filter((d) => (d.folder || '') === fpath); // directly in this folder
+  const underPath = dashboards.filter((d) => { const f = d.folder || ''; return fpath ? (f === fpath || f.startsWith(fpath + '/')) : true; });
+  const fsegs = fpath ? fpath.split('/') : [];
+  const addAllUnder = () => setIds((cur) => [...new Set([...cur, ...underPath.map((d) => d.id)])]);
 
   // Reordering the set's dashboards (the array order is the saved order).
   const byId = Object.fromEntries(dashboards.map((d) => [d.id, d]));
@@ -419,25 +431,41 @@ function SetCard({ set, dashboards, onChange }) {
       <L>Name</L>
       <input style={{ ...input, fontWeight: 700, width: '100%' }} value={name} onChange={(e) => setName(e.target.value)} />
       <Field label="Icon"><IconPicker value={icon} onChange={setIcon} /></Field>
-      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
-        <Field label="Folder">
-          <select style={input} value={folder} onChange={(e) => setFolder(e.target.value)}>
-            <option value="">All folders</option>
-            {folders.map((f) => <option key={f} value={f}>{f}</option>)}
-            <option value="__unfiled">Unfiled</option>
-          </select>
-        </Field>
-        {folder !== '' && visible.length > 0 && <button style={miniBtn} onClick={addAll}>+ Add all in folder</button>}
-        <span style={{ fontSize: 12, color: 'var(--muted)', marginLeft: 'auto' }}>{ids.length} selected</span>
-      </div>
-      <div style={checkList}>
-        {visible.map((d) => (
-          <label key={d.id} style={checkItem}>
-            <input type="checkbox" checked={ids.includes(d.id)} onChange={() => toggle(d.id)} />
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.title}{!d.folder && <span style={{ color: '#bbb' }}> · unfiled</span>}</span>
-          </label>
-        ))}
-        {visible.length === 0 && <Muted>No dashboards{folder ? ' in this folder' : ' yet'}.</Muted>}
+      <L>Add dashboards from folder</L>
+      <div style={{ border: '1px solid #eee', borderRadius: 8, padding: 10, margin: '6px 0' }}>
+        {/* Breadcrumb */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', fontSize: 13, marginBottom: 8 }}>
+          <button style={crumbLink} onClick={() => setFpath('')}>All folders</button>
+          {fsegs.map((s, i) => (
+            <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ color: 'var(--muted)' }}>/</span>
+              <button style={crumbLink} onClick={() => setFpath(fsegs.slice(0, i + 1).join('/'))}>{s}</button>
+            </span>
+          ))}
+          <span style={{ marginLeft: 'auto', color: 'var(--muted)', fontSize: 12 }}>{ids.length} selected</span>
+        </div>
+        {/* Subfolders */}
+        {childSegs.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+            {childSegs.map((seg) => (
+              <button key={seg} style={folderChip} onClick={() => setFpath(fullChild(seg))}>📁 {seg}</button>
+            ))}
+          </div>
+        )}
+        {/* Add-all for the current folder (incl. subfolders) */}
+        {underPath.length > 0 && (
+          <button style={{ ...miniBtn, marginBottom: 8 }} onClick={addAllUnder}>+ Add all {fpath ? 'in this folder' : ''} ({underPath.length})</button>
+        )}
+        {/* Dashboards directly in this folder */}
+        <div style={{ ...checkList, margin: 0 }}>
+          {dashHere.map((d) => (
+            <label key={d.id} style={checkItem}>
+              <input type="checkbox" checked={ids.includes(d.id)} onChange={() => toggle(d.id)} />
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.title}{!d.folder && <span style={{ color: '#bbb' }}> · unfiled</span>}</span>
+            </label>
+          ))}
+          {dashHere.length === 0 && <Muted>{childSegs.length ? 'Open a subfolder, or add all above.' : 'No dashboards here.'}</Muted>}
+        </div>
       </div>
       {ids.length > 0 && (
         <>
@@ -853,6 +881,8 @@ const th = { textAlign: 'left', padding: '8px 10px', borderBottom: '2px solid #e
 const td = { padding: '8px 10px', borderBottom: '1px solid #f0f0f0' };
 const checkList = { display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 200, overflowY: 'auto', border: '1px solid #eee', borderRadius: 8, padding: 10, margin: '6px 0' };
 const checkItem = { display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' };
+const crumbLink = { border: 'none', background: 'transparent', color: 'var(--brand)', fontWeight: 600, fontSize: 13, cursor: 'pointer', padding: 0 };
+const folderChip = { display: 'inline-flex', alignItems: 'center', gap: 4, border: '1px solid #e0e0e0', background: '#fafafa', borderRadius: 8, padding: '5px 10px', fontSize: 13, cursor: 'pointer', color: 'var(--text)' };
 const orderList = { display: 'flex', flexDirection: 'column', gap: 4, border: '1px solid #eee', borderRadius: 8, padding: 8, margin: '6px 0' };
 const orderRow = { display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, padding: '4px 2px' };
 const orderBtn = { width: 26, height: 26, flexShrink: 0, border: '1px solid #e0e0e0', borderRadius: 6, background: '#fafafa', cursor: 'pointer', fontSize: 13, lineHeight: 1, padding: 0 };
