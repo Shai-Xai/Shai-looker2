@@ -73,7 +73,7 @@ export default function ClientLayout() {
           <div key={su.id} style={{ marginBottom: 2 }}>
             <button className="nav-row" style={{ ...rowBtn, fontWeight: 600 }} onClick={() => toggleSuite(su.id)}>
               <Caret open={!!openSuites[su.id]} />
-              <Ico v={su.icon} size={17} />
+              <Ico v={su.icon} size={22} />
               <span style={ellip}>{su.name}</span>
             </button>
             {openSuites[su.id] && (
