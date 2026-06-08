@@ -225,25 +225,32 @@ app.post('/api/dashboards/import', auth.requireAdmin, async (req, res) => {
   }
 });
 
-// Preview a Looker folder's dashboards (admin picks before importing). Also
-// reports totals across subfolders so the import button reflects the full tree.
+// Preview a Looker folder as a tree of folders → dashboards (admin picks/
+// confirms before importing). Honours ?subfolders=0 to show top-level only.
 app.get('/api/looker/folder/:id', auth.requireAdmin, async (req, res) => {
   try {
-    const f = await looker.lookerRequest('GET', `/folders/${encodeURIComponent(req.params.id)}?fields=id,name,dashboards(id,title)`);
-    let tree = [];
-    try { tree = await collectFolderTree(req.params.id); } catch { /* fall back to top-level only */ }
-    const folderCount = new Set(tree.map((t) => t.folder)).size;
-    res.json({
-      id: f.id, name: f.name,
-      dashboards: (f.dashboards || []).map((d) => ({ id: String(d.id), title: d.title })),
-      totalWithSubfolders: tree.length,
-      folderCount,
-    });
+    const includeSub = req.query.subfolders !== '0';
+    const root = await looker.lookerRequest('GET', `/folders/${encodeURIComponent(req.params.id)}?fields=id,name,dashboards(id,title)`);
+    let tree;
+    if (includeSub) {
+      try { tree = await collectFolderTree(req.params.id); }
+      catch { tree = (root.dashboards || []).map((d) => ({ id: String(d.id), title: d.title, folder: root.name, folderId: String(root.id), depth: 0 })); }
+    } else {
+      tree = (root.dashboards || []).map((d) => ({ id: String(d.id), title: d.title, folder: root.name, folderId: String(root.id), depth: 0 }));
+    }
+    // Group into folders, preserving depth-first order.
+    const order = [];
+    const byId = new Map();
+    for (const d of tree) {
+      if (!byId.has(d.folderId)) { byId.set(d.folderId, { id: d.folderId, name: d.folder, depth: d.depth, dashboards: [] }); order.push(d.folderId); }
+      byId.get(d.folderId).dashboards.push({ id: d.id, title: d.title });
+    }
+    res.json({ id: String(root.id), name: root.name, folders: order.map((fid) => byId.get(fid)), total: tree.length });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // Recursively collect every dashboard in a folder and its subfolders.
-// Returns [{ id, title, folder, depth }] — folder = the Looker folder it lives in.
+// Returns [{ id, title, folder, folderId, depth }] — folder = where it lives.
 async function collectFolderTree(folderId, maxDepth = 6) {
   const result = [];
   const seen = new Set();
@@ -252,7 +259,7 @@ async function collectFolderTree(folderId, maxDepth = 6) {
     seen.add(String(id));
     const f = await looker.lookerRequest('GET', `/folders/${encodeURIComponent(id)}?fields=id,name,dashboards(id,title)`);
     const name = f.name || 'Imported folder';
-    for (const d of f.dashboards || []) result.push({ id: String(d.id), title: d.title, folder: name, depth });
+    for (const d of f.dashboards || []) result.push({ id: String(d.id), title: d.title, folder: name, folderId: String(f.id), depth });
     if (depth < maxDepth) {
       let children = [];
       try { children = await looker.lookerRequest('GET', `/folders/${encodeURIComponent(id)}/children?fields=id,name`); } catch { children = []; }

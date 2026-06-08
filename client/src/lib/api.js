@@ -96,7 +96,7 @@ export const api = {
   adminFolders: () => fetch('/api/admin/folders').then(json),
   backfillFolders: () => fetch('/api/admin/backfill-folders', { method: 'POST' }).then(json),
   // Looker folder import (files all its dashboards under a folder)
-  lookerFolder: (id) => fetch(`/api/looker/folder/${encodeURIComponent(id)}`).then(json),
+  lookerFolder: (id, includeSubfolders = true) => fetch(`/api/looker/folder/${encodeURIComponent(id)}?subfolders=${includeSubfolders ? 1 : 0}`).then(json),
   importFolder: (folderId, folder, includeSubfolders = true) =>
     fetch('/api/dashboards/import-folder', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },

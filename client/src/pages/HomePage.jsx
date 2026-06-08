@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/auth.jsx';
+import FolderImportModal from '../components/FolderImportModal.jsx';
 
 export default function HomePage() {
   const navigate = useNavigate();
@@ -19,6 +20,7 @@ export default function HomePage() {
   const [folderPreview, setFolderPreview] = useState(null);
   const [folderBusy, setFolderBusy] = useState(false);
   const [includeSubfolders, setIncludeSubfolders] = useState(true);
+  const [showFolderModal, setShowFolderModal] = useState(false);
 
   function load() {
     setLoading(true);
@@ -33,20 +35,13 @@ export default function HomePage() {
   const shown = dashboards.filter((d) => (d.folder || '') === (openFolder || ''));
 
   async function previewFolder() {
-    setFolderPreview(null);
-    if (!lookerFolderId.trim()) return;
-    try { setFolderPreview(await api.lookerFolder(lookerFolderId.trim())); }
-    catch (e) { alert('Could not read folder: ' + e.message); }
-  }
-  async function importLookerFolder() {
     if (!lookerFolderId.trim()) return;
     setFolderBusy(true);
     try {
-      const r = await api.importFolder(lookerFolderId.trim(), undefined, includeSubfolders);
-      alert(`Imported ${r.imported} of ${r.total} dashboards across ${r.folders || 1} folder${(r.folders || 1) === 1 ? '' : 's'}.` + (r.failed.length ? `\n${r.failed.length} failed.` : ''));
-      setLookerFolderId(''); setFolderPreview(null);
-      load();
-    } catch (e) { alert('Folder import failed: ' + e.message); }
+      const p = await api.lookerFolder(lookerFolderId.trim(), includeSubfolders);
+      setFolderPreview(p);
+      setShowFolderModal(true);
+    } catch (e) { alert('Could not read folder: ' + e.message); }
     finally { setFolderBusy(false); }
   }
 
@@ -126,23 +121,13 @@ export default function HomePage() {
           <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>Import a Looker folder</div>
           <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 14 }}>Bring in every dashboard in a Looker folder at once. With subfolders included, each dashboard is filed under its own Looker (sub)folder name.</div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <input style={inputStyle} placeholder="Looker folder ID" value={lookerFolderId} onChange={(e) => { setLookerFolderId(e.target.value); setFolderPreview(null); }} onBlur={previewFolder} />
-            <button style={miniBtnOutline} onClick={previewFolder} disabled={!lookerFolderId.trim()}>Preview</button>
-            <button style={primaryBtn} onClick={importLookerFolder} disabled={folderBusy || !lookerFolderId.trim()}>{folderBusy ? 'Importing…' : (folderPreview ? `Import ${includeSubfolders ? (folderPreview.totalWithSubfolders ?? folderPreview.dashboards.length) : folderPreview.dashboards.length}` : 'Import folder')}</button>
+            <input style={inputStyle} placeholder="Looker folder ID" value={lookerFolderId} onChange={(e) => setLookerFolderId(e.target.value)} />
+            <button style={primaryBtn} onClick={previewFolder} disabled={folderBusy || !lookerFolderId.trim()}>{folderBusy ? 'Reading…' : 'Preview & import'}</button>
           </div>
           <label style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 10, fontSize: 13, color: 'var(--text)', cursor: 'pointer' }}>
             <input type="checkbox" checked={includeSubfolders} onChange={(e) => setIncludeSubfolders(e.target.checked)} />
             Include subfolders
           </label>
-          {folderPreview && (
-            <div style={{ marginTop: 8, fontSize: 12, color: 'var(--muted)' }}>
-              <b style={{ color: 'var(--text)' }}>{folderPreview.name}</b> — {folderPreview.dashboards.length} dashboard{folderPreview.dashboards.length === 1 ? '' : 's'} here
-              {includeSubfolders && folderPreview.totalWithSubfolders > folderPreview.dashboards.length && (
-                <span> · {folderPreview.totalWithSubfolders} across {folderPreview.folderCount} folder{folderPreview.folderCount === 1 ? '' : 's'} (with subfolders)</span>
-              )}
-              {folderBusy && <span> · importing, this can take a minute…</span>}
-            </div>
-          )}
         </div>
       </div>
       )}
@@ -216,6 +201,15 @@ export default function HomePage() {
           ))}
           {shown.length === 0 && <p style={{ color: 'var(--muted)' }}>No dashboards in this folder.</p>}
         </div>
+      )}
+
+      {showFolderModal && folderPreview && (
+        <FolderImportModal
+          preview={folderPreview}
+          alreadyImported={new Set(dashboards.map((d) => d.source?.lookerDashboardId).filter(Boolean).map(String))}
+          onImported={load}
+          onClose={() => { setShowFolderModal(false); setLookerFolderId(''); setFolderPreview(null); }}
+        />
       )}
     </main>
   );
