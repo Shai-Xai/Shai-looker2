@@ -324,12 +324,15 @@ async function runLookerQuery(path, body) {
 // clobber each other. A suiteId only gates access + picks the right entity.
 // Admins are unscoped. Returns false to deny.
 function applyScope(query, user, suiteId) {
-  if (user.role === 'admin') return true;
   let scope;
   if (suiteId) {
+    // A suite context (client view, or an admin previewing a client) is always
+    // scoped to that suite's organiser — so an admin preview faithfully matches
+    // what the client sees.
     if (!auth.canAccessSuite(user, suiteId)) return false;
     scope = auth.forcedScopeForSuite(suiteId);
   } else {
+    if (user.role === 'admin') return true; // admin browsing their own studio
     scope = auth.scopeFiltersForUser(user);
     if (scope && scope.__block) return false;
   }

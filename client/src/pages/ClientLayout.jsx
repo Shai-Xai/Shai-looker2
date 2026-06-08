@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Outlet, useParams, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
+import { useAuth } from '../lib/auth.jsx';
 
 // Persistent client shell: a left sidebar tree of Suites → Sets → Dashboards,
 // with the selected dashboard rendered in the main area.
@@ -9,6 +10,7 @@ export default function ClientLayout() {
   const { suiteId, id } = useParams();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
+  const { isAdmin } = useAuth();
   const [suites, setSuites] = useState([]);
   const [details, setDetails] = useState({}); // suiteId -> { sets:[{id,name,dashboards}] }
   const [openSuites, setOpenSuites] = useState({});
@@ -115,6 +117,14 @@ export default function ClientLayout() {
         </div>
       )}
       <main style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'auto' }}>
+        {isAdmin && (
+          <div style={previewBar}>
+            <span style={{ fontWeight: 700 }}>👁 Client preview</span>
+            <span style={{ opacity: 0.85 }}>You're viewing this exactly as the client would, scoped to their data.</span>
+            <div style={{ flex: 1 }} />
+            <button style={exitPreviewBtn} onClick={() => navigate('/')}>Exit preview</button>
+          </div>
+        )}
         {(isMobile || collapsed) && (
           <div style={menuBar}>
             <button style={menuBtn} onClick={() => (isMobile ? setNavOpen(true) : toggleCollapsed())}>☰&nbsp; Menu</button>
@@ -145,4 +155,6 @@ const subRow = { padding: '7px 12px', fontSize: 13 };
 const ellip = { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' };
 const dot = { flexShrink: 0, width: 5, height: 5, borderRadius: '50%', display: 'inline-block' };
 const menuBtn = { flexShrink: 0, padding: '8px 16px', borderRadius: 980, border: '1px solid var(--hairline)', background: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer' };
+const previewBar = { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '8px 16px', background: 'linear-gradient(90deg, #FF385C, #FF6B35)', color: '#fff', fontSize: 13 };
+const exitPreviewBtn = { flexShrink: 0, padding: '6px 14px', borderRadius: 980, border: 'none', background: 'rgba(255,255,255,0.25)', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer' };
 const iconBtn = { width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--hairline)', borderRadius: 7, background: '#fff', color: 'var(--muted-2)', fontSize: 12, cursor: 'pointer' };
