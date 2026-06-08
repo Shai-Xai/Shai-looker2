@@ -131,6 +131,7 @@ addColumn('sets', 'icon', "TEXT NOT NULL DEFAULT ''");   // emoji or image data-
 addColumn('suites', 'icon', "TEXT NOT NULL DEFAULT ''");
 addColumn('entities', 'logo', "TEXT NOT NULL DEFAULT ''"); // client brand image data-URL / emoji
 addColumn('entities', 'ai_context', "TEXT NOT NULL DEFAULT ''"); // client-specific AI background
+addColumn('entities', 'integrations', "TEXT NOT NULL DEFAULT '{}'"); // per-client API credentials (Looker / Anthropic)
 
 // ─── Settings (simple key/value) ──────────────────────────────────────────────
 db.exec(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '');`);
@@ -192,6 +193,20 @@ function updateEntity(id, patch) {
   return getEntity(id);
 }
 function deleteEntity(id) { db.prepare('DELETE FROM entities WHERE id=?').run(id); }
+
+// Per-client integration credentials (Looker / Anthropic). Kept separate from
+// the general entity object so secrets never ride along to the browser by
+// accident — only the dedicated, masked endpoints expose them.
+function getEntityIntegrations(id) {
+  const r = db.prepare('SELECT integrations FROM entities WHERE id=?').get(id);
+  return r ? J(r.integrations, {}) : {};
+}
+function setEntityIntegrations(id, patch) {
+  const cur = getEntityIntegrations(id);
+  const next = { ...cur, ...(patch || {}) }; // patch carries only the keys to change
+  db.prepare('UPDATE entities SET integrations=? WHERE id=?').run(JSON.stringify(next), id);
+  return getEntityIntegrations(id);
+}
 
 // ─── Users ────────────────────────────────────────────────────────────────────
 function entityIdsForUser(userId) {
@@ -471,7 +486,7 @@ function bumpLibraryUsage(id) { db.prepare('UPDATE tile_library SET usage_count 
 module.exports = {
   db,
   defaultTheme,
-  listEntities, getEntity, createEntity, updateEntity, deleteEntity,
+  listEntities, getEntity, createEntity, updateEntity, deleteEntity, getEntityIntegrations, setEntityIntegrations,
   listUsers, getUser, getUserByEmail, createUser, updateUser, deleteUser, verifyCredentials, publicUser, setUserEntities,
   listDashboards, getDashboard, createDashboard, updateDashboard, removeDashboard,
   // sets (reusable collections)

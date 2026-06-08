@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
+import IntegrationsForm from '../components/IntegrationsForm.jsx';
 
 // Icon control: an emoji, or an uploaded image (downscaled to a small data-URL).
 // Offers a palette of common dashboard-category icons for quick picking.
@@ -112,11 +113,13 @@ export default function AdminPage() {
         <Tab active={tab === 'sets'} onClick={() => setTab('sets')}>Sets</Tab>
         <Tab active={tab === 'library'} onClick={() => setTab('library')}>Tile library</Tab>
         <Tab active={tab === 'ai'} onClick={() => setTab('ai')}>AI</Tab>
+        <Tab active={tab === 'integrations'} onClick={() => setTab('integrations')}>Integrations</Tab>
       </div>
       {tab === 'entities' && <Entities fields={fields} />}
       {tab === 'sets' && <Sets />}
       {tab === 'library' && <Library />}
       {tab === 'ai' && <AISettings />}
+      {tab === 'integrations' && <AdminIntegrations />}
     </main>
   );
 }
@@ -187,7 +190,7 @@ function Entities({ fields }) {
 // One client's settings hub: a left nav (Settings / Suites / Logins) + panel.
 function ClientDetail({ entity, fields, allEntities, allSets, suites, users, onChange, onBack }) {
   const [section, setSection] = useState('settings');
-  const nav = [['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['logins', `Logins (${users.length})`]];
+  const nav = [['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations']];
   return (
     <div>
       <button style={miniBtnOutline} onClick={onBack}>← All clients</button>
@@ -202,6 +205,7 @@ function ClientDetail({ entity, fields, allEntities, allSets, suites, users, onC
           {section === 'settings' && <ClientSettings entity={entity} suites={suites} fields={fields} onChange={onChange} onBack={onBack} />}
           {section === 'suites' && <ClientSuites entity={entity} suites={suites} allEntities={allEntities} allSets={allSets} fields={fields} onChange={onChange} />}
           {section === 'logins' && <EntityLogins entity={entity} users={users} onChange={onChange} />}
+          {section === 'integrations' && <ClientIntegrations entity={entity} />}
         </div>
       </div>
     </div>
@@ -784,6 +788,32 @@ function AISettings() {
           <span style={{ fontSize: 12, color: 'var(--muted)', marginLeft: 'auto' }}>{text.length} characters</span>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── Integrations (admin: primary Looker + Anthropic accounts) ─────────────────
+function AdminIntegrations() {
+  const [value, setValue] = useState(null);
+  useEffect(() => { api.getAdminIntegrations().then(setValue); }, []);
+  if (!value) return <Muted>Loading…</Muted>;
+  return (
+    <div>
+      <p style={hint}>The primary Looker and Anthropic accounts for the whole platform. These override the values in <code>.env</code>. Clients can set their own (Client → Integrations), which take precedence for their data.</p>
+      <IntegrationsForm value={value} onSave={async (p) => setValue(await api.saveAdminIntegrations(p))} />
+    </div>
+  );
+}
+
+// Per-client integrations (admin), shown inside a client's detail nav.
+function ClientIntegrations({ entity }) {
+  const [value, setValue] = useState(null);
+  useEffect(() => { api.getEntityIntegrations(entity.id).then(setValue); }, [entity.id]);
+  if (!value) return <Muted>Loading…</Muted>;
+  return (
+    <div>
+      <p style={hint}>Optional per-client accounts. Anything left blank falls back to the platform default (Admin → Integrations).</p>
+      <IntegrationsForm value={value} lookerActive={false} onSave={async (p) => setValue(await api.saveEntityIntegrations(entity.id, p))} />
     </div>
   );
 }

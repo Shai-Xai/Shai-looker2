@@ -7,6 +7,7 @@ import AdminPage from './pages/AdminPage.jsx';
 import LoginPage from './pages/LoginPage.jsx';
 import ClientLayout from './pages/ClientLayout.jsx';
 import ClientHome from './pages/ClientHome.jsx';
+import ClientIntegrationsPage from './pages/ClientIntegrationsPage.jsx';
 import Logo from './components/Logo.jsx';
 import { DrillProvider } from './lib/DrillContext.jsx';
 import { AuthProvider, useAuth } from './lib/auth.jsx';
@@ -28,6 +29,7 @@ function Header() {
       <Link to="/" style={{ fontSize: 17, fontWeight: 700, letterSpacing: '-0.3px', textDecoration: 'none', color: 'var(--text)' }}>Howler&nbsp;:&nbsp;Pulse</Link>
       <div style={{ flex: 1 }} />
       {isAdmin && <Link to="/admin" style={navLink}>Admin</Link>}
+      {!isAdmin && <Link to="/settings" style={navLink} title="Integrations">{isMobile ? '⚙' : 'Integrations'}</Link>}
       {!isMobile && <UserBadge user={user} isAdmin={isAdmin} />}
       <button onClick={() => logout()} style={logoutBtn}>{isMobile ? 'Exit' : 'Log out'}</button>
     </header>
@@ -88,6 +90,7 @@ function Shell() {
             <Routes>
               <Route element={<ClientLayout />}>
                 <Route path="/" element={<ClientHome />} />
+                <Route path="/settings" element={<ClientIntegrationsPage />} />
                 <Route path="/suite/:suiteId/d/:id" element={<ViewPage />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Route>

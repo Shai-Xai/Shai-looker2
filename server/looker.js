@@ -4,53 +4,63 @@
 // browsing. Looker is used purely as a headless calculation engine — no embeds.
 
 const fetch = require('node-fetch');
+const db = require('./db');
 
-const LOOKER_BASE_URL = process.env.LOOKER_BASE_URL?.replace(/\/$/, '');
-const API_BASE = `${LOOKER_BASE_URL}/api/4.0`;
+// The primary Looker account is configurable in Admin → Integrations (stored in
+// the DB) and falls back to the .env values. Resolved fresh per request so an
+// admin edit takes effect without a restart.
+function creds() {
+  const baseUrl = (db.getSetting('looker_base_url') || process.env.LOOKER_BASE_URL || '').replace(/\/$/, '');
+  const clientId = db.getSetting('looker_client_id') || process.env.LOOKER_CLIENT_ID || '';
+  const clientSecret = db.getSetting('looker_client_secret') || process.env.LOOKER_CLIENT_SECRET || '';
+  return { baseUrl, clientId, clientSecret, apiBase: `${baseUrl}/api/4.0` };
+}
+function isConfigured() {
+  const c = creds();
+  return !!(c.baseUrl && c.clientId && c.clientSecret);
+}
 
-// ─── Token Cache ────────────────────────────────────────────────────────────
+// ─── Token Cache (keyed by account so changing creds re-authenticates) ────────
 
-let tokenCache = { token: null, expiresAt: 0 };
-let tokenPromise = null; // shared in-flight login so concurrent requests don't stampede
+const tokenCacheByKey = new Map();   // key -> { token, expiresAt }
+const tokenPromiseByKey = new Map(); // key -> in-flight login promise
 
 async function getAccessToken() {
-  if (tokenCache.token && Date.now() < tokenCache.expiresAt) {
-    return tokenCache.token;
+  const { apiBase, clientId, clientSecret, baseUrl } = creds();
+  if (!baseUrl || !clientId || !clientSecret) {
+    throw new Error('Looker is not configured. Set the primary Looker account in Admin → Integrations (or .env).');
   }
-  if (tokenPromise) return tokenPromise; // a login is already underway — reuse it
+  const key = `${baseUrl}|${clientId}`;
+  const cached = tokenCacheByKey.get(key);
+  if (cached && Date.now() < cached.expiresAt) return cached.token;
+  if (tokenPromiseByKey.has(key)) return tokenPromiseByKey.get(key);
 
-  tokenPromise = (async () => {
-    const res = await fetch(`${API_BASE}/login`, {
+  const p = (async () => {
+    const res = await fetch(`${apiBase}/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        client_id: process.env.LOOKER_CLIENT_ID,
-        client_secret: process.env.LOOKER_CLIENT_SECRET,
-      }),
+      body: new URLSearchParams({ client_id: clientId, client_secret: clientSecret }),
       timeout: 30000,
     });
-
     if (!res.ok) {
       const text = await res.text();
       throw new Error(`Looker auth failed (${res.status}): ${text}`);
     }
-
     const data = await res.json();
-    tokenCache = {
-      token: data.access_token,
-      expiresAt: Date.now() + (data.expires_in - 30) * 1000,
-    };
+    tokenCacheByKey.set(key, { token: data.access_token, expiresAt: Date.now() + (data.expires_in - 30) * 1000 });
     console.log('[auth] Obtained new Looker access token');
-    return tokenCache.token;
-  })().finally(() => { tokenPromise = null; });
+    return data.access_token;
+  })().finally(() => { tokenPromiseByKey.delete(key); });
 
-  return tokenPromise;
+  tokenPromiseByKey.set(key, p);
+  return p;
 }
 
 // ─── Generic request helper (auto-refresh on 401) ────────────────────────────
 
 async function lookerRequest(method, path, body = null, retry = true) {
   const token = await getAccessToken();
+  const { apiBase, baseUrl, clientId } = creds();
 
   const options = {
     method,
@@ -64,7 +74,7 @@ async function lookerRequest(method, path, body = null, retry = true) {
 
   let res;
   try {
-    res = await fetch(`${API_BASE}${path}`, options);
+    res = await fetch(`${apiBase}${path}`, options);
   } catch (err) {
     if (err.type === 'request-timeout') {
       throw new Error(`Looker request timed out after 120s (${method} ${path}) — the query may be too slow or Looker is overloaded.`);
@@ -74,7 +84,7 @@ async function lookerRequest(method, path, body = null, retry = true) {
 
   if (res.status === 401 && retry) {
     console.log('[auth] Token expired, refreshing...');
-    tokenCache = { token: null, expiresAt: 0 };
+    tokenCacheByKey.delete(`${baseUrl}|${clientId}`);
     return lookerRequest(method, path, body, false);
   }
 
@@ -211,7 +221,6 @@ async function getExploreFields(model, explore) {
 }
 
 module.exports = {
-  LOOKER_BASE_URL,
   lookerRequest,
   fetchDashboard,
   resolveElementQueries,
@@ -220,4 +229,7 @@ module.exports = {
   normalizeQuery,
   listModels,
   getExploreFields,
+  isConfigured,
+  creds,
+  lookerBaseUrl: () => creds().baseUrl,
 };

@@ -437,6 +437,26 @@ app.post('/api/filter-suggest', auth.requireAuth, async (req, res) => {
   }
 });
 
+// ─── Integrations: credential resolution (client overrides admin default) ──────
+function adminAnthropicKey() { return db.getSetting('anthropic_api_key') || process.env.ANTHROPIC_API_KEY || ''; }
+function anthropicKeyForEntity(entityId) {
+  const k = entityId ? (db.getEntityIntegrations(entityId).anthropicApiKey || '') : '';
+  return k.trim() ? k.trim() : adminAnthropicKey();
+}
+function anthropicKeyForSuite(suiteId) {
+  if (!suiteId) return adminAnthropicKey();
+  const su = db.getSuite(suiteId);
+  return anthropicKeyForEntity(su?.entityId);
+}
+function anthropicKeyForUser(user) {
+  for (const eid of user?.entityIds || []) {
+    const k = (db.getEntityIntegrations(eid).anthropicApiKey || '').trim();
+    if (k) return k;
+  }
+  return adminAnthropicKey();
+}
+const maskSecret = (v) => (v && v.length ? `••••••${String(v).slice(-4)}` : '');
+
 // Combined AI instructions: the global standing instructions, plus the
 // per-client context when the request is in a suite (client) context.
 function aiInstructionsFor(suiteId) {
@@ -452,24 +472,102 @@ function aiInstructionsFor(suiteId) {
 }
 
 // ─── AI insight for a tile ─────────────────────────────────────────────────────
-app.get('/api/insight/status', auth.requireAuth, (_req, res) => {
-  res.json({ enabled: insights.isConfigured() });
+app.get('/api/insight/status', auth.requireAuth, (req, res) => {
+  res.json({ enabled: insights.isConfigured(anthropicKeyForUser(req.user)) });
 });
 
 // Global AI instructions (admin) — appended to every AI prompt.
 app.get('/api/admin/ai-instructions', auth.requireAdmin, (_req, res) => {
-  res.json({ instructions: db.getSetting('ai_instructions'), aiEnabled: insights.isConfigured() });
+  res.json({ instructions: db.getSetting('ai_instructions'), aiEnabled: insights.isConfigured(adminAnthropicKey()) });
 });
 app.put('/api/admin/ai-instructions', auth.requireAdmin, (req, res) => {
   res.json({ instructions: db.setSetting('ai_instructions', (req.body || {}).instructions || '') });
+});
+
+// ─── Integrations ──────────────────────────────────────────────────────────────
+// Admin sets the PRIMARY Looker + Anthropic accounts (override .env). Clients can
+// set their own, which take precedence for their data. Secrets are write-only:
+// responses only report whether a value is set, never the value itself.
+function applyIntegrationsPatch(body, set) {
+  // `set(key, value)` writes a field; called only for fields the caller changed.
+  const lk = body.looker || {};
+  if (lk.baseUrl !== undefined) set('lookerBaseUrl', String(lk.baseUrl || '').replace(/\/$/, ''));
+  if (lk.clientId !== undefined) set('lookerClientId', String(lk.clientId || ''));
+  if (lk.clientSecret) set('lookerClientSecret', String(lk.clientSecret));
+  if (lk.clearClientSecret) set('lookerClientSecret', '');
+  const an = body.anthropic || {};
+  if (an.apiKey) set('anthropicApiKey', String(an.apiKey));
+  if (an.clearApiKey) set('anthropicApiKey', '');
+}
+function adminIntegrationsView() {
+  return {
+    looker: {
+      baseUrl: db.getSetting('looker_base_url') || '',
+      clientId: db.getSetting('looker_client_id') || '',
+      clientSecretSet: !!db.getSetting('looker_client_secret'),
+      envFallback: !db.getSetting('looker_base_url') && !!process.env.LOOKER_BASE_URL,
+      configured: looker.isConfigured(),
+    },
+    anthropic: {
+      keySet: !!db.getSetting('anthropic_api_key'),
+      keyHint: maskSecret(db.getSetting('anthropic_api_key')),
+      envFallback: !db.getSetting('anthropic_api_key') && !!process.env.ANTHROPIC_API_KEY,
+      configured: !!adminAnthropicKey(),
+    },
+  };
+}
+function entityIntegrationsView(entityId) {
+  const i = db.getEntityIntegrations(entityId);
+  return {
+    looker: { baseUrl: i.lookerBaseUrl || '', clientId: i.lookerClientId || '', clientSecretSet: !!i.lookerClientSecret },
+    anthropic: { keySet: !!i.anthropicApiKey, keyHint: maskSecret(i.anthropicApiKey) },
+  };
+}
+
+// Admin: primary accounts.
+app.get('/api/admin/integrations', auth.requireAdmin, (_req, res) => res.json(adminIntegrationsView()));
+app.put('/api/admin/integrations', auth.requireAdmin, (req, res) => {
+  const map = { lookerBaseUrl: 'looker_base_url', lookerClientId: 'looker_client_id', lookerClientSecret: 'looker_client_secret', anthropicApiKey: 'anthropic_api_key' };
+  applyIntegrationsPatch(req.body || {}, (k, v) => db.setSetting(map[k], v));
+  res.json(adminIntegrationsView());
+});
+
+// Admin: a specific client's overrides.
+app.get('/api/admin/entities/:id/integrations', auth.requireAdmin, (req, res) => {
+  if (!db.getEntity(req.params.id)) return res.status(404).json({ error: 'Not found' });
+  res.json(entityIntegrationsView(req.params.id));
+});
+app.put('/api/admin/entities/:id/integrations', auth.requireAdmin, (req, res) => {
+  if (!db.getEntity(req.params.id)) return res.status(404).json({ error: 'Not found' });
+  const patch = {};
+  applyIntegrationsPatch(req.body || {}, (k, v) => { patch[k] = v; });
+  db.setEntityIntegrations(req.params.id, patch);
+  res.json(entityIntegrationsView(req.params.id));
+});
+
+// Client self-service: the logged-in user's own client(s).
+app.get('/api/my/integrations', auth.requireAuth, (req, res) => {
+  const out = (req.user.entityIds || []).map((id) => {
+    const e = db.getEntity(id);
+    return e ? { entityId: id, name: e.name, ...entityIntegrationsView(id) } : null;
+  }).filter(Boolean);
+  res.json(out);
+});
+app.put('/api/my/integrations/:entityId', auth.requireAuth, (req, res) => {
+  if (!(req.user.entityIds || []).includes(req.params.entityId)) return res.status(403).json({ error: 'Not allowed' });
+  const patch = {};
+  applyIntegrationsPatch(req.body || {}, (k, v) => { patch[k] = v; });
+  db.setEntityIntegrations(req.params.entityId, patch);
+  res.json(entityIntegrationsView(req.params.entityId));
 });
 
 // Streams the insight back as plain text chunks as Claude writes it.
 app.post('/api/insight', auth.requireAuth, async (req, res) => {
   const { title, visType, fields, rows, filters, userContext, history, suiteId, dashboardContext, tileContext } = req.body || {};
   if (!fields || !rows) return res.status(400).json({ error: 'fields and rows are required' });
-  if (!insights.isConfigured()) {
-    return res.status(400).json({ error: 'AI insights are not configured. Set ANTHROPIC_API_KEY in your .env to enable them.' });
+  const apiKey = anthropicKeyForSuite(suiteId);
+  if (!insights.isConfigured(apiKey)) {
+    return res.status(400).json({ error: 'AI insights are not configured. Set an Anthropic API key in Admin → Integrations (or .env).' });
   }
   try {
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
@@ -479,7 +577,7 @@ app.post('/api/insight', auth.requireAuth, async (req, res) => {
       dashboardContext && dashboardContext.trim() ? `Context for this dashboard:\n${dashboardContext.trim()}` : '',
       tileContext && tileContext.trim() ? `Context for this tile:\n${tileContext.trim()}` : '',
     ].filter(Boolean).join('\n\n');
-    await insights.streamInsight({ title, visType, fields, rows, filters, userContext, history, instructions }, (text) => res.write(text));
+    await insights.streamInsight({ title, visType, fields, rows, filters, userContext, history, instructions, apiKey }, (text) => res.write(text));
     res.end();
   } catch (err) {
     console.error('[POST /api/insight]', err.message);
@@ -493,8 +591,9 @@ app.post('/api/insight', auth.requireAuth, async (req, res) => {
 app.post('/api/dashboard-insight', auth.requireAuth, async (req, res) => {
   const { dashboardId, filterValues = {}, suiteId } = req.body || {};
   if (!dashboardId) return res.status(400).json({ error: 'dashboardId is required' });
-  if (!insights.isConfigured()) {
-    return res.status(400).json({ error: 'AI insights are not configured. Set ANTHROPIC_API_KEY in your .env to enable them.' });
+  const apiKey = anthropicKeyForSuite(suiteId);
+  if (!insights.isConfigured(apiKey)) {
+    return res.status(400).json({ error: 'AI insights are not configured. Set an Anthropic API key in Admin → Integrations (or .env).' });
   }
   const def = store.get(dashboardId);
   if (!def) return res.status(404).json({ error: 'Dashboard not found' });
@@ -537,7 +636,7 @@ app.post('/api/dashboard-insight', auth.requireAuth, async (req, res) => {
       aiInstructionsFor(suiteId),
       def.aiContext && def.aiContext.trim() ? `Context for this dashboard:\n${def.aiContext.trim()}` : '',
     ].filter(Boolean).join('\n\n');
-    await insights.streamDashboardInsight({ title: def.title, filters: filterValues, tiles, instructions }, (t) => res.write(t));
+    await insights.streamDashboardInsight({ title: def.title, filters: filterValues, tiles, instructions, apiKey }, (t) => res.write(t));
     res.end();
   } catch (err) {
     console.error('[POST /api/dashboard-insight]', err.message);
@@ -553,7 +652,7 @@ app.get('/api/admin/library', auth.requireAdmin, (req, res) => {
   res.json({
     tiles: db.listLibraryTiles({ search: req.query.search, category: req.query.category }),
     categories: db.listLibraryCategories(),
-    aiEnabled: insights.isConfigured(),
+    aiEnabled: insights.isConfigured(adminAnthropicKey()),
   });
 });
 app.get('/api/admin/library/:id', auth.requireAdmin, (req, res) => {
@@ -588,11 +687,11 @@ app.post('/api/admin/library/backfill', auth.requireAdmin, (_req, res) => {
 app.post('/api/admin/library/:id/describe', auth.requireAdmin, async (req, res) => {
   const t = db.getLibraryTile(req.params.id);
   if (!t) return res.status(404).json({ error: 'Not found' });
-  if (!insights.isConfigured()) return res.status(400).json({ error: 'AI is not configured (set ANTHROPIC_API_KEY).' });
+  if (!insights.isConfigured(adminAnthropicKey())) return res.status(400).json({ error: 'AI is not configured (set an Anthropic key in Admin → Integrations).' });
   try {
     const out = await insights.describeTile({
       title: t.name, visType: t.visType, fields: (t.def.query?.fields || []),
-      model: t.model, explore: t.explore, instructions: db.getSetting('ai_instructions'),
+      model: t.model, explore: t.explore, instructions: db.getSetting('ai_instructions'), apiKey: adminAnthropicKey(),
     });
     const saved = db.updateLibraryTile(t.id, {
       name: out.name || t.name,
@@ -637,5 +736,5 @@ app.get('*', (_req, res) => {
 const PORT = process.env.PORT || 3045;
 app.listen(PORT, () => {
   console.log(`Howler Looker Tool running on http://localhost:${PORT}`);
-  console.log(`Looker instance: ${looker.LOOKER_BASE_URL}`);
+  console.log(`Looker instance: ${looker.lookerBaseUrl() || '(not configured — set in Admin → Integrations)'}`);
 });

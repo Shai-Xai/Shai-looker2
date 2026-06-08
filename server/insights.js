@@ -8,11 +8,13 @@ const Anthropic = require('@anthropic-ai/sdk');
 const MODEL = 'claude-opus-4-8';
 const MAX_ROWS = 60; // cap rows sent to keep the prompt small and cheap
 
-let client = null;
-function getClient() {
-  if (!process.env.ANTHROPIC_API_KEY) return null;
-  if (!client) client = new Anthropic(); // reads ANTHROPIC_API_KEY from env
-  return client;
+// One Anthropic client per API key (admin default from env/DB, or a client's own).
+const clientsByKey = new Map();
+function clientFor(apiKey) {
+  const key = apiKey || process.env.ANTHROPIC_API_KEY || '';
+  if (!key) return null;
+  if (!clientsByKey.has(key)) clientsByKey.set(key, new Anthropic({ apiKey: key }));
+  return clientsByKey.get(key);
 }
 
 const SYSTEM = `You are a senior data analyst for Howler, an events ticketing platform (organisers run events; customers buy tickets; amounts are in South African Rand, ZAR).
@@ -86,10 +88,10 @@ function buildMessages(ctx) {
   return messages;
 }
 
-function requireClient() {
-  const c = getClient();
+function requireClient(apiKey) {
+  const c = clientFor(apiKey);
   if (!c) {
-    const err = new Error('AI insights are not configured. Set ANTHROPIC_API_KEY in your .env to enable them.');
+    const err = new Error('AI insights are not configured. Set an Anthropic API key in Admin → Integrations (or .env).');
     err.code = 'NO_API_KEY';
     throw err;
   }
@@ -113,7 +115,7 @@ function systemWith(base, instructions) {
 
 // Non-streaming (kept for completeness / non-stream callers).
 async function generateInsight(tileContext) {
-  const c = requireClient();
+  const c = requireClient(tileContext.apiKey);
   const resp = await c.messages.create(REQUEST(buildMessages(tileContext), systemWith(SYSTEM, tileContext.instructions)));
   const text = (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
   return { insight: text, model: resp.model, usage: resp.usage };
@@ -122,7 +124,7 @@ async function generateInsight(tileContext) {
 // Streaming: invokes onText(deltaString) as the model produces text. Handles both
 // the initial insight and follow-up questions (via tileContext.history).
 async function streamInsight(tileContext, onText) {
-  const c = requireClient();
+  const c = requireClient(tileContext.apiKey);
   const stream = c.messages.stream(REQUEST(buildMessages(tileContext), systemWith(SYSTEM, tileContext.instructions)));
   stream.on('text', (delta) => onText(delta));
   await stream.finalMessage();
@@ -158,7 +160,7 @@ function buildDashboardPrompt({ title, filters, tiles }) {
 
 // Streaming whole-dashboard summary. ctx = { title, filters, tiles:[{title,visType,fields,rows}] }.
 async function streamDashboardInsight(ctx, onText) {
-  const c = requireClient();
+  const c = requireClient(ctx.apiKey);
   const stream = c.messages.stream({
     model: MODEL,
     max_tokens: 1500,
@@ -182,8 +184,8 @@ const LIBRARY_SYSTEM = `You catalogue analytics tiles for Howler, an events tick
 - category: one short bucket from this set when it fits, else your own: "Revenue", "Tickets", "Attendance", "Cashless", "Access Control", "Marketing", "Customers", "Operations".
 Be concrete and business-focused. Do not invent fields that aren't listed.`;
 
-async function describeTile({ title, visType, fields, model, explore, instructions }) {
-  const c = requireClient();
+async function describeTile({ title, visType, fields, model, explore, instructions, apiKey }) {
+  const c = requireClient(apiKey);
   const prompt = [
     `Title: ${title || '(untitled)'}`,
     `Chart type: ${visType || 'unknown'}`,
@@ -209,4 +211,4 @@ async function describeTile({ title, visType, fields, model, explore, instructio
   };
 }
 
-module.exports = { generateInsight, streamInsight, streamDashboardInsight, describeTile, isConfigured: () => !!process.env.ANTHROPIC_API_KEY };
+module.exports = { generateInsight, streamInsight, streamDashboardInsight, describeTile, isConfigured: (apiKey) => !!(apiKey || process.env.ANTHROPIC_API_KEY) };

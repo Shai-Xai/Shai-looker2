@@ -3,7 +3,7 @@
 // brand-new Looker dashboard via POST. Kept intact for the "clone in Looker"
 // workflow; the editable-builder path uses convert.js + store.js instead.
 
-const { lookerRequest, LOOKER_BASE_URL, fetchDashboard } = require('./looker');
+const { lookerRequest, lookerBaseUrl, fetchDashboard } = require('./looker');
 
 async function recreateDashboard(source, newTitle, folderId) {
   const { dashboard, elements, filters } = source;
@@ -19,7 +19,7 @@ async function recreateDashboard(source, newTitle, folderId) {
 
   const results = {
     dashboardId: newDashboard.id,
-    dashboardUrl: `${LOOKER_BASE_URL}/dashboards/${newDashboard.id}`,
+    dashboardUrl: `${lookerBaseUrl()}/dashboards/${newDashboard.id}`,
     tilesCreated: 0,
     tilesFailed: 0,
     filtersCreated: 0,
