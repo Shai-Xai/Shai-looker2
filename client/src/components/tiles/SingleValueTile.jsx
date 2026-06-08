@@ -82,7 +82,7 @@ export default function SingleValueTile({ data, visConfig = {}, label }) {
       <AutoFitText
         max={40}
         min={12}
-        style={{ flex: 1, minHeight: 0 }}
+        style={{ flex: 1, minHeight: 26 }}
         onClick={drillable ? () => openDrill(primaryCell.links, primaryField.label_short || primaryField.label) : undefined}
         spanStyle={{
           fontWeight: cf?.bold ? 800 : 700, color: valueColor, letterSpacing: '-0.5px',
@@ -92,13 +92,13 @@ export default function SingleValueTile({ data, visConfig = {}, label }) {
         {primaryValue}
       </AutoFitText>
       {comparison && (
-        <div style={{ fontSize: 13, marginTop: 6, fontWeight: 600, color: comparison.color }}>
+        <div style={{ fontSize: 12.5, marginTop: 3, fontWeight: 600, color: comparison.color, flexShrink: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>
           {comparison.text}
           <span style={{ color: 'var(--muted)', fontWeight: 400, marginLeft: 6 }}>{comparison.label}</span>
         </div>
       )}
       {labelText && (
-        <div style={{ fontSize: 13, color: labelColor, marginTop: 6, fontWeight: 500, lineHeight: 1.25, textAlign: 'center', overflow: 'hidden' }}>
+        <div style={{ fontSize: 13, color: labelColor, marginTop: 3, fontWeight: 500, lineHeight: 1.2, textAlign: 'center', overflow: 'hidden', flexShrink: 0 }}>
           {labelText}
         </div>
       )}
@@ -155,7 +155,7 @@ function ruleMatches(r, v, raw) {
   }
 }
 
-const wrap = { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', padding: '12px 16px', textAlign: 'center' };
+const wrap = { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', padding: '8px 12px', textAlign: 'center', overflow: 'hidden' };
 
 function Empty() {
   return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#ccc', fontSize: 12 }}>No data</div>;

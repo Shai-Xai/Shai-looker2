@@ -143,7 +143,7 @@ function DesktopGrid({ tiles = [], carousels = [], filterValues, editable, onLay
         </div>
       ))}
       {carousels.map((c) => (
-        <div key={c.id} style={{ background: '#fff', border: '1px solid #e0e0e0', borderRadius: 8, padding: 10, boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
+        <div key={c.id} style={{ background: '#fff', border: '1px solid #e0e0e0', borderRadius: 'var(--radius-md)', padding: 10, boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
           {c.mode === 'grid'
             ? <SectionGrid carousel={c} filterValues={filterValues} editable={editable} {...(carouselHandlers ? carouselHandlers(c) : {})} />
             : <Carousel carousel={c} filterValues={filterValues} editable={editable} {...(carouselHandlers ? carouselHandlers(c) : {})} />}
