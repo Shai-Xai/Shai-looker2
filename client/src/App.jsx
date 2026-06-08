@@ -27,7 +27,6 @@ function Header() {
       </div>
       <Link to="/" style={{ fontSize: 17, fontWeight: 700, letterSpacing: '-0.3px', textDecoration: 'none', color: 'var(--text)' }}>Howler&nbsp;:&nbsp;Pulse</Link>
       <div style={{ flex: 1 }} />
-      {isAdmin && <Link to="/preview" style={navLink}>Preview client</Link>}
       {isAdmin && <Link to="/admin" style={navLink}>Admin</Link>}
       {!isMobile && <span style={{ fontSize: 13, color: 'var(--muted)' }}>{user?.email}{isAdmin ? ' (admin)' : ''}</span>}
       <button onClick={() => logout()} style={logoutBtn}>{isMobile ? 'Exit' : 'Log out'}</button>

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 
 // Icon control: an emoji, or an uploaded image (downscaled to a small data-URL).
@@ -188,6 +188,7 @@ function Suites({ fields }) {
   );
 }
 function SuiteCard({ suite, entities, sets, fields, onChange }) {
+  const navigate = useNavigate();
   const [name, setName] = useState(suite.name);
   const [icon, setIcon] = useState(suite.icon || '');
   const [entityId, setEntityId] = useState(suite.entityId);
@@ -197,10 +198,21 @@ function SuiteCard({ suite, entities, sets, fields, onChange }) {
   const toggleSet = (id) => setSetIds((cur) => cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]);
   const save = async () => { await api.adminUpdateSuite(suite.id, { name, icon, entityId, setIds, lockedFilters: locks }); flash(setSaved); onChange(); };
   const remove = async () => { if (confirm(`Delete suite "${suite.name}"?`)) { await api.adminDeleteSuite(suite.id); onChange(); } };
+  // Open this suite exactly as the client sees it (preview), jumping to its
+  // first dashboard. Uses the client suite endpoint (admins can read any suite).
+  const preview = async () => {
+    try {
+      const d = await api.mySuite(suite.id);
+      const first = d.sets.flatMap((s) => s.dashboards)[0];
+      if (first) navigate(`/suite/${suite.id}/d/${first.id}`);
+      else alert('This suite has no dashboards to preview yet.');
+    } catch (e) { alert('Could not open preview: ' + e.message); }
+  };
   return (
     <div style={cardStyle}>
       <Row>
         <input style={{ ...input, fontWeight: 700, flex: 1 }} value={name} onChange={(e) => setName(e.target.value)} />
+        <button style={previewBtn} onClick={preview} title="Preview as the client sees it">👁 Preview</button>
         <button style={delBtn} onClick={remove}>Delete</button>
       </Row>
       <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end' }}>
@@ -556,6 +568,7 @@ const saveBtn = { padding: '8px 16px', background: 'var(--brand)', color: '#fff'
 const addBtn = { padding: '9px 16px', background: '#f7f7f7', border: '1.5px solid #e0e0e0', borderRadius: 8, fontWeight: 600, fontSize: 13, cursor: 'pointer' };
 const miniBtn = { padding: '6px 12px', background: '#f7f7f7', border: '1.5px solid #e0e0e0', borderRadius: 6, fontWeight: 600, fontSize: 12, cursor: 'pointer' };
 const delBtn = { padding: '6px 12px', background: '#fff', color: 'var(--error)', border: '1.5px solid #f0c0c0', borderRadius: 6, fontWeight: 600, fontSize: 12, cursor: 'pointer' };
+const previewBtn = { padding: '6px 12px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 600, fontSize: 12, cursor: 'pointer' };
 const th = { textAlign: 'left', padding: '8px 10px', borderBottom: '2px solid #e0e0e0', fontSize: 12, color: 'var(--muted)' };
 const td = { padding: '8px 10px', borderBottom: '1px solid #f0f0f0' };
 const checkList = { display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 200, overflowY: 'auto', border: '1px solid #eee', borderRadius: 8, padding: 10, margin: '6px 0' };
