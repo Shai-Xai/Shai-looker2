@@ -4,6 +4,7 @@ import EditableGrid from '../components/EditableGrid.jsx';
 import FilterBar from '../components/FilterBar.jsx';
 import TileEditorPanel from '../components/editor/TileEditorPanel.jsx';
 import FilterManager from '../components/editor/FilterManager.jsx';
+import TileLibraryPicker from '../components/editor/TileLibraryPicker.jsx';
 import { api } from '../lib/api.js';
 
 export default function EditorPage() {
@@ -16,6 +17,7 @@ export default function EditorPage() {
   const [saving, setSaving] = useState(false);
   const [selectedTileId, setSelectedTileId] = useState(null);
   const [showFilters, setShowFilters] = useState(false);
+  const [showLibrary, setShowLibrary] = useState(false);
   const [filterValues, setFilterValues] = useState({});
 
   useEffect(() => {
@@ -59,6 +61,25 @@ export default function EditorPage() {
       : { id: crypto.randomUUID(), type: 'vis', title: 'New tile', body_text: '', layout: { x: 0, y: nextY, w: 8, h: 6 }, query: null, vis: { type: 'looker_column' }, listenTo: {} };
     mutate((d) => ({ ...d, tiles: [...d.tiles, tile] }));
     setSelectedTileId(tile.id);
+  }
+
+  // Stamp a copy of a library tile into the dashboard, positioned at the bottom.
+  function addLibraryTile(libTile) {
+    const nextY = def.tiles.reduce((max, t) => Math.max(max, (t.layout?.y ?? 0) + (t.layout?.h ?? 6)), 0);
+    const base = libTile.def || {};
+    const tile = {
+      ...structuredClone(base),
+      id: crypto.randomUUID(),
+      type: base.type || 'vis',
+      title: base.title || libTile.name || 'New tile',
+      layout: { x: 0, y: nextY, w: base.layout?.w ?? 8, h: base.layout?.h ?? 6 },
+      vis: base.vis || { type: 'looker_column' },
+      listenTo: base.listenTo || {},
+    };
+    mutate((d) => ({ ...d, tiles: [...d.tiles, tile] }));
+    setSelectedTileId(tile.id);
+    setShowLibrary(false);
+    api.libraryUse(libTile.id).catch(() => {});
   }
 
   // Update a tile wherever it lives — main grid or any carousel.
@@ -182,6 +203,7 @@ export default function EditorPage() {
           onChange={(e) => mutate((d) => ({ ...d, title: e.target.value }))}
         />
         <button style={btn} onClick={() => addTile('vis')}>+ Visualization</button>
+        <button style={btn} onClick={() => setShowLibrary(true)}>+ From library</button>
         <button style={btn} onClick={() => addTile('text')}>+ Text</button>
         <button style={btn} onClick={addCarousel}>+ Carousel</button>
         <button style={btn} onClick={() => setShowFilters(true)}>Filters ({def.filters?.length || 0})</button>
@@ -235,6 +257,10 @@ export default function EditorPage() {
           onChange={(filters) => mutate((d) => ({ ...d, filters }))}
           onClose={() => setShowFilters(false)}
         />
+      )}
+
+      {showLibrary && (
+        <TileLibraryPicker onPick={addLibraryTile} onClose={() => setShowLibrary(false)} />
       )}
     </div>
   );

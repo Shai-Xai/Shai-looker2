@@ -106,4 +106,15 @@ export const api = {
   // Client navigation: Suites
   mySuites: () => fetch('/api/my/suites').then(json),
   mySuite: (id) => fetch(`/api/my/suites/${id}`).then(json),
+
+  // Tile library
+  libraryList: (params = {}) => {
+    const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v)).toString();
+    return fetch(`/api/admin/library${qs ? `?${qs}` : ''}`).then(json);
+  },
+  libraryUpdate: (id, patch) => fetch(`/api/admin/library/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) }).then(json),
+  libraryDelete: (id) => fetch(`/api/admin/library/${id}`, { method: 'DELETE' }),
+  libraryDescribe: (id) => fetch(`/api/admin/library/${id}/describe`, { method: 'POST' }).then(json),
+  libraryBackfill: () => fetch('/api/admin/library/backfill', { method: 'POST' }).then(json),
+  libraryUse: (id) => fetch(`/api/admin/library/${id}/use`, { method: 'POST' }).then(json),
 };

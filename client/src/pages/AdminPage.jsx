@@ -56,11 +56,13 @@ export default function AdminPage() {
         <Tab active={tab === 'entities'} onClick={() => setTab('entities')}>Clients</Tab>
         <Tab active={tab === 'sets'} onClick={() => setTab('sets')}>Sets</Tab>
         <Tab active={tab === 'suites'} onClick={() => setTab('suites')}>Suites</Tab>
+        <Tab active={tab === 'library'} onClick={() => setTab('library')}>Tile library</Tab>
         <Tab active={tab === 'users'} onClick={() => setTab('users')}>Logins</Tab>
       </div>
       {tab === 'entities' && <Entities fields={fields} />}
       {tab === 'sets' && <Sets />}
       {tab === 'suites' && <Suites fields={fields} />}
+      {tab === 'library' && <Library />}
       {tab === 'users' && <Users />}
     </main>
   );
@@ -439,6 +441,107 @@ function SaveRow({ onSave, saved, id }) {
     </div>
   );
 }
+// ─── Tile library ─────────────────────────────────────────────────────────────
+// Tiles harvested from imported dashboards. Curate their label, description and
+// category (optionally with AI) so they can be reused when building dashboards.
+function Library() {
+  const [tiles, setTiles] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [aiEnabled, setAiEnabled] = useState(false);
+  const [search, setSearch] = useState('');
+  const [category, setCategory] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [backfilling, setBackfilling] = useState(false);
+
+  const load = () => {
+    setLoading(true);
+    api.libraryList({ search, category })
+      .then((r) => { setTiles(r.tiles || []); setCategories(r.categories || []); setAiEnabled(!!r.aiEnabled); })
+      .finally(() => setLoading(false));
+  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(load, [search, category]);
+
+  async function backfill() {
+    setBackfilling(true);
+    try { const r = await api.libraryBackfill(); alert(`Harvested ${r.added} new tile(s) from ${r.scanned} dashboard(s).`); load(); }
+    catch (e) { alert('Harvest failed: ' + e.message); }
+    finally { setBackfilling(false); }
+  }
+
+  return (
+    <div>
+      <p style={hint}>Every visualization imported from Looker is catalogued here. Label what each tile is and what it’s used for — these become reusable building blocks in the dashboard editor (“+ From library”).</p>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' }}>
+        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search tiles…" style={{ ...input, minWidth: 220 }} />
+        <select value={category} onChange={(e) => setCategory(e.target.value)} style={input}>
+          <option value="">All categories</option>
+          {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <div style={{ flex: 1 }} />
+        <button style={addBtn} onClick={backfill} disabled={backfilling}>{backfilling ? 'Harvesting…' : '↻ Harvest existing dashboards'}</button>
+      </div>
+      {loading ? <Muted>Loading…</Muted>
+        : tiles.length === 0 ? <Muted>No tiles yet. Import a dashboard, or harvest your existing dashboards above.</Muted>
+        : tiles.map((t) => <LibraryRow key={t.id} tile={t} aiEnabled={aiEnabled} onSaved={load} onDeleted={load} />)}
+    </div>
+  );
+}
+
+function LibraryRow({ tile, aiEnabled, onSaved, onDeleted }) {
+  const [name, setName] = useState(tile.name);
+  const [description, setDescription] = useState(tile.description);
+  const [category, setCategory] = useState(tile.category);
+  const [busy, setBusy] = useState(false);
+  const dirty = name !== tile.name || description !== tile.description || category !== tile.category;
+
+  async function save() {
+    setBusy(true);
+    try { await api.libraryUpdate(tile.id, { name, description, category }); onSaved(); }
+    catch (e) { alert('Save failed: ' + e.message); }
+    finally { setBusy(false); }
+  }
+  async function describe() {
+    setBusy(true);
+    try {
+      const r = await api.libraryDescribe(tile.id);
+      setName(r.name); setDescription(r.description); setCategory(r.category);
+      onSaved();
+    } catch (e) { alert('AI describe failed: ' + e.message); }
+    finally { setBusy(false); }
+  }
+  async function remove() {
+    if (!confirm('Remove this tile from the library?')) return;
+    await api.libraryDelete(tile.id); onDeleted();
+  }
+
+  return (
+    <div style={cardStyle}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <span style={{ ...chip, background: 'rgba(0,0,0,0.05)', color: 'var(--muted)' }}>{tile.visType || 'vis'}</span>
+        {tile.fieldsSummary && <span style={{ fontSize: 12, color: 'var(--muted)' }}>{tile.fieldsSummary}</span>}
+        <div style={{ flex: 1 }} />
+        {tile.usageCount > 0 && <span style={{ fontSize: 11, color: 'var(--muted)' }}>used {tile.usageCount}×</span>}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 160px', gap: 10 }}>
+        <Field label="Name"><input value={name} onChange={(e) => setName(e.target.value)} style={{ ...input, minWidth: 0, width: '100%' }} /></Field>
+        <Field label="Category"><input value={category} onChange={(e) => setCategory(e.target.value)} placeholder="e.g. Revenue" style={{ ...input, minWidth: 0, width: '100%' }} /></Field>
+      </div>
+      <div style={{ marginTop: 10 }}>
+        <Field label="What it is / used for">
+          <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} style={{ ...input, minWidth: 0, width: '100%', resize: 'vertical', fontFamily: 'inherit' }} />
+        </Field>
+      </div>
+      <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+        {aiEnabled && <button style={miniBtn} onClick={describe} disabled={busy}>{busy ? '…' : '✨ Describe with AI'}</button>}
+        <div style={{ flex: 1 }} />
+        <button style={delBtn} onClick={remove} disabled={busy}>Delete</button>
+        <button style={saveBtn} onClick={save} disabled={busy || !dirty}>{busy ? 'Saving…' : 'Save'}</button>
+      </div>
+    </div>
+  );
+}
+
 function Tab({ active, onClick, children }) {
   return <button onClick={onClick} style={{ padding: '8px 16px', borderRadius: 8, border: active ? '1.5px solid var(--brand)' : '1.5px solid #e0e0e0', background: active ? 'var(--brand)' : '#fff', color: active ? '#fff' : 'var(--text)', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>{children}</button>;
 }

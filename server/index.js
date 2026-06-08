@@ -204,7 +204,9 @@ app.post('/api/dashboards/import', auth.requireAdmin, async (req, res) => {
     if (title) def.title = title;
     // Folder: explicit choice, else the dashboard's Looker folder.
     def.folder = (folder || source.dashboard?.folder?.name || '').trim();
-    res.status(201).json(store.create(def));
+    const created = store.create(def);
+    try { db.harvestDashboardTiles(created, { sourceDashboardId: created.id }); } catch (e) { console.error('[harvest]', e.message); }
+    res.status(201).json(created);
   } catch (err) {
     console.error('[POST /api/dashboards/import]', err.message);
     res.status(500).json({ error: err.message });
@@ -236,7 +238,8 @@ app.post('/api/dashboards/import-folder', auth.requireAdmin, async (req, res) =>
         await looker.resolveElementQueries(source.elements);
         const def = convertDashboard(source);
         def.folder = name;
-        store.create(def);
+        const created = store.create(def);
+        try { db.harvestDashboardTiles(created, { sourceDashboardId: created.id }); } catch (e) { console.error('[harvest]', e.message); }
         imported++;
       } catch (e) {
         failed.push({ id: d.id, title: d.title, error: e.message });
@@ -440,6 +443,66 @@ app.post('/api/insight', auth.requireAuth, async (req, res) => {
     console.error('[POST /api/insight]', err.message);
     if (!res.headersSent) res.status(500).json({ error: err.message });
     else { res.write(`\n\n[error: ${err.message}]`); res.end(); }
+  }
+});
+
+// ─── Tile library (admin) ──────────────────────────────────────────────────────
+// A catalogue of reusable tiles harvested from imported dashboards. Admins
+// curate the labels; the editor stamps copies into new dashboards.
+app.get('/api/admin/library', auth.requireAdmin, (req, res) => {
+  res.json({
+    tiles: db.listLibraryTiles({ search: req.query.search, category: req.query.category }),
+    categories: db.listLibraryCategories(),
+    aiEnabled: insights.isConfigured(),
+  });
+});
+app.get('/api/admin/library/:id', auth.requireAdmin, (req, res) => {
+  const t = db.getLibraryTile(req.params.id);
+  if (!t) return res.status(404).json({ error: 'Not found' });
+  res.json(t);
+});
+app.put('/api/admin/library/:id', auth.requireAdmin, (req, res) => {
+  const t = db.updateLibraryTile(req.params.id, req.body || {});
+  if (!t) return res.status(404).json({ error: 'Not found' });
+  res.json(t);
+});
+app.delete('/api/admin/library/:id', auth.requireAdmin, (req, res) => {
+  res.status(db.deleteLibraryTile(req.params.id) ? 204 : 404).end();
+});
+// Record that a library tile was used (stamped into a dashboard).
+app.post('/api/admin/library/:id/use', auth.requireAdmin, (req, res) => {
+  db.bumpLibraryUsage(req.params.id); res.json({ ok: true });
+});
+// Backfill: harvest tiles from every existing dashboard into the library.
+app.post('/api/admin/library/backfill', auth.requireAdmin, (_req, res) => {
+  let added = 0, scanned = 0;
+  for (const d of store.list()) {
+    const def = store.get(d.id);
+    if (!def) continue;
+    scanned++;
+    try { added += db.harvestDashboardTiles(def, { sourceDashboardId: d.id }); } catch (e) { console.error('[backfill]', e.message); }
+  }
+  res.json({ scanned, added });
+});
+// AI-describe one library tile (label + description + category).
+app.post('/api/admin/library/:id/describe', auth.requireAdmin, async (req, res) => {
+  const t = db.getLibraryTile(req.params.id);
+  if (!t) return res.status(404).json({ error: 'Not found' });
+  if (!insights.isConfigured()) return res.status(400).json({ error: 'AI is not configured (set ANTHROPIC_API_KEY).' });
+  try {
+    const out = await insights.describeTile({
+      title: t.name, visType: t.visType, fields: (t.def.query?.fields || []),
+      model: t.model, explore: t.explore,
+    });
+    const saved = db.updateLibraryTile(t.id, {
+      name: out.name || t.name,
+      description: out.description || t.description,
+      category: out.category || t.category,
+    });
+    res.json(saved);
+  } catch (err) {
+    console.error('[POST /api/admin/library/:id/describe]', err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 

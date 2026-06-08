@@ -120,4 +120,42 @@ async function streamInsight(tileContext, onText) {
   await stream.finalMessage();
 }
 
-module.exports = { generateInsight, streamInsight, isConfigured: () => !!process.env.ANTHROPIC_API_KEY };
+// ─── Tile-library labelling ────────────────────────────────────────────────────
+// Given a tile's metadata (its title, chart type, and the fields it queries),
+// ask Claude to name it and explain what it shows and what it's used for. Used
+// to enrich the reusable tile library. Returns { name, description, category }.
+const LIBRARY_SYSTEM = `You catalogue analytics tiles for Howler, an events ticketing platform (organisers run events; customers buy tickets; amounts in South African Rand). For a single tile you are given its current title, chart type, and the data fields it uses. Respond with STRICT JSON only (no markdown, no prose) of the form:
+{"name": "...", "description": "...", "category": "..."}
+- name: a short, clear, human label for the tile (max ~6 words).
+- description: 1-2 sentences on what the tile shows and what a user would use it for.
+- category: one short bucket from this set when it fits, else your own: "Revenue", "Tickets", "Attendance", "Cashless", "Access Control", "Marketing", "Customers", "Operations".
+Be concrete and business-focused. Do not invent fields that aren't listed.`;
+
+async function describeTile({ title, visType, fields, model, explore }) {
+  const c = requireClient();
+  const prompt = [
+    `Title: ${title || '(untitled)'}`,
+    `Chart type: ${visType || 'unknown'}`,
+    model && explore ? `Source: ${model} / ${explore}` : null,
+    `Fields: ${(fields && fields.length) ? fields.join(', ') : '(none)'}`,
+  ].filter(Boolean).join('\n');
+  const resp = await c.messages.create({
+    model: MODEL,
+    max_tokens: 400,
+    thinking: { type: 'adaptive' },
+    output_config: { effort: 'low' },
+    system: LIBRARY_SYSTEM,
+    messages: [{ role: 'user', content: prompt }],
+  });
+  const text = (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error('AI did not return JSON');
+  const out = JSON.parse(match[0]);
+  return {
+    name: (out.name || '').toString().trim(),
+    description: (out.description || '').toString().trim(),
+    category: (out.category || '').toString().trim(),
+  };
+}
+
+module.exports = { generateInsight, streamInsight, describeTile, isConfigured: () => !!process.env.ANTHROPIC_API_KEY };
