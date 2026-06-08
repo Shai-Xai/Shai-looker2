@@ -7,6 +7,7 @@ import AdminPage from './pages/AdminPage.jsx';
 import LoginPage from './pages/LoginPage.jsx';
 import ClientLayout from './pages/ClientLayout.jsx';
 import ClientHome from './pages/ClientHome.jsx';
+import Logo from './components/Logo.jsx';
 import { DrillProvider } from './lib/DrillContext.jsx';
 import { AuthProvider, useAuth } from './lib/auth.jsx';
 import { useIsMobile } from './lib/useIsMobile.js';
@@ -21,14 +22,10 @@ function Header() {
       borderBottom: '1px solid var(--hairline)', padding: isMobile ? '0 14px' : '0 22px',
       height: 56, display: 'flex', alignItems: 'center', gap: isMobile ? 8 : 12, flexShrink: 0, zIndex: 10,
     }}>
-      <div style={{ width: 30, height: 30, background: 'var(--brand)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer' }} onClick={() => navigate('/')}>
-        <svg width="17" height="17" viewBox="0 0 24 24" fill="white">
-          <path d="M9 3v11.5a3.5 3.5 0 1 0 2 3.13V8h7V3H9zm-1.5 16a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zM11 6V5h5v1h-5z" />
-        </svg>
+      <div style={{ cursor: 'pointer', display: 'flex' }} onClick={() => navigate('/')}>
+        <Logo size={30} radius={8} />
       </div>
-      <Link to="/" style={{ fontSize: 17, fontWeight: 700, letterSpacing: '-0.3px', textDecoration: 'none', color: 'var(--text)' }}>Howler</Link>
-      {/* Secondary text only fits on tablet+ */}
-      {!isMobile && <span style={{ fontSize: 13, color: 'var(--muted)', borderLeft: '1px solid #e0e0e0', paddingLeft: 12 }}>Analytics Studio</span>}
+      <Link to="/" style={{ fontSize: 17, fontWeight: 700, letterSpacing: '-0.3px', textDecoration: 'none', color: 'var(--text)' }}>Howler&nbsp;:&nbsp;Pulse</Link>
       <div style={{ flex: 1 }} />
       {isAdmin && <Link to="/admin" style={navLink}>Admin</Link>}
       {!isMobile && <span style={{ fontSize: 13, color: 'var(--muted)' }}>{user?.email}{isAdmin ? ' (admin)' : ''}</span>}
