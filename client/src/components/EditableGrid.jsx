@@ -3,6 +3,7 @@ import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
 import TileFrame from './TileFrame.jsx';
 import Carousel from './Carousel.jsx';
+import SectionGrid from './SectionGrid.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
 
 const Grid = WidthProvider(GridLayout);
@@ -35,20 +36,39 @@ function StackedGrid({ tiles = [], carousels = [], filterValues }) {
   // gaps so a lone metric before a full-width tile doesn't leave a hole.
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, gridAutoFlow: 'dense' }}>
-      {items.map((it) =>
-        it.kind === 'tile' ? (
-          <div key={it.el.id} style={{ height: mobileTileHeight(it.el), gridColumn: isMetricTile(it.el) ? 'auto' : '1 / -1' }}>
-            <TileFrame tile={it.el} filterValues={filterValues} editable={false} />
+      {items.map((it) => {
+        if (it.kind === 'tile') {
+          return (
+            <div key={it.el.id} style={{ height: mobileTileHeight(it.el), gridColumn: isMetricTile(it.el) ? 'auto' : '1 / -1' }}>
+              <TileFrame tile={it.el} filterValues={filterValues} editable={false} />
+            </div>
+          );
+        }
+        const c = it.el;
+        // A grid "section": stack its tiles like the main mobile view (metrics 2-up).
+        if (c.mode === 'grid') {
+          const stiles = (c.tiles || []).slice().sort((a, b) => (a.layout?.y ?? 0) - (b.layout?.y ?? 0) || (a.layout?.x ?? 0) - (b.layout?.x ?? 0));
+          return (
+            <div key={c.id} style={{ gridColumn: '1 / -1', background: '#fff', border: '1px solid #e0e0e0', borderRadius: 12, padding: 12, boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
+              {c.title && <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 10 }}>{c.title}</h3>}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, gridAutoFlow: 'dense' }}>
+                {stiles.map((t) => (
+                  <div key={t.id} style={{ height: mobileTileHeight(t), gridColumn: isMetricTile(t) ? 'auto' : '1 / -1' }}>
+                    <TileFrame tile={t} filterValues={filterValues} editable={false} />
+                  </div>
+                ))}
+                {stiles.length === 0 && <div style={{ gridColumn: '1 / -1', color: '#bbb', fontSize: 13 }}>No tiles</div>}
+              </div>
+            </div>
+          );
+        }
+        // A scrolling carousel: a compact capped swipe band.
+        return (
+          <div key={c.id} style={{ gridColumn: '1 / -1', height: Math.min(340, Math.max(220, it.h * 22)), background: '#fff', border: '1px solid #e0e0e0', borderRadius: 12, padding: 10, boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
+            <Carousel carousel={c} filterValues={filterValues} editable={false} />
           </div>
-        ) : (
-          // Containers need a bounded height or their height:100% cards collapse.
-          // A scrolling carousel gets a compact capped band; a grid "section"
-          // grows to fit its stacked tiles.
-          <div key={it.el.id} style={{ gridColumn: '1 / -1', height: it.el.mode === 'grid' ? (44 + Math.max(1, (it.el.tiles || []).length) * 232) : Math.min(340, Math.max(220, it.h * 22)), background: '#fff', border: '1px solid #e0e0e0', borderRadius: 12, padding: 10, boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
-            <Carousel carousel={it.el} filterValues={filterValues} editable={false} />
-          </div>
-        )
-      )}
+        );
+      })}
     </div>
   );
 }
@@ -124,7 +144,9 @@ function DesktopGrid({ tiles = [], carousels = [], filterValues, editable, onLay
       ))}
       {carousels.map((c) => (
         <div key={c.id} style={{ background: '#fff', border: '1px solid #e0e0e0', borderRadius: 8, padding: 10, boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
-          <Carousel carousel={c} filterValues={filterValues} editable={editable} {...(carouselHandlers ? carouselHandlers(c) : {})} />
+          {c.mode === 'grid'
+            ? <SectionGrid carousel={c} filterValues={filterValues} editable={editable} {...(carouselHandlers ? carouselHandlers(c) : {})} />
+            : <Carousel carousel={c} filterValues={filterValues} editable={editable} {...(carouselHandlers ? carouselHandlers(c) : {})} />}
         </div>
       ))}
     </Grid>

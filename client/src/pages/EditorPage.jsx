@@ -139,10 +139,20 @@ export default function EditorPage() {
       carousels: (d.carousels || []).map((c) => ({ ...c, tiles: c.tiles.map((t) => (t.id === tileId ? { ...t, cw: w } : t)) })),
     }));
   }
+  // Free-form layout of tiles inside a grid "section".
+  function setSectionTileLayouts(cid, map) {
+    mutate((d) => ({
+      ...d,
+      carousels: (d.carousels || []).map((c) => (c.id === cid
+        ? { ...c, tiles: c.tiles.map((t) => (map[t.id] ? { ...t, layout: { ...(t.layout || {}), ...map[t.id] } } : t)) }
+        : c)),
+    }));
+  }
   function addTileToCarousel(cid, type) {
+    const layout = { x: 0, y: 9999, w: type === 'text' ? 24 : 8, h: type === 'text' ? 3 : 6 }; // used by grid sections
     const tile = type === 'text'
-      ? { id: crypto.randomUUID(), type: 'text', title: '', body_text: '## New text tile', query: null, vis: {}, listenTo: {} }
-      : { id: crypto.randomUUID(), type: 'vis', title: 'New tile', body_text: '', query: null, vis: { type: 'looker_column' }, listenTo: {} };
+      ? { id: crypto.randomUUID(), type: 'text', title: '', body_text: '## New text tile', query: null, vis: {}, listenTo: {}, layout }
+      : { id: crypto.randomUUID(), type: 'vis', title: 'New tile', body_text: '', query: null, vis: { type: 'looker_column' }, listenTo: {}, layout };
     mutate((d) => ({ ...d, carousels: (d.carousels || []).map((c) => (c.id === cid ? { ...c, tiles: [...c.tiles, tile] } : c)) }));
     setSelectedTileId(tile.id);
   }
@@ -160,7 +170,9 @@ export default function EditorPage() {
         tiles: c.tiles.filter((t) => { if (t.id === tileId) { moved = { ...t }; return false; } return true; }),
       }));
       if (!moved) return d;
-      delete moved.layout; // carousel tiles are fixed-size cards
+      // Drop at the bottom of the target container; grid sections use this
+      // layout, scrolling carousels ignore it (they size by card width).
+      moved.layout = { x: 0, y: 9999, w: moved.layout?.w || 8, h: moved.layout?.h || 6 };
       return {
         ...d,
         tiles,
@@ -200,6 +212,7 @@ export default function EditorPage() {
     onRemove: () => removeCarousel(c.id),
     onDropTile: (tileId) => moveTileToCarousel(tileId, c.id),
     onChangeTileW: (tileId, w) => setTileWidth(tileId, w),
+    onTileLayout: (map) => setSectionTileLayouts(c.id, map),
   });
 
   return (
