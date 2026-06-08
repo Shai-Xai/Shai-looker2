@@ -1,8 +1,7 @@
-import { useState } from 'react';
-import GridLayout, { WidthProvider } from 'react-grid-layout';
+import { useState, useRef, useLayoutEffect } from 'react';
+import GridLayout from 'react-grid-layout';
 import TileFrame from './TileFrame.jsx';
 
-const Grid = WidthProvider(GridLayout);
 const COLS = 24;
 const ROW_HEIGHT = 30;
 
@@ -13,6 +12,20 @@ const ROW_HEIGHT = 30;
 // whole section in the outer dashboard grid.
 export default function SectionGrid({ carousel, filterValues, editable, onEditTile, onRemoveTile, onDuplicateTile, onAddTile, onChangeTitle, onRemove, onDropTile, onTileLayout }) {
   const [dragOver, setDragOver] = useState(false);
+  // Measure our own width so the nested grid lays out across the real columns
+  // (WidthProvider mis-measures inside another grid item, collapsing tiles to
+  // a single column so they can't sit side by side).
+  const bodyRef = useRef(null);
+  const [width, setWidth] = useState(0);
+  useLayoutEffect(() => {
+    if (!bodyRef.current) return;
+    const el = bodyRef.current;
+    const measure = () => setWidth(el.clientWidth);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   const tiles = carousel.tiles || [];
   const layout = tiles.map((t, i) => ({
     i: t.id,
@@ -56,6 +69,7 @@ export default function SectionGrid({ carousel, filterValues, editable, onEditTi
       </div>
 
       <div
+        ref={bodyRef}
         onMouseDown={editable ? (e) => e.stopPropagation() : undefined}
         onDragOver={editable && onDropTile ? (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (!dragOver) setDragOver(true); } : undefined}
         onDragLeave={editable && onDropTile ? () => setDragOver(false) : undefined}
@@ -66,9 +80,10 @@ export default function SectionGrid({ carousel, filterValues, editable, onEditTi
           <div style={{ color: '#bbb', fontSize: 13, padding: '20px 12px' }}>
             {editable ? 'Empty section — add tiles above, or drag a tile here' : 'No tiles'}
           </div>
-        ) : (
-          <Grid
+        ) : width > 0 ? (
+          <GridLayout
             className="layout"
+            width={width}
             layout={layout}
             cols={COLS}
             rowHeight={ROW_HEIGHT}
@@ -93,8 +108,8 @@ export default function SectionGrid({ carousel, filterValues, editable, onEditTi
                 />
               </div>
             ))}
-          </Grid>
-        )}
+          </GridLayout>
+        ) : null}
       </div>
     </div>
   );
