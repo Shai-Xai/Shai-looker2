@@ -442,6 +442,14 @@ app.get('/api/insight/status', auth.requireAuth, (_req, res) => {
   res.json({ enabled: insights.isConfigured() });
 });
 
+// Global AI instructions (admin) — appended to every AI prompt.
+app.get('/api/admin/ai-instructions', auth.requireAdmin, (_req, res) => {
+  res.json({ instructions: db.getSetting('ai_instructions'), aiEnabled: insights.isConfigured() });
+});
+app.put('/api/admin/ai-instructions', auth.requireAdmin, (req, res) => {
+  res.json({ instructions: db.setSetting('ai_instructions', (req.body || {}).instructions || '') });
+});
+
 // Streams the insight back as plain text chunks as Claude writes it.
 app.post('/api/insight', auth.requireAuth, async (req, res) => {
   const { title, visType, fields, rows, filters, userContext, history } = req.body || {};
@@ -452,7 +460,7 @@ app.post('/api/insight', auth.requireAuth, async (req, res) => {
   try {
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache');
-    await insights.streamInsight({ title, visType, fields, rows, filters, userContext, history }, (text) => res.write(text));
+    await insights.streamInsight({ title, visType, fields, rows, filters, userContext, history, instructions: db.getSetting('ai_instructions') }, (text) => res.write(text));
     res.end();
   } catch (err) {
     console.error('[POST /api/insight]', err.message);
@@ -506,7 +514,7 @@ app.post('/api/dashboard-insight', auth.requireAuth, async (req, res) => {
   try {
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache');
-    await insights.streamDashboardInsight({ title: def.title, filters: filterValues, tiles }, (t) => res.write(t));
+    await insights.streamDashboardInsight({ title: def.title, filters: filterValues, tiles, instructions: db.getSetting('ai_instructions') }, (t) => res.write(t));
     res.end();
   } catch (err) {
     console.error('[POST /api/dashboard-insight]', err.message);
@@ -561,7 +569,7 @@ app.post('/api/admin/library/:id/describe', auth.requireAdmin, async (req, res) 
   try {
     const out = await insights.describeTile({
       title: t.name, visType: t.visType, fields: (t.def.query?.fields || []),
-      model: t.model, explore: t.explore,
+      model: t.model, explore: t.explore, instructions: db.getSetting('ai_instructions'),
     });
     const saved = db.updateLibraryTile(t.id, {
       name: out.name || t.name,

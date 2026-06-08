@@ -117,4 +117,8 @@ export const api = {
   libraryDescribe: (id) => fetch(`/api/admin/library/${id}/describe`, { method: 'POST' }).then(json),
   libraryBackfill: () => fetch('/api/admin/library/backfill', { method: 'POST' }).then(json),
   libraryUse: (id) => fetch(`/api/admin/library/${id}/use`, { method: 'POST' }).then(json),
+
+  // Global AI instructions
+  getAiInstructions: () => fetch('/api/admin/ai-instructions').then(json),
+  saveAiInstructions: (instructions) => fetch('/api/admin/ai-instructions', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instructions }) }).then(json),
 };

@@ -131,6 +131,17 @@ addColumn('sets', 'icon', "TEXT NOT NULL DEFAULT ''");   // emoji or image data-
 addColumn('suites', 'icon', "TEXT NOT NULL DEFAULT ''");
 addColumn('entities', 'logo', "TEXT NOT NULL DEFAULT ''"); // client brand image data-URL / emoji
 
+// ─── Settings (simple key/value) ──────────────────────────────────────────────
+db.exec(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '');`);
+function getSetting(key, fallback = '') {
+  const r = db.prepare('SELECT value FROM settings WHERE key=?').get(key);
+  return r ? r.value : fallback;
+}
+function setSetting(key, value) {
+  db.prepare('INSERT INTO settings (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(key, value == null ? '' : String(value));
+  return getSetting(key);
+}
+
 // ─── Tile library ─────────────────────────────────────────────────────────────
 // Every visualization tile imported from Looker is harvested here so it can be
 // labelled (what it is / what it's used for) and reused when building new
@@ -466,4 +477,6 @@ module.exports = {
   listSuites, listSuitesForEntity, getSuite, createSuite, updateSuite, deleteSuite, setSuiteSets, suiteSetIds, dashboardsInSuite, lockedFiltersForSuite,
   // tile library
   listLibraryTiles, listLibraryCategories, getLibraryTile, harvestTile, harvestDashboardTiles, updateLibraryTile, deleteLibraryTile, bumpLibraryUsage,
+  // settings (key/value)
+  getSetting, setSetting,
 };

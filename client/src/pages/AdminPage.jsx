@@ -111,10 +111,12 @@ export default function AdminPage() {
         <Tab active={tab === 'entities'} onClick={() => setTab('entities')}>Clients</Tab>
         <Tab active={tab === 'sets'} onClick={() => setTab('sets')}>Sets</Tab>
         <Tab active={tab === 'library'} onClick={() => setTab('library')}>Tile library</Tab>
+        <Tab active={tab === 'ai'} onClick={() => setTab('ai')}>AI</Tab>
       </div>
       {tab === 'entities' && <Entities fields={fields} />}
       {tab === 'sets' && <Sets />}
       {tab === 'library' && <Library />}
+      {tab === 'ai' && <AISettings />}
     </main>
   );
 }
@@ -732,6 +734,43 @@ function LibraryRow({ tile, aiEnabled, onSaved, onDeleted }) {
         <div style={{ flex: 1 }} />
         <button style={delBtn} onClick={remove} disabled={busy}>Delete</button>
         <button style={saveBtn} onClick={save} disabled={busy || !dirty}>{busy ? 'Saving…' : 'Save'}</button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Global AI instructions ───────────────────────────────────────────────────
+// One set of standing instructions appended to every AI prompt (tile insights,
+// dashboard summary, tile-library descriptions).
+function AISettings() {
+  const [text, setText] = useState('');
+  const [orig, setOrig] = useState('');
+  const [aiEnabled, setAiEnabled] = useState(true);
+  const [loading, setLoading] = useState(true);
+  const [saved, setSaved] = useState(false);
+  useEffect(() => {
+    api.getAiInstructions().then((r) => { setText(r.instructions || ''); setOrig(r.instructions || ''); setAiEnabled(!!r.aiEnabled); }).finally(() => setLoading(false));
+  }, []);
+  const save = async () => { const r = await api.saveAiInstructions(text); setOrig(r.instructions || ''); flash(setSaved); };
+  if (loading) return <Muted>Loading…</Muted>;
+  return (
+    <div>
+      <p style={hint}>Standing instructions added to every AI prompt — tile insights, the dashboard summary, and tile-library descriptions. Use it for terminology, tone, comparison rules, and anything the AI should always know or avoid.</p>
+      {!aiEnabled && <p style={{ color: 'var(--warn, #b45309)', fontSize: 13, marginBottom: 10 }}>⚠ AI is not configured (set ANTHROPIC_API_KEY) — instructions are saved but won't be used until it is.</p>}
+      <div style={cardStyle}>
+        <L>Global AI instructions</L>
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          rows={12}
+          placeholder={"e.g.\n- All amounts are in South African Rand (ZAR).\n- Always compare against the previous event when a comparison is available.\n- Be concise and avoid speculation; flag implausible figures.\n- Refer to attendees, organisers, and events using Howler terminology."}
+          style={{ width: '100%', boxSizing: 'border-box', marginTop: 6, padding: '10px 12px', border: '1.5px solid #e0e0e0', borderRadius: 8, fontSize: 13, outline: 'none', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }}
+        />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
+          <button style={saveBtn} onClick={save} disabled={text === orig}>Save</button>
+          {saved && <span style={{ color: 'var(--success)', fontSize: 13 }}>✓ Saved</span>}
+          <span style={{ fontSize: 12, color: 'var(--muted)', marginLeft: 'auto' }}>{text.length} characters</span>
+        </div>
       </div>
     </div>
   );

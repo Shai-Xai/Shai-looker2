@@ -96,19 +96,25 @@ function requireClient() {
   return c;
 }
 
-const REQUEST = (messages) => ({
+const REQUEST = (messages, system) => ({
   model: MODEL,
   max_tokens: 1024,
   thinking: { type: 'adaptive' },
   output_config: { effort: 'low' }, // keep insights snappy
-  system: SYSTEM,
+  system,
   messages,
 });
+
+// Append the team's global standing instructions to a base system prompt.
+function systemWith(base, instructions) {
+  const extra = (instructions || '').trim();
+  return extra ? `${base}\n\nStanding instructions from the Howler team — always follow these:\n${extra}` : base;
+}
 
 // Non-streaming (kept for completeness / non-stream callers).
 async function generateInsight(tileContext) {
   const c = requireClient();
-  const resp = await c.messages.create(REQUEST(buildMessages(tileContext)));
+  const resp = await c.messages.create(REQUEST(buildMessages(tileContext), systemWith(SYSTEM, tileContext.instructions)));
   const text = (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
   return { insight: text, model: resp.model, usage: resp.usage };
 }
@@ -117,7 +123,7 @@ async function generateInsight(tileContext) {
 // the initial insight and follow-up questions (via tileContext.history).
 async function streamInsight(tileContext, onText) {
   const c = requireClient();
-  const stream = c.messages.stream(REQUEST(buildMessages(tileContext)));
+  const stream = c.messages.stream(REQUEST(buildMessages(tileContext), systemWith(SYSTEM, tileContext.instructions)));
   stream.on('text', (delta) => onText(delta));
   await stream.finalMessage();
 }
@@ -157,7 +163,7 @@ async function streamDashboardInsight(ctx, onText) {
     max_tokens: 1500,
     thinking: { type: 'adaptive' },
     output_config: { effort: 'low' },
-    system: DASHBOARD_SYSTEM,
+    system: systemWith(DASHBOARD_SYSTEM, ctx.instructions),
     messages: [{ role: 'user', content: buildDashboardPrompt(ctx) }],
   });
   stream.on('text', (delta) => onText(delta));
@@ -175,7 +181,7 @@ const LIBRARY_SYSTEM = `You catalogue analytics tiles for Howler, an events tick
 - category: one short bucket from this set when it fits, else your own: "Revenue", "Tickets", "Attendance", "Cashless", "Access Control", "Marketing", "Customers", "Operations".
 Be concrete and business-focused. Do not invent fields that aren't listed.`;
 
-async function describeTile({ title, visType, fields, model, explore }) {
+async function describeTile({ title, visType, fields, model, explore, instructions }) {
   const c = requireClient();
   const prompt = [
     `Title: ${title || '(untitled)'}`,
@@ -188,7 +194,7 @@ async function describeTile({ title, visType, fields, model, explore }) {
     max_tokens: 400,
     thinking: { type: 'adaptive' },
     output_config: { effort: 'low' },
-    system: LIBRARY_SYSTEM,
+    system: systemWith(LIBRARY_SYSTEM, instructions),
     messages: [{ role: 'user', content: prompt }],
   });
   const text = (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
