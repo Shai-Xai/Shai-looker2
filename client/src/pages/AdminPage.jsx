@@ -314,13 +314,15 @@ function SetCard({ set, dashboards, onChange }) {
 
   // Reordering the set's dashboards (the array order is the saved order).
   const byId = Object.fromEntries(dashboards.map((d) => [d.id, d]));
-  const move = (i, dir) => setIds((cur) => {
-    const j = i + dir;
-    if (j < 0 || j >= cur.length) return cur;
-    const next = cur.slice();
-    [next[i], next[j]] = [next[j], next[i]];
-    return next;
-  });
+  const dragFrom = useRef(null);
+  const [dragOver, setDragOver] = useState(null);
+  const onDragOverRow = (i) => {
+    const from = dragFrom.current;
+    if (from === null || from === i) { setDragOver(i); return; }
+    setIds((cur) => { const n = cur.slice(); const [m] = n.splice(from, 1); n.splice(i, 0, m); return n; });
+    dragFrom.current = i;
+    setDragOver(i);
+  };
   const removeId = (id) => setIds((cur) => cur.filter((x) => x !== id));
 
   return (
@@ -352,14 +354,21 @@ function SetCard({ set, dashboards, onChange }) {
       </div>
       {ids.length > 0 && (
         <>
-          <L>Order in this set (drag with the arrows)</L>
+          <L>Order in this set (drag to reorder)</L>
           <div style={orderList}>
             {ids.map((id, i) => (
-              <div key={id} style={orderRow}>
+              <div
+                key={id}
+                draggable
+                onDragStart={(e) => { dragFrom.current = i; e.dataTransfer.effectAllowed = 'move'; }}
+                onDragOver={(e) => { e.preventDefault(); onDragOverRow(i); }}
+                onDragEnd={() => { dragFrom.current = null; setDragOver(null); }}
+                onDrop={(e) => { e.preventDefault(); dragFrom.current = null; setDragOver(null); }}
+                style={{ ...orderRow, cursor: 'grab', background: dragOver === i ? '#fff0f3' : 'transparent', borderRadius: 6 }}
+              >
+                <span style={{ color: '#c4c4c8', flexShrink: 0, fontSize: 15, lineHeight: 1 }} title="Drag to reorder">⠿</span>
                 <span style={{ color: 'var(--muted)', width: 20, textAlign: 'right', flexShrink: 0 }}>{i + 1}.</span>
                 <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{byId[id] ? byId[id].title : '(dashboard not found)'}</span>
-                <button style={orderBtn} disabled={i === 0} onClick={() => move(i, -1)} title="Move up">↑</button>
-                <button style={orderBtn} disabled={i === ids.length - 1} onClick={() => move(i, 1)} title="Move down">↓</button>
                 <button style={{ ...orderBtn, color: 'var(--error)' }} onClick={() => removeId(id)} title="Remove from set">✕</button>
               </div>
             ))}
