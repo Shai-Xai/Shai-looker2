@@ -149,7 +149,13 @@ export default function EditorPage() {
     }));
   }
   function addTileToCarousel(cid, type) {
-    const layout = { x: 0, y: 9999, w: type === 'text' ? 24 : 8, h: type === 'text' ? 3 : 6 }; // used by grid sections
+    // For grid sections, auto-place the new tile beside the others (rows of 3
+    // for vis tiles) so they sit side by side; scrolling carousels ignore layout.
+    const cur = (def.carousels || []).find((x) => x.id === cid);
+    const n = cur ? cur.tiles.length : 0;
+    const w = type === 'text' ? 24 : 8;
+    const perRow = Math.max(1, Math.floor(24 / w));
+    const layout = { x: (n % perRow) * w, y: Math.floor(n / perRow) * 6, w, h: type === 'text' ? 3 : 6 };
     const tile = type === 'text'
       ? { id: crypto.randomUUID(), type: 'text', title: '', body_text: '## New text tile', query: null, vis: {}, listenTo: {}, layout }
       : { id: crypto.randomUUID(), type: 'vis', title: 'New tile', body_text: '', query: null, vis: { type: 'looker_column' }, listenTo: {}, layout };
@@ -170,9 +176,10 @@ export default function EditorPage() {
         tiles: c.tiles.filter((t) => { if (t.id === tileId) { moved = { ...t }; return false; } return true; }),
       }));
       if (!moved) return d;
-      // Drop at the bottom of the target container; grid sections use this
-      // layout, scrolling carousels ignore it (they size by card width).
-      moved.layout = { x: 0, y: 9999, w: moved.layout?.w || 8, h: moved.layout?.h || 6 };
+      // Drop at the bottom of the target container; cap the width to half so it
+      // can sit beside another tile. Grid sections use this layout; scrolling
+      // carousels ignore it (they size by card width).
+      moved.layout = { x: 0, y: 9999, w: Math.min(moved.layout?.w || 8, 12), h: moved.layout?.h || 6 };
       return {
         ...d,
         tiles,
