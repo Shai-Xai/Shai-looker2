@@ -53,6 +53,11 @@ export default function ClientLayout() {
   const cur = details[suiteId];
   if (cur && id) for (const set of cur.sets) { const dash = set.dashboards.find((x) => x.id === id); if (dash) { activeTitle = dash.title; break; } }
 
+  // When an admin previews, scope the sidebar to just the active suite's client
+  // (entity) so the preview faithfully shows that one account, not every suite.
+  const activeEntityId = isAdmin && suiteId ? suites.find((s) => s.id === suiteId)?.entityId : null;
+  const visibleSuites = activeEntityId ? suites.filter((s) => s.entityId === activeEntityId) : suites;
+
   const sidebar = (
     <nav className="howler-sidebar" style={{ ...sidebarStyle, ...(isMobile ? mobileSidebar : null) }}>
       <div style={{ display: 'flex', alignItems: 'center', padding: '6px 8px 12px 14px' }}>
@@ -61,10 +66,10 @@ export default function ClientLayout() {
       </div>
       {loading ? (
         <div style={{ padding: 14, color: 'var(--muted)', fontSize: 13 }}>Loading…</div>
-      ) : suites.length === 0 ? (
+      ) : visibleSuites.length === 0 ? (
         <div style={{ padding: 14, color: 'var(--muted)', fontSize: 13 }}>No suites assigned.</div>
       ) : (
-        suites.map((su) => (
+        visibleSuites.map((su) => (
           <div key={su.id} style={{ marginBottom: 2 }}>
             <button className="nav-row" style={{ ...rowBtn, fontWeight: 600 }} onClick={() => toggleSuite(su.id)}>
               <Caret open={!!openSuites[su.id]} />
@@ -119,10 +124,10 @@ export default function ClientLayout() {
       <main style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'auto' }}>
         {isAdmin && (
           <div style={previewBar}>
-            <span style={{ fontWeight: 700 }}>👁 Client preview</span>
+            <span style={{ fontWeight: 700 }}>👁 Client preview{activeEntityId && (() => { const n = suites.find((s) => s.id === suiteId)?.entityName; return n ? ` — ${n}` : ''; })()}</span>
             <span style={{ opacity: 0.85 }}>You're viewing this exactly as the client would, scoped to their data.</span>
             <div style={{ flex: 1 }} />
-            <button style={exitPreviewBtn} onClick={() => navigate('/')}>Exit preview</button>
+            <button style={exitPreviewBtn} onClick={() => navigate('/admin')}>Exit preview</button>
           </div>
         )}
         {(isMobile || collapsed) && (

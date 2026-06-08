@@ -84,15 +84,31 @@ function Entities({ fields }) {
   );
 }
 function EntityCard({ entity, fields, onChange }) {
+  const navigate = useNavigate();
   const [name, setName] = useState(entity.name);
   const [locks, setLocks] = useState(entity.lockedFilters || {});
   const [saved, setSaved] = useState(false);
   const save = async () => { await api.adminUpdateEntity(entity.id, { name, lockedFilters: locks }); flash(setSaved); onChange(); };
   const remove = async () => { if (confirm(`Delete client "${entity.name}"? This removes its sets too.`)) { await api.adminDeleteEntity(entity.id); onChange(); } };
+  // Preview this client's account: open the client experience scoped to this
+  // entity, landing on the first dashboard of its first non-empty suite.
+  const preview = async () => {
+    try {
+      const mine = (await api.adminListSuites()).filter((s) => s.entityId === entity.id);
+      if (!mine.length) { alert('This client has no suites yet.'); return; }
+      for (const su of mine) {
+        const d = await api.mySuite(su.id);
+        const first = d.sets.flatMap((s) => s.dashboards)[0];
+        if (first) { navigate(`/suite/${su.id}/d/${first.id}`); return; }
+      }
+      alert('This client has no dashboards to preview yet.');
+    } catch (e) { alert('Could not open preview: ' + e.message); }
+  };
   return (
     <div style={cardStyle}>
       <Row>
         <input style={{ ...input, fontWeight: 700, flex: 1 }} value={name} onChange={(e) => setName(e.target.value)} />
+        <button style={previewBtn} onClick={preview} title="Preview this client's account">👁 Preview account</button>
         <button style={delBtn} onClick={remove}>Delete</button>
       </Row>
       <L>Locked filters (organiser-level — apply across all this client's sets)</L>
