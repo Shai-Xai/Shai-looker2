@@ -55,15 +55,11 @@ export default function AdminPage() {
       <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
         <Tab active={tab === 'entities'} onClick={() => setTab('entities')}>Clients</Tab>
         <Tab active={tab === 'sets'} onClick={() => setTab('sets')}>Sets</Tab>
-        <Tab active={tab === 'suites'} onClick={() => setTab('suites')}>Suites</Tab>
         <Tab active={tab === 'library'} onClick={() => setTab('library')}>Tile library</Tab>
-        <Tab active={tab === 'users'} onClick={() => setTab('users')}>Logins</Tab>
       </div>
       {tab === 'entities' && <Entities fields={fields} />}
       {tab === 'sets' && <Sets />}
-      {tab === 'suites' && <Suites fields={fields} />}
       {tab === 'library' && <Library />}
-      {tab === 'users' && <Users />}
     </main>
   );
 }
@@ -99,6 +95,48 @@ function Entities({ fields }) {
         />
       ))}
       <button style={addBtn} onClick={() => api.adminCreateEntity({ name: 'New client', lockedFilters: {} }).then(load)}>+ Add client</button>
+
+      <div style={{ marginTop: 30 }}>
+        <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>Admin logins</h3>
+        <AdminLogins admins={users.filter((u) => u.role === 'admin')} onChange={load} />
+      </div>
+    </div>
+  );
+}
+
+// Full-access team logins (not tied to any client).
+function AdminLogins({ admins, onChange }) {
+  const [form, setForm] = useState({ email: '', password: '' });
+  const [error, setError] = useState(null);
+  const add = async () => {
+    setError(null);
+    try { await api.adminCreateUser({ email: form.email, password: form.password, role: 'admin', entityIds: [] }); setForm({ email: '', password: '' }); onChange(); }
+    catch (e) { setError(e.message); }
+  };
+  const del = async (u) => { if (confirm(`Delete admin ${u.email}?`)) { await api.adminDeleteUser(u.id); onChange(); } };
+  return (
+    <div style={cardStyle}>
+      <p style={hint}>Full-access logins for your team — they see every client and the admin console.</p>
+      {admins.length === 0 ? <Muted>No admin logins.</Muted> : (
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <tbody>
+            {admins.map((u) => (
+              <tr key={u.id}>
+                <td style={td}>{u.email}</td>
+                <td style={{ ...td, textAlign: 'right' }}>
+                  <button style={delBtn} onClick={() => del(u)} disabled={admins.length === 1} title={admins.length === 1 ? 'Cannot delete the only admin' : ''}>Delete</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginTop: 8 }}>
+        <Field label="Email"><input style={input} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>
+        <Field label="Password"><input style={input} type="text" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></Field>
+        <button style={miniBtn} onClick={add} disabled={!form.email || !form.password}>+ Add admin</button>
+      </div>
+      {error && <div style={{ color: 'var(--error)', fontSize: 13, marginTop: 6 }}>{error}</div>}
     </div>
   );
 }
@@ -294,29 +332,8 @@ function SetCard({ set, dashboards, onChange }) {
   );
 }
 
-// ─── Suites (a client's event context: locks + bundled Sets) ──────────────────
-function Suites({ fields }) {
-  const [items, setItems] = useState([]);
-  const [entities, setEntities] = useState([]);
-  const [sets, setSets] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const load = () => { setLoading(true); Promise.all([api.adminListSuites(), api.adminListEntities(), api.adminListSets()]).then(([su, e, s]) => { setItems(su); setEntities(e); setSets(s); }).finally(() => setLoading(false)); };
-  useEffect(load, []);
-
-  async function add() {
-    if (!entities.length) { alert('Create at least one client first.'); return; }
-    await api.adminCreateSuite({ entityId: entities[0].id, name: 'New suite', lockedFilters: {}, setIds: [] });
-    load();
-  }
-  if (loading) return <Muted>Loading…</Muted>;
-  return (
-    <div>
-      <p style={hint}>A Suite is what a client opens — an event context. It bundles Sets and locks the event (and any other) filters. Organiser is locked on the Client.</p>
-      {items.map((su) => <SuiteCard key={su.id} suite={su} entities={entities} sets={sets} fields={fields} onChange={load} />)}
-      <button style={addBtn} onClick={add}>+ Add suite</button>
-    </div>
-  );
-}
+// ─── Suite editor (a client's event context: locks + bundled Sets) ────────────
+// Rendered inside each Client card (see EntityCard).
 function SuiteCard({ suite, entities, sets, fields, onChange }) {
   const navigate = useNavigate();
   const [name, setName] = useState(suite.name);
@@ -495,78 +512,6 @@ function ValuePicker({ meta, value, onChange }) {
           )}
         </ul>
       )}
-    </div>
-  );
-}
-
-// ─── Logins (Users) ───────────────────────────────────────────────────────────
-function Users() {
-  const [users, setUsers] = useState([]);
-  const [entities, setEntities] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [form, setForm] = useState({ email: '', password: '', role: 'client', entityIds: [] });
-  const [error, setError] = useState(null);
-  const load = () => { setLoading(true); Promise.all([api.adminListUsers(), api.adminListEntities()]).then(([u, e]) => { setUsers(u); setEntities(e); }).finally(() => setLoading(false)); };
-  useEffect(load, []);
-
-  async function add() {
-    setError(null);
-    try {
-      await api.adminCreateUser({ email: form.email, password: form.password, role: form.role, entityIds: form.role === 'client' ? form.entityIds : [] });
-      setForm({ email: '', password: '', role: 'client', entityIds: [] });
-      load();
-    } catch (e) { setError(e.message); }
-  }
-  const del = async (id) => { if (confirm('Delete this login?')) { await api.adminDeleteUser(id); load(); } };
-  const toggleEntity = (id) => setForm((f) => ({ ...f, entityIds: f.entityIds.includes(id) ? f.entityIds.filter((x) => x !== id) : [...f.entityIds, id] }));
-  const entityNames = (ids) => (ids || []).map((id) => entities.find((e) => e.id === id)?.name).filter(Boolean).join(', ') || '—';
-
-  if (loading) return <Muted>Loading…</Muted>;
-  return (
-    <div>
-      <div style={cardStyle}>
-        <div style={{ fontWeight: 700, marginBottom: 10 }}>Create a login</div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-          <Field label="Email"><input style={input} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>
-          <Field label="Password"><input style={input} type="text" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></Field>
-          <Field label="Role">
-            <select style={input} value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
-              <option value="client">Client</option>
-              <option value="admin">Admin</option>
-            </select>
-          </Field>
-          <button style={saveBtn} onClick={add}>Create</button>
-        </div>
-        {form.role === 'client' && (
-          <div style={{ marginTop: 12 }}>
-            <L>Clients this login can access</L>
-            <div style={checkList}>
-              {entities.map((e) => (
-                <label key={e.id} style={checkItem}>
-                  <input type="checkbox" checked={form.entityIds.includes(e.id)} onChange={() => toggleEntity(e.id)} />
-                  <span>{e.name}</span>
-                </label>
-              ))}
-              {entities.length === 0 && <Muted>Create a client first.</Muted>}
-            </div>
-          </div>
-        )}
-        {error && <div style={{ color: 'var(--error)', fontSize: 13, marginTop: 8 }}>{error}</div>}
-      </div>
-
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, marginTop: 8 }}>
-        <thead><tr>{['Email', 'Role', 'Clients', ''].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead>
-        <tbody>
-          {users.map((u) => (
-            <tr key={u.id}>
-              <td style={td}>{u.email}</td>
-              <td style={td}>{u.role}</td>
-              <td style={td}>{u.role === 'admin' ? '—' : entityNames(u.entityIds)}</td>
-              <td style={{ ...td, textAlign: 'right' }}><button style={delBtn} onClick={() => del(u.id)}>Delete</button></td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
     </div>
   );
 }
