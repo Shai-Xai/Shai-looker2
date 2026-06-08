@@ -238,11 +238,12 @@ app.get('/api/looker/folder/:id', auth.requireAdmin, async (req, res) => {
     } else {
       tree = (root.dashboards || []).map((d) => ({ id: String(d.id), title: d.title, folder: root.name, folderId: String(root.id), depth: 0 }));
     }
-    // Group into folders, preserving depth-first order.
+    // Group into folders, preserving depth-first order. `path` is the nested
+    // folder path (e.g. "Festivals/MTN Bushfire/Cashless") used when importing.
     const order = [];
     const byId = new Map();
     for (const d of tree) {
-      if (!byId.has(d.folderId)) { byId.set(d.folderId, { id: d.folderId, name: d.folder, depth: d.depth, dashboards: [] }); order.push(d.folderId); }
+      if (!byId.has(d.folderId)) { byId.set(d.folderId, { id: d.folderId, name: d.folder, depth: d.depth, path: (d.path || [d.folder]).join('/'), dashboards: [] }); order.push(d.folderId); }
       byId.get(d.folderId).dashboards.push({ id: d.id, title: d.title });
     }
     res.json({ id: String(root.id), name: root.name, folders: order.map((fid) => byId.get(fid)), total: tree.length });
@@ -250,23 +251,25 @@ app.get('/api/looker/folder/:id', auth.requireAdmin, async (req, res) => {
 });
 
 // Recursively collect every dashboard in a folder and its subfolders.
-// Returns [{ id, title, folder, folderId, depth }] — folder = where it lives.
+// Returns [{ id, title, folder, folderId, depth, path }] where path is the array
+// of folder names from the import root down to where the dashboard lives.
 async function collectFolderTree(folderId, maxDepth = 6) {
   const result = [];
   const seen = new Set();
-  async function walk(id, depth) {
+  async function walk(id, depth, pathArr) {
     if (seen.has(String(id))) return; // guard against odd cycles
     seen.add(String(id));
     const f = await looker.lookerRequest('GET', `/folders/${encodeURIComponent(id)}?fields=id,name,dashboards(id,title)`);
     const name = f.name || 'Imported folder';
-    for (const d of f.dashboards || []) result.push({ id: String(d.id), title: d.title, folder: name, folderId: String(f.id), depth });
+    const path = [...pathArr, name];
+    for (const d of f.dashboards || []) result.push({ id: String(d.id), title: d.title, folder: name, folderId: String(f.id), depth, path });
     if (depth < maxDepth) {
       let children = [];
       try { children = await looker.lookerRequest('GET', `/folders/${encodeURIComponent(id)}/children?fields=id,name`); } catch { children = []; }
-      for (const c of children || []) await walk(c.id, depth + 1);
+      for (const c of children || []) await walk(c.id, depth + 1, path);
     }
   }
-  await walk(folderId, 0);
+  await walk(folderId, 0, []);
   return result;
 }
 
@@ -282,7 +285,7 @@ app.post('/api/dashboards/import-folder', auth.requireAdmin, async (req, res) =>
     const rootName = (folderName || root.name || 'Imported folder').trim();
     const list = includeSubfolders
       ? await collectFolderTree(folderId)
-      : (root.dashboards || []).map((d) => ({ id: String(d.id), title: d.title, folder: rootName, depth: 0 }));
+      : (root.dashboards || []).map((d) => ({ id: String(d.id), title: d.title, path: [root.name], depth: 0 }));
     let imported = 0;
     const failed = [];
     for (const d of list) {
@@ -290,8 +293,10 @@ app.post('/api/dashboards/import-folder', auth.requireAdmin, async (req, res) =>
         const source = await fetchDashboard(String(d.id));
         await looker.resolveElementQueries(source.elements);
         const def = convertDashboard(source);
-        // Root folder honours the optional name override; subfolders keep their own name.
-        def.folder = d.depth === 0 ? rootName : d.folder;
+        // Nested folder path; the root segment honours the optional name override.
+        const path = (d.path || [root.name]).slice();
+        path[0] = rootName;
+        def.folder = path.join('/');
         const created = store.create(def);
         try { db.harvestDashboardTiles(created, { sourceDashboardId: created.id }); } catch (e) { console.error('[harvest]', e.message); }
         imported++;
@@ -299,7 +304,7 @@ app.post('/api/dashboards/import-folder', auth.requireAdmin, async (req, res) =>
         failed.push({ id: d.id, title: d.title, error: e.message });
       }
     }
-    const folders = [...new Set(list.map((d) => (d.depth === 0 ? rootName : d.folder)))];
+    const folders = [...new Set(list.map((d) => { const p = (d.path || [root.name]).slice(); p[0] = rootName; return p.join('/'); }))];
     res.json({ folder: rootName, imported, total: list.length, failed, folders: folders.length });
   } catch (err) {
     console.error('[POST /api/dashboards/import-folder]', err.message);
@@ -330,6 +335,37 @@ app.get('/api/admin/folders', auth.requireAdmin, (_req, res) => {
   const set = new Set();
   for (const d of db.listDashboards()) if (d.folder) set.add(d.folder);
   res.json([...set].sort((a, b) => a.localeCompare(b)));
+});
+
+// Rename a folder (and everything nested beneath it). `from`/`to` are folder
+// paths; the matched prefix is rewritten on every dashboard under it.
+app.post('/api/admin/folders/rename', auth.requireAdmin, (req, res) => {
+  const from = String((req.body || {}).from || '').replace(/\/+$/, '');
+  const toLeaf = String((req.body || {}).to || '').trim();
+  if (!from || !toLeaf) return res.status(400).json({ error: 'from and to are required' });
+  const parent = from.includes('/') ? from.slice(0, from.lastIndexOf('/') + 1) : '';
+  const newPrefix = parent + toLeaf;
+  let updated = 0;
+  for (const d of db.listDashboards()) {
+    const f = d.folder || '';
+    if (f === from || f.startsWith(from + '/')) {
+      db.updateDashboard(d.id, { folder: newPrefix + f.slice(from.length) });
+      updated++;
+    }
+  }
+  res.json({ updated });
+});
+
+// Delete a folder (and subfolders): removes every dashboard filed under it.
+app.post('/api/admin/folders/delete', auth.requireAdmin, (req, res) => {
+  const path = String((req.body || {}).path || '').replace(/\/+$/, '');
+  if (!path) return res.status(400).json({ error: 'path is required' });
+  let deleted = 0;
+  for (const d of db.listDashboards()) {
+    const f = d.folder || '';
+    if (f === path || f.startsWith(path + '/')) { store.remove(d.id); deleted++; }
+  }
+  res.json({ deleted });
 });
 
 // ─── LookML metadata (admin builds tiles) ──────────────────────────────────────

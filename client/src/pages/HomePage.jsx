@@ -14,7 +14,7 @@ export default function HomePage() {
   const [importTitle, setImportTitle] = useState('');
   const [importing, setImporting] = useState(false);
   const [importFolderName, setImportFolderName] = useState('');
-  const [openFolder, setOpenFolder] = useState(null); // null = folder grid; '' = unfiled; else folder name
+  const [path, setPath] = useState(''); // current folder path; '' = top level
   // Looker-folder import
   const [lookerFolderId, setLookerFolderId] = useState('');
   const [folderPreview, setFolderPreview] = useState(null);
@@ -28,11 +28,22 @@ export default function HomePage() {
   }
   useEffect(load, []);
 
-  // Folder list (with counts) for the landing grid; + Unfiled if any.
-  const folderNames = [...new Set(dashboards.map((d) => d.folder).filter(Boolean))].sort((a, b) => a.localeCompare(b));
-  const unfiledCount = dashboards.filter((d) => !d.folder).length;
-  const folders = [...folderNames]; // for the import datalist
-  const shown = dashboards.filter((d) => (d.folder || '') === (openFolder || ''));
+  // Nested-folder navigation. Folders are stored as "/"-separated paths on each
+  // dashboard (e.g. "Festivals/MTN Bushfire/Cashless").
+  const allFolders = [...new Set(dashboards.map((d) => d.folder).filter(Boolean))];
+  const folders = [...allFolders].sort((a, b) => a.localeCompare(b)); // for the import datalist
+  const fullChild = (seg) => (path ? `${path}/${seg}` : seg);
+  const childSegments = (() => {
+    const set = new Set();
+    for (const f of allFolders) {
+      if (path) { if (f === path || !f.startsWith(path + '/')) continue; set.add(f.slice(path.length + 1).split('/')[0]); }
+      else set.add(f.split('/')[0]);
+    }
+    return [...set].sort((a, b) => a.localeCompare(b));
+  })();
+  const dashHere = dashboards.filter((d) => (d.folder || '') === path); // dashboards directly in this folder
+  const folderCountOf = (fp) => dashboards.filter((d) => { const f = d.folder || ''; return f === fp || f.startsWith(fp + '/'); }).length;
+  const segs = path ? path.split('/') : [];
 
   async function previewFolder() {
     if (!lookerFolderId.trim()) return;
@@ -71,28 +82,41 @@ export default function HomePage() {
     if (!confirm('Delete this dashboard?')) return;
     await api.deleteDashboard(id); load();
   }
-  // Move a dashboard into a folder (a string label).
+  // Move a dashboard into a folder. Accepts a nested path (e.g. "A/B").
   async function moveToFolder(d, e) {
     e.stopPropagation();
-    const name = prompt(`Folder for "${d.title}" (blank = unfiled):`, d.folder || '');
+    const name = prompt(`Folder for "${d.title}" — use "/" for subfolders (blank = unfiled):`, d.folder || '');
     if (name === null) return;
-    await api.updateDashboard(d.id, { folder: name.trim() });
+    await api.updateDashboard(d.id, { folder: name.trim().replace(/^\/+|\/+$/g, '') });
     load();
   }
-  // Rename a folder — applies the new name to every dashboard filed under it.
-  async function renameFolder(oldName, e) {
+  // Rename a folder (its leaf), rippling to every dashboard nested under it.
+  async function renameFolder(fullPath, e) {
     if (e) e.stopPropagation();
-    if (!oldName) return; // "Unfiled" isn't a real folder
-    const next = prompt(`Rename folder "${oldName}" to:`, oldName);
+    if (!fullPath) return;
+    const leaf = fullPath.split('/').pop();
+    const next = prompt(`Rename folder "${leaf}" to:`, leaf);
     if (next === null) return;
-    const name = next.trim();
-    if (!name || name === oldName) return;
-    const affected = dashboards.filter((d) => (d.folder || '') === oldName);
+    const to = next.trim();
+    if (!to || to === leaf) return;
     try {
-      await Promise.all(affected.map((d) => api.updateDashboard(d.id, { folder: name })));
-      if (openFolder === oldName) setOpenFolder(name);
+      await api.renameFolder(fullPath, to);
+      const parent = fullPath.includes('/') ? fullPath.slice(0, fullPath.lastIndexOf('/') + 1) : '';
+      if (path === fullPath || path.startsWith(fullPath + '/')) setPath((parent + to) + path.slice(fullPath.length));
       load();
     } catch (err) { alert('Rename failed: ' + err.message); }
+  }
+  // Delete a folder and everything nested under it (removes those dashboards).
+  async function deleteFolderAction(fullPath, e) {
+    if (e) e.stopPropagation();
+    if (!fullPath) return;
+    const count = dashboards.filter((d) => { const f = d.folder || ''; return f === fullPath || f.startsWith(fullPath + '/'); }).length;
+    if (!confirm(`Delete folder "${fullPath.split('/').pop()}" and its ${count} dashboard${count === 1 ? '' : 's'} (including subfolders)? This cannot be undone.`)) return;
+    try {
+      await api.deleteFolder(fullPath);
+      if (path === fullPath || path.startsWith(fullPath + '/')) setPath(fullPath.includes('/') ? fullPath.slice(0, fullPath.lastIndexOf('/')) : '');
+      load();
+    } catch (err) { alert('Delete failed: ' + err.message); }
   }
 
   return (
@@ -135,19 +159,25 @@ export default function HomePage() {
       {/* shared datalist of existing folders for the import input */}
       <datalist id="folder-list">{folders.map((f) => <option key={f} value={f} />)}</datalist>
 
-      {/* Header: folder grid title, or a breadcrumb when inside a folder */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-        {openFolder !== null && (
-          <button style={{ ...miniBtnOutline, fontSize: 12 }} onClick={() => setOpenFolder(null)}>← Folders</button>
-        )}
-        <h2 style={{ fontSize: 18, fontWeight: 700 }}>
-          {openFolder === null ? (isAdmin ? 'Your dashboards' : 'Dashboards') : (openFolder || 'Unfiled')}
+      {/* Header: breadcrumb + actions */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
+        <h2 style={{ fontSize: 18, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <button style={crumbBtn} onClick={() => setPath('')}>{isAdmin ? 'Your dashboards' : 'Dashboards'}</button>
+          {segs.map((s, i) => (
+            <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ color: 'var(--muted)' }}>/</span>
+              <button style={crumbBtn} onClick={() => setPath(segs.slice(0, i + 1).join('/'))}>{s}</button>
+            </span>
+          ))}
         </h2>
-        {isAdmin && openFolder === null && dashboards.some((d) => !d.folder) && (
-          <button style={{ ...miniBtnOutline, fontSize: 12 }} onClick={syncFolders} title="Look up each imported dashboard's Looker folder">↻ Sync folders from Looker</button>
+        {isAdmin && path && (
+          <>
+            <button style={{ ...miniBtnOutline, fontSize: 12 }} onClick={(e) => renameFolder(path, e)} title="Rename this folder">✎ Rename</button>
+            <button style={{ ...miniBtnOutline, fontSize: 12, color: 'var(--error)' }} onClick={(e) => deleteFolderAction(path, e)} title="Delete this folder">🗑 Delete</button>
+          </>
         )}
-        {isAdmin && openFolder && (
-          <button style={{ ...miniBtnOutline, fontSize: 12 }} onClick={(e) => renameFolder(openFolder, e)} title="Rename this folder">✎ Rename folder</button>
+        {isAdmin && !path && dashboards.some((d) => !d.folder) && (
+          <button style={{ ...miniBtnOutline, fontSize: 12 }} onClick={syncFolders} title="Look up each imported dashboard's Looker folder">↻ Sync folders from Looker</button>
         )}
       </div>
 
@@ -157,49 +187,56 @@ export default function HomePage() {
         <p style={{ color: 'var(--error)' }}>{error}</p>
       ) : dashboards.length === 0 ? (
         <p style={{ color: 'var(--muted)' }}>No dashboards yet{isAdmin ? ' — create or import one above.' : '.'}</p>
-      ) : openFolder === null ? (
-        // ── Landing: folder cards ──────────────────────────────────────────────
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 16 }}>
-          {folderNames.map((f) => {
-            const count = dashboards.filter((d) => d.folder === f).length;
-            return (
-              <div key={f} className="lift" style={{ ...folderCard, position: 'relative' }} onClick={() => setOpenFolder(f)}>
-                <div style={{ display: 'flex', alignItems: 'flex-start' }}>
-                  <div style={{ fontSize: 28, flex: 1 }}>📁</div>
-                  {isAdmin && <button style={folderEditBtn} title="Rename folder" onClick={(e) => renameFolder(f, e)}>✎</button>}
-                </div>
-                <div style={{ fontSize: 15, fontWeight: 700, marginTop: 6, lineHeight: 1.3 }}>{f}</div>
-                <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>{count} dashboard{count === 1 ? '' : 's'}</div>
-              </div>
-            );
-          })}
-          {unfiledCount > 0 && (
-            <button className="lift" style={folderCard} onClick={() => setOpenFolder('')}>
-              <div style={{ fontSize: 28, opacity: 0.5 }}>🗂️</div>
-              <div style={{ fontSize: 15, fontWeight: 700, marginTop: 6 }}>Unfiled</div>
-              <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>{unfiledCount} dashboard{unfiledCount === 1 ? '' : 's'}</div>
-            </button>
-          )}
-        </div>
       ) : (
-        // ── Inside a folder: its dashboards ────────────────────────────────────
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 16 }}>
-          {shown.map((d) => (
-            <div key={d.id} style={listCardStyle} onClick={() => navigate(`/d/${d.id}`)}>
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                <div style={{ flex: 1, fontSize: 15, fontWeight: 700, lineHeight: 1.3 }}>{d.title}</div>
-                {isAdmin && <button style={deleteBtn} title="Delete" onClick={(e) => handleDelete(d.id, e)}>✕</button>}
-              </div>
-              {d.description && <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>{d.description}</div>}
-              <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 12 }}>{d.tileCount} tiles</div>
-              <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
-                <button style={miniBtn} onClick={(e) => { e.stopPropagation(); navigate(`/d/${d.id}`); }}>View</button>
-                {isAdmin && <button style={miniBtnOutline} onClick={(e) => { e.stopPropagation(); navigate(`/d/${d.id}/edit`); }}>Edit</button>}
-                {isAdmin && <button style={miniBtnOutline} onClick={(e) => moveToFolder(d, e)}>📁 Move</button>}
-              </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
+          {/* Subfolders in the current folder */}
+          {childSegments.length > 0 && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 16 }}>
+              {childSegments.map((seg) => {
+                const fp = fullChild(seg);
+                return (
+                  <div key={seg} className="lift" style={{ ...folderCard, position: 'relative' }} onClick={() => setPath(fp)}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 4 }}>
+                      <div style={{ fontSize: 28, flex: 1 }}>📁</div>
+                      {isAdmin && (
+                        <>
+                          <button style={folderEditBtn} title="Rename folder" onClick={(e) => renameFolder(fp, e)}>✎</button>
+                          <button style={{ ...folderEditBtn, color: 'var(--error)' }} title="Delete folder" onClick={(e) => deleteFolderAction(fp, e)}>🗑</button>
+                        </>
+                      )}
+                    </div>
+                    <div style={{ fontSize: 15, fontWeight: 700, marginTop: 6, lineHeight: 1.3 }}>{seg}</div>
+                    <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>{folderCountOf(fp)} dashboard{folderCountOf(fp) === 1 ? '' : 's'}</div>
+                  </div>
+                );
+              })}
             </div>
-          ))}
-          {shown.length === 0 && <p style={{ color: 'var(--muted)' }}>No dashboards in this folder.</p>}
+          )}
+
+          {/* Dashboards directly in the current folder */}
+          {dashHere.length > 0 && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 16 }}>
+              {dashHere.map((d) => (
+                <div key={d.id} style={listCardStyle} onClick={() => navigate(`/d/${d.id}`)}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                    <div style={{ flex: 1, fontSize: 15, fontWeight: 700, lineHeight: 1.3 }}>{d.title}</div>
+                    {isAdmin && <button style={deleteBtn} title="Delete" onClick={(e) => handleDelete(d.id, e)}>✕</button>}
+                  </div>
+                  {d.description && <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>{d.description}</div>}
+                  <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 12 }}>{d.tileCount} tiles</div>
+                  <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
+                    <button style={miniBtn} onClick={(e) => { e.stopPropagation(); navigate(`/d/${d.id}`); }}>View</button>
+                    {isAdmin && <button style={miniBtnOutline} onClick={(e) => { e.stopPropagation(); navigate(`/d/${d.id}/edit`); }}>Edit</button>}
+                    {isAdmin && <button style={miniBtnOutline} onClick={(e) => moveToFolder(d, e)}>📁 Move</button>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {childSegments.length === 0 && dashHere.length === 0 && (
+            <p style={{ color: 'var(--muted)' }}>This folder is empty.</p>
+          )}
         </div>
       )}
 
@@ -224,4 +261,5 @@ const miniBtn = { padding: '7px 16px', background: 'var(--brand)', color: '#fff'
 const miniBtnOutline = { padding: '7px 14px', background: 'rgba(0,0,0,0.05)', color: 'var(--text)', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer' };
 const deleteBtn = { border: 'none', background: 'transparent', color: '#bbb', cursor: 'pointer', fontSize: 14, padding: 2 };
 const folderEditBtn = { border: 'none', background: 'rgba(0,0,0,0.05)', color: 'var(--muted)', cursor: 'pointer', fontSize: 13, borderRadius: 8, width: 28, height: 28, flexShrink: 0 };
+const crumbBtn = { border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 18, fontWeight: 700, color: 'var(--text)', padding: 0 };
 const folderTag = { fontSize: 11, fontWeight: 600, background: '#eef2ff', color: '#4f46e5', padding: '2px 8px', borderRadius: 980 };

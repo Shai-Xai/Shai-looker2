@@ -14,7 +14,7 @@ export default function FolderImportModal({ preview, alreadyImported, onClose, o
   });
   const [busy, setBusy] = useState(false);
 
-  const all = preview.folders.flatMap((f) => f.dashboards.map((d) => ({ ...d, folderName: f.name })));
+  const all = preview.folders.flatMap((f) => f.dashboards.map((d) => ({ ...d, folderName: f.path || f.name })));
   const total = all.length;
   const doneCount = all.filter((d) => status[d.id] === 'done').length;
   const pct = total ? Math.round((doneCount / total) * 100) : 0;
@@ -66,12 +66,12 @@ export default function FolderImportModal({ preview, alreadyImported, onClose, o
                 <div style={folderRow}>
                   <span style={{ paddingLeft: (f.depth || 0) * 14 }}>📁 <b>{f.name}</b> <span style={{ color: 'var(--muted)', fontWeight: 400 }}>({f.dashboards.length})</span></span>
                   <div style={{ flex: 1 }} />
-                  {remaining > 0 && <button style={miniBtn} onClick={() => importMany(f.dashboards.map((d) => ({ ...d, folderName: f.name })))} disabled={busy}>Import folder</button>}
+                  {remaining > 0 && <button style={miniBtn} onClick={() => importMany(f.dashboards.map((d) => ({ ...d, folderName: f.path || f.name })))} disabled={busy}>Import folder</button>}
                 </div>
                 {f.dashboards.map((d) => (
                   <div key={d.id} style={dashRow}>
                     <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', paddingLeft: (f.depth || 0) * 14 + 18 }}>{d.title}</span>
-                    <StatusButton status={status[d.id]} onClick={() => importOne(d, f.name)} busy={busy} />
+                    <StatusButton status={status[d.id]} onClick={() => importOne(d, f.path || f.name)} busy={busy} />
                   </div>
                 ))}
                 {f.dashboards.length === 0 && <div style={{ ...dashRow, color: 'var(--muted)', paddingLeft: 18 }}>No dashboards</div>}
