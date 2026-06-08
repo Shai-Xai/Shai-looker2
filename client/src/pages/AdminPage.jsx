@@ -507,6 +507,15 @@ function SuiteCard({ suite, entities, sets, fields, onChange }) {
   const [locks, setLocks] = useState(suite.lockedFilters || {});
   const [saved, setSaved] = useState(false);
   const toggleSet = (id) => setSetIds((cur) => cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]);
+  const setById = Object.fromEntries(sets.map((s) => [s.id, s]));
+  const dragFrom = useRef(null);
+  const [dragOver, setDragOver] = useState(null);
+  const onDragOverRow = (i) => {
+    const from = dragFrom.current;
+    if (from === null || from === i) { setDragOver(i); return; }
+    setSetIds((cur) => { const n = cur.slice(); const [m] = n.splice(from, 1); n.splice(i, 0, m); return n; });
+    dragFrom.current = i; setDragOver(i);
+  };
   const save = async () => { await api.adminUpdateSuite(suite.id, { name, icon, entityId, setIds, lockedFilters: locks }); flash(setSaved); onChange(); };
   const remove = async () => { if (confirm(`Delete suite "${suite.name}"?`)) { await api.adminDeleteSuite(suite.id); onChange(); } };
   // Open this suite exactly as the client sees it (preview), jumping to its
@@ -540,6 +549,29 @@ function SuiteCard({ suite, entities, sets, fields, onChange }) {
         ))}
         {sets.length === 0 && <Muted>Create a Set first.</Muted>}
       </div>
+      {setIds.length > 1 && (
+        <>
+          <L>Order in this suite (drag to reorder)</L>
+          <div style={orderList}>
+            {setIds.map((id, i) => (
+              <div
+                key={id}
+                draggable
+                onDragStart={(e) => { dragFrom.current = i; e.dataTransfer.effectAllowed = 'move'; }}
+                onDragOver={(e) => { e.preventDefault(); onDragOverRow(i); }}
+                onDragEnd={() => { dragFrom.current = null; setDragOver(null); }}
+                onDrop={(e) => { e.preventDefault(); dragFrom.current = null; setDragOver(null); }}
+                style={{ ...orderRow, cursor: 'grab', background: dragOver === i ? '#fff0f3' : 'transparent', borderRadius: 6 }}
+              >
+                <span style={{ color: '#c4c4c8', flexShrink: 0, fontSize: 15, lineHeight: 1 }} title="Drag to reorder">⠿</span>
+                <span style={{ color: 'var(--muted)', width: 20, textAlign: 'right', flexShrink: 0 }}>{i + 1}.</span>
+                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{setById[id] ? setById[id].name : '(set not found)'}</span>
+                <button style={{ ...orderBtn, color: 'var(--error)' }} onClick={() => toggleSet(id)} title="Remove from suite">✕</button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
       <L>Locked filters (the event, cashless events…)</L>
       <LockedFilterEditor value={locks} onChange={setLocks} fields={fields} />
       <SaveRow onSave={save} saved={saved} id={suite.id} />
