@@ -22,7 +22,9 @@ You are given the data behind a single dashboard tile. Produce a tight, business
 - Call out notable trends, comparisons, concentrations, or outliers, with specific numbers.
 - If useful, add one short, concrete suggested action.
 
-Rules: interpret, don't just restate every number. Be specific and quantitative. Keep it to 2-4 short sentences or up to 4 brief bullet points. No preamble, no headings, no restating the question. If the data is too sparse to say anything meaningful, say so briefly.`;
+Rules: interpret, don't just restate every number. Be specific and quantitative. Keep it to 2-4 short sentences or up to 4 brief bullet points. No preamble, no headings, no restating the question. If the data is too sparse to say anything meaningful, say so briefly.
+
+The reader may then ask follow-up questions about this tile. Answer them directly and concisely, grounded in the data you were given. If a question can't be answered from the data available, say so plainly rather than guessing.`;
 
 // Turn the tile + data into a compact text prompt.
 function buildPrompt({ title, visType, fields, rows, filters }) {
@@ -64,6 +66,24 @@ function buildPrompt({ title, visType, fields, rows, filters }) {
   return lines.join('\n');
 }
 
+// Build the full message list: the tile data (plus any user-supplied context) as
+// the opening turn, followed by the running conversation (prior insight +
+// follow-up questions). `history` holds the assistant/user turns after the data.
+function buildMessages(ctx) {
+  let dataPrompt = buildPrompt(ctx);
+  const extra = (ctx.userContext || '').trim();
+  if (extra) {
+    dataPrompt += `\n\nAdditional context from the user — use this to focus the analysis and inform your answers:\n${extra}`;
+  }
+  const messages = [{ role: 'user', content: dataPrompt }];
+  for (const turn of ctx.history || []) {
+    if (turn && (turn.role === 'user' || turn.role === 'assistant') && turn.content) {
+      messages.push({ role: turn.role, content: String(turn.content) });
+    }
+  }
+  return messages;
+}
+
 function requireClient() {
   const c = getClient();
   if (!c) {
@@ -74,27 +94,28 @@ function requireClient() {
   return c;
 }
 
-const REQUEST = (prompt) => ({
+const REQUEST = (messages) => ({
   model: MODEL,
   max_tokens: 1024,
   thinking: { type: 'adaptive' },
   output_config: { effort: 'low' }, // keep insights snappy
   system: SYSTEM,
-  messages: [{ role: 'user', content: prompt }],
+  messages,
 });
 
 // Non-streaming (kept for completeness / non-stream callers).
 async function generateInsight(tileContext) {
   const c = requireClient();
-  const resp = await c.messages.create(REQUEST(buildPrompt(tileContext)));
+  const resp = await c.messages.create(REQUEST(buildMessages(tileContext)));
   const text = (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
   return { insight: text, model: resp.model, usage: resp.usage };
 }
 
-// Streaming: invokes onText(deltaString) as the model produces text.
+// Streaming: invokes onText(deltaString) as the model produces text. Handles both
+// the initial insight and follow-up questions (via tileContext.history).
 async function streamInsight(tileContext, onText) {
   const c = requireClient();
-  const stream = c.messages.stream(REQUEST(buildPrompt(tileContext)));
+  const stream = c.messages.stream(REQUEST(buildMessages(tileContext)));
   stream.on('text', (delta) => onText(delta));
   await stream.finalMessage();
 }

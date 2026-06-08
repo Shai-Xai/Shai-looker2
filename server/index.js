@@ -426,7 +426,7 @@ app.get('/api/insight/status', auth.requireAuth, (_req, res) => {
 
 // Streams the insight back as plain text chunks as Claude writes it.
 app.post('/api/insight', auth.requireAuth, async (req, res) => {
-  const { title, visType, fields, rows, filters } = req.body || {};
+  const { title, visType, fields, rows, filters, userContext, history } = req.body || {};
   if (!fields || !rows) return res.status(400).json({ error: 'fields and rows are required' });
   if (!insights.isConfigured()) {
     return res.status(400).json({ error: 'AI insights are not configured. Set ANTHROPIC_API_KEY in your .env to enable them.' });
@@ -434,7 +434,7 @@ app.post('/api/insight', auth.requireAuth, async (req, res) => {
   try {
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache');
-    await insights.streamInsight({ title, visType, fields, rows, filters }, (text) => res.write(text));
+    await insights.streamInsight({ title, visType, fields, rows, filters, userContext, history }, (text) => res.write(text));
     res.end();
   } catch (err) {
     console.error('[POST /api/insight]', err.message);
