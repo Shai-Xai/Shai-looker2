@@ -20,16 +20,7 @@ export default function ClientLayout() {
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('howler_nav_collapsed') === '1'); // desktop
   const toggleCollapsed = () => setCollapsed((c) => { localStorage.setItem('howler_nav_collapsed', c ? '0' : '1'); return !c; });
 
-  // Load suites and expand them all by default (fetch each suite's sets too).
-  useEffect(() => {
-    api.mySuites().then((s) => {
-      setSuites(s);
-      const open = {};
-      s.forEach((su) => { open[su.id] = true; ensureDetail(su.id); });
-      setOpenSuites(open);
-    }).catch(() => {}).finally(() => setLoading(false));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  useEffect(() => { api.mySuites().then(setSuites).catch(() => {}).finally(() => setLoading(false)); }, []);
 
   async function ensureDetail(sid) {
     if (details[sid]) return;
@@ -40,16 +31,6 @@ export default function ClientLayout() {
     setOpenSuites((p) => ({ ...p, [sid]: !p[sid] }));
     ensureDetail(sid);
   }
-
-  // Expand each suite's sets by default once its detail loads (respecting any
-  // later manual collapse — only sets a default for sets not yet seen).
-  useEffect(() => {
-    setOpenSets((prev) => {
-      const next = { ...prev };
-      for (const sid in details) for (const set of details[sid].sets || []) if (!(set.id in next)) next[set.id] = true;
-      return next;
-    });
-  }, [details]);
 
   // Auto-expand the suite (and its sets) for the active dashboard.
   useEffect(() => {
