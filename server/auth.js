@@ -105,10 +105,17 @@ const fieldLocksFromEntities = (entityIds) => {
   let any = false;
   for (const eid of entityIds || []) {
     const e = db.getEntity(eid);
-    for (const [f, v] of Object.entries(e?.lockedFilters || {})) {
-      if (!f.includes('.') || v == null || v === '') continue; // only real fields
-      acc[f] = acc[f] || new Set();
-      for (const part of String(v).split(',')) { const t = part.trim(); if (t) { acc[f].add(t); any = true; } }
+    for (const [key, v] of Object.entries(e?.lockedFilters || {})) {
+      if (v == null || v === '') continue;
+      // The lock key is usually already a real dotted field. But the admin UI
+      // hides raw fields used by several named filters (organiser, event…) and
+      // offers name-based options instead — so a lock may be keyed by a filter
+      // NAME (e.g. "Organiser Name"). Resolve that back to its underlying field
+      // so the organiser security lock actually applies.
+      const field = key.includes('.') ? key : filterNameToField(key);
+      if (!field || !field.includes('.')) continue;
+      acc[field] = acc[field] || new Set();
+      for (const part of String(v).split(',')) { const t = part.trim(); if (t) { acc[field].add(t); any = true; } }
     }
   }
   if (!any) return null;
@@ -116,6 +123,27 @@ const fieldLocksFromEntities = (entityIds) => {
   for (const [f, set] of Object.entries(acc)) out[f] = [...set].join(',');
   return out;
 };
+
+// Map a filter NAME (as shown in the locked-filter picker) to its real Looker
+// field by scanning the saved dashboards' filters. Cached briefly since
+// dashboards change rarely and this runs on every scoped query.
+let _nameMap = null, _nameMapAt = 0;
+function filterNameToField(name) {
+  const NOW = Date.now();
+  if (!_nameMap || NOW - _nameMapAt > 60000) {
+    const map = {};
+    for (const d of db.listDashboards()) {
+      const full = db.getDashboard(d.id);
+      for (const f of full?.filters || []) {
+        const field = f.field || f.dimension;
+        const nm = f.name || f.title;
+        if (field && nm && !map[nm]) map[nm] = field;
+      }
+    }
+    _nameMap = map; _nameMapAt = NOW;
+  }
+  return _nameMap[name] || null;
+}
 
 // Mandatory filters for a user with no suite context (admin → null; client →
 // their entities' organiser locks; nothing configured → fail closed).
