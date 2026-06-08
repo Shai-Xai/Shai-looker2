@@ -534,7 +534,7 @@ app.get('*', (_req, res) => {
   res.sendFile(path.join(staticDir, 'index.html'));
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3045;
 app.listen(PORT, () => {
   console.log(`Howler Looker Tool running on http://localhost:${PORT}`);
   console.log(`Looker instance: ${looker.LOOKER_BASE_URL}`);
