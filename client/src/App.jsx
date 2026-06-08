@@ -41,7 +41,6 @@ function UserBadge({ user, isAdmin }) {
   const extra = !isAdmin && (user?.entities || []).length > 1 ? ` +${user.entities.length - 1}` : '';
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-      {client?.logo && <img src={client.logo} alt="" style={{ height: 26, maxWidth: 70, objectFit: 'contain' }} />}
       <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.2, alignItems: 'flex-end' }}>
         {client ? (
           <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{client.name}{extra}</span>
