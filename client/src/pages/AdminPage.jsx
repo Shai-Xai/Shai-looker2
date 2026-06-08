@@ -431,7 +431,7 @@ function SetCard({ set, dashboards, onChange }) {
       <L>Name</L>
       <input style={{ ...input, fontWeight: 700, width: '100%' }} value={name} onChange={(e) => setName(e.target.value)} />
       <Field label="Icon"><IconPicker value={icon} onChange={setIcon} /></Field>
-      <L>Add dashboards from folder</L>
+      <Section title="Add dashboards from folder">
       <div style={{ border: '1px solid #eee', borderRadius: 8, padding: 10, margin: '6px 0' }}>
         {/* Breadcrumb */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', fontSize: 13, marginBottom: 8 }}>
@@ -467,9 +467,9 @@ function SetCard({ set, dashboards, onChange }) {
           {dashHere.length === 0 && <Muted>{childSegs.length ? 'Open a subfolder, or add all above.' : 'No dashboards here.'}</Muted>}
         </div>
       </div>
+      </Section>
       {ids.length > 0 && (
-        <>
-          <L>Order in this set (drag to reorder)</L>
+        <Section title="Order in this set (drag to reorder)">
           <div style={orderList}>
             {ids.map((id, i) => (
               <div
@@ -488,7 +488,7 @@ function SetCard({ set, dashboards, onChange }) {
               </div>
             ))}
           </div>
-        </>
+        </Section>
       )}
       <SaveRow onSave={save} saved={saved} id={set.id} />
       </>)}
@@ -539,19 +539,19 @@ function SuiteCard({ suite, entities, sets, fields, onChange }) {
         <Field label="Client"><select style={input} value={entityId} onChange={(e) => setEntityId(e.target.value)}>{entities.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}</select></Field>
         <Field label="Icon"><IconPicker value={icon} onChange={setIcon} /></Field>
       </div>
-      <L>Sets in this suite ({setIds.length})</L>
-      <div style={checkList}>
-        {sets.map((s) => (
-          <label key={s.id} style={checkItem}>
-            <input type="checkbox" checked={setIds.includes(s.id)} onChange={() => toggleSet(s.id)} />
-            <span>{s.name} <span style={{ color: 'var(--muted)' }}>({s.dashboardIds.length})</span></span>
-          </label>
-        ))}
-        {sets.length === 0 && <Muted>Create a Set first.</Muted>}
-      </div>
+      <Section title={`Sets in this suite (${setIds.length})`}>
+        <div style={checkList}>
+          {sets.map((s) => (
+            <label key={s.id} style={checkItem}>
+              <input type="checkbox" checked={setIds.includes(s.id)} onChange={() => toggleSet(s.id)} />
+              <span>{s.name} <span style={{ color: 'var(--muted)' }}>({s.dashboardIds.length})</span></span>
+            </label>
+          ))}
+          {sets.length === 0 && <Muted>Create a Set first.</Muted>}
+        </div>
+      </Section>
       {setIds.length > 1 && (
-        <>
-          <L>Order in this suite (drag to reorder)</L>
+        <Section title="Order in this suite (drag to reorder)">
           <div style={orderList}>
             {setIds.map((id, i) => (
               <div
@@ -570,10 +570,11 @@ function SuiteCard({ suite, entities, sets, fields, onChange }) {
               </div>
             ))}
           </div>
-        </>
+        </Section>
       )}
-      <L>Locked filters (the event, cashless events…)</L>
-      <LockedFilterEditor value={locks} onChange={setLocks} fields={fields} />
+      <Section title="Locked filters (the event, cashless events…)">
+        <LockedFilterEditor value={locks} onChange={setLocks} fields={fields} />
+      </Section>
       <SaveRow onSave={save} saved={saved} id={suite.id} />
     </div>
   );
@@ -892,6 +893,19 @@ function Tab({ active, onClick, children }) {
   return <button onClick={onClick} style={{ padding: '8px 16px', borderRadius: 8, border: active ? '1.5px solid var(--brand)' : '1.5px solid #e0e0e0', background: active ? 'var(--brand)' : '#fff', color: active ? '#fff' : 'var(--text)', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>{children}</button>;
 }
 function Field({ label, children }) { return <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}><L>{label}</L>{children}</div>; }
+// Collapsible labelled section with a caret toggle.
+function Section({ title, children, defaultOpen = true }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div style={{ marginTop: 14 }}>
+      <button onClick={() => setOpen((o) => !o)} style={{ display: 'flex', alignItems: 'center', gap: 7, width: '100%', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer', padding: 0 }}>
+        <span style={{ width: 12, color: '#b0b0b6', fontSize: 11, transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}>▶</span>
+        <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--muted)' }}>{title}</span>
+      </button>
+      {open && <div style={{ marginTop: 6 }}>{children}</div>}
+    </div>
+  );
+}
 function L({ children }) { return <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{children}</span>; }
 function Muted({ children }) { return <p style={{ color: 'var(--muted)' }}>{children}</p>; }
 
