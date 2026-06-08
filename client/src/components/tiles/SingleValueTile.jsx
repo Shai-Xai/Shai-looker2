@@ -1,5 +1,6 @@
 import { cellText, formatNumber } from '../../lib/format.js';
 import { useDrill } from '../../lib/DrillContext.jsx';
+import { useIsMobile } from '../../lib/useIsMobile.js';
 import AutoFitText from '../AutoFitText.jsx';
 
 // Single value / KPI tile. Mirrors Looker's single_value visualization:
@@ -7,6 +8,7 @@ import AutoFitText from '../AutoFitText.jsx';
 // measure (value or % change) with a coloured up/down indicator.
 export default function SingleValueTile({ data, visConfig = {}, label }) {
   const { openDrill, canDrill } = useDrill();
+  const isMobile = useIsMobile();
   const fields = data.fields || {};
   const rows = data.data || [];
   if (!rows.length) return <Empty />;
@@ -80,9 +82,9 @@ export default function SingleValueTile({ data, visConfig = {}, label }) {
   return (
     <div style={{ ...wrap, ...(cf?.background ? { background: cf.background } : null) }}>
       <AutoFitText
-        max={22}
-        min={11}
-        style={{ flex: 1, minHeight: 22 }}
+        max={isMobile ? 34 : 22}
+        min={isMobile ? 14 : 11}
+        style={{ flex: 1, minHeight: isMobile ? 30 : 22 }}
         onClick={drillable ? () => openDrill(primaryCell.links, primaryField.label_short || primaryField.label) : undefined}
         spanStyle={{
           fontWeight: cf?.bold ? 800 : 700, color: valueColor, letterSpacing: '-0.5px',
