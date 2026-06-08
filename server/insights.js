@@ -149,6 +149,7 @@ function buildDashboardPrompt({ title, filters, tiles }) {
   lines.push('');
   for (const t of tiles) {
     lines.push(`### ${t.title || '(untitled tile)'}${t.visType ? ` [${t.visType}]` : ''}`);
+    if (t.context && t.context.trim()) lines.push(`(context: ${t.context.trim()})`);
     lines.push(compactTable(t.fields, t.rows, 15));
     lines.push('');
   }

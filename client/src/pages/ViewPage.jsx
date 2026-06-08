@@ -71,7 +71,7 @@ export default function ViewPage() {
   const canSummarize = insightsEnabled && hasTiles;
 
   return (
-    <ScopeProvider suiteId={suiteId || null}>
+    <ScopeProvider suiteId={suiteId || null} dashboardContext={def.aiContext || ''}>
       <div
         style={{
           display: 'flex', flexDirection: 'column', flex: 1,

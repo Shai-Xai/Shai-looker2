@@ -9,7 +9,7 @@ import { useScope } from '../lib/ScopeContext.jsx';
 // portal to document.body so it escapes the dashboard grid's CSS transform.
 export default function InsightModal({ tile, data, filters, onClose }) {
   const isMobile = useIsMobile();
-  const { suiteId } = useScope();
+  const { suiteId, dashboardContext } = useScope();
   // turns: the conversation after the (server-side) data prompt — the first is
   // the initial insight, then alternating user questions / assistant answers.
   const [turns, setTurns] = useState([]);
@@ -43,6 +43,8 @@ export default function InsightModal({ tile, data, filters, onClose }) {
           userContext,
           history,
           suiteId,
+          dashboardContext,
+          tileContext: tile.aiContext || '',
         }),
         signal: controller.signal,
       });

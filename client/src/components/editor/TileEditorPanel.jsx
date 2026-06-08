@@ -135,6 +135,15 @@ export default function TileEditorPanel({ tile, dashboardFilters, onChange, onCl
                 )}
               </>
             )}
+
+            <div style={divider} />
+            <Label>AI context (for insights)</Label>
+            <textarea
+              style={{ ...input, minHeight: 70, fontFamily: 'inherit', resize: 'vertical' }}
+              value={tile.aiContext || ''}
+              onChange={(e) => patch({ aiContext: e.target.value })}
+              placeholder="What this tile means, how to read it, caveats — used by AI insights & the dashboard summary."
+            />
           </>
         )}
       </div>

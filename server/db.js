@@ -265,6 +265,7 @@ function createDashboard(def = {}) {
     folder: def.folder || '', // organisational folder (e.g. the Looker folder it came from)
     theme: def.theme || defaultTheme(), filters: def.filters || [], tiles: def.tiles || [],
     carousels: def.carousels || [], gridAfter: def.gridAfter || 0, source: def.source || null,
+    aiContext: def.aiContext || '', // dashboard-level AI context
     createdAt: ts, updatedAt: ts,
   };
   db.prepare('INSERT INTO dashboards (id,title,def,created_at,updated_at) VALUES (?,?,?,?,?)')

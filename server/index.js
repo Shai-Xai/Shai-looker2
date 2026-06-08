@@ -466,7 +466,7 @@ app.put('/api/admin/ai-instructions', auth.requireAdmin, (req, res) => {
 
 // Streams the insight back as plain text chunks as Claude writes it.
 app.post('/api/insight', auth.requireAuth, async (req, res) => {
-  const { title, visType, fields, rows, filters, userContext, history, suiteId } = req.body || {};
+  const { title, visType, fields, rows, filters, userContext, history, suiteId, dashboardContext, tileContext } = req.body || {};
   if (!fields || !rows) return res.status(400).json({ error: 'fields and rows are required' });
   if (!insights.isConfigured()) {
     return res.status(400).json({ error: 'AI insights are not configured. Set ANTHROPIC_API_KEY in your .env to enable them.' });
@@ -474,7 +474,12 @@ app.post('/api/insight', auth.requireAuth, async (req, res) => {
   try {
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache');
-    await insights.streamInsight({ title, visType, fields, rows, filters, userContext, history, instructions: aiInstructionsFor(suiteId) }, (text) => res.write(text));
+    const instructions = [
+      aiInstructionsFor(suiteId),
+      dashboardContext && dashboardContext.trim() ? `Context for this dashboard:\n${dashboardContext.trim()}` : '',
+      tileContext && tileContext.trim() ? `Context for this tile:\n${tileContext.trim()}` : '',
+    ].filter(Boolean).join('\n\n');
+    await insights.streamInsight({ title, visType, fields, rows, filters, userContext, history, instructions }, (text) => res.write(text));
     res.end();
   } catch (err) {
     console.error('[POST /api/insight]', err.message);
@@ -511,7 +516,7 @@ app.post('/api/dashboard-insight', auth.requireAuth, async (req, res) => {
     }
     const queryBody = { ...q, filters: { ...(q.filters || {}), ...overrides } };
     if (!applyScope(queryBody, req.user, suiteId)) continue; // skip blocked tiles
-    jobs.push({ title: tile.title, visType: tile.vis?.type, queryBody });
+    jobs.push({ title: tile.title, visType: tile.vis?.type, context: tile.aiContext || '', queryBody });
     if (jobs.length >= MAX_TILES) break;
   }
 
@@ -519,7 +524,7 @@ app.post('/api/dashboard-insight', auth.requireAuth, async (req, res) => {
     try {
       const data = await runLookerQuery('/queries/run/json_detail', j.queryBody);
       if (!data?.data?.length) return null;
-      return { title: j.title, visType: j.visType, fields: data.fields, rows: data.data };
+      return { title: j.title, visType: j.visType, context: j.context, fields: data.fields, rows: data.data };
     } catch { return null; }
   }));
   const tiles = settled.filter(Boolean);
@@ -528,7 +533,11 @@ app.post('/api/dashboard-insight', auth.requireAuth, async (req, res) => {
   try {
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache');
-    await insights.streamDashboardInsight({ title: def.title, filters: filterValues, tiles, instructions: aiInstructionsFor(suiteId) }, (t) => res.write(t));
+    const instructions = [
+      aiInstructionsFor(suiteId),
+      def.aiContext && def.aiContext.trim() ? `Context for this dashboard:\n${def.aiContext.trim()}` : '',
+    ].filter(Boolean).join('\n\n');
+    await insights.streamDashboardInsight({ title: def.title, filters: filterValues, tiles, instructions }, (t) => res.write(t));
     res.end();
   } catch (err) {
     console.error('[POST /api/dashboard-insight]', err.message);
