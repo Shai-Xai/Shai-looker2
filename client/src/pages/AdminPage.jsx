@@ -148,6 +148,17 @@ function SetCard({ set, dashboards, onChange }) {
   const visible = dashboards.filter((d) => folder === '' || (folder === '__unfiled' ? !d.folder : d.folder === folder));
   const addAll = () => setIds((cur) => [...new Set([...cur, ...visible.map((d) => d.id)])]);
 
+  // Reordering the set's dashboards (the array order is the saved order).
+  const byId = Object.fromEntries(dashboards.map((d) => [d.id, d]));
+  const move = (i, dir) => setIds((cur) => {
+    const j = i + dir;
+    if (j < 0 || j >= cur.length) return cur;
+    const next = cur.slice();
+    [next[i], next[j]] = [next[j], next[i]];
+    return next;
+  });
+  const removeId = (id) => setIds((cur) => cur.filter((x) => x !== id));
+
   return (
     <div style={cardStyle}>
       <Row>
@@ -175,6 +186,22 @@ function SetCard({ set, dashboards, onChange }) {
         ))}
         {visible.length === 0 && <Muted>No dashboards{folder ? ' in this folder' : ' yet'}.</Muted>}
       </div>
+      {ids.length > 0 && (
+        <>
+          <L>Order in this set (drag with the arrows)</L>
+          <div style={orderList}>
+            {ids.map((id, i) => (
+              <div key={id} style={orderRow}>
+                <span style={{ color: 'var(--muted)', width: 20, textAlign: 'right', flexShrink: 0 }}>{i + 1}.</span>
+                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{byId[id] ? byId[id].title : '(dashboard not found)'}</span>
+                <button style={orderBtn} disabled={i === 0} onClick={() => move(i, -1)} title="Move up">↑</button>
+                <button style={orderBtn} disabled={i === ids.length - 1} onClick={() => move(i, 1)} title="Move down">↓</button>
+                <button style={{ ...orderBtn, color: 'var(--error)' }} onClick={() => removeId(id)} title="Remove from set">✕</button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
       <SaveRow onSave={save} saved={saved} id={set.id} />
     </div>
   );
@@ -589,6 +616,9 @@ const th = { textAlign: 'left', padding: '8px 10px', borderBottom: '2px solid #e
 const td = { padding: '8px 10px', borderBottom: '1px solid #f0f0f0' };
 const checkList = { display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 200, overflowY: 'auto', border: '1px solid #eee', borderRadius: 8, padding: 10, margin: '6px 0' };
 const checkItem = { display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' };
+const orderList = { display: 'flex', flexDirection: 'column', gap: 4, border: '1px solid #eee', borderRadius: 8, padding: 8, margin: '6px 0' };
+const orderRow = { display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, padding: '4px 2px' };
+const orderBtn = { width: 26, height: 26, flexShrink: 0, border: '1px solid #e0e0e0', borderRadius: 6, background: '#fafafa', cursor: 'pointer', fontSize: 13, lineHeight: 1, padding: 0 };
 const pickBtn = { position: 'absolute', right: 4, top: 4, padding: '4px 8px', fontSize: 11, fontWeight: 600, border: '1px solid #e0e0e0', borderRadius: 5, background: '#fafafa', cursor: 'pointer' };
 const ddList = { position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50, marginTop: 4, background: '#fff', border: '1px solid #e0e0e0', borderRadius: 8, boxShadow: '0 6px 20px rgba(0,0,0,0.12)', maxHeight: 220, overflowY: 'auto', listStyle: 'none', margin: 0, padding: '4px 0' };
 const ddItem = { display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', fontSize: 13, cursor: 'pointer' };
