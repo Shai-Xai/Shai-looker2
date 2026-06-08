@@ -129,6 +129,7 @@ function addColumn(table, col, decl) {
 }
 addColumn('sets', 'icon', "TEXT NOT NULL DEFAULT ''");   // emoji or image data-URL
 addColumn('suites', 'icon', "TEXT NOT NULL DEFAULT ''");
+addColumn('entities', 'logo', "TEXT NOT NULL DEFAULT ''"); // client brand image data-URL / emoji
 
 // ─── Tile library ─────────────────────────────────────────────────────────────
 // Every visualization tile imported from Looker is harvested here so it can be
@@ -157,23 +158,24 @@ CREATE INDEX IF NOT EXISTS idx_tile_library_category ON tile_library(category);
 
 // ─── Entities ─────────────────────────────────────────────────────────────────
 function rowToEntity(r) {
-  return r && { id: r.id, name: r.name, lockedFilters: J(r.locked_filters, {}), scopeFields: J(r.scope_fields, {}), createdAt: r.created_at };
+  return r && { id: r.id, name: r.name, logo: r.logo || '', lockedFilters: J(r.locked_filters, {}), scopeFields: J(r.scope_fields, {}), createdAt: r.created_at };
 }
 function listEntities() { return db.prepare('SELECT * FROM entities ORDER BY name').all().map(rowToEntity); }
 function getEntity(id) { return rowToEntity(db.prepare('SELECT * FROM entities WHERE id=?').get(id)); }
-function createEntity({ name, lockedFilters = {}, scopeFields = {} }) {
-  const e = { id: uuid(), name: name || 'Untitled entity', lockedFilters, scopeFields, createdAt: now() };
-  db.prepare('INSERT INTO entities (id,name,locked_filters,scope_fields,created_at) VALUES (?,?,?,?,?)')
-    .run(e.id, e.name, JSON.stringify(lockedFilters), JSON.stringify(scopeFields), e.createdAt);
+function createEntity({ name, logo = '', lockedFilters = {}, scopeFields = {} }) {
+  const e = { id: uuid(), name: name || 'Untitled entity', logo: logo || '', lockedFilters, scopeFields, createdAt: now() };
+  db.prepare('INSERT INTO entities (id,name,logo,locked_filters,scope_fields,created_at) VALUES (?,?,?,?,?,?)')
+    .run(e.id, e.name, e.logo, JSON.stringify(lockedFilters), JSON.stringify(scopeFields), e.createdAt);
   return e;
 }
 function updateEntity(id, patch) {
   const cur = db.prepare('SELECT * FROM entities WHERE id=?').get(id);
   if (!cur) return null;
   const name = patch.name ?? cur.name;
+  const logo = patch.logo !== undefined ? (patch.logo || '') : (cur.logo || '');
   const lf = patch.lockedFilters !== undefined ? JSON.stringify(patch.lockedFilters) : cur.locked_filters;
   const sf = patch.scopeFields !== undefined ? JSON.stringify(patch.scopeFields) : cur.scope_fields;
-  db.prepare('UPDATE entities SET name=?, locked_filters=?, scope_fields=? WHERE id=?').run(name, lf, sf, id);
+  db.prepare('UPDATE entities SET name=?, logo=?, locked_filters=?, scope_fields=? WHERE id=?').run(name, logo, lf, sf, id);
   return getEntity(id);
 }
 function deleteEntity(id) { db.prepare('DELETE FROM entities WHERE id=?').run(id); }

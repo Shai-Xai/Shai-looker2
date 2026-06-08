@@ -143,11 +143,14 @@ app.get('/api/admin/filter-fields', auth.requireAdmin, (_req, res) => {
 // ─── Client navigation: Entity → Suite → Set → Dashboards ──────────────────────
 // The suites this user can open (each carries its entity name).
 app.get('/api/my/suites', auth.requireAuth, (req, res) => {
-  res.json(auth.suitesForUser(req.user).map((su) => ({
-    id: su.id, name: su.name, icon: su.icon || '', entityId: su.entityId,
-    entityName: db.getEntity(su.entityId)?.name || '',
-    setCount: su.setIds.length, dashboardCount: db.dashboardsInSuite(su.id).length,
-  })));
+  res.json(auth.suitesForUser(req.user).map((su) => {
+    const ent = db.getEntity(su.entityId);
+    return {
+      id: su.id, name: su.name, icon: su.icon || '', entityId: su.entityId,
+      entityName: ent?.name || '', entityLogo: ent?.logo || '',
+      setCount: su.setIds.length, dashboardCount: db.dashboardsInSuite(su.id).length,
+    };
+  }));
 });
 
 // One suite: merged locks (for pre-fill + lock) + its Sets, each with its
@@ -163,8 +166,10 @@ app.get('/api/my/suites/:id', auth.requireAuth, (req, res) => {
       .map((d) => ({ id: d.id, title: d.title, description: d.description || '', tileCount: (d.tiles || []).length }));
     return { id: set.id, name: set.name, icon: set.icon || '', dashboards };
   }).filter(Boolean);
+  const ent = db.getEntity(su.entityId);
   res.json({
-    id: su.id, name: su.name, icon: su.icon || '', entityName: db.getEntity(su.entityId)?.name || '',
+    id: su.id, name: su.name, icon: su.icon || '',
+    entityName: ent?.name || '', entityLogo: ent?.logo || '',
     lockedFilters: auth.lockedFiltersForSuite(su.id), sets,
   });
 });

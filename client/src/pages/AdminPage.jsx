@@ -10,6 +10,39 @@ const ICON_PRESETS = [
   ['💰', 'Revenue'], ['🎫', 'Comps'], ['🔁', 'Resale'], ['🏷️', 'Pricing'], ['🧑‍💼', 'Reps'],
   ['🍔', 'Food & bev'], ['🍺', 'Bar'], ['📍', 'Stations'], ['🗓️', 'Schedule'], ['⭐', 'Overview'],
 ];
+// Client logo: an uploaded image (downscaled to a reasonable size), shown to
+// the client as their brand. Larger/clearer than the small emoji IconPicker.
+function LogoPicker({ value, onChange }) {
+  const fileRef = useRef(null);
+  const onFile = (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const max = 256, scale = Math.min(1, max / Math.max(img.width, img.height));
+        const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+        const c = document.createElement('canvas'); c.width = w; c.height = h;
+        c.getContext('2d').drawImage(img, 0, 0, w, h);
+        onChange(c.toDataURL('image/png'));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(f);
+  };
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      <div style={logoPreview}>
+        {value ? <img src={value} alt="" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} /> : <span style={{ color: '#c8c8cc', fontSize: 12 }}>No logo</span>}
+      </div>
+      <button style={miniBtn} onClick={() => fileRef.current?.click()}>Upload logo</button>
+      <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={onFile} />
+      {value && <button style={delBtn} onClick={() => onChange('')}>Remove</button>}
+    </div>
+  );
+}
+
 function IconPicker({ value, onChange }) {
   const fileRef = useRef(null);
   const isImg = typeof value === 'string' && value.startsWith('data:');
@@ -177,9 +210,10 @@ function ClientDetail({ entity, fields, allEntities, allSets, suites, users, onC
 function ClientSettings({ entity, suites, fields, onChange, onBack }) {
   const navigate = useNavigate();
   const [name, setName] = useState(entity.name);
+  const [logo, setLogo] = useState(entity.logo || '');
   const [locks, setLocks] = useState(entity.lockedFilters || {});
   const [saved, setSaved] = useState(false);
-  const save = async () => { await api.adminUpdateEntity(entity.id, { name, lockedFilters: locks }); flash(setSaved); onChange(); };
+  const save = async () => { await api.adminUpdateEntity(entity.id, { name, logo, lockedFilters: locks }); flash(setSaved); onChange(); };
   const remove = async () => { if (confirm(`Delete client "${entity.name}"? This removes its sets too.`)) { await api.adminDeleteEntity(entity.id); onBack(); onChange(); } };
   const preview = async () => {
     if (!suites.length) { alert('This client has no suites yet.'); return; }
@@ -199,6 +233,10 @@ function ClientSettings({ entity, suites, fields, onChange, onBack }) {
         <button style={previewBtn} onClick={preview} title="Preview this client's account">👁 Preview account</button>
         <button style={delBtn} onClick={remove}>Delete</button>
       </Row>
+      <div style={{ marginBottom: 12 }}>
+        <L>Client logo</L>
+        <div style={{ marginTop: 6 }}><LogoPicker value={logo} onChange={setLogo} /></div>
+      </div>
       <L>Locked filters (organiser-level — apply across all this client's sets)</L>
       <LockedFilterEditor value={locks} onChange={setLocks} fields={fields} />
       <SaveRow onSave={save} saved={saved} id={entity.id} />
@@ -733,4 +771,5 @@ const ddItem = { display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12
 const ddMuted = { padding: '7px 12px', fontSize: 13, color: 'var(--muted)' };
 const iconPreview = { width: 38, height: 38, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--hairline)', borderRadius: 10, background: '#fafafa' };
 const iconChip = { width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 17, border: '1px solid #e6e6e6', borderRadius: 8, background: '#fff', cursor: 'pointer', padding: 0, lineHeight: 1 };
+const logoPreview = { width: 120, height: 56, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--hairline)', borderRadius: 10, background: '#fafafa', padding: 6, boxSizing: 'border-box' };
 const chip = { display: 'inline-flex', alignItems: 'center', gap: 2, background: '#fff0f3', color: 'var(--brand)', borderRadius: 980, padding: '3px 10px', fontSize: 12, fontWeight: 600 };

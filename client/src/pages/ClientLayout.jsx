@@ -58,8 +58,20 @@ export default function ClientLayout() {
   const activeEntityId = isAdmin && suiteId ? suites.find((s) => s.id === suiteId)?.entityId : null;
   const visibleSuites = activeEntityId ? suites.filter((s) => s.entityId === activeEntityId) : suites;
 
+  // When the visible suites all belong to one client, show that client's brand
+  // (logo / name) at the top of the sidebar.
+  const uniqueEntityIds = [...new Set(visibleSuites.map((s) => s.entityId))];
+  const brand = uniqueEntityIds.length === 1 ? visibleSuites.find((s) => s.entityId === uniqueEntityIds[0]) : null;
+
   const sidebar = (
     <nav className="howler-sidebar" style={{ ...sidebarStyle, ...(isMobile ? mobileSidebar : null) }}>
+      {brand && (brand.entityLogo || brand.entityName) && (
+        <div style={brandHeader}>
+          {brand.entityLogo
+            ? <img src={brand.entityLogo} alt={brand.entityName} style={{ maxHeight: 38, maxWidth: '100%', objectFit: 'contain' }} />
+            : <span style={{ fontSize: 15, fontWeight: 700 }}>{brand.entityName}</span>}
+        </div>
+      )}
       <div style={{ display: 'flex', alignItems: 'center', padding: '6px 8px 12px 14px' }}>
         <span style={{ flex: 1, fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)' }}>Suites</span>
         {!isMobile && <button onClick={toggleCollapsed} title="Collapse sidebar" style={iconBtn}>⟨</button>}
@@ -153,6 +165,7 @@ function Caret({ open, small }) {
 }
 
 const sidebarStyle = { width: 264, flexShrink: 0, overflowY: 'auto', padding: '16px 10px' };
+const brandHeader = { display: 'flex', alignItems: 'center', justifyContent: 'flex-start', padding: '4px 12px 14px', marginBottom: 4, borderBottom: '1px solid var(--hairline)' };
 const mobileSidebar = { position: 'relative', zIndex: 51, height: '100%', width: 'min(290px, 84vw)', boxShadow: '4px 0 24px rgba(0,0,0,0.15)', WebkitOverflowScrolling: 'touch' };
 const menuBar = { position: 'sticky', top: 0, zIndex: 20, display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderBottom: '1px solid var(--hairline)', background: 'rgba(255,255,255,0.72)', backdropFilter: 'saturate(180%) blur(20px)', WebkitBackdropFilter: 'saturate(180%) blur(20px)' };
 const rowBtn = { display: 'flex', alignItems: 'center', gap: 7, width: '100%', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer', padding: '8px 12px', borderRadius: 9, fontSize: 14, color: 'var(--text)', lineHeight: 1.3 };
