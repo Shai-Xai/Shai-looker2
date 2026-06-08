@@ -130,12 +130,13 @@ function Entities({ fields }) {
   const [suites, setSuites] = useState([]);
   const [sets, setSets] = useState([]);
   const [users, setUsers] = useState([]);
+  const [dashTitle, setDashTitle] = useState({});
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState(null);
   const load = () => {
     setLoading(true);
-    Promise.all([api.adminListEntities(), api.adminListSuites(), api.adminListSets(), api.adminListUsers()])
-      .then(([e, su, s, u]) => { setItems(e); setSuites(su); setSets(s); setUsers(u); })
+    Promise.all([api.adminListEntities(), api.adminListSuites(), api.adminListSets(), api.adminListUsers(), api.listDashboards()])
+      .then(([e, su, s, u, d]) => { setItems(e); setSuites(su); setSets(s); setUsers(u); setDashTitle(Object.fromEntries(d.map((x) => [x.id, x.title]))); })
       .finally(() => setLoading(false));
   };
   useEffect(load, []);
@@ -153,6 +154,7 @@ function Entities({ fields }) {
         fields={fields}
         allEntities={items}
         allSets={sets}
+        dashTitle={dashTitle}
         suites={suitesOf(selected.id)}
         users={loginsOf(selected.id)}
         onChange={load}
@@ -188,7 +190,7 @@ function Entities({ fields }) {
 }
 
 // One client's settings hub: a left nav (Settings / Suites / Logins) + panel.
-function ClientDetail({ entity, fields, allEntities, allSets, suites, users, onChange, onBack }) {
+function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites, users, onChange, onBack }) {
   const [section, setSection] = useState('settings');
   const nav = [['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations']];
   return (
@@ -203,7 +205,7 @@ function ClientDetail({ entity, fields, allEntities, allSets, suites, users, onC
         </nav>
         <div style={{ flex: 1, minWidth: 280 }}>
           {section === 'settings' && <ClientSettings entity={entity} suites={suites} fields={fields} onChange={onChange} onBack={onBack} />}
-          {section === 'suites' && <ClientSuites entity={entity} suites={suites} allEntities={allEntities} allSets={allSets} fields={fields} onChange={onChange} />}
+          {section === 'suites' && <ClientSuites entity={entity} suites={suites} allEntities={allEntities} allSets={allSets} dashTitle={dashTitle} fields={fields} onChange={onChange} />}
           {section === 'logins' && <EntityLogins entity={entity} users={users} onChange={onChange} />}
           {section === 'integrations' && <ClientIntegrations entity={entity} />}
         </div>
@@ -263,12 +265,12 @@ function ClientSettings({ entity, suites, fields, onChange, onBack }) {
 }
 
 // Client suites: the full suite editor for each, plus add.
-function ClientSuites({ entity, suites, allEntities, allSets, fields, onChange }) {
+function ClientSuites({ entity, suites, allEntities, allSets, dashTitle, fields, onChange }) {
   const addSuite = async () => { await api.adminCreateSuite({ entityId: entity.id, name: 'New suite', lockedFilters: {}, setIds: [] }); onChange(); };
   return (
     <div>
       {suites.map((su) => (
-        <SuiteCard key={su.id} suite={su} entities={allEntities} sets={allSets} fields={fields} onChange={onChange} />
+        <SuiteCard key={su.id} suite={su} entities={allEntities} sets={allSets} dashTitle={dashTitle} fields={fields} onChange={onChange} />
       ))}
       {suites.length === 0 && <Muted>No suites yet.</Muted>}
       <button style={addBtn} onClick={addSuite}>+ Add suite</button>
@@ -498,8 +500,9 @@ function SetCard({ set, dashboards, onChange }) {
 
 // ─── Suite editor (a client's event context: locks + bundled Sets) ────────────
 // Rendered inside a client's Suites section (see ClientSuites).
-function SuiteCard({ suite, entities, sets, fields, onChange }) {
+function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) {
   const navigate = useNavigate();
+  const [openSets, setOpenSets] = useState({});
   const [name, setName] = useState(suite.name);
   const [icon, setIcon] = useState(suite.icon || '');
   const [entityId, setEntityId] = useState(suite.entityId);
@@ -541,12 +544,29 @@ function SuiteCard({ suite, entities, sets, fields, onChange }) {
       </div>
       <Section title={`Sets in this suite (${setIds.length})`}>
         <div style={checkList}>
-          {sets.map((s) => (
-            <label key={s.id} style={checkItem}>
-              <input type="checkbox" checked={setIds.includes(s.id)} onChange={() => toggleSet(s.id)} />
-              <span>{s.name} <span style={{ color: 'var(--muted)' }}>({s.dashboardIds.length})</span></span>
-            </label>
-          ))}
+          {sets.map((s) => {
+            const open = !!openSets[s.id];
+            return (
+              <div key={s.id}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <button onClick={() => setOpenSets((p) => ({ ...p, [s.id]: !p[s.id] }))} title="Show dashboards" style={{ width: 14, border: 'none', background: 'transparent', cursor: 'pointer', color: '#b0b0b6', fontSize: 10, padding: 0, transform: open ? 'rotate(90deg)' : 'none' }}>▶</button>
+                  <label style={{ ...checkItem, flex: 1 }}>
+                    <input type="checkbox" checked={setIds.includes(s.id)} onChange={() => toggleSet(s.id)} />
+                    <span>{s.name} <span style={{ color: 'var(--muted)' }}>({s.dashboardIds.length})</span></span>
+                  </label>
+                </div>
+                {open && (
+                  <div style={{ paddingLeft: 26, margin: '2px 0 6px' }}>
+                    {s.dashboardIds.length === 0 ? (
+                      <div style={{ fontSize: 12, color: 'var(--muted)' }}>No dashboards in this set.</div>
+                    ) : s.dashboardIds.map((id) => (
+                      <div key={id} style={{ fontSize: 12.5, color: 'var(--muted-2, #555)', padding: '2px 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>• {dashTitle[id] || id}</div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
           {sets.length === 0 && <Muted>Create a Set first.</Muted>}
         </div>
       </Section>
