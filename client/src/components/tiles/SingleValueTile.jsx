@@ -34,22 +34,29 @@ export default function SingleValueTile({ data, visConfig = {}, label }) {
     const compCell = resolvePivotCell(rows[0][compField.name], pivots);
     const a = Number(primaryCell?.value);
     const b = Number(compCell?.value);
-    const type = visConfig.comparison_type || 'change';
-    if (type === 'change' && !Number.isNaN(a) && !Number.isNaN(b) && b !== 0) {
+    const rendered = typeof compCell?.rendered === 'string' ? compCell.rendered : null;
+    const label = visConfig.comparison_label || `vs ${compField.label_short || compField.label}`;
+    // Is the comparison field ALREADY a percentage / change (a % change table
+    // calc, a %-formatted value, or comparison_type 'value')? Then show it as
+    // Looker does — directly — instead of recomputing (a−b)/b, which would
+    // explode when b is a tiny fraction like -0.0046.
+    const alreadyPct = visConfig.comparison_type === 'value'
+      || (rendered && rendered.includes('%'))
+      || (compField.value_format && String(compField.value_format).includes('%'))
+      || compField.is_percent === true;
+
+    if (alreadyPct && !Number.isNaN(b)) {
+      const up = b >= 0;
+      const good = visConfig.comparison_reverse_colors ? !up : up;
+      const shown = rendered && rendered.includes('%') ? rendered : formatNumber(b, '0.0%');
+      comparison = { text: `${up ? '▲' : '▼'} ${shown}`, color: good ? '#10b981' : '#ef4444', label };
+    } else if ((visConfig.comparison_type || 'change') === 'change' && !Number.isNaN(a) && !Number.isNaN(b) && b !== 0) {
       const pct = (a - b) / Math.abs(b);
       const up = pct >= 0;
       const good = visConfig.comparison_reverse_colors ? !up : up;
-      comparison = {
-        text: `${up ? '▲' : '▼'} ${formatNumber(Math.abs(pct), '0.0%')}`,
-        color: good ? '#10b981' : '#ef4444',
-        label: visConfig.comparison_label || `vs ${compField.label_short || compField.label}`,
-      };
+      comparison = { text: `${up ? '▲' : '▼'} ${formatNumber(Math.abs(pct), '0.0%')}`, color: good ? '#10b981' : '#ef4444', label };
     } else {
-      comparison = {
-        text: cellText(rows[0][compField.name]),
-        color: 'var(--muted)',
-        label: visConfig.comparison_label || `vs ${compField.label_short || compField.label}`,
-      };
+      comparison = { text: cellText(compCell), color: 'var(--muted)', label };
     }
   }
 
