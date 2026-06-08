@@ -71,6 +71,7 @@ function Entities({ fields }) {
   const [sets, setSets] = useState([]);
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [selectedId, setSelectedId] = useState(null);
   const load = () => {
     setLoading(true);
     Promise.all([api.adminListEntities(), api.adminListSuites(), api.adminListSets(), api.adminListUsers()])
@@ -79,27 +80,120 @@ function Entities({ fields }) {
   };
   useEffect(load, []);
   if (loading) return <Muted>Loading…</Muted>;
+
+  const suitesOf = (eid) => suites.filter((s) => s.entityId === eid);
+  const loginsOf = (eid) => users.filter((u) => u.role !== 'admin' && (u.entityIds || []).includes(eid));
+
+  // Detail view: a single client with its own Settings / Suites / Logins nav.
+  const selected = items.find((e) => e.id === selectedId);
+  if (selected) {
+    return (
+      <ClientDetail
+        entity={selected}
+        fields={fields}
+        allEntities={items}
+        allSets={sets}
+        suites={suitesOf(selected.id)}
+        users={loginsOf(selected.id)}
+        onChange={load}
+        onBack={() => setSelectedId(null)}
+      />
+    );
+  }
+
+  // List view: client names only.
   return (
     <div>
-      <p style={hint}>A client (entity) is locked to its organiser(s). Manage its suites and logins here too.</p>
-      {items.map((e) => (
-        <EntityCard
-          key={e.id}
-          entity={e}
-          fields={fields}
-          allEntities={items}
-          allSets={sets}
-          suites={suites.filter((s) => s.entityId === e.id)}
-          users={users.filter((u) => u.role !== 'admin' && (u.entityIds || []).includes(e.id))}
-          onChange={load}
-        />
-      ))}
+      <p style={hint}>Pick a client to manage its settings, suites and logins.</p>
+      <div style={clientList}>
+        {items.map((e) => (
+          <button key={e.id} className="lift" style={clientRow} onClick={() => setSelectedId(e.id)}>
+            <span style={{ fontWeight: 600, fontSize: 15 }}>{e.name}</span>
+            <span style={{ marginLeft: 'auto', color: 'var(--muted)', fontSize: 12 }}>
+              {suitesOf(e.id).length} suite{suitesOf(e.id).length === 1 ? '' : 's'} · {loginsOf(e.id).length} login{loginsOf(e.id).length === 1 ? '' : 's'}
+            </span>
+            <span style={{ color: '#bbb', marginLeft: 10 }}>›</span>
+          </button>
+        ))}
+        {items.length === 0 && <Muted>No clients yet.</Muted>}
+      </div>
       <button style={addBtn} onClick={() => api.adminCreateEntity({ name: 'New client', lockedFilters: {} }).then(load)}>+ Add client</button>
 
-      <div style={{ marginTop: 30 }}>
+      <div style={{ marginTop: 32 }}>
         <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>Admin logins</h3>
         <AdminLogins admins={users.filter((u) => u.role === 'admin')} onChange={load} />
       </div>
+    </div>
+  );
+}
+
+// One client's settings hub: a left nav (Settings / Suites / Logins) + panel.
+function ClientDetail({ entity, fields, allEntities, allSets, suites, users, onChange, onBack }) {
+  const [section, setSection] = useState('settings');
+  const nav = [['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['logins', `Logins (${users.length})`]];
+  return (
+    <div>
+      <button style={miniBtnOutline} onClick={onBack}>← All clients</button>
+      <h2 style={{ fontSize: 20, fontWeight: 700, margin: '12px 0 16px' }}>{entity.name}</h2>
+      <div style={{ display: 'flex', gap: 18, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+        <nav style={detailNav}>
+          {nav.map(([key, label]) => (
+            <button key={key} onClick={() => setSection(key)} style={{ ...detailNavItem, ...(section === key ? detailNavActive : null) }}>{label}</button>
+          ))}
+        </nav>
+        <div style={{ flex: 1, minWidth: 280 }}>
+          {section === 'settings' && <ClientSettings entity={entity} suites={suites} fields={fields} onChange={onChange} onBack={onBack} />}
+          {section === 'suites' && <ClientSuites entity={entity} suites={suites} allEntities={allEntities} allSets={allSets} fields={fields} onChange={onChange} />}
+          {section === 'logins' && <EntityLogins entity={entity} users={users} onChange={onChange} />}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Client settings: name, organiser locks, preview, delete.
+function ClientSettings({ entity, suites, fields, onChange, onBack }) {
+  const navigate = useNavigate();
+  const [name, setName] = useState(entity.name);
+  const [locks, setLocks] = useState(entity.lockedFilters || {});
+  const [saved, setSaved] = useState(false);
+  const save = async () => { await api.adminUpdateEntity(entity.id, { name, lockedFilters: locks }); flash(setSaved); onChange(); };
+  const remove = async () => { if (confirm(`Delete client "${entity.name}"? This removes its sets too.`)) { await api.adminDeleteEntity(entity.id); onBack(); onChange(); } };
+  const preview = async () => {
+    if (!suites.length) { alert('This client has no suites yet.'); return; }
+    try {
+      for (const su of suites) {
+        const d = await api.mySuite(su.id);
+        const first = d.sets.flatMap((s) => s.dashboards)[0];
+        if (first) { navigate(`/suite/${su.id}/d/${first.id}`); return; }
+      }
+      alert('This client has no dashboards to preview yet.');
+    } catch (e) { alert('Could not open preview: ' + e.message); }
+  };
+  return (
+    <div style={cardStyle}>
+      <Row>
+        <input style={{ ...input, fontWeight: 700, flex: 1 }} value={name} onChange={(e) => setName(e.target.value)} />
+        <button style={previewBtn} onClick={preview} title="Preview this client's account">👁 Preview account</button>
+        <button style={delBtn} onClick={remove}>Delete</button>
+      </Row>
+      <L>Locked filters (organiser-level — apply across all this client's sets)</L>
+      <LockedFilterEditor value={locks} onChange={setLocks} fields={fields} />
+      <SaveRow onSave={save} saved={saved} id={entity.id} />
+    </div>
+  );
+}
+
+// Client suites: the full suite editor for each, plus add.
+function ClientSuites({ entity, suites, allEntities, allSets, fields, onChange }) {
+  const addSuite = async () => { await api.adminCreateSuite({ entityId: entity.id, name: 'New suite', lockedFilters: {}, setIds: [] }); onChange(); };
+  return (
+    <div>
+      {suites.map((su) => (
+        <SuiteCard key={su.id} suite={su} entities={allEntities} sets={allSets} fields={fields} onChange={onChange} />
+      ))}
+      {suites.length === 0 && <Muted>No suites yet.</Muted>}
+      <button style={addBtn} onClick={addSuite}>+ Add suite</button>
     </div>
   );
 }
@@ -140,61 +234,6 @@ function AdminLogins({ admins, onChange }) {
     </div>
   );
 }
-function EntityCard({ entity, fields, allEntities, allSets, suites, users, onChange }) {
-  const navigate = useNavigate();
-  const [name, setName] = useState(entity.name);
-  const [locks, setLocks] = useState(entity.lockedFilters || {});
-  const [saved, setSaved] = useState(false);
-  const [expanded, setExpanded] = useState(false);
-  const save = async () => { await api.adminUpdateEntity(entity.id, { name, lockedFilters: locks }); flash(setSaved); onChange(); };
-  const remove = async () => { if (confirm(`Delete client "${entity.name}"? This removes its sets too.`)) { await api.adminDeleteEntity(entity.id); onChange(); } };
-  // Preview this client's account: open the client experience scoped to this
-  // entity, landing on the first dashboard of its first non-empty suite.
-  const preview = async () => {
-    if (!suites.length) { alert('This client has no suites yet.'); return; }
-    try {
-      for (const su of suites) {
-        const d = await api.mySuite(su.id);
-        const first = d.sets.flatMap((s) => s.dashboards)[0];
-        if (first) { navigate(`/suite/${su.id}/d/${first.id}`); return; }
-      }
-      alert('This client has no dashboards to preview yet.');
-    } catch (e) { alert('Could not open preview: ' + e.message); }
-  };
-  const addSuite = async () => { await api.adminCreateSuite({ entityId: entity.id, name: 'New suite', lockedFilters: {}, setIds: [] }); setExpanded(true); onChange(); };
-  return (
-    <div style={cardStyle}>
-      <Row>
-        <input style={{ ...input, fontWeight: 700, flex: 1 }} value={name} onChange={(e) => setName(e.target.value)} />
-        <button style={previewBtn} onClick={preview} title="Preview this client's account">👁 Preview account</button>
-        <button style={delBtn} onClick={remove}>Delete</button>
-      </Row>
-      <L>Locked filters (organiser-level — apply across all this client's sets)</L>
-      <LockedFilterEditor value={locks} onChange={setLocks} fields={fields} />
-      <SaveRow onSave={save} saved={saved} id={entity.id} />
-
-      <button style={sectionToggle} onClick={() => setExpanded((v) => !v)}>
-        {expanded ? '▾' : '▸'} Suites ({suites.length}) · Logins ({users.length})
-      </button>
-      {expanded && (
-        <div style={nestedBox}>
-          <L>Suites</L>
-          {suites.map((su) => (
-            <SuiteCard key={su.id} suite={su} entities={allEntities} sets={allSets} fields={fields} onChange={onChange} />
-          ))}
-          {suites.length === 0 && <Muted>No suites yet.</Muted>}
-          <button style={miniBtn} onClick={addSuite}>+ Add suite</button>
-
-          <div style={{ marginTop: 18 }}>
-            <L>Logins</L>
-            <EntityLogins entity={entity} users={users} onChange={onChange} />
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
 // Compact login management scoped to one client: list its logins (remove access
 // or delete) and add a new client login pre-assigned to this entity.
 function EntityLogins({ entity, users, onChange }) {
@@ -333,7 +372,7 @@ function SetCard({ set, dashboards, onChange }) {
 }
 
 // ─── Suite editor (a client's event context: locks + bundled Sets) ────────────
-// Rendered inside each Client card (see EntityCard).
+// Rendered inside a client's Suites section (see ClientSuites).
 function SuiteCard({ suite, entities, sets, fields, onChange }) {
   const navigate = useNavigate();
   const [name, setName] = useState(suite.name);
@@ -643,8 +682,11 @@ const saveBtn = { padding: '8px 16px', background: 'var(--brand)', color: '#fff'
 const addBtn = { padding: '9px 16px', background: '#f7f7f7', border: '1.5px solid #e0e0e0', borderRadius: 8, fontWeight: 600, fontSize: 13, cursor: 'pointer' };
 const miniBtn = { padding: '6px 12px', background: '#f7f7f7', border: '1.5px solid #e0e0e0', borderRadius: 6, fontWeight: 600, fontSize: 12, cursor: 'pointer' };
 const miniBtnOutline = { padding: '5px 11px', background: '#fff', border: '1.5px solid #e0e0e0', borderRadius: 6, fontWeight: 600, fontSize: 12, cursor: 'pointer', color: 'var(--text)' };
-const sectionToggle = { marginTop: 14, padding: '8px 12px', width: '100%', textAlign: 'left', background: '#f7f7f8', border: '1px solid #ececec', borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: 'pointer', color: 'var(--text)' };
-const nestedBox = { marginTop: 10, padding: '12px 12px 4px', border: '1px solid #ececec', borderLeft: '3px solid var(--brand)', borderRadius: 8, background: 'rgba(0,0,0,0.015)' };
+const clientList = { display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 };
+const clientRow = { display: 'flex', alignItems: 'center', width: '100%', textAlign: 'left', background: '#fff', border: '1px solid #e6e6e6', borderRadius: 10, padding: '14px 16px', cursor: 'pointer', boxShadow: '0 1px 4px rgba(0,0,0,0.04)' };
+const detailNav = { display: 'flex', flexDirection: 'column', gap: 4, width: 170, flexShrink: 0 };
+const detailNavItem = { textAlign: 'left', padding: '9px 13px', border: 'none', background: 'transparent', borderRadius: 8, fontSize: 14, fontWeight: 600, color: 'var(--muted-2, #555)', cursor: 'pointer' };
+const detailNavActive = { background: 'var(--brand)', color: '#fff' };
 const delBtn = { padding: '6px 12px', background: '#fff', color: 'var(--error)', border: '1.5px solid #f0c0c0', borderRadius: 6, fontWeight: 600, fontSize: 12, cursor: 'pointer' };
 const previewBtn = { padding: '6px 12px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 600, fontSize: 12, cursor: 'pointer' };
 const th = { textAlign: 'left', padding: '8px 10px', borderBottom: '2px solid #e0e0e0', fontSize: 12, color: 'var(--muted)' };
