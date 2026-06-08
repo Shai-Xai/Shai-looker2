@@ -402,13 +402,22 @@ function SetCard({ set, dashboards, onChange }) {
     setDragOver(i);
   };
   const removeId = (id) => setIds((cur) => cur.filter((x) => x !== id));
+  const [open, setOpen] = useState(false);
 
   return (
     <div style={cardStyle}>
       <Row>
-        <input style={{ ...input, fontWeight: 700, flex: 1 }} value={name} onChange={(e) => setName(e.target.value)} />
+        <button onClick={() => setOpen((o) => !o)} style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer', padding: 0 }}>
+          <span style={{ width: 12, color: '#b0b0b6', fontSize: 11, transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}>▶</span>
+          {set.icon && <span style={{ fontSize: 16 }}>{set.icon.startsWith('data:') ? <img src={set.icon} alt="" style={{ width: 18, height: 18, objectFit: 'contain', verticalAlign: 'middle' }} /> : set.icon}</span>}
+          <span style={{ fontWeight: 700, fontSize: 15 }}>{name || 'Untitled set'}</span>
+          <span style={{ color: 'var(--muted)', fontSize: 12, fontWeight: 400 }}>· {ids.length} dashboard{ids.length === 1 ? '' : 's'}</span>
+        </button>
         <button style={delBtn} onClick={remove}>Delete</button>
       </Row>
+      {!open ? null : (<>
+      <L>Name</L>
+      <input style={{ ...input, fontWeight: 700, width: '100%' }} value={name} onChange={(e) => setName(e.target.value)} />
       <Field label="Icon"><IconPicker value={icon} onChange={setIcon} /></Field>
       <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
         <Field label="Folder">
@@ -454,6 +463,7 @@ function SetCard({ set, dashboards, onChange }) {
         </>
       )}
       <SaveRow onSave={save} saved={saved} id={set.id} />
+      </>)}
     </div>
   );
 }
