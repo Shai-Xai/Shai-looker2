@@ -80,9 +80,9 @@ export default function SingleValueTile({ data, visConfig = {}, label }) {
   return (
     <div style={{ ...wrap, ...(cf?.background ? { background: cf.background } : null) }}>
       <AutoFitText
-        max={40}
-        min={12}
-        style={{ flex: 1, minHeight: 26 }}
+        max={28}
+        min={11}
+        style={{ flex: 1, minHeight: 24 }}
         onClick={drillable ? () => openDrill(primaryCell.links, primaryField.label_short || primaryField.label) : undefined}
         spanStyle={{
           fontWeight: cf?.bold ? 800 : 700, color: valueColor, letterSpacing: '-0.5px',
