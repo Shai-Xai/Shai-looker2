@@ -71,32 +71,51 @@ export default function AdminPage() {
 // ─── Clients (Entities) ───────────────────────────────────────────────────────
 function Entities({ fields }) {
   const [items, setItems] = useState([]);
+  const [suites, setSuites] = useState([]);
+  const [sets, setSets] = useState([]);
+  const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
-  const load = () => { setLoading(true); api.adminListEntities().then(setItems).finally(() => setLoading(false)); };
+  const load = () => {
+    setLoading(true);
+    Promise.all([api.adminListEntities(), api.adminListSuites(), api.adminListSets(), api.adminListUsers()])
+      .then(([e, su, s, u]) => { setItems(e); setSuites(su); setSets(s); setUsers(u); })
+      .finally(() => setLoading(false));
+  };
   useEffect(load, []);
   if (loading) return <Muted>Loading…</Muted>;
   return (
     <div>
-      <p style={hint}>A client (entity) is locked to its organiser(s). These filters are forced onto every query the client runs.</p>
-      {items.map((e) => <EntityCard key={e.id} entity={e} fields={fields} onChange={load} />)}
+      <p style={hint}>A client (entity) is locked to its organiser(s). Manage its suites and logins here too.</p>
+      {items.map((e) => (
+        <EntityCard
+          key={e.id}
+          entity={e}
+          fields={fields}
+          allEntities={items}
+          allSets={sets}
+          suites={suites.filter((s) => s.entityId === e.id)}
+          users={users.filter((u) => u.role !== 'admin' && (u.entityIds || []).includes(e.id))}
+          onChange={load}
+        />
+      ))}
       <button style={addBtn} onClick={() => api.adminCreateEntity({ name: 'New client', lockedFilters: {} }).then(load)}>+ Add client</button>
     </div>
   );
 }
-function EntityCard({ entity, fields, onChange }) {
+function EntityCard({ entity, fields, allEntities, allSets, suites, users, onChange }) {
   const navigate = useNavigate();
   const [name, setName] = useState(entity.name);
   const [locks, setLocks] = useState(entity.lockedFilters || {});
   const [saved, setSaved] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const save = async () => { await api.adminUpdateEntity(entity.id, { name, lockedFilters: locks }); flash(setSaved); onChange(); };
   const remove = async () => { if (confirm(`Delete client "${entity.name}"? This removes its sets too.`)) { await api.adminDeleteEntity(entity.id); onChange(); } };
   // Preview this client's account: open the client experience scoped to this
   // entity, landing on the first dashboard of its first non-empty suite.
   const preview = async () => {
+    if (!suites.length) { alert('This client has no suites yet.'); return; }
     try {
-      const mine = (await api.adminListSuites()).filter((s) => s.entityId === entity.id);
-      if (!mine.length) { alert('This client has no suites yet.'); return; }
-      for (const su of mine) {
+      for (const su of suites) {
         const d = await api.mySuite(su.id);
         const first = d.sets.flatMap((s) => s.dashboards)[0];
         if (first) { navigate(`/suite/${su.id}/d/${first.id}`); return; }
@@ -104,6 +123,7 @@ function EntityCard({ entity, fields, onChange }) {
       alert('This client has no dashboards to preview yet.');
     } catch (e) { alert('Could not open preview: ' + e.message); }
   };
+  const addSuite = async () => { await api.adminCreateSuite({ entityId: entity.id, name: 'New suite', lockedFilters: {}, setIds: [] }); setExpanded(true); onChange(); };
   return (
     <div style={cardStyle}>
       <Row>
@@ -114,6 +134,73 @@ function EntityCard({ entity, fields, onChange }) {
       <L>Locked filters (organiser-level — apply across all this client's sets)</L>
       <LockedFilterEditor value={locks} onChange={setLocks} fields={fields} />
       <SaveRow onSave={save} saved={saved} id={entity.id} />
+
+      <button style={sectionToggle} onClick={() => setExpanded((v) => !v)}>
+        {expanded ? '▾' : '▸'} Suites ({suites.length}) · Logins ({users.length})
+      </button>
+      {expanded && (
+        <div style={nestedBox}>
+          <L>Suites</L>
+          {suites.map((su) => (
+            <SuiteCard key={su.id} suite={su} entities={allEntities} sets={allSets} fields={fields} onChange={onChange} />
+          ))}
+          {suites.length === 0 && <Muted>No suites yet.</Muted>}
+          <button style={miniBtn} onClick={addSuite}>+ Add suite</button>
+
+          <div style={{ marginTop: 18 }}>
+            <L>Logins</L>
+            <EntityLogins entity={entity} users={users} onChange={onChange} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Compact login management scoped to one client: list its logins (remove access
+// or delete) and add a new client login pre-assigned to this entity.
+function EntityLogins({ entity, users, onChange }) {
+  const [form, setForm] = useState({ email: '', password: '' });
+  const [error, setError] = useState(null);
+  const add = async () => {
+    setError(null);
+    try {
+      await api.adminCreateUser({ email: form.email, password: form.password, role: 'client', entityIds: [entity.id] });
+      setForm({ email: '', password: '' });
+      onChange();
+    } catch (e) { setError(e.message); }
+  };
+  const removeAccess = async (u) => {
+    const nextIds = (u.entityIds || []).filter((x) => x !== entity.id);
+    await api.adminUpdateUser(u.id, { entityIds: nextIds });
+    onChange();
+  };
+  const del = async (u) => { if (confirm(`Delete login ${u.email}? (removes it for all clients)`)) { await api.adminDeleteUser(u.id); onChange(); } };
+  return (
+    <div>
+      {users.length === 0 ? (
+        <Muted>No logins yet for this client.</Muted>
+      ) : (
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <tbody>
+            {users.map((u) => (
+              <tr key={u.id}>
+                <td style={td}>{u.email}{(u.entityIds || []).length > 1 && <span style={{ color: 'var(--muted)', fontSize: 11 }}> · also other clients</span>}</td>
+                <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}>
+                  <button style={miniBtnOutline} onClick={() => removeAccess(u)}>Remove access</button>
+                  <button style={{ ...delBtn, marginLeft: 6 }} onClick={() => del(u)}>Delete</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginTop: 8 }}>
+        <Field label="Email"><input style={input} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>
+        <Field label="Password"><input style={input} type="text" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></Field>
+        <button style={miniBtn} onClick={add} disabled={!form.email || !form.password}>+ Add login</button>
+      </div>
+      {error && <div style={{ color: 'var(--error)', fontSize: 13, marginTop: 6 }}>{error}</div>}
     </div>
   );
 }
@@ -610,6 +697,9 @@ const input = { padding: '8px 10px', border: '1.5px solid #e0e0e0', borderRadius
 const saveBtn = { padding: '8px 16px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 7, fontWeight: 600, fontSize: 13, cursor: 'pointer' };
 const addBtn = { padding: '9px 16px', background: '#f7f7f7', border: '1.5px solid #e0e0e0', borderRadius: 8, fontWeight: 600, fontSize: 13, cursor: 'pointer' };
 const miniBtn = { padding: '6px 12px', background: '#f7f7f7', border: '1.5px solid #e0e0e0', borderRadius: 6, fontWeight: 600, fontSize: 12, cursor: 'pointer' };
+const miniBtnOutline = { padding: '5px 11px', background: '#fff', border: '1.5px solid #e0e0e0', borderRadius: 6, fontWeight: 600, fontSize: 12, cursor: 'pointer', color: 'var(--text)' };
+const sectionToggle = { marginTop: 14, padding: '8px 12px', width: '100%', textAlign: 'left', background: '#f7f7f8', border: '1px solid #ececec', borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: 'pointer', color: 'var(--text)' };
+const nestedBox = { marginTop: 10, padding: '12px 12px 4px', border: '1px solid #ececec', borderLeft: '3px solid var(--brand)', borderRadius: 8, background: 'rgba(0,0,0,0.015)' };
 const delBtn = { padding: '6px 12px', background: '#fff', color: 'var(--error)', border: '1.5px solid #f0c0c0', borderRadius: 6, fontWeight: 600, fontSize: 12, cursor: 'pointer' };
 const previewBtn = { padding: '6px 12px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 600, fontSize: 12, cursor: 'pointer' };
 const th = { textAlign: 'left', padding: '8px 10px', borderBottom: '2px solid #e0e0e0', fontSize: 12, color: 'var(--muted)' };
