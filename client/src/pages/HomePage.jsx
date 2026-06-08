@@ -83,6 +83,21 @@ export default function HomePage() {
     await api.updateDashboard(d.id, { folder: name.trim() });
     load();
   }
+  // Rename a folder — applies the new name to every dashboard filed under it.
+  async function renameFolder(oldName, e) {
+    if (e) e.stopPropagation();
+    if (!oldName) return; // "Unfiled" isn't a real folder
+    const next = prompt(`Rename folder "${oldName}" to:`, oldName);
+    if (next === null) return;
+    const name = next.trim();
+    if (!name || name === oldName) return;
+    const affected = dashboards.filter((d) => (d.folder || '') === oldName);
+    try {
+      await Promise.all(affected.map((d) => api.updateDashboard(d.id, { folder: name })));
+      if (openFolder === oldName) setOpenFolder(name);
+      load();
+    } catch (err) { alert('Rename failed: ' + err.message); }
+  }
 
   return (
     <main style={{ flex: 1, padding: '32px 24px', maxWidth: 1100, margin: '0 auto', width: '100%' }}>
@@ -137,6 +152,9 @@ export default function HomePage() {
         {isAdmin && openFolder === null && dashboards.some((d) => !d.folder) && (
           <button style={{ ...miniBtnOutline, fontSize: 12 }} onClick={syncFolders} title="Look up each imported dashboard's Looker folder">↻ Sync folders from Looker</button>
         )}
+        {isAdmin && openFolder && (
+          <button style={{ ...miniBtnOutline, fontSize: 12 }} onClick={(e) => renameFolder(openFolder, e)} title="Rename this folder">✎ Rename folder</button>
+        )}
       </div>
 
       {loading ? (
@@ -151,11 +169,14 @@ export default function HomePage() {
           {folderNames.map((f) => {
             const count = dashboards.filter((d) => d.folder === f).length;
             return (
-              <button key={f} className="lift" style={folderCard} onClick={() => setOpenFolder(f)}>
-                <div style={{ fontSize: 28 }}>📁</div>
+              <div key={f} className="lift" style={{ ...folderCard, position: 'relative' }} onClick={() => setOpenFolder(f)}>
+                <div style={{ display: 'flex', alignItems: 'flex-start' }}>
+                  <div style={{ fontSize: 28, flex: 1 }}>📁</div>
+                  {isAdmin && <button style={folderEditBtn} title="Rename folder" onClick={(e) => renameFolder(f, e)}>✎</button>}
+                </div>
                 <div style={{ fontSize: 15, fontWeight: 700, marginTop: 6, lineHeight: 1.3 }}>{f}</div>
                 <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>{count} dashboard{count === 1 ? '' : 's'}</div>
-              </button>
+              </div>
             );
           })}
           {unfiledCount > 0 && (
@@ -199,4 +220,5 @@ const inputStyle = { flex: '1 1 140px', padding: '9px 12px', border: '1px solid 
 const miniBtn = { padding: '7px 16px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer' };
 const miniBtnOutline = { padding: '7px 14px', background: 'rgba(0,0,0,0.05)', color: 'var(--text)', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer' };
 const deleteBtn = { border: 'none', background: 'transparent', color: '#bbb', cursor: 'pointer', fontSize: 14, padding: 2 };
+const folderEditBtn = { border: 'none', background: 'rgba(0,0,0,0.05)', color: 'var(--muted)', cursor: 'pointer', fontSize: 13, borderRadius: 8, width: 28, height: 28, flexShrink: 0 };
 const folderTag = { fontSize: 11, fontWeight: 600, background: '#eef2ff', color: '#4f46e5', padding: '2px 8px', borderRadius: 980 };
