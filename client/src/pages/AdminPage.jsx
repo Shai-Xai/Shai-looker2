@@ -3,6 +3,13 @@ import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 
 // Icon control: an emoji, or an uploaded image (downscaled to a small data-URL).
+// Offers a palette of common dashboard-category icons for quick picking.
+const ICON_PRESETS = [
+  ['🎟️', 'Ticketing'], ['💳', 'Cashless'], ['🛂', 'Access control'], ['👥', 'Audience'],
+  ['📱', 'App'], ['📊', 'GA4'], ['📈', 'Analytics'], ['🌐', 'Web'], ['🤖', 'AI'],
+  ['💰', 'Revenue'], ['🎫', 'Comps'], ['🔁', 'Resale'], ['🏷️', 'Pricing'], ['🧑‍💼', 'Reps'],
+  ['🍔', 'Food & bev'], ['🍺', 'Bar'], ['📍', 'Stations'], ['🗓️', 'Schedule'], ['⭐', 'Overview'],
+];
 function IconPicker({ value, onChange }) {
   const fileRef = useRef(null);
   const isImg = typeof value === 'string' && value.startsWith('data:');
@@ -24,14 +31,29 @@ function IconPicker({ value, onChange }) {
     reader.readAsDataURL(f);
   };
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-      <div style={iconPreview}>
-        {isImg ? <img src={value} alt="" style={{ width: 26, height: 26, objectFit: 'contain' }} /> : (value ? <span style={{ fontSize: 22 }}>{value}</span> : <span style={{ color: '#c8c8cc', fontSize: 18 }}>＋</span>)}
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={iconPreview}>
+          {isImg ? <img src={value} alt="" style={{ width: 26, height: 26, objectFit: 'contain' }} /> : (value ? <span style={{ fontSize: 22 }}>{value}</span> : <span style={{ color: '#c8c8cc', fontSize: 18 }}>＋</span>)}
+        </div>
+        <input style={{ ...input, width: 72, minWidth: 0, textAlign: 'center' }} placeholder="emoji" value={isImg ? '' : (value || '')} onChange={(e) => onChange(e.target.value)} maxLength={4} title="Type/paste an emoji" />
+        <button style={miniBtn} onClick={() => fileRef.current?.click()}>Upload image</button>
+        <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={onFile} />
+        {value && <button style={delBtn} onClick={() => onChange('')} title="Clear">✕</button>}
       </div>
-      <input style={{ ...input, width: 72, minWidth: 0, textAlign: 'center' }} placeholder="emoji" value={isImg ? '' : (value || '')} onChange={(e) => onChange(e.target.value)} maxLength={4} title="Type/paste an emoji" />
-      <button style={miniBtn} onClick={() => fileRef.current?.click()}>Upload image</button>
-      <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={onFile} />
-      {value && <button style={delBtn} onClick={() => onChange('')} title="Clear">✕</button>}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 8, maxWidth: 360 }}>
+        {ICON_PRESETS.map(([emo, label]) => (
+          <button
+            key={label}
+            type="button"
+            onClick={() => onChange(emo)}
+            title={label}
+            style={{ ...iconChip, ...(value === emo ? { borderColor: 'var(--brand)', background: '#fff0f3' } : null) }}
+          >
+            {emo}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -710,4 +732,5 @@ const ddList = { position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 5
 const ddItem = { display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', fontSize: 13, cursor: 'pointer' };
 const ddMuted = { padding: '7px 12px', fontSize: 13, color: 'var(--muted)' };
 const iconPreview = { width: 38, height: 38, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--hairline)', borderRadius: 10, background: '#fafafa' };
+const iconChip = { width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 17, border: '1px solid #e6e6e6', borderRadius: 8, background: '#fff', cursor: 'pointer', padding: 0, lineHeight: 1 };
 const chip = { display: 'inline-flex', alignItems: 'center', gap: 2, background: '#fff0f3', color: 'var(--brand)', borderRadius: 980, padding: '3px 10px', fontSize: 12, fontWeight: 600 };
