@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import FilterBar, { activeFilterCount } from '../components/FilterBar.jsx';
+import DashboardInsightModal from '../components/DashboardInsightModal.jsx';
 import EditableGrid from '../components/EditableGrid.jsx';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/auth.jsx';
@@ -14,7 +15,7 @@ export default function ViewPage() {
   const isMobile = useIsMobile();
   const { id, suiteId } = useParams();
   const navigate = useNavigate();
-  const { isAdmin } = useAuth();
+  const { isAdmin, insightsEnabled } = useAuth();
   const [def, setDef] = useState(null);
   const [setInfo, setSetInfo] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -22,6 +23,7 @@ export default function ViewPage() {
   const [filterValues, setFilterValues] = useState({});
   const [locked, setLocked] = useState({});
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [summaryOpen, setSummaryOpen] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -65,6 +67,8 @@ export default function ViewPage() {
   const backTo = '/';
   const hasFilters = (def.filters?.length || 0) > 0;
   const activeCount = hasFilters ? activeFilterCount(def.filters, filterValues) : 0;
+  const hasTiles = !!(def.tiles?.length || def.carousels?.length);
+  const canSummarize = insightsEnabled && hasTiles;
 
   return (
     <ScopeProvider suiteId={suiteId || null}>
@@ -84,6 +88,9 @@ export default function ViewPage() {
               {setInfo && <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)' }}>{setInfo.name}</div>}
               <h2 style={{ fontSize: isMobile ? 17 : 21, fontWeight: 600, letterSpacing: '-0.02em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{def.title}</h2>
             </div>
+            {canSummarize && !isMobile && (
+              <button style={summaryBtn} onClick={() => setSummaryOpen(true)} title="AI summary of the whole dashboard">✨ Summary</button>
+            )}
             {hasFilters && !isMobile && (
               <button style={filtersBtn(filtersOpen)} onClick={() => setFiltersOpen(v => !v)}>
                 <span>⚲ Filters</span>
@@ -92,6 +99,13 @@ export default function ViewPage() {
               </button>
             )}
             {isAdmin && !isMobile && <button style={editBtn} onClick={() => navigate(`/d/${id}/edit`)}>Edit</button>}
+          </div>
+        )}
+
+        {/* On mobile inside a suite the header is hidden, so offer the summary here. */}
+        {canSummarize && isMobile && suiteId && (
+          <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '8px 12px 0' }}>
+            <button style={summaryBtn} onClick={() => setSummaryOpen(true)}>✨ Summary</button>
           </div>
         )}
 
@@ -106,6 +120,15 @@ export default function ViewPage() {
             <Centered>This dashboard has no tiles yet.</Centered>
           )}
         </div>
+        {summaryOpen && (
+          <DashboardInsightModal
+            dashboardId={id}
+            title={def.title}
+            filterValues={filterValues}
+            suiteId={suiteId || null}
+            onClose={() => setSummaryOpen(false)}
+          />
+        )}
       </div>
     </ScopeProvider>
   );
@@ -114,6 +137,7 @@ export default function ViewPage() {
 const editBtn = { padding: '8px 18px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer', boxShadow: '0 1px 2px rgba(0,0,0,0.08)' };
 const filtersBtn = (active) => ({ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '8px 16px', background: active ? 'rgba(0,0,0,0.08)' : 'rgba(0,0,0,0.05)', color: 'var(--text)', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer' });
 const countBadge = { background: 'var(--brand)', color: '#fff', fontSize: 11, fontWeight: 700, borderRadius: 980, minWidth: 18, height: 18, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' };
+const summaryBtn = { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 16px', background: 'rgba(0,0,0,0.05)', color: 'var(--text)', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer' };
 
 function Centered({ children, error }) {
   return (

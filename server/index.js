@@ -461,6 +461,60 @@ app.post('/api/insight', auth.requireAuth, async (req, res) => {
   }
 });
 
+// Whole-dashboard summary: runs every tile's query (same scope + filters as the
+// live view), then streams an executive summary of the whole dashboard.
+app.post('/api/dashboard-insight', auth.requireAuth, async (req, res) => {
+  const { dashboardId, filterValues = {}, suiteId } = req.body || {};
+  if (!dashboardId) return res.status(400).json({ error: 'dashboardId is required' });
+  if (!insights.isConfigured()) {
+    return res.status(400).json({ error: 'AI insights are not configured. Set ANTHROPIC_API_KEY in your .env to enable them.' });
+  }
+  const def = store.get(dashboardId);
+  if (!def) return res.status(404).json({ error: 'Dashboard not found' });
+  if (req.user.role !== 'admin' && !auth.canAccessDashboard(req.user, def)) {
+    return res.status(403).json({ error: 'Not allowed' });
+  }
+
+  // Build each runnable tile's scoped query (mirrors the client's per-tile logic).
+  const MAX_TILES = 24;
+  const allTiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))];
+  const jobs = [];
+  for (const tile of allTiles) {
+    const q = tile.query;
+    if (tile.type === 'text' || !q?.model || !q?.view || !(q.fields || []).length) continue;
+    const overrides = {};
+    for (const [filterName, queryField] of Object.entries(tile.listenTo || {})) {
+      const v = filterValues[filterName];
+      if (v && String(v).trim()) overrides[queryField] = String(v).trim();
+    }
+    const queryBody = { ...q, filters: { ...(q.filters || {}), ...overrides } };
+    if (!applyScope(queryBody, req.user, suiteId)) continue; // skip blocked tiles
+    jobs.push({ title: tile.title, visType: tile.vis?.type, queryBody });
+    if (jobs.length >= MAX_TILES) break;
+  }
+
+  const settled = await Promise.all(jobs.map(async (j) => {
+    try {
+      const data = await runLookerQuery('/queries/run/json_detail', j.queryBody);
+      if (!data?.data?.length) return null;
+      return { title: j.title, visType: j.visType, fields: data.fields, rows: data.data };
+    } catch { return null; }
+  }));
+  const tiles = settled.filter(Boolean);
+  if (!tiles.length) return res.status(400).json({ error: 'No tile data available to summarize.' });
+
+  try {
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache');
+    await insights.streamDashboardInsight({ title: def.title, filters: filterValues, tiles }, (t) => res.write(t));
+    res.end();
+  } catch (err) {
+    console.error('[POST /api/dashboard-insight]', err.message);
+    if (!res.headersSent) res.status(500).json({ error: err.message });
+    else { res.write(`\n\n[error: ${err.message}]`); res.end(); }
+  }
+});
+
 // ─── Tile library (admin) ──────────────────────────────────────────────────────
 // A catalogue of reusable tiles harvested from imported dashboards. Admins
 // curate the labels; the editor stamps copies into new dashboards.

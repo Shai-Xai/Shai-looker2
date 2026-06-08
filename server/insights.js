@@ -26,6 +26,27 @@ Rules: interpret, don't just restate every number. Be specific and quantitative.
 
 The reader may then ask follow-up questions about this tile. Answer them directly and concisely, grounded in the data you were given. If a question can't be answered from the data available, say so plainly rather than guessing.`;
 
+// Render a tile's rows as a compact pipe table using rendered (formatted)
+// values. Shared by single-tile and whole-dashboard prompts.
+function compactTable(fields, rows, maxRows = MAX_ROWS) {
+  const cols = [...(fields?.dimensions || []), ...(fields?.measures || []), ...(fields?.table_calculations || [])];
+  const header = cols.map((c) => c.label_short || c.label || c.name).join(' | ');
+  const body = (rows || []).slice(0, maxRows).map((row) =>
+    cols.map((c) => {
+      const cell = row[c.name];
+      if (cell == null) return '';
+      // Pivoted measures are nested by pivot key — flatten to "key:val" pairs.
+      if (cell.value === undefined && cell.rendered === undefined && typeof cell === 'object') {
+        return Object.entries(cell).map(([k, v]) => `${k}:${v?.rendered ?? v?.value ?? ''}`).join(' ');
+      }
+      return cell.rendered ?? cell.value ?? '';
+    }).join(' | ')
+  );
+  const out = [header, ...body];
+  if ((rows || []).length > maxRows) out.push(`… (${rows.length - maxRows} more rows omitted)`);
+  return out.join('\n');
+}
+
 // Turn the tile + data into a compact text prompt.
 function buildPrompt({ title, visType, fields, rows, filters }) {
   const dims = (fields?.dimensions || []).map((f) => f.label_short || f.label || f.name);
@@ -42,27 +63,8 @@ function buildPrompt({ title, visType, fields, rows, filters }) {
   if (filters && Object.keys(filters).length) {
     lines.push(`Active filters: ${Object.entries(filters).map(([k, v]) => `${k}=${v}`).join('; ')}`);
   }
-
-  // Render rows as a compact pipe table using the rendered (formatted) values.
-  const cols = [...(fields?.dimensions || []), ...(fields?.measures || []), ...(fields?.table_calculations || [])];
-  const header = cols.map((c) => c.label_short || c.label || c.name).join(' | ');
-  const body = (rows || []).slice(0, MAX_ROWS).map((row) =>
-    cols.map((c) => {
-      const cell = row[c.name];
-      if (cell == null) return '';
-      // Pivoted measures are nested by pivot key — flatten to "key:val" pairs.
-      if (cell.value === undefined && cell.rendered === undefined && typeof cell === 'object') {
-        return Object.entries(cell).map(([k, v]) => `${k}:${v?.rendered ?? v?.value ?? ''}`).join(' ');
-      }
-      return cell.rendered ?? cell.value ?? '';
-    }).join(' | ')
-  );
-
   lines.push('\nData:');
-  lines.push(header);
-  lines.push(...body);
-  if ((rows || []).length > MAX_ROWS) lines.push(`… (${rows.length - MAX_ROWS} more rows omitted)`);
-
+  lines.push(compactTable(fields, rows));
   return lines.join('\n');
 }
 
@@ -120,6 +122,48 @@ async function streamInsight(tileContext, onText) {
   await stream.finalMessage();
 }
 
+// ─── Whole-dashboard summary ────────────────────────────────────────────────────
+const DASHBOARD_SYSTEM = `You are a senior data analyst for Howler, an events ticketing platform (organisers run events; customers buy tickets; amounts are in South African Rand, ZAR).
+
+You are given the data behind EVERY tile on one dashboard. Produce an executive summary of the whole dashboard for a non-technical reader:
+- Open with 1-2 sentences on the headline story — the most important takeaways across the whole dashboard.
+- Then 3-6 bullet points with the most important specific findings (with numbers): notable totals, period-over-period changes ("vs previous"), top contributors, concentrations, and any outliers or concerns.
+- Optionally end with one short "Worth a look" pointer.
+
+Rules: synthesize ACROSS tiles — don't just describe each tile in turn. Be specific and quantitative, citing tile names where helpful. Keep it concise and skimmable. If a figure looks implausible, note it cautiously rather than over-claiming.`;
+
+function buildDashboardPrompt({ title, filters, tiles }) {
+  const lines = [];
+  lines.push(`Dashboard: ${title || '(untitled)'}`);
+  if (filters && Object.keys(filters).length) {
+    const active = Object.entries(filters).filter(([, v]) => v != null && String(v).trim() !== '');
+    if (active.length) lines.push(`Active filters: ${active.map(([k, v]) => `${k}=${v}`).join('; ')}`);
+  }
+  lines.push(`Tiles: ${tiles.length}`);
+  lines.push('');
+  for (const t of tiles) {
+    lines.push(`### ${t.title || '(untitled tile)'}${t.visType ? ` [${t.visType}]` : ''}`);
+    lines.push(compactTable(t.fields, t.rows, 15));
+    lines.push('');
+  }
+  return lines.join('\n');
+}
+
+// Streaming whole-dashboard summary. ctx = { title, filters, tiles:[{title,visType,fields,rows}] }.
+async function streamDashboardInsight(ctx, onText) {
+  const c = requireClient();
+  const stream = c.messages.stream({
+    model: MODEL,
+    max_tokens: 1500,
+    thinking: { type: 'adaptive' },
+    output_config: { effort: 'low' },
+    system: DASHBOARD_SYSTEM,
+    messages: [{ role: 'user', content: buildDashboardPrompt(ctx) }],
+  });
+  stream.on('text', (delta) => onText(delta));
+  await stream.finalMessage();
+}
+
 // ─── Tile-library labelling ────────────────────────────────────────────────────
 // Given a tile's metadata (its title, chart type, and the fields it queries),
 // ask Claude to name it and explain what it shows and what it's used for. Used
@@ -158,4 +202,4 @@ async function describeTile({ title, visType, fields, model, explore }) {
   };
 }
 
-module.exports = { generateInsight, streamInsight, describeTile, isConfigured: () => !!process.env.ANTHROPIC_API_KEY };
+module.exports = { generateInsight, streamInsight, streamDashboardInsight, describeTile, isConfigured: () => !!process.env.ANTHROPIC_API_KEY };
