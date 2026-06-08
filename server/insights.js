@@ -11,7 +11,7 @@ const MAX_ROWS = 60; // cap rows sent to keep the prompt small and cheap
 // One Anthropic client per API key (admin default from env/DB, or a client's own).
 const clientsByKey = new Map();
 function clientFor(apiKey) {
-  const key = apiKey || process.env.ANTHROPIC_API_KEY || '';
+  const key = (apiKey || process.env.ANTHROPIC_API_KEY || '').trim();
   if (!key) return null;
   if (!clientsByKey.has(key)) clientsByKey.set(key, new Anthropic({ apiKey: key }));
   return clientsByKey.get(key);

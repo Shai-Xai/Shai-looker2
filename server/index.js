@@ -438,7 +438,7 @@ app.post('/api/filter-suggest', auth.requireAuth, async (req, res) => {
 });
 
 // ─── Integrations: credential resolution (client overrides admin default) ──────
-function adminAnthropicKey() { return db.getSetting('anthropic_api_key') || process.env.ANTHROPIC_API_KEY || ''; }
+function adminAnthropicKey() { return (db.getSetting('anthropic_api_key') || process.env.ANTHROPIC_API_KEY || '').trim(); }
 function anthropicKeyForEntity(entityId) {
   const k = entityId ? (db.getEntityIntegrations(entityId).anthropicApiKey || '') : '';
   return k.trim() ? k.trim() : adminAnthropicKey();
