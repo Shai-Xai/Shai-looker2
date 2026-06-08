@@ -225,23 +225,57 @@ app.post('/api/dashboards/import', auth.requireAdmin, async (req, res) => {
   }
 });
 
-// Preview a Looker folder's dashboards (admin picks before importing).
+// Preview a Looker folder's dashboards (admin picks before importing). Also
+// reports totals across subfolders so the import button reflects the full tree.
 app.get('/api/looker/folder/:id', auth.requireAdmin, async (req, res) => {
   try {
     const f = await looker.lookerRequest('GET', `/folders/${encodeURIComponent(req.params.id)}?fields=id,name,dashboards(id,title)`);
-    res.json({ id: f.id, name: f.name, dashboards: (f.dashboards || []).map((d) => ({ id: String(d.id), title: d.title })) });
+    let tree = [];
+    try { tree = await collectFolderTree(req.params.id); } catch { /* fall back to top-level only */ }
+    const folderCount = new Set(tree.map((t) => t.folder)).size;
+    res.json({
+      id: f.id, name: f.name,
+      dashboards: (f.dashboards || []).map((d) => ({ id: String(d.id), title: d.title })),
+      totalWithSubfolders: tree.length,
+      folderCount,
+    });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Recursively collect every dashboard in a folder and its subfolders.
+// Returns [{ id, title, folder, depth }] — folder = the Looker folder it lives in.
+async function collectFolderTree(folderId, maxDepth = 6) {
+  const result = [];
+  const seen = new Set();
+  async function walk(id, depth) {
+    if (seen.has(String(id))) return; // guard against odd cycles
+    seen.add(String(id));
+    const f = await looker.lookerRequest('GET', `/folders/${encodeURIComponent(id)}?fields=id,name,dashboards(id,title)`);
+    const name = f.name || 'Imported folder';
+    for (const d of f.dashboards || []) result.push({ id: String(d.id), title: d.title, folder: name, depth });
+    if (depth < maxDepth) {
+      let children = [];
+      try { children = await looker.lookerRequest('GET', `/folders/${encodeURIComponent(id)}/children?fields=id,name`); } catch { children = []; }
+      for (const c of children || []) await walk(c.id, depth + 1);
+    }
+  }
+  await walk(folderId, 0);
+  return result;
+}
+
 // Import every dashboard in a Looker folder, filing them under a folder (the
-// Looker folder name by default). Sequential — can take a while for big folders.
+// Looker folder name by default). With includeSubfolders, the whole tree is
+// imported and each dashboard is filed under its own Looker (sub)folder name.
+// Sequential — can take a while for big folders.
 app.post('/api/dashboards/import-folder', auth.requireAdmin, async (req, res) => {
-  const { folderId, folder: folderName } = req.body || {};
+  const { folderId, folder: folderName, includeSubfolders = true } = req.body || {};
   if (!folderId) return res.status(400).json({ error: 'folderId is required' });
   try {
-    const folder = await looker.lookerRequest('GET', `/folders/${encodeURIComponent(folderId)}?fields=id,name,dashboards(id,title)`);
-    const name = (folderName || folder.name || 'Imported folder').trim();
-    const list = folder.dashboards || [];
+    const root = await looker.lookerRequest('GET', `/folders/${encodeURIComponent(folderId)}?fields=id,name,dashboards(id,title)`);
+    const rootName = (folderName || root.name || 'Imported folder').trim();
+    const list = includeSubfolders
+      ? await collectFolderTree(folderId)
+      : (root.dashboards || []).map((d) => ({ id: String(d.id), title: d.title, folder: rootName, depth: 0 }));
     let imported = 0;
     const failed = [];
     for (const d of list) {
@@ -249,7 +283,8 @@ app.post('/api/dashboards/import-folder', auth.requireAdmin, async (req, res) =>
         const source = await fetchDashboard(String(d.id));
         await looker.resolveElementQueries(source.elements);
         const def = convertDashboard(source);
-        def.folder = name;
+        // Root folder honours the optional name override; subfolders keep their own name.
+        def.folder = d.depth === 0 ? rootName : d.folder;
         const created = store.create(def);
         try { db.harvestDashboardTiles(created, { sourceDashboardId: created.id }); } catch (e) { console.error('[harvest]', e.message); }
         imported++;
@@ -257,7 +292,8 @@ app.post('/api/dashboards/import-folder', auth.requireAdmin, async (req, res) =>
         failed.push({ id: d.id, title: d.title, error: e.message });
       }
     }
-    res.json({ folder: name, imported, total: list.length, failed });
+    const folders = [...new Set(list.map((d) => (d.depth === 0 ? rootName : d.folder)))];
+    res.json({ folder: rootName, imported, total: list.length, failed, folders: folders.length });
   } catch (err) {
     console.error('[POST /api/dashboards/import-folder]', err.message);
     res.status(500).json({ error: err.message });
