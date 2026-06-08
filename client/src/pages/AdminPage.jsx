@@ -213,9 +213,10 @@ function ClientSettings({ entity, suites, fields, onChange, onBack }) {
   const navigate = useNavigate();
   const [name, setName] = useState(entity.name);
   const [logo, setLogo] = useState(entity.logo || '');
+  const [aiContext, setAiContext] = useState(entity.aiContext || '');
   const [locks, setLocks] = useState(entity.lockedFilters || {});
   const [saved, setSaved] = useState(false);
-  const save = async () => { await api.adminUpdateEntity(entity.id, { name, logo, lockedFilters: locks }); flash(setSaved); onChange(); };
+  const save = async () => { await api.adminUpdateEntity(entity.id, { name, logo, aiContext, lockedFilters: locks }); flash(setSaved); onChange(); };
   const remove = async () => { if (confirm(`Delete client "${entity.name}"? This removes its sets too.`)) { await api.adminDeleteEntity(entity.id); onBack(); onChange(); } };
   const preview = async () => {
     if (!suites.length) { alert('This client has no suites yet.'); return; }
@@ -241,6 +242,17 @@ function ClientSettings({ entity, suites, fields, onChange, onBack }) {
       </div>
       <L>Locked filters (organiser-level — apply across all this client's sets)</L>
       <LockedFilterEditor value={locks} onChange={setLocks} fields={fields} />
+      <div style={{ marginTop: 12 }}>
+        <L>Client AI context</L>
+        <div style={{ fontSize: 12, color: 'var(--muted)', margin: '4px 0 4px' }}>Added to the AI for this client's insights & dashboard summaries (on top of the global AI instructions).</div>
+        <textarea
+          value={aiContext}
+          onChange={(e) => setAiContext(e.target.value)}
+          rows={5}
+          placeholder={"e.g. MTN Bushfire is a 3-day festival in Eswatini each May. Compare 2026 vs 2025. Capacity ~25k/day. Cashless is closed-loop tokens."}
+          style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', border: '1.5px solid #e0e0e0', borderRadius: 8, fontSize: 13, outline: 'none', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }}
+        />
+      </div>
       <SaveRow onSave={save} saved={saved} id={entity.id} />
     </div>
   );

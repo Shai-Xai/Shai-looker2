@@ -437,6 +437,20 @@ app.post('/api/filter-suggest', auth.requireAuth, async (req, res) => {
   }
 });
 
+// Combined AI instructions: the global standing instructions, plus the
+// per-client context when the request is in a suite (client) context.
+function aiInstructionsFor(suiteId) {
+  const parts = [];
+  const global = db.getSetting('ai_instructions');
+  if (global && global.trim()) parts.push(global.trim());
+  if (suiteId) {
+    const su = db.getSuite(suiteId);
+    const ent = su && db.getEntity(su.entityId);
+    if (ent?.aiContext && ent.aiContext.trim()) parts.push(`Context for the client "${ent.name}":\n${ent.aiContext.trim()}`);
+  }
+  return parts.join('\n\n');
+}
+
 // ─── AI insight for a tile ─────────────────────────────────────────────────────
 app.get('/api/insight/status', auth.requireAuth, (_req, res) => {
   res.json({ enabled: insights.isConfigured() });
@@ -452,7 +466,7 @@ app.put('/api/admin/ai-instructions', auth.requireAdmin, (req, res) => {
 
 // Streams the insight back as plain text chunks as Claude writes it.
 app.post('/api/insight', auth.requireAuth, async (req, res) => {
-  const { title, visType, fields, rows, filters, userContext, history } = req.body || {};
+  const { title, visType, fields, rows, filters, userContext, history, suiteId } = req.body || {};
   if (!fields || !rows) return res.status(400).json({ error: 'fields and rows are required' });
   if (!insights.isConfigured()) {
     return res.status(400).json({ error: 'AI insights are not configured. Set ANTHROPIC_API_KEY in your .env to enable them.' });
@@ -460,7 +474,7 @@ app.post('/api/insight', auth.requireAuth, async (req, res) => {
   try {
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache');
-    await insights.streamInsight({ title, visType, fields, rows, filters, userContext, history, instructions: db.getSetting('ai_instructions') }, (text) => res.write(text));
+    await insights.streamInsight({ title, visType, fields, rows, filters, userContext, history, instructions: aiInstructionsFor(suiteId) }, (text) => res.write(text));
     res.end();
   } catch (err) {
     console.error('[POST /api/insight]', err.message);
@@ -514,7 +528,7 @@ app.post('/api/dashboard-insight', auth.requireAuth, async (req, res) => {
   try {
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache');
-    await insights.streamDashboardInsight({ title: def.title, filters: filterValues, tiles, instructions: db.getSetting('ai_instructions') }, (t) => res.write(t));
+    await insights.streamDashboardInsight({ title: def.title, filters: filterValues, tiles, instructions: aiInstructionsFor(suiteId) }, (t) => res.write(t));
     res.end();
   } catch (err) {
     console.error('[POST /api/dashboard-insight]', err.message);

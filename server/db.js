@@ -130,6 +130,7 @@ function addColumn(table, col, decl) {
 addColumn('sets', 'icon', "TEXT NOT NULL DEFAULT ''");   // emoji or image data-URL
 addColumn('suites', 'icon', "TEXT NOT NULL DEFAULT ''");
 addColumn('entities', 'logo', "TEXT NOT NULL DEFAULT ''"); // client brand image data-URL / emoji
+addColumn('entities', 'ai_context', "TEXT NOT NULL DEFAULT ''"); // client-specific AI background
 
 // ─── Settings (simple key/value) ──────────────────────────────────────────────
 db.exec(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '');`);
@@ -169,14 +170,14 @@ CREATE INDEX IF NOT EXISTS idx_tile_library_category ON tile_library(category);
 
 // ─── Entities ─────────────────────────────────────────────────────────────────
 function rowToEntity(r) {
-  return r && { id: r.id, name: r.name, logo: r.logo || '', lockedFilters: J(r.locked_filters, {}), scopeFields: J(r.scope_fields, {}), createdAt: r.created_at };
+  return r && { id: r.id, name: r.name, logo: r.logo || '', aiContext: r.ai_context || '', lockedFilters: J(r.locked_filters, {}), scopeFields: J(r.scope_fields, {}), createdAt: r.created_at };
 }
 function listEntities() { return db.prepare('SELECT * FROM entities ORDER BY name').all().map(rowToEntity); }
 function getEntity(id) { return rowToEntity(db.prepare('SELECT * FROM entities WHERE id=?').get(id)); }
-function createEntity({ name, logo = '', lockedFilters = {}, scopeFields = {} }) {
-  const e = { id: uuid(), name: name || 'Untitled entity', logo: logo || '', lockedFilters, scopeFields, createdAt: now() };
-  db.prepare('INSERT INTO entities (id,name,logo,locked_filters,scope_fields,created_at) VALUES (?,?,?,?,?,?)')
-    .run(e.id, e.name, e.logo, JSON.stringify(lockedFilters), JSON.stringify(scopeFields), e.createdAt);
+function createEntity({ name, logo = '', aiContext = '', lockedFilters = {}, scopeFields = {} }) {
+  const e = { id: uuid(), name: name || 'Untitled entity', logo: logo || '', aiContext: aiContext || '', lockedFilters, scopeFields, createdAt: now() };
+  db.prepare('INSERT INTO entities (id,name,logo,ai_context,locked_filters,scope_fields,created_at) VALUES (?,?,?,?,?,?,?)')
+    .run(e.id, e.name, e.logo, e.aiContext, JSON.stringify(lockedFilters), JSON.stringify(scopeFields), e.createdAt);
   return e;
 }
 function updateEntity(id, patch) {
@@ -184,9 +185,10 @@ function updateEntity(id, patch) {
   if (!cur) return null;
   const name = patch.name ?? cur.name;
   const logo = patch.logo !== undefined ? (patch.logo || '') : (cur.logo || '');
+  const aiContext = patch.aiContext !== undefined ? (patch.aiContext || '') : (cur.ai_context || '');
   const lf = patch.lockedFilters !== undefined ? JSON.stringify(patch.lockedFilters) : cur.locked_filters;
   const sf = patch.scopeFields !== undefined ? JSON.stringify(patch.scopeFields) : cur.scope_fields;
-  db.prepare('UPDATE entities SET name=?, logo=?, locked_filters=?, scope_fields=? WHERE id=?').run(name, logo, lf, sf, id);
+  db.prepare('UPDATE entities SET name=?, logo=?, ai_context=?, locked_filters=?, scope_fields=? WHERE id=?').run(name, logo, aiContext, lf, sf, id);
   return getEntity(id);
 }
 function deleteEntity(id) { db.prepare('DELETE FROM entities WHERE id=?').run(id); }

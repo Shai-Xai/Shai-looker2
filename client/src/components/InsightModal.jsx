@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useIsMobile } from '../lib/useIsMobile.js';
+import { useScope } from '../lib/ScopeContext.jsx';
 
 // Full-height side panel showing an AI insight that streams in live as Claude
 // writes it. The reader can add extra context to steer the analysis and ask
@@ -8,6 +9,7 @@ import { useIsMobile } from '../lib/useIsMobile.js';
 // portal to document.body so it escapes the dashboard grid's CSS transform.
 export default function InsightModal({ tile, data, filters, onClose }) {
   const isMobile = useIsMobile();
+  const { suiteId } = useScope();
   // turns: the conversation after the (server-side) data prompt — the first is
   // the initial insight, then alternating user questions / assistant answers.
   const [turns, setTurns] = useState([]);
@@ -40,6 +42,7 @@ export default function InsightModal({ tile, data, filters, onClose }) {
           filters,
           userContext,
           history,
+          suiteId,
         }),
         signal: controller.signal,
       });
