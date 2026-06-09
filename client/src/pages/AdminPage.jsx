@@ -114,12 +114,14 @@ export default function AdminPage() {
         <Tab active={tab === 'library'} onClick={() => setTab('library')}>Tile library</Tab>
         <Tab active={tab === 'ai'} onClick={() => setTab('ai')}>AI</Tab>
         <Tab active={tab === 'integrations'} onClick={() => setTab('integrations')}>Integrations</Tab>
+        <Tab active={tab === 'backup'} onClick={() => setTab('backup')}>Backup</Tab>
       </div>
       {tab === 'entities' && <Entities fields={fields} />}
       {tab === 'sets' && <Sets />}
       {tab === 'library' && <Library />}
       {tab === 'ai' && <AISettings />}
       {tab === 'integrations' && <AdminIntegrations />}
+      {tab === 'backup' && <BackupRestore />}
     </main>
   );
 }
@@ -905,6 +907,59 @@ function ClientIntegrations({ entity }) {
     <div>
       <p style={hint}>Optional per-client accounts. Anything left blank falls back to the platform default (Admin → Integrations).</p>
       <IntegrationsForm value={value} lookerActive={false} onSave={async (p) => setValue(await api.saveEntityIntegrations(entity.id, p))} />
+    </div>
+  );
+}
+
+// ─── Backup / restore ─────────────────────────────────────────────────────────
+// Download a full JSON snapshot (clients, suites, sets, dashboards, logins,
+// settings, tile library) and restore it on another instance. Used to migrate
+// local → production, and as an ongoing backup.
+function BackupRestore() {
+  const [busy, setBusy] = useState('');
+  async function doExport() {
+    setBusy('export');
+    try {
+      const data = await api.exportData();
+      const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `pulse-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click(); URL.revokeObjectURL(url);
+    } catch (e) { alert('Export failed: ' + e.message); }
+    finally { setBusy(''); }
+  }
+  async function doImport(e) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!confirm('Restore from this backup? It REPLACES all current clients, suites, sets, dashboards, logins and settings on THIS server. You may need to log in again with the credentials from the backup afterwards.')) return;
+    setBusy('import');
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      const r = await api.importData(data);
+      alert('Restored. Counts: ' + JSON.stringify(r.counts) + '\n\nReloading…');
+      window.location.href = '/';
+    } catch (err) { alert('Import failed: ' + err.message); }
+    finally { setBusy(''); }
+  }
+  return (
+    <div>
+      <p style={hint}>Download a full snapshot of everything (clients, suites, sets, dashboards, logins, settings, tile library), or restore one. Use it to move your local setup to production, or as a backup.</p>
+      <div style={cardStyle}>
+        <div style={{ fontWeight: 700, marginBottom: 4 }}>⬇ Export</div>
+        <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 12 }}>Saves a JSON backup of this server's data to your computer.</div>
+        <button style={saveBtn} onClick={doExport} disabled={!!busy}>{busy === 'export' ? 'Exporting…' : 'Download backup'}</button>
+      </div>
+      <div style={{ ...cardStyle, borderColor: '#f0c0c0' }}>
+        <div style={{ fontWeight: 700, marginBottom: 4 }}>⬆ Restore</div>
+        <div style={{ fontSize: 13, color: 'var(--error)', marginBottom: 12 }}>Replaces ALL data on this server with the contents of a backup file. Use the file you exported from your other instance.</div>
+        <label style={{ ...addBtn, display: 'inline-block', cursor: busy ? 'default' : 'pointer' }}>
+          {busy === 'import' ? 'Restoring…' : 'Choose backup file…'}
+          <input type="file" accept="application/json,.json" style={{ display: 'none' }} onChange={doImport} disabled={!!busy} />
+        </label>
+      </div>
     </div>
   );
 }

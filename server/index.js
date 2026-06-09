@@ -62,6 +62,27 @@ app.get('/api/auth/me', (req, res) => {
   res.json({ user: meUser(req.user) });
 });
 
+// ─── Backup / restore (full data export & import) ──────────────────────────────
+app.get('/api/admin/export', auth.requireAdmin, (_req, res) => {
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Content-Disposition', `attachment; filename="pulse-backup-${new Date().toISOString().slice(0, 10)}.json"`);
+  res.send(JSON.stringify(db.exportAll()));
+});
+// Large limit: a full export (with logo/icon data-URLs + dashboard defs) can be big.
+app.post('/api/admin/import', auth.requireAdmin, express.json({ limit: '64mb' }), (req, res) => {
+  const data = req.body;
+  if (!data || !Array.isArray(data.dashboards) || !Array.isArray(data.entities)) {
+    return res.status(400).json({ error: 'That doesn\'t look like a Pulse backup file.' });
+  }
+  try {
+    const counts = db.importAll(data);
+    res.json({ ok: true, counts });
+  } catch (err) {
+    console.error('[POST /api/admin/import]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── Admin: users ──────────────────────────────────────────────────────────────
 app.get('/api/admin/users', auth.requireAdmin, (_req, res) => res.json(auth.loadUsers().map(auth.publicUser)));
 app.post('/api/admin/users', auth.requireAdmin, (req, res) => {

@@ -483,9 +483,39 @@ function updateLibraryTile(id, patch) {
 function deleteLibraryTile(id) { return db.prepare('DELETE FROM tile_library WHERE id=?').run(id).changes > 0; }
 function bumpLibraryUsage(id) { db.prepare('UPDATE tile_library SET usage_count = usage_count + 1 WHERE id=?').run(id); }
 
+// ─── Full backup / restore (export to JSON, import to replace) ────────────────
+const EXPORT_TABLES = ['entities', 'users', 'user_entities', 'sets', 'set_dashboards', 'suites', 'suite_sets', 'dashboards', 'settings', 'tile_library'];
+function exportAll() {
+  const out = { _version: 1, exportedAt: now() };
+  for (const t of EXPORT_TABLES) out[t] = tableExists(t) ? db.prepare(`SELECT * FROM ${t}`).all() : [];
+  return out;
+}
+function insertRow(name, row) {
+  const valid = new Set(db.prepare(`PRAGMA table_info(${name})`).all().map((c) => c.name));
+  const cols = Object.keys(row).filter((c) => valid.has(c));
+  if (!cols.length) return;
+  const sql = `INSERT OR REPLACE INTO ${name} (${cols.map((c) => `"${c}"`).join(',')}) VALUES (${cols.map(() => '?').join(',')})`;
+  db.prepare(sql).run(...cols.map((c) => row[c]));
+}
+// Replace ALL data with the contents of an export. Deletes children first
+// (FK-safe), then inserts parents first.
+const importAll = db.transaction((data) => {
+  const delOrder = ['user_entities', 'suite_sets', 'set_dashboards', 'suites', 'sets', 'dashboards', 'users', 'entities', 'settings', 'tile_library'];
+  const insOrder = ['entities', 'dashboards', 'users', 'sets', 'suites', 'set_dashboards', 'suite_sets', 'user_entities', 'settings', 'tile_library'];
+  for (const t of delOrder) { if (tableExists(t)) db.prepare(`DELETE FROM ${t}`).run(); }
+  let counts = {};
+  for (const t of insOrder) {
+    if (!Array.isArray(data[t])) continue;
+    for (const row of data[t]) insertRow(t, row);
+    counts[t] = data[t].length;
+  }
+  return counts;
+});
+
 module.exports = {
   db,
   defaultTheme,
+  exportAll, importAll,
   listEntities, getEntity, createEntity, updateEntity, deleteEntity, getEntityIntegrations, setEntityIntegrations,
   listUsers, getUser, getUserByEmail, createUser, updateUser, deleteUser, verifyCredentials, publicUser, setUserEntities,
   listDashboards, getDashboard, createDashboard, updateDashboard, removeDashboard,
