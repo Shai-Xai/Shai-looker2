@@ -58,7 +58,33 @@ async function getAccessToken() {
 
 // ─── Generic request helper (auto-refresh on 401) ────────────────────────────
 
-async function lookerRequest(method, path, body = null, retry = true) {
+// Cap concurrent outbound Looker requests so a traffic spike (many clients
+// loading dashboards at once) can't exceed Looker's query concurrency — excess
+// requests queue here instead of failing. Tune with LOOKER_MAX_CONCURRENCY.
+const LOOKER_MAX = Number(process.env.LOOKER_MAX_CONCURRENCY) || 8;
+let activeRequests = 0;
+const requestQueue = [];
+function acquireSlot() {
+  if (activeRequests < LOOKER_MAX) { activeRequests++; return Promise.resolve(); }
+  return new Promise((resolve) => requestQueue.push(resolve)).then(() => { activeRequests++; });
+}
+function releaseSlot() {
+  activeRequests = Math.max(0, activeRequests - 1);
+  const next = requestQueue.shift();
+  if (next) next();
+}
+
+// Public entry point: gate one concurrency slot, then run (with 401-retry inside).
+async function lookerRequest(method, path, body = null) {
+  await acquireSlot();
+  try {
+    return await _request(method, path, body, true);
+  } finally {
+    releaseSlot();
+  }
+}
+
+async function _request(method, path, body = null, retry = true) {
   const token = await getAccessToken();
   const { apiBase, baseUrl, clientId } = creds();
 
@@ -85,7 +111,7 @@ async function lookerRequest(method, path, body = null, retry = true) {
   if (res.status === 401 && retry) {
     console.log('[auth] Token expired, refreshing...');
     tokenCacheByKey.delete(`${baseUrl}|${clientId}`);
-    return lookerRequest(method, path, body, false);
+    return _request(method, path, body, false); // same concurrency slot
   }
 
   if (!res.ok) {

@@ -15,6 +15,9 @@ const { parseDrillUrl } = require('./drill');
 const insights = require('./insights');
 
 const app = express();
+// Behind a reverse proxy (Caddy/Nginx) in production so Secure cookies + the
+// real client IP/protocol are honoured.
+if (process.env.NODE_ENV === 'production' || process.env.TRUST_PROXY === '1') app.set('trust proxy', 1);
 app.use(express.json({ limit: '5mb' }));
 app.use(cookieParser());
 app.use(auth.attachUser);
@@ -383,8 +386,14 @@ app.get('/api/looker/explores/:model/:explore', auth.requireAdmin, async (req, r
 // Slow explores (e.g. cashless) get hammered with identical queries when many
 // tiles or repeat views run. Cache results briefly AND de-duplicate in-flight
 // runs so the same Looker query is never launched twice at once.
-const QCACHE_TTL = (Number(process.env.QUERY_CACHE_TTL) || 60) * 1000;
-const QCACHE_MAX = 300;
+// Query cache with stale-while-revalidate. Fresh hits (< TTL) return instantly.
+// Stale hits (< TTL+STALE) return the cached data immediately AND kick off a
+// background refresh, so users never wait on a slow Looker query for repeat
+// views while data still stays reasonably current. Concurrent identical runs
+// are de-duplicated into one Looker call.
+const QCACHE_TTL = (Number(process.env.QUERY_CACHE_TTL) || 60) * 1000;          // fresh window (s)
+const QCACHE_STALE = (Number(process.env.QUERY_CACHE_STALE) || 600) * 1000;     // serve-stale window (s)
+const QCACHE_MAX = Number(process.env.QUERY_CACHE_MAX) || 500;
 const qCache = new Map();    // key -> { at, data }
 const qInflight = new Map(); // key -> Promise
 function stableKey(obj) {
@@ -392,11 +401,8 @@ function stableKey(obj) {
   if (obj && typeof obj === 'object') return '{' + Object.keys(obj).sort().map((k) => JSON.stringify(k) + ':' + stableKey(obj[k])).join(',') + '}';
   return JSON.stringify(obj);
 }
-async function runLookerQuery(path, body) {
-  const key = path + '|' + stableKey(body);
-  const hit = qCache.get(key);
-  if (hit && Date.now() - hit.at < QCACHE_TTL) return hit.data;
-  if (qInflight.has(key)) return qInflight.get(key); // dedup concurrent identical runs
+function refreshQuery(key, path, body) {
+  if (qInflight.has(key)) return qInflight.get(key);
   const p = looker.lookerRequest('POST', path, body)
     .then((data) => {
       qInflight.delete(key);
@@ -407,6 +413,18 @@ async function runLookerQuery(path, body) {
     .catch((e) => { qInflight.delete(key); throw e; });
   qInflight.set(key, p);
   return p;
+}
+// `ttl` optionally overrides the fresh window for this query (ms).
+async function runLookerQuery(path, body, ttl = QCACHE_TTL) {
+  const key = path + '|' + stableKey(body);
+  const hit = qCache.get(key);
+  const age = hit ? Date.now() - hit.at : Infinity;
+  if (hit && age < ttl) return hit.data;                       // fresh
+  if (hit && age < ttl + QCACHE_STALE) {                        // stale → serve now, refresh behind
+    refreshQuery(key, path, body).catch(() => {});
+    return hit.data;
+  }
+  return refreshQuery(key, path, body);                         // miss → wait for it
 }
 
 // Force the user's ENTITY (organiser) lock onto every query — the hard security

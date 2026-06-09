@@ -71,11 +71,17 @@ function seedAdmin() {
 }
 
 // ─── JWT cookie helpers ───────────────────────────────────────────────────────
+// In production (behind HTTPS) the session cookie must be Secure so it's only
+// sent over TLS. Driven by NODE_ENV; override with COOKIE_SECURE=1/0 if needed.
+const COOKIE_SECURE = process.env.COOKIE_SECURE != null
+  ? process.env.COOKIE_SECURE === '1' || process.env.COOKIE_SECURE === 'true'
+  : process.env.NODE_ENV === 'production';
+const COOKIE_OPTS = { httpOnly: true, sameSite: 'lax', secure: COOKIE_SECURE };
 function issueCookie(res, user) {
   const token = jwt.sign({ sub: user.id }, getSecret(), { expiresIn: TOKEN_TTL });
-  res.cookie(COOKIE, token, { httpOnly: true, sameSite: 'lax', secure: false, maxAge: 7 * 24 * 60 * 60 * 1000 });
+  res.cookie(COOKIE, token, { ...COOKIE_OPTS, maxAge: 7 * 24 * 60 * 60 * 1000 });
 }
-function clearCookie(res) { res.clearCookie(COOKIE); }
+function clearCookie(res) { res.clearCookie(COOKIE, COOKIE_OPTS); }
 
 function attachUser(req, _res, next) {
   const token = req.cookies?.[COOKIE];
