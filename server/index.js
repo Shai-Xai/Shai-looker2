@@ -18,7 +18,10 @@ const app = express();
 // Behind a reverse proxy (Caddy/Nginx) in production so Secure cookies + the
 // real client IP/protocol are honoured.
 if (process.env.NODE_ENV === 'production' || process.env.TRUST_PROXY === '1') app.set('trust proxy', 1);
-app.use(express.json({ limit: '5mb' }));
+// Global JSON parser at a modest limit, EXCEPT the backup-import route, which
+// parses its (potentially large) body itself with a much higher limit.
+const jsonParser = express.json({ limit: '5mb' });
+app.use((req, res, next) => (req.path === '/api/admin/import' ? next() : jsonParser(req, res, next)));
 app.use(cookieParser());
 app.use(auth.attachUser);
 
@@ -69,7 +72,7 @@ app.get('/api/admin/export', auth.requireAdmin, (_req, res) => {
   res.send(JSON.stringify(db.exportAll()));
 });
 // Large limit: a full export (with logo/icon data-URLs + dashboard defs) can be big.
-app.post('/api/admin/import', auth.requireAdmin, express.json({ limit: '64mb' }), (req, res) => {
+app.post('/api/admin/import', auth.requireAdmin, express.json({ limit: '256mb' }), (req, res) => {
   const data = req.body;
   if (!data || !Array.isArray(data.dashboards) || !Array.isArray(data.entities)) {
     return res.status(400).json({ error: 'That doesn\'t look like a Pulse backup file.' });
