@@ -1,0 +1,45 @@
+# Render Blueprint for Howler : Pulse
+# Render → New → Blueprint → connect this repo. Review, then set the secret
+# env vars (marked sync:false) in the dashboard and deploy.
+#
+# Notes:
+#  - A persistent disk holds the SQLite database (DATA_DIR), so data survives
+#    redeploys. This requires a paid instance type (free tier has no disk and
+#    spins down).
+#  - Run ONE instance (SQLite is single-file). Don't scale to >1 until you
+#    migrate storage to Postgres (see DEPLOY.md).
+#  - Render injects PORT automatically; the server already reads process.env.PORT.
+services:
+  - type: web
+    name: howler-pulse
+    runtime: node
+    plan: starter
+    branch: claude/ecstatic-thompson-vUFsS   # change to 'main' once you merge
+    buildCommand: npm ci && npm run build
+    startCommand: node server/index.js
+    healthCheckPath: /health
+    autoDeploy: true
+    numInstances: 1
+    disk:
+      name: pulse-data
+      mountPath: /var/lib/pulse
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATA_DIR
+        value: /var/lib/pulse
+      - key: SESSION_SECRET
+        generateValue: true        # Render generates a strong secret once
+      - key: ADMIN_EMAIL
+        sync: false                # set in dashboard (first-boot admin login)
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: LOOKER_BASE_URL
+        sync: false                # or set later in Admin → Integrations
+      - key: LOOKER_CLIENT_ID
+        sync: false
+      - key: LOOKER_CLIENT_SECRET
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
