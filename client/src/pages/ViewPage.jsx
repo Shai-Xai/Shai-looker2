@@ -39,14 +39,19 @@ export default function ViewPage() {
         setSetInfo(suite);
         // Lock filters from the suite's locks. A lock keyed by the filter NAME
         // (e.g. "Past Event") wins over one keyed by the field, so the
-        // Current/Past/Comparison event filters lock independently.
+        // Current/Past/Comparison event filters lock independently. Matching is
+        // case/whitespace-insensitive — dashboards name the same filter
+        // inconsistently ("Organiser Name" vs "organiser name").
         const lockMap = suite?.lockedFilters || {};
+        const norm = {};
+        for (const [k, v] of Object.entries(lockMap)) norm[k.trim().toLowerCase()] = v;
         const defaults = {};
         const lockedMap = {};
         for (const f of data.filters || []) {
           defaults[f.name] = f.default_value || '';
-          const field = f.field || f.dimension;
-          const v = lockMap[f.name] != null ? lockMap[f.name] : (field ? lockMap[field] : undefined);
+          const field = (f.field || f.dimension || '').trim().toLowerCase();
+          const nameKey = (f.name || '').trim().toLowerCase();
+          const v = norm[nameKey] != null ? norm[nameKey] : (field ? norm[field] : undefined);
           if (v != null && v !== '') {
             defaults[f.name] = v;
             lockedMap[f.name] = true;

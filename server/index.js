@@ -223,9 +223,24 @@ app.get('/api/my/suites/:id', auth.requireAuth, (req, res) => {
   res.json({
     id: su.id, name: su.name, icon: su.icon || '',
     entityName: ent?.name || '', entityLogo: ent?.logo || '',
-    lockedFilters: auth.lockedFiltersForSuite(su.id), sets,
+    lockedFilters: expandLockMap(auth.lockedFiltersForSuite(su.id)), sets,
   });
 });
+
+// A lock keyed by a filter NAME only matches dashboards using that exact name.
+// Expand the map so each name-keyed lock also appears under its resolved field
+// — then a dashboard whose organiser filter is named differently still locks.
+// Name keys stay (and win client-side) so same-field filters (Current/Past
+// Event) keep locking independently.
+function expandLockMap(lockMap) {
+  const out = { ...(lockMap || {}) };
+  for (const [k, v] of Object.entries(lockMap || {})) {
+    if (k.includes('.')) continue;
+    const field = auth.filterNameToField(k);
+    if (field && out[field] == null) out[field] = v;
+  }
+  return out;
+}
 
 // ─── Saved (editable) dashboards ───────────────────────────────────────────────
 
@@ -1108,11 +1123,15 @@ function tileQueryBody(tile, def, user, suiteId, lockMap = {}) {
   const q = tile.query;
   if (tile.type === 'text' || !q?.model || !q?.view || !(q.fields || []).length) return null;
   // Effective value per dashboard filter (suite lock wins over default).
+  // Case/whitespace-insensitive, mirroring the dashboard view.
+  const norm = {};
+  for (const [k, v] of Object.entries(lockMap)) norm[k.trim().toLowerCase()] = v;
   const fv = {};
   for (const f of def.filters || []) {
-    const field = f.field || f.dimension;
+    const field = (f.field || f.dimension || '').trim().toLowerCase();
+    const nameKey = (f.name || '').trim().toLowerCase();
     let v = f.default_value || '';
-    const locked = lockMap[f.name] != null ? lockMap[f.name] : (field ? lockMap[field] : undefined);
+    const locked = norm[nameKey] != null ? norm[nameKey] : (field ? norm[field] : undefined);
     if (locked != null && locked !== '') v = locked;
     fv[f.name] = v;
   }
@@ -1192,9 +1211,10 @@ async function buildFacts(user, entityId) {
     if (picks.length >= FACT_MAX_TILES) break;
   }
 
-  // Suite locked filters (Current Event / Cashless) per suite, resolved once.
+  // Suite locked filters (Current Event / Cashless) per suite, resolved once
+  // and expanded so name-keyed locks also match by field.
   const lockMaps = {};
-  for (const p of picks) if (p.suiteId && !(p.suiteId in lockMaps)) lockMaps[p.suiteId] = db.lockedFiltersForSuite(p.suiteId);
+  for (const p of picks) if (p.suiteId && !(p.suiteId in lockMaps)) lockMaps[p.suiteId] = expandLockMap(db.lockedFiltersForSuite(p.suiteId));
 
   const tiles = (await Promise.all(picks.slice(0, FACT_MAX_TILES).map(async (p) => {
     const body = tileQueryBody(p.tile, p.def, user, p.suiteId, lockMaps[p.suiteId] || {});

@@ -205,4 +205,5 @@ module.exports = {
   scopeFiltersForUser, canAccessDashboard,
   // suites / navigation
   suitesForUser, canAccessSuite, lockedFiltersForSuite, forcedScopeForSuite,
+  filterNameToField,
 };
