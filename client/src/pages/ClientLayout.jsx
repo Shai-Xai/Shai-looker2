@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { Outlet, useParams, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import { useAuth } from '../lib/auth.jsx';
+import { vtNavigate } from '../lib/viewTransition.js';
 
 // Persistent client shell: a left sidebar tree of Suites → Sets → Dashboards,
 // with the selected dashboard rendered in the main area.
@@ -46,7 +47,28 @@ export default function ClientLayout() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [details, suiteId, id]);
 
-  const go = (sid, did) => { navigate(`/suite/${sid}/d/${did}`); if (isMobile) setNavOpen(false); };
+  const go = (sid, did) => {
+    if (!(sid === suiteId && did === id)) vtNavigate(navigate, `/suite/${sid}/d/${did}`);
+    if (isMobile) setNavOpen(false);
+  };
+
+  // Sliding active indicator: track the active dashboard button and glide a
+  // single pill to its position whenever the selection/layout changes.
+  const navRef = useRef(null);
+  const activeRef = useRef(null);
+  const [indicator, setIndicator] = useState({ y: 0, h: 0, show: false });
+  const measure = () => {
+    const btn = activeRef.current; const nav = navRef.current;
+    if (!btn || !nav) { setIndicator((i) => ({ ...i, show: false })); return; }
+    setIndicator({ y: btn.offsetTop, h: btn.offsetHeight, show: true });
+  };
+  useLayoutEffect(() => {
+    measure();
+    // Re-measure after the expand/collapse animation settles (positions shift).
+    const t = setTimeout(measure, 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, suiteId, openSuites, openSets, details, collapsed, loading, isMobile, navOpen]);
 
   // Title of the active dashboard (for the mobile menu bar).
   let activeTitle = '';
@@ -64,7 +86,8 @@ export default function ClientLayout() {
   const brand = uniqueEntityIds.length === 1 ? visibleSuites.find((s) => s.entityId === uniqueEntityIds[0]) : null;
 
   const sidebar = (
-    <nav className="howler-sidebar" style={{ ...sidebarStyle, ...(isMobile ? mobileSidebar : null) }}>
+    <nav ref={navRef} className="howler-sidebar" style={{ ...sidebarStyle, position: 'relative', ...(isMobile ? mobileSidebar : null) }}>
+      <div className="nav-indicator" style={{ transform: `translateY(${indicator.y}px)`, height: indicator.h, opacity: indicator.show ? 1 : 0 }} />
       {brand && (brand.entityLogo || brand.entityName) && (
         <div style={brandHeader}>
           {brand.entityLogo && <img src={brand.entityLogo} alt="" style={{ height: 34, maxWidth: 90, objectFit: 'contain', flexShrink: 0 }} />}
@@ -87,10 +110,10 @@ export default function ClientLayout() {
               <Ico v={su.icon} size={22} />
               <span style={ellip}>{su.name}</span>
             </button>
-            {openSuites[su.id] && (
-              <div style={{ marginTop: 1 }}>
+            <div className={`collapsey${openSuites[su.id] ? ' open' : ''}`}>
+              <div className="collapsey-inner" style={{ marginTop: 1 }}>
                 {!details[su.id] ? (
-                  <div style={{ ...subRow, color: 'var(--muted)' }}>Loading…</div>
+                  openSuites[su.id] && <div style={{ ...subRow, color: 'var(--muted)' }}>Loading…</div>
                 ) : details[su.id].sets.length === 0 ? (
                   <div style={{ ...subRow, color: 'var(--muted)' }}>No sets</div>
                 ) : (
@@ -101,21 +124,25 @@ export default function ClientLayout() {
                         <Ico v={set.icon} size={15} />
                         <span style={ellip}>{set.name}</span>
                       </button>
-                      {openSets[set.id] && set.dashboards.map((d) => {
-                        const active = d.id === id && su.id === suiteId;
-                        return (
-                          <button key={d.id} onClick={() => go(su.id, d.id)} className={`nav-row${active ? ' active' : ''}`} style={{ ...rowBtn, paddingLeft: 52, fontSize: 13, fontWeight: active ? 600 : 450 }}>
-                            <span style={{ ...dot, background: active ? 'var(--brand)' : 'rgba(0,0,0,0.18)' }} />
-                            <span style={ellip}>{d.title}</span>
-                          </button>
-                        );
-                      })}
-                      {openSets[set.id] && set.dashboards.length === 0 && <div style={{ ...subRow, paddingLeft: 52, color: 'var(--muted)' }}>No dashboards</div>}
+                      <div className={`collapsey${openSets[set.id] ? ' open' : ''}`}>
+                        <div className="collapsey-inner">
+                          {set.dashboards.map((d) => {
+                            const active = d.id === id && su.id === suiteId;
+                            return (
+                              <button key={d.id} ref={active ? activeRef : null} onClick={() => go(su.id, d.id)} className={`nav-row${active ? ' active' : ''}`} style={{ ...rowBtn, paddingLeft: 52, fontSize: 13, fontWeight: active ? 600 : 450 }}>
+                                <span style={{ ...dot, background: active ? 'var(--brand)' : 'rgba(0,0,0,0.18)' }} />
+                                <span style={ellip}>{d.title}</span>
+                              </button>
+                            );
+                          })}
+                          {set.dashboards.length === 0 && <div style={{ ...subRow, paddingLeft: 52, color: 'var(--muted)' }}>No dashboards</div>}
+                        </div>
+                      </div>
                     </div>
                   ))
                 )}
               </div>
-            )}
+            </div>
           </div>
         ))
       )}
@@ -124,8 +151,9 @@ export default function ClientLayout() {
 
   return (
     <div style={{ display: 'flex', flex: 1, minHeight: 0, position: 'relative' }}>
-      {/* Desktop: sidebar shown unless collapsed. Mobile: a drawer. */}
-      {!isMobile && !collapsed && sidebar}
+      {/* Desktop: sidebar always mounted, width-animates to 0 when collapsed.
+          Mobile: a drawer. */}
+      {!isMobile && <div className={`sidebar-wrap${collapsed ? ' collapsed' : ''}`}>{sidebar}</div>}
       {isMobile && navOpen && (
         <div style={{ position: 'fixed', inset: 0, top: 56, zIndex: 50, display: 'flex' }}>
           <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.35)' }} onClick={() => setNavOpen(false)} />

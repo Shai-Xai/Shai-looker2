@@ -87,11 +87,35 @@ input::placeholder, textarea::placeholder { color: #b0b0b6; }
   -webkit-backdrop-filter: saturate(180%) blur(20px);
   border-right: 1px solid var(--hairline);
 }
-.nav-row { transition: background .15s ease, color .15s ease; }
+.nav-row { transition: background .15s ease, color .15s ease; position: relative; z-index: 1; }
 .nav-row:hover { background: rgba(0,0,0,0.045); }
-.nav-row.active { background: rgba(255,56,92,0.10); color: var(--brand); }
-.nav-row.active:hover { background: rgba(255,56,92,0.14); }
-.nav-caret { transition: transform .18s cubic-bezier(.4,0,.2,1); }
+.nav-row.active { color: var(--brand); }
+.nav-caret { transition: transform .22s var(--ease-out); }
+
+/* Sliding active indicator — one pink pill that glides between nav items. */
+.nav-indicator {
+  position: absolute; left: 6px; right: 6px; top: 0; height: 0;
+  background: rgba(255,56,92,0.12); border-radius: 9px;
+  z-index: 0; pointer-events: none; opacity: 0;
+  transition: transform .32s var(--ease-spring), height .32s var(--ease-spring), opacity .2s ease;
+}
+
+/* Animated expand/collapse of tree sections (grid-rows 0fr↔1fr — no JS measuring). */
+.collapsey { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .26s var(--ease-out); }
+.collapsey.open { grid-template-rows: 1fr; }
+.collapsey-inner { overflow: hidden; min-height: 0; opacity: 0; transition: opacity .18s ease; }
+.collapsey.open > .collapsey-inner { opacity: 1; transition: opacity .28s ease .05s; }
+
+/* Desktop sidebar collapse — slide width to 0 instead of disappearing. */
+.sidebar-wrap { flex-shrink: 0; overflow: hidden; transition: width .3s var(--ease-out), opacity .24s ease; }
+.sidebar-wrap.collapsed { width: 0 !important; opacity: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .nav-indicator, .collapsey, .collapsey-inner, .sidebar-wrap, .nav-caret { transition-duration: 1ms !important; }
+}
+
+/* Route cross-fade (View Transitions API) — quick and soft. */
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: .26s; animation-timing-function: var(--ease-out); }
 
 /* Soft hover lift for cards (folders, suites) */
 .lift { transition: box-shadow .22s ease, transform .22s ease, border-color .22s ease; }
