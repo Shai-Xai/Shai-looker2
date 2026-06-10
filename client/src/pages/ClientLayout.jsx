@@ -79,10 +79,22 @@ export default function ClientLayout() {
   const cur = details[suiteId];
   if (cur && id) for (const set of cur.sets) { const dash = set.dashboards.find((x) => x.id === id); if (dash) { activeTitle = dash.title; break; } }
 
-  // When an admin previews, scope the sidebar to just the active suite's client
-  // (entity) so the preview faithfully shows that one account, not every suite.
-  const activeEntityId = isAdmin && suiteId ? suites.find((s) => s.id === suiteId)?.entityId : null;
+  // When an admin previews, scope EVERYTHING to the previewed client (entity) so
+  // the preview faithfully shows that one account, not every client. The active
+  // suite tells us the entity; we remember it (sessionStorage) so pages without
+  // a suite in the URL — settlements, documents — stay scoped too.
+  const suiteEntityId = isAdmin && suiteId ? suites.find((s) => s.id === suiteId)?.entityId : null;
+  const [previewEntityId, setPreviewEntityId] = useState(() => sessionStorage.getItem('howler_preview_entity') || null);
+  useEffect(() => {
+    if (suiteEntityId && suiteEntityId !== previewEntityId) {
+      sessionStorage.setItem('howler_preview_entity', suiteEntityId);
+      setPreviewEntityId(suiteEntityId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [suiteEntityId]);
+  const activeEntityId = isAdmin ? (suiteEntityId || previewEntityId) : null;
   const visibleSuites = activeEntityId ? suites.filter((s) => s.entityId === activeEntityId) : suites;
+  const visibleSettlements = activeEntityId ? settlements.filter((s) => s.entityId === activeEntityId) : settlements;
 
   // When the visible suites all belong to one client, show that client's brand
   // (logo / name) at the top of the sidebar.
@@ -152,7 +164,7 @@ export default function ClientLayout() {
       )}
       {/* Settlements — its own section below the suites. Hidden for clients
           with no reports; admins always see it (to preview the feature). */}
-      {(settlements.length > 0 || isAdmin) && (
+      {(visibleSettlements.length > 0 || isAdmin) && (
         <>
           <div style={{ borderTop: '1px solid var(--hairline)', margin: '12px 6px 10px' }} />
           <div style={{ padding: '0 8px 8px 14px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)' }}>Reports</div>
@@ -164,7 +176,7 @@ export default function ClientLayout() {
           >
             <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>🧾</span>
             <span style={ellip}>Settlements</span>
-            {settlements.length > 0 && <span style={countChip}>{settlements.length}</span>}
+            {visibleSettlements.length > 0 && <span style={countChip}>{visibleSettlements.length}</span>}
           </button>
         </>
       )}
@@ -185,7 +197,7 @@ export default function ClientLayout() {
       <main style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'auto' }}>
         {isAdmin && (
           <div style={previewBar}>
-            <span style={{ fontWeight: 700 }}>👁 Client preview{activeEntityId && (() => { const n = suites.find((s) => s.id === suiteId)?.entityName; return n ? ` — ${n}` : ''; })()}</span>
+            <span style={{ fontWeight: 700 }}>👁 Client preview{activeEntityId && (() => { const n = suites.find((s) => s.entityId === activeEntityId)?.entityName; return n ? ` — ${n}` : ''; })()}</span>
             <span style={{ opacity: 0.85 }}>You're viewing this exactly as the client would, scoped to their data.</span>
             <div style={{ flex: 1 }} />
             <button style={exitPreviewBtn} onClick={() => navigate('/admin')}>Exit preview</button>
@@ -197,7 +209,7 @@ export default function ClientLayout() {
             {activeTitle && <span style={{ fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeTitle}</span>}
           </div>
         )}
-        <Outlet />
+        <Outlet context={{ previewEntityId: activeEntityId }} />
       </main>
     </div>
   );

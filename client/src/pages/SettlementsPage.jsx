@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useOutletContext } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { useCountUp } from '../lib/useCountUp.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
@@ -11,17 +11,23 @@ import { fmtR } from '../lib/money.js';
 export default function SettlementsPage() {
   const isMobile = useIsMobile();
   const navigate = useNavigate();
-  const [list, setList] = useState(null);
-  const [docs, setDocs] = useState([]);
+  // In an admin client-preview the layout passes the previewed entity — scope
+  // both lists to it so the preview never leaks other clients' reports.
+  const { previewEntityId } = useOutletContext() || {};
+  const [rawList, setRawList] = useState(null);
+  const [rawDocs, setRawDocs] = useState([]);
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    api.mySettlements().then(setList).catch((e) => setError(e.message));
-    api.myDocuments().then(setDocs).catch(() => {});
+    api.mySettlements().then(setRawList).catch((e) => setError(e.message));
+    api.myDocuments().then(setRawDocs).catch(() => {});
   }, []);
 
   if (error) return <Centered error>Error: {error}</Centered>;
-  if (!list) return <Centered>Loading settlements…</Centered>;
+  if (!rawList) return <Centered>Loading settlements…</Centered>;
+
+  const list = previewEntityId ? rawList.filter((s) => s.entityId === previewEntityId) : rawList;
+  const docs = previewEntityId ? rawDocs.filter((d) => d.entityId === previewEntityId) : rawDocs;
 
   // Group by event + product: an event accrues many weekly settlements per
   // product (ticketing / cashless), then one final each. The hero card is the
