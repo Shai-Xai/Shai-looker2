@@ -799,6 +799,26 @@ app.get('/api/settlements/:id', auth.requireAuth, (req, res) => {
   res.json(s);
 });
 
+// Save notes (user annotations) on a settlement. Writable by anyone who can
+// view it — admin or the assigned client — since notes are collaborative.
+// The client sends the full notes array; we stamp author + timestamp.
+app.put('/api/settlements/:id/notes', auth.requireAuth, (req, res) => {
+  const s = db.getSettlement(req.params.id);
+  if (!s) return res.status(404).json({ error: 'Settlement not found' });
+  if (!canAccessSettlement(req.user, s)) return res.status(403).json({ error: 'Not allowed' });
+  const incoming = Array.isArray(req.body?.notes) ? req.body.notes : [];
+  const clean = incoming.slice(0, 500).map((n) => ({
+    id: String(n.id || '').slice(0, 64) || Math.random().toString(36).slice(2),
+    section: String(n.section || 'general').slice(0, 64),
+    sectionLabel: String(n.sectionLabel || '').slice(0, 120),
+    text: String(n.text || '').slice(0, 4000),
+    author: String(n.author || req.user.email || '').slice(0, 160),
+    at: n.at || new Date().toISOString(),
+  })).filter((n) => n.text.trim());
+  const updated = db.setSettlementNotes(req.params.id, clean);
+  res.json({ notes: updated.notes });
+});
+
 // Download the original PDF.
 app.get('/api/settlements/:id/file', auth.requireAuth, (req, res) => {
   const s = db.getSettlement(req.params.id);

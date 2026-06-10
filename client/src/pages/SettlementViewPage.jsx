@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import ReactECharts from 'echarts-for-react';
 import { api } from '../lib/api.js';
@@ -6,7 +6,7 @@ import { useAuth } from '../lib/auth.jsx';
 import { useTheme } from '../lib/theme.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import { useCountUp } from '../lib/useCountUp.js';
-import { fmtR, fmtQty } from '../lib/money.js';
+import { fmtR, fmtQty, deriveCategory } from '../lib/money.js';
 import { StatusBadge } from './SettlementsPage.jsx';
 import InsightModal from '../components/InsightModal.jsx';
 import AiMark from '../components/AiMark.jsx';
@@ -14,24 +14,38 @@ import { ScopeProvider } from '../lib/ScopeContext.jsx';
 
 // Interactive settlement report: the money story (turnover → fees → advances →
 // value due) as a waterfall, with every PDF section as a collapsible,
-// searchable table underneath. Rendered entirely from the extracted JSON.
+// searchable table underneath. Each section has its own Owl insight + notes.
 export default function SettlementViewPage() {
   const { id } = useParams();
   const isMobile = useIsMobile();
-  const { insightsEnabled } = useAuth();
+  const { user, insightsEnabled } = useAuth();
   const { theme } = useTheme();
   const [s, setS] = useState(null);
   const [error, setError] = useState(null);
-  const [owlOpen, setOwlOpen] = useState(false);
+  const [notes, setNotes] = useState([]);
+  const [owlCtx, setOwlCtx] = useState(null); // { tile, data }
 
   useEffect(() => {
     setS(null); setError(null);
-    api.getSettlement(id).then(setS).catch((e) => setError(e.message));
+    api.getSettlement(id).then((d) => { setS(d); setNotes(d.notes || []); }).catch((e) => setError(e.message));
   }, [id]);
 
-  // Synthesized rows for the Owl. MUST be declared before the early returns
-  // below — hooks can't sit after a conditional return.
-  const owlData = useMemo(() => (s ? buildOwlData(s.data || {}) : null), [s]);
+  // Persist the whole notes array whenever it changes (after the initial load).
+  const persist = useCallback((next) => {
+    setNotes(next);
+    api.saveSettlementNotes(id, next).then((r) => setNotes(r.notes)).catch(() => {});
+  }, [id]);
+
+  const addNote = useCallback((section, sectionLabel, text) => {
+    const t = text.trim();
+    if (!t) return;
+    persist([...notes, { id: (crypto.randomUUID?.() || String(Math.random()).slice(2)), section, sectionLabel, text: t, author: user?.email || '', at: new Date().toISOString() }]);
+  }, [notes, persist, user]);
+  const deleteNote = useCallback((noteId) => persist(notes.filter((n) => n.id !== noteId)), [notes, persist]);
+
+  const openOwl = useCallback((key, title, ctx, data) => {
+    setOwlCtx({ tile: { id: `settlement-${id}-${key}`, title, vis: { type: 'looker_grid' }, aiContext: ctx }, data });
+  }, [id]);
 
   if (error) return <Centered error>Error: {error}</Centered>;
   if (!s) return <Centered>Loading report…</Centered>;
@@ -40,15 +54,12 @@ export default function SettlementViewPage() {
   const meta = d.meta || {};
   const dark = theme === 'dark';
   const advTotal = d.advances?.subtotal ?? 0;
+  const MONEY_CTX = 'This is an event settlement report: gross ticketing turnover, Howler commissions/fees deducted (negative amounts), advance payments already paid to the client, and the final value due. Withholding tax lines are tax credits. Help the client understand where the money went.';
 
-  // Synthesized "tile" for the Owl: the report's key lines as rows so the
-  // existing per-tile insight chat works unchanged on settlements.
-  const owlTile = {
-    id: `settlement-${s.id}`,
-    title: `${meta.eventName || s.title} — Settlement`,
-    vis: { type: 'looker_grid' },
-    aiContext: 'This is an event settlement report: gross ticketing turnover, Howler commissions/fees deducted (negative amounts), advance payments already made to the client, and the final value due. Withholding tax lines are tax credits. Help the client understand where the money went.',
-  };
+  const sectionProps = (key, label, ctx, owlData) => ({
+    sectionKey: key, sectionLabel: label, notes, onAddNote: addNote, onDeleteNote: deleteNote,
+    owl: insightsEnabled ? () => openOwl(key, `${meta.eventName || s.title} — ${label}`, ctx, owlData) : null,
+  });
 
   return (
     <ScopeProvider suiteId={null} dashboardContext="">
@@ -66,7 +77,7 @@ export default function SettlementViewPage() {
             </div>
           </div>
           {insightsEnabled && (
-            <button className="btn-key" style={pillBtn} onClick={() => setOwlOpen(true)} title="Ask the Owl about this settlement">
+            <button className="btn-key" style={pillBtn} onClick={() => openOwl('overview', `${meta.eventName || s.title} — Settlement`, MONEY_CTX, buildOwlData(d))} title="Ask the Owl about the whole settlement">
               <AiMark size={18} /> {!isMobile && 'Ask the Owl'}
             </button>
           )}
@@ -86,21 +97,24 @@ export default function SettlementViewPage() {
               <Kpi label="Value due to you" value={d.valueDue} delay={210} highlight />
             </div>
 
+            {/* Notes summary across the whole report */}
+            {notes.length > 0 && <NotesSummary notes={notes} onDelete={deleteNote} />}
+
             {/* The money story */}
-            <Card title="Where the money went" subtitle="From gross turnover to your final settlement">
+            <Section title="Where the money went" subtitle="From gross turnover to your final settlement" defaultOpen {...sectionProps('money', 'Where the money went', MONEY_CTX, buildOwlData(d))}>
               <Waterfall d={d} dark={dark} isMobile={isMobile} />
-            </Card>
+            </Section>
 
             {/* Ticket sales */}
             {(d.sales || []).map((g, i) => (
-              <Section key={i} title={g.name} defaultOpen={i === 0} summary={fmtR(g.subtotal?.total)}>
-                <SalesTable group={g} isMobile={isMobile} searchable={(g.rows || []).length > 10} />
+              <Section key={i} title={g.name} defaultOpen={i === 0} summary={fmtR(g.subtotal?.total)} {...sectionProps(`sales-${i}`, g.name, `Ticket sales section "${g.name}" from an event settlement report (amounts in ZAR; negative = refunds/adjustments). Categories are derived from the ticket names.`, salesOwl(g))}>
+                <SalesTable group={g} isMobile={isMobile} />
               </Section>
             ))}
 
             {/* Commissions */}
             {(d.commissions || []).length > 0 && (
-              <Section title="Howler commissions & fees" summary={fmtR(d.commissionsTotal)} defaultOpen={false}>
+              <Section title="Howler commissions & fees" summary={fmtR(d.commissionsTotal)} defaultOpen={false} {...sectionProps('commissions', 'Howler commissions & fees', 'Howler commission and fee lines deducted from the settlement (negative amounts). Withholding tax lines are tax credits.', commissionsOwl(d))}>
                 <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '300px 1fr', gap: 16, alignItems: 'start' }}>
                   <CommissionDonut groups={d.commissions} dark={dark} />
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 18, minWidth: 0 }}>
@@ -117,27 +131,18 @@ export default function SettlementViewPage() {
 
             {/* Advances + payment timeline */}
             {((d.advances?.rows || []).length > 0 || (d.settlementSummary || []).length > 0) && (
-              <Section title="Payments to you" summary={d.settlementSummary?.length ? fmtR(d.settlementSummary.reduce((a, r) => a + (r.amount || 0), 0)) : ''} defaultOpen>
+              <Section title="Payments to you" summary={d.settlementSummary?.length ? fmtR(d.settlementSummary.reduce((a, r) => a + (r.amount || 0), 0)) : ''} defaultOpen {...sectionProps('payments', 'Payments to you', 'Payments made to the client over time: net settlements paid, advance payments, and withheld portions (held then released). Amounts in ZAR.', paymentsOwl(d))}>
                 {(d.settlementSummary || []).length > 0 && <PaymentsChart d={d} dark={dark} isMobile={isMobile} />}
                 {(d.advances?.rows || []).length > 0 && (
                   <div style={{ marginTop: 14 }}>
                     <div style={groupHead}><span>Advance payments</span><span style={{ color: numColor(d.advances.subtotal) }}>{fmtR(d.advances.subtotal)}</span></div>
-                    <SimpleTable
-                      cols={['Date', 'Description', 'Amount']}
-                      rows={(d.advances.rows || []).map((r) => [r.date, r.desc, fmtR(r.value)])}
-                      numericFrom={2}
-                    />
+                    <SimpleTable cols={['Date', 'Description', 'Amount']} rows={(d.advances.rows || []).map((r) => [r.date, r.desc, fmtR(r.value)])} numericFrom={2} />
                   </div>
                 )}
                 {(d.withheldSummary || []).length > 0 && (
                   <div style={{ marginTop: 14 }}>
                     <div style={groupHead}><span>Withheld portion</span></div>
-                    <SimpleTable
-                      cols={['Date', 'Description', 'Amount']}
-                      rows={(d.withheldSummary || []).map((r) => [r.date, r.desc, fmtR(r.amount)])}
-                      negIdx={2}
-                      numericFrom={2}
-                    />
+                    <SimpleTable cols={['Date', 'Description', 'Amount']} rows={(d.withheldSummary || []).map((r) => [r.date, r.desc, fmtR(r.amount)])} negIdx={2} numericFrom={2} />
                   </div>
                 )}
               </Section>
@@ -149,7 +154,7 @@ export default function SettlementViewPage() {
           </div>
         </div>
 
-        {owlOpen && <InsightModal tile={owlTile} data={owlData} filters={{}} onClose={() => setOwlOpen(false)} />}
+        {owlCtx && <InsightModal key={owlCtx.tile.id} tile={owlCtx.tile} data={owlCtx.data} filters={{}} onClose={() => setOwlCtx(null)} />}
       </div>
     </ScopeProvider>
   );
@@ -171,7 +176,110 @@ function Kpi({ label, value, delay, highlight }) {
   );
 }
 
-// ─── Waterfall: turnover → commission groups → advances → value due ───────────
+// ─── Section with Owl + notes ─────────────────────────────────────────────────
+function Section({ title, subtitle, summary, defaultOpen = true, sectionKey, sectionLabel, notes = [], onAddNote, onDeleteNote, owl, children }) {
+  const [open, setOpen] = useState(defaultOpen);
+  const [notesOpen, setNotesOpen] = useState(false);
+  const mine = notes.filter((n) => n.section === sectionKey);
+  return (
+    <div className="howler-tile" style={{ background: 'var(--tile-bg, var(--card))', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', boxShadow: 'var(--shadow-sm)', overflow: 'hidden' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 14px' }}>
+        <button onClick={() => setOpen((v) => !v)} style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 10, border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text)', textAlign: 'left', padding: 0 }}>
+          <span className="nav-caret" style={{ fontSize: 10, color: 'var(--muted)', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .2s', flexShrink: 0 }}>▶</span>
+          <span style={{ minWidth: 0 }}>
+            <span style={{ display: 'block', fontSize: 14, fontWeight: 700, letterSpacing: '-0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
+            {subtitle && <span style={{ display: 'block', fontSize: 12, color: 'var(--muted)' }}>{subtitle}</span>}
+          </span>
+        </button>
+        {summary && <span style={{ fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: 'var(--muted-2)', flexShrink: 0 }}>{summary}</span>}
+        <button onClick={() => { setNotesOpen((v) => !v); setOpen(true); }} title="Notes" style={{ ...iconAction, color: mine.length ? 'var(--brand)' : 'var(--muted)' }}>
+          📝{mine.length > 0 && <span style={noteCount}>{mine.length}</span>}
+        </button>
+        {owl && <button className="btn-key" onClick={owl} title="Ask the Owl about this section" style={{ ...iconAction, padding: '4px 6px' }}><AiMark size={17} /></button>}
+      </div>
+      <div className={`collapsey${open ? ' open' : ''}`}>
+        <div className="collapsey-inner">
+          <div style={{ padding: '2px 14px 16px' }}>
+            {notesOpen && <NotesPanel notes={mine} onAdd={(t) => onAddNote(sectionKey, sectionLabel, t)} onDelete={onDeleteNote} />}
+            {children}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Notes ────────────────────────────────────────────────────────────────────
+function NotesPanel({ notes, onAdd, onDelete }) {
+  const [text, setText] = useState('');
+  return (
+    <div style={{ background: 'var(--elevated)', border: '1px solid var(--hairline)', borderRadius: 10, padding: 12, marginBottom: 14 }}>
+      {notes.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10 }}>
+          {notes.map((n) => <NoteRow key={n.id} n={n} onDelete={onDelete} />)}
+        </div>
+      )}
+      <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+        <textarea
+          value={text} onChange={(e) => setText(e.target.value)} rows={2} placeholder="Add a note about this section…"
+          onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { onAdd(text); setText(''); } }}
+          style={{ flex: 1, border: '1px solid var(--hairline)', borderRadius: 9, padding: '8px 10px', fontSize: 13, outline: 'none', resize: 'vertical', boxSizing: 'border-box', fontFamily: 'inherit', background: 'var(--card)', color: 'var(--text)' }}
+        />
+        <button onClick={() => { onAdd(text); setText(''); }} disabled={!text.trim()} style={{ ...miniSolid, opacity: text.trim() ? 1 : 0.5 }}>Add</button>
+      </div>
+    </div>
+  );
+}
+
+function NoteRow({ n, onDelete }) {
+  return (
+    <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 13 }}>
+      <span style={{ color: 'var(--brand)', lineHeight: 1.5 }}>•</span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ whiteSpace: 'pre-wrap', color: 'var(--text)' }}>{n.text}</div>
+        <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 1 }}>{n.author || 'someone'} · {fmtWhen(n.at)}</div>
+      </div>
+      <button onClick={() => onDelete(n.id)} title="Delete note" style={{ border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 13, lineHeight: 1, padding: 2, flexShrink: 0 }}>✕</button>
+    </div>
+  );
+}
+
+// All notes across the report, grouped by section.
+function NotesSummary({ notes, onDelete }) {
+  const [open, setOpen] = useState(true);
+  const bySection = [];
+  for (const n of notes) {
+    let g = bySection.find((x) => x.section === n.section);
+    if (!g) { g = { section: n.section, label: n.sectionLabel || n.section, items: [] }; bySection.push(g); }
+    g.items.push(n);
+  }
+  return (
+    <div className="howler-tile" style={{ background: 'var(--tile-bg, var(--card))', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', boxShadow: 'var(--shadow-sm)', overflow: 'hidden' }}>
+      <button onClick={() => setOpen((v) => !v)} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '11px 14px', border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text)', textAlign: 'left' }}>
+        <span style={{ fontSize: 15 }}>📝</span>
+        <span style={{ flex: 1, fontSize: 14, fontWeight: 700 }}>Notes</span>
+        <span style={{ fontSize: 12, color: 'var(--muted)' }}>{notes.length} note{notes.length === 1 ? '' : 's'}</span>
+        <span className="nav-caret" style={{ fontSize: 10, color: 'var(--muted)', transform: open ? 'rotate(90deg)' : 'none' }}>▶</span>
+      </button>
+      <div className={`collapsey${open ? ' open' : ''}`}>
+        <div className="collapsey-inner">
+          <div style={{ padding: '0 14px 14px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {bySection.map((g) => (
+              <div key={g.section}>
+                <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', marginBottom: 6 }}>{g.label}</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {g.items.map((n) => <NoteRow key={n.id} n={n} onDelete={onDelete} />)}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Waterfall ────────────────────────────────────────────────────────────────
 function Waterfall({ d, dark, isMobile }) {
   const option = useMemo(() => {
     const steps = [
@@ -199,32 +307,13 @@ function Waterfall({ d, dark, isMobile }) {
         trigger: 'axis', axisPointer: { type: 'shadow' },
         backgroundColor: dark ? '#26262c' : '#fff', borderColor: dark ? '#3a3a42' : '#e5e5ea',
         textStyle: { color: dark ? '#f3f3f6' : '#1d1d1f', fontSize: 12 },
-        formatter: (ps) => {
-          const i = ps[0].dataIndex; const st = labels[i];
-          const v = st.total !== undefined ? st.total : st.delta;
-          return `<b>${st.label}</b><br/>${fmtR(v)}`;
-        },
+        formatter: (ps) => { const i = ps[0].dataIndex; const st = labels[i]; const v = st.total !== undefined ? st.total : st.delta; return `<b>${st.label}</b><br/>${fmtR(v)}`; },
       },
-      xAxis: {
-        type: 'category', data: labels.map((s) => s.label),
-        axisLabel: { color: axisC, fontSize: isMobile ? 9 : 11, interval: 0, rotate: isMobile ? 28 : 0 },
-        axisLine: { lineStyle: { color: splitC } }, axisTick: { show: false },
-      },
-      yAxis: {
-        type: 'value',
-        axisLabel: { color: axisC, fontSize: 10, formatter: (v) => fmtR(v, { compact: true }) },
-        splitLine: { lineStyle: { color: splitC } },
-      },
+      xAxis: { type: 'category', data: labels.map((s) => s.label), axisLabel: { color: axisC, fontSize: isMobile ? 9 : 11, interval: 0, rotate: isMobile ? 28 : 0 }, axisLine: { lineStyle: { color: splitC } }, axisTick: { show: false } },
+      yAxis: { type: 'value', axisLabel: { color: axisC, fontSize: 10, formatter: (v) => fmtR(v, { compact: true }) }, splitLine: { lineStyle: { color: splitC } } },
       series: [
         { type: 'bar', stack: 'w', itemStyle: { color: 'transparent' }, emphasis: { itemStyle: { color: 'transparent' } }, tooltip: { show: false }, data: base, barWidth: isMobile ? '52%' : '44%' },
-        {
-          type: 'bar', stack: 'w', data: bars,
-          label: {
-            show: !isMobile, position: 'top', fontSize: 10, fontWeight: 700,
-            color: dark ? '#d6d6de' : '#48484e',
-            formatter: (p) => { const st = labels[p.dataIndex]; const v = st.total !== undefined ? st.total : st.delta; return fmtR(v, { compact: true }); },
-          },
-        },
+        { type: 'bar', stack: 'w', data: bars, label: { show: !isMobile, position: 'top', fontSize: 10, fontWeight: 700, color: dark ? '#d6d6de' : '#48484e', formatter: (p) => { const st = labels[p.dataIndex]; const v = st.total !== undefined ? st.total : st.delta; return fmtR(v, { compact: true }); } } },
       ],
     };
   }, [d, dark, isMobile]);
@@ -235,11 +324,7 @@ function Waterfall({ d, dark, isMobile }) {
 function CommissionDonut({ groups, dark }) {
   const option = useMemo(() => ({
     animationDuration: 700,
-    tooltip: {
-      backgroundColor: dark ? '#26262c' : '#fff', borderColor: dark ? '#3a3a42' : '#e5e5ea',
-      textStyle: { color: dark ? '#f3f3f6' : '#1d1d1f', fontSize: 12 },
-      formatter: (p) => `<b>${p.name}</b><br/>${fmtR(-p.value)} (${p.percent}%)`,
-    },
+    tooltip: { backgroundColor: dark ? '#26262c' : '#fff', borderColor: dark ? '#3a3a42' : '#e5e5ea', textStyle: { color: dark ? '#f3f3f6' : '#1d1d1f', fontSize: 12 }, formatter: (p) => `<b>${p.name}</b><br/>${fmtR(-p.value)} (${p.percent}%)` },
     series: [{
       type: 'pie', radius: ['52%', '78%'], center: ['50%', '50%'],
       itemStyle: { borderColor: dark ? '#1a1a1f' : '#fff', borderWidth: 2 },
@@ -250,7 +335,7 @@ function CommissionDonut({ groups, dark }) {
   return <ReactECharts option={option} style={{ height: 230 }} notMerge />;
 }
 
-// ─── Payments over time (net settlements vs withheld) ─────────────────────────
+// ─── Payments over time ───────────────────────────────────────────────────────
 function PaymentsChart({ d, dark, isMobile }) {
   const option = useMemo(() => {
     const dates = [...new Set([...(d.settlementSummary || []).map((r) => r.date), ...(d.withheldSummary || []).map((r) => r.date)])].sort();
@@ -262,12 +347,7 @@ function PaymentsChart({ d, dark, isMobile }) {
       animationDuration: 700,
       grid: { left: 8, right: 8, top: 30, bottom: 4, containLabel: true },
       legend: { top: 0, textStyle: { color: axisC, fontSize: 11 }, itemWidth: 14, itemHeight: 9 },
-      tooltip: {
-        trigger: 'axis', axisPointer: { type: 'shadow' },
-        backgroundColor: dark ? '#26262c' : '#fff', borderColor: dark ? '#3a3a42' : '#e5e5ea',
-        textStyle: { color: dark ? '#f3f3f6' : '#1d1d1f', fontSize: 12 },
-        valueFormatter: (v) => fmtR(v),
-      },
+      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, backgroundColor: dark ? '#26262c' : '#fff', borderColor: dark ? '#3a3a42' : '#e5e5ea', textStyle: { color: dark ? '#f3f3f6' : '#1d1d1f', fontSize: 12 }, valueFormatter: (v) => fmtR(v) },
       xAxis: { type: 'category', data: dates, axisLabel: { color: axisC, fontSize: 10 }, axisLine: { lineStyle: { color: splitC } }, axisTick: { show: false } },
       yAxis: { type: 'value', axisLabel: { color: axisC, fontSize: 10, formatter: (v) => fmtR(v, { compact: true }) }, splitLine: { lineStyle: { color: splitC } } },
       series: [
@@ -279,81 +359,72 @@ function PaymentsChart({ d, dark, isMobile }) {
   return <ReactECharts option={option} style={{ height: isMobile ? 200 : 240 }} notMerge />;
 }
 
-// ─── Collapsible section ──────────────────────────────────────────────────────
-function Section({ title, summary, defaultOpen = true, children }) {
-  const [open, setOpen] = useState(defaultOpen);
-  return (
-    <div className="howler-tile" style={{ background: 'var(--tile-bg, var(--card))', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', boxShadow: 'var(--shadow-sm)', overflow: 'hidden' }}>
-      <button onClick={() => setOpen((v) => !v)} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '13px 16px', border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text)', textAlign: 'left' }}>
-        <span className="nav-caret" style={{ fontSize: 10, color: 'var(--muted)', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .2s' }}>▶</span>
-        <span style={{ flex: 1, fontSize: 14, fontWeight: 700, letterSpacing: '-0.01em' }}>{title}</span>
-        {summary && <span style={{ fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: 'var(--muted-2)' }}>{summary}</span>}
-      </button>
-      <div className={`collapsey${open ? ' open' : ''}`}>
-        <div className="collapsey-inner">
-          <div style={{ padding: '2px 16px 16px' }}>{children}</div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function Card({ title, subtitle, children }) {
-  return (
-    <div className="howler-tile tile-enter" style={{ animationDelay: '120ms', background: 'var(--tile-bg, var(--card))', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', boxShadow: 'var(--shadow-sm)', padding: '14px 16px' }}>
-      <div style={{ fontSize: 14, fontWeight: 700, letterSpacing: '-0.01em' }}>{title}</div>
-      {subtitle && <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 4 }}>{subtitle}</div>}
-      {children}
-    </div>
-  );
-}
-
-// ─── Tables ───────────────────────────────────────────────────────────────────
-function SalesTable({ group, isMobile, searchable }) {
+// ─── Sales table: flat or grouped-by-category, with search ────────────────────
+function SalesTable({ group, isMobile }) {
+  const rows = group.rows || [];
+  const cats = useMemo(() => {
+    const map = new Map();
+    for (const r of rows) {
+      const c = deriveCategory(r.desc);
+      if (!map.has(c)) map.set(c, { category: c, rows: [], qty: 0, sales: 0, fees: 0, total: 0 });
+      const g = map.get(c);
+      g.rows.push(r); g.qty += r.qty || 0; g.sales += r.sales || 0; g.fees += r.fees || 0; g.total += r.total || 0;
+    }
+    return [...map.values()].sort((a, b) => Math.abs(b.total) - Math.abs(a.total));
+  }, [rows]);
+  const canGroup = cats.length > 1 && rows.length > 6;
+  const [grouped, setGrouped] = useState(canGroup);
   const [q, setQ] = useState('');
-  const rows = (group.rows || []).filter((r) => !q.trim() || (r.desc || '').toLowerCase().includes(q.trim().toLowerCase()));
   const st = group.subtotal || {};
+  const flat = !grouped || q.trim();
+  const filtered = rows.filter((r) => !q.trim() || (r.desc || '').toLowerCase().includes(q.trim().toLowerCase()));
+
   return (
     <div>
-      {searchable && (
-        <input
-          value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search line items…"
-          style={{ width: '100%', maxWidth: 320, marginBottom: 10, border: '1px solid var(--hairline)', borderRadius: 980, padding: '7px 14px', fontSize: 13, outline: 'none', boxSizing: 'border-box' }}
-        />
-      )}
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
+        {rows.length > 6 && (
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search line items…" style={{ flex: 1, minWidth: 180, maxWidth: 320, border: '1px solid var(--hairline)', borderRadius: 980, padding: '7px 14px', fontSize: 13, outline: 'none', boxSizing: 'border-box', background: 'var(--card)', color: 'var(--text)' }} />
+        )}
+        {canGroup && (
+          <div style={{ display: 'inline-flex', background: 'var(--elevated)', border: '1px solid var(--hairline)', borderRadius: 980, padding: 2 }}>
+            <Toggle on={grouped && !q.trim()} onClick={() => { setGrouped(true); setQ(''); }}>By category</Toggle>
+            <Toggle on={!grouped || !!q.trim()} onClick={() => setGrouped(false)}>All items</Toggle>
+          </div>
+        )}
+      </div>
+
       <div style={{ overflowX: 'auto' }}>
         <table style={tbl}>
           <thead>
             <tr>
-              <th style={th}>Item</th>
-              {!isMobile && <th style={th}>Type</th>}
+              <th style={th}>{flat ? 'Item' : 'Category'}</th>
+              {!isMobile && flat && <th style={th}>Type</th>}
               <th style={{ ...th, textAlign: 'right' }}>Qty</th>
-              {!isMobile && <th style={{ ...th, textAlign: 'right' }}>Price</th>}
-              <th style={{ ...th, textAlign: 'right' }}>Sales</th>
+              {!isMobile && <th style={{ ...th, textAlign: 'right' }}>Sales</th>}
               {!isMobile && <th style={{ ...th, textAlign: 'right' }}>Fees</th>}
               <th style={{ ...th, textAlign: 'right' }}>Total</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((r, i) => (
-              <tr key={i} style={{ background: i % 2 ? 'var(--row-stripe)' : 'transparent' }}>
-                <td style={td}>{r.desc}</td>
-                {!isMobile && <td style={{ ...td, color: 'var(--muted)' }}>{r.type}</td>}
-                <td style={{ ...td, ...num, color: numColor(r.qty) }}>{fmtQty(r.qty)}</td>
-                {!isMobile && <td style={{ ...td, ...num }}>{fmtR(r.price)}</td>}
-                <td style={{ ...td, ...num, color: numColor(r.sales) }}>{fmtR(r.sales)}</td>
-                {!isMobile && <td style={{ ...td, ...num, color: numColor(r.fees) }}>{fmtR(r.fees)}</td>}
-                <td style={{ ...td, ...num, fontWeight: 600, color: numColor(r.total) }}>{fmtR(r.total)}</td>
-              </tr>
-            ))}
+            {flat
+              ? filtered.map((r, i) => (
+                <tr key={i} style={{ background: i % 2 ? 'var(--row-stripe)' : 'transparent' }}>
+                  <td style={td}>{r.desc}</td>
+                  {!isMobile && <td style={{ ...td, color: 'var(--muted)' }}>{r.type}</td>}
+                  <td style={{ ...td, ...num, color: numColor(r.qty) }}>{fmtQty(r.qty)}</td>
+                  {!isMobile && <td style={{ ...td, ...num, color: numColor(r.sales) }}>{fmtR(r.sales)}</td>}
+                  {!isMobile && <td style={{ ...td, ...num, color: numColor(r.fees) }}>{fmtR(r.fees)}</td>}
+                  <td style={{ ...td, ...num, fontWeight: 600, color: numColor(r.total) }}>{fmtR(r.total)}</td>
+                </tr>
+              ))
+              : cats.map((c) => <CategoryRows key={c.category} cat={c} isMobile={isMobile} />)}
           </tbody>
           <tfoot>
             <tr style={{ borderTop: '2px solid var(--hairline)' }}>
-              <td style={{ ...td, fontWeight: 700 }}>Sub total{q.trim() ? ' (all rows)' : ''}</td>
-              {!isMobile && <td style={td} />}
+              <td style={{ ...td, fontWeight: 700 }}>Sub total</td>
+              {!isMobile && flat && <td style={td} />}
               <td style={{ ...td, ...num, fontWeight: 700 }}>{fmtQty(st.qty)}</td>
-              {!isMobile && <td style={td} />}
-              <td style={{ ...td, ...num, fontWeight: 700, color: numColor(st.sales) }}>{fmtR(st.sales)}</td>
+              {!isMobile && <td style={{ ...td, ...num, fontWeight: 700, color: numColor(st.sales) }}>{fmtR(st.sales)}</td>}
               {!isMobile && <td style={{ ...td, ...num, fontWeight: 700, color: numColor(st.fees) }}>{fmtR(st.fees)}</td>}
               <td style={{ ...td, ...num, fontWeight: 700, color: numColor(st.total) }}>{fmtR(st.total)}</td>
             </tr>
@@ -361,6 +432,34 @@ function SalesTable({ group, isMobile, searchable }) {
         </table>
       </div>
     </div>
+  );
+}
+
+// A category roll-up row that expands to its underlying line items.
+function CategoryRows({ cat, isMobile }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <tr onClick={() => setOpen((v) => !v)} style={{ cursor: 'pointer', background: 'var(--elevated)' }}>
+        <td style={{ ...td, fontWeight: 700 }}>
+          <span className="nav-caret" style={{ display: 'inline-block', width: 12, fontSize: 9, color: 'var(--muted)', transform: open ? 'rotate(90deg)' : 'none' }}>▶</span>
+          {cat.category} <span style={{ color: 'var(--muted)', fontWeight: 400, fontSize: 11 }}>({cat.rows.length})</span>
+        </td>
+        <td style={{ ...td, ...num, fontWeight: 700, color: numColor(cat.qty) }}>{fmtQty(cat.qty)}</td>
+        {!isMobile && <td style={{ ...td, ...num, fontWeight: 700, color: numColor(cat.sales) }}>{fmtR(cat.sales)}</td>}
+        {!isMobile && <td style={{ ...td, ...num, fontWeight: 700, color: numColor(cat.fees) }}>{fmtR(cat.fees)}</td>}
+        <td style={{ ...td, ...num, fontWeight: 700, color: numColor(cat.total) }}>{fmtR(cat.total)}</td>
+      </tr>
+      {open && cat.rows.map((r, i) => (
+        <tr key={i} style={{ background: 'transparent' }}>
+          <td style={{ ...td, paddingLeft: 26, color: 'var(--muted-2)' }}>{phaseName(r.desc, cat.category)}</td>
+          <td style={{ ...td, ...num, color: numColor(r.qty) }}>{fmtQty(r.qty)}</td>
+          {!isMobile && <td style={{ ...td, ...num, color: numColor(r.sales) }}>{fmtR(r.sales)}</td>}
+          {!isMobile && <td style={{ ...td, ...num, color: numColor(r.fees) }}>{fmtR(r.fees)}</td>}
+          <td style={{ ...td, ...num, color: numColor(r.total) }}>{fmtR(r.total)}</td>
+        </tr>
+      ))}
+    </>
   );
 }
 
@@ -412,32 +511,60 @@ function SimpleTable({ cols, rows, numericFrom = 99, negIdx = -1 }) {
   );
 }
 
-// ─── Owl data: report key lines as a pseudo-tile so InsightModal just works ───
+function Toggle({ on, onClick, children }) {
+  return <button onClick={onClick} style={{ border: 'none', borderRadius: 980, padding: '5px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer', background: on ? 'var(--brand)' : 'transparent', color: on ? '#fff' : 'var(--muted-2)' }}>{children}</button>;
+}
+
+// ─── Owl data builders (report lines → pseudo-tile rows) ──────────────────────
+function makeOwl(dims, measures, rows) { return { fields: { dimensions: dims, measures }, data: rows }; }
 function buildOwlData(d) {
   const rows = [];
-  const add = (item, amount) => rows.push({ item: { value: item }, amount: { value: amount, rendered: fmtR(amount) } });
+  const add = (item, amount) => { if (amount != null) rows.push({ item: { value: item }, amount: { value: amount, rendered: fmtR(amount) } }); };
   for (const g of d.sales || []) add(`${g.name} (subtotal)`, g.subtotal?.total);
   add('Total event turnover', d.turnover);
-  for (const g of d.commissions || []) {
-    for (const r of g.rows || []) add(`${g.name}: ${r.desc}${r.rate ? ` @ ${r.rate}` : ''}`, r.total);
-    add(`${g.name} (subtotal)`, g.subtotal?.total);
-  }
+  for (const g of d.commissions || []) add(`${g.name} (subtotal)`, g.subtotal?.total);
   add('Total Howler commissions', d.commissionsTotal);
-  for (const r of d.advances?.rows || []) add(`Advance payment ${r.date}`, r.settled ?? -(r.value || 0));
-  add('Advances (subtotal)', d.advances?.subtotal);
+  add('Advances paid (subtotal)', d.advances?.subtotal);
   add('VALUE DUE TO CLIENT', d.valueDue);
-  for (const r of d.settlementSummary || []) add(`Net settlement paid ${r.date}`, r.amount);
-  for (const r of d.withheldSummary || []) add(`${r.desc} ${r.date}`, r.amount);
-  return {
-    fields: { dimensions: [{ name: 'item', label: 'Item' }], measures: [{ name: 'amount', label: 'Amount (ZAR)' }] },
-    data: rows.filter((r) => r.amount.value != null),
-  };
+  return makeOwl([{ name: 'item', label: 'Item' }], [{ name: 'amount', label: 'Amount (ZAR)' }], rows);
+}
+function salesOwl(group) {
+  return makeOwl(
+    [{ name: 'item', label: 'Item' }, { name: 'category', label: 'Category' }],
+    [{ name: 'qty', label: 'Qty' }, { name: 'sales', label: 'Sales (ZAR)' }, { name: 'total', label: 'Total incl VAT (ZAR)' }],
+    (group.rows || []).map((r) => ({ item: { value: r.desc }, category: { value: deriveCategory(r.desc) }, qty: { value: r.qty, rendered: fmtQty(r.qty) }, sales: { value: r.sales, rendered: fmtR(r.sales) }, total: { value: r.total, rendered: fmtR(r.total) } })),
+  );
+}
+function commissionsOwl(d) {
+  const rows = [];
+  for (const g of d.commissions || []) for (const r of g.rows || []) rows.push({ group: { value: g.name }, item: { value: `${r.desc}${r.rate ? ` @ ${r.rate}` : ''}` }, amount: { value: r.total, rendered: fmtR(r.total) } });
+  return makeOwl([{ name: 'group', label: 'Group' }, { name: 'item', label: 'Service' }], [{ name: 'amount', label: 'Amount (ZAR)' }], rows);
+}
+function paymentsOwl(d) {
+  const rows = [];
+  for (const r of d.settlementSummary || []) rows.push({ item: { value: `Net settlement ${r.date}` }, amount: { value: r.amount, rendered: fmtR(r.amount) } });
+  for (const r of d.advances?.rows || []) rows.push({ item: { value: `Advance ${r.date}` }, amount: { value: r.settled ?? -(r.value || 0), rendered: fmtR(r.settled ?? -(r.value || 0)) } });
+  for (const r of d.withheldSummary || []) rows.push({ item: { value: `${r.desc} ${r.date}` }, amount: { value: r.amount, rendered: fmtR(r.amount) } });
+  return makeOwl([{ name: 'item', label: 'Item' }], [{ name: 'amount', label: 'Amount (ZAR)' }], rows);
 }
 
 // ─── Bits ─────────────────────────────────────────────────────────────────────
 const numColor = (v) => (v != null && v < 0 ? 'var(--error)' : 'var(--text)');
 const shortName = (n) => (n || '').replace(/ Commissions?$/i, '').replace('Payment Processing', 'Processing') || 'Fees';
+// In a category group, show just the tier/phase ("Phase 1") rather than repeat
+// the whole "3-day Full Fest Main Arena - Phase 1".
+function phaseName(desc, category) {
+  const parts = String(desc).split(/\s[-–]\s/);
+  if (parts.length > 1) return parts.slice(1).join(' – ');
+  return desc;
+}
+function fmtWhen(at) {
+  try { return new Date(at).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' }); } catch { return ''; }
+}
 const pillBtn = { display: 'inline-flex', alignItems: 'center', gap: 7, padding: '7px 14px', background: 'rgba(128,128,128,0.15)', color: 'var(--text)', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer', flexShrink: 0 };
+const iconAction = { position: 'relative', display: 'inline-flex', alignItems: 'center', gap: 3, border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 14, lineHeight: 1, padding: '4px 5px', borderRadius: 7, flexShrink: 0 };
+const noteCount = { fontSize: 10, fontWeight: 700, background: 'var(--brand)', color: '#fff', borderRadius: 980, minWidth: 15, height: 15, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 4px' };
+const miniSolid = { border: 'none', background: 'var(--brand)', color: '#fff', borderRadius: 8, padding: '8px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer', flexShrink: 0 };
 const tbl = { width: '100%', borderCollapse: 'collapse', fontSize: 12.5 };
 const th = { textAlign: 'left', padding: '7px 9px', fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', borderBottom: '1px solid var(--hairline)', whiteSpace: 'nowrap' };
 const td = { padding: '7px 9px', color: 'var(--text)', verticalAlign: 'top' };

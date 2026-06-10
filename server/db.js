@@ -132,6 +132,8 @@ addColumn('suites', 'icon', "TEXT NOT NULL DEFAULT ''");
 addColumn('entities', 'logo', "TEXT NOT NULL DEFAULT ''"); // client brand image data-URL / emoji
 addColumn('entities', 'ai_context', "TEXT NOT NULL DEFAULT ''"); // client-specific AI background
 addColumn('entities', 'integrations', "TEXT NOT NULL DEFAULT '{}'"); // per-client API credentials (Looker / Anthropic)
+// settlements.notes added after the table shipped, so migrate existing DBs.
+if (tableExists('settlements')) addColumn('settlements', 'notes', "TEXT NOT NULL DEFAULT '[]'");
 
 // ─── Settings (simple key/value) ──────────────────────────────────────────────
 db.exec(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '');`);function getSetting(key, fallback = '') {
@@ -155,6 +157,7 @@ CREATE TABLE IF NOT EXISTS settlements (
   status          TEXT NOT NULL DEFAULT 'final',
   settlement_date TEXT NOT NULL DEFAULT '',
   data            TEXT NOT NULL DEFAULT '{}',
+  notes           TEXT NOT NULL DEFAULT '[]',
   file            TEXT NOT NULL DEFAULT '',
   file_name       TEXT NOT NULL DEFAULT '',
   file_type       TEXT NOT NULL DEFAULT '',
@@ -525,7 +528,7 @@ function rowToSettlementSummary(r) {
 }
 function rowToSettlement(r) {
   if (!r) return null;
-  return { ...rowToSettlementSummary(r), data: J(r.data, {}) };
+  return { ...rowToSettlementSummary(r), data: J(r.data, {}), notes: J(r.notes, []) };
 }
 function listSettlements({ entityIds } = {}) {
   let rows = db.prepare('SELECT id, entity_id, title, status, settlement_date, data, file_name, created_at, updated_at, (file != \'\') AS file FROM settlements ORDER BY settlement_date DESC, created_at DESC').all();
@@ -561,6 +564,13 @@ function updateSettlement(id, patch) {
   return getSettlement(id);
 }
 function deleteSettlement(id) { return db.prepare('DELETE FROM settlements WHERE id=?').run(id).changes > 0; }
+// Notes are user-authored annotations (a JSON array) — replaced wholesale by the
+// client, which holds the full list. Kept separate from `data` (the extraction).
+function setSettlementNotes(id, notes) {
+  if (!db.prepare('SELECT 1 FROM settlements WHERE id=?').get(id)) return null;
+  db.prepare('UPDATE settlements SET notes=?, updated_at=? WHERE id=?').run(JSON.stringify(Array.isArray(notes) ? notes : []), now(), id);
+  return getSettlement(id);
+}
 
 // ─── Full backup / restore (export to JSON, import to replace) ────────────────
 const EXPORT_TABLES = ['entities', 'users', 'user_entities', 'sets', 'set_dashboards', 'suites', 'suite_sets', 'dashboards', 'settings', 'tile_library', 'settlements'];
@@ -607,5 +617,5 @@ module.exports = {
   // settings (key/value)
   getSetting, setSetting,
   // settlements
-  listSettlements, getSettlement, getSettlementFile, createSettlement, updateSettlement, deleteSettlement,
+  listSettlements, getSettlement, getSettlementFile, createSettlement, updateSettlement, deleteSettlement, setSettlementNotes,
 };

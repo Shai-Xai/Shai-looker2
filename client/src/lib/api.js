@@ -139,6 +139,7 @@ export const api = {
   // Settlements
   mySettlements: () => fetch('/api/my/settlements').then(json),
   getSettlement: (id) => fetch(`/api/settlements/${id}`).then(json),
+  saveSettlementNotes: (id, notes) => fetch(`/api/settlements/${id}/notes`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ notes }) }).then(json),
   adminListSettlements: () => fetch('/api/admin/settlements').then(json),
   // Streams ndjson progress events; resolves with the extracted data.
   adminExtractSettlement: async (fileBase64, fileType, onProgress) => {
