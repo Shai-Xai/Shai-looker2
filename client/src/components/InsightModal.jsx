@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import { useScope } from '../lib/ScopeContext.jsx';
 import { useSheetDrag } from '../lib/useSheetDrag.js';
+import AiMark from './AiMark.jsx';
 
 // Full-height side panel showing an AI insight that streams in live as Claude
 // writes it. The reader can add extra context to steer the analysis and ask
@@ -122,7 +123,7 @@ export default function InsightModal({ tile, data, filters, onClose }) {
         <style>{`@keyframes blink { 50% { opacity: 0; } } @keyframes spin { to { transform: rotate(360deg); } }`}</style>
         {isMobile && <div className="sheet-grip" {...drag.handlers} style={{ marginTop: 8 }} />}
         <div style={header}>
-          <span style={{ fontSize: 18 }}>✨</span>
+          <AiMark size={22} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)' }}>AI insight</div>
             <div style={{ fontSize: 15, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{tile.title || 'This tile'}</div>

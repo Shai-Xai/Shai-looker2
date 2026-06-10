@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import { useSheetDrag } from '../lib/useSheetDrag.js';
+import AiMark from './AiMark.jsx';
 
 // Whole-dashboard AI summary. Streams an executive summary built from every
 // tile's data (scoped + filtered exactly like the live view).
@@ -58,7 +59,7 @@ export default function DashboardInsightModal({ dashboardId, title, filterValues
         <style>{`@keyframes blink { 50% { opacity: 0; } } @keyframes spin { to { transform: rotate(360deg); } }`}</style>
         {isMobile && <div className="sheet-grip" {...drag.handlers} style={{ marginTop: 8 }} />}
         <div style={header}>
-          <span style={{ fontSize: 18 }}>✨</span>
+          <AiMark size={22} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)' }}>Dashboard summary</div>
             <div style={{ fontSize: 15, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{title || 'This dashboard'}</div>

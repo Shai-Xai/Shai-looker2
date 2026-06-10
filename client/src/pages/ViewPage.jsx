@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import FilterBar, { activeFilterCount } from '../components/FilterBar.jsx';
 import DashboardInsightModal from '../components/DashboardInsightModal.jsx';
+import AiMark from '../components/AiMark.jsx';
 import EditableGrid from '../components/EditableGrid.jsx';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/auth.jsx';
@@ -95,7 +96,7 @@ export default function ViewPage() {
               <h2 style={{ fontSize: isMobile ? 17 : 21, fontWeight: 600, letterSpacing: '-0.02em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{def.title}</h2>
             </div>
             {canSummarize && !isMobile && (
-              <button className="btn-key" style={summaryBtn} onClick={() => setSummaryOpen(true)} title="AI summary of the whole dashboard">✨ Summary</button>
+              <button className="btn-key" style={summaryBtn} onClick={() => setSummaryOpen(true)} title="AI summary of the whole dashboard"><AiMark size={16} /> Summary</button>
             )}
             {hasFilters && !isMobile && (
               <button style={filtersBtn(filtersOpen)} onClick={() => setFiltersOpen(v => !v)}>
@@ -111,7 +112,7 @@ export default function ViewPage() {
         {/* On mobile inside a suite the header is hidden, so offer the summary here. */}
         {canSummarize && isMobile && suiteId && (
           <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '8px 12px 0' }}>
-            <button className="btn-key" style={summaryBtn} onClick={() => setSummaryOpen(true)}>✨ Summary</button>
+            <button className="btn-key" style={summaryBtn} onClick={() => setSummaryOpen(true)}><AiMark size={16} /> Summary</button>
           </div>
         )}
 

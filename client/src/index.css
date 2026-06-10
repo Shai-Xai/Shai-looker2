@@ -177,11 +177,48 @@ input::placeholder, textarea::placeholder { color: #b0b0b6; }
   pointer-events: none; z-index: 1;
 }
 
+/* AI mark — the Howler owl logo used as the "AI" affordance everywhere.
+   A soft rotating glow halo sits behind it and a few sparkles twinkle around
+   it so the mark feels alive without being noisy. */
+.ai-mark {
+  position: relative; display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0; line-height: 0; isolation: isolate;
+}
+.ai-mark .ai-mark-img {
+  width: 100%; height: 100%; object-fit: contain; display: block;
+  border-radius: 50%; position: relative; z-index: 1;
+  animation: ai-mark-breathe 4s var(--ease-out, ease-in-out) infinite;
+}
+/* Rotating conic halo behind the owl. */
+.ai-mark::before {
+  content: ''; position: absolute; inset: -16%; border-radius: 50%; z-index: 0;
+  background: conic-gradient(from var(--ai-angle), #ff385c, #ff6b35, #7c3aed, #06b6d4, #ff385c);
+  filter: blur(5px); opacity: 0.55;
+  animation: ai-rotate 4.5s linear infinite;
+  pointer-events: none;
+}
+/* Two sparkles that twinkle on alternating beats (drawn with ::after + a child). */
+.ai-mark .ai-spark {
+  position: absolute; z-index: 2; pointer-events: none; color: #fff;
+  filter: drop-shadow(0 0 2px rgba(124,58,237,0.9));
+  animation: ai-twinkle 2.4s var(--ease-out, ease-in-out) infinite;
+}
+.ai-mark .ai-spark.s1 { top: -10%; right: -8%; font-size: 0.5em; }
+.ai-mark .ai-spark.s2 { bottom: -6%; left: -6%; font-size: 0.36em; animation-delay: 1.2s; }
+@keyframes ai-mark-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
+@keyframes ai-twinkle {
+  0%, 100% { opacity: 0; transform: scale(0.3) rotate(0deg); }
+  40% { opacity: 1; transform: scale(1) rotate(25deg); }
+  70% { opacity: 0.4; transform: scale(0.7) rotate(0deg); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .ai-overlay, .ai-panel, .ai-sheet, .modal-in, .msg-in { animation-duration: 1ms !important; }
   .streaming { mask-image: none; -webkit-mask-image: none; }
   .ai-glow::before { animation: none; }
   .btn-key:hover::after { animation: none; }
+  .ai-mark::before, .ai-mark .ai-mark-img, .ai-mark .ai-spark { animation: none; }
+  .ai-mark .ai-spark { opacity: 0.85; }
 }
 
 /* Client sidebar — frosted, Apple-like */

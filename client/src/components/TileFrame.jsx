@@ -6,6 +6,7 @@ import { useState } from 'react';
 import TextTile from './tiles/TextTile.jsx';
 import ErrorBoundary from './ErrorBoundary.jsx';
 import InsightModal from './InsightModal.jsx';
+import AiMark from './AiMark.jsx';
 import { useTileData, isRunnableQuery } from '../lib/useTileData.js';
 import { useAuth } from '../lib/auth.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
@@ -186,9 +187,10 @@ function TileContent({ tile, data }) {
   return <TableTile data={data} visConfig={tile.vis} />;
 }
 
-// ✨ AI insight trigger. In the header it sits inline at the right; on metric
-// tiles (no header) it floats in the top-right corner. Hidden until tile hover
-// (via .insight-btn CSS) and theme-aware (purple accent that adapts to dark).
+// AI insight trigger — the Howler owl mark. In the header it sits inline at the
+// right; on metric tiles (no header) it floats in the top-right corner. Hidden
+// until tile hover (via .insight-btn CSS) and theme-aware (purple accent that
+// adapts to dark).
 function InsightButton({ onClick, isMobile, corner }) {
   return (
     <button
@@ -198,12 +200,13 @@ function InsightButton({ onClick, isMobile, corner }) {
       className="insight-btn btn-key"
       style={{
         ...(corner ? { position: 'absolute', top: 6, right: 6, zIndex: 5 } : { flexShrink: 0 }),
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
         border: '1px solid var(--ai-border)', background: 'var(--ai-bg)', color: 'var(--ai)',
         borderRadius: isMobile ? 9 : 7, cursor: 'pointer', lineHeight: 1, fontWeight: 600,
-        fontSize: isMobile ? 13 : 12, padding: isMobile ? '6px 9px' : '3px 7px',
+        padding: isMobile ? '5px' : '3px',
         backdropFilter: 'blur(2px)', WebkitBackdropFilter: 'blur(2px)',
       }}
-    >✨</button>
+    ><AiMark size={isMobile ? 20 : 17} /></button>
   );
 }
 
