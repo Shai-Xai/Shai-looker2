@@ -1,7 +1,22 @@
 import { cellText, formatNumber } from '../../lib/format.js';
 import { useDrill } from '../../lib/DrillContext.jsx';
 import { useIsMobile } from '../../lib/useIsMobile.js';
+import { useCountUp } from '../../lib/useCountUp.js';
 import AutoFitText from '../AutoFitText.jsx';
+
+// The big number, animated. A hidden copy of the FINAL text reserves the full
+// width (so AutoFitText sizes the font to the finished number, not the small
+// in-flight one); the animating value paints on top with tabular digits.
+function CountUpValue({ text }) {
+  const display = useCountUp(text);
+  if (display === text) return text;
+  return (
+    <span style={{ position: 'relative', display: 'inline-block', fontVariantNumeric: 'tabular-nums' }}>
+      <span style={{ visibility: 'hidden' }}>{text}</span>
+      <span style={{ position: 'absolute', inset: 0, textAlign: 'center', whiteSpace: 'nowrap' }}>{display}</span>
+    </span>
+  );
+}
 
 // Single value / KPI tile. Mirrors Looker's single_value visualization:
 // big rendered value, optional custom color, optional comparison to a second
@@ -91,16 +106,16 @@ export default function SingleValueTile({ data, visConfig = {}, label }) {
           ...(drillable ? { textDecoration: 'underline', textDecorationStyle: 'dotted', textUnderlineOffset: 4 } : null),
         }}
       >
-        {primaryValue}
+        <CountUpValue text={primaryValue} />
       </AutoFitText>
       {comparison && (
-        <div style={{ fontSize: 12.5, marginTop: 3, fontWeight: 600, color: comparison.color, flexShrink: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>
+        <div className="chip-in" style={{ fontSize: 12.5, marginTop: 3, fontWeight: 600, color: comparison.color, flexShrink: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%', animationDelay: '420ms' }}>
           {comparison.text}
           <span style={{ color: 'var(--muted)', fontWeight: 400, marginLeft: 6 }}>{comparison.label}</span>
         </div>
       )}
       {labelText && (
-        <div style={{ fontSize: 13, color: labelColor, marginTop: 3, fontWeight: 500, lineHeight: 1.2, textAlign: 'center', overflow: 'hidden', flexShrink: 0 }}>
+        <div className="chip-in" style={{ fontSize: 13, color: labelColor, marginTop: 3, fontWeight: 500, lineHeight: 1.2, textAlign: 'center', overflow: 'hidden', flexShrink: 0, animationDelay: '240ms' }}>
           {labelText}
         </div>
       )}

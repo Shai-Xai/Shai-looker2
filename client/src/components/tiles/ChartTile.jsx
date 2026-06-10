@@ -107,7 +107,16 @@ function buildOption({ rows, dimensions, measures, pivots, visType, stacked, vis
   const labels = rows.map((r) => (primaryDim ? cellText(r[primaryDim.name]) : ''));
   const seriesMeta = [];
 
-  const baseAnim = { animationDuration: 800, animationEasing: 'cubicOut', animationDelay: (i) => i * 18 };
+  // First paint: grow in with a per-point stagger. Updates (filter changes):
+  // morph the existing shapes to their new values instead of redrawing.
+  const baseAnim = {
+    animationDuration: 800,
+    animationEasing: 'cubicOut',
+    animationDelay: (i) => i * 18,
+    animationDurationUpdate: 420,
+    animationEasingUpdate: 'cubicInOut',
+    animationDelayUpdate: (i) => i * 6,
+  };
 
   // ─── Pie / doughnut ──────────────────────────────────────────────────────────
   if (isPie) {

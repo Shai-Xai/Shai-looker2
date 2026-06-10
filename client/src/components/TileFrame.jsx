@@ -111,20 +111,64 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
           <TextTile tile={tile} />
         ) : !isRunnableQuery(tile.query) ? (
           <Centered faint>{editable ? 'Pick an explore and at least one field →' : 'Not configured'}</Centered>
-        ) : loading ? (
-          <Centered faint>Loading…</Centered>
+        ) : loading && !data ? (
+          <Skeleton metric={isMetric} chart={!!(visType || '').match(/column|bar|line|area|scatter|pie|donut/)} />
         ) : error ? (
           <Centered error>⚠ {error}</Centered>
         ) : data ? (
-          <ErrorBoundary resetKey={data}>
-            <TileContent tile={tile} data={data} />
-          </ErrorBoundary>
+          // First data → fade-rise in, staggered by grid position. On refetch
+          // (filter change) the stale data stays visible, dimmed, until the new
+          // result lands — no flash back to a loading state.
+          <div
+            className={`tile-enter tile-live${loading ? ' tile-refreshing' : ''}`}
+            style={{ height: '100%', animationDelay: `${enterDelay(tile)}ms` }}
+          >
+            <ErrorBoundary resetKey={data}>
+              <TileContent tile={tile} data={data} />
+            </ErrorBoundary>
+          </div>
         ) : null}
       </div>
 
       {showInsight && (
         <InsightModal tile={tile} data={data} filters={appliedFilters()} onClose={() => setShowInsight(false)} />
       )}
+    </div>
+  );
+}
+
+// Stagger the entrance by grid position (top-left first, bottom-right last)
+// so the dashboard "composes" itself instead of popping in at random.
+function enterDelay(tile) {
+  const lay = tile.layout || {};
+  return Math.min((lay.y ?? 0) * 40 + (lay.x ?? 0) * 7, 480);
+}
+
+// Shimmering placeholder shaped roughly like the tile it's standing in for.
+function Skeleton({ metric, chart }) {
+  if (metric) {
+    return (
+      <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, padding: 16 }}>
+        <div className="skel" style={{ width: '55%', height: 26 }} />
+        <div className="skel" style={{ width: '38%', height: 11 }} />
+      </div>
+    );
+  }
+  if (chart) {
+    const heights = [38, 62, 48, 78, 56, 88, 70];
+    return (
+      <div style={{ height: '100%', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', gap: '6%', padding: '18% 12% 14%' }}>
+        {heights.map((h, i) => (
+          <div key={i} className="skel" style={{ width: '9%', height: `${h}%`, borderRadius: '5px 5px 2px 2px' }} />
+        ))}
+      </div>
+    );
+  }
+  return (
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 10, padding: 16 }}>
+      {[88, 100, 96, 100, 92].map((w, i) => (
+        <div key={i} className="skel" style={{ width: `${w}%`, height: 12, opacity: 1 - i * 0.14 }} />
+      ))}
     </div>
   );
 }
