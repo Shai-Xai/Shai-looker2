@@ -1160,32 +1160,90 @@ function Settlements({ entityId = null }) {
 }
 
 // ─── Event documents (invoices) ─────────────────────────────────────────────────
-// Plain uploads per client/event — invoices and other paperwork the client can
-// download alongside their settlement reports.
+// Invoice PDFs go through the same AI extract → review → publish flow as
+// settlements, so the client gets an interactive invoice view. Other file
+// types (images etc.) upload straight through and render as-is.
 function EventDocuments({ entityId, eventNames }) {
   const navigate = useNavigate();
   const [docs, setDocs] = useState([]);
   const [eventName, setEventName] = useState(eventNames[0] || '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const [prog, setProg] = useState(null);   // extraction progress
+  const [queue, setQueue] = useState([]);   // PDFs waiting to be extracted
+  const [draft, setDraft] = useState(null); // extracted invoice under review
   const load = () => api.adminListDocuments(entityId).then(setDocs).catch((e) => setError(e.message));
   useEffect(load, [entityId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const readB64 = (file) => new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(',')[1]);
+    r.onerror = reject;
+    r.readAsDataURL(file);
+  });
 
   async function onFiles(e) {
     const files = [...(e.target.files || [])];
     e.target.value = '';
     if (!files.length) return;
-    setBusy(true); setError(null);
-    try {
-      for (const file of files) {
-        const fileBase64 = await new Promise((resolve, reject) => {
-          const r = new FileReader();
-          r.onload = () => resolve(String(r.result).split(',')[1]);
-          r.onerror = reject;
-          r.readAsDataURL(file);
+    setError(null);
+    // Non-PDFs upload directly; PDFs queue for extraction one at a time.
+    const pdfs = files.filter((f) => f.type === 'application/pdf');
+    const others = files.filter((f) => f.type !== 'application/pdf');
+    if (others.length) {
+      setBusy(true);
+      try {
+        for (const file of others) {
+          const fileBase64 = await readB64(file);
+          await api.adminCreateDocument({ entityId, eventName: eventName.trim(), title: file.name.replace(/\.[^.]+$/, ''), category: 'invoice', fileBase64, fileName: file.name, fileType: file.type || 'application/octet-stream' });
+        }
+        load();
+      } catch (err) { setError(err.message); } finally { setBusy(false); }
+    }
+    if (pdfs.length) setQueue((q) => [...q, ...pdfs]);
+  }
+
+  // Pull the next queued PDF into extraction whenever we're idle.
+  useEffect(() => {
+    if (draft || prog || !queue.length) return;
+    const file = queue[0];
+    setQueue((q) => q.slice(1));
+    (async () => {
+      const startedAt = Date.now();
+      setProg({ stage: 'upload', chars: 0, rows: 0, fileName: file.name, startedAt });
+      let fileBase64 = '';
+      try {
+        fileBase64 = await readB64(file);
+        setProg({ stage: 'reading', chars: 0, rows: 0, fileName: file.name, startedAt });
+        const data = await api.adminExtractInvoice(fileBase64, (p) => {
+          setProg({ stage: p.stage || 'extracting', chars: p.chars || 0, rows: p.rows || 0, fileName: file.name, startedAt });
         });
-        await api.adminCreateDocument({ entityId, eventName: eventName.trim(), title: file.name.replace(/\.[^.]+$/, ''), category: 'invoice', fileBase64, fileName: file.name, fileType: file.type || 'application/octet-stream' });
+        setDraft({
+          data, fileBase64, fileName: file.name, fileType: 'application/pdf',
+          title: data.meta?.invoiceNumber ? `Invoice ${data.meta.invoiceNumber}` : file.name.replace(/\.[^.]+$/, ''),
+          eventName: data.meta?.eventName || eventName,
+        });
+      } catch (err) {
+        // Extraction failed — let the admin publish the raw PDF anyway.
+        setDraft({
+          data: null, extractError: err.message, fileBase64, fileName: file.name, fileType: 'application/pdf',
+          title: file.name.replace(/\.[^.]+$/, ''), eventName,
+        });
+      } finally {
+        setProg(null);
       }
+    })();
+  }, [queue, draft, prog]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function publish() {
+    setBusy(true);
+    try {
+      await api.adminCreateDocument({
+        entityId, eventName: (draft.eventName || '').trim(), title: (draft.title || '').trim() || draft.fileName,
+        category: 'invoice', data: draft.data || {},
+        fileBase64: draft.fileBase64, fileName: draft.fileName, fileType: draft.fileType,
+      });
+      setDraft(null);
       load();
     } catch (err) { setError(err.message); } finally { setBusy(false); }
   }
@@ -1202,19 +1260,44 @@ function EventDocuments({ entityId, eventNames }) {
   return (
     <div style={{ marginTop: 28 }}>
       <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>Invoices & documents</h3>
-      <p style={hint}>Upload invoices (and any other paperwork) for this client's events — they appear for the client under Reports → Settlements.</p>
+      <p style={hint}>Upload invoices for this client's events — PDFs are read by the Owl into an interactive view (totals cross-checked before publishing); other files are stored as-is.</p>
       {error && <p style={{ color: 'var(--error)', fontSize: 13, marginBottom: 8 }}>⚠ {error}</p>}
-      <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 14, flexWrap: 'wrap' }}>
-        <input
-          list="evt-names" style={{ ...input, minWidth: 200 }} value={eventName}
-          onChange={(e) => setEventName(e.target.value)} placeholder="Event name (e.g. Mtn Bushfire 2026)"
-        />
-        <datalist id="evt-names">{eventNames.map((n) => <option key={n} value={n} />)}</datalist>
-        <label style={{ ...addBtn, display: 'inline-block', opacity: busy ? 0.6 : 1 }}>
-          {busy ? 'Uploading…' : '⤴ Upload invoices'}
-          <input type="file" multiple style={{ display: 'none' }} onChange={onFiles} disabled={busy} />
-        </label>
-      </div>
+      {!draft && !prog && (
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 14, flexWrap: 'wrap' }}>
+          <input
+            list="evt-names" style={{ ...input, minWidth: 200 }} value={eventName}
+            onChange={(e) => setEventName(e.target.value)} placeholder="Event name (e.g. Mtn Bushfire 2026)"
+          />
+          <datalist id="evt-names">{eventNames.map((n) => <option key={n} value={n} />)}</datalist>
+          <label style={{ ...addBtn, display: 'inline-block', opacity: busy ? 0.6 : 1 }}>
+            {busy ? 'Uploading…' : '⤴ Upload invoices'}
+            <input type="file" multiple style={{ display: 'none' }} onChange={onFiles} disabled={busy} />
+          </label>
+          {queue.length > 0 && <span style={{ fontSize: 12, color: 'var(--muted)' }}>{queue.length} more queued…</span>}
+        </div>
+      )}
+
+      {prog && <ExtractProgress prog={prog} />}
+
+      {/* Extracted invoice under review */}
+      {draft && (
+        <div style={{ ...cardStyle, borderColor: 'var(--brand)' }}>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
+            <input style={{ ...input, fontWeight: 700, minWidth: 200 }} value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} placeholder="Title" />
+            <input list="evt-names2" style={{ ...input, minWidth: 200 }} value={draft.eventName} onChange={(e) => setDraft({ ...draft, eventName: e.target.value })} placeholder="Event name" />
+            <datalist id="evt-names2">{eventNames.map((n) => <option key={n} value={n} />)}</datalist>
+          </div>
+          {draft.data ? (
+            <InvoiceChecks data={draft.data} />
+          ) : (
+            <p style={{ color: 'var(--error)', fontSize: 13 }}>⚠ Extraction failed ({draft.extractError}). You can still publish the PDF — it will render as the original document without the interactive view.</p>
+          )}
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 12 }}>
+            <button style={miniBtnOutline} onClick={() => setDraft(null)} disabled={busy}>Discard</button>
+            <button style={{ ...miniBtn, background: 'var(--brand)', color: '#fff', border: 'none' }} onClick={publish} disabled={busy}>{busy ? '…' : 'Publish'}</button>
+          </div>
+        </div>
+      )}
       {groups.map((g) => (
         <div key={g.key} style={{ marginBottom: 14 }}>
           <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', marginBottom: 6 }}>{g.key}</div>
@@ -1224,7 +1307,9 @@ function EventDocuments({ entityId, eventNames }) {
                 <span style={{ fontSize: 15 }}>🧾</span>
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ fontWeight: 600, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{doc.title}</div>
-                  <div style={{ fontSize: 11, color: 'var(--muted)' }}>{doc.fileName} · {new Date(doc.createdAt).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' })}</div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+                    {[doc.fileName, new Date(doc.createdAt).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' }), doc.total != null && `R${Number(doc.total).toLocaleString('en-US', { minimumFractionDigits: 2 })}`, doc.hasData ? 'interactive' : null].filter(Boolean).join(' · ')}
+                  </div>
                 </div>
                 <button style={miniBtnOutline} onClick={() => navigate(`/documents/${doc.id}`)}>Open</button>
                 <a href={`/api/documents/${doc.id}/file`} style={{ ...miniBtnOutline, textDecoration: 'none' }}>⤓</a>
@@ -1316,6 +1401,42 @@ function SettlementChecks({ data }) {
         <div style={{ color: 'var(--error)' }}>
           <p style={{ fontWeight: 700 }}>⚠ {bad.length} check{bad.length > 1 ? 's' : ''} failed — compare against the PDF before publishing:</p>
           {bad.map((c, i) => <p key={i} style={{ fontSize: 12 }}>· {c.label}: rows sum to {R(c.got)}, report says {R(c.want)}</p>)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Cross-check the extracted invoice: line items must sum to the subtotal, and
+// subtotal + VAT must equal the total.
+function InvoiceChecks({ data }) {
+  const d = data || {};
+  const close = (a, b) => Math.abs((a || 0) - (b || 0)) < 0.05;
+  const itemSum = (d.items || []).reduce((a, r) => a + (r.total || 0), 0);
+  const checks = [];
+  if (d.subtotal != null && d.subtotal !== 0) checks.push({ label: 'Line items sum to subtotal', ok: close(itemSum, d.subtotal), got: itemSum, want: d.subtotal });
+  else if (d.total != null) checks.push({ label: 'Line items sum to total', ok: close(itemSum, d.total), got: itemSum, want: d.total });
+  if (d.subtotal != null && d.vatTotal != null && d.total != null && d.total !== 0) {
+    checks.push({ label: 'Subtotal + VAT = total', ok: close((d.subtotal || 0) + (d.vatTotal || 0), d.total), got: (d.subtotal || 0) + (d.vatTotal || 0), want: d.total });
+  }
+  const bad = checks.filter((c) => !c.ok);
+  const R = (n) => `R${Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+  return (
+    <div style={{ fontSize: 13 }}>
+      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 8 }}>
+        {d.meta?.invoiceNumber && <span><b>Nº</b> {d.meta.invoiceNumber}</span>}
+        {d.meta?.date && <span><b>Date</b> {d.meta.date}</span>}
+        <span><b>Items</b> {(d.items || []).length}</span>
+        <span><b>Subtotal</b> {R(d.subtotal)}</span>
+        <span><b>VAT</b> {R(d.vatTotal)}</span>
+        <span><b>Total</b> {R(d.total)}</span>
+      </div>
+      {bad.length === 0 ? (
+        <p style={{ color: '#2da44e', fontWeight: 600 }}>✓ {checks.length ? `All ${checks.length} cross-checks pass — extracted totals reconcile.` : 'Extracted (no totals to cross-check).'}</p>
+      ) : (
+        <div style={{ color: 'var(--error)' }}>
+          <p style={{ fontWeight: 700 }}>⚠ {bad.length} check{bad.length > 1 ? 's' : ''} failed — compare against the PDF before publishing:</p>
+          {bad.map((c, i) => <p key={i} style={{ fontSize: 12 }}>· {c.label}: got {R(c.got)}, invoice says {R(c.want)}</p>)}
         </div>
       )}
     </div>

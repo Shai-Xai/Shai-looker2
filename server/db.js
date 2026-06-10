@@ -137,6 +137,8 @@ if (tableExists('settlements')) {
   addColumn('settlements', 'notes', "TEXT NOT NULL DEFAULT '[]'");
   addColumn('settlements', 'kind', "TEXT NOT NULL DEFAULT 'ticketing'"); // ticketing | cashless
 }
+// event_documents.data (extracted invoice JSON) added after the table shipped.
+if (tableExists('event_documents')) addColumn('event_documents', 'data', "TEXT NOT NULL DEFAULT '{}'");
 
 // ─── Settings (simple key/value) ──────────────────────────────────────────────
 db.exec(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '');`);function getSetting(key, fallback = '') {
@@ -178,6 +180,7 @@ CREATE TABLE IF NOT EXISTS event_documents (
   event_name  TEXT NOT NULL DEFAULT '',
   title       TEXT NOT NULL,
   category    TEXT NOT NULL DEFAULT 'invoice',
+  data        TEXT NOT NULL DEFAULT '{}',
   file        TEXT NOT NULL DEFAULT '',
   file_name   TEXT NOT NULL DEFAULT '',
   file_type   TEXT NOT NULL DEFAULT '',
@@ -598,27 +601,37 @@ function setSettlementNotes(id, notes) {
 }
 
 // ─── Event documents (invoices etc.) ──────────────────────────────────────────
-function rowToDocument(r) {
-  return r && {
+// `data` carries the AI-extracted invoice JSON (empty object when the file was
+// stored without extraction). List rows surface just the headline numbers.
+function rowToDocumentSummary(r) {
+  if (!r) return null;
+  const d = J(r.data, {});
+  return {
     id: r.id, entityId: r.entity_id, eventName: r.event_name, title: r.title,
     category: r.category, fileName: r.file_name, fileType: r.file_type, createdAt: r.created_at,
+    invoiceNumber: d.meta?.invoiceNumber || '', invoiceDate: d.meta?.date || '',
+    total: d.total ?? null, hasData: !!(d.items?.length || d.total != null),
   };
 }
+function rowToDocument(r) {
+  if (!r) return null;
+  return { ...rowToDocumentSummary(r), data: J(r.data, {}) };
+}
 function listDocuments({ entityIds, entityId } = {}) {
-  let rows = db.prepare('SELECT id, entity_id, event_name, title, category, file_name, file_type, created_at FROM event_documents ORDER BY created_at DESC').all();
+  let rows = db.prepare('SELECT id, entity_id, event_name, title, category, data, file_name, file_type, created_at FROM event_documents ORDER BY created_at DESC').all();
   if (entityId) rows = rows.filter((r) => r.entity_id === entityId);
   else if (entityIds) rows = rows.filter((r) => r.entity_id && entityIds.includes(r.entity_id));
-  return rows.map(rowToDocument);
+  return rows.map(rowToDocumentSummary);
 }
-function getDocument(id) { return rowToDocument(db.prepare('SELECT id, entity_id, event_name, title, category, file_name, file_type, created_at FROM event_documents WHERE id=?').get(id)); }
+function getDocument(id) { return rowToDocument(db.prepare('SELECT id, entity_id, event_name, title, category, data, file_name, file_type, created_at FROM event_documents WHERE id=?').get(id)); }
 function getDocumentFile(id) {
   const r = db.prepare('SELECT file, file_name, file_type FROM event_documents WHERE id=?').get(id);
   return r && r.file ? { file: r.file, fileName: r.file_name, fileType: r.file_type } : null;
 }
-function createDocument({ entityId = null, eventName = '', title, category = 'invoice', file = '', fileName = '', fileType = '' }) {
+function createDocument({ entityId = null, eventName = '', title, category = 'invoice', data = {}, file = '', fileName = '', fileType = '' }) {
   const id = uuid();
-  db.prepare('INSERT INTO event_documents (id,entity_id,event_name,title,category,file,file_name,file_type,created_at) VALUES (?,?,?,?,?,?,?,?,?)')
-    .run(id, entityId || null, eventName || '', title || fileName || 'Document', category || 'invoice', file, fileName, fileType, now());
+  db.prepare('INSERT INTO event_documents (id,entity_id,event_name,title,category,data,file,file_name,file_type,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
+    .run(id, entityId || null, eventName || '', title || fileName || 'Document', category || 'invoice', JSON.stringify(data || {}), file, fileName, fileType, now());
   return getDocument(id);
 }
 function deleteDocument(id) { return db.prepare('DELETE FROM event_documents WHERE id=?').run(id).changes > 0; }

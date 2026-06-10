@@ -276,4 +276,62 @@ async function extractSettlement({ pdfBase64, apiKey, onProgress }) {
   return JSON.parse(match[0]);
 }
 
-module.exports = { generateInsight, streamInsight, streamDashboardInsight, describeTile, extractSettlement, isConfigured: (apiKey) => !!(apiKey || process.env.ANTHROPIC_API_KEY) };
+// ─── Invoice extraction ─────────────────────────────────────────────────────────
+// Howler invoices follow one template, so the schema is simple: header meta,
+// line items, and the subtotal / VAT / total footer.
+const INVOICE_SYSTEM = `You extract Howler invoices (PDF) into strict JSON for an interactive viewer. Amounts are South African Rand.
+
+Respond with ONLY a JSON object (no markdown fences, no prose) of exactly this shape:
+{
+  "meta": { "invoiceNumber": "", "date": "", "dueDate": "", "from": "", "to": "", "eventName": "", "reference": "", "vatNumber": "" },
+  "items": [ { "code": "", "desc": "", "qty": 0, "unitPrice": 0, "vat": 0, "total": 0 } ],
+  "subtotal": 0,
+  "vatTotal": 0,
+  "total": 0,
+  "paymentDetails": "",
+  "notes": ""
+}
+
+Rules:
+- ALL monetary values are plain JSON numbers: strip currency symbols and thousands separators; negative amounts (credits/discounts) are NEGATIVE numbers.
+- Include EVERY line item row — never summarise, omit, or merge rows. Keep the invoice's row order.
+- "from"/"to" are single strings (company name + address lines joined with commas).
+- "subtotal" is the pre-VAT total, "vatTotal" the VAT amount, "total" the final amount due (incl VAT).
+- "paymentDetails" holds banking/payment instructions if printed; "notes" any other footer text worth keeping.
+- If a field doesn't exist on the invoice, use "" / 0 / [].`;
+
+async function extractInvoice({ pdfBase64, apiKey, onProgress }) {
+  const c = requireClient(apiKey);
+  const stream = c.messages.stream({
+    model: MODEL,
+    max_tokens: 16000,
+    thinking: { type: 'adaptive' },
+    system: INVOICE_SYSTEM,
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: pdfBase64 } },
+        { type: 'text', text: 'Extract this invoice to the JSON schema. Every row, every number, verbatim.' },
+      ],
+    }],
+  });
+  if (onProgress) {
+    let acc = '';
+    let lastAt = 0;
+    stream.on('text', (delta) => {
+      acc += delta;
+      const now = Date.now();
+      if (now - lastAt > 400) {
+        lastAt = now;
+        onProgress({ chars: acc.length, rows: (acc.match(/"desc"/g) || []).length });
+      }
+    });
+  }
+  const resp = await stream.finalMessage();
+  const text = (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error('AI did not return JSON for the invoice');
+  return JSON.parse(match[0]);
+}
+
+module.exports = { generateInsight, streamInsight, streamDashboardInsight, describeTile, extractSettlement, extractInvoice, isConfigured: (apiKey) => !!(apiKey || process.env.ANTHROPIC_API_KEY) };

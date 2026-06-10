@@ -867,9 +867,34 @@ app.get('/api/admin/documents', auth.requireAdmin, (req, res) => {
   res.json(db.listDocuments(req.query.entityId ? { entityId: req.query.entityId } : {}));
 });
 app.post('/api/admin/documents', auth.requireAdmin, settlementJson, (req, res) => {
-  const { entityId, eventName, title, category, fileBase64, fileName, fileType } = req.body || {};
+  const { entityId, eventName, title, category, data, fileBase64, fileName, fileType } = req.body || {};
   if (!fileBase64) return res.status(400).json({ error: 'fileBase64 is required' });
-  res.status(201).json(db.createDocument({ entityId, eventName, title, category, file: fileBase64, fileName: fileName || '', fileType: fileType || '' }));
+  res.status(201).json(db.createDocument({ entityId, eventName, title, category, data: data || {}, file: fileBase64, fileName: fileName || '', fileType: fileType || '' }));
+});
+// AI-extract an invoice PDF into structured JSON (same ndjson progress stream
+// as the settlement extraction). Nothing saved — the admin reviews & publishes.
+app.post('/api/admin/documents/extract', auth.requireAdmin, settlementJson, async (req, res) => {
+  const { fileBase64 } = req.body || {};
+  if (!fileBase64) return res.status(400).json({ error: 'fileBase64 is required' });
+  const apiKey = adminAnthropicKey();
+  if (!insights.isConfigured(apiKey)) return res.status(400).json({ error: 'AI extraction needs an Anthropic API key (Admin → Integrations).' });
+  res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders?.();
+  const send = (obj) => res.write(JSON.stringify(obj) + '\n');
+  send({ type: 'progress', stage: 'reading', chars: 0, rows: 0 });
+  try {
+    const data = await insights.extractInvoice({
+      pdfBase64: fileBase64, apiKey,
+      onProgress: (p) => send({ type: 'progress', stage: 'extracting', ...p }),
+    });
+    send({ type: 'done', data });
+  } catch (err) {
+    console.error('[POST /api/admin/documents/extract]', err.message);
+    send({ type: 'error', error: err.message });
+  }
+  res.end();
 });
 app.delete('/api/admin/documents/:id', auth.requireAdmin, (req, res) => {
   res.status(db.deleteDocument(req.params.id) ? 204 : 404).end();

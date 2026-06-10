@@ -86,7 +86,7 @@ function DocumentsSection({ docs, isMobile }) {
                   <span style={{ fontSize: 15, flexShrink: 0 }}>🧾</span>
                   <span style={{ flex: 1, minWidth: 0 }}>
                     <span style={{ display: 'block', fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{doc.title}</span>
-                    <span style={{ display: 'block', fontSize: 11, color: 'var(--muted)' }}>{new Date(doc.createdAt).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+                    <span style={{ display: 'block', fontSize: 11, color: 'var(--muted)' }}>{[doc.invoiceDate || new Date(doc.createdAt).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' }), doc.total != null && fmtR(doc.total)].filter(Boolean).join(' · ')}</span>
                   </span>
                   <span style={{ color: 'var(--brand)', fontSize: 13, fontWeight: 600, flexShrink: 0 }}>View →</span>
                 </button>

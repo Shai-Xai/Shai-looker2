@@ -6,6 +6,36 @@ async function json(res) {
   return data;
 }
 
+// POST to an AI-extraction endpoint that streams ndjson progress events
+// ({type:'progress'|'done'|'error'}); calls onProgress per event and resolves
+// with the extracted data.
+async function extractStream(url, body, onProgress) {
+  const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (!res.ok) return json(res); // pre-stream rejection (e.g. no API key) → throws
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '';
+  let result = null;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let i;
+    while ((i = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, i).trim();
+      buf = buf.slice(i + 1);
+      if (!line) continue;
+      let msg;
+      try { msg = JSON.parse(line); } catch { continue; }
+      if (msg.type === 'progress') onProgress?.(msg);
+      else if (msg.type === 'done') result = msg.data;
+      else if (msg.type === 'error') throw new Error(msg.error);
+    }
+  }
+  if (!result) throw new Error('Extraction ended unexpectedly — please try again.');
+  return result;
+}
+
 export const api = {
   // Auth
   me: () => fetch('/api/auth/me').then(json),
@@ -142,32 +172,10 @@ export const api = {
   saveSettlementNotes: (id, notes) => fetch(`/api/settlements/${id}/notes`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ notes }) }).then(json),
   adminListSettlements: () => fetch('/api/admin/settlements').then(json),
   // Streams ndjson progress events; resolves with the extracted data.
-  adminExtractSettlement: async (fileBase64, fileType, onProgress) => {
-    const res = await fetch('/api/admin/settlements/extract', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fileBase64, fileType }) });
-    if (!res.ok) return json(res); // pre-stream rejection (e.g. no API key) → throws
-    const reader = res.body.getReader();
-    const dec = new TextDecoder();
-    let buf = '';
-    let result = null;
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += dec.decode(value, { stream: true });
-      let i;
-      while ((i = buf.indexOf('\n')) >= 0) {
-        const line = buf.slice(0, i).trim();
-        buf = buf.slice(i + 1);
-        if (!line) continue;
-        let msg;
-        try { msg = JSON.parse(line); } catch { continue; }
-        if (msg.type === 'progress') onProgress?.(msg);
-        else if (msg.type === 'done') result = msg.data;
-        else if (msg.type === 'error') throw new Error(msg.error);
-      }
-    }
-    if (!result) throw new Error('Extraction ended unexpectedly — please try again.');
-    return result;
-  },
+  adminExtractSettlement: (fileBase64, fileType, onProgress) =>
+    extractStream('/api/admin/settlements/extract', { fileBase64, fileType }, onProgress),
+  adminExtractInvoice: (fileBase64, onProgress) =>
+    extractStream('/api/admin/documents/extract', { fileBase64 }, onProgress),
   adminCreateSettlement: (s) => fetch('/api/admin/settlements', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(s) }).then(json),
   adminUpdateSettlement: (id, p) => fetch(`/api/admin/settlements/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),
   adminDeleteSettlement: (id) => fetch(`/api/admin/settlements/${id}`, { method: 'DELETE' }),
