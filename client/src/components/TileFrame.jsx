@@ -87,14 +87,14 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
             draggable
             onDragStart={(e) => { e.dataTransfer.setData('text/plain', tile.id); e.dataTransfer.effectAllowed = 'move'; }}
             title="Drag into a carousel"
-            style={{ position: 'absolute', top: 6, left: 6, zIndex: 6, cursor: 'grab', fontSize: 12, color: '#999', background: '#fff', border: '1px solid #eee', borderRadius: 5, padding: '1px 5px', lineHeight: 1.3 }}
+            style={{ position: 'absolute', top: 6, left: 6, zIndex: 6, cursor: 'grab', fontSize: 12, color: '#999', background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 5, padding: '1px 5px', lineHeight: 1.3 }}
           >⠿</span>
         )}
         {canInsight && (
           <button
             title="AI insight"
             onClick={() => setShowInsight(true)}
-            className="insight-btn"
+            className="insight-btn btn-key"
             style={{
               position: 'absolute', top: 6, right: 6, zIndex: 5,
               border: '1px solid #eadfff', background: 'rgba(246,241,255,0.92)', color: '#6d28d9',

@@ -104,9 +104,9 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
 
 function Lbl({ children }) { return <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', margin: '12px 0 5px' }}>{children}</div>; }
 
-const card = { background: '#fff', border: '1px solid #e6e6e6', borderRadius: 12, padding: 18 };
+const card = { background: 'var(--card)', border: '1px solid #e6e6e6', borderRadius: 12, padding: 18 };
 const secTitle = { fontSize: 14, fontWeight: 700, marginBottom: 4 };
-const input = { width: '100%', boxSizing: 'border-box', padding: '9px 12px', border: '1.5px solid #e0e0e0', borderRadius: 8, fontSize: 13, outline: 'none' };
-const note = { fontSize: 12, color: 'var(--muted)', background: '#f7f7f8', border: '1px solid #ececec', borderRadius: 8, padding: '8px 10px', margin: '4px 0 4px' };
+const input = { width: '100%', boxSizing: 'border-box', padding: '9px 12px', border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 13, outline: 'none' };
+const note = { fontSize: 12, color: 'var(--muted)', background: '#f7f7f8', border: '1px solid var(--hairline)', borderRadius: 8, padding: '8px 10px', margin: '4px 0 4px' };
 const clearRow = { display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--error, #ef4444)', marginTop: 6, cursor: 'pointer' };
 const saveBtn = { padding: '9px 18px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer' };

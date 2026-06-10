@@ -11,15 +11,17 @@ import ClientIntegrationsPage from './pages/ClientIntegrationsPage.jsx';
 import Logo from './components/Logo.jsx';
 import { DrillProvider } from './lib/DrillContext.jsx';
 import { AuthProvider, useAuth } from './lib/auth.jsx';
+import { ThemeProvider, useTheme } from './lib/theme.jsx';
 import { useIsMobile } from './lib/useIsMobile.js';
 
 function Header() {
   const navigate = useNavigate();
   const { user, isAdmin, logout } = useAuth();
+  const { theme, toggle } = useTheme();
   const isMobile = useIsMobile();
   return (
     <header style={{
-      background: 'rgba(255,255,255,0.72)', backdropFilter: 'saturate(180%) blur(20px)', WebkitBackdropFilter: 'saturate(180%) blur(20px)',
+      background: 'var(--frost)', backdropFilter: 'saturate(180%) blur(20px)', WebkitBackdropFilter: 'saturate(180%) blur(20px)',
       borderBottom: '1px solid var(--hairline)', padding: isMobile ? '0 14px' : '0 22px',
       height: 56, display: 'flex', alignItems: 'center', gap: isMobile ? 8 : 12, flexShrink: 0, zIndex: 10,
     }}>
@@ -30,6 +32,7 @@ function Header() {
       <div style={{ flex: 1 }} />
       {isAdmin && <Link to="/admin" style={navLink}>Admin</Link>}
       {!isAdmin && <Link to="/settings" style={navLink} title="Integrations">{isMobile ? '⚙' : 'Integrations'}</Link>}
+      <button onClick={toggle} title={theme === 'dark' ? 'Light mode' : 'Dark mode'} aria-label="Toggle theme" style={themeBtn}>{theme === 'dark' ? '☀️' : '🌙'}</button>
       {!isMobile && <UserBadge user={user} isAdmin={isAdmin} />}
       <button onClick={() => logout()} style={logoutBtn}>{isMobile ? 'Exit' : 'Log out'}</button>
     </header>
@@ -56,7 +59,8 @@ function UserBadge({ user, isAdmin }) {
 }
 
 const navLink = { fontSize: 13, fontWeight: 600, color: 'var(--brand)', textDecoration: 'none' };
-const logoutBtn = { fontSize: 12, fontWeight: 600, border: 'none', background: 'rgba(0,0,0,0.05)', color: 'var(--text)', borderRadius: 980, padding: '7px 14px', cursor: 'pointer' };
+const logoutBtn = { fontSize: 12, fontWeight: 600, border: 'none', background: 'rgba(128,128,128,0.12)', color: 'var(--text)', borderRadius: 980, padding: '7px 14px', cursor: 'pointer' };
+const themeBtn = { border: 'none', background: 'rgba(128,128,128,0.12)', borderRadius: 980, width: 30, height: 30, fontSize: 14, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1 };
 
 function Shell() {
   const { user, loading, isAdmin } = useAuth();
@@ -104,8 +108,10 @@ function Shell() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <Shell />
-    </AuthProvider>
+    <ThemeProvider>
+      <AuthProvider>
+        <Shell />
+      </AuthProvider>
+    </ThemeProvider>
   );
 }

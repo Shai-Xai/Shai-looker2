@@ -66,7 +66,7 @@ export default function DrillModal({ links, title, onClose }) {
                   {rowCount} row{rowCount === 1 ? '' : 's'}
                 </div>
               )}
-              <div style={{ flex: 1, minHeight: 0, border: '1px solid #eee', borderRadius: 8, overflow: 'hidden' }}>
+              <div style={{ flex: 1, minHeight: 0, border: '1px solid var(--hairline)', borderRadius: 8, overflow: 'hidden' }}>
                 <TableTile data={data} />
               </div>
             </div>
@@ -78,12 +78,12 @@ export default function DrillModal({ links, title, onClose }) {
 }
 
 const overlay = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', justifyContent: 'flex-end', zIndex: 300 };
-const panel = { width: 'min(820px, 92vw)', height: '100%', background: '#fff', boxShadow: '-4px 0 24px rgba(0,0,0,0.15)', display: 'flex', flexDirection: 'column' };
-const header = { display: 'flex', alignItems: 'center', gap: 12, padding: '16px 20px', borderBottom: '1px solid #e0e0e0' };
+const panel = { width: 'min(820px, 92vw)', height: '100%', background: 'var(--card)', boxShadow: '-4px 0 24px rgba(0,0,0,0.15)', display: 'flex', flexDirection: 'column' };
+const header = { display: 'flex', alignItems: 'center', gap: 12, padding: '16px 20px', borderBottom: '1px solid var(--border)' };
 const body = { flex: 1, minHeight: 0, padding: 16, display: 'flex', flexDirection: 'column' };
 const closeBtn = { border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 17, color: '#888' };
-const backBtn = { border: '1.5px solid #e0e0e0', background: '#fff', cursor: 'pointer', fontSize: 12, fontWeight: 600, borderRadius: 6, padding: '6px 10px' };
-const menuItem = { display: 'block', width: '100%', textAlign: 'left', padding: '10px 12px', marginBottom: 6, border: '1.5px solid #e0e0e0', borderRadius: 8, background: '#fff', cursor: 'pointer', fontSize: 13, fontWeight: 600 };
+const backBtn = { border: '1.5px solid var(--hairline)', background: 'var(--card)', cursor: 'pointer', fontSize: 12, fontWeight: 600, borderRadius: 6, padding: '6px 10px' };
+const menuItem = { display: 'block', width: '100%', textAlign: 'left', padding: '10px 12px', marginBottom: 6, border: '1.5px solid var(--hairline)', borderRadius: 8, background: 'var(--card)', cursor: 'pointer', fontSize: 13, fontWeight: 600 };
 
 function Centered({ children, error }) {
   return <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: error ? 'var(--error)' : 'var(--muted)', fontSize: 13, padding: 20, textAlign: 'center' }}>{children}</div>;

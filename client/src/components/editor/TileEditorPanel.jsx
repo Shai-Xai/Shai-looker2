@@ -163,7 +163,7 @@ function Toggle({ active, onClick, children }) {
       onClick={onClick}
       style={{
         flex: 1, padding: '8px 10px', fontSize: 13, fontWeight: 600, cursor: 'pointer', borderRadius: 6,
-        border: active ? '1.5px solid var(--brand)' : '1.5px solid #e0e0e0',
+        border: active ? '1.5px solid var(--brand)' : '1.5px solid var(--hairline)',
         background: active ? 'var(--brand)' : '#fff',
         color: active ? '#fff' : 'var(--text)',
       }}
@@ -171,9 +171,9 @@ function Toggle({ active, onClick, children }) {
   );
 }
 
-const panel = { width: 320, flexShrink: 0, background: '#fff', borderLeft: '1px solid #e0e0e0', display: 'flex', flexDirection: 'column', height: '100%' };
-const header = { display: 'flex', alignItems: 'center', padding: '14px 16px', borderBottom: '1px solid #e0e0e0' };
+const panel = { width: 320, flexShrink: 0, background: 'var(--card)', borderLeft: '1px solid var(--border)', display: 'flex', flexDirection: 'column', height: '100%' };
+const header = { display: 'flex', alignItems: 'center', padding: '14px 16px', borderBottom: '1px solid var(--border)' };
 const body = { flex: 1, overflowY: 'auto', padding: '4px 16px 24px' };
 const closeBtn = { border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 15, color: '#888' };
-const input = { width: '100%', padding: '8px 10px', border: '1.5px solid #e0e0e0', borderRadius: 6, fontSize: 13, outline: 'none', boxSizing: 'border-box' };
-const divider = { borderTop: '1px solid #eee', margin: '16px 0 0' };
+const input = { width: '100%', padding: '8px 10px', border: '1.5px solid var(--hairline)', borderRadius: 6, fontSize: 13, outline: 'none', boxSizing: 'border-box' };
+const divider = { borderTop: '1px solid var(--hairline)', margin: '16px 0 0' };

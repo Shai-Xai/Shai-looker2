@@ -92,7 +92,7 @@ export default function TableTile({ data, visConfig = {} }) {
                   const mx = colMax[`${g.p.key}.${m.name}`];
                   return (
                     <td key={`${g.p.key}.${m.name}`} {...dr}
-                      style={{ ...tdStyle, textAlign: 'right', fontVariantNumeric: 'tabular-nums', borderLeft: (gi && mi === 0) ? '1px solid #f0f0f0' : undefined, ...(dr.style || null) }}>
+                      style={{ ...tdStyle, textAlign: 'right', fontVariantNumeric: 'tabular-nums', borderLeft: (gi && mi === 0) ? '1px solid var(--hairline)' : undefined, ...(dr.style || null) }}>
                       {mx ? <Bar value={Number(cell?.value)} max={mx}>{cellText(cell)}</Bar> : cellText(cell)}
                     </td>
                   );
@@ -154,10 +154,10 @@ function Scroll({ children }) {
 
 const tableStyle = { borderCollapse: 'collapse', width: '100%', fontSize: 12 };
 const thStyle = {
-  padding: '6px 10px', background: '#f7f7f7', borderBottom: '2px solid #e0e0e0',
+  padding: '6px 10px', background: 'var(--elevated)', borderBottom: '2px solid #e0e0e0',
   fontWeight: 600, whiteSpace: 'nowrap', position: 'sticky', top: 0, zIndex: 2,
 };
-const tdStyle = { padding: '5px 10px', borderBottom: '1px solid #f0f0f0', whiteSpace: 'nowrap' };
+const tdStyle = { padding: '5px 10px', borderBottom: '1px solid var(--hairline)', whiteSpace: 'nowrap' };
 // Keep the first (label) column pinned while scrolling wide tables sideways —
 // matters most on narrow/mobile widths. Corner header sits above everything.
 const stickyHeadCorner = { left: 0, zIndex: 3 };

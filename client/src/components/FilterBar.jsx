@@ -81,7 +81,7 @@ export default function FilterBar({ filters, values, onChange, locked = {}, open
 const filterTrigger = { display: 'inline-flex', alignItems: 'center', gap: 8, padding: '9px 16px', background: 'rgba(0,0,0,0.05)', color: 'var(--text)', border: 'none', borderRadius: 980, fontSize: 14, fontWeight: 600, cursor: 'pointer' };
 const countPill = { background: 'var(--brand)', color: '#fff', fontSize: 11, fontWeight: 700, borderRadius: 980, minWidth: 18, height: 18, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' };
 const sheetBackdrop = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 1000, display: 'flex', alignItems: 'flex-end' };
-const sheet = { background: '#fff', width: '100%', maxHeight: '80dvh', overflowY: 'auto', borderRadius: '18px 18px 0 0', padding: '18px 18px calc(18px + env(safe-area-inset-bottom))', boxShadow: '0 -4px 24px rgba(0,0,0,0.2)' };
+const sheet = { background: 'var(--card)', width: '100%', maxHeight: '80dvh', overflowY: 'auto', borderRadius: '18px 18px 0 0', padding: '18px 18px calc(18px + env(safe-area-inset-bottom))', boxShadow: '0 -4px 24px rgba(0,0,0,0.2)' };
 const doneBtn = { padding: '7px 16px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer' };
 
 // A scoped, non-editable filter (the client's organiser/event). Shows the
@@ -267,14 +267,14 @@ function FilterDropdown({ filter, value, onChange, multi = false }) {
 
 const fieldStyle = { display: 'flex', flexDirection: 'column', gap: 5, minWidth: 180 };
 const labelStyle = { fontSize: 11, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em' };
-const inputStyle = { padding: '9px 12px', border: '1px solid var(--hairline)', borderRadius: 10, fontSize: 13, outline: 'none', width: '100%', background: '#fff', boxSizing: 'border-box' };
-const rangeWrap = { display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', border: '1px solid var(--hairline)', borderRadius: 10, background: '#fff' };
+const inputStyle = { padding: '9px 12px', border: '1px solid var(--hairline)', borderRadius: 10, fontSize: 13, outline: 'none', width: '100%', background: 'var(--card)', boxSizing: 'border-box' };
+const rangeWrap = { display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', border: '1px solid var(--hairline)', borderRadius: 10, background: 'var(--card)' };
 const rangeOp = { fontSize: 12, color: 'var(--muted-2)', fontWeight: 600, whiteSpace: 'nowrap' };
-const rangeInput = { width: 64, padding: '6px 8px', border: '1px solid var(--hairline)', borderRadius: 8, fontSize: 13, outline: 'none', textAlign: 'center', background: '#fff', boxSizing: 'border-box' };
+const rangeInput = { width: 64, padding: '6px 8px', border: '1px solid var(--hairline)', borderRadius: 8, fontSize: 13, outline: 'none', textAlign: 'center', background: 'var(--card)', boxSizing: 'border-box' };
 const caretStyle = { position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 11, color: '#888', pointerEvents: 'auto', cursor: 'pointer' };
 const dropdownList = {
   position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 100, marginTop: 4,
-  background: '#fff', border: '1px solid #e0e0e0', borderRadius: 10,
+  background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 10,
   boxShadow: '0 6px 20px rgba(0,0,0,0.12)', maxHeight: 240, overflowY: 'auto',
   listStyle: 'none', margin: 0, padding: '4px 0',
 };

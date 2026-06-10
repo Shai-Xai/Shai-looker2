@@ -9,6 +9,7 @@
   --card: #ffffff;
   --elevated: #ffffff;
   --tile-bg: #ffffff;
+  --frost: rgba(255, 255, 255, 0.72); /* frosted headers / sidebar */
   /* Hairlines & text */
   --border: rgba(0, 0, 0, 0.06);
   --hairline: rgba(0, 0, 0, 0.08);
@@ -25,6 +26,8 @@
   --shadow: 0 1px 2px rgba(0,0,0,0.04), 0 10px 30px -12px rgba(0,0,0,0.12);
   --shadow-sm: 0 1px 2px rgba(0,0,0,0.05), 0 4px 12px -6px rgba(0,0,0,0.08);
   --shadow-pop: 0 8px 40px rgba(0,0,0,0.16);
+  --skel: rgba(128,128,128,0.13);
+  --skel-hi: rgba(128,128,128,0.24);
   /* Motion — one shared language for the whole app */
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);      /* decisive, settles softly */
   --ease-spring: cubic-bezier(0.34, 1.30, 0.64, 1); /* slight overshoot */
@@ -32,6 +35,32 @@
   --dur-med: 280ms;
   --dur-slow: 460ms;
 }
+
+/* ─── Dark theme ─────────────────────────────────────────────────────────────
+   Activated via <html data-theme="dark">. Brand pink stays; surfaces/text flip
+   by redefining the same tokens, so anything using the variables adapts. */
+[data-theme="dark"] {
+  --bg: #0e0e11;
+  --card: #1a1a1f;
+  --elevated: #222228;
+  --tile-bg: #1a1a1f;
+  --frost: rgba(22, 22, 27, 0.72);
+  --border: rgba(255, 255, 255, 0.09);
+  --hairline: rgba(255, 255, 255, 0.12);
+  --text: #f3f3f6;
+  --muted: #9a9aa3;
+  --muted-2: #c0c0c9;
+  --success: #34d399;
+  --error: #ff6b6b;
+  --warn: #fbbf24;
+  --shadow: 0 1px 2px rgba(0,0,0,0.5), 0 12px 34px -14px rgba(0,0,0,0.7);
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.45), 0 6px 16px -8px rgba(0,0,0,0.6);
+  --shadow-pop: 0 10px 44px rgba(0,0,0,0.7);
+  --skel: rgba(255,255,255,0.07);
+  --skel-hi: rgba(255,255,255,0.14);
+  color-scheme: dark;
+}
+html { transition: background .3s ease; }
 
 html, body {
   font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
@@ -110,22 +139,56 @@ input::placeholder, textarea::placeholder { color: #b0b0b6; }
 }
 
 /* Grab handle for mobile bottom sheets. */
-.sheet-grip { width: 38px; height: 4px; border-radius: 980px; background: rgba(0,0,0,0.18); margin: 0 auto 10px; flex-shrink: 0; }
+.sheet-grip { width: 38px; height: 4px; border-radius: 980px; background: rgba(128,128,128,0.3); margin: 0 auto 10px; flex-shrink: 0; }
+
+/* Dark mode: flip inline-white form fields (inline styles need !important). */
+[data-theme="dark"] input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+[data-theme="dark"] select,
+[data-theme="dark"] textarea {
+  background: var(--elevated) !important;
+  color: var(--text) !important;
+  border-color: var(--hairline) !important;
+}
+
+/* Key buttons get a soft light "shine" sweep on hover. Add class .btn-key. */
+.btn-key { position: relative; overflow: hidden; }
+.btn-key::after {
+  content: ''; position: absolute; top: 0; left: -120%; width: 55%; height: 100%;
+  background: linear-gradient(100deg, transparent, rgba(255,255,255,0.35), transparent);
+  transform: skewX(-18deg); pointer-events: none;
+}
+.btn-key:hover:not(:disabled)::after { animation: shine .7s var(--ease-out); }
+@keyframes shine { to { left: 135%; } }
+
+/* AI panels: an animated gradient border that rotates as they slide in. */
+@property --ai-angle { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+@keyframes ai-rotate { to { --ai-angle: 360deg; } }
+.ai-glow { position: relative; }
+.ai-glow::before {
+  content: ''; position: absolute; inset: 0; border-radius: inherit; padding: 1.6px;
+  background: conic-gradient(from var(--ai-angle), #ff385c, #ff6b35, #7c3aed, #06b6d4, #ff385c);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  animation: ai-rotate 4.5s linear infinite;
+  pointer-events: none; z-index: 1;
+}
 
 @media (prefers-reduced-motion: reduce) {
   .ai-overlay, .ai-panel, .ai-sheet, .modal-in, .msg-in { animation-duration: 1ms !important; }
   .streaming { mask-image: none; -webkit-mask-image: none; }
+  .ai-glow::before { animation: none; }
+  .btn-key:hover::after { animation: none; }
 }
 
 /* Client sidebar — frosted, Apple-like */
 .howler-sidebar {
-  background: rgba(255,255,255,0.72);
+  background: var(--frost);
   backdrop-filter: saturate(180%) blur(20px);
   -webkit-backdrop-filter: saturate(180%) blur(20px);
   border-right: 1px solid var(--hairline);
 }
 .nav-row { transition: background .15s ease, color .15s ease; position: relative; z-index: 1; }
-.nav-row:hover { background: rgba(0,0,0,0.045); }
+.nav-row:hover { background: rgba(128,128,128,0.10); }
 .nav-row.active { color: var(--brand); }
 .nav-caret { transition: transform .22s var(--ease-out); }
 
@@ -173,7 +236,7 @@ input::placeholder, textarea::placeholder { color: #b0b0b6; }
 /* Skeleton shimmer shown while a tile's first query runs. */
 @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 .skel {
-  background: linear-gradient(100deg, rgba(0,0,0,0.05) 40%, rgba(0,0,0,0.09) 50%, rgba(0,0,0,0.05) 60%);
+  background: linear-gradient(100deg, var(--skel) 40%, var(--skel-hi) 50%, var(--skel) 60%);
   background-size: 200% 100%;
   animation: shimmer 1.6s linear infinite;
   border-radius: 7px;

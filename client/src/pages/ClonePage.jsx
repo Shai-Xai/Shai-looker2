@@ -77,7 +77,7 @@ export default function ClonePage() {
 
   return (
     <main style={{ flex: 1, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '48px 24px' }}>
-      <div style={{ background: '#fff', border: '1px solid #e0e0e0', borderRadius: 12, boxShadow: '0 2px 16px rgba(0,0,0,0.08)', width: '100%', maxWidth: 560, padding: '36px 40px' }}>
+      <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, boxShadow: '0 2px 16px rgba(0,0,0,0.08)', width: '100%', maxWidth: 560, padding: '36px 40px' }}>
         <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 6 }}>Clone a Dashboard inside Looker</div>
         <div style={{ fontSize: 14, color: 'var(--muted)', marginBottom: 32, lineHeight: 1.5 }}>
           Copy a Looker dashboard — tiles, filters, layout — into a new <em>Looker</em> dashboard.
@@ -104,7 +104,7 @@ export default function ClonePage() {
             )}
           </Field>
 
-          <hr style={{ border: 'none', borderTop: '1px solid #e0e0e0', margin: '28px 0' }} />
+          <hr style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '28px 0' }} />
 
           <Field label="New Dashboard Title" hint="name for the copy">
             <Input value={newTitle} onChange={setNewTitle} placeholder="e.g. Howler — Glastonbury 2025" />
@@ -120,7 +120,7 @@ export default function ClonePage() {
         </form>
 
         {result && (
-          <div style={{ marginTop: 24, borderRadius: 10, overflow: 'hidden', border: '1px solid #e0e0e0' }}>
+          <div style={{ marginTop: 24, borderRadius: 10, overflow: 'hidden', border: '1px solid var(--border)' }}>
             <div style={{ padding: '14px 18px', fontWeight: 700, fontSize: 14, display: 'flex', alignItems: 'center', gap: 8, ...(allOk ? { background: '#f0fdf4', color: 'var(--success)', borderBottom: '1px solid #bbf7d0' } : result.ok ? { background: '#fffbeb', color: 'var(--warn)', borderBottom: '1px solid #fde68a' } : { background: '#fff5f5', color: 'var(--error)', borderBottom: '1px solid #fecaca' }) }}>
               {allOk ? '✓ Dashboard recreated successfully!' : result.ok ? '⚠ Recreated with some errors' : '✗ Failed'}
             </div>
@@ -188,7 +188,7 @@ function Input({ value, onChange, placeholder }) {
       onChange={e => onChange(e.target.value)}
       placeholder={placeholder}
       autoComplete="off"
-      style={{ width: '100%', padding: '10px 14px', border: '1.5px solid #e0e0e0', borderRadius: 8, fontSize: 14, outline: 'none' }}
+      style={{ width: '100%', padding: '10px 14px', border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 14, outline: 'none' }}
     />
   );
 }
@@ -208,8 +208,8 @@ const submitBtnStyle = {
 };
 
 const previewBtnStyle = {
-  flexShrink: 0, padding: '10px 16px', background: '#f7f7f7',
-  border: '1.5px solid #e0e0e0', borderRadius: 8, fontSize: 13, fontWeight: 600,
+  flexShrink: 0, padding: '10px 16px', background: 'var(--elevated)',
+  border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 13, fontWeight: 600,
   cursor: 'pointer', whiteSpace: 'nowrap',
 };
 

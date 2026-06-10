@@ -3,6 +3,7 @@ import ReactECharts from 'echarts-for-react';
 import * as echarts from 'echarts';
 import { cellText, formatNumber, formatAxis } from '../../lib/format.js';
 import { useDrill } from '../../lib/DrillContext.jsx';
+import { useTheme } from '../../lib/theme.jsx';
 
 // Howler-branded chart renderer (Apache ECharts): gradient fills, rounded bars,
 // staggered load animation, branded tooltips. Always uses the Howler palette
@@ -60,9 +61,10 @@ export default function ChartTile({ data, visConfig = {} }) {
 
   // seriesMeta[seriesIndex] = { measure, pivotKey, fmt } for tooltip + drill.
   const stacked = visConfig.stacking === 'normal' || visConfig.stacking === 'percent';
+  const { theme } = useTheme();
   const { option, seriesMeta } = useMemo(
     () => buildOption({ rows, dimensions, measures, pivots, visType, stacked, visConfig, boxH }),
-    [data, visType, stacked, boxH]
+    [data, visType, stacked, boxH, theme]
   );
 
   if (!rows.length || !measures.length) return <Empty />;
@@ -96,6 +98,12 @@ export default function ChartTile({ data, visConfig = {} }) {
 }
 
 function buildOption({ rows, dimensions, measures, pivots, visType, stacked, visConfig = {}, boxH = 280 }) {
+  const dark = typeof document !== 'undefined' && document.documentElement.dataset.theme === 'dark';
+  const axisC = dark ? '#9a9aa3' : '#888';
+  const nameC = dark ? '#8a8a92' : '#9a9a9a';
+  const splitC = dark ? 'rgba(255,255,255,0.08)' : '#f2f2f2';
+  const axisLineC = dark ? 'rgba(255,255,255,0.14)' : '#e6e6e6';
+  const labelC = dark ? '#c0c0c9' : '#5a5a5a';
   const isPie = visType === 'looker_pie' || visType === 'looker_donut_multiples';
   const isDonut = visType === 'looker_donut_multiples';
   const isBar = visType === 'looker_bar';       // horizontal
@@ -139,7 +147,7 @@ function buildOption({ rows, dimensions, measures, pivots, visType, stacked, vis
           radius: isDonut ? ['42%', '70%'] : '72%',
           center: ['50%', '46%'],
           data: pieData,
-          itemStyle: { borderColor: '#fff', borderWidth: 2, borderRadius: 6 },
+          itemStyle: { borderColor: dark ? '#1a1a1f' : '#fff', borderWidth: 2, borderRadius: 6 },
           label: { show: false },
           emphasis: { scale: true, scaleSize: 6, itemStyle: { shadowBlur: 12, shadowColor: 'rgba(0,0,0,0.2)' } },
         }],
@@ -225,20 +233,20 @@ function buildOption({ rows, dimensions, measures, pivots, visType, stacked, vis
   const xNameRaw = visConfig.show_x_axis_label === false ? '' : (visConfig.x_axis_label || primaryDim?.label || primaryDim?.label_short || '');
   const xName = isBar ? clip(xNameRaw, yBudget) : clip(xNameRaw, 70);
 
-  const nameStyle = { fontSize: 10, color: '#9a9a9a', fontWeight: 500 };
+  const nameStyle = { fontSize: 10, color: nameC, fontWeight: 500 };
   const valueAxis = (axisIdx, position) => ({
     type: 'value', position,
     name: yName(axisIdx), nameLocation: 'middle', nameGap: 46, nameRotate: position === 'right' ? -90 : 90,
     nameTextStyle: nameStyle,
-    axisLabel: { fontSize: 10, color: '#888', formatter: (v) => formatAxis(v, fmtFor(axisIdx)) },
-    splitLine: { lineStyle: { color: '#f2f2f2' } },
+    axisLabel: { fontSize: 10, color: axisC, formatter: (v) => formatAxis(v, fmtFor(axisIdx)) },
+    splitLine: { lineStyle: { color: splitC } },
     axisLine: { show: false }, axisTick: { show: false },
   });
   const catAxis = {
     type: 'category', data: labels, boundaryGap: true,
     name: isBar ? '' : xName, nameLocation: 'middle', nameGap: 28, nameTextStyle: nameStyle,
-    axisLabel: { fontSize: 10, color: '#888', hideOverlap: true, rotate: labels.length > 8 && !isBar ? 35 : 0 },
-    axisLine: { lineStyle: { color: '#e6e6e6' } }, axisTick: { show: false },
+    axisLabel: { fontSize: 10, color: axisC, hideOverlap: true, rotate: labels.length > 8 && !isBar ? 35 : 0 },
+    axisLine: { lineStyle: { color: axisLineC } }, axisTick: { show: false },
   };
 
   const xAxis = isBar ? valueAxis(0, 'bottom') : catAxis;
@@ -295,7 +303,7 @@ function makeSeries(name, vals, idx, { isBar, isLine, isArea, isScatter, stacked
   const labelSet = new Set(nonNull.filter((_, k) => k % lstep === 0 || k === nonNull.length - 1));
   const label = showLabels ? {
     show: true, position: isBar ? 'right' : 'top', distance: 4,
-    fontSize: 9, color: '#5a5a5a', fontWeight: 500,
+    fontSize: 9, color: labelC, fontWeight: 500,
     formatter: (p) => {
       if (!labelSet.has(p.dataIndex)) return '';
       const v = Array.isArray(p.value) ? p.value[p.value.length - 1] : p.value;

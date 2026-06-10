@@ -93,14 +93,14 @@ function StatusButton({ status, onClick, busy }) {
 }
 
 const overlay = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 600, padding: 20 };
-const panel = { width: 'min(640px, 96vw)', maxHeight: '88vh', background: '#fff', borderRadius: 16, boxShadow: '0 12px 48px rgba(0,0,0,0.25)', display: 'flex', flexDirection: 'column', overflow: 'hidden' };
-const header = { display: 'flex', alignItems: 'center', gap: 10, padding: '16px 18px', borderBottom: '1px solid #e0e0e0' };
+const panel = { width: 'min(640px, 96vw)', maxHeight: '88vh', background: 'var(--card)', borderRadius: 16, boxShadow: '0 12px 48px rgba(0,0,0,0.25)', display: 'flex', flexDirection: 'column', overflow: 'hidden' };
+const header = { display: 'flex', alignItems: 'center', gap: 10, padding: '16px 18px', borderBottom: '1px solid var(--border)' };
 const body = { flex: 1, overflowY: 'auto', padding: '12px 18px 18px' };
-const folderRow = { display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, padding: '6px 0', borderBottom: '1px solid #f0f0f0' };
+const folderRow = { display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, padding: '6px 0', borderBottom: '1px solid var(--hairline)' };
 const dashRow = { display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, padding: '7px 0' };
 const progressTrack = { height: 8, borderRadius: 980, background: 'rgba(0,0,0,0.08)', overflow: 'hidden' };
 const progressFill = { height: '100%', background: 'var(--brand)', borderRadius: 980, transition: 'width 0.3s ease' };
 const btn = { padding: '8px 16px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer' };
 const miniBtn = { padding: '5px 12px', background: 'rgba(0,0,0,0.05)', color: 'var(--text)', border: 'none', borderRadius: 980, fontSize: 12, fontWeight: 600, cursor: 'pointer' };
-const rowBtn = { padding: '5px 14px', background: '#fff', color: 'var(--brand)', border: '1.5px solid var(--brand)', borderRadius: 980, fontSize: 12, fontWeight: 600, cursor: 'pointer' };
+const rowBtn = { padding: '5px 14px', background: 'var(--card)', color: 'var(--brand)', border: '1.5px solid var(--brand)', borderRadius: 980, fontSize: 12, fontWeight: 600, cursor: 'pointer' };
 const closeBtn = { border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 17, color: '#888' };

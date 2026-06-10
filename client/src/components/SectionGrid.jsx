@@ -53,7 +53,7 @@ export default function SectionGrid({ carousel, filterValues, editable, onEditTi
             onChange={(e) => onChangeTitle(e.target.value)}
             onMouseDown={(e) => e.stopPropagation()}
             placeholder="Section title"
-            style={{ fontSize: 15, fontWeight: 700, border: '1.5px solid transparent', background: '#fafafa', borderRadius: 6, padding: '4px 8px', outline: 'none' }}
+            style={{ fontSize: 15, fontWeight: 700, border: '1.5px solid transparent', background: 'var(--elevated)', borderRadius: 6, padding: '4px 8px', outline: 'none' }}
           />
         ) : (
           carousel.title && <h3 style={{ fontSize: 15, fontWeight: 700 }}>{carousel.title}</h3>
@@ -115,4 +115,4 @@ export default function SectionGrid({ carousel, filterValues, editable, onEditTi
   );
 }
 
-const miniBtn = { padding: '6px 10px', background: '#fff', border: '1.5px solid #e0e0e0', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer' };
+const miniBtn = { padding: '6px 10px', background: 'var(--card)', border: '1.5px solid var(--hairline)', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer' };

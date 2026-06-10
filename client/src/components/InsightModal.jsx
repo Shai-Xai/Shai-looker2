@@ -115,7 +115,7 @@ export default function InsightModal({ tile, data, filters, onClose }) {
   const node = (
     <div className="ai-overlay" style={isMobile ? { ...overlay, alignItems: 'flex-end', justifyContent: 'center' } : overlay} onClick={onClose}>
       <div
-        className={isMobile ? 'ai-sheet' : 'ai-panel'}
+        className={(isMobile ? 'ai-sheet' : 'ai-panel') + ' ai-glow'}
         style={isMobile ? { ...panelStyle, ...drag.style } : panelStyle}
         onClick={(e) => e.stopPropagation()}
       >
@@ -227,18 +227,18 @@ function renderMarkdownish(text) {
 }
 
 const overlay = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', justifyContent: 'flex-end', zIndex: 400 };
-const panel = { width: 'min(460px, 92vw)', height: '100%', background: '#fff', boxShadow: '-4px 0 24px rgba(0,0,0,0.15)', display: 'flex', flexDirection: 'column' };
-const header = { display: 'flex', alignItems: 'center', gap: 12, padding: '16px 18px', borderBottom: '1px solid #e0e0e0' };
-const contextBar = { padding: '10px 18px', borderBottom: '1px solid #f0f0f0', background: '#fafafa' };
+const panel = { width: 'min(460px, 92vw)', height: '100%', background: 'var(--card)', boxShadow: '-4px 0 24px rgba(0,0,0,0.15)', display: 'flex', flexDirection: 'column' };
+const header = { display: 'flex', alignItems: 'center', gap: 12, padding: '16px 18px', borderBottom: '1px solid var(--border)' };
+const contextBar = { padding: '10px 18px', borderBottom: '1px solid var(--hairline)', background: 'var(--elevated)' };
 const contextToggle = { border: 'none', background: 'transparent', color: 'var(--brand)', fontSize: 13, fontWeight: 600, cursor: 'pointer', padding: 0 };
 const contextArea = { width: '100%', border: '1px solid var(--hairline)', borderRadius: 10, padding: '9px 11px', fontSize: 14, outline: 'none', resize: 'vertical', boxSizing: 'border-box', fontFamily: 'inherit' };
 const body = { flex: 1, minHeight: 0, overflowY: 'auto', padding: 18 };
 const userBubbleWrap = { display: 'flex', justifyContent: 'flex-end' };
 const userBubble = { background: 'var(--brand)', color: '#fff', fontSize: 14, lineHeight: 1.5, padding: '8px 13px', borderRadius: '14px 14px 4px 14px', maxWidth: '85%' };
-const composer = { display: 'flex', alignItems: 'center', gap: 8, padding: '12px 18px', borderTop: '1px solid #eee' };
+const composer = { display: 'flex', alignItems: 'center', gap: 8, padding: '12px 18px', borderTop: '1px solid var(--hairline)' };
 const composerInput = { flex: 1, border: '1px solid var(--hairline)', borderRadius: 980, padding: '10px 16px', fontSize: 14, outline: 'none', boxSizing: 'border-box' };
 const sendBtn = { flexShrink: 0, width: 38, height: 38, borderRadius: '50%', border: 'none', background: 'var(--brand)', color: '#fff', fontSize: 18, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' };
 const closeBtn = { border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 17, color: '#888' };
-const ghostBtn = { border: '1px solid var(--hairline)', background: '#fff', color: 'var(--text)', borderRadius: 980, padding: '6px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer' };
+const ghostBtn = { border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 980, padding: '6px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer' };
 const primaryBtn = { border: 'none', background: 'var(--brand)', color: '#fff', borderRadius: 980, padding: '6px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer' };
 const cursor = { display: 'inline-block', width: 7, height: 15, background: 'var(--brand)', marginLeft: 2, verticalAlign: 'text-bottom', animation: 'blink 1s step-end infinite' };

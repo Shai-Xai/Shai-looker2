@@ -29,7 +29,7 @@ export default function TileLibraryPicker({ onPick, onClose }) {
           <button style={closeBtn} onClick={onClose} aria-label="Close">✕</button>
         </div>
 
-        <div style={{ display: 'flex', gap: 8, padding: '12px 18px', borderBottom: '1px solid #f0f0f0' }}>
+        <div style={{ display: 'flex', gap: 8, padding: '12px 18px', borderBottom: '1px solid var(--hairline)' }}>
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search tiles…" style={searchInput} autoFocus />
           <select value={category} onChange={(e) => setCategory(e.target.value)} style={select}>
             <option value="">All categories</option>
@@ -65,11 +65,11 @@ export default function TileLibraryPicker({ onPick, onClose }) {
 }
 
 const overlay = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 500, padding: 20 };
-const panel = { width: 'min(640px, 96vw)', maxHeight: '86vh', background: '#fff', borderRadius: 16, boxShadow: '0 12px 48px rgba(0,0,0,0.25)', display: 'flex', flexDirection: 'column', overflow: 'hidden' };
-const header = { display: 'flex', alignItems: 'center', gap: 12, padding: '16px 18px', borderBottom: '1px solid #e0e0e0' };
+const panel = { width: 'min(640px, 96vw)', maxHeight: '86vh', background: 'var(--card)', borderRadius: 16, boxShadow: '0 12px 48px rgba(0,0,0,0.25)', display: 'flex', flexDirection: 'column', overflow: 'hidden' };
+const header = { display: 'flex', alignItems: 'center', gap: 12, padding: '16px 18px', borderBottom: '1px solid var(--border)' };
 const closeBtn = { border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 17, color: '#888' };
 const searchInput = { flex: 1, border: '1px solid var(--hairline)', borderRadius: 10, padding: '9px 12px', fontSize: 14, outline: 'none' };
-const select = { border: '1px solid var(--hairline)', borderRadius: 10, padding: '9px 12px', fontSize: 13, outline: 'none', background: '#fff' };
+const select = { border: '1px solid var(--hairline)', borderRadius: 10, padding: '9px 12px', fontSize: 13, outline: 'none', background: 'var(--card)' };
 const list = { flex: 1, overflowY: 'auto', padding: 14, display: 'flex', flexDirection: 'column', gap: 10 };
 const card = { display: 'flex', alignItems: 'center', gap: 12, border: '1px solid var(--border, #eee)', borderRadius: 12, padding: '12px 14px', background: 'var(--card, #fff)' };
 const addBtn = { flexShrink: 0, padding: '8px 18px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer' };

@@ -98,7 +98,7 @@ function FieldGroup({ title, items, selected, onToggle }) {
   return (
     <div style={{ marginTop: 12 }}>
       <Label>{title}</Label>
-      <div style={{ maxHeight: 180, overflowY: 'auto', border: '1px solid #eee', borderRadius: 6 }}>
+      <div style={{ maxHeight: 180, overflowY: 'auto', border: '1px solid var(--hairline)', borderRadius: 6 }}>
         {items.map((f) => (
           <label key={f.name} style={fieldRow} title={f.description || f.name}>
             <input type="checkbox" checked={selected.includes(f.name)} onChange={() => onToggle(f.name)} />
@@ -119,5 +119,5 @@ function Hint({ children, error }) {
   return <div style={{ fontSize: 12, color: error ? 'var(--error)' : 'var(--muted)', padding: '4px 0' }}>{children}</div>;
 }
 
-const select = { width: '100%', padding: '7px 10px', border: '1.5px solid #e0e0e0', borderRadius: 6, fontSize: 13, outline: 'none', background: '#fff' };
+const select = { width: '100%', padding: '7px 10px', border: '1.5px solid var(--hairline)', borderRadius: 6, fontSize: 13, outline: 'none', background: 'var(--card)' };
 const fieldRow = { display: 'flex', alignItems: 'center', gap: 8, padding: '5px 10px', fontSize: 13, cursor: 'pointer', borderBottom: '1px solid #f5f5f5' };

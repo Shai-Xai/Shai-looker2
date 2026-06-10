@@ -49,7 +49,7 @@ function StackedGrid({ tiles = [], carousels = [], filterValues }) {
         if (c.mode === 'grid') {
           const stiles = (c.tiles || []).slice().sort((a, b) => (a.layout?.y ?? 0) - (b.layout?.y ?? 0) || (a.layout?.x ?? 0) - (b.layout?.x ?? 0));
           return (
-            <div key={c.id} style={{ gridColumn: '1 / -1', background: '#fff', border: '1px solid #e0e0e0', borderRadius: 12, padding: 12, boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
+            <div key={c.id} style={{ gridColumn: '1 / -1', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 12, boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
               {c.title && <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 10 }}>{c.title}</h3>}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, gridAutoFlow: 'dense' }}>
                 {stiles.map((t) => (
@@ -64,7 +64,7 @@ function StackedGrid({ tiles = [], carousels = [], filterValues }) {
         }
         // A scrolling carousel: a compact capped swipe band.
         return (
-          <div key={c.id} style={{ gridColumn: '1 / -1', height: Math.min(340, Math.max(220, it.h * 22)), background: '#fff', border: '1px solid #e0e0e0', borderRadius: 12, padding: 10, boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
+          <div key={c.id} style={{ gridColumn: '1 / -1', height: Math.min(340, Math.max(220, it.h * 22)), background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 10, boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
             <Carousel carousel={c} filterValues={filterValues} editable={false} />
           </div>
         );
@@ -143,7 +143,7 @@ function DesktopGrid({ tiles = [], carousels = [], filterValues, editable, onLay
         </div>
       ))}
       {carousels.map((c) => (
-        <div key={c.id} style={{ background: '#fff', border: '1px solid #e0e0e0', borderRadius: 'var(--radius-md)', padding: 10, boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
+        <div key={c.id} style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: 10, boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
           {c.mode === 'grid'
             ? <SectionGrid carousel={c} filterValues={filterValues} editable={editable} {...(carouselHandlers ? carouselHandlers(c) : {})} />
             : <Carousel carousel={c} filterValues={filterValues} editable={editable} {...(carouselHandlers ? carouselHandlers(c) : {})} />}

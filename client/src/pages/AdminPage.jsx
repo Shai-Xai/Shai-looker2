@@ -258,7 +258,7 @@ function ClientSettings({ entity, suites, fields, onChange, onBack }) {
           onChange={(e) => setAiContext(e.target.value)}
           rows={5}
           placeholder={"e.g. MTN Bushfire is a 3-day festival in Eswatini each May. Compare 2026 vs 2025. Capacity ~25k/day. Cashless is closed-loop tokens."}
-          style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', border: '1.5px solid #e0e0e0', borderRadius: 8, fontSize: 13, outline: 'none', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }}
+          style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 13, outline: 'none', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }}
         />
       </div>
       <SaveRow onSave={save} saved={saved} id={entity.id} />
@@ -436,7 +436,7 @@ function SetCard({ set, dashboards, onChange }) {
       <input style={{ ...input, fontWeight: 700, width: '100%' }} value={name} onChange={(e) => setName(e.target.value)} />
       <Field label="Icon"><IconPicker value={icon} onChange={setIcon} /></Field>
       <Section title="Add dashboards from folder">
-      <div style={{ border: '1px solid #eee', borderRadius: 8, padding: 10, margin: '6px 0' }}>
+      <div style={{ border: '1px solid var(--hairline)', borderRadius: 8, padding: 10, margin: '6px 0' }}>
         {/* Breadcrumb */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', fontSize: 13, marginBottom: 8 }}>
           <button style={crumbLink} onClick={() => setFpath('')}>All folders</button>
@@ -882,7 +882,7 @@ function AISettings() {
           onChange={(e) => setText(e.target.value)}
           rows={12}
           placeholder={"e.g.\n- All amounts are in South African Rand (ZAR).\n- Always compare against the previous event when a comparison is available.\n- Be concise and avoid speculation; flag implausible figures.\n- Refer to attendees, organisers, and events using Howler terminology."}
-          style={{ width: '100%', boxSizing: 'border-box', marginTop: 6, padding: '10px 12px', border: '1.5px solid #e0e0e0', borderRadius: 8, fontSize: 13, outline: 'none', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }}
+          style={{ width: '100%', boxSizing: 'border-box', marginTop: 6, padding: '10px 12px', border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 13, outline: 'none', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }}
         />
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
           <button style={saveBtn} onClick={save} disabled={text === orig}>Save</button>
@@ -974,7 +974,7 @@ function BackupRestore() {
 }
 
 function Tab({ active, onClick, children }) {
-  return <button onClick={onClick} style={{ padding: '8px 16px', borderRadius: 8, border: active ? '1.5px solid var(--brand)' : '1.5px solid #e0e0e0', background: active ? 'var(--brand)' : '#fff', color: active ? '#fff' : 'var(--text)', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>{children}</button>;
+  return <button onClick={onClick} style={{ padding: '8px 16px', borderRadius: 8, border: active ? '1.5px solid var(--brand)' : '1.5px solid var(--hairline)', background: active ? 'var(--brand)' : '#fff', color: active ? '#fff' : 'var(--text)', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>{children}</button>;
 }
 function Field({ label, children }) { return <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}><L>{label}</L>{children}</div>; }
 // Collapsible labelled section with a caret toggle.
@@ -994,33 +994,33 @@ function L({ children }) { return <span style={{ fontSize: 11, fontWeight: 700, 
 function Muted({ children }) { return <p style={{ color: 'var(--muted)' }}>{children}</p>; }
 
 const hint = { fontSize: 13, color: 'var(--muted)', marginBottom: 14 };
-const cardStyle = { background: '#fff', border: '1px solid #e0e0e0', borderRadius: 12, padding: 18, marginBottom: 14, boxShadow: '0 1px 6px rgba(0,0,0,0.05)' };
-const input = { padding: '8px 10px', border: '1.5px solid #e0e0e0', borderRadius: 7, fontSize: 13, outline: 'none', boxSizing: 'border-box', minWidth: 160 };
+const cardStyle = { background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 18, marginBottom: 14, boxShadow: '0 1px 6px rgba(0,0,0,0.05)' };
+const input = { padding: '8px 10px', border: '1.5px solid var(--hairline)', borderRadius: 7, fontSize: 13, outline: 'none', boxSizing: 'border-box', minWidth: 160 };
 const saveBtn = { padding: '8px 16px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 7, fontWeight: 600, fontSize: 13, cursor: 'pointer' };
-const addBtn = { padding: '9px 16px', background: '#f7f7f7', border: '1.5px solid #e0e0e0', borderRadius: 8, fontWeight: 600, fontSize: 13, cursor: 'pointer' };
-const miniBtn = { padding: '6px 12px', background: '#f7f7f7', border: '1.5px solid #e0e0e0', borderRadius: 6, fontWeight: 600, fontSize: 12, cursor: 'pointer' };
-const miniBtnOutline = { padding: '5px 11px', background: '#fff', border: '1.5px solid #e0e0e0', borderRadius: 6, fontWeight: 600, fontSize: 12, cursor: 'pointer', color: 'var(--text)' };
+const addBtn = { padding: '9px 16px', background: 'var(--elevated)', border: '1.5px solid var(--hairline)', borderRadius: 8, fontWeight: 600, fontSize: 13, cursor: 'pointer' };
+const miniBtn = { padding: '6px 12px', background: 'var(--elevated)', border: '1.5px solid var(--hairline)', borderRadius: 6, fontWeight: 600, fontSize: 12, cursor: 'pointer' };
+const miniBtnOutline = { padding: '5px 11px', background: 'var(--card)', border: '1.5px solid var(--hairline)', borderRadius: 6, fontWeight: 600, fontSize: 12, cursor: 'pointer', color: 'var(--text)' };
 const clientList = { display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 };
-const clientRow = { display: 'flex', alignItems: 'center', width: '100%', textAlign: 'left', background: '#fff', border: '1px solid #e6e6e6', borderRadius: 10, padding: '14px 16px', cursor: 'pointer', boxShadow: '0 1px 4px rgba(0,0,0,0.04)' };
+const clientRow = { display: 'flex', alignItems: 'center', width: '100%', textAlign: 'left', background: 'var(--card)', border: '1px solid #e6e6e6', borderRadius: 10, padding: '14px 16px', cursor: 'pointer', boxShadow: '0 1px 4px rgba(0,0,0,0.04)' };
 const detailNav = { display: 'flex', flexDirection: 'column', gap: 4, width: 170, flexShrink: 0 };
 const detailNavItem = { textAlign: 'left', padding: '9px 13px', border: 'none', background: 'transparent', borderRadius: 8, fontSize: 14, fontWeight: 600, color: 'var(--muted-2, #555)', cursor: 'pointer' };
 const detailNavActive = { background: 'var(--brand)', color: '#fff' };
-const delBtn = { padding: '6px 12px', background: '#fff', color: 'var(--error)', border: '1.5px solid #f0c0c0', borderRadius: 6, fontWeight: 600, fontSize: 12, cursor: 'pointer' };
+const delBtn = { padding: '6px 12px', background: 'var(--card)', color: 'var(--error)', border: '1.5px solid #f0c0c0', borderRadius: 6, fontWeight: 600, fontSize: 12, cursor: 'pointer' };
 const previewBtn = { padding: '6px 12px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 600, fontSize: 12, cursor: 'pointer' };
 const th = { textAlign: 'left', padding: '8px 10px', borderBottom: '2px solid #e0e0e0', fontSize: 12, color: 'var(--muted)' };
-const td = { padding: '8px 10px', borderBottom: '1px solid #f0f0f0' };
-const checkList = { display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 200, overflowY: 'auto', border: '1px solid #eee', borderRadius: 8, padding: 10, margin: '6px 0' };
+const td = { padding: '8px 10px', borderBottom: '1px solid var(--hairline)' };
+const checkList = { display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 200, overflowY: 'auto', border: '1px solid var(--hairline)', borderRadius: 8, padding: 10, margin: '6px 0' };
 const checkItem = { display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' };
 const crumbLink = { border: 'none', background: 'transparent', color: 'var(--brand)', fontWeight: 600, fontSize: 13, cursor: 'pointer', padding: 0 };
-const folderChip = { display: 'inline-flex', alignItems: 'center', gap: 4, border: '1px solid #e0e0e0', background: '#fafafa', borderRadius: 8, padding: '5px 10px', fontSize: 13, cursor: 'pointer', color: 'var(--text)' };
-const orderList = { display: 'flex', flexDirection: 'column', gap: 4, border: '1px solid #eee', borderRadius: 8, padding: 8, margin: '6px 0' };
+const folderChip = { display: 'inline-flex', alignItems: 'center', gap: 4, border: '1px solid var(--border)', background: 'var(--elevated)', borderRadius: 8, padding: '5px 10px', fontSize: 13, cursor: 'pointer', color: 'var(--text)' };
+const orderList = { display: 'flex', flexDirection: 'column', gap: 4, border: '1px solid var(--hairline)', borderRadius: 8, padding: 8, margin: '6px 0' };
 const orderRow = { display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, padding: '4px 2px' };
-const orderBtn = { width: 26, height: 26, flexShrink: 0, border: '1px solid #e0e0e0', borderRadius: 6, background: '#fafafa', cursor: 'pointer', fontSize: 13, lineHeight: 1, padding: 0 };
-const pickBtn = { position: 'absolute', right: 4, top: 4, padding: '4px 8px', fontSize: 11, fontWeight: 600, border: '1px solid #e0e0e0', borderRadius: 5, background: '#fafafa', cursor: 'pointer' };
-const ddList = { position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50, marginTop: 4, background: '#fff', border: '1px solid #e0e0e0', borderRadius: 8, boxShadow: '0 6px 20px rgba(0,0,0,0.12)', maxHeight: 220, overflowY: 'auto', listStyle: 'none', margin: 0, padding: '4px 0' };
+const orderBtn = { width: 26, height: 26, flexShrink: 0, border: '1px solid var(--border)', borderRadius: 6, background: 'var(--elevated)', cursor: 'pointer', fontSize: 13, lineHeight: 1, padding: 0 };
+const pickBtn = { position: 'absolute', right: 4, top: 4, padding: '4px 8px', fontSize: 11, fontWeight: 600, border: '1px solid var(--border)', borderRadius: 5, background: 'var(--elevated)', cursor: 'pointer' };
+const ddList = { position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50, marginTop: 4, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 6px 20px rgba(0,0,0,0.12)', maxHeight: 220, overflowY: 'auto', listStyle: 'none', margin: 0, padding: '4px 0' };
 const ddItem = { display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', fontSize: 13, cursor: 'pointer' };
 const ddMuted = { padding: '7px 12px', fontSize: 13, color: 'var(--muted)' };
-const iconPreview = { width: 38, height: 38, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--hairline)', borderRadius: 10, background: '#fafafa' };
-const iconChip = { width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 17, border: '1px solid #e6e6e6', borderRadius: 8, background: '#fff', cursor: 'pointer', padding: 0, lineHeight: 1 };
-const logoPreview = { width: 120, height: 56, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--hairline)', borderRadius: 10, background: '#fafafa', padding: 6, boxSizing: 'border-box' };
+const iconPreview = { width: 38, height: 38, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--hairline)', borderRadius: 10, background: 'var(--elevated)' };
+const iconChip = { width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 17, border: '1px solid #e6e6e6', borderRadius: 8, background: 'var(--card)', cursor: 'pointer', padding: 0, lineHeight: 1 };
+const logoPreview = { width: 120, height: 56, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--hairline)', borderRadius: 10, background: 'var(--elevated)', padding: 6, boxSizing: 'border-box' };
 const chip = { display: 'inline-flex', alignItems: 'center', gap: 2, background: '#fff0f3', color: 'var(--brand)', borderRadius: 980, padding: '3px 10px', fontSize: 12, fontWeight: 600 };

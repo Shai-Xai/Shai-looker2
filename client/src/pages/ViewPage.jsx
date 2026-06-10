@@ -82,14 +82,14 @@ export default function ViewPage() {
         {/* On mobile inside a suite the sticky "☰ Menu" bar already shows the
             context, so skip this header to avoid stacking two titles. */}
         {!(isMobile && suiteId) && (
-          <div style={{ background: 'rgba(255,255,255,0.72)', backdropFilter: 'saturate(180%) blur(20px)', WebkitBackdropFilter: 'saturate(180%) blur(20px)', borderBottom: '1px solid var(--hairline)', padding: isMobile ? '12px 14px' : '16px 22px', display: 'flex', alignItems: 'center', gap: isMobile ? 10 : 16 }}>
+          <div style={{ background: 'var(--frost)', backdropFilter: 'saturate(180%) blur(20px)', WebkitBackdropFilter: 'saturate(180%) blur(20px)', borderBottom: '1px solid var(--hairline)', padding: isMobile ? '12px 14px' : '16px 22px', display: 'flex', alignItems: 'center', gap: isMobile ? 10 : 16 }}>
             <Link to={backTo} style={{ color: 'var(--muted)', fontSize: 13, textDecoration: 'none' }}>← Back</Link>
             <div style={{ flex: 1, minWidth: 0 }}>
               {setInfo && <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)' }}>{setInfo.name}</div>}
               <h2 style={{ fontSize: isMobile ? 17 : 21, fontWeight: 600, letterSpacing: '-0.02em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{def.title}</h2>
             </div>
             {canSummarize && !isMobile && (
-              <button style={summaryBtn} onClick={() => setSummaryOpen(true)} title="AI summary of the whole dashboard">✨ Summary</button>
+              <button className="btn-key" style={summaryBtn} onClick={() => setSummaryOpen(true)} title="AI summary of the whole dashboard">✨ Summary</button>
             )}
             {hasFilters && !isMobile && (
               <button style={filtersBtn(filtersOpen)} onClick={() => setFiltersOpen(v => !v)}>
@@ -105,7 +105,7 @@ export default function ViewPage() {
         {/* On mobile inside a suite the header is hidden, so offer the summary here. */}
         {canSummarize && isMobile && suiteId && (
           <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '8px 12px 0' }}>
-            <button style={summaryBtn} onClick={() => setSummaryOpen(true)}>✨ Summary</button>
+            <button className="btn-key" style={summaryBtn} onClick={() => setSummaryOpen(true)}>✨ Summary</button>
           </div>
         )}
 

@@ -79,7 +79,7 @@ export default function SingleValueTile({ data, visConfig = {}, label }) {
 
   const color = visConfig.custom_color_enabled && visConfig.custom_color
     ? visConfig.custom_color
-    : visConfig.value_color || '#222';
+    : visConfig.value_color || 'var(--text)';
 
   // Looker conditional formatting → colour the whole tile + text.
   const cf = evalConditionalFormatting(visConfig.conditional_formatting, primaryField, primaryCell);

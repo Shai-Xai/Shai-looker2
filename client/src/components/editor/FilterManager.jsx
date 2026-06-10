@@ -61,7 +61,7 @@ export default function FilterManager({ filters, onChange, onClose }) {
           ))}
           <button style={addBtn} onClick={add}>+ Add filter</button>
         </div>
-        <div style={{ padding: '12px 16px', borderTop: '1px solid #e0e0e0', textAlign: 'right' }}>
+        <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border)', textAlign: 'right' }}>
           <button style={doneBtn} onClick={onClose}>Done</button>
         </div>
       </div>
@@ -80,11 +80,11 @@ function L({ children }) {
 }
 
 const overlay = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200 };
-const modal = { background: '#fff', borderRadius: 12, width: 560, maxWidth: '92vw', maxHeight: '85vh', display: 'flex', flexDirection: 'column', boxShadow: '0 8px 40px rgba(0,0,0,0.2)' };
-const head = { display: 'flex', alignItems: 'center', padding: '16px 18px', borderBottom: '1px solid #e0e0e0' };
-const row = { border: '1px solid #eee', borderRadius: 8, padding: 12, marginBottom: 10 };
-const inp = { width: '100%', padding: '6px 9px', border: '1.5px solid #e0e0e0', borderRadius: 6, fontSize: 13, outline: 'none', marginTop: 3, boxSizing: 'border-box', fontWeight: 400 };
+const modal = { background: 'var(--card)', borderRadius: 12, width: 560, maxWidth: '92vw', maxHeight: '85vh', display: 'flex', flexDirection: 'column', boxShadow: '0 8px 40px rgba(0,0,0,0.2)' };
+const head = { display: 'flex', alignItems: 'center', padding: '16px 18px', borderBottom: '1px solid var(--border)' };
+const row = { border: '1px solid var(--hairline)', borderRadius: 8, padding: 12, marginBottom: 10 };
+const inp = { width: '100%', padding: '6px 9px', border: '1.5px solid var(--hairline)', borderRadius: 6, fontSize: 13, outline: 'none', marginTop: 3, boxSizing: 'border-box', fontWeight: 400 };
 const closeBtn = { border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 16, color: '#888' };
 const del = { border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--error)', fontSize: 14, alignSelf: 'flex-end', paddingBottom: 8 };
-const addBtn = { padding: '8px 14px', background: '#f7f7f7', border: '1.5px solid #e0e0e0', borderRadius: 7, fontSize: 13, fontWeight: 600, cursor: 'pointer' };
+const addBtn = { padding: '8px 14px', background: 'var(--elevated)', border: '1.5px solid var(--hairline)', borderRadius: 7, fontSize: 13, fontWeight: 600, cursor: 'pointer' };
 const doneBtn = { padding: '8px 18px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 7, fontSize: 13, fontWeight: 600, cursor: 'pointer' };
