@@ -6,6 +6,8 @@ import { useIsMobile } from '../lib/useIsMobile.js';
 import { vtNavigate } from '../lib/viewTransition.js';
 import AiMark from '../components/AiMark.jsx';
 import BriefingTuneModal from '../components/BriefingTuneModal.jsx';
+import TileFrame from '../components/TileFrame.jsx';
+import { ScopeProvider } from '../lib/ScopeContext.jsx';
 import { fmtR } from '../lib/money.js';
 
 // Personalised landing page (briefing-led): the Owl opens with what changed
@@ -16,7 +18,7 @@ import { fmtR } from '../lib/money.js';
 export default function ClientHome() {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
   const { previewEntityId } = useOutletContext() || {};
   const [suites, setSuites] = useState([]);
   const [snap, setSnap] = useState(null);
@@ -112,6 +114,29 @@ export default function ClientHome() {
         </div>
       )}
 
+      {/* Pinned tiles — live tiles the user chose to keep on home */}
+      {(snap?.pinnedTiles || []).length > 0 && (
+        <>
+          <SectionHead icon="📌">Pinned</SectionHead>
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
+            {snap.pinnedTiles.map((p) => (
+              <PinnedTile
+                key={`${p.dashboardId}|${p.tile.id}`}
+                p={p}
+                isAdmin={isAdmin}
+                entityId={previewEntityId}
+                onOpen={() => go(p.suiteId, p.dashboardId)}
+                onUnpin={() => {
+                  api.togglePin({ dashboardId: p.dashboardId, tileId: p.tile.id, kind: 'pin', on: false, scope: isAdmin ? 'entity' : 'user', entityId: previewEntityId })
+                    .then(() => api.mySnapshot(previewEntityId, true).then(setSnap))
+                    .catch(() => {});
+                }}
+              />
+            ))}
+          </div>
+        </>
+      )}
+
       {/* Suggestions from the Owl */}
       {(brief?.suggestions || []).length > 0 && (
         <>
@@ -186,6 +211,29 @@ export default function ClientHome() {
     </main>
   );
 }
+
+// A pinned tile: source bar (set · dashboard, open, unpin) + the REAL tile,
+// scoped to its suite so queries run exactly like the dashboard view.
+function PinnedTile({ p, onOpen, onUnpin }) {
+  const metric = (p.tile.vis?.type || '').startsWith('single_value');
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 2px 5px' }}>
+        <span style={{ flex: 1, minWidth: 0, fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {p.setName} · {p.dashTitle}
+        </span>
+        <button onClick={onOpen} title="Open dashboard" style={pinAct}>→</button>
+        <button onClick={onUnpin} title="Unpin from home" style={pinAct}>✕</button>
+      </div>
+      <div style={{ height: metric ? 150 : 300 }}>
+        <ScopeProvider suiteId={p.suiteId} dashboardContext="">
+          <TileFrame tile={p.tile} filterValues={p.filterValues || {}} editable={false} />
+        </ScopeProvider>
+      </div>
+    </div>
+  );
+}
+const pinAct = { flexShrink: 0, border: 'none', background: 'rgba(128,128,128,0.12)', color: 'var(--muted-2)', borderRadius: 980, width: 22, height: 22, fontSize: 12, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1 };
 
 function SectionHead({ icon, children }) {
   return <h2 style={{ fontSize: 14, fontWeight: 800, letterSpacing: '-0.01em', margin: '22px 0 10px', display: 'flex', alignItems: 'center', gap: 7 }}>{icon && <span>{icon}</span>}{children}</h2>;

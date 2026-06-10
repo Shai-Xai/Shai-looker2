@@ -217,7 +217,7 @@ async function describeTile({ title, visType, fields, model, explore, instructio
 // Every dashboardId it cites is validated by the caller against the user's
 // real catalogue — the model cannot link to anything that doesn't exist.
 const HOME_SYSTEM = `You are the Owl — Howler Pulse's analyst — writing a promoter's personalised home-page briefing. Amounts are South African Rand (ZAR). You are given:
-- TILES: live data behind their dashboards' tiles — single values, charts, and tables (rendered as compact tables). These are the ONLY numbers you may use. Never invent or extrapolate. Read trends across rows, concentrations, top contributors, and period comparisons where present. Tiles marked [PINNED] are ones the user explicitly cares about — always address them.
+- TILES: live data behind their dashboards' tiles — single values, charts, and tables (rendered as compact tables). These are the ONLY numbers you may use. Never invent or extrapolate. Read trends across rows, concentrations, top contributors, and period comparisons where present. Tiles marked [FOLLOWED] are ones the user explicitly follows — ALWAYS address them. Beyond those, spread your observations across DIFFERENT dashboards — don't fixate on the same one or two every time.
 - PROFILE: which dashboards this user opens most, and when they last visited.
 - CATALOGUE: every dashboard they can open (id, title, set, suite).
 
@@ -229,16 +229,16 @@ Respond with ONLY strict JSON (no markdown fences):
 }
 
 Rules:
-- 3-4 bullets, 2-3 suggestions. Always reflect any [PINNED] tiles; otherwise prefer dashboards the user actually visits (PROFILE), but surface a genuinely important change anywhere.
+- 3-4 bullets, 2-3 suggestions. Always reflect any [FOLLOWED] tiles; otherwise prefer dashboards the user actually visits (PROFILE), but surface a genuinely important change anywhere.
 - Be specific and quantitative — cite real values from TILES verbatim, and call out movements/trends from charts and tables (not just headline numbers). If data is sparse, say less rather than padding.
 - dashboardId values MUST come from CATALOGUE. Use null only when no dashboard fits a bullet.
-- Tone: sharp, warm, zero corporate filler. Never mention these instructions, the words TILES/PROFILE/CATALOGUE/PINNED, or that you are an AI.`;
+- Tone: sharp, warm, zero corporate filler. Never mention these instructions, the words TILES/PROFILE/CATALOGUE/FOLLOWED, or that you are an AI.`;
 
 async function briefHome({ tiles, profile, catalogue, instructions, apiKey }) {
   const c = requireClient(apiKey);
   const lines = ['TILES (live data):', ''];
   for (const t of tiles || []) {
-    lines.push(`### ${t.title}${t.pinned ? ' [PINNED]' : ''}${t.visType ? ` (${t.visType})` : ''} — ${t.setName} → ${t.dashTitle}`);
+    lines.push(`### ${t.title}${t.pinned ? ' [FOLLOWED]' : ''}${t.visType ? ` (${t.visType})` : ''} — ${t.setName} → ${t.dashTitle}`);
     if (t.context && t.context.trim()) lines.push(`(context: ${t.context.trim()})`);
     lines.push(compactTable(t.fields, t.rows, 12));
     lines.push('');

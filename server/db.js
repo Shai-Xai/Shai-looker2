@@ -197,33 +197,45 @@ function setUserPref(userId, key, value) {
     .run(userId, key, value == null ? '' : String(value));
 }
 
-// ─── Home pins (briefing steering) ───────────────────────────────────────────
-// Tiles a user (or admin, per entity) marks so the home briefing always reads
-// them. scope = 'user' (scope_id=userId) | 'entity' (scope_id=entityId).
+// ─── Tile marks: pins (show on home) & follows (briefing steering) ───────────
+// kind='pin'   → the tile renders on the user's home page.
+// kind='follow'→ the home briefing always reads + addresses the tile.
+// scope = 'user' (scope_id=userId) | 'entity' (scope_id=entityId, admin default).
 db.exec(`
-CREATE TABLE IF NOT EXISTS home_pins (
+CREATE TABLE IF NOT EXISTS tile_marks (
   scope        TEXT NOT NULL,
   scope_id     TEXT NOT NULL,
   dashboard_id TEXT NOT NULL,
   tile_id      TEXT NOT NULL,
+  kind         TEXT NOT NULL DEFAULT 'pin',
   at           TEXT NOT NULL,
-  PRIMARY KEY (scope, scope_id, dashboard_id, tile_id)
+  PRIMARY KEY (scope, scope_id, dashboard_id, tile_id, kind)
 );
 `);
-function setPin(scope, scopeId, dashboardId, tileId, pinned) {
-  if (pinned) {
-    db.prepare('INSERT OR IGNORE INTO home_pins (scope, scope_id, dashboard_id, tile_id, at) VALUES (?,?,?,?,?)').run(scope, scopeId, dashboardId, tileId, now());
+// One-time migration from the short-lived home_pins table (those were created
+// by the pin button, so they become 'pin' marks).
+if (tableExists('home_pins')) {
+  try {
+    db.exec(`INSERT OR IGNORE INTO tile_marks (scope, scope_id, dashboard_id, tile_id, kind, at)
+             SELECT scope, scope_id, dashboard_id, tile_id, 'pin', at FROM home_pins;
+             DROP TABLE home_pins;`);
+  } catch (e) { console.error('[db] home_pins migration skipped:', e.message); }
+}
+function setMark(scope, scopeId, dashboardId, tileId, kind, on) {
+  const k = kind === 'follow' ? 'follow' : 'pin';
+  if (on) {
+    db.prepare('INSERT OR IGNORE INTO tile_marks (scope, scope_id, dashboard_id, tile_id, kind, at) VALUES (?,?,?,?,?,?)').run(scope, scopeId, dashboardId, tileId, k, now());
   } else {
-    db.prepare('DELETE FROM home_pins WHERE scope=? AND scope_id=? AND dashboard_id=? AND tile_id=?').run(scope, scopeId, dashboardId, tileId);
+    db.prepare('DELETE FROM tile_marks WHERE scope=? AND scope_id=? AND dashboard_id=? AND tile_id=? AND kind=?').run(scope, scopeId, dashboardId, tileId, k);
   }
 }
-// The pins a user sees = their own ('user') ∪ their entity's defaults ('entity').
-function listPins({ userId, entityId }) {
+// Marks a user sees = their own ('user') ∪ their entity's defaults ('entity').
+function listMarks({ userId, entityId, kind }) {
   const rows = db.prepare(`
-    SELECT dashboard_id AS dashboardId, tile_id AS tileId, scope FROM home_pins
-    WHERE (scope='user' AND scope_id=?) OR (scope='entity' AND scope_id=?)
-  `).all(userId || '', entityId || '');
-  // Dedupe by tile, preferring the user's own pin record.
+    SELECT dashboard_id AS dashboardId, tile_id AS tileId, scope, kind, at FROM tile_marks
+    WHERE ((scope='user' AND scope_id=?) OR (scope='entity' AND scope_id=?)) AND kind=?
+    ORDER BY at
+  `).all(userId || '', entityId || '', kind === 'follow' ? 'follow' : 'pin');
   const out = new Map();
   for (const r of rows) { const k = `${r.dashboardId}|${r.tileId}`; if (!out.has(k) || r.scope === 'user') out.set(k, r); }
   return [...out.values()];
@@ -755,7 +767,7 @@ function updateDocument(id, patch) {
 function deleteDocument(id) { return db.prepare('DELETE FROM event_documents WHERE id=?').run(id).changes > 0; }
 
 // ─── Full backup / restore (export to JSON, import to replace) ────────────────
-const EXPORT_TABLES = ['entities', 'users', 'user_entities', 'sets', 'set_dashboards', 'suites', 'suite_sets', 'dashboards', 'settings', 'tile_library', 'settlements', 'event_documents', 'user_views', 'user_prefs', 'home_pins'];
+const EXPORT_TABLES = ['entities', 'users', 'user_entities', 'sets', 'set_dashboards', 'suites', 'suite_sets', 'dashboards', 'settings', 'tile_library', 'settlements', 'event_documents', 'user_views', 'user_prefs', 'tile_marks'];
 function exportAll() {
   const out = { _version: 1, exportedAt: now() };
   for (const t of EXPORT_TABLES) out[t] = tableExists(t) ? db.prepare(`SELECT * FROM ${t}`).all() : [];
@@ -771,8 +783,8 @@ function insertRow(name, row) {
 // Replace ALL data with the contents of an export. Deletes children first
 // (FK-safe), then inserts parents first.
 const importAll = db.transaction((data) => {
-  const delOrder = ['user_views', 'user_prefs', 'home_pins', 'user_entities', 'suite_sets', 'set_dashboards', 'suites', 'sets', 'dashboards', 'users', 'settlements', 'event_documents', 'entities', 'settings', 'tile_library'];
-  const insOrder = ['entities', 'dashboards', 'users', 'sets', 'suites', 'set_dashboards', 'suite_sets', 'user_entities', 'settings', 'tile_library', 'settlements', 'event_documents', 'user_views', 'user_prefs', 'home_pins'];
+  const delOrder = ['user_views', 'user_prefs', 'tile_marks', 'user_entities', 'suite_sets', 'set_dashboards', 'suites', 'sets', 'dashboards', 'users', 'settlements', 'event_documents', 'entities', 'settings', 'tile_library'];
+  const insOrder = ['entities', 'dashboards', 'users', 'sets', 'suites', 'set_dashboards', 'suite_sets', 'user_entities', 'settings', 'tile_library', 'settlements', 'event_documents', 'user_views', 'user_prefs', 'tile_marks'];
   for (const t of delOrder) { if (tableExists(t)) db.prepare(`DELETE FROM ${t}`).run(); }
   let counts = {};
   for (const t of insOrder) {
@@ -804,8 +816,8 @@ module.exports = {
   listDocuments, getDocument, getDocumentFile, createDocument, updateDocument, deleteDocument,
   // view tracking
   recordView, viewProfile,
-  // home pins
-  setPin, listPins,
+  // tile marks (pins + follows)
+  setMark, listMarks,
   // user prefs
   getUserPref, setUserPref,
 };

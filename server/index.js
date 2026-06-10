@@ -1123,11 +1123,10 @@ function clientCatalogue(entityId) {
 // the tile's listenTo map, then the organiser scope is forced on. Without the
 // suite locks, "Current Event" measures come back empty (the zeros bug).
 // `lockMap` = db.lockedFiltersForSuite(suiteId) (entity + suite locks).
-function tileQueryBody(tile, def, user, suiteId, lockMap = {}) {
-  const q = tile.query;
-  if (tile.type === 'text' || !q?.model || !q?.view || !(q.fields || []).length) return null;
-  // Effective value per dashboard filter (suite lock wins over default).
-  // Case/whitespace-insensitive, mirroring the dashboard view.
+// Effective value per dashboard filter (suite lock wins over default), keyed
+// by filter NAME — the shape the client's listenTo plumbing expects. Matching
+// is case/whitespace-insensitive, mirroring the dashboard view.
+function effectiveFilterValues(def, lockMap = {}) {
   const norm = {};
   for (const [k, v] of Object.entries(lockMap)) norm[k.trim().toLowerCase()] = v;
   const fv = {};
@@ -1139,6 +1138,13 @@ function tileQueryBody(tile, def, user, suiteId, lockMap = {}) {
     if (locked != null && locked !== '') v = locked;
     fv[f.name] = v;
   }
+  return fv;
+}
+
+function tileQueryBody(tile, def, user, suiteId, lockMap = {}) {
+  const q = tile.query;
+  if (tile.type === 'text' || !q?.model || !q?.view || !(q.fields || []).length) return null;
+  const fv = effectiveFilterValues(def, lockMap);
   const overrides = {};
   for (const [filterName, queryField] of Object.entries(tile.listenTo || {})) {
     const v = fv[filterName];
@@ -1160,21 +1166,43 @@ function buildLightSnapshot(user, entityId) {
   const shortcuts = prof.top.filter((t) => byId[t.dashboardId]).map((t) => ({ ...t, ...byId[t.dashboardId] })).slice(0, 4);
   const latest = db.listSettlements({ entityIds: [entityId] })[0] || null;
   const fresh = latest && (Date.now() - new Date(latest.settlementDate || latest.createdAt).getTime()) < 60 * 864e5;
+
+  // Pinned tiles render as REAL tiles on the home page: ship the tile def plus
+  // the dashboard's effective filter values (defaults + suite locks) so the
+  // client runs them exactly like the dashboard view would.
+  const pinnedTiles = [];
+  const lockCache = {};
+  for (const m of db.listMarks({ userId: user.id, entityId, kind: 'pin' })) {
+    const meta = byId[m.dashboardId];
+    const def = meta && store.get(m.dashboardId);
+    if (!def) continue;
+    const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))];
+    const tile = tiles.find((t) => t.id === m.tileId);
+    if (!tile || tile.type === 'text') continue;
+    lockCache[meta.suiteId] = lockCache[meta.suiteId] || expandLockMap(db.lockedFiltersForSuite(meta.suiteId));
+    pinnedTiles.push({
+      tile, suiteId: meta.suiteId, dashboardId: def.id, dashTitle: def.title, setName: meta.setName,
+      filterValues: effectiveFilterValues(def, lockCache[meta.suiteId]), scope: m.scope,
+    });
+    if (pinnedTiles.length >= 8) break;
+  }
+
   return {
     entity: { id: entity.id, name: entity.name },
     generatedAt: new Date().toISOString(),
     lastVisit: prof.lastVisit,
     shortcuts, catalogue, settlement: fresh ? latest : null,
+    pinnedTiles,
   };
 }
 
 // Heavy facts for the briefing (Looker reads): pinned tiles first (always
 // covered), then the lead dashboards' value/chart/table tiles, capped, with
 // row-limited data. Bounded for scale + behind the briefing cache.
-const FACT_MAX_TILES = 14;
+const FACT_MAX_TILES = 18;
 async function buildFacts(user, entityId, force = false) {
-  const { catalogue, leads } = clientCatalogue(entityId);
-  const pins = db.listPins({ userId: user.id, entityId }); // [{dashboardId, tileId, scope}]
+  const { catalogue } = clientCatalogue(entityId);
+  const follows = db.listMarks({ userId: user.id, entityId, kind: 'follow' });
   const dashMeta = Object.fromEntries(catalogue.map((c) => [c.dashboardId, c]));
   const picks = []; // { tile, def, suiteId, setName, dashTitle, pinned }
   const seen = new Set();
@@ -1185,34 +1213,46 @@ async function buildFacts(user, entityId, force = false) {
     picks.push({ tile, def, suiteId: suiteId || meta?.suiteId, setName: meta?.setName || '', dashTitle: def.title, pinned: !!pinned });
     seen.add(sig);
   };
-  // 1) Pinned tiles — wherever they live — always make the cut.
-  for (const p of pins) {
+  // 1) Followed tiles — wherever they live — always make the cut.
+  for (const p of follows) {
     const def = store.get(p.dashboardId);
     if (!def) continue;
     const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))];
     const tile = tiles.find((t) => t.id === p.tileId);
     if (tile) addTile(def, tile, dashMeta[def.id]?.suiteId, true);
   }
-  // 2) Fill from lead dashboards (value/chart/table tiles). Cap PER dashboard
-  //    so a busy lead tab (e.g. Overview) can't eat the whole budget and starve
-  //    the tabs that hold today's movement (e.g. Daily Sales).
-  const PER_DASH = 6;
-  for (const lead of leads) {
-    for (const did of lead.dashboardIds) {
-      const def = store.get(did);
-      if (!def) continue;
-      const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))];
-      let n = 0;
-      for (const tile of tiles) {
-        if (tile.type === 'text' || !tile.query?.fields?.length) continue;
-        const before = picks.length;
-        addTile(def, tile, lead.suiteId, false);
-        if (picks.length > before) n += 1;
-        if (n >= PER_DASH || picks.length >= FACT_MAX_TILES) break;
-      }
+  // 2) Fill from EVERY dashboard across the client's sets, round-robin so the
+  //    budget spreads over the whole catalogue (Payments, Comps, Resale…)
+  //    instead of the first dashboard eating it. A per-dashboard cap keeps any
+  //    one dashboard from dominating, and a daily rotation offset starts the
+  //    sweep at a different dashboard each day — so the briefing's coverage
+  //    (and therefore its story) naturally varies day to day.
+  const PER_DASH = 4;
+  const pools = [];
+  const pooled = new Set();
+  for (const c of catalogue) {
+    if (pooled.has(c.dashboardId)) continue;
+    pooled.add(c.dashboardId);
+    const def = store.get(c.dashboardId);
+    if (!def) continue;
+    const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((t) => t.tiles || []))]
+      .filter((t) => t.type !== 'text' && t.query?.fields?.length);
+    if (tiles.length) pools.push({ def, suiteId: c.suiteId, tiles, idx: 0, taken: 0 });
+  }
+  const offset = pools.length ? Math.floor(Date.now() / 864e5) % pools.length : 0;
+  const rotated = [...pools.slice(offset), ...pools.slice(0, offset)];
+  let progressed = true;
+  while (picks.length < FACT_MAX_TILES && progressed) {
+    progressed = false;
+    for (const pool of rotated) {
       if (picks.length >= FACT_MAX_TILES) break;
+      while (pool.idx < pool.tiles.length && pool.taken < PER_DASH) {
+        const tile = pool.tiles[pool.idx++];
+        const before = picks.length;
+        addTile(pool.def, tile, pool.suiteId, false);
+        if (picks.length > before) { pool.taken += 1; progressed = true; break; }
+      }
     }
-    if (picks.length >= FACT_MAX_TILES) break;
   }
 
   // Suite locked filters (Current Event / Cashless) per suite, resolved once
@@ -1356,30 +1396,35 @@ app.put('/api/my/briefing-tune', auth.requireAuth, (req, res) => {
   res.json({ tune: db.getUserPref(req.user.id, `briefing_tune:${entityId}`) });
 });
 
-// ─── Pin to home (briefing steering) ────────────────────────────────────────────
-// Pinned tiles are always read into the briefing. Promoters pin to their own
-// 'user' scope; admins pin a client default to 'entity' scope. A user sees the
-// union of both.
+// ─── Tile marks: 📌 pin (show on home) & follow (briefing steering) ─────────────
+// Promoters mark for themselves ('user' scope); admins in client preview set
+// entity-wide defaults. A user sees the union of both.
+function marksFor(req, entityId) {
+  if (!entityId) return { pins: [], follows: [] };
+  return {
+    pins: db.listMarks({ userId: req.user.id, entityId, kind: 'pin' }),
+    follows: db.listMarks({ userId: req.user.id, entityId, kind: 'follow' }),
+  };
+}
 app.get('/api/my/pins', auth.requireAuth, (req, res) => {
-  const entityId = homeEntityFor(req);
-  res.json({ pins: entityId ? db.listPins({ userId: req.user.id, entityId }) : [] });
+  res.json(marksFor(req, homeEntityFor(req)));
 });
 app.post('/api/my/pins', auth.requireAuth, (req, res) => {
-  const { dashboardId, tileId, pinned, scope } = req.body || {};
+  const { dashboardId, tileId, kind, scope } = req.body || {};
+  const on = req.body?.on ?? req.body?.pinned;
   if (!dashboardId || !tileId) return res.status(400).json({ error: 'dashboardId and tileId required' });
   const def = store.get(dashboardId);
   if (!def || !auth.canAccessDashboard(req.user, def)) return res.status(403).json({ error: 'Not allowed' });
-  // Admins may pin a client-wide default ('entity'); everyone can pin their own.
   const useEntity = scope === 'entity' && req.user.role === 'admin';
   const entityId = homeEntityFor(req);
   if (useEntity) {
-    if (!entityId) return res.status(400).json({ error: 'entityId required for an entity pin' });
-    db.setPin('entity', entityId, dashboardId, tileId, !!pinned);
+    if (!entityId) return res.status(400).json({ error: 'entityId required for an entity mark' });
+    db.setMark('entity', entityId, dashboardId, tileId, kind, !!on);
   } else {
-    db.setPin('user', req.user.id, dashboardId, tileId, !!pinned);
+    db.setMark('user', req.user.id, dashboardId, tileId, kind, !!on);
   }
-  if (entityId) bustHome(req.user.id, entityId); // next briefing reflects the change
-  res.json({ pins: entityId ? db.listPins({ userId: req.user.id, entityId }) : [] });
+  if (entityId) bustHome(req.user.id, entityId); // next home load reflects it
+  res.json(marksFor(req, entityId));
 });
 
 // ─── Tile library (admin) ──────────────────────────────────────────────────────
