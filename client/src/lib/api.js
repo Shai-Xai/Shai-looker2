@@ -175,6 +175,7 @@ export const api = {
 
   // Event documents (invoices etc.)
   myDocuments: () => fetch('/api/my/documents').then(json),
+  getDocument: (id) => fetch(`/api/documents/${id}`).then(json),
   adminListDocuments: (entityId) => fetch(`/api/admin/documents${entityId ? `?entityId=${encodeURIComponent(entityId)}` : ''}`).then(json),
   adminCreateDocument: (d) => fetch('/api/admin/documents', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(d) }).then(json),
   adminDeleteDocument: (id) => fetch(`/api/admin/documents/${id}`, { method: 'DELETE' }),

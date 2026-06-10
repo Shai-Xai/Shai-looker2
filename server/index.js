@@ -843,6 +843,13 @@ app.get('/api/my/documents', auth.requireAuth, (req, res) => {
   const list = req.user.role === 'admin' ? db.listDocuments() : db.listDocuments({ entityIds: req.user.entityIds || [] });
   res.json(list);
 });
+app.get('/api/documents/:id', auth.requireAuth, (req, res) => {
+  const doc = db.getDocument(req.params.id);
+  if (!doc) return res.status(404).json({ error: 'Document not found' });
+  const allowed = req.user.role === 'admin' || (doc.entityId && (req.user.entityIds || []).includes(doc.entityId));
+  if (!allowed) return res.status(403).json({ error: 'Not allowed' });
+  res.json({ ...doc, entityName: doc.entityId ? (db.getEntity(doc.entityId)?.name || '') : '' });
+});
 app.get('/api/documents/:id/file', auth.requireAuth, (req, res) => {
   const doc = db.getDocument(req.params.id);
   if (!doc) return res.status(404).json({ error: 'Document not found' });
@@ -851,7 +858,9 @@ app.get('/api/documents/:id/file', auth.requireAuth, (req, res) => {
   const f = db.getDocumentFile(req.params.id);
   if (!f) return res.status(404).json({ error: 'No file attached' });
   res.setHeader('Content-Type', f.fileType || 'application/octet-stream');
-  res.setHeader('Content-Disposition', `attachment; filename="${(f.fileName || 'document').replace(/"/g, '')}"`);
+  // inline=1 lets the browser render it in the viewer; otherwise force download.
+  const disp = req.query.inline ? 'inline' : 'attachment';
+  res.setHeader('Content-Disposition', `${disp}; filename="${(f.fileName || 'document').replace(/"/g, '')}"`);
   res.send(Buffer.from(f.file, 'base64'));
 });
 app.get('/api/admin/documents', auth.requireAdmin, (req, res) => {

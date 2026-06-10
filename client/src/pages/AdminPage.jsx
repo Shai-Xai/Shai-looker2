@@ -1163,6 +1163,7 @@ function Settlements({ entityId = null }) {
 // Plain uploads per client/event — invoices and other paperwork the client can
 // download alongside their settlement reports.
 function EventDocuments({ entityId, eventNames }) {
+  const navigate = useNavigate();
   const [docs, setDocs] = useState([]);
   const [eventName, setEventName] = useState(eventNames[0] || '');
   const [busy, setBusy] = useState(false);
@@ -1225,7 +1226,8 @@ function EventDocuments({ entityId, eventNames }) {
                   <div style={{ fontWeight: 600, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{doc.title}</div>
                   <div style={{ fontSize: 11, color: 'var(--muted)' }}>{doc.fileName} · {new Date(doc.createdAt).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' })}</div>
                 </div>
-                <a href={`/api/documents/${doc.id}/file`} style={{ ...miniBtnOutline, textDecoration: 'none' }}>⤓ Download</a>
+                <button style={miniBtnOutline} onClick={() => navigate(`/documents/${doc.id}`)}>Open</button>
+                <a href={`/api/documents/${doc.id}/file`} style={{ ...miniBtnOutline, textDecoration: 'none' }}>⤓</a>
                 <button style={{ ...miniBtnOutline, color: 'var(--error)' }} onClick={() => { if (confirm(`Delete "${doc.title}"?`)) api.adminDeleteDocument(doc.id).then(load); }}>Delete</button>
               </div>
             ))}

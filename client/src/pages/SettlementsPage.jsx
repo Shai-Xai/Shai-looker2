@@ -65,6 +65,7 @@ export default function SettlementsPage() {
 
 // Invoices & other paperwork uploaded for this client's events.
 function DocumentsSection({ docs, isMobile }) {
+  const navigate = useNavigate();
   const groups = [];
   for (const doc of docs) {
     const key = doc.eventName || 'Other documents';
@@ -80,14 +81,17 @@ function DocumentsSection({ docs, isMobile }) {
           <div key={g.key} style={{ background: 'var(--tile-bg, var(--card))', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', boxShadow: 'var(--shadow-sm)', padding: '12px 14px' }}>
             <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', marginBottom: 8 }}>{g.key}</div>
             {g.items.map((doc) => (
-              <a key={doc.id} href={`/api/documents/${doc.id}/file`} className="nav-row" style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '8px 8px', borderRadius: 8, textDecoration: 'none', color: 'var(--text)' }}>
-                <span style={{ fontSize: 15 }}>🧾</span>
-                <span style={{ flex: 1, minWidth: 0 }}>
-                  <span style={{ display: 'block', fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{doc.title}</span>
-                  <span style={{ display: 'block', fontSize: 11, color: 'var(--muted)' }}>{new Date(doc.createdAt).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
-                </span>
-                <span style={{ color: 'var(--brand)', fontSize: 13, fontWeight: 600, flexShrink: 0 }}>⤓</span>
-              </a>
+              <div key={doc.id} className="nav-row" style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '8px 8px', borderRadius: 8, color: 'var(--text)' }}>
+                <button onClick={() => vtNavigate(navigate, `/documents/${doc.id}`)} style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 9, border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left', padding: 0, color: 'var(--text)' }}>
+                  <span style={{ fontSize: 15, flexShrink: 0 }}>🧾</span>
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    <span style={{ display: 'block', fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{doc.title}</span>
+                    <span style={{ display: 'block', fontSize: 11, color: 'var(--muted)' }}>{new Date(doc.createdAt).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+                  </span>
+                  <span style={{ color: 'var(--brand)', fontSize: 13, fontWeight: 600, flexShrink: 0 }}>View →</span>
+                </button>
+                <a href={`/api/documents/${doc.id}/file`} title="Download" style={{ flexShrink: 0, color: 'var(--muted)', textDecoration: 'none', fontSize: 14, padding: '0 4px' }}>⤓</a>
+              </div>
             ))}
           </div>
         ))}
