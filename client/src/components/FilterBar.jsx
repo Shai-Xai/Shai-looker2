@@ -29,7 +29,10 @@ export function activeFilterCount(filters, values) {
 // `onClose`); this component then renders only the panel of controls when open.
 // On mobile it stays self-contained: a "Filters" trigger + bottom sheet, since
 // the suite view hides its header there.
-export default function FilterBar({ filters, values, onChange, locked = {}, open = false, onClose }) {
+// `leading` (mobile only): content rendered on the left of the trigger row —
+// the page passes its Summary button so both share one compact bar instead of
+// stacking two right-aligned rows.
+export default function FilterBar({ filters, values, onChange, locked = {}, open = false, onClose, leading = null }) {
   const isMobile = useIsMobile();
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -49,7 +52,9 @@ export default function FilterBar({ filters, values, onChange, locked = {}, open
     const activeCount = activeFilterCount(filters, values);
     return (
       <>
-        <div style={{ background: 'var(--card)', borderBottom: '1px solid var(--hairline)', padding: '10px 14px', display: 'flex', justifyContent: 'flex-end' }}>
+        <div style={{ background: 'var(--card)', borderBottom: '1px solid var(--hairline)', padding: '8px 14px', display: 'flex', alignItems: 'center', gap: 8 }}>
+          {leading}
+          <span style={{ flex: 1 }} />
           <button onClick={() => setMobileOpen(true)} style={filterTrigger}>
             <span>⚲ Filters</span>
             {activeCount > 0 && <span key={activeCount} className="pop" style={countPill}>{activeCount}</span>}

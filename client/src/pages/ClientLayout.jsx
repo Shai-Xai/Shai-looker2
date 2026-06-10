@@ -3,6 +3,7 @@ import { Outlet, useParams, useNavigate, useLocation } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import { useAuth } from '../lib/auth.jsx';
+import { useTheme } from '../lib/theme.jsx';
 import { vtNavigate } from '../lib/viewTransition.js';
 
 // Persistent client shell: a left sidebar tree of Suites → Sets → Dashboards,
@@ -12,7 +13,7 @@ export default function ClientLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const isMobile = useIsMobile();
-  const { isAdmin } = useAuth();
+  const { user, isAdmin } = useAuth();
   const [suites, setSuites] = useState([]);
   const [settlements, setSettlements] = useState([]);
   const [details, setDetails] = useState({}); // suiteId -> { sets:[{id,name,dashboards}] }
@@ -144,8 +145,10 @@ export default function ClientLayout() {
   };
   const shownSuites = searching ? visibleSuites.filter((su) => suiteSets(su) !== null) : visibleSuites;
 
+  // Shell = frosted column: scrollable tree on top, profile pinned at bottom.
   const sidebar = (
-    <nav ref={navRef} className="howler-sidebar" style={{ ...sidebarStyle, position: 'relative', ...(isMobile ? mobileSidebar : null) }}>
+    <div className="howler-sidebar" style={{ ...sidebarShell, ...(isMobile ? mobileSidebar : null) }}>
+    <nav ref={navRef} style={sidebarStyle}>
       <div className="nav-indicator" style={{ transform: `translateY(${indicator.y}px)`, height: indicator.h, opacity: indicator.show ? 1 : 0 }} />
       {brand && (brand.entityLogo || brand.entityName) && (
         <div style={brandHeader}>
@@ -240,6 +243,13 @@ export default function ClientLayout() {
         </>
       )}
     </nav>
+    <ProfileFooter
+      user={user}
+      isAdmin={isAdmin}
+      brand={brand}
+      onNavigate={(path) => { navigate(path); if (isMobile) setNavOpen(false); }}
+    />
+    </div>
   );
 
   return (
@@ -278,6 +288,51 @@ function readJson(key) {
   try { return JSON.parse(localStorage.getItem(key)) || {}; } catch { return {}; }
 }
 
+// Bottom-left profile: avatar + identity, opening a menu with Integrations
+// (clients), the theme toggle and Log out — everything that used to crowd the
+// top header.
+function ProfileFooter({ user, isAdmin, brand, onNavigate }) {
+  const { theme, toggle } = useTheme();
+  const { logout } = useAuth();
+  const [open, setOpen] = useState(false);
+  const entity = user?.entities?.[0];
+  const name = isAdmin ? 'Howler · Admin' : (brand?.entityName || entity?.name || (user?.email || '').split('@')[0]);
+  const logo = brand?.entityLogo || entity?.logo || '';
+  const initial = (name || '?').trim().charAt(0).toUpperCase();
+  return (
+    <div style={{ position: 'relative', borderTop: '1px solid var(--hairline)', padding: 8, flexShrink: 0 }}>
+      {open && <div style={{ position: 'fixed', inset: 0, zIndex: 70 }} onClick={() => setOpen(false)} />}
+      {open && (
+        <div className="modal-in" style={profileMenu}>
+          {!isAdmin && (
+            <button className="nav-row" style={menuItem} onClick={() => { setOpen(false); onNavigate('/settings'); }}>
+              <span style={menuIco}>⚙</span> Integrations
+            </button>
+          )}
+          <button className="nav-row" style={menuItem} onClick={toggle}>
+            <span style={menuIco}>{theme === 'dark' ? '☀️' : '🌙'}</span> {theme === 'dark' ? 'Light mode' : 'Dark mode'}
+          </button>
+          <button className="nav-row" style={{ ...menuItem, color: 'var(--error)' }} onClick={() => logout()}>
+            <span style={menuIco}>↪</span> Log out
+          </button>
+        </div>
+      )}
+      <button className="nav-row" style={profileRow} onClick={() => setOpen((v) => !v)} title="Profile & settings">
+        {logo ? (
+          <img src={logo} alt="" style={{ width: 30, height: 30, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }} />
+        ) : (
+          <span style={avatar}>{initial}</span>
+        )}
+        <span style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+          <span style={{ display: 'block', fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
+          <span style={{ display: 'block', fontSize: 11, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user?.email}</span>
+        </span>
+        <span style={{ color: 'var(--muted)', fontSize: 14, flexShrink: 0 }}>⋯</span>
+      </button>
+    </div>
+  );
+}
+
 function Ico({ v, size = 16 }) {
   if (!v) return null;
   return v.startsWith('data:')
@@ -288,7 +343,13 @@ function Caret({ open, small }) {
   return <span className="nav-caret" style={{ display: 'inline-block', width: 12, fontSize: small ? 8 : 9, color: '#b0b0b6', transform: open ? 'rotate(90deg)' : 'none' }}>▶</span>;
 }
 
-const sidebarStyle = { width: 264, flexShrink: 0, overflowY: 'auto', padding: '16px 10px' };
+const sidebarShell = { width: 264, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0 };
+const sidebarStyle = { flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px 10px', position: 'relative' };
+const profileRow = { display: 'flex', alignItems: 'center', gap: 9, width: '100%', border: 'none', background: 'transparent', cursor: 'pointer', padding: '8px 10px', borderRadius: 10, color: 'var(--text)' };
+const avatar = { flexShrink: 0, width: 30, height: 30, borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 800, color: '#fff', background: 'linear-gradient(135deg, #FF385C 0%, #FF6B35 45%, #7C3AED 100%)' };
+const profileMenu = { position: 'absolute', bottom: 'calc(100% + 6px)', left: 8, right: 8, zIndex: 71, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, boxShadow: '0 10px 36px -8px rgba(0,0,0,0.25)', padding: 6, display: 'flex', flexDirection: 'column', gap: 2 };
+const menuItem = { display: 'flex', alignItems: 'center', gap: 9, width: '100%', border: 'none', background: 'transparent', cursor: 'pointer', padding: '9px 10px', borderRadius: 8, fontSize: 13, fontWeight: 600, color: 'var(--text)', textAlign: 'left' };
+const menuIco = { width: 18, textAlign: 'center', fontSize: 14, flexShrink: 0 };
 const brandHeader = { display: 'flex', alignItems: 'center', gap: 9, padding: '4px 12px 14px', marginBottom: 4, borderBottom: '1px solid var(--hairline)' };
 const mobileSidebar = { position: 'relative', zIndex: 51, height: '100%', width: 'min(290px, 84vw)', boxShadow: '4px 0 24px rgba(0,0,0,0.15)', WebkitOverflowScrolling: 'touch' };
 const menuBar = { position: 'sticky', top: 0, zIndex: 20, display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderBottom: '1px solid var(--hairline)', background: 'var(--frost)', backdropFilter: 'saturate(180%) blur(20px)', WebkitBackdropFilter: 'saturate(180%) blur(20px)' };

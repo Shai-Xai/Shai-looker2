@@ -286,7 +286,8 @@ input::placeholder, textarea::placeholder { color: #b0b0b6; }
 .collapsey.open > .collapsey-inner { opacity: 1; transition: opacity .28s ease .05s; }
 
 /* Desktop sidebar collapse — slide width to 0 instead of disappearing. */
-.sidebar-wrap { flex-shrink: 0; overflow: hidden; transition: width .3s var(--ease-out), opacity .24s ease; }
+.sidebar-wrap { flex-shrink: 0; overflow: hidden; display: flex; transition: width .3s var(--ease-out), opacity .24s ease; }
+.sidebar-wrap > .howler-sidebar { height: 100%; }
 .sidebar-wrap.collapsed { width: 0 !important; opacity: 0; }
 
 @media (prefers-reduced-motion: reduce) {

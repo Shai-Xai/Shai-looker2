@@ -138,7 +138,7 @@ export default function ViewPage() {
             context, so skip this header to avoid stacking two titles. */}
         {!(isMobile && suiteId) && (
           <div style={{ background: 'var(--frost)', backdropFilter: 'saturate(180%) blur(20px)', WebkitBackdropFilter: 'saturate(180%) blur(20px)', borderBottom: '1px solid var(--hairline)', padding: isMobile ? '12px 14px' : '16px 22px', display: 'flex', alignItems: 'center', gap: isMobile ? 10 : 16 }}>
-            <Link to={backTo} style={{ color: 'var(--muted)', fontSize: 13, textDecoration: 'none' }}>← Back</Link>
+            <Link to={backTo} title="Home" aria-label="Home" className="btn-key" style={homeBtn}><HomeIcon /></Link>
             <div style={{ flex: 1, minWidth: 0 }}>
               {setInfo && <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)' }}>{setInfo.name}</div>}
               <h2 style={{ fontSize: isMobile ? 17 : 21, fontWeight: 600, letterSpacing: '-0.02em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{headerTitle}</h2>
@@ -169,15 +169,22 @@ export default function ViewPage() {
           />
         )}
 
-        {/* On mobile inside a suite the header is hidden, so offer the summary here. */}
-        {canSummarize && isMobile && suiteId && (
-          <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '8px 12px 0' }}>
-            <button className="btn-key" style={summaryBtn} onClick={() => setSummaryOpen(true)}><AiMark size={20} /> Summary</button>
+        {/* On mobile inside a suite the header is hidden, so the Summary button
+            shares the filters bar (or gets its own compact row if no filters). */}
+        {canSummarize && isMobile && suiteId && !hasFilters && (
+          <div style={{ background: 'var(--card)', borderBottom: '1px solid var(--hairline)', padding: '8px 14px', display: 'flex', justifyContent: 'flex-start' }}>
+            <button className="btn-key" style={summaryBtn} onClick={() => setSummaryOpen(true)}><AiMark size={18} /> Summary</button>
           </div>
         )}
 
         {hasFilters && (
-          <FilterBar filters={def.filters} values={filterValues} onChange={handleFilterChange} locked={locked} open={filtersOpen} onClose={() => setFiltersOpen(false)} />
+          <FilterBar
+            filters={def.filters} values={filterValues} onChange={handleFilterChange} locked={locked}
+            open={filtersOpen} onClose={() => setFiltersOpen(false)}
+            leading={canSummarize && isMobile && suiteId ? (
+              <button className="btn-key" style={summaryBtn} onClick={() => setSummaryOpen(true)}><AiMark size={18} /> Summary</button>
+            ) : null}
+          />
         )}
 
         <div
@@ -214,6 +221,16 @@ const editBtn = { padding: '8px 18px', background: 'var(--brand)', color: '#fff'
 const filtersBtn = (active) => ({ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '8px 16px', background: active ? 'rgba(128,128,128,0.2)' : 'rgba(128,128,128,0.15)', color: 'var(--text)', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer' });
 const countBadge = { background: 'var(--brand)', color: '#fff', fontSize: 11, fontWeight: 700, borderRadius: 980, minWidth: 18, height: 18, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' };
 const summaryBtn = { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 16px', background: 'rgba(128,128,128,0.15)', color: 'var(--text)', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer' };
+const homeBtn = { flexShrink: 0, width: 34, height: 34, borderRadius: '50%', background: 'rgba(128,128,128,0.15)', color: 'var(--text)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', textDecoration: 'none' };
+
+function HomeIcon({ size = 16 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 10.5 12 3l9 7.5" />
+      <path d="M5 9.5V21h5.5v-6h3v6H19V9.5" />
+    </svg>
+  );
+}
 
 // Underline tab bar for a parent dashboard and its sub-dashboards. The
 // gradient underline is a single element measured against the active tab so it

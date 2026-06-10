@@ -34,11 +34,17 @@ function Header() {
       </div>
       <Link to="/" style={{ fontSize: 17, fontWeight: 700, letterSpacing: '-0.3px', textDecoration: 'none', color: 'var(--text)' }}>Howler&nbsp;:&nbsp;Pulse</Link>
       <div style={{ flex: 1 }} />
-      {isAdmin && <Link to="/admin" style={navLink}>Admin</Link>}
-      {!isAdmin && <Link to="/settings" style={navLink} title="Integrations">{isMobile ? '⚙' : 'Integrations'}</Link>}
-      <button onClick={toggle} title={theme === 'dark' ? 'Light mode' : 'Dark mode'} aria-label="Toggle theme" style={themeBtn}>{theme === 'dark' ? '☀️' : '🌙'}</button>
-      {!isMobile && <UserBadge user={user} isAdmin={isAdmin} />}
-      <button onClick={() => logout()} style={logoutBtn}>{isMobile ? 'Exit' : 'Log out'}</button>
+      {/* Clients get their identity, Integrations, theme and Log out in the
+          sidebar's bottom-left profile menu — the header stays clean. Admin
+          pages have no persistent sidebar, so admins keep the header controls. */}
+      {isAdmin && (
+        <>
+          <Link to="/admin" style={navLink}>Admin</Link>
+          <button onClick={toggle} title={theme === 'dark' ? 'Light mode' : 'Dark mode'} aria-label="Toggle theme" style={themeBtn}>{theme === 'dark' ? '☀️' : '🌙'}</button>
+          {!isMobile && <UserBadge user={user} isAdmin={isAdmin} />}
+          <button onClick={() => logout()} style={logoutBtn}>{isMobile ? 'Exit' : 'Log out'}</button>
+        </>
+      )}
     </header>
   );
 }
