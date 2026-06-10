@@ -67,14 +67,14 @@ export default function TableTile({ data, visConfig = {} }) {
                 <th key={d.name} rowSpan={2} style={{ ...thStyle, textAlign: 'left', ...(di === 0 ? stickyHeadCorner : null) }}>{d.label_short || d.label}</th>
               ))}
               {groups.map((g, gi) => (
-                <th key={g.p.key} colSpan={g.ms.length} style={{ ...thStyle, textAlign: 'center', borderLeft: gi ? '1px solid #e6e6e6' : undefined }}>
+                <th key={g.p.key} colSpan={g.ms.length} style={{ ...thStyle, textAlign: 'center', borderLeft: gi ? '1px solid var(--hairline)' : undefined }}>
                   {pLabel(g.p)}
                 </th>
               ))}
             </tr>
             <tr>
               {groups.map((g, gi) => g.ms.map((m, mi) => (
-                <th key={`${g.p.key}.${m.name}`} style={{ ...thStyle, top: 28, textAlign: 'right', borderLeft: (gi && mi === 0) ? '1px solid #e6e6e6' : undefined }}>
+                <th key={`${g.p.key}.${m.name}`} style={{ ...thStyle, top: 28, textAlign: 'right', borderLeft: (gi && mi === 0) ? '1px solid var(--hairline)' : undefined }}>
                   {mLabel(m)}
                 </th>
               )))}
@@ -157,7 +157,7 @@ const thStyle = {
   padding: '6px 10px', background: 'var(--elevated)', borderBottom: '2px solid var(--border)',
   fontWeight: 600, whiteSpace: 'nowrap', position: 'sticky', top: 0, zIndex: 2,
 };
-const tdStyle = { padding: '5px 10px', borderBottom: '1px solid var(--hairline)', whiteSpace: 'nowrap' };
+const tdStyle = { padding: '5px 10px', borderBottom: '1px solid var(--hairline)', whiteSpace: 'nowrap', color: 'var(--text)' };
 // Keep the first (label) column pinned while scrolling wide tables sideways —
 // matters most on narrow/mobile widths. Corner header sits above everything.
 const stickyHeadCorner = { left: 0, zIndex: 3 };
