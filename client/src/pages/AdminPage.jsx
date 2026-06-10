@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import IntegrationsForm from '../components/IntegrationsForm.jsx';
+import { BriefingConfigForm } from '../components/BriefingTuneModal.jsx';
 
 // Icon control: an emoji, or an uploaded image (downscaled to a small data-URL).
 // Offers a palette of common dashboard-category icons for quick picking.
@@ -196,7 +197,7 @@ function Entities({ fields }) {
 // One client's settings hub: a left nav (Settings / Suites / Logins) + panel.
 function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites, users, onChange, onBack }) {
   const [section, setSection] = useState('settings');
-  const nav = [['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['settlements', 'Settlements'], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations']];
+  const nav = [['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['briefing', 'Briefing'], ['settlements', 'Settlements'], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations']];
   return (
     <div>
       <button style={miniBtnOutline} onClick={onBack}>← All clients</button>
@@ -210,6 +211,16 @@ function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites,
         <div style={{ flex: 1, minWidth: 280 }}>
           {section === 'settings' && <ClientSettings entity={entity} suites={suites} fields={fields} onChange={onChange} onBack={onBack} />}
           {section === 'suites' && <ClientSuites entity={entity} suites={suites} allEntities={allEntities} allSets={allSets} dashTitle={dashTitle} fields={fields} onChange={onChange} />}
+          {section === 'briefing' && (
+            <div style={cardStyle}>
+              <p style={hint}>
+                Per-event briefing setup for this client: key dates (the phase follows them automatically), a manual phase override,
+                event instructions, and per-phase wording. Global phase defaults live under <b>AI → Home briefing</b>;
+                each reader's personal focus text is theirs (set via ⚙ Tune on their home page).
+              </p>
+              <BriefingConfigForm entityId={entity.id} showTune={false} />
+            </div>
+          )}
           {section === 'settlements' && <Settlements entityId={entity.id} />}
           {section === 'logins' && <EntityLogins entity={entity} users={users} onChange={onChange} />}
           {section === 'integrations' && <ClientIntegrations entity={entity} />}

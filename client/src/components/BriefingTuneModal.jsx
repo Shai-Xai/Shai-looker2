@@ -3,18 +3,21 @@ import { createPortal } from 'react-dom';
 import { api } from '../lib/api.js';
 import AiMark from './AiMark.jsx';
 
-// "Tune your briefing": the promoter-facing controls behind the home briefing.
+// "Tune your briefing": the controls behind the home briefing.
 // - Your focus: standing requests applied to every briefing for this reader.
 // - Per event: dates (drive automatic phase detection), a manual phase
 //   override (e.g. Artist Drops), event-specific instructions, and per-phase
 //   wording overrides (defaults shown as placeholders).
-export default function BriefingTuneModal({ entityId, onClose, onSaved }) {
+// The form is exported standalone so the admin client space can embed it
+// (with showTune=false — the tune text is per-reader, not per-client).
+export function BriefingConfigForm({ entityId, onSaved, showTune = true }) {
   const [cfg, setCfg] = useState(null);
   const [tune, setTune] = useState('');
   const [suiteEdits, setSuiteEdits] = useState({}); // suiteId -> briefing cfg
   const [openSuite, setOpenSuite] = useState(null);
   const [openPhase, setOpenPhase] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [savedAt, setSavedAt] = useState(0);
   const [error, setError] = useState(null);
 
   useEffect(() => {
@@ -33,39 +36,34 @@ export default function BriefingTuneModal({ entityId, onClose, onSaved }) {
   async function saveAll() {
     setBusy(true); setError(null);
     try {
-      await api.saveBriefingTune(tune, entityId);
+      if (showTune) await api.saveBriefingTune(tune, entityId);
       for (const su of cfg.suites) await api.saveSuiteBriefing(su.id, suiteEdits[su.id], entityId);
+      setSavedAt(Date.now());
       onSaved?.();
-      onClose();
     } catch (e) { setError(e.message); } finally { setBusy(false); }
   }
 
   const upd = (sid, patch) => setSuiteEdits((p) => ({ ...p, [sid]: { ...p[sid], ...patch } }));
   const phaseLabel = (key) => cfg?.phases.find((p) => p.key === key)?.label || key;
 
-  const node = (
-    <div className="ai-overlay" style={overlay} onClick={onClose}>
-      <div className="modal-in ai-glow" style={panel} onClick={(e) => e.stopPropagation()}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
-          <AiMark size={24} />
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 15, fontWeight: 800 }}>Tune your briefing</div>
-            <div style={{ fontSize: 12, color: 'var(--muted)' }}>Teach the Owl what matters to you and where each event is in its lifecycle.</div>
-          </div>
-          <button onClick={onClose} aria-label="Close" style={closeBtn}>✕</button>
-        </div>
-
+  return (
+    <>
         {error && <p style={{ color: 'var(--error)', fontSize: 13, margin: '8px 0' }}>⚠ {error}</p>}
         {!cfg ? (
           <p style={{ color: 'var(--muted)', fontSize: 13, padding: '14px 0' }}>Loading…</p>
         ) : (
           <div style={{ overflowY: 'auto', flex: 1, minHeight: 0, paddingRight: 2 }}>
-            <Label>Your focus — applied to every briefing</Label>
-            <textarea
-              value={tune} onChange={(e) => setTune(e.target.value)} rows={3}
-              placeholder={'e.g. Always mention resale activity. Compare everything to last year. I care most about cashless spend per head.'}
-              style={ta}
-            />
+            {cfg.suites.length === 0 && <p style={{ color: 'var(--muted)', fontSize: 13 }}>No events (suites) on this client yet.</p>}
+            {showTune && (
+              <>
+                <Label>Your focus — applied to every briefing</Label>
+                <textarea
+                  value={tune} onChange={(e) => setTune(e.target.value)} rows={3}
+                  placeholder={'e.g. Always mention resale activity. Compare everything to last year. I care most about cashless spend per head.'}
+                  style={ta}
+                />
+              </>
+            )}
 
             {cfg.suites.map((su) => {
               const e = suiteEdits[su.id] || {};
@@ -133,10 +131,28 @@ export default function BriefingTuneModal({ entityId, onClose, onSaved }) {
           </div>
         )}
 
-        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', paddingTop: 12, flexShrink: 0 }}>
-          <button style={ghost} onClick={onClose} disabled={busy}>Cancel</button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'flex-end', paddingTop: 12, flexShrink: 0 }}>
+          {savedAt > 0 && !busy && <span style={{ fontSize: 12, fontWeight: 700, color: '#2da44e' }}>✓ Saved</span>}
           <button style={primary} onClick={saveAll} disabled={busy || !cfg}>{busy ? 'Saving…' : 'Save & regenerate'}</button>
         </div>
+    </>
+  );
+}
+
+// Modal wrapper used from the home briefing card.
+export default function BriefingTuneModal({ entityId, onClose, onSaved }) {
+  const node = (
+    <div className="ai-overlay" style={overlay} onClick={onClose}>
+      <div className="modal-in ai-glow" style={panel} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+          <AiMark size={24} />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 15, fontWeight: 800 }}>Tune your briefing</div>
+            <div style={{ fontSize: 12, color: 'var(--muted)' }}>Teach the Owl what matters to you and where each event is in its lifecycle.</div>
+          </div>
+          <button onClick={onClose} aria-label="Close" style={closeBtn}>✕</button>
+        </div>
+        <BriefingConfigForm entityId={entityId} onSaved={() => { onSaved?.(); onClose(); }} />
       </div>
     </div>
   );
