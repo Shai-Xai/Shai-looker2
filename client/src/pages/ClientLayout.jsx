@@ -207,7 +207,7 @@ export default function ClientLayout() {
                                   <button key={d.id} ref={active ? activeRef : null} onClick={() => go(su.id, d.id)} className={`nav-row${active ? ' active' : ''}`} style={{ ...rowBtn, padding: '6px 12px 6px 50px', fontSize: 13, fontWeight: active ? 600 : 450 }}>
                                     <span style={{ ...dot, background: active ? 'var(--brand)' : 'rgba(0,0,0,0.18)' }} />
                                     <span style={ellip}>{d.title}</span>
-                                    {tabs > 0 && <span style={tabChip}>{tabs + 1} tabs</span>}
+                                    {tabs > 0 && <span style={tabChip} title={`${tabs + 1} tabs inside`}>{tabs + 1}</span>}
                                   </button>
                                 );
                               })}
