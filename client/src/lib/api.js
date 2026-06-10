@@ -135,4 +135,15 @@ export const api = {
   // Backup / restore
   exportData: () => fetch('/api/admin/export').then((r) => r.json()),
   importData: (data) => fetch('/api/admin/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(json),
+
+  // Settlements
+  mySettlements: () => fetch('/api/my/settlements').then(json),
+  getSettlement: (id) => fetch(`/api/settlements/${id}`).then(json),
+  adminListSettlements: () => fetch('/api/admin/settlements').then(json),
+  adminExtractSettlement: (fileBase64, fileType) =>
+    fetch('/api/admin/settlements/extract', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fileBase64, fileType }) }).then(json),
+  adminCreateSettlement: (s) => fetch('/api/admin/settlements', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(s) }).then(json),
+  adminUpdateSettlement: (id, p) => fetch(`/api/admin/settlements/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),
+  adminDeleteSettlement: (id) => fetch(`/api/admin/settlements/${id}`, { method: 'DELETE' }),
+  adminLoadSettlementExample: () => fetch('/api/admin/settlements/example', { method: 'POST' }).then(json),
 };

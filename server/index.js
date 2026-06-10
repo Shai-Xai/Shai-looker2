@@ -18,10 +18,12 @@ const app = express();
 // Behind a reverse proxy (Caddy/Nginx) in production so Secure cookies + the
 // real client IP/protocol are honoured.
 if (process.env.NODE_ENV === 'production' || process.env.TRUST_PROXY === '1') app.set('trust proxy', 1);
-// Global JSON parser at a modest limit, EXCEPT the backup-import route, which
-// parses its (potentially large) body itself with a much higher limit.
+// Global JSON parser at a modest limit, EXCEPT routes that take large bodies
+// (backup import, settlement PDF uploads) — those parse themselves with a
+// higher limit.
 const jsonParser = express.json({ limit: '5mb' });
-app.use((req, res, next) => (req.path === '/api/admin/import' ? next() : jsonParser(req, res, next)));
+const parsesOwnBody = (p) => p === '/api/admin/import' || p.startsWith('/api/admin/settlements');
+app.use((req, res, next) => (parsesOwnBody(req.path) ? next() : jsonParser(req, res, next)));
 app.use(cookieParser());
 app.use(auth.attachUser);
 
@@ -768,6 +770,97 @@ app.post('/api/dashboard-insight', auth.requireAuth, async (req, res) => {
     if (!res.headersSent) res.status(500).json({ error: err.message });
     else { res.write(`\n\n[error: ${err.message}]`); res.end(); }
   }
+});
+
+// ─── Settlements ───────────────────────────────────────────────────────────────
+// Event settlement reports. Admin uploads the PDF; Claude extracts it into
+// structured JSON; the client gets an interactive report scoped to their
+// entity. PDF bodies can be large, so admin routes parse their own body.
+const settlementJson = express.json({ limit: '40mb' });
+
+// Can this user open this settlement? Admin: any. Client: must belong to one of
+// their entities.
+function canAccessSettlement(user, s) {
+  if (!s) return false;
+  if (user.role === 'admin') return true;
+  return !!s.entityId && (user.entityIds || []).includes(s.entityId);
+}
+
+// Client list: settlements for the user's entities (admin sees all).
+app.get('/api/my/settlements', auth.requireAuth, (req, res) => {
+  const list = req.user.role === 'admin' ? db.listSettlements() : db.listSettlements({ entityIds: req.user.entityIds || [] });
+  res.json(list);
+});
+
+app.get('/api/settlements/:id', auth.requireAuth, (req, res) => {
+  const s = db.getSettlement(req.params.id);
+  if (!s) return res.status(404).json({ error: 'Settlement not found' });
+  if (!canAccessSettlement(req.user, s)) return res.status(403).json({ error: 'Not allowed' });
+  res.json(s);
+});
+
+// Download the original PDF.
+app.get('/api/settlements/:id/file', auth.requireAuth, (req, res) => {
+  const s = db.getSettlement(req.params.id);
+  if (!s) return res.status(404).json({ error: 'Settlement not found' });
+  if (!canAccessSettlement(req.user, s)) return res.status(403).json({ error: 'Not allowed' });
+  const f = db.getSettlementFile(req.params.id);
+  if (!f) return res.status(404).json({ error: 'No file attached' });
+  res.setHeader('Content-Type', f.fileType || 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="${(f.fileName || 'settlement.pdf').replace(/"/g, '')}"`);
+  res.send(Buffer.from(f.file, 'base64'));
+});
+
+// Admin: list all (with entity names for the management table).
+app.get('/api/admin/settlements', auth.requireAdmin, (_req, res) => {
+  res.json(db.listSettlements().map((s) => ({ ...s, entityName: s.entityId ? (db.getEntity(s.entityId)?.name || '') : '' })));
+});
+
+// Admin: AI-extract an uploaded settlement PDF into the structured JSON draft.
+// Returns the draft WITHOUT saving — the admin reviews, assigns a client, then
+// publishes via POST /api/admin/settlements.
+app.post('/api/admin/settlements/extract', auth.requireAdmin, settlementJson, async (req, res) => {
+  const { fileBase64, fileType } = req.body || {};
+  if (!fileBase64) return res.status(400).json({ error: 'fileBase64 is required' });
+  if (fileType && fileType !== 'application/pdf') return res.status(400).json({ error: 'Only PDF files are supported for now' });
+  const apiKey = adminAnthropicKey();
+  if (!insights.isConfigured(apiKey)) return res.status(400).json({ error: 'AI extraction needs an Anthropic API key (Admin → Integrations).' });
+  try {
+    const data = await insights.extractSettlement({ pdfBase64: fileBase64, apiKey });
+    res.json({ data });
+  } catch (err) {
+    console.error('[POST /api/admin/settlements/extract]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Admin: publish a settlement (extracted data + original file + assignment).
+app.post('/api/admin/settlements', auth.requireAdmin, settlementJson, (req, res) => {
+  const { entityId, title, status, settlementDate, data, fileBase64, fileName, fileType } = req.body || {};
+  if (!data || typeof data !== 'object') return res.status(400).json({ error: 'data is required' });
+  const s = db.createSettlement({ entityId, title, status, settlementDate, data, file: fileBase64 || '', fileName: fileName || '', fileType: fileType || '' });
+  res.status(201).json(s);
+});
+
+// Admin: load the bundled example report (MTN Bushfire) to demo the feature.
+app.post('/api/admin/settlements/example', auth.requireAdmin, (_req, res) => {
+  try {
+    const data = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'settlement-example.json'), 'utf8'));
+    const s = db.createSettlement({ entityId: null, title: data.meta.eventName, status: 'final', settlementDate: data.meta.settlementDate, data });
+    res.status(201).json(s);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/admin/settlements/:id', auth.requireAdmin, settlementJson, (req, res) => {
+  const s = db.updateSettlement(req.params.id, req.body || {});
+  if (!s) return res.status(404).json({ error: 'Settlement not found' });
+  res.json(s);
+});
+
+app.delete('/api/admin/settlements/:id', auth.requireAdmin, (req, res) => {
+  res.status(db.deleteSettlement(req.params.id) ? 204 : 404).end();
 });
 
 // ─── Tile library (admin) ──────────────────────────────────────────────────────

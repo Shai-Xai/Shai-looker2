@@ -134,8 +134,7 @@ addColumn('entities', 'ai_context', "TEXT NOT NULL DEFAULT ''"); // client-speci
 addColumn('entities', 'integrations', "TEXT NOT NULL DEFAULT '{}'"); // per-client API credentials (Looker / Anthropic)
 
 // ─── Settings (simple key/value) ──────────────────────────────────────────────
-db.exec(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '');`);
-function getSetting(key, fallback = '') {
+db.exec(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '');`);function getSetting(key, fallback = '') {
   const r = db.prepare('SELECT value FROM settings WHERE key=?').get(key);
   return r ? r.value : fallback;
 }
@@ -144,7 +143,28 @@ function setSetting(key, value) {
   return getSetting(key);
 }
 
-// ─── Tile library ─────────────────────────────────────────────────────────────
+// ─── Settlements ──────────────────────────────────────────────────────────────
+// Event settlement reports for clients. The original PDF is uploaded by an
+// admin, AI-extracted into a structured JSON blob (`data`), and rendered as an
+// interactive report. The source file rides along (base64) for download.
+db.exec(`
+CREATE TABLE IF NOT EXISTS settlements (
+  id              TEXT PRIMARY KEY,
+  entity_id       TEXT REFERENCES entities(id) ON DELETE SET NULL,
+  title           TEXT NOT NULL,
+  status          TEXT NOT NULL DEFAULT 'final',
+  settlement_date TEXT NOT NULL DEFAULT '',
+  data            TEXT NOT NULL DEFAULT '{}',
+  file            TEXT NOT NULL DEFAULT '',
+  file_name       TEXT NOT NULL DEFAULT '',
+  file_type       TEXT NOT NULL DEFAULT '',
+  created_at      TEXT NOT NULL,
+  updated_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_settlements_entity ON settlements(entity_id);
+`);
+
+// Tile library ─────────────────────────────────────────────────────────────────
 // Every visualization tile imported from Looker is harvested here so it can be
 // labelled (what it is / what it's used for) and reused when building new
 // dashboards. Deduplicated by a signature of its underlying query + vis type.
@@ -483,8 +503,67 @@ function updateLibraryTile(id, patch) {
 function deleteLibraryTile(id) { return db.prepare('DELETE FROM tile_library WHERE id=?').run(id).changes > 0; }
 function bumpLibraryUsage(id) { db.prepare('UPDATE tile_library SET usage_count = usage_count + 1 WHERE id=?').run(id); }
 
+// ─── Settlements ──────────────────────────────────────────────────────────────
+// Lightweight summary for lists: pull the headline numbers out of the JSON so
+// index pages never ship the full row data or the PDF.
+function rowToSettlementSummary(r) {
+  if (!r) return null;
+  const d = J(r.data, {});
+  return {
+    id: r.id, entityId: r.entity_id, title: r.title, status: r.status,
+    settlementDate: r.settlement_date,
+    eventName: d.meta?.eventName || r.title,
+    eventDates: d.meta?.eventDates || '',
+    venue: d.meta?.venue || '',
+    clientName: d.meta?.clientName || '',
+    turnover: d.turnover ?? null,
+    valueDue: d.valueDue ?? null,
+    advances: (d.advances?.rows || []).map((a) => ({ date: a.date, value: a.value })),
+    hasFile: !!r.file, fileName: r.file_name || '',
+    createdAt: r.created_at, updatedAt: r.updated_at,
+  };
+}
+function rowToSettlement(r) {
+  if (!r) return null;
+  return { ...rowToSettlementSummary(r), data: J(r.data, {}) };
+}
+function listSettlements({ entityIds } = {}) {
+  let rows = db.prepare('SELECT id, entity_id, title, status, settlement_date, data, file_name, created_at, updated_at, (file != \'\') AS file FROM settlements ORDER BY settlement_date DESC, created_at DESC').all();
+  if (entityIds) rows = rows.filter((r) => r.entity_id && entityIds.includes(r.entity_id));
+  return rows.map(rowToSettlementSummary);
+}
+function getSettlement(id) { return rowToSettlement(db.prepare('SELECT * FROM settlements WHERE id=?').get(id)); }
+function getSettlementFile(id) {
+  const r = db.prepare('SELECT file, file_name, file_type FROM settlements WHERE id=?').get(id);
+  return r && r.file ? { file: r.file, fileName: r.file_name, fileType: r.file_type } : null;
+}
+function createSettlement({ entityId = null, title, status = 'final', settlementDate = '', data = {}, file = '', fileName = '', fileType = '' }) {
+  const ts = now();
+  const id = uuid();
+  db.prepare('INSERT INTO settlements (id,entity_id,title,status,settlement_date,data,file,file_name,file_type,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
+    .run(id, entityId || null, title || data.meta?.eventName || 'Settlement report', status === 'interim' ? 'interim' : 'final',
+      settlementDate || data.meta?.settlementDate || '', JSON.stringify(data), file, fileName, fileType, ts, ts);
+  return getSettlement(id);
+}
+function updateSettlement(id, patch) {
+  const cur = db.prepare('SELECT * FROM settlements WHERE id=?').get(id);
+  if (!cur) return null;
+  const entityId = patch.entityId !== undefined ? (patch.entityId || null) : cur.entity_id;
+  const title = patch.title ?? cur.title;
+  const status = patch.status !== undefined ? (patch.status === 'interim' ? 'interim' : 'final') : cur.status;
+  const date = patch.settlementDate ?? cur.settlement_date;
+  const data = patch.data !== undefined ? JSON.stringify(patch.data) : cur.data;
+  const file = patch.file !== undefined ? patch.file : cur.file;
+  const fileName = patch.fileName !== undefined ? patch.fileName : cur.file_name;
+  const fileType = patch.fileType !== undefined ? patch.fileType : cur.file_type;
+  db.prepare('UPDATE settlements SET entity_id=?, title=?, status=?, settlement_date=?, data=?, file=?, file_name=?, file_type=?, updated_at=? WHERE id=?')
+    .run(entityId, title, status, date, data, file, fileName, fileType, now(), id);
+  return getSettlement(id);
+}
+function deleteSettlement(id) { return db.prepare('DELETE FROM settlements WHERE id=?').run(id).changes > 0; }
+
 // ─── Full backup / restore (export to JSON, import to replace) ────────────────
-const EXPORT_TABLES = ['entities', 'users', 'user_entities', 'sets', 'set_dashboards', 'suites', 'suite_sets', 'dashboards', 'settings', 'tile_library'];
+const EXPORT_TABLES = ['entities', 'users', 'user_entities', 'sets', 'set_dashboards', 'suites', 'suite_sets', 'dashboards', 'settings', 'tile_library', 'settlements'];
 function exportAll() {
   const out = { _version: 1, exportedAt: now() };
   for (const t of EXPORT_TABLES) out[t] = tableExists(t) ? db.prepare(`SELECT * FROM ${t}`).all() : [];
@@ -500,8 +579,8 @@ function insertRow(name, row) {
 // Replace ALL data with the contents of an export. Deletes children first
 // (FK-safe), then inserts parents first.
 const importAll = db.transaction((data) => {
-  const delOrder = ['user_entities', 'suite_sets', 'set_dashboards', 'suites', 'sets', 'dashboards', 'users', 'entities', 'settings', 'tile_library'];
-  const insOrder = ['entities', 'dashboards', 'users', 'sets', 'suites', 'set_dashboards', 'suite_sets', 'user_entities', 'settings', 'tile_library'];
+  const delOrder = ['user_entities', 'suite_sets', 'set_dashboards', 'suites', 'sets', 'dashboards', 'users', 'settlements', 'entities', 'settings', 'tile_library'];
+  const insOrder = ['entities', 'dashboards', 'users', 'sets', 'suites', 'set_dashboards', 'suite_sets', 'user_entities', 'settings', 'tile_library', 'settlements'];
   for (const t of delOrder) { if (tableExists(t)) db.prepare(`DELETE FROM ${t}`).run(); }
   let counts = {};
   for (const t of insOrder) {
@@ -527,4 +606,6 @@ module.exports = {
   listLibraryTiles, listLibraryCategories, getLibraryTile, harvestTile, harvestDashboardTiles, updateLibraryTile, deleteLibraryTile, bumpLibraryUsage,
   // settings (key/value)
   getSetting, setSetting,
+  // settlements
+  listSettlements, getSettlement, getSettlementFile, createSettlement, updateSettlement, deleteSettlement,
 };

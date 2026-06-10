@@ -211,4 +211,52 @@ async function describeTile({ title, visType, fields, model, explore, instructio
   };
 }
 
-module.exports = { generateInsight, streamInsight, streamDashboardInsight, describeTile, isConfigured: (apiKey) => !!(apiKey || process.env.ANTHROPIC_API_KEY) };
+// ─── Settlement report extraction ──────────────────────────────────────────────
+// Claude reads the uploaded settlement PDF directly (document block) and emits
+// the structured JSON the interactive settlement view renders. Every number is
+// extracted verbatim — the caller re-validates subtotals before publishing.
+const SETTLEMENT_SYSTEM = `You extract Howler event settlement reports (PDF) into strict JSON for an interactive viewer. Amounts are South African Rand.
+
+Respond with ONLY a JSON object (no markdown fences, no prose) of exactly this shape:
+{
+  "meta": { "clientName": "", "eventName": "", "venue": "", "eventDates": "", "settlementPeriod": "", "settlementDate": "" },
+  "sales": [ { "name": "<section name, e.g. Howler Ticket Sales>", "rows": [ { "desc": "", "type": "Purchase|Refund", "qty": 0, "price": 0, "sales": 0, "fees": 0, "total": 0 } ], "subtotal": { "qty": 0, "sales": 0, "fees": 0, "total": 0 } } ],
+  "turnover": 0,
+  "commissions": [ { "name": "<group, e.g. Ticketing Commissions>", "rows": [ { "code": "", "desc": "", "rateType": "", "rate": "", "value": 0, "vat": 0, "total": 0 } ], "subtotal": { "vat": 0, "total": 0 } } ],
+  "commissionsTotal": 0,
+  "advances": { "rows": [ { "code": "", "desc": "", "date": "", "value": 0, "settled": 0 } ], "subtotal": 0 },
+  "valueDue": 0,
+  "settlementSummary": [ { "date": "", "code": "", "desc": "", "amount": 0 } ],
+  "withheldSummary": [ { "date": "", "code": "", "desc": "", "amount": 0 } ]
+}
+
+Rules:
+- ALL monetary values are plain JSON numbers: strip currency symbols and thousands separators; negative amounts (minus signs, red figures, or parenthesised values) are NEGATIVE numbers.
+- "rate" stays a STRING exactly as printed (e.g. "3.00%", "R1.50", "15.00%") since rates mix percentages and fixed amounts.
+- Include EVERY line item row — never summarise, omit, or merge rows. Keep the report's row order.
+- "turnover" = Total Event Turnover; "commissionsTotal" = Total Howler Ticketing Commissions; "valueDue" = Value Due to Client; "advances.subtotal" = the advances subtotal.
+- Withholding Tax lines inside a commission group are rows of that group (code may be empty).
+- If a section doesn't exist in the report, use an empty array / 0.`;
+
+async function extractSettlement({ pdfBase64, apiKey }) {
+  const c = requireClient(apiKey);
+  const resp = await c.messages.create({
+    model: MODEL,
+    max_tokens: 32000,
+    thinking: { type: 'adaptive' },
+    system: SETTLEMENT_SYSTEM,
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: pdfBase64 } },
+        { type: 'text', text: 'Extract this settlement report to the JSON schema. Every row, every number, verbatim.' },
+      ],
+    }],
+  });
+  const text = (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error('AI did not return JSON for the settlement report');
+  return JSON.parse(match[0]);
+}
+
+module.exports = { generateInsight, streamInsight, streamDashboardInsight, describeTile, extractSettlement, isConfigured: (apiKey) => !!(apiKey || process.env.ANTHROPIC_API_KEY) };

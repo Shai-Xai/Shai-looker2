@@ -8,6 +8,8 @@ import LoginPage from './pages/LoginPage.jsx';
 import ClientLayout from './pages/ClientLayout.jsx';
 import ClientHome from './pages/ClientHome.jsx';
 import ClientIntegrationsPage from './pages/ClientIntegrationsPage.jsx';
+import SettlementsPage from './pages/SettlementsPage.jsx';
+import SettlementViewPage from './pages/SettlementViewPage.jsx';
 import Logo from './components/Logo.jsx';
 import { DrillProvider } from './lib/DrillContext.jsx';
 import { AuthProvider, useAuth } from './lib/auth.jsx';
@@ -86,6 +88,8 @@ function Shell() {
               <Route element={<ClientLayout />}>
                 <Route path="/preview" element={<ClientHome />} />
                 <Route path="/suite/:suiteId/d/:id" element={<ViewPage />} />
+                <Route path="/settlements" element={<SettlementsPage />} />
+                <Route path="/settlements/:id" element={<SettlementViewPage />} />
               </Route>
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
@@ -96,6 +100,8 @@ function Shell() {
                 <Route path="/" element={<ClientHome />} />
                 <Route path="/settings" element={<ClientIntegrationsPage />} />
                 <Route path="/suite/:suiteId/d/:id" element={<ViewPage />} />
+                <Route path="/settlements" element={<SettlementsPage />} />
+                <Route path="/settlements/:id" element={<SettlementViewPage />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Route>
             </Routes>

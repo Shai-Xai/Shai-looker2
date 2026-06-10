@@ -1,0 +1,127 @@
+{
+  "meta": {
+    "clientName": "Mtn Bushfire",
+    "eventName": "Mtn Bushfire 2026",
+    "venue": "House On Fire",
+    "eventDates": "2026/05/29 - 2026/05/31",
+    "settlementPeriod": "2025/10/13 - 2026/06/08",
+    "settlementDate": "2026/06/10"
+  },
+  "sales": [
+    {
+      "name": "Howler Ticket Sales",
+      "rows": [
+        { "desc": "3-day Full Fest Children (6-12) - Early Bird", "type": "Purchase", "qty": 20, "price": 370, "sales": 7400, "fees": 444, "total": 7844 },
+        { "desc": "3-day Full Fest Children (6-12) - Phase 1", "type": "Purchase", "qty": 50, "price": 420, "sales": 21000, "fees": 1260, "total": 22260 },
+        { "desc": "3-day Full Fest Children (6-12) - Phase 2", "type": "Purchase", "qty": 50, "price": 470, "sales": 23500, "fees": 1410, "total": 24910 },
+        { "desc": "3-day Full Fest Children (6-12) - Phase 3", "type": "Purchase", "qty": 15, "price": 520, "sales": 7800, "fees": 468, "total": 8268 },
+        { "desc": "3-day Full Fest Children (6-12) - Phase 4", "type": "Purchase", "qty": 50, "price": 560, "sales": 28000, "fees": 1680, "total": 29680 },
+        { "desc": "3-day Full Fest Golden Lounge - Early Bird", "type": "Purchase", "qty": 62, "price": 2400, "sales": 148800, "fees": 8928, "total": 157728 },
+        { "desc": "3-day Full Fest Golden Lounge - Early Bird + E1000 Cashless Credits", "type": "Purchase", "qty": 8, "price": 3400, "sales": 27200, "fees": 1632, "total": 28832 },
+        { "desc": "3-day Full Fest Golden Lounge - Phase 1", "type": "Purchase", "qty": 181, "price": 3050, "sales": 552050, "fees": 33123, "total": 585173 },
+        { "desc": "3-day Full Fest Golden Lounge - Phase 1 + E1000 Cashless Credits", "type": "Purchase", "qty": 20, "price": 4050, "sales": 81000, "fees": 4860, "total": 85860 },
+        { "desc": "3-day Full Fest Golden Lounge - Phase 2", "type": "Purchase", "qty": 290, "price": 3400, "sales": 986000, "fees": 59160, "total": 1045160 },
+        { "desc": "3-day Full Fest Golden Lounge - Phase 2 + E1000 Cashless Credits", "type": "Purchase", "qty": 50, "price": 4400, "sales": 220000, "fees": 13200, "total": 233200 },
+        { "desc": "3-day Full Fest Golden Lounge - Phase 3", "type": "Purchase", "qty": 250, "price": 3650, "sales": 912500, "fees": 54750, "total": 967250 },
+        { "desc": "3-day Full Fest Golden Lounge - Phase 3 + E1000 Cashless Credits", "type": "Purchase", "qty": 40, "price": 4650, "sales": 186000, "fees": 11160, "total": 197160 },
+        { "desc": "3-day Full Fest Golden Lounge - Phase 4", "type": "Purchase", "qty": 200, "price": 3950, "sales": 790000, "fees": 47400, "total": 837400 },
+        { "desc": "3-day Full Fest Golden Lounge - Phase 4 + E1000 Cashless Credits", "type": "Purchase", "qty": 140, "price": 4950, "sales": 693000, "fees": 41580, "total": 734580 },
+        { "desc": "3-day Full Fest Main Arena - Early Bird", "type": "Purchase", "qty": 128, "price": 1250, "sales": 160000, "fees": 9600, "total": 169600 },
+        { "desc": "3-day Full Fest Main Arena - Early Bird + E500 Cashless Credits", "type": "Purchase", "qty": 10, "price": 1750, "sales": 17500, "fees": 1050, "total": 18550 },
+        { "desc": "3-day Full Fest Main Arena - Phase 1", "type": "Purchase", "qty": 1549, "price": 1580, "sales": 2447420, "fees": 146845.2, "total": 2594265.2 },
+        { "desc": "3-day Full Fest Main Arena - Phase 1 + E500 Cashless Credits", "type": "Purchase", "qty": 100, "price": 2080, "sales": 208000, "fees": 12480, "total": 220480 },
+        { "desc": "3-day Full Fest Main Arena - Phase 2", "type": "Purchase", "qty": 1750, "price": 1780, "sales": 3115000, "fees": 186900, "total": 3301900 },
+        { "desc": "3-day Full Fest Main Arena - Phase 2 + E500 Cashless Credits", "type": "Purchase", "qty": 350, "price": 2280, "sales": 798000, "fees": 47880, "total": 845880 },
+        { "desc": "3-day Full Fest Main Arena - Phase 3", "type": "Purchase", "qty": 1001, "price": 1980, "sales": 1981980, "fees": 118918.8, "total": 2100898.8 },
+        { "desc": "3-day Full Fest Main Arena - Phase 3 + E500 Cashless Credits", "type": "Purchase", "qty": 90, "price": 2480, "sales": 223200, "fees": 13392, "total": 236592 },
+        { "desc": "3-day Full Fest Main Arena - Phase 4", "type": "Purchase", "qty": 1418, "price": 2200, "sales": 3119600, "fees": 187176, "total": 3306776 },
+        { "desc": "3-day Full Fest Main Arena - Phase 4 + E500 Cashless Credits", "type": "Purchase", "qty": 122, "price": 2700, "sales": 329400, "fees": 19764, "total": 349164 },
+        { "desc": "Cancelation Fee Refund", "type": "Purchase", "qty": -71, "price": 0.77, "sales": -55, "fees": 0, "total": -55 },
+        { "desc": "Ticket Item Cancellation Fee", "type": "Purchase", "qty": -71, "price": -118.83, "sales": 8437.2, "fees": 0, "total": 8437.2 },
+        { "desc": "3-day Full Fest Main Arena - Phase 2", "type": "Purchase", "qty": 1, "price": 2136, "sales": 2136, "fees": 0, "total": 2136 },
+        { "desc": "3-day Full Fest Main Arena - Phase 4", "type": "Purchase", "qty": 1, "price": 132, "sales": 132, "fees": 0, "total": 132 },
+        { "desc": "Ticket Resale Purchaser Fee", "type": "Purchase", "qty": 523, "price": 98.24, "sales": 51381.93, "fees": 0, "total": 51381.93 },
+        { "desc": "Ticket Resale Seller Fee", "type": "Purchase", "qty": -520, "price": -393.66, "sales": 204703.82, "fees": 0, "total": 204703.82 }
+      ],
+      "subtotal": { "qty": 9132, "sales": 17351085.95, "fees": 1025061, "total": 18376146.95 }
+    },
+    {
+      "name": "Ticket Refunds",
+      "rows": [
+        { "desc": "3-day Full Fest Children (6-12) - Phase 4", "type": "Refund", "qty": -1, "price": 560, "sales": -560, "fees": -33.6, "total": -593.6 },
+        { "desc": "3-day Full Fest Main Arena - Phase 1", "type": "Refund", "qty": -2, "price": 1580, "sales": -3160, "fees": -189.6, "total": -3349.6 },
+        { "desc": "3-day Full Fest Main Arena - Phase 1 + E500 Cashless Credits", "type": "Refund", "qty": -1, "price": 2080, "sales": -2080, "fees": -124.8, "total": -2204.8 },
+        { "desc": "3-day Full Fest Main Arena - Phase 2", "type": "Refund", "qty": -2, "price": 1780, "sales": -3560, "fees": -213.6, "total": -3773.6 },
+        { "desc": "3-day Full Fest Main Arena - Phase 2 + E500 Cashless Credits", "type": "Refund", "qty": -1, "price": 2280, "sales": -2280, "fees": -136.8, "total": -2416.8 },
+        { "desc": "3-day Full Fest Main Arena - Phase 3", "type": "Refund", "qty": -1, "price": 1980, "sales": -1980, "fees": -118.8, "total": -2098.8 },
+        { "desc": "3-day Full Fest Main Arena - Phase 4", "type": "Refund", "qty": -1, "price": 2200, "sales": -2200, "fees": -110, "total": -2310 }
+      ],
+      "subtotal": { "qty": -9, "sales": -15820, "fees": -927.2, "total": -16747.2 }
+    }
+  ],
+  "turnover": 18359399.75,
+  "commissions": [
+    {
+      "name": "Ticketing Commissions",
+      "rows": [
+        { "code": "TK-TS-003", "desc": "TK - Ticket Online Sales", "rateType": "VAR", "rate": "3.00%", "value": 18376146.95, "vat": -82692.66, "total": -633977.07 },
+        { "code": "TK-TS-003", "desc": "TK - Ticket Online Sales (Cashless Credits Rebate)", "rateType": "VAR", "rate": "-3.00%", "value": 594000, "vat": 2673, "total": 20493 },
+        { "code": "TK-TS-003", "desc": "TK - Ticket Sales - MTN Weekly", "rateType": "VAR", "rate": "3.00%", "value": 31255, "vat": -140.65, "total": -1078.3 },
+        { "code": "TK-TS-003", "desc": "TK - Ticket Sales - Corporate", "rateType": "VAR", "rate": "3.00%", "value": 6212946.2, "vat": -27958.26, "total": -214346.64 },
+        { "code": "TK-TS-003", "desc": "TK - Ticket Sales - Corporate Discount", "rateType": "VAR", "rate": "-1.00%", "value": 6212946.2, "vat": 9319.42, "total": 71448.88 },
+        { "code": "TK-TS-012", "desc": "TK - Complimentary Tickets", "rateType": "VAR", "rate": "R1.50", "value": 10998, "vat": -2474.55, "total": -18971.55 },
+        { "code": "TK-TS-012", "desc": "TK - Complimentary Tickets - Discount", "rateType": "VAR", "rate": "-R1.50", "value": 10998, "vat": 2474.55, "total": 18971.55 },
+        { "code": "TK-TS-027", "desc": "TK - Ticket Resale Purchaser Howler Fee (10% of 25% charged)", "rateType": "VAR", "rate": "40.00%", "value": 51381.93, "vat": -3082.92, "total": -23635.69 },
+        { "code": "TK-TS-028", "desc": "TK - Ticket Resale Seller Howler Fee (10% of 25% charged)", "rateType": "VAR", "rate": "40.00%", "value": 204703.82, "vat": -12282.23, "total": -94163.76 },
+        { "code": "", "desc": "Withholding Tax", "rateType": "FIX", "rate": "15.00%", "value": -761095.28, "vat": 0, "total": 114164.29 }
+      ],
+      "subtotal": { "vat": -114164.29, "total": -761095.28 }
+    },
+    {
+      "name": "Payment Processing Commissions",
+      "rows": [
+        { "code": "TK-HP-001", "desc": "TK - Processing Fees", "rateType": "VAR", "rate": "2.50%", "value": 18376146.95, "vat": -68910.55, "total": -528314.22 },
+        { "code": "TK-HP-001", "desc": "TK - Ticket Sales - MTN Weekly", "rateType": "VAR", "rate": "2.50%", "value": 31255, "vat": -117.21, "total": -898.58 },
+        { "code": "TK-HP-002", "desc": "TK - Card Online Refunds", "rateType": "FIX", "rate": "R5.00", "value": 66, "vat": -49.5, "total": -379.5 },
+        { "code": "TK-HP-007", "desc": "TK - Instant EFT Refunds", "rateType": "FIX", "rate": "R5.00", "value": 5, "vat": -3.75, "total": -28.75 },
+        { "code": "", "desc": "Withholding Tax", "rateType": "FIX", "rate": "15.00%", "value": -460540.05, "vat": 0, "total": 69081.01 }
+      ],
+      "subtotal": { "vat": -69081.01, "total": -460540.05 }
+    },
+    {
+      "name": "Other",
+      "rows": [
+        { "code": "TK-EL-005", "desc": "Access Manager", "rateType": "FIX", "rate": "R160.00", "value": 283.75, "vat": -6810, "total": -52210 },
+        { "code": "TK-EL-029", "desc": "Access Site Manager", "rateType": "FIX", "rate": "R200.00", "value": 48.5, "vat": -1455, "total": -11155 },
+        { "code": "TK-EL-007", "desc": "Customer Support", "rateType": "FIX", "rate": "R110.00", "value": 138.25, "vat": -2281.13, "total": -17488.63 },
+        { "code": "TK-OT-033", "desc": "Email Promotion", "rateType": "FIX", "rate": "R0.05", "value": 346522, "vat": -2598.92, "total": -19925.02 },
+        { "code": "TK-OT-029", "desc": "Africa Travel", "rateType": "FIX", "rate": "R22,825.60", "value": 1, "vat": -3423.84, "total": -26249.44 },
+        { "code": "TK-PR-028", "desc": "Pulse & Owl Fee", "rateType": "FIX", "rate": "R100,000.00", "value": 1, "vat": -15000, "total": -115000 },
+        { "code": "", "desc": "Withholding Tax", "rateType": "FIX", "rate": "15.00%", "value": -210459.2, "vat": 0, "total": 31568.88 }
+      ],
+      "subtotal": { "vat": -31568.88, "total": -210459.2 }
+    }
+  ],
+  "commissionsTotal": -1432094.53,
+  "advances": {
+    "rows": [
+      { "code": "ST-ET-003", "desc": "ST - Client Advance Settlement - Bushfire", "date": "2026/01/13", "value": 9475794.7, "settled": -9475794.7 },
+      { "code": "ST-ET-003", "desc": "ST - Client Advance Settlement - Bushfire", "date": "2026/02/04", "value": 1462261.45, "settled": -1462261.45 },
+      { "code": "ST-ET-003", "desc": "ST - Client Advance Settlement - Bushfire", "date": "2026/03/30", "value": 3020005.17, "settled": -3020005.17 }
+    ],
+    "subtotal": -13958061.32
+  },
+  "valueDue": 2969243.9,
+  "settlementSummary": [
+    { "date": "2026/01/13", "code": "ST-ET-002", "desc": "Net Settlement", "amount": 9475794.7 },
+    { "date": "2026/02/04", "code": "ST-ET-002", "desc": "Net Settlement", "amount": 1462261.45 },
+    { "date": "2026/03/30", "code": "ST-ET-002", "desc": "Net Settlement", "amount": 3020005.17 },
+    { "date": "2026/06/08", "code": "ST-ET-002", "desc": "Net Settlement", "amount": 2969243.9 }
+  ],
+  "withheldSummary": [
+    { "date": "2026/01/13", "code": "TK-WP-001", "desc": "Withheld Portion Held", "amount": -1111854.14 },
+    { "date": "2026/02/04", "code": "TK-WP-001", "desc": "Withheld Portion Held", "amount": -171375.5 },
+    { "date": "2026/03/30", "code": "TK-WP-001", "desc": "Withheld Portion Held", "amount": -353941.42 },
+    { "date": "2026/06/08", "code": "TK-WP-001", "desc": "Withheld Portion Held Released", "amount": 1637171.06 }
+  ]
+}

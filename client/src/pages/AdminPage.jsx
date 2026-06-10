@@ -113,6 +113,7 @@ export default function AdminPage() {
         <Tab active={tab === 'sets'} onClick={() => setTab('sets')}>Sets</Tab>
         <Tab active={tab === 'library'} onClick={() => setTab('library')}>Tile library</Tab>
         <Tab active={tab === 'ai'} onClick={() => setTab('ai')}>AI</Tab>
+        <Tab active={tab === 'settlements'} onClick={() => setTab('settlements')}>Settlements</Tab>
         <Tab active={tab === 'integrations'} onClick={() => setTab('integrations')}>Integrations</Tab>
         <Tab active={tab === 'backup'} onClick={() => setTab('backup')}>Backup</Tab>
       </div>
@@ -120,6 +121,7 @@ export default function AdminPage() {
       {tab === 'sets' && <Sets />}
       {tab === 'library' && <Library />}
       {tab === 'ai' && <AISettings />}
+      {tab === 'settlements' && <Settlements />}
       {tab === 'integrations' && <AdminIntegrations />}
       {tab === 'backup' && <BackupRestore />}
     </main>
@@ -969,6 +971,180 @@ function BackupRestore() {
           <input type="file" accept="application/json,.json" style={{ display: 'none' }} onChange={doImport} disabled={!!busy} />
         </label>
       </div>
+    </div>
+  );
+}
+
+// ─── Settlements ───────────────────────────────────────────────────────────────
+// Upload a settlement PDF → Claude extracts it to structured JSON → review the
+// recomputed totals against the report's own → assign a client → publish.
+function Settlements() {
+  const navigate = useNavigate();
+  const [items, setItems] = useState([]);
+  const [entities, setEntities] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState('');
+  const [error, setError] = useState(null);
+  // Draft being reviewed before publish: { data, fileBase64, fileName, fileType, entityId, status }
+  const [draft, setDraft] = useState(null);
+
+  const load = () => {
+    Promise.all([api.adminListSettlements(), api.adminListEntities()])
+      .then(([s, e]) => { setItems(s); setEntities(e); })
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  };
+  useEffect(load, []);
+
+  async function onFile(e) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (file.type !== 'application/pdf') { setError('Please upload a PDF settlement report.'); return; }
+    setError(null);
+    setBusy('Reading the report with AI — this takes ~30–60 seconds…');
+    try {
+      const fileBase64 = await new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(String(r.result).split(',')[1]);
+        r.onerror = reject;
+        r.readAsDataURL(file);
+      });
+      const { data } = await api.adminExtractSettlement(fileBase64, 'application/pdf');
+      setDraft({ data, fileBase64, fileName: file.name, fileType: 'application/pdf', entityId: '', status: 'final' });
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy('');
+    }
+  }
+
+  async function publish() {
+    setBusy('Publishing…');
+    try {
+      await api.adminCreateSettlement({
+        entityId: draft.entityId || null,
+        title: draft.data?.meta?.eventName || draft.fileName,
+        status: draft.status,
+        settlementDate: draft.data?.meta?.settlementDate || '',
+        data: draft.data,
+        fileBase64: draft.fileBase64, fileName: draft.fileName, fileType: draft.fileType,
+      });
+      setDraft(null);
+      load();
+    } catch (err) { setError(err.message); } finally { setBusy(''); }
+  }
+
+  if (loading) return <Muted>Loading…</Muted>;
+
+  return (
+    <div>
+      <p style={hint}>Upload a settlement PDF; the Owl extracts it into the interactive report clients see under <b>Reports → Settlements</b>. Review the totals before publishing.</p>
+      {error && <p style={{ color: 'var(--error)', fontSize: 13, marginBottom: 10 }}>⚠ {error}</p>}
+
+      {!draft && (
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 18, flexWrap: 'wrap' }}>
+          <label style={{ ...addBtn, display: 'inline-block', opacity: busy ? 0.6 : 1 }}>
+            {busy || '⤴ Upload settlement PDF'}
+            <input type="file" accept="application/pdf" style={{ display: 'none' }} onChange={onFile} disabled={!!busy} />
+          </label>
+          <button style={miniBtnOutline} disabled={!!busy} onClick={() => { setBusy('Loading example…'); api.adminLoadSettlementExample().then(load).catch((e) => setError(e.message)).finally(() => setBusy('')); }}>
+            Load example report
+          </button>
+        </div>
+      )}
+
+      {/* Draft review before publish */}
+      {draft && (
+        <div style={{ ...cardStyle, borderColor: 'var(--brand)' }}>
+          <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 2 }}>{draft.data?.meta?.eventName || draft.fileName}</h3>
+          <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12 }}>
+            {[draft.data?.meta?.clientName, draft.data?.meta?.venue, draft.data?.meta?.eventDates].filter(Boolean).join(' · ')}
+          </p>
+          <SettlementChecks data={draft.data} />
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 14, flexWrap: 'wrap' }}>
+            <select style={input} value={draft.entityId} onChange={(e) => setDraft({ ...draft, entityId: e.target.value })}>
+              <option value="">— Assign to client —</option>
+              {entities.map((en) => <option key={en.id} value={en.id}>{en.name}</option>)}
+            </select>
+            <select style={input} value={draft.status} onChange={(e) => setDraft({ ...draft, status: e.target.value })}>
+              <option value="final">Final</option>
+              <option value="interim">Interim</option>
+            </select>
+            <span style={{ flex: 1 }} />
+            <button style={miniBtnOutline} onClick={() => setDraft(null)} disabled={!!busy}>Discard</button>
+            <button style={{ ...miniBtn, background: 'var(--brand)', color: '#fff', border: 'none' }} onClick={publish} disabled={!!busy}>{busy || 'Publish'}</button>
+          </div>
+        </div>
+      )}
+
+      {/* Published reports */}
+      <div style={clientList}>
+        {items.map((s) => (
+          <div key={s.id} style={{ ...clientRow, cursor: 'default', gap: 10, flexWrap: 'wrap' }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontWeight: 600, fontSize: 14 }}>{s.eventName || s.title}</div>
+              <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+                {[s.status === 'interim' ? 'Interim' : 'Final', s.settlementDate && `settled ${s.settlementDate}`, s.valueDue != null && `due R${Number(s.valueDue).toLocaleString('en-US', { minimumFractionDigits: 2 })}`].filter(Boolean).join(' · ')}
+              </div>
+            </div>
+            <span style={{ flex: 1 }} />
+            <select
+              style={{ ...input, minWidth: 150 }}
+              value={s.entityId || ''}
+              onChange={(e) => api.adminUpdateSettlement(s.id, { entityId: e.target.value || null }).then(load)}
+            >
+              <option value="">— No client (hidden) —</option>
+              {entities.map((en) => <option key={en.id} value={en.id}>{en.name}</option>)}
+            </select>
+            <button style={miniBtnOutline} onClick={() => navigate(`/settlements/${s.id}`)}>Open</button>
+            <button style={{ ...miniBtnOutline, color: 'var(--error)' }} onClick={() => { if (confirm(`Delete the settlement report "${s.eventName || s.title}"?`)) api.adminDeleteSettlement(s.id).then(load); }}>Delete</button>
+          </div>
+        ))}
+        {items.length === 0 && !draft && <Muted>No settlement reports yet.</Muted>}
+      </div>
+    </div>
+  );
+}
+
+// Recompute every subtotal from the extracted line items and compare with the
+// report's own totals — the safety net against extraction slips.
+function SettlementChecks({ data }) {
+  const d = data || {};
+  const close = (a, b) => Math.abs((a || 0) - (b || 0)) < 0.05;
+  const checks = [];
+  for (const g of d.sales || []) {
+    const sum = (g.rows || []).reduce((a, r) => a + (r.total || 0), 0);
+    checks.push({ label: `${g.name} subtotal`, ok: close(sum, g.subtotal?.total), got: sum, want: g.subtotal?.total });
+  }
+  const salesTotal = (d.sales || []).reduce((a, g) => a + (g.subtotal?.total || 0), 0);
+  checks.push({ label: 'Turnover = sales − refunds', ok: close(salesTotal, d.turnover), got: salesTotal, want: d.turnover });
+  for (const g of d.commissions || []) {
+    const sum = (g.rows || []).reduce((a, r) => a + (r.total || 0), 0);
+    checks.push({ label: `${g.name} subtotal`, ok: close(sum, g.subtotal?.total), got: sum, want: g.subtotal?.total });
+  }
+  const commTotal = (d.commissions || []).reduce((a, g) => a + (g.subtotal?.total || 0), 0);
+  checks.push({ label: 'Commissions total', ok: close(commTotal, d.commissionsTotal), got: commTotal, want: d.commissionsTotal });
+  const due = (d.turnover || 0) + (d.commissionsTotal || 0) + (d.advances?.subtotal || 0);
+  checks.push({ label: 'Value due = turnover − commissions − advances', ok: close(due, d.valueDue), got: due, want: d.valueDue });
+  const bad = checks.filter((c) => !c.ok);
+  const R = (n) => `R${Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+  return (
+    <div style={{ fontSize: 13 }}>
+      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 8 }}>
+        <span><b>Turnover</b> {R(d.turnover)}</span>
+        <span><b>Commissions</b> {R(d.commissionsTotal)}</span>
+        <span><b>Advances</b> {R(d.advances?.subtotal)}</span>
+        <span><b>Value due</b> {R(d.valueDue)}</span>
+      </div>
+      {bad.length === 0 ? (
+        <p style={{ color: '#2da44e', fontWeight: 600 }}>✓ All {checks.length} cross-checks pass — extracted totals reconcile.</p>
+      ) : (
+        <div style={{ color: 'var(--error)' }}>
+          <p style={{ fontWeight: 700 }}>⚠ {bad.length} check{bad.length > 1 ? 's' : ''} failed — compare against the PDF before publishing:</p>
+          {bad.map((c, i) => <p key={i} style={{ fontSize: 12 }}>· {c.label}: rows sum to {R(c.got)}, report says {R(c.want)}</p>)}
+        </div>
+      )}
     </div>
   );
 }

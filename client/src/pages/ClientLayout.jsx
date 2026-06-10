@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useLayoutEffect } from 'react';
-import { Outlet, useParams, useNavigate } from 'react-router-dom';
+import { Outlet, useParams, useNavigate, useLocation } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import { useAuth } from '../lib/auth.jsx';
@@ -10,9 +10,11 @@ import { vtNavigate } from '../lib/viewTransition.js';
 export default function ClientLayout() {
   const { suiteId, id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const isMobile = useIsMobile();
   const { isAdmin } = useAuth();
   const [suites, setSuites] = useState([]);
+  const [settlements, setSettlements] = useState([]);
   const [details, setDetails] = useState({}); // suiteId -> { sets:[{id,name,dashboards}] }
   const [openSuites, setOpenSuites] = useState({});
   const [openSets, setOpenSets] = useState({});
@@ -22,6 +24,8 @@ export default function ClientLayout() {
   const toggleCollapsed = () => setCollapsed((c) => { localStorage.setItem('howler_nav_collapsed', c ? '0' : '1'); return !c; });
 
   useEffect(() => { api.mySuites().then(setSuites).catch(() => {}).finally(() => setLoading(false)); }, []);
+  useEffect(() => { api.mySettlements().then(setSettlements).catch(() => {}); }, []);
+  const onSettlements = location.pathname.startsWith('/settlements');
 
   async function ensureDetail(sid) {
     if (details[sid]) return;
@@ -68,7 +72,7 @@ export default function ClientLayout() {
     const t = setTimeout(measure, 300);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, suiteId, openSuites, openSets, details, collapsed, loading, isMobile, navOpen]);
+  }, [id, suiteId, openSuites, openSets, details, collapsed, loading, isMobile, navOpen, location.pathname, settlements]);
 
   // Title of the active dashboard (for the mobile menu bar).
   let activeTitle = '';
@@ -146,6 +150,24 @@ export default function ClientLayout() {
           </div>
         ))
       )}
+      {/* Settlements — its own section below the suites. Hidden for clients
+          with no reports; admins always see it (to preview the feature). */}
+      {(settlements.length > 0 || isAdmin) && (
+        <>
+          <div style={{ borderTop: '1px solid var(--hairline)', margin: '12px 6px 10px' }} />
+          <div style={{ padding: '0 8px 8px 14px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)' }}>Reports</div>
+          <button
+            ref={onSettlements ? activeRef : null}
+            className={`nav-row${onSettlements ? ' active' : ''}`}
+            style={{ ...rowBtn, fontWeight: onSettlements ? 600 : 500 }}
+            onClick={() => { if (!onSettlements) vtNavigate(navigate, '/settlements'); if (isMobile) setNavOpen(false); }}
+          >
+            <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>🧾</span>
+            <span style={ellip}>Settlements</span>
+            {settlements.length > 0 && <span style={countChip}>{settlements.length}</span>}
+          </button>
+        </>
+      )}
     </nav>
   );
 
@@ -199,6 +221,7 @@ const rowBtn = { display: 'flex', alignItems: 'center', gap: 7, width: '100%', t
 const subRow = { padding: '7px 12px', fontSize: 13 };
 const ellip = { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' };
 const dot = { flexShrink: 0, width: 5, height: 5, borderRadius: '50%', display: 'inline-block' };
+const countChip = { flexShrink: 0, marginLeft: 'auto', fontSize: 10.5, fontWeight: 700, background: 'rgba(128,128,128,0.18)', color: 'var(--muted-2)', borderRadius: 980, minWidth: 18, height: 18, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' };
 const menuBtn = { flexShrink: 0, padding: '8px 16px', borderRadius: 980, border: '1px solid var(--hairline)', background: 'var(--card)', fontSize: 14, fontWeight: 600, cursor: 'pointer' };
 const previewBar = { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '8px 16px', background: 'linear-gradient(90deg, #FF385C, #FF6B35)', color: '#fff', fontSize: 13 };
 const exitPreviewBtn = { flexShrink: 0, padding: '6px 14px', borderRadius: 980, border: 'none', background: 'rgba(255,255,255,0.25)', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer' };
