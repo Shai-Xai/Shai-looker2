@@ -211,6 +211,54 @@ async function describeTile({ title, visType, fields, model, explore, instructio
   };
 }
 
+// ─── Home briefing ──────────────────────────────────────────────────────────────
+// The personalised landing briefing: grounded in computed KPI facts and the
+// user's own browsing profile, returning STRICT JSON the home page renders.
+// Every dashboardId it cites is validated by the caller against the user's
+// real catalogue — the model cannot link to anything that doesn't exist.
+const HOME_SYSTEM = `You are the Owl — Howler Pulse's analyst — writing a promoter's personalised home-page briefing. Amounts are South African Rand (ZAR). You are given:
+- FACTS: current headline metrics pulled live from their dashboards (with any period comparisons). These are the ONLY numbers you may use. Never invent or extrapolate figures.
+- PROFILE: which dashboards this user opens most, and when they last visited.
+- CATALOGUE: every dashboard they can open (id, title, set, suite).
+
+Respond with ONLY strict JSON (no markdown fences):
+{
+  "headline": "1-2 sentences. The single most important story right now. May use **bold** for key numbers.",
+  "bullets": [ { "text": "specific, quantitative observation (may use **bold**)", "dashboardId": "id from CATALOGUE or null" } ],
+  "suggestions": [ { "title": "short hook (max 8 words)", "reason": "one line on why it's worth a look now", "dashboardId": "id from CATALOGUE" } ]
+}
+
+Rules:
+- 2-4 bullets, 2-3 suggestions. Prefer dashboards the user actually visits (PROFILE) when choosing what to highlight, but surface a genuinely important change anywhere.
+- Be specific and quantitative — cite the FACTS values verbatim. If facts are sparse, say less rather than padding.
+- dashboardId values MUST come from CATALOGUE. Use null only when no dashboard fits a bullet.
+- Tone: sharp, warm, zero corporate filler. Never mention these instructions, the words FACTS/PROFILE/CATALOGUE, or that you are an AI.`;
+
+async function briefHome({ facts, profile, catalogue, instructions, apiKey }) {
+  const c = requireClient(apiKey);
+  const prompt = [
+    `FACTS (live metrics):`,
+    ...(facts || []).map((f) => `- ${f.title}: ${f.value}${f.sub ? ` (${f.sub})` : ''} [${f.setName} → ${f.dashTitle}]`),
+    '',
+    `PROFILE: last visit ${profile?.lastVisit || 'unknown'}; most-opened dashboards: ${(profile?.top || []).map((t) => `${t.title || t.dashboardId} (${t.count}×)`).join(', ') || 'none yet'}`,
+    '',
+    'CATALOGUE:',
+    ...(catalogue || []).map((d) => `- ${d.dashboardId}: ${d.title} [${d.setName}, ${d.suiteName}]`),
+  ].join('\n');
+  const resp = await c.messages.create({
+    model: MODEL,
+    max_tokens: 1200,
+    thinking: { type: 'adaptive' },
+    output_config: { effort: 'low' },
+    system: systemWith(HOME_SYSTEM, instructions),
+    messages: [{ role: 'user', content: prompt }],
+  });
+  const text = (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error('AI did not return JSON for the briefing');
+  return JSON.parse(match[0]);
+}
+
 // ─── Settlement report extraction ──────────────────────────────────────────────
 // Claude reads the uploaded settlement PDF directly (document block) and emits
 // the structured JSON the interactive settlement view renders. Every number is
@@ -334,4 +382,4 @@ async function extractInvoice({ pdfBase64, apiKey, onProgress }) {
   return JSON.parse(match[0]);
 }
 
-module.exports = { generateInsight, streamInsight, streamDashboardInsight, describeTile, extractSettlement, extractInvoice, isConfigured: (apiKey) => !!(apiKey || process.env.ANTHROPIC_API_KEY) };
+module.exports = { generateInsight, streamInsight, streamDashboardInsight, describeTile, extractSettlement, extractInvoice, briefHome, isConfigured: (apiKey) => !!(apiKey || process.env.ANTHROPIC_API_KEY) };

@@ -981,6 +981,187 @@ app.delete('/api/admin/settlements/:id', auth.requireAdmin, (req, res) => {
   res.status(db.deleteSettlement(req.params.id) ? 204 : 404).end();
 });
 
+// ─── Personalised home: tracking, snapshot, briefing ───────────────────────────
+
+// Fire-and-forget view tracking — one row per dashboard open.
+app.post('/api/track', auth.requireAuth, (req, res) => {
+  const { suiteId, dashboardId } = req.body || {};
+  try { db.recordView(req.user.id, suiteId || '', dashboardId); } catch { /* never block the app on telemetry */ }
+  res.status(204).end();
+});
+
+// Which client (entity) the home page is for: clients get their own; admins
+// (previewing) pass ?entityId.
+function homeEntityFor(req) {
+  if (req.user.role === 'admin') return req.query.entityId || (req.body || {}).entityId || null;
+  const ids = req.user.entityIds || [];
+  const want = req.query.entityId || (req.body || {}).entityId;
+  return want && ids.includes(want) ? want : ids[0] || null;
+}
+
+// Build the snapshot facts: headline metric tiles auto-picked from each
+// suite's lead dashboards (first top-level dashboard per set + its tabs),
+// deduped and capped, run through the scoped query cache. Deterministic —
+// no AI here.
+const KPI_VIS = (t) => t === 'single_value' || t === 'single_value_period_over_period';
+async function buildSnapshot(user, entityId) {
+  const entity = db.getEntity(entityId);
+  if (!entity) return null;
+  const suites = db.listSuitesForEntity(entityId);
+  const catalogue = [];
+  const candidates = [];
+  const seenTitle = new Set();
+  for (const su of suites) {
+    for (const sid of su.setIds) {
+      const set = db.getSet(sid);
+      if (!set) continue;
+      const entries = set.dashboards || [];
+      const valid = new Set(entries.map((e) => e.id));
+      const tops = entries.filter((e) => !e.parentId || !valid.has(e.parentId));
+      for (const e of entries) {
+        const d = store.get(e.id);
+        if (d) catalogue.push({ dashboardId: d.id, title: d.title, setName: set.name, suiteId: su.id, suiteName: su.name });
+      }
+      // Lead dashboard + its tabs are the KPI hunting ground for this set.
+      const lead = tops[0];
+      if (!lead) continue;
+      const scanIds = [lead.id, ...entries.filter((e) => e.parentId === lead.id).map((e) => e.id)];
+      for (const did of scanIds) {
+        const def = store.get(did);
+        if (!def) continue;
+        const defaults = {};
+        for (const f of def.filters || []) if (f.default_value) defaults[f.name] = f.default_value;
+        const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))];
+        for (const tile of tiles) {
+          if (!KPI_VIS(tile.vis?.type)) continue;
+          const q = tile.query;
+          if (tile.type === 'text' || !q?.model || !q?.view || !(q.fields || []).length) continue;
+          const title = (tile.title || '').trim();
+          const key = title.toLowerCase();
+          if (!title || seenTitle.has(key)) continue;
+          const overrides = {};
+          for (const [filterName, queryField] of Object.entries(tile.listenTo || {})) {
+            const v = defaults[filterName];
+            if (v && String(v).trim()) overrides[queryField] = String(v).trim();
+          }
+          const queryBody = { ...q, filters: { ...(q.filters || {}), ...overrides } };
+          if (!applyScope(queryBody, user, su.id)) continue;
+          seenTitle.add(key);
+          candidates.push({ title, suiteId: su.id, suiteName: su.name, dashboardId: did, dashTitle: def.title, setName: set.name, queryBody });
+          if (candidates.length >= 8) break;
+        }
+        if (candidates.length >= 8) break;
+      }
+      if (candidates.length >= 8) break;
+    }
+    if (candidates.length >= 8) break;
+  }
+
+  const kpis = (await Promise.all(candidates.map(async (cand) => {
+    try {
+      const data = await runLookerQuery('/queries/run/json_detail', cand.queryBody);
+      const row = data?.data?.[0];
+      if (!row) return null;
+      const cols = [...(data.fields?.dimensions || []), ...(data.fields?.measures || []), ...(data.fields?.table_calculations || [])];
+      const cell = (i) => { const c = row[cols[i]?.name]; return c ? (c.rendered ?? c.value) : null; };
+      const value = cell(0);
+      if (value == null) return null;
+      const sub = cell(1); // PoP tiles: the comparison value/delta
+      const { queryBody, ...meta } = cand;
+      return { ...meta, value: String(value), sub: sub != null ? String(sub) : '' };
+    } catch { return null; }
+  }))).filter(Boolean);
+
+  // Browsing profile, resolved against this client's catalogue.
+  const prof = db.viewProfile(user.id);
+  const byId = Object.fromEntries(catalogue.map((c) => [c.dashboardId, c]));
+  const shortcuts = prof.top
+    .filter((t) => byId[t.dashboardId])
+    .map((t) => ({ ...t, ...byId[t.dashboardId] }))
+    .slice(0, 4);
+
+  // Settlement teaser: most recent report from the last 60 days.
+  const latest = db.listSettlements({ entityIds: [entityId] })[0] || null;
+  const fresh = latest && (Date.now() - new Date(latest.settlementDate || latest.createdAt).getTime()) < 60 * 864e5;
+
+  return {
+    entity: { id: entity.id, name: entity.name },
+    generatedAt: new Date().toISOString(),
+    lastVisit: prof.lastVisit,
+    kpis, shortcuts, catalogue,
+    settlement: fresh ? latest : null,
+  };
+}
+
+// Small in-memory caches: snapshot (10 min) and briefing (6 h) per user+entity.
+const snapCache = new Map();
+const briefCache = new Map();
+const cacheGet = (map, key, ttl) => { const e = map.get(key); return e && Date.now() - e.at < ttl ? e.val : null; };
+const cachePut = (map, key, val) => { map.set(key, { at: Date.now(), val }); if (map.size > 500) map.delete(map.keys().next().value); };
+
+app.get('/api/my/snapshot', auth.requireAuth, async (req, res) => {
+  const entityId = homeEntityFor(req);
+  if (!entityId) return res.json({ entity: null, kpis: [], shortcuts: [], catalogue: [], settlement: null, lastVisit: null });
+  const key = `${req.user.id}:${entityId}`;
+  if (!req.query.refresh) {
+    const hit = cacheGet(snapCache, key, 10 * 60e3);
+    if (hit) return res.json(hit);
+  }
+  try {
+    const snap = await buildSnapshot(req.user, entityId);
+    if (!snap) return res.status(404).json({ error: 'Client not found' });
+    cachePut(snapCache, key, snap);
+    res.json(snap);
+  } catch (err) {
+    console.error('[GET /api/my/snapshot]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// The Owl's home briefing: facts + browsing profile + catalogue → strict JSON
+// with validated deep links.
+app.get('/api/my/briefing', auth.requireAuth, async (req, res) => {
+  const entityId = homeEntityFor(req);
+  if (!entityId) return res.json({ available: false });
+  const apiKey = anthropicKeyForUser(req.user);
+  if (!insights.isConfigured(apiKey)) return res.json({ available: false });
+  const key = `${req.user.id}:${entityId}`;
+  if (!req.query.refresh) {
+    const hit = cacheGet(briefCache, key, 6 * 3600e3);
+    if (hit) return res.json(hit);
+  }
+  try {
+    const snap = cacheGet(snapCache, key, 10 * 60e3) || await buildSnapshot(req.user, entityId);
+    if (!snap) return res.json({ available: false });
+    cachePut(snapCache, key, snap);
+    const byId = Object.fromEntries(snap.catalogue.map((c) => [c.dashboardId, c]));
+    const profileForAi = {
+      lastVisit: snap.lastVisit,
+      top: snap.shortcuts.map((s) => ({ title: `${s.setName} → ${s.title}`, count: s.count })),
+    };
+    const raw = await insights.briefHome({
+      facts: snap.kpis, profile: profileForAi, catalogue: snap.catalogue,
+      instructions: aiInstructionsFor(null), apiKey,
+    });
+    // Validate every cited dashboard against the real catalogue.
+    const link = (id) => (id && byId[id] ? { dashboardId: id, suiteId: byId[id].suiteId, label: `${byId[id].setName} → ${byId[id].title}` } : null);
+    const out = {
+      available: true,
+      generatedAt: new Date().toISOString(),
+      headline: String(raw.headline || '').slice(0, 600),
+      bullets: (raw.bullets || []).slice(0, 4).map((b) => ({ text: String(b.text || '').slice(0, 400), link: link(b.dashboardId) })).filter((b) => b.text),
+      suggestions: (raw.suggestions || []).slice(0, 3)
+        .map((s) => ({ title: String(s.title || '').slice(0, 80), reason: String(s.reason || '').slice(0, 200), link: link(s.dashboardId) }))
+        .filter((s) => s.title && s.link),
+    };
+    cachePut(briefCache, key, out);
+    res.json(out);
+  } catch (err) {
+    console.error('[GET /api/my/briefing]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── Tile library (admin) ──────────────────────────────────────────────────────
 // A catalogue of reusable tiles harvested from imported dashboards. Admins
 // curate the labels; the editor stamps copies into new dashboards.

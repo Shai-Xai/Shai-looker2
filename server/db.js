@@ -145,6 +145,37 @@ if (tableExists('settlements')) {
 // event_documents.data (extracted invoice JSON) added after the table shipped.
 if (tableExists('event_documents')) addColumn('event_documents', 'data', "TEXT NOT NULL DEFAULT '{}'");
 
+// ─── View tracking (powers the personalised home) ────────────────────────────
+// One row per dashboard open. Aggregated into a per-user profile: what they
+// check most, when they last visited — feeds shortcut ranking and the Owl's
+// home briefing.
+db.exec(`
+CREATE TABLE IF NOT EXISTS user_views (
+  user_id      TEXT NOT NULL,
+  suite_id     TEXT NOT NULL DEFAULT '',
+  dashboard_id TEXT NOT NULL,
+  at           TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_user_views_user ON user_views(user_id, at);
+`);
+function recordView(userId, suiteId, dashboardId) {
+  if (!userId || !dashboardId) return;
+  db.prepare('INSERT INTO user_views (user_id, suite_id, dashboard_id, at) VALUES (?,?,?,?)').run(userId, suiteId || '', dashboardId, now());
+}
+// Profile: top dashboards over the last 90 days + the user's previous session
+// start (most recent view older than 30 minutes — so "since your last visit"
+// doesn't mean "since 30 seconds ago").
+function viewProfile(userId) {
+  const since = new Date(Date.now() - 90 * 864e5).toISOString();
+  const top = db.prepare(`
+    SELECT dashboard_id AS dashboardId, suite_id AS suiteId, COUNT(*) AS count, MAX(at) AS lastAt
+    FROM user_views WHERE user_id=? AND at>=? GROUP BY dashboard_id ORDER BY count DESC, lastAt DESC LIMIT 10
+  `).all(userId, since);
+  const cutoff = new Date(Date.now() - 30 * 60e3).toISOString();
+  const last = db.prepare('SELECT MAX(at) AS at FROM user_views WHERE user_id=? AND at<?').get(userId, cutoff);
+  return { top, lastVisit: last?.at || null };
+}
+
 // ─── Settings (simple key/value) ──────────────────────────────────────────────
 db.exec(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '');`);function getSetting(key, fallback = '') {
   const r = db.prepare('SELECT value FROM settings WHERE key=?').get(key);
@@ -670,7 +701,7 @@ function updateDocument(id, patch) {
 function deleteDocument(id) { return db.prepare('DELETE FROM event_documents WHERE id=?').run(id).changes > 0; }
 
 // ─── Full backup / restore (export to JSON, import to replace) ────────────────
-const EXPORT_TABLES = ['entities', 'users', 'user_entities', 'sets', 'set_dashboards', 'suites', 'suite_sets', 'dashboards', 'settings', 'tile_library', 'settlements', 'event_documents'];
+const EXPORT_TABLES = ['entities', 'users', 'user_entities', 'sets', 'set_dashboards', 'suites', 'suite_sets', 'dashboards', 'settings', 'tile_library', 'settlements', 'event_documents', 'user_views'];
 function exportAll() {
   const out = { _version: 1, exportedAt: now() };
   for (const t of EXPORT_TABLES) out[t] = tableExists(t) ? db.prepare(`SELECT * FROM ${t}`).all() : [];
@@ -686,8 +717,8 @@ function insertRow(name, row) {
 // Replace ALL data with the contents of an export. Deletes children first
 // (FK-safe), then inserts parents first.
 const importAll = db.transaction((data) => {
-  const delOrder = ['user_entities', 'suite_sets', 'set_dashboards', 'suites', 'sets', 'dashboards', 'users', 'settlements', 'event_documents', 'entities', 'settings', 'tile_library'];
-  const insOrder = ['entities', 'dashboards', 'users', 'sets', 'suites', 'set_dashboards', 'suite_sets', 'user_entities', 'settings', 'tile_library', 'settlements', 'event_documents'];
+  const delOrder = ['user_views', 'user_entities', 'suite_sets', 'set_dashboards', 'suites', 'sets', 'dashboards', 'users', 'settlements', 'event_documents', 'entities', 'settings', 'tile_library'];
+  const insOrder = ['entities', 'dashboards', 'users', 'sets', 'suites', 'set_dashboards', 'suite_sets', 'user_entities', 'settings', 'tile_library', 'settlements', 'event_documents', 'user_views'];
   for (const t of delOrder) { if (tableExists(t)) db.prepare(`DELETE FROM ${t}`).run(); }
   let counts = {};
   for (const t of insOrder) {
@@ -717,4 +748,6 @@ module.exports = {
   listSettlements, getSettlement, getSettlementFile, createSettlement, updateSettlement, deleteSettlement, setSettlementNotes,
   // event documents (invoices etc.)
   listDocuments, getDocument, getDocumentFile, createDocument, updateDocument, deleteDocument,
+  // view tracking
+  recordView, viewProfile,
 };

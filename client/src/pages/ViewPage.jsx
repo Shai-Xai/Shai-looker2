@@ -63,6 +63,9 @@ export default function ViewPage() {
     setFilterValues((prev) => ({ ...prev, [name]: value }));
   }, []);
 
+  // View tracking (fire-and-forget) — powers home-page personalisation.
+  useEffect(() => { if (suiteId && id) api.track(suiteId, id); }, [suiteId, id]);
+
   // Sub-dashboard tabs: if this dashboard is a parent with children — or one of
   // the children — surface the whole family as a tab bar (parent first).
   // Computed from the suite tree (setInfo + id), independent of `def`, so the

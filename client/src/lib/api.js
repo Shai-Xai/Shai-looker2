@@ -188,4 +188,12 @@ export const api = {
   adminCreateDocument: (d) => fetch('/api/admin/documents', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(d) }).then(json),
   adminUpdateDocument: (id, p) => fetch(`/api/admin/documents/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),
   adminDeleteDocument: (id) => fetch(`/api/admin/documents/${id}`, { method: 'DELETE' }),
+
+  // Personalised home
+  track: (suiteId, dashboardId) =>
+    fetch('/api/track', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ suiteId, dashboardId }) }).catch(() => {}),
+  mySnapshot: (entityId, refresh) =>
+    fetch(`/api/my/snapshot?${new URLSearchParams({ ...(entityId ? { entityId } : {}), ...(refresh ? { refresh: 1 } : {}) })}`).then(json),
+  myBriefing: (entityId, refresh) =>
+    fetch(`/api/my/briefing?${new URLSearchParams({ ...(entityId ? { entityId } : {}), ...(refresh ? { refresh: 1 } : {}) })}`).then(json),
 };
