@@ -206,7 +206,7 @@ function InsightButton({ onClick, isMobile, corner }) {
         padding: isMobile ? '5px' : '3px',
         backdropFilter: 'blur(2px)', WebkitBackdropFilter: 'blur(2px)',
       }}
-    ><AiMark size={isMobile ? 20 : 17} /></button>
+    ><AiMark size={isMobile ? 24 : 21} /></button>
   );
 }
 
