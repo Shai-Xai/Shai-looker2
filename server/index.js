@@ -1003,14 +1003,11 @@ function homeEntityFor(req) {
 // suite's lead dashboards (first top-level dashboard per set + its tabs),
 // deduped and capped, run through the scoped query cache. Deterministic —
 // no AI here.
-const KPI_VIS = (t) => t === 'single_value' || t === 'single_value_period_over_period';
-async function buildSnapshot(user, entityId) {
-  const entity = db.getEntity(entityId);
-  if (!entity) return null;
+// Catalogue + lead dashboards for a client's suites (cheap; no Looker).
+function clientCatalogue(entityId) {
   const suites = db.listSuitesForEntity(entityId);
   const catalogue = [];
-  const candidates = [];
-  const seenTitle = new Set();
+  const leads = []; // first top-level dashboard (+ its tabs) per set
   for (const su of suites) {
     for (const sid of su.setIds) {
       const set = db.getSet(sid);
@@ -1022,93 +1019,142 @@ async function buildSnapshot(user, entityId) {
         const d = store.get(e.id);
         if (d) catalogue.push({ dashboardId: d.id, title: d.title, setName: set.name, suiteId: su.id, suiteName: su.name });
       }
-      // Lead dashboard + its tabs are the KPI hunting ground for this set.
       const lead = tops[0];
-      if (!lead) continue;
-      const scanIds = [lead.id, ...entries.filter((e) => e.parentId === lead.id).map((e) => e.id)];
-      for (const did of scanIds) {
-        const def = store.get(did);
-        if (!def) continue;
-        const defaults = {};
-        for (const f of def.filters || []) if (f.default_value) defaults[f.name] = f.default_value;
-        const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))];
-        for (const tile of tiles) {
-          if (!KPI_VIS(tile.vis?.type)) continue;
-          const q = tile.query;
-          if (tile.type === 'text' || !q?.model || !q?.view || !(q.fields || []).length) continue;
-          const title = (tile.title || '').trim();
-          const key = title.toLowerCase();
-          if (!title || seenTitle.has(key)) continue;
-          const overrides = {};
-          for (const [filterName, queryField] of Object.entries(tile.listenTo || {})) {
-            const v = defaults[filterName];
-            if (v && String(v).trim()) overrides[queryField] = String(v).trim();
-          }
-          const queryBody = { ...q, filters: { ...(q.filters || {}), ...overrides } };
-          if (!applyScope(queryBody, user, su.id)) continue;
-          seenTitle.add(key);
-          candidates.push({ title, suiteId: su.id, suiteName: su.name, dashboardId: did, dashTitle: def.title, setName: set.name, queryBody });
-          if (candidates.length >= 8) break;
-        }
-        if (candidates.length >= 8) break;
-      }
-      if (candidates.length >= 8) break;
+      if (lead) leads.push({ suiteId: su.id, suiteName: su.name, setName: set.name, dashboardIds: [lead.id, ...entries.filter((e) => e.parentId === lead.id).map((e) => e.id)] });
     }
-    if (candidates.length >= 8) break;
   }
+  return { suites, catalogue, leads };
+}
 
-  const kpis = (await Promise.all(candidates.map(async (cand) => {
-    try {
-      const data = await runLookerQuery('/queries/run/json_detail', cand.queryBody);
-      const row = data?.data?.[0];
-      if (!row) return null;
-      const cols = [...(data.fields?.dimensions || []), ...(data.fields?.measures || []), ...(data.fields?.table_calculations || [])];
-      const cell = (i) => { const c = row[cols[i]?.name]; return c ? (c.rendered ?? c.value) : null; };
-      const value = cell(0);
-      if (value == null) return null;
-      const sub = cell(1); // PoP tiles: the comparison value/delta
-      const { queryBody, ...meta } = cand;
-      return { ...meta, value: String(value), sub: sub != null ? String(sub) : '' };
-    } catch { return null; }
-  }))).filter(Boolean);
+// Build a scoped query body for a tile within a dashboard. Mirrors the
+// dashboard view exactly: each dashboard filter resolves to its default OR the
+// suite's locked value (the Current-Event / Cashless locks), those flow through
+// the tile's listenTo map, then the organiser scope is forced on. Without the
+// suite locks, "Current Event" measures come back empty (the zeros bug).
+// `lockMap` = db.lockedFiltersForSuite(suiteId) (entity + suite locks).
+function tileQueryBody(tile, def, user, suiteId, lockMap = {}) {
+  const q = tile.query;
+  if (tile.type === 'text' || !q?.model || !q?.view || !(q.fields || []).length) return null;
+  // Effective value per dashboard filter (suite lock wins over default).
+  const fv = {};
+  for (const f of def.filters || []) {
+    const field = f.field || f.dimension;
+    let v = f.default_value || '';
+    const locked = lockMap[f.name] != null ? lockMap[f.name] : (field ? lockMap[field] : undefined);
+    if (locked != null && locked !== '') v = locked;
+    fv[f.name] = v;
+  }
+  const overrides = {};
+  for (const [filterName, queryField] of Object.entries(tile.listenTo || {})) {
+    const v = fv[filterName];
+    if (v && String(v).trim()) overrides[queryField] = String(v).trim();
+  }
+  const body = { ...q, filters: { ...(q.filters || {}), ...overrides } };
+  if (!applyScope(body, user, suiteId)) return null;
+  return body;
+}
 
-  // Browsing profile, resolved against this client's catalogue.
+// Cheap home data (no Looker): greeting context, browsing shortcuts, settlement
+// teaser, dashboard catalogue. Called on every home load.
+function buildLightSnapshot(user, entityId) {
+  const entity = db.getEntity(entityId);
+  if (!entity) return null;
+  const { catalogue } = clientCatalogue(entityId);
   const prof = db.viewProfile(user.id);
   const byId = Object.fromEntries(catalogue.map((c) => [c.dashboardId, c]));
-  const shortcuts = prof.top
-    .filter((t) => byId[t.dashboardId])
-    .map((t) => ({ ...t, ...byId[t.dashboardId] }))
-    .slice(0, 4);
-
-  // Settlement teaser: most recent report from the last 60 days.
+  const shortcuts = prof.top.filter((t) => byId[t.dashboardId]).map((t) => ({ ...t, ...byId[t.dashboardId] })).slice(0, 4);
   const latest = db.listSettlements({ entityIds: [entityId] })[0] || null;
   const fresh = latest && (Date.now() - new Date(latest.settlementDate || latest.createdAt).getTime()) < 60 * 864e5;
-
   return {
     entity: { id: entity.id, name: entity.name },
     generatedAt: new Date().toISOString(),
     lastVisit: prof.lastVisit,
-    kpis, shortcuts, catalogue,
-    settlement: fresh ? latest : null,
+    shortcuts, catalogue, settlement: fresh ? latest : null,
   };
 }
 
-// Small in-memory caches: snapshot (10 min) and briefing (6 h) per user+entity.
+// Heavy facts for the briefing (Looker reads): pinned tiles first (always
+// covered), then the lead dashboards' value/chart/table tiles, capped, with
+// row-limited data. Bounded for scale + behind the briefing cache.
+const FACT_MAX_TILES = 14;
+async function buildFacts(user, entityId) {
+  const { catalogue, leads } = clientCatalogue(entityId);
+  const pins = db.listPins({ userId: user.id, entityId }); // [{dashboardId, tileId, scope}]
+  const dashMeta = Object.fromEntries(catalogue.map((c) => [c.dashboardId, c]));
+  const picks = []; // { tile, def, suiteId, setName, dashTitle, pinned }
+  const seen = new Set();
+  const addTile = (def, tile, suiteId, pinned) => {
+    const sig = `${def.id}|${tile.id}`;
+    if (seen.has(sig)) return;
+    const meta = dashMeta[def.id];
+    picks.push({ tile, def, suiteId: suiteId || meta?.suiteId, setName: meta?.setName || '', dashTitle: def.title, pinned: !!pinned });
+    seen.add(sig);
+  };
+  // 1) Pinned tiles — wherever they live — always make the cut.
+  for (const p of pins) {
+    const def = store.get(p.dashboardId);
+    if (!def) continue;
+    const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))];
+    const tile = tiles.find((t) => t.id === p.tileId);
+    if (tile) addTile(def, tile, dashMeta[def.id]?.suiteId, true);
+  }
+  // 2) Fill from lead dashboards (value/chart/table tiles). Cap PER dashboard
+  //    so a busy lead tab (e.g. Overview) can't eat the whole budget and starve
+  //    the tabs that hold today's movement (e.g. Daily Sales).
+  const PER_DASH = 6;
+  for (const lead of leads) {
+    for (const did of lead.dashboardIds) {
+      const def = store.get(did);
+      if (!def) continue;
+      const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))];
+      let n = 0;
+      for (const tile of tiles) {
+        if (tile.type === 'text' || !tile.query?.fields?.length) continue;
+        const before = picks.length;
+        addTile(def, tile, lead.suiteId, false);
+        if (picks.length > before) n += 1;
+        if (n >= PER_DASH || picks.length >= FACT_MAX_TILES) break;
+      }
+      if (picks.length >= FACT_MAX_TILES) break;
+    }
+    if (picks.length >= FACT_MAX_TILES) break;
+  }
+
+  // Suite locked filters (Current Event / Cashless) per suite, resolved once.
+  const lockMaps = {};
+  for (const p of picks) if (p.suiteId && !(p.suiteId in lockMaps)) lockMaps[p.suiteId] = db.lockedFiltersForSuite(p.suiteId);
+
+  const tiles = (await Promise.all(picks.slice(0, FACT_MAX_TILES).map(async (p) => {
+    const body = tileQueryBody(p.tile, p.def, user, p.suiteId, lockMaps[p.suiteId] || {});
+    if (!body) return null;
+    try {
+      const data = await runLookerQuery('/queries/run/json_detail', body);
+      if (!data?.data?.length) return null;
+      return {
+        title: p.tile.title || '(untitled)', visType: p.tile.vis?.type, context: p.tile.aiContext || '',
+        fields: data.fields, rows: data.data,
+        dashboardId: p.def.id, suiteId: p.suiteId, setName: p.setName, dashTitle: p.dashTitle, pinned: p.pinned,
+      };
+    } catch { return null; }
+  }))).filter(Boolean);
+
+  return { tiles, catalogue };
+}
+
+// In-memory caches: light snapshot (10 min) and briefing (6 h) per user+entity.
 const snapCache = new Map();
 const briefCache = new Map();
 const cacheGet = (map, key, ttl) => { const e = map.get(key); return e && Date.now() - e.at < ttl ? e.val : null; };
 const cachePut = (map, key, val) => { map.set(key, { at: Date.now(), val }); if (map.size > 500) map.delete(map.keys().next().value); };
+const bustHome = (userId, entityId) => { const k = `${userId}:${entityId}`; snapCache.delete(k); briefCache.delete(k); };
 
-app.get('/api/my/snapshot', auth.requireAuth, async (req, res) => {
+app.get('/api/my/snapshot', auth.requireAuth, (req, res) => {
   const entityId = homeEntityFor(req);
-  if (!entityId) return res.json({ entity: null, kpis: [], shortcuts: [], catalogue: [], settlement: null, lastVisit: null });
+  if (!entityId) return res.json({ entity: null, shortcuts: [], catalogue: [], settlement: null, lastVisit: null });
   const key = `${req.user.id}:${entityId}`;
-  if (!req.query.refresh) {
-    const hit = cacheGet(snapCache, key, 10 * 60e3);
-    if (hit) return res.json(hit);
-  }
+  if (!req.query.refresh) { const hit = cacheGet(snapCache, key, 10 * 60e3); if (hit) return res.json(hit); }
   try {
-    const snap = await buildSnapshot(req.user, entityId);
+    const snap = buildLightSnapshot(req.user, entityId);
     if (!snap) return res.status(404).json({ error: 'Client not found' });
     cachePut(snapCache, key, snap);
     res.json(snap);
@@ -1118,34 +1164,26 @@ app.get('/api/my/snapshot', auth.requireAuth, async (req, res) => {
   }
 });
 
-// The Owl's home briefing: facts + browsing profile + catalogue → strict JSON
-// with validated deep links.
+// The Owl's home briefing: reads pinned + lead-dashboard tile data (values,
+// charts, tables), grounds the Owl in it, returns strict JSON with deep links
+// validated against the real catalogue.
 app.get('/api/my/briefing', auth.requireAuth, async (req, res) => {
   const entityId = homeEntityFor(req);
   if (!entityId) return res.json({ available: false });
   const apiKey = anthropicKeyForUser(req.user);
   if (!insights.isConfigured(apiKey)) return res.json({ available: false });
   const key = `${req.user.id}:${entityId}`;
-  if (!req.query.refresh) {
-    const hit = cacheGet(briefCache, key, 6 * 3600e3);
-    if (hit) return res.json(hit);
-  }
+  if (!req.query.refresh) { const hit = cacheGet(briefCache, key, 6 * 3600e3); if (hit) return res.json(hit); }
   try {
-    // On refresh, re-pull the live facts too so the briefing isn't re-phrasing
-    // stale numbers; otherwise reuse the cached snapshot.
-    const snap = (!req.query.refresh && cacheGet(snapCache, key, 10 * 60e3)) || await buildSnapshot(req.user, entityId);
-    if (!snap) return res.json({ available: false });
-    cachePut(snapCache, key, snap);
-    const byId = Object.fromEntries(snap.catalogue.map((c) => [c.dashboardId, c]));
+    const { tiles, catalogue } = await buildFacts(req.user, entityId);
+    if (!tiles.length) return res.json({ available: false });
+    const byId = Object.fromEntries(catalogue.map((c) => [c.dashboardId, c]));
+    const prof = db.viewProfile(req.user.id);
     const profileForAi = {
-      lastVisit: snap.lastVisit,
-      top: snap.shortcuts.map((s) => ({ title: `${s.setName} → ${s.title}`, count: s.count })),
+      lastVisit: prof.lastVisit,
+      top: prof.top.filter((t) => byId[t.dashboardId]).map((t) => ({ title: byId[t.dashboardId].title, count: t.count })),
     };
-    const raw = await insights.briefHome({
-      facts: snap.kpis, profile: profileForAi, catalogue: snap.catalogue,
-      instructions: aiInstructionsFor(null), apiKey,
-    });
-    // Validate every cited dashboard against the real catalogue.
+    const raw = await insights.briefHome({ tiles, profile: profileForAi, catalogue, instructions: aiInstructionsFor(null), apiKey });
     const link = (id) => (id && byId[id] ? { dashboardId: id, suiteId: byId[id].suiteId, label: `${byId[id].setName} → ${byId[id].title}` } : null);
     const out = {
       available: true,
@@ -1162,6 +1200,32 @@ app.get('/api/my/briefing', auth.requireAuth, async (req, res) => {
     console.error('[GET /api/my/briefing]', err.message);
     res.status(500).json({ error: err.message });
   }
+});
+
+// ─── Pin to home (briefing steering) ────────────────────────────────────────────
+// Pinned tiles are always read into the briefing. Promoters pin to their own
+// 'user' scope; admins pin a client default to 'entity' scope. A user sees the
+// union of both.
+app.get('/api/my/pins', auth.requireAuth, (req, res) => {
+  const entityId = homeEntityFor(req);
+  res.json({ pins: entityId ? db.listPins({ userId: req.user.id, entityId }) : [] });
+});
+app.post('/api/my/pins', auth.requireAuth, (req, res) => {
+  const { dashboardId, tileId, pinned, scope } = req.body || {};
+  if (!dashboardId || !tileId) return res.status(400).json({ error: 'dashboardId and tileId required' });
+  const def = store.get(dashboardId);
+  if (!def || !auth.canAccessDashboard(req.user, def)) return res.status(403).json({ error: 'Not allowed' });
+  // Admins may pin a client-wide default ('entity'); everyone can pin their own.
+  const useEntity = scope === 'entity' && req.user.role === 'admin';
+  const entityId = homeEntityFor(req);
+  if (useEntity) {
+    if (!entityId) return res.status(400).json({ error: 'entityId required for an entity pin' });
+    db.setPin('entity', entityId, dashboardId, tileId, !!pinned);
+  } else {
+    db.setPin('user', req.user.id, dashboardId, tileId, !!pinned);
+  }
+  if (entityId) bustHome(req.user.id, entityId); // next briefing reflects the change
+  res.json({ pins: entityId ? db.listPins({ userId: req.user.id, entityId }) : [] });
 });
 
 // ─── Tile library (admin) ──────────────────────────────────────────────────────

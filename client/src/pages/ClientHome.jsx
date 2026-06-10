@@ -3,7 +3,6 @@ import { useNavigate, useOutletContext } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/auth.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
-import { useCountUp } from '../lib/useCountUp.js';
 import { vtNavigate } from '../lib/viewTransition.js';
 import AiMark from '../components/AiMark.jsx';
 import { fmtR } from '../lib/money.js';
@@ -54,7 +53,6 @@ export default function ClientHome() {
 
   const firstName = deriveFirstName(user?.email);
   const visibleSuites = previewEntityId ? suites.filter((s) => s.entityId === previewEntityId) : suites;
-  const kpis = snap?.kpis || [];
   const shortcuts = snap?.shortcuts || [];
 
   return (
@@ -108,18 +106,6 @@ export default function ClientHome() {
               )}
             </>
           )}
-        </div>
-      )}
-
-      {/* KPI strip */}
-      {kpis.length > 0 && (
-        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : `repeat(${Math.min(kpis.length, 4)}, 1fr)`, gap: 12, marginTop: 16 }}>
-          {kpis.slice(0, isMobile ? 4 : 8).map((k, i) => <Kpi key={k.title} k={k} delay={i * 60} onOpen={() => go(k.suiteId, k.dashboardId)} />)}
-        </div>
-      )}
-      {snap == null && (
-        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, 1fr)', gap: 12, marginTop: 16 }}>
-          {[0, 1, 2, 3].map((i) => <div key={i} className="skel" style={{ height: 86, borderRadius: 14 }} />)}
         </div>
       )}
 
@@ -194,18 +180,6 @@ export default function ClientHome() {
   );
 }
 
-function Kpi({ k, delay, onOpen }) {
-  const value = useCountUp(k.value);
-  return (
-    <button className="tile-enter lift" style={{ ...cardBtn, animationDelay: `${delay}ms` }} onClick={onOpen}>
-      <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)' }}>{k.title}</div>
-      <div style={{ fontSize: 'clamp(17px, 2vw, 22px)', fontWeight: 800, letterSpacing: '-0.02em', marginTop: 3, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{value}</div>
-      {k.sub && <div style={{ fontSize: 11, fontWeight: 700, marginTop: 2, color: deltaColor(k.sub) }}>{k.sub}</div>}
-      <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{k.setName} · {k.dashTitle}</div>
-    </button>
-  );
-}
-
 function SectionHead({ icon, children }) {
   return <h2 style={{ fontSize: 14, fontWeight: 800, letterSpacing: '-0.01em', margin: '22px 0 10px', display: 'flex', alignItems: 'center', gap: 7 }}>{icon && <span>{icon}</span>}{children}</h2>;
 }
@@ -236,13 +210,6 @@ function bold(text) {
   return String(text || '').split(/(\*\*[^*]+\*\*)/g).map((p, i) =>
     p.startsWith('**') && p.endsWith('**') ? <b key={i}>{p.slice(2, -2)}</b> : p);
 }
-function deltaColor(sub) {
-  const s = String(sub);
-  if (/^[▼\-−]|(-\d)/.test(s.trim())) return 'var(--error)';
-  if (/[▲+]|up /i.test(s)) return '#2da44e';
-  return 'var(--muted-2)';
-}
-
 const briefCard = { background: 'var(--tile-bg, var(--card))', border: '1px solid var(--border)', borderRadius: 16, boxShadow: 'var(--shadow-sm)', padding: '16px 18px' };
 const cardBtn = { textAlign: 'left', background: 'var(--tile-bg, var(--card))', border: '1px solid var(--border)', borderRadius: 14, padding: '13px 15px', cursor: 'pointer', boxShadow: 'var(--shadow-sm)', color: 'var(--text)', width: '100%' };
 const settleCard = { display: 'flex', alignItems: 'center', gap: 12, width: '100%', marginTop: 16, background: 'linear-gradient(90deg, rgba(52,199,89,0.10), transparent 60%) var(--tile-bg, var(--card))', border: '1px solid rgba(52,199,89,0.35)', borderRadius: 14, padding: '13px 16px', cursor: 'pointer', color: 'var(--text)' };

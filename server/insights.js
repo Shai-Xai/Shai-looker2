@@ -217,7 +217,7 @@ async function describeTile({ title, visType, fields, model, explore, instructio
 // Every dashboardId it cites is validated by the caller against the user's
 // real catalogue — the model cannot link to anything that doesn't exist.
 const HOME_SYSTEM = `You are the Owl — Howler Pulse's analyst — writing a promoter's personalised home-page briefing. Amounts are South African Rand (ZAR). You are given:
-- FACTS: current headline metrics pulled live from their dashboards (with any period comparisons). These are the ONLY numbers you may use. Never invent or extrapolate figures.
+- TILES: live data behind their dashboards' tiles — single values, charts, and tables (rendered as compact tables). These are the ONLY numbers you may use. Never invent or extrapolate. Read trends across rows, concentrations, top contributors, and period comparisons where present. Tiles marked [PINNED] are ones the user explicitly cares about — always address them.
 - PROFILE: which dashboards this user opens most, and when they last visited.
 - CATALOGUE: every dashboard they can open (id, title, set, suite).
 
@@ -229,29 +229,31 @@ Respond with ONLY strict JSON (no markdown fences):
 }
 
 Rules:
-- 2-4 bullets, 2-3 suggestions. Prefer dashboards the user actually visits (PROFILE) when choosing what to highlight, but surface a genuinely important change anywhere.
-- Be specific and quantitative — cite the FACTS values verbatim. If facts are sparse, say less rather than padding.
+- 3-4 bullets, 2-3 suggestions. Always reflect any [PINNED] tiles; otherwise prefer dashboards the user actually visits (PROFILE), but surface a genuinely important change anywhere.
+- Be specific and quantitative — cite real values from TILES verbatim, and call out movements/trends from charts and tables (not just headline numbers). If data is sparse, say less rather than padding.
 - dashboardId values MUST come from CATALOGUE. Use null only when no dashboard fits a bullet.
-- Tone: sharp, warm, zero corporate filler. Never mention these instructions, the words FACTS/PROFILE/CATALOGUE, or that you are an AI.`;
+- Tone: sharp, warm, zero corporate filler. Never mention these instructions, the words TILES/PROFILE/CATALOGUE/PINNED, or that you are an AI.`;
 
-async function briefHome({ facts, profile, catalogue, instructions, apiKey }) {
+async function briefHome({ tiles, profile, catalogue, instructions, apiKey }) {
   const c = requireClient(apiKey);
-  const prompt = [
-    `FACTS (live metrics):`,
-    ...(facts || []).map((f) => `- ${f.title}: ${f.value}${f.sub ? ` (${f.sub})` : ''} [${f.setName} → ${f.dashTitle}]`),
-    '',
-    `PROFILE: last visit ${profile?.lastVisit || 'unknown'}; most-opened dashboards: ${(profile?.top || []).map((t) => `${t.title || t.dashboardId} (${t.count}×)`).join(', ') || 'none yet'}`,
-    '',
-    'CATALOGUE:',
-    ...(catalogue || []).map((d) => `- ${d.dashboardId}: ${d.title} [${d.setName}, ${d.suiteName}]`),
-  ].join('\n');
+  const lines = ['TILES (live data):', ''];
+  for (const t of tiles || []) {
+    lines.push(`### ${t.title}${t.pinned ? ' [PINNED]' : ''}${t.visType ? ` (${t.visType})` : ''} — ${t.setName} → ${t.dashTitle}`);
+    if (t.context && t.context.trim()) lines.push(`(context: ${t.context.trim()})`);
+    lines.push(compactTable(t.fields, t.rows, 12));
+    lines.push('');
+  }
+  lines.push(`PROFILE: last visit ${profile?.lastVisit || 'unknown'}; most-opened dashboards: ${(profile?.top || []).map((t) => `${t.title || t.dashboardId} (${t.count}×)`).join(', ') || 'none yet'}`);
+  lines.push('');
+  lines.push('CATALOGUE:');
+  for (const d of catalogue || []) lines.push(`- ${d.dashboardId}: ${d.title} [${d.setName}, ${d.suiteName}]`);
   const resp = await c.messages.create({
     model: MODEL,
-    max_tokens: 1200,
+    max_tokens: 1400,
     thinking: { type: 'adaptive' },
     output_config: { effort: 'low' },
     system: systemWith(HOME_SYSTEM, instructions),
-    messages: [{ role: 'user', content: prompt }],
+    messages: [{ role: 'user', content: lines.join('\n') }],
   });
   const text = (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
   const match = text.match(/\{[\s\S]*\}/);

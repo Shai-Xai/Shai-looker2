@@ -176,6 +176,38 @@ function viewProfile(userId) {
   return { top, lastVisit: last?.at || null };
 }
 
+// ─── Home pins (briefing steering) ───────────────────────────────────────────
+// Tiles a user (or admin, per entity) marks so the home briefing always reads
+// them. scope = 'user' (scope_id=userId) | 'entity' (scope_id=entityId).
+db.exec(`
+CREATE TABLE IF NOT EXISTS home_pins (
+  scope        TEXT NOT NULL,
+  scope_id     TEXT NOT NULL,
+  dashboard_id TEXT NOT NULL,
+  tile_id      TEXT NOT NULL,
+  at           TEXT NOT NULL,
+  PRIMARY KEY (scope, scope_id, dashboard_id, tile_id)
+);
+`);
+function setPin(scope, scopeId, dashboardId, tileId, pinned) {
+  if (pinned) {
+    db.prepare('INSERT OR IGNORE INTO home_pins (scope, scope_id, dashboard_id, tile_id, at) VALUES (?,?,?,?,?)').run(scope, scopeId, dashboardId, tileId, now());
+  } else {
+    db.prepare('DELETE FROM home_pins WHERE scope=? AND scope_id=? AND dashboard_id=? AND tile_id=?').run(scope, scopeId, dashboardId, tileId);
+  }
+}
+// The pins a user sees = their own ('user') ∪ their entity's defaults ('entity').
+function listPins({ userId, entityId }) {
+  const rows = db.prepare(`
+    SELECT dashboard_id AS dashboardId, tile_id AS tileId, scope FROM home_pins
+    WHERE (scope='user' AND scope_id=?) OR (scope='entity' AND scope_id=?)
+  `).all(userId || '', entityId || '');
+  // Dedupe by tile, preferring the user's own pin record.
+  const out = new Map();
+  for (const r of rows) { const k = `${r.dashboardId}|${r.tileId}`; if (!out.has(k) || r.scope === 'user') out.set(k, r); }
+  return [...out.values()];
+}
+
 // ─── Settings (simple key/value) ──────────────────────────────────────────────
 db.exec(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '');`);function getSetting(key, fallback = '') {
   const r = db.prepare('SELECT value FROM settings WHERE key=?').get(key);
@@ -750,4 +782,6 @@ module.exports = {
   listDocuments, getDocument, getDocumentFile, createDocument, updateDocument, deleteDocument,
   // view tracking
   recordView, viewProfile,
+  // home pins
+  setPin, listPins,
 };
