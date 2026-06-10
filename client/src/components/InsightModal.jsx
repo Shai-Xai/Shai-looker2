@@ -135,7 +135,7 @@ export default function InsightModal({ tile, data, filters, onClose }) {
         <div style={contextBar}>
           {!contextOpen ? (
             <button style={contextToggle} onClick={() => setContextOpen(true)}>
-              {userContext.trim() ? '✎ Edit context' : '＋ Add context for the AI'}
+              {userContext.trim() ? '✎ Edit context' : '＋ Add context for the Owl'}
             </button>
           ) : (
             <div>

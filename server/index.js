@@ -692,7 +692,9 @@ app.post('/api/insight', auth.requireAuth, async (req, res) => {
   }
   try {
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('X-Accel-Buffering', 'no'); // don't let a reverse proxy buffer the stream
+    res.flushHeaders?.();
     const instructions = [
       aiInstructionsFor(suiteId),
       dashboardContext && dashboardContext.trim() ? `Context for this dashboard:\n${dashboardContext.trim()}` : '',
@@ -752,7 +754,9 @@ app.post('/api/dashboard-insight', auth.requireAuth, async (req, res) => {
 
   try {
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('X-Accel-Buffering', 'no'); // don't let a reverse proxy buffer the stream
+    res.flushHeaders?.();
     const instructions = [
       aiInstructionsFor(suiteId),
       def.aiContext && def.aiContext.trim() ? `Context for this dashboard:\n${def.aiContext.trim()}` : '',
