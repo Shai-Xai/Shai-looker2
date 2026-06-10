@@ -78,7 +78,7 @@ export default function FilterBar({ filters, values, onChange, locked = {}, open
   );
 }
 
-const filterTrigger = { display: 'inline-flex', alignItems: 'center', gap: 8, padding: '9px 16px', background: 'rgba(0,0,0,0.05)', color: 'var(--text)', border: 'none', borderRadius: 980, fontSize: 14, fontWeight: 600, cursor: 'pointer' };
+const filterTrigger = { display: 'inline-flex', alignItems: 'center', gap: 8, padding: '9px 16px', background: 'rgba(128,128,128,0.15)', color: 'var(--text)', border: 'none', borderRadius: 980, fontSize: 14, fontWeight: 600, cursor: 'pointer' };
 const countPill = { background: 'var(--brand)', color: '#fff', fontSize: 11, fontWeight: 700, borderRadius: 980, minWidth: 18, height: 18, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' };
 const sheetBackdrop = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 1000, display: 'flex', alignItems: 'flex-end' };
 const sheet = { background: 'var(--card)', width: '100%', maxHeight: '80dvh', overflowY: 'auto', borderRadius: '18px 18px 0 0', padding: '18px 18px calc(18px + env(safe-area-inset-bottom))', boxShadow: '0 -4px 24px rgba(0,0,0,0.2)' };
@@ -90,7 +90,7 @@ function LockedField({ filter, value }) {
   return (
     <div style={fieldStyle}>
       <label style={labelStyle}>{filter.title}</label>
-      <div style={{ ...inputStyle, background: '#f3f4f6', color: '#555', display: 'flex', alignItems: 'center', gap: 6, cursor: 'not-allowed' }} title="Locked to your account">
+      <div style={{ ...inputStyle, background: 'var(--elevated)', color: 'var(--muted-2)', display: 'flex', alignItems: 'center', gap: 6, cursor: 'not-allowed' }} title="Locked to your account">
         <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{value || '—'}</span>
         <span style={{ fontSize: 12 }}>🔒</span>
       </div>
@@ -249,8 +249,8 @@ function FilterDropdown({ filter, value, onChange, multi = false }) {
                 <li
                   key={i}
                   onMouseDown={(e) => { e.preventDefault(); multi ? toggleMulti(s) : pickSingle(s); }}
-                  style={{ ...optStyle, display: 'flex', alignItems: 'center', gap: 8, ...(isSel ? { background: '#fff0f3', fontWeight: 600 } : null) }}
-                  onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = '#f7f7f7'; }}
+                  style={{ ...optStyle, display: 'flex', alignItems: 'center', gap: 8, ...(isSel ? { background: 'rgba(255,56,92,0.15)', fontWeight: 600 } : null) }}
+                  onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = 'rgba(128,128,128,0.12)'; }}
                   onMouseLeave={e => { if (!isSel) e.currentTarget.style.background = 'transparent'; }}
                 >
                   {multi && <span style={{ color: isSel ? 'var(--brand)' : '#bbb' }}>{isSel ? '☑' : '☐'}</span>}

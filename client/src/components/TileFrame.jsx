@@ -71,6 +71,9 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
           <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             {isMetric ? null : (tile.title || <em style={{ color: '#bbb', fontWeight: 400 }}>Untitled</em>)}
           </span>
+          {canInsight && (
+            <InsightButton onClick={() => setShowInsight(true)} isMobile={isMobile} />
+          )}
           {editable && (
             <span style={{ display: 'flex', gap: 4 }} onMouseDown={(e) => e.stopPropagation()}>
               <IconBtn title="Edit" onClick={onEdit}>✎</IconBtn>
@@ -90,22 +93,9 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
             style={{ position: 'absolute', top: 6, left: 6, zIndex: 6, cursor: 'grab', fontSize: 12, color: '#999', background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 5, padding: '1px 5px', lineHeight: 1.3 }}
           >⠿</span>
         )}
-        {canInsight && (
-          <button
-            title="AI insight"
-            onClick={() => setShowInsight(true)}
-            className="insight-btn btn-key"
-            style={{
-              position: 'absolute', top: 6, right: 6, zIndex: 5,
-              border: '1px solid #eadfff', background: 'rgba(246,241,255,0.92)', color: '#6d28d9',
-              borderRadius: isMobile ? 9 : 6, cursor: 'pointer', lineHeight: 1, fontWeight: 600,
-              // Roomy tap target on touch, but compact enough not to cover the
-              // number on small KPI tiles; backdrop keeps it legible over content.
-              fontSize: isMobile ? 13 : 12,
-              padding: isMobile ? '7px 9px' : '4px 7px',
-              backdropFilter: 'blur(2px)', WebkitBackdropFilter: 'blur(2px)',
-            }}
-          >✨</button>
+        {/* No header (metric tiles): the insight button floats in the corner. */}
+        {canInsight && !showHeader && (
+          <InsightButton onClick={() => setShowInsight(true)} isMobile={isMobile} corner />
         )}
         {tile.type === 'text' ? (
           <TextTile tile={tile} />
@@ -194,6 +184,27 @@ function TileContent({ tile, data }) {
   }
   // Fallback: always show the data.
   return <TableTile data={data} visConfig={tile.vis} />;
+}
+
+// ✨ AI insight trigger. In the header it sits inline at the right; on metric
+// tiles (no header) it floats in the top-right corner. Hidden until tile hover
+// (via .insight-btn CSS) and theme-aware (purple accent that adapts to dark).
+function InsightButton({ onClick, isMobile, corner }) {
+  return (
+    <button
+      title="AI insight"
+      onClick={onClick}
+      onMouseDown={(e) => e.stopPropagation()}
+      className="insight-btn btn-key"
+      style={{
+        ...(corner ? { position: 'absolute', top: 6, right: 6, zIndex: 5 } : { flexShrink: 0 }),
+        border: '1px solid var(--ai-border)', background: 'var(--ai-bg)', color: 'var(--ai)',
+        borderRadius: isMobile ? 9 : 7, cursor: 'pointer', lineHeight: 1, fontWeight: 600,
+        fontSize: isMobile ? 13 : 12, padding: isMobile ? '6px 9px' : '3px 7px',
+        backdropFilter: 'blur(2px)', WebkitBackdropFilter: 'blur(2px)',
+      }}
+    >✨</button>
+  );
 }
 
 function IconBtn({ children, onClick, title, danger }) {
