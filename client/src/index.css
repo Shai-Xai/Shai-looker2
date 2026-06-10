@@ -205,6 +205,9 @@ input::placeholder, textarea::placeholder { color: #b0b0b6; }
 }
 .ai-mark .ai-spark.s1 { top: -10%; right: -8%; font-size: 0.5em; }
 .ai-mark .ai-spark.s2 { bottom: -6%; left: -6%; font-size: 0.36em; animation-delay: 1.2s; }
+/* Quiet variant: just the owl, motionless — for dense mobile tile corners. */
+.ai-mark.quiet::before { display: none; }
+.ai-mark.quiet .ai-mark-img { animation: none; }
 @keyframes ai-mark-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
 @keyframes ai-twinkle {
   0%, 100% { opacity: 0; transform: scale(0.3) rotate(0deg); }

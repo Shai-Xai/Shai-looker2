@@ -192,6 +192,25 @@ function TileContent({ tile, data }) {
 // until tile hover (via .insight-btn CSS) and theme-aware (purple accent that
 // adapts to dark).
 function InsightButton({ onClick, isMobile, corner }) {
+  // On touch screens the button is ALWAYS visible (no hover to hide behind),
+  // so the full purple treatment repeated on every tile is noisy — render a
+  // small ghosted owl instead. Desktop keeps the full hover-revealed styling,
+  // as do the Summary buttons and AI panels.
+  if (isMobile) {
+    return (
+      <button
+        title="AI insight"
+        onClick={onClick}
+        className="insight-btn"
+        style={{
+          ...(corner ? { position: 'absolute', top: 4, right: 4, zIndex: 5 } : { flexShrink: 0 }),
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          border: 'none', background: 'transparent', cursor: 'pointer', lineHeight: 1,
+          padding: 6, opacity: 0.4,
+        }}
+      ><AiMark size={16} quiet /></button>
+    );
+  }
   return (
     <button
       title="AI insight"
@@ -202,11 +221,10 @@ function InsightButton({ onClick, isMobile, corner }) {
         ...(corner ? { position: 'absolute', top: 6, right: 6, zIndex: 5 } : { flexShrink: 0 }),
         display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
         border: '1px solid var(--ai-border)', background: 'var(--ai-bg)', color: 'var(--ai)',
-        borderRadius: isMobile ? 9 : 7, cursor: 'pointer', lineHeight: 1, fontWeight: 600,
-        padding: isMobile ? '5px' : '3px',
+        borderRadius: 7, cursor: 'pointer', lineHeight: 1, fontWeight: 600, padding: 3,
         backdropFilter: 'blur(2px)', WebkitBackdropFilter: 'blur(2px)',
       }}
-    ><AiMark size={isMobile ? 24 : 21} /></button>
+    ><AiMark size={21} /></button>
   );
 }
 
