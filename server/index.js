@@ -473,8 +473,12 @@ function refreshQuery(key, path, body) {
   return p;
 }
 // `ttl` optionally overrides the fresh window for this query (ms).
-async function runLookerQuery(path, body, ttl = QCACHE_TTL) {
+// `force` skips the cache entirely and waits for live Looker data — used when
+// the user explicitly asks for a refresh (otherwise the serve-stale path would
+// hand back up-to-10-minute-old rows instantly and "refresh" changes nothing).
+async function runLookerQuery(path, body, ttl = QCACHE_TTL, force = false) {
   const key = path + '|' + stableKey(body);
+  if (force) return refreshQuery(key, path, body);
   const hit = qCache.get(key);
   const age = hit ? Date.now() - hit.at : Infinity;
   if (hit && age < ttl) return hit.data;                       // fresh
@@ -1168,7 +1172,7 @@ function buildLightSnapshot(user, entityId) {
 // covered), then the lead dashboards' value/chart/table tiles, capped, with
 // row-limited data. Bounded for scale + behind the briefing cache.
 const FACT_MAX_TILES = 14;
-async function buildFacts(user, entityId) {
+async function buildFacts(user, entityId, force = false) {
   const { catalogue, leads } = clientCatalogue(entityId);
   const pins = db.listPins({ userId: user.id, entityId }); // [{dashboardId, tileId, scope}]
   const dashMeta = Object.fromEntries(catalogue.map((c) => [c.dashboardId, c]));
@@ -1220,7 +1224,7 @@ async function buildFacts(user, entityId) {
     const body = tileQueryBody(p.tile, p.def, user, p.suiteId, lockMaps[p.suiteId] || {});
     if (!body) return null;
     try {
-      const data = await runLookerQuery('/queries/run/json_detail', body);
+      const data = await runLookerQuery('/queries/run/json_detail', body, undefined, force);
       if (!data?.data?.length) return null;
       return {
         title: p.tile.title || '(untitled)', visType: p.tile.vis?.type, context: p.tile.aiContext || '',
@@ -1267,7 +1271,8 @@ app.get('/api/my/briefing', auth.requireAuth, async (req, res) => {
   const key = `${req.user.id}:${entityId}`;
   if (!req.query.refresh) { const hit = cacheGet(briefCache, key, 6 * 3600e3); if (hit) return res.json(hit); }
   try {
-    const { tiles, catalogue } = await buildFacts(req.user, entityId);
+    // Explicit refresh waits for live Looker data instead of cached rows.
+    const { tiles, catalogue } = await buildFacts(req.user, entityId, !!req.query.refresh);
     if (!tiles.length) return res.json({ available: false });
     const byId = Object.fromEntries(catalogue.map((c) => [c.dashboardId, c]));
     const prof = db.viewProfile(req.user.id);

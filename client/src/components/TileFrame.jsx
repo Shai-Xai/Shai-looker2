@@ -7,6 +7,7 @@ import TextTile from './tiles/TextTile.jsx';
 import ErrorBoundary from './ErrorBoundary.jsx';
 import InsightModal from './InsightModal.jsx';
 import AiMark from './AiMark.jsx';
+import { usePins } from '../lib/PinContext.jsx';
 import { useTileData, isRunnableQuery } from '../lib/useTileData.js';
 import { useAuth } from '../lib/auth.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
@@ -73,7 +74,10 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
             {isMetric ? null : (tile.title || <em style={{ color: '#bbb', fontWeight: 400 }}>Untitled</em>)}
           </span>
           {canInsight && (
-            <InsightButton onClick={() => setShowInsight(true)} isMobile={isMobile} />
+            <>
+              <PinButton tileId={tile.id} isMobile={isMobile} />
+              <InsightButton onClick={() => setShowInsight(true)} isMobile={isMobile} />
+            </>
           )}
           {editable && (
             <span style={{ display: 'flex', gap: 4 }} onMouseDown={(e) => e.stopPropagation()}>
@@ -94,9 +98,13 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
             style={{ position: 'absolute', top: 6, left: 6, zIndex: 6, cursor: 'grab', fontSize: 12, color: '#999', background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 5, padding: '1px 5px', lineHeight: 1.3 }}
           >⠿</span>
         )}
-        {/* No header (metric tiles): the insight button floats in the corner. */}
+        {/* No header (metric tiles): the insight button floats in the corner,
+            with the pin just left of it. */}
         {canInsight && !showHeader && (
-          <InsightButton onClick={() => setShowInsight(true)} isMobile={isMobile} corner />
+          <>
+            <PinButton tileId={tile.id} isMobile={isMobile} corner />
+            <InsightButton onClick={() => setShowInsight(true)} isMobile={isMobile} corner />
+          </>
         )}
         {tile.type === 'text' ? (
           <TextTile tile={tile} />
@@ -191,6 +199,31 @@ function TileContent({ tile, data }) {
 // right; on metric tiles (no header) it floats in the top-right corner. Hidden
 // until tile hover (via .insight-btn CSS) and theme-aware (purple accent that
 // adapts to dark).
+// Pin-to-home: pinned tiles are always read into the home briefing. Hidden
+// outside a suite context (PinContext disabled). Hover-revealed like the owl;
+// stays visible (filled) when pinned so you can see what's pinned at a glance.
+function PinButton({ tileId, isMobile, corner }) {
+  const { enabled, isPinned, toggle } = usePins();
+  if (!enabled) return null;
+  const pinned = isPinned(tileId);
+  return (
+    <button
+      title={pinned ? 'Unpin from home briefing' : 'Pin to home briefing — the Owl will always cover this tile'}
+      onClick={() => toggle(tileId)}
+      onMouseDown={(e) => e.stopPropagation()}
+      className={pinned ? undefined : 'insight-btn'}
+      style={{
+        ...(corner ? { position: 'absolute', top: isMobile ? 4 : 6, right: isMobile ? 30 : 38, zIndex: 5 } : { flexShrink: 0 }),
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        border: 'none', background: 'transparent', cursor: 'pointer', lineHeight: 1,
+        padding: isMobile ? 5 : 4, fontSize: isMobile ? 14 : 15,
+        opacity: pinned ? 1 : (isMobile ? 0.4 : 1),
+        filter: pinned ? 'none' : 'grayscale(1)',
+      }}
+    >📌</button>
+  );
+}
+
 function InsightButton({ onClick, isMobile, corner }) {
   // On touch screens the button is ALWAYS visible (no hover to hide behind),
   // so the full purple treatment repeated on every tile is noisy — render a

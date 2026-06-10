@@ -134,10 +134,10 @@ export default function ClientHome() {
           <SectionHead icon="⚡">Your shortcuts <Faint>based on what you check most</Faint></SectionHead>
           <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : `repeat(${Math.min(shortcuts.length, 4)}, 1fr)`, gap: 12 }}>
             {shortcuts.map((s) => (
-              <button key={s.dashboardId} className="lift" style={cardBtn} onClick={() => go(s.suiteId || s.link?.suiteId, s.dashboardId)}>
-                <div style={{ fontSize: 13.5, fontWeight: 700 }}>{s.title}</div>
+              <button key={s.dashboardId} className="lift" style={{ ...cardBtn, position: 'relative' }} onClick={() => go(s.suiteId || s.link?.suiteId, s.dashboardId)}>
+                <div style={{ fontSize: 13.5, fontWeight: 700, paddingRight: 22 }}>{s.title}</div>
                 <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 3 }}>{s.setName} · viewed {s.count}×</div>
-                <div style={{ marginTop: 9, fontSize: 12, fontWeight: 700, color: 'var(--brand)' }}>Jump back in →</div>
+                <span style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', fontSize: 15, fontWeight: 700, color: 'var(--brand)' }}>→</span>
               </button>
             ))}
           </div>

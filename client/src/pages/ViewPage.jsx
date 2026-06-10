@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useLayoutEffect } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, Link, useNavigate, useOutletContext } from 'react-router-dom';
 import { vtNavigate } from '../lib/viewTransition.js';
+import { PinProvider } from '../lib/PinContext.jsx';
 import FilterBar, { activeFilterCount } from '../components/FilterBar.jsx';
 import DashboardInsightModal from '../components/DashboardInsightModal.jsx';
 import AiMark from '../components/AiMark.jsx';
@@ -19,6 +20,7 @@ export default function ViewPage() {
   const { id, suiteId } = useParams();
   const navigate = useNavigate();
   const { isAdmin, insightsEnabled } = useAuth();
+  const { previewEntityId } = useOutletContext() || {};
   const { theme: appTheme } = useTheme();
   const [def, setDef] = useState(null);
   const [setInfo, setSetInfo] = useState(null);
@@ -139,8 +141,13 @@ export default function ViewPage() {
   // stable suite tree), so it doesn't lag behind the dashboard fetch.
   const headerTitle = (family && family.find((t) => t.id === id)?.title) || def.title;
 
+  // Pin-to-home is available inside a suite when AI is on; admins previewing a
+  // client pin entity-wide defaults (needs the previewed entity).
+  const pinsEnabled = !!suiteId && insightsEnabled && (!isAdmin || !!previewEntityId);
+
   return (
     <ScopeProvider suiteId={suiteId || null} dashboardContext={def.aiContext || ''}>
+    <PinProvider dashboardId={id} entityId={previewEntityId || null} isAdmin={isAdmin} enabled={pinsEnabled}>
       <div style={shellStyle}>
         {/* On mobile inside a suite the sticky "☰ Menu" bar already shows the
             context, so skip this header to avoid stacking two titles. */}
@@ -221,6 +228,7 @@ export default function ViewPage() {
           />
         )}
       </div>
+    </PinProvider>
     </ScopeProvider>
   );
 }
