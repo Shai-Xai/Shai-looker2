@@ -23,6 +23,7 @@ export default function SettlementViewPage() {
   const [s, setS] = useState(null);
   const [error, setError] = useState(null);
   const [notes, setNotes] = useState([]);
+  const [noteMode, setNoteMode] = useState(false); // header toggle reveals per-section note editors
   const [owlCtx, setOwlCtx] = useState(null); // { tile, data }
 
   useEffect(() => {
@@ -57,7 +58,7 @@ export default function SettlementViewPage() {
   const MONEY_CTX = 'This is an event settlement report: gross ticketing turnover, Howler commissions/fees deducted (negative amounts), advance payments already paid to the client, and the final value due. Withholding tax lines are tax credits. Help the client understand where the money went.';
 
   const sectionProps = (key, label, ctx, owlData) => ({
-    sectionKey: key, sectionLabel: label, notes, onAddNote: addNote, onDeleteNote: deleteNote,
+    sectionKey: key, sectionLabel: label, notes, noteMode, onAddNote: addNote, onDeleteNote: deleteNote,
     owl: insightsEnabled ? () => openOwl(key, `${meta.eventName || s.title} — ${label}`, ctx, owlData) : null,
   });
 
@@ -76,6 +77,14 @@ export default function SettlementViewPage() {
               {[meta.venue, meta.eventDates, meta.settlementDate && `Settled ${meta.settlementDate}`].filter(Boolean).join(' · ')}
             </div>
           </div>
+          <button
+            style={{ ...pillBtn, ...(noteMode ? { background: 'var(--brand)', color: '#fff' } : null) }}
+            onClick={() => setNoteMode((v) => !v)}
+            title={noteMode ? 'Done adding notes' : 'Add notes to sections'}
+          >
+            📝 {!isMobile && (noteMode ? 'Done' : 'Notes')}
+            {notes.length > 0 && <span style={{ ...noteCount, ...(noteMode ? { background: '#fff', color: 'var(--brand)' } : null) }}>{notes.length}</span>}
+          </button>
           {insightsEnabled && (
             <button className="btn-key" style={pillBtn} onClick={() => openOwl('overview', `${meta.eventName || s.title} — Settlement`, MONEY_CTX, buildOwlData(d))} title="Ask the Owl about the whole settlement">
               <AiMark size={18} /> {!isMobile && 'Ask the Owl'}
@@ -177,30 +186,36 @@ function Kpi({ label, value, delay, highlight }) {
 }
 
 // ─── Section with Owl + notes ─────────────────────────────────────────────────
-function Section({ title, subtitle, summary, defaultOpen = true, sectionKey, sectionLabel, notes = [], onAddNote, onDeleteNote, owl, children }) {
+// The Owl button is hover-revealed (same .insight-btn treatment as dashboard
+// tiles; always visible on touch). Note editors stay hidden until the report's
+// header "Notes" toggle turns note mode on — then every section shows its
+// editor and auto-expands.
+function Section({ title, subtitle, summary, defaultOpen = true, sectionKey, sectionLabel, notes = [], noteMode, onAddNote, onDeleteNote, owl, children }) {
   const [open, setOpen] = useState(defaultOpen);
-  const [notesOpen, setNotesOpen] = useState(false);
   const mine = notes.filter((n) => n.section === sectionKey);
+  const expanded = open || noteMode;
   return (
     <div className="howler-tile" style={{ background: 'var(--tile-bg, var(--card))', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', boxShadow: 'var(--shadow-sm)', overflow: 'hidden' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 14px' }}>
         <button onClick={() => setOpen((v) => !v)} style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 10, border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text)', textAlign: 'left', padding: 0 }}>
-          <span className="nav-caret" style={{ fontSize: 10, color: 'var(--muted)', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .2s', flexShrink: 0 }}>▶</span>
+          <span className="nav-caret" style={{ fontSize: 10, color: 'var(--muted)', transform: expanded ? 'rotate(90deg)' : 'none', transition: 'transform .2s', flexShrink: 0 }}>▶</span>
           <span style={{ minWidth: 0 }}>
             <span style={{ display: 'block', fontSize: 14, fontWeight: 700, letterSpacing: '-0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
             {subtitle && <span style={{ display: 'block', fontSize: 12, color: 'var(--muted)' }}>{subtitle}</span>}
           </span>
         </button>
         {summary && <span style={{ fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: 'var(--muted-2)', flexShrink: 0 }}>{summary}</span>}
-        <button onClick={() => { setNotesOpen((v) => !v); setOpen(true); }} title="Notes" style={{ ...iconAction, color: mine.length ? 'var(--brand)' : 'var(--muted)' }}>
-          📝{mine.length > 0 && <span style={noteCount}>{mine.length}</span>}
-        </button>
-        {owl && <button className="btn-key" onClick={owl} title="Ask the Owl about this section" style={{ ...iconAction, padding: '4px 6px' }}><AiMark size={17} /></button>}
+        {mine.length > 0 && !noteMode && <span title={`${mine.length} note${mine.length === 1 ? '' : 's'}`} style={{ ...noteCount, flexShrink: 0 }}>{mine.length}</span>}
+        {owl && (
+          <button className="insight-btn btn-key" onClick={owl} title="Ask the Owl about this section" style={{ ...iconAction, padding: '4px 6px', border: '1px solid var(--ai-border)', background: 'var(--ai-bg)', borderRadius: 7 }}>
+            <AiMark size={17} />
+          </button>
+        )}
       </div>
-      <div className={`collapsey${open ? ' open' : ''}`}>
+      <div className={`collapsey${expanded ? ' open' : ''}`}>
         <div className="collapsey-inner">
           <div style={{ padding: '2px 14px 16px' }}>
-            {notesOpen && <NotesPanel notes={mine} onAdd={(t) => onAddNote(sectionKey, sectionLabel, t)} onDelete={onDeleteNote} />}
+            {noteMode && <NotesPanel notes={mine} onAdd={(t) => onAddNote(sectionKey, sectionLabel, t)} onDelete={onDeleteNote} />}
             {children}
           </div>
         </div>
