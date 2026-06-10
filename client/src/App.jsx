@@ -12,6 +12,7 @@ import SettlementsPage from './pages/SettlementsPage.jsx';
 import SettlementViewPage from './pages/SettlementViewPage.jsx';
 import DocumentViewPage from './pages/DocumentViewPage.jsx';
 import Logo from './components/Logo.jsx';
+import RootErrorBoundary from './components/RootErrorBoundary.jsx';
 import { DrillProvider } from './lib/DrillContext.jsx';
 import { AuthProvider, useAuth } from './lib/auth.jsx';
 import { ThemeProvider, useTheme } from './lib/theme.jsx';
@@ -117,10 +118,12 @@ function Shell() {
 
 export default function App() {
   return (
-    <ThemeProvider>
-      <AuthProvider>
-        <Shell />
-      </AuthProvider>
-    </ThemeProvider>
+    <RootErrorBoundary>
+      <ThemeProvider>
+        <AuthProvider>
+          <Shell />
+        </AuthProvider>
+      </ThemeProvider>
+    </RootErrorBoundary>
   );
 }

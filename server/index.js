@@ -31,7 +31,15 @@ app.use(auth.attachUser);
 const clientDist = path.join(__dirname, '../client/dist');
 const clientFallback = path.join(__dirname, '../client');
 const staticDir = fs.existsSync(clientDist) ? clientDist : clientFallback;
-app.use(express.static(staticDir));
+// Hashed build assets (/assets/*) are immutable → cache hard. index.html must
+// NEVER be cached stale, or after a redeploy the browser keeps an old index
+// that references deleted asset hashes → blank screen. So always revalidate it.
+app.use(express.static(staticDir, {
+  setHeaders(res, filePath) {
+    if (filePath.endsWith('index.html')) res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+    else if (filePath.includes(`${path.sep}assets${path.sep}`)) res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  },
+}));
 
 // Bring legacy JSON data into SQLite on first boot (idempotent), then ensure an
 // admin exists.
@@ -1049,6 +1057,7 @@ app.post('/api/recreate', auth.requireAdmin, async (req, res) => {
 
 // ─── SPA fallback ───────────────────────────────────────────────────────────
 app.get('*', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, must-revalidate');
   res.sendFile(path.join(staticDir, 'index.html'));
 });
 
