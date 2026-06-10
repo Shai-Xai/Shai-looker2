@@ -220,7 +220,9 @@ function PinButton({ tileId, isMobile, corner }) {
     display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
     border: 'none', background: 'transparent', cursor: 'pointer', lineHeight: 1,
     padding: isMobile ? 5 : 4, fontSize: isMobile ? 14 : 15,
-    opacity: on ? 1 : (isMobile ? 0.55 : 1),
+    // No inline opacity on desktop — it would override the .insight-btn class
+    // (inline beats CSS), defeating the hidden-until-hover behaviour.
+    ...(isMobile ? { opacity: on ? 1 : 0.55 } : null),
     filter: on ? 'none' : 'grayscale(1)',
     flexShrink: 0,
   });
