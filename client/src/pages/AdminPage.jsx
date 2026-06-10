@@ -212,14 +212,17 @@ function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites,
           {section === 'settings' && <ClientSettings entity={entity} suites={suites} fields={fields} onChange={onChange} onBack={onBack} />}
           {section === 'suites' && <ClientSuites entity={entity} suites={suites} allEntities={allEntities} allSets={allSets} dashTitle={dashTitle} fields={fields} onChange={onChange} />}
           {section === 'briefing' && (
-            <div style={cardStyle}>
-              <p style={hint}>
-                Per-event briefing setup for this client: key dates (the phase follows them automatically), a manual phase override,
-                event instructions, and per-phase wording. Global phase defaults live under <b>AI → Home briefing</b>;
-                each reader's personal focus text is theirs (set via ⚙ Tune on their home page).
-              </p>
-              <BriefingConfigForm entityId={entity.id} showTune={false} />
-            </div>
+            <>
+              <div style={cardStyle}>
+                <p style={hint}>
+                  Per-event briefing setup for this client: key dates (the phase follows them automatically), a manual phase override,
+                  event instructions, and per-phase wording. Global phase defaults live under <b>AI → Home briefing</b>;
+                  each reader's personal focus text is theirs (set via ⚙ Tune on their home page).
+                </p>
+                <BriefingConfigForm entityId={entity.id} showTune={false} />
+              </div>
+              <BriefingFeedback entityId={entity.id} />
+            </>
           )}
           {section === 'settlements' && <Settlements entityId={entity.id} />}
           {section === 'logins' && <EntityLogins entity={entity} users={users} onChange={onChange} />}
@@ -951,16 +954,21 @@ function AISettings() {
 }
 
 // Reader reactions to home briefings — the Investigate items are requests for
-// Howler to dig into the data; resolve them once handled.
-function BriefingFeedback() {
+// Howler to dig into the data; resolve them once handled. With `entityId` the
+// list scopes to one client (embedded in the client's Briefing section).
+function BriefingFeedback({ entityId = null }) {
   const [items, setItems] = useState(null);
   const [filter, setFilter] = useState('open'); // open | investigate | all
-  const load = () => api.adminListBriefingFeedback().then(setItems).catch(() => setItems([]));
-  useEffect(load, []);
+  const load = () => { api.adminListBriefingFeedback().then(setItems).catch(() => setItems([])); };
+  // NB: don't pass `load` straight to useEffect — returning a promise makes
+  // React call it as a cleanup fn on unmount ("x is not a function" crash).
+  useEffect(() => { load(); }, []);
   if (!items) return null;
-  const shown = items.filter((f) =>
+  const scoped = entityId ? items.filter((f) => f.entityId === entityId) : items;
+  const shown = scoped.filter((f) =>
     filter === 'all' ? true : filter === 'investigate' ? f.kind === 'investigate' : f.status === 'new');
   const ICON = { like: '♥', dislike: '👎', investigate: '🔍' };
+  if (entityId && scoped.length === 0) return null;
   return (
     <div style={{ ...cardStyle, marginTop: 14 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
@@ -1351,8 +1359,8 @@ function EventDocuments({ entityId, eventNames }) {
   const [prog, setProg] = useState(null);   // extraction progress
   const [queue, setQueue] = useState([]);   // PDFs waiting to be extracted
   const [draft, setDraft] = useState(null); // extracted invoice under review
-  const load = () => api.adminListDocuments(entityId).then(setDocs).catch((e) => setError(e.message));
-  useEffect(load, [entityId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const load = () => { api.adminListDocuments(entityId).then(setDocs).catch((e) => setError(e.message)); };
+  useEffect(() => { load(); }, [entityId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const readB64 = (file) => new Promise((resolve, reject) => {
     const r = new FileReader();

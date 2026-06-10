@@ -209,13 +209,13 @@ function buildOption({ rows, dimensions, measures, pivots, visType, stacked, vis
         const idx = pi * measures.length + mi;
         const name = multi ? `${plabel} — ${m.label_short || m.label}` : plabel;
         seriesMeta[series.length] = { measure: m.name, pivotKey: pivot.key, fmt: m.value_format };
-        series.push(makeSeries(name, rows.map((r) => num(r[m.name]?.[pivot.key]?.value)), idx, { ...flagsFor(typeFor(pivot.key, m.name)), stacked, yAxisIndex: yIndexOf(m), showLabels, fmt: m.value_format }));
+        series.push(makeSeries(name, rows.map((r) => num(r[m.name]?.[pivot.key]?.value)), idx, { ...flagsFor(typeFor(pivot.key, m.name)), stacked, yAxisIndex: yIndexOf(m), showLabels, labelC, fmt: m.value_format }));
       });
     });
   } else {
     measures.forEach((m, i) => {
       seriesMeta[series.length] = { measure: m.name, fmt: m.value_format };
-      series.push(makeSeries(m.label_short || m.label, rows.map((r) => num(r[m.name]?.value)), i, { ...flagsFor(typeFor(null, m.name)), stacked, yAxisIndex: yIndexOf(m), showLabels, fmt: m.value_format }));
+      series.push(makeSeries(m.label_short || m.label, rows.map((r) => num(r[m.name]?.value)), i, { ...flagsFor(typeFor(null, m.name)), stacked, yAxisIndex: yIndexOf(m), showLabels, labelC, fmt: m.value_format }));
     });
   }
 
@@ -293,7 +293,7 @@ function buildOption({ rows, dimensions, measures, pivots, visType, stacked, vis
   };
 }
 
-function makeSeries(name, vals, idx, { isBar, isLine, isArea, isScatter, stacked, yAxisIndex = 0, showLabels = false, fmt }) {
+function makeSeries(name, vals, idx, { isBar, isLine, isArea, isScatter, stacked, yAxisIndex = 0, showLabels = false, labelC = '#5a5a5a', fmt }) {
   const c = color(idx);
   // Value labels on each point/bar (Looker's show_value_labels). For dense
   // line/area/scatter series, thin the labels so a readable subset shows
