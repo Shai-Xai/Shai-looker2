@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useOutletContext } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/auth.jsx';
@@ -114,17 +114,17 @@ export default function ClientHome() {
         </div>
       )}
 
-      {/* Pinned tiles — live tiles the user chose to keep on home */}
+      {/* Pinned tiles — live tiles the user chose to keep on home. Uniform
+          cards in a horizontal snap carousel (one row, scroll for more). */}
       {(snap?.pinnedTiles || []).length > 0 && (
         <>
           <SectionHead icon="📌">Pinned</SectionHead>
-          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
+          <PinStrip isMobile={isMobile}>
             {snap.pinnedTiles.map((p) => (
               <PinnedTile
                 key={`${p.dashboardId}|${p.tile.id}`}
                 p={p}
-                isAdmin={isAdmin}
-                entityId={previewEntityId}
+                isMobile={isMobile}
                 onOpen={() => go(p.suiteId, p.dashboardId)}
                 onUnpin={() => {
                   api.togglePin({ dashboardId: p.dashboardId, tileId: p.tile.id, kind: 'pin', on: false, scope: isAdmin ? 'entity' : 'user', entityId: previewEntityId })
@@ -133,7 +133,7 @@ export default function ClientHome() {
                 }}
               />
             ))}
-          </div>
+          </PinStrip>
         </>
       )}
 
@@ -212,12 +212,41 @@ export default function ClientHome() {
   );
 }
 
-// A pinned tile: source bar (set · dashboard, open, unpin) + the REAL tile,
-// scoped to its suite so queries run exactly like the dashboard view.
-function PinnedTile({ p, onOpen, onUnpin }) {
-  const metric = (p.tile.vis?.type || '').startsWith('single_value');
+// Horizontal snap strip for pinned tiles: one row, uniform cards, scroll (or
+// chevrons on desktop) when there are more than fit.
+function PinStrip({ isMobile, children }) {
+  const ref = useRef(null);
+  const [canScroll, setCanScroll] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const check = () => setCanScroll(el.scrollWidth > el.clientWidth + 8);
+    check();
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [children]);
+  const nudge = (dir) => ref.current?.scrollBy({ left: dir * (ref.current.clientWidth - 80), behavior: 'smooth' });
   return (
-    <div>
+    <div style={{ position: 'relative' }}>
+      <div ref={ref} style={{ display: 'flex', gap: 12, overflowX: 'auto', scrollSnapType: 'x mandatory', paddingBottom: 6, scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' }}>
+        {children}
+      </div>
+      {!isMobile && canScroll && (
+        <>
+          <button onClick={() => nudge(-1)} aria-label="Scroll left" style={{ ...stripArrow, left: -12 }}>‹</button>
+          <button onClick={() => nudge(1)} aria-label="Scroll right" style={{ ...stripArrow, right: -12 }}>›</button>
+        </>
+      )}
+    </div>
+  );
+}
+
+// A pinned tile: uniform card (same size whatever the vis), source bar on top,
+// the REAL tile inside, scoped to its suite like the dashboard view.
+function PinnedTile({ p, isMobile, onOpen, onUnpin }) {
+  return (
+    <div style={{ flex: `0 0 ${isMobile ? 'min(86vw, 320px)' : '320px'}`, scrollSnapAlign: 'start' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 2px 5px' }}>
         <span style={{ flex: 1, minWidth: 0, fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {p.setName} · {p.dashTitle}
@@ -225,7 +254,7 @@ function PinnedTile({ p, onOpen, onUnpin }) {
         <button onClick={onOpen} title="Open dashboard" style={pinAct}>→</button>
         <button onClick={onUnpin} title="Unpin from home" style={pinAct}>✕</button>
       </div>
-      <div style={{ height: metric ? 150 : 300 }}>
+      <div style={{ height: 230 }}>
         <ScopeProvider suiteId={p.suiteId} dashboardContext="">
           <TileFrame tile={p.tile} filterValues={p.filterValues || {}} editable={false} />
         </ScopeProvider>
@@ -234,6 +263,7 @@ function PinnedTile({ p, onOpen, onUnpin }) {
   );
 }
 const pinAct = { flexShrink: 0, border: 'none', background: 'rgba(128,128,128,0.12)', color: 'var(--muted-2)', borderRadius: 980, width: 22, height: 22, fontSize: 12, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1 };
+const stripArrow = { position: 'absolute', top: '50%', transform: 'translateY(-50%)', zIndex: 5, width: 30, height: 30, borderRadius: '50%', border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--text)', fontSize: 17, fontWeight: 700, cursor: 'pointer', boxShadow: 'var(--shadow-sm)', display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1 };
 
 function SectionHead({ icon, children }) {
   return <h2 style={{ fontSize: 14, fontWeight: 800, letterSpacing: '-0.01em', margin: '22px 0 10px', display: 'flex', alignItems: 'center', gap: 7 }}>{icon && <span>{icon}</span>}{children}</h2>;

@@ -955,13 +955,14 @@ function BriefingSettings() {
   const [data, setData] = useState(null);
   const [instructions, setInstructions] = useState('');
   const [defaults, setDefaults] = useState({});
+  const [timeDefs, setTimeDefs] = useState({});
   const [openPhase, setOpenPhase] = useState(null);
   const [saved, setSaved] = useState(false);
   useEffect(() => {
-    api.getBriefingSettings().then((r) => { setData(r); setInstructions(r.instructions || ''); setDefaults(r.phaseDefaults || {}); });
+    api.getBriefingSettings().then((r) => { setData(r); setInstructions(r.instructions || ''); setDefaults(r.phaseDefaults || {}); setTimeDefs(r.timeDefaults || {}); });
   }, []);
   if (!data) return null;
-  const save = async () => { await api.saveBriefingSettings({ instructions, phaseDefaults: defaults }); flash(setSaved); };
+  const save = async () => { await api.saveBriefingSettings({ instructions, phaseDefaults: defaults, timeDefaults: timeDefs }); flash(setSaved); };
   return (
     <div style={{ ...cardStyle, marginTop: 14 }}>
       <L>Home briefing</L>
@@ -974,6 +975,23 @@ function BriefingSettings() {
         placeholder={'e.g.\n- Lead with money, then tickets.\n- Always name the ticket tier driving change.\n- Never speculate about causes you can\'t see in the data.'}
         style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 13, outline: 'none', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }}
       />
+      <div style={{ marginTop: 12 }}>
+        <L>Time of day</L>
+        <p style={{ fontSize: 12, color: 'var(--muted)', margin: '2px 0 6px' }}>The reader's local time shapes the angle: morning recaps, midday tracks today, evening wraps the day.</p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {(data.times || []).map((t) => (
+            <div key={t.key}>
+              <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 3 }}>{t.label}
+                {(timeDefs[t.key] || '') !== (data.builtInTimes?.[t.key] || '') && <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--brand)', marginLeft: 6 }}>edited</span>}
+              </div>
+              <textarea
+                value={timeDefs[t.key] || ''} onChange={(e) => setTimeDefs({ ...timeDefs, [t.key]: e.target.value })} rows={2}
+                style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 12.5, outline: 'none', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }}
+              />
+            </div>
+          ))}
+        </div>
+      </div>
       <div style={{ marginTop: 12 }}>
         <L>Phase defaults</L>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6 }}>

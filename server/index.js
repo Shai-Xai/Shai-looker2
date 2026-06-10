@@ -1069,6 +1069,28 @@ function phaseDefaults() {
   const saved = JSON.parse(db.getSetting('briefing_phase_defaults', '{}') || '{}');
   return Object.fromEntries(PHASES.map((p) => [p.key, (saved[p.key] || '').trim() || PHASE_DEFAULTS[p.key]]));
 }
+
+// Time-of-day lens: a reader wants different things at 8am, 1pm and 7pm. The
+// client sends its local hour; the segment shapes the briefing's angle and
+// splits the cache so each part of the day gets a fresh generation.
+const TIMES = [
+  { key: 'morning', label: 'Morning' },
+  { key: 'midday', label: 'Midday' },
+  { key: 'evening', label: 'Evening' },
+];
+const TIME_DEFAULTS = {
+  morning: 'It is MORNING for the reader. Open with what happened since yesterday/overnight — sales added, notable moves — then where the campaign stands overall, and set up the day: the one or two things to watch today.',
+  midday: 'It is MIDDAY for the reader. Focus on how TODAY is tracking so far — pace versus a typical day, anything spiking or stalling — and flag anything that needs action this afternoon.',
+  evening: 'It is EVENING for the reader. Wrap the day: how today closed (sales, revenue, standout performers or laggards), and what tomorrow should bring or needs attention.',
+};
+function timeSegment(hour) {
+  const h = Number.isFinite(hour) ? hour : new Date().getHours();
+  return h < 12 ? 'morning' : h < 17 ? 'midday' : 'evening';
+}
+function timeDefaults() {
+  const saved = JSON.parse(db.getSetting('briefing_time_defaults', '{}') || '{}');
+  return Object.fromEntries(TIMES.map((t) => [t.key, (saved[t.key] || '').trim() || TIME_DEFAULTS[t.key]]));
+}
 // Assemble the briefing instruction stack for an entity (most specific last).
 function briefingInstructionsFor(user, entityId, suites) {
   const parts = [];
@@ -1282,7 +1304,11 @@ const snapCache = new Map();
 const briefCache = new Map();
 const cacheGet = (map, key, ttl) => { const e = map.get(key); return e && Date.now() - e.at < ttl ? e.val : null; };
 const cachePut = (map, key, val) => { map.set(key, { at: Date.now(), val }); if (map.size > 500) map.delete(map.keys().next().value); };
-const bustHome = (userId, entityId) => { const k = `${userId}:${entityId}`; snapCache.delete(k); briefCache.delete(k); };
+const bustHome = (userId, entityId) => {
+  const k = `${userId}:${entityId}`;
+  snapCache.delete(k);
+  for (const t of TIMES) briefCache.delete(`${k}:${t.key}`);
+};
 
 app.get('/api/my/snapshot', auth.requireAuth, (req, res) => {
   const entityId = homeEntityFor(req);
@@ -1308,7 +1334,10 @@ app.get('/api/my/briefing', auth.requireAuth, async (req, res) => {
   if (!entityId) return res.json({ available: false });
   const apiKey = anthropicKeyForUser(req.user);
   if (!insights.isConfigured(apiKey)) return res.json({ available: false });
-  const key = `${req.user.id}:${entityId}`;
+  // Segment by the reader's local time of day — morning / midday / evening
+  // briefings answer different questions, and each gets its own cache slot.
+  const segment = timeSegment(Number(req.query.hour));
+  const key = `${req.user.id}:${entityId}:${segment}`;
   if (!req.query.refresh) { const hit = cacheGet(briefCache, key, 6 * 3600e3); if (hit) return res.json(hit); }
   try {
     // Explicit refresh waits for live Looker data instead of cached rows.
@@ -1321,7 +1350,11 @@ app.get('/api/my/briefing', auth.requireAuth, async (req, res) => {
       top: prof.top.filter((t) => byId[t.dashboardId]).map((t) => ({ title: byId[t.dashboardId].title, count: t.count })),
     };
     const { suites } = clientCatalogue(entityId);
-    const instructions = [aiInstructionsFor(null), briefingInstructionsFor(req.user, entityId, suites)].filter(Boolean).join('\n\n');
+    const instructions = [
+      aiInstructionsFor(null),
+      briefingInstructionsFor(req.user, entityId, suites),
+      timeDefaults()[segment],
+    ].filter(Boolean).join('\n\n');
     const raw = await insights.briefHome({ tiles, profile: profileForAi, catalogue, instructions, apiKey });
     const link = (id) => (id && byId[id] ? { dashboardId: id, suiteId: byId[id].suiteId, label: `${byId[id].setName} → ${byId[id].title}` } : null);
     const out = {
@@ -1344,18 +1377,27 @@ app.get('/api/my/briefing', auth.requireAuth, async (req, res) => {
 // ─── Briefing configuration ─────────────────────────────────────────────────────
 // Admin: global briefing rules + editable phase defaults.
 app.get('/api/admin/briefing-settings', auth.requireAdmin, (_req, res) => {
-  res.json({ instructions: db.getSetting('briefing_instructions'), phases: PHASES, phaseDefaults: phaseDefaults(), builtIn: PHASE_DEFAULTS });
+  res.json({
+    instructions: db.getSetting('briefing_instructions'),
+    phases: PHASES, phaseDefaults: phaseDefaults(), builtIn: PHASE_DEFAULTS,
+    times: TIMES, timeDefaults: timeDefaults(), builtInTimes: TIME_DEFAULTS,
+  });
 });
 app.put('/api/admin/briefing-settings', auth.requireAdmin, (req, res) => {
-  const { instructions, phaseDefaults: pd } = req.body || {};
+  const { instructions, phaseDefaults: pd, timeDefaults: td } = req.body || {};
   if (instructions !== undefined) db.setSetting('briefing_instructions', instructions || '');
   if (pd && typeof pd === 'object') {
     const clean = {};
     for (const p of PHASES) if (typeof pd[p.key] === 'string') clean[p.key] = pd[p.key].slice(0, 2000);
     db.setSetting('briefing_phase_defaults', JSON.stringify(clean));
   }
+  if (td && typeof td === 'object') {
+    const clean = {};
+    for (const t of TIMES) if (typeof td[t.key] === 'string') clean[t.key] = td[t.key].slice(0, 2000);
+    db.setSetting('briefing_time_defaults', JSON.stringify(clean));
+  }
   briefCache.clear();
-  res.json({ instructions: db.getSetting('briefing_instructions'), phases: PHASES, phaseDefaults: phaseDefaults() });
+  res.json({ instructions: db.getSetting('briefing_instructions'), phases: PHASES, phaseDefaults: phaseDefaults(), times: TIMES, timeDefaults: timeDefaults() });
 });
 
 // Client (and admin): per-event briefing config — dates, phase override,
