@@ -634,6 +634,16 @@ function createDocument({ entityId = null, eventName = '', title, category = 'in
     .run(id, entityId || null, eventName || '', title || fileName || 'Document', category || 'invoice', JSON.stringify(data || {}), file, fileName, fileType, now());
   return getDocument(id);
 }
+function updateDocument(id, patch) {
+  const cur = db.prepare('SELECT entity_id, event_name, title, category FROM event_documents WHERE id=?').get(id);
+  if (!cur) return null;
+  const entityId = patch.entityId !== undefined ? (patch.entityId || null) : cur.entity_id;
+  const eventName = patch.eventName !== undefined ? (patch.eventName || '') : cur.event_name;
+  const title = patch.title ?? cur.title;
+  const category = patch.category ?? cur.category;
+  db.prepare('UPDATE event_documents SET entity_id=?, event_name=?, title=?, category=? WHERE id=?').run(entityId, eventName, title, category, id);
+  return getDocument(id);
+}
 function deleteDocument(id) { return db.prepare('DELETE FROM event_documents WHERE id=?').run(id).changes > 0; }
 
 // ─── Full backup / restore (export to JSON, import to replace) ────────────────
@@ -683,5 +693,5 @@ module.exports = {
   // settlements
   listSettlements, getSettlement, getSettlementFile, createSettlement, updateSettlement, deleteSettlement, setSettlementNotes,
   // event documents (invoices etc.)
-  listDocuments, getDocument, getDocumentFile, createDocument, deleteDocument,
+  listDocuments, getDocument, getDocumentFile, createDocument, updateDocument, deleteDocument,
 };

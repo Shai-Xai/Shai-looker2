@@ -1218,10 +1218,12 @@ function EventDocuments({ entityId, eventNames }) {
         const data = await api.adminExtractInvoice(fileBase64, (p) => {
           setProg({ stage: p.stage || 'extracting', chars: p.chars || 0, rows: p.rows || 0, fileName: file.name, startedAt });
         });
+        // The name printed on the invoice rarely matches our event names —
+        // fuzzy-match it onto a known event, falling back to the picker value.
         setDraft({
           data, fileBase64, fileName: file.name, fileType: 'application/pdf',
           title: data.meta?.invoiceNumber ? `Invoice ${data.meta.invoiceNumber}` : file.name.replace(/\.[^.]+$/, ''),
-          eventName: data.meta?.eventName || eventName,
+          eventName: matchEvent(data.meta?.eventName, eventNames) || eventName || data.meta?.eventName || '',
         });
       } catch (err) {
         // Extraction failed — let the admin publish the raw PDF anyway.
@@ -1264,11 +1266,7 @@ function EventDocuments({ entityId, eventNames }) {
       {error && <p style={{ color: 'var(--error)', fontSize: 13, marginBottom: 8 }}>⚠ {error}</p>}
       {!draft && !prog && (
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 14, flexWrap: 'wrap' }}>
-          <input
-            list="evt-names" style={{ ...input, minWidth: 200 }} value={eventName}
-            onChange={(e) => setEventName(e.target.value)} placeholder="Event name (e.g. Mtn Bushfire 2026)"
-          />
-          <datalist id="evt-names">{eventNames.map((n) => <option key={n} value={n} />)}</datalist>
+          <EventPicker value={eventName} onChange={setEventName} eventNames={eventNames} style={{ ...input, minWidth: 200 }} />
           <label style={{ ...addBtn, display: 'inline-block', opacity: busy ? 0.6 : 1 }}>
             {busy ? 'Uploading…' : '⤴ Upload invoices'}
             <input type="file" multiple style={{ display: 'none' }} onChange={onFiles} disabled={busy} />
@@ -1284,8 +1282,7 @@ function EventDocuments({ entityId, eventNames }) {
         <div style={{ ...cardStyle, borderColor: 'var(--brand)' }}>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
             <input style={{ ...input, fontWeight: 700, minWidth: 200 }} value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} placeholder="Title" />
-            <input list="evt-names2" style={{ ...input, minWidth: 200 }} value={draft.eventName} onChange={(e) => setDraft({ ...draft, eventName: e.target.value })} placeholder="Event name" />
-            <datalist id="evt-names2">{eventNames.map((n) => <option key={n} value={n} />)}</datalist>
+            <EventPicker value={draft.eventName} onChange={(v) => setDraft({ ...draft, eventName: v })} eventNames={eventNames} style={{ ...input, minWidth: 200 }} />
           </div>
           {draft.data ? (
             <InvoiceChecks data={draft.data} />
@@ -1311,6 +1308,7 @@ function EventDocuments({ entityId, eventNames }) {
                     {[doc.fileName, new Date(doc.createdAt).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' }), doc.total != null && `R${Number(doc.total).toLocaleString('en-US', { minimumFractionDigits: 2 })}`, doc.hasData ? 'interactive' : null].filter(Boolean).join(' · ')}
                   </div>
                 </div>
+                <EventPicker value={doc.eventName} onChange={(v) => api.adminUpdateDocument(doc.id, { eventName: v }).then(load)} eventNames={eventNames} style={{ ...input, minWidth: 150, maxWidth: 190 }} />
                 <button style={miniBtnOutline} onClick={() => navigate(`/documents/${doc.id}`)}>Open</button>
                 <a href={`/api/documents/${doc.id}/file`} style={{ ...miniBtnOutline, textDecoration: 'none' }}>⤓</a>
                 <button style={{ ...miniBtnOutline, color: 'var(--error)' }} onClick={() => { if (confirm(`Delete "${doc.title}"?`)) api.adminDeleteDocument(doc.id).then(load); }}>Delete</button>
@@ -1405,6 +1403,55 @@ function SettlementChecks({ data }) {
       )}
     </div>
   );
+}
+
+// Assign-to-event control: a select fed by the client's known events (from
+// their settlements), with an "Other / new event…" escape hatch to type a name
+// that doesn't exist yet. Values not in the list show as "(custom)".
+function EventPicker({ value, onChange, eventNames, style }) {
+  const known = [...new Set((eventNames || []).filter(Boolean))];
+  const custom = !!value && !known.includes(value);
+  const [typing, setTyping] = useState(false);
+  if (typing || known.length === 0) {
+    return (
+      <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+        <input style={style} value={value} onChange={(e) => onChange(e.target.value)} placeholder="Event name" autoFocus={typing} />
+        {known.length > 0 && <button style={miniBtnOutline} title="Pick from known events" onClick={() => setTyping(false)}>▾</button>}
+      </span>
+    );
+  }
+  return (
+    <select
+      style={style}
+      value={custom ? '__custom' : value}
+      onChange={(e) => {
+        if (e.target.value === '__other') { setTyping(true); onChange(''); }
+        else if (e.target.value !== '__custom') onChange(e.target.value);
+      }}
+    >
+      <option value="">— Assign to event —</option>
+      {known.map((n) => <option key={n} value={n}>{n}</option>)}
+      {custom && <option value="__custom">{value} (custom)</option>}
+      <option value="__other">Other / new event…</option>
+    </select>
+  );
+}
+
+// Best-overlap match of a free-text name (as printed on an invoice) onto one of
+// our known event names. Returns '' when nothing matches convincingly.
+function matchEvent(name, eventNames) {
+  if (!name) return '';
+  const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
+  const words = new Set(norm(name));
+  let best = '', score = 0;
+  for (const ev of eventNames || []) {
+    const evWords = norm(ev);
+    if (!evWords.length) continue;
+    const hit = evWords.filter((w) => words.has(w)).length;
+    const s = hit / evWords.length;
+    if (s > score) { score = s; best = ev; }
+  }
+  return score >= 0.5 ? best : '';
 }
 
 // Cross-check the extracted invoice: line items must sum to the subtotal, and

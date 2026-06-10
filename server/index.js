@@ -896,6 +896,11 @@ app.post('/api/admin/documents/extract', auth.requireAdmin, settlementJson, asyn
   }
   res.end();
 });
+app.put('/api/admin/documents/:id', auth.requireAdmin, settlementJson, (req, res) => {
+  const doc = db.updateDocument(req.params.id, req.body || {});
+  if (!doc) return res.status(404).json({ error: 'Document not found' });
+  res.json(doc);
+});
 app.delete('/api/admin/documents/:id', auth.requireAdmin, (req, res) => {
   res.status(db.deleteDocument(req.params.id) ? 204 : 404).end();
 });
