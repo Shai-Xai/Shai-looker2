@@ -1,6 +1,24 @@
 import { useState, useRef, useEffect } from 'react';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import { useScope } from '../lib/ScopeContext.jsx';
+import { useSheetDrag } from '../lib/useSheetDrag.js';
+
+// Mobile filter bottom sheet: animated entrance + drag-to-dismiss via the grip.
+function FilterSheet({ onClose, children }) {
+  const drag = useSheetDrag(onClose);
+  return (
+    <div className="ai-overlay" style={sheetBackdrop} onClick={onClose}>
+      <div className="ai-sheet" style={{ ...sheet, ...drag.style }} onClick={(e) => e.stopPropagation()}>
+        <div className="sheet-grip" {...drag.handlers} />
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 14 }}>
+          <h3 style={{ fontSize: 16, fontWeight: 700, flex: 1 }}>Filters</h3>
+          <button onClick={onClose} style={doneBtn}>Done</button>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>{children}</div>
+      </div>
+    </div>
+  );
+}
 
 // Counts the filters that currently have a value — used for the trigger badge.
 export function activeFilterCount(filters, values) {
@@ -38,15 +56,7 @@ export default function FilterBar({ filters, values, onChange, locked = {}, open
           </button>
         </div>
         {mobileOpen && (
-          <div style={sheetBackdrop} onClick={() => setMobileOpen(false)}>
-            <div style={sheet} onClick={e => e.stopPropagation()}>
-              <div style={{ display: 'flex', alignItems: 'center', marginBottom: 14 }}>
-                <h3 style={{ fontSize: 16, fontWeight: 700, flex: 1 }}>Filters</h3>
-                <button onClick={() => setMobileOpen(false)} style={doneBtn}>Done</button>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>{controls}</div>
-            </div>
-          </div>
+          <FilterSheet onClose={() => setMobileOpen(false)}>{controls}</FilterSheet>
         )}
       </>
     );

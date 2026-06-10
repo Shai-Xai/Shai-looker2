@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import { useScope } from '../lib/ScopeContext.jsx';
+import { useSheetDrag } from '../lib/useSheetDrag.js';
 
 // Full-height side panel showing an AI insight that streams in live as Claude
 // writes it. The reader can add extra context to steer the analysis and ask
@@ -103,15 +104,23 @@ export default function InsightModal({ tile, data, filters, onClose }) {
     generate(next);
   }
 
-  // On phones the panel becomes a full-screen sheet rather than a side panel.
+  const drag = useSheetDrag(onClose);
+
+  // On phones the panel becomes a sheet (rounded top, drag-to-dismiss) rather
+  // than a full-height side panel.
   const panelStyle = isMobile
-    ? { ...panel, width: '100%', borderRadius: 0, paddingBottom: 'env(safe-area-inset-bottom)' }
+    ? { ...panel, width: '100%', maxHeight: '92dvh', borderRadius: '18px 18px 0 0', paddingBottom: 'env(safe-area-inset-bottom)' }
     : panel;
 
   const node = (
-    <div style={isMobile ? { ...overlay, justifyContent: 'stretch' } : overlay} onClick={onClose}>
-      <div style={panelStyle} onClick={(e) => e.stopPropagation()}>
+    <div className="ai-overlay" style={isMobile ? { ...overlay, alignItems: 'flex-end', justifyContent: 'center' } : overlay} onClick={onClose}>
+      <div
+        className={isMobile ? 'ai-sheet' : 'ai-panel'}
+        style={isMobile ? { ...panelStyle, ...drag.style } : panelStyle}
+        onClick={(e) => e.stopPropagation()}
+      >
         <style>{`@keyframes blink { 50% { opacity: 0; } } @keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        {isMobile && <div className="sheet-grip" {...drag.handlers} style={{ marginTop: 8 }} />}
         <div style={header}>
           <span style={{ fontSize: 18 }}>✨</span>
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -152,11 +161,11 @@ export default function InsightModal({ tile, data, filters, onClose }) {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               {turns.map((t, i) => (
                 t.role === 'user' ? (
-                  <div key={i} style={userBubbleWrap}>
+                  <div key={i} className="msg-in" style={userBubbleWrap}>
                     <div style={userBubble}>{t.content}</div>
                   </div>
                 ) : (
-                  <div key={i} style={{ fontSize: 14, lineHeight: 1.65, color: 'var(--text)' }}>
+                  <div key={i} className={`msg-in${streaming && i === turns.length - 1 && t.content ? ' streaming' : ''}`} style={{ fontSize: 14, lineHeight: 1.65, color: 'var(--text)' }}>
                     {t.content
                       ? renderMarkdownish(t.content)
                       : <span style={{ color: 'var(--muted)', display: 'inline-flex', alignItems: 'center', gap: 8 }}>

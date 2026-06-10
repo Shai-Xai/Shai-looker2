@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useIsMobile } from '../lib/useIsMobile.js';
+import { useSheetDrag } from '../lib/useSheetDrag.js';
 
 // Whole-dashboard AI summary. Streams an executive summary built from every
 // tile's data (scoped + filtered exactly like the live view).
@@ -49,11 +50,13 @@ export default function DashboardInsightModal({ dashboardId, title, filterValues
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dashboardId, JSON.stringify(filterValues), suiteId]);
 
-  const panelStyle = isMobile ? { ...panel, width: '100%', borderRadius: 0 } : panel;
+  const drag = useSheetDrag(onClose);
+  const panelStyle = isMobile ? { ...panel, width: '100%', maxHeight: '92dvh', borderRadius: '18px 18px 0 0' } : panel;
   const node = (
-    <div style={isMobile ? { ...overlay, justifyContent: 'stretch' } : overlay} onClick={onClose}>
-      <div style={panelStyle} onClick={(e) => e.stopPropagation()}>
+    <div className="ai-overlay" style={isMobile ? { ...overlay, alignItems: 'flex-end', justifyContent: 'center' } : overlay} onClick={onClose}>
+      <div className={isMobile ? 'ai-sheet' : 'ai-panel'} style={isMobile ? { ...panelStyle, ...drag.style } : panelStyle} onClick={(e) => e.stopPropagation()}>
         <style>{`@keyframes blink { 50% { opacity: 0; } } @keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        {isMobile && <div className="sheet-grip" {...drag.handlers} style={{ marginTop: 8 }} />}
         <div style={header}>
           <span style={{ fontSize: 18 }}>✨</span>
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -72,7 +75,7 @@ export default function DashboardInsightModal({ dashboardId, title, filterValues
               Reading every tile and summarising…
             </div>
           ) : (
-            <div style={{ fontSize: 14, lineHeight: 1.65, color: 'var(--text)' }}>
+            <div className={loading ? 'streaming' : ''} style={{ fontSize: 14, lineHeight: 1.65, color: 'var(--text)' }}>
               {renderMarkdownish(text)}
               {loading && <span style={cursor} />}
             </div>

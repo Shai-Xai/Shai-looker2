@@ -32,8 +32,8 @@ export default function DrillModal({ links, title, onClose }) {
     : panel;
 
   return (
-    <div style={isMobile ? { ...overlay, justifyContent: 'stretch' } : overlay} onClick={onClose}>
-      <div style={panelStyle} onClick={(e) => e.stopPropagation()}>
+    <div className="ai-overlay" style={isMobile ? { ...overlay, justifyContent: 'stretch' } : overlay} onClick={onClose}>
+      <div className="ai-panel" style={panelStyle} onClick={(e) => e.stopPropagation()}>
         <div style={header}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)' }}>Drill into</div>
