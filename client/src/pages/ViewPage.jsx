@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef, useLayoutEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
+import { vtNavigate } from '../lib/viewTransition.js';
 import FilterBar, { activeFilterCount } from '../components/FilterBar.jsx';
 import DashboardInsightModal from '../components/DashboardInsightModal.jsx';
 import AiMark from '../components/AiMark.jsx';
@@ -83,6 +84,21 @@ export default function ViewPage() {
   const hasTiles = !!(def.tiles?.length || def.carousels?.length);
   const canSummarize = insightsEnabled && hasTiles;
 
+  // Sub-dashboard tabs: if this dashboard is a parent with children — or one of
+  // the children — surface the whole family as a tab bar (parent first).
+  let family = null;
+  if (setInfo && id) {
+    outer: for (const set of setInfo.sets || []) {
+      for (const d of set.dashboards || []) {
+        const kids = d.children || [];
+        if ((d.id === id && kids.length) || kids.some((c) => c.id === id)) {
+          family = [{ id: d.id, title: d.title }, ...kids.map((c) => ({ id: c.id, title: c.title }))];
+          break outer;
+        }
+      }
+    }
+  }
+
   return (
     <ScopeProvider suiteId={suiteId || null} dashboardContext={def.aiContext || ''}>
       <div style={shellStyle}>
@@ -107,6 +123,16 @@ export default function ViewPage() {
             )}
             {isAdmin && !isMobile && <button style={editBtn} onClick={() => navigate(`/d/${id}/edit`)}>Edit</button>}
           </div>
+        )}
+
+        {/* Sub-dashboard tab bar (parent + its tabs). */}
+        {family && (
+          <SubTabs
+            tabs={family}
+            activeId={id}
+            isMobile={isMobile}
+            onSelect={(tid) => vtNavigate(navigate, `/suite/${suiteId}/d/${tid}`)}
+          />
         )}
 
         {/* On mobile inside a suite the header is hidden, so offer the summary here. */}
@@ -145,6 +171,35 @@ const editBtn = { padding: '8px 18px', background: 'var(--brand)', color: '#fff'
 const filtersBtn = (active) => ({ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '8px 16px', background: active ? 'rgba(128,128,128,0.2)' : 'rgba(128,128,128,0.15)', color: 'var(--text)', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer' });
 const countBadge = { background: 'var(--brand)', color: '#fff', fontSize: 11, fontWeight: 700, borderRadius: 980, minWidth: 18, height: 18, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' };
 const summaryBtn = { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 16px', background: 'rgba(128,128,128,0.15)', color: 'var(--text)', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer' };
+
+// Underline tab bar for a parent dashboard and its sub-dashboards. The
+// gradient underline is a single element measured against the active tab so it
+// slides between tabs (same pattern as the sidebar's nav indicator).
+function SubTabs({ tabs, activeId, onSelect, isMobile }) {
+  const wrapRef = useRef(null);
+  const [u, setU] = useState({ left: 0, width: 0, show: false });
+  useLayoutEffect(() => {
+    const el = wrapRef.current?.querySelector('[data-active="1"]');
+    if (!el) { setU((s) => ({ ...s, show: false })); return; }
+    setU({ left: el.offsetLeft + 10, width: Math.max(0, el.offsetWidth - 20), show: true });
+    el.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+  }, [activeId, tabs]);
+  return (
+    <div className="subtabs" ref={wrapRef} style={{ padding: isMobile ? '0 8px' : '0 14px' }}>
+      {tabs.map((t) => (
+        <button
+          key={t.id}
+          data-active={t.id === activeId ? '1' : undefined}
+          className={`subtab${t.id === activeId ? ' active' : ''}`}
+          onClick={() => { if (t.id !== activeId) onSelect(t.id); }}
+        >
+          {t.title}
+        </button>
+      ))}
+      <span className="subtab-underline" style={{ transform: `translateX(${u.left}px)`, width: u.width, opacity: u.show ? 1 : 0 }} />
+    </div>
+  );
+}
 
 function Centered({ children, error }) {
   return (

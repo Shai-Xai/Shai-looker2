@@ -132,6 +132,11 @@ addColumn('suites', 'icon', "TEXT NOT NULL DEFAULT ''");
 addColumn('entities', 'logo', "TEXT NOT NULL DEFAULT ''"); // client brand image data-URL / emoji
 addColumn('entities', 'ai_context', "TEXT NOT NULL DEFAULT ''"); // client-specific AI background
 addColumn('entities', 'integrations', "TEXT NOT NULL DEFAULT '{}'"); // per-client API credentials (Looker / Anthropic)
+// Sub-dashboards: within a set, a dashboard may nest one level under a parent
+// from the same set — children render as tabs inside the parent, not as
+// sidebar rows. The relation lives on the membership so the same dashboard can
+// be a tab in one set and standalone in another.
+addColumn('set_dashboards', 'parent_dashboard_id', 'TEXT');
 // settlements.notes/.kind added after the table shipped, so migrate existing DBs.
 if (tableExists('settlements')) {
   addColumn('settlements', 'notes', "TEXT NOT NULL DEFAULT '[]'");
@@ -345,13 +350,29 @@ function removeDashboard(id) { return db.prepare('DELETE FROM dashboards WHERE i
 function setDashboardIds(setId) {
   return db.prepare('SELECT dashboard_id FROM set_dashboards WHERE set_id=? ORDER BY position').all(setId).map((r) => r.dashboard_id);
 }
-function rowToSet(r) { return r && { id: r.id, name: r.name, icon: r.icon || '', dashboardIds: setDashboardIds(r.id), createdAt: r.created_at }; }
+// Ordered membership entries with the nesting relation: [{ id, parentId }].
+function setDashboardEntries(setId) {
+  return db.prepare('SELECT dashboard_id, parent_dashboard_id FROM set_dashboards WHERE set_id=? ORDER BY position').all(setId)
+    .map((r) => ({ id: r.dashboard_id, parentId: r.parent_dashboard_id || null }));
+}
+function rowToSet(r) { return r && { id: r.id, name: r.name, icon: r.icon || '', dashboardIds: setDashboardIds(r.id), dashboards: setDashboardEntries(r.id), createdAt: r.created_at }; }
 function listSets() { return db.prepare('SELECT * FROM sets ORDER BY name').all().map(rowToSet); }
 function getSet(id) { return rowToSet(db.prepare('SELECT * FROM sets WHERE id=?').get(id)); }
-const setSetDashboards = db.transaction((setId, dashboardIds) => {
+// Accepts plain ids (top-level) or { id, parentId } entries. Nesting is one
+// level deep and a parent must be in the same set — anything else flattens to
+// top-level rather than ever losing a dashboard.
+const setSetDashboards = db.transaction((setId, items) => {
   db.prepare('DELETE FROM set_dashboards WHERE set_id=?').run(setId);
-  const ins = db.prepare('INSERT OR IGNORE INTO set_dashboards (set_id, dashboard_id, position) VALUES (?,?,?)');
-  (dashboardIds || []).forEach((did, i) => { if (did) ins.run(setId, did, i); });
+  const norm = (items || [])
+    .map((x) => (typeof x === 'string' ? { id: x, parentId: null } : { id: x?.id, parentId: x?.parentId || null }))
+    .filter((x) => x.id);
+  const inSet = new Set(norm.map((x) => x.id));
+  const ins = db.prepare('INSERT OR IGNORE INTO set_dashboards (set_id, dashboard_id, position, parent_dashboard_id) VALUES (?,?,?,?)');
+  norm.forEach((x, i) => {
+    let p = x.parentId && x.parentId !== x.id && inSet.has(x.parentId) ? x.parentId : null;
+    if (p && norm.find((n) => n.id === p)?.parentId) p = null; // parent is itself a child → flatten
+    ins.run(setId, x.id, i, p);
+  });
 });
 function createSet({ name, icon = '', dashboardIds = [] }) {
   const id = uuid();
@@ -364,7 +385,9 @@ function updateSet(id, patch) {
   if (!cur) return null;
   if (patch.name !== undefined) db.prepare('UPDATE sets SET name=? WHERE id=?').run(patch.name, id);
   if (patch.icon !== undefined) db.prepare('UPDATE sets SET icon=? WHERE id=?').run(patch.icon || '', id);
-  if (patch.dashboardIds !== undefined) setSetDashboards(id, patch.dashboardIds);
+  // `dashboards` ({id,parentId} entries) wins over the legacy flat id list.
+  if (patch.dashboards !== undefined) setSetDashboards(id, patch.dashboards);
+  else if (patch.dashboardIds !== undefined) setSetDashboards(id, patch.dashboardIds);
   return getSet(id);
 }
 function deleteSet(id) { db.prepare('DELETE FROM sets WHERE id=?').run(id); }

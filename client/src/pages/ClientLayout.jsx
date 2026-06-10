@@ -16,8 +16,13 @@ export default function ClientLayout() {
   const [suites, setSuites] = useState([]);
   const [settlements, setSettlements] = useState([]);
   const [details, setDetails] = useState({}); // suiteId -> { sets:[{id,name,dashboards}] }
-  const [openSuites, setOpenSuites] = useState({});
-  const [openSets, setOpenSets] = useState({});
+  // Expanded state survives reloads — the tree reopens the way you left it.
+  const [openSuites, setOpenSuites] = useState(() => readJson('howler_nav_open_suites'));
+  const [openSets, setOpenSets] = useState(() => readJson('howler_nav_open_sets'));
+  useEffect(() => { localStorage.setItem('howler_nav_open_suites', JSON.stringify(openSuites)); }, [openSuites]);
+  useEffect(() => { localStorage.setItem('howler_nav_open_sets', JSON.stringify(openSets)); }, [openSets]);
+  const [q, setQ] = useState(''); // sidebar search
+  const searching = q.trim().length > 0;
   const [loading, setLoading] = useState(true);
   const [navOpen, setNavOpen] = useState(false); // mobile drawer
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('howler_nav_collapsed') === '1'); // desktop
@@ -37,6 +42,13 @@ export default function ClientLayout() {
     ensureDetail(sid);
   }
 
+  // Hydrate details for suites that were left open, and for everything once a
+  // search starts (search needs every suite's tree to match against).
+  useEffect(() => {
+    for (const su of suites) if (openSuites[su.id] || searching) ensureDetail(su.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [suites, searching]);
+
   // Auto-expand the suite (and its sets) for the active dashboard.
   useEffect(() => {
     if (!suiteId) return;
@@ -47,7 +59,11 @@ export default function ClientLayout() {
   useEffect(() => {
     const d = details[suiteId];
     if (!d || !id) return;
-    for (const set of d.sets) if (set.dashboards.some((x) => x.id === id)) setOpenSets((p) => ({ ...p, [set.id]: true }));
+    for (const set of d.sets) {
+      if (set.dashboards.some((x) => x.id === id || (x.children || []).some((c) => c.id === id))) {
+        setOpenSets((p) => ({ ...p, [set.id]: true }));
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [details, suiteId, id]);
 
@@ -72,12 +88,20 @@ export default function ClientLayout() {
     const t = setTimeout(measure, 300);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, suiteId, openSuites, openSets, details, collapsed, loading, isMobile, navOpen, location.pathname, settlements]);
+  }, [id, suiteId, openSuites, openSets, details, collapsed, loading, isMobile, navOpen, location.pathname, settlements, q]);
 
-  // Title of the active dashboard (for the mobile menu bar).
+  // Title of the active dashboard (for the mobile menu bar) — may be a tab.
   let activeTitle = '';
   const cur = details[suiteId];
-  if (cur && id) for (const set of cur.sets) { const dash = set.dashboards.find((x) => x.id === id); if (dash) { activeTitle = dash.title; break; } }
+  if (cur && id) {
+    outer: for (const set of cur.sets) {
+      for (const dash of set.dashboards) {
+        if (dash.id === id) { activeTitle = dash.title; break outer; }
+        const child = (dash.children || []).find((c) => c.id === id);
+        if (child) { activeTitle = child.title; break outer; }
+      }
+    }
+  }
 
   // When an admin previews, scope EVERYTHING to the previewed client (entity) so
   // the preview faithfully shows that one account, not every client. The active
@@ -101,6 +125,25 @@ export default function ClientLayout() {
   const uniqueEntityIds = [...new Set(visibleSuites.map((s) => s.entityId))];
   const brand = uniqueEntityIds.length === 1 ? visibleSuites.find((s) => s.entityId === uniqueEntityIds[0]) : null;
 
+  // Sidebar search: filters suites → sets → dashboards (including tab titles).
+  // Returns the sets to render for a suite; null hides the suite, undefined
+  // means "matches but still loading".
+  const ql = q.trim().toLowerCase();
+  const hit = (s) => String(s || '').toLowerCase().includes(ql);
+  const suiteSets = (su) => {
+    const det = details[su.id];
+    if (!searching) return det ? det.sets : undefined;
+    if (hit(su.name)) return det ? det.sets : undefined;
+    if (!det) return null;
+    const sets = det.sets.map((set) => {
+      if (hit(set.name)) return set;
+      const dashboards = set.dashboards.filter((d) => hit(d.title) || (d.children || []).some((c) => hit(c.title)));
+      return dashboards.length ? { ...set, dashboards } : null;
+    }).filter(Boolean);
+    return sets.length ? sets : null;
+  };
+  const shownSuites = searching ? visibleSuites.filter((su) => suiteSets(su) !== null) : visibleSuites;
+
   const sidebar = (
     <nav ref={navRef} className="howler-sidebar" style={{ ...sidebarStyle, position: 'relative', ...(isMobile ? mobileSidebar : null) }}>
       <div className="nav-indicator" style={{ transform: `translateY(${indicator.y}px)`, height: indicator.h, opacity: indicator.show ? 1 : 0 }} />
@@ -110,7 +153,12 @@ export default function ClientLayout() {
           {brand.entityName && <span style={{ fontSize: 14, fontWeight: 700, letterSpacing: '-0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{brand.entityName}</span>}
         </div>
       )}
-      <div style={{ display: 'flex', alignItems: 'center', padding: '6px 8px 12px 14px' }}>
+      <div style={searchWrap}>
+        <span style={{ color: 'var(--muted)', fontSize: 13, flexShrink: 0 }}>⌕</span>
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search dashboards…" style={searchInput} />
+        {searching && <button onClick={() => setQ('')} style={searchClear} aria-label="Clear search">✕</button>}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', padding: '2px 8px 10px 14px' }}>
         <span style={{ flex: 1, fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)' }}>Suites</span>
         {!isMobile && <button onClick={toggleCollapsed} title="Collapse sidebar" style={iconBtn}>⟨</button>}
       </div>
@@ -118,49 +166,60 @@ export default function ClientLayout() {
         <div style={{ padding: 14, color: 'var(--muted)', fontSize: 13 }}>Loading…</div>
       ) : visibleSuites.length === 0 ? (
         <div style={{ padding: 14, color: 'var(--muted)', fontSize: 13 }}>No suites assigned.</div>
+      ) : searching && shownSuites.length === 0 ? (
+        <div style={{ padding: 14, color: 'var(--muted)', fontSize: 13 }}>No matches for “{q.trim()}”.</div>
       ) : (
-        visibleSuites.map((su) => (
-          <div key={su.id} style={{ marginBottom: 2 }}>
-            <button className="nav-row" style={{ ...rowBtn, fontWeight: 600 }} onClick={() => toggleSuite(su.id)}>
-              <Caret open={!!openSuites[su.id]} />
-              <Ico v={su.icon} size={22} />
-              <span style={ellip}>{su.name}</span>
-            </button>
-            <div className={`collapsey${openSuites[su.id] ? ' open' : ''}`}>
-              <div className="collapsey-inner" style={{ marginTop: 1 }}>
-                {!details[su.id] ? (
-                  openSuites[su.id] && <div style={{ ...subRow, color: 'var(--muted)' }}>Loading…</div>
-                ) : details[su.id].sets.length === 0 ? (
-                  <div style={{ ...subRow, color: 'var(--muted)' }}>No sets</div>
-                ) : (
-                  details[su.id].sets.map((set) => (
-                    <div key={set.id}>
-                      <button className="nav-row" style={{ ...rowBtn, paddingLeft: 28, fontWeight: 500, fontSize: 13, color: 'var(--muted-2)' }} onClick={() => setOpenSets((p) => ({ ...p, [set.id]: !p[set.id] }))}>
-                        <Caret open={!!openSets[set.id]} small />
-                        <Ico v={set.icon} size={15} />
-                        <span style={ellip}>{set.name}</span>
-                      </button>
-                      <div className={`collapsey${openSets[set.id] ? ' open' : ''}`}>
-                        <div className="collapsey-inner">
-                          {set.dashboards.map((d) => {
-                            const active = d.id === id && su.id === suiteId;
-                            return (
-                              <button key={d.id} ref={active ? activeRef : null} onClick={() => go(su.id, d.id)} className={`nav-row${active ? ' active' : ''}`} style={{ ...rowBtn, paddingLeft: 52, fontSize: 13, fontWeight: active ? 600 : 450 }}>
-                                <span style={{ ...dot, background: active ? 'var(--brand)' : 'rgba(0,0,0,0.18)' }} />
-                                <span style={ellip}>{d.title}</span>
-                              </button>
-                            );
-                          })}
-                          {set.dashboards.length === 0 && <div style={{ ...subRow, paddingLeft: 52, color: 'var(--muted)' }}>No dashboards</div>}
+        shownSuites.map((su) => {
+          const sets = suiteSets(su);
+          const suiteOpen = searching || !!openSuites[su.id];
+          return (
+            <div key={su.id} style={{ marginBottom: 2 }}>
+              <button className="nav-row" style={{ ...rowBtn, fontWeight: 600 }} onClick={() => toggleSuite(su.id)}>
+                <Caret open={suiteOpen} />
+                <Ico v={su.icon} size={22} />
+                <span style={ellip}>{su.name}</span>
+              </button>
+              <div className={`collapsey${suiteOpen ? ' open' : ''}`}>
+                <div className="collapsey-inner" style={{ marginTop: 1 }}>
+                  {sets === undefined ? (
+                    suiteOpen && <div style={{ ...subRow, color: 'var(--muted)' }}>Loading…</div>
+                  ) : (sets || []).length === 0 ? (
+                    <div style={{ ...subRow, color: 'var(--muted)' }}>No sets</div>
+                  ) : (
+                    sets.map((set) => {
+                      const setOpen = searching || !!openSets[set.id];
+                      return (
+                        <div key={set.id}>
+                          <button className="nav-row" style={{ ...rowBtn, padding: '7px 12px 7px 28px', fontWeight: 500, fontSize: 13, color: 'var(--muted-2)' }} onClick={() => setOpenSets((p) => ({ ...p, [set.id]: !p[set.id] }))}>
+                            <Caret open={setOpen} small />
+                            <Ico v={set.icon} size={15} />
+                            <span style={ellip}>{set.name}</span>
+                          </button>
+                          <div className={`collapsey${setOpen ? ' open' : ''}`}>
+                            <div className="collapsey-inner">
+                              {set.dashboards.map((d) => {
+                                const tabs = d.children?.length || 0;
+                                const active = (d.id === id || (d.children || []).some((c) => c.id === id)) && su.id === suiteId;
+                                return (
+                                  <button key={d.id} ref={active ? activeRef : null} onClick={() => go(su.id, d.id)} className={`nav-row${active ? ' active' : ''}`} style={{ ...rowBtn, padding: '6px 12px 6px 50px', fontSize: 13, fontWeight: active ? 600 : 450 }}>
+                                    <span style={{ ...dot, background: active ? 'var(--brand)' : 'rgba(0,0,0,0.18)' }} />
+                                    <span style={ellip}>{d.title}</span>
+                                    {tabs > 0 && <span style={tabChip}>{tabs + 1} tabs</span>}
+                                  </button>
+                                );
+                              })}
+                              {set.dashboards.length === 0 && <div style={{ ...subRow, paddingLeft: 50, color: 'var(--muted)' }}>No dashboards</div>}
+                            </div>
+                          </div>
                         </div>
-                      </div>
-                    </div>
-                  ))
-                )}
+                      );
+                    })
+                  )}
+                </div>
               </div>
             </div>
-          </div>
-        ))
+          );
+        })
       )}
       {/* Settlements — its own section below the suites. Hidden for clients
           with no reports; admins always see it (to preview the feature). */}
@@ -215,6 +274,10 @@ export default function ClientLayout() {
   );
 }
 
+function readJson(key) {
+  try { return JSON.parse(localStorage.getItem(key)) || {}; } catch { return {}; }
+}
+
 function Ico({ v, size = 16 }) {
   if (!v) return null;
   return v.startsWith('data:')
@@ -234,6 +297,10 @@ const subRow = { padding: '7px 12px', fontSize: 13 };
 const ellip = { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' };
 const dot = { flexShrink: 0, width: 5, height: 5, borderRadius: '50%', display: 'inline-block' };
 const countChip = { flexShrink: 0, marginLeft: 'auto', fontSize: 10.5, fontWeight: 700, background: 'rgba(128,128,128,0.18)', color: 'var(--muted-2)', borderRadius: 980, minWidth: 18, height: 18, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' };
+const tabChip = { flexShrink: 0, marginLeft: 'auto', fontSize: 10, fontWeight: 700, color: 'var(--ai, #7c3aed)', background: 'var(--ai-bg, rgba(124,58,237,0.10))', borderRadius: 980, padding: '2px 7px' };
+const searchWrap = { display: 'flex', alignItems: 'center', gap: 7, background: 'rgba(128,128,128,0.10)', border: '1px solid var(--hairline)', borderRadius: 9, padding: '6px 10px', margin: '0 4px 10px' };
+const searchInput = { flex: 1, minWidth: 0, border: 'none', background: 'transparent', outline: 'none', fontSize: 13, color: 'var(--text)', fontFamily: 'inherit' };
+const searchClear = { flexShrink: 0, border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 12, padding: 0, lineHeight: 1 };
 const menuBtn = { flexShrink: 0, padding: '8px 16px', borderRadius: 980, border: '1px solid var(--hairline)', background: 'var(--card)', fontSize: 14, fontWeight: 600, cursor: 'pointer' };
 const previewBar = { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '8px 16px', background: 'linear-gradient(90deg, #FF385C, #FF6B35)', color: '#fff', fontSize: 13 };
 const exitPreviewBtn = { flexShrink: 0, padding: '6px 14px', borderRadius: 980, border: 'none', background: 'rgba(255,255,255,0.25)', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer' };

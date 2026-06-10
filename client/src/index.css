@@ -221,6 +221,33 @@ input::placeholder, textarea::placeholder { color: #b0b0b6; }
   .ai-mark .ai-spark { opacity: 0.85; }
 }
 
+/* Sub-dashboard tabs — underline style; the gradient underline slides between
+   tabs like the sidebar's nav indicator. Horizontally scrollable when long. */
+.subtabs {
+  position: relative; display: flex; gap: 2px; overflow-x: auto;
+  padding: 0 16px; flex-shrink: 0;
+  background: var(--frost);
+  backdrop-filter: saturate(180%) blur(20px); -webkit-backdrop-filter: saturate(180%) blur(20px);
+  border-bottom: 1px solid var(--hairline);
+  scrollbar-width: none;
+}
+.subtabs::-webkit-scrollbar { display: none; }
+.subtab {
+  flex-shrink: 0; border: none; background: transparent; cursor: pointer;
+  padding: 10px 14px 12px; font-size: 13.5px; font-weight: 600; font-family: inherit;
+  color: var(--muted-2); border-radius: 8px 8px 0 0;
+  transition: color .15s ease, background .15s ease;
+}
+.subtab:hover { background: rgba(128,128,128,0.08); color: var(--text); }
+.subtab.active { color: var(--brand); }
+.subtab-underline {
+  position: absolute; bottom: 0; left: 0; height: 2.5px; border-radius: 3px;
+  background: linear-gradient(90deg, var(--brand), #ff6b35);
+  transition: transform .3s var(--ease-out), width .3s var(--ease-out), opacity .2s ease;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) { .subtab-underline { transition: none; } }
+
 /* Client sidebar — frosted, Apple-like */
 .howler-sidebar {
   background: var(--frost);

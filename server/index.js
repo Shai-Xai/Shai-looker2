@@ -206,8 +206,17 @@ app.get('/api/my/suites/:id', auth.requireAuth, (req, res) => {
   const sets = su.setIds.map((sid) => {
     const set = db.getSet(sid);
     if (!set) return null;
-    const dashboards = set.dashboardIds.map((id) => store.get(id)).filter(Boolean)
-      .map((d) => ({ id: d.id, title: d.title, description: d.description || '', tileCount: (d.tiles || []).length }));
+    // One-level tree: top-level dashboards carry their sub-dashboards (tabs)
+    // in `children`. An orphaned parent reference renders top-level.
+    const nodes = (set.dashboards || []).map(({ id, parentId }) => {
+      const d = store.get(id);
+      return d && { id: d.id, title: d.title, description: d.description || '', tileCount: (d.tiles || []).length, parentId };
+    }).filter(Boolean);
+    const valid = new Set(nodes.map((n) => n.id));
+    const dashboards = nodes.filter((n) => !n.parentId || !valid.has(n.parentId)).map(({ parentId, ...top }) => ({
+      ...top,
+      children: nodes.filter((c) => c.parentId === top.id).map(({ parentId: _p, ...rest }) => rest),
+    }));
     return { id: set.id, name: set.name, icon: set.icon || '', dashboards };
   }).filter(Boolean);
   const ent = db.getEntity(su.entityId);

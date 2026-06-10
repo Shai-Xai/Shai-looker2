@@ -387,10 +387,26 @@ function SetCard({ set, dashboards, onChange }) {
   const [name, setName] = useState(set.name);
   const [icon, setIcon] = useState(set.icon || '');
   const [ids, setIds] = useState(set.dashboardIds || []);
+  // Sub-dashboards: id -> parentId for ids nested as tabs of another dashboard.
+  const [parents, setParents] = useState(() => {
+    const m = {};
+    for (const e of set.dashboards || []) if (e.parentId) m[e.id] = e.parentId;
+    return m;
+  });
   const [fpath, setFpath] = useState(''); // current folder path in the picker; '' = top
   const [saved, setSaved] = useState(false);
   const toggle = (id) => setIds((cur) => cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]);
-  const save = async () => { await api.adminUpdateSet(set.id, { name, icon, dashboardIds: ids }); flash(setSaved); onChange(); };
+  const setParent = (id, parentId) => setParents((cur) => {
+    const next = { ...cur };
+    if (parentId) next[id] = parentId; else delete next[id];
+    // Anything nested under `id` un-nests if `id` itself becomes a child.
+    if (parentId) for (const k of Object.keys(next)) if (next[k] === id) delete next[k];
+    return next;
+  });
+  const save = async () => {
+    await api.adminUpdateSet(set.id, { name, icon, dashboards: ids.map((id) => ({ id, parentId: parents[id] || null })) });
+    flash(setSaved); onChange();
+  };
   const remove = async () => { if (confirm(`Delete set "${set.name}"?`)) { await api.adminDeleteSet(set.id); onChange(); } };
 
   // Folder picker: drill through nested folders (paths are "/"-separated).
@@ -420,7 +436,15 @@ function SetCard({ set, dashboards, onChange }) {
     dragFrom.current = i;
     setDragOver(i);
   };
-  const removeId = (id) => setIds((cur) => cur.filter((x) => x !== id));
+  const removeId = (id) => {
+    setIds((cur) => cur.filter((x) => x !== id));
+    setParents((cur) => {
+      const next = { ...cur };
+      delete next[id];
+      for (const k of Object.keys(next)) if (next[k] === id) delete next[k]; // children go top-level
+      return next;
+    });
+  };
   const [open, setOpen] = useState(false);
 
   return (
@@ -476,24 +500,40 @@ function SetCard({ set, dashboards, onChange }) {
       </div>
       </Section>
       {ids.length > 0 && (
-        <Section title="Order in this set (drag to reorder)">
+        <Section title="Order in this set (drag to reorder · nest a dashboard as a tab of another)">
           <div style={orderList}>
-            {ids.map((id, i) => (
-              <div
-                key={id}
-                draggable
-                onDragStart={(e) => { dragFrom.current = i; e.dataTransfer.effectAllowed = 'move'; }}
-                onDragOver={(e) => { e.preventDefault(); onDragOverRow(i); }}
-                onDragEnd={() => { dragFrom.current = null; setDragOver(null); }}
-                onDrop={(e) => { e.preventDefault(); dragFrom.current = null; setDragOver(null); }}
-                style={{ ...orderRow, cursor: 'grab', background: dragOver === i ? '#fff0f3' : 'transparent', borderRadius: 6 }}
-              >
-                <span style={{ color: '#c4c4c8', flexShrink: 0, fontSize: 15, lineHeight: 1 }} title="Drag to reorder">⠿</span>
-                <span style={{ color: 'var(--muted)', width: 20, textAlign: 'right', flexShrink: 0 }}>{i + 1}.</span>
-                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{byId[id] ? byId[id].title : '(dashboard not found)'}</span>
-                <button style={{ ...orderBtn, color: 'var(--error)' }} onClick={() => removeId(id)} title="Remove from set">✕</button>
-              </div>
-            ))}
+            {ids.map((id, i) => {
+              const parentId = parents[id] || '';
+              // Valid parents: top-level dashboards in this set (not itself).
+              const parentOptions = ids.filter((x) => x !== id && !parents[x]);
+              return (
+                <div
+                  key={id}
+                  draggable
+                  onDragStart={(e) => { dragFrom.current = i; e.dataTransfer.effectAllowed = 'move'; }}
+                  onDragOver={(e) => { e.preventDefault(); onDragOverRow(i); }}
+                  onDragEnd={() => { dragFrom.current = null; setDragOver(null); }}
+                  onDrop={(e) => { e.preventDefault(); dragFrom.current = null; setDragOver(null); }}
+                  style={{ ...orderRow, cursor: 'grab', background: dragOver === i ? '#fff0f3' : 'transparent', borderRadius: 6, paddingLeft: parentId ? 26 : 0 }}
+                >
+                  <span style={{ color: '#c4c4c8', flexShrink: 0, fontSize: 15, lineHeight: 1 }} title="Drag to reorder">⠿</span>
+                  <span style={{ color: 'var(--muted)', width: 20, textAlign: 'right', flexShrink: 0 }}>{parentId ? '↳' : `${i + 1}.`}</span>
+                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{byId[id] ? byId[id].title : '(dashboard not found)'}</span>
+                  <select
+                    value={parentId}
+                    onChange={(e) => setParent(id, e.target.value)}
+                    title="Show as a tab inside another dashboard"
+                    style={{ ...input, minWidth: 120, maxWidth: 180, padding: '4px 8px', fontSize: 12 }}
+                  >
+                    <option value="">Sidebar item</option>
+                    {parentOptions.map((pid) => (
+                      <option key={pid} value={pid}>Tab of: {byId[pid]?.title || pid}</option>
+                    ))}
+                  </select>
+                  <button style={{ ...orderBtn, color: 'var(--error)' }} onClick={() => removeId(id)} title="Remove from set">✕</button>
+                </div>
+              );
+            })}
           </div>
         </Section>
       )}
