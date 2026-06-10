@@ -6,7 +6,7 @@ import { useAuth } from '../lib/auth.jsx';
 import { useTheme } from '../lib/theme.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import { useCountUp } from '../lib/useCountUp.js';
-import { fmtR, fmtQty, deriveCategory } from '../lib/money.js';
+import { fmtR, fmtQty, deriveCategory, deriveSubCategory, variantLabel } from '../lib/money.js';
 import { StatusBadge } from './SettlementsPage.jsx';
 import InsightModal from '../components/InsightModal.jsx';
 import AiMark from '../components/AiMark.jsx';
@@ -377,15 +377,26 @@ function PaymentsChart({ d, dark, isMobile }) {
 // ─── Sales table: flat or grouped-by-category, with search ────────────────────
 function SalesTable({ group, isMobile }) {
   const rows = group.rows || [];
+  // Two-level roll-up: Category → Sub-category (phase) → line items.
   const cats = useMemo(() => {
+    const acc = (o, r) => { o.qty += r.qty || 0; o.sales += r.sales || 0; o.fees += r.fees || 0; o.total += r.total || 0; };
     const map = new Map();
     for (const r of rows) {
       const c = deriveCategory(r.desc);
-      if (!map.has(c)) map.set(c, { category: c, rows: [], qty: 0, sales: 0, fees: 0, total: 0 });
+      if (!map.has(c)) map.set(c, { category: c, rows: [], subMap: new Map(), qty: 0, sales: 0, fees: 0, total: 0 });
       const g = map.get(c);
-      g.rows.push(r); g.qty += r.qty || 0; g.sales += r.sales || 0; g.fees += r.fees || 0; g.total += r.total || 0;
+      g.rows.push(r); acc(g, r);
+      const sub = deriveSubCategory(r.desc) || '—';
+      if (!g.subMap.has(sub)) g.subMap.set(sub, { sub, rows: [], qty: 0, sales: 0, fees: 0, total: 0 });
+      const sg = g.subMap.get(sub); sg.rows.push(r); acc(sg, r);
     }
-    return [...map.values()].sort((a, b) => Math.abs(b.total) - Math.abs(a.total));
+    return [...map.values()].map((g) => ({
+      ...g,
+      subs: [...g.subMap.values()].sort((a, b) => Math.abs(b.total) - Math.abs(a.total)),
+      // Only worth a sub-category level when the category actually splits into
+      // more than one phase (otherwise nest straight to the rows).
+      nested: g.subMap.size > 1,
+    })).sort((a, b) => Math.abs(b.total) - Math.abs(a.total));
   }, [rows]);
   const canGroup = cats.length > 1 && rows.length > 6;
   const [grouped, setGrouped] = useState(canGroup);
@@ -450,14 +461,15 @@ function SalesTable({ group, isMobile }) {
   );
 }
 
-// A category roll-up row that expands to its underlying line items.
+// A category roll-up that expands to its sub-categories (phases), each of which
+// expands to its individual line items.
 function CategoryRows({ cat, isMobile }) {
   const [open, setOpen] = useState(false);
   return (
     <>
       <tr onClick={() => setOpen((v) => !v)} style={{ cursor: 'pointer', background: 'var(--elevated)' }}>
         <td style={{ ...td, fontWeight: 700 }}>
-          <span className="nav-caret" style={{ display: 'inline-block', width: 12, fontSize: 9, color: 'var(--muted)', transform: open ? 'rotate(90deg)' : 'none' }}>▶</span>
+          <Caret open={open} />
           {cat.category} <span style={{ color: 'var(--muted)', fontWeight: 400, fontSize: 11 }}>({cat.rows.length})</span>
         </td>
         <td style={{ ...td, ...num, fontWeight: 700, color: numColor(cat.qty) }}>{fmtQty(cat.qty)}</td>
@@ -465,17 +477,55 @@ function CategoryRows({ cat, isMobile }) {
         {!isMobile && <td style={{ ...td, ...num, fontWeight: 700, color: numColor(cat.fees) }}>{fmtR(cat.fees)}</td>}
         <td style={{ ...td, ...num, fontWeight: 700, color: numColor(cat.total) }}>{fmtR(cat.total)}</td>
       </tr>
-      {open && cat.rows.map((r, i) => (
-        <tr key={i} style={{ background: 'transparent' }}>
-          <td style={{ ...td, paddingLeft: 26, color: 'var(--muted-2)' }}>{phaseName(r.desc, cat.category)}</td>
-          <td style={{ ...td, ...num, color: numColor(r.qty) }}>{fmtQty(r.qty)}</td>
-          {!isMobile && <td style={{ ...td, ...num, color: numColor(r.sales) }}>{fmtR(r.sales)}</td>}
-          {!isMobile && <td style={{ ...td, ...num, color: numColor(r.fees) }}>{fmtR(r.fees)}</td>}
-          <td style={{ ...td, ...num, color: numColor(r.total) }}>{fmtR(r.total)}</td>
-        </tr>
-      ))}
+      {open && (cat.nested
+        ? cat.subs.map((sub, i) => <SubRows key={i} sub={sub} isMobile={isMobile} />)
+        : cat.rows.map((r, i) => <LeafRow key={i} r={r} indent={26} isMobile={isMobile} />))}
     </>
   );
+}
+
+// A sub-category (phase) roll-up. A single-item phase renders as a plain leaf —
+// no point in a roll-up over one row.
+function SubRows({ sub, isMobile }) {
+  const [open, setOpen] = useState(false);
+  if (sub.rows.length === 1) return <LeafRow r={sub.rows[0]} indent={26} isMobile={isMobile} label={sub.sub !== '—' ? sub.sub : undefined} />;
+  return (
+    <>
+      <tr onClick={() => setOpen((v) => !v)} style={{ cursor: 'pointer' }}>
+        <td style={{ ...td, paddingLeft: 26, fontWeight: 600, color: 'var(--text)' }}>
+          <Caret open={open} />
+          {sub.sub} <span style={{ color: 'var(--muted)', fontWeight: 400, fontSize: 11 }}>({sub.rows.length})</span>
+        </td>
+        <td style={{ ...td, ...num, fontWeight: 600, color: numColor(sub.qty) }}>{fmtQty(sub.qty)}</td>
+        {!isMobile && <td style={{ ...td, ...num, fontWeight: 600, color: numColor(sub.sales) }}>{fmtR(sub.sales)}</td>}
+        {!isMobile && <td style={{ ...td, ...num, fontWeight: 600, color: numColor(sub.fees) }}>{fmtR(sub.fees)}</td>}
+        <td style={{ ...td, ...num, fontWeight: 600, color: numColor(sub.total) }}>{fmtR(sub.total)}</td>
+      </tr>
+      {open && sub.rows.map((r, i) => <LeafRow key={i} r={r} indent={46} isMobile={isMobile} variant />)}
+    </>
+  );
+}
+
+// An individual line item. Within a phase we show the variant (cashless add-on
+// / base) plus the unit price so same-named, different-priced rows are clear.
+function LeafRow({ r, indent, isMobile, label, variant }) {
+  const text = variant ? variantLabel(r.desc) : (label || phaseName(r.desc));
+  return (
+    <tr style={{ background: 'transparent' }}>
+      <td style={{ ...td, paddingLeft: indent, color: 'var(--muted-2)' }}>
+        {text}
+        {r.price != null && <span style={{ color: 'var(--muted)', fontSize: 11 }}> · @ {fmtR(r.price)}</span>}
+      </td>
+      <td style={{ ...td, ...num, color: numColor(r.qty) }}>{fmtQty(r.qty)}</td>
+      {!isMobile && <td style={{ ...td, ...num, color: numColor(r.sales) }}>{fmtR(r.sales)}</td>}
+      {!isMobile && <td style={{ ...td, ...num, color: numColor(r.fees) }}>{fmtR(r.fees)}</td>}
+      <td style={{ ...td, ...num, color: numColor(r.total) }}>{fmtR(r.total)}</td>
+    </tr>
+  );
+}
+
+function Caret({ open }) {
+  return <span className="nav-caret" style={{ display: 'inline-block', width: 12, fontSize: 9, color: 'var(--muted)', transform: open ? 'rotate(90deg)' : 'none' }}>▶</span>;
 }
 
 function CommissionTable({ group, isMobile }) {
@@ -545,9 +595,9 @@ function buildOwlData(d) {
 }
 function salesOwl(group) {
   return makeOwl(
-    [{ name: 'item', label: 'Item' }, { name: 'category', label: 'Category' }],
+    [{ name: 'category', label: 'Category' }, { name: 'phase', label: 'Sub-category / phase' }, { name: 'item', label: 'Item' }],
     [{ name: 'qty', label: 'Qty' }, { name: 'sales', label: 'Sales (ZAR)' }, { name: 'total', label: 'Total incl VAT (ZAR)' }],
-    (group.rows || []).map((r) => ({ item: { value: r.desc }, category: { value: deriveCategory(r.desc) }, qty: { value: r.qty, rendered: fmtQty(r.qty) }, sales: { value: r.sales, rendered: fmtR(r.sales) }, total: { value: r.total, rendered: fmtR(r.total) } })),
+    (group.rows || []).map((r) => ({ category: { value: deriveCategory(r.desc) }, phase: { value: deriveSubCategory(r.desc) || '—' }, item: { value: r.desc }, qty: { value: r.qty, rendered: fmtQty(r.qty) }, sales: { value: r.sales, rendered: fmtR(r.sales) }, total: { value: r.total, rendered: fmtR(r.total) } })),
   );
 }
 function commissionsOwl(d) {
@@ -568,7 +618,7 @@ const numColor = (v) => (v != null && v < 0 ? 'var(--error)' : 'var(--text)');
 const shortName = (n) => (n || '').replace(/ Commissions?$/i, '').replace('Payment Processing', 'Processing') || 'Fees';
 // In a category group, show just the tier/phase ("Phase 1") rather than repeat
 // the whole "3-day Full Fest Main Arena - Phase 1".
-function phaseName(desc, category) {
+function phaseName(desc) {
   const parts = String(desc).split(/\s[-–]\s/);
   if (parts.length > 1) return parts.slice(1).join(' – ');
   return desc;

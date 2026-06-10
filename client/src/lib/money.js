@@ -38,3 +38,31 @@ export function deriveCategory(desc) {
     .trim();
   return head || 'Other';
 }
+
+// Derive the sub-category (the phase / tier / price band) from a line item —
+// the part after the category, e.g. "Phase 1", "Early Bird". Cashless-credit
+// variants and "(6-12)" qualifiers collapse onto the same phase so, say,
+// "Phase 1" and "Phase 1 + E500 Cashless Credits" group together.
+export function deriveSubCategory(desc) {
+  const d = String(desc || '').trim();
+  const parts = d.split(/\s[-–]\s/);
+  if (parts.length < 2) return ''; // no phase component (fees, resale, etc.)
+  const sub = parts.slice(1).join(' – ')
+    .replace(/\s*\+\s*E\s*\d[\d,]*\s*Cashless Credits/ig, '')
+    .replace(/\([^)]*\)/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return sub;
+}
+
+// The variant detail that distinguishes line items within the same phase —
+// the cashless add-on if present, otherwise the base tier. Used as the leaf
+// label so same-named, different-priced rows stay readable.
+export function variantLabel(desc) {
+  const d = String(desc || '').trim();
+  const m = d.match(/\+\s*E\s*\d[\d,]*\s*Cashless Credits/i);
+  if (m) return '+ ' + m[0].replace(/^\+\s*/, '');
+  const paren = d.match(/\([^)]*\)/);
+  if (paren) return paren[0];
+  return 'Base';
+}
