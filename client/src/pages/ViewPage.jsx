@@ -94,7 +94,7 @@ export default function ViewPage() {
             {hasFilters && !isMobile && (
               <button style={filtersBtn(filtersOpen)} onClick={() => setFiltersOpen(v => !v)}>
                 <span>⚲ Filters</span>
-                {activeCount > 0 && <span style={countBadge}>{activeCount}</span>}
+                {activeCount > 0 && <span key={activeCount} className="pop" style={countBadge}>{activeCount}</span>}
                 <span style={{ fontSize: 11, opacity: 0.7 }}>{filtersOpen ? '▴' : '▾'}</span>
               </button>
             )}

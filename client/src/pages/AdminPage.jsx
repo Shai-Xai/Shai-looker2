@@ -742,9 +742,18 @@ function SaveRow({ onSave, saved, id }) {
   return (
     <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 10 }}>
       <button style={saveBtn} onClick={onSave}>Save</button>
-      {saved && <span style={{ color: 'var(--success)', fontSize: 13 }}>✓ Saved</span>}
+      {saved && <SavedChip />}
       <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 'auto' }}>id: {id.slice(0, 8)}</span>
     </div>
+  );
+}
+// "Saved" with a checkmark that draws itself on.
+function SavedChip() {
+  return (
+    <span className="saved-chip" style={{ color: 'var(--success)', fontSize: 13, fontWeight: 600 }}>
+      <svg className="check-anim" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M5 13l4 4L19 7" /></svg>
+      Saved
+    </span>
   );
 }
 // ─── Tile library ─────────────────────────────────────────────────────────────
@@ -877,7 +886,7 @@ function AISettings() {
         />
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
           <button style={saveBtn} onClick={save} disabled={text === orig}>Save</button>
-          {saved && <span style={{ color: 'var(--success)', fontSize: 13 }}>✓ Saved</span>}
+          {saved && <SavedChip />}
           <span style={{ fontSize: 12, color: 'var(--muted)', marginLeft: 'auto' }}>{text.length} characters</span>
         </div>
       </div>

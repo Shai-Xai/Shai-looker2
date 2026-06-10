@@ -45,8 +45,8 @@ html, body {
 }
 
 a { color: inherit; }
-button { font-family: inherit; transition: background .15s ease, box-shadow .15s ease, opacity .15s ease, transform .05s ease; }
-button:active:not(:disabled) { transform: translateY(0.5px); }
+button { font-family: inherit; transition: background .15s ease, box-shadow .15s ease, opacity .15s ease, filter .15s ease, transform .08s var(--ease-out); }
+button:active:not(:disabled) { transform: translateY(0.5px) scale(0.975); }
 button:disabled { opacity: 0.45; cursor: default !important; }
 input, select, textarea { font-family: inherit; color: var(--text); }
 input::placeholder, textarea::placeholder { color: #b0b0b6; }
@@ -76,9 +76,19 @@ input::placeholder, textarea::placeholder { color: #b0b0b6; }
 .howler-tile:focus-within .insight-btn { opacity: 1; }
 @media (hover: none) { .howler-tile .insight-btn { opacity: 1; } }
 
-/* Tiles get a touch more lift on hover */
-.howler-tile { transition: box-shadow .2s ease, transform .2s ease; }
-.howler-tile:hover { box-shadow: 0 1px 2px rgba(0,0,0,0.05), 0 14px 36px -14px rgba(0,0,0,0.18); }
+/* Tiles get a touch more lift + a faint brand ring on hover */
+.howler-tile { transition: box-shadow .2s ease, transform .2s ease, border-color .2s ease; }
+.howler-tile:hover { box-shadow: 0 1px 2px rgba(0,0,0,0.05), 0 14px 36px -14px rgba(0,0,0,0.18); border-color: rgba(255,56,92,0.16); }
+
+/* Pop — for count badges / status chips that appear or change. */
+@keyframes pop { 0% { transform: scale(.4); opacity: 0; } 60% { transform: scale(1.14); } 100% { transform: scale(1); opacity: 1; } }
+.pop { animation: pop .34s var(--ease-spring) both; }
+
+/* Save → animated check that draws on. */
+@keyframes draw-check { to { stroke-dashoffset: 0; } }
+@keyframes fade-up { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.saved-chip { display: inline-flex; align-items: center; gap: 5px; animation: fade-up .25s var(--ease-out) both; }
+.check-anim path { stroke-dasharray: 22; stroke-dashoffset: 22; animation: draw-check .42s var(--ease-out) .05s forwards; }
 
 /* Client sidebar — frosted, Apple-like */
 .howler-sidebar {
@@ -112,6 +122,8 @@ input::placeholder, textarea::placeholder { color: #b0b0b6; }
 
 @media (prefers-reduced-motion: reduce) {
   .nav-indicator, .collapsey, .collapsey-inner, .sidebar-wrap, .nav-caret { transition-duration: 1ms !important; }
+  .pop, .saved-chip { animation: none !important; }
+  .check-anim path { animation: none !important; stroke-dashoffset: 0 !important; }
 }
 
 /* Route cross-fade (View Transitions API) — quick and soft. */

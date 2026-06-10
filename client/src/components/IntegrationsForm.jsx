@@ -91,7 +91,12 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <button style={saveBtn} onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
-        {saved && <span style={{ color: 'var(--success, #10b981)', fontSize: 13 }}>✓ Saved</span>}
+        {saved && (
+          <span className="saved-chip" style={{ color: 'var(--success, #10b981)', fontSize: 13, fontWeight: 600 }}>
+            <svg className="check-anim" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M5 13l4 4L19 7" /></svg>
+            Saved
+          </span>
+        )}
       </div>
     </div>
   );

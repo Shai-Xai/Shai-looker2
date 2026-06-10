@@ -34,7 +34,7 @@ export default function FilterBar({ filters, values, onChange, locked = {}, open
         <div style={{ background: 'var(--card)', borderBottom: '1px solid var(--hairline)', padding: '10px 14px', display: 'flex', justifyContent: 'flex-end' }}>
           <button onClick={() => setMobileOpen(true)} style={filterTrigger}>
             <span>⚲ Filters</span>
-            {activeCount > 0 && <span style={countPill}>{activeCount}</span>}
+            {activeCount > 0 && <span key={activeCount} className="pop" style={countPill}>{activeCount}</span>}
           </button>
         </div>
         {mobileOpen && (
