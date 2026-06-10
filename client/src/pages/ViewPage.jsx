@@ -63,6 +63,46 @@ export default function ViewPage() {
     setFilterValues((prev) => ({ ...prev, [name]: value }));
   }, []);
 
+  // Sub-dashboard tabs: if this dashboard is a parent with children — or one of
+  // the children — surface the whole family as a tab bar (parent first).
+  // Computed from the suite tree (setInfo + id), independent of `def`, so the
+  // hooks below stay above the early returns (rules of hooks).
+  let family = null;
+  if (setInfo && id) {
+    outer: for (const set of setInfo.sets || []) {
+      for (const d of set.dashboards || []) {
+        const kids = d.children || [];
+        if ((d.id === id && kids.length) || kids.some((c) => c.id === id)) {
+          family = [{ id: d.id, title: d.title }, ...kids.map((c) => ({ id: c.id, title: c.title }))];
+          break outer;
+        }
+      }
+    }
+  }
+  const curIdx = family ? family.findIndex((t) => t.id === id) : -1;
+  const lastIdxRef = useRef(curIdx);
+  let swipeDir = 0; // direction of the last tab change, for the slide animation
+  if (family && lastIdxRef.current >= 0 && curIdx >= 0 && curIdx !== lastIdxRef.current) {
+    swipeDir = curIdx > lastIdxRef.current ? 1 : -1;
+  }
+  useEffect(() => { lastIdxRef.current = curIdx; }, [curIdx]);
+  const touch = useRef(null);
+  const goToTab = (delta) => {
+    if (!family || curIdx < 0) return;
+    const next = family[curIdx + delta];
+    if (next) navigate(`/suite/${suiteId}/d/${next.id}`);
+  };
+  // Touch swipe: a predominantly-horizontal flick moves to the adjacent tab.
+  const onTouchStart = (e) => { if (family && e.touches.length === 1) { const t = e.touches[0]; touch.current = { x: t.clientX, y: t.clientY, at: Date.now() }; } };
+  const onTouchEnd = (e) => {
+    if (!touch.current) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - touch.current.x, dy = t.clientY - touch.current.y, dt = Date.now() - touch.current.at;
+    touch.current = null;
+    if (dt < 600 && Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.8) goToTab(dx < 0 ? 1 : -1);
+  };
+  const swapClass = swipeDir > 0 ? 'tab-swap tab-swap-next' : swipeDir < 0 ? 'tab-swap tab-swap-prev' : 'tab-swap';
+
   // Full-page loader only on the very first load. When switching between
   // sibling tabs we already have a def, so keep the header + tab bar mounted
   // and just swap the content (see the dimmed grid below).
@@ -86,21 +126,6 @@ export default function ViewPage() {
   const activeCount = hasFilters ? activeFilterCount(def.filters, filterValues) : 0;
   const hasTiles = !!(def.tiles?.length || def.carousels?.length);
   const canSummarize = insightsEnabled && hasTiles;
-
-  // Sub-dashboard tabs: if this dashboard is a parent with children — or one of
-  // the children — surface the whole family as a tab bar (parent first).
-  let family = null;
-  if (setInfo && id) {
-    outer: for (const set of setInfo.sets || []) {
-      for (const d of set.dashboards || []) {
-        const kids = d.children || [];
-        if ((d.id === id && kids.length) || kids.some((c) => c.id === id)) {
-          family = [{ id: d.id, title: d.title }, ...kids.map((c) => ({ id: c.id, title: c.title }))];
-          break outer;
-        }
-      }
-    }
-  }
 
   // Header shows the active tab's title instantly on tab switch (from the
   // stable suite tree), so it doesn't lag behind the dashboard fetch.
@@ -155,10 +180,15 @@ export default function ViewPage() {
           <FilterBar filters={def.filters} values={filterValues} onChange={handleFilterChange} locked={locked} open={filtersOpen} onClose={() => setFiltersOpen(false)} />
         )}
 
-        <div style={{ flex: 1, padding: isMobile ? '12px' : '22px', overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
-          {/* Keyed by dashboard id so the grid fades in fresh on each tab
-              switch; dimmed while the next dashboard's definition loads. */}
-          <div key={id} className="tab-swap" style={{ opacity: loading ? 0.45 : 1, transition: 'opacity .18s ease', pointerEvents: loading ? 'none' : 'auto' }}>
+        <div
+          style={{ flex: 1, padding: isMobile ? '12px' : '22px', overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}
+          onTouchStart={family ? onTouchStart : undefined}
+          onTouchEnd={family ? onTouchEnd : undefined}
+        >
+          {/* Keyed by dashboard id so the grid animates in on each tab switch
+              (sliding in the swipe/click direction); dimmed while the next
+              dashboard's definition loads. */}
+          <div key={id} className={swapClass} style={{ opacity: loading ? 0.45 : 1, transition: 'opacity .18s ease', pointerEvents: loading ? 'none' : 'auto' }}>
             {def.tiles?.length || def.carousels?.length ? (
               <EditableGrid tiles={def.tiles || []} carousels={def.carousels || []} filterValues={filterValues} editable={false} />
             ) : (

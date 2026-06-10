@@ -222,10 +222,15 @@ input::placeholder, textarea::placeholder { color: #b0b0b6; }
 }
 
 /* Content fades in when switching sub-dashboard tabs (the tiles inside still
-   do their own staggered entrance). */
+   do their own staggered entrance). A directional variant slides the content
+   in from the side you swiped/clicked toward. */
 .tab-swap { animation: tab-fade .22s var(--ease-out, ease-out); }
+.tab-swap-next { animation: tab-in-right .26s var(--ease-out, ease-out); }
+.tab-swap-prev { animation: tab-in-left .26s var(--ease-out, ease-out); }
 @keyframes tab-fade { from { opacity: 0; } to { opacity: 1; } }
-@media (prefers-reduced-motion: reduce) { .tab-swap { animation: none; } }
+@keyframes tab-in-right { from { opacity: 0; transform: translateX(26px); } to { opacity: 1; transform: none; } }
+@keyframes tab-in-left { from { opacity: 0; transform: translateX(-26px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .tab-swap, .tab-swap-next, .tab-swap-prev { animation: none; } }
 
 /* Sub-dashboard tabs — underline style; the gradient underline slides between
    tabs like the sidebar's nav indicator. Horizontally scrollable when long. */
