@@ -67,10 +67,15 @@ export default function ViewPage() {
 
   const theme = def.theme || {};
   // In dark mode the global theme wins: ignore the dashboard's own (light)
-  // background/tile colours so tiles don't stay white with invisible text.
+  // background/tile colours (otherwise tiles stay white with invisible text).
+  // We OMIT --tile-bg so tiles inherit the global dark token rather than
+  // self-referencing it.
   const dark = appTheme === 'dark';
-  const pageBg = dark ? 'var(--bg)' : (theme.background || 'var(--bg)');
-  const tileBg = dark ? 'var(--tile-bg)' : (theme.tileBackground || '#fff');
+  const shellStyle = {
+    display: 'flex', flexDirection: 'column', flex: 1,
+    background: dark ? 'var(--bg)' : (theme.background || 'var(--bg)'),
+    ...(dark ? null : { '--tile-bg': theme.tileBackground || '#fff' }),
+  };
   const backTo = '/';
   const hasFilters = (def.filters?.length || 0) > 0;
   const activeCount = hasFilters ? activeFilterCount(def.filters, filterValues) : 0;
@@ -79,13 +84,7 @@ export default function ViewPage() {
 
   return (
     <ScopeProvider suiteId={suiteId || null} dashboardContext={def.aiContext || ''}>
-      <div
-        style={{
-          display: 'flex', flexDirection: 'column', flex: 1,
-          background: pageBg,
-          '--tile-bg': tileBg,
-        }}
-      >
+      <div style={shellStyle}>
         {/* On mobile inside a suite the sticky "☰ Menu" bar already shows the
             context, so skip this header to avoid stacking two titles. */}
         {!(isMobile && suiteId) && (

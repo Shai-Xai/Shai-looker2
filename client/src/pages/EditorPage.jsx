@@ -212,7 +212,9 @@ export default function EditorPage() {
   const theme = def.theme || {};
   const dark = document.documentElement.dataset.theme === 'dark';
   const canvasBg = dark ? 'var(--bg)' : (theme.background || '#f5f6f8');
-  const canvasTileBg = dark ? 'var(--tile-bg)' : (theme.tileBackground || '#fff');
+  // Omit --tile-bg in dark so tiles inherit the global dark token (avoids a
+  // self-referential var cycle).
+  const canvasInner = { flex: 1, overflowY: 'auto', padding: '16px 24px', ...(dark ? null : { '--tile-bg': theme.tileBackground || '#fff' }) };
   const carouselHandlers = (c) => ({
     onEditTile: setSelectedTileId,
     onRemoveTile: (tid) => removeTileFromCarousel(c.id, tid),
@@ -257,7 +259,7 @@ export default function EditorPage() {
 
       {/* Canvas + side panel */}
       <div style={{ flex: 1, display: 'flex', minHeight: 0, background: canvasBg }}>
-        <div style={{ flex: 1, overflowY: 'auto', padding: '16px 24px', '--tile-bg': canvasTileBg }}>
+        <div style={canvasInner}>
           {def.tiles.length > 0 || def.carousels.length > 0 ? (
             <EditableGrid
               tiles={def.tiles}

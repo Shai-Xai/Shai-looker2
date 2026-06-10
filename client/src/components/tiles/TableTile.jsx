@@ -82,9 +82,9 @@ export default function TableTile({ data, visConfig = {} }) {
           </thead>
           <tbody>
             {rows.map((row, i) => (
-              <tr key={i} style={{ background: i % 2 ? '#fafafa' : '#fff' }}>
+              <tr key={i} style={{ background: i % 2 ? 'var(--row-stripe)' : 'var(--tile-bg)' }}>
                 {dimensions.map((d, di) => (
-                  <td key={d.name} style={{ ...tdStyle, textAlign: 'left', ...(di === 0 ? stickyCol(i % 2 ? '#fafafa' : '#fff') : null) }}>{cellText(row[d.name])}</td>
+                  <td key={d.name} style={{ ...tdStyle, textAlign: 'left', ...(di === 0 ? stickyCol(i % 2 ? 'var(--row-stripe)' : 'var(--tile-bg)') : null) }}>{cellText(row[d.name])}</td>
                 ))}
                 {groups.map((g, gi) => g.ms.map((m, mi) => {
                   const cell = row[m.name]?.[g.p.key];
@@ -128,14 +128,14 @@ export default function TableTile({ data, visConfig = {} }) {
         </thead>
         <tbody>
           {rows.map((row, i) => (
-            <tr key={i} style={{ background: i % 2 ? '#fafafa' : '#fff' }}>
+            <tr key={i} style={{ background: i % 2 ? 'var(--row-stripe)' : 'var(--tile-bg)' }}>
               {allFields.map((f, fi) => {
                 const cell = row[f.name];
                 const isMeasure = measures.includes(f);
                 const dr = isMeasure ? drillCell(cell, [drillTitle(row, f)]) : {};
                 return (
                   <td key={f.name} {...dr}
-                    style={{ ...tdStyle, textAlign: align(f), fontVariantNumeric: isMeasure ? 'tabular-nums' : 'normal', ...(fi === 0 ? stickyCol(i % 2 ? '#fafafa' : '#fff') : null), ...(dr.style || null) }}>
+                    style={{ ...tdStyle, textAlign: align(f), fontVariantNumeric: isMeasure ? 'tabular-nums' : 'normal', ...(fi === 0 ? stickyCol(i % 2 ? 'var(--row-stripe)' : 'var(--tile-bg)') : null), ...(dr.style || null) }}>
                     {cellText(cell)}
                   </td>
                 );
@@ -154,7 +154,7 @@ function Scroll({ children }) {
 
 const tableStyle = { borderCollapse: 'collapse', width: '100%', fontSize: 12 };
 const thStyle = {
-  padding: '6px 10px', background: 'var(--elevated)', borderBottom: '2px solid #e0e0e0',
+  padding: '6px 10px', background: 'var(--elevated)', borderBottom: '2px solid var(--border)',
   fontWeight: 600, whiteSpace: 'nowrap', position: 'sticky', top: 0, zIndex: 2,
 };
 const tdStyle = { padding: '5px 10px', borderBottom: '1px solid var(--hairline)', whiteSpace: 'nowrap' };
