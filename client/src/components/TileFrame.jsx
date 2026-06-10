@@ -2,7 +2,7 @@ import SingleValueTile from './tiles/SingleValueTile.jsx';
 import ChartTile from './tiles/ChartTile.jsx';
 import TableTile from './tiles/TableTile.jsx';
 import BarGaugeTile from './tiles/BarGaugeTile.jsx';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import TextTile from './tiles/TextTile.jsx';
 import ErrorBoundary from './ErrorBoundary.jsx';
 import InsightModal from './InsightModal.jsx';
@@ -199,11 +199,20 @@ function TileContent({ tile, data }) {
 // right; on metric tiles (no header) it floats in the top-right corner. Hidden
 // until tile hover (via .insight-btn CSS) and theme-aware (purple accent that
 // adapts to dark).
-// Tile marks, two buttons (hover-revealed; filled state stays visible):
+// Tile marks, two buttons:
 //   📌 Pin   → the tile renders on the home page.
 //   👁 Follow → the Owl always covers this tile in the home briefing.
+// Desktop: hover-revealed (hidden until the tile is hovered). Touch: collapsed
+// behind a single ghost ⋯ — tap to reveal the two buttons (auto-collapse) so
+// dense KPI grids aren't littered with icons. Active marks stay visible.
 function PinButton({ tileId, isMobile, corner }) {
   const { enabled, isPinned, isFollowed, toggle } = usePins();
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    const t = setTimeout(() => setOpen(false), 5000);
+    return () => clearTimeout(t);
+  }, [open]);
   if (!enabled) return null;
   const pinned = isPinned(tileId);
   const followed = isFollowed(tileId);
@@ -211,27 +220,48 @@ function PinButton({ tileId, isMobile, corner }) {
     display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
     border: 'none', background: 'transparent', cursor: 'pointer', lineHeight: 1,
     padding: isMobile ? 5 : 4, fontSize: isMobile ? 14 : 15,
-    opacity: on ? 1 : (isMobile ? 0.4 : 1),
+    opacity: on ? 1 : (isMobile ? 0.55 : 1),
     filter: on ? 'none' : 'grayscale(1)',
     flexShrink: 0,
   });
+  const followBtn = (
+    <button
+      title={followed ? 'Unfollow — stop covering this in your briefing' : 'Follow — the Owl always covers this tile in your home briefing'}
+      onClick={() => { toggle(tileId, 'follow'); setOpen(false); }}
+      className={isMobile || followed ? undefined : 'insight-btn'}
+      style={base(followed)}
+    >👁</button>
+  );
+  const pinBtn = (
+    <button
+      title={pinned ? 'Unpin from your home page' : 'Pin — show this tile on your home page'}
+      onClick={() => { toggle(tileId, 'pin'); setOpen(false); }}
+      className={isMobile || pinned ? undefined : 'insight-btn'}
+      style={base(pinned)}
+    >📌</button>
+  );
+  const wrap = corner
+    ? { position: 'absolute', top: isMobile ? 4 : 6, right: isMobile ? 30 : 38, zIndex: 5, display: 'inline-flex', alignItems: 'center' }
+    : { display: 'inline-flex', alignItems: 'center', flexShrink: 0 };
+
+  if (isMobile) {
+    return (
+      <span onMouseDown={(e) => e.stopPropagation()} style={wrap}>
+        {(open || followed) && followBtn}
+        {(open || pinned) && pinBtn}
+        <button
+          title="Pin or follow this tile"
+          aria-label="Tile options"
+          onClick={() => setOpen((v) => !v)}
+          style={{ ...base(false), opacity: open ? 0.9 : 0.35, fontSize: 15, fontWeight: 700, color: 'var(--muted)' }}
+        >⋯</button>
+      </span>
+    );
+  }
   return (
-    <span
-      onMouseDown={(e) => e.stopPropagation()}
-      style={corner ? { position: 'absolute', top: isMobile ? 4 : 6, right: isMobile ? 30 : 38, zIndex: 5, display: 'inline-flex' } : { display: 'inline-flex', flexShrink: 0 }}
-    >
-      <button
-        title={followed ? 'Unfollow — stop covering this in your briefing' : 'Follow — the Owl always covers this tile in your home briefing'}
-        onClick={() => toggle(tileId, 'follow')}
-        className={followed ? undefined : 'insight-btn'}
-        style={base(followed)}
-      >👁</button>
-      <button
-        title={pinned ? 'Unpin from your home page' : 'Pin — show this tile on your home page'}
-        onClick={() => toggle(tileId, 'pin')}
-        className={pinned ? undefined : 'insight-btn'}
-        style={base(pinned)}
-      >📌</button>
+    <span onMouseDown={(e) => e.stopPropagation()} style={wrap}>
+      {followBtn}
+      {pinBtn}
     </span>
   );
 }

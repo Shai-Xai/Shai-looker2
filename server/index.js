@@ -1438,6 +1438,31 @@ app.put('/api/my/briefing-tune', auth.requireAuth, (req, res) => {
   res.json({ tune: db.getUserPref(req.user.id, `briefing_tune:${entityId}`) });
 });
 
+// ─── Briefing feedback ───────────────────────────────────────────────────────
+// like / dislike (+comment) / investigate (asks Howler to dig into the data).
+// The client snapshots the briefing it reacted to.
+app.post('/api/my/briefing-feedback', auth.requireAuth, (req, res) => {
+  const { kind, comment, briefing } = req.body || {};
+  const entityId = homeEntityFor(req);
+  const id = db.addBriefingFeedback({
+    userId: req.user.id, userEmail: req.user.email, entityId: entityId || '',
+    kind, comment,
+    briefing: {
+      headline: String(briefing?.headline || '').slice(0, 600),
+      bullets: (briefing?.bullets || []).slice(0, 6).map((b) => String(b).slice(0, 400)),
+      generatedAt: briefing?.generatedAt || null,
+    },
+  });
+  res.status(201).json({ id });
+});
+app.get('/api/admin/briefing-feedback', auth.requireAdmin, (_req, res) => {
+  res.json(db.listBriefingFeedback().map((f) => ({ ...f, entityName: f.entityId ? (db.getEntity(f.entityId)?.name || '') : '' })));
+});
+app.put('/api/admin/briefing-feedback/:id', auth.requireAdmin, (req, res) => {
+  db.setBriefingFeedbackStatus(req.params.id, (req.body || {}).status);
+  res.json({ ok: true });
+});
+
 // ─── Tile marks: 📌 pin (show on home) & follow (briefing steering) ─────────────
 // Promoters mark for themselves ('user' scope); admins in client preview set
 // entity-wide defaults. A user sees the union of both.

@@ -945,6 +945,57 @@ function AISettings() {
         </div>
       </div>
       <BriefingSettings />
+      <BriefingFeedback />
+    </div>
+  );
+}
+
+// Reader reactions to home briefings — the Investigate items are requests for
+// Howler to dig into the data; resolve them once handled.
+function BriefingFeedback() {
+  const [items, setItems] = useState(null);
+  const [filter, setFilter] = useState('open'); // open | investigate | all
+  const load = () => api.adminListBriefingFeedback().then(setItems).catch(() => setItems([]));
+  useEffect(load, []);
+  if (!items) return null;
+  const shown = items.filter((f) =>
+    filter === 'all' ? true : filter === 'investigate' ? f.kind === 'investigate' : f.status === 'new');
+  const ICON = { like: '♥', dislike: '👎', investigate: '🔍' };
+  return (
+    <div style={{ ...cardStyle, marginTop: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+        <L>Briefing feedback</L>
+        <span style={{ flex: 1 }} />
+        {[['open', 'Open'], ['investigate', 'Investigate'], ['all', 'All']].map(([k, label]) => (
+          <button key={k} onClick={() => setFilter(k)} style={{ ...miniBtnOutline, ...(filter === k ? { background: 'var(--brand)', color: '#fff', borderColor: 'var(--brand)' } : null) }}>{label}</button>
+        ))}
+      </div>
+      {shown.length === 0 ? (
+        <Muted>{filter === 'open' ? 'No open feedback.' : 'Nothing here yet.'}</Muted>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {shown.map((f) => (
+            <div key={f.id} style={{ border: '1px solid var(--hairline)', borderRadius: 10, padding: '10px 12px', opacity: f.status === 'resolved' ? 0.55 : 1 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5 }}>
+                <span style={{ fontSize: 14 }}>{ICON[f.kind] || '•'}</span>
+                <b>{f.entityName || '—'}</b>
+                <span style={{ color: 'var(--muted)' }}>{f.userEmail}</span>
+                <span style={{ color: 'var(--muted)' }}>· {new Date(f.createdAt).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+                <span style={{ flex: 1 }} />
+                {f.status === 'new'
+                  ? <button style={miniBtnOutline} onClick={() => api.adminResolveBriefingFeedback(f.id, 'resolved').then(load)}>Resolve</button>
+                  : <span style={{ fontSize: 11, fontWeight: 700, color: '#2da44e' }}>✓ Resolved</span>}
+              </div>
+              {f.comment && <div style={{ fontSize: 13, marginTop: 6, whiteSpace: 'pre-wrap' }}>{f.comment}</div>}
+              {f.briefing?.headline && (
+                <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 6, fontStyle: 'italic', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  re: “{f.briefing.headline.replace(/\*\*/g, '')}”
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

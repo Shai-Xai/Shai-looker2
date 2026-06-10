@@ -65,7 +65,7 @@ export default function ClientHome() {
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
         <div style={{ flex: 1, minWidth: 220 }}>
           <h1 style={{ fontSize: isMobile ? 21 : 25, fontWeight: 800, letterSpacing: '-0.02em' }}>
-            {timeGreeting()}{firstName ? `, ${firstName}` : ''} 👋
+            Howzat{firstName ? `, ${firstName}` : ''} 👋
           </h1>
           <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: 2 }}>
             {todayLine()}{snap?.lastVisit ? ` · Here's what changed since your last visit ${relDay(snap.lastVisit)}.` : ''}
@@ -109,6 +109,7 @@ export default function ClientHome() {
                   ))}
                 </div>
               )}
+              <FeedbackRow brief={brief} entityId={previewEntityId} />
             </>
           )}
         </div>
@@ -212,6 +213,71 @@ export default function ClientHome() {
   );
 }
 
+// Reactions on the briefing: ♥ like, 👎 what's-off (comment), 🔍 investigate
+// (files a request for Howler to dig into the data). The briefing text is
+// snapshotted with the feedback so the team sees exactly what was reacted to.
+function FeedbackRow({ brief, entityId }) {
+  const [mode, setMode] = useState(null);   // 'dislike' | 'investigate' | null
+  const [text, setText] = useState('');
+  const [sent, setSent] = useState(null);   // kind that was sent
+  const [busy, setBusy] = useState(false);
+
+  const snapshot = () => ({
+    headline: brief?.headline || '',
+    bullets: (brief?.bullets || []).map((b) => b.text),
+    generatedAt: brief?.generatedAt || null,
+  });
+  const send = (kind, comment = '') => {
+    setBusy(true);
+    api.sendBriefingFeedback({ kind, comment, briefing: snapshot() }, entityId)
+      .then(() => { setSent(kind); setMode(null); setText(''); })
+      .catch(() => {})
+      .finally(() => setBusy(false));
+  };
+
+  if (sent === 'like') return <FbNote>♥ Glad it's useful — noted.</FbNote>;
+  if (sent === 'dislike') return <FbNote>Thanks — your note helps tune the Owl.</FbNote>;
+  if (sent === 'investigate') return <FbNote>🔍 Sent to Howler — the team will take a look at the data.</FbNote>;
+
+  return (
+    <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--hairline)' }}>
+      {!mode ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 11, color: 'var(--muted)', marginRight: 2 }}>Was this useful?</span>
+          <button style={fbBtn} title="Love it" onClick={() => send('like')} disabled={busy}>♥</button>
+          <button style={fbBtn} title="Something's off" onClick={() => setMode('dislike')} disabled={busy}>👎</button>
+          <span style={{ flex: 1 }} />
+          <button style={{ ...fbBtn, width: 'auto', padding: '0 12px', fontSize: 12, fontWeight: 700 }} title="Ask Howler to dig into the data behind this" onClick={() => setMode('investigate')} disabled={busy}>
+            🔍 Investigate
+          </button>
+        </div>
+      ) : (
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 5 }}>
+            {mode === 'dislike' ? "What's off about this briefing?" : 'What should Howler dig into?'}
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+            <textarea
+              value={text} onChange={(e) => setText(e.target.value)} rows={2} autoFocus
+              placeholder={mode === 'dislike' ? 'e.g. The resale numbers don’t match what I see on the dashboard…' : 'e.g. Why did Golden Lounge sales stop on the 8th?'}
+              style={{ flex: 1, boxSizing: 'border-box', padding: '8px 10px', border: '1.5px solid var(--hairline)', borderRadius: 9, fontSize: 13, outline: 'none', resize: 'vertical', fontFamily: 'inherit', background: 'var(--card)', color: 'var(--text)' }}
+            />
+            <button style={{ ...fbBtn, width: 'auto', padding: '0 14px', height: 32, fontSize: 12, fontWeight: 700 }} onClick={() => setMode(null)} disabled={busy}>Cancel</button>
+            <button
+              style={{ ...fbBtn, width: 'auto', padding: '0 14px', height: 32, fontSize: 12, fontWeight: 700, background: 'var(--brand)', color: '#fff' }}
+              onClick={() => send(mode, text)} disabled={busy || !text.trim()}
+            >{busy ? '…' : 'Send'}</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+function FbNote({ children }) {
+  return <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--hairline)', fontSize: 12, fontWeight: 600, color: 'var(--muted-2)' }}>{children}</div>;
+}
+const fbBtn = { width: 30, height: 30, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 980, fontSize: 14, cursor: 'pointer', lineHeight: 1 };
+
 // Horizontal snap strip for pinned tiles: one row, uniform cards, scroll (or
 // chevrons on desktop) when there are more than fit.
 function PinStrip({ isMobile, children }) {
@@ -274,10 +340,6 @@ function Faint({ children }) { return <span style={{ fontWeight: 400, fontSize: 
 function deriveFirstName(email) {
   const head = String(email || '').split('@')[0].split(/[._\-+]/)[0];
   return head ? head.charAt(0).toUpperCase() + head.slice(1) : '';
-}
-function timeGreeting() {
-  const h = new Date().getHours();
-  return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
 }
 function todayLine() {
   return new Date().toLocaleDateString('en-ZA', { weekday: 'long', day: 'numeric', month: 'long' });

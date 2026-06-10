@@ -179,6 +179,40 @@ function viewProfile(userId) {
   return { top, lastVisit: last?.at || null };
 }
 
+// ─── Briefing feedback ────────────────────────────────────────────────────────
+// Reader reactions to the home briefing: like / dislike (with comment) /
+// investigate (asks Howler to look at the data). The briefing text is
+// snapshotted so the team sees exactly what was reacted to.
+db.exec(`
+CREATE TABLE IF NOT EXISTS briefing_feedback (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL,
+  user_email TEXT NOT NULL DEFAULT '',
+  entity_id  TEXT NOT NULL DEFAULT '',
+  kind       TEXT NOT NULL,
+  comment    TEXT NOT NULL DEFAULT '',
+  briefing   TEXT NOT NULL DEFAULT '{}',
+  status     TEXT NOT NULL DEFAULT 'new',
+  created_at TEXT NOT NULL
+);
+`);
+function addBriefingFeedback({ userId, userEmail, entityId, kind, comment, briefing }) {
+  const id = uuid();
+  const k = ['like', 'dislike', 'investigate'].includes(kind) ? kind : 'like';
+  db.prepare('INSERT INTO briefing_feedback (id,user_id,user_email,entity_id,kind,comment,briefing,status,created_at) VALUES (?,?,?,?,?,?,?,?,?)')
+    .run(id, userId, userEmail || '', entityId || '', k, (comment || '').slice(0, 2000), JSON.stringify(briefing || {}), 'new', now());
+  return id;
+}
+function listBriefingFeedback() {
+  return db.prepare('SELECT * FROM briefing_feedback ORDER BY created_at DESC LIMIT 200').all().map((r) => ({
+    id: r.id, userId: r.user_id, userEmail: r.user_email, entityId: r.entity_id,
+    kind: r.kind, comment: r.comment, briefing: J(r.briefing, {}), status: r.status, createdAt: r.created_at,
+  }));
+}
+function setBriefingFeedbackStatus(id, status) {
+  db.prepare('UPDATE briefing_feedback SET status=? WHERE id=?').run(status === 'resolved' ? 'resolved' : 'new', id);
+}
+
 // ─── User preferences (small k/v per user — e.g. briefing tune text) ─────────
 db.exec(`
 CREATE TABLE IF NOT EXISTS user_prefs (
@@ -767,7 +801,7 @@ function updateDocument(id, patch) {
 function deleteDocument(id) { return db.prepare('DELETE FROM event_documents WHERE id=?').run(id).changes > 0; }
 
 // ─── Full backup / restore (export to JSON, import to replace) ────────────────
-const EXPORT_TABLES = ['entities', 'users', 'user_entities', 'sets', 'set_dashboards', 'suites', 'suite_sets', 'dashboards', 'settings', 'tile_library', 'settlements', 'event_documents', 'user_views', 'user_prefs', 'tile_marks'];
+const EXPORT_TABLES = ['entities', 'users', 'user_entities', 'sets', 'set_dashboards', 'suites', 'suite_sets', 'dashboards', 'settings', 'tile_library', 'settlements', 'event_documents', 'user_views', 'user_prefs', 'tile_marks', 'briefing_feedback'];
 function exportAll() {
   const out = { _version: 1, exportedAt: now() };
   for (const t of EXPORT_TABLES) out[t] = tableExists(t) ? db.prepare(`SELECT * FROM ${t}`).all() : [];
@@ -783,8 +817,8 @@ function insertRow(name, row) {
 // Replace ALL data with the contents of an export. Deletes children first
 // (FK-safe), then inserts parents first.
 const importAll = db.transaction((data) => {
-  const delOrder = ['user_views', 'user_prefs', 'tile_marks', 'user_entities', 'suite_sets', 'set_dashboards', 'suites', 'sets', 'dashboards', 'users', 'settlements', 'event_documents', 'entities', 'settings', 'tile_library'];
-  const insOrder = ['entities', 'dashboards', 'users', 'sets', 'suites', 'set_dashboards', 'suite_sets', 'user_entities', 'settings', 'tile_library', 'settlements', 'event_documents', 'user_views', 'user_prefs', 'tile_marks'];
+  const delOrder = ['user_views', 'user_prefs', 'tile_marks', 'briefing_feedback', 'user_entities', 'suite_sets', 'set_dashboards', 'suites', 'sets', 'dashboards', 'users', 'settlements', 'event_documents', 'entities', 'settings', 'tile_library'];
+  const insOrder = ['entities', 'dashboards', 'users', 'sets', 'suites', 'set_dashboards', 'suite_sets', 'user_entities', 'settings', 'tile_library', 'settlements', 'event_documents', 'user_views', 'user_prefs', 'tile_marks', 'briefing_feedback'];
   for (const t of delOrder) { if (tableExists(t)) db.prepare(`DELETE FROM ${t}`).run(); }
   let counts = {};
   for (const t of insOrder) {
@@ -820,4 +854,6 @@ module.exports = {
   setMark, listMarks,
   // user prefs
   getUserPref, setUserPref,
+  // briefing feedback
+  addBriefingFeedback, listBriefingFeedback, setBriefingFeedbackStatus,
 };
