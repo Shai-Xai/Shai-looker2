@@ -132,8 +132,11 @@ addColumn('suites', 'icon', "TEXT NOT NULL DEFAULT ''");
 addColumn('entities', 'logo', "TEXT NOT NULL DEFAULT ''"); // client brand image data-URL / emoji
 addColumn('entities', 'ai_context', "TEXT NOT NULL DEFAULT ''"); // client-specific AI background
 addColumn('entities', 'integrations', "TEXT NOT NULL DEFAULT '{}'"); // per-client API credentials (Looker / Anthropic)
-// settlements.notes added after the table shipped, so migrate existing DBs.
-if (tableExists('settlements')) addColumn('settlements', 'notes', "TEXT NOT NULL DEFAULT '[]'");
+// settlements.notes/.kind added after the table shipped, so migrate existing DBs.
+if (tableExists('settlements')) {
+  addColumn('settlements', 'notes', "TEXT NOT NULL DEFAULT '[]'");
+  addColumn('settlements', 'kind', "TEXT NOT NULL DEFAULT 'ticketing'"); // ticketing | cashless
+}
 
 // ─── Settings (simple key/value) ──────────────────────────────────────────────
 db.exec(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '');`);function getSetting(key, fallback = '') {
@@ -155,6 +158,7 @@ CREATE TABLE IF NOT EXISTS settlements (
   entity_id       TEXT REFERENCES entities(id) ON DELETE SET NULL,
   title           TEXT NOT NULL,
   status          TEXT NOT NULL DEFAULT 'final',
+  kind            TEXT NOT NULL DEFAULT 'ticketing',
   settlement_date TEXT NOT NULL DEFAULT '',
   data            TEXT NOT NULL DEFAULT '{}',
   notes           TEXT NOT NULL DEFAULT '[]',
@@ -165,6 +169,21 @@ CREATE TABLE IF NOT EXISTS settlements (
   updated_at      TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_settlements_entity ON settlements(entity_id);
+
+-- Event documents: invoices and other files uploaded per client/event. Plain
+-- storage + download, no extraction.
+CREATE TABLE IF NOT EXISTS event_documents (
+  id          TEXT PRIMARY KEY,
+  entity_id   TEXT REFERENCES entities(id) ON DELETE SET NULL,
+  event_name  TEXT NOT NULL DEFAULT '',
+  title       TEXT NOT NULL,
+  category    TEXT NOT NULL DEFAULT 'invoice',
+  file        TEXT NOT NULL DEFAULT '',
+  file_name   TEXT NOT NULL DEFAULT '',
+  file_type   TEXT NOT NULL DEFAULT '',
+  created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_event_documents_entity ON event_documents(entity_id);
 `);
 
 // Tile library ─────────────────────────────────────────────────────────────────
@@ -514,6 +533,7 @@ function rowToSettlementSummary(r) {
   const d = J(r.data, {});
   return {
     id: r.id, entityId: r.entity_id, title: r.title, status: r.status,
+    kind: r.kind || 'ticketing',
     settlementDate: r.settlement_date,
     eventName: d.meta?.eventName || r.title,
     eventDates: d.meta?.eventDates || '',
@@ -531,7 +551,7 @@ function rowToSettlement(r) {
   return { ...rowToSettlementSummary(r), data: J(r.data, {}), notes: J(r.notes, []) };
 }
 function listSettlements({ entityIds } = {}) {
-  let rows = db.prepare('SELECT id, entity_id, title, status, settlement_date, data, file_name, created_at, updated_at, (file != \'\') AS file FROM settlements ORDER BY settlement_date DESC, created_at DESC').all();
+  let rows = db.prepare('SELECT id, entity_id, title, status, kind, settlement_date, data, file_name, created_at, updated_at, (file != \'\') AS file FROM settlements ORDER BY settlement_date DESC, created_at DESC').all();
   if (entityIds) rows = rows.filter((r) => r.entity_id && entityIds.includes(r.entity_id));
   return rows.map(rowToSettlementSummary);
 }
@@ -540,11 +560,15 @@ function getSettlementFile(id) {
   const r = db.prepare('SELECT file, file_name, file_type FROM settlements WHERE id=?').get(id);
   return r && r.file ? { file: r.file, fileName: r.file_name, fileType: r.file_type } : null;
 }
-function createSettlement({ entityId = null, title, status = 'final', settlementDate = '', data = {}, file = '', fileName = '', fileType = '' }) {
+// Settlement types: many weeklies during the sales period, then one final
+// report (interim kept for ad-hoc statements).
+const normSettlementStatus = (s) => (['weekly', 'interim', 'final'].includes(s) ? s : 'final');
+const normSettlementKind = (k) => (['ticketing', 'cashless'].includes(k) ? k : 'ticketing');
+function createSettlement({ entityId = null, title, status = 'final', kind = 'ticketing', settlementDate = '', data = {}, file = '', fileName = '', fileType = '' }) {
   const ts = now();
   const id = uuid();
-  db.prepare('INSERT INTO settlements (id,entity_id,title,status,settlement_date,data,file,file_name,file_type,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
-    .run(id, entityId || null, title || data.meta?.eventName || 'Settlement report', status === 'interim' ? 'interim' : 'final',
+  db.prepare('INSERT INTO settlements (id,entity_id,title,status,kind,settlement_date,data,file,file_name,file_type,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
+    .run(id, entityId || null, title || data.meta?.eventName || 'Settlement report', normSettlementStatus(status), normSettlementKind(kind),
       settlementDate || data.meta?.settlementDate || '', JSON.stringify(data), file, fileName, fileType, ts, ts);
   return getSettlement(id);
 }
@@ -553,14 +577,15 @@ function updateSettlement(id, patch) {
   if (!cur) return null;
   const entityId = patch.entityId !== undefined ? (patch.entityId || null) : cur.entity_id;
   const title = patch.title ?? cur.title;
-  const status = patch.status !== undefined ? (patch.status === 'interim' ? 'interim' : 'final') : cur.status;
+  const status = patch.status !== undefined ? normSettlementStatus(patch.status) : cur.status;
+  const kind = patch.kind !== undefined ? normSettlementKind(patch.kind) : (cur.kind || 'ticketing');
   const date = patch.settlementDate ?? cur.settlement_date;
   const data = patch.data !== undefined ? JSON.stringify(patch.data) : cur.data;
   const file = patch.file !== undefined ? patch.file : cur.file;
   const fileName = patch.fileName !== undefined ? patch.fileName : cur.file_name;
   const fileType = patch.fileType !== undefined ? patch.fileType : cur.file_type;
-  db.prepare('UPDATE settlements SET entity_id=?, title=?, status=?, settlement_date=?, data=?, file=?, file_name=?, file_type=?, updated_at=? WHERE id=?')
-    .run(entityId, title, status, date, data, file, fileName, fileType, now(), id);
+  db.prepare('UPDATE settlements SET entity_id=?, title=?, status=?, kind=?, settlement_date=?, data=?, file=?, file_name=?, file_type=?, updated_at=? WHERE id=?')
+    .run(entityId, title, status, kind, date, data, file, fileName, fileType, now(), id);
   return getSettlement(id);
 }
 function deleteSettlement(id) { return db.prepare('DELETE FROM settlements WHERE id=?').run(id).changes > 0; }
@@ -572,8 +597,34 @@ function setSettlementNotes(id, notes) {
   return getSettlement(id);
 }
 
+// ─── Event documents (invoices etc.) ──────────────────────────────────────────
+function rowToDocument(r) {
+  return r && {
+    id: r.id, entityId: r.entity_id, eventName: r.event_name, title: r.title,
+    category: r.category, fileName: r.file_name, fileType: r.file_type, createdAt: r.created_at,
+  };
+}
+function listDocuments({ entityIds, entityId } = {}) {
+  let rows = db.prepare('SELECT id, entity_id, event_name, title, category, file_name, file_type, created_at FROM event_documents ORDER BY created_at DESC').all();
+  if (entityId) rows = rows.filter((r) => r.entity_id === entityId);
+  else if (entityIds) rows = rows.filter((r) => r.entity_id && entityIds.includes(r.entity_id));
+  return rows.map(rowToDocument);
+}
+function getDocument(id) { return rowToDocument(db.prepare('SELECT id, entity_id, event_name, title, category, file_name, file_type, created_at FROM event_documents WHERE id=?').get(id)); }
+function getDocumentFile(id) {
+  const r = db.prepare('SELECT file, file_name, file_type FROM event_documents WHERE id=?').get(id);
+  return r && r.file ? { file: r.file, fileName: r.file_name, fileType: r.file_type } : null;
+}
+function createDocument({ entityId = null, eventName = '', title, category = 'invoice', file = '', fileName = '', fileType = '' }) {
+  const id = uuid();
+  db.prepare('INSERT INTO event_documents (id,entity_id,event_name,title,category,file,file_name,file_type,created_at) VALUES (?,?,?,?,?,?,?,?,?)')
+    .run(id, entityId || null, eventName || '', title || fileName || 'Document', category || 'invoice', file, fileName, fileType, now());
+  return getDocument(id);
+}
+function deleteDocument(id) { return db.prepare('DELETE FROM event_documents WHERE id=?').run(id).changes > 0; }
+
 // ─── Full backup / restore (export to JSON, import to replace) ────────────────
-const EXPORT_TABLES = ['entities', 'users', 'user_entities', 'sets', 'set_dashboards', 'suites', 'suite_sets', 'dashboards', 'settings', 'tile_library', 'settlements'];
+const EXPORT_TABLES = ['entities', 'users', 'user_entities', 'sets', 'set_dashboards', 'suites', 'suite_sets', 'dashboards', 'settings', 'tile_library', 'settlements', 'event_documents'];
 function exportAll() {
   const out = { _version: 1, exportedAt: now() };
   for (const t of EXPORT_TABLES) out[t] = tableExists(t) ? db.prepare(`SELECT * FROM ${t}`).all() : [];
@@ -589,8 +640,8 @@ function insertRow(name, row) {
 // Replace ALL data with the contents of an export. Deletes children first
 // (FK-safe), then inserts parents first.
 const importAll = db.transaction((data) => {
-  const delOrder = ['user_entities', 'suite_sets', 'set_dashboards', 'suites', 'sets', 'dashboards', 'users', 'settlements', 'entities', 'settings', 'tile_library'];
-  const insOrder = ['entities', 'dashboards', 'users', 'sets', 'suites', 'set_dashboards', 'suite_sets', 'user_entities', 'settings', 'tile_library', 'settlements'];
+  const delOrder = ['user_entities', 'suite_sets', 'set_dashboards', 'suites', 'sets', 'dashboards', 'users', 'settlements', 'event_documents', 'entities', 'settings', 'tile_library'];
+  const insOrder = ['entities', 'dashboards', 'users', 'sets', 'suites', 'set_dashboards', 'suite_sets', 'user_entities', 'settings', 'tile_library', 'settlements', 'event_documents'];
   for (const t of delOrder) { if (tableExists(t)) db.prepare(`DELETE FROM ${t}`).run(); }
   let counts = {};
   for (const t of insOrder) {
@@ -618,4 +669,6 @@ module.exports = {
   getSetting, setSetting,
   // settlements
   listSettlements, getSettlement, getSettlementFile, createSettlement, updateSettlement, deleteSettlement, setSettlementNotes,
+  // event documents (invoices etc.)
+  listDocuments, getDocument, getDocumentFile, createDocument, deleteDocument,
 };

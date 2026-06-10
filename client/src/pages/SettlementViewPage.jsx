@@ -7,7 +7,7 @@ import { useTheme } from '../lib/theme.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import { useCountUp } from '../lib/useCountUp.js';
 import { fmtR, fmtQty, deriveCategory, deriveSubCategory, variantLabel } from '../lib/money.js';
-import { StatusBadge } from './SettlementsPage.jsx';
+import { StatusBadge, KindBadge } from './SettlementsPage.jsx';
 import InsightModal from '../components/InsightModal.jsx';
 import AiMark from '../components/AiMark.jsx';
 import { ScopeProvider } from '../lib/ScopeContext.jsx';
@@ -69,8 +69,9 @@ export default function SettlementViewPage() {
         <div style={{ background: 'var(--frost)', backdropFilter: 'saturate(180%) blur(20px)', WebkitBackdropFilter: 'saturate(180%) blur(20px)', borderBottom: '1px solid var(--hairline)', padding: isMobile ? '12px 14px' : '14px 22px', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           <Link to="/settlements" style={{ color: 'var(--muted)', fontSize: 13, textDecoration: 'none', flexShrink: 0 }}>← Settlements</Link>
           <div style={{ flex: 1, minWidth: 160 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
               <h2 style={{ fontSize: isMobile ? 16 : 20, fontWeight: 700, letterSpacing: '-0.02em' }}>{meta.eventName || s.title}</h2>
+              <KindBadge kind={s.kind} />
               <StatusBadge status={s.status} />
             </div>
             <div style={{ fontSize: 12, color: 'var(--muted)' }}>

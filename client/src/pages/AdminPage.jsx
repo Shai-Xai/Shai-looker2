@@ -196,7 +196,7 @@ function Entities({ fields }) {
 // One client's settings hub: a left nav (Settings / Suites / Logins) + panel.
 function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites, users, onChange, onBack }) {
   const [section, setSection] = useState('settings');
-  const nav = [['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations']];
+  const nav = [['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['settlements', 'Settlements'], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations']];
   return (
     <div>
       <button style={miniBtnOutline} onClick={onBack}>← All clients</button>
@@ -210,6 +210,7 @@ function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites,
         <div style={{ flex: 1, minWidth: 280 }}>
           {section === 'settings' && <ClientSettings entity={entity} suites={suites} fields={fields} onChange={onChange} onBack={onBack} />}
           {section === 'suites' && <ClientSuites entity={entity} suites={suites} allEntities={allEntities} allSets={allSets} dashTitle={dashTitle} fields={fields} onChange={onChange} />}
+          {section === 'settlements' && <Settlements entityId={entity.id} />}
           {section === 'logins' && <EntityLogins entity={entity} users={users} onChange={onChange} />}
           {section === 'integrations' && <ClientIntegrations entity={entity} />}
         </div>
@@ -978,7 +979,9 @@ function BackupRestore() {
 // ─── Settlements ───────────────────────────────────────────────────────────────
 // Upload a settlement PDF → Claude extracts it to structured JSON → review the
 // recomputed totals against the report's own → assign a client → publish.
-function Settlements() {
+// With `entityId` set (the client-space section) everything is pre-scoped to
+// that client: the list filters to them and uploads assign automatically.
+function Settlements({ entityId = null }) {
   const navigate = useNavigate();
   const [items, setItems] = useState([]);
   const [entities, setEntities] = useState([]);
@@ -992,11 +995,11 @@ function Settlements() {
 
   const load = () => {
     Promise.all([api.adminListSettlements(), api.adminListEntities()])
-      .then(([s, e]) => { setItems(s); setEntities(e); })
+      .then(([s, e]) => { setItems(entityId ? s.filter((x) => x.entityId === entityId) : s); setEntities(e); })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   };
-  useEffect(load, []);
+  useEffect(load, [entityId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function onFile(e) {
     const file = e.target.files?.[0];
@@ -1017,7 +1020,12 @@ function Settlements() {
       const data = await api.adminExtractSettlement(fileBase64, 'application/pdf', (p) => {
         setProg({ stage: p.stage || 'extracting', chars: p.chars || 0, rows: p.rows || 0, fileName: file.name, startedAt });
       });
-      setDraft({ data, fileBase64, fileName: file.name, fileType: 'application/pdf', entityId: '', status: 'final' });
+      // Guess type + product from the filename: events get many weekly
+      // settlements before the one final report, and ticketing & cashless come
+      // as separate reports. The admin can still override below.
+      const status = /weekly/i.test(file.name) ? 'weekly' : /interim/i.test(file.name) ? 'interim' : 'final';
+      const kind = /cashless/i.test(file.name) ? 'cashless' : 'ticketing';
+      setDraft({ data, fileBase64, fileName: file.name, fileType: 'application/pdf', entityId: entityId || '', status, kind });
     } catch (err) {
       setError(err.message);
     } finally {
@@ -1032,6 +1040,7 @@ function Settlements() {
         entityId: draft.entityId || null,
         title: draft.data?.meta?.eventName || draft.fileName,
         status: draft.status,
+        kind: draft.kind,
         settlementDate: draft.data?.meta?.settlementDate || '',
         data: draft.data,
         fileBase64: draft.fileBase64, fileName: draft.fileName, fileType: draft.fileType,
@@ -1054,9 +1063,11 @@ function Settlements() {
             {busy || '⤴ Upload settlement PDF'}
             <input type="file" accept="application/pdf" style={{ display: 'none' }} onChange={onFile} disabled={!!busy} />
           </label>
-          <button style={miniBtnOutline} disabled={!!busy} onClick={() => { setBusy('Loading example…'); api.adminLoadSettlementExample().then(load).catch((e) => setError(e.message)).finally(() => setBusy('')); }}>
-            Load example report
-          </button>
+          {!entityId && (
+            <button style={miniBtnOutline} disabled={!!busy} onClick={() => { setBusy('Loading example…'); api.adminLoadSettlementExample().then(load).catch((e) => setError(e.message)).finally(() => setBusy('')); }}>
+              Load example report
+            </button>
+          )}
         </div>
       )}
 
@@ -1071,13 +1082,22 @@ function Settlements() {
           </p>
           <SettlementChecks data={draft.data} />
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 14, flexWrap: 'wrap' }}>
-            <select style={input} value={draft.entityId} onChange={(e) => setDraft({ ...draft, entityId: e.target.value })}>
-              <option value="">— Assign to client —</option>
-              {entities.map((en) => <option key={en.id} value={en.id}>{en.name}</option>)}
-            </select>
+            {entityId ? (
+              <span style={{ fontSize: 13, color: 'var(--muted)' }}>Client: <b style={{ color: 'var(--text)' }}>{entities.find((en) => en.id === entityId)?.name || '—'}</b></span>
+            ) : (
+              <select style={input} value={draft.entityId} onChange={(e) => setDraft({ ...draft, entityId: e.target.value })}>
+                <option value="">— Assign to client —</option>
+                {entities.map((en) => <option key={en.id} value={en.id}>{en.name}</option>)}
+              </select>
+            )}
             <select style={input} value={draft.status} onChange={(e) => setDraft({ ...draft, status: e.target.value })}>
-              <option value="final">Final</option>
+              <option value="weekly">Weekly settlement</option>
               <option value="interim">Interim</option>
+              <option value="final">Final settlement</option>
+            </select>
+            <select style={input} value={draft.kind} onChange={(e) => setDraft({ ...draft, kind: e.target.value })}>
+              <option value="ticketing">🎟 Ticketing</option>
+              <option value="cashless">💳 Cashless</option>
             </select>
             <span style={{ flex: 1 }} />
             <button style={miniBtnOutline} onClick={() => setDraft(null)} disabled={!!busy}>Discard</button>
@@ -1091,26 +1111,128 @@ function Settlements() {
         {items.map((s) => (
           <div key={s.id} style={{ ...clientRow, cursor: 'default', gap: 10, flexWrap: 'wrap' }}>
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontWeight: 600, fontSize: 14 }}>{s.eventName || s.title}</div>
+              <div style={{ fontWeight: 600, fontSize: 14 }}>{s.kind === 'cashless' ? '💳' : '🎟'} {s.eventName || s.title}</div>
               <div style={{ fontSize: 12, color: 'var(--muted)' }}>
-                {[s.status === 'interim' ? 'Interim' : 'Final', s.settlementDate && `settled ${s.settlementDate}`, s.valueDue != null && `due R${Number(s.valueDue).toLocaleString('en-US', { minimumFractionDigits: 2 })}`].filter(Boolean).join(' · ')}
+                {[s.settlementDate && `settled ${s.settlementDate}`, s.valueDue != null && `due R${Number(s.valueDue).toLocaleString('en-US', { minimumFractionDigits: 2 })}`].filter(Boolean).join(' · ')}
               </div>
             </div>
             <span style={{ flex: 1 }} />
             <select
-              style={{ ...input, minWidth: 150 }}
-              value={s.entityId || ''}
-              onChange={(e) => api.adminUpdateSettlement(s.id, { entityId: e.target.value || null }).then(load)}
+              style={{ ...input, minWidth: 90 }}
+              value={s.status}
+              onChange={(e) => api.adminUpdateSettlement(s.id, { status: e.target.value }).then(load)}
+              title="Settlement type"
             >
-              <option value="">— No client (hidden) —</option>
-              {entities.map((en) => <option key={en.id} value={en.id}>{en.name}</option>)}
+              <option value="weekly">Weekly</option>
+              <option value="interim">Interim</option>
+              <option value="final">Final</option>
             </select>
+            <select
+              style={{ ...input, minWidth: 100 }}
+              value={s.kind || 'ticketing'}
+              onChange={(e) => api.adminUpdateSettlement(s.id, { kind: e.target.value }).then(load)}
+              title="Product"
+            >
+              <option value="ticketing">🎟 Ticketing</option>
+              <option value="cashless">💳 Cashless</option>
+            </select>
+            {!entityId && (
+              <select
+                style={{ ...input, minWidth: 150 }}
+                value={s.entityId || ''}
+                onChange={(e) => api.adminUpdateSettlement(s.id, { entityId: e.target.value || null }).then(load)}
+              >
+                <option value="">— No client (hidden) —</option>
+                {entities.map((en) => <option key={en.id} value={en.id}>{en.name}</option>)}
+              </select>
+            )}
             <button style={miniBtnOutline} onClick={() => navigate(`/settlements/${s.id}`)}>Open</button>
             <button style={{ ...miniBtnOutline, color: 'var(--error)' }} onClick={() => { if (confirm(`Delete the settlement report "${s.eventName || s.title}"?`)) api.adminDeleteSettlement(s.id).then(load); }}>Delete</button>
           </div>
         ))}
         {items.length === 0 && !draft && <Muted>No settlement reports yet.</Muted>}
       </div>
+
+      {/* Invoices live in the client space, where the client context is known. */}
+      {entityId && <EventDocuments entityId={entityId} eventNames={[...new Set(items.map((s) => s.eventName || s.title))]} />}
+    </div>
+  );
+}
+
+// ─── Event documents (invoices) ─────────────────────────────────────────────────
+// Plain uploads per client/event — invoices and other paperwork the client can
+// download alongside their settlement reports.
+function EventDocuments({ entityId, eventNames }) {
+  const [docs, setDocs] = useState([]);
+  const [eventName, setEventName] = useState(eventNames[0] || '');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const load = () => api.adminListDocuments(entityId).then(setDocs).catch((e) => setError(e.message));
+  useEffect(load, [entityId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function onFiles(e) {
+    const files = [...(e.target.files || [])];
+    e.target.value = '';
+    if (!files.length) return;
+    setBusy(true); setError(null);
+    try {
+      for (const file of files) {
+        const fileBase64 = await new Promise((resolve, reject) => {
+          const r = new FileReader();
+          r.onload = () => resolve(String(r.result).split(',')[1]);
+          r.onerror = reject;
+          r.readAsDataURL(file);
+        });
+        await api.adminCreateDocument({ entityId, eventName: eventName.trim(), title: file.name.replace(/\.[^.]+$/, ''), category: 'invoice', fileBase64, fileName: file.name, fileType: file.type || 'application/octet-stream' });
+      }
+      load();
+    } catch (err) { setError(err.message); } finally { setBusy(false); }
+  }
+
+  // Group by event for the list.
+  const groups = [];
+  for (const doc of docs) {
+    const key = doc.eventName || 'Other documents';
+    let g = groups.find((x) => x.key === key);
+    if (!g) { g = { key, items: [] }; groups.push(g); }
+    g.items.push(doc);
+  }
+
+  return (
+    <div style={{ marginTop: 28 }}>
+      <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>Invoices & documents</h3>
+      <p style={hint}>Upload invoices (and any other paperwork) for this client's events — they appear for the client under Reports → Settlements.</p>
+      {error && <p style={{ color: 'var(--error)', fontSize: 13, marginBottom: 8 }}>⚠ {error}</p>}
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 14, flexWrap: 'wrap' }}>
+        <input
+          list="evt-names" style={{ ...input, minWidth: 200 }} value={eventName}
+          onChange={(e) => setEventName(e.target.value)} placeholder="Event name (e.g. Mtn Bushfire 2026)"
+        />
+        <datalist id="evt-names">{eventNames.map((n) => <option key={n} value={n} />)}</datalist>
+        <label style={{ ...addBtn, display: 'inline-block', opacity: busy ? 0.6 : 1 }}>
+          {busy ? 'Uploading…' : '⤴ Upload invoices'}
+          <input type="file" multiple style={{ display: 'none' }} onChange={onFiles} disabled={busy} />
+        </label>
+      </div>
+      {groups.map((g) => (
+        <div key={g.key} style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', marginBottom: 6 }}>{g.key}</div>
+          <div style={clientList}>
+            {g.items.map((doc) => (
+              <div key={doc.id} style={{ ...clientRow, cursor: 'default', gap: 10, padding: '10px 14px' }}>
+                <span style={{ fontSize: 15 }}>🧾</span>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontWeight: 600, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{doc.title}</div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)' }}>{doc.fileName} · {new Date(doc.createdAt).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' })}</div>
+                </div>
+                <a href={`/api/documents/${doc.id}/file`} style={{ ...miniBtnOutline, textDecoration: 'none' }}>⤓ Download</a>
+                <button style={{ ...miniBtnOutline, color: 'var(--error)' }} onClick={() => { if (confirm(`Delete "${doc.title}"?`)) api.adminDeleteDocument(doc.id).then(load); }}>Delete</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+      {docs.length === 0 && <Muted>No documents yet.</Muted>}
     </div>
   );
 }

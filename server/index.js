@@ -22,7 +22,7 @@ if (process.env.NODE_ENV === 'production' || process.env.TRUST_PROXY === '1') ap
 // (backup import, settlement PDF uploads) — those parse themselves with a
 // higher limit.
 const jsonParser = express.json({ limit: '5mb' });
-const parsesOwnBody = (p) => p === '/api/admin/import' || p.startsWith('/api/admin/settlements');
+const parsesOwnBody = (p) => p === '/api/admin/import' || p.startsWith('/api/admin/settlements') || p.startsWith('/api/admin/documents');
 app.use((req, res, next) => (parsesOwnBody(req.path) ? next() : jsonParser(req, res, next)));
 app.use(cookieParser());
 app.use(auth.attachUser);
@@ -834,6 +834,36 @@ app.get('/api/settlements/:id/file', auth.requireAuth, (req, res) => {
 // Admin: list all (with entity names for the management table).
 app.get('/api/admin/settlements', auth.requireAdmin, (_req, res) => {
   res.json(db.listSettlements().map((s) => ({ ...s, entityName: s.entityId ? (db.getEntity(s.entityId)?.name || '') : '' })));
+});
+
+// ─── Event documents (invoices etc.) ───────────────────────────────────────────
+// Plain file storage per client/event — uploaded by admins, downloadable by the
+// assigned client. No extraction.
+app.get('/api/my/documents', auth.requireAuth, (req, res) => {
+  const list = req.user.role === 'admin' ? db.listDocuments() : db.listDocuments({ entityIds: req.user.entityIds || [] });
+  res.json(list);
+});
+app.get('/api/documents/:id/file', auth.requireAuth, (req, res) => {
+  const doc = db.getDocument(req.params.id);
+  if (!doc) return res.status(404).json({ error: 'Document not found' });
+  const allowed = req.user.role === 'admin' || (doc.entityId && (req.user.entityIds || []).includes(doc.entityId));
+  if (!allowed) return res.status(403).json({ error: 'Not allowed' });
+  const f = db.getDocumentFile(req.params.id);
+  if (!f) return res.status(404).json({ error: 'No file attached' });
+  res.setHeader('Content-Type', f.fileType || 'application/octet-stream');
+  res.setHeader('Content-Disposition', `attachment; filename="${(f.fileName || 'document').replace(/"/g, '')}"`);
+  res.send(Buffer.from(f.file, 'base64'));
+});
+app.get('/api/admin/documents', auth.requireAdmin, (req, res) => {
+  res.json(db.listDocuments(req.query.entityId ? { entityId: req.query.entityId } : {}));
+});
+app.post('/api/admin/documents', auth.requireAdmin, settlementJson, (req, res) => {
+  const { entityId, eventName, title, category, fileBase64, fileName, fileType } = req.body || {};
+  if (!fileBase64) return res.status(400).json({ error: 'fileBase64 is required' });
+  res.status(201).json(db.createDocument({ entityId, eventName, title, category, file: fileBase64, fileName: fileName || '', fileType: fileType || '' }));
+});
+app.delete('/api/admin/documents/:id', auth.requireAdmin, (req, res) => {
+  res.status(db.deleteDocument(req.params.id) ? 204 : 404).end();
 });
 
 // Admin: AI-extract an uploaded settlement PDF into the structured JSON draft.
