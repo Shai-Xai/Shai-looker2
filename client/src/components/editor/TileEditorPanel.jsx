@@ -164,7 +164,7 @@ function Toggle({ active, onClick, children }) {
       style={{
         flex: 1, padding: '8px 10px', fontSize: 13, fontWeight: 600, cursor: 'pointer', borderRadius: 6,
         border: active ? '1.5px solid var(--brand)' : '1.5px solid var(--hairline)',
-        background: active ? 'var(--brand)' : '#fff',
+        background: active ? 'var(--brand)' : 'var(--card)',
         color: active ? '#fff' : 'var(--text)',
       }}
     >{children}</button>

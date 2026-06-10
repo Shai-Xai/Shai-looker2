@@ -104,6 +104,9 @@ function buildOption({ rows, dimensions, measures, pivots, visType, stacked, vis
   const splitC = dark ? 'rgba(255,255,255,0.08)' : '#f2f2f2';
   const axisLineC = dark ? 'rgba(255,255,255,0.14)' : '#e6e6e6';
   const labelC = dark ? '#c0c0c9' : '#5a5a5a';
+  const tip = dark
+    ? { ...tooltipStyle, backgroundColor: 'rgba(28,28,34,0.97)', borderColor: 'rgba(255,255,255,0.12)', textStyle: { color: '#f3f3f6', fontSize: 12 } }
+    : tooltipStyle;
   const isPie = visType === 'looker_pie' || visType === 'looker_donut_multiples';
   const isDonut = visType === 'looker_donut_multiples';
   const isBar = visType === 'looker_bar';       // horizontal
@@ -138,7 +141,7 @@ function buildOption({ rows, dimensions, measures, pivots, visType, stacked, vis
         color: HOWLER,
         tooltip: {
           trigger: 'item',
-          ...tooltipStyle,
+          ...tip,
           formatter: (p) => `${p.marker} ${p.name}<b style="margin-left:10px">${formatNumber(p.value, m?.value_format)}</b> <span style="color:#999">(${p.percent}%)</span>`,
         },
         legend: { bottom: 0, type: 'scroll', textStyle: { fontSize: 11 }, icon: 'circle' },
@@ -268,7 +271,7 @@ function buildOption({ rows, dimensions, measures, pivots, visType, stacked, vis
       grid: { left: 6 + leftName, right: (dual ? 6 : 14) + rightName, top: 12, bottom: (showLegend ? 34 : 18) + xNameSpace, containLabel: true },
       tooltip: {
         trigger: isScatter ? 'item' : 'axis',
-        ...tooltipStyle,
+        ...tip,
         axisPointer: { type: isBar ? 'line' : 'shadow', shadowStyle: { color: 'rgba(255,56,92,0.06)' } },
         formatter: (params) => {
           const arr = Array.isArray(params) ? params : [params];
