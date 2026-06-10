@@ -63,7 +63,10 @@ export default function ViewPage() {
     setFilterValues((prev) => ({ ...prev, [name]: value }));
   }, []);
 
-  if (loading) return <Centered>Loading dashboard…</Centered>;
+  // Full-page loader only on the very first load. When switching between
+  // sibling tabs we already have a def, so keep the header + tab bar mounted
+  // and just swap the content (see the dimmed grid below).
+  if (loading && !def) return <Centered>Loading dashboard…</Centered>;
   if (error) return <Centered error>Error: {error}</Centered>;
   if (!def) return null;
 
@@ -99,6 +102,10 @@ export default function ViewPage() {
     }
   }
 
+  // Header shows the active tab's title instantly on tab switch (from the
+  // stable suite tree), so it doesn't lag behind the dashboard fetch.
+  const headerTitle = (family && family.find((t) => t.id === id)?.title) || def.title;
+
   return (
     <ScopeProvider suiteId={suiteId || null} dashboardContext={def.aiContext || ''}>
       <div style={shellStyle}>
@@ -109,7 +116,7 @@ export default function ViewPage() {
             <Link to={backTo} style={{ color: 'var(--muted)', fontSize: 13, textDecoration: 'none' }}>← Back</Link>
             <div style={{ flex: 1, minWidth: 0 }}>
               {setInfo && <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)' }}>{setInfo.name}</div>}
-              <h2 style={{ fontSize: isMobile ? 17 : 21, fontWeight: 600, letterSpacing: '-0.02em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{def.title}</h2>
+              <h2 style={{ fontSize: isMobile ? 17 : 21, fontWeight: 600, letterSpacing: '-0.02em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{headerTitle}</h2>
             </div>
             {canSummarize && !isMobile && (
               <button className="btn-key" style={summaryBtn} onClick={() => setSummaryOpen(true)} title="AI summary of the whole dashboard"><AiMark size={20} /> Summary</button>
@@ -125,13 +132,15 @@ export default function ViewPage() {
           </div>
         )}
 
-        {/* Sub-dashboard tab bar (parent + its tabs). */}
+        {/* Sub-dashboard tab bar (parent + its tabs). Plain navigate (no
+            whole-page transition) so only the content area swaps — the header
+            and this bar stay put. */}
         {family && (
           <SubTabs
             tabs={family}
             activeId={id}
             isMobile={isMobile}
-            onSelect={(tid) => vtNavigate(navigate, `/suite/${suiteId}/d/${tid}`)}
+            onSelect={(tid) => navigate(`/suite/${suiteId}/d/${tid}`)}
           />
         )}
 
@@ -147,11 +156,15 @@ export default function ViewPage() {
         )}
 
         <div style={{ flex: 1, padding: isMobile ? '12px' : '22px', overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
-          {def.tiles?.length || def.carousels?.length ? (
-            <EditableGrid tiles={def.tiles || []} carousels={def.carousels || []} filterValues={filterValues} editable={false} />
-          ) : (
-            <Centered>This dashboard has no tiles yet.</Centered>
-          )}
+          {/* Keyed by dashboard id so the grid fades in fresh on each tab
+              switch; dimmed while the next dashboard's definition loads. */}
+          <div key={id} className="tab-swap" style={{ opacity: loading ? 0.45 : 1, transition: 'opacity .18s ease', pointerEvents: loading ? 'none' : 'auto' }}>
+            {def.tiles?.length || def.carousels?.length ? (
+              <EditableGrid tiles={def.tiles || []} carousels={def.carousels || []} filterValues={filterValues} editable={false} />
+            ) : (
+              <Centered>This dashboard has no tiles yet.</Centered>
+            )}
+          </div>
         </div>
         {summaryOpen && (
           <DashboardInsightModal

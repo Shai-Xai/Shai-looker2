@@ -221,6 +221,12 @@ input::placeholder, textarea::placeholder { color: #b0b0b6; }
   .ai-mark .ai-spark { opacity: 0.85; }
 }
 
+/* Content fades in when switching sub-dashboard tabs (the tiles inside still
+   do their own staggered entrance). */
+.tab-swap { animation: tab-fade .22s var(--ease-out, ease-out); }
+@keyframes tab-fade { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .tab-swap { animation: none; } }
+
 /* Sub-dashboard tabs — underline style; the gradient underline slides between
    tabs like the sidebar's nav indicator. Horizontally scrollable when long. */
 .subtabs {
