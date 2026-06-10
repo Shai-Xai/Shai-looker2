@@ -1131,7 +1131,9 @@ app.get('/api/my/briefing', auth.requireAuth, async (req, res) => {
     if (hit) return res.json(hit);
   }
   try {
-    const snap = cacheGet(snapCache, key, 10 * 60e3) || await buildSnapshot(req.user, entityId);
+    // On refresh, re-pull the live facts too so the briefing isn't re-phrasing
+    // stale numbers; otherwise reuse the cached snapshot.
+    const snap = (!req.query.refresh && cacheGet(snapCache, key, 10 * 60e3)) || await buildSnapshot(req.user, entityId);
     if (!snap) return res.json({ available: false });
     cachePut(snapCache, key, snap);
     const byId = Object.fromEntries(snap.catalogue.map((c) => [c.dashboardId, c]));

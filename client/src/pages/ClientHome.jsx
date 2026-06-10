@@ -22,6 +22,7 @@ export default function ClientHome() {
   const [snap, setSnap] = useState(null);
   const [brief, setBrief] = useState(null); // null=loading, {available:false}=hidden
   const [refreshing, setRefreshing] = useState(false);
+  const [refreshErr, setRefreshErr] = useState(false);
 
   useEffect(() => { api.mySuites().then(setSuites).catch(() => {}); }, []);
   useEffect(() => {
@@ -30,9 +31,16 @@ export default function ClientHome() {
     api.myBriefing(previewEntityId).then(setBrief).catch(() => setBrief({ available: false }));
   }, [previewEntityId]);
 
+  // Refresh re-pulls the live numbers AND regenerates the briefing — otherwise
+  // the Owl just re-phrases the same cached facts and looks unchanged.
   const refreshBrief = () => {
     setRefreshing(true);
-    api.myBriefing(previewEntityId, true).then(setBrief).catch(() => {}).finally(() => setRefreshing(false));
+    setRefreshErr(false);
+    api.mySnapshot(previewEntityId, true).then(setSnap).catch(() => {});
+    api.myBriefing(previewEntityId, true)
+      .then((b) => setBrief(b))
+      .catch(() => setRefreshErr(true))
+      .finally(() => setRefreshing(false));
   };
 
   const go = (suiteId, dashboardId) => vtNavigate(navigate, `/suite/${suiteId}/d/${dashboardId}`);
@@ -71,6 +79,7 @@ export default function ClientHome() {
             <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)' }}>Your briefing</span>
             <span style={{ flex: 1 }} />
             {brief?.generatedAt && <span style={{ fontSize: 11, color: 'var(--muted)' }}>{new Date(brief.generatedAt).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}</span>}
+            {refreshErr && <span style={{ fontSize: 11, color: 'var(--error)' }} title="Couldn't refresh — try again">⚠</span>}
             <button onClick={refreshBrief} disabled={refreshing} title="Regenerate briefing" style={refreshBtn}>{refreshing ? '…' : '↻ Refresh'}</button>
           </div>
           {brief == null || refreshing ? (
