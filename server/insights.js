@@ -240,7 +240,9 @@ Rules:
 
 async function extractSettlement({ pdfBase64, apiKey }) {
   const c = requireClient(apiKey);
-  const resp = await c.messages.create({
+  // Streamed because large extractions can exceed the SDK's 10-minute cap for
+  // non-streaming requests; we still just collect the full text at the end.
+  const stream = c.messages.stream({
     model: MODEL,
     max_tokens: 32000,
     thinking: { type: 'adaptive' },
@@ -253,6 +255,7 @@ async function extractSettlement({ pdfBase64, apiKey }) {
       ],
     }],
   });
+  const resp = await stream.finalMessage();
   const text = (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
   const match = text.match(/\{[\s\S]*\}/);
   if (!match) throw new Error('AI did not return JSON for the settlement report');
