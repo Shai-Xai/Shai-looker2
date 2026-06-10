@@ -137,6 +137,9 @@ addColumn('entities', 'integrations', "TEXT NOT NULL DEFAULT '{}'"); // per-clie
 // sidebar rows. The relation lives on the membership so the same dashboard can
 // be a tab in one set and standalone in another.
 addColumn('set_dashboards', 'parent_dashboard_id', 'TEXT');
+// Per-event briefing config: { launchDate, eventStart, eventEnd, manualPhase,
+// instructions, phaseOverrides: {phaseKey: text} } — drives the home briefing.
+addColumn('suites', 'briefing', "TEXT NOT NULL DEFAULT '{}'");
 // settlements.notes/.kind added after the table shipped, so migrate existing DBs.
 if (tableExists('settlements')) {
   addColumn('settlements', 'notes', "TEXT NOT NULL DEFAULT '[]'");
@@ -174,6 +177,24 @@ function viewProfile(userId) {
   const cutoff = new Date(Date.now() - 30 * 60e3).toISOString();
   const last = db.prepare('SELECT MAX(at) AS at FROM user_views WHERE user_id=? AND at<?').get(userId, cutoff);
   return { top, lastVisit: last?.at || null };
+}
+
+// ─── User preferences (small k/v per user — e.g. briefing tune text) ─────────
+db.exec(`
+CREATE TABLE IF NOT EXISTS user_prefs (
+  user_id TEXT NOT NULL,
+  key     TEXT NOT NULL,
+  value   TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (user_id, key)
+);
+`);
+function getUserPref(userId, key, fallback = '') {
+  const r = db.prepare('SELECT value FROM user_prefs WHERE user_id=? AND key=?').get(userId, key);
+  return r ? r.value : fallback;
+}
+function setUserPref(userId, key, value) {
+  db.prepare('INSERT INTO user_prefs (user_id,key,value) VALUES (?,?,?) ON CONFLICT(user_id,key) DO UPDATE SET value=excluded.value')
+    .run(userId, key, value == null ? '' : String(value));
 }
 
 // ─── Home pins (briefing steering) ───────────────────────────────────────────
@@ -461,7 +482,7 @@ function suiteSetIds(suiteId) {
   return db.prepare('SELECT set_id FROM suite_sets WHERE suite_id=? ORDER BY position').all(suiteId).map((r) => r.set_id);
 }
 function rowToSuite(r) {
-  return r && { id: r.id, entityId: r.entity_id, name: r.name, icon: r.icon || '', lockedFilters: J(r.locked_filters, {}), setIds: suiteSetIds(r.id), position: r.position, createdAt: r.created_at };
+  return r && { id: r.id, entityId: r.entity_id, name: r.name, icon: r.icon || '', lockedFilters: J(r.locked_filters, {}), briefing: J(r.briefing, {}), setIds: suiteSetIds(r.id), position: r.position, createdAt: r.created_at };
 }
 function listSuites() { return db.prepare('SELECT * FROM suites ORDER BY position, name').all().map(rowToSuite); }
 function listSuitesForEntity(entityId) {
@@ -486,9 +507,10 @@ function updateSuite(id, patch) {
   const name = patch.name ?? cur.name;
   const icon = patch.icon !== undefined ? (patch.icon || '') : cur.icon;
   const lf = patch.lockedFilters !== undefined ? JSON.stringify(patch.lockedFilters) : cur.locked_filters;
+  const brief = patch.briefing !== undefined ? JSON.stringify(patch.briefing || {}) : (cur.briefing || '{}');
   const pos = patch.position ?? cur.position;
   const ent = patch.entityId ?? cur.entity_id;
-  db.prepare('UPDATE suites SET name=?, icon=?, entity_id=?, locked_filters=?, position=? WHERE id=?').run(name, icon, ent, lf, pos, id);
+  db.prepare('UPDATE suites SET name=?, icon=?, entity_id=?, locked_filters=?, briefing=?, position=? WHERE id=?').run(name, icon, ent, lf, brief, pos, id);
   if (patch.setIds !== undefined) setSuiteSets(id, patch.setIds);
   return getSuite(id);
 }
@@ -733,7 +755,7 @@ function updateDocument(id, patch) {
 function deleteDocument(id) { return db.prepare('DELETE FROM event_documents WHERE id=?').run(id).changes > 0; }
 
 // ─── Full backup / restore (export to JSON, import to replace) ────────────────
-const EXPORT_TABLES = ['entities', 'users', 'user_entities', 'sets', 'set_dashboards', 'suites', 'suite_sets', 'dashboards', 'settings', 'tile_library', 'settlements', 'event_documents', 'user_views'];
+const EXPORT_TABLES = ['entities', 'users', 'user_entities', 'sets', 'set_dashboards', 'suites', 'suite_sets', 'dashboards', 'settings', 'tile_library', 'settlements', 'event_documents', 'user_views', 'user_prefs', 'home_pins'];
 function exportAll() {
   const out = { _version: 1, exportedAt: now() };
   for (const t of EXPORT_TABLES) out[t] = tableExists(t) ? db.prepare(`SELECT * FROM ${t}`).all() : [];
@@ -749,8 +771,8 @@ function insertRow(name, row) {
 // Replace ALL data with the contents of an export. Deletes children first
 // (FK-safe), then inserts parents first.
 const importAll = db.transaction((data) => {
-  const delOrder = ['user_views', 'user_entities', 'suite_sets', 'set_dashboards', 'suites', 'sets', 'dashboards', 'users', 'settlements', 'event_documents', 'entities', 'settings', 'tile_library'];
-  const insOrder = ['entities', 'dashboards', 'users', 'sets', 'suites', 'set_dashboards', 'suite_sets', 'user_entities', 'settings', 'tile_library', 'settlements', 'event_documents', 'user_views'];
+  const delOrder = ['user_views', 'user_prefs', 'home_pins', 'user_entities', 'suite_sets', 'set_dashboards', 'suites', 'sets', 'dashboards', 'users', 'settlements', 'event_documents', 'entities', 'settings', 'tile_library'];
+  const insOrder = ['entities', 'dashboards', 'users', 'sets', 'suites', 'set_dashboards', 'suite_sets', 'user_entities', 'settings', 'tile_library', 'settlements', 'event_documents', 'user_views', 'user_prefs', 'home_pins'];
   for (const t of delOrder) { if (tableExists(t)) db.prepare(`DELETE FROM ${t}`).run(); }
   let counts = {};
   for (const t of insOrder) {
@@ -784,4 +806,6 @@ module.exports = {
   recordView, viewProfile,
   // home pins
   setPin, listPins,
+  // user prefs
+  getUserPref, setUserPref,
 };

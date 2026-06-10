@@ -933,6 +933,65 @@ function AISettings() {
           <span style={{ fontSize: 12, color: 'var(--muted)', marginLeft: 'auto' }}>{text.length} characters</span>
         </div>
       </div>
+      <BriefingSettings />
+    </div>
+  );
+}
+
+// Global home-briefing rules + the editable per-phase default instructions.
+// Clients can override any phase per event from their briefing Tune panel.
+function BriefingSettings() {
+  const [data, setData] = useState(null);
+  const [instructions, setInstructions] = useState('');
+  const [defaults, setDefaults] = useState({});
+  const [openPhase, setOpenPhase] = useState(null);
+  const [saved, setSaved] = useState(false);
+  useEffect(() => {
+    api.getBriefingSettings().then((r) => { setData(r); setInstructions(r.instructions || ''); setDefaults(r.phaseDefaults || {}); });
+  }, []);
+  if (!data) return null;
+  const save = async () => { await api.saveBriefingSettings({ instructions, phaseDefaults: defaults }); flash(setSaved); };
+  return (
+    <div style={{ ...cardStyle, marginTop: 14 }}>
+      <L>Home briefing</L>
+      <p style={{ fontSize: 12, color: 'var(--muted)', margin: '4px 0 8px' }}>
+        Rules for the Owl's home-page briefing, plus the default instruction for each event phase.
+        The phase is picked automatically from each event's dates (set in the client's briefing panel); clients can override any phase's wording for their event.
+      </p>
+      <textarea
+        value={instructions} onChange={(e) => setInstructions(e.target.value)} rows={4}
+        placeholder={'e.g.\n- Lead with money, then tickets.\n- Always name the ticket tier driving change.\n- Never speculate about causes you can\'t see in the data.'}
+        style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 13, outline: 'none', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }}
+      />
+      <div style={{ marginTop: 12 }}>
+        <L>Phase defaults</L>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6 }}>
+          {data.phases.map((p) => (
+            <div key={p.key} style={{ border: '1px solid var(--hairline)', borderRadius: 9, overflow: 'hidden' }}>
+              <button onClick={() => setOpenPhase(openPhase === p.key ? null : p.key)} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', border: 'none', background: 'var(--elevated)', cursor: 'pointer', fontSize: 13, fontWeight: 700, color: 'var(--text)', textAlign: 'left' }}>
+                <span style={{ width: 12, fontSize: 9, color: 'var(--muted)', transform: openPhase === p.key ? 'rotate(90deg)' : 'none' }}>▶</span>
+                {p.label}
+                {(defaults[p.key] || '') !== (data.builtIn?.[p.key] || '') && <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--brand)', marginLeft: 6 }}>edited</span>}
+              </button>
+              {openPhase === p.key && (
+                <div style={{ padding: 10 }}>
+                  <textarea
+                    value={defaults[p.key] || ''} onChange={(e) => setDefaults({ ...defaults, [p.key]: e.target.value })} rows={3}
+                    style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 12.5, outline: 'none', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }}
+                  />
+                  {(defaults[p.key] || '') !== (data.builtIn?.[p.key] || '') && (
+                    <button style={{ ...miniBtnOutline, marginTop: 6 }} onClick={() => setDefaults({ ...defaults, [p.key]: data.builtIn?.[p.key] || '' })}>Reset to built-in</button>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12 }}>
+        <button style={saveBtn} onClick={save}>Save briefing settings</button>
+        {saved && <SavedChip />}
+      </div>
     </div>
   );
 }

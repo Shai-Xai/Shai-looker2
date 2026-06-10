@@ -5,6 +5,7 @@ import { useAuth } from '../lib/auth.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import { vtNavigate } from '../lib/viewTransition.js';
 import AiMark from '../components/AiMark.jsx';
+import BriefingTuneModal from '../components/BriefingTuneModal.jsx';
 import { fmtR } from '../lib/money.js';
 
 // Personalised landing page (briefing-led): the Owl opens with what changed
@@ -22,6 +23,7 @@ export default function ClientHome() {
   const [brief, setBrief] = useState(null); // null=loading, {available:false}=hidden
   const [refreshing, setRefreshing] = useState(false);
   const [refreshErr, setRefreshErr] = useState(false);
+  const [tuneOpen, setTuneOpen] = useState(false);
 
   useEffect(() => { api.mySuites().then(setSuites).catch(() => {}); }, []);
   useEffect(() => {
@@ -78,6 +80,7 @@ export default function ClientHome() {
             <span style={{ flex: 1 }} />
             {brief?.generatedAt && <span style={{ fontSize: 11, color: 'var(--muted)' }}>{new Date(brief.generatedAt).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}</span>}
             {refreshErr && <span style={{ fontSize: 11, color: 'var(--error)' }} title="Couldn't refresh — try again">⚠</span>}
+            <button onClick={() => setTuneOpen(true)} title="Tune your briefing — focus, event dates, phases" style={refreshBtn}>⚙ Tune</button>
             <button onClick={refreshBrief} disabled={refreshing} title="Regenerate briefing" style={refreshBtn}>{refreshing ? '…' : '↻ Refresh'}</button>
           </div>
           {brief == null || refreshing ? (
@@ -156,6 +159,10 @@ export default function ClientHome() {
           {snap.settlement.valueDue != null && <span style={{ fontSize: 17, fontWeight: 800, color: '#2da44e', flexShrink: 0 }}>{fmtR(snap.settlement.valueDue)}</span>}
           <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--brand)', flexShrink: 0 }}>View →</span>
         </button>
+      )}
+
+      {tuneOpen && (
+        <BriefingTuneModal entityId={previewEntityId} onClose={() => setTuneOpen(false)} onSaved={refreshBrief} />
       )}
 
       {/* Suites */}

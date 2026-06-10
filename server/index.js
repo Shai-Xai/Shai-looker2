@@ -1003,6 +1003,78 @@ function homeEntityFor(req) {
 // suite's lead dashboards (first top-level dashboard per set + its tabs),
 // deduped and capped, run through the scoped query cache. Deterministic —
 // no AI here.
+// ─── Event phases (briefing steering) ───────────────────────────────────────
+// Every event moves through phases; the briefing's instructions change with
+// them. Defaults are global (editable in Admin → AI); each suite/event can
+// override per phase, and the phase itself auto-derives from the suite's dates
+// (launch + event start/end) with a manual override for things like Artist
+// Drops, which are announcement-driven rather than date-driven.
+const PHASES = [
+  { key: 'pre_launch', label: 'Pre Launch' },
+  { key: 'launch', label: 'Launch' },
+  { key: 'artist_drops', label: 'Artist Drops' },
+  { key: 'mid_campaign', label: 'Mid Campaign' },
+  { key: 'build_up', label: 'Build Up' },
+  { key: 'event_day', label: 'Event Day' },
+  { key: 'day_after', label: 'Day After' },
+  { key: 'post_event', label: 'Post Event' },
+];
+const PHASE_DEFAULTS = {
+  pre_launch: 'Tickets are not on sale yet. Focus on readiness: pricing tiers set up, comparisons to the previous event at this point, and audience/marketing signals. Do not treat zero sales as a problem.',
+  launch: 'Tickets just went on sale. Focus on launch velocity: first-day/first-week sales, which tiers are moving, early-bird sell-through, and how launch compares to the previous event\'s launch.',
+  artist_drops: 'A lineup announcement just happened. Focus on the sales spike around the announcement: uplift vs the days before, which ticket types benefited, resale activity, and traffic/audience response.',
+  mid_campaign: 'Steady campaign period. Focus on weekly pace, sell-through by tier, pricing-phase transitions, comps creep, and whether pace projects to sell-out — call out anything going quiet.',
+  build_up: 'Final week before the event. Focus on daily pace, projected final numbers, door-list/comps readiness, cashless top-up uptake, and any operational flags.',
+  event_day: 'The event is LIVE. Focus on today: gate/check-in numbers, on-the-day sales, cashless top-ups and spend, and anything anomalous that needs action now.',
+  day_after: 'The event just ended. Focus on the headline result: final attendance vs tickets sold, total revenue vs previous event, cashless spend per head, and biggest surprises.',
+  post_event: 'Wrap-up mode. Focus on final totals vs last event, what over- and under-performed, refund/resale tails, and settlement status. Frame learnings for the next event.',
+};
+// Resolve a suite's current phase from its briefing config.
+function resolvePhase(cfg = {}, nowMs = Date.now()) {
+  if (cfg.manualPhase && cfg.manualPhase !== 'auto' && PHASES.some((p) => p.key === cfg.manualPhase)) {
+    return { key: cfg.manualPhase, source: 'manual' };
+  }
+  const day = 864e5;
+  const t = (s) => (s ? new Date(`${s}T00:00:00`).getTime() : null);
+  const launch = t(cfg.launchDate), start = t(cfg.eventStart), end = t(cfg.eventEnd) ?? t(cfg.eventStart);
+  if (end != null && nowMs > end + 2 * day) return { key: 'post_event', source: 'auto' };
+  if (end != null && nowMs > end + day) return { key: 'day_after', source: 'auto' };
+  if (start != null && end != null && nowMs >= start && nowMs <= end + day) return { key: 'event_day', source: 'auto' };
+  if (start != null && nowMs >= start - 7 * day) return { key: 'build_up', source: 'auto' };
+  if (launch != null && nowMs < launch) return { key: 'pre_launch', source: 'auto' };
+  if (launch != null && nowMs <= launch + 7 * day) return { key: 'launch', source: 'auto' };
+  if (launch != null || start != null) return { key: 'mid_campaign', source: 'auto' };
+  return { key: null, source: 'none' }; // no dates configured
+}
+function phaseDefaults() {
+  const saved = JSON.parse(db.getSetting('briefing_phase_defaults', '{}') || '{}');
+  return Object.fromEntries(PHASES.map((p) => [p.key, (saved[p.key] || '').trim() || PHASE_DEFAULTS[p.key]]));
+}
+// Assemble the briefing instruction stack for an entity (most specific last).
+function briefingInstructionsFor(user, entityId, suites) {
+  const parts = [];
+  const global = (db.getSetting('briefing_instructions') || '').trim();
+  if (global) parts.push(`Howler briefing rules:\n${global}`);
+  const ent = db.getEntity(entityId);
+  if (ent?.aiContext?.trim()) parts.push(`About this client:\n${ent.aiContext.trim()}`);
+  const defaults = phaseDefaults();
+  for (const su of suites) {
+    const cfg = su.briefing || {};
+    const ph = resolvePhase(cfg);
+    const lines = [];
+    if (ph.key) {
+      const label = PHASES.find((p) => p.key === ph.key)?.label || ph.key;
+      const text = (cfg.phaseOverrides?.[ph.key] || '').trim() || defaults[ph.key];
+      lines.push(`Current phase: ${label}${cfg.eventStart ? ` (event ${cfg.eventStart}${cfg.eventEnd ? ` – ${cfg.eventEnd}` : ''})` : ''}. ${text}`);
+    }
+    if ((cfg.instructions || '').trim()) lines.push(cfg.instructions.trim());
+    if (lines.length) parts.push(`For the event "${su.name}":\n${lines.join('\n')}`);
+  }
+  const tune = db.getUserPref(user.id, `briefing_tune:${entityId}`).trim();
+  if (tune) parts.push(`This reader's standing requests — always honour these:\n${tune}`);
+  return parts.join('\n\n');
+}
+
 // Catalogue + lead dashboards for a client's suites (cheap; no Looker).
 function clientCatalogue(entityId) {
   const suites = db.listSuitesForEntity(entityId);
@@ -1183,7 +1255,9 @@ app.get('/api/my/briefing', auth.requireAuth, async (req, res) => {
       lastVisit: prof.lastVisit,
       top: prof.top.filter((t) => byId[t.dashboardId]).map((t) => ({ title: byId[t.dashboardId].title, count: t.count })),
     };
-    const raw = await insights.briefHome({ tiles, profile: profileForAi, catalogue, instructions: aiInstructionsFor(null), apiKey });
+    const { suites } = clientCatalogue(entityId);
+    const instructions = [aiInstructionsFor(null), briefingInstructionsFor(req.user, entityId, suites)].filter(Boolean).join('\n\n');
+    const raw = await insights.briefHome({ tiles, profile: profileForAi, catalogue, instructions, apiKey });
     const link = (id) => (id && byId[id] ? { dashboardId: id, suiteId: byId[id].suiteId, label: `${byId[id].setName} → ${byId[id].title}` } : null);
     const out = {
       available: true,
@@ -1200,6 +1274,61 @@ app.get('/api/my/briefing', auth.requireAuth, async (req, res) => {
     console.error('[GET /api/my/briefing]', err.message);
     res.status(500).json({ error: err.message });
   }
+});
+
+// ─── Briefing configuration ─────────────────────────────────────────────────────
+// Admin: global briefing rules + editable phase defaults.
+app.get('/api/admin/briefing-settings', auth.requireAdmin, (_req, res) => {
+  res.json({ instructions: db.getSetting('briefing_instructions'), phases: PHASES, phaseDefaults: phaseDefaults(), builtIn: PHASE_DEFAULTS });
+});
+app.put('/api/admin/briefing-settings', auth.requireAdmin, (req, res) => {
+  const { instructions, phaseDefaults: pd } = req.body || {};
+  if (instructions !== undefined) db.setSetting('briefing_instructions', instructions || '');
+  if (pd && typeof pd === 'object') {
+    const clean = {};
+    for (const p of PHASES) if (typeof pd[p.key] === 'string') clean[p.key] = pd[p.key].slice(0, 2000);
+    db.setSetting('briefing_phase_defaults', JSON.stringify(clean));
+  }
+  briefCache.clear();
+  res.json({ instructions: db.getSetting('briefing_instructions'), phases: PHASES, phaseDefaults: phaseDefaults() });
+});
+
+// Client (and admin): per-event briefing config — dates, phase override,
+// event instructions, per-phase overrides — plus their personal tune text.
+app.get('/api/my/briefing-config', auth.requireAuth, (req, res) => {
+  const entityId = homeEntityFor(req);
+  if (!entityId) return res.json({ suites: [], phases: PHASES, phaseDefaults: phaseDefaults(), tune: '' });
+  const suites = db.listSuitesForEntity(entityId).map((su) => ({
+    id: su.id, name: su.name, briefing: su.briefing || {}, phase: resolvePhase(su.briefing || {}),
+  }));
+  res.json({ suites, phases: PHASES, phaseDefaults: phaseDefaults(), tune: db.getUserPref(req.user.id, `briefing_tune:${entityId}`) });
+});
+app.put('/api/my/briefing-config/suite/:id', auth.requireAuth, (req, res) => {
+  if (!auth.canAccessSuite(req.user, req.params.id)) return res.status(403).json({ error: 'Not allowed' });
+  const su = db.getSuite(req.params.id);
+  if (!su) return res.status(404).json({ error: 'Suite not found' });
+  const b = req.body || {};
+  const cfg = {
+    launchDate: String(b.launchDate || '').slice(0, 10),
+    eventStart: String(b.eventStart || '').slice(0, 10),
+    eventEnd: String(b.eventEnd || '').slice(0, 10),
+    manualPhase: PHASES.some((p) => p.key === b.manualPhase) ? b.manualPhase : 'auto',
+    instructions: String(b.instructions || '').slice(0, 2000),
+    phaseOverrides: {},
+  };
+  if (b.phaseOverrides && typeof b.phaseOverrides === 'object') {
+    for (const p of PHASES) if (typeof b.phaseOverrides[p.key] === 'string' && b.phaseOverrides[p.key].trim()) cfg.phaseOverrides[p.key] = b.phaseOverrides[p.key].slice(0, 2000);
+  }
+  const updated = db.updateSuite(su.id, { briefing: cfg });
+  briefCache.clear(); // next briefing for anyone on this client reflects it
+  res.json({ id: updated.id, briefing: updated.briefing, phase: resolvePhase(updated.briefing) });
+});
+app.put('/api/my/briefing-tune', auth.requireAuth, (req, res) => {
+  const entityId = homeEntityFor(req);
+  if (!entityId) return res.status(400).json({ error: 'No client context' });
+  db.setUserPref(req.user.id, `briefing_tune:${entityId}`, String((req.body || {}).tune || '').slice(0, 1500));
+  bustHome(req.user.id, entityId);
+  res.json({ tune: db.getUserPref(req.user.id, `briefing_tune:${entityId}`) });
 });
 
 // ─── Pin to home (briefing steering) ────────────────────────────────────────────

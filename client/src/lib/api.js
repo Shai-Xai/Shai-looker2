@@ -198,4 +198,13 @@ export const api = {
     fetch(`/api/my/briefing?${new URLSearchParams({ ...(entityId ? { entityId } : {}), ...(refresh ? { refresh: 1 } : {}) })}`).then(json),
   myPins: (entityId) => fetch(`/api/my/pins${entityId ? `?entityId=${encodeURIComponent(entityId)}` : ''}`).then(json),
   togglePin: (body) => fetch('/api/my/pins', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
+
+  // Briefing configuration
+  getBriefingSettings: () => fetch('/api/admin/briefing-settings').then(json),
+  saveBriefingSettings: (p) => fetch('/api/admin/briefing-settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),
+  myBriefingConfig: (entityId) => fetch(`/api/my/briefing-config${entityId ? `?entityId=${encodeURIComponent(entityId)}` : ''}`).then(json),
+  saveSuiteBriefing: (suiteId, cfg, entityId) =>
+    fetch(`/api/my/briefing-config/suite/${suiteId}${entityId ? `?entityId=${encodeURIComponent(entityId)}` : ''}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg) }).then(json),
+  saveBriefingTune: (tune, entityId) =>
+    fetch(`/api/my/briefing-tune${entityId ? `?entityId=${encodeURIComponent(entityId)}` : ''}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tune }) }).then(json),
 };
