@@ -985,6 +985,8 @@ function Settlements() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState(null);
+  // Live extraction progress: { stage:'upload'|'reading'|'extracting', chars, rows, fileName, startedAt }
+  const [prog, setProg] = useState(null);
   // Draft being reviewed before publish: { data, fileBase64, fileName, fileType, entityId, status }
   const [draft, setDraft] = useState(null);
 
@@ -1002,7 +1004,8 @@ function Settlements() {
     if (!file) return;
     if (file.type !== 'application/pdf') { setError('Please upload a PDF settlement report.'); return; }
     setError(null);
-    setBusy('Reading the report with AI — this takes ~30–60 seconds…');
+    const startedAt = Date.now();
+    setProg({ stage: 'upload', chars: 0, rows: 0, fileName: file.name, startedAt });
     try {
       const fileBase64 = await new Promise((resolve, reject) => {
         const r = new FileReader();
@@ -1010,12 +1013,15 @@ function Settlements() {
         r.onerror = reject;
         r.readAsDataURL(file);
       });
-      const { data } = await api.adminExtractSettlement(fileBase64, 'application/pdf');
+      setProg({ stage: 'reading', chars: 0, rows: 0, fileName: file.name, startedAt });
+      const data = await api.adminExtractSettlement(fileBase64, 'application/pdf', (p) => {
+        setProg({ stage: p.stage || 'extracting', chars: p.chars || 0, rows: p.rows || 0, fileName: file.name, startedAt });
+      });
       setDraft({ data, fileBase64, fileName: file.name, fileType: 'application/pdf', entityId: '', status: 'final' });
     } catch (err) {
       setError(err.message);
     } finally {
-      setBusy('');
+      setProg(null);
     }
   }
 
@@ -1042,7 +1048,7 @@ function Settlements() {
       <p style={hint}>Upload a settlement PDF; the Owl extracts it into the interactive report clients see under <b>Reports → Settlements</b>. Review the totals before publishing.</p>
       {error && <p style={{ color: 'var(--error)', fontSize: 13, marginBottom: 10 }}>⚠ {error}</p>}
 
-      {!draft && (
+      {!draft && !prog && (
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 18, flexWrap: 'wrap' }}>
           <label style={{ ...addBtn, display: 'inline-block', opacity: busy ? 0.6 : 1 }}>
             {busy || '⤴ Upload settlement PDF'}
@@ -1053,6 +1059,8 @@ function Settlements() {
           </button>
         </div>
       )}
+
+      {prog && <ExtractProgress prog={prog} />}
 
       {/* Draft review before publish */}
       {draft && (
@@ -1102,6 +1110,47 @@ function Settlements() {
           </div>
         ))}
         {items.length === 0 && !draft && <Muted>No settlement reports yet.</Muted>}
+      </div>
+    </div>
+  );
+}
+
+// Live progress for the AI extraction. The % is an estimate (we can't know the
+// report's size up front) but the row counter and elapsed time are real, so
+// it's always visibly moving while the Owl works.
+function ExtractProgress({ prog }) {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const elapsed = Math.max(0, Math.round((Date.now() - prog.startedAt) / 1000));
+  // upload → ~4%; reading (waiting for first tokens) creeps to ~14%; extracting
+  // ramps with output volume and saturates at 96% until the data lands.
+  let pct = 4;
+  if (prog.stage === 'reading') pct = Math.min(14, 6 + elapsed * 0.5);
+  if (prog.stage === 'extracting') pct = 15 + 81 * (prog.chars / (prog.chars + 9000));
+  const stageLabel = prog.stage === 'upload' ? 'Uploading the PDF…'
+    : prog.stage === 'reading' ? 'The Owl is reading the report…'
+    : 'Extracting line items…';
+  return (
+    <div style={{ ...cardStyle, marginBottom: 18 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+        <span style={{ fontSize: 13, fontWeight: 700 }}>{stageLabel}</span>
+        <span style={{ fontSize: 12, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{prog.fileName}</span>
+        <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--muted)', fontVariantNumeric: 'tabular-nums' }}>{elapsed}s</span>
+      </div>
+      <div style={{ height: 8, borderRadius: 980, background: 'rgba(128,128,128,0.18)', overflow: 'hidden' }}>
+        <div style={{
+          height: '100%', width: `${pct}%`, borderRadius: 980,
+          background: 'linear-gradient(90deg, #ff385c, #ff6b35, #7c3aed)',
+          transition: 'width .45s ease',
+        }} />
+      </div>
+      <div style={{ marginTop: 8, fontSize: 12, color: 'var(--muted)' }}>
+        {prog.rows > 0
+          ? `${prog.rows} line item${prog.rows === 1 ? '' : 's'} extracted so far — totals get cross-checked before anything is published.`
+          : 'This usually takes 30–90 seconds depending on the report size. Leave this tab open.'}
       </div>
     </div>
   );

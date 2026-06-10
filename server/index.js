@@ -817,7 +817,9 @@ app.get('/api/admin/settlements', auth.requireAdmin, (_req, res) => {
 });
 
 // Admin: AI-extract an uploaded settlement PDF into the structured JSON draft.
-// Returns the draft WITHOUT saving — the admin reviews, assigns a client, then
+// Streams progress as newline-delimited JSON ({type:'progress'|'done'|'error'})
+// so the admin sees live feedback — and so bytes keep flowing through any
+// proxy during the long extraction. Nothing is saved; the admin reviews, then
 // publishes via POST /api/admin/settlements.
 app.post('/api/admin/settlements/extract', auth.requireAdmin, settlementJson, async (req, res) => {
   const { fileBase64, fileType } = req.body || {};
@@ -825,13 +827,23 @@ app.post('/api/admin/settlements/extract', auth.requireAdmin, settlementJson, as
   if (fileType && fileType !== 'application/pdf') return res.status(400).json({ error: 'Only PDF files are supported for now' });
   const apiKey = adminAnthropicKey();
   if (!insights.isConfigured(apiKey)) return res.status(400).json({ error: 'AI extraction needs an Anthropic API key (Admin → Integrations).' });
+  res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders?.();
+  const send = (obj) => res.write(JSON.stringify(obj) + '\n');
+  send({ type: 'progress', stage: 'reading', chars: 0, rows: 0 });
   try {
-    const data = await insights.extractSettlement({ pdfBase64: fileBase64, apiKey });
-    res.json({ data });
+    const data = await insights.extractSettlement({
+      pdfBase64: fileBase64, apiKey,
+      onProgress: (p) => send({ type: 'progress', stage: 'extracting', ...p }),
+    });
+    send({ type: 'done', data });
   } catch (err) {
     console.error('[POST /api/admin/settlements/extract]', err.message);
-    res.status(500).json({ error: err.message });
+    send({ type: 'error', error: err.message });
   }
+  res.end();
 });
 
 // Admin: publish a settlement (extracted data + original file + assignment).

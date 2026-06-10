@@ -238,10 +238,11 @@ Rules:
 - Withholding Tax lines inside a commission group are rows of that group (code may be empty).
 - If a section doesn't exist in the report, use an empty array / 0.`;
 
-async function extractSettlement({ pdfBase64, apiKey }) {
+async function extractSettlement({ pdfBase64, apiKey, onProgress }) {
   const c = requireClient(apiKey);
   // Streamed because large extractions can exceed the SDK's 10-minute cap for
-  // non-streaming requests; we still just collect the full text at the end.
+  // non-streaming requests — and so we can report live progress (characters +
+  // line items seen so far) while the JSON accumulates.
   const stream = c.messages.stream({
     model: MODEL,
     max_tokens: 32000,
@@ -255,6 +256,19 @@ async function extractSettlement({ pdfBase64, apiKey }) {
       ],
     }],
   });
+  if (onProgress) {
+    let acc = '';
+    let lastAt = 0;
+    stream.on('text', (delta) => {
+      acc += delta;
+      const now = Date.now();
+      if (now - lastAt > 400) {
+        lastAt = now;
+        // "desc" keys ≈ line items extracted so far — a real progress signal.
+        onProgress({ chars: acc.length, rows: (acc.match(/"desc"/g) || []).length });
+      }
+    });
+  }
   const resp = await stream.finalMessage();
   const text = (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
   const match = text.match(/\{[\s\S]*\}/);
