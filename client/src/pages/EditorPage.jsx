@@ -210,6 +210,9 @@ export default function EditorPage() {
        || null)
     : null;
   const theme = def.theme || {};
+  const dark = document.documentElement.dataset.theme === 'dark';
+  const canvasBg = dark ? 'var(--bg)' : (theme.background || '#f5f6f8');
+  const canvasTileBg = dark ? 'var(--tile-bg)' : (theme.tileBackground || '#fff');
   const carouselHandlers = (c) => ({
     onEditTile: setSelectedTileId,
     onRemoveTile: (tid) => removeTileFromCarousel(c.id, tid),
@@ -253,8 +256,8 @@ export default function EditorPage() {
       )}
 
       {/* Canvas + side panel */}
-      <div style={{ flex: 1, display: 'flex', minHeight: 0, background: theme.background || '#f5f6f8' }}>
-        <div style={{ flex: 1, overflowY: 'auto', padding: '16px 24px', '--tile-bg': theme.tileBackground || '#fff' }}>
+      <div style={{ flex: 1, display: 'flex', minHeight: 0, background: canvasBg }}>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '16px 24px', '--tile-bg': canvasTileBg }}>
           {def.tiles.length > 0 || def.carousels.length > 0 ? (
             <EditableGrid
               tiles={def.tiles}

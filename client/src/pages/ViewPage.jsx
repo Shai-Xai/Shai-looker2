@@ -5,6 +5,7 @@ import DashboardInsightModal from '../components/DashboardInsightModal.jsx';
 import EditableGrid from '../components/EditableGrid.jsx';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/auth.jsx';
+import { useTheme } from '../lib/theme.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import { ScopeProvider } from '../lib/ScopeContext.jsx';
 
@@ -16,6 +17,7 @@ export default function ViewPage() {
   const { id, suiteId } = useParams();
   const navigate = useNavigate();
   const { isAdmin, insightsEnabled } = useAuth();
+  const { theme: appTheme } = useTheme();
   const [def, setDef] = useState(null);
   const [setInfo, setSetInfo] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -64,6 +66,11 @@ export default function ViewPage() {
   if (!def) return null;
 
   const theme = def.theme || {};
+  // In dark mode the global theme wins: ignore the dashboard's own (light)
+  // background/tile colours so tiles don't stay white with invisible text.
+  const dark = appTheme === 'dark';
+  const pageBg = dark ? 'var(--bg)' : (theme.background || 'var(--bg)');
+  const tileBg = dark ? 'var(--tile-bg)' : (theme.tileBackground || '#fff');
   const backTo = '/';
   const hasFilters = (def.filters?.length || 0) > 0;
   const activeCount = hasFilters ? activeFilterCount(def.filters, filterValues) : 0;
@@ -75,8 +82,8 @@ export default function ViewPage() {
       <div
         style={{
           display: 'flex', flexDirection: 'column', flex: 1,
-          background: theme.background || 'var(--bg)',
-          '--tile-bg': theme.tileBackground || '#fff',
+          background: pageBg,
+          '--tile-bg': tileBg,
         }}
       >
         {/* On mobile inside a suite the sticky "☰ Menu" bar already shows the
