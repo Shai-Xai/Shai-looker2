@@ -29,6 +29,10 @@ export default function SettlementViewPage() {
     api.getSettlement(id).then(setS).catch((e) => setError(e.message));
   }, [id]);
 
+  // Synthesized rows for the Owl. MUST be declared before the early returns
+  // below — hooks can't sit after a conditional return.
+  const owlData = useMemo(() => (s ? buildOwlData(s.data || {}) : null), [s]);
+
   if (error) return <Centered error>Error: {error}</Centered>;
   if (!s) return <Centered>Loading report…</Centered>;
 
@@ -45,7 +49,6 @@ export default function SettlementViewPage() {
     vis: { type: 'looker_grid' },
     aiContext: 'This is an event settlement report: gross ticketing turnover, Howler commissions/fees deducted (negative amounts), advance payments already made to the client, and the final value due. Withholding tax lines are tax credits. Help the client understand where the money went.',
   };
-  const owlData = useMemo(() => buildOwlData(d), [s.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <ScopeProvider suiteId={null} dashboardContext="">
