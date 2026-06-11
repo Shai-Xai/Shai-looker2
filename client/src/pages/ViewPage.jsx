@@ -168,10 +168,6 @@ export default function ViewPage() {
               {setInfo && <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)' }}>{setInfo.name}</div>}
               <h2 style={{ fontSize: isMobile ? 17 : 21, fontWeight: 600, letterSpacing: '-0.02em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{headerTitle}</h2>
             </div>
-            {!isMobile && <ShareButton suiteId={suiteId} dashboardId={id} filterValues={filterValues} />}
-            {!isMobile && (
-              <button className="no-print" style={summaryBtn} onClick={() => window.print()} title="Download / print this dashboard as PDF">⤓ PDF</button>
-            )}
             {canSummarize && !isMobile && (
               <button className="btn-key no-print" style={summaryBtn} onClick={() => setSummaryOpen(true)} title="AI summary of the whole dashboard"><AiMark size={20} /> Summary</button>
             )}
@@ -182,6 +178,7 @@ export default function ViewPage() {
                 <span style={{ fontSize: 11, opacity: 0.7 }}>{filtersOpen ? '▴' : '▾'}</span>
               </button>
             )}
+            {!isMobile && <ActionsMenu suiteId={suiteId} dashboardId={id} filterValues={filterValues} />}
             {isAdmin && !isMobile && <button style={editBtn} onClick={() => navigate(`/d/${id}/edit`)}>Edit</button>}
           </div>
         )}
@@ -200,9 +197,11 @@ export default function ViewPage() {
 
         {/* On mobile inside a suite the header is hidden, so the Summary button
             shares the filters bar (or gets its own compact row if no filters). */}
-        {canSummarize && isMobile && suiteId && !hasFilters && (
-          <div style={{ background: 'var(--card)', borderBottom: '1px solid var(--hairline)', padding: '8px 14px', display: 'flex', justifyContent: 'flex-start' }}>
-            <button className="btn-key" style={summaryBtn} onClick={() => setSummaryOpen(true)}><AiMark size={18} /> Summary</button>
+        {isMobile && suiteId && !hasFilters && (
+          <div style={{ background: 'var(--card)', borderBottom: '1px solid var(--hairline)', padding: '8px 14px', display: 'flex', alignItems: 'center', gap: 8 }}>
+            {canSummarize && <button className="btn-key" style={summaryBtn} onClick={() => setSummaryOpen(true)}><AiMark size={18} /> Summary</button>}
+            <span style={{ flex: 1 }} />
+            <ActionsMenu suiteId={suiteId} dashboardId={id} filterValues={filterValues} />
           </div>
         )}
 
@@ -210,8 +209,11 @@ export default function ViewPage() {
           <FilterBar
             filters={def.filters} values={filterValues} onChange={handleFilterChange} locked={locked}
             open={filtersOpen} onClose={() => setFiltersOpen(false)}
-            leading={canSummarize && isMobile && suiteId ? (
-              <button className="btn-key" style={summaryBtn} onClick={() => setSummaryOpen(true)}><AiMark size={18} /> Summary</button>
+            leading={isMobile && suiteId ? (
+              <>
+                {canSummarize && <button className="btn-key" style={summaryBtn} onClick={() => setSummaryOpen(true)}><AiMark size={18} /> Summary</button>}
+                <ActionsMenu suiteId={suiteId} dashboardId={id} filterValues={filterValues} />
+              </>
             ) : null}
           />
         )}
@@ -262,29 +264,55 @@ function HomeIcon({ size = 16 }) {
   );
 }
 
-// Mint a short link carrying the current filters, copy it, flash ✓. The
-// recipient still logs in; scoping applies to THEM (a link is never a bypass).
-function ShareButton({ suiteId, dashboardId, filterValues }) {
-  const [state, setState] = useState('idle'); // idle | busy | copied | err
+// "⋯" actions menu next to Filters: Share (mint short link with current
+// filters, copy, flash ✓) and Download PDF (print stylesheet does the rest).
+// A share link is never an auth bypass — recipients log in; scoping applies.
+function ActionsMenu({ suiteId, dashboardId, filterValues }) {
+  const [open, setOpen] = useState(false);
+  const [shareState, setShareState] = useState('idle'); // idle | busy | copied | err
   async function share() {
-    setState('busy');
+    setShareState('busy');
     try {
       const { path } = await api.createShareLink({ suiteId, dashboardId, filters: filterValues });
       const url = `${window.location.origin}${path}`;
       try { await navigator.clipboard.writeText(url); } catch { window.prompt('Copy this link:', url); }
-      setState('copied');
-      setTimeout(() => setState('idle'), 2200);
+      setShareState('copied');
+      setTimeout(() => { setShareState('idle'); setOpen(false); }, 1600);
     } catch {
-      setState('err');
-      setTimeout(() => setState('idle'), 2200);
+      setShareState('err');
+      setTimeout(() => setShareState('idle'), 2200);
     }
   }
   return (
-    <button className="no-print" style={summaryBtn} onClick={share} disabled={state === 'busy'} title="Copy a link to this dashboard with your current filters">
-      {state === 'copied' ? '✓ Link copied' : state === 'err' ? '⚠ Try again' : state === 'busy' ? '…' : '↗ Share'}
-    </button>
+    <div className="no-print" style={{ position: 'relative', flexShrink: 0 }}>
+      <button style={{ ...summaryBtn, padding: '8px 13px' }} onClick={() => setOpen((v) => !v)} title="Actions" aria-label="Dashboard actions">⋯</button>
+      {open && (
+        <>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 90 }} onClick={() => setOpen(false)} />
+          <div className="modal-in" style={actionsPanel}>
+            <button style={actionItem} onClick={share} disabled={shareState === 'busy'}>
+              <span style={actionIco}>{shareState === 'copied' ? '✓' : '↗'}</span>
+              <span style={{ flex: 1, textAlign: 'left' }}>
+                {shareState === 'copied' ? 'Link copied' : shareState === 'err' ? 'Failed — try again' : shareState === 'busy' ? 'Creating link…' : 'Share'}
+                <span style={{ display: 'block', fontSize: 11, color: 'var(--muted)', fontWeight: 500 }}>Copy a link with your current filters</span>
+              </span>
+            </button>
+            <button style={actionItem} onClick={() => { setOpen(false); setTimeout(() => window.print(), 150); }}>
+              <span style={actionIco}>⤓</span>
+              <span style={{ flex: 1, textAlign: 'left' }}>
+                Download PDF
+                <span style={{ display: 'block', fontSize: 11, color: 'var(--muted)', fontWeight: 500 }}>Print-ready copy of this view</span>
+              </span>
+            </button>
+          </div>
+        </>
+      )}
+    </div>
   );
 }
+const actionsPanel = { position: 'absolute', top: 'calc(100% + 7px)', right: 0, zIndex: 91, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 13, boxShadow: 'var(--shadow-pop)', padding: 6, minWidth: 250, display: 'flex', flexDirection: 'column', gap: 2 };
+const actionItem = { display: 'flex', alignItems: 'center', gap: 10, width: '100%', border: 'none', background: 'transparent', cursor: 'pointer', padding: '9px 11px', borderRadius: 9, fontSize: 13.5, fontWeight: 600, color: 'var(--text)' };
+const actionIco = { flexShrink: 0, width: 20, textAlign: 'center', fontSize: 15 };
 
 // Underline tab bar for a parent dashboard and its sub-dashboards. The
 // gradient underline is a single element measured against the active tab so it
