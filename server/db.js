@@ -132,6 +132,7 @@ addColumn('suites', 'icon', "TEXT NOT NULL DEFAULT ''");
 addColumn('entities', 'logo', "TEXT NOT NULL DEFAULT ''"); // client brand image data-URL / emoji
 addColumn('entities', 'ai_context', "TEXT NOT NULL DEFAULT ''"); // client-specific AI background
 addColumn('entities', 'integrations', "TEXT NOT NULL DEFAULT '{}'"); // per-client API credentials (Looker / Anthropic)
+addColumn('entities', 'mail_branding', "TEXT NOT NULL DEFAULT '{}'"); // per-client email branding (logo/colour/sender/wording)
 // Sub-dashboards: within a set, a dashboard may nest one level under a parent
 // from the same set — children render as tabs inside the parent, not as
 // sidebar rows. The relation lives on the membership so the same dashboard can
@@ -414,6 +415,18 @@ function setEntityIntegrations(id, patch) {
   const next = { ...cur, ...(patch || {}) }; // patch carries only the keys to change
   db.prepare('UPDATE entities SET integrations=? WHERE id=?').run(JSON.stringify(next), id);
   return getEntityIntegrations(id);
+}
+// Per-client email branding (logo / brand colour / sender name / wording). A
+// plain JSON blob on the entity — safe to send to the browser, unlike creds.
+function getEntityMailBranding(id) {
+  const r = db.prepare('SELECT mail_branding FROM entities WHERE id=?').get(id);
+  return r ? J(r.mail_branding, {}) : {};
+}
+function setEntityMailBranding(id, patch) {
+  const cur = getEntityMailBranding(id);
+  const next = { ...cur, ...(patch || {}) };
+  db.prepare('UPDATE entities SET mail_branding=? WHERE id=?').run(JSON.stringify(next), id);
+  return getEntityMailBranding(id);
 }
 
 // ─── Users ────────────────────────────────────────────────────────────────────
@@ -862,6 +875,7 @@ module.exports = {
   defaultTheme,
   exportAll, importAll,
   listEntities, getEntity, createEntity, updateEntity, deleteEntity, getEntityIntegrations, setEntityIntegrations,
+  getEntityMailBranding, setEntityMailBranding,
   listUsers, getUser, getUserByEmail, createUser, updateUser, deleteUser, verifyCredentials, publicUser, setUserEntities,
   listDashboards, getDashboard, createDashboard, updateDashboard, removeDashboard,
   // sets (reusable collections)

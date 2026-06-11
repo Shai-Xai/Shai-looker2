@@ -108,9 +108,11 @@ function mount(app, { db, auth, mailer }) {
       body: lead ? `${lead}\n\n${body}` : body,
       ctaText: t.priority === 'must_ack' ? 'Acknowledge in Pulse' : 'Reply in Pulse',
       ctaPath: '/inbox',
+      entityId, // resolve this client's branding (logo / colour / sender / wording)
     });
     // One email per recipient so addresses are never exposed to each other.
-    for (const addr of to) mailer.send({ to: addr, subject, html, text });
+    const fromName = (mailer.resolveBranding(entityId) || {}).senderName;
+    for (const addr of to) mailer.send({ to: addr, subject, html, text, fromName });
   }
 
   // ── Client + shared reads ───────────────────────────────────────────────────

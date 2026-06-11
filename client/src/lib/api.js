@@ -157,11 +157,20 @@ export const api = {
   // Integrations
   getAdminIntegrations: () => fetch('/api/admin/integrations').then(json),
   saveAdminIntegrations: (p) => fetch('/api/admin/integrations', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),
-  sendMailTest: () => fetch('/api/admin/mail/test', { method: 'POST' }).then(json),
+  sendMailTest: (entityId) => fetch('/api/admin/mail/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entityId }) }).then(json),
   getEntityIntegrations: (id) => fetch(`/api/admin/entities/${id}/integrations`).then(json),
   saveEntityIntegrations: (id, p) => fetch(`/api/admin/entities/${id}/integrations`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),
   getMyIntegrations: () => fetch('/api/my/integrations').then(json),
   saveMyIntegrations: (entityId, p) => fetch(`/api/my/integrations/${entityId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),
+
+  // Email templates / branding (platform default + per-client overrides)
+  getMailTemplate: () => fetch('/api/admin/mail-template').then(json),
+  saveMailTemplate: (p) => fetch('/api/admin/mail-template', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),
+  getEntityMailTemplate: (id) => fetch(`/api/admin/entities/${id}/mail-template`).then(json),
+  saveEntityMailTemplate: (id, p) => fetch(`/api/admin/entities/${id}/mail-template`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),
+  getMyMailTemplate: (entityId) => fetch(`/api/my/mail-template/${entityId}`).then(json),
+  saveMyMailTemplate: (entityId, p) => fetch(`/api/my/mail-template/${entityId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),
+  previewMail: (edits, entityId) => fetch('/api/mail/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ edits, entityId }) }).then(json),
 
   // Backup / restore
   exportData: () => fetch('/api/admin/export').then((r) => r.json()),

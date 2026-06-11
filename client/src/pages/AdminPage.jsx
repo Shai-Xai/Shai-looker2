@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import IntegrationsForm from '../components/IntegrationsForm.jsx';
+import MailTemplateEditor from '../components/MailTemplateEditor.jsx';
 import { BriefingConfigForm } from '../components/BriefingTuneModal.jsx';
 
 // Icon control: an emoji, or an uploaded image (downscaled to a small data-URL).
@@ -197,7 +198,7 @@ function Entities({ fields }) {
 // One client's settings hub: a left nav (Settings / Suites / Logins) + panel.
 function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites, users, onChange, onBack }) {
   const [section, setSection] = useState('settings');
-  const nav = [['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['briefing', 'Briefing'], ['messages', 'Messages'], ['settlements', 'Settlements'], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations']];
+  const nav = [['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['briefing', 'Briefing'], ['messages', 'Messages'], ['settlements', 'Settlements'], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations'], ['email', 'Email branding']];
   return (
     <div>
       <button style={miniBtnOutline} onClick={onBack}>← All clients</button>
@@ -228,6 +229,12 @@ function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites,
           {section === 'settlements' && <Settlements entityId={entity.id} />}
           {section === 'logins' && <EntityLogins entity={entity} users={users} onChange={onChange} />}
           {section === 'integrations' && <ClientIntegrations entity={entity} />}
+          {section === 'email' && (
+            <div>
+              <p style={hint}>This client's email branding. Anything left blank inherits the Howler platform default. Sends still come from Howler's verified domain.</p>
+              <MailTemplateEditor scope="admin-client" entityId={entity.id} canTest />
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -1119,7 +1126,10 @@ function AdminIntegrations() {
   return (
     <div>
       <p style={hint}>The primary Looker, Anthropic and email accounts for the whole platform. These override the values in <code>.env</code>. Clients can set their own Looker/Anthropic (Client → Integrations), which take precedence for their data.</p>
-      <IntegrationsForm value={value} showResend onTestEmail={api.sendMailTest} onSave={async (p) => setValue(await api.saveAdminIntegrations(p))} />
+      <IntegrationsForm value={value} showResend onTestEmail={() => api.sendMailTest()} onSave={async (p) => setValue(await api.saveAdminIntegrations(p))} />
+      <h3 style={{ fontSize: 15, fontWeight: 700, margin: '24px 0 4px' }}>Email template — platform default</h3>
+      <p style={hint}>The default look of every notification email. Each client can layer their own branding on top (Client → Email branding).</p>
+      <MailTemplateEditor scope="platform" canTest />
     </div>
   );
 }

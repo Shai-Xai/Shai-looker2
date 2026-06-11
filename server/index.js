@@ -705,15 +705,76 @@ app.put('/api/admin/integrations', auth.requireAdmin, (req, res) => {
 });
 
 // Send a test email to the signed-in admin to prove the Resend setup works.
+// Optional { entityId } renders with that client's branding so you can preview
+// exactly what a client's recipients will get.
 app.post('/api/admin/mail/test', auth.requireAdmin, async (req, res) => {
+  const entityId = (req.body || {}).entityId || null;
+  const branding = entityId ? mailer.resolveBranding(entityId) : undefined;
   const { html, text } = mailer.notificationEmail({
     title: 'Pulse email is working',
     body: 'This is a test from Howler : Pulse. Outbound notifications (must-acknowledge messages, replies from Howler) will arrive like this.',
-    ctaText: 'Open Pulse', ctaPath: '/',
+    ctaText: 'Open Pulse', ctaPath: '/', branding,
   });
-  const r = await mailer.send({ to: req.user.email, subject: 'Howler : Pulse — test email', html, text });
+  const r = await mailer.send({ to: req.user.email, subject: 'Howler : Pulse — test email', html, text, fromName: branding?.senderName });
   if (r.ok) return res.json({ ok: true, to: req.user.email });
   res.status(400).json({ error: r.error || r.reason || 'Email is not configured yet' });
+});
+
+// ─── Email templates / branding ────────────────────────────────────────────────
+// Platform default (admin) and per-client overrides (admin + client self-serve).
+// Branding fields are plain presentation (logo / colour / sender / wording) —
+// never secrets — so they ride along to the browser freely.
+const MAIL_FIELDS = Object.keys(mailer.DEFAULTS);
+const cleanBrandingPatch = (body) => {
+  const out = {};
+  for (const k of MAIL_FIELDS) if (body && k in body) out[k] = String(body[k] ?? '').slice(0, 4000);
+  return out;
+};
+
+app.get('/api/admin/mail-template', auth.requireAdmin, (_req, res) =>
+  res.json({ template: mailer.getPlatformTemplate(), defaults: mailer.DEFAULTS }));
+app.put('/api/admin/mail-template', auth.requireAdmin, (req, res) =>
+  res.json({ template: mailer.setPlatformTemplate(cleanBrandingPatch(req.body || {})), defaults: mailer.DEFAULTS }));
+
+// Per-client branding view: the raw overrides + the fully resolved result.
+function clientMailView(entityId) {
+  return { branding: db.getEntityMailBranding(entityId), resolved: mailer.resolveBranding(entityId), defaults: mailer.DEFAULTS };
+}
+app.get('/api/admin/entities/:id/mail-template', auth.requireAdmin, (req, res) => {
+  if (!db.getEntity(req.params.id)) return res.status(404).json({ error: 'Not found' });
+  res.json(clientMailView(req.params.id));
+});
+app.put('/api/admin/entities/:id/mail-template', auth.requireAdmin, (req, res) => {
+  if (!db.getEntity(req.params.id)) return res.status(404).json({ error: 'Not found' });
+  db.setEntityMailBranding(req.params.id, cleanBrandingPatch(req.body || {}));
+  res.json(clientMailView(req.params.id));
+});
+
+// Client self-service for their own entity.
+app.get('/api/my/mail-template/:entityId', auth.requireAuth, (req, res) => {
+  if (!(req.user.entityIds || []).includes(req.params.entityId)) return res.status(403).json({ error: 'Not allowed' });
+  res.json(clientMailView(req.params.entityId));
+});
+app.put('/api/my/mail-template/:entityId', auth.requireAuth, (req, res) => {
+  if (!(req.user.entityIds || []).includes(req.params.entityId)) return res.status(403).json({ error: 'Not allowed' });
+  db.setEntityMailBranding(req.params.entityId, cleanBrandingPatch(req.body || {}));
+  res.json(clientMailView(req.params.entityId));
+});
+
+// Live preview: render the email HTML with unsaved edits layered on the right
+// base. Clients may only preview their own entity.
+app.post('/api/mail/preview', auth.requireAuth, (req, res) => {
+  const { edits, entityId } = req.body || {};
+  if (entityId && req.user.role !== 'admin' && !(req.user.entityIds || []).includes(entityId)) {
+    return res.status(403).json({ error: 'Not allowed' });
+  }
+  const branding = mailer.previewBranding({ edits: cleanBrandingPatch(edits || {}), entityId });
+  const { html } = mailer.notificationEmail({
+    title: 'Sound check signoff needed',
+    body: 'Hi — please review the stage plot and confirm the gate times before Friday. Tap below to acknowledge in Pulse.',
+    ctaText: 'Acknowledge in Pulse', ctaPath: '/inbox', branding,
+  });
+  res.json({ html, resolved: branding });
 });
 
 // Admin: a specific client's overrides.
