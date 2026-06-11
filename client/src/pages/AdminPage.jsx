@@ -302,12 +302,22 @@ function ClientSuites({ entity, suites, allEntities, allSets, dashTitle, fields,
 function AdminLogins({ admins, onChange }) {
   const [form, setForm] = useState({ email: '', password: '' });
   const [error, setError] = useState(null);
+  const [editing, setEditing] = useState(null); // { id, email, password }
   const add = async () => {
     setError(null);
     try { await api.adminCreateUser({ email: form.email, password: form.password, role: 'admin', entityIds: [] }); setForm({ email: '', password: '' }); onChange(); }
     catch (e) { setError(e.message); }
   };
   const del = async (u) => { if (confirm(`Delete admin ${u.email}?`)) { await api.adminDeleteUser(u.id); onChange(); } };
+  const save = async () => {
+    setError(null);
+    try {
+      const patch = { email: editing.email };
+      if (editing.password) patch.password = editing.password; // blank = keep current
+      await api.adminUpdateUser(editing.id, patch);
+      setEditing(null); onChange();
+    } catch (e) { setError(e.message); }
+  };
   return (
     <div style={cardStyle}>
       <p style={hint}>Full-access logins for your team — they see every client and the admin console.</p>
@@ -315,12 +325,28 @@ function AdminLogins({ admins, onChange }) {
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <tbody>
             {admins.map((u) => (
-              <tr key={u.id}>
-                <td style={td}>{u.email}</td>
-                <td style={{ ...td, textAlign: 'right' }}>
-                  <button style={delBtn} onClick={() => del(u)} disabled={admins.length === 1} title={admins.length === 1 ? 'Cannot delete the only admin' : ''}>Delete</button>
-                </td>
-              </tr>
+              editing?.id === u.id ? (
+                <tr key={u.id}>
+                  <td style={td}>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      <input style={input} value={editing.email} onChange={(e) => setEditing({ ...editing, email: e.target.value })} placeholder="Email" autoComplete="off" />
+                      <input style={input} type="text" value={editing.password} onChange={(e) => setEditing({ ...editing, password: e.target.value })} placeholder="New password (blank = keep)" autoComplete="off" />
+                    </div>
+                  </td>
+                  <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}>
+                    <button style={miniBtn} onClick={save} disabled={!editing.email.trim()}>Save</button>{' '}
+                    <button style={delBtn} onClick={() => setEditing(null)}>Cancel</button>
+                  </td>
+                </tr>
+              ) : (
+                <tr key={u.id}>
+                  <td style={td}>{u.email}</td>
+                  <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}>
+                    <button style={miniBtn} onClick={() => setEditing({ id: u.id, email: u.email, password: '' })}>Edit</button>{' '}
+                    <button style={delBtn} onClick={() => del(u)} disabled={admins.length === 1} title={admins.length === 1 ? 'Cannot delete the only admin' : ''}>Delete</button>
+                  </td>
+                </tr>
+              )
             ))}
           </tbody>
         </table>
