@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import IntegrationsForm from '../components/IntegrationsForm.jsx';
 import MailTemplateEditor from '../components/MailTemplateEditor.jsx';
+import OwlAddressCard from '../components/OwlAddressCard.jsx';
 import { BriefingConfigForm } from '../components/BriefingTuneModal.jsx';
 
 // Icon control: an emoji, or an uploaded image (downscaled to a small data-URL).
@@ -1130,9 +1131,58 @@ function AdminIntegrations() {
       <h3 style={{ fontSize: 15, fontWeight: 700, margin: '24px 0 4px' }}>Email template — platform default</h3>
       <p style={hint}>The default look of every notification email. Each client can layer their own branding on top (Client → Email branding).</p>
       <MailTemplateEditor scope="platform" canTest />
+      <h3 style={{ fontSize: 15, fontWeight: 700, margin: '28px 0 4px' }}>Inbound email — CC the Owl</h3>
+      <p style={hint}>Lets emails be captured into client inboxes by CC’ing a per-client address. Set the inbound domain, then point your mail forwarder at the webhook below.</p>
+      <InboundConfig />
     </div>
   );
 }
+
+// Platform inbound config: the inbound domain + the webhook URL & secret to wire
+// into whatever forwards mail (Cloudflare Email Worker, SendGrid Parse, etc.).
+function InboundConfig() {
+  const [cfg, setCfg] = useState(null);
+  const [domain, setDomain] = useState('');
+  const [saved, setSaved] = useState(false);
+  const [copied, setCopied] = useState('');
+  useEffect(() => { api.getInboundConfig().then((c) => { setCfg(c); setDomain(c.domain || ''); }); }, []);
+  if (!cfg) return <Muted>Loading…</Muted>;
+  const webhookUrl = `${window.location.origin}${cfg.webhookPath}`;
+  const copy = (label, text) => { (navigator.clipboard?.writeText(text) || Promise.reject()).then(() => { setCopied(label); setTimeout(() => setCopied(''), 1500); }).catch(() => window.prompt('Copy:', text)); };
+  const save = async () => { const c = await api.saveInboundConfig({ domain }); setCfg(c); setDomain(c.domain || ''); setSaved(true); setTimeout(() => setSaved(false), 1600); };
+  const regen = async () => { if (window.confirm('Rotate the webhook secret? Your forwarder must be updated with the new value.')) setCfg(await api.saveInboundConfig({ regenerateSecret: true })); };
+  return (
+    <div style={{ ...cardStyle, display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div>
+        <div style={lblS}>Inbound domain</div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <input style={inS} value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="in.howler-pulse.com" />
+          <button style={miniBtn} onClick={save}>Save</button>
+          {saved && <span style={{ color: 'var(--success,#10b981)', fontSize: 13, fontWeight: 600 }}>✓</span>}
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>Client addresses become <code>token@{domain || 'in.yourdomain.com'}</code>.</div>
+      </div>
+      <div>
+        <div style={lblS}>Webhook URL</div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <code style={{ ...inS, padding: '8px 10px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{webhookUrl}</code>
+          <button style={miniBtn} onClick={() => copy('url', webhookUrl)}>{copied === 'url' ? '✓' : 'Copy'}</button>
+        </div>
+      </div>
+      <div>
+        <div style={lblS}>Webhook secret</div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <code style={{ ...inS, padding: '8px 10px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cfg.secret}</code>
+          <button style={miniBtn} onClick={() => copy('secret', cfg.secret)}>{copied === 'secret' ? '✓' : 'Copy'}</button>
+          <button style={{ ...miniBtn, background: 'transparent', color: 'var(--muted)' }} onClick={regen}>Rotate</button>
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>Send it as header <code>x-owl-secret</code> on every webhook POST.</div>
+      </div>
+    </div>
+  );
+}
+const lblS = { fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', marginBottom: 5 };
+const inS = { flex: 1, boxSizing: 'border-box', padding: '9px 12px', border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 13, outline: 'none', background: 'var(--card)', color: 'var(--text)' };
 
 // Per-client integrations (admin), shown inside a client's detail nav.
 function ClientIntegrations({ entity }) {
@@ -1224,6 +1274,7 @@ function ClientMessages({ entity }) {
 
   return (
     <div>
+      <OwlAddressCard entityId={entity.id} admin />
       <p style={hint}>Send a message to <b>{entity.name}</b>. It lands in their Inbox; “Must acknowledge” raises a banner on their home until they confirm — and you'll see who acknowledged, when.</p>
       <div style={cardStyle}>
         <input style={{ ...input, width: '100%', fontWeight: 700, marginBottom: 8 }} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Subject (optional)" />

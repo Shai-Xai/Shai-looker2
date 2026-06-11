@@ -133,6 +133,7 @@ addColumn('entities', 'logo', "TEXT NOT NULL DEFAULT ''"); // client brand image
 addColumn('entities', 'ai_context', "TEXT NOT NULL DEFAULT ''"); // client-specific AI background
 addColumn('entities', 'integrations', "TEXT NOT NULL DEFAULT '{}'"); // per-client API credentials (Looker / Anthropic)
 addColumn('entities', 'mail_branding', "TEXT NOT NULL DEFAULT '{}'"); // per-client email branding (logo/colour/sender/wording)
+addColumn('entities', 'inbox_token', "TEXT NOT NULL DEFAULT ''"); // unique token for the client's CC-the-Owl inbound address
 // Sub-dashboards: within a set, a dashboard may nest one level under a parent
 // from the same set — children render as tabs inside the parent, not as
 // sidebar rows. The relation lives on the membership so the same dashboard can
@@ -427,6 +428,34 @@ function setEntityMailBranding(id, patch) {
   const next = { ...cur, ...(patch || {}) };
   db.prepare('UPDATE entities SET mail_branding=? WHERE id=?').run(JSON.stringify(next), id);
   return getEntityMailBranding(id);
+}
+
+// ── CC-the-Owl inbound address tokens ──
+// Each entity owns a short, URL/email-safe token used as the local part of its
+// inbound address (e.g. <name>-<token>@in.<domain>). Generated lazily and
+// rotatable; lookups route an arriving email to the right client.
+function makeInboxToken(name) {
+  const slug = String(name || 'client').toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 16) || 'client';
+  return `${slug}-${uuid().slice(0, 6)}`;
+}
+function ensureInboxToken(id) {
+  const r = db.prepare('SELECT name, inbox_token FROM entities WHERE id=?').get(id);
+  if (!r) return '';
+  if (r.inbox_token) return r.inbox_token;
+  const tok = makeInboxToken(r.name);
+  db.prepare('UPDATE entities SET inbox_token=? WHERE id=?').run(tok, id);
+  return tok;
+}
+function regenerateInboxToken(id) {
+  const r = db.prepare('SELECT name FROM entities WHERE id=?').get(id);
+  if (!r) return '';
+  const tok = makeInboxToken(r.name);
+  db.prepare('UPDATE entities SET inbox_token=? WHERE id=?').run(tok, id);
+  return tok;
+}
+function findEntityByInboxToken(token) {
+  if (!token) return null;
+  return rowToEntity(db.prepare('SELECT * FROM entities WHERE inbox_token=? COLLATE NOCASE').get(String(token)));
 }
 
 // ─── Users ────────────────────────────────────────────────────────────────────
@@ -876,6 +905,7 @@ module.exports = {
   exportAll, importAll,
   listEntities, getEntity, createEntity, updateEntity, deleteEntity, getEntityIntegrations, setEntityIntegrations,
   getEntityMailBranding, setEntityMailBranding,
+  ensureInboxToken, regenerateInboxToken, findEntityByInboxToken,
   listUsers, getUser, getUserByEmail, createUser, updateUser, deleteUser, verifyCredentials, publicUser, setUserEntities,
   listDashboards, getDashboard, createDashboard, updateDashboard, removeDashboard,
   // sets (reusable collections)

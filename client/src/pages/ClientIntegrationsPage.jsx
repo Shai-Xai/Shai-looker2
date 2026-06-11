@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { api } from '../lib/api.js';
 import IntegrationsForm from '../components/IntegrationsForm.jsx';
 import MailTemplateEditor from '../components/MailTemplateEditor.jsx';
+import OwlAddressCard from '../components/OwlAddressCard.jsx';
 
 // Client self-service: connect your own Looker / Anthropic accounts and brand
 // your notification emails. Everything falls back to Howler's defaults if blank.
@@ -21,6 +22,9 @@ export default function ClientIntegrationsPage() {
         items.map((it) => (
           <div key={it.entityId} style={{ marginBottom: 40 }}>
             {items.length > 1 && <h2 style={{ fontSize: 17, fontWeight: 700, marginBottom: 12 }}>{it.name}</h2>}
+            <div style={{ maxWidth: 680 }}>
+              <OwlAddressCard entityId={it.entityId} />
+            </div>
             <div style={{ maxWidth: 680 }}>
               <IntegrationsForm
                 value={it}

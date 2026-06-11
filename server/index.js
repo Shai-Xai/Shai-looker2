@@ -750,6 +750,28 @@ app.put('/api/admin/entities/:id/mail-template', auth.requireAdmin, (req, res) =
   res.json(clientMailView(req.params.id));
 });
 
+// ── CC-the-Owl: a client's inbound address (admin + client self-service) ───────
+const inboundDomain = () => db.getSetting('inbound_domain', '');
+function inboxView(entityId) {
+  const token = db.ensureInboxToken(entityId);
+  const domain = inboundDomain();
+  return { token, domain, address: domain ? `${token}@${domain}` : '', configured: !!domain };
+}
+app.get('/api/admin/entities/:id/inbox', auth.requireAdmin, (req, res) => {
+  if (!db.getEntity(req.params.id)) return res.status(404).json({ error: 'Not found' });
+  res.json(inboxView(req.params.id));
+});
+app.post('/api/admin/entities/:id/inbox/regenerate', auth.requireAdmin, (req, res) => {
+  if (!db.getEntity(req.params.id)) return res.status(404).json({ error: 'Not found' });
+  db.regenerateInboxToken(req.params.id);
+  res.json(inboxView(req.params.id));
+});
+app.get('/api/my/inbox/:entityId', auth.requireAuth, (req, res) => {
+  if (!(req.user.entityIds || []).includes(req.params.entityId)) return res.status(403).json({ error: 'Not allowed' });
+  const v = inboxView(req.params.entityId);
+  res.json({ address: v.address, domain: v.domain, configured: v.configured }); // no token churn surface for clients
+});
+
 // Client self-service for their own entity.
 app.get('/api/my/mail-template/:entityId', auth.requireAuth, (req, res) => {
   if (!(req.user.entityIds || []).includes(req.params.entityId)) return res.status(403).json({ error: 'Not allowed' });

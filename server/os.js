@@ -55,6 +55,13 @@ function mount(app, { db, auth, mailer }) {
     );
   `);
 
+  // Idempotency for inbound email: store the source Message-ID so webhook
+  // retries don't double-post. (ALTER for DBs created before this column.)
+  try {
+    const cols = sql.prepare('PRAGMA table_info(os_messages)').all().map((c) => c.name);
+    if (!cols.includes('ext_id')) sql.exec("ALTER TABLE os_messages ADD COLUMN ext_id TEXT NOT NULL DEFAULT ''");
+  } catch (e) { console.error('[os] ext_id migration skipped:', e.message); }
+
   const enabled = () => db.getSetting('os_enabled', '1') !== '0'; // on by default; kill switch
   const isAdmin = (u) => u && u.role === 'admin';
   const entityIds = (u) => u?.entityIds || [];
@@ -218,6 +225,94 @@ function mount(app, { db, auth, mailer }) {
 
   // Status (used by the client to know whether to show the feature at all).
   app.get('/api/os/status', auth.requireAuth, (req, res) => res.json({ enabled: enabled() }));
+
+  // ── CC-the-Owl: inbound email ingestion ──────────────────────────────────────
+  // External mail (email/forwards) lands here via a webhook. The Owl is CC'd on
+  // a unique per-client address; we route by that address's token, thread by
+  // subject, and post it as an `email`-channel message into the OS spine — so
+  // outside comms become tracked, recallable knowledge alongside in-app messages.
+  const inboundSecret = () => {
+    let s = db.getSetting('inbound_secret', '');
+    if (!s) { s = crypto.randomBytes(18).toString('base64url'); db.setSetting('inbound_secret', s); }
+    return s;
+  };
+  // Local part of any recipient that matches a known client token wins.
+  const tokenFromAddress = (addr) => String(addr || '').split('@')[0].trim().toLowerCase();
+  const normSubject = (s) => String(s || '').replace(/^((re|fwd|fw)\s*:\s*)+/i, '').trim().slice(0, 200);
+  const stripAngle = (a) => String(a || '').replace(/.*<([^>]+)>.*/, '$1').trim().toLowerCase();
+  const asList = (v) => (Array.isArray(v) ? v : String(v || '').split(',')).map(stripAngle).filter(Boolean);
+
+  // Resolve which client an inbound email belongs to, by scanning recipients
+  // (to + cc) for a local part that equals a client's inbox token.
+  function routeEntity(recipients) {
+    for (const addr of recipients) {
+      const ent = db.findEntityByInboxToken(tokenFromAddress(addr));
+      if (ent) return ent;
+    }
+    return null;
+  }
+  function authorTypeFor(entityId, fromEmail) {
+    const u = db.getUserByEmail(fromEmail);
+    if (u && u.role === 'admin') return 'howler';
+    return 'client'; // client login OR an external participant writing into the thread
+  }
+
+  // Idempotent ingest. Returns { ok, threadId } | { skipped } | { error }.
+  function ingestInbound({ from, to, cc, subject, text, html, messageId }) {
+    const fromEmail = stripAngle(from);
+    const recipients = [...asList(to), ...asList(cc)];
+    const ent = routeEntity(recipients);
+    if (!ent) return { error: 'no matching client address', recipients };
+    if (messageId) {
+      const dup = sql.prepare('SELECT 1 FROM os_messages WHERE ext_id=? LIMIT 1').get(String(messageId));
+      if (dup) return { skipped: true, reason: 'duplicate message-id' };
+    }
+    const body = String(text || html || '').slice(0, 16000).trim() || '(no body)';
+    const subj = normSubject(subject) || '(no subject)';
+    const ts = now();
+    // Thread by normalised subject within the client; else open a new one.
+    let t = sql.prepare("SELECT * FROM os_threads WHERE entity_id=? AND subject_type='message' AND title=? COLLATE NOCASE ORDER BY updated_at DESC LIMIT 1").get(ent.id, subj);
+    let threadId;
+    if (t) { threadId = t.id; }
+    else {
+      threadId = uuid();
+      sql.prepare('INSERT INTO os_threads (id, entity_id, suite_id, subject_type, subject_id, title, priority, status, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
+        .run(threadId, ent.id, '', 'message', '', subj, 'normal', 'open', fromEmail, ts, ts);
+    }
+    const authorType = authorTypeFor(ent.id, fromEmail);
+    sql.prepare('INSERT INTO os_messages (id, thread_id, author_type, author_email, author_name, channel, body, created_at, ext_id) VALUES (?,?,?,?,?,?,?,?,?)')
+      .run(uuid(), threadId, authorType, fromEmail, '', 'email', body, ts, String(messageId || ''));
+    touch(threadId);
+    return { ok: true, threadId, entityId: ent.id, created: !t };
+  }
+
+  // The webhook. NOT cookie-authed — protected by a shared secret (header
+  // `x-owl-secret` or `?secret=`) that whatever forwards mail must include.
+  // Transport-agnostic: Cloudflare Email Worker, SendGrid Parse, Resend inbound,
+  // etc. all just POST this JSON shape.
+  app.post('/api/inbound/email', requireOn, (req, res) => {
+    const given = req.get('x-owl-secret') || req.query.secret || (req.body || {}).secret || '';
+    if (given !== inboundSecret()) return res.status(401).json({ error: 'bad secret' });
+    const r = ingestInbound(req.body || {});
+    if (r.ok) return res.status(201).json({ ok: true, threadId: r.threadId });
+    if (r.skipped) return res.json({ ok: true, skipped: r.reason });
+    console.warn('[os] inbound unrouted:', r.error, r.recipients || '');
+    return res.status(202).json({ ok: false, error: r.error }); // 202: accepted but ignored
+  });
+
+  // Admin: inbound config (the secret + webhook URL to wire into the forwarder).
+  app.get('/api/os/admin/inbound', auth.requireAdmin, (req, res) => {
+    res.json({
+      domain: db.getSetting('inbound_domain', ''),
+      secret: inboundSecret(),
+      webhookPath: '/api/inbound/email',
+    });
+  });
+  app.put('/api/os/admin/inbound', auth.requireAdmin, (req, res) => {
+    if ((req.body || {}).domain !== undefined) db.setSetting('inbound_domain', String(req.body.domain || '').trim().replace(/^@/, ''));
+    if ((req.body || {}).regenerateSecret) db.setSetting('inbound_secret', crypto.randomBytes(18).toString('base64url'));
+    res.json({ domain: db.getSetting('inbound_domain', ''), secret: inboundSecret(), webhookPath: '/api/inbound/email' });
+  });
 
   console.log('[os] Experience OS spine mounted', enabled() ? '(enabled)' : '(disabled — set os_enabled=1)');
 }
