@@ -45,6 +45,9 @@ app.use(express.static(staticDir, {
 // admin exists.
 migrate.run();
 auth.seedAdmin();
+// Experience OS comms spine — self-contained module (own tables + routes under
+// /api/os). Remove this line + server/os.js to fully uninstall the feature.
+require('./os').mount(app, { db, auth });
 
 // ─── Health ───────────────────────────────────────────────────────────────────
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
