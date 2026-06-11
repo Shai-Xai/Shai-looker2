@@ -188,6 +188,79 @@ function notificationEmail({ title, body, ctaText = 'Open in Pulse', ctaPath = '
   return { html, text };
 }
 
+// Light **bold** → <strong> for narrative/headline text (everything escaped first).
+function mdBold(s) { return esc(s).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>'); }
+
+// Render a scheduled digest into the branded shell: headline, KPI stat cards,
+// analytical narrative, and role-appropriate suggested actions (each may deep
+// link into Pulse). `content` is the structured output of insights.digestBrief
+// with links already resolved ({label/value/delta/href} kpis, {text/href} actions).
+function digestEmail({ branding, entityId, assetScope, content, roleLabel, ctaPath = '/' }) {
+  const b = branding || resolveBranding(entityId);
+  const scope = assetScope || entityId;
+  const logoSrc = b.logo && b.logo.startsWith('data:') && scope ? `${baseUrl()}/mail-assets/logo/${scope}` : b.logo;
+  const brandMark = logoSrc
+    ? `<img src="${esc(logoSrc)}" alt="${esc(b.wordmark)}" style="max-height:40px;max-width:200px;display:block;" />`
+    : `<div style="font-size:15px;font-weight:800;letter-spacing:-0.02em;color:#111;">${esc(b.wordmark)}</div>`;
+  const headerLine = b.header ? `<div style="font-size:12.5px;color:#6e6e73;margin-top:5px;white-space:pre-wrap;">${esc(b.header)}</div>` : '';
+  const poweredBy = b.wordmark && b.wordmark.toLowerCase().includes('howler') ? ''
+    : '<div style="font-size:11px;color:#a1a1a6;margin-top:8px;">⚡ Powered by Howler : Pulse</div>';
+
+  // KPI cards laid out 3 per row (email-safe table).
+  let kpiHtml = '';
+  const kpis = content.kpis || [];
+  for (let i = 0; i < kpis.length; i += 3) {
+    const row = kpis.slice(i, i + 3).map((k) => `
+      <td style="padding:6px;" width="33%" valign="top">
+        <div style="background:#fafafa;border:1px solid #ececf0;border-radius:12px;padding:13px 14px;">
+          <div style="font-size:11px;color:#86868b;text-transform:uppercase;letter-spacing:0.04em;font-weight:700;">${esc(k.label)}</div>
+          <div style="font-size:21px;font-weight:800;color:#111;margin-top:4px;letter-spacing:-0.02em;">${esc(k.value)}</div>
+          ${k.delta ? `<div style="font-size:11.5px;font-weight:700;margin-top:2px;color:${/^-|↓|▼|down|behind/i.test(k.delta) ? '#d11' : '#1a8a4a'};">${esc(k.delta)}</div>` : ''}
+        </div>
+      </td>`).join('');
+    kpiHtml += `<tr>${row}</tr>`;
+  }
+  const kpiTable = kpis.length ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:6px 0 4px;border-collapse:collapse;">${kpiHtml}</table>` : '';
+
+  const narrative = (content.narrative || []).map((p) => `<p style="font-size:14px;line-height:1.6;color:#3a3a3c;margin:0 0 12px;">${mdBold(p)}</p>`).join('');
+  const actions = (content.actions || []).filter((a) => a.text).map((a) => {
+    const txt = `<span style="color:#111;font-weight:600;">${esc(a.text)}</span>`;
+    return `<li style="margin:0 0 8px;line-height:1.5;">${a.href ? `<a href="${esc(a.href)}" style="color:${esc(b.brandColor)};text-decoration:none;">${esc(a.text)} →</a>` : txt}</li>`;
+  }).join('');
+  const actionsBlock = actions ? `
+    <div style="margin-top:18px;padding-top:16px;border-top:1px solid #ececf0;">
+      <div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:0.05em;color:#86868b;margin-bottom:8px;">Suggested actions</div>
+      <ul style="margin:0;padding-left:18px;font-size:13.5px;color:#3a3a3c;">${actions}</ul>
+    </div>` : '';
+
+  const url = `${baseUrl()}${ctaPath}`;
+  const html = `<!doctype html><html><body style="margin:0;padding:0;background:#f5f5f7;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
+  <div style="display:none;max-height:0;overflow:hidden;">${esc(content.headline || '').slice(0, 140)}</div>
+  <div style="max-width:600px;margin:0 auto;padding:28px 16px;">
+    <div style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:flex-start;">
+      <div>${brandMark}${headerLine}</div>
+      <div style="font-size:11px;color:#a1a1a6;text-align:right;">${esc(roleLabel || '')} digest<br>${new Date().toLocaleDateString('en-ZA', { weekday: 'short', day: 'numeric', month: 'short' })}</div>
+    </div>
+    <div style="background:#ffffff;border:1px solid #e8e8ec;border-radius:14px;padding:24px;">
+      ${content.headline ? `<div style="font-size:18px;font-weight:800;color:#111;margin-bottom:14px;line-height:1.35;letter-spacing:-0.01em;">${mdBold(content.headline)}</div>` : ''}
+      ${kpiTable}
+      <div style="margin-top:14px;">${narrative}</div>
+      ${actionsBlock}
+      <a href="${url}" style="display:inline-block;margin-top:20px;background:${esc(b.brandColor)};color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;border-radius:980px;padding:11px 22px;">Open Pulse →</a>
+    </div>
+    <div style="font-size:11.5px;color:#86868b;margin-top:14px;line-height:1.5;white-space:pre-wrap;">${esc(b.footer)}${poweredBy}</div>
+  </div>
+</body></html>`;
+
+  const textParts = [content.headline || ''];
+  for (const k of kpis) textParts.push(`• ${k.label}: ${k.value}${k.delta ? ` (${k.delta})` : ''}`);
+  textParts.push('', ...(content.narrative || []));
+  if (content.actions?.length) { textParts.push('', 'Suggested actions:'); for (const a of content.actions) textParts.push(`- ${a.text}`); }
+  textParts.push('', `Open Pulse: ${url}`, '', b.footer);
+  const text = textParts.join('\n').replace(/\*\*/g, '');
+  return { html, text, subject: content.subject };
+}
+
 // Branding to render for a live preview: unsaved `edits` layered over the right
 // base (a client's resolved branding, or the platform template for the platform
 // editor). Used by the preview endpoint so editors see exactly what will send.
@@ -198,5 +271,5 @@ function previewBranding({ edits, entityId } = {}) {
 
 module.exports = {
   init, isConfigured, send, status, recent, notificationEmail, baseUrl,
-  DEFAULTS, getPlatformTemplate, setPlatformTemplate, resolveBranding, previewBranding,
+  DEFAULTS, getPlatformTemplate, setPlatformTemplate, resolveBranding, previewBranding, digestEmail,
 };

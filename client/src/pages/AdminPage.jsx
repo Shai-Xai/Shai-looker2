@@ -4,6 +4,7 @@ import { api } from '../lib/api.js';
 import IntegrationsForm from '../components/IntegrationsForm.jsx';
 import MailTemplateEditor from '../components/MailTemplateEditor.jsx';
 import OwlAddressCard from '../components/OwlAddressCard.jsx';
+import DigestManager from '../components/DigestManager.jsx';
 import { BriefingConfigForm } from '../components/BriefingTuneModal.jsx';
 
 // Icon control: an emoji, or an uploaded image (downscaled to a small data-URL).
@@ -199,7 +200,7 @@ function Entities({ fields }) {
 // One client's settings hub: a left nav (Settings / Suites / Logins) + panel.
 function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites, users, onChange, onBack }) {
   const [section, setSection] = useState('settings');
-  const nav = [['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['briefing', 'Briefing'], ['messages', 'Messages'], ['settlements', 'Settlements'], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations'], ['email', 'Email branding']];
+  const nav = [['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['briefing', 'Briefing'], ['messages', 'Messages'], ['digests', 'Digests'], ['settlements', 'Settlements'], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations'], ['email', 'Email branding']];
   return (
     <div>
       <button style={miniBtnOutline} onClick={onBack}>← All clients</button>
@@ -227,6 +228,12 @@ function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites,
             </>
           )}
           {section === 'messages' && <ClientMessages entity={entity} />}
+          {section === 'digests' && (
+            <div>
+              <p style={hint}>Scheduled, role-personalised briefing emails for <b>{entity.name}</b>. Clients can also manage these themselves.</p>
+              <DigestManager entityId={entity.id} scope="admin" logins={users.filter((u) => u.role !== 'admin' && (u.entityIds || []).includes(entity.id))} />
+            </div>
+          )}
           {section === 'settlements' && <Settlements entityId={entity.id} />}
           {section === 'logins' && <EntityLogins entity={entity} users={users} onChange={onChange} />}
           {section === 'integrations' && <ClientIntegrations entity={entity} />}

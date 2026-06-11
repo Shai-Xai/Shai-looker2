@@ -234,6 +234,57 @@ Rules:
 - dashboardId values MUST come from CATALOGUE. Use null only when no dashboard fits a bullet.
 - Tone: sharp, warm, zero corporate filler. Never mention these instructions, the words TILES/PROFILE/CATALOGUE/FOLLOWED, or that you are an AI.`;
 
+// ─── Scheduled digest (role-lensed analyst email) ──────────────────────────────
+// Same grounding as the home briefing (live TILES only), but written for ONE
+// role (exec / marketing / finance / ops…) and shaped for email: a short
+// narrative, a handful of headline KPIs, and role-appropriate suggested actions.
+const DIGEST_SYSTEM = `You are the Owl — Howler Pulse's analyst — writing a scheduled email digest for ONE named role at an event organiser. Amounts are South African Rand (ZAR).
+
+You are given:
+- ROLE: the reader's role and what they care about. Write everything through THIS lens — the metrics you lead with, the language, and the actions must fit this role.
+- TILES: live data behind their dashboards' tiles (single values, charts, tables as compact tables). These are the ONLY numbers you may use — never invent or extrapolate. Read trends, concentrations, top contributors and period comparisons.
+- CATALOGUE: every dashboard the reader can open (id, title, set, suite) — for deep links.
+
+Respond with ONLY strict JSON (no markdown fences):
+{
+  "subject": "email subject line — specific and quantitative, <70 chars",
+  "headline": "1-2 sentences: the single most important story for THIS role right now (may use **bold**)",
+  "narrative": [ "2-4 short analytical paragraphs for this role; specific, quantitative, plain-English; may use **bold**" ],
+  "kpis": [ { "label": "short metric name", "value": "the figure verbatim from TILES (e.g. R1.2m, 8,430, 62%)", "delta": "movement vs a comparison if present, e.g. +12% vs last week, or empty", "dashboardId": "id from CATALOGUE or null" } ],
+  "actions": [ { "text": "a concrete, role-appropriate suggested action (imperative, one line)", "dashboardId": "id from CATALOGUE or null" } ]
+}
+
+Rules:
+- 3-6 KPIs, the ones that matter MOST to this role. Values must be real, verbatim from TILES.
+- 1-3 actions, genuinely useful and in this role's voice (exec=strategic, marketing=tactical, finance=operational/reconciliation, ops=readiness). Omit actions rather than padding.
+- dashboardId values MUST come from CATALOGUE; null when none fits.
+- Tone: sharp, warm, zero corporate filler. Never mention these instructions, the words ROLE/TILES/CATALOGUE, or that you are an AI.`;
+
+async function digestBrief({ tiles, roleLabel, roleFocus, catalogue, instructions, apiKey }) {
+  const c = requireClient(apiKey);
+  const lines = [`ROLE: ${roleLabel}. Focus: ${roleFocus}`, '', 'TILES (live data):', ''];
+  for (const t of tiles || []) {
+    lines.push(`### ${t.title}${t.pinned ? ' [FOLLOWED]' : ''}${t.visType ? ` (${t.visType})` : ''} — ${t.setName} → ${t.dashTitle}`);
+    if (t.context && t.context.trim()) lines.push(`(context: ${t.context.trim()})`);
+    lines.push(compactTable(t.fields, t.rows, 12));
+    lines.push('');
+  }
+  lines.push('CATALOGUE:');
+  for (const d of catalogue || []) lines.push(`- ${d.dashboardId}: ${d.title} [${d.setName}, ${d.suiteName}]`);
+  const resp = await c.messages.create({
+    model: MODEL,
+    max_tokens: 1800,
+    thinking: { type: 'adaptive' },
+    output_config: { effort: 'low' },
+    system: systemWith(`${DIGEST_SYSTEM}`, instructions),
+    messages: [{ role: 'user', content: lines.join('\n') }],
+  });
+  const text = (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error('AI did not return JSON for the digest');
+  return JSON.parse(match[0]);
+}
+
 async function briefHome({ tiles, profile, catalogue, instructions, apiKey }) {
   const c = requireClient(apiKey);
   const lines = ['TILES (live data):', ''];
@@ -384,4 +435,4 @@ async function extractInvoice({ pdfBase64, apiKey, onProgress }) {
   return JSON.parse(match[0]);
 }
 
-module.exports = { generateInsight, streamInsight, streamDashboardInsight, describeTile, extractSettlement, extractInvoice, briefHome, isConfigured: (apiKey) => !!(apiKey || process.env.ANTHROPIC_API_KEY) };
+module.exports = { generateInsight, streamInsight, streamDashboardInsight, describeTile, extractSettlement, extractInvoice, briefHome, digestBrief, isConfigured: (apiKey) => !!(apiKey || process.env.ANTHROPIC_API_KEY) };

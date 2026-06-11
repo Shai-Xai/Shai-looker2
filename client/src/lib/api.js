@@ -179,6 +179,21 @@ export const api = {
   regenEntityInbox: (id) => fetch(`/api/admin/entities/${id}/inbox/regenerate`, { method: 'POST' }).then(json),
   getMyInbox: (entityId) => fetch(`/api/my/inbox/${entityId}`).then(json),
 
+  // Scheduled digests — admin (any client) + client self-service (own entity)
+  getDigests: (entityId) => fetch(`/api/admin/entities/${entityId}/digests`).then(json),
+  createDigest: (entityId, b) => fetch(`/api/admin/entities/${entityId}/digests`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  updateDigest: (jobId, b) => fetch(`/api/admin/digests/${jobId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  deleteDigest: (jobId) => fetch(`/api/admin/digests/${jobId}`, { method: 'DELETE' }).then((r) => r.ok),
+  testDigest: (jobId) => fetch(`/api/admin/digests/${jobId}/test`, { method: 'POST' }).then(json),
+  runDigest: (jobId) => fetch(`/api/admin/digests/${jobId}/run`, { method: 'POST' }).then(json),
+  previewDigest: (b) => fetch('/api/admin/digests/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  getMyDigests: (entityId) => fetch(`/api/my/digests/${entityId}`).then(json),
+  createMyDigest: (entityId, b) => fetch(`/api/my/digests/${entityId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  updateMyDigest: (entityId, jobId, b) => fetch(`/api/my/digests/${entityId}/${jobId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  deleteMyDigest: (entityId, jobId) => fetch(`/api/my/digests/${entityId}/${jobId}`, { method: 'DELETE' }).then((r) => r.ok),
+  testMyDigest: (entityId, jobId) => fetch(`/api/my/digests/${entityId}/${jobId}/test`, { method: 'POST' }).then(json),
+  previewMyDigest: (entityId, b) => fetch(`/api/my/digests/${entityId}/preview`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+
   // Backup / restore
   exportData: () => fetch('/api/admin/export').then((r) => r.json()),
   importData: (data) => fetch('/api/admin/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(json),

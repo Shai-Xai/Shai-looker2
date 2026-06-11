@@ -1501,6 +1501,72 @@ app.get('/api/my/briefing', auth.requireAuth, async (req, res) => {
   }
 });
 
+// ─── Scheduled digests: role-lensed content builder ────────────────────────────
+// Default role "lenses" — what the analyst leads with for each audience. Editable
+// per client later; the job may also carry a custom focus override.
+const ROLE_LENSES = {
+  exec: { label: 'Executive', focus: 'Overall event health, revenue vs target and pacing, margin, and the biggest risks & opportunities. Board-level and strategic; suggested actions are strategic decisions.' },
+  marketing: { label: 'Marketing', focus: 'Demand and sales pace, channel/source performance, conversion, promo and campaign ROI, and audience mix. Tactical; suggested actions are marketing moves.' },
+  finance: { label: 'Finance', focus: 'Revenue, fees and costs, settlements and reconciliation, refunds and cashflow. Precise and numbers-first; suggested actions are financial/operational.' },
+  ops: { label: 'Operations', focus: 'Capacity and sell-through, entry/redemption and on-the-day readiness, staffing and logistics. Suggested actions are operational prep.' },
+};
+
+// Curated mode: fetch a specific set of tiles (by dashboard+tile id) instead of
+// the round-robin sweep buildFacts does.
+async function buildFactsFromTiles(user, entityId, picks) {
+  const { catalogue } = clientCatalogue(entityId);
+  const meta = Object.fromEntries(catalogue.map((c) => [c.dashboardId, c]));
+  const lockMaps = {};
+  const out = [];
+  for (const p of (picks || []).slice(0, 18)) {
+    const def = store.get(p.dashboardId);
+    const m = meta[p.dashboardId];
+    if (!def || !m) continue;
+    const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))];
+    const tile = tiles.find((t) => t.id === p.tileId);
+    if (!tile) continue;
+    if (!(m.suiteId in lockMaps)) lockMaps[m.suiteId] = expandLockMap(db.lockedFiltersForSuite(m.suiteId));
+    const body = tileQueryBody(tile, def, user, m.suiteId, lockMaps[m.suiteId] || {});
+    if (!body) continue;
+    try {
+      const data = await runLookerQuery('/queries/run/json_detail', body, undefined, false);
+      if (!data?.data?.length) continue;
+      out.push({ title: tile.title || '(untitled)', visType: tile.vis?.type, context: tile.aiContext || '', fields: data.fields, rows: data.data, dashboardId: def.id, suiteId: m.suiteId, setName: m.setName, dashTitle: def.title, pinned: false });
+    } catch { /* skip tile on error */ }
+  }
+  return { tiles: out, catalogue };
+}
+
+// Produce a role-lensed digest's structured content (links resolved). Throws if
+// AI/Looker isn't configured or there's no data — callers decide how to surface.
+async function buildDigestContent({ entityId, role, roleFocus, contentMode, tiles, recipientEmail }) {
+  const apiKey = anthropicKeyForEntity(entityId);
+  if (!insights.isConfigured(apiKey)) throw new Error('AI is not configured for this client');
+  const lens = ROLE_LENSES[role] || ROLE_LENSES.exec;
+  let user = recipientEmail ? db.getUserByEmail(recipientEmail) : null;
+  if (!user || !(user.entityIds || []).includes(entityId)) user = { id: `digest:${entityId}`, email: recipientEmail || '', role: 'client', entityIds: [entityId] };
+  const { tiles: factTiles, catalogue } = (contentMode === 'curated' && (tiles || []).length)
+    ? await buildFactsFromTiles(user, entityId, tiles)
+    : await buildFacts(user, entityId, false);
+  if (!factTiles.length) throw new Error('No tile data available to summarise');
+  const byId = Object.fromEntries(catalogue.map((c) => [c.dashboardId, c]));
+  const instructions = [aiInstructionsFor(null), briefingInstructionsFor(user, entityId, clientCatalogue(entityId).suites)].filter(Boolean).join('\n\n');
+  const raw = await insights.digestBrief({ tiles: factTiles, roleLabel: lens.label, roleFocus: roleFocus || lens.focus, catalogue, instructions, apiKey });
+  const href = (id) => { const c = id && byId[id]; return c ? `${mailer.baseUrl()}/suite/${c.suiteId}/d/${id}` : ''; };
+  return {
+    subject: String(raw.subject || '').slice(0, 120),
+    headline: String(raw.headline || '').slice(0, 600),
+    narrative: (raw.narrative || []).slice(0, 5).map((s) => String(s).slice(0, 800)).filter(Boolean),
+    kpis: (raw.kpis || []).slice(0, 6).map((k) => ({ label: String(k.label || '').slice(0, 40), value: String(k.value || '').slice(0, 30), delta: String(k.delta || '').slice(0, 40), href: href(k.dashboardId) })).filter((k) => k.label && k.value),
+    actions: (raw.actions || []).slice(0, 3).map((a) => ({ text: String(a.text || '').slice(0, 200), href: href(a.dashboardId) })).filter((a) => a.text),
+  };
+}
+
+// Scheduler — recurring/one-off digest jobs (own table + routes). Mounted here,
+// after its content builder + role lenses exist. Remove this line + scheduler.js
+// to uninstall. The 60s tick lives inside the module.
+require('./scheduler').mount(app, { db, auth, mailer, generateContent: buildDigestContent, roleLenses: ROLE_LENSES });
+
 // ─── Briefing configuration ─────────────────────────────────────────────────────
 // Admin: global briefing rules + editable phase defaults.
 app.get('/api/admin/briefing-settings', auth.requireAdmin, (_req, res) => {
