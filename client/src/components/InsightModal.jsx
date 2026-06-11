@@ -4,6 +4,7 @@ import { useIsMobile } from '../lib/useIsMobile.js';
 import { useScope } from '../lib/ScopeContext.jsx';
 import { useSheetDrag } from '../lib/useSheetDrag.js';
 import AiMark from './AiMark.jsx';
+import OwlQuips from './OwlQuips.jsx';
 
 // Full-height side panel showing an AI insight that streams in live as Claude
 // writes it. The reader can add extra context to steer the analysis and ask
@@ -169,9 +170,12 @@ export default function InsightModal({ tile, data, filters, onClose }) {
                   <div key={i} className={`msg-in${streaming && i === turns.length - 1 && t.content ? ' streaming' : ''}`} style={{ fontSize: 14, lineHeight: 1.65, color: 'var(--text)' }}>
                     {t.content
                       ? renderMarkdownish(t.content)
-                      : <span style={{ color: 'var(--muted)', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                          <span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>⏳</span>
-                          {i === 0 ? 'Analysing this tile…' : 'Thinking…'}
+                      : <span style={{ display: 'inline-flex', flexDirection: 'column', gap: 5 }}>
+                          <span style={{ color: 'var(--muted)', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                            <span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>⏳</span>
+                            {i === 0 ? 'Analysing this tile…' : 'Thinking…'}
+                          </span>
+                          <OwlQuips prefix="" style={{ paddingLeft: 26 }} />
                         </span>}
                     {/* Live cursor on the turn currently streaming. */}
                     {streaming && i === turns.length - 1 && t.content && <span style={cursor} />}

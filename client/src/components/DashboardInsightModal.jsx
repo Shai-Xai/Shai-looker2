@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import { useSheetDrag } from '../lib/useSheetDrag.js';
 import AiMark from './AiMark.jsx';
+import OwlQuips from './OwlQuips.jsx';
 
 // Whole-dashboard AI summary. Streams an executive summary built from every
 // tile's data (scoped + filtered exactly like the live view).
@@ -71,9 +72,12 @@ export default function DashboardInsightModal({ dashboardId, title, filterValues
           {error ? (
             <div style={{ color: 'var(--error)', fontSize: 14, lineHeight: 1.5 }}>⚠ {error}</div>
           ) : loading && !text ? (
-            <div style={{ color: 'var(--muted)', fontSize: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>⏳</span>
-              Reading every tile and summarising…
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div style={{ color: 'var(--muted)', fontSize: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>⏳</span>
+                Reading every tile and summarising…
+              </div>
+              <OwlQuips prefix="" style={{ paddingLeft: 26 }} />
             </div>
           ) : (
             <div className={loading ? 'streaming' : ''} style={{ fontSize: 14, lineHeight: 1.65, color: 'var(--text)' }}>

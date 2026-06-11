@@ -6,6 +6,7 @@ import { useIsMobile } from '../lib/useIsMobile.js';
 import { vtNavigate } from '../lib/viewTransition.js';
 import AiMark from '../components/AiMark.jsx';
 import BriefingTuneModal from '../components/BriefingTuneModal.jsx';
+import OwlQuips from '../components/OwlQuips.jsx';
 import TileFrame from '../components/TileFrame.jsx';
 import { ScopeProvider } from '../lib/ScopeContext.jsx';
 import { fmtR } from '../lib/money.js';
@@ -90,6 +91,7 @@ export default function ClientHome() {
               <div className="skel" style={{ width: '88%', height: 13 }} />
               <div className="skel" style={{ width: '70%', height: 13 }} />
               <div className="skel" style={{ width: '78%', height: 13 }} />
+              <OwlQuips style={{ marginTop: 4 }} />
             </div>
           ) : (
             <>
