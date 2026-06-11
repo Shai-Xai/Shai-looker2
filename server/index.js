@@ -1562,6 +1562,30 @@ async function buildDigestContent({ entityId, role, roleFocus, contentMode, tile
   };
 }
 
+// Selectable tiles per client, grouped by dashboard — drives the curated
+// digest picker. Only data tiles (with fields, not text) can be chosen.
+function digestTileCatalogue(entityId) {
+  const { catalogue } = clientCatalogue(entityId);
+  const dashboards = [];
+  for (const c of catalogue) {
+    const def = store.get(c.dashboardId);
+    if (!def) continue;
+    const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((x) => x.tiles || []))]
+      .filter((t) => t.type !== 'text' && t.query?.fields?.length)
+      .map((t) => ({ tileId: t.id, title: t.title || '(untitled)', visType: t.vis?.type || '' }));
+    if (tiles.length) dashboards.push({ dashboardId: c.dashboardId, title: c.title, setName: c.setName, suiteName: c.suiteName, tiles });
+  }
+  return { dashboards };
+}
+app.get('/api/admin/entities/:id/digest-tiles', auth.requireAdmin, (req, res) => {
+  if (!db.getEntity(req.params.id)) return res.status(404).json({ error: 'Not found' });
+  res.json(digestTileCatalogue(req.params.id));
+});
+app.get('/api/my/digest-tiles/:entityId', auth.requireAuth, (req, res) => {
+  if (!(req.user.entityIds || []).includes(req.params.entityId)) return res.status(403).json({ error: 'Not allowed' });
+  res.json(digestTileCatalogue(req.params.entityId));
+});
+
 // Scheduler — recurring/one-off digest jobs (own table + routes). Mounted here,
 // after its content builder + role lenses exist. Remove this line + scheduler.js
 // to uninstall. The 60s tick lives inside the module.

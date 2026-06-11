@@ -193,6 +193,8 @@ export const api = {
   deleteMyDigest: (entityId, jobId) => fetch(`/api/my/digests/${entityId}/${jobId}`, { method: 'DELETE' }).then((r) => r.ok),
   testMyDigest: (entityId, jobId) => fetch(`/api/my/digests/${entityId}/${jobId}/test`, { method: 'POST' }).then(json),
   previewMyDigest: (entityId, b) => fetch(`/api/my/digests/${entityId}/preview`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  getDigestTiles: (entityId) => fetch(`/api/admin/entities/${entityId}/digest-tiles`).then(json),
+  getMyDigestTiles: (entityId) => fetch(`/api/my/digest-tiles/${entityId}`).then(json),
 
   // Backup / restore
   exportData: () => fetch('/api/admin/export').then((r) => r.json()),
