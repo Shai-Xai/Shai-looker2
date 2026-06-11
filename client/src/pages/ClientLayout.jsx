@@ -367,7 +367,7 @@ export default function ClientLayout() {
         )}
         {(isMobile || collapsed) && (
           <div style={menuBar}>
-            <button style={menuBtn} onClick={() => (isMobile ? setNavOpen(true) : toggleCollapsed())}>☰&nbsp; Menu</button>
+            <button style={menuBtn} onClick={() => (isMobile ? setNavOpen(true) : toggleCollapsed())} title="Menu" aria-label="Open menu">☰</button>
             {activeTitle && <span style={{ flex: 1, fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeTitle}</span>}
             {/* Page (dashboard) actions portal in here — Summary · Filters · ⋯ */}
             <div ref={setActionsSlot} style={{ display: 'flex', alignItems: 'center', gap: 7, marginLeft: 'auto', flexShrink: 0 }} />
@@ -462,7 +462,7 @@ const navSheet = { width: '100%', maxHeight: '86dvh', background: 'var(--card)',
 const mRowSuite = { display: 'flex', alignItems: 'center', gap: 9, width: '100%', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer', padding: '12px 12px', borderRadius: 11, fontSize: 15, fontWeight: 700, color: 'var(--text)', lineHeight: 1.3 };
 const mRowSet = { display: 'flex', alignItems: 'center', gap: 9, width: '100%', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer', padding: '11px 12px', borderRadius: 10, fontSize: 14, fontWeight: 600, color: 'var(--muted-2)', lineHeight: 1.3 };
 const mRowDash = { display: 'flex', alignItems: 'center', gap: 9, width: '100%', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer', padding: '11px 12px', borderRadius: 10, fontSize: 14.5, color: 'var(--text)', lineHeight: 1.3 };
-const menuBtn = { flexShrink: 0, padding: '8px 16px', borderRadius: 980, border: '1px solid var(--hairline)', background: 'var(--card)', fontSize: 14, fontWeight: 600, cursor: 'pointer' };
+const menuBtn = { flexShrink: 0, width: 36, height: 36, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 980, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', fontSize: 16, lineHeight: 1, cursor: 'pointer' };
 const previewBar = { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '8px 16px', background: 'linear-gradient(90deg, #FF385C, #FF6B35)', color: '#fff', fontSize: 13 };
 const exitPreviewBtn = { flexShrink: 0, padding: '6px 14px', borderRadius: 980, border: 'none', background: 'rgba(255,255,255,0.25)', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer' };
 const iconBtn = { width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--hairline)', borderRadius: 7, background: 'var(--card)', color: 'var(--muted-2)', fontSize: 12, cursor: 'pointer' };
