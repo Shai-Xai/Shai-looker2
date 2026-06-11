@@ -680,7 +680,7 @@ function adminIntegrationsView() {
       configured: !!adminAnthropicKey(),
     },
     // Email (Resend) is platform-level only — it sends from Howler's domain.
-    resend: mailer.status(),
+    resend: { ...mailer.status(), recent: mailer.recent() },
   };
 }
 function entityIntegrationsView(entityId) {

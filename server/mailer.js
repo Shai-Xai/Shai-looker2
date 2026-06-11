@@ -20,7 +20,30 @@ let db = null;
 let lastError = '';
 let lastSentAt = '';
 
-function init(deps) { db = deps.db; }
+function init(deps) {
+  db = deps.db;
+  // Tiny send log so admins can see what the mailer did (sent / failed /
+  // skipped) from Admin → Integrations — survives restarts, unlike module
+  // state. Owned by this module; drop mail_log to uninstall.
+  db.db.exec(`CREATE TABLE IF NOT EXISTS mail_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    at TEXT NOT NULL, recipient TEXT NOT NULL, subject TEXT NOT NULL,
+    status TEXT NOT NULL, detail TEXT NOT NULL DEFAULT ''
+  )`);
+}
+
+function log(recipient, subject, status, detail = '') {
+  try {
+    db.db.prepare('INSERT INTO mail_log (at, recipient, subject, status, detail) VALUES (?,?,?,?,?)')
+      .run(new Date().toISOString(), recipient, subject, status, detail);
+    db.db.prepare('DELETE FROM mail_log WHERE id NOT IN (SELECT id FROM mail_log ORDER BY id DESC LIMIT 50)').run();
+  } catch { /* logging must never break sending */ }
+}
+
+function recent(limit = 15) {
+  try { return db.db.prepare('SELECT at, recipient, subject, status, detail FROM mail_log ORDER BY id DESC LIMIT ?').all(limit); }
+  catch { return []; }
+}
 
 const setting = (key, env) => ((db && db.getSetting(key)) || process.env[env] || '').trim();
 const apiKey = () => setting('resend_api_key', 'RESEND_API_KEY');
@@ -59,16 +82,18 @@ async function deliver({ to, subject, html, text }) {
 async function send({ to, subject, html, text }) {
   const recipients = (Array.isArray(to) ? to : [to]).filter(Boolean);
   if (!recipients.length) return { skipped: true, reason: 'no recipients' };
-  if (!enabled()) return { skipped: true, reason: 'mail disabled (mail_enabled=0)' };
-  if (!apiKey()) return { skipped: true, reason: 'no Resend API key configured' };
+  if (!enabled()) { log(recipients.join(', '), subject, 'skipped', 'mail disabled (mail_enabled=0)'); return { skipped: true, reason: 'mail disabled (mail_enabled=0)' }; }
+  if (!apiKey()) { log(recipients.join(', '), subject, 'skipped', 'no Resend API key configured'); return { skipped: true, reason: 'no Resend API key configured' }; }
   try {
     const r = await deliver({ to: recipients, subject, html, text });
     lastSentAt = new Date().toISOString();
     lastError = '';
+    log(recipients.join(', '), subject, 'sent', r.id || '');
     console.log(`[mailer] sent "${subject}" → ${recipients.join(', ')} (${r.id || 'ok'})`);
     return { ok: true, id: r.id };
   } catch (err) {
     lastError = err.message;
+    log(recipients.join(', '), subject, 'failed', err.message);
     console.error(`[mailer] FAILED "${subject}" → ${recipients.join(', ')}: ${err.message}`);
     return { ok: false, error: err.message };
   }
@@ -99,4 +124,4 @@ function notificationEmail({ title, body, ctaText = 'Open in Pulse', ctaPath = '
   return { html, text };
 }
 
-module.exports = { init, isConfigured, send, status, notificationEmail, baseUrl };
+module.exports = { init, isConfigured, send, status, recent, notificationEmail, baseUrl };

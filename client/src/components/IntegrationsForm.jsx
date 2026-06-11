@@ -104,6 +104,25 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
             autoComplete="off"
           />
           {value?.resend?.lastError && <div style={{ ...note, color: 'var(--error, #ef4444)', marginTop: 8 }}>Last send failed: {value.resend.lastError}</div>}
+          {(value?.resend?.recent || []).length > 0 && (
+            <>
+              <Lbl>Recent sends</Lbl>
+              <div style={{ fontSize: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {value.resend.recent.map((r, i) => (
+                  <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
+                    <span style={{ flexShrink: 0, fontWeight: 700, color: r.status === 'sent' ? 'var(--success, #10b981)' : r.status === 'failed' ? 'var(--error, #ef4444)' : 'var(--muted)' }}>
+                      {r.status === 'sent' ? '✓ Sent' : r.status === 'failed' ? '✗ Failed' : '— Skipped'}
+                    </span>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <b>{r.recipient}</b> · {r.subject}
+                      {r.status !== 'sent' && r.detail ? <span style={{ color: 'var(--error, #ef4444)' }}> — {r.detail}</span> : null}
+                    </span>
+                    <span style={{ flexShrink: 0, color: 'var(--muted)', fontSize: 11 }}>{new Date(r.at).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
           {onTestEmail && value?.resend?.configured && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12 }}>
               <button
