@@ -27,40 +27,76 @@ Dashboard → your domain → **Email → Email Routing → Get started**. Accep
 **MX + SPF** records it adds (one click). This lets the domain receive mail.
 
 ## 3. Cloudflare — the Email Worker
-Workers & Pages → **Create → Worker**. Replace the code with:
+Email Routing → **Email Workers → Create** (or Workers & Pages → Create →
+Worker). Name it `owl-inbound`, pick **"Create my own"**, and use the
+ZERO-DEPENDENCY version below — the dashboard editor can't install npm
+packages, so this parses the MIME inline:
 
 ```js
-import PostalMime from 'postal-mime';
-
 export default {
-  async email(message, env) {
-    const buf = await new Response(message.raw).arrayBuffer();
-    const email = await new PostalMime().parse(buf);
-    const addrs = (list) => (list || []).map((a) => a.address).filter(Boolean);
-    const payload = {
-      from: email.from?.address || message.from,
-      to: addrs(email.to),
-      cc: addrs(email.cc),
-      subject: email.subject || '',
-      text: email.text || '',
-      html: email.html || '',
-      messageId: email.messageId || message.headers.get('message-id') || '',
+  async email(message, env, ctx) {
+    const raw = await new Response(message.raw).text();
+    const cut = raw.search(/\r?\n\r?\n/);
+    const headerBlock = cut === -1 ? raw : raw.slice(0, cut);
+    let body = cut === -1 ? '' : raw.slice(cut).trim();
+
+    // Unfold + parse headers
+    const headers = {};
+    let cur = '';
+    const push = () => {
+      const m = cur.match(/^([^:]+):\s*([\s\S]*)$/);
+      if (m) { const k = m[1].toLowerCase(); headers[k] = headers[k] ? headers[k] + ', ' + m[2] : m[2]; }
     };
+    for (const ln of headerBlock.split(/\r?\n/)) {
+      if (/^\s/.test(ln) && cur) cur += ' ' + ln.trim();
+      else { if (cur) push(); cur = ln; }
+    }
+    if (cur) push();
+
+    // Best-effort text body: first text/plain (else text/html) part of a multipart
+    let text = body;
+    const bm = (headers['content-type'] || '').match(/boundary="?([^";]+)"?/i);
+    if (bm) {
+      const parts = body.split('--' + bm[1]);
+      const pick = parts.find(p => /content-type:\s*text\/plain/i.test(p))
+        || parts.find(p => /content-type:\s*text\/html/i.test(p)) || '';
+      const pi = pick.search(/\r?\n\r?\n/);
+      text = pi === -1 ? pick : pick.slice(pi).trim();
+      if (/quoted-printable/i.test(pick)) {
+        text = text.replace(/=\r?\n/g, '').replace(/=([0-9A-F]{2})/gi, (_, h) => String.fromCharCode(parseInt(h, 16)));
+      } else if (/base64/i.test(pick)) {
+        try { text = atob(text.replace(/\s+/g, '')); } catch {}
+      }
+    }
+
+    const addrs = (v) => (v || '').split(',')
+      .map(s => { const m = s.match(/<([^>]+)>/); return (m ? m[1] : s).trim(); })
+      .filter(s => s.includes('@'));
+
     await fetch(env.OWL_WEBHOOK_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-owl-secret': env.OWL_SECRET },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        from: message.from,
+        to: [...new Set([message.to, ...addrs(headers['to'])])], // envelope recipient first — catches BCC'd owl addresses
+        cc: addrs(headers['cc']),
+        subject: headers['subject'] || '',
+        text: text.slice(0, 15000),
+        html: '',
+        messageId: headers['message-id'] || '',
+      }),
     });
   },
 };
 ```
 
-- Add the dependency: in the Worker editor, `postal-mime` resolves automatically
-  on deploy; if using Wrangler locally, `npm i postal-mime`.
-- Worker → **Settings → Variables**: add
+(If deploying via Wrangler locally instead, the `postal-mime` version in git
+history also works — `npm i postal-mime` first.)
+
+- Worker → **Settings → Variables and Secrets**: add
   - `OWL_WEBHOOK_URL` = the webhook URL from step 1
   - `OWL_SECRET` = the webhook secret from step 1  *(mark as encrypted)*
-- **Deploy**.
+- **Deploy** again so the variables take effect.
 
 ## 4. Route mail to the Worker
 Email Routing → **Routing rules → Catch-all** → action **Send to a Worker** →
