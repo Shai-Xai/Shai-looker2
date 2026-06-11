@@ -152,6 +152,17 @@ function resolveBranding(entityId) {
 // a CTA back into Pulse — the conversation itself lives in the inbox.
 function esc(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
+// Default footer brand row on EVERY email: the Howler mark + the Pulse owl +
+// wordmark. Small pre-resized PNGs served from the app's static root.
+function brandRow() {
+  const base = baseUrl();
+  return `<div style="margin-top:10px;">
+      <img src="${base}/email-howler.png" width="20" height="20" alt="Howler" style="border-radius:5px;vertical-align:middle;" />
+      <img src="${base}/email-pulse.png" width="20" height="20" alt="Pulse" style="border-radius:50%;vertical-align:middle;margin-left:4px;" />
+      <span style="font-size:11px;color:#a1a1a6;vertical-align:middle;margin-left:7px;font-weight:600;">Howler&nbsp;:&nbsp;Pulse</span>
+    </div>`;
+}
+
 // `branding` may be a resolved object, or {entityId} to resolve, or omitted.
 // Uploaded logos are stored as data-URLs, which Gmail/Outlook STRIP from emails
 // — so for real sends pass `assetScope` (an entityId or 'platform') and the img
@@ -168,9 +179,6 @@ function notificationEmail({ title, body, ctaText = 'Open in Pulse', ctaPath = '
   const headerLine = b.header ? `<div style="font-size:12.5px;color:#6e6e73;margin-top:5px;white-space:pre-wrap;">${esc(b.header)}</div>` : '';
   const header = `<div style="margin-bottom:14px;">${brandMark}${headerLine}</div>`;
   const introHtml = b.intro ? `<div style="font-size:14px;line-height:1.6;color:#3a3a3c;margin-bottom:12px;white-space:pre-wrap;">${esc(b.intro)}</div>` : '';
-  const poweredBy = b.wordmark && b.wordmark.toLowerCase().includes('howler')
-    ? '' // already Howler-branded; avoid saying it twice
-    : '<div style="font-size:11px;color:#a1a1a6;margin-top:8px;">⚡ Powered by Howler : Pulse</div>';
   const html = `<!doctype html><html><body style="margin:0;padding:0;background:#f5f5f7;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
   <div style="display:none;max-height:0;overflow:hidden;">${esc(preheader || body).slice(0, 140)}</div>
   <div style="max-width:560px;margin:0 auto;padding:28px 16px;">
@@ -181,7 +189,8 @@ function notificationEmail({ title, body, ctaText = 'Open in Pulse', ctaPath = '
       <div style="font-size:14px;line-height:1.6;color:#3a3a3c;white-space:pre-wrap;">${esc(body)}</div>
       <a href="${url}" style="display:inline-block;margin-top:18px;background:${esc(b.brandColor)};color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;border-radius:980px;padding:11px 22px;">${esc(ctaText)} →</a>
     </div>
-    <div style="font-size:11.5px;color:#86868b;margin-top:14px;line-height:1.5;white-space:pre-wrap;">${esc(b.footer)}${poweredBy}</div>
+    <div style="font-size:11.5px;color:#86868b;margin-top:14px;line-height:1.5;white-space:pre-wrap;">${esc(b.footer)}</div>
+    ${brandRow()}
   </div>
 </body></html>`;
   const text = `${b.header ? b.header + '\n\n' : ''}${b.intro ? b.intro + '\n\n' : ''}${title}\n\n${body}\n\n${ctaText}: ${url}\n\n${b.footer}`;
@@ -203,8 +212,6 @@ function digestEmail({ branding, entityId, assetScope, content, roleLabel, custo
     ? `<img src="${esc(logoSrc)}" alt="${esc(b.wordmark)}" style="max-height:40px;max-width:200px;display:block;" />`
     : `<div style="font-size:15px;font-weight:800;letter-spacing:-0.02em;color:#111;">${esc(b.wordmark)}</div>`;
   const headerLine = b.header ? `<div style="font-size:12.5px;color:#6e6e73;margin-top:5px;white-space:pre-wrap;">${esc(b.header)}</div>` : '';
-  const poweredBy = b.wordmark && b.wordmark.toLowerCase().includes('howler') ? ''
-    : '<div style="font-size:11px;color:#a1a1a6;margin-top:8px;">⚡ Powered by Howler : Pulse</div>';
 
   // KPI cards laid out 3 per row (email-safe table).
   let kpiHtml = '';
@@ -255,7 +262,8 @@ function digestEmail({ branding, entityId, assetScope, content, roleLabel, custo
       ${actionsBlock}
       <a href="${url}" style="display:inline-block;margin-top:20px;background:${esc(b.brandColor)};color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;border-radius:980px;padding:11px 22px;">Open Pulse →</a>
     </div>
-    <div style="font-size:11.5px;color:#86868b;margin-top:14px;line-height:1.5;white-space:pre-wrap;">${esc(b.footer)}${poweredBy}</div>
+    <div style="font-size:11.5px;color:#86868b;margin-top:14px;line-height:1.5;white-space:pre-wrap;">${esc(b.footer)}</div>
+    ${brandRow()}
   </div>
 </body></html>`;
 
