@@ -279,7 +279,12 @@ function ActionsMenu({ suiteId, dashboardId, filterValues }) {
   const toggle = () => {
     if (!open && btnRef.current) {
       const r = btnRef.current.getBoundingClientRect();
-      setPos({ top: r.bottom + 7, right: Math.max(8, window.innerWidth - r.right) });
+      // Prefer aligning the panel's right edge to the button, but clamp fully
+      // inside the viewport — on mobile the button sits on the LEFT, where a
+      // right-anchored panel would run off-screen.
+      const width = Math.min(260, window.innerWidth - 16);
+      const left = Math.min(Math.max(8, r.right - width), window.innerWidth - width - 8);
+      setPos({ top: r.bottom + 7, left, width });
     }
     setOpen((v) => !v);
   };
@@ -302,7 +307,7 @@ function ActionsMenu({ suiteId, dashboardId, filterValues }) {
       {open && pos && createPortal(
         <>
           <div style={{ position: 'fixed', inset: 0, zIndex: 398 }} onClick={() => setOpen(false)} />
-          <div className="modal-in" style={{ ...actionsPanel, top: pos.top, right: pos.right }}>
+          <div className="modal-in" style={{ ...actionsPanel, top: pos.top, left: pos.left, width: pos.width }}>
             <button style={actionItem} onClick={share} disabled={shareState === 'busy'}>
               <span style={actionIco}>{shareState === 'copied' ? '✓' : '↗'}</span>
               <span style={{ flex: 1, textAlign: 'left' }}>
@@ -324,7 +329,7 @@ function ActionsMenu({ suiteId, dashboardId, filterValues }) {
     </div>
   );
 }
-const actionsPanel = { position: 'fixed', zIndex: 399, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 13, boxShadow: 'var(--shadow-pop)', padding: 6, minWidth: 250, display: 'flex', flexDirection: 'column', gap: 2 };
+const actionsPanel = { position: 'fixed', zIndex: 399, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 13, boxShadow: 'var(--shadow-pop)', padding: 6, display: 'flex', flexDirection: 'column', gap: 2 };
 const actionItem = { display: 'flex', alignItems: 'center', gap: 10, width: '100%', border: 'none', background: 'transparent', cursor: 'pointer', padding: '9px 11px', borderRadius: 9, fontSize: 13.5, fontWeight: 600, color: 'var(--text)' };
 const actionIco = { flexShrink: 0, width: 20, textAlign: 'center', fontSize: 15 };
 
