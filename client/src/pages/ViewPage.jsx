@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useLayoutEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useParams, Link, useNavigate, useOutletContext } from 'react-router-dom';
 import { vtNavigate } from '../lib/viewTransition.js';
 import { PinProvider } from '../lib/PinContext.jsx';
@@ -269,7 +270,19 @@ function HomeIcon({ size = 16 }) {
 // A share link is never an auth bypass — recipients log in; scoping applies.
 function ActionsMenu({ suiteId, dashboardId, filterValues }) {
   const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState(null);
+  const btnRef = useRef(null);
   const [shareState, setShareState] = useState('idle'); // idle | busy | copied | err
+  // The frosted header (backdrop-filter) forms its own stacking context, so an
+  // in-place dropdown paints BEHIND the tiles. Portal the panel to <body>,
+  // fixed-positioned against the button.
+  const toggle = () => {
+    if (!open && btnRef.current) {
+      const r = btnRef.current.getBoundingClientRect();
+      setPos({ top: r.bottom + 7, right: Math.max(8, window.innerWidth - r.right) });
+    }
+    setOpen((v) => !v);
+  };
   async function share() {
     setShareState('busy');
     try {
@@ -284,12 +297,12 @@ function ActionsMenu({ suiteId, dashboardId, filterValues }) {
     }
   }
   return (
-    <div className="no-print" style={{ position: 'relative', flexShrink: 0 }}>
-      <button style={{ ...summaryBtn, padding: '8px 13px' }} onClick={() => setOpen((v) => !v)} title="Actions" aria-label="Dashboard actions">⋯</button>
-      {open && (
+    <div className="no-print" style={{ flexShrink: 0 }}>
+      <button ref={btnRef} style={{ ...summaryBtn, padding: '8px 13px' }} onClick={toggle} title="Actions" aria-label="Dashboard actions">⋯</button>
+      {open && pos && createPortal(
         <>
-          <div style={{ position: 'fixed', inset: 0, zIndex: 90 }} onClick={() => setOpen(false)} />
-          <div className="modal-in" style={actionsPanel}>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 398 }} onClick={() => setOpen(false)} />
+          <div className="modal-in" style={{ ...actionsPanel, top: pos.top, right: pos.right }}>
             <button style={actionItem} onClick={share} disabled={shareState === 'busy'}>
               <span style={actionIco}>{shareState === 'copied' ? '✓' : '↗'}</span>
               <span style={{ flex: 1, textAlign: 'left' }}>
@@ -305,12 +318,13 @@ function ActionsMenu({ suiteId, dashboardId, filterValues }) {
               </span>
             </button>
           </div>
-        </>
+        </>,
+        document.body
       )}
     </div>
   );
 }
-const actionsPanel = { position: 'absolute', top: 'calc(100% + 7px)', right: 0, zIndex: 91, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 13, boxShadow: 'var(--shadow-pop)', padding: 6, minWidth: 250, display: 'flex', flexDirection: 'column', gap: 2 };
+const actionsPanel = { position: 'fixed', zIndex: 399, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 13, boxShadow: 'var(--shadow-pop)', padding: 6, minWidth: 250, display: 'flex', flexDirection: 'column', gap: 2 };
 const actionItem = { display: 'flex', alignItems: 'center', gap: 10, width: '100%', border: 'none', background: 'transparent', cursor: 'pointer', padding: '9px 11px', borderRadius: 9, fontSize: 13.5, fontWeight: 600, color: 'var(--text)' };
 const actionIco = { flexShrink: 0, width: 20, textAlign: 'center', fontSize: 15 };
 
