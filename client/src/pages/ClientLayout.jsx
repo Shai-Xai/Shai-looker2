@@ -5,6 +5,7 @@ import { useIsMobile } from '../lib/useIsMobile.js';
 import { useAuth } from '../lib/auth.jsx';
 import { useTheme } from '../lib/theme.jsx';
 import { vtNavigate } from '../lib/viewTransition.js';
+import { useSheetDrag } from '../lib/useSheetDrag.js';
 
 // Persistent client shell: a left sidebar tree of Suites → Sets → Dashboards,
 // with the selected dashboard rendered in the main area.
@@ -28,6 +29,7 @@ export default function ClientLayout() {
   const [navOpen, setNavOpen] = useState(false); // mobile drawer
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('howler_nav_collapsed') === '1'); // desktop
   const toggleCollapsed = () => setCollapsed((c) => { localStorage.setItem('howler_nav_collapsed', c ? '0' : '1'); return !c; });
+  const navDrag = useSheetDrag(() => setNavOpen(false)); // mobile bottom-sheet dismiss
 
   useEffect(() => { api.mySuites().then(setSuites).catch(() => {}).finally(() => setLoading(false)); }, []);
   useEffect(() => { api.mySettlements().then(setSettlements).catch(() => {}); }, []);
@@ -120,6 +122,13 @@ export default function ClientLayout() {
   const activeEntityId = isAdmin ? (suiteEntityId || previewEntityId) : null;
   const visibleSuites = activeEntityId ? suites.filter((s) => s.entityId === activeEntityId) : suites;
   const visibleSettlements = activeEntityId ? settlements.filter((s) => s.entityId === activeEntityId) : settlements;
+
+  // Mobile sheet skips the suite level for single-suite clients — make sure
+  // that suite's detail is loaded the moment the sheet opens.
+  useEffect(() => {
+    if (isMobile && navOpen && visibleSuites.length === 1) ensureDetail(visibleSuites[0].id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isMobile, navOpen, visibleSuites.length]);
 
   // When the visible suites all belong to one client, show that client's brand
   // (logo / name) at the top of the sidebar.
@@ -257,10 +266,91 @@ export default function ClientLayout() {
       {/* Desktop: sidebar always mounted, width-animates to 0 when collapsed.
           Mobile: a drawer. */}
       {!isMobile && <div className={`sidebar-wrap${collapsed ? ' collapsed' : ''}`}>{sidebar}</div>}
+      {/* Mobile: navigation is a bottom sheet (same language as the filters) —
+          thumb-reachable, drag-to-dismiss, bigger touch targets. With a single
+          suite the suite level is skipped entirely. */}
       {isMobile && navOpen && (
-        <div style={{ position: 'fixed', inset: 0, top: 56, zIndex: 50, display: 'flex' }}>
-          <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.35)' }} onClick={() => setNavOpen(false)} />
-          {sidebar}
+        <div className="ai-overlay" style={{ position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'flex-end' }} onClick={() => setNavOpen(false)}>
+          <div className="ai-sheet" style={{ ...navSheet, ...navDrag.style }} onClick={(e) => e.stopPropagation()}>
+            <div className="sheet-grip" {...navDrag.handlers} style={{ marginTop: 10 }} />
+            <div style={{ padding: '2px 14px 8px' }}>
+              <div style={searchWrap}>
+                <span style={{ color: 'var(--muted)', fontSize: 13, flexShrink: 0 }}>⌕</span>
+                <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search dashboards…" style={searchInput} />
+                {searching && <button onClick={() => setQ('')} style={searchClear} aria-label="Clear search">✕</button>}
+              </div>
+            </div>
+            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: '0 10px 8px' }}>
+              {searching && shownSuites.length === 0 && (
+                <div style={{ padding: 14, color: 'var(--muted)', fontSize: 13 }}>No matches for “{q.trim()}”.</div>
+              )}
+              {shownSuites.map((su) => {
+                const sets = suiteSets(su);
+                const single = shownSuites.length === 1;
+                const suiteOpen = single || searching || !!openSuites[su.id];
+                return (
+                  <div key={su.id}>
+                    {!single && (
+                      <button className="nav-row" style={mRowSuite} onClick={() => toggleSuite(su.id)}>
+                        <Caret open={suiteOpen} />
+                        <Ico v={su.icon} size={22} />
+                        <span style={ellip}>{su.name}</span>
+                      </button>
+                    )}
+                    {suiteOpen && (
+                      sets === undefined ? (
+                        <div style={{ padding: '8px 14px', color: 'var(--muted)', fontSize: 13 }}>Loading…</div>
+                      ) : (
+                        (sets || []).map((set) => {
+                          const setOpen = searching || !!openSets[set.id];
+                          return (
+                            <div key={set.id}>
+                              <button className="nav-row" style={{ ...mRowSet, paddingLeft: single ? 12 : 26 }} onClick={() => setOpenSets((p) => ({ ...p, [set.id]: !p[set.id] }))}>
+                                <Caret open={setOpen} small />
+                                <Ico v={set.icon} size={17} />
+                                <span style={ellip}>{set.name}</span>
+                              </button>
+                              {setOpen && set.dashboards.map((d) => {
+                                const tabs = d.children?.length || 0;
+                                const active = (d.id === id || (d.children || []).some((c) => c.id === id)) && su.id === suiteId;
+                                return (
+                                  <button key={d.id} onClick={() => go(su.id, d.id)} className={`nav-row${active ? ' active' : ''}`} style={{ ...mRowDash, paddingLeft: single ? 34 : 48, fontWeight: active ? 700 : 450 }}>
+                                    <span style={{ ...dot, background: active ? 'var(--brand)' : 'rgba(128,128,128,0.35)' }} />
+                                    <span style={ellip}>{d.title}</span>
+                                    {tabs > 0 && <span style={tabChip}>{tabs + 1}</span>}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          );
+                        })
+                      )
+                    )}
+                  </div>
+                );
+              })}
+              {(visibleSettlements.length > 0 || isAdmin) && (
+                <>
+                  <div style={{ borderTop: '1px solid var(--hairline)', margin: '10px 4px' }} />
+                  <button
+                    className={`nav-row${onSettlements ? ' active' : ''}`}
+                    style={{ ...mRowSuite, fontWeight: onSettlements ? 700 : 500 }}
+                    onClick={() => { if (!onSettlements) vtNavigate(navigate, '/settlements'); setNavOpen(false); }}
+                  >
+                    <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>🧾</span>
+                    <span style={ellip}>Settlements</span>
+                    {visibleSettlements.length > 0 && <span style={countChip}>{visibleSettlements.length}</span>}
+                  </button>
+                </>
+              )}
+            </div>
+            <ProfileFooter
+              user={user}
+              isAdmin={isAdmin}
+              brand={brand}
+              onNavigate={(path) => { navigate(path); setNavOpen(false); }}
+            />
+          </div>
         </div>
       )}
       <main style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'auto' }}>
@@ -362,6 +452,11 @@ const tabChip = { flexShrink: 0, marginLeft: 'auto', fontSize: 10, fontWeight: 7
 const searchWrap = { display: 'flex', alignItems: 'center', gap: 7, background: 'rgba(128,128,128,0.10)', border: '1px solid var(--hairline)', borderRadius: 9, padding: '6px 10px', margin: '0 4px 10px' };
 const searchInput = { flex: 1, minWidth: 0, border: 'none', background: 'transparent', outline: 'none', fontSize: 13, color: 'var(--text)', fontFamily: 'inherit' };
 const searchClear = { flexShrink: 0, border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 12, padding: 0, lineHeight: 1 };
+// Mobile bottom-sheet nav
+const navSheet = { width: '100%', maxHeight: '86dvh', background: 'var(--card)', borderRadius: '18px 18px 0 0', display: 'flex', flexDirection: 'column', paddingBottom: 'env(safe-area-inset-bottom)', boxShadow: '0 -10px 40px rgba(0,0,0,0.25)' };
+const mRowSuite = { display: 'flex', alignItems: 'center', gap: 9, width: '100%', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer', padding: '12px 12px', borderRadius: 11, fontSize: 15, fontWeight: 700, color: 'var(--text)', lineHeight: 1.3 };
+const mRowSet = { display: 'flex', alignItems: 'center', gap: 9, width: '100%', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer', padding: '11px 12px', borderRadius: 10, fontSize: 14, fontWeight: 600, color: 'var(--muted-2)', lineHeight: 1.3 };
+const mRowDash = { display: 'flex', alignItems: 'center', gap: 9, width: '100%', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer', padding: '11px 12px', borderRadius: 10, fontSize: 14.5, color: 'var(--text)', lineHeight: 1.3 };
 const menuBtn = { flexShrink: 0, padding: '8px 16px', borderRadius: 980, border: '1px solid var(--hairline)', background: 'var(--card)', fontSize: 14, fontWeight: 600, cursor: 'pointer' };
 const previewBar = { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '8px 16px', background: 'linear-gradient(90deg, #FF385C, #FF6B35)', color: '#fff', fontSize: 13 };
 const exitPreviewBtn = { flexShrink: 0, padding: '6px 14px', borderRadius: 980, border: 'none', background: 'rgba(255,255,255,0.25)', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer' };
