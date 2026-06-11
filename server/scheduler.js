@@ -233,26 +233,34 @@ function mount(app, { db, auth, mailer, generateContent, roleLenses }) {
   }
 
   // Render a preview email from an (unsaved) job config.
+  // body.live=false (the default) renders the SAMPLE layout instantly — used by
+  // the editor's debounced auto-preview so layout/branding updates are free.
+  // body.live=true does the real thing (Looker pulls + AI write — can take
+  // 30-60s, costs tokens) — used by the explicit Refresh button.
   async function preview(body, res) {
     const entityId = body.entityId;
     if (!entityId) return res.status(400).json({ error: 'entityId required' });
     const job = { ...clean(body, entityId), id: 'preview' };
     const lens = lensFor(job);
-    try {
-      const { html, subject } = await render(job, (job.recipients[0] || ''));
-      res.json({ html, subject, sample: false });
-    } catch (e) {
-      // Fallback: render the shell with sample content so layout is visible even
-      // before Looker/Anthropic are configured. Clearly labelled.
+    const sample = (reason) => {
       const content = sampleContent(lens.label);
       const branding = mailer.resolveBranding(entityId);
       const { html, subject } = mailer.digestEmail({ branding, entityId, assetScope: entityId, content, roleLabel: lens.label });
-      res.json({ html, subject, sample: true, reason: e.message });
+      res.json({ html, subject, sample: true, reason: reason || '' });
+    };
+    if (!body.live) return sample('');
+    try {
+      const { html, subject } = await render(job, (job.recipients[0] || ''));
+      res.json({ html, subject, sample: false, generatedAt: new Date().toISOString() });
+    } catch (e) {
+      // Fall back to the sample layout, but SURFACE the reason so the editor
+      // can show why live data didn't come back.
+      sample(e.message);
     }
   }
   const sampleContent = (roleLabel) => ({
     subject: `${roleLabel} digest — sample`,
-    headline: 'This is a **sample** layout. Live numbers appear once Looker + AI are connected for this client.',
+    headline: 'This is a **sample** layout. Press “Refresh with live data” to generate the real thing.',
     kpis: [
       { label: 'Tickets sold', value: '8,430', delta: '+12% vs last week' },
       { label: 'Revenue', value: 'R1.24m', delta: '+R140k' },

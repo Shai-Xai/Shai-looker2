@@ -86,10 +86,22 @@ function DigestEditor({ job, roles, logins, api: A, onClose, onSaved }) {
     contentMode: f.contentMode, tiles: f.tiles, recipients: f.recipients.split(',').map((s) => s.trim()).filter(Boolean),
   });
 
-  const refreshPreview = () => { setPreviewBusy(true); return A.preview(payload()).then(setPreview).catch(() => {}).finally(() => setPreviewBusy(false)); };
+  // Two preview paths: the debounced auto-preview renders the SAMPLE layout
+  // (instant, free — reflects branding/shell), while the explicit refresh
+  // button generates with LIVE data (Looker + AI, can take ~30-60s). A request
+  // sequence guard stops a slow older response overwriting a newer one.
+  const seq = useRef(0);
+  const refreshPreview = (live) => {
+    const mine = ++seq.current;
+    if (live) setPreviewBusy(true);
+    return A.preview({ ...payload(), live: !!live })
+      .then((r) => { if (seq.current === mine) setPreview(r); })
+      .catch(() => {})
+      .finally(() => { if (seq.current === mine) setPreviewBusy(false); });
+  };
   useEffect(() => {
     clearTimeout(debounce.current);
-    debounce.current = setTimeout(refreshPreview, 400);
+    debounce.current = setTimeout(() => refreshPreview(false), 350);
     return () => clearTimeout(debounce.current);
   }, [f.role, f.roleFocus, f.focusMode, f.contentMode, JSON.stringify(f.tiles)]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -177,14 +189,33 @@ function DigestEditor({ job, roles, logins, api: A, onClose, onSaved }) {
         </div>
 
         <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, gap: 8, flexWrap: 'wrap' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ ...hintLbl, margin: 0 }}>Live preview</span>
-              <button type="button" style={{ ...mini, padding: '4px 10px' }} onClick={refreshPreview} disabled={previewBusy}>{previewBusy ? '…' : '↻ Refresh'}</button>
+              <span style={{ ...hintLbl, margin: 0 }}>Preview</span>
+              <button type="button" style={{ ...mini, padding: '4px 10px' }} onClick={() => refreshPreview(true)} disabled={previewBusy}>
+                {previewBusy ? 'Generating…' : '↻ Refresh with live data'}
+              </button>
             </div>
-            {preview.sample && <span style={{ fontSize: 11, color: '#b45309', fontWeight: 600 }}>Sample — live data on the server</span>}
+            {preview.sample
+              ? <span style={{ fontSize: 11, color: '#b45309', fontWeight: 600 }}>Sample layout — press refresh for live data</span>
+              : preview.generatedAt && <span style={{ fontSize: 11, color: 'var(--success,#10b981)', fontWeight: 600 }}>✓ Live data · {new Date(preview.generatedAt).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}</span>}
           </div>
-          <iframe title="Digest preview" srcDoc={preview.html} style={{ width: '100%', height: 540, border: '1px solid var(--hairline)', borderRadius: 12, background: '#fff' }} />
+          {preview.sample && preview.reason && (
+            <div style={{ fontSize: 11.5, color: 'var(--error,#ef4444)', background: 'rgba(239,68,68,0.07)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 8, padding: '6px 10px', marginBottom: 6 }}>
+              Live generation failed: {preview.reason}
+            </div>
+          )}
+          <div style={{ position: 'relative' }}>
+            <iframe title="Digest preview" srcDoc={preview.html} style={{ width: '100%', height: 540, border: '1px solid var(--hairline)', borderRadius: 12, background: '#fff', opacity: previewBusy ? 0.45 : 1, transition: 'opacity 0.2s' }} />
+            {previewBusy && (
+              <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                <div style={{ background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 12, padding: '14px 20px', fontSize: 13, fontWeight: 600, boxShadow: '0 4px 18px rgba(0,0,0,0.08)' }}>
+                  Pulling live data & writing the digest…
+                  <div style={{ fontSize: 11.5, color: 'var(--muted)', fontWeight: 400, marginTop: 3 }}>Usually 20–60 seconds — the analyst reads the tiles first.</div>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>
