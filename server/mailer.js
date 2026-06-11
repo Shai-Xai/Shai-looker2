@@ -118,6 +118,7 @@ const DEFAULTS = {
   brandColor: '#FF385C',
   logo: '',                                  // image URL/data-URL; blank → text wordmark
   wordmark: 'Howler : Pulse',
+  header: '',                                // optional tagline under the logo/wordmark
   intro: '',                                 // optional line above the message
   footer: "You're receiving this because you have a Howler : Pulse login. Reply inside Pulse so it's tracked.",
 };
@@ -152,13 +153,21 @@ function resolveBranding(entityId) {
 function esc(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
 // `branding` may be a resolved object, or {entityId} to resolve, or omitted.
-function notificationEmail({ title, body, ctaText = 'Open in Pulse', ctaPath = '/inbox', preheader = '', branding, entityId }) {
+// Uploaded logos are stored as data-URLs, which Gmail/Outlook STRIP from emails
+// — so for real sends pass `assetScope` (an entityId or 'platform') and the img
+// src becomes a Pulse-hosted URL instead. Previews omit it (browsers render
+// data-URLs fine, and it lets unsaved uploads show live).
+function notificationEmail({ title, body, ctaText = 'Open in Pulse', ctaPath = '/inbox', preheader = '', branding, entityId, assetScope }) {
   const b = branding || resolveBranding(entityId);
   const url = `${baseUrl()}${ctaPath}`;
-  const header = b.logo
-    ? `<img src="${esc(b.logo)}" alt="${esc(b.wordmark)}" style="max-height:40px;max-width:200px;display:block;margin-bottom:14px;" />`
-    : `<div style="font-size:15px;font-weight:800;letter-spacing:-0.02em;color:#111;margin-bottom:14px;">${esc(b.wordmark)}</div>`;
-  const introHtml = b.intro ? `<div style="font-size:14px;line-height:1.6;color:#3a3a3c;margin-bottom:12px;">${esc(b.intro)}</div>` : '';
+  const scope = assetScope || entityId;
+  const logoSrc = b.logo && b.logo.startsWith('data:') && scope ? `${baseUrl()}/mail-assets/logo/${scope}` : b.logo;
+  const brandMark = logoSrc
+    ? `<img src="${esc(logoSrc)}" alt="${esc(b.wordmark)}" style="max-height:40px;max-width:200px;display:block;" />`
+    : `<div style="font-size:15px;font-weight:800;letter-spacing:-0.02em;color:#111;">${esc(b.wordmark)}</div>`;
+  const headerLine = b.header ? `<div style="font-size:12.5px;color:#6e6e73;margin-top:5px;white-space:pre-wrap;">${esc(b.header)}</div>` : '';
+  const header = `<div style="margin-bottom:14px;">${brandMark}${headerLine}</div>`;
+  const introHtml = b.intro ? `<div style="font-size:14px;line-height:1.6;color:#3a3a3c;margin-bottom:12px;white-space:pre-wrap;">${esc(b.intro)}</div>` : '';
   const poweredBy = b.wordmark && b.wordmark.toLowerCase().includes('howler')
     ? '' // already Howler-branded; avoid saying it twice
     : '<div style="font-size:11px;color:#a1a1a6;margin-top:8px;">⚡ Powered by Howler : Pulse</div>';
@@ -172,13 +181,10 @@ function notificationEmail({ title, body, ctaText = 'Open in Pulse', ctaPath = '
       <div style="font-size:14px;line-height:1.6;color:#3a3a3c;white-space:pre-wrap;">${esc(body)}</div>
       <a href="${url}" style="display:inline-block;margin-top:18px;background:${esc(b.brandColor)};color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;border-radius:980px;padding:11px 22px;">${esc(ctaText)} →</a>
     </div>
-    <div style="font-size:11.5px;color:#86868b;margin-top:14px;line-height:1.5;">
-      ${esc(b.footer)}
-      ${poweredBy}
-    </div>
+    <div style="font-size:11.5px;color:#86868b;margin-top:14px;line-height:1.5;white-space:pre-wrap;">${esc(b.footer)}${poweredBy}</div>
   </div>
 </body></html>`;
-  const text = `${b.intro ? b.intro + '\n\n' : ''}${title}\n\n${body}\n\n${ctaText}: ${url}`;
+  const text = `${b.header ? b.header + '\n\n' : ''}${b.intro ? b.intro + '\n\n' : ''}${title}\n\n${body}\n\n${ctaText}: ${url}\n\n${b.footer}`;
   return { html, text };
 }
 

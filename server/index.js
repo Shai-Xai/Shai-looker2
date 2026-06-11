@@ -713,7 +713,7 @@ app.post('/api/admin/mail/test', auth.requireAdmin, async (req, res) => {
   const { html, text } = mailer.notificationEmail({
     title: 'Pulse email is working',
     body: 'This is a test from Howler : Pulse. Outbound notifications (must-acknowledge messages, replies from Howler) will arrive like this.',
-    ctaText: 'Open Pulse', ctaPath: '/', branding,
+    ctaText: 'Open Pulse', ctaPath: '/', branding, assetScope: entityId || 'platform',
   });
   const r = await mailer.send({ to: req.user.email, subject: 'Howler : Pulse — test email', html, text, fromName: branding?.senderName });
   if (r.ok) return res.json({ ok: true, to: req.user.email });
@@ -727,9 +727,28 @@ app.post('/api/admin/mail/test', auth.requireAdmin, async (req, res) => {
 const MAIL_FIELDS = Object.keys(mailer.DEFAULTS);
 const cleanBrandingPatch = (body) => {
   const out = {};
-  for (const k of MAIL_FIELDS) if (body && k in body) out[k] = String(body[k] ?? '').slice(0, 4000);
+  // Logo can be an uploaded data-URL (resized client-side, but still big).
+  for (const k of MAIL_FIELDS) if (body && k in body) out[k] = String(body[k] ?? '').slice(0, k === 'logo' ? 800000 : 4000);
   return out;
 };
+
+// Public, cacheable logo asset for emails: Gmail/Outlook strip data-URL images,
+// so sends reference this URL instead. Serves the resolved logo for a client
+// (or the platform template's). Logos are public-facing brand assets — no auth.
+app.get('/mail-assets/logo/:scope', (req, res) => {
+  const scope = req.params.scope;
+  const logo = scope === 'platform'
+    ? mailer.getPlatformTemplate().logo
+    : (db.getEntity(scope) ? mailer.resolveBranding(scope).logo : '');
+  if (!logo) return res.status(404).end();
+  if (!logo.startsWith('data:')) return res.redirect(302, logo); // external URL
+  const m = logo.match(/^data:([^;,]+)?(;base64)?,(.*)$/s);
+  if (!m) return res.status(404).end();
+  const buf = m[2] ? Buffer.from(m[3], 'base64') : Buffer.from(decodeURIComponent(m[3]), 'utf8');
+  res.set('Content-Type', m[1] || 'image/png');
+  res.set('Cache-Control', 'public, max-age=300'); // short: re-uploads show within minutes
+  res.send(buf);
+});
 
 app.get('/api/admin/mail-template', auth.requireAdmin, (_req, res) =>
   res.json({ template: mailer.getPlatformTemplate(), defaults: mailer.DEFAULTS }));

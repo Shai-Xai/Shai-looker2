@@ -9,10 +9,11 @@ import { api } from '../lib/api.js';
 const FIELDS = [
   ['senderName', 'Sender name', 'text', 'Shown on the From line, e.g. "Kunye"'],
   ['brandColor', 'Brand colour', 'color', 'Button / accent colour'],
-  ['logo', 'Logo image URL', 'text', 'https://…/logo.png — blank uses the wordmark'],
+  ['logo', 'Logo image', 'logo', 'Upload an image or paste a URL — blank uses the wordmark'],
   ['wordmark', 'Wordmark', 'text', 'Text shown if there is no logo'],
-  ['intro', 'Intro line', 'textarea', 'Optional line above the message'],
-  ['footer', 'Footer text', 'textarea', 'Small print under the card'],
+  ['header', 'Header text', 'textarea', 'Tagline shown under the logo, at the top of every email'],
+  ['intro', 'Intro line', 'textarea', 'Optional line above the message, inside the card'],
+  ['footer', 'Footer text', 'textarea', 'Small print under the card — supports multiple lines (e.g. contact details)'],
 ];
 
 export default function MailTemplateEditor({ entityId, scope = 'platform', canTest = false }) {
@@ -62,7 +63,9 @@ export default function MailTemplateEditor({ entityId, scope = 'platform', canTe
         {FIELDS.map(([key, label, type, help]) => (
           <div key={key}>
             <div style={lbl}>{label}</div>
-            {type === 'textarea' ? (
+            {type === 'logo' ? (
+              <LogoField value={edits[key] || ''} inherited={placeholderFor(key)} onChange={(v) => set(key, v)} />
+            ) : type === 'textarea' ? (
               <textarea value={edits[key] || ''} onChange={(e) => set(key, e.target.value)} placeholder={placeholderFor(key)} rows={2} style={{ ...input, resize: 'vertical', fontFamily: 'inherit' }} />
             ) : type === 'color' ? (
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -101,6 +104,48 @@ export default function MailTemplateEditor({ entityId, scope = 'platform', canTe
   );
 }
 
+// Logo: upload an image (resized client-side to ≤320px, stored as a data-URL —
+// emails reference it via /mail-assets/logo/:scope since Gmail strips data-URLs)
+// or paste a hosted URL. Shows the inherited logo when nothing is set here.
+function LogoField({ value, inherited, onChange }) {
+  const fileRef = useRef(null);
+  const shown = value || inherited;
+  const onFile = (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const max = 320, scale = Math.min(1, max / Math.max(img.width, img.height));
+        const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+        const c = document.createElement('canvas'); c.width = w; c.height = h;
+        c.getContext('2d').drawImage(img, 0, 0, w, h);
+        onChange(c.toDataURL('image/png'));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(f);
+    e.target.value = ''; // allow re-uploading the same file
+  };
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+        <div style={{ width: 120, height: 44, border: '1px dashed var(--hairline)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', background: '#fff' }}>
+          {shown ? <img src={shown} alt="" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', opacity: value ? 1 : 0.45 }} /> : <span style={{ fontSize: 11, color: 'var(--muted)' }}>No logo</span>}
+        </div>
+        <button type="button" style={smallBtn} onClick={() => fileRef.current?.click()}>Upload image</button>
+        {value && <button type="button" style={{ ...smallBtn, background: 'transparent', color: 'var(--error, #ef4444)' }} onClick={() => onChange('')}>Remove</button>}
+        <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={onFile} />
+      </div>
+      {!value?.startsWith('data:') && (
+        <input value={value || ''} onChange={(e) => onChange(e.target.value)} placeholder={inherited && !inherited.startsWith('data:') ? inherited : 'or paste an image URL: https://…/logo.png'} style={input} />
+      )}
+    </div>
+  );
+}
+
+const smallBtn = { border: '1px solid var(--hairline)', background: 'rgba(128,128,128,0.10)', color: 'var(--text)', borderRadius: 980, padding: '7px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer' };
 const lbl = { fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', margin: '0 0 5px' };
 const input = { width: '100%', boxSizing: 'border-box', padding: '9px 12px', border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 13, outline: 'none', background: 'var(--card)', color: 'var(--text)' };
 const saveBtn = { padding: '9px 18px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer' };
