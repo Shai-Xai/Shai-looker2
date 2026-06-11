@@ -16,6 +16,7 @@ export default function DigestManager({ entityId, scope = 'admin', logins = [] }
     test: (id) => (isAdmin ? api.testDigest(id) : api.testMyDigest(entityId, id)),
     run: (id) => api.runDigest(id),
     preview: (b) => (isAdmin ? api.previewDigest({ ...b, entityId }) : api.previewMyDigest(entityId, b)),
+    testSend: (b) => (isAdmin ? api.testSendDigest({ ...b, entityId }) : api.testSendMyDigest(entityId, b)),
     tiles: () => (isAdmin ? api.getDigestTiles(entityId) : api.getMyDigestTiles(entityId)),
   };
   const [data, setData] = useState(null);
@@ -67,27 +68,30 @@ export default function DigestManager({ entityId, scope = 'admin', logins = [] }
 
 function DigestEditor({ job, roles, logins, api: A, onClose, onSaved }) {
   const [f, setF] = useState(() => ({
-    title: job?.title || '', role: job?.role || 'exec', roleFocus: job?.roleFocus || '',
+    title: job?.title || '', role: job?.role || 'exec', roleFocus: job?.roleFocus || '', focusMode: job?.focusMode || 'override',
     cadence: job?.cadence || 'daily', timeOfDay: job?.timeOfDay || '07:00', weekday: job?.weekday ?? 1,
     runAt: job?.runAt || '', recipients: (job?.recipients || []).join(', '), status: job?.status || 'active',
     contentMode: job?.contentMode || 'ai', tiles: job?.tiles || [],
   }));
   const [preview, setPreview] = useState({ html: '', sample: false });
+  const [previewBusy, setPreviewBusy] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [testState, setTestState] = useState('');
   const debounce = useRef(null);
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
 
   const payload = () => ({
-    title: f.title, role: f.role, roleFocus: f.roleFocus, cadence: f.cadence, timeOfDay: f.timeOfDay,
+    title: f.title, role: f.role, roleFocus: f.roleFocus, focusMode: f.focusMode, cadence: f.cadence, timeOfDay: f.timeOfDay,
     weekday: Number(f.weekday), runAt: f.runAt ? new Date(f.runAt).toISOString() : '', status: f.status,
     contentMode: f.contentMode, tiles: f.tiles, recipients: f.recipients.split(',').map((s) => s.trim()).filter(Boolean),
   });
 
+  const refreshPreview = () => { setPreviewBusy(true); return A.preview(payload()).then(setPreview).catch(() => {}).finally(() => setPreviewBusy(false)); };
   useEffect(() => {
     clearTimeout(debounce.current);
-    debounce.current = setTimeout(() => { A.preview(payload()).then(setPreview).catch(() => {}); }, 400);
+    debounce.current = setTimeout(refreshPreview, 400);
     return () => clearTimeout(debounce.current);
-  }, [f.role, f.roleFocus, f.contentMode, JSON.stringify(f.tiles)]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [f.role, f.roleFocus, f.focusMode, f.contentMode, JSON.stringify(f.tiles)]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function save() {
     setBusy(true);
@@ -108,8 +112,15 @@ function DigestEditor({ job, roles, logins, api: A, onClose, onSaved }) {
             </select>
             <div style={hintS}>{roles.find((r) => r.key === f.role)?.focus}</div>
           </Field>
-          <Field label="Custom focus (optional — overrides the role's default)">
+          <Field label="Custom focus (optional)">
             <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit' }} rows={2} value={f.roleFocus} onChange={(e) => set('roleFocus', e.target.value)} placeholder="Leave blank to use the role default above" />
+            {f.roleFocus.trim() && (
+              <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+                <Toggle on={f.focusMode === 'override'} onClick={() => set('focusMode', 'override')}>Override role</Toggle>
+                <Toggle on={f.focusMode === 'blend'} onClick={() => set('focusMode', 'blend')}>Blend with role</Toggle>
+              </div>
+            )}
+            {f.roleFocus.trim() && <div style={hintS}>{f.focusMode === 'override' ? 'Replaces the role lens entirely.' : 'Adds your emphasis on top of the role lens.'}</div>}
           </Field>
 
           <Field label="Content">
@@ -154,15 +165,23 @@ function DigestEditor({ job, roles, logins, api: A, onClose, onSaved }) {
             </div>
           </Field>
 
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 4 }}>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 4, flexWrap: 'wrap' }}>
             <button style={primary} onClick={save} disabled={busy}>{busy ? 'Saving…' : (job ? 'Save changes' : 'Create digest')}</button>
+            <button
+              type="button" style={mini} disabled={testState === 'sending'}
+              onClick={async () => { setTestState('sending'); try { const r = await A.testSend(payload()); setTestState(`✓ Sent to ${r.to}`); } catch (e) { setTestState(`✗ ${e.message}`); } }}
+            >{testState === 'sending' ? 'Sending…' : 'Send test to me'}</button>
             <button style={mini} onClick={onClose}>Cancel</button>
+            {testState && testState !== 'sending' && <span style={{ fontSize: 12, color: testState.startsWith('✓') ? 'var(--success,#10b981)' : 'var(--error,#ef4444)' }}>{testState}</span>}
           </div>
         </div>
 
         <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={hintLbl}>Live preview</div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ ...hintLbl, margin: 0 }}>Live preview</span>
+              <button type="button" style={{ ...mini, padding: '4px 10px' }} onClick={refreshPreview} disabled={previewBusy}>{previewBusy ? '…' : '↻ Refresh'}</button>
+            </div>
             {preview.sample && <span style={{ fontSize: 11, color: '#b45309', fontWeight: 600 }}>Sample — live data on the server</span>}
           </div>
           <iframe title="Digest preview" srcDoc={preview.html} style={{ width: '100%', height: 540, border: '1px solid var(--hairline)', borderRadius: 12, background: '#fff' }} />
@@ -182,11 +201,17 @@ function TilePicker({ load, selected, onChange }) {
 
   const key = (d, t) => `${d}|${t}`;
   const sel = new Set(selected.map((t) => key(t.dashboardId, t.tileId)));
+  const whole = (dashId) => sel.has(key(dashId, '*'));
   const toggle = (d, t) => {
+    if (whole(d)) return; // whole-dashboard selected; individual toggles are no-ops
     const k = key(d, t);
     onChange(sel.has(k) ? selected.filter((x) => key(x.dashboardId, x.tileId) !== k) : [...selected, { dashboardId: d, tileId: t }]);
   };
-  const countIn = (dash) => dash.tiles.filter((t) => sel.has(key(dash.dashboardId, t.tileId))).length;
+  const toggleWhole = (dashId) => {
+    if (whole(dashId)) onChange(selected.filter((x) => !(x.dashboardId === dashId && x.tileId === '*')));
+    else onChange([...selected.filter((x) => x.dashboardId !== dashId), { dashboardId: dashId, tileId: '*' }]); // replaces individual picks
+  };
+  const countIn = (dash) => whole(dash.dashboardId) ? dash.tiles.length : dash.tiles.filter((t) => sel.has(key(dash.dashboardId, t.tileId))).length;
 
   return (
     <div style={{ marginTop: 8, border: '1px solid var(--hairline)', borderRadius: 10, maxHeight: 300, overflowY: 'auto' }}>
@@ -199,22 +224,27 @@ function TilePicker({ load, selected, onChange }) {
         const isOpen = open[d.dashboardId];
         return (
           <div key={d.dashboardId} style={{ borderBottom: '1px solid var(--hairline)' }}>
-            <button type="button" onClick={() => setOpen((o) => ({ ...o, [d.dashboardId]: !o[d.dashboardId] }))}
-              style={{ width: '100%', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer', padding: '9px 10px', display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text)' }}>
-              <span style={{ fontSize: 11, color: 'var(--muted)', width: 10 }}>{isOpen ? '▾' : '▸'}</span>
-              <span style={{ flex: 1, minWidth: 0 }}>
-                <span style={{ fontSize: 13, fontWeight: 600 }}>{d.title}</span>
-                <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 6 }}>{d.setName}</span>
-              </span>
-              {n > 0 && <span style={{ ...roleChip, background: 'rgba(255,56,92,0.12)', color: 'var(--brand)' }}>{n}</span>}
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 10px' }}>
+              <button type="button" onClick={() => setOpen((o) => ({ ...o, [d.dashboardId]: !o[d.dashboardId] }))}
+                style={{ flex: 1, minWidth: 0, textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text)', padding: 0 }}>
+                <span style={{ fontSize: 11, color: 'var(--muted)', width: 10 }}>{isOpen ? '▾' : '▸'}</span>
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ fontSize: 13, fontWeight: 600 }}>{d.title}</span>
+                  <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 6 }}>{d.setName}</span>
+                </span>
+                {n > 0 && <span style={{ ...roleChip, background: 'rgba(255,56,92,0.12)', color: 'var(--brand)' }}>{whole(d.dashboardId) ? 'All' : n}</span>}
+              </button>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--muted)', cursor: 'pointer', flexShrink: 0 }} title="Include the whole dashboard">
+                <input type="checkbox" checked={whole(d.dashboardId)} onChange={() => toggleWhole(d.dashboardId)} /> Whole
+              </label>
+            </div>
             {isOpen && (
-              <div style={{ padding: '0 10px 8px 28px' }}>
+              <div style={{ padding: '0 10px 8px 28px', opacity: whole(d.dashboardId) ? 0.55 : 1 }}>
                 {d.tiles.map((t) => {
-                  const checked = sel.has(key(d.dashboardId, t.tileId));
+                  const checked = whole(d.dashboardId) || sel.has(key(d.dashboardId, t.tileId));
                   return (
-                    <label key={t.tileId} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0', fontSize: 12.5, cursor: 'pointer' }}>
-                      <input type="checkbox" checked={checked} onChange={() => toggle(d.dashboardId, t.tileId)} />
+                    <label key={t.tileId} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0', fontSize: 12.5, cursor: whole(d.dashboardId) ? 'default' : 'pointer' }}>
+                      <input type="checkbox" checked={checked} disabled={whole(d.dashboardId)} onChange={() => toggle(d.dashboardId, t.tileId)} />
                       <span style={{ flex: 1 }}>{t.title}</span>
                       {t.visType && <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>{t.visType}</span>}
                     </label>

@@ -1516,15 +1516,29 @@ const ROLE_LENSES = {
 async function buildFactsFromTiles(user, entityId, picks) {
   const { catalogue } = clientCatalogue(entityId);
   const meta = Object.fromEntries(catalogue.map((c) => [c.dashboardId, c]));
-  const lockMaps = {};
-  const out = [];
-  for (const p of (picks || []).slice(0, 18)) {
+  // Resolve the picks into a concrete tile list. tileId '*' = the whole
+  // dashboard (all its data tiles). Capped so a "whole dashboard" pick can't
+  // blow the budget.
+  const wanted = [];
+  const seen = new Set();
+  for (const p of picks || []) {
     const def = store.get(p.dashboardId);
     const m = meta[p.dashboardId];
     if (!def || !m) continue;
-    const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))];
-    const tile = tiles.find((t) => t.id === p.tileId);
-    if (!tile) continue;
+    const allTiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))];
+    const chosen = p.tileId === '*'
+      ? allTiles.filter((t) => t.type !== 'text' && t.query?.fields?.length)
+      : allTiles.filter((t) => t.id === p.tileId);
+    for (const tile of chosen) {
+      const sig = `${def.id}|${tile.id}`;
+      if (seen.has(sig)) continue;
+      seen.add(sig);
+      wanted.push({ tile, def, m });
+    }
+  }
+  const lockMaps = {};
+  const out = [];
+  for (const { tile, def, m } of wanted.slice(0, 24)) {
     if (!(m.suiteId in lockMaps)) lockMaps[m.suiteId] = expandLockMap(db.lockedFiltersForSuite(m.suiteId));
     const body = tileQueryBody(tile, def, user, m.suiteId, lockMaps[m.suiteId] || {});
     if (!body) continue;
@@ -1539,10 +1553,14 @@ async function buildFactsFromTiles(user, entityId, picks) {
 
 // Produce a role-lensed digest's structured content (links resolved). Throws if
 // AI/Looker isn't configured or there's no data — callers decide how to surface.
-async function buildDigestContent({ entityId, role, roleFocus, contentMode, tiles, recipientEmail }) {
+async function buildDigestContent({ entityId, role, roleFocus, focusMode, contentMode, tiles, recipientEmail }) {
   const apiKey = anthropicKeyForEntity(entityId);
   if (!insights.isConfigured(apiKey)) throw new Error('AI is not configured for this client');
   const lens = ROLE_LENSES[role] || ROLE_LENSES.exec;
+  // Custom focus either OVERRIDES the role lens or BLENDS on top of it.
+  const customFocus = String(roleFocus || '').trim();
+  const effectiveFocus = !customFocus ? lens.focus
+    : (focusMode === 'blend' ? `${lens.focus}\n\nExtra emphasis for this digest: ${customFocus}` : customFocus);
   let user = recipientEmail ? db.getUserByEmail(recipientEmail) : null;
   if (!user || !(user.entityIds || []).includes(entityId)) user = { id: `digest:${entityId}`, email: recipientEmail || '', role: 'client', entityIds: [entityId] };
   const { tiles: factTiles, catalogue } = (contentMode === 'curated' && (tiles || []).length)
@@ -1551,7 +1569,7 @@ async function buildDigestContent({ entityId, role, roleFocus, contentMode, tile
   if (!factTiles.length) throw new Error('No tile data available to summarise');
   const byId = Object.fromEntries(catalogue.map((c) => [c.dashboardId, c]));
   const instructions = [aiInstructionsFor(null), briefingInstructionsFor(user, entityId, clientCatalogue(entityId).suites)].filter(Boolean).join('\n\n');
-  const raw = await insights.digestBrief({ tiles: factTiles, roleLabel: lens.label, roleFocus: roleFocus || lens.focus, catalogue, instructions, apiKey });
+  const raw = await insights.digestBrief({ tiles: factTiles, roleLabel: lens.label, roleFocus: effectiveFocus, catalogue, instructions, apiKey });
   const href = (id) => { const c = id && byId[id]; return c ? `${mailer.baseUrl()}/suite/${c.suiteId}/d/${id}` : ''; };
   return {
     subject: String(raw.subject || '').slice(0, 120),

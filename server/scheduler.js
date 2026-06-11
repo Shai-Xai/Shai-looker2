@@ -26,9 +26,10 @@ function mount(app, { db, auth, mailer, generateContent, roleLenses }) {
       type         TEXT NOT NULL DEFAULT 'digest',
       title        TEXT NOT NULL DEFAULT '',
       role         TEXT NOT NULL DEFAULT 'exec',
-      role_focus   TEXT NOT NULL DEFAULT '',        -- optional override of the role lens
+      role_focus   TEXT NOT NULL DEFAULT '',        -- optional override/blend of the role lens
+      focus_mode   TEXT NOT NULL DEFAULT 'override', -- override | blend (how role_focus combines with the lens)
       content_mode TEXT NOT NULL DEFAULT 'ai',       -- ai | curated
-      tiles        TEXT NOT NULL DEFAULT '[]',       -- [{dashboardId,tileId}] for curated
+      tiles        TEXT NOT NULL DEFAULT '[]',       -- [{dashboardId,tileId}] for curated; tileId '*' = whole dashboard
       recipients   TEXT NOT NULL DEFAULT '[]',       -- [email]
       cadence      TEXT NOT NULL DEFAULT 'daily',     -- daily | weekly | once
       time_of_day  TEXT NOT NULL DEFAULT '07:00',
@@ -45,6 +46,11 @@ function mount(app, { db, auth, mailer, generateContent, roleLenses }) {
     );
     CREATE INDEX IF NOT EXISTS idx_jobs_due ON scheduled_jobs(status, next_run_at);
   `);
+  // ALTER for DBs created before focus_mode existed.
+  try {
+    const cols = sql.prepare('PRAGMA table_info(scheduled_jobs)').all().map((c) => c.name);
+    if (!cols.includes('focus_mode')) sql.exec("ALTER TABLE scheduled_jobs ADD COLUMN focus_mode TEXT NOT NULL DEFAULT 'override'");
+  } catch (e) { console.error('[scheduler] focus_mode migration skipped:', e.message); }
 
   // ── timezone-aware schedule maths ──
   const tzParts = (tz, date) => {
@@ -79,7 +85,7 @@ function mount(app, { db, auth, mailer, generateContent, roleLenses }) {
 
   // ── row <-> object ──
   const rowToJob = (r) => ({
-    id: r.id, entityId: r.entity_id, type: r.type, title: r.title, role: r.role, roleFocus: r.role_focus,
+    id: r.id, entityId: r.entity_id, type: r.type, title: r.title, role: r.role, roleFocus: r.role_focus, focusMode: r.focus_mode || 'override',
     contentMode: r.content_mode, tiles: JSON.parse(r.tiles || '[]'), recipients: JSON.parse(r.recipients || '[]'),
     cadence: r.cadence, timeOfDay: r.time_of_day, weekday: r.weekday, runAt: r.run_at, timezone: r.timezone,
     status: r.status, lastRunAt: r.last_run_at, lastStatus: r.last_status, nextRunAt: r.next_run_at,
@@ -97,8 +103,9 @@ function mount(app, { db, auth, mailer, generateContent, roleLenses }) {
       title: String(body.title || '').slice(0, 80),
       role,
       roleFocus: String(body.roleFocus || '').slice(0, 1000),
+      focusMode: body.focusMode === 'blend' ? 'blend' : 'override',
       contentMode: body.contentMode === 'curated' ? 'curated' : 'ai',
-      tiles: Array.isArray(body.tiles) ? body.tiles.filter((t) => t && t.dashboardId && t.tileId).slice(0, 18).map((t) => ({ dashboardId: String(t.dashboardId), tileId: String(t.tileId) })) : [],
+      tiles: Array.isArray(body.tiles) ? body.tiles.filter((t) => t && t.dashboardId && t.tileId).slice(0, 40).map((t) => ({ dashboardId: String(t.dashboardId), tileId: String(t.tileId) })) : [],
       recipients: Array.isArray(body.recipients) ? [...new Set(body.recipients.map((e) => String(e).trim().toLowerCase()).filter(Boolean))].slice(0, 25) : [],
       cadence,
       timeOfDay: /^\d{1,2}:\d{2}$/.test(body.timeOfDay || '') ? body.timeOfDay : '07:00',
@@ -114,20 +121,20 @@ function mount(app, { db, auth, mailer, generateContent, roleLenses }) {
     const next = j.status === 'active' ? computeNextRun(j) : null;
     const nextIso = next ? next.toISOString() : (j.status === 'active' && j.cadence === 'once' && j.runAt ? new Date(j.runAt).toISOString() : null);
     if (id) {
-      sql.prepare(`UPDATE scheduled_jobs SET title=?, role=?, role_focus=?, content_mode=?, tiles=?, recipients=?, cadence=?, time_of_day=?, weekday=?, run_at=?, timezone=?, status=?, next_run_at=?, updated_at=? WHERE id=?`)
-        .run(j.title, j.role, j.roleFocus, j.contentMode, JSON.stringify(j.tiles), JSON.stringify(j.recipients), j.cadence, j.timeOfDay, j.weekday, j.runAt, j.timezone, j.status, nextIso, ts, id);
+      sql.prepare(`UPDATE scheduled_jobs SET title=?, role=?, role_focus=?, focus_mode=?, content_mode=?, tiles=?, recipients=?, cadence=?, time_of_day=?, weekday=?, run_at=?, timezone=?, status=?, next_run_at=?, updated_at=? WHERE id=?`)
+        .run(j.title, j.role, j.roleFocus, j.focusMode, j.contentMode, JSON.stringify(j.tiles), JSON.stringify(j.recipients), j.cadence, j.timeOfDay, j.weekday, j.runAt, j.timezone, j.status, nextIso, ts, id);
       return getJob(id);
     }
     const nid = uuid();
-    sql.prepare(`INSERT INTO scheduled_jobs (id, entity_id, type, title, role, role_focus, content_mode, tiles, recipients, cadence, time_of_day, weekday, run_at, timezone, status, next_run_at, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-      .run(nid, j.entityId, 'digest', j.title, j.role, j.roleFocus, j.contentMode, JSON.stringify(j.tiles), JSON.stringify(j.recipients), j.cadence, j.timeOfDay, j.weekday, j.runAt, j.timezone, j.status, nextIso, createdBy || '', ts, ts);
+    sql.prepare(`INSERT INTO scheduled_jobs (id, entity_id, type, title, role, role_focus, focus_mode, content_mode, tiles, recipients, cadence, time_of_day, weekday, run_at, timezone, status, next_run_at, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(nid, j.entityId, 'digest', j.title, j.role, j.roleFocus, j.focusMode, j.contentMode, JSON.stringify(j.tiles), JSON.stringify(j.recipients), j.cadence, j.timeOfDay, j.weekday, j.runAt, j.timezone, j.status, nextIso, createdBy || '', ts, ts);
     return getJob(nid);
   }
 
   // Render a job's email (real content; throws if generation fails).
   async function render(job, recipientEmail) {
     const lens = lensFor(job);
-    const content = await generateContent({ entityId: job.entityId, role: job.role, roleFocus: job.roleFocus || lens.focus, contentMode: job.contentMode, tiles: job.tiles, recipientEmail });
+    const content = await generateContent({ entityId: job.entityId, role: job.role, roleFocus: job.roleFocus, focusMode: job.focusMode, contentMode: job.contentMode, tiles: job.tiles, recipientEmail });
     const branding = mailer.resolveBranding(job.entityId);
     const email = mailer.digestEmail({ branding, entityId: job.entityId, assetScope: job.entityId, content, roleLabel: lens.label });
     return { ...email, content, senderName: branding.senderName };
@@ -199,6 +206,8 @@ function mount(app, { db, auth, mailer, generateContent, roleLenses }) {
   // Live preview (renders real content; falls back to a labelled sample if AI
   // isn't configured yet, so the layout is always viewable).
   app.post('/api/admin/digests/preview', auth.requireAdmin, (req, res) => preview(req.body || {}, res));
+  // Send a test of the CURRENT (possibly unsaved) editor config to the admin.
+  app.post('/api/admin/digests/test-send', auth.requireAdmin, (req, res) => testSendConfig(req.body || {}, (req.body || {}).entityId, req.user.email, res));
 
   // Client self-service — own entity only.
   const ownsEntity = (req) => (req.user.entityIds || []).includes(req.params.entityId);
@@ -213,6 +222,15 @@ function mount(app, { db, auth, mailer, generateContent, roleLenses }) {
     r.status === 'ok' ? res.json({ ok: true, to: req.user.email }) : res.status(400).json({ error: r.detail });
   });
   app.post('/api/my/digests/:entityId/preview', auth.requireAuth, (req, res) => { if (!enabled()) return off(res); if (!ownsEntity(req)) return res.status(403).json({ error: 'Not allowed' }); preview({ ...req.body, entityId: req.params.entityId }, res); });
+  app.post('/api/my/digests/:entityId/test-send', auth.requireAuth, (req, res) => { if (!enabled()) return off(res); if (!ownsEntity(req)) return res.status(403).json({ error: 'Not allowed' }); testSendConfig({ ...req.body, entityId: req.params.entityId }, req.params.entityId, req.user.email, res); });
+
+  // Render + send the current (unsaved) config as a test to one address.
+  async function testSendConfig(body, entityId, toEmail, res) {
+    if (!entityId) return res.status(400).json({ error: 'entityId required' });
+    const job = { ...clean(body, entityId), id: 'test' };
+    const r = await runJob(job, { manual: true, toOverride: toEmail });
+    return r.status === 'ok' ? res.json({ ok: true, to: toEmail }) : res.status(400).json({ error: r.detail });
+  }
 
   // Render a preview email from an (unsaved) job config.
   async function preview(body, res) {
