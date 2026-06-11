@@ -122,9 +122,15 @@ function mount(app, { db, auth, mailer }) {
     if (ids === null) rows = sql.prepare('SELECT * FROM os_threads ORDER BY updated_at DESC LIMIT 200').all();
     else if (!ids.length) rows = [];
     else rows = sql.prepare(`SELECT * FROM os_threads WHERE entity_id IN (${ids.map(() => '?').join(',')}) ORDER BY updated_at DESC LIMIT 200`).all(...ids);
+    const admin = isAdmin(req.user);
     const out = rows.map((r) => {
       const last = sql.prepare('SELECT * FROM os_messages WHERE thread_id=? ORDER BY created_at DESC LIMIT 1').get(r.id);
       const st = threadState(r.id, req.user.id);
+      // In the admin list, "acked" should mean the CLIENT acknowledged — not the
+      // admin — so the chip reflects what Howler cares about.
+      if (admin && r.priority === 'must_ack') {
+        st.acked = sql.prepare("SELECT 1 FROM os_receipts re JOIN users u ON u.id=re.user_id WHERE re.thread_id=? AND re.kind='ack' AND u.role!='admin' LIMIT 1").get(r.id) ? true : false;
+      }
       return { ...threadRow(r), entityName: db.getEntity(r.entity_id)?.name || '', preview: last ? messageRow(last) : null, ...st };
     });
     res.json({ threads: out, unread: out.filter((t) => t.unread).length, pendingAcks: out.filter((t) => t.priority === 'must_ack' && !t.acked).length });
@@ -136,7 +142,17 @@ function mount(app, { db, auth, mailer }) {
     if (!t) return res.status(404).json({ error: 'Not found' });
     if (!canEntity(req.user, t.entityId)) return res.status(403).json({ error: 'Not allowed' });
     sql.prepare('INSERT OR REPLACE INTO os_receipts (thread_id, user_id, kind, at) VALUES (?,?,?,?)').run(t.id, req.user.id, 'read', now());
-    res.json({ thread: { ...t, entityName: db.getEntity(t.entityId)?.name || '' }, messages: messages(t.id), state: threadState(t.id, req.user.id) });
+    // For Howler (admin) viewers, surface the client's read/ack receipts so the
+    // UI can show read/unread + acknowledgement inline next to each message —
+    // WhatsApp-style, no separate panel needed.
+    let clientReceipts = null;
+    if (isAdmin(req.user)) {
+      const rows = sql.prepare('SELECT user_id, kind, at FROM os_receipts WHERE thread_id=?').all(t.id);
+      clientReceipts = rows
+        .map((r) => { const u = db.getUser(r.user_id); return u && u.role !== 'admin' ? { email: u.email, kind: r.kind, at: r.at } : null; })
+        .filter(Boolean);
+    }
+    res.json({ thread: { ...t, entityName: db.getEntity(t.entityId)?.name || '' }, messages: messages(t.id), state: threadState(t.id, req.user.id), clientReceipts });
   });
 
   // Reply / post a message into a thread.

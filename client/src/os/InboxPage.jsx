@@ -71,7 +71,14 @@ function ThreadView({ id, isAdmin, isMobile, onBack, onChange }) {
 
   if (!data) return <Centered>Loading…</Centered>;
   const t = data.thread;
-  const mustAck = t.priority === 'must_ack' && !data.state.acked;
+  // Client read/ack receipts (admin view only) — drive inline read indicators.
+  const clientReceipts = data.clientReceipts || [];
+  const reads = clientReceipts.filter((r) => r.kind === 'read');
+  const acked = isAdmin ? clientReceipts.some((r) => r.kind === 'ack') : data.state.acked;
+  // Only the client is ever asked to acknowledge — never Howler.
+  const mustAck = !isAdmin && t.priority === 'must_ack' && !data.state.acked;
+  // A Howler message is "read" once a client read-receipt lands at/after it.
+  const readBy = (m) => reads.filter((r) => r.at >= m.createdAt);
 
   const reply = () => {
     const b = text.trim(); if (!b) return;
@@ -87,7 +94,7 @@ function ThreadView({ id, isAdmin, isMobile, onBack, onChange }) {
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <h2 style={{ fontSize: 16, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.title || '(no subject)'}</h2>
-            <PriorityChip priority={t.priority} acked={data.state.acked} />
+            <PriorityChip priority={t.priority} acked={acked} />
           </div>
           {isAdmin && <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>{t.entityName}</div>}
         </div>
@@ -104,6 +111,9 @@ function ThreadView({ id, isAdmin, isMobile, onBack, onChange }) {
       <div style={{ flex: 1, overflowY: 'auto', padding: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
         {data.messages.map((m) => {
           const mine = m.authorType !== 'howler';
+          // Admin sees, under each Howler message, whether the client has read it
+          // (WhatsApp-style ticks) — read/unread alongside the message itself.
+          const seen = isAdmin && m.authorType === 'howler' ? readBy(m) : null;
           return (
             <div key={m.id} style={{ display: 'flex', justifyContent: mine ? 'flex-end' : 'flex-start' }}>
               <div style={{ maxWidth: '78%' }}>
@@ -111,6 +121,11 @@ function ThreadView({ id, isAdmin, isMobile, onBack, onChange }) {
                   {m.authorType === 'howler' ? 'Howler' : m.authorEmail}{m.channel !== 'pulse' ? ` · ${m.channel}` : ''} · {shortDate(m.createdAt)}
                 </div>
                 <div style={{ background: mine ? 'var(--brand)' : 'var(--elevated)', color: mine ? '#fff' : 'var(--text)', borderRadius: mine ? '14px 14px 4px 14px' : '14px 14px 14px 4px', padding: '9px 13px', fontSize: 13.5, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{m.body}</div>
+                {seen && (
+                  <div style={{ fontSize: 10, marginTop: 3, color: seen.length ? '#2da44e' : 'var(--muted)', fontWeight: 600 }}>
+                    {seen.length ? `✓✓ Read by ${seen.map((r) => r.email).join(', ')} · ${shortDate(seen.map((r) => r.at).sort()[0])}` : '✓ Sent · not yet read'}
+                  </div>
+                )}
               </div>
             </div>
           );
@@ -138,7 +153,9 @@ function ThreadView({ id, isAdmin, isMobile, onBack, onChange }) {
 }
 
 function PriorityChip({ priority, acked }) {
-  if (priority === 'must_ack') return <span style={{ ...chip, background: acked ? 'rgba(52,199,89,0.15)' : 'rgba(245,158,11,0.16)', color: acked ? '#2da44e' : '#b45309' }}>{acked ? '✓ Acknowledged' : 'Acknowledge'}</span>;
+  // Status only — the action lives in the amber bar. Labelling this chip
+  // "Acknowledge" made clients click it expecting it to register the ack.
+  if (priority === 'must_ack') return <span style={{ ...chip, background: acked ? 'rgba(52,199,89,0.15)' : 'rgba(245,158,11,0.16)', color: acked ? '#2da44e' : '#b45309' }}>{acked ? '✓ Acknowledged' : 'Needs ack'}</span>;
   if (priority === 'needs_reply') return <span style={{ ...chip, background: 'rgba(10,132,255,0.13)', color: '#0a66c2' }}>Needs reply</span>;
   if (priority === 'fyi') return <span style={{ ...chip, background: 'rgba(128,128,128,0.14)', color: 'var(--muted-2)' }}>FYI</span>;
   return null;
