@@ -456,7 +456,7 @@ function ProfileFooter({ user, isAdmin, brand, onNavigate }) {
         <div className="modal-in" style={profileMenu}>
           {!isAdmin && (
             <button className="nav-row" style={menuItem} onClick={() => { setOpen(false); onNavigate('/settings'); }}>
-              <span style={menuIco}>⚙</span> Integrations
+              <span style={menuIco}>⚙</span> Settings
             </button>
           )}
           <button className="nav-row" style={menuItem} onClick={toggle}>
