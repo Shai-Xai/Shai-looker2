@@ -4,13 +4,17 @@ import { useState } from 'react';
 // write-only: the form only knows whether a value is set (value.*.keySet /
 // clientSecretSet); typing a new value changes it, blank leaves it unchanged.
 // `onSave(payload)` receives only the fields that changed.
-export default function IntegrationsForm({ value, onSave, showLooker = true, lookerActive = true }) {
+export default function IntegrationsForm({ value, onSave, showLooker = true, lookerActive = true, showResend = false, onTestEmail }) {
   const [baseUrl, setBaseUrl] = useState(value?.looker?.baseUrl || '');
   const [clientId, setClientId] = useState(value?.looker?.clientId || '');
   const [clientSecret, setClientSecret] = useState('');
   const [clearSecret, setClearSecret] = useState(false);
   const [anthropicKey, setAnthropicKey] = useState('');
   const [clearKey, setClearKey] = useState(false);
+  const [resendKey, setResendKey] = useState('');
+  const [clearResendKey, setClearResendKey] = useState(false);
+  const [mailFrom, setMailFrom] = useState(value?.resend?.from || '');
+  const [testState, setTestState] = useState('');
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
 
@@ -18,6 +22,8 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
   const keySet = value?.anthropic?.keySet;
   const envLooker = value?.looker?.envFallback;
   const envKey = value?.anthropic?.envFallback;
+  const resendSet = value?.resend?.keySet;
+  const envResend = value?.resend?.envFallback;
 
   async function save() {
     setBusy(true);
@@ -31,8 +37,14 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
       }
       if (anthropicKey) payload.anthropic.apiKey = anthropicKey;
       if (clearKey) payload.anthropic.clearApiKey = true;
+      if (showResend) {
+        payload.resend = { from: mailFrom };
+        if (resendKey) payload.resend.apiKey = resendKey;
+        if (clearResendKey) payload.resend.clearApiKey = true;
+      }
       await onSave(payload);
       setClientSecret(''); setAnthropicKey(''); setClearSecret(false); setClearKey(false);
+      setResendKey(''); setClearResendKey(false);
       setSaved(true); setTimeout(() => setSaved(false), 1600);
     } catch (e) { alert('Save failed: ' + e.message); }
     finally { setBusy(false); }
@@ -59,6 +71,56 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
           </label>
         )}
       </section>
+
+      {/* Resend (email) — platform-level only */}
+      {showResend && (
+        <section style={card}>
+          <div style={secTitle}>✉️ Email (Resend)</div>
+          <div style={note}>
+            Powers outbound notifications — must-acknowledge messages and Howler replies email the client's logins with a link back into Pulse.
+            Until your domain is verified in Resend, the default sender <code>onboarding@resend.dev</code> can only deliver to your own Resend account email.
+          </div>
+          <Lbl>API key</Lbl>
+          <input
+            type="password"
+            autoComplete="off"
+            value={resendKey}
+            onChange={(e) => setResendKey(e.target.value)}
+            placeholder={resendSet ? `Set (${value.resend.keyHint || '••••'}) — leave blank to keep` : (envResend ? 'Using .env key — type to override' : 're_…')}
+            style={input}
+            disabled={clearResendKey}
+          />
+          {resendSet && (
+            <label style={clearRow}>
+              <input type="checkbox" checked={clearResendKey} onChange={(e) => setClearResendKey(e.target.checked)} /> Remove this key
+            </label>
+          )}
+          <Lbl>From address</Lbl>
+          <input
+            value={mailFrom}
+            onChange={(e) => setMailFrom(e.target.value)}
+            placeholder="Howler Pulse <pulse@updates.howler.co.za>"
+            style={input}
+            autoComplete="off"
+          />
+          {value?.resend?.lastError && <div style={{ ...note, color: 'var(--error, #ef4444)', marginTop: 8 }}>Last send failed: {value.resend.lastError}</div>}
+          {onTestEmail && value?.resend?.configured && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12 }}>
+              <button
+                type="button"
+                style={{ ...saveBtn, background: 'rgba(128,128,128,0.14)', color: 'var(--text)' }}
+                disabled={testState === 'sending'}
+                onClick={async () => {
+                  setTestState('sending');
+                  try { const r = await onTestEmail(); setTestState(`✓ Sent to ${r.to}`); }
+                  catch (e) { setTestState(`✗ ${e.message}`); }
+                }}
+              >{testState === 'sending' ? 'Sending…' : 'Send me a test email'}</button>
+              {testState && testState !== 'sending' && <span style={{ fontSize: 12.5, color: testState.startsWith('✓') ? 'var(--success, #10b981)' : 'var(--error, #ef4444)' }}>{testState}</span>}
+            </div>
+          )}
+        </section>
+      )}
 
       {/* Looker */}
       {showLooker && (

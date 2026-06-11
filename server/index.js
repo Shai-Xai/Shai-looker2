@@ -13,6 +13,7 @@ const { convertDashboard } = require('./convert');
 const { recreateDashboard, fetchDashboard } = require('./recreate');
 const { parseDrillUrl } = require('./drill');
 const insights = require('./insights');
+const mailer = require('./mailer');
 
 const app = express();
 // Behind a reverse proxy (Caddy/Nginx) in production so Secure cookies + the
@@ -45,9 +46,11 @@ app.use(express.static(staticDir, {
 // admin exists.
 migrate.run();
 auth.seedAdmin();
+// Outbound email (Resend) — disposable module; senders no-op when unconfigured.
+mailer.init({ db });
 // Experience OS comms spine — self-contained module (own tables + routes under
 // /api/os). Remove this line + server/os.js to fully uninstall the feature.
-require('./os').mount(app, { db, auth });
+require('./os').mount(app, { db, auth, mailer });
 
 // ─── Health ───────────────────────────────────────────────────────────────────
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
@@ -676,6 +679,8 @@ function adminIntegrationsView() {
       envFallback: !db.getSetting('anthropic_api_key') && !!process.env.ANTHROPIC_API_KEY,
       configured: !!adminAnthropicKey(),
     },
+    // Email (Resend) is platform-level only — it sends from Howler's domain.
+    resend: mailer.status(),
   };
 }
 function entityIntegrationsView(entityId) {
@@ -691,7 +696,24 @@ app.get('/api/admin/integrations', auth.requireAdmin, (_req, res) => res.json(ad
 app.put('/api/admin/integrations', auth.requireAdmin, (req, res) => {
   const map = { lookerBaseUrl: 'looker_base_url', lookerClientId: 'looker_client_id', lookerClientSecret: 'looker_client_secret', anthropicApiKey: 'anthropic_api_key' };
   applyIntegrationsPatch(req.body || {}, (k, v) => db.setSetting(map[k], v));
+  // Resend (email) — admin-only, so handled here rather than in the shared patch.
+  const re = (req.body || {}).resend || {};
+  if (re.apiKey) db.setSetting('resend_api_key', String(re.apiKey));
+  if (re.clearApiKey) db.setSetting('resend_api_key', '');
+  if (re.from !== undefined) db.setSetting('mail_from', String(re.from || '').trim());
   res.json(adminIntegrationsView());
+});
+
+// Send a test email to the signed-in admin to prove the Resend setup works.
+app.post('/api/admin/mail/test', auth.requireAdmin, async (req, res) => {
+  const { html, text } = mailer.notificationEmail({
+    title: 'Pulse email is working',
+    body: 'This is a test from Howler : Pulse. Outbound notifications (must-acknowledge messages, replies from Howler) will arrive like this.',
+    ctaText: 'Open Pulse', ctaPath: '/',
+  });
+  const r = await mailer.send({ to: req.user.email, subject: 'Howler : Pulse — test email', html, text });
+  if (r.ok) return res.json({ ok: true, to: req.user.email });
+  res.status(400).json({ error: r.error || r.reason || 'Email is not configured yet' });
 });
 
 // Admin: a specific client's overrides.

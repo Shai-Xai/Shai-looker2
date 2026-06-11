@@ -13,7 +13,7 @@
 
 const crypto = require('crypto');
 
-function mount(app, { db, auth }) {
+function mount(app, { db, auth, mailer }) {
   const sql = db.db;            // raw better-sqlite3 handle
   const now = () => new Date().toISOString();
   const uuid = () => crypto.randomUUID();
@@ -90,6 +90,29 @@ function mount(app, { db, auth }) {
   // ── middleware ──
   const requireOn = (req, res, next) => (enabled() ? next() : res.status(404).json({ error: 'Experience OS is disabled' }));
 
+  // ── email nudge (best-effort, fire-and-forget) ──────────────────────────────
+  // When Howler posts to a client, email every login on that entity with a CTA
+  // back into Pulse — the conversation itself stays in the inbox. No-ops when
+  // the mailer isn't wired or configured, so this never blocks the API call.
+  function emailEntity(entityId, t, body) {
+    if (!mailer?.isConfigured()) return;
+    const to = db.listUsers().filter((u) => u.role !== 'admin' && (u.entityIds || []).includes(entityId)).map((u) => u.email);
+    if (!to.length) return;
+    const subject = t.priority === 'must_ack' ? `Action needed: ${t.title || 'a message from Howler'}`
+      : t.priority === 'needs_reply' ? `Reply needed: ${t.title || 'a message from Howler'}`
+      : `Howler: ${t.title || 'new message'}`;
+    const lead = t.priority === 'must_ack' ? 'Howler needs you to read and acknowledge this in Pulse.'
+      : t.priority === 'needs_reply' ? 'Howler is waiting on your reply in Pulse.' : '';
+    const { html, text } = mailer.notificationEmail({
+      title: t.title || 'A message from Howler',
+      body: lead ? `${lead}\n\n${body}` : body,
+      ctaText: t.priority === 'must_ack' ? 'Acknowledge in Pulse' : 'Reply in Pulse',
+      ctaPath: '/inbox',
+    });
+    // One email per recipient so addresses are never exposed to each other.
+    for (const addr of to) mailer.send({ to: addr, subject, html, text });
+  }
+
   // ── Client + shared reads ───────────────────────────────────────────────────
   // Inbox: threads for the user's entities (admin: all, or ?entityId=). Includes
   // last message preview + unread/ack flags + pending-ack count for badges.
@@ -128,6 +151,7 @@ function mount(app, { db, auth }) {
       .run(id, t.id, isAdmin(req.user) ? 'howler' : 'client', req.user.email, '', 'pulse', body, now());
     touch(t.id);
     sql.prepare('INSERT OR REPLACE INTO os_receipts (thread_id, user_id, kind, at) VALUES (?,?,?,?)').run(t.id, req.user.id, 'read', now());
+    if (isAdmin(req.user)) emailEntity(t.entityId, t, body); // nudge the client when Howler replies
     res.status(201).json({ messages: messages(t.id) });
   });
 
@@ -162,7 +186,9 @@ function mount(app, { db, auth }) {
       .run(id, entityId, suiteId || '', 'message', '', String(title || '').slice(0, 200), pri, 'open', req.user.email, ts, ts);
     sql.prepare('INSERT INTO os_messages (id, thread_id, author_type, author_email, author_name, channel, body, created_at) VALUES (?,?,?,?,?,?,?,?)')
       .run(uuid(), id, 'howler', req.user.email, '', 'pulse', String(body).slice(0, 8000), ts);
-    res.status(201).json({ thread: thread(id) });
+    const t = thread(id);
+    emailEntity(entityId, t, String(body).slice(0, 8000));
+    res.status(201).json({ thread: t });
   });
 
   // Admin: who has read / acknowledged a thread (the audit the ops team never had).

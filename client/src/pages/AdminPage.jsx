@@ -1092,8 +1092,8 @@ function AdminIntegrations() {
   if (!value) return <Muted>Loading…</Muted>;
   return (
     <div>
-      <p style={hint}>The primary Looker and Anthropic accounts for the whole platform. These override the values in <code>.env</code>. Clients can set their own (Client → Integrations), which take precedence for their data.</p>
-      <IntegrationsForm value={value} onSave={async (p) => setValue(await api.saveAdminIntegrations(p))} />
+      <p style={hint}>The primary Looker, Anthropic and email accounts for the whole platform. These override the values in <code>.env</code>. Clients can set their own Looker/Anthropic (Client → Integrations), which take precedence for their data.</p>
+      <IntegrationsForm value={value} showResend onTestEmail={api.sendMailTest} onSave={async (p) => setValue(await api.saveAdminIntegrations(p))} />
     </div>
   );
 }
