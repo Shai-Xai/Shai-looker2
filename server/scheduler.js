@@ -28,6 +28,7 @@ function mount(app, { db, auth, mailer, generateContent, roleLenses }) {
       role         TEXT NOT NULL DEFAULT 'exec',
       role_focus   TEXT NOT NULL DEFAULT '',        -- optional override/blend of the role lens
       focus_mode   TEXT NOT NULL DEFAULT 'override', -- override | blend (how role_focus combines with the lens)
+      custom_message TEXT NOT NULL DEFAULT '',       -- a personal note rendered at the top of the email
       content_mode TEXT NOT NULL DEFAULT 'ai',       -- ai | curated
       tiles        TEXT NOT NULL DEFAULT '[]',       -- [{dashboardId,tileId}] for curated; tileId '*' = whole dashboard
       recipients   TEXT NOT NULL DEFAULT '[]',       -- [email]
@@ -50,7 +51,8 @@ function mount(app, { db, auth, mailer, generateContent, roleLenses }) {
   try {
     const cols = sql.prepare('PRAGMA table_info(scheduled_jobs)').all().map((c) => c.name);
     if (!cols.includes('focus_mode')) sql.exec("ALTER TABLE scheduled_jobs ADD COLUMN focus_mode TEXT NOT NULL DEFAULT 'override'");
-  } catch (e) { console.error('[scheduler] focus_mode migration skipped:', e.message); }
+    if (!cols.includes('custom_message')) sql.exec("ALTER TABLE scheduled_jobs ADD COLUMN custom_message TEXT NOT NULL DEFAULT ''");
+  } catch (e) { console.error('[scheduler] column migration skipped:', e.message); }
 
   // ── timezone-aware schedule maths ──
   const tzParts = (tz, date) => {
@@ -86,6 +88,7 @@ function mount(app, { db, auth, mailer, generateContent, roleLenses }) {
   // ── row <-> object ──
   const rowToJob = (r) => ({
     id: r.id, entityId: r.entity_id, type: r.type, title: r.title, role: r.role, roleFocus: r.role_focus, focusMode: r.focus_mode || 'override',
+    customMessage: r.custom_message || '',
     contentMode: r.content_mode, tiles: JSON.parse(r.tiles || '[]'), recipients: JSON.parse(r.recipients || '[]'),
     cadence: r.cadence, timeOfDay: r.time_of_day, weekday: r.weekday, runAt: r.run_at, timezone: r.timezone,
     status: r.status, lastRunAt: r.last_run_at, lastStatus: r.last_status, nextRunAt: r.next_run_at,
@@ -104,6 +107,7 @@ function mount(app, { db, auth, mailer, generateContent, roleLenses }) {
       role,
       roleFocus: String(body.roleFocus || '').slice(0, 1000),
       focusMode: body.focusMode === 'blend' ? 'blend' : 'override',
+      customMessage: String(body.customMessage || '').slice(0, 2000),
       contentMode: body.contentMode === 'curated' ? 'curated' : 'ai',
       tiles: Array.isArray(body.tiles) ? body.tiles.filter((t) => t && t.dashboardId && t.tileId).slice(0, 40).map((t) => ({ dashboardId: String(t.dashboardId), tileId: String(t.tileId) })) : [],
       recipients: Array.isArray(body.recipients) ? [...new Set(body.recipients.map((e) => String(e).trim().toLowerCase()).filter(Boolean))].slice(0, 25) : [],
@@ -121,13 +125,13 @@ function mount(app, { db, auth, mailer, generateContent, roleLenses }) {
     const next = j.status === 'active' ? computeNextRun(j) : null;
     const nextIso = next ? next.toISOString() : (j.status === 'active' && j.cadence === 'once' && j.runAt ? new Date(j.runAt).toISOString() : null);
     if (id) {
-      sql.prepare(`UPDATE scheduled_jobs SET title=?, role=?, role_focus=?, focus_mode=?, content_mode=?, tiles=?, recipients=?, cadence=?, time_of_day=?, weekday=?, run_at=?, timezone=?, status=?, next_run_at=?, updated_at=? WHERE id=?`)
-        .run(j.title, j.role, j.roleFocus, j.focusMode, j.contentMode, JSON.stringify(j.tiles), JSON.stringify(j.recipients), j.cadence, j.timeOfDay, j.weekday, j.runAt, j.timezone, j.status, nextIso, ts, id);
+      sql.prepare(`UPDATE scheduled_jobs SET title=?, role=?, role_focus=?, focus_mode=?, custom_message=?, content_mode=?, tiles=?, recipients=?, cadence=?, time_of_day=?, weekday=?, run_at=?, timezone=?, status=?, next_run_at=?, updated_at=? WHERE id=?`)
+        .run(j.title, j.role, j.roleFocus, j.focusMode, j.customMessage, j.contentMode, JSON.stringify(j.tiles), JSON.stringify(j.recipients), j.cadence, j.timeOfDay, j.weekday, j.runAt, j.timezone, j.status, nextIso, ts, id);
       return getJob(id);
     }
     const nid = uuid();
-    sql.prepare(`INSERT INTO scheduled_jobs (id, entity_id, type, title, role, role_focus, focus_mode, content_mode, tiles, recipients, cadence, time_of_day, weekday, run_at, timezone, status, next_run_at, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-      .run(nid, j.entityId, 'digest', j.title, j.role, j.roleFocus, j.focusMode, j.contentMode, JSON.stringify(j.tiles), JSON.stringify(j.recipients), j.cadence, j.timeOfDay, j.weekday, j.runAt, j.timezone, j.status, nextIso, createdBy || '', ts, ts);
+    sql.prepare(`INSERT INTO scheduled_jobs (id, entity_id, type, title, role, role_focus, focus_mode, custom_message, content_mode, tiles, recipients, cadence, time_of_day, weekday, run_at, timezone, status, next_run_at, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(nid, j.entityId, 'digest', j.title, j.role, j.roleFocus, j.focusMode, j.customMessage, j.contentMode, JSON.stringify(j.tiles), JSON.stringify(j.recipients), j.cadence, j.timeOfDay, j.weekday, j.runAt, j.timezone, j.status, nextIso, createdBy || '', ts, ts);
     return getJob(nid);
   }
 
@@ -136,7 +140,7 @@ function mount(app, { db, auth, mailer, generateContent, roleLenses }) {
     const lens = lensFor(job);
     const content = await generateContent({ entityId: job.entityId, role: job.role, roleFocus: job.roleFocus, focusMode: job.focusMode, contentMode: job.contentMode, tiles: job.tiles, recipientEmail });
     const branding = mailer.resolveBranding(job.entityId);
-    const email = mailer.digestEmail({ branding, entityId: job.entityId, assetScope: job.entityId, content, roleLabel: lens.label });
+    const email = mailer.digestEmail({ branding, entityId: job.entityId, assetScope: job.entityId, content, roleLabel: lens.label, customMessage: job.customMessage });
     return { ...email, content, senderName: branding.senderName };
   }
 
@@ -245,7 +249,7 @@ function mount(app, { db, auth, mailer, generateContent, roleLenses }) {
     const sample = (reason) => {
       const content = sampleContent(lens.label);
       const branding = mailer.resolveBranding(entityId);
-      const { html, subject } = mailer.digestEmail({ branding, entityId, assetScope: entityId, content, roleLabel: lens.label });
+      const { html, subject } = mailer.digestEmail({ branding, entityId, assetScope: entityId, content, roleLabel: lens.label, customMessage: job.customMessage });
       res.json({ html, subject, sample: true, reason: reason || '' });
     };
     if (!body.live) return sample('');

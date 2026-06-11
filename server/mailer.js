@@ -195,7 +195,7 @@ function mdBold(s) { return esc(s).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</stro
 // analytical narrative, and role-appropriate suggested actions (each may deep
 // link into Pulse). `content` is the structured output of insights.digestBrief
 // with links already resolved ({label/value/delta/href} kpis, {text/href} actions).
-function digestEmail({ branding, entityId, assetScope, content, roleLabel, ctaPath = '/' }) {
+function digestEmail({ branding, entityId, assetScope, content, roleLabel, customMessage, ctaPath = '/' }) {
   const b = branding || resolveBranding(entityId);
   const scope = assetScope || entityId;
   const logoSrc = b.logo && b.logo.startsWith('data:') && scope ? `${baseUrl()}/mail-assets/logo/${scope}` : b.logo;
@@ -233,15 +233,22 @@ function digestEmail({ branding, entityId, assetScope, content, roleLabel, ctaPa
       <ul style="margin:0;padding-left:18px;font-size:13.5px;color:#3a3a3c;">${actions}</ul>
     </div>` : '';
 
+  // Optional personal note (from the AM / client), rendered as a callout above
+  // the AI content. Verbatim, with **bold** + line breaks honoured.
+  const note = (customMessage || '').trim()
+    ? `<div style="background:${esc(b.brandColor)}12;border-left:3px solid ${esc(b.brandColor)};border-radius:8px;padding:13px 15px;margin-bottom:16px;font-size:14px;line-height:1.55;color:#2a2a2c;white-space:pre-wrap;">${mdBold(customMessage)}</div>`
+    : '';
+
   const url = `${baseUrl()}${ctaPath}`;
   const html = `<!doctype html><html><body style="margin:0;padding:0;background:#f5f5f7;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
-  <div style="display:none;max-height:0;overflow:hidden;">${esc(content.headline || '').slice(0, 140)}</div>
+  <div style="display:none;max-height:0;overflow:hidden;">${esc((customMessage || content.headline || '')).slice(0, 140)}</div>
   <div style="max-width:600px;margin:0 auto;padding:28px 16px;">
     <div style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:flex-start;">
       <div>${brandMark}${headerLine}</div>
       <div style="font-size:11px;color:#a1a1a6;text-align:right;">${esc(roleLabel || '')} digest<br>${new Date().toLocaleDateString('en-ZA', { weekday: 'short', day: 'numeric', month: 'short' })}</div>
     </div>
     <div style="background:#ffffff;border:1px solid #e8e8ec;border-radius:14px;padding:24px;">
+      ${note}
       ${content.headline ? `<div style="font-size:18px;font-weight:800;color:#111;margin-bottom:14px;line-height:1.35;letter-spacing:-0.01em;">${mdBold(content.headline)}</div>` : ''}
       ${kpiTable}
       <div style="margin-top:14px;">${narrative}</div>
@@ -252,7 +259,9 @@ function digestEmail({ branding, entityId, assetScope, content, roleLabel, ctaPa
   </div>
 </body></html>`;
 
-  const textParts = [content.headline || ''];
+  const textParts = [];
+  if ((customMessage || '').trim()) textParts.push(customMessage.trim(), '');
+  textParts.push(content.headline || '');
   for (const k of kpis) textParts.push(`• ${k.label}: ${k.value}${k.delta ? ` (${k.delta})` : ''}`);
   textParts.push('', ...(content.narrative || []));
   if (content.actions?.length) { textParts.push('', 'Suggested actions:'); for (const a of content.actions) textParts.push(`- ${a.text}`); }

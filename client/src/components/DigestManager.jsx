@@ -69,6 +69,7 @@ export default function DigestManager({ entityId, scope = 'admin', logins = [] }
 function DigestEditor({ job, roles, logins, api: A, onClose, onSaved }) {
   const [f, setF] = useState(() => ({
     title: job?.title || '', role: job?.role || 'exec', roleFocus: job?.roleFocus || '', focusMode: job?.focusMode || 'override',
+    customMessage: job?.customMessage || '',
     cadence: job?.cadence || 'daily', timeOfDay: job?.timeOfDay || '07:00', weekday: job?.weekday ?? 1,
     runAt: job?.runAt || '', recipients: (job?.recipients || []).join(', '), status: job?.status || 'active',
     contentMode: job?.contentMode || 'ai', tiles: job?.tiles || [],
@@ -81,7 +82,7 @@ function DigestEditor({ job, roles, logins, api: A, onClose, onSaved }) {
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
 
   const payload = () => ({
-    title: f.title, role: f.role, roleFocus: f.roleFocus, focusMode: f.focusMode, cadence: f.cadence, timeOfDay: f.timeOfDay,
+    title: f.title, role: f.role, roleFocus: f.roleFocus, focusMode: f.focusMode, customMessage: f.customMessage, cadence: f.cadence, timeOfDay: f.timeOfDay,
     weekday: Number(f.weekday), runAt: f.runAt ? new Date(f.runAt).toISOString() : '', status: f.status,
     contentMode: f.contentMode, tiles: f.tiles, recipients: f.recipients.split(',').map((s) => s.trim()).filter(Boolean),
   });
@@ -103,7 +104,7 @@ function DigestEditor({ job, roles, logins, api: A, onClose, onSaved }) {
     clearTimeout(debounce.current);
     debounce.current = setTimeout(() => refreshPreview(false), 350);
     return () => clearTimeout(debounce.current);
-  }, [f.role, f.roleFocus, f.focusMode, f.contentMode, JSON.stringify(f.tiles)]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [f.role, f.roleFocus, f.focusMode, f.customMessage, f.contentMode, JSON.stringify(f.tiles)]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function save() {
     setBusy(true);
@@ -133,6 +134,11 @@ function DigestEditor({ job, roles, logins, api: A, onClose, onSaved }) {
               </div>
             )}
             {f.roleFocus.trim() && <div style={hintS}>{f.focusMode === 'override' ? 'Replaces the role lens entirely.' : 'Adds your emphasis on top of the role lens.'}</div>}
+          </Field>
+
+          <Field label="Custom message (optional — a personal note at the top of the email)">
+            <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit' }} rows={3} value={f.customMessage} onChange={(e) => set('customMessage', e.target.value)} placeholder="e.g. Hi team — big weekend ahead. Here's where we stand…" />
+            <div style={hintS}>Sent verbatim above the AI summary. Supports **bold** and line breaks.</div>
           </Field>
 
           <Field label="Content">
