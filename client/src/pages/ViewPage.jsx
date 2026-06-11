@@ -21,7 +21,7 @@ export default function ViewPage() {
   const { id, suiteId } = useParams();
   const navigate = useNavigate();
   const { isAdmin, insightsEnabled } = useAuth();
-  const { previewEntityId } = useOutletContext() || {};
+  const { previewEntityId, actionsSlot } = useOutletContext() || {};
   const { theme: appTheme } = useTheme();
   const [def, setDef] = useState(null);
   const [setInfo, setSetInfo] = useState(null);
@@ -196,26 +196,28 @@ export default function ViewPage() {
           />
         )}
 
-        {/* On mobile inside a suite the header is hidden, so the Summary button
-            shares the filters bar (or gets its own compact row if no filters). */}
-        {isMobile && suiteId && !hasFilters && (
-          <div style={{ background: 'var(--card)', borderBottom: '1px solid var(--hairline)', padding: '8px 14px', display: 'flex', alignItems: 'center', gap: 8 }}>
-            {canSummarize && <button className="btn-key" style={summaryBtn} onClick={() => setSummaryOpen(true)}><AiMark size={18} /> Summary</button>}
-            <span style={{ flex: 1 }} />
+        {/* On mobile inside a suite, the dashboard actions live in the ☰ Menu
+            bar (same line) — portalled there, desktop order: Summary · Filters · ⋯ */}
+        {isMobile && suiteId && actionsSlot && createPortal(
+          <>
+            {canSummarize && (
+              <button className="btn-key" style={iconAction} onClick={() => setSummaryOpen(true)} title="AI summary" aria-label="AI summary"><AiMark size={20} /></button>
+            )}
+            {hasFilters && (
+              <button style={{ ...iconAction, ...(filtersOpen ? { background: 'rgba(128,128,128,0.22)' } : null) }} onClick={() => setFiltersOpen(v => !v)} title="Filters" aria-label="Filters">
+                <span style={{ fontSize: 15 }}>⚲</span>
+                {activeCount > 0 && <span key={activeCount} className="pop" style={countBadge}>{activeCount}</span>}
+              </button>
+            )}
             <ActionsMenu suiteId={suiteId} dashboardId={id} filterValues={filterValues} />
-          </div>
+          </>,
+          actionsSlot
         )}
 
         {hasFilters && (
           <FilterBar
             filters={def.filters} values={filterValues} onChange={handleFilterChange} locked={locked}
             open={filtersOpen} onClose={() => setFiltersOpen(false)}
-            leading={isMobile && suiteId ? (
-              <>
-                {canSummarize && <button className="btn-key" style={summaryBtn} onClick={() => setSummaryOpen(true)}><AiMark size={18} /> Summary</button>}
-                <ActionsMenu suiteId={suiteId} dashboardId={id} filterValues={filterValues} />
-              </>
-            ) : null}
           />
         )}
 
@@ -254,6 +256,8 @@ const editBtn = { padding: '8px 18px', background: 'var(--brand)', color: '#fff'
 const filtersBtn = (active) => ({ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '8px 16px', background: active ? 'rgba(128,128,128,0.2)' : 'rgba(128,128,128,0.15)', color: 'var(--text)', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer' });
 const countBadge = { background: 'var(--brand)', color: '#fff', fontSize: 11, fontWeight: 700, borderRadius: 980, minWidth: 18, height: 18, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' };
 const summaryBtn = { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 16px', background: 'rgba(128,128,128,0.15)', color: 'var(--text)', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer' };
+// Compact circular action for the mobile menu bar (Summary / Filters / ⋯).
+const iconAction = { position: 'relative', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 34, height: 34, padding: '0 8px', background: 'rgba(128,128,128,0.15)', color: 'var(--text)', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer', flexShrink: 0 };
 const homeBtn = { flexShrink: 0, width: 34, height: 34, borderRadius: '50%', background: 'rgba(128,128,128,0.15)', color: 'var(--text)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', textDecoration: 'none' };
 
 function HomeIcon({ size = 16 }) {

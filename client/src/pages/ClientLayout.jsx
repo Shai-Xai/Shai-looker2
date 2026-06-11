@@ -30,6 +30,9 @@ export default function ClientLayout() {
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('howler_nav_collapsed') === '1'); // desktop
   const toggleCollapsed = () => setCollapsed((c) => { localStorage.setItem('howler_nav_collapsed', c ? '0' : '1'); return !c; });
   const navDrag = useSheetDrag(() => setNavOpen(false)); // mobile bottom-sheet dismiss
+  // The dashboard page (ViewPage) portals its actions into the menu bar so
+  // Summary / Filters / ⋯ sit on the ☰ Menu line, not a separate row below.
+  const [actionsSlot, setActionsSlot] = useState(null);
 
   useEffect(() => { api.mySuites().then(setSuites).catch(() => {}).finally(() => setLoading(false)); }, []);
   useEffect(() => { api.mySettlements().then(setSettlements).catch(() => {}); }, []);
@@ -365,10 +368,12 @@ export default function ClientLayout() {
         {(isMobile || collapsed) && (
           <div style={menuBar}>
             <button style={menuBtn} onClick={() => (isMobile ? setNavOpen(true) : toggleCollapsed())}>☰&nbsp; Menu</button>
-            {activeTitle && <span style={{ fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeTitle}</span>}
+            {activeTitle && <span style={{ flex: 1, fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeTitle}</span>}
+            {/* Page (dashboard) actions portal in here — Summary · Filters · ⋯ */}
+            <div ref={setActionsSlot} style={{ display: 'flex', alignItems: 'center', gap: 7, marginLeft: 'auto', flexShrink: 0 }} />
           </div>
         )}
-        <Outlet context={{ previewEntityId: activeEntityId }} />
+        <Outlet context={{ previewEntityId: activeEntityId, actionsSlot }} />
       </main>
     </div>
   );
