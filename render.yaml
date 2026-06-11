@@ -14,8 +14,12 @@ services:
     name: howler-pulse
     runtime: node
     plan: starter
-    branch: claude/ecstatic-thompson-vUFsS   # change to 'main' once you merge
-    buildCommand: npm ci --include=dev && npm --prefix client ci --include=dev && npm --prefix client run build
+    branch: main
+    # Root install is production-only (the server needs no devDeps). Installing
+    # root devDeps pulls Playwright, which downloads a ~150MB browser on every
+    # deploy — the slow build. The client build DOES need its devDeps (Vite), so
+    # keep --include=dev there.
+    buildCommand: npm ci --omit=dev && npm --prefix client ci --include=dev && npm --prefix client run build
     startCommand: node server/index.js
     healthCheckPath: /health
     autoDeploy: true
