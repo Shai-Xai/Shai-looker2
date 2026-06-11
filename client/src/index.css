@@ -347,3 +347,20 @@ input::placeholder, textarea::placeholder { color: #b0b0b6; }
 @media (max-width: 767px) {
   input, select, textarea { font-size: 16px !important; }
 }
+
+/* ─── Print / PDF ─────────────────────────────────────────────────────────────
+   The dashboard's "⤓ PDF" button calls window.print(); these rules strip the
+   app chrome and let the tile grid flow across pages, so Save-as-PDF yields a
+   clean report. Landscape suits the desktop grid's proportions. */
+@media print {
+  @page { size: A4 landscape; margin: 9mm; }
+  html, body, #root { height: auto !important; overflow: visible !important; background: #fff !important; }
+  #root > div { height: auto !important; display: block !important; }
+  header, .howler-sidebar, .sidebar-wrap, .subtabs, .no-print, .insight-btn,
+  .nav-indicator, .sheet-grip { display: none !important; }
+  main { overflow: visible !important; display: block !important; }
+  main > div { overflow: visible !important; height: auto !important; }
+  body { zoom: 0.72; }
+  .howler-tile { box-shadow: none !important; break-inside: avoid; }
+  .ai-glow::before { display: none !important; }
+}

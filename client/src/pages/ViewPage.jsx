@@ -59,6 +59,16 @@ export default function ViewPage() {
             lockedMap[f.name] = true;
           }
         }
+        // Shared-link filters (?f=) override the defaults — but never a lock.
+        try {
+          const f = new URLSearchParams(window.location.search).get('f');
+          if (f) {
+            const shared = JSON.parse(decodeURIComponent(f));
+            for (const [k, v] of Object.entries(shared || {})) {
+              if (k in defaults && !lockedMap[k] && typeof v === 'string') defaults[k] = v;
+            }
+          }
+        } catch { /* malformed share param — ignore */ }
         setFilterValues(defaults);
         setLocked(lockedMap);
       })
@@ -158,8 +168,12 @@ export default function ViewPage() {
               {setInfo && <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)' }}>{setInfo.name}</div>}
               <h2 style={{ fontSize: isMobile ? 17 : 21, fontWeight: 600, letterSpacing: '-0.02em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{headerTitle}</h2>
             </div>
+            {!isMobile && <ShareButton suiteId={suiteId} dashboardId={id} filterValues={filterValues} />}
+            {!isMobile && (
+              <button className="no-print" style={summaryBtn} onClick={() => window.print()} title="Download / print this dashboard as PDF">⤓ PDF</button>
+            )}
             {canSummarize && !isMobile && (
-              <button className="btn-key" style={summaryBtn} onClick={() => setSummaryOpen(true)} title="AI summary of the whole dashboard"><AiMark size={20} /> Summary</button>
+              <button className="btn-key no-print" style={summaryBtn} onClick={() => setSummaryOpen(true)} title="AI summary of the whole dashboard"><AiMark size={20} /> Summary</button>
             )}
             {hasFilters && !isMobile && (
               <button style={filtersBtn(filtersOpen)} onClick={() => setFiltersOpen(v => !v)}>
@@ -245,6 +259,30 @@ function HomeIcon({ size = 16 }) {
       <path d="M3 10.5 12 3l9 7.5" />
       <path d="M5 9.5V21h5.5v-6h3v6H19V9.5" />
     </svg>
+  );
+}
+
+// Mint a short link carrying the current filters, copy it, flash ✓. The
+// recipient still logs in; scoping applies to THEM (a link is never a bypass).
+function ShareButton({ suiteId, dashboardId, filterValues }) {
+  const [state, setState] = useState('idle'); // idle | busy | copied | err
+  async function share() {
+    setState('busy');
+    try {
+      const { path } = await api.createShareLink({ suiteId, dashboardId, filters: filterValues });
+      const url = `${window.location.origin}${path}`;
+      try { await navigator.clipboard.writeText(url); } catch { window.prompt('Copy this link:', url); }
+      setState('copied');
+      setTimeout(() => setState('idle'), 2200);
+    } catch {
+      setState('err');
+      setTimeout(() => setState('idle'), 2200);
+    }
+  }
+  return (
+    <button className="no-print" style={summaryBtn} onClick={share} disabled={state === 'busy'} title="Copy a link to this dashboard with your current filters">
+      {state === 'copied' ? '✓ Link copied' : state === 'err' ? '⚠ Try again' : state === 'busy' ? '…' : '↗ Share'}
+    </button>
   );
 }
 

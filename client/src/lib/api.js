@@ -199,6 +199,9 @@ export const api = {
   myPins: (entityId) => fetch(`/api/my/pins${entityId ? `?entityId=${encodeURIComponent(entityId)}` : ''}`).then(json),
   togglePin: (body) => fetch('/api/my/pins', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
 
+  // Share links
+  createShareLink: (body) => fetch('/api/share', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
+
   // Briefing configuration
   getBriefingSettings: () => fetch('/api/admin/briefing-settings').then(json),
   saveBriefingSettings: (p) => fetch('/api/admin/briefing-settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),

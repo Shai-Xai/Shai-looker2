@@ -179,6 +179,34 @@ function viewProfile(userId) {
   return { top, lastVisit: last?.at || null };
 }
 
+// ─── Share links ──────────────────────────────────────────────────────────────
+// Short links to a dashboard + filter snapshot. NEVER an auth bypass: the
+// recipient still logs in and organiser scoping applies — the link just lands
+// them on the right dashboard with the sender's filters pre-applied.
+db.exec(`
+CREATE TABLE IF NOT EXISTS share_links (
+  token       TEXT PRIMARY KEY,
+  suite_id    TEXT NOT NULL DEFAULT '',
+  dashboard_id TEXT NOT NULL,
+  filters     TEXT NOT NULL DEFAULT '{}',
+  created_by  TEXT NOT NULL DEFAULT '',
+  created_at  TEXT NOT NULL,
+  hits        INTEGER NOT NULL DEFAULT 0
+);
+`);
+function createShareLink({ suiteId, dashboardId, filters, createdBy }) {
+  const token = crypto.randomBytes(6).toString('base64url');
+  db.prepare('INSERT INTO share_links (token, suite_id, dashboard_id, filters, created_by, created_at) VALUES (?,?,?,?,?,?)')
+    .run(token, suiteId || '', dashboardId, JSON.stringify(filters || {}), createdBy || '', now());
+  return token;
+}
+function getShareLink(token) {
+  const r = db.prepare('SELECT * FROM share_links WHERE token=?').get(token);
+  if (!r) return null;
+  db.prepare('UPDATE share_links SET hits = hits + 1 WHERE token=?').run(token);
+  return { token: r.token, suiteId: r.suite_id, dashboardId: r.dashboard_id, filters: J(r.filters, {}), createdBy: r.created_by, createdAt: r.created_at, hits: r.hits + 1 };
+}
+
 // ─── Briefing feedback ────────────────────────────────────────────────────────
 // Reader reactions to the home briefing: like / dislike (with comment) /
 // investigate (asks Howler to look at the data). The briefing text is
@@ -801,7 +829,7 @@ function updateDocument(id, patch) {
 function deleteDocument(id) { return db.prepare('DELETE FROM event_documents WHERE id=?').run(id).changes > 0; }
 
 // ─── Full backup / restore (export to JSON, import to replace) ────────────────
-const EXPORT_TABLES = ['entities', 'users', 'user_entities', 'sets', 'set_dashboards', 'suites', 'suite_sets', 'dashboards', 'settings', 'tile_library', 'settlements', 'event_documents', 'user_views', 'user_prefs', 'tile_marks', 'briefing_feedback'];
+const EXPORT_TABLES = ['entities', 'users', 'user_entities', 'sets', 'set_dashboards', 'suites', 'suite_sets', 'dashboards', 'settings', 'tile_library', 'settlements', 'event_documents', 'user_views', 'user_prefs', 'tile_marks', 'briefing_feedback', 'share_links'];
 function exportAll() {
   const out = { _version: 1, exportedAt: now() };
   for (const t of EXPORT_TABLES) out[t] = tableExists(t) ? db.prepare(`SELECT * FROM ${t}`).all() : [];
@@ -817,8 +845,8 @@ function insertRow(name, row) {
 // Replace ALL data with the contents of an export. Deletes children first
 // (FK-safe), then inserts parents first.
 const importAll = db.transaction((data) => {
-  const delOrder = ['user_views', 'user_prefs', 'tile_marks', 'briefing_feedback', 'user_entities', 'suite_sets', 'set_dashboards', 'suites', 'sets', 'dashboards', 'users', 'settlements', 'event_documents', 'entities', 'settings', 'tile_library'];
-  const insOrder = ['entities', 'dashboards', 'users', 'sets', 'suites', 'set_dashboards', 'suite_sets', 'user_entities', 'settings', 'tile_library', 'settlements', 'event_documents', 'user_views', 'user_prefs', 'tile_marks', 'briefing_feedback'];
+  const delOrder = ['user_views', 'user_prefs', 'tile_marks', 'briefing_feedback', 'share_links', 'user_entities', 'suite_sets', 'set_dashboards', 'suites', 'sets', 'dashboards', 'users', 'settlements', 'event_documents', 'entities', 'settings', 'tile_library'];
+  const insOrder = ['entities', 'dashboards', 'users', 'sets', 'suites', 'set_dashboards', 'suite_sets', 'user_entities', 'settings', 'tile_library', 'settlements', 'event_documents', 'user_views', 'user_prefs', 'tile_marks', 'briefing_feedback', 'share_links'];
   for (const t of delOrder) { if (tableExists(t)) db.prepare(`DELETE FROM ${t}`).run(); }
   let counts = {};
   for (const t of insOrder) {
@@ -856,4 +884,6 @@ module.exports = {
   getUserPref, setUserPref,
   // briefing feedback
   addBriefingFeedback, listBriefingFeedback, setBriefingFeedbackStatus,
+  // share links
+  createShareLink, getShareLink,
 };
