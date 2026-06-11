@@ -11,6 +11,7 @@ import ClientIntegrationsPage from './pages/ClientIntegrationsPage.jsx';
 import SettlementsPage from './pages/SettlementsPage.jsx';
 import SettlementViewPage from './pages/SettlementViewPage.jsx';
 import DocumentViewPage from './pages/DocumentViewPage.jsx';
+import InboxPage from './os/InboxPage.jsx';
 import Logo from './components/Logo.jsx';
 import RootErrorBoundary from './components/RootErrorBoundary.jsx';
 import { DrillProvider } from './lib/DrillContext.jsx';
@@ -99,6 +100,7 @@ function Shell() {
                 <Route path="/settlements" element={<SettlementsPage />} />
                 <Route path="/settlements/:id" element={<SettlementViewPage />} />
                 <Route path="/documents/:id" element={<DocumentViewPage />} />
+                <Route path="/inbox" element={<InboxPage />} />
               </Route>
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
@@ -112,6 +114,7 @@ function Shell() {
                 <Route path="/settlements" element={<SettlementsPage />} />
                 <Route path="/settlements/:id" element={<SettlementViewPage />} />
                 <Route path="/documents/:id" element={<DocumentViewPage />} />
+                <Route path="/inbox" element={<InboxPage />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Route>
             </Routes>

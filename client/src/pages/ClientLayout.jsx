@@ -37,6 +37,21 @@ export default function ClientLayout() {
   useEffect(() => { api.mySuites().then(setSuites).catch(() => {}).finally(() => setLoading(false)); }, []);
   useEffect(() => { api.mySettlements().then(setSettlements).catch(() => {}); }, []);
   const onSettlements = location.pathname.startsWith('/settlements');
+  const onInbox = location.pathname.startsWith('/inbox');
+
+  // Experience OS inbox: unread + must-acknowledge counts for the badge/banner.
+  const [inbox, setInbox] = useState({ enabled: false, unread: 0, pending: [] });
+  useEffect(() => {
+    let alive = true;
+    const poll = () => api.osInbox().then((r) => {
+      if (alive) setInbox((s) => ({ ...s, enabled: true, unread: r.unread, pending: r.threads.filter((t) => t.priority === 'must_ack' && !t.acked) }));
+    }).catch(() => {});
+    poll();
+    const t = setInterval(poll, 60000); // light poll; webhook push later
+    window.addEventListener('os-refresh', poll); // instant update after ack/reply
+    return () => { alive = false; clearInterval(t); window.removeEventListener('os-refresh', poll); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname]);
 
   async function ensureDetail(sid) {
     if (details[sid]) return;
@@ -238,10 +253,11 @@ export default function ClientLayout() {
       )}
       {/* Settlements — its own section below the suites. Hidden for clients
           with no reports; admins always see it (to preview the feature). */}
-      {(visibleSettlements.length > 0 || isAdmin) && (
+      {(visibleSettlements.length > 0 || isAdmin || inbox.enabled) && (
         <>
           <div style={{ borderTop: '1px solid var(--hairline)', margin: '12px 6px 10px' }} />
           <div style={{ padding: '0 8px 8px 14px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)' }}>Reports</div>
+          {(visibleSettlements.length > 0 || isAdmin) && (
           <button
             ref={onSettlements ? activeRef : null}
             className={`nav-row${onSettlements ? ' active' : ''}`}
@@ -252,6 +268,18 @@ export default function ClientLayout() {
             <span style={ellip}>Settlements</span>
             {visibleSettlements.length > 0 && <span style={countChip}>{visibleSettlements.length}</span>}
           </button>
+          )}
+          {inbox.enabled && (
+            <button
+              className={`nav-row${onInbox ? ' active' : ''}`}
+              style={{ ...rowBtn, fontWeight: onInbox ? 600 : 500 }}
+              onClick={() => { if (!onInbox) vtNavigate(navigate, '/inbox'); if (isMobile) setNavOpen(false); }}
+            >
+              <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>📥</span>
+              <span style={ellip}>Inbox</span>
+              {inbox.unread > 0 && <span style={{ ...countChip, background: 'var(--brand)', color: '#fff' }}>{inbox.unread}</span>}
+            </button>
+          )}
         </>
       )}
     </nav>
@@ -332,9 +360,10 @@ export default function ClientLayout() {
                   </div>
                 );
               })}
-              {(visibleSettlements.length > 0 || isAdmin) && (
+              {(visibleSettlements.length > 0 || isAdmin || inbox.enabled) && (
                 <>
                   <div style={{ borderTop: '1px solid var(--hairline)', margin: '10px 4px' }} />
+                  {(visibleSettlements.length > 0 || isAdmin) && (
                   <button
                     className={`nav-row${onSettlements ? ' active' : ''}`}
                     style={{ ...mRowSuite, fontWeight: onSettlements ? 700 : 500 }}
@@ -344,6 +373,18 @@ export default function ClientLayout() {
                     <span style={ellip}>Settlements</span>
                     {visibleSettlements.length > 0 && <span style={countChip}>{visibleSettlements.length}</span>}
                   </button>
+                  )}
+                  {inbox.enabled && (
+                    <button
+                      className={`nav-row${onInbox ? ' active' : ''}`}
+                      style={{ ...mRowSuite, fontWeight: onInbox ? 700 : 500 }}
+                      onClick={() => { if (!onInbox) vtNavigate(navigate, '/inbox'); setNavOpen(false); }}
+                    >
+                      <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>📥</span>
+                      <span style={ellip}>Inbox</span>
+                      {inbox.unread > 0 && <span style={{ ...countChip, background: 'var(--brand)', color: '#fff' }}>{inbox.unread}</span>}
+                    </button>
+                  )}
                 </>
               )}
             </div>
@@ -357,6 +398,20 @@ export default function ClientLayout() {
         </div>
       )}
       <main style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'auto' }}>
+        {/* Must-acknowledge banner — Howler messages that need a response,
+            persistent until acknowledged. Tapping opens the inbox. */}
+        {!onInbox && inbox.pending.length > 0 && (
+          <button
+            onClick={() => vtNavigate(navigate, '/inbox')}
+            style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', border: 'none', cursor: 'pointer', textAlign: 'left', padding: '10px 16px', background: 'linear-gradient(90deg, #FF385C, #FF6B35)', color: '#fff', fontSize: 13 }}
+          >
+            <span style={{ fontSize: 15 }}>📣</span>
+            <span style={{ fontWeight: 700 }}>{inbox.pending.length === 1 ? 'A message from Howler needs your acknowledgement' : `${inbox.pending.length} messages from Howler need your acknowledgement`}</span>
+            {inbox.pending[0]?.title && inbox.pending.length === 1 && <span style={{ opacity: 0.9, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>— {inbox.pending[0].title}</span>}
+            <span style={{ flex: 1 }} />
+            <span style={{ background: 'rgba(255,255,255,0.25)', borderRadius: 980, padding: '5px 14px', fontWeight: 700, flexShrink: 0 }}>Open →</span>
+          </button>
+        )}
         {isAdmin && (
           <div style={previewBar}>
             <span style={{ fontWeight: 700 }}>👁 Client preview{activeEntityId && (() => { const n = suites.find((s) => s.entityId === activeEntityId)?.entityName; return n ? ` — ${n}` : ''; })()}</span>

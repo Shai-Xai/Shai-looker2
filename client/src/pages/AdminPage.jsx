@@ -197,7 +197,7 @@ function Entities({ fields }) {
 // One client's settings hub: a left nav (Settings / Suites / Logins) + panel.
 function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites, users, onChange, onBack }) {
   const [section, setSection] = useState('settings');
-  const nav = [['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['briefing', 'Briefing'], ['settlements', 'Settlements'], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations']];
+  const nav = [['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['briefing', 'Briefing'], ['messages', 'Messages'], ['settlements', 'Settlements'], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations']];
   return (
     <div>
       <button style={miniBtnOutline} onClick={onBack}>← All clients</button>
@@ -224,6 +224,7 @@ function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites,
               <BriefingFeedback entityId={entity.id} />
             </>
           )}
+          {section === 'messages' && <ClientMessages entity={entity} />}
           {section === 'settlements' && <Settlements entityId={entity.id} />}
           {section === 'logins' && <EntityLogins entity={entity} users={users} onChange={onChange} />}
           {section === 'integrations' && <ClientIntegrations entity={entity} />}
@@ -1159,6 +1160,60 @@ function BackupRestore() {
           <input type="file" accept="application/json,.json" style={{ display: 'none' }} onChange={doImport} disabled={!!busy} />
         </label>
       </div>
+    </div>
+  );
+}
+
+// ─── Messages (Experience OS) ───────────────────────────────────────────────────
+// Send an announcement to this client and see the thread list. Clients see it
+// in their Inbox; must-acknowledge ones raise a banner until acknowledged.
+function ClientMessages({ entity }) {
+  const navigate = useNavigate();
+  const [threads, setThreads] = useState(null);
+  const [title, setTitle] = useState('');
+  const [body, setBody] = useState('');
+  const [priority, setPriority] = useState('normal');
+  const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState(false);
+  const load = () => { api.osInbox(entity.id).then((r) => setThreads(r.threads)).catch(() => setThreads([])); };
+  useEffect(() => { load(); }, [entity.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function send() {
+    if (!body.trim()) return;
+    setBusy(true);
+    try { await api.osAnnounce({ entityId: entity.id, title, body, priority }); setTitle(''); setBody(''); setPriority('normal'); flash(setSent); load(); }
+    catch (e) { alert(e.message); } finally { setBusy(false); }
+  }
+  const PRI = { fyi: 'FYI', normal: 'Normal', needs_reply: 'Needs reply', must_ack: 'Must acknowledge' };
+
+  return (
+    <div>
+      <p style={hint}>Send a message to <b>{entity.name}</b>. It lands in their Inbox; “Must acknowledge” raises a banner on their home until they confirm — and you'll see who acknowledged, when.</p>
+      <div style={cardStyle}>
+        <input style={{ ...input, width: '100%', fontWeight: 700, marginBottom: 8 }} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Subject (optional)" />
+        <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={4} placeholder="Your message to the client…"
+          style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 13, outline: 'none', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
+          <select style={input} value={priority} onChange={(e) => setPriority(e.target.value)}>
+            {Object.entries(PRI).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select>
+          <span style={{ flex: 1 }} />
+          {sent && <SavedChip />}
+          <button style={{ ...saveBtn }} onClick={send} disabled={busy || !body.trim()}>{busy ? 'Sending…' : 'Send message'}</button>
+        </div>
+      </div>
+      <h3 style={{ fontSize: 14, fontWeight: 700, margin: '18px 0 8px' }}>Conversations</h3>
+      {!threads ? <Muted>Loading…</Muted> : threads.length === 0 ? <Muted>No messages yet.</Muted> : (
+        <div style={clientList}>
+          {threads.map((t) => (
+            <button key={t.id} className="lift" style={clientRow} onClick={() => navigate('/inbox')}>
+              <span style={{ fontWeight: 600, fontSize: 14 }}>{t.title || '(no subject)'}</span>
+              {t.priority === 'must_ack' && <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: t.acked ? '#2da44e' : '#b45309' }}>{t.acked ? '✓ acknowledged' : 'awaiting ack'}</span>}
+              <span style={{ marginLeft: 'auto', color: 'var(--muted)', fontSize: 12 }}>{t.preview?.body?.slice(0, 40) || ''}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

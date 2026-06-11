@@ -202,6 +202,16 @@ export const api = {
   // Share links
   createShareLink: (body) => fetch('/api/share', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
 
+  // Experience OS — comms spine (isolated /api/os)
+  osStatus: () => fetch('/api/os/status').then(json),
+  osInbox: (entityId) => fetch(`/api/os/inbox${entityId ? `?entityId=${encodeURIComponent(entityId)}` : ''}`).then(json),
+  osPending: () => fetch('/api/os/pending').then(json),
+  osThread: (id) => fetch(`/api/os/threads/${id}`).then(json),
+  osReply: (id, body) => fetch(`/api/os/threads/${id}/messages`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body }) }).then(json),
+  osAck: (id) => fetch(`/api/os/threads/${id}/ack`, { method: 'POST' }).then(json),
+  osAnnounce: (body) => fetch('/api/os/admin/announce', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
+  osReceipts: (id) => fetch(`/api/os/admin/threads/${id}/receipts`).then(json),
+
   // Briefing configuration
   getBriefingSettings: () => fetch('/api/admin/briefing-settings').then(json),
   saveBriefingSettings: (p) => fetch('/api/admin/briefing-settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),
