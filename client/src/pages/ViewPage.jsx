@@ -173,9 +173,10 @@ export default function ViewPage() {
               <button className="btn-key no-print" style={summaryBtn} onClick={() => setSummaryOpen(true)} title="AI summary of the whole dashboard"><AiMark size={20} /> Summary</button>
             )}
             {hasFilters && !isMobile && (
-              <button style={filtersBtn(filtersOpen)} onClick={() => setFiltersOpen(v => !v)}>
-                <span>⚲ Filters</span>
-                {activeCount > 0 && <span key={activeCount} className="pop" style={countBadge}>{activeCount}</span>}
+              <button style={filtersBtn(filtersOpen)} onClick={() => setFiltersOpen(v => !v)} title="Filters" aria-label="Filters">
+                {/* Icon-only trigger — a funnel + chevron. The funnel tints to the
+                    brand colour when filters are active (no number, just cleaner). */}
+                <span style={{ color: activeCount > 0 ? 'var(--brand)' : 'inherit', fontSize: 15 }}>⚲</span>
                 <span style={{ fontSize: 11, opacity: 0.7 }}>{filtersOpen ? '▴' : '▾'}</span>
               </button>
             )}
@@ -253,7 +254,7 @@ export default function ViewPage() {
 }
 
 const editBtn = { padding: '8px 18px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer', boxShadow: '0 1px 2px rgba(128,128,128,0.2)' };
-const filtersBtn = (active) => ({ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '8px 16px', background: active ? 'rgba(128,128,128,0.2)' : 'rgba(128,128,128,0.15)', color: 'var(--text)', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer' });
+const filtersBtn = (active) => ({ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '8px 12px', background: active ? 'rgba(128,128,128,0.2)' : 'rgba(128,128,128,0.15)', color: 'var(--text)', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer' });
 const countBadge = { background: 'var(--brand)', color: '#fff', fontSize: 11, fontWeight: 700, borderRadius: 980, minWidth: 18, height: 18, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' };
 const summaryBtn = { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 16px', background: 'rgba(128,128,128,0.15)', color: 'var(--text)', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer' };
 // Compact circular action for the mobile menu bar (Summary / Filters / ⋯).
