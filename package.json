@@ -22,7 +22,6 @@
     "node-fetch": "^2.7.0"
   },
   "devDependencies": {
-    "concurrently": "^8.2.2",
-    "playwright": "^1.60.0"
+    "concurrently": "^8.2.2"
   }
 }
