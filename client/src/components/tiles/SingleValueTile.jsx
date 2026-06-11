@@ -51,29 +51,31 @@ export default function SingleValueTile({ data, visConfig = {}, label }) {
     const compCell = resolvePivotCell(rows[0][compField.name], pivots);
     const a = Number(primaryCell?.value);
     const b = Number(compCell?.value);
-    const rendered = typeof compCell?.rendered === 'string' ? compCell.rendered : null;
     const label = visConfig.comparison_label || `vs ${compField.label_short || compField.label}`;
-    // Is the comparison field ALREADY a percentage / change (a % change table
-    // calc, a %-formatted value, or comparison_type 'value')? Then show it as
-    // Looker does — directly — instead of recomputing (a−b)/b, which would
-    // explode when b is a tiny fraction like -0.0046.
-    const alreadyPct = visConfig.comparison_type === 'value'
-      || (rendered && rendered.includes('%'))
-      || (compField.value_format && String(compField.value_format).includes('%'))
-      || compField.is_percent === true;
+    const arrowColour = (positive) => ((visConfig.comparison_reverse_colors ? !positive : positive) ? '#10b981' : '#ef4444');
 
-    if (alreadyPct && !Number.isNaN(b)) {
-      const up = b >= 0;
-      const good = visConfig.comparison_reverse_colors ? !up : up;
-      const shown = rendered && rendered.includes('%') ? rendered : formatNumber(b, '0.0%');
-      comparison = { text: `${up ? '▲' : '▼'} ${shown}`, color: good ? '#10b981' : '#ef4444', label };
-    } else if ((visConfig.comparison_type || 'change') === 'change' && !Number.isNaN(a) && !Number.isNaN(b) && b !== 0) {
+    // Looker only computes a PERCENT change when the comparison is explicitly a
+    // 'change' type AND its field is a plain measure used as the baseline. In
+    // every other case — the default, comparison_type 'value', or a table-calc
+    // that already IS the delta (e.g. "−12 vs previous day") — Looker shows the
+    // comparison field's own value verbatim. Recomputing (a−b)/|b| there flips
+    // the sign and inflates the number (the "266.7%" bug), so we mirror Looker
+    // and display the rendered value directly.
+    const compIsTableCalc = (fields.table_calculations || []).some((tc) => tc.name === compField.name);
+    const wantsPctChange = visConfig.comparison_type === 'change' && !compIsTableCalc;
+
+    if (wantsPctChange && !Number.isNaN(a) && !Number.isNaN(b) && b !== 0) {
       const pct = (a - b) / Math.abs(b);
       const up = pct >= 0;
-      const good = visConfig.comparison_reverse_colors ? !up : up;
-      comparison = { text: `${up ? '▲' : '▼'} ${formatNumber(Math.abs(pct), '0.0%')}`, color: good ? '#10b981' : '#ef4444', label };
+      comparison = { text: `${up ? '▲' : '▼'} ${formatNumber(Math.abs(pct), '0.0%')}`, color: arrowColour(up), label };
     } else {
-      comparison = { text: cellText(compCell), color: 'var(--muted)', label };
+      // Show the comparison field's own value exactly as Looker renders it.
+      const shown = (compCell?.rendered != null && compCell.rendered !== '') ? String(compCell.rendered) : cellText(compCell);
+      if (!Number.isNaN(b) && b !== 0) {
+        comparison = { text: `${b > 0 ? '▲' : '▼'} ${shown}`, color: arrowColour(b > 0), label };
+      } else {
+        comparison = { text: shown, color: 'var(--muted)', label };
+      }
     }
   }
 
