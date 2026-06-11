@@ -500,20 +500,13 @@ async function runLookerQuery(path, body, ttl = QCACHE_TTL, force = false) {
 // presets applied client-side via listenTo, so current/past/comparison don't
 // clobber each other. A suiteId only gates access + picks the right entity.
 // Admins are unscoped. Returns false to deny.
+// Force the organiser scope onto a query — using the organiser field that
+// belongs to the query's OWN explore (so GA4 etc. don't get core_organisers.name
+// injected, which Looker rejects). A suite context (client view or admin
+// preview) scopes to that suite's organiser; no suite + admin is unscoped.
 function applyScope(query, user, suiteId) {
-  let scope;
-  if (suiteId) {
-    // A suite context (client view, or an admin previewing a client) is always
-    // scoped to that suite's organiser — so an admin preview faithfully matches
-    // what the client sees.
-    if (!auth.canAccessSuite(user, suiteId)) return false;
-    scope = auth.forcedScopeForSuite(suiteId);
-  } else {
-    if (user.role === 'admin') return true; // admin browsing their own studio
-    scope = auth.scopeFiltersForUser(user);
-    if (scope && scope.__block) return false;
-  }
-  if (!scope || !Object.keys(scope).length) return false; // fail closed (need organiser)
+  const scope = auth.scopeForQuery(query, user, suiteId);
+  if (scope === false) return false; // fail closed
   query.filters = { ...(query.filters || {}), ...scope };
   return true;
 }

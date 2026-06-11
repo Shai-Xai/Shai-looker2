@@ -194,6 +194,82 @@ function forcedScopeForSuite(suiteId) {
   return su ? fieldLocksFromEntities([su.entityId]) : null;
 }
 
+// ─── Explore-aware organiser scope ─────────────────────────────────────────────
+// The forced organiser lock is keyed to ONE explore's field (core_organisers.name
+// on the ticketing model). Other explores (e.g. GA4) have their own organiser
+// dimension, so injecting core_organisers.name there is an "Invalid filter".
+// We resolve the organiser field that belongs to the QUERY's explore — using the
+// organiser filter the dashboards already define on that explore (Looker has
+// validated it) — and apply the entity's organiser VALUE to it.
+const ORG_RE = /organi[sz]er/i;
+const isOrgField = (field, name) => field === ORG_FIELD || ORG_RE.test(field || '') || ORG_RE.test(name || '');
+
+let _exIdx = null, _exIdxAt = 0;
+function exploreScopeIndex() {
+  const NOW = Date.now();
+  if (_exIdx && NOW - _exIdxAt < 60000) return _exIdx;
+  const orgField = new Map(); // `${model}::${explore}` -> organiser field valid there
+  const views = new Map();    // `${model}::${explore}` -> Set(view prefixes seen in tile fields)
+  const addView = (key, v) => { if (!v) return; let s = views.get(key); if (!s) { s = new Set(); views.set(key, s); } s.add(v); };
+  for (const d of db.listDashboards()) {
+    const full = db.getDashboard(d.id);
+    for (const t of full?.tiles || []) {
+      const q = t.query; if (!q?.model || !q?.view) continue;
+      const key = `${q.model}::${q.view}`;
+      for (const f of q.fields || []) addView(key, String(f).split('.')[0]);
+    }
+    for (const f of full?.filters || []) {
+      const field = f.field || f.dimension;
+      if (!field || !field.includes('.') || !isOrgField(field, f.name || f.title)) continue;
+      if (f.model && f.explore) { const k = `${f.model}::${f.explore}`; if (!orgField.has(k) || field === ORG_FIELD) orgField.set(k, field); }
+    }
+  }
+  _exIdx = { orgField, views }; _exIdxAt = NOW; return _exIdx;
+}
+
+// The entity's organiser VALUE + the field it's stored under.
+function entityOrganiser(entityIds) {
+  const locks = fieldLocksFromEntities(entityIds);
+  if (!locks) return null;
+  let value = null, directField = null;
+  for (const [field, val] of Object.entries(locks)) {
+    if (isOrgField(field)) { value = value ? `${value},${val}` : val; directField = directField || field; }
+  }
+  return value ? { value, directField } : null;
+}
+
+// Forced organiser scope for ONE query, using the organiser field that belongs
+// to the query's explore. Returns a filters object, {} (admin, no suite), or
+// false to block (fail closed).
+function scopeForQuery(query, user, suiteId) {
+  let entityIds;
+  if (suiteId) {
+    if (!canAccessSuite(user, suiteId)) return false;
+    const su = db.getSuite(suiteId); entityIds = su ? [su.entityId] : [];
+  } else {
+    if (user.role === 'admin') return {};
+    entityIds = user.entityIds || [];
+  }
+  const org = entityOrganiser(entityIds);
+  if (!org) return false; // fail closed — organiser scope is required
+
+  const idx = exploreScopeIndex();
+  const key = `${query?.model}::${query?.view}`;
+  let field = idx.orgField.get(key) || null; // the explore's own (Looker-validated) organiser field
+  if (!field) {
+    // Fallback to the entity's direct organiser field, but only if this query's
+    // explore actually exposes that field's view (otherwise it's an invalid filter).
+    const qViews = new Set([
+      ...((query?.fields) || []).map((f) => String(f).split('.')[0]),
+      ...Object.keys(query?.filters || {}).map((f) => f.split('.')[0]),
+      ...(idx.views.get(key) ? [...idx.views.get(key)] : []),
+    ]);
+    if (org.directField && qViews.has(org.directField.split('.')[0])) field = org.directField;
+  }
+  if (!field) return false; // can't scope this explore safely → block
+  return { [field]: org.value };
+}
+
 module.exports = {
   COOKIE,
   seedAdmin,
@@ -204,6 +280,6 @@ module.exports = {
   // scoping
   scopeFiltersForUser, canAccessDashboard,
   // suites / navigation
-  suitesForUser, canAccessSuite, lockedFiltersForSuite, forcedScopeForSuite,
+  suitesForUser, canAccessSuite, lockedFiltersForSuite, forcedScopeForSuite, scopeForQuery,
   filterNameToField,
 };
