@@ -1,0 +1,274 @@
+import { useState, useEffect, useRef } from 'react';
+import { api } from '../lib/api.js';
+
+// Action Engine v1 — email campaigns (e.g. abandoned cart). The lifecycle IS
+// the product: draft (AI-written, editable) → preview audience + email →
+// APPROVE (explicit, shows the count) → running → done with results.
+// One component for both surfaces (admin + client self-service) — the server
+// enforces entity access on every call.
+export default function CampaignManager({ entityId, scope = 'admin' }) {
+  const isAdmin = scope === 'admin';
+  const [data, setData] = useState(null);
+  const [editing, setEditing] = useState(null); // action object | 'new'
+
+  const load = () => api.listActions(entityId).then(setData).catch(() => setData({ actions: [] }));
+  useEffect(() => { load(); }, [entityId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Poll while anything is running so results tick up live.
+  useEffect(() => {
+    if (!data?.actions?.some((a) => a.status === 'running')) return;
+    const t = setInterval(load, 4000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(data?.actions?.map((a) => a.status))]);
+
+  if (!data) return <p style={{ color: 'var(--muted)', fontSize: 13 }}>Loading…</p>;
+
+  if (editing) {
+    return <CampaignEditor entityId={entityId} isAdmin={isAdmin} action={editing === 'new' ? null : editing}
+      onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />;
+  }
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <p style={{ fontSize: 13, color: 'var(--muted)', margin: 0 }}>Data-driven email campaigns — e.g. nudge abandoned-cart customers. Nothing sends without an explicit approval.</p>
+        <button style={primary} onClick={() => setEditing('new')}>+ New campaign</button>
+      </div>
+      {data.actions.length === 0 ? (
+        <div style={{ ...card, textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>
+          No campaigns yet. Try one: target customers who abandoned checkout and bring them back.
+        </div>
+      ) : data.actions.map((a) => (
+        <div key={a.id} style={{ ...card, display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <span style={{ fontWeight: 700, fontSize: 14 }}>{a.title || a.config.subject || 'Untitled campaign'}</span>
+              <StatusChip status={a.status} />
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 3 }}>
+              {a.status === 'draft'
+                ? `Draft · created ${fmt(a.createdAt)} by ${a.createdBy}`
+                : `Approved by ${a.approvedBy} · ${fmt(a.approvedAt)}`}
+            </div>
+            {a.status !== 'draft' && (
+              <div style={{ display: 'flex', gap: 14, marginTop: 6, fontSize: 12.5, fontWeight: 600 }}>
+                <span>📤 {a.results.sent ?? 0}/{a.results.total ?? a.audienceCount} sent</span>
+                {(a.results.failed ?? 0) > 0 && <span style={{ color: 'var(--error,#ef4444)' }}>✗ {a.results.failed} failed</span>}
+                <span>🔗 {a.results.clicks ?? 0} clicks</span>
+                {a.results.sent > 0 && <span style={{ color: 'var(--muted)' }}>{Math.round(((a.results.clicks || 0) / a.results.sent) * 100)}% CTR</span>}
+              </div>
+            )}
+            {a.results?.lastError && a.status !== 'done' && <div style={{ fontSize: 11, color: 'var(--error,#ef4444)', marginTop: 3 }}>{a.results.lastError}</div>}
+          </div>
+          <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+            {a.status === 'draft' && <button style={mini} onClick={() => setEditing(a)}>Edit</button>}
+            {a.status !== 'running' && <button style={{ ...mini, color: 'var(--error,#ef4444)' }} onClick={() => { if (confirm('Delete this campaign?')) api.deleteAction(entityId, a.id).then(load); }}>Delete</button>}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function CampaignEditor({ entityId, isAdmin, action, onClose, onSaved }) {
+  const cfg = action?.config || {};
+  const [f, setF] = useState(() => ({
+    title: action?.title || '',
+    goal: cfg.goal || 'Re-engage customers who abandoned their ticket checkout and get them to complete the purchase.',
+    audienceMode: cfg.audience?.mode || 'tile',
+    dashboardId: cfg.audience?.dashboardId || '',
+    tileId: cfg.audience?.tileId || '',
+    emailField: cfg.audience?.emailField || '',
+    nameField: cfg.audience?.nameField || '',
+    pasted: cfg.audience?.pasted || '',
+    subject: cfg.subject || '',
+    body: cfg.body || '',
+    ctaText: cfg.ctaText || 'Complete your order',
+    ctaUrl: cfg.ctaUrl || '',
+  }));
+  const [tiles, setTiles] = useState(null);
+  const [aud, setAud] = useState(null); // { count, excluded, sample, fields }
+  const [audBusy, setAudBusy] = useState(false);
+  const [preview, setPreview] = useState('');
+  const [drafting, setDrafting] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [testState, setTestState] = useState('');
+  const [approveState, setApproveState] = useState('');
+  const debounce = useRef(null);
+  const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
+
+  useEffect(() => { (isAdmin ? api.getDigestTiles(entityId) : api.getMyDigestTiles(entityId)).then(setTiles).catch(() => setTiles({ dashboards: [] })); }, [entityId, isAdmin]);
+
+  const payload = () => ({
+    title: f.title, goal: f.goal, subject: f.subject, body: f.body, ctaText: f.ctaText, ctaUrl: f.ctaUrl,
+    audience: { mode: f.audienceMode, dashboardId: f.dashboardId, tileId: f.tileId, emailField: f.emailField, nameField: f.nameField, pasted: f.pasted },
+  });
+
+  const refreshAudience = () => {
+    if (f.audienceMode === 'tile' && (!f.dashboardId || !f.tileId)) { setAud(null); return; }
+    setAudBusy(true);
+    api.actionAudiencePreview(entityId, payload()).then(setAud).catch((e) => setAud({ error: e.message })).finally(() => setAudBusy(false));
+  };
+  useEffect(() => { refreshAudience(); }, [f.audienceMode, f.dashboardId, f.tileId, f.emailField]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Debounced email preview.
+  useEffect(() => {
+    clearTimeout(debounce.current);
+    debounce.current = setTimeout(() => {
+      api.actionPreviewEmail(entityId, payload()).then((r) => setPreview(r.html)).catch(() => {});
+    }, 350);
+    return () => clearTimeout(debounce.current);
+  }, [f.subject, f.body, f.ctaText, f.ctaUrl]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const draft = async () => {
+    setDrafting(true);
+    try {
+      const d = await api.actionDraftCopy(entityId, { goal: f.goal, audienceCount: aud?.count || 0 });
+      setF((s) => ({ ...s, subject: d.subject || s.subject, body: d.body || s.body, ctaText: d.ctaText || s.ctaText }));
+    } catch (e) { alert('AI draft failed: ' + e.message); }
+    finally { setDrafting(false); }
+  };
+
+  async function saveDraft() {
+    setBusy(true);
+    try {
+      if (action) await api.updateAction(entityId, action.id, payload());
+      else await api.createAction(entityId, payload());
+      onSaved();
+    } catch (e) { alert('Save failed: ' + e.message); }
+    finally { setBusy(false); }
+  }
+
+  async function approve() {
+    if (!aud?.count) { alert('Audience is empty.'); return; }
+    if (!confirm(`Send this campaign to ${aud.count} recipient${aud.count === 1 ? '' : 's'} now?\n\nThis cannot be undone.`)) return;
+    setApproveState('working');
+    try {
+      let id = action?.id;
+      if (id) await api.updateAction(entityId, id, payload());
+      else { const r = await api.createAction(entityId, payload()); id = r.action.id; }
+      const r = await api.approveAction(entityId, id);
+      setApproveState(`✓ Sending to ${r.sendingTo}`);
+      setTimeout(onSaved, 900);
+    } catch (e) { setApproveState(`✗ ${e.message}`); }
+  }
+
+  const dash = tiles?.dashboards?.find((d) => d.dashboardId === f.dashboardId);
+
+  return (
+    <div>
+      <button style={{ ...mini, marginBottom: 12 }} onClick={onClose}>← Back to campaigns</button>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 20, alignItems: 'start' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <Field label="Campaign name"><input style={input} value={f.title} onChange={(e) => set('title', e.target.value)} placeholder="e.g. Abandoned cart — Pretoria show" /></Field>
+
+          <Field label="Goal (steers the AI copy)">
+            <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit' }} rows={2} value={f.goal} onChange={(e) => set('goal', e.target.value)} />
+          </Field>
+
+          <Field label="Audience">
+            <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+              <Toggle on={f.audienceMode === 'tile'} onClick={() => set('audienceMode', 'tile')}>From a dashboard tile</Toggle>
+              <Toggle on={f.audienceMode === 'paste'} onClick={() => set('audienceMode', 'paste')}>Paste emails</Toggle>
+            </div>
+            {f.audienceMode === 'tile' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <select style={input} value={f.dashboardId} onChange={(e) => { set('dashboardId', e.target.value); set('tileId', ''); set('emailField', ''); }}>
+                  <option value="">Pick a dashboard…</option>
+                  {(tiles?.dashboards || []).map((d) => <option key={d.dashboardId} value={d.dashboardId}>{d.title} — {d.setName}</option>)}
+                </select>
+                {dash && (
+                  <select style={input} value={f.tileId} onChange={(e) => { set('tileId', e.target.value); set('emailField', ''); }}>
+                    <option value="">Pick the tile listing the audience…</option>
+                    {dash.tiles.map((t) => <option key={t.tileId} value={t.tileId}>{t.title}</option>)}
+                  </select>
+                )}
+                {aud?.fields?.length > 0 && (
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <select style={{ ...input, flex: 1 }} value={f.emailField} onChange={(e) => set('emailField', e.target.value)}>
+                      <option value="">Email column (auto-detect)</option>
+                      {aud.fields.map((fl) => <option key={fl.name} value={fl.name}>{fl.label}</option>)}
+                    </select>
+                    <select style={{ ...input, flex: 1 }} value={f.nameField} onChange={(e) => set('nameField', e.target.value)}>
+                      <option value="">Name column (optional)</option>
+                      {aud.fields.map((fl) => <option key={fl.name} value={fl.name}>{fl.label}</option>)}
+                    </select>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit' }} rows={3} value={f.pasted} onChange={(e) => set('pasted', e.target.value)} placeholder="one@example.com, two@example.com …" onBlur={refreshAudience} />
+            )}
+            <div style={{ marginTop: 8, fontSize: 12.5 }}>
+              {audBusy ? <span style={{ color: 'var(--muted)' }}>Counting audience…</span>
+                : aud?.error ? <span style={{ color: 'var(--error,#ef4444)' }}>✗ {aud.error}</span>
+                : aud ? (
+                  <span>
+                    <b style={{ color: 'var(--brand)' }}>{aud.count}</b> recipient{aud.count === 1 ? '' : 's'}
+                    {aud.excluded > 0 && <span style={{ color: 'var(--muted)' }}> · {aud.excluded} unsubscribed excluded</span>}
+                    {aud.sample?.length > 0 && <span style={{ color: 'var(--muted)' }}> · e.g. {aud.sample.slice(0, 3).map((s) => s.email).join(', ')}</span>}
+                  </span>
+                ) : <span style={{ color: 'var(--muted)' }}>Pick an audience source to see the count.</span>}
+            </div>
+          </Field>
+
+          <Field label="Email copy">
+            <button type="button" style={{ ...mini, marginBottom: 8 }} onClick={draft} disabled={drafting}>{drafting ? 'Writing…' : '✨ Draft with AI'}</button>
+            <input style={{ ...input, fontWeight: 700, marginBottom: 8 }} value={f.subject} onChange={(e) => set('subject', e.target.value)} placeholder="Subject line" />
+            <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit' }} rows={6} value={f.body} onChange={(e) => set('body', e.target.value)} placeholder={'Hi {{name}},\n\nYour tickets are still waiting…'} />
+            <div style={hintS}>{'{{name}}'} personalises with the recipient's first name when the audience has a name column.</div>
+          </Field>
+
+          <Field label="Call to action">
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input style={{ ...input, flex: 1 }} value={f.ctaText} onChange={(e) => set('ctaText', e.target.value)} placeholder="Button text" />
+              <input style={{ ...input, flex: 2 }} value={f.ctaUrl} onChange={(e) => set('ctaUrl', e.target.value)} placeholder="https://… (clicks are tracked)" />
+            </div>
+          </Field>
+
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 4, flexWrap: 'wrap' }}>
+            <button style={mini} onClick={saveDraft} disabled={busy}>{busy ? 'Saving…' : 'Save draft'}</button>
+            <button
+              type="button" style={mini} disabled={testState === 'sending'}
+              onClick={async () => { setTestState('sending'); try { const r = await api.actionTestSend(entityId, payload()); setTestState(`✓ Test sent to ${r.to}`); } catch (e) { setTestState(`✗ ${e.message}`); } }}
+            >{testState === 'sending' ? 'Sending…' : 'Send test to me'}</button>
+            <button style={{ ...primary, background: '#15803d' }} onClick={approve} disabled={approveState === 'working' || !aud?.count}>
+              {approveState === 'working' ? 'Approving…' : `Approve & send${aud?.count ? ` to ${aud.count}` : ''}`}
+            </button>
+            {(testState && testState !== 'sending') && <span style={{ fontSize: 12, color: testState.startsWith('✓') ? 'var(--success,#10b981)' : 'var(--error,#ef4444)' }}>{testState}</span>}
+            {(approveState && approveState !== 'working') && <span style={{ fontSize: 12, color: approveState.startsWith('✓') ? 'var(--success,#10b981)' : 'var(--error,#ef4444)' }}>{approveState}</span>}
+          </div>
+        </div>
+
+        <div>
+          <div style={hintLbl}>Email preview</div>
+          <iframe title="Campaign preview" srcDoc={preview} style={{ width: '100%', height: 560, border: '1px solid var(--hairline)', borderRadius: 12, background: '#fff' }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StatusChip({ status }) {
+  const map = {
+    draft: { bg: 'rgba(128,128,128,0.14)', c: 'var(--muted)', t: 'Draft' },
+    running: { bg: 'rgba(10,132,255,0.13)', c: '#0a66c2', t: 'Sending…' },
+    done: { bg: 'rgba(52,199,89,0.15)', c: '#2da44e', t: 'Sent' },
+    failed: { bg: 'rgba(239,68,68,0.12)', c: '#dc2626', t: 'Failed' },
+  }[status] || { bg: 'rgba(128,128,128,0.14)', c: 'var(--muted)', t: status };
+  return <span style={{ fontSize: 10.5, fontWeight: 700, borderRadius: 980, padding: '2px 9px', background: map.bg, color: map.c }}>{map.t}</span>;
+}
+
+const fmt = (iso) => { try { return new Date(iso).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch { return ''; } };
+function Field({ label, children }) { return <div><div style={hintLbl}>{label}</div>{children}</div>; }
+function Toggle({ on, onClick, children }) {
+  return <button type="button" onClick={onClick} style={{ flex: 1, padding: '8px 10px', borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', border: on ? '1.5px solid var(--brand)' : '1.5px solid var(--hairline)', background: on ? 'rgba(var(--brand-rgb), 0.08)' : 'transparent', color: on ? 'var(--brand)' : 'var(--text)' }}>{children}</button>;
+}
+
+const card = { background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 12, padding: 14, marginBottom: 10 };
+const input = { width: '100%', boxSizing: 'border-box', padding: '9px 12px', border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 13, outline: 'none', background: 'var(--card)', color: 'var(--text)' };
+const primary = { padding: '9px 18px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer' };
+const mini = { padding: '7px 12px', background: 'rgba(128,128,128,0.10)', color: 'var(--text)', border: '1px solid var(--hairline)', borderRadius: 980, fontSize: 12, fontWeight: 600, cursor: 'pointer' };
+const hintLbl = { fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', margin: '0 0 5px' };
+const hintS = { fontSize: 11, color: 'var(--muted)', marginTop: 4, lineHeight: 1.4 };

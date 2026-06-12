@@ -282,6 +282,37 @@ function digestEmail({ branding, entityId, assetScope, content, roleLabel, custo
   return { html, text, subject: content.subject };
 }
 
+// Marketing campaign email (Action Engine): client-branded shell with the
+// campaign copy, a tracked CTA button, and the REQUIRED unsubscribe link.
+// Body is plain text (pre-wrap) with **bold**; personalisation happens before
+// this is called.
+function campaignEmail({ branding, entityId, assetScope, subject, bodyText, ctaText, ctaUrl, unsubUrl }) {
+  const b = branding || resolveBranding(entityId);
+  const scope = assetScope || entityId;
+  const logoSrc = b.logo && b.logo.startsWith('data:') && scope ? `${baseUrl()}/mail-assets/logo/${scope}` : b.logo;
+  const brandMark = logoSrc
+    ? `<img src="${esc(logoSrc)}" alt="${esc(b.wordmark)}" style="max-height:40px;max-width:200px;display:block;" />`
+    : `<div style="font-size:15px;font-weight:800;letter-spacing:-0.02em;color:#111;">${esc(b.wordmark)}</div>`;
+  const cta = ctaUrl ? `<a href="${esc(ctaUrl)}" style="display:inline-block;margin-top:20px;background:${esc(b.brandColor)};color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;border-radius:980px;padding:12px 26px;">${esc(ctaText || 'View event')} →</a>` : '';
+  const html = `<!doctype html><html><body style="margin:0;padding:0;background:#f5f5f7;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
+  <div style="display:none;max-height:0;overflow:hidden;">${esc(bodyText || '').slice(0, 140)}</div>
+  <div style="max-width:600px;margin:0 auto;padding:28px 16px;">
+    <div style="margin-bottom:14px;">${brandMark}</div>
+    <div style="background:#ffffff;border:1px solid #e8e8ec;border-radius:14px;padding:26px;">
+      ${subject ? `<div style="font-size:19px;font-weight:800;color:#111;margin-bottom:12px;line-height:1.35;letter-spacing:-0.01em;">${mdBold(subject)}</div>` : ''}
+      <div style="font-size:14.5px;line-height:1.65;color:#3a3a3c;white-space:pre-wrap;">${mdBold(bodyText || '')}</div>
+      ${cta}
+    </div>
+    <div style="font-size:11.5px;color:#86868b;margin-top:14px;line-height:1.5;">
+      Sent by ${esc(b.senderName)} via Howler : Pulse · <a href="${esc(unsubUrl)}" style="color:#86868b;">Unsubscribe</a>
+    </div>
+    ${brandRow()}
+  </div>
+</body></html>`;
+  const text = `${subject || ''}\n\n${bodyText || ''}\n\n${ctaUrl ? `${ctaText || 'View event'}: ${ctaUrl}\n\n` : ''}Unsubscribe: ${unsubUrl}`;
+  return { html, text };
+}
+
 // Branding to render for a live preview: unsaved `edits` layered over the right
 // base (a client's resolved branding, or the platform template for the platform
 // editor). Used by the preview endpoint so editors see exactly what will send.
@@ -292,5 +323,5 @@ function previewBranding({ edits, entityId } = {}) {
 
 module.exports = {
   init, isConfigured, send, status, recent, notificationEmail, baseUrl,
-  DEFAULTS, getPlatformTemplate, setPlatformTemplate, resolveBranding, previewBranding, digestEmail,
+  DEFAULTS, getPlatformTemplate, setPlatformTemplate, resolveBranding, previewBranding, digestEmail, campaignEmail,
 };

@@ -4,6 +4,7 @@ import IntegrationsForm from '../components/IntegrationsForm.jsx';
 import MailTemplateEditor from '../components/MailTemplateEditor.jsx';
 import OwlAddressCard from '../components/OwlAddressCard.jsx';
 import DigestManager from '../components/DigestManager.jsx';
+import CampaignManager from '../components/CampaignManager.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
 
 // Client self-service Settings — one place for everything the client manages
@@ -13,6 +14,7 @@ const SECTIONS = [
   ['integrations', 'Integrations', '🔌'],
   ['email', 'Branding', '🎨'],
   ['digests', 'Scheduled digests', '🗓'],
+  ['campaigns', 'Actions', '⚡'],
   ['inbox', 'CC the Owl', '📨'],
 ];
 
@@ -70,6 +72,13 @@ export default function ClientIntegrationsPage() {
               <div>
                 <p style={hint}>Automated briefing emails for your team — personalised by role (exec, marketing, finance…) and sent on your schedule.</p>
                 <DigestManager entityId={it.entityId} scope="my" />
+              </div>
+            )}
+
+            {section === 'campaigns' && (
+              <div>
+                <p style={hint}>Turn your data into action — e.g. email customers who abandoned checkout. Preview the audience and copy, then explicitly approve the send.</p>
+                <CampaignManager entityId={it.entityId} scope="my" />
               </div>
             )}
 

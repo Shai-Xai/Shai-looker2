@@ -285,6 +285,46 @@ async function digestBrief({ tiles, roleLabel, roleFocus, catalogue, instruction
   return JSON.parse(match[0]);
 }
 
+// ─── Campaign copy drafting (Action Engine) ────────────────────────────────────
+// Writes editable marketing email copy for a client's campaign. The human edits
+// and approves; this is a first draft, never auto-sent.
+const CAMPAIGN_SYSTEM = `You write short, high-converting marketing emails for event organisers (tickets, festivals, live events). South African audience; amounts in Rand.
+
+Respond with ONLY strict JSON (no markdown fences):
+{
+  "subject": "email subject — punchy, specific, <60 chars, no clickbait",
+  "body": "the email body as plain text, 60-130 words. May use **bold** sparingly and {{name}} once as the greeting personalisation token. Warm, direct, one clear idea; end before the button (the CTA button is rendered separately).",
+  "ctaText": "button label, 2-4 words"
+}
+
+Rules:
+- Match the GOAL exactly (e.g. abandoned cart → gentle nudge: their tickets are waiting, scarcity if honest, frictionless next step).
+- Never invent facts, prices, dates or discounts not given in the goal/context.
+- No spam tropes (ALL CAPS, !!!, "act now"), no emoji walls (one tasteful emoji max).
+- Tone: human, confident, like a great event brand — not corporate.`;
+
+async function draftCampaign({ goal, clientName, clientContext, audienceCount, instructions, apiKey }) {
+  const c = requireClient(apiKey);
+  const lines = [
+    `CLIENT: ${clientName || 'an event organiser'}`,
+    clientContext ? `CONTEXT: ${clientContext}` : '',
+    `AUDIENCE: ${audienceCount || 'unknown number of'} recipients`,
+    `GOAL: ${goal || 'Re-engage customers who abandoned their ticket checkout and get them to complete the purchase.'}`,
+  ].filter(Boolean);
+  const resp = await c.messages.create({
+    model: MODEL,
+    max_tokens: 700,
+    thinking: { type: 'adaptive' },
+    output_config: { effort: 'low' },
+    system: systemWith(CAMPAIGN_SYSTEM, instructions),
+    messages: [{ role: 'user', content: lines.join('\n') }],
+  });
+  const text = (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error('AI did not return JSON for the campaign draft');
+  return JSON.parse(match[0]);
+}
+
 async function briefHome({ tiles, profile, catalogue, instructions, apiKey }) {
   const c = requireClient(apiKey);
   const lines = ['TILES (live data):', ''];
@@ -435,4 +475,4 @@ async function extractInvoice({ pdfBase64, apiKey, onProgress }) {
   return JSON.parse(match[0]);
 }
 
-module.exports = { generateInsight, streamInsight, streamDashboardInsight, describeTile, extractSettlement, extractInvoice, briefHome, digestBrief, isConfigured: (apiKey) => !!(apiKey || process.env.ANTHROPIC_API_KEY) };
+module.exports = { generateInsight, streamInsight, streamDashboardInsight, describeTile, extractSettlement, extractInvoice, briefHome, digestBrief, draftCampaign, isConfigured: (apiKey) => !!(apiKey || process.env.ANTHROPIC_API_KEY) };

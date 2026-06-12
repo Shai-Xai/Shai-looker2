@@ -1614,6 +1614,39 @@ app.get('/api/my/digest-tiles/:entityId', auth.requireAuth, (req, res) => {
 // to uninstall. The 60s tick lives inside the module.
 require('./scheduler').mount(app, { db, auth, mailer, generateContent: buildDigestContent, roleLenses: ROLE_LENSES });
 
+// Action Engine — suggested actions → executed automations (v1: email campaigns,
+// e.g. abandoned cart). Audience = a dashboard tile's query, run with the SAME
+// organiser scoping as the dashboards themselves. Remove this line + actions.js
+// to uninstall.
+require('./actions').mount(app, {
+  db, auth, mailer,
+  // Run a tile's query (scoped + suite-locked) and return its rows + fields —
+  // the campaign audience source.
+  resolveAudience: async ({ entityId, dashboardId, tileId, user }) => {
+    const { catalogue } = clientCatalogue(entityId);
+    const meta = catalogue.find((c) => c.dashboardId === dashboardId);
+    const def = store.get(dashboardId);
+    if (!meta || !def) throw new Error('That dashboard is not available for this client');
+    const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))];
+    const tile = tiles.find((t) => t.id === tileId);
+    if (!tile) throw new Error('Tile not found on that dashboard');
+    const lockMap = expandLockMap(db.lockedFiltersForSuite(meta.suiteId));
+    const qBody = tileQueryBody(tile, def, user, meta.suiteId, lockMap);
+    if (!qBody) throw new Error('No data access for that tile');
+    const data = await runLookerQuery('/queries/run/json_detail', { ...qBody, limit: '5000' }, undefined, true);
+    const fields = [...(data.fields?.dimensions || []), ...(data.fields?.measures || []), ...(data.fields?.table_calculations || [])]
+      .map((f) => ({ name: f.name, label: f.label_short || f.label }));
+    return { rows: data.data || [], fields };
+  },
+  // AI-draft campaign copy, grounded in the client's context.
+  draftCopy: async ({ entityId, goal, audienceCount }) => {
+    const apiKey = anthropicKeyForEntity(entityId);
+    if (!insights.isConfigured(apiKey)) throw new Error('AI is not configured for this client');
+    const ent = db.getEntity(entityId);
+    return insights.draftCampaign({ goal, clientName: ent?.name, clientContext: ent?.aiContext || '', audienceCount, instructions: aiInstructionsFor(null), apiKey });
+  },
+});
+
 // ─── Briefing configuration ─────────────────────────────────────────────────────
 // Admin: global briefing rules + editable phase defaults.
 app.get('/api/admin/briefing-settings', auth.requireAdmin, (_req, res) => {
