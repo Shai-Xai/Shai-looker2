@@ -1376,6 +1376,12 @@ function briefingInstructionsFor(user, entityId, suites) {
   if (global) parts.push(`Howler briefing rules:\n${global}`);
   const ent = db.getEntity(entityId);
   if (ent?.aiContext?.trim()) parts.push(`About this client:\n${ent.aiContext.trim()}`);
+  // Personalize by the reader's ROLE at this client: lead with what matters to
+  // them (marketing → demand/channels; finance → revenue/settlements; …). The
+  // reader's own standing requests (tune, below) still win.
+  const role = auth.roleForEntity(user, entityId);
+  const lens = role && ROLE_LENSES[roles.lensForRole(role)];
+  if (lens) parts.push(`This reader's role is ${roles.getRole(role).label}. Frame the briefing for them — ${lens.focus}`);
   const defaults = phaseDefaults();
   for (const su of suites) {
     const cfg = su.briefing || {};
