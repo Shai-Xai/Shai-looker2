@@ -8,8 +8,10 @@ const HOWLER_PRIMARY = '#FF385C';
 const HOWLER_SECONDARY = '#FF6B35';
 // Howler's hand-tuned chart palette (primary, secondary, then series colours).
 const HOWLER_PALETTE = ['#FF385C', '#FF6B35', '#FFB020', '#06B6D4', '#7C3AED', '#10B981', '#EC4899', '#3B82F6', '#F97316', '#14B8A6'];
+// The fixed tail (series 6-10) for the Howler default.
+const HOWLER_TAIL = ['#10B981', '#EC4899', '#3B82F6', '#F97316', '#14B8A6'];
 
-let current = { primary: HOWLER_PRIMARY, secondary: HOWLER_SECONDARY };
+let current = { primary: HOWLER_PRIMARY, secondary: HOWLER_SECONDARY, chart3: '', chart4: '', chart5: '' };
 
 // ── colour maths ──
 function hexToRgb(hex) {
@@ -57,30 +59,39 @@ const darken = (hex, amt) => { const [h, s, l] = rgbToHsl(hexToRgb(hex)); return
 const norm = (hex) => (hex || '').trim().toLowerCase();
 
 // ── chart palette ──
-// Howler's pair gets Howler's exact hand-tuned palette. Any other pair gets the
-// same structure generated: primary, secondary, then alternating hue-shifts off
-// each — cohesive with the brand but distinct enough to separate series.
+// Up to FIVE explicit brand colours (primary, secondary, chart3-5) lead the
+// palette; any unset slots and the tail (series 6-10) are filled — with Howler's
+// hand-tuned colours for the default pair, or generated from the pair for a
+// white-labelled client (cohesive with the brand, distinct enough per series).
 export function chartPalette() {
-  const { primary, secondary } = current;
-  if (norm(primary) === norm(HOWLER_PRIMARY) && norm(secondary) === norm(HOWLER_SECONDARY)) return HOWLER_PALETTE;
-  return [
-    primary,
-    secondary,
-    shift(secondary, 35, 0, 0.04),   // analogous past secondary
-    shift(primary, 150, -0.05, 0),   // complementary-ish of primary
-    shift(primary, -60, 0, -0.02),   // cool side of primary
+  const { primary, secondary, chart3, chart4, chart5 } = current;
+  const isHowler = norm(primary) === norm(HOWLER_PRIMARY) && norm(secondary) === norm(HOWLER_SECONDARY);
+  // Generated fallbacks for each slot, used when a slot is left blank.
+  const gen = [
+    primary, secondary,
+    shift(secondary, 35, 0, 0.04),
+    shift(primary, 150, -0.05, 0),
+    shift(primary, -60, 0, -0.02),
+  ];
+  const howlerHead = HOWLER_PALETTE.slice(0, 5);
+  const slot = (val, i) => val || (isHowler ? howlerHead[i] : gen[i]);
+  const head = [
+    slot(primary, 0), slot(secondary, 1), slot(chart3, 2), slot(chart4, 3), slot(chart5, 4),
+  ];
+  const tail = isHowler ? HOWLER_TAIL : [
     shift(secondary, 90, -0.05, 0),
     shift(primary, 40, 0, 0.05),
     shift(secondary, -130, 0, 0),
     shift(primary, 200, -0.1, 0.03),
     shift(secondary, 160, -0.05, -0.02),
   ];
+  return [...head, ...tail].slice(0, 10);
 }
 export const brandPrimary = () => current.primary;
 
 // ── CSS variable application ──
-export function applyBrand({ primary, secondary } = {}) {
-  current = { primary: primary || HOWLER_PRIMARY, secondary: secondary || HOWLER_SECONDARY };
+export function applyBrand({ primary, secondary, chart3, chart4, chart5 } = {}) {
+  current = { primary: primary || HOWLER_PRIMARY, secondary: secondary || HOWLER_SECONDARY, chart3: chart3 || '', chart4: chart4 || '', chart5: chart5 || '' };
   const root = document.documentElement;
   root.style.setProperty('--brand', current.primary);
   root.style.setProperty('--brand-2', current.secondary);
@@ -89,7 +100,7 @@ export function applyBrand({ primary, secondary } = {}) {
   window.dispatchEvent(new Event('brand-changed'));
 }
 export function resetBrand() {
-  current = { primary: HOWLER_PRIMARY, secondary: HOWLER_SECONDARY };
+  current = { primary: HOWLER_PRIMARY, secondary: HOWLER_SECONDARY, chart3: '', chart4: '', chart5: '' };
   const root = document.documentElement;
   for (const v of ['--brand', '--brand-2', '--brand-dark', '--brand-rgb']) root.style.removeProperty(v);
   window.dispatchEvent(new Event('brand-changed'));

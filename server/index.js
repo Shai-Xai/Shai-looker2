@@ -804,7 +804,7 @@ app.get('/api/theme/:entityId', auth.requireAuth, (req, res) => {
   if (req.user.role !== 'admin' && !(req.user.entityIds || []).includes(id)) return res.status(403).json({ error: 'Not allowed' });
   if (!db.getEntity(id)) return res.status(404).json({ error: 'Not found' });
   const b = mailer.resolveBranding(id);
-  res.json({ primary: b.brandColor, secondary: b.secondaryColor, logo: b.logo || '' });
+  res.json({ primary: b.brandColor, secondary: b.secondaryColor, chart3: b.chart3, chart4: b.chart4, chart5: b.chart5, logo: b.logo || '' });
 });
 
 // Live preview: render the email HTML with unsaved edits layered on the right

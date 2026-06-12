@@ -117,6 +117,9 @@ const DEFAULTS = {
   senderName: 'Howler : Pulse',
   brandColor: '#FF385C',
   secondaryColor: '#FF6B35',                 // gradient partner + 2nd chart series
+  chart3: '#FFB020',                         // chart series 3-5 (charts often use 4-5 colours)
+  chart4: '#06B6D4',
+  chart5: '#7C3AED',
   logo: '',                                  // image URL/data-URL; blank → text wordmark
   wordmark: 'Howler : Pulse',
   header: '',                                // optional tagline under the logo/wordmark
