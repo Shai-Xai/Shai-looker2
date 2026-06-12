@@ -27,6 +27,11 @@ const parsesOwnBody = (p) => p === '/api/admin/import' || p.startsWith('/api/adm
   // OS messenger attachment payloads (base64) need a bigger limit — os.js parses these itself.
   || /^\/api\/os\/threads\/[^/]+\/messages$/.test(p) || p === '/api/os/admin/announce';
 app.use((req, res, next) => (parsesOwnBody(req.path) ? next() : jsonParser(req, res, next)));
+// API responses are personal and live (suites, branding, icons…). Without an
+// explicit header some browsers (Safari especially) heuristically cache GETs,
+// so edits like a suite's event logo look "stuck". Cacheable assets
+// (/mail-assets, built /assets) set their own headers and live outside /api.
+app.use('/api', (_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
 app.use(cookieParser());
 app.use(auth.attachUser);
 
