@@ -10,6 +10,7 @@ export default function CampaignManager({ entityId, scope = 'admin' }) {
   const isAdmin = scope === 'admin';
   const [data, setData] = useState(null);
   const [editing, setEditing] = useState(null); // action object | 'new'
+  const [reporting, setReporting] = useState(null); // action object
 
   const load = () => api.listActions(entityId).then(setData).catch(() => setData({ actions: [] }));
   useEffect(() => { load(); }, [entityId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -27,6 +28,9 @@ export default function CampaignManager({ entityId, scope = 'admin' }) {
   if (editing) {
     return <CampaignEditor entityId={entityId} isAdmin={isAdmin} action={editing === 'new' ? null : editing}
       onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />;
+  }
+  if (reporting) {
+    return <CampaignReport entityId={entityId} action={reporting} onClose={() => setReporting(null)} />;
   }
 
   return (
@@ -62,6 +66,7 @@ export default function CampaignManager({ entityId, scope = 'admin' }) {
             {a.results?.lastError && a.status !== 'done' && <div style={{ fontSize: 11, color: 'var(--error,#ef4444)', marginTop: 3 }}>{a.results.lastError}</div>}
           </div>
           <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+            {a.status !== 'draft' && <button style={mini} onClick={() => setReporting(a)}>📊 Report</button>}
             {a.status === 'draft' && <button style={mini} onClick={() => setEditing(a)}>Edit</button>}
             {a.status !== 'running' && <button style={{ ...mini, color: 'var(--error,#ef4444)' }} onClick={() => { if (confirm('Delete this campaign?')) api.deleteAction(entityId, a.id).then(load); }}>Delete</button>}
           </div>
@@ -351,6 +356,68 @@ function CampaignEditor({ entityId, isAdmin, action, onClose, onSaved }) {
   );
 }
 
+// Detailed campaign report: summary stats + who clicked, how often, when.
+function CampaignReport({ entityId, action, onClose }) {
+  const [r, setR] = useState(null);
+  useEffect(() => { api.actionReport(entityId, action.id).then(setR).catch(() => setR({ error: true })); }, [entityId, action.id]);
+  if (!r) return <p style={{ color: 'var(--muted)', fontSize: 13 }}>Loading report…</p>;
+  if (r.error) return <div><button style={mini} onClick={onClose}>← Back</button><p style={{ color: 'var(--error,#ef4444)', fontSize: 13, marginTop: 10 }}>Could not load the report.</p></div>;
+  const stat = (label, value, color) => (
+    <div style={{ background: 'var(--elevated, #fafafa)', border: '1px solid var(--hairline)', borderRadius: 12, padding: '12px 16px', minWidth: 110 }}>
+      <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 700 }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: '-0.02em', color: color || 'var(--text)' }}>{value}</div>
+    </div>
+  );
+  return (
+    <div>
+      <button style={{ ...mini, marginBottom: 12 }} onClick={onClose}>← Back to campaigns</button>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 4 }}>
+        <h2 style={{ fontSize: 18, fontWeight: 800, letterSpacing: '-0.01em' }}>{r.title || 'Campaign report'}</h2>
+        <StatusChip status={r.status} />
+      </div>
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14 }}>Approved by {r.approvedBy} · {fmt(r.approvedAt)}</div>
+
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 18 }}>
+        {stat('Sent', `${r.sent}/${r.total}`)}
+        {r.failed > 0 && stat('Failed', r.failed, 'var(--error,#ef4444)')}
+        {stat('Total clicks', r.totalClicks)}
+        {stat('Unique clickers', r.uniqueClickers)}
+        {stat('CTR', `${r.ctr}%`, 'var(--brand)')}
+      </div>
+
+      <div style={{ ...card }}>
+        <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Who clicked</div>
+        {r.clickers.length === 0 ? (
+          <p style={{ color: 'var(--muted)', fontSize: 13 }}>No clicks yet.</p>
+        ) : (
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+            <thead>
+              <tr style={{ textAlign: 'left', color: 'var(--muted)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                <th style={tdR}>Recipient</th><th style={tdR}>Clicks</th><th style={tdR}>First click</th><th style={tdR}>Last click</th>
+              </tr>
+            </thead>
+            <tbody>
+              {r.clickers.map((c) => (
+                <tr key={c.email} style={{ borderTop: '1px solid var(--hairline)' }}>
+                  <td style={tdR}>{c.name ? <span><b>{c.name}</b> · </span> : null}{c.email}</td>
+                  <td style={{ ...tdR, fontWeight: 700 }}>{c.clicks}</td>
+                  <td style={{ ...tdR, color: 'var(--muted)' }}>{fmt(c.firstAt)}</td>
+                  <td style={{ ...tdR, color: 'var(--muted)' }}>{fmt(c.lastAt)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 10 }}>
+          {r.nonClickers > 0 && <span>{r.nonClickers} recipient{r.nonClickers === 1 ? '' : 's'} haven't clicked. </span>}
+          {r.anonClicks > 0 && <span>{r.anonClicks} click{r.anonClicks === 1 ? '' : 's'} couldn't be attributed (e.g. older links). </span>}
+          Forwarded links count toward the original recipient.
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Hero image: upload (resized ≤1000px wide, data-URL) or paste a URL.
 function ImageField({ label, value, onChange }) {
   const ref = useRef(null);
@@ -426,6 +493,7 @@ function Toggle({ on, onClick, children }) {
 }
 
 const card = { background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 12, padding: 14, marginBottom: 10 };
+const tdR = { padding: '7px 8px', verticalAlign: 'top' };
 const input = { width: '100%', boxSizing: 'border-box', padding: '9px 12px', border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 13, outline: 'none', background: 'var(--card)', color: 'var(--text)' };
 const primary = { padding: '9px 18px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer' };
 const mini = { padding: '7px 12px', background: 'rgba(128,128,128,0.10)', color: 'var(--text)', border: '1px solid var(--hairline)', borderRadius: 980, fontSize: 12, fontWeight: 600, cursor: 'pointer' };

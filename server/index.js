@@ -1522,7 +1522,7 @@ app.get('/api/my/briefing', auth.requireAuth, async (req, res) => {
       briefingInstructionsFor(req.user, entityId, suites),
       timeDefaults()[segment],
     ].filter(Boolean).join('\n\n');
-    const raw = await insights.briefHome({ tiles, profile: profileForAi, catalogue, instructions, apiKey });
+    const raw = await insights.briefHome({ tiles, profile: profileForAi, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId) });
     const link = (id) => (id && byId[id] ? { dashboardId: id, suiteId: byId[id].suiteId, label: `${byId[id].setName} → ${byId[id].title}` } : null);
     const out = {
       available: true,
@@ -1609,7 +1609,7 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
   if (!factTiles.length) throw new Error('No tile data available to summarise');
   const byId = Object.fromEntries(catalogue.map((c) => [c.dashboardId, c]));
   const instructions = [aiInstructionsFor(null), briefingInstructionsFor(user, entityId, clientCatalogue(entityId).suites)].filter(Boolean).join('\n\n');
-  const raw = await insights.digestBrief({ tiles: factTiles, roleLabel: lens.label, roleFocus: effectiveFocus, catalogue, instructions, apiKey });
+  const raw = await insights.digestBrief({ tiles: factTiles, roleLabel: lens.label, roleFocus: effectiveFocus, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId) });
   const href = (id) => { const c = id && byId[id]; return c ? `${mailer.baseUrl()}/suite/${c.suiteId}/d/${id}` : ''; };
   return {
     subject: String(raw.subject || '').slice(0, 120),
@@ -1643,6 +1643,33 @@ app.get('/api/my/digest-tiles/:entityId', auth.requireAuth, (req, res) => {
   if (!(req.user.entityIds || []).includes(req.params.entityId)) return res.status(403).json({ error: 'Not allowed' });
   res.json(digestTileCatalogue(req.params.entityId));
 });
+
+// Home-page strip: a client's recent actions + how they're performing.
+app.get('/api/actions-summary/:entityId', auth.requireAuth, (req, res) => {
+  const id = req.params.entityId;
+  if (req.user.role !== 'admin' && !(req.user.entityIds || []).includes(id)) return res.status(403).json({ error: 'Not allowed' });
+  res.json({ actions: actionsSummaryFor(id, 6) });
+});
+
+// Compact summary of a client's recent marketing actions (non-draft campaigns
+// + results) — shown on the home page and fed to the briefing/digest AI so the
+// analyst can comment on performance.
+function actionsSummaryFor(entityId, limit = 5) {
+  try {
+    return db.db.prepare("SELECT id, title, status, config, results, approved_at FROM actions WHERE entity_id=? AND status != 'draft' ORDER BY approved_at DESC LIMIT ?")
+      .all(entityId, limit).map((r) => {
+        const results = JSON.parse(r.results || '{}');
+        const cfg = JSON.parse(r.config || '{}');
+        const clickers = db.db.prepare('SELECT COUNT(DISTINCT email) n FROM action_clicks WHERE action_id=? AND email != \'\'').get(r.id)?.n || 0;
+        return {
+          id: r.id, title: r.title || cfg.subject || 'Campaign', status: r.status, approvedAt: r.approved_at,
+          sent: results.sent || 0, failed: results.failed || 0, total: results.total || 0,
+          clicks: results.clicks || 0, uniqueClickers: clickers,
+          ctr: (results.sent || 0) > 0 ? Math.round((clickers / results.sent) * 100) : 0,
+        };
+      });
+  } catch { return []; }
+}
 
 // Scheduler — recurring/one-off digest jobs (own table + routes). Mounted here,
 // after its content builder + role lenses exist. Remove this line + scheduler.js

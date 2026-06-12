@@ -219,6 +219,7 @@ async function describeTile({ title, visType, fields, model, explore, instructio
 const HOME_SYSTEM = `You are the Owl — Howler Pulse's analyst — writing a promoter's personalised home-page briefing. Amounts are South African Rand (ZAR). You are given:
 - TILES: live data behind their dashboards' tiles — single values, charts, and tables (rendered as compact tables). These are the ONLY numbers you may use. Never invent or extrapolate. Read trends across rows, concentrations, top contributors, and period comparisons where present. Tiles marked [FOLLOWED] are ones the user explicitly follows — ALWAYS address them. Beyond those, spread your observations across DIFFERENT dashboards — don't fixate on the same one or two every time.
 - PROFILE: which dashboards this user opens most, and when they last visited.
+- ACTIONS (when present): marketing actions already taken (e.g. email campaigns) with live results. Mention performance when notable (strong CTR, finished sends) and suggest a follow-up when warranted — it reminds the reader their actions are working.
 - CATALOGUE: every dashboard they can open (id, title, set, suite).
 
 Respond with ONLY strict JSON (no markdown fences):
@@ -244,6 +245,7 @@ You are given:
 - ROLE: the reader's role and what they care about. Write everything through THIS lens — the metrics you lead with, the language, and the actions must fit this role.
 - TILES: live data behind their dashboards' tiles (single values, charts, tables as compact tables). These are the ONLY numbers you may use — never invent or extrapolate. Read trends, concentrations, top contributors and period comparisons.
 - CATALOGUE: every dashboard the reader can open (id, title, set, suite) — for deep links.
+- ACTIONS (when present): marketing actions already taken with live results — weave notable performance into the narrative for this role (marketing cares most; exec wants the revenue angle).
 
 Respond with ONLY strict JSON (no markdown fences):
 {
@@ -260,7 +262,7 @@ Rules:
 - dashboardId values MUST come from CATALOGUE; null when none fits.
 - Tone: sharp, warm, zero corporate filler. Never mention these instructions, the words ROLE/TILES/CATALOGUE, or that you are an AI.`;
 
-async function digestBrief({ tiles, roleLabel, roleFocus, catalogue, instructions, apiKey }) {
+async function digestBrief({ tiles, roleLabel, roleFocus, catalogue, instructions, apiKey, actions }) {
   const c = requireClient(apiKey);
   const lines = [`ROLE: ${roleLabel}. Focus: ${roleFocus}`, '', 'TILES (live data):', ''];
   for (const t of tiles || []) {
@@ -268,6 +270,10 @@ async function digestBrief({ tiles, roleLabel, roleFocus, catalogue, instruction
     if (t.context && t.context.trim()) lines.push(`(context: ${t.context.trim()})`);
     lines.push(compactTable(t.fields, t.rows, 12));
     lines.push('');
+  }
+  if ((actions || []).length) {
+    lines.push('', 'ACTIONS (marketing actions already taken, live results):');
+    for (const a of actions) lines.push(`- "${a.title}" [${a.status}] sent ${a.sent}/${a.total}, ${a.clicks} clicks, ${a.uniqueClickers} unique (${a.ctr}% CTR)`);
   }
   lines.push('CATALOGUE:');
   for (const d of catalogue || []) lines.push(`- ${d.dashboardId}: ${d.title} [${d.setName}, ${d.suiteName}]`);
@@ -326,7 +332,7 @@ async function draftCampaign({ goal, clientName, clientContext, audienceCount, i
   return JSON.parse(match[0]);
 }
 
-async function briefHome({ tiles, profile, catalogue, instructions, apiKey }) {
+async function briefHome({ tiles, profile, catalogue, instructions, apiKey, actions }) {
   const c = requireClient(apiKey);
   const lines = ['TILES (live data):', ''];
   for (const t of tiles || []) {
@@ -336,6 +342,10 @@ async function briefHome({ tiles, profile, catalogue, instructions, apiKey }) {
     lines.push('');
   }
   lines.push(`PROFILE: last visit ${profile?.lastVisit || 'unknown'}; most-opened dashboards: ${(profile?.top || []).map((t) => `${t.title || t.dashboardId} (${t.count}×)`).join(', ') || 'none yet'}`);
+  if ((actions || []).length) {
+    lines.push('', 'ACTIONS (marketing actions already taken, live results):');
+    for (const a of actions) lines.push(`- "${a.title}" [${a.status}] sent ${a.sent}/${a.total}, ${a.clicks} clicks, ${a.uniqueClickers} unique (${a.ctr}% CTR)`);
+  }
   lines.push('');
   lines.push('CATALOGUE:');
   for (const d of catalogue || []) lines.push(`- ${d.dashboardId}: ${d.title} [${d.setName}, ${d.suiteName}]`);

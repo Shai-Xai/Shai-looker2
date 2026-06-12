@@ -156,6 +156,9 @@ export default function ClientHome() {
         </>
       )}
 
+      {/* Your actions — campaigns taken + how they're performing */}
+      <YourActions entityId={isAdmin ? previewEntityId : ((user?.entities || [])[0]?.id || (user?.entityIds || [])[0])} isMobile={isMobile} onOpen={() => vtNavigate(navigate, '/actions')} />
+
       {/* Personal shortcuts (browsing-based) */}
       {shortcuts.length > 0 && (
         <>
@@ -332,6 +335,44 @@ function PinnedTile({ p, isMobile, onOpen, onUnpin }) {
 }
 const pinAct = { flexShrink: 0, border: 'none', background: 'rgba(128,128,128,0.12)', color: 'var(--muted-2)', borderRadius: 980, width: 22, height: 22, fontSize: 12, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1 };
 const stripArrow = { position: 'absolute', top: '50%', transform: 'translateY(-50%)', zIndex: 5, width: 30, height: 30, borderRadius: '50%', border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--text)', fontSize: 17, fontWeight: 700, cursor: 'pointer', boxShadow: 'var(--shadow-sm)', display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1 };
+
+// "Your actions" — recent campaigns and their live performance, linking to the
+// Actions page. Hidden entirely until the client has taken at least one action.
+function YourActions({ entityId, isMobile, onOpen }) {
+  const [actions, setActions] = useState([]);
+  useEffect(() => {
+    if (!entityId) return;
+    api.getActionsSummary(entityId).then((r) => setActions(r.actions || [])).catch(() => {});
+  }, [entityId]);
+  if (!actions.length) return null;
+  const chip = (s) => s === 'done' ? { t: 'Sent', c: '#2da44e', bg: 'rgba(52,199,89,0.15)' }
+    : s === 'running' ? { t: 'Sending…', c: '#0a66c2', bg: 'rgba(10,132,255,0.13)' }
+    : { t: 'Failed', c: '#dc2626', bg: 'rgba(239,68,68,0.12)' };
+  return (
+    <>
+      <SectionHead icon="⚡">Your actions <Faint>campaigns you've taken and how they're performing</Faint></SectionHead>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : `repeat(${Math.min(actions.length, 3)}, 1fr)`, gap: 12 }}>
+        {actions.slice(0, 3).map((a) => {
+          const c = chip(a.status);
+          return (
+            <button key={a.id} className="lift" style={cardBtn} onClick={onOpen}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                <span style={{ fontSize: 13.5, fontWeight: 700, lineHeight: 1.4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.title}</span>
+                <span style={{ fontSize: 10, fontWeight: 700, borderRadius: 980, padding: '2px 8px', background: c.bg, color: c.c, flexShrink: 0 }}>{c.t}</span>
+              </div>
+              <div style={{ display: 'flex', gap: 12, marginTop: 8, fontSize: 12.5, fontWeight: 600 }}>
+                <span>📤 {a.sent}/{a.total}</span>
+                <span>🔗 {a.clicks}</span>
+                <span style={{ color: 'var(--brand)' }}>{a.ctr}% CTR</span>
+              </div>
+              <div style={{ marginTop: 8, fontSize: 12, fontWeight: 700, color: 'var(--brand)' }}>View report →</div>
+            </button>
+          );
+        })}
+      </div>
+    </>
+  );
+}
 
 function SectionHead({ icon, children }) {
   return <h2 style={{ fontSize: 14, fontWeight: 800, letterSpacing: '-0.01em', margin: '22px 0 10px', display: 'flex', alignItems: 'center', gap: 7 }}>{icon && <span>{icon}</span>}{children}</h2>;

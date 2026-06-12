@@ -211,6 +211,8 @@ export const api = {
   actionPreviewEmail: (entityId, b) => fetch(`/api/actions/${entityId}/preview-email`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   actionTestSend: (entityId, b) => fetch(`/api/actions/${entityId}/test-send`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   listCampaignEvents: (entityId) => fetch(`/api/actions/${entityId}/events`).then(json),
+  actionReport: (entityId, id) => fetch(`/api/actions/${entityId}/${id}/report`).then(json),
+  getActionsSummary: (entityId) => fetch(`/api/actions-summary/${entityId}`).then(json),
   getMyDigestTiles: (entityId) => fetch(`/api/my/digest-tiles/${entityId}`).then(json),
 
   // Backup / restore

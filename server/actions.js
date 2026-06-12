@@ -47,6 +47,16 @@ function mount(app, { db, auth, mailer, resolveAudience, draftCopy, listEvents }
       reason    TEXT NOT NULL DEFAULT 'unsubscribed',
       PRIMARY KEY (entity_id, email)
     );
+
+    -- One row per click event, attributed to the recipient when the link
+    -- carried their signed token (forwarded links attribute to the original
+    -- recipient — standard email-marketing behaviour).
+    CREATE TABLE IF NOT EXISTS action_clicks (
+      action_id TEXT NOT NULL,
+      email     TEXT NOT NULL DEFAULT '',
+      at        TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_action_clicks ON action_clicks(action_id, email);
   `);
 
   // ── helpers ──
@@ -167,8 +177,11 @@ function mount(app, { db, auth, mailer, resolveAudience, draftCopy, listEvents }
     const cfg = action.config;
     const firstName = (recipient.name || '').split(/\s+/)[0] || '';
     const ticket = recipient.ticket || '';
-    const ctaUrl = cfg.ctaUrl ? `${mailer.baseUrl()}/c/${cfg.clickToken}` : '';
-    const unsubUrl = `${mailer.baseUrl()}/u/${unsubToken(action.entityId, recipient.email)}`;
+    // Per-recipient tracked link: the same signed token used for unsubscribe
+    // identifies WHO clicked, powering the campaign report.
+    const rtok = unsubToken(action.entityId, recipient.email);
+    const ctaUrl = cfg.ctaUrl ? `${mailer.baseUrl()}/c/${cfg.clickToken}/${rtok}` : '';
+    const unsubUrl = `${mailer.baseUrl()}/u/${rtok}`;
     const tok = (s) => String(s || '')
       .replace(/\{\{\s*name\s*\}\}/gi, firstName || 'there')
       .replace(/\{\{\s*(ticket_?type|ticket)\s*\}\}/gi, ticket || 'your tickets')
@@ -336,14 +349,38 @@ function mount(app, { db, auth, mailer, resolveAudience, draftCopy, listEvents }
     } catch (e) { res.status(400).json({ error: e.message }); }
   });
 
+  // Detailed campaign report: per-recipient clicks (who, how many, when),
+  // plus the summary. Names come from the audience snapshot.
+  app.get('/api/actions/:entityId/:id/report', auth.requireAuth, (req, res) => {
+    if (!guard(req, res, req.params.entityId)) return;
+    const a = getAction(req.params.id);
+    if (!a || a.entityId !== req.params.entityId) return res.status(404).json({ error: 'Not found' });
+    const rows = sql.prepare('SELECT email, COUNT(*) n, MAX(at) lastAt, MIN(at) firstAt FROM action_clicks WHERE action_id=? GROUP BY email ORDER BY n DESC, lastAt DESC').all(a.id);
+    const nameOf = Object.fromEntries(a.audience.map((r) => [r.email, r.name || '']));
+    const clickers = rows.filter((r) => r.email).map((r) => ({ email: r.email, name: nameOf[r.email] || '', clicks: r.n, firstAt: r.firstAt, lastAt: r.lastAt }));
+    const anonClicks = rows.find((r) => !r.email)?.n || 0;
+    const totalClicks = rows.reduce((s, r) => s + r.n, 0);
+    res.json({
+      title: a.title || a.config.subject, status: a.status, approvedBy: a.approvedBy, approvedAt: a.approvedAt,
+      sent: a.results.sent || 0, failed: a.results.failed || 0, total: a.results.total ?? a.audience.length,
+      totalClicks, uniqueClickers: clickers.length, anonClicks,
+      ctr: (a.results.sent || 0) > 0 ? Math.round((clickers.length / a.results.sent) * 100) : 0,
+      clickers,
+      nonClickers: a.audience.filter((r) => !clickers.some((c) => c.email === r.email)).length,
+    });
+  });
+
   // ── public routes (no auth; registered before the SPA fallback) ──
   // Tracked CTA click → count + redirect, with the campaign's UTM parameters
   // appended to the destination (clean URL in the email, full attribution in
   // the client's analytics). Existing query keys on the destination win.
-  app.get('/c/:token', (req, res) => {
+  app.get('/c/:token/:rtok?', (req, res) => {
     const r = sql.prepare(`SELECT * FROM actions WHERE json_extract(config,'$.clickToken')=?`).get(req.params.token);
     if (!r) return res.redirect('/');
     const a = rowToAction(r);
+    // Attribute the click when the link carries a valid recipient token.
+    const who = req.params.rtok ? parseUnsubToken(req.params.rtok) : null;
+    try { sql.prepare('INSERT INTO action_clicks (action_id, email, at) VALUES (?,?,?)').run(a.id, who?.e ? String(who.e).toLowerCase() : '', now()); } catch { /* never block the redirect */ }
     const results = { ...a.results, clicks: (a.results.clicks || 0) + 1, lastClickAt: now() };
     saveResults(a.id, results);
     let dest = a.config.ctaUrl || '/';
