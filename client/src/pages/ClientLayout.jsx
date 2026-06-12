@@ -542,6 +542,11 @@ function ProfileFooter({ user, isAdmin, brand, onNavigate }) {
     try { await api.setNotifPrefs({ email: next }); } catch { setNotif((s) => ({ ...s, email: !next })); }
     setNotif((s) => ({ ...s, busy: '' }));
   };
+  // iOS only delivers web push to the installed (Home Screen) app, never a
+  // Safari tab — so in Safari we guide instead of showing a toggle that lies.
+  const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent);
+  const standalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
+  const iosNeedsInstall = isIOS && !standalone;
   const togglePush = async () => {
     const turningOn = !(notif.push && notif.deviceOn);
     setNotif((s) => ({ ...s, busy: 'push' }));
@@ -572,20 +577,30 @@ function ProfileFooter({ user, isAdmin, brand, onNavigate }) {
             <span style={{ flex: 1, textAlign: 'left' }}>Email</span>
             <Switch on={notif.email} busy={notif.busy === 'email'} />
           </button>
-          {notif.supported && notif.pushAvailable && (
+          {notif.pushAvailable && iosNeedsInstall ? (
+            // iOS Safari can't receive push — only the installed app can. Don't
+            // show a toggle that would lie; guide them to install instead.
+            <button className="nav-row" style={{ ...menuItem, alignItems: 'flex-start' }} onClick={() => alert('To get push notifications on iPhone/iPad:\n\n1. Tap the Share button\n2. Choose “Add to Home Screen”\n3. Open Pulse from the new icon\n\nThen turn on Push from this menu.')}>
+              <span style={menuIco}>🔔</span>
+              <span style={{ flex: 1, textAlign: 'left' }}>Push<div style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 400 }}>Add Pulse to your Home Screen to enable</div></span>
+              <span style={{ fontSize: 13, color: 'var(--muted)' }}>ⓘ</span>
+            </button>
+          ) : notif.supported && notif.pushAvailable ? (
             <button className="nav-row" style={menuItem} onClick={togglePush} disabled={notif.busy === 'push'}>
               <span style={menuIco}>🔔</span>
               <span style={{ flex: 1, textAlign: 'left' }}>Push (this device)</span>
               <Switch on={notif.push && notif.deviceOn} busy={notif.busy === 'push'} />
             </button>
-          )}
-          {notif.supported && notif.pushAvailable && notif.push && notif.deviceOn && (
+          ) : null}
+          {notif.supported && notif.pushAvailable && notif.push && notif.deviceOn && !iosNeedsInstall && (
             <button className="nav-row" style={{ ...menuItem, fontSize: 12, color: 'var(--muted)' }} disabled={notif.testing} onClick={async () => {
               setNotif((s) => ({ ...s, testing: true }));
               try {
                 const r = await api.pushTest();
-                if (!r.sent) alert('No registered devices yet — toggle push off and on again.');
-              } catch { alert('Test failed — try re-enabling push.'); }
+                alert(r.sent
+                  ? `Sent to ${r.sent} device${r.sent === 1 ? '' : 's'} ✓\n\nIf you don't see it, lock your phone or switch apps — iOS hides the banner while Pulse is open.`
+                  : 'No devices are registered yet. Turn Push off and on again on the installed app.');
+              } catch { alert('Test failed — try turning Push off and on again.'); }
               setNotif((s) => ({ ...s, testing: false }));
             }}>
               <span style={menuIco}>📨</span> {notif.testing ? 'Sending…' : 'Send a test notification'}
