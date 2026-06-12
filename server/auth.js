@@ -138,7 +138,13 @@ function filterNameToField(name) {
   const NOW = Date.now();
   if (!_nameMap || NOW - _nameMapAt > 60000) {
     const map = {};
-    for (const d of db.listDashboards()) {
+    // Shared platform dashboards are authoritative: a client's bespoke import
+    // must NEVER redefine what a shared filter name (e.g. "Organiser") maps to.
+    // Process shared first (first-wins), so custom dashboards only resolve names
+    // that no shared dashboard already defines.
+    const all = db.listDashboards();
+    const ordered = [...all.filter((d) => !d.ownerEntityId), ...all.filter((d) => d.ownerEntityId)];
+    for (const d of ordered) {
       const full = db.getDashboard(d.id);
       for (const f of full?.filters || []) {
         const field = f.field || f.dimension;
@@ -211,17 +217,34 @@ function exploreScopeIndex() {
   const orgField = new Map(); // `${model}::${explore}` -> organiser field valid there
   const views = new Map();    // `${model}::${explore}` -> Set(view prefixes seen in tile fields)
   const addView = (key, v) => { if (!v) return; let s = views.get(key); if (!s) { s = new Set(); views.set(key, s); } s.add(v); };
-  for (const d of db.listDashboards()) {
+  const setOrg = (k, field) => { if (k && field && (!orgField.has(k) || field === ORG_FIELD)) orgField.set(k, field); };
+  // Shared dashboards first so they own each explore's organiser field; a
+  // client's bespoke import can only resolve explores no shared dashboard covers.
+  const all = db.listDashboards();
+  const ordered = [...all.filter((d) => !d.ownerEntityId), ...all.filter((d) => d.ownerEntityId)];
+  for (const d of ordered) {
     const full = db.getDashboard(d.id);
+    // Names of this dashboard's organiser-style filters (e.g. "Organiser").
+    const orgFilterNames = new Set();
+    for (const f of full?.filters || []) {
+      const field = f.field || f.dimension;
+      if (isOrgField(field, f.name || f.title)) { if (f.name) orgFilterNames.add(f.name); if (f.title) orgFilterNames.add(f.title); }
+    }
     for (const t of full?.tiles || []) {
       const q = t.query; if (!q?.model || !q?.view) continue;
       const key = `${q.model}::${q.view}`;
       for (const f of q.fields || []) addView(key, String(f).split('.')[0]);
+      // Authoritative: how Looker wires the organiser dashboard-filter onto THIS
+      // tile's query field — works even when the filter's own model/explore are
+      // null on a bespoke import. listenTo: { dashboardFilterName -> queryField }.
+      for (const [fname, qfield] of Object.entries(t.listenTo || {})) {
+        if (orgFilterNames.has(fname) && qfield && String(qfield).includes('.')) setOrg(key, qfield);
+      }
     }
     for (const f of full?.filters || []) {
       const field = f.field || f.dimension;
       if (!field || !field.includes('.') || !isOrgField(field, f.name || f.title)) continue;
-      if (f.model && f.explore) { const k = `${f.model}::${f.explore}`; if (!orgField.has(k) || field === ORG_FIELD) orgField.set(k, field); }
+      if (f.model && f.explore) setOrg(`${f.model}::${f.explore}`, field);
     }
   }
   _exIdx = { orgField, views }; _exIdxAt = NOW; return _exIdx;
