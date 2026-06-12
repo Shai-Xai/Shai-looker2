@@ -293,7 +293,7 @@ const CAMPAIGN_SYSTEM = `You write short, high-converting marketing emails for e
 Respond with ONLY strict JSON (no markdown fences):
 {
   "subject": "email subject — punchy, specific, <60 chars, no clickbait",
-  "body": "the email body as plain text, 60-130 words. May use **bold** sparingly and {{name}} once as the greeting personalisation token. Warm, direct, one clear idea; end before the button (the CTA button is rendered separately).",
+  "body": "the email body as plain text, 60-130 words. May use **bold** sparingly. Personalisation tokens you may use: {{name}} (recipient first name, once as the greeting) and {{ticketType}} (the ticket they were buying, e.g. 'your {{ticketType}} tickets') — only use {{ticketType}} if it reads naturally. Warm, direct, one clear idea; end before the button (the CTA button is rendered separately).",
   "ctaText": "button label, 2-4 words"
 }
 

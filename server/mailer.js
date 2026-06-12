@@ -286,19 +286,21 @@ function digestEmail({ branding, entityId, assetScope, content, roleLabel, custo
 // campaign copy, a tracked CTA button, and the REQUIRED unsubscribe link.
 // Body is plain text (pre-wrap) with **bold**; personalisation happens before
 // this is called.
-function campaignEmail({ branding, entityId, assetScope, subject, bodyText, ctaText, ctaUrl, unsubUrl }) {
+function campaignEmail({ branding, entityId, assetScope, subject, bodyText, ctaText, ctaUrl, unsubUrl, heroImage }) {
   const b = branding || resolveBranding(entityId);
   const scope = assetScope || entityId;
   const logoSrc = b.logo && b.logo.startsWith('data:') && scope ? `${baseUrl()}/mail-assets/logo/${scope}` : b.logo;
   const brandMark = logoSrc
     ? `<img src="${esc(logoSrc)}" alt="${esc(b.wordmark)}" style="max-height:40px;max-width:200px;display:block;" />`
     : `<div style="font-size:15px;font-weight:800;letter-spacing:-0.02em;color:#111;">${esc(b.wordmark)}</div>`;
+  const hero = heroImage ? `<img src="${esc(heroImage)}" alt="" style="width:100%;border-radius:10px;margin-bottom:18px;display:block;" />` : '';
   const cta = ctaUrl ? `<a href="${esc(ctaUrl)}" style="display:inline-block;margin-top:20px;background:${esc(b.brandColor)};color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;border-radius:980px;padding:12px 26px;">${esc(ctaText || 'View event')} →</a>` : '';
   const html = `<!doctype html><html><body style="margin:0;padding:0;background:#f5f5f7;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
   <div style="display:none;max-height:0;overflow:hidden;">${esc(bodyText || '').slice(0, 140)}</div>
   <div style="max-width:600px;margin:0 auto;padding:28px 16px;">
     <div style="margin-bottom:14px;">${brandMark}</div>
     <div style="background:#ffffff;border:1px solid #e8e8ec;border-radius:14px;padding:26px;">
+      ${hero}
       ${subject ? `<div style="font-size:19px;font-weight:800;color:#111;margin-bottom:12px;line-height:1.35;letter-spacing:-0.01em;">${mdBold(subject)}</div>` : ''}
       <div style="font-size:14.5px;line-height:1.65;color:#3a3a3c;white-space:pre-wrap;">${mdBold(bodyText || '')}</div>
       ${cta}

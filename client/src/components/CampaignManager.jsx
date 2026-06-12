@@ -82,12 +82,19 @@ function CampaignEditor({ entityId, isAdmin, action, onClose, onSaved }) {
     emailField: cfg.audience?.emailField || '',
     nameField: cfg.audience?.nameField || '',
     consentField: cfg.audience?.consentField || '',
+    ticketField: cfg.audience?.ticketField || '',
     pasted: cfg.audience?.pasted || '',
+    eventSuiteId: cfg.eventSuiteId || '',
+    contentMode: cfg.contentMode || 'template',
+    heroImage: cfg.heroImage || '',
+    customHtml: cfg.customHtml || '',
     subject: cfg.subject || '',
     body: cfg.body || '',
     ctaText: cfg.ctaText || 'Complete your order',
     ctaUrl: cfg.ctaUrl || '',
   }));
+  const [events, setEvents] = useState([]);
+  useEffect(() => { api.listCampaignEvents(entityId).then((r) => setEvents(r.events || [])).catch(() => {}); }, [entityId]);
   const [tiles, setTiles] = useState(null);
   const [aud, setAud] = useState(null); // { count, excluded, sample, fields }
   const [audBusy, setAudBusy] = useState(false);
@@ -103,7 +110,8 @@ function CampaignEditor({ entityId, isAdmin, action, onClose, onSaved }) {
 
   const payload = () => ({
     title: f.title, goal: f.goal, subject: f.subject, body: f.body, ctaText: f.ctaText, ctaUrl: f.ctaUrl,
-    audience: { mode: f.audienceMode, dashboardId: f.dashboardId, tileId: f.tileId, emailField: f.emailField, nameField: f.nameField, consentField: f.consentField, pasted: f.pasted },
+    eventSuiteId: f.eventSuiteId, contentMode: f.contentMode, heroImage: f.heroImage, customHtml: f.customHtml,
+    audience: { mode: f.audienceMode, dashboardId: f.dashboardId, tileId: f.tileId, emailField: f.emailField, nameField: f.nameField, consentField: f.consentField, ticketField: f.ticketField, pasted: f.pasted },
   });
 
   const refreshAudience = () => {
@@ -120,7 +128,7 @@ function CampaignEditor({ entityId, isAdmin, action, onClose, onSaved }) {
       api.actionPreviewEmail(entityId, payload()).then((r) => setPreview(r.html)).catch(() => {});
     }, 350);
     return () => clearTimeout(debounce.current);
-  }, [f.subject, f.body, f.ctaText, f.ctaUrl]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [f.subject, f.body, f.ctaText, f.ctaUrl, f.contentMode, f.customHtml, f.heroImage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const draft = async () => {
     setDrafting(true);
@@ -164,6 +172,15 @@ function CampaignEditor({ entityId, isAdmin, action, onClose, onSaved }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <Field label="Campaign name"><input style={input} value={f.title} onChange={(e) => set('title', e.target.value)} placeholder="e.g. Abandoned cart — Pretoria show" /></Field>
 
+          {events.length > 0 && (
+            <Field label="Event (optional)">
+              <select style={input} value={f.eventSuiteId} onChange={(e) => set('eventSuiteId', e.target.value)}>
+                <option value="">Not linked to an event</option>
+                {events.map((ev) => <option key={ev.id} value={ev.id}>{ev.name}</option>)}
+              </select>
+            </Field>
+          )}
+
           <Field label="Goal (steers the AI copy)">
             <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit' }} rows={2} value={f.goal} onChange={(e) => set('goal', e.target.value)} />
           </Field>
@@ -197,6 +214,10 @@ function CampaignEditor({ entityId, isAdmin, action, onClose, onSaved }) {
                         {aud.fields.map((fl) => <option key={fl.name} value={fl.name}>{fl.label}</option>)}
                       </select>
                     </div>
+                    <select style={input} value={f.ticketField} onChange={(e) => set('ticketField', e.target.value)}>
+                      <option value="">Ticket-type column (optional — enables {'{{ticketType}}'})</option>
+                      {aud.fields.map((fl) => <option key={fl.name} value={fl.name}>{fl.label}</option>)}
+                    </select>
                     <select style={input} value={f.consentField} onChange={(e) => set('consentField', e.target.value)}>
                       <option value="">Consent column — recommended (only email when = Yes)</option>
                       {aud.fields.map((fl) => <option key={fl.name} value={fl.name}>Only if “{fl.label}” = Yes</option>)}
@@ -221,19 +242,42 @@ function CampaignEditor({ entityId, isAdmin, action, onClose, onSaved }) {
             </div>
           </Field>
 
-          <Field label="Email copy">
-            <button type="button" style={{ ...mini, marginBottom: 8 }} onClick={draft} disabled={drafting}>{drafting ? 'Writing…' : '✨ Draft with AI'}</button>
-            <input style={{ ...input, fontWeight: 700, marginBottom: 8 }} value={f.subject} onChange={(e) => set('subject', e.target.value)} placeholder="Subject line" />
-            <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit' }} rows={6} value={f.body} onChange={(e) => set('body', e.target.value)} placeholder={'Hi {{name}},\n\nYour tickets are still waiting…'} />
-            <div style={hintS}>{'{{name}}'} personalises with the recipient's first name when the audience has a name column.</div>
+          <Field label="Content">
+            <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+              <Toggle on={f.contentMode === 'template'} onClick={() => set('contentMode', 'template')}>Built template</Toggle>
+              <Toggle on={f.contentMode === 'html'} onClick={() => set('contentMode', 'html')}>Custom HTML</Toggle>
+            </div>
+
+            {f.contentMode === 'template' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <ImageField label="Hero image (optional)" value={f.heroImage} onChange={(v) => set('heroImage', v)} />
+                <button type="button" style={mini} onClick={draft} disabled={drafting}>{drafting ? 'Writing…' : '✨ Draft copy with AI'}</button>
+                <input style={{ ...input, fontWeight: 700 }} value={f.subject} onChange={(e) => set('subject', e.target.value)} placeholder="Subject line" />
+                <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit' }} rows={6} value={f.body} onChange={(e) => set('body', e.target.value)} placeholder={'Hi {{name}},\n\nYour {{ticketType}} tickets are still waiting…'} />
+                <div style={hintS}>Tokens: <b>{'{{name}}'}</b> (first name) · <b>{'{{ticketType}}'}</b> (their ticket) — filled when the audience has those columns.</div>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <input style={{ ...input, fontWeight: 700 }} value={f.subject} onChange={(e) => set('subject', e.target.value)} placeholder="Subject line" />
+                <HtmlField value={f.customHtml} onChange={(v) => set('customHtml', v)} />
+                <div style={hintS}>Upload or paste your own HTML email. Tokens work inside it: <b>{'{{name}}'}</b>, <b>{'{{ticketType}}'}</b>, <b>{'{{cta}}'}</b> (tracked link), <b>{'{{unsubscribe}}'}</b>. An unsubscribe link is added automatically if you omit one.</div>
+              </div>
+            )}
           </Field>
 
-          <Field label="Call to action">
-            <div style={{ display: 'flex', gap: 8 }}>
-              <input style={{ ...input, flex: 1 }} value={f.ctaText} onChange={(e) => set('ctaText', e.target.value)} placeholder="Button text" />
-              <input style={{ ...input, flex: 2 }} value={f.ctaUrl} onChange={(e) => set('ctaUrl', e.target.value)} placeholder="https://… (clicks are tracked)" />
-            </div>
-          </Field>
+          {f.contentMode === 'template' && (
+            <Field label="Call to action">
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input style={{ ...input, flex: 1 }} value={f.ctaText} onChange={(e) => set('ctaText', e.target.value)} placeholder="Button text" />
+                <input style={{ ...input, flex: 2 }} value={f.ctaUrl} onChange={(e) => set('ctaUrl', e.target.value)} placeholder="https://… (clicks are tracked)" />
+              </div>
+            </Field>
+          )}
+          {f.contentMode === 'html' && (
+            <Field label="Tracked link (for {{cta}})">
+              <input style={input} value={f.ctaUrl} onChange={(e) => set('ctaUrl', e.target.value)} placeholder="https://… — clicks on {{cta}} are tracked" />
+            </Field>
+          )}
 
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 4, flexWrap: 'wrap' }}>
             <button style={mini} onClick={saveDraft} disabled={busy}>{busy ? 'Saving…' : 'Save draft'}</button>
@@ -254,6 +298,64 @@ function CampaignEditor({ entityId, isAdmin, action, onClose, onSaved }) {
           <iframe title="Campaign preview" srcDoc={preview} style={{ width: '100%', height: 560, border: '1px solid var(--hairline)', borderRadius: 12, background: '#fff' }} />
         </div>
       </div>
+    </div>
+  );
+}
+
+// Hero image: upload (resized ≤1000px wide, data-URL) or paste a URL.
+function ImageField({ label, value, onChange }) {
+  const ref = useRef(null);
+  const onFile = (e) => {
+    const file = e.target.files?.[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const max = 1000, scale = Math.min(1, max / img.width);
+        const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+        const c = document.createElement('canvas'); c.width = w; c.height = h;
+        c.getContext('2d').drawImage(img, 0, 0, w, h);
+        onChange(c.toDataURL('image/jpeg', 0.85));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+  return (
+    <div>
+      <div style={hintLbl}>{label}</div>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+        <div style={{ width: 120, height: 56, border: '1px dashed var(--hairline)', borderRadius: 8, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fff', flexShrink: 0 }}>
+          {value ? <img src={value} alt="" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'cover' }} /> : <span style={{ fontSize: 11, color: 'var(--muted)' }}>None</span>}
+        </div>
+        <button type="button" style={mini} onClick={() => ref.current?.click()}>Upload</button>
+        {value && <button type="button" style={{ ...mini, color: 'var(--error,#ef4444)' }} onClick={() => onChange('')}>Remove</button>}
+        <input ref={ref} type="file" accept="image/*" style={{ display: 'none' }} onChange={onFile} />
+      </div>
+      {!value?.startsWith('data:') && <input value={value || ''} onChange={(e) => onChange(e.target.value)} placeholder="or paste an image URL" style={{ ...input, marginTop: 6 }} />}
+    </div>
+  );
+}
+
+// Custom HTML: upload an .html file or paste/edit markup directly.
+function HtmlField({ value, onChange }) {
+  const ref = useRef(null);
+  const onFile = (e) => {
+    const file = e.target.files?.[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => onChange(String(reader.result || '').slice(0, 500000));
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+        <button type="button" style={mini} onClick={() => ref.current?.click()}>Upload .html file</button>
+        {value && <button type="button" style={{ ...mini, color: 'var(--error,#ef4444)' }} onClick={() => onChange('')}>Clear</button>}
+        <input ref={ref} type="file" accept=".html,text/html" style={{ display: 'none' }} onChange={onFile} />
+      </div>
+      <textarea style={{ ...input, resize: 'vertical', fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 12 }} rows={8} value={value} onChange={(e) => onChange(e.target.value)} placeholder="<html>…</html> — or upload a file above" />
     </div>
   );
 }

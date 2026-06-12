@@ -16,7 +16,7 @@ const crypto = require('crypto');
 const MAX_AUDIENCE = 2000;       // v1 safety cap per campaign
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-function mount(app, { db, auth, mailer, resolveAudience, draftCopy }) {
+function mount(app, { db, auth, mailer, resolveAudience, draftCopy, listEvents }) {
   const sql = db.db;
   const now = () => new Date().toISOString();
   const uuid = () => crypto.randomUUID();
@@ -93,8 +93,13 @@ function mount(app, { db, auth, mailer, resolveAudience, draftCopy }) {
         emailField: String(aud.emailField || ''),
         nameField: String(aud.nameField || ''),
         consentField: String(aud.consentField || ''),
+        ticketField: String(aud.ticketField || ''),
         pasted: String(aud.pasted || '').slice(0, 200000),
       },
+      contentMode: body.contentMode === 'html' ? 'html' : 'template',
+      eventSuiteId: String(body.eventSuiteId || ''),
+      heroImage: String(body.heroImage || '').slice(0, 2000000),  // hero image data-URL/URL
+      customHtml: String(body.customHtml || '').slice(0, 500000), // custom-HTML mode body
       subject: String(body.subject || '').slice(0, 200),
       body: String(body.body || '').slice(0, 8000),
       ctaText: String(body.ctaText || '').slice(0, 60),
@@ -122,13 +127,14 @@ function mount(app, { db, auth, mailer, resolveAudience, draftCopy }) {
       const emailField = cfg.audience.emailField || res.fields.find((f) => /email/i.test(f.name) || /email/i.test(f.label))?.name || '';
       const nameField = cfg.audience.nameField || '';
       const consentField = cfg.audience.consentField || '';
+      const ticketField = cfg.audience.ticketField || '';
       if (emailField) {
         for (const row of res.rows) {
           const email = cellVal(row[emailField]).toLowerCase();
           if (!EMAIL_RE.test(email)) continue;
           // Consent gate: when a consent column is chosen, only include "Yes".
           if (consentField && !isYes(cellVal(row[consentField]))) { noConsent += 1; continue; }
-          raw.push({ email, name: nameField ? cellVal(row[nameField]) : '' });
+          raw.push({ email, name: nameField ? cellVal(row[nameField]) : '', ticket: ticketField ? cellVal(row[ticketField]) : '' });
         }
       }
     }
@@ -147,14 +153,41 @@ function mount(app, { db, auth, mailer, resolveAudience, draftCopy }) {
     return { list, fields, excluded, noConsent };
   }
 
-  // Render one recipient's email ({{name}} personalisation + tracked CTA + unsubscribe).
+  // Render one recipient's email. Tokens: {{name}}, {{ticketType}}, {{cta}},
+  // {{unsubscribe}}. Two modes: the built branded template, or the client's own
+  // uploaded HTML (we still inject tracking + a guaranteed unsubscribe link).
   function renderFor(action, recipient) {
     const cfg = action.config;
     const firstName = (recipient.name || '').split(/\s+/)[0] || '';
-    const bodyText = cfg.body.replace(/\{\{\s*name\s*\}\}/gi, firstName || 'there');
+    const ticket = recipient.ticket || '';
     const ctaUrl = cfg.ctaUrl ? `${mailer.baseUrl()}/c/${cfg.clickToken}` : '';
     const unsubUrl = `${mailer.baseUrl()}/u/${unsubToken(action.entityId, recipient.email)}`;
-    return mailer.campaignEmail({ entityId: action.entityId, assetScope: action.entityId, subject: cfg.subject, bodyText, ctaText: cfg.ctaText || 'View event', ctaUrl, unsubUrl });
+    const tok = (s) => String(s || '')
+      .replace(/\{\{\s*name\s*\}\}/gi, firstName || 'there')
+      .replace(/\{\{\s*(ticket_?type|ticket)\s*\}\}/gi, ticket || 'your tickets')
+      .replace(/\{\{\s*cta(_url)?\s*\}\}/gi, ctaUrl || '#')
+      .replace(/\{\{\s*unsubscribe\s*\}\}/gi, unsubUrl);
+    const subject = tok(cfg.subject);
+
+    if (cfg.contentMode === 'html' && (cfg.customHtml || '').trim()) {
+      let html = tok(cfg.customHtml);
+      // Guarantee an unsubscribe link (compliance) if the author didn't include one.
+      if (!/unsubscrib/i.test(html)) {
+        const footer = `<div style="font-size:11px;color:#888;text-align:center;padding:18px;font-family:-apple-system,Segoe UI,Roboto,sans-serif;">Sent via Howler : Pulse · <a href="${unsubUrl}" style="color:#888;">Unsubscribe</a></div>`;
+        html = /<\/body>/i.test(html) ? html.replace(/<\/body>/i, `${footer}</body>`) : html + footer;
+      }
+      const text = `${tok(cfg.customHtml).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 4000)}\n\nUnsubscribe: ${unsubUrl}`;
+      return { html, text, subject };
+    }
+
+    // Hero image: hosted by action id for real sends (email clients strip
+    // data-URLs); inline for preview/test so it shows live.
+    const realSend = action.id && !['preview', 'test'].includes(action.id);
+    const heroImage = cfg.heroImage
+      ? (cfg.heroImage.startsWith('data:') && realSend ? `${mailer.baseUrl()}/mail-assets/campaign/${action.id}` : cfg.heroImage)
+      : '';
+    const { html, text } = mailer.campaignEmail({ entityId: action.entityId, assetScope: action.entityId, subject, bodyText: tok(cfg.body), ctaText: cfg.ctaText || 'View event', ctaUrl, unsubUrl, heroImage });
+    return { html, text, subject };
   }
 
   // Execute: send to every recipient in the snapshot. Runs detached; the UI
@@ -167,8 +200,8 @@ function mount(app, { db, auth, mailer, resolveAudience, draftCopy }) {
     saveResults(a.id, results);
     for (const recipient of a.audience) {
       try {
-        const { html, text } = renderFor(a, recipient);
-        const r = await mailer.send({ to: recipient.email, subject: a.config.subject || a.title || 'An update from your event', html, text, fromName: branding.senderName });
+        const { html, text, subject } = renderFor(a, recipient);
+        const r = await mailer.send({ to: recipient.email, subject: subject || a.title || 'An update from your event', html, text, fromName: branding.senderName });
         if (r.ok) results.sent += 1; else { results.failed += 1; results.lastError = r.error || r.reason || 'send failed'; }
       } catch (e) { results.failed += 1; results.lastError = e.message; }
       if ((results.sent + results.failed) % 20 === 0) saveResults(a.id, results);
@@ -222,6 +255,27 @@ function mount(app, { db, auth, mailer, resolveAudience, draftCopy }) {
     res.status(204).end();
   });
 
+  // The client's events (suites) — for optionally linking a campaign to an event.
+  app.get('/api/actions/:entityId/events', auth.requireAuth, (req, res) => {
+    if (!guard(req, res, req.params.entityId)) return;
+    res.json({ events: (listEvents ? listEvents(req.params.entityId) : []) });
+  });
+
+  // Public: serve a campaign's hero image (data-URL stored on the action) so
+  // real sends reference a URL, not an embedded data-URL clients would strip.
+  app.get('/mail-assets/campaign/:id', (req, res) => {
+    const a = getAction(req.params.id);
+    const img = a?.config?.heroImage || '';
+    if (!img) return res.status(404).end();
+    if (!img.startsWith('data:')) return res.redirect(302, img);
+    const m = img.match(/^data:([^;,]+)?(;base64)?,(.*)$/s);
+    if (!m) return res.status(404).end();
+    const buf = m[2] ? Buffer.from(m[3], 'base64') : Buffer.from(decodeURIComponent(m[3]), 'utf8');
+    res.set('Content-Type', m[1] || 'image/png');
+    res.set('Cache-Control', 'public, max-age=300');
+    res.send(buf);
+  });
+
   // Audience preview for an (unsaved) config: count + sample + field options.
   app.post('/api/actions/:entityId/audience-preview', auth.requireAuth, async (req, res) => {
     if (!guard(req, res, req.params.entityId)) return;
@@ -245,15 +299,15 @@ function mount(app, { db, auth, mailer, resolveAudience, draftCopy }) {
   app.post('/api/actions/:entityId/preview-email', auth.requireAuth, (req, res) => {
     if (!guard(req, res, req.params.entityId)) return;
     const fake = { id: 'preview', entityId: req.params.entityId, config: cleanConfig(req.body || {}) };
-    const { html } = renderFor(fake, { email: 'sam@example.com', name: 'Sam' });
+    const { html } = renderFor(fake, { email: 'sam@example.com', name: 'Sam', ticket: 'General Admission' });
     res.json({ html });
   });
   app.post('/api/actions/:entityId/test-send', auth.requireAuth, async (req, res) => {
     if (!guard(req, res, req.params.entityId)) return;
     const fake = { id: 'test', entityId: req.params.entityId, config: cleanConfig(req.body || {}) };
-    const { html, text } = renderFor(fake, { email: req.user.email, name: '' });
+    const { html, text, subject } = renderFor(fake, { email: req.user.email, name: '', ticket: 'General Admission' });
     const branding = mailer.resolveBranding(req.params.entityId);
-    const r = await mailer.send({ to: req.user.email, subject: `[TEST] ${fake.config.subject || 'Campaign'}`, html, text, fromName: branding.senderName });
+    const r = await mailer.send({ to: req.user.email, subject: `[TEST] ${subject || 'Campaign'}`, html, text, fromName: branding.senderName });
     r.ok ? res.json({ ok: true, to: req.user.email }) : res.status(400).json({ error: r.error || r.reason || 'not configured' });
   });
 
