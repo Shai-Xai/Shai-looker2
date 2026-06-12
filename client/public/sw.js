@@ -37,6 +37,23 @@ self.addEventListener('notificationclick', (event) => {
   const action = event.action || '';
   const url = (event.notification.data && event.notification.data.url) || '/';
 
+  // Acknowledge a must-ack thread straight from the notification.
+  if (action.startsWith('ack:')) {
+    const id = action.slice(4);
+    event.waitUntil((async () => {
+      try {
+        const r = await fetch(`/api/os/threads/${id}/ack`, {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' }, body: '{}',
+        });
+        if (r.ok) {
+          await self.registration.showNotification('Acknowledged ✓', { body: 'Thanks — Howler has been notified.', icon: '/logo.png', badge: '/logo.png' });
+        } else { await openApp(url); }
+      } catch { await openApp(url); }
+    })());
+    return;
+  }
+
   // Approve a campaign straight from the notification (no app open needed).
   // The fetch carries the session cookie (same-origin). Falls back to opening
   // the app if the call fails.

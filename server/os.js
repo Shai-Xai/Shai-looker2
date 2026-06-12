@@ -186,8 +186,44 @@ function mount(app, { db, auth, mailer, push }) {
       tag: `thread-${t.id}`,
       icon: brand.logo && !String(brand.logo).startsWith('data:') ? brand.logo : '/logo.png',
       requireInteraction: t.priority === 'must_ack',
+      // Acknowledge straight from the notification (where action buttons render).
+      actions: t.priority === 'must_ack' ? [{ action: `ack:${t.id}`, title: 'Acknowledge' }, { action: 'review', title: 'Open' }] : undefined,
     }).catch(() => {});
   }
+
+  // Periodic reminder: a must-acknowledge thread that's still unacknowledged
+  // after a delay gets a push nudge (with an Acknowledge button), re-nudging at
+  // most once per window until it's acked or closed. Best-effort; respects each
+  // user's push preference via sendToUser.
+  function remindUnacked() {
+    if (!enabled() || !push?.isEnabled?.()) return;
+    const hours = Number(db.getSetting('ack_reminder_hours', '12')) || 12;
+    const cutoff = new Date(Date.now() - hours * 3600e3).toISOString();
+    const open = sql.prepare("SELECT * FROM os_threads WHERE priority='must_ack' AND status='open' AND created_at < ?").all(cutoff).map(threadRow);
+    if (!open.length) return;
+    const usersByEntity = new Map();
+    for (const t of open) {
+      let users = usersByEntity.get(t.entityId);
+      if (!users) { users = db.listUsers().filter((u) => (u.entityIds || []).includes(t.entityId) && u.notifyPush !== false); usersByEntity.set(t.entityId, users); }
+      for (const u of users) {
+        if (threadState(t.id, u.id).acked) continue;
+        const last = sql.prepare("SELECT at FROM os_receipts WHERE thread_id=? AND user_id=? AND kind='remind'").get(t.id, u.id)?.at;
+        if (last && last > cutoff) continue; // already reminded this window
+        push.sendToUser(u.id, {
+          title: `Reminder: ${t.title || 'action needed'}`,
+          body: 'This still needs your acknowledgement in Pulse.',
+          url: `/inbox?thread=${t.id}`,
+          tag: `ack-${t.id}`,
+          requireInteraction: true,
+          actions: [{ action: `ack:${t.id}`, title: 'Acknowledge' }, { action: 'review', title: 'Open' }],
+        }).catch(() => {});
+        sql.prepare("INSERT OR REPLACE INTO os_receipts (thread_id, user_id, kind, at) VALUES (?,?,?,?)").run(t.id, u.id, 'remind', now());
+      }
+    }
+  }
+  const remindTimer = setInterval(() => { try { remindUnacked(); } catch (e) { console.error('[os] ack reminder failed', e.message); } }, 60 * 60000);
+  if (remindTimer.unref) remindTimer.unref();
+  setTimeout(() => { try { remindUnacked(); } catch { /* ignore */ } }, 30000);
   // Notify a client's team. `channels` chooses which methods this message uses
   // (admin's send-time choice); each recipient's own preference still applies
   // inside emailEntity / sendToEntity. Default = both.
