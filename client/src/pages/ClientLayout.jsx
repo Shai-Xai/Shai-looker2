@@ -505,28 +505,41 @@ function ProfileFooter({ user, isAdmin, brand, onNavigate }) {
   const { theme, toggle } = useTheme();
   const { logout } = useAuth();
   const [open, setOpen] = useState(false);
-  const [notif, setNotif] = useState({ supported: false, on: false, busy: false });
+  // Notification channel preferences: account-level (email/push prefs) + this
+  // device's push subscription (push needs both the pref on AND this device
+  // subscribed). busy holds which row is mid-flight; testing for the test send.
+  const [notif, setNotif] = useState({ supported: false, pushAvailable: false, email: true, push: false, deviceOn: false, busy: '', testing: false });
   const entity = user?.entities?.[0];
   const name = isAdmin ? 'Howler · Admin' : (brand?.entityName || entity?.name || (user?.email || '').split('@')[0]);
   const logo = brand?.entityLogo || entity?.logo || '';
   const initial = (name || '?').trim().charAt(0).toUpperCase();
-  // Reflect this device's notification state when the menu opens.
   useEffect(() => {
     if (!open) return;
     let alive = true;
     (async () => {
-      const on = pushSupported() ? await isSubscribed() : false;
-      if (alive) setNotif((s) => ({ ...s, supported: pushSupported(), on }));
+      const supported = pushSupported();
+      const [prefs, deviceOn] = await Promise.all([
+        api.getNotifPrefs().catch(() => ({ email: true, push: true, pushAvailable: false })),
+        supported ? isSubscribed() : Promise.resolve(false),
+      ]);
+      if (alive) setNotif((s) => ({ ...s, supported, pushAvailable: !!prefs.pushAvailable, email: prefs.email !== false, push: prefs.push !== false, deviceOn }));
     })();
     return () => { alive = false; };
   }, [open]);
-  const toggleNotif = async () => {
-    setNotif((s) => ({ ...s, busy: true }));
+  const toggleEmail = async () => {
+    const next = !notif.email;
+    setNotif((s) => ({ ...s, busy: 'email', email: next }));
+    try { await api.setNotifPrefs({ email: next }); } catch { setNotif((s) => ({ ...s, email: !next })); }
+    setNotif((s) => ({ ...s, busy: '' }));
+  };
+  const togglePush = async () => {
+    const turningOn = !(notif.push && notif.deviceOn);
+    setNotif((s) => ({ ...s, busy: 'push' }));
     try {
-      if (notif.on) { await disablePush(); setNotif((s) => ({ ...s, on: false, busy: false })); }
-      else { await enablePush(); setNotif((s) => ({ ...s, on: true, busy: false })); }
+      if (turningOn) { await enablePush(); await api.setNotifPrefs({ push: true }); setNotif((s) => ({ ...s, push: true, deviceOn: true, busy: '' })); }
+      else { await disablePush(); await api.setNotifPrefs({ push: false }); setNotif((s) => ({ ...s, push: false, deviceOn: false, busy: '' })); }
     } catch (e) {
-      setNotif((s) => ({ ...s, busy: false }));
+      setNotif((s) => ({ ...s, busy: '' }));
       const iosNotInstalled = /iPhone|iPad/.test(navigator.userAgent) && !window.matchMedia('(display-mode: standalone)').matches;
       alert(iosNotInstalled
         ? 'On iPhone/iPad, first tap the Share button and "Add to Home Screen", then open Pulse from your home screen to enable notifications.'
@@ -543,24 +556,32 @@ function ProfileFooter({ user, isAdmin, brand, onNavigate }) {
               <span style={menuIco}>⚙</span> Settings
             </button>
           )}
-          {notif.supported && (
-            <button className="nav-row" style={menuItem} onClick={toggleNotif} disabled={notif.busy}>
-              <span style={menuIco}>{notif.on ? '🔔' : '🔕'}</span>
-              {notif.busy ? 'Working…' : notif.on ? 'Notifications on' : 'Enable notifications'}
+          <div style={menuCap}>Notifications</div>
+          <button className="nav-row" style={menuItem} onClick={toggleEmail} disabled={notif.busy === 'email'}>
+            <span style={menuIco}>✉️</span>
+            <span style={{ flex: 1, textAlign: 'left' }}>Email</span>
+            <Switch on={notif.email} busy={notif.busy === 'email'} />
+          </button>
+          {notif.supported && notif.pushAvailable && (
+            <button className="nav-row" style={menuItem} onClick={togglePush} disabled={notif.busy === 'push'}>
+              <span style={menuIco}>🔔</span>
+              <span style={{ flex: 1, textAlign: 'left' }}>Push (this device)</span>
+              <Switch on={notif.push && notif.deviceOn} busy={notif.busy === 'push'} />
             </button>
           )}
-          {notif.supported && notif.on && (
-            <button className="nav-row" style={menuItem} disabled={notif.testing} onClick={async () => {
+          {notif.supported && notif.pushAvailable && notif.push && notif.deviceOn && (
+            <button className="nav-row" style={{ ...menuItem, fontSize: 12, color: 'var(--muted)' }} disabled={notif.testing} onClick={async () => {
               setNotif((s) => ({ ...s, testing: true }));
               try {
                 const r = await api.pushTest();
-                if (!r.sent) alert('No registered devices yet — toggle notifications off and on again.');
-              } catch { alert('Test failed — try re-enabling notifications.'); }
+                if (!r.sent) alert('No registered devices yet — toggle push off and on again.');
+              } catch { alert('Test failed — try re-enabling push.'); }
               setNotif((s) => ({ ...s, testing: false }));
             }}>
               <span style={menuIco}>📨</span> {notif.testing ? 'Sending…' : 'Send a test notification'}
             </button>
           )}
+          <div style={menuDivider} />
           <button className="nav-row" style={menuItem} onClick={toggle}>
             <span style={menuIco}>{theme === 'dark' ? '☀️' : '🌙'}</span> {theme === 'dark' ? 'Light mode' : 'Dark mode'}
           </button>
@@ -585,6 +606,14 @@ function ProfileFooter({ user, isAdmin, brand, onNavigate }) {
   );
 }
 
+// Small iOS-style on/off pill used in the notifications preferences.
+function Switch({ on, busy }) {
+  return (
+    <span style={{ width: 34, height: 20, borderRadius: 999, background: on ? 'var(--brand)' : 'rgba(128,128,128,0.35)', position: 'relative', flexShrink: 0, transition: 'background 0.15s', opacity: busy ? 0.5 : 1 }}>
+      <span style={{ position: 'absolute', top: 2, left: on ? 16 : 2, width: 16, height: 16, borderRadius: '50%', background: '#fff', transition: 'left 0.15s', boxShadow: '0 1px 2px rgba(0,0,0,0.3)' }} />
+    </span>
+  );
+}
 function Ico({ v, size = 16 }) {
   if (!v) return null;
   return v.startsWith('data:')
@@ -602,6 +631,8 @@ const avatar = { flexShrink: 0, width: 30, height: 30, borderRadius: '50%', disp
 const profileMenu = { position: 'absolute', bottom: 'calc(100% + 6px)', left: 8, right: 8, zIndex: 71, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, boxShadow: '0 10px 36px -8px rgba(0,0,0,0.25)', padding: 6, display: 'flex', flexDirection: 'column', gap: 2 };
 const menuItem = { display: 'flex', alignItems: 'center', gap: 9, width: '100%', border: 'none', background: 'transparent', cursor: 'pointer', padding: '9px 10px', borderRadius: 8, fontSize: 13, fontWeight: 600, color: 'var(--text)', textAlign: 'left' };
 const menuIco = { width: 18, textAlign: 'center', fontSize: 14, flexShrink: 0 };
+const menuCap = { fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--muted)', padding: '6px 10px 2px' };
+const menuDivider = { height: 1, background: 'var(--hairline)', margin: '5px 6px' };
 const mobileSidebar = { position: 'relative', zIndex: 51, height: '100%', width: 'min(290px, 84vw)', boxShadow: '4px 0 24px rgba(0,0,0,0.15)', WebkitOverflowScrolling: 'touch' };
 const menuBar = { position: 'sticky', top: 0, zIndex: 20, display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderBottom: '1px solid var(--hairline)', background: 'var(--frost)', backdropFilter: 'saturate(180%) blur(20px)', WebkitBackdropFilter: 'saturate(180%) blur(20px)' };
 const rowBtn = { display: 'flex', alignItems: 'center', gap: 7, width: '100%', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer', padding: '8px 12px', borderRadius: 9, fontSize: 14, color: 'var(--text)', lineHeight: 1.3 };

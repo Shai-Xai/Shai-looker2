@@ -263,6 +263,10 @@ export const api = {
   // Share links
   createShareLink: (body) => fetch('/api/share', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
 
+  // Notification channel preferences (per user)
+  getNotifPrefs: () => fetch('/api/my/notification-prefs').then(json),
+  setNotifPrefs: (prefs) => fetch('/api/my/notification-prefs', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(prefs) }).then(json),
+
   // Web Push (installable-app notifications)
   getPushKey: () => fetch('/api/push/key').then(json),
   pushSubscribe: (subscription) => fetch('/api/push/subscribe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subscription }) }).then(json),

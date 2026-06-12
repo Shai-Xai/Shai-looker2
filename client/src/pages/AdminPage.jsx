@@ -1421,6 +1421,7 @@ function ClientMessages({ entity }) {
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [priority, setPriority] = useState('normal');
+  const [channels, setChannels] = useState({ email: true, push: true }); // send-time channel choice
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState(false);
   const [files, setFiles] = useState([]); // [{name, mime, size, data}]
@@ -1439,7 +1440,8 @@ function ClientMessages({ entity }) {
   async function send() {
     if (!body.trim() && !files.length) return;
     setBusy(true);
-    try { await api.osAnnounce({ entityId: entity.id, title, body, priority, attachments: files }); setTitle(''); setBody(''); setPriority('normal'); setFiles([]); flash(setSent); load(); }
+    const chans = Object.entries(channels).filter(([, on]) => on).map(([k]) => k);
+    try { await api.osAnnounce({ entityId: entity.id, title, body, priority, attachments: files, channels: chans }); setTitle(''); setBody(''); setPriority('normal'); setFiles([]); flash(setSent); load(); }
     catch (e) { alert(e.message); } finally { setBusy(false); }
   }
   const PRI = { fyi: 'FYI', normal: 'Normal', needs_reply: 'Needs reply', must_ack: 'Must acknowledge' };
@@ -1468,6 +1470,10 @@ function ClientMessages({ entity }) {
           </select>
           <button style={miniBtn} onClick={() => fileRef.current?.click()}>📎 Attach</button>
           <input ref={fileRef} type="file" multiple style={{ display: 'none' }} onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }} />
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10, fontSize: 12, color: 'var(--muted)', marginLeft: 4 }} title="In-app inbox is always delivered; these add outside nudges. Each recipient's own preference still applies.">
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}><input type="checkbox" checked={channels.email} onChange={(e) => setChannels((c) => ({ ...c, email: e.target.checked }))} /> Email</label>
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}><input type="checkbox" checked={channels.push} onChange={(e) => setChannels((c) => ({ ...c, push: e.target.checked }))} /> Push</label>
+          </span>
           <span style={{ flex: 1 }} />
           {sent && <SavedChip />}
           <button style={{ ...saveBtn }} onClick={send} disabled={busy || (!body.trim() && !files.length)}>{busy ? 'Sending…' : 'Send message'}</button>

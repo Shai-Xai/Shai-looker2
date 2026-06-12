@@ -93,6 +93,20 @@ app.get('/api/auth/me', (req, res) => {
   res.json({ user: meUser(req.user) });
 });
 
+// Per-user notification channel preferences (self-service).
+app.get('/api/my/notification-prefs', auth.requireAuth, (req, res) => {
+  const u = auth.publicUser(db.getUser(req.user.id));
+  res.json({ email: u?.notifyEmail !== false, push: u?.notifyPush !== false, pushAvailable: push.isEnabled() });
+});
+app.put('/api/my/notification-prefs', auth.requireAuth, (req, res) => {
+  const { email, push: wantPush } = req.body || {};
+  const next = db.setNotificationPrefs(req.user.id, {
+    ...(email != null ? { email: !!email } : {}),
+    ...(wantPush != null ? { push: !!wantPush } : {}),
+  });
+  res.json(next || { email: true, push: true });
+});
+
 // ─── Backup / restore (full data export & import) ──────────────────────────────
 app.get('/api/admin/export', auth.requireAdmin, (_req, res) => {
   res.setHeader('Content-Type', 'application/json');

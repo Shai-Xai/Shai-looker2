@@ -117,7 +117,10 @@ function sendToUser(userId, payload) {
 // linked to that client are included — same rule as the email nudge.
 function sendToEntity(entityId, payload) {
   if (!enabled() || !entityId) return Promise.resolve(0);
-  const userIds = _db.listUsers().filter((u) => (u.entityIds || []).includes(entityId)).map((u) => u.id);
+  // Linked to the entity AND hasn't muted push.
+  const userIds = _db.listUsers()
+    .filter((u) => (u.entityIds || []).includes(entityId) && u.notifyPush !== false)
+    .map((u) => u.id);
   if (!userIds.length) return Promise.resolve(0);
   const ph = userIds.map(() => '?').join(',');
   const rows = sql.prepare(`SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE user_id IN (${ph})`).all(...userIds);

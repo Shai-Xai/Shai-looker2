@@ -38,7 +38,7 @@ function getSecret() {
 // current admin UI, alongside the real `entityIds`.
 function publicUser(u) {
   if (!u) return null;
-  return { id: u.id, email: u.email, role: u.role, tenantId: (u.entityIds || [])[0] || null, entityIds: u.entityIds || [] };
+  return { id: u.id, email: u.email, role: u.role, tenantId: (u.entityIds || [])[0] || null, entityIds: u.entityIds || [], notifyEmail: u.notifyEmail !== false, notifyPush: u.notifyPush !== false };
 }
 function loadUsers() { return db.listUsers(); }
 function getUser(id) { return db.getUser(id); }

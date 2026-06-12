@@ -150,9 +150,11 @@ function mount(app, { db, auth, mailer, push }) {
   // the mailer isn't wired or configured, so this never blocks the API call.
   function emailEntity(entityId, t, body) {
     if (!mailer?.isConfigured()) return;
-    // Every login LINKED to the entity — including admins who are explicitly
-    // linked as part of this client's team (admins are never linked by default).
-    const to = db.listUsers().filter((u) => (u.entityIds || []).includes(entityId)).map((u) => u.email);
+    // Every login LINKED to the entity that hasn't muted email — including admins
+    // explicitly linked as part of this client's team (admins aren't linked by default).
+    const to = db.listUsers()
+      .filter((u) => (u.entityIds || []).includes(entityId) && u.notifyEmail !== false)
+      .map((u) => u.email);
     if (!to.length) return;
     const subject = t.priority === 'must_ack' ? `Action needed: ${t.title || 'a message from Howler'}`
       : t.priority === 'needs_reply' ? `Reply needed: ${t.title || 'a message from Howler'}`
@@ -186,8 +188,19 @@ function mount(app, { db, auth, mailer, push }) {
       requireInteraction: t.priority === 'must_ack',
     }).catch(() => {});
   }
-  // Notify a client's team across every channel (email + push).
-  function notifyEntity(entityId, t, body) { emailEntity(entityId, t, body); pushEntity(entityId, t, body); }
+  // Notify a client's team. `channels` chooses which methods this message uses
+  // (admin's send-time choice); each recipient's own preference still applies
+  // inside emailEntity / sendToEntity. Default = both.
+  const VALID_CHANNELS = ['email', 'push'];
+  function cleanChannels(ch) {
+    const list = Array.isArray(ch) ? ch.filter((c) => VALID_CHANNELS.includes(c)) : VALID_CHANNELS;
+    return list.length ? list : VALID_CHANNELS; // never silently drop everything
+  }
+  function notifyEntity(entityId, t, body, channels) {
+    const ch = cleanChannels(channels);
+    if (ch.includes('email')) emailEntity(entityId, t, body);
+    if (ch.includes('push')) pushEntity(entityId, t, body);
+  }
 
   // ── Client + shared reads ───────────────────────────────────────────────────
   // Inbox: threads for the user's entities (admin: all, or ?entityId=). Includes
@@ -286,7 +299,7 @@ function mount(app, { db, auth, mailer, push }) {
 
   // ── Admin: send an announcement / open a thread to a client ──────────────────
   app.post('/api/os/admin/announce', bigJson, auth.requireAdmin, requireOn, (req, res) => {
-    const { entityId, suiteId, title, body, priority, attachments } = req.body || {};
+    const { entityId, suiteId, title, body, priority, attachments, channels } = req.body || {};
     if (!entityId || !db.getEntity(entityId)) return res.status(400).json({ error: 'Valid entityId required' });
     if (!String(body || '').trim() && !(attachments || []).length) return res.status(400).json({ error: 'Message body required' });
     const pri = ['fyi', 'normal', 'needs_reply', 'must_ack'].includes(priority) ? priority : 'normal';
@@ -299,7 +312,7 @@ function mount(app, { db, auth, mailer, push }) {
       .run(mid, id, 'howler', req.user.email, '', 'pulse', String(body || '(attachment)').slice(0, 8000), ts);
     const nAtt = saveAttachments(id, mid, Array.isArray(attachments) ? attachments : []);
     const t = thread(id);
-    notifyEntity(entityId, t, `${String(body || '').slice(0, 8000)}${nAtt ? `\n\n📎 ${nAtt} attachment${nAtt === 1 ? '' : 's'} — view in Pulse` : ''}`.trim());
+    notifyEntity(entityId, t, `${String(body || '').slice(0, 8000)}${nAtt ? `\n\n📎 ${nAtt} attachment${nAtt === 1 ? '' : 's'} — view in Pulse` : ''}`.trim(), channels);
     res.status(201).json({ thread: t });
   });
 

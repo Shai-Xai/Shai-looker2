@@ -135,6 +135,9 @@ addColumn('entities', 'ai_context', "TEXT NOT NULL DEFAULT ''"); // client-speci
 addColumn('entities', 'integrations', "TEXT NOT NULL DEFAULT '{}'"); // per-client API credentials (Looker / Anthropic)
 addColumn('entities', 'mail_branding', "TEXT NOT NULL DEFAULT '{}'"); // per-client email branding (logo/colour/sender/wording)
 addColumn('entities', 'inbox_token', "TEXT NOT NULL DEFAULT ''"); // unique token for the client's CC-the-Owl inbound address
+// Per-user notification channel preferences (1 = receive on that channel).
+addColumn('users', 'notify_email', 'INTEGER NOT NULL DEFAULT 1');
+addColumn('users', 'notify_push', 'INTEGER NOT NULL DEFAULT 1');
 // Sub-dashboards: within a set, a dashboard may nest one level under a parent
 // from the same set — children render as tabs inside the parent, not as
 // sidebar rows. The relation lives on the membership so the same dashboard can
@@ -464,11 +467,20 @@ function entityIdsForUser(userId) {
   return db.prepare('SELECT entity_id FROM user_entities WHERE user_id=?').all(userId).map((r) => r.entity_id);
 }
 function rowToUser(r) {
-  return r && { id: r.id, email: r.email, role: r.role, passwordHash: r.password_hash, entityIds: entityIdsForUser(r.id), createdAt: r.created_at };
+  return r && { id: r.id, email: r.email, role: r.role, passwordHash: r.password_hash, entityIds: entityIdsForUser(r.id), notifyEmail: r.notify_email !== 0, notifyPush: r.notify_push !== 0, createdAt: r.created_at };
 }
 function publicUser(u) {
   if (!u) return null;
-  return { id: u.id, email: u.email, role: u.role, entityIds: u.entityIds || [] };
+  return { id: u.id, email: u.email, role: u.role, entityIds: u.entityIds || [], notifyEmail: u.notifyEmail !== false, notifyPush: u.notifyPush !== false };
+}
+// Update a user's notification channel preferences (partial).
+function setNotificationPrefs(userId, prefs = {}) {
+  const cur = db.prepare('SELECT notify_email, notify_push FROM users WHERE id=?').get(userId);
+  if (!cur) return null;
+  const email = 'email' in prefs ? (prefs.email ? 1 : 0) : cur.notify_email;
+  const push = 'push' in prefs ? (prefs.push ? 1 : 0) : cur.notify_push;
+  db.prepare('UPDATE users SET notify_email=?, notify_push=? WHERE id=?').run(email, push, userId);
+  return { email: email !== 0, push: push !== 0 };
 }
 function listUsers() { return db.prepare('SELECT * FROM users ORDER BY email').all().map(rowToUser); }
 function getUser(id) { return rowToUser(db.prepare('SELECT * FROM users WHERE id=?').get(id)); }
@@ -927,7 +939,7 @@ module.exports = {
   listEntities, getEntity, createEntity, updateEntity, deleteEntity, getEntityIntegrations, setEntityIntegrations,
   getEntityMailBranding, setEntityMailBranding,
   ensureInboxToken, regenerateInboxToken, findEntityByInboxToken,
-  listUsers, getUser, getUserByEmail, createUser, updateUser, deleteUser, verifyCredentials, publicUser, setUserEntities,
+  listUsers, getUser, getUserByEmail, createUser, updateUser, deleteUser, verifyCredentials, publicUser, setUserEntities, setNotificationPrefs,
   listDashboards, getDashboard, createDashboard, updateDashboard, removeDashboard, dashboardPoolFor, sharedDashboards,
   // sets (reusable collections)
   listSets, listSetsForEntity, getSet, createSet, cloneSetForEntity, updateSet, deleteSet, setSetDashboards, dashboardsInSet,
