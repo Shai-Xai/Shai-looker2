@@ -81,6 +81,7 @@ function CampaignEditor({ entityId, isAdmin, action, onClose, onSaved }) {
     tileId: cfg.audience?.tileId || '',
     emailField: cfg.audience?.emailField || '',
     nameField: cfg.audience?.nameField || '',
+    consentField: cfg.audience?.consentField || '',
     pasted: cfg.audience?.pasted || '',
     subject: cfg.subject || '',
     body: cfg.body || '',
@@ -102,7 +103,7 @@ function CampaignEditor({ entityId, isAdmin, action, onClose, onSaved }) {
 
   const payload = () => ({
     title: f.title, goal: f.goal, subject: f.subject, body: f.body, ctaText: f.ctaText, ctaUrl: f.ctaUrl,
-    audience: { mode: f.audienceMode, dashboardId: f.dashboardId, tileId: f.tileId, emailField: f.emailField, nameField: f.nameField, pasted: f.pasted },
+    audience: { mode: f.audienceMode, dashboardId: f.dashboardId, tileId: f.tileId, emailField: f.emailField, nameField: f.nameField, consentField: f.consentField, pasted: f.pasted },
   });
 
   const refreshAudience = () => {
@@ -110,7 +111,7 @@ function CampaignEditor({ entityId, isAdmin, action, onClose, onSaved }) {
     setAudBusy(true);
     api.actionAudiencePreview(entityId, payload()).then(setAud).catch((e) => setAud({ error: e.message })).finally(() => setAudBusy(false));
   };
-  useEffect(() => { refreshAudience(); }, [f.audienceMode, f.dashboardId, f.tileId, f.emailField]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { refreshAudience(); }, [f.audienceMode, f.dashboardId, f.tileId, f.emailField, f.consentField]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Debounced email preview.
   useEffect(() => {
@@ -185,16 +186,22 @@ function CampaignEditor({ entityId, isAdmin, action, onClose, onSaved }) {
                   </select>
                 )}
                 {aud?.fields?.length > 0 && (
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <select style={{ ...input, flex: 1 }} value={f.emailField} onChange={(e) => set('emailField', e.target.value)}>
-                      <option value="">Email column (auto-detect)</option>
-                      {aud.fields.map((fl) => <option key={fl.name} value={fl.name}>{fl.label}</option>)}
+                  <>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <select style={{ ...input, flex: 1 }} value={f.emailField} onChange={(e) => set('emailField', e.target.value)}>
+                        <option value="">Email column (auto-detect)</option>
+                        {aud.fields.map((fl) => <option key={fl.name} value={fl.name}>{fl.label}</option>)}
+                      </select>
+                      <select style={{ ...input, flex: 1 }} value={f.nameField} onChange={(e) => set('nameField', e.target.value)}>
+                        <option value="">Name column (optional)</option>
+                        {aud.fields.map((fl) => <option key={fl.name} value={fl.name}>{fl.label}</option>)}
+                      </select>
+                    </div>
+                    <select style={input} value={f.consentField} onChange={(e) => set('consentField', e.target.value)}>
+                      <option value="">Consent column — recommended (only email when = Yes)</option>
+                      {aud.fields.map((fl) => <option key={fl.name} value={fl.name}>Only if “{fl.label}” = Yes</option>)}
                     </select>
-                    <select style={{ ...input, flex: 1 }} value={f.nameField} onChange={(e) => set('nameField', e.target.value)}>
-                      <option value="">Name column (optional)</option>
-                      {aud.fields.map((fl) => <option key={fl.name} value={fl.name}>{fl.label}</option>)}
-                    </select>
-                  </div>
+                  </>
                 )}
               </div>
             ) : (
@@ -206,7 +213,8 @@ function CampaignEditor({ entityId, isAdmin, action, onClose, onSaved }) {
                 : aud ? (
                   <span>
                     <b style={{ color: 'var(--brand)' }}>{aud.count}</b> recipient{aud.count === 1 ? '' : 's'}
-                    {aud.excluded > 0 && <span style={{ color: 'var(--muted)' }}> · {aud.excluded} unsubscribed excluded</span>}
+                    {aud.noConsent > 0 && <span style={{ color: 'var(--muted)' }}> · {aud.noConsent} excluded (no consent)</span>}
+                    {aud.excluded > 0 && <span style={{ color: 'var(--muted)' }}> · {aud.excluded} unsubscribed</span>}
                     {aud.sample?.length > 0 && <span style={{ color: 'var(--muted)' }}> · e.g. {aud.sample.slice(0, 3).map((s) => s.email).join(', ')}</span>}
                   </span>
                 ) : <span style={{ color: 'var(--muted)' }}>Pick an audience source to see the count.</span>}

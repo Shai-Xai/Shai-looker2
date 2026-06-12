@@ -92,6 +92,7 @@ function mount(app, { db, auth, mailer, resolveAudience, draftCopy }) {
         tileId: String(aud.tileId || ''),
         emailField: String(aud.emailField || ''),
         nameField: String(aud.nameField || ''),
+        consentField: String(aud.consentField || ''),
         pasted: String(aud.pasted || '').slice(0, 200000),
       },
       subject: String(body.subject || '').slice(0, 200),
@@ -105,24 +106,29 @@ function mount(app, { db, auth, mailer, resolveAudience, draftCopy }) {
 
   // Resolve the audience for a config: tile query (scoped) or pasted emails,
   // minus this client's suppression list. Returns { list, fields?, excluded }.
+  const cellVal = (cell) => String((cell && (cell.value ?? cell)) || '').trim();
+  const isYes = (v) => ['yes', 'y', 'true', '1', 'consented', 'opted in', 'opt in'].includes(String(v).trim().toLowerCase());
+
   async function audienceFor(entityId, cfg, user) {
     let raw = [];
     let fields = [];
+    let noConsent = 0;
     if (cfg.audience.mode === 'paste') {
       raw = cfg.audience.pasted.split(/[\s,;]+/).map((e) => e.trim().toLowerCase()).filter((e) => EMAIL_RE.test(e)).map((email) => ({ email }));
     } else {
-      if (!cfg.audience.dashboardId || !cfg.audience.tileId) return { list: [], fields: [], excluded: 0 };
+      if (!cfg.audience.dashboardId || !cfg.audience.tileId) return { list: [], fields: [], excluded: 0, noConsent: 0 };
       const res = await resolveAudience({ entityId, dashboardId: cfg.audience.dashboardId, tileId: cfg.audience.tileId, user });
       fields = res.fields;
       const emailField = cfg.audience.emailField || res.fields.find((f) => /email/i.test(f.name) || /email/i.test(f.label))?.name || '';
       const nameField = cfg.audience.nameField || '';
+      const consentField = cfg.audience.consentField || '';
       if (emailField) {
         for (const row of res.rows) {
-          const cell = row[emailField];
-          const email = String((cell && (cell.value ?? cell)) || '').trim().toLowerCase();
+          const email = cellVal(row[emailField]).toLowerCase();
           if (!EMAIL_RE.test(email)) continue;
-          const nCell = nameField ? row[nameField] : null;
-          raw.push({ email, name: nCell ? String(nCell.value ?? nCell ?? '').trim() : '' });
+          // Consent gate: when a consent column is chosen, only include "Yes".
+          if (consentField && !isYes(cellVal(row[consentField]))) { noConsent += 1; continue; }
+          raw.push({ email, name: nameField ? cellVal(row[nameField]) : '' });
         }
       }
     }
@@ -138,7 +144,7 @@ function mount(app, { db, auth, mailer, resolveAudience, draftCopy }) {
       list.push(r);
       if (list.length >= MAX_AUDIENCE) break;
     }
-    return { list, fields, excluded };
+    return { list, fields, excluded, noConsent };
   }
 
   // Render one recipient's email ({{name}} personalisation + tracked CTA + unsubscribe).
@@ -221,8 +227,8 @@ function mount(app, { db, auth, mailer, resolveAudience, draftCopy }) {
     if (!guard(req, res, req.params.entityId)) return;
     try {
       const cfg = cleanConfig(req.body || {});
-      const { list, fields, excluded } = await audienceFor(req.params.entityId, cfg, req.user);
-      res.json({ count: list.length, excluded, sample: list.slice(0, 8), fields: (fields || []).map((f) => ({ name: f.name, label: f.label })) });
+      const { list, fields, excluded, noConsent } = await audienceFor(req.params.entityId, cfg, req.user);
+      res.json({ count: list.length, excluded, noConsent, sample: list.slice(0, 8), fields: (fields || []).map((f) => ({ name: f.name, label: f.label })) });
     } catch (e) { res.status(400).json({ error: e.message }); }
   });
 
