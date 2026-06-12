@@ -549,6 +549,18 @@ function ProfileFooter({ user, isAdmin, brand, onNavigate }) {
               {notif.busy ? 'Working…' : notif.on ? 'Notifications on' : 'Enable notifications'}
             </button>
           )}
+          {notif.supported && notif.on && (
+            <button className="nav-row" style={menuItem} disabled={notif.testing} onClick={async () => {
+              setNotif((s) => ({ ...s, testing: true }));
+              try {
+                const r = await api.pushTest();
+                if (!r.sent) alert('No registered devices yet — toggle notifications off and on again.');
+              } catch { alert('Test failed — try re-enabling notifications.'); }
+              setNotif((s) => ({ ...s, testing: false }));
+            }}>
+              <span style={menuIco}>📨</span> {notif.testing ? 'Sending…' : 'Send a test notification'}
+            </button>
+          )}
           <button className="nav-row" style={menuItem} onClick={toggle}>
             <span style={menuIco}>{theme === 'dark' ? '☀️' : '🌙'}</span> {theme === 'dark' ? 'Light mode' : 'Dark mode'}
           </button>
