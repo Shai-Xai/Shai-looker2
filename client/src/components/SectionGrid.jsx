@@ -74,7 +74,7 @@ export default function SectionGrid({ carousel, filterValues, editable, onEditTi
         onDragOver={editable && onDropTile ? (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (!dragOver) setDragOver(true); } : undefined}
         onDragLeave={editable && onDropTile ? () => setDragOver(false) : undefined}
         onDrop={editable && onDropTile ? (e) => { e.preventDefault(); setDragOver(false); const id = e.dataTransfer.getData('text/plain'); if (id) onDropTile(id); } : undefined}
-        style={{ flex: 1, minHeight: 0, overflowY: 'auto', borderRadius: 8, outline: dragOver ? '2px dashed var(--brand)' : 'none', background: dragOver ? 'rgba(255,56,92,0.04)' : 'transparent' }}
+        style={{ flex: 1, minHeight: 0, overflowY: 'auto', borderRadius: 8, outline: dragOver ? '2px dashed var(--brand)' : 'none', background: dragOver ? 'rgba(var(--brand-rgb), 0.04)' : 'transparent' }}
       >
         {tiles.length === 0 ? (
           <div style={{ color: '#bbb', fontSize: 13, padding: '20px 12px' }}>

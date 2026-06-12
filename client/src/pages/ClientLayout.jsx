@@ -6,6 +6,7 @@ import { useAuth } from '../lib/auth.jsx';
 import { useTheme } from '../lib/theme.jsx';
 import { vtNavigate } from '../lib/viewTransition.js';
 import { useSheetDrag } from '../lib/useSheetDrag.js';
+import { applyBrand, resetBrand } from '../lib/brand.js';
 
 // Persistent client shell: a left sidebar tree of Suites → Sets → Dashboards,
 // with the selected dashboard rendered in the main area.
@@ -140,6 +141,20 @@ export default function ClientLayout() {
   const activeEntityId = isAdmin ? (suiteEntityId || previewEntityId) : null;
   const visibleSuites = activeEntityId ? suites.filter((s) => s.entityId === activeEntityId) : suites;
   const visibleSettlements = activeEntityId ? settlements.filter((s) => s.entityId === activeEntityId) : settlements;
+
+  // White-label: apply the active client's brand pair (primary + secondary) to
+  // the whole shell — UI accents AND chart palettes follow it. Clients theme to
+  // their own entity; an admin preview themes to the previewed client (faithful
+  // preview). Reverts to Howler on unmount / when no entity is in context.
+  const themeEntityId = isAdmin ? activeEntityId : ((user?.entities || [])[0]?.id || (user?.entityIds || [])[0] || null);
+  useEffect(() => {
+    let alive = true;
+    if (!themeEntityId) { resetBrand(); return; }
+    api.getEntityTheme(themeEntityId)
+      .then((t) => { if (alive) applyBrand(t); })
+      .catch(() => { if (alive) resetBrand(); });
+    return () => { alive = false; resetBrand(); };
+  }, [themeEntityId]);
 
   // Mobile sheet skips the suite level for single-suite clients — make sure
   // that suite's detail is loaded the moment the sheet opens.
@@ -403,7 +418,7 @@ export default function ClientLayout() {
         {!onInbox && inbox.pending.length > 0 && (
           <button
             onClick={() => vtNavigate(navigate, '/inbox')}
-            style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', border: 'none', cursor: 'pointer', textAlign: 'left', padding: '10px 16px', background: 'linear-gradient(90deg, #FF385C, #FF6B35)', color: '#fff', fontSize: 13 }}
+            style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', border: 'none', cursor: 'pointer', textAlign: 'left', padding: '10px 16px', background: 'linear-gradient(90deg, var(--brand), var(--brand-2))', color: '#fff', fontSize: 13 }}
           >
             <span style={{ fontSize: 15 }}>📣</span>
             <span style={{ fontWeight: 700 }}>{inbox.pending.length === 1 ? 'A message from Howler needs your acknowledgement' : `${inbox.pending.length} messages from Howler need your acknowledgement`}</span>
@@ -496,7 +511,7 @@ function Caret({ open, small }) {
 const sidebarShell = { width: 264, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0 };
 const sidebarStyle = { flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px 10px', position: 'relative' };
 const profileRow = { display: 'flex', alignItems: 'center', gap: 9, width: '100%', border: 'none', background: 'transparent', cursor: 'pointer', padding: '8px 10px', borderRadius: 10, color: 'var(--text)' };
-const avatar = { flexShrink: 0, width: 30, height: 30, borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 800, color: '#fff', background: 'linear-gradient(135deg, #FF385C 0%, #FF6B35 45%, #7C3AED 100%)' };
+const avatar = { flexShrink: 0, width: 30, height: 30, borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 800, color: '#fff', background: 'linear-gradient(135deg, var(--brand) 0%, var(--brand-2) 45%, #7C3AED 100%)' };
 const profileMenu = { position: 'absolute', bottom: 'calc(100% + 6px)', left: 8, right: 8, zIndex: 71, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, boxShadow: '0 10px 36px -8px rgba(0,0,0,0.25)', padding: 6, display: 'flex', flexDirection: 'column', gap: 2 };
 const menuItem = { display: 'flex', alignItems: 'center', gap: 9, width: '100%', border: 'none', background: 'transparent', cursor: 'pointer', padding: '9px 10px', borderRadius: 8, fontSize: 13, fontWeight: 600, color: 'var(--text)', textAlign: 'left' };
 const menuIco = { width: 18, textAlign: 'center', fontSize: 14, flexShrink: 0 };
@@ -518,6 +533,6 @@ const mRowSuite = { display: 'flex', alignItems: 'center', gap: 9, width: '100%'
 const mRowSet = { display: 'flex', alignItems: 'center', gap: 9, width: '100%', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer', padding: '11px 12px', borderRadius: 10, fontSize: 14, fontWeight: 600, color: 'var(--muted-2)', lineHeight: 1.3 };
 const mRowDash = { display: 'flex', alignItems: 'center', gap: 9, width: '100%', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer', padding: '11px 12px', borderRadius: 10, fontSize: 14.5, color: 'var(--text)', lineHeight: 1.3 };
 const menuBtn = { flexShrink: 0, width: 36, height: 36, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 980, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', fontSize: 16, lineHeight: 1, cursor: 'pointer' };
-const previewBar = { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '8px 16px', background: 'linear-gradient(90deg, #FF385C, #FF6B35)', color: '#fff', fontSize: 13 };
+const previewBar = { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '8px 16px', background: 'linear-gradient(90deg, var(--brand), var(--brand-2))', color: '#fff', fontSize: 13 };
 const exitPreviewBtn = { flexShrink: 0, padding: '6px 14px', borderRadius: 980, border: 'none', background: 'rgba(255,255,255,0.25)', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer' };
 const iconBtn = { width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--hairline)', borderRadius: 7, background: 'var(--card)', color: 'var(--muted-2)', fontSize: 12, cursor: 'pointer' };

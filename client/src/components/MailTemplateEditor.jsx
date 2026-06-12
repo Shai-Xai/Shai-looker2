@@ -8,7 +8,8 @@ import { api } from '../lib/api.js';
 // used if left empty. The HTML shell + "Powered by Howler Pulse" are fixed.
 const FIELDS = [
   ['senderName', 'Sender name', 'text', 'Shown on the From line, e.g. "Kunye"'],
-  ['brandColor', 'Brand colour', 'color', 'Button / accent colour'],
+  ['brandColor', 'Primary colour', 'color', 'Buttons, accents, first chart series — across the platform and emails'],
+  ['secondaryColor', 'Secondary colour', 'color', 'Gradient partner and second chart series'],
   ['logo', 'Logo image', 'logo', 'Upload an image or paste a URL — blank uses the wordmark'],
   ['wordmark', 'Wordmark', 'text', 'Text shown if there is no logo'],
   ['header', 'Header text', 'textarea', 'Tagline shown under the logo, at the top of every email'],
@@ -79,7 +80,7 @@ export default function MailTemplateEditor({ entityId, scope = 'platform', canTe
           </div>
         ))}
         <div style={{ fontSize: 11.5, color: 'var(--muted)', background: 'var(--elevated, #f7f7f8)', border: '1px solid var(--hairline)', borderRadius: 8, padding: '8px 10px' }}>
-          All email sends from Howler's verified domain — branding sets the look (logo, colour, name, wording), not the email address. A “Powered by Howler : Pulse” line always stays in the footer.
+          The primary + secondary pair drives the look of the whole platform (buttons, accents, chart palettes) and these emails. Sends stay on Howler's verified domain, and a “Powered by Howler : Pulse” line stays in the footer.
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
           <button style={saveBtn} onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>

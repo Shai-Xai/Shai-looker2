@@ -795,6 +795,18 @@ app.put('/api/my/mail-template/:entityId', auth.requireAuth, (req, res) => {
   res.json(clientMailView(req.params.entityId));
 });
 
+// ── White-label theme ──────────────────────────────────────────────────────────
+// The client's brand pair (primary + secondary) + logo, resolved through the
+// same layering as email branding (defaults ← platform ← client) — ONE brand
+// source drives emails AND the platform look. Pure presentation, no secrets.
+app.get('/api/theme/:entityId', auth.requireAuth, (req, res) => {
+  const id = req.params.entityId;
+  if (req.user.role !== 'admin' && !(req.user.entityIds || []).includes(id)) return res.status(403).json({ error: 'Not allowed' });
+  if (!db.getEntity(id)) return res.status(404).json({ error: 'Not found' });
+  const b = mailer.resolveBranding(id);
+  res.json({ primary: b.brandColor, secondary: b.secondaryColor, logo: b.logo || '' });
+});
+
 // Live preview: render the email HTML with unsaved edits layered on the right
 // base. Clients may only preview their own entity.
 app.post('/api/mail/preview', auth.requireAuth, (req, res) => {

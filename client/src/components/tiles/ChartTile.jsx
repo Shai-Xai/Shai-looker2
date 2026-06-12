@@ -4,14 +4,16 @@ import * as echarts from 'echarts';
 import { cellText, formatNumber, formatAxis } from '../../lib/format.js';
 import { useDrill } from '../../lib/DrillContext.jsx';
 import { useTheme } from '../../lib/theme.jsx';
+import { chartPalette, brandPrimary } from '../../lib/brand.js';
 
 // Howler-branded chart renderer (Apache ECharts): gradient fills, rounded bars,
 // staggered load animation, branded tooltips. Always uses the Howler palette
 // (ignores Looker's colours by design). Supports column/bar/line/area/pie/
 // doughnut/scatter, pivoted series, table calculations, and drill-down.
 
-const HOWLER = ['#FF385C', '#FF6B35', '#FFB020', '#06B6D4', '#7C3AED', '#10B981', '#EC4899', '#3B82F6', '#F97316', '#14B8A6'];
-const color = (i) => HOWLER[i % HOWLER.length];
+// Palette comes from the brand engine: Howler's hand-tuned palette by default,
+// or one generated from a white-labelled client's primary+secondary pair.
+const color = (i) => { const P = chartPalette(); return P[i % P.length]; };
 
 function hexToRgba(hex, a) {
   const h = hex.replace('#', '');
@@ -62,9 +64,17 @@ export default function ChartTile({ data, visConfig = {} }) {
   // seriesMeta[seriesIndex] = { measure, pivotKey, fmt } for tooltip + drill.
   const stacked = visConfig.stacking === 'normal' || visConfig.stacking === 'percent';
   const { theme } = useTheme();
+  // Rebuild colours when the white-label brand pair changes (palette is read
+  // inside buildOption, so the brand version must be a dependency).
+  const [brandV, setBrandV] = useState(0);
+  useLayoutEffect(() => {
+    const f = () => setBrandV((v) => v + 1);
+    window.addEventListener('brand-changed', f);
+    return () => window.removeEventListener('brand-changed', f);
+  }, []);
   const { option, seriesMeta } = useMemo(
     () => buildOption({ rows, dimensions, measures, pivots, visType, stacked, visConfig, boxH }),
-    [data, visType, stacked, boxH, theme]
+    [data, visType, stacked, boxH, theme, brandV]
   );
 
   if (!rows.length || !measures.length) return <Empty />;
@@ -138,7 +148,7 @@ function buildOption({ rows, dimensions, measures, pivots, visType, stacked, vis
       seriesMeta,
       option: {
         ...baseAnim,
-        color: HOWLER,
+        color: chartPalette(),
         tooltip: {
           trigger: 'item',
           ...tip,
@@ -267,12 +277,12 @@ function buildOption({ rows, dimensions, measures, pivots, visType, stacked, vis
     seriesMeta,
     option: {
       ...baseAnim,
-      color: HOWLER,
+      color: chartPalette(),
       grid: { left: 6 + leftName, right: (dual ? 6 : 14) + rightName, top: 12, bottom: (showLegend ? 34 : 18) + xNameSpace, containLabel: true },
       tooltip: {
         trigger: isScatter ? 'item' : 'axis',
         ...tip,
-        axisPointer: { type: isBar ? 'line' : 'shadow', shadowStyle: { color: 'rgba(255,56,92,0.06)' } },
+        axisPointer: { type: isBar ? 'line' : 'shadow', shadowStyle: { color: hexToRgba(brandPrimary(), 0.06) } },
         formatter: (params) => {
           const arr = Array.isArray(params) ? params : [params];
           const title = arr[0]?.axisValueLabel ?? arr[0]?.name ?? '';

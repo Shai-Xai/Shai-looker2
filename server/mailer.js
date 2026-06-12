@@ -116,6 +116,7 @@ async function send({ to, subject, html, text, fromName }) {
 const DEFAULTS = {
   senderName: 'Howler : Pulse',
   brandColor: '#FF385C',
+  secondaryColor: '#FF6B35',                 // gradient partner + 2nd chart series
   logo: '',                                  // image URL/data-URL; blank → text wordmark
   wordmark: 'Howler : Pulse',
   header: '',                                // optional tagline under the logo/wordmark

@@ -79,7 +79,7 @@ export default function Carousel({ carousel, filterValues, editable, onEditTile,
               ? { flexWrap: 'wrap', alignContent: 'flex-start', overflowY: 'auto', overflowX: 'hidden' }
               : { overflowX: 'auto', WebkitOverflowScrolling: 'touch', scrollSnapType: isMobile ? 'x mandatory' : undefined }),
             outline: dragOver ? '2px dashed var(--brand)' : 'none',
-            background: dragOver ? 'rgba(255,56,92,0.04)' : 'transparent',
+            background: dragOver ? 'rgba(var(--brand-rgb), 0.04)' : 'transparent',
           }}
         >
           {tiles.length === 0 ? (

@@ -11,7 +11,7 @@ import { useIsMobile } from '../lib/useIsMobile.js';
 // branding, Scheduled digests, CC-the-Owl inbox address.
 const SECTIONS = [
   ['integrations', 'Integrations', '🔌'],
-  ['email', 'Email branding', '✉️'],
+  ['email', 'Branding', '🎨'],
   ['digests', 'Scheduled digests', '🗓'],
   ['inbox', 'CC the Owl', '📨'],
 ];
@@ -61,7 +61,7 @@ export default function ClientIntegrationsPage() {
 
             {section === 'email' && (
               <div>
-                <p style={hint}>How your notification emails look. Sends come from Howler's verified domain; a “Powered by Howler : Pulse” line stays in the footer.</p>
+                <p style={hint}>Your colours and logo — they style your whole Pulse platform (buttons, accents, charts) and your notification emails. Blank fields keep Howler's defaults.</p>
                 <MailTemplateEditor scope="my" entityId={it.entityId} />
               </div>
             )}
@@ -89,7 +89,7 @@ export default function ClientIntegrationsPage() {
 const tabBtn = (active) => ({
   padding: '8px 14px', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer',
   border: active ? '1.5px solid var(--brand)' : '1.5px solid var(--hairline)',
-  background: active ? 'rgba(255,56,92,0.08)' : 'transparent',
+  background: active ? 'rgba(var(--brand-rgb), 0.08)' : 'transparent',
   color: active ? 'var(--brand)' : 'var(--text)',
 });
 const hint = { color: 'var(--muted)', fontSize: 13, marginBottom: 14, lineHeight: 1.5 };

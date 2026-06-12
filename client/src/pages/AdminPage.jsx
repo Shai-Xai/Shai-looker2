@@ -200,7 +200,7 @@ function Entities({ fields }) {
 // One client's settings hub: a left nav (Settings / Suites / Logins) + panel.
 function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites, users, onChange, onBack }) {
   const [section, setSection] = useState('settings');
-  const nav = [['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['briefing', 'Briefing'], ['messages', 'Messages'], ['digests', 'Digests'], ['settlements', 'Settlements'], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations'], ['email', 'Email branding']];
+  const nav = [['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['briefing', 'Briefing'], ['messages', 'Messages'], ['digests', 'Digests'], ['settlements', 'Settlements'], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations'], ['email', 'Branding']];
   return (
     <div>
       <button style={miniBtnOutline} onClick={onBack}>← All clients</button>
@@ -239,7 +239,7 @@ function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites,
           {section === 'integrations' && <ClientIntegrations entity={entity} />}
           {section === 'email' && (
             <div>
-              <p style={hint}>This client's email branding. Anything left blank inherits the Howler platform default. Sends still come from Howler's verified domain.</p>
+              <p style={hint}>This client's branding — the primary/secondary colours and logo here white-label their whole platform (UI accents + charts) and their emails. Anything left blank inherits the Howler default.</p>
               <MailTemplateEditor scope="admin-client" entityId={entity.id} canTest />
             </div>
           )}

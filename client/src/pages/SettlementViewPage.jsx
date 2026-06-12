@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import ReactECharts from 'echarts-for-react';
 import { api } from '../lib/api.js';
+import { chartPalette } from '../lib/brand.js';
 import { useAuth } from '../lib/auth.jsx';
 import { useTheme } from '../lib/theme.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
@@ -300,7 +301,7 @@ function Waterfall({ d, dark, isMobile }) {
   const option = useMemo(() => {
     const steps = [
       { label: 'Turnover', delta: d.turnover || 0, color: '#7c3aed' },
-      ...(d.commissions || []).map((g) => ({ label: shortName(g.name), delta: g.subtotal?.total || 0, color: '#ff6b35' })),
+      ...(d.commissions || []).map((g) => ({ label: shortName(g.name), delta: g.subtotal?.total || 0, color: chartPalette()[1] })),
       { label: 'Advances paid', delta: d.advances?.subtotal || 0, color: '#8e8e93' },
       { label: 'Due to you', total: d.valueDue || 0, color: '#34c759' },
     ];
@@ -345,7 +346,7 @@ function CommissionDonut({ groups, dark }) {
       type: 'pie', radius: ['52%', '78%'], center: ['50%', '50%'],
       itemStyle: { borderColor: dark ? '#1a1a1f' : '#fff', borderWidth: 2 },
       label: { show: true, fontSize: 10, color: dark ? '#9a9aa2' : '#6e6e73', formatter: '{b}\n{d}%' },
-      data: groups.map((g, i) => ({ name: shortName(g.name), value: Math.abs(g.subtotal?.total || 0), itemStyle: { color: ['#ff385c', '#ff6b35', '#7c3aed', '#06b6d4'][i % 4] } })),
+      data: groups.map((g, i) => ({ name: shortName(g.name), value: Math.abs(g.subtotal?.total || 0), itemStyle: { color: chartPalette()[i % 4] } })),
     }],
   }), [groups, dark]);
   return <ReactECharts option={option} style={{ height: 230 }} notMerge />;

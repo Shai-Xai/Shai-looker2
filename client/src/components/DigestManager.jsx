@@ -269,7 +269,7 @@ function TilePicker({ load, selected, onChange }) {
                   <span style={{ fontSize: 13, fontWeight: 600 }}>{d.title}</span>
                   <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 6 }}>{d.setName}</span>
                 </span>
-                {n > 0 && <span style={{ ...roleChip, background: 'rgba(255,56,92,0.12)', color: 'var(--brand)' }}>{whole(d.dashboardId) ? 'All' : n}</span>}
+                {n > 0 && <span style={{ ...roleChip, background: 'rgba(var(--brand-rgb), 0.12)', color: 'var(--brand)' }}>{whole(d.dashboardId) ? 'All' : n}</span>}
               </button>
               <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--muted)', cursor: 'pointer', flexShrink: 0 }} title="Include the whole dashboard">
                 <input type="checkbox" checked={whole(d.dashboardId)} onChange={() => toggleWhole(d.dashboardId)} /> Whole
@@ -303,7 +303,7 @@ const fmt = (iso) => { try { return new Date(iso).toLocaleString('en-ZA', { day:
 
 function Field({ label, children }) { return <div><div style={hintLbl}>{label}</div>{children}</div>; }
 function Toggle({ on, onClick, children }) {
-  return <button type="button" onClick={onClick} style={{ flex: 1, padding: '8px 10px', borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', border: on ? '1.5px solid var(--brand)' : '1.5px solid var(--hairline)', background: on ? 'rgba(255,56,92,0.08)' : 'transparent', color: on ? 'var(--brand)' : 'var(--text)' }}>{children}</button>;
+  return <button type="button" onClick={onClick} style={{ flex: 1, padding: '8px 10px', borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', border: on ? '1.5px solid var(--brand)' : '1.5px solid var(--hairline)', background: on ? 'rgba(var(--brand-rgb), 0.08)' : 'transparent', color: on ? 'var(--brand)' : 'var(--text)' }}>{children}</button>;
 }
 
 const card = { background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 12, padding: 14, marginBottom: 10 };

@@ -235,7 +235,7 @@ function FilterDropdown({ filter, value, onChange, multi = false }) {
                 <li
                   key={i}
                   onMouseDown={(e) => { e.preventDefault(); multi ? toggleMulti(s) : pickSingle(s); }}
-                  style={{ ...optStyle, display: 'flex', alignItems: 'center', gap: 8, ...(isSel ? { background: 'rgba(255,56,92,0.15)', fontWeight: 600 } : null) }}
+                  style={{ ...optStyle, display: 'flex', alignItems: 'center', gap: 8, ...(isSel ? { background: 'rgba(var(--brand-rgb), 0.15)', fontWeight: 600 } : null) }}
                   onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = 'rgba(128,128,128,0.12)'; }}
                   onMouseLeave={e => { if (!isSel) e.currentTarget.style.background = 'transparent'; }}
                 >
