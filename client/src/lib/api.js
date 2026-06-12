@@ -55,6 +55,11 @@ export const api = {
   adminCreateSet: (s) => fetch('/api/admin/sets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(s) }).then(json),
   adminUpdateSet: (id, s) => fetch(`/api/admin/sets/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(s) }).then(json),
   adminDeleteSet: (id) => fetch(`/api/admin/sets/${id}`, { method: 'DELETE' }),
+  // Custom (client-owned) sets
+  getEntitySets: (entityId) => fetch(`/api/admin/entities/${entityId}/sets`).then(json),
+  createEntitySet: (entityId, s) => fetch(`/api/admin/entities/${entityId}/sets`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(s) }).then(json),
+  cloneEntitySet: (entityId, setId, name) => fetch(`/api/admin/entities/${entityId}/sets/clone`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ setId, name }) }).then(json),
+  importEntityDashboard: (entityId, b) => fetch(`/api/admin/entities/${entityId}/dashboards/import`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   adminListSuites: () => fetch('/api/admin/suites').then(json),
   adminCreateSuite: (s) => fetch('/api/admin/suites', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(s) }).then(json),
   adminUpdateSuite: (id, s) => fetch(`/api/admin/suites/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(s) }).then(json),

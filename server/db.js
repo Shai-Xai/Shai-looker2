@@ -128,6 +128,7 @@ function addColumn(table, col, decl) {
   if (!cols.includes(col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${decl}`);
 }
 addColumn('sets', 'icon', "TEXT NOT NULL DEFAULT ''");   // emoji or image data-URL
+addColumn('sets', 'owner_entity_id', "TEXT NOT NULL DEFAULT ''"); // '' = shared template; else a client's CUSTOM set
 addColumn('suites', 'icon', "TEXT NOT NULL DEFAULT ''");
 addColumn('entities', 'logo', "TEXT NOT NULL DEFAULT ''"); // client brand image data-URL / emoji
 addColumn('entities', 'ai_context', "TEXT NOT NULL DEFAULT ''"); // client-specific AI background
@@ -518,9 +519,16 @@ function rowToDashboard(r) {
 function listDashboards() {
   return db.prepare('SELECT * FROM dashboards ORDER BY updated_at DESC').all().map((r) => {
     const def = J(r.def, {});
-    return { id: r.id, title: r.title, description: def.description || '', folder: def.folder || '', tileCount: (def.tiles || []).length, source: def.source || null, createdAt: r.created_at, updatedAt: r.updated_at };
+    return { id: r.id, title: r.title, description: def.description || '', folder: def.folder || '', tileCount: (def.tiles || []).length, source: def.source || null, ownerEntityId: def.ownerEntityId || '', createdAt: r.created_at, updatedAt: r.updated_at };
   });
 }
+// Dashboards available to put in a context: shared (no owner) + those owned by
+// the given entity. Client-owned dashboards never leak into another client's
+// picker or the shared library.
+function dashboardPoolFor(entityId) {
+  return listDashboards().filter((d) => !d.ownerEntityId || d.ownerEntityId === entityId);
+}
+function sharedDashboards() { return listDashboards().filter((d) => !d.ownerEntityId); }
 function getDashboard(id) { return rowToDashboard(db.prepare('SELECT * FROM dashboards WHERE id=?').get(id)); }
 function stripMeta(d) { const { id, title, createdAt, updatedAt, ...rest } = d; return rest; }
 function createDashboard(def = {}) {
@@ -531,6 +539,7 @@ function createDashboard(def = {}) {
     theme: def.theme || defaultTheme(), filters: def.filters || [], tiles: def.tiles || [],
     carousels: def.carousels || [], gridAfter: def.gridAfter || 0, source: def.source || null,
     aiContext: def.aiContext || '', // dashboard-level AI context
+    ownerEntityId: def.ownerEntityId || '', // '' = shared; else a client's bespoke dashboard
     createdAt: ts, updatedAt: ts,
   };
   db.prepare('INSERT INTO dashboards (id,title,def,created_at,updated_at) VALUES (?,?,?,?,?)')
@@ -555,8 +564,11 @@ function setDashboardEntries(setId) {
   return db.prepare('SELECT dashboard_id, parent_dashboard_id FROM set_dashboards WHERE set_id=? ORDER BY position').all(setId)
     .map((r) => ({ id: r.dashboard_id, parentId: r.parent_dashboard_id || null }));
 }
-function rowToSet(r) { return r && { id: r.id, name: r.name, icon: r.icon || '', dashboardIds: setDashboardIds(r.id), dashboards: setDashboardEntries(r.id), createdAt: r.created_at }; }
-function listSets() { return db.prepare('SELECT * FROM sets ORDER BY name').all().map(rowToSet); }
+function rowToSet(r) { return r && { id: r.id, name: r.name, icon: r.icon || '', ownerEntityId: r.owner_entity_id || '', dashboardIds: setDashboardIds(r.id), dashboards: setDashboardEntries(r.id), createdAt: r.created_at }; }
+// Shared library only (custom client sets are hidden here).
+function listSets() { return db.prepare("SELECT * FROM sets WHERE owner_entity_id='' ORDER BY name").all().map(rowToSet); }
+// A client's CUSTOM sets.
+function listSetsForEntity(entityId) { return db.prepare('SELECT * FROM sets WHERE owner_entity_id=? ORDER BY name').all(entityId).map(rowToSet); }
 function getSet(id) { return rowToSet(db.prepare('SELECT * FROM sets WHERE id=?').get(id)); }
 // Accepts plain ids (top-level) or { id, parentId } entries. Nesting is one
 // level deep and a parent must be in the same set — anything else flattens to
@@ -574,11 +586,20 @@ const setSetDashboards = db.transaction((setId, items) => {
     ins.run(setId, x.id, i, p);
   });
 });
-function createSet({ name, icon = '', dashboardIds = [] }) {
+function createSet({ name, icon = '', dashboardIds = [], ownerEntityId = '' }) {
   const id = uuid();
-  db.prepare('INSERT INTO sets (id,name,icon,created_at) VALUES (?,?,?,?)').run(id, name || 'Untitled set', icon || '', now());
+  db.prepare('INSERT INTO sets (id,name,icon,owner_entity_id,created_at) VALUES (?,?,?,?,?)').run(id, name || 'Untitled set', icon || '', ownerEntityId || '', now());
   setSetDashboards(id, dashboardIds);
   return getSet(id);
+}
+// Duplicate a set (and its dashboard membership/nesting) into a CLIENT-OWNED
+// copy. References the same dashboards — a custom bundle the client can tweak.
+function cloneSetForEntity(setId, ownerEntityId, name) {
+  const src = getSet(setId);
+  if (!src) return null;
+  const copy = createSet({ name: name || `${src.name} (custom)`, icon: src.icon, ownerEntityId });
+  setSetDashboards(copy.id, src.dashboards); // preserves {id,parentId} nesting
+  return getSet(copy.id);
 }
 function updateSet(id, patch) {
   const cur = db.prepare('SELECT * FROM sets WHERE id=?').get(id);
@@ -907,9 +928,9 @@ module.exports = {
   getEntityMailBranding, setEntityMailBranding,
   ensureInboxToken, regenerateInboxToken, findEntityByInboxToken,
   listUsers, getUser, getUserByEmail, createUser, updateUser, deleteUser, verifyCredentials, publicUser, setUserEntities,
-  listDashboards, getDashboard, createDashboard, updateDashboard, removeDashboard,
+  listDashboards, getDashboard, createDashboard, updateDashboard, removeDashboard, dashboardPoolFor, sharedDashboards,
   // sets (reusable collections)
-  listSets, getSet, createSet, updateSet, deleteSet, setSetDashboards, dashboardsInSet,
+  listSets, listSetsForEntity, getSet, createSet, cloneSetForEntity, updateSet, deleteSet, setSetDashboards, dashboardsInSet,
   // suites (event context)
   listSuites, listSuitesForEntity, getSuite, createSuite, updateSuite, deleteSuite, setSuiteSets, suiteSetIds, dashboardsInSuite, lockedFiltersForSuite,
   // tile library

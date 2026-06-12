@@ -204,7 +204,7 @@ function Entities({ fields }) {
 // One client's settings hub: a left nav (Settings / Suites / Logins) + panel.
 function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites, users, onChange, onBack }) {
   const [section, setSection] = useState('settings');
-  const nav = [['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['briefing', 'Briefing'], ['messages', 'Messages'], ['digests', 'Digests'], ['campaigns', 'Actions'], ['settlements', 'Settlements'], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations'], ['email', 'Branding']];
+  const nav = [['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['sets', 'Custom sets'], ['briefing', 'Briefing'], ['messages', 'Messages'], ['digests', 'Digests'], ['campaigns', 'Actions'], ['settlements', 'Settlements'], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations'], ['email', 'Branding']];
   return (
     <div>
       <button style={miniBtnOutline} onClick={onBack}>← All clients</button>
@@ -218,6 +218,7 @@ function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites,
         <div style={{ flex: 1, minWidth: 280 }}>
           {section === 'settings' && <ClientSettings entity={entity} suites={suites} fields={fields} onChange={onChange} onBack={onBack} />}
           {section === 'suites' && <ClientSuites entity={entity} suites={suites} allEntities={allEntities} allSets={allSets} dashTitle={dashTitle} fields={fields} onChange={onChange} />}
+          {section === 'sets' && <CustomSets entity={entity} />}
           {section === 'briefing' && (
             <>
               <div style={cardStyle}>
@@ -311,11 +312,14 @@ function ClientSettings({ entity, suites, fields, onChange, onBack }) {
 
 // Client suites: the full suite editor for each, plus add.
 function ClientSuites({ entity, suites, allEntities, allSets, dashTitle, fields, onChange }) {
+  const [customSets, setCustomSets] = useState([]);
+  useEffect(() => { api.getEntitySets(entity.id).then((d) => setCustomSets(d.sets || [])).catch(() => setCustomSets([])); }, [entity.id]);
+  const sets = [...allSets, ...customSets]; // shared templates + this client's bespoke sets
   const addSuite = async () => { await api.adminCreateSuite({ entityId: entity.id, name: 'New suite', lockedFilters: {}, setIds: [] }); onChange(); };
   return (
     <div>
       {suites.map((su) => (
-        <SuiteCard key={su.id} suite={su} entities={allEntities} sets={allSets} dashTitle={dashTitle} fields={fields} onChange={onChange} />
+        <SuiteCard key={su.id} suite={su} entities={allEntities} sets={sets} dashTitle={dashTitle} fields={fields} onChange={onChange} />
       ))}
       {suites.length === 0 && <Muted>No suites yet.</Muted>}
       <button style={addBtn} onClick={addSuite}>+ Add suite</button>
@@ -433,12 +437,70 @@ function EntityLogins({ entity, users, onChange }) {
   );
 }
 
+// ─── Custom sets (a client's bespoke collections, hidden from the shared library) ──
+function CustomSets({ entity }) {
+  const [data, setData] = useState(null);
+  const [cloneId, setCloneId] = useState('');
+  const [imp, setImp] = useState({ lookerDashboardId: '', setId: '', title: '', busy: false, err: '' });
+  const load = () => api.getEntitySets(entity.id).then(setData).catch(() => setData({ sets: [], pool: [], templates: [] }));
+  useEffect(load, [entity.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!data) return <Muted>Loading…</Muted>;
+
+  const doImport = async () => {
+    if (!imp.lookerDashboardId.trim()) return;
+    setImp((s) => ({ ...s, busy: true, err: '' }));
+    try { await api.importEntityDashboard(entity.id, { lookerDashboardId: imp.lookerDashboardId.trim(), setId: imp.setId || undefined, title: imp.title || undefined }); setImp({ lookerDashboardId: '', setId: '', title: '', busy: false, err: '' }); load(); }
+    catch (e) { setImp((s) => ({ ...s, busy: false, err: e.message })); }
+  };
+
+  return (
+    <div>
+      <p style={hint}>Bespoke sets for <b>{entity.name}</b> — visible only here and attachable only to this client's suites (never in the shared Sets library). Clone a standard template to tweak it, or import a custom Looker dashboard.</p>
+
+      {/* Create / clone */}
+      <div style={{ ...cardStyle, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 14 }}>
+        <button style={miniBtn} onClick={() => api.createEntitySet(entity.id, { name: 'New custom set', dashboardIds: [] }).then(load)}>+ New empty set</button>
+        <span style={{ color: 'var(--muted)', alignSelf: 'center' }}>or</span>
+        <Field label="Clone a template">
+          <select style={input} value={cloneId} onChange={(e) => setCloneId(e.target.value)}>
+            <option value="">Pick a shared set…</option>
+            {data.templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        </Field>
+        <button style={miniBtn} disabled={!cloneId} onClick={() => api.cloneEntitySet(entity.id, cloneId).then(() => { setCloneId(''); load(); })}>Clone</button>
+      </div>
+
+      {/* Import a bespoke Looker dashboard */}
+      <div style={{ ...cardStyle, marginBottom: 14 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Import a custom dashboard from Looker</div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+          <Field label="Looker dashboard ID"><input style={input} value={imp.lookerDashboardId} onChange={(e) => setImp({ ...imp, lookerDashboardId: e.target.value })} placeholder="e.g. 1234" /></Field>
+          <Field label="Title (optional)"><input style={input} value={imp.title} onChange={(e) => setImp({ ...imp, title: e.target.value })} /></Field>
+          <Field label="Add to set (optional)">
+            <select style={input} value={imp.setId} onChange={(e) => setImp({ ...imp, setId: e.target.value })}>
+              <option value="">Don't add yet</option>
+              {data.sets.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </Field>
+          <button style={miniBtn} onClick={doImport} disabled={imp.busy || !imp.lookerDashboardId.trim()}>{imp.busy ? 'Importing…' : 'Import'}</button>
+        </div>
+        {imp.err && <div style={{ color: 'var(--error)', fontSize: 13, marginTop: 6 }}>{imp.err}</div>}
+        <div style={hint}>The imported dashboard is private to this client. Add it to a custom set, then bundle that set into one of their suites.</div>
+      </div>
+
+      {data.sets.length === 0 ? <Muted>No custom sets yet.</Muted>
+        : data.sets.map((s) => <SetCard key={s.id} set={s} dashboards={data.pool} onChange={load} />)}
+    </div>
+  );
+}
+
 // ─── Sets (reusable dashboard collections: Ticketing, Cashless, …) ────────────
 function Sets() {
   const [items, setItems] = useState([]);
   const [dashboards, setDashboards] = useState([]);
   const [loading, setLoading] = useState(true);
-  const load = () => { setLoading(true); Promise.all([api.adminListSets(), api.listDashboards()]).then(([t, d]) => { setItems(t); setDashboards(d); }).finally(() => setLoading(false)); };
+  // Shared library only ever bundles shared dashboards — never a client's bespoke one.
+  const load = () => { setLoading(true); Promise.all([api.adminListSets(), api.listDashboards()]).then(([t, d]) => { setItems(t); setDashboards(d.filter((x) => !x.ownerEntityId)); }).finally(() => setLoading(false)); };
   useEffect(load, []);
   if (loading) return <Muted>Loading…</Muted>;
   return (

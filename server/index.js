@@ -140,6 +140,53 @@ app.put('/api/admin/sets/:id', auth.requireAdmin, (req, res) => {
 });
 app.delete('/api/admin/sets/:id', auth.requireAdmin, (req, res) => { db.deleteSet(req.params.id); res.status(204).end(); });
 
+// ─── Custom sets: a client's bespoke collections (hidden from the shared library) ──
+// A client's custom sets + the dashboard pool available to build them with
+// (shared dashboards + this client's own bespoke dashboards).
+app.get('/api/admin/entities/:id/sets', auth.requireAdmin, (req, res) => {
+  if (!db.getEntity(req.params.id)) return res.status(404).json({ error: 'Not found' });
+  res.json({ sets: db.listSetsForEntity(req.params.id), pool: db.dashboardPoolFor(req.params.id), templates: db.listSets() });
+});
+app.post('/api/admin/entities/:id/sets', auth.requireAdmin, (req, res) => {
+  if (!db.getEntity(req.params.id)) return res.status(404).json({ error: 'Not found' });
+  res.status(201).json(db.createSet({ ...(req.body || {}), ownerEntityId: req.params.id }));
+});
+// Clone a shared template set into a client-owned custom copy.
+app.post('/api/admin/entities/:id/sets/clone', auth.requireAdmin, (req, res) => {
+  if (!db.getEntity(req.params.id)) return res.status(404).json({ error: 'Not found' });
+  const { setId, name } = req.body || {};
+  const copy = db.cloneSetForEntity(setId, req.params.id, name);
+  if (!copy) return res.status(400).json({ error: 'Template set not found' });
+  res.status(201).json(copy);
+});
+// Import a bespoke Looker dashboard as CLIENT-OWNED, optionally adding it to one
+// of the client's custom sets.
+app.post('/api/admin/entities/:id/dashboards/import', auth.requireAdmin, async (req, res) => {
+  const entityId = req.params.id;
+  if (!db.getEntity(entityId)) return res.status(404).json({ error: 'Not found' });
+  const { lookerDashboardId, title, setId } = req.body || {};
+  if (!lookerDashboardId) return res.status(400).json({ error: 'lookerDashboardId is required' });
+  try {
+    const source = await fetchDashboard(lookerDashboardId);
+    await looker.resolveElementQueries(source.elements);
+    const def = convertDashboard(source);
+    if (title) def.title = title;
+    def.folder = (source.dashboard?.folder?.name || '').trim();
+    def.ownerEntityId = entityId; // bespoke to this client
+    const created = store.create(def);
+    try { db.harvestDashboardTiles(created, { sourceDashboardId: created.id }); } catch (e) { console.error('[harvest]', e.message); }
+    // Add to the chosen custom set (must belong to this client).
+    if (setId) {
+      const set = db.getSet(setId);
+      if (set && set.ownerEntityId === entityId) db.setSetDashboards(setId, [...set.dashboards, { id: created.id, parentId: null }]);
+    }
+    res.status(201).json({ dashboard: { id: created.id, title: created.title } });
+  } catch (err) {
+    console.error('[POST entity dashboards/import]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Suites = a client's event context: locks + bundled Sets.
 function enrichSuite(su) {
   return { ...su, entityName: db.getEntity(su.entityId)?.name || '', dashboardCount: db.dashboardsInSuite(su.id).length };
