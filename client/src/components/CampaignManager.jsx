@@ -430,7 +430,11 @@ function CampaignReport({ entityId, action, onClose }) {
       <div style={{ ...card }}>
         <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Who clicked</div>
         {r.clickers.length === 0 ? (
-          <p style={{ color: 'var(--muted)', fontSize: 13 }}>No clicks yet.</p>
+          <p style={{ color: 'var(--muted)', fontSize: 13 }}>
+            {r.totalClicks > 0
+              ? `${r.totalClicks} click${r.totalClicks === 1 ? '' : 's'} recorded, but not attributed to individuals — this campaign predates per-recipient tracking. New campaigns will show who clicked here.`
+              : 'No clicks yet.'}
+          </p>
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
             <thead>
@@ -451,8 +455,8 @@ function CampaignReport({ entityId, action, onClose }) {
           </table>
         )}
         <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 10 }}>
-          {r.nonClickers > 0 && <span>{r.nonClickers} recipient{r.nonClickers === 1 ? '' : 's'} haven't clicked. </span>}
-          {r.anonClicks > 0 && <span>{r.anonClicks} click{r.anonClicks === 1 ? '' : 's'} couldn't be attributed (e.g. older links). </span>}
+          {r.uniqueClickers > 0 && r.nonClickers > 0 && <span>{r.nonClickers} recipient{r.nonClickers === 1 ? '' : 's'} haven't clicked. </span>}
+          {r.anonClicks > 0 && <span>{r.anonClicks} click{r.anonClicks === 1 ? '' : 's'} couldn't be attributed to a person (older/forwarded links). </span>}
           Forwarded links count toward the original recipient.
         </div>
       </div>

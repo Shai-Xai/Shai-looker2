@@ -407,15 +407,25 @@ function mount(app, { db, auth, mailer, resolveAudience, draftCopy, listEvents }
     const rows = sql.prepare('SELECT email, COUNT(*) n, MAX(at) lastAt, MIN(at) firstAt FROM action_clicks WHERE action_id=? GROUP BY email ORDER BY n DESC, lastAt DESC').all(a.id);
     const nameOf = Object.fromEntries(a.audience.map((r) => [r.email, r.name || '']));
     const clickers = rows.filter((r) => r.email).map((r) => ({ email: r.email, name: nameOf[r.email] || '', clicks: r.n, firstAt: r.firstAt, lastAt: r.lastAt }));
-    const anonClicks = rows.find((r) => !r.email)?.n || 0;
-    const totalClicks = rows.reduce((s, r) => s + r.n, 0);
+    const tableTotal = rows.reduce((s, r) => s + r.n, 0);
+    const tableAnon = rows.find((r) => !r.email)?.n || 0;
+    // Reconcile with the legacy click counter: campaigns sent before per-recipient
+    // tracking recorded clicks there (and on non-attributable links), so the
+    // action_clicks table is empty for them. Surface those as unattributed.
+    const counter = a.results.clicks || 0;
+    const legacy = Math.max(0, counter - tableTotal);
+    const totalClicks = tableTotal + legacy;
+    const anonClicks = tableAnon + legacy;
+    const sent = a.results.sent || 0;
     res.json({
       title: a.title || a.config.subject, status: a.status, approvedBy: a.approvedBy, approvedAt: a.approvedAt,
-      sent: a.results.sent || 0, failed: a.results.failed || 0, total: a.results.total ?? a.audience.length,
+      sent, failed: a.results.failed || 0, total: a.results.total ?? a.audience.length,
       totalClicks, uniqueClickers: clickers.length, anonClicks,
-      ctr: (a.results.sent || 0) > 0 ? Math.round((clickers.length / a.results.sent) * 100) : 0,
+      // CTR mirrors the card (total clicks / sent) so the two never disagree.
+      ctr: sent > 0 ? Math.min(100, Math.round((totalClicks / sent) * 100)) : 0,
       clickers,
       nonClickers: a.audience.filter((r) => !clickers.some((c) => c.email === r.email)).length,
+      attributed: clickers.length > 0 || tableAnon > 0,
     });
   });
 
