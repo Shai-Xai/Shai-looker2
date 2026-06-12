@@ -149,7 +149,15 @@ export default function ClientHome() {
               <button key={i} className="lift" style={cardBtn} onClick={() => go(s.link.suiteId, s.link.dashboardId)}>
                 <div style={{ fontSize: 13.5, fontWeight: 700, lineHeight: 1.4 }}>{s.title}</div>
                 {s.reason && <div style={{ fontSize: 12, color: 'var(--muted-2)', lineHeight: 1.5, marginTop: 4 }}>{s.reason}</div>}
-                <div style={{ marginTop: 9, fontSize: 12, fontWeight: 700, color: 'var(--brand)' }}>{s.link.label} →</div>
+                <div style={{ marginTop: 9, display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--brand)' }}>{s.link.label} →</span>
+                  <span
+                    role="button" tabIndex={0}
+                    title="Turn this suggestion into a campaign"
+                    onClick={(e) => { e.stopPropagation(); vtNavigate(navigate, `/actions?goal=${encodeURIComponent(`${s.title}${s.reason ? ` — ${s.reason}` : ''}`)}`); }}
+                    style={{ fontSize: 11.5, fontWeight: 700, color: '#7c3aed', background: 'rgba(124,58,237,0.10)', borderRadius: 980, padding: '3px 10px' }}
+                  >⚡ Make it happen</span>
+                </div>
               </button>
             ))}
           </div>

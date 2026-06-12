@@ -6,11 +6,14 @@ import { api } from '../lib/api.js';
 // APPROVE (explicit, shows the count) → running → done with results.
 // One component for both surfaces (admin + client self-service) — the server
 // enforces entity access on every call.
-export default function CampaignManager({ entityId, scope = 'admin' }) {
+export default function CampaignManager({ entityId, scope = 'admin', initialGoal = '' }) {
   const isAdmin = scope === 'admin';
   const [data, setData] = useState(null);
   const [editing, setEditing] = useState(null); // action object | 'new'
   const [reporting, setReporting] = useState(null); // action object
+  // "Make it happen": arriving with a goal (from a briefing/digest suggestion)
+  // opens a fresh campaign pre-filled with it.
+  useEffect(() => { if (initialGoal) setEditing('new'); }, [initialGoal]);
 
   const load = () => api.listActions(entityId).then(setData).catch(() => setData({ actions: [] }));
   useEffect(() => { load(); }, [entityId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -26,7 +29,7 @@ export default function CampaignManager({ entityId, scope = 'admin' }) {
   if (!data) return <p style={{ color: 'var(--muted)', fontSize: 13 }}>Loading…</p>;
 
   if (editing) {
-    return <CampaignEditor entityId={entityId} isAdmin={isAdmin} action={editing === 'new' ? null : editing}
+    return <CampaignEditor entityId={entityId} isAdmin={isAdmin} action={editing === 'new' ? null : editing} initialGoal={editing === 'new' ? initialGoal : ''}
       onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />;
   }
   if (reporting) {
@@ -51,8 +54,10 @@ export default function CampaignManager({ entityId, scope = 'admin' }) {
               <StatusChip status={a.status} />
             </div>
             <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 3 }}>
-              {a.status === 'draft'
-                ? `Draft · created ${fmt(a.createdAt)} by ${a.createdBy}`
+              {a.status === 'auto'
+                ? `Automation active · checks daily${a.lastCheck ? ` · last check ${fmt(a.lastCheck)}` : ''}`
+                : a.status === 'draft'
+                ? (a.createdBy === 'automation' ? `⏳ Queued by automation · awaiting approval · ${fmt(a.createdAt)}` : `Draft · created ${fmt(a.createdAt)} by ${a.createdBy}`)
                 : `Approved by ${a.approvedBy} · ${fmt(a.approvedAt)}`}
             </div>
             {a.status !== 'draft' && (
@@ -66,8 +71,9 @@ export default function CampaignManager({ entityId, scope = 'admin' }) {
             {a.results?.lastError && a.status !== 'done' && <div style={{ fontSize: 11, color: 'var(--error,#ef4444)', marginTop: 3 }}>{a.results.lastError}</div>}
           </div>
           <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-            {a.status !== 'draft' && <button style={mini} onClick={() => setReporting(a)}>📊 Report</button>}
-            {a.status === 'draft' && <button style={mini} onClick={() => setEditing(a)}>Edit</button>}
+            {(a.status === 'done' || a.status === 'running' || a.status === 'failed') && <button style={mini} onClick={() => setReporting(a)}>📊 Report</button>}
+            {(a.status === 'draft' || a.status === 'auto') && <button style={mini} onClick={() => setEditing(a)}>{a.createdBy === 'automation' ? 'Review & approve' : 'Edit'}</button>}
+            {a.status === 'auto' && <button style={mini} onClick={() => api.pauseAction(entityId, a.id).then(load)}>⏸ Pause</button>}
             {a.status !== 'running' && <button style={{ ...mini, color: 'var(--error,#ef4444)' }} onClick={() => { if (confirm('Delete this campaign?')) api.deleteAction(entityId, a.id).then(load); }}>Delete</button>}
           </div>
         </div>
@@ -76,11 +82,12 @@ export default function CampaignManager({ entityId, scope = 'admin' }) {
   );
 }
 
-function CampaignEditor({ entityId, isAdmin, action, onClose, onSaved }) {
+function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', onClose, onSaved }) {
   const cfg = action?.config || {};
   const [f, setF] = useState(() => ({
     title: action?.title || '',
-    goal: cfg.goal || 'Re-engage customers who abandoned their ticket checkout and get them to complete the purchase.',
+    goal: cfg.goal || initialGoal || 'Re-engage customers who abandoned their ticket checkout and get them to complete the purchase.',
+    recurring: action?.recurring || false,
     audienceMode: cfg.audience?.mode || 'tile',
     dashboardId: cfg.audience?.dashboardId || '',
     tileId: cfg.audience?.tileId || '',
@@ -115,12 +122,14 @@ function CampaignEditor({ entityId, isAdmin, action, onClose, onSaved }) {
   useEffect(() => { (isAdmin ? api.getDigestTiles(entityId) : api.getMyDigestTiles(entityId)).then(setTiles).catch(() => setTiles({ dashboards: [] })); }, [entityId, isAdmin]);
 
   const payload = () => ({
-    title: f.title, goal: f.goal, subject: f.subject, body: f.body, ctaText: f.ctaText, ctaUrl: f.ctaUrl, utm: f.utm,
+    title: f.title, goal: f.goal, subject: f.subject, body: f.body, ctaText: f.ctaText, ctaUrl: f.ctaUrl, utm: f.utm, recurring: f.recurring,
     eventSuiteId: f.eventSuiteId, contentMode: f.contentMode, heroImage: f.heroImage, customHtml: f.customHtml,
     audience: { mode: f.audienceMode, dashboardId: f.dashboardId, tileId: f.tileId, emailField: f.emailField, nameField: f.nameField, consentField: f.consentField, ticketField: f.ticketField, pasted: f.pasted },
   });
 
   const refreshAudience = () => {
+    // Snapshot children (queued by an automation) carry their audience already.
+    if (f.audienceMode === 'snapshot') { setAud({ count: action?.audienceCount || 0, excluded: 0, noConsent: 0, sample: [], fields: [] }); return; }
     if (f.audienceMode === 'tile' && (!f.dashboardId || !f.tileId)) { setAud(null); return; }
     setAudBusy(true);
     api.actionAudiencePreview(entityId, payload()).then(setAud).catch((e) => setAud({ error: e.message })).finally(() => setAudBusy(false));
@@ -181,6 +190,19 @@ function CampaignEditor({ entityId, isAdmin, action, onClose, onSaved }) {
   }
 
   async function approve() {
+    if (f.recurring) {
+      if (!confirm('Activate this automation?\n\nIt will check the tile daily and queue any NEW recipients as a draft for your approval. Nothing sends without you approving each batch.')) return;
+      setApproveState('working');
+      try {
+        let id = action?.id;
+        if (id) await api.updateAction(entityId, id, payload());
+        else { const r = await api.createAction(entityId, payload()); id = r.action.id; }
+        await api.approveAction(entityId, id);
+        setApproveState('✓ Automation active');
+        setTimeout(onSaved, 900);
+      } catch (e) { setApproveState(`✗ ${e.message}`); }
+      return;
+    }
     if (!aud?.count) { alert('Audience is empty.'); return; }
     // Show the actual recipients (not just a count) so the sender sees exactly
     // who this goes to before it's irreversible.
@@ -224,6 +246,12 @@ function CampaignEditor({ entityId, isAdmin, action, onClose, onSaved }) {
           </Field>
 
           <Field label="Audience">
+            {f.audienceMode === 'snapshot' ? (
+              <div style={{ fontSize: 13, background: 'rgba(124,58,237,0.07)', border: '1px solid rgba(124,58,237,0.25)', borderRadius: 8, padding: '9px 12px' }}>
+                ⚙ Queued by the automation: <b>{action?.audienceCount || 0} new recipient{(action?.audienceCount || 0) === 1 ? '' : 's'}</b> since the last send. Approve to email exactly these people.
+              </div>
+            ) : (
+            <>
             <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
               <Toggle on={f.audienceMode === 'tile'} onClick={() => set('audienceMode', 'tile')}>From a dashboard tile</Toggle>
               <Toggle on={f.audienceMode === 'paste'} onClick={() => set('audienceMode', 'paste')}>Paste emails</Toggle>
@@ -278,6 +306,8 @@ function CampaignEditor({ entityId, isAdmin, action, onClose, onSaved }) {
                   </span>
                 ) : <span style={{ color: 'var(--muted)' }}>Pick an audience source to see the count.</span>}
             </div>
+            </>
+            )}
           </Field>
 
           <Field label="Content">
@@ -317,6 +347,18 @@ function CampaignEditor({ entityId, isAdmin, action, onClose, onSaved }) {
             </Field>
           )}
 
+          {f.audienceMode === 'tile' && (
+            <Field label="Automation">
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Toggle on={!f.recurring} onClick={() => set('recurring', false)}>One-off send</Toggle>
+                <Toggle on={!!f.recurring} onClick={() => set('recurring', true)}>Daily auto-check</Toggle>
+              </div>
+              <div style={hintS}>{f.recurring
+                ? 'Checks the tile daily; anyone NEW (never emailed by this campaign, not unsubscribed) is queued as a draft for your approval. Nothing sends on its own.'
+                : 'Sends once to the current audience when you approve.'}</div>
+            </Field>
+          )}
+
           <Field label="UTM tracking (appended to the link on every click)">
             <button type="button" style={{ ...mini, marginBottom: 8 }} onClick={autoUtm}>✨ Auto-fill</button>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
@@ -339,8 +381,8 @@ function CampaignEditor({ entityId, isAdmin, action, onClose, onSaved }) {
               type="button" style={mini} disabled={testState === 'sending'}
               onClick={async () => { setTestState('sending'); try { const r = await api.actionTestSend(entityId, payload()); setTestState(`✓ Test sent to ${r.to}`); } catch (e) { setTestState(`✗ ${e.message}`); } }}
             >{testState === 'sending' ? 'Sending…' : 'Send test to me'}</button>
-            <button style={{ ...primary, background: '#15803d' }} onClick={approve} disabled={approveState === 'working' || !aud?.count}>
-              {approveState === 'working' ? 'Approving…' : `Approve & send${aud?.count ? ` to ${aud.count}` : ''}`}
+            <button style={{ ...primary, background: '#15803d' }} onClick={approve} disabled={approveState === 'working' || (!f.recurring && !aud?.count)}>
+              {approveState === 'working' ? 'Approving…' : f.recurring ? '⚙ Activate automation' : `Approve & send${aud?.count ? ` to ${aud.count}` : ''}`}
             </button>
             {(testState && testState !== 'sending') && <span style={{ fontSize: 12, color: testState.startsWith('✓') ? 'var(--success,#10b981)' : 'var(--error,#ef4444)' }}>{testState}</span>}
             {(approveState && approveState !== 'working') && <span style={{ fontSize: 12, color: approveState.startsWith('✓') ? 'var(--success,#10b981)' : 'var(--error,#ef4444)' }}>{approveState}</span>}
@@ -479,6 +521,7 @@ function HtmlField({ value, onChange }) {
 function StatusChip({ status }) {
   const map = {
     draft: { bg: 'rgba(128,128,128,0.14)', c: 'var(--muted)', t: 'Draft' },
+    auto: { bg: 'rgba(124,58,237,0.12)', c: '#7c3aed', t: '⚙ Automation' },
     running: { bg: 'rgba(10,132,255,0.13)', c: '#0a66c2', t: 'Sending…' },
     done: { bg: 'rgba(52,199,89,0.15)', c: '#2da44e', t: 'Sent' },
     failed: { bg: 'rgba(239,68,68,0.12)', c: '#dc2626', t: 'Failed' },

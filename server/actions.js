@@ -57,13 +57,30 @@ function mount(app, { db, auth, mailer, resolveAudience, draftCopy, listEvents }
       at        TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_action_clicks ON action_clicks(action_id, email);
+
+    -- Memory for recurring automations: who a campaign family has already
+    -- emailed, so the daily check only queues NEW people.
+    CREATE TABLE IF NOT EXISTS action_sent (
+      root_id TEXT NOT NULL,
+      email   TEXT NOT NULL,
+      at      TEXT NOT NULL,
+      PRIMARY KEY (root_id, email)
+    );
   `);
+  // Recurring-automation columns (ALTER for existing DBs).
+  try {
+    const cols = sql.prepare('PRAGMA table_info(actions)').all().map((c) => c.name);
+    if (!cols.includes('recurring')) sql.exec('ALTER TABLE actions ADD COLUMN recurring INTEGER NOT NULL DEFAULT 0');
+    if (!cols.includes('parent_id')) sql.exec("ALTER TABLE actions ADD COLUMN parent_id TEXT NOT NULL DEFAULT ''");
+    if (!cols.includes('last_check')) sql.exec("ALTER TABLE actions ADD COLUMN last_check TEXT NOT NULL DEFAULT ''");
+  } catch (e) { console.error('[actions] recurring migration skipped:', e.message); }
 
   // ── helpers ──
   const rowToAction = (r) => ({
     id: r.id, entityId: r.entity_id, type: r.type, status: r.status, title: r.title,
     config: JSON.parse(r.config || '{}'), audience: JSON.parse(r.audience || '[]'),
     results: JSON.parse(r.results || '{}'),
+    recurring: !!r.recurring, parentId: r.parent_id || '', lastCheck: r.last_check || '',
     createdBy: r.created_by, approvedBy: r.approved_by, approvedAt: r.approved_at,
     createdAt: r.created_at, updatedAt: r.updated_at,
   });
@@ -97,7 +114,7 @@ function mount(app, { db, auth, mailer, resolveAudience, draftCopy, listEvents }
     const aud = body.audience || {};
     return {
       audience: {
-        mode: aud.mode === 'paste' ? 'paste' : 'tile',
+        mode: ['paste', 'snapshot'].includes(aud.mode) ? aud.mode : 'tile',
         dashboardId: String(aud.dashboardId || ''),
         tileId: String(aud.tileId || ''),
         emailField: String(aud.emailField || ''),
@@ -252,18 +269,20 @@ function mount(app, { db, auth, mailer, resolveAudience, draftCopy, listEvents }
     if (!guard(req, res, req.params.entityId)) return;
     const id = uuid();
     const cfg = cleanConfig(req.body || {});
-    sql.prepare('INSERT INTO actions (id, entity_id, type, status, title, config, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)')
-      .run(id, req.params.entityId, 'email_campaign', 'draft', String((req.body || {}).title || '').slice(0, 120), JSON.stringify(cfg), req.user.email, now(), now());
+    const rec = (req.body || {}).recurring && cfg.audience.mode === 'tile' ? 1 : 0;
+    sql.prepare('INSERT INTO actions (id, entity_id, type, status, title, config, recurring, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
+      .run(id, req.params.entityId, 'email_campaign', 'draft', String((req.body || {}).title || '').slice(0, 120), JSON.stringify(cfg), rec, req.user.email, now(), now());
     res.status(201).json({ action: publicAction(getAction(id)) });
   });
   app.put('/api/actions/:entityId/:id', auth.requireAuth, (req, res) => {
     if (!guard(req, res, req.params.entityId)) return;
     const a = getAction(req.params.id);
     if (!a || a.entityId !== req.params.entityId) return res.status(404).json({ error: 'Not found' });
-    if (a.status !== 'draft') return res.status(400).json({ error: 'Only drafts can be edited' });
+    if (a.status !== 'draft' && a.status !== 'auto') return res.status(400).json({ error: 'Only drafts can be edited' });
     const cfg = { ...cleanConfig(req.body || {}), clickToken: a.config.clickToken };
-    sql.prepare('UPDATE actions SET title=?, config=?, updated_at=? WHERE id=?')
-      .run(String((req.body || {}).title || a.title).slice(0, 120), JSON.stringify(cfg), now(), a.id);
+    const rec = (req.body || {}).recurring && cfg.audience.mode === 'tile' ? 1 : 0;
+    sql.prepare('UPDATE actions SET title=?, config=?, recurring=?, updated_at=? WHERE id=?')
+      .run(String((req.body || {}).title || a.title).slice(0, 120), JSON.stringify(cfg), rec, now(), a.id);
     res.json({ action: publicAction(getAction(a.id)) });
   });
   app.delete('/api/actions/:entityId/:id', auth.requireAuth, (req, res) => {
@@ -339,14 +358,44 @@ function mount(app, { db, auth, mailer, resolveAudience, draftCopy, listEvents }
     if (!a || a.entityId !== req.params.entityId) return res.status(404).json({ error: 'Not found' });
     if (a.status !== 'draft') return res.status(400).json({ error: `Cannot approve a ${a.status} campaign` });
     if (!a.config.subject || !a.config.body) return res.status(400).json({ error: 'Subject and body are required' });
+
+    // Recurring template: approving ACTIVATES the automation (no send) — the
+    // daily check queues child drafts for explicit approval.
+    if (a.recurring) {
+      sql.prepare('UPDATE actions SET status=?, approved_by=?, approved_at=?, updated_at=? WHERE id=?')
+        .run('auto', req.user.email, now(), now(), a.id);
+      return res.json({ ok: true, activated: true });
+    }
+
     try {
-      const { list } = await audienceFor(a.entityId, a.config, req.user);
+      // Auto-queued children carry a pre-resolved snapshot (the NEW people at
+      // check time); everything else resolves the audience now.
+      let list;
+      if (a.config.audience.mode === 'snapshot') {
+        const sup = suppressed(a.entityId);
+        list = a.audience.filter((r) => !sup.has(r.email));
+      } else {
+        ({ list } = await audienceFor(a.entityId, a.config, req.user));
+      }
       if (!list.length) return res.status(400).json({ error: 'Audience is empty — nothing to send' });
       sql.prepare('UPDATE actions SET status=?, audience=?, approved_by=?, approved_at=?, updated_at=? WHERE id=?')
         .run('running', JSON.stringify(list), req.user.email, now(), now(), a.id);
+      // Remember who this campaign family has reached, for recurring dedupe.
+      const rootId = a.parentId || a.id;
+      const ins = sql.prepare('INSERT OR IGNORE INTO action_sent (root_id, email, at) VALUES (?,?,?)');
+      for (const r of list) ins.run(rootId, r.email, now());
       runCampaign(a.id).catch((e) => { console.error('[actions] run failed', a.id, e.message); setStatus(a.id, 'failed'); });
       res.json({ ok: true, sendingTo: list.length });
     } catch (e) { res.status(400).json({ error: e.message }); }
+  });
+
+  // Pause a recurring automation (back to draft; the check stops).
+  app.post('/api/actions/:entityId/:id/pause', auth.requireAuth, (req, res) => {
+    if (!guard(req, res, req.params.entityId)) return;
+    const a = getAction(req.params.id);
+    if (!a || a.entityId !== req.params.entityId || a.status !== 'auto') return res.status(400).json({ error: 'Not an active automation' });
+    setStatus(a.id, 'draft');
+    res.json({ ok: true });
   });
 
   // Detailed campaign report: per-recipient clicks (who, how many, when),
@@ -369,6 +418,39 @@ function mount(app, { db, auth, mailer, resolveAudience, draftCopy, listEvents }
       nonClickers: a.audience.filter((r) => !clickers.some((c) => c.email === r.email)).length,
     });
   });
+
+  // ── Recurring automations: the daily check ──────────────────────────────────
+  // Every active automation ('auto') re-runs its audience tile roughly daily;
+  // anyone NEW (never reached by this campaign family, not suppressed) is
+  // queued as a child DRAFT for explicit human approval — automation proposes,
+  // a person approves. The synthetic admin user scopes exactly like a real one.
+  async function autoCheck() {
+    if (!enabled()) return;
+    const due = sql.prepare("SELECT id FROM actions WHERE status='auto' AND (last_check='' OR last_check < ?)")
+      .all(new Date(Date.now() - 20 * 3600e3).toISOString());
+    for (const { id } of due) {
+      const a = getAction(id);
+      if (!a) continue;
+      sql.prepare('UPDATE actions SET last_check=? WHERE id=?').run(now(), a.id);
+      try {
+        const sysUser = { id: 'auto-check', email: 'auto@pulse', role: 'admin', entityIds: [] };
+        const { list } = await audienceFor(a.entityId, a.config, sysUser);
+        const already = new Set(sql.prepare('SELECT email FROM action_sent WHERE root_id=?').all(a.id).map((r) => r.email));
+        const fresh = list.filter((r) => !already.has(r.email));
+        if (!fresh.length) continue;
+        const childId = uuid();
+        const cfg = { ...a.config, audience: { ...a.config.audience, mode: 'snapshot' }, clickToken: crypto.randomBytes(6).toString('base64url') };
+        const day = new Date().toLocaleDateString('en-ZA', { day: 'numeric', month: 'short' });
+        sql.prepare('INSERT INTO actions (id, entity_id, type, status, title, config, audience, parent_id, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
+          .run(childId, a.entityId, 'email_campaign', 'draft', `${a.title || 'Campaign'} — ${day} (${fresh.length} new)`.slice(0, 120),
+            JSON.stringify(cfg), JSON.stringify(fresh), a.id, 'automation', now(), now());
+        console.log(`[actions] automation "${a.title}" queued ${fresh.length} new recipient(s) for approval`);
+      } catch (e) { console.error('[actions] auto-check failed', a.id, e.message); }
+    }
+  }
+  const autoTimer = setInterval(() => autoCheck().catch(() => {}), 10 * 60000);
+  if (autoTimer.unref) autoTimer.unref();
+  setTimeout(() => autoCheck().catch(() => {}), 20000);
 
   // ── public routes (no auth; registered before the SPA fallback) ──
   // Tracked CTA click → count + redirect, with the campaign's UTM parameters

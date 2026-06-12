@@ -253,7 +253,8 @@ function digestEmail({ branding, entityId, assetScope, content, roleLabel, custo
   const narrative = (content.narrative || []).map((p) => `<p style="font-size:14px;line-height:1.6;color:#3a3a3c;margin:0 0 12px;">${mdBold(p)}</p>`).join('');
   const actions = (content.actions || []).filter((a) => a.text).map((a) => {
     const txt = `<span style="color:#111;font-weight:600;">${esc(a.text)}</span>`;
-    return `<li style="margin:0 0 8px;line-height:1.5;">${a.href ? `<a href="${esc(a.href)}" style="color:${esc(b.brandColor)};text-decoration:none;">${esc(a.text)} →</a>` : txt}</li>`;
+    const makeIt = `<a href="${baseUrl()}/actions?goal=${encodeURIComponent(a.text)}" style="color:#7c3aed;text-decoration:none;font-size:12px;font-weight:700;margin-left:8px;">⚡ Make it happen</a>`;
+    return `<li style="margin:0 0 8px;line-height:1.5;">${a.href ? `<a href="${esc(a.href)}" style="color:${esc(b.brandColor)};text-decoration:none;">${esc(a.text)} →</a>` : txt}${makeIt}</li>`;
   }).join('');
   const actionsBlock = actions ? `
     <div style="margin-top:18px;padding-top:16px;border-top:1px solid #ececf0;">

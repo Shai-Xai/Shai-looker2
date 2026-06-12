@@ -206,6 +206,7 @@ export const api = {
   updateAction: (entityId, id, b) => fetch(`/api/actions/${entityId}/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   deleteAction: (entityId, id) => fetch(`/api/actions/${entityId}/${id}`, { method: 'DELETE' }).then((r) => r.ok),
   approveAction: (entityId, id) => fetch(`/api/actions/${entityId}/${id}/approve`, { method: 'POST' }).then(json),
+  pauseAction: (entityId, id) => fetch(`/api/actions/${entityId}/${id}/pause`, { method: 'POST' }).then(json),
   actionAudiencePreview: (entityId, b) => fetch(`/api/actions/${entityId}/audience-preview`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   actionDraftCopy: (entityId, b) => fetch(`/api/actions/${entityId}/draft-copy`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   actionPreviewEmail: (entityId, b) => fetch(`/api/actions/${entityId}/preview-email`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
