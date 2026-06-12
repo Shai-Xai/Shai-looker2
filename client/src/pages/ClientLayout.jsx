@@ -45,17 +45,6 @@ export default function ClientLayout() {
 
   // Experience OS inbox: unread + must-acknowledge counts for the badge/banner.
   const [inbox, setInbox] = useState({ enabled: false, unread: 0, pending: [] });
-  useEffect(() => {
-    let alive = true;
-    const poll = () => api.osInbox().then((r) => {
-      if (alive) setInbox((s) => ({ ...s, enabled: true, unread: r.unread, pending: r.threads.filter((t) => t.priority === 'must_ack' && !t.acked) }));
-    }).catch(() => {});
-    poll();
-    const t = setInterval(poll, 60000); // light poll; webhook push later
-    window.addEventListener('os-refresh', poll); // instant update after ack/reply
-    return () => { alive = false; clearInterval(t); window.removeEventListener('os-refresh', poll); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.pathname]);
 
   async function ensureDetail(sid) {
     if (details[sid]) return;
@@ -143,11 +132,31 @@ export default function ClientLayout() {
   }, [suiteEntityId]);
   // A login can hold several client profiles. The active one (shared context,
   // switched from the top-header identity) drives the whole shell — nav, theme,
-  // home, digests, actions — and persists across visits.
-  const { activeEntityId: clientEntityId } = useProfile();
-  const activeEntityId = isAdmin ? (suiteEntityId || previewEntityId) : clientEntityId;
+  // home, digests, actions — and persists across visits. An admin in the console
+  // who opens a suite is "previewing"; an admin who switched INTO a client
+  // account (mode 'client') is acting as that client (no preview banner).
+  const { activeEntityId: profileEntityId, mode: profileMode } = useProfile();
+  const previewMode = isAdmin && profileMode === 'console';
+  const activeEntityId = isAdmin
+    ? (previewMode ? (suiteEntityId || previewEntityId) : (suiteEntityId || profileEntityId))
+    : profileEntityId;
   const visibleSuites = activeEntityId ? suites.filter((s) => s.entityId === activeEntityId) : suites;
   const visibleSettlements = activeEntityId ? settlements.filter((s) => s.entityId === activeEntityId) : settlements;
+
+  // Experience OS inbox badge/banner — scoped to the ACTIVE profile so a
+  // multi-profile login only sees the current client's messages (re-polls when
+  // you switch profile). Admin console (no active entity) sees all.
+  useEffect(() => {
+    let alive = true;
+    const poll = () => api.osInbox(activeEntityId || undefined).then((r) => {
+      if (alive) setInbox((s) => ({ ...s, enabled: true, unread: r.unread, pending: r.threads.filter((t) => t.priority === 'must_ack' && !t.acked) }));
+    }).catch(() => {});
+    poll();
+    const t = setInterval(poll, 60000); // light poll; webhook push later
+    window.addEventListener('os-refresh', poll); // instant update after ack/reply
+    return () => { alive = false; clearInterval(t); window.removeEventListener('os-refresh', poll); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname, activeEntityId]);
 
   // White-label: apply the active client's brand pair (primary + secondary) to
   // the whole shell — UI accents AND chart palettes follow it. Clients theme to
@@ -462,7 +471,7 @@ export default function ClientLayout() {
             <span style={{ background: 'rgba(255,255,255,0.25)', borderRadius: 980, padding: '5px 14px', fontWeight: 700, flexShrink: 0 }}>Open →</span>
           </button>
         )}
-        {isAdmin && (
+        {previewMode && (
           <div style={previewBar}>
             <span style={{ fontWeight: 700 }}>👁 Client preview{activeEntityId && (() => { const n = suites.find((s) => s.entityId === activeEntityId)?.entityName; return n ? ` — ${n}` : ''; })()}</span>
             <span style={{ opacity: 0.85 }}>You're viewing this exactly as the client would, scoped to their data.</span>

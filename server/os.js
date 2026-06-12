@@ -134,7 +134,11 @@ function mount(app, { db, auth, mailer }) {
   }
   function entitiesFilter(u, qEntity) {
     if (isAdmin(u)) return qEntity ? [qEntity] : null; // null = all
-    return entityIds(u);
+    const own = entityIds(u);
+    // Multi-profile clients: scope to the requested profile (if they own it),
+    // else they'd see every profile's messages at once. No entity → all theirs.
+    if (qEntity) return own.includes(qEntity) ? [qEntity] : [];
+    return own;
   }
 
   // ── middleware ──

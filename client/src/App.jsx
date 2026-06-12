@@ -27,50 +27,48 @@ function Header() {
   const navigate = useNavigate();
   const { user, isAdmin, logout } = useAuth();
   const { theme, toggle } = useTheme();
-  const { active, entities, activeEntityId, setProfile } = useProfile();
+  const { active, entities, activeEntityId, mode, setProfile, enterConsole } = useProfile();
   const isMobile = useIsMobile();
-  // Clients lead with their OWN identity (active profile's logo + name) — and
-  // that identity IS the profile switcher when the login holds several clients.
-  // The Howler·Pulse platform badge sits on the right as the "powered by".
-  // Admins keep the platform brand on the left + their header controls.
-  const showClientIdentity = !isAdmin && active;
-  const canSwitch = !isAdmin && entities.length > 1;
+  // "In a client experience" = a client login, or an admin acting as one of
+  // their client accounts. Then the header leads with the client's identity and
+  // the Howler·Pulse badge sits on the right as the "powered by". In the admin
+  // console it's the reverse: Howler brand left, admin controls right.
+  const inClientView = mode === 'client' && !!active;
+  // The top-left identity doubles as the workspace switcher when there's
+  // somewhere else to go: a client with >1 profile, or ANY admin that's linked
+  // to client accounts (so they can flip between console and those clients).
+  const canSwitch = isAdmin ? entities.length > 0 : entities.length > 1;
+  const enterClient = (id) => { setProfile(id); navigate('/'); };
+  const goConsole = () => { enterConsole(); navigate('/admin'); };
   return (
     <header style={{
       background: 'var(--frost)', backdropFilter: 'saturate(180%) blur(20px)', WebkitBackdropFilter: 'saturate(180%) blur(20px)',
       borderBottom: '1px solid var(--hairline)', padding: isMobile ? '0 14px' : '0 22px',
       height: 56, display: 'flex', alignItems: 'center', gap: isMobile ? 8 : 12, flexShrink: 0, zIndex: 10,
     }}>
-      {showClientIdentity ? (
-        <ProfileIdentity
-          active={active}
-          entities={entities}
-          activeEntityId={activeEntityId}
-          canSwitch={canSwitch}
-          onSwitch={(id) => { setProfile(id); navigate('/'); }}
-          onHome={() => navigate('/')}
-          isMobile={isMobile}
-        />
-      ) : (
-        <>
-          <div style={{ cursor: 'pointer', display: 'flex' }} onClick={() => navigate('/')}>
-            <Logo size={30} radius={8} />
-          </div>
-          <Link to="/" style={{ fontSize: 17, fontWeight: 700, letterSpacing: '-0.3px', textDecoration: 'none', color: 'var(--text)' }}>Howler&nbsp;:&nbsp;Pulse</Link>
-        </>
-      )}
+      <WorkspaceSwitcher
+        inClientView={inClientView}
+        active={active}
+        entities={entities}
+        activeEntityId={activeEntityId}
+        isAdmin={isAdmin}
+        canSwitch={canSwitch}
+        onEnterClient={enterClient}
+        onConsole={goConsole}
+        onHome={() => navigate('/')}
+      />
       <div style={{ flex: 1 }} />
-      {/* Clients get Integrations, theme and Log out in the sidebar's bottom-left
-          profile menu — the header carries only the Howler·Pulse platform badge.
-          Admin pages have no persistent sidebar, so admins keep the controls. */}
-      {isAdmin ? (
+      {/* Admin console: admin controls on the right. Client experience (client
+          login OR admin acting as a client): just the Howler·Pulse badge — the
+          account actions live in the sidebar's bottom-left profile menu. */}
+      {isAdmin && !inClientView ? (
         <>
           <Link to="/admin" style={navLink}>Admin</Link>
           <button onClick={toggle} title={theme === 'dark' ? 'Light mode' : 'Dark mode'} aria-label="Toggle theme" style={themeBtn}>{theme === 'dark' ? '☀️' : '🌙'}</button>
           {!isMobile && <UserBadge user={user} isAdmin={isAdmin} />}
           <button onClick={() => logout()} style={logoutBtn}>{isMobile ? 'Exit' : 'Log out'}</button>
         </>
-      ) : showClientIdentity && (
+      ) : inClientView && (
         <button onClick={() => navigate('/')} title="Powered by Howler Pulse" style={{ display: 'flex', alignItems: 'center', gap: 7, border: 'none', background: 'transparent', cursor: 'pointer', padding: 0, opacity: 0.85 }}>
           <Logo size={22} radius={6} />
           {!isMobile && <span style={{ fontSize: 13, fontWeight: 600, letterSpacing: '-0.2px', color: 'var(--muted)' }}>Howler&nbsp;:&nbsp;Pulse</span>}
@@ -80,10 +78,11 @@ function Header() {
   );
 }
 
-// The client identity in the top-left. With more than one profile it doubles as
-// the profile switcher: click to drop a list of the other clients you can act
-// as. Otherwise it's just a Home button.
-function ProfileIdentity({ active, entities, activeEntityId, canSwitch, onSwitch, onHome, isMobile }) {
+// Top-left identity + workspace switcher. Shows the active client's identity (in
+// a client experience) or the Howler·Pulse brand (admin console). When the login
+// can go elsewhere, clicking it drops a list: for admins, "Admin console" plus
+// each linked client; for clients, their profiles.
+function WorkspaceSwitcher({ inClientView, active, entities, activeEntityId, isAdmin, canSwitch, onEnterClient, onConsole, onHome }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   useEffect(() => {
@@ -97,10 +96,15 @@ function ProfileIdentity({ active, entities, activeEntityId, canSwitch, onSwitch
       ? <img src={e.logo} alt="" style={{ height: size, maxWidth: size * 2.8, objectFit: 'contain', flexShrink: 0 }} />
       : <span style={{ width: size, height: size, borderRadius: 7, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: size * 0.5, fontWeight: 800, color: '#fff', background: 'var(--brand)' }}>{(e.name || '?').trim().charAt(0).toUpperCase()}</span>
   );
-  const idRow = (
+  const idRow = inClientView ? (
     <span style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
       <Avatar e={active} size={30} />
       <span style={{ fontSize: 16, fontWeight: 700, letterSpacing: '-0.2px', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{active.name}</span>
+    </span>
+  ) : (
+    <span style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+      <Logo size={30} radius={8} />
+      <span style={{ fontSize: 17, fontWeight: 700, letterSpacing: '-0.3px', color: 'var(--text)' }}>Howler&nbsp;:&nbsp;Pulse</span>
     </span>
   );
   if (!canSwitch) {
@@ -108,17 +112,28 @@ function ProfileIdentity({ active, entities, activeEntityId, canSwitch, onSwitch
   }
   return (
     <div ref={ref} style={{ position: 'relative' }}>
-      <button onClick={() => setOpen((o) => !o)} style={identityBtn} title="Switch profile">
+      <button onClick={() => setOpen((o) => !o)} style={identityBtn} title="Switch workspace">
         {idRow}
-        <span style={{ flexShrink: 0, fontSize: 11, color: 'var(--muted)', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}>▾</span>
+        <span style={{ flexShrink: 0, fontSize: 14, color: 'var(--text)', lineHeight: 1, marginLeft: 3, transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}>▾</span>
       </button>
       {open && (
         <div className="modal-in" style={identityMenu}>
-          <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)', padding: '4px 10px 6px' }}>Switch profile</div>
+          {isAdmin && (
+            <>
+              <div style={menuCap}>Howler</div>
+              <button className="nav-row" onClick={() => { setOpen(false); if (inClientView) onConsole(); }}
+                style={{ ...identityItem, background: !inClientView ? 'rgba(128,128,128,0.10)' : 'transparent' }}>
+                <span style={{ width: 22, textAlign: 'center', fontSize: 15, flexShrink: 0 }}>⚙</span>
+                <span style={{ flex: 1, textAlign: 'left', fontWeight: !inClientView ? 700 : 500, fontSize: 14 }}>Admin console</span>
+                {!inClientView && <span style={{ flexShrink: 0, color: 'var(--brand)', fontWeight: 700 }}>✓</span>}
+              </button>
+              {entities.length > 0 && <div style={menuCap}>Act as client</div>}
+            </>
+          )}
           {entities.map((e) => {
-            const on = e.id === activeEntityId;
+            const on = inClientView && e.id === activeEntityId;
             return (
-              <button key={e.id} className="nav-row" onClick={() => { setOpen(false); if (!on) onSwitch(e.id); }}
+              <button key={e.id} className="nav-row" onClick={() => { setOpen(false); if (!on) onEnterClient(e.id); }}
                 style={{ ...identityItem, background: on ? 'rgba(128,128,128,0.10)' : 'transparent' }}>
                 <Avatar e={e} size={22} />
                 <span style={{ flex: 1, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: on ? 700 : 500, fontSize: 14 }}>{e.name}</span>
@@ -154,24 +169,30 @@ function UserBadge({ user, isAdmin }) {
 const identityBtn = { display: 'flex', alignItems: 'center', gap: 8, border: 'none', background: 'transparent', cursor: 'pointer', padding: '4px 8px 4px 4px', borderRadius: 10, minWidth: 0 };
 const identityMenu = { position: 'absolute', top: 'calc(100% + 6px)', left: 0, minWidth: 220, zIndex: 71, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, boxShadow: '0 12px 36px -8px rgba(0,0,0,0.28)', padding: 6, display: 'flex', flexDirection: 'column', gap: 2 };
 const identityItem = { display: 'flex', alignItems: 'center', gap: 10, width: '100%', border: 'none', cursor: 'pointer', padding: '8px 10px', borderRadius: 9, color: 'var(--text)' };
+const menuCap = { fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)', padding: '6px 10px 4px' };
 const navLink = { fontSize: 13, fontWeight: 600, color: 'var(--brand)', textDecoration: 'none' };
 const logoutBtn = { fontSize: 12, fontWeight: 600, border: 'none', background: 'rgba(128,128,128,0.12)', color: 'var(--text)', borderRadius: 980, padding: '7px 14px', cursor: 'pointer' };
 const themeBtn = { border: 'none', background: 'rgba(128,128,128,0.12)', borderRadius: 980, width: 30, height: 30, fontSize: 14, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1 };
 
 function Shell() {
   const { user, loading, isAdmin } = useAuth();
+  const { mode, activeEntityId } = useProfile();
 
   if (loading) {
     return <div style={{ minHeight: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)' }}>Loading…</div>;
   }
   if (!user) return <LoginPage />;
 
+  // An admin who has switched into one of their client accounts gets the real
+  // client shell (scoped to that entity), not the admin console.
+  const actingAsClient = isAdmin && mode === 'client' && !!activeEntityId;
+
   return (
     <BrowserRouter>
       <DrillProvider>
         <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh' }}>
           <Header />
-          {isAdmin ? (
+          {isAdmin && !actingAsClient ? (
             <Routes>
               <Route path="/" element={<HomePage />} />
               <Route path="/d/:id" element={<ViewPage />} />
