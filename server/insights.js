@@ -226,7 +226,7 @@ const HOME_SYSTEM = `You are the Owl — Howler Pulse's analyst — writing a pr
 Respond with ONLY strict JSON (no markdown fences):
 {
   "headline": "1-2 sentences. The single most important story right now. May use **bold** for key numbers.",
-  "bullets": [ { "text": "specific, quantitative observation (may use **bold**)", "dashboardId": "id from CATALOGUE or null" } ],
+  "bullets": [ { "text": "specific, quantitative observation (may use **bold**)", "dashboardId": "id from CATALOGUE or null", "threadId": "ONLY when the bullet is about a MESSAGES item: its [id:…] value, else omit" } ],
   "suggestions": [ { "title": "short hook (max 8 words)", "reason": "one line on why it's worth a look now", "dashboardId": "id from CATALOGUE" } ]
 }
 
@@ -350,7 +350,7 @@ async function briefHome({ tiles, profile, catalogue, instructions, apiKey, acti
   const fromHowler = (messages || []).filter((m) => m.fromHowler);
   if (fromHowler.length) {
     lines.push('', 'MESSAGES (from the Howler team):');
-    for (const m of fromHowler) lines.push(`- ${m.unread ? '[UNREAD] ' : ''}${m.priority === 'must_ack' && !m.acked ? '[NEEDS ACK] ' : ''}"${m.title}": ${m.preview}`);
+    for (const m of fromHowler) lines.push(`- [id:${m.id}] ${m.unread ? '[UNREAD] ' : ''}${m.priority === 'must_ack' && !m.acked ? '[NEEDS ACK] ' : ''}"${m.title}": ${m.preview}`);
   }
   lines.push('');
   lines.push('CATALOGUE:');

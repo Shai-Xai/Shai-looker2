@@ -1524,13 +1524,17 @@ app.get('/api/my/briefing', auth.requireAuth, async (req, res) => {
       briefingInstructionsFor(req.user, entityId, suites),
       timeDefaults()[segment],
     ].filter(Boolean).join('\n\n');
-    const raw = await insights.briefHome({ tiles, profile: profileForAi, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), messages: recentMessages(entityId, req.user.id) });
+    const msgs = recentMessages(entityId, req.user.id);
+    const raw = await insights.briefHome({ tiles, profile: profileForAi, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), messages: msgs });
     const link = (id) => (id && byId[id] ? { dashboardId: id, suiteId: byId[id].suiteId, label: `${byId[id].setName} → ${byId[id].title}` } : null);
+    const msgIds = new Set(msgs.map((m) => m.id));
     const out = {
       available: true,
       generatedAt: new Date().toISOString(),
       headline: String(raw.headline || '').slice(0, 600),
-      bullets: (raw.bullets || []).slice(0, 4).map((b) => ({ text: String(b.text || '').slice(0, 400), link: link(b.dashboardId) })).filter((b) => b.text),
+      bullets: (raw.bullets || []).slice(0, 4)
+        .map((b) => ({ text: String(b.text || '').slice(0, 400), link: link(b.dashboardId), threadId: msgIds.has(b.threadId) ? b.threadId : null }))
+        .filter((b) => b.text),
       suggestions: (raw.suggestions || []).slice(0, 3)
         .map((s) => ({ title: String(s.title || '').slice(0, 80), reason: String(s.reason || '').slice(0, 200), link: link(s.dashboardId) }))
         .filter((s) => s.title && s.link),
@@ -1644,6 +1648,22 @@ app.get('/api/admin/entities/:id/digest-tiles', auth.requireAdmin, (req, res) =>
 app.get('/api/my/digest-tiles/:entityId', auth.requireAuth, (req, res) => {
   if (!(req.user.entityIds || []).includes(req.params.entityId)) return res.status(403).json({ error: 'Not allowed' });
   res.json(digestTileCatalogue(req.params.entityId));
+});
+
+// Home message-card dismissals: per-user, so a handled message can be cleared
+// off the home page without touching the inbox record.
+app.get('/api/my/dismissed-threads', auth.requireAuth, (req, res) => {
+  try { res.json({ dismissed: JSON.parse(db.getUserPref(req.user.id, 'home_dismissed') || '[]') }); }
+  catch { res.json({ dismissed: [] }); }
+});
+app.post('/api/my/dismiss-thread', auth.requireAuth, (req, res) => {
+  const tid = String((req.body || {}).threadId || '');
+  if (!tid) return res.status(400).json({ error: 'threadId required' });
+  let list = [];
+  try { list = JSON.parse(db.getUserPref(req.user.id, 'home_dismissed') || '[]'); } catch { /* fresh */ }
+  if (!list.includes(tid)) list.push(tid);
+  db.setUserPref(req.user.id, 'home_dismissed', JSON.stringify(list.slice(-200)));
+  res.json({ ok: true });
 });
 
 // Home-page strip: a client's recent actions + how they're performing.

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useOutletContext } from 'react-router-dom';
+import { useOutletContext, useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/auth.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
@@ -12,7 +12,9 @@ export default function InboxPage() {
   const { isAdmin } = useAuth();
   const { previewEntityId } = useOutletContext() || {};
   const [list, setList] = useState(null);
-  const [openId, setOpenId] = useState(null);
+  // Deep links (briefing "Open message →") arrive as /inbox?thread=<id>.
+  const [params] = useSearchParams();
+  const [openId, setOpenId] = useState(() => params.get('thread') || null);
 
   const load = () => api.osInbox(previewEntityId).then((r) => setList(r.threads)).catch(() => setList([]));
   useEffect(() => { load(); }, [previewEntityId]); // eslint-disable-line react-hooks/exhaustive-deps

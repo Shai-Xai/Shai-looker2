@@ -28,6 +28,7 @@ export default function ClientHome() {
   const [refreshErr, setRefreshErr] = useState(false);
   const [tuneOpen, setTuneOpen] = useState(false);
   const [messages, setMessages] = useState([]);
+  const [dismissed, setDismissed] = useState([]);
 
   useEffect(() => { api.mySuites().then(setSuites).catch(() => {}); }, []);
   useEffect(() => {
@@ -35,7 +36,12 @@ export default function ClientHome() {
     api.mySnapshot(previewEntityId).then(setSnap).catch(() => setSnap({ kpis: [], shortcuts: [], settlement: null, lastVisit: null }));
     api.myBriefing(previewEntityId).then(setBrief).catch(() => setBrief({ available: false }));
     api.osInbox(previewEntityId).then((r) => setMessages(r.threads || [])).catch(() => {});
+    api.getDismissedThreads().then((r) => setDismissed(r.dismissed || [])).catch(() => {});
   }, [previewEntityId]);
+  const dismissMessage = (id) => {
+    setDismissed((d) => [...d, id]); // optimistic
+    api.dismissThread(id).catch(() => {});
+  };
 
   // Refresh re-pulls the live numbers AND regenerates the briefing — otherwise
   // the Owl just re-phrases the same cached facts and looks unchanged.
@@ -105,7 +111,9 @@ export default function ClientHome() {
                       <span style={{ color: 'var(--brand)', flexShrink: 0 }}>●</span>
                       <span>
                         {bold(b.text)}{' '}
-                        {b.link && (
+                        {b.threadId ? (
+                          <button onClick={() => vtNavigate(navigate, `/inbox?thread=${b.threadId}`)} style={inlineLink}>Open message →</button>
+                        ) : b.link && (
                           <button onClick={() => go(b.link.suiteId, b.link.dashboardId)} style={inlineLink}>{b.link.label} →</button>
                         )}
                       </span>
@@ -119,8 +127,14 @@ export default function ClientHome() {
         </div>
       )}
 
-      {/* Messages from Howler — recent threads, surfaced on home. */}
-      <MessagesFromHowler messages={messages} isMobile={isMobile} onOpen={() => vtNavigate(navigate, '/inbox')} />
+      {/* Messages from Howler — recent threads, surfaced on home. Handled ones
+          can be dismissed (per-user; the inbox record is untouched). */}
+      <MessagesFromHowler
+        messages={messages.filter((m) => !dismissed.includes(m.id))}
+        isMobile={isMobile}
+        onOpen={(id) => vtNavigate(navigate, id ? `/inbox?thread=${id}` : '/inbox')}
+        onDismiss={dismissMessage}
+      />
 
       {/* Pinned tiles — live tiles the user chose to keep on home. Uniform
           cards in a horizontal snap carousel (one row, scroll for more). */}
@@ -352,7 +366,7 @@ const stripArrow = { position: 'absolute', top: '50%', transform: 'translateY(-5
 // Messages from the Howler team, surfaced on home (the inbox lives in the nav).
 // Shows the few most recent threads with an unread dot + priority chip; hidden
 // when there are none.
-function MessagesFromHowler({ messages, isMobile, onOpen }) {
+function MessagesFromHowler({ messages, isMobile, onOpen, onDismiss }) {
   const recent = (messages || []).slice(0, 3);
   if (!recent.length) return null;
   const unreadCount = (messages || []).filter((m) => m.unread).length;
@@ -366,15 +380,24 @@ function MessagesFromHowler({ messages, isMobile, onOpen }) {
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : `repeat(${Math.min(recent.length, 3)}, 1fr)`, gap: 12 }}>
         {recent.map((m) => {
           const c = chip(m);
+          // A pending must-ack can't be cleared off home — acknowledge it first.
+          const dismissible = !(m.priority === 'must_ack' && !m.acked);
           return (
-            <button key={m.id} className="lift" style={cardBtn} onClick={onOpen}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+            <button key={m.id} className="lift" style={{ ...cardBtn, position: 'relative' }} onClick={() => onOpen(m.id)}>
+              {dismissible && (
+                <span
+                  role="button" title="Clear from home (stays in your inbox)"
+                  onClick={(e) => { e.stopPropagation(); onDismiss(m.id); }}
+                  style={{ position: 'absolute', top: 8, right: 10, fontSize: 13, color: 'var(--muted)', lineHeight: 1, padding: 3 }}
+                >✕</span>
+              )}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 7, paddingRight: 16 }}>
                 {m.unread && <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--brand)', flexShrink: 0 }} />}
                 <span style={{ fontSize: 13.5, fontWeight: m.unread ? 800 : 700, lineHeight: 1.4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.title || '(no subject)'}</span>
                 {c && <span style={{ fontSize: 10, fontWeight: 700, borderRadius: 980, padding: '2px 8px', background: c.bg, color: c.c, flexShrink: 0 }}>{c.t}</span>}
               </div>
               {m.preview?.body && <div style={{ fontSize: 12, color: 'var(--muted-2)', lineHeight: 1.5, marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.preview.body}</div>}
-              <div style={{ marginTop: 8, fontSize: 12, fontWeight: 700, color: 'var(--brand)' }}>Open inbox →</div>
+              <div style={{ marginTop: 8, fontSize: 12, fontWeight: 700, color: 'var(--brand)' }}>Open message →</div>
             </button>
           );
         })}
