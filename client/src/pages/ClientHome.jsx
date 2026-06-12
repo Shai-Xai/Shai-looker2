@@ -170,12 +170,16 @@ export default function ClientHome() {
                 {s.reason && <div style={{ fontSize: 12, color: 'var(--muted-2)', lineHeight: 1.5, marginTop: 4 }}>{s.reason}</div>}
                 <div style={{ marginTop: 9, display: 'flex', alignItems: 'center', gap: 12 }}>
                   <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--brand)' }}>{s.link.label} →</span>
-                  <span
-                    role="button" tabIndex={0}
-                    title="Turn this suggestion into a campaign"
-                    onClick={(e) => { e.stopPropagation(); vtNavigate(navigate, `/actions?goal=${encodeURIComponent(`${s.title}${s.reason ? ` — ${s.reason}` : ''}`)}`); }}
-                    style={{ fontSize: 11.5, fontWeight: 700, color: '#7c3aed', background: 'rgba(124,58,237,0.10)', borderRadius: 980, padding: '3px 10px' }}
-                  >⚡ Make it happen</span>
+                  {/* Only when the suggestion maps to an EXECUTABLE capability
+                      (validated server-side) — never a button we can't deliver. */}
+                  {s.action && (
+                    <span
+                      role="button" tabIndex={0}
+                      title="Turn this suggestion into a campaign"
+                      onClick={(e) => { e.stopPropagation(); vtNavigate(navigate, `/actions?goal=${encodeURIComponent(`${s.title}${s.reason ? ` — ${s.reason}` : ''}`)}&type=${s.action}`); }}
+                      style={{ fontSize: 11.5, fontWeight: 700, color: '#7c3aed', background: 'rgba(124,58,237,0.10)', borderRadius: 980, padding: '3px 10px' }}
+                    >⚡ Make it happen</span>
+                  )}
                 </div>
               </button>
             ))}

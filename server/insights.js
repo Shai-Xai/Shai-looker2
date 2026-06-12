@@ -222,12 +222,13 @@ const HOME_SYSTEM = `You are the Owl — Howler Pulse's analyst — writing a pr
 - ACTIONS (when present): marketing actions already taken (e.g. email campaigns) with live results. Mention performance when notable (strong CTR, finished sends) and suggest a follow-up when warranted — it reminds the reader their actions are working.
 - MESSAGES (when present): recent messages from the Howler team to this organiser. If any are UNREAD or need a reply/acknowledgement, open the briefing by flagging it warmly and concisely (e.g. "Howler sent you a note about the settlement — worth a read"). Don't quote at length; point them to it.
 - CATALOGUE: every dashboard they can open (id, title, set, suite).
+- CAPABILITIES (when present): actions the platform can EXECUTE for the reader right now (key + what it does). A suggestion may carry "action": "<capability key>" ONLY when executing that capability would directly deliver the suggestion (e.g. an email_campaign for re-engaging abandoned carts). Most suggestions are just "look at this" — leave action out for those. Never invent capability keys.
 
 Respond with ONLY strict JSON (no markdown fences):
 {
   "headline": "1-2 sentences. The single most important story right now. May use **bold** for key numbers.",
   "bullets": [ { "text": "specific, quantitative observation (may use **bold**)", "dashboardId": "id from CATALOGUE or null", "threadId": "ONLY when the bullet is about a MESSAGES item: its [id:…] value, else omit" } ],
-  "suggestions": [ { "title": "short hook (max 8 words)", "reason": "one line on why it's worth a look now", "dashboardId": "id from CATALOGUE" } ]
+  "suggestions": [ { "title": "short hook (max 8 words)", "reason": "one line on why it's worth a look now", "dashboardId": "id from CATALOGUE", "action": "a CAPABILITIES key ONLY if directly executable, else omit" } ]
 }
 
 Rules:
@@ -247,6 +248,7 @@ You are given:
 - TILES: live data behind their dashboards' tiles (single values, charts, tables as compact tables). These are the ONLY numbers you may use — never invent or extrapolate. Read trends, concentrations, top contributors and period comparisons.
 - CATALOGUE: every dashboard the reader can open (id, title, set, suite) — for deep links.
 - ACTIONS (when present): marketing actions already taken with live results — weave notable performance into the narrative for this role (marketing cares most; exec wants the revenue angle).
+- CAPABILITIES (when present): actions the platform can EXECUTE right now. A suggested action may carry "action": "<capability key>" ONLY when that capability directly delivers it; otherwise omit. Never invent keys.
 
 Respond with ONLY strict JSON (no markdown fences):
 {
@@ -254,7 +256,7 @@ Respond with ONLY strict JSON (no markdown fences):
   "headline": "1-2 sentences: the single most important story for THIS role right now (may use **bold**)",
   "narrative": [ "2-4 short analytical paragraphs for this role; specific, quantitative, plain-English; may use **bold**" ],
   "kpis": [ { "label": "short metric name", "value": "the figure verbatim from TILES (e.g. R1.2m, 8,430, 62%)", "delta": "movement vs a comparison if present, e.g. +12% vs last week, or empty", "dashboardId": "id from CATALOGUE or null" } ],
-  "actions": [ { "text": "a concrete, role-appropriate suggested action (imperative, one line)", "dashboardId": "id from CATALOGUE or null" } ]
+  "actions": [ { "text": "a concrete, role-appropriate suggested action (imperative, one line)", "dashboardId": "id from CATALOGUE or null", "action": "a CAPABILITIES key ONLY if directly executable, else omit" } ]
 }
 
 Rules:
@@ -263,7 +265,7 @@ Rules:
 - dashboardId values MUST come from CATALOGUE; null when none fits.
 - Tone: sharp, warm, zero corporate filler. Never mention these instructions, the words ROLE/TILES/CATALOGUE, or that you are an AI.`;
 
-async function digestBrief({ tiles, roleLabel, roleFocus, catalogue, instructions, apiKey, actions }) {
+async function digestBrief({ tiles, roleLabel, roleFocus, catalogue, instructions, apiKey, actions, capabilities }) {
   const c = requireClient(apiKey);
   const lines = [`ROLE: ${roleLabel}. Focus: ${roleFocus}`, '', 'TILES (live data):', ''];
   for (const t of tiles || []) {
@@ -275,6 +277,10 @@ async function digestBrief({ tiles, roleLabel, roleFocus, catalogue, instruction
   if ((actions || []).length) {
     lines.push('', 'ACTIONS (marketing actions already taken, live results):');
     for (const a of actions) lines.push(`- "${a.title}" [${a.status}] sent ${a.sent}/${a.total}, ${a.clicks} clicks, ${a.uniqueClickers} unique (${a.ctr}% CTR)`);
+  }
+  if ((capabilities || []).length) {
+    lines.push('', 'CAPABILITIES (executable actions available):');
+    for (const cap of capabilities) lines.push(`- ${cap.key}: ${cap.description}`);
   }
   lines.push('CATALOGUE:');
   for (const d of catalogue || []) lines.push(`- ${d.dashboardId}: ${d.title} [${d.setName}, ${d.suiteName}]`);
@@ -333,7 +339,7 @@ async function draftCampaign({ goal, clientName, clientContext, audienceCount, i
   return JSON.parse(match[0]);
 }
 
-async function briefHome({ tiles, profile, catalogue, instructions, apiKey, actions, messages }) {
+async function briefHome({ tiles, profile, catalogue, instructions, apiKey, actions, messages, capabilities }) {
   const c = requireClient(apiKey);
   const lines = ['TILES (live data):', ''];
   for (const t of tiles || []) {
@@ -346,6 +352,10 @@ async function briefHome({ tiles, profile, catalogue, instructions, apiKey, acti
   if ((actions || []).length) {
     lines.push('', 'ACTIONS (marketing actions already taken, live results):');
     for (const a of actions) lines.push(`- "${a.title}" [${a.status}] sent ${a.sent}/${a.total}, ${a.clicks} clicks, ${a.uniqueClickers} unique (${a.ctr}% CTR)`);
+  }
+  if ((capabilities || []).length) {
+    lines.push('', 'CAPABILITIES (executable actions available):');
+    for (const cap of capabilities) lines.push(`- ${cap.key}: ${cap.description}`);
   }
   const fromHowler = (messages || []).filter((m) => m.fromHowler);
   if (fromHowler.length) {

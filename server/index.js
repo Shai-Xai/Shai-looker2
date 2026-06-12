@@ -1525,7 +1525,7 @@ app.get('/api/my/briefing', auth.requireAuth, async (req, res) => {
       timeDefaults()[segment],
     ].filter(Boolean).join('\n\n');
     const msgs = recentMessages(entityId, req.user.id);
-    const raw = await insights.briefHome({ tiles, profile: profileForAi, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), messages: msgs });
+    const raw = await insights.briefHome({ tiles, profile: profileForAi, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), messages: msgs, capabilities: ACTION_CAPABILITIES });
     const link = (id) => (id && byId[id] ? { dashboardId: id, suiteId: byId[id].suiteId, label: `${byId[id].setName} → ${byId[id].title}` } : null);
     const msgIds = new Set(msgs.map((m) => m.id));
     const out = {
@@ -1536,7 +1536,9 @@ app.get('/api/my/briefing', auth.requireAuth, async (req, res) => {
         .map((b) => ({ text: String(b.text || '').slice(0, 400), link: link(b.dashboardId), threadId: msgIds.has(b.threadId) ? b.threadId : null }))
         .filter((b) => b.text),
       suggestions: (raw.suggestions || []).slice(0, 3)
-        .map((s) => ({ title: String(s.title || '').slice(0, 80), reason: String(s.reason || '').slice(0, 200), link: link(s.dashboardId) }))
+        // `action` = an executable capability key — only then does the UI offer
+        // "Make it happen". Validated against the registry; AI can't invent one.
+        .map((s) => ({ title: String(s.title || '').slice(0, 80), reason: String(s.reason || '').slice(0, 200), link: link(s.dashboardId), action: CAPABILITY_KEYS.has(s.action) ? s.action : null }))
         .filter((s) => s.title && s.link),
     };
     cachePut(briefCache, key, out);
@@ -1615,14 +1617,14 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
   if (!factTiles.length) throw new Error('No tile data available to summarise');
   const byId = Object.fromEntries(catalogue.map((c) => [c.dashboardId, c]));
   const instructions = [aiInstructionsFor(null), briefingInstructionsFor(user, entityId, clientCatalogue(entityId).suites)].filter(Boolean).join('\n\n');
-  const raw = await insights.digestBrief({ tiles: factTiles, roleLabel: lens.label, roleFocus: effectiveFocus, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId) });
+  const raw = await insights.digestBrief({ tiles: factTiles, roleLabel: lens.label, roleFocus: effectiveFocus, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), capabilities: ACTION_CAPABILITIES });
   const href = (id) => { const c = id && byId[id]; return c ? `${mailer.baseUrl()}/suite/${c.suiteId}/d/${id}` : ''; };
   return {
     subject: String(raw.subject || '').slice(0, 120),
     headline: String(raw.headline || '').slice(0, 600),
     narrative: (raw.narrative || []).slice(0, 5).map((s) => String(s).slice(0, 800)).filter(Boolean),
     kpis: (raw.kpis || []).slice(0, 6).map((k) => ({ label: String(k.label || '').slice(0, 40), value: String(k.value || '').slice(0, 30), delta: String(k.delta || '').slice(0, 40), href: href(k.dashboardId) })).filter((k) => k.label && k.value),
-    actions: (raw.actions || []).slice(0, 3).map((a) => ({ text: String(a.text || '').slice(0, 200), href: href(a.dashboardId) })).filter((a) => a.text),
+    actions: (raw.actions || []).slice(0, 3).map((a) => ({ text: String(a.text || '').slice(0, 200), href: href(a.dashboardId), action: CAPABILITY_KEYS.has(a.action) ? a.action : null })).filter((a) => a.text),
   };
 }
 
@@ -1672,6 +1674,21 @@ app.get('/api/actions-summary/:entityId', auth.requireAuth, (req, res) => {
   if (req.user.role !== 'admin' && !(req.user.entityIds || []).includes(id)) return res.status(403).json({ error: 'Not allowed' });
   res.json({ actions: actionsSummaryFor(id, 6) });
 });
+
+// ─── Action capabilities ────────────────────────────────────────────────────────
+// What the Action Engine can actually EXECUTE today. The briefing/digest AI may
+// only mark a suggestion as actionable ("Make it happen") with one of these
+// keys — so the button never appears on suggestions we can't deliver. New
+// executors (meta_ads, howler_writeback…) get added here and suggestions start
+// lighting up automatically.
+const ACTION_CAPABILITIES = [
+  {
+    key: 'email_campaign',
+    label: 'Email campaign',
+    description: 'Send a targeted, branded email campaign to a customer audience pulled from the data — e.g. re-engage abandoned-cart customers, nudge a ticket tier, announce to past buyers.',
+  },
+];
+const CAPABILITY_KEYS = new Set(ACTION_CAPABILITIES.map((c) => c.key));
 
 // Compact summary of a client's recent marketing actions (non-draft campaigns
 // + results) — shown on the home page and fed to the briefing/digest AI so the
