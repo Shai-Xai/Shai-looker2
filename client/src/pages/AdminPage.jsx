@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import IntegrationsForm from '../components/IntegrationsForm.jsx';
 import MailTemplateEditor from '../components/MailTemplateEditor.jsx';
+import MailLogView from '../components/MailLogView.jsx';
 import OwlAddressCard from '../components/OwlAddressCard.jsx';
 import DigestManager from '../components/DigestManager.jsx';
 import CampaignManager from '../components/CampaignManager.jsx';
@@ -1137,78 +1138,10 @@ function BriefingSettings() {
 
 // ─── Email audit: everything sent + what's scheduled next ──────────────────────
 function MailLog() {
-  const [data, setData] = useState(null);
-  const [kind, setKind] = useState('');
-  const [status, setStatus] = useState('');
-  const load = () => api.getMailLog({ kind, status, limit: 200 }).then(setData).catch(() => setData({ log: [], upcoming: [] }));
-  useEffect(() => { load(); }, [kind, status]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  if (!data) return <Muted>Loading…</Muted>;
-  const KINDS = { digest: '🗓 Digest', campaign: '⚡ Campaign', notification: '📥 Notification', test: '🧪 Test', other: 'Other' };
-  const fmtT = (iso) => { try { return new Date(iso).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch { return iso; } };
-  const statusColor = (s) => s === 'sent' ? 'var(--success, #10b981)' : s === 'failed' ? 'var(--error, #ef4444)' : 'var(--muted)';
-
   return (
     <div>
       <p style={hint}>Every email the platform sends — notifications, digests, campaigns, tests — and what's scheduled to go out next.</p>
-
-      {data.upcoming.length > 0 && (
-        <div style={{ ...cardStyle, marginBottom: 16 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>⏭ Scheduled next</div>
-          {data.upcoming.map((u) => (
-            <div key={u.id} style={{ display: 'flex', gap: 10, alignItems: 'baseline', padding: '5px 0', borderTop: '1px solid var(--hairline)', fontSize: 12.5 }}>
-              <span style={{ fontWeight: 600 }}>{u.title}</span>
-              <span style={{ color: 'var(--muted)' }}>{u.entityName}</span>
-              <span style={{ color: 'var(--muted)' }}>{u.recipients} recipient{u.recipients === 1 ? '' : 's'} · {u.cadence} {u.timeOfDay}</span>
-              <span style={{ marginLeft: 'auto', color: 'var(--brand)', fontWeight: 600, flexShrink: 0 }}>{fmtT(u.nextRunAt)}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
-        <select style={input} value={kind} onChange={(e) => setKind(e.target.value)}>
-          <option value="">All types</option>
-          <option value="digest">Digests</option>
-          <option value="campaign">Campaigns</option>
-          <option value="notification">Notifications</option>
-          <option value="test">Tests</option>
-        </select>
-        <select style={input} value={status} onChange={(e) => setStatus(e.target.value)}>
-          <option value="">All statuses</option>
-          <option value="sent">Sent</option>
-          <option value="failed">Failed</option>
-          <option value="skipped">Skipped</option>
-        </select>
-        <button style={miniBtn} onClick={load}>↻ Refresh</button>
-      </div>
-
-      <div style={cardStyle}>
-        {data.log.length === 0 ? <Muted>No emails match.</Muted> : (
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
-            <thead>
-              <tr style={{ textAlign: 'left', color: 'var(--muted)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                <th style={td}>When</th><th style={td}>Type</th><th style={td}>To</th><th style={td}>Subject</th><th style={td}>Client</th><th style={td}>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.log.map((r, i) => (
-                <tr key={i} style={{ borderTop: '1px solid var(--hairline)' }}>
-                  <td style={{ ...td, whiteSpace: 'nowrap', color: 'var(--muted)' }}>{fmtT(r.at)}</td>
-                  <td style={{ ...td, whiteSpace: 'nowrap' }}>{KINDS[r.kind] || r.kind}</td>
-                  <td style={{ ...td, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.recipient}</td>
-                  <td style={{ ...td, maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.subject}>{r.subject}</td>
-                  <td style={{ ...td, color: 'var(--muted)' }}>{r.entityName}</td>
-                  <td style={{ ...td, whiteSpace: 'nowrap' }}>
-                    <span style={{ fontWeight: 700, color: statusColor(r.status) }}>{r.status}</span>
-                    {r.status !== 'sent' && r.detail && <span style={{ color: 'var(--muted)' }} title={r.detail}> · {String(r.detail).slice(0, 40)}</span>}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+      <MailLogView load={(params) => api.getMailLog(params)} showClient />
     </div>
   );
 }

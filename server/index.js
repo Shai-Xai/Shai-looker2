@@ -719,7 +719,20 @@ app.get('/api/admin/mail-log', auth.requireAdmin, (req, res) => {
   res.json({ log, upcoming });
 });
 
-// Send a test email to the signed-in admin to prove the Resend setup works.
+// Client self-service: a client's own sent emails + their scheduled digests.
+// Scoped strictly to entities the user owns (or admin preview).
+app.get('/api/my/mail-log/:entityId', auth.requireAuth, (req, res) => {
+  const id = req.params.entityId;
+  if (req.user.role !== 'admin' && !(req.user.entityIds || []).includes(id)) return res.status(403).json({ error: 'Not allowed' });
+  const { kind = '', status = '', limit = 100 } = req.query;
+  const log = mailer.recent({ limit: Number(limit) || 100, kind: String(kind), status: String(status), entityId: id });
+  let upcoming = [];
+  try {
+    upcoming = db.db.prepare("SELECT id, title, role, recipients, cadence, time_of_day, next_run_at FROM scheduled_jobs WHERE entity_id=? AND status='active' AND next_run_at IS NOT NULL ORDER BY next_run_at LIMIT 50")
+      .all(id).map((j) => ({ id: j.id, title: j.title || `${j.role} digest`, kind: 'digest', recipients: JSON.parse(j.recipients || '[]').length, cadence: j.cadence, timeOfDay: j.time_of_day, nextRunAt: j.next_run_at }));
+  } catch { /* scheduler removed */ }
+  res.json({ log, upcoming });
+});
 // Optional { entityId } renders with that client's branding so you can preview
 // exactly what a client's recipients will get.
 app.post('/api/admin/mail/test', auth.requireAdmin, async (req, res) => {

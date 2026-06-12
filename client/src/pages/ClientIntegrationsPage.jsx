@@ -3,6 +3,7 @@ import { api } from '../lib/api.js';
 import IntegrationsForm from '../components/IntegrationsForm.jsx';
 import MailTemplateEditor from '../components/MailTemplateEditor.jsx';
 import OwlAddressCard from '../components/OwlAddressCard.jsx';
+import MailLogView from '../components/MailLogView.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
 
 // Client self-service Settings — one place for everything the client manages
@@ -11,6 +12,7 @@ import { useIsMobile } from '../lib/useIsMobile.js';
 const SECTIONS = [
   ['integrations', 'Integrations', '🔌'],
   ['email', 'Branding', '🎨'],
+  ['sentmail', 'Sent emails', '📤'],
   ['inbox', 'CC the Owl', '📨'],
 ];
 
@@ -65,6 +67,13 @@ export default function ClientIntegrationsPage() {
             )}
 
 
+
+            {section === 'sentmail' && (
+              <div>
+                <p style={hint}>Every email sent on your behalf — digests, campaigns and notifications — and what's scheduled next.</p>
+                <MailLogView load={(params) => api.getMyMailLog(it.entityId, params)} />
+              </div>
+            )}
 
             {section === 'inbox' && (
               <div style={{ maxWidth: 680 }}>
