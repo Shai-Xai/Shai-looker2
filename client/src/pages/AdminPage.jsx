@@ -196,7 +196,7 @@ function Entities({ fields }) {
 
       <div style={{ marginTop: 32 }}>
         <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>Admin logins</h3>
-        <AdminLogins admins={users.filter((u) => u.role === 'admin')} onChange={load} />
+        <AdminLogins admins={users.filter((u) => u.role === 'admin')} entities={items} onChange={load} />
       </div>
     </div>
   );
@@ -328,21 +328,25 @@ function ClientSuites({ entity, suites, allEntities, allSets, dashTitle, fields,
   );
 }
 
-// Full-access team logins (not tied to any client).
-function AdminLogins({ admins, onChange }) {
-  const [form, setForm] = useState({ email: '', password: '' });
+// Full-access team logins. An admin sees every client and the admin console;
+// optionally they can ALSO be a customer of chosen clients (the same login can
+// open those clients' customer experience). Linking here = the entity profiles
+// on the admin login.
+function AdminLogins({ admins, entities = [], onChange }) {
+  const [form, setForm] = useState({ email: '', password: '', entityIds: [] });
   const [error, setError] = useState(null);
-  const [editing, setEditing] = useState(null); // { id, email, password }
+  const [editing, setEditing] = useState(null); // { id, email, password, entityIds }
+  const nameOf = (id) => entities.find((e) => e.id === id)?.name || id;
   const add = async () => {
     setError(null);
-    try { await api.adminCreateUser({ email: form.email, password: form.password, role: 'admin', entityIds: [] }); setForm({ email: '', password: '' }); onChange(); }
+    try { await api.adminCreateUser({ email: form.email, password: form.password, role: 'admin', entityIds: form.entityIds }); setForm({ email: '', password: '', entityIds: [] }); onChange(); }
     catch (e) { setError(e.message); }
   };
   const del = async (u) => { if (confirm(`Delete admin ${u.email}?`)) { await api.adminDeleteUser(u.id); onChange(); } };
   const save = async () => {
     setError(null);
     try {
-      const patch = { email: editing.email };
+      const patch = { email: editing.email, entityIds: editing.entityIds };
       if (editing.password) patch.password = editing.password; // blank = keep current
       await api.adminUpdateUser(editing.id, patch);
       setEditing(null); onChange();
@@ -350,29 +354,33 @@ function AdminLogins({ admins, onChange }) {
   };
   return (
     <div style={cardStyle}>
-      <p style={hint}>Full-access logins for your team — they see every client and the admin console.</p>
+      <p style={hint}>Full-access logins for your team — they see every client and the admin console. Tick clients to also make a login a <b>customer</b> of those clients (they can open that client's customer view from the profile switcher).</p>
       {admins.length === 0 ? <Muted>No admin logins.</Muted> : (
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <tbody>
             {admins.map((u) => (
               editing?.id === u.id ? (
                 <tr key={u.id}>
-                  <td style={td}>
-                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <td style={td} colSpan={2}>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
                       <input style={input} value={editing.email} onChange={(e) => setEditing({ ...editing, email: e.target.value })} placeholder="Email" autoComplete="off" />
                       <input style={input} type="text" value={editing.password} onChange={(e) => setEditing({ ...editing, password: e.target.value })} placeholder="New password (blank = keep)" autoComplete="off" />
                     </div>
-                  </td>
-                  <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}>
-                    <button style={miniBtn} onClick={save} disabled={!editing.email.trim()}>Save</button>{' '}
-                    <button style={delBtn} onClick={() => setEditing(null)}>Cancel</button>
+                    <ClientLinkPicker entities={entities} value={editing.entityIds} onChange={(ids) => setEditing({ ...editing, entityIds: ids })} />
+                    <div style={{ marginTop: 8 }}>
+                      <button style={miniBtn} onClick={save} disabled={!editing.email.trim()}>Save</button>{' '}
+                      <button style={delBtn} onClick={() => setEditing(null)}>Cancel</button>
+                    </div>
                   </td>
                 </tr>
               ) : (
                 <tr key={u.id}>
-                  <td style={td}>{u.email}</td>
+                  <td style={td}>
+                    {u.email}
+                    {(u.entityIds || []).length > 0 && <span style={{ color: 'var(--muted)', fontSize: 11 }}> · customer of {(u.entityIds || []).map(nameOf).join(', ')}</span>}
+                  </td>
                   <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}>
-                    <button style={miniBtn} onClick={() => setEditing({ id: u.id, email: u.email, password: '' })}>Edit</button>{' '}
+                    <button style={miniBtn} onClick={() => setEditing({ id: u.id, email: u.email, password: '', entityIds: u.entityIds || [] })}>Edit</button>{' '}
                     <button style={delBtn} onClick={() => del(u)} disabled={admins.length === 1} title={admins.length === 1 ? 'Cannot delete the only admin' : ''}>Delete</button>
                   </td>
                 </tr>
@@ -386,7 +394,30 @@ function AdminLogins({ admins, onChange }) {
         <Field label="Password"><input style={input} type="text" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></Field>
         <button style={miniBtn} onClick={add} disabled={!form.email || !form.password}>+ Add admin</button>
       </div>
+      {entities.length > 0 && (
+        <div style={{ marginTop: 8 }}>
+          <L>Also a customer of (optional)</L>
+          <ClientLinkPicker entities={entities} value={form.entityIds} onChange={(ids) => setForm({ ...form, entityIds: ids })} />
+        </div>
+      )}
       {error && <div style={{ color: 'var(--error)', fontSize: 13, marginTop: 6 }}>{error}</div>}
+    </div>
+  );
+}
+// Multi-select of clients as toggle chips — used to attach customer profiles.
+function ClientLinkPicker({ entities, value = [], onChange }) {
+  const toggle = (id) => onChange(value.includes(id) ? value.filter((x) => x !== id) : [...value, id]);
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+      {entities.map((e) => {
+        const on = value.includes(e.id);
+        return (
+          <button key={e.id} type="button" onClick={() => toggle(e.id)}
+            style={{ ...folderChip, borderColor: on ? 'var(--brand)' : 'var(--border)', color: on ? 'var(--brand)' : 'var(--text)', fontWeight: on ? 700 : 400 }}>
+            {on ? '✓ ' : ''}{e.name}
+          </button>
+        );
+      })}
     </div>
   );
 }
