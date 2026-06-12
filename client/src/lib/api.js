@@ -269,6 +269,12 @@ export const api = {
   // Share links
   createShareLink: (body) => fetch('/api/share', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
 
+  // Client self-service team management (team.manage)
+  myTeam: (entityId) => fetch(`/api/my/team/${entityId}`).then(json),
+  myTeamAdd: (entityId, body) => fetch(`/api/my/team/${entityId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
+  myTeamSetRole: (entityId, userId, role) => fetch(`/api/my/team/${entityId}/${userId}/role`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ role }) }).then(json),
+  myTeamRemove: (entityId, userId) => fetch(`/api/my/team/${entityId}/${userId}`, { method: 'DELETE' }).then((r) => { if (!r.ok) return r.json().then((e) => Promise.reject(new Error(e.error || 'Failed'))); return {}; }),
+
   // Notification channel preferences (per user)
   getNotifPrefs: () => fetch('/api/my/notification-prefs').then(json),
   setNotifPrefs: (prefs) => fetch('/api/my/notification-prefs', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(prefs) }).then(json),

@@ -529,6 +529,10 @@ const setUserEntities = db.transaction((userId, list, defaultRole = 'owner') => 
 function setMembershipRole(userId, entityId, role) {
   return db.prepare('UPDATE user_entities SET role=? WHERE user_id=? AND entity_id=?').run(role, userId, entityId).changes > 0;
 }
+// Remove a single membership (unlink a user from one client).
+function removeMembership(userId, entityId) {
+  return db.prepare('DELETE FROM user_entities WHERE user_id=? AND entity_id=?').run(userId, entityId).changes > 0;
+}
 function createUser({ email, password, role = 'client', entityIds = [] }) {
   const e = (email || '').trim().toLowerCase();
   if (!e || !password) throw new Error('email and password are required');
@@ -1005,7 +1009,7 @@ module.exports = {
   getEntityMailBranding, setEntityMailBranding,
   ensureInboxToken, regenerateInboxToken, findEntityByInboxToken,
   listUsers, getUser, getUserByEmail, createUser, updateUser, deleteUser, verifyCredentials, publicUser, setUserEntities, setNotificationPrefs,
-  membershipsForUser, roleForMembership, setMembershipRole,
+  membershipsForUser, roleForMembership, setMembershipRole, removeMembership,
   listDashboards, getDashboard, createDashboard, updateDashboard, removeDashboard, dashboardPoolFor, sharedDashboards,
   // sets (reusable collections)
   listSets, listSetsForEntity, getSet, createSet, cloneSetForEntity, updateSet, deleteSet, setSetDashboards, dashboardsInSet,

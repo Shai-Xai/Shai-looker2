@@ -5,7 +5,9 @@ import MailTemplateEditor from '../components/MailTemplateEditor.jsx';
 import OwlAddressCard from '../components/OwlAddressCard.jsx';
 import MailLogView from '../components/MailLogView.jsx';
 import NotificationPrefs from '../components/NotificationPrefs.jsx';
+import TeamManager from '../components/TeamManager.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
+import { useProfile } from '../lib/profile.jsx';
 import { useAccess, PERMS } from '../lib/access.js';
 
 // Client self-service Settings — one place for everything the client manages
@@ -14,6 +16,7 @@ import { useAccess, PERMS } from '../lib/access.js';
 // Each section declares the permission that reveals it; Notifications is
 // personal so it's always available.
 const SECTIONS = [
+  ['team', 'Team', '👥', PERMS.TEAM_MANAGE],
   ['integrations', 'Integrations', '🔌', PERMS.INTEGRATIONS_MANAGE],
   ['notifications', 'Notifications', '🔔', null],
   ['email', 'Branding', '🎨', PERMS.BRANDING_MANAGE],
@@ -24,6 +27,7 @@ const SECTIONS = [
 export default function ClientIntegrationsPage() {
   const isMobile = useIsMobile();
   const { can } = useAccess();
+  const { active } = useProfile(); // team management is scoped to the active client
   const [items, setItems] = useState(null);
   // Only the sections this role can use (Notifications is personal, always on).
   const sections = SECTIONS.filter(([, , , perm]) => !perm || can(perm));
@@ -46,7 +50,14 @@ export default function ClientIntegrationsPage() {
         ))}
       </div>
 
-      {section === 'notifications' ? (
+      {section === 'team' ? (
+        active ? (
+          <div>
+            <h2 style={{ fontSize: 17, fontWeight: 700, marginBottom: 8 }}>{active.name} · Team</h2>
+            <TeamManager entityId={active.id} entityName={active.name} />
+          </div>
+        ) : <p style={{ color: 'var(--muted)' }}>Switch to a client to manage its team.</p>
+      ) : section === 'notifications' ? (
         <div style={{ maxWidth: 520 }}>
           <p style={hint}>Choose how Howler reaches you. These apply to your login across all your profiles — the in-app inbox always receives messages regardless.</p>
           <NotificationPrefs />

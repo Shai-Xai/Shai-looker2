@@ -114,6 +114,48 @@ app.put('/api/my/notification-prefs', auth.requireAuth, (req, res) => {
   res.json(next || { email: true, push: true });
 });
 
+// ─── Client self-service team management (team.manage) ─────────────────────────
+// A client Owner manages their own team's logins + roles, scoped to their
+// entity. Mirror of the admin Logins tab. Howler-staff logins are never exposed
+// or editable here; a client can only ever touch its own members.
+function teamMembers(entityId) {
+  return db.listUsers()
+    .filter((u) => u.role !== 'admin' && (u.entityIds || []).includes(entityId))
+    .map((u) => ({ id: u.id, email: u.email, role: (u.memberships || []).find((m) => m.entityId === entityId)?.role || 'owner', alsoOtherClients: (u.entityIds || []).length > 1 }));
+}
+const ownerCount = (entityId) => teamMembers(entityId).filter((m) => m.role === 'owner').length;
+
+app.get('/api/my/team/:entityId', auth.requireAuth, auth.requirePermission('team.manage'), (req, res) => {
+  res.json({ members: teamMembers(req.params.entityId).map((m) => ({ ...m, isYou: m.id === req.user.id })), roles: roles.catalog() });
+});
+app.post('/api/my/team/:entityId', auth.requireAuth, auth.requirePermission('team.manage'), (req, res) => {
+  const { email, password, role } = req.body || {};
+  if (!roles.ROLE_KEYS.includes(String(role || ''))) return res.status(400).json({ error: 'Unknown role' });
+  try {
+    const u = auth.createUser({ email, password, role: 'client', entityIds: [req.params.entityId] });
+    db.setMembershipRole(u.id, req.params.entityId, role);
+    res.status(201).json({ ok: true });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.put('/api/my/team/:entityId/:userId/role', auth.requireAuth, auth.requirePermission('team.manage'), (req, res) => {
+  const { entityId, userId } = req.params;
+  const role = String((req.body || {}).role || '');
+  if (!roles.ROLE_KEYS.includes(role)) return res.status(400).json({ error: 'Unknown role' });
+  const target = teamMembers(entityId).find((m) => m.id === userId);
+  if (!target) return res.status(404).json({ error: 'Not a member of this client' });
+  if (target.role === 'owner' && role !== 'owner' && ownerCount(entityId) <= 1) return res.status(400).json({ error: 'This is the last Owner — promote someone else first.' });
+  db.setMembershipRole(userId, entityId, role);
+  res.json({ ok: true, role });
+});
+app.delete('/api/my/team/:entityId/:userId', auth.requireAuth, auth.requirePermission('team.manage'), (req, res) => {
+  const { entityId, userId } = req.params;
+  const target = teamMembers(entityId).find((m) => m.id === userId);
+  if (!target) return res.status(404).json({ error: 'Not a member of this client' });
+  if (target.role === 'owner' && ownerCount(entityId) <= 1) return res.status(400).json({ error: 'This is the last Owner — promote someone else first.' });
+  db.removeMembership(userId, entityId);
+  res.status(204).end();
+});
+
 // ─── Backup / restore (full data export & import) ──────────────────────────────
 app.get('/api/admin/export', auth.requireAdmin, (_req, res) => {
   res.setHeader('Content-Type', 'application/json');
