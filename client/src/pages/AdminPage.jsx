@@ -765,6 +765,29 @@ function SetCard({ set, dashboards, onChange }) {
   );
 }
 
+// Role allowlist editor: toggle-chip per role. Empty = "Everyone" (open). When
+// `inherit` is set, empty reads as "Inherit" (a dashboard with no override
+// follows its set). Persists on every change.
+function RoleChips({ value = [], roles, onChange, inherit = false }) {
+  const on = new Set(value);
+  const toggle = (key) => { const next = on.has(key) ? value.filter((r) => r !== key) : [...value, key]; onChange(next); };
+  return (
+    <span style={{ display: 'inline-flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
+      <span style={{ fontSize: 11, color: 'var(--muted)', marginRight: 2 }}>{value.length ? 'Only:' : (inherit ? 'Inherit' : 'Everyone')}</span>
+      {roles.map((r) => {
+        const sel = on.has(r.key);
+        return (
+          <button key={r.key} type="button" onClick={() => toggle(r.key)} title={r.description}
+            style={{ fontSize: 11, fontWeight: sel ? 700 : 500, padding: '2px 8px', borderRadius: 980, cursor: 'pointer',
+              border: `1px solid ${sel ? 'var(--brand)' : 'var(--border)'}`, color: sel ? 'var(--brand)' : 'var(--muted)', background: sel ? 'rgba(var(--brand-rgb,255,56,92),0.08)' : 'transparent' }}>
+            {sel ? '✓ ' : ''}{r.label}
+          </button>
+        );
+      })}
+    </span>
+  );
+}
+
 // ─── Suite editor (a client's event context: locks + bundled Sets) ────────────
 // Rendered inside a client's Suites section (see ClientSuites).
 function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) {
@@ -776,6 +799,17 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
   const [setIds, setSetIds] = useState(suite.setIds || []);
   const [locks, setLocks] = useState(suite.lockedFilters || {});
   const [saved, setSaved] = useState(false);
+  // Role-based visibility for this client (keyed to the suite's entity).
+  const [cr, setCr] = useState({ sets: {}, dashboards: {} });
+  const [roleCat, setRoleCat] = useState([]);
+  useEffect(() => {
+    if (!entityId) return;
+    api.getEntityContentRoles(entityId).then((r) => { setCr(r.content || { sets: {}, dashboards: {} }); setRoleCat(r.roles || []); }).catch(() => {});
+  }, [entityId]);
+  const saveScope = async (scopeType, scopeId, list) => {
+    setCr((c) => ({ ...c, [scopeType === 'set' ? 'sets' : 'dashboards']: { ...c[scopeType === 'set' ? 'sets' : 'dashboards'], [scopeId]: list } }));
+    try { await api.setContentRoles(entityId, scopeType, scopeId, list); } catch (e) { alert('Could not save visibility: ' + e.message); }
+  };
   const toggleSet = (id) => setSetIds((cur) => cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]);
   const setById = Object.fromEntries(sets.map((s) => [s.id, s]));
   const dragFrom = useRef(null);
@@ -856,6 +890,38 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
                 <button style={{ ...orderBtn, color: 'var(--error)' }} onClick={() => toggleSet(id)} title="Remove from suite">✕</button>
               </div>
             ))}
+          </div>
+        </Section>
+      )}
+      {roleCat.length > 0 && setIds.length > 0 && (
+        <Section title="Dashboard access by role">
+          <p style={{ ...hint, marginTop: 0 }}>Who sees what at <b>{entities.find((e) => e.id === entityId)?.name || 'this client'}</b>. A set defaults to <b>Everyone</b>; pick roles to restrict it. Each dashboard can override its set. Saves immediately. (Howler staff always see everything.)</p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {setIds.map((sid) => {
+              const s = setById[sid];
+              if (!s) return null;
+              const open = !!openSets[`acc-${sid}`];
+              return (
+                <div key={sid} style={{ border: '1px solid var(--hairline)', borderRadius: 8, padding: '8px 10px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <button onClick={() => setOpenSets((p) => ({ ...p, [`acc-${sid}`]: !p[`acc-${sid}`] }))} style={{ width: 14, border: 'none', background: 'transparent', cursor: 'pointer', color: '#b0b0b6', fontSize: 10, padding: 0, transform: open ? 'rotate(90deg)' : 'none' }}>▶</button>
+                    <span style={{ fontWeight: 700, fontSize: 13, flex: '0 0 auto' }}>{s.name}</span>
+                    <RoleChips value={cr.sets[sid] || []} roles={roleCat} onChange={(list) => saveScope('set', sid, list)} />
+                  </div>
+                  {open && (
+                    <div style={{ paddingLeft: 22, marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      {(s.dashboardIds || []).length === 0 ? <Muted>No dashboards in this set.</Muted>
+                        : s.dashboardIds.map((did) => (
+                          <div key={did} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                            <span style={{ fontSize: 12, flex: '0 0 auto', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{dashTitle[did] || did}</span>
+                            <RoleChips value={cr.dashboards[did] || []} roles={roleCat} inherit onChange={(list) => saveScope('dashboard', did, list)} />
+                          </div>
+                        ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </Section>
       )}

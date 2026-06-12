@@ -57,6 +57,8 @@ export const api = {
   adminDeleteSet: (id) => fetch(`/api/admin/sets/${id}`, { method: 'DELETE' }),
   // Custom (client-owned) sets
   getRoles: () => fetch('/api/admin/roles').then(json),
+  getEntityContentRoles: (entityId) => fetch(`/api/admin/entities/${entityId}/content-roles`).then(json),
+  setContentRoles: (entityId, scopeType, scopeId, roles) => fetch(`/api/admin/entities/${entityId}/content-roles/${scopeType}/${encodeURIComponent(scopeId)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ roles }) }).then(json),
   setMembershipRole: (entityId, userId, role) => fetch(`/api/admin/entities/${entityId}/logins/${userId}/role`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ role }) }).then(json),
   getEntitySets: (entityId) => fetch(`/api/admin/entities/${entityId}/sets`).then(json),
   createEntitySet: (entityId, s) => fetch(`/api/admin/entities/${entityId}/sets`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(s) }).then(json),

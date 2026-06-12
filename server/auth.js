@@ -181,9 +181,13 @@ function scopeFiltersForUser(user) {
 function canAccessDashboard(user, dashboard) {
   if (!dashboard) return false;
   if (user.role === 'admin') return true;
-  for (const eid of user.entityIds || []) {
-    for (const su of db.listSuitesForEntity(eid)) {
-      if (db.dashboardsInSuite(su.id).includes(dashboard.id)) return true;
+  // Reachable via one of the user's memberships AND visible to their role there.
+  for (const m of user.memberships || []) {
+    const role = m.role || roles.DEFAULT_ROLE;
+    for (const su of db.listSuitesForEntity(m.entityId)) {
+      for (const sid of db.suiteSetIds(su.id)) {
+        if (db.dashboardsInSet(sid).includes(dashboard.id) && db.dashboardVisibleToRole(m.entityId, sid, dashboard.id, role)) return true;
+      }
     }
   }
   return false;

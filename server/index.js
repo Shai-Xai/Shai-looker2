@@ -162,6 +162,19 @@ app.put('/api/admin/entities/:id/logins/:userId/role', auth.requireAdmin, (req, 
   if (!db.setMembershipRole(userId, id, role)) return res.status(404).json({ error: 'Membership not found' });
   res.json({ ok: true, role });
 });
+// Content visibility by role for a client (set/dashboard allowlists).
+app.get('/api/admin/entities/:id/content-roles', auth.requireAdmin, (req, res) => {
+  if (!db.getEntity(req.params.id)) return res.status(404).json({ error: 'Not found' });
+  res.json({ content: db.contentRolesForEntity(req.params.id), roles: roles.catalog() });
+});
+app.put('/api/admin/entities/:id/content-roles/:scopeType/:scopeId', auth.requireAdmin, (req, res) => {
+  const { id, scopeType, scopeId } = req.params;
+  if (!db.getEntity(id)) return res.status(404).json({ error: 'Not found' });
+  if (!['set', 'dashboard'].includes(scopeType)) return res.status(400).json({ error: 'Bad scope' });
+  const list = Array.isArray((req.body || {}).roles) ? req.body.roles.filter((r) => roles.ROLE_KEYS.includes(r)) : [];
+  db.setContentRoles(id, scopeType, scopeId, list);
+  res.json({ ok: true, roles: list });
+});
 
 // ─── Admin: entities / sets / suites (the model) ───────────────────────────────
 app.get('/api/admin/entities', auth.requireAdmin, (_req, res) => res.json(db.listEntities()));
@@ -303,6 +316,10 @@ app.get('/api/my/suites/:id', auth.requireAuth, (req, res) => {
   if (!auth.canAccessSuite(req.user, req.params.id)) return res.status(403).json({ error: 'Not allowed' });
   const su = db.getSuite(req.params.id);
   if (!su) return res.status(404).json({ error: 'Suite not found' });
+  // Role-based dashboard visibility for this client (admins see everything).
+  const isAdmin = req.user.role === 'admin';
+  const role = auth.roleForEntity(req.user, su.entityId);
+  const visible = (setId, dashId) => isAdmin || db.dashboardVisibleToRole(su.entityId, setId, dashId, role);
   const sets = su.setIds.map((sid) => {
     const set = db.getSet(sid);
     if (!set) return null;
@@ -310,7 +327,7 @@ app.get('/api/my/suites/:id', auth.requireAuth, (req, res) => {
     // in `children`. An orphaned parent reference renders top-level.
     const nodes = (set.dashboards || []).map(({ id, parentId }) => {
       const d = store.get(id);
-      return d && { id: d.id, title: d.title, description: d.description || '', tileCount: (d.tiles || []).length, parentId };
+      return d && visible(set.id, id) && { id: d.id, title: d.title, description: d.description || '', tileCount: (d.tiles || []).length, parentId };
     }).filter(Boolean);
     const valid = new Set(nodes.map((n) => n.id));
     const dashboards = nodes.filter((n) => !n.parentId || !valid.has(n.parentId)).map(({ parentId, ...top }) => ({
@@ -318,7 +335,7 @@ app.get('/api/my/suites/:id', auth.requireAuth, (req, res) => {
       children: nodes.filter((c) => c.parentId === top.id).map(({ parentId: _p, ...rest }) => rest),
     }));
     return { id: set.id, name: set.name, icon: set.icon || '', dashboards };
-  }).filter(Boolean);
+  }).filter((s) => s && (isAdmin || s.dashboards.length)); // drop sets fully hidden for this role
   const ent = db.getEntity(su.entityId);
   res.json({
     id: su.id, name: su.name, icon: su.icon || '',

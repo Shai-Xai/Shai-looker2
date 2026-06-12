@@ -142,6 +142,19 @@ addColumn('users', 'notify_push', 'INTEGER NOT NULL DEFAULT 1');
 // same person can hold different roles at different clients. Existing rows
 // become 'owner' (full client access) so nothing loses access on upgrade.
 addColumn('user_entities', 'role', "TEXT NOT NULL DEFAULT 'owner'");
+
+// Content visibility by role, scoped PER CLIENT. A row allowlists a role for a
+// set or a dashboard within an entity. NO rows for a scope = visible to everyone
+// (open by default, non-breaking). Resolution: dashboard rows win, else the
+// set's rows, else open. So the same dashboard can be marketing-only at one
+// client and finance-only at another.
+db.exec(`CREATE TABLE IF NOT EXISTS content_roles (
+  entity_id  TEXT NOT NULL,
+  scope_type TEXT NOT NULL,   -- 'set' | 'dashboard'
+  scope_id   TEXT NOT NULL,
+  role       TEXT NOT NULL,
+  PRIMARY KEY (entity_id, scope_type, scope_id, role)
+);`);
 // Sub-dashboards: within a set, a dashboard may nest one level under a parent
 // from the same set — children render as tabs inside the parent, not as
 // sidebar rows. The relation lives on the membership so the same dashboard can
@@ -650,6 +663,34 @@ function updateSet(id, patch) {
 function deleteSet(id) { db.prepare('DELETE FROM sets WHERE id=?').run(id); }
 function dashboardsInSet(setId) { return setDashboardIds(setId); }
 
+// ─── Content visibility by role (per client) ──────────────────────────────────
+function rolesForScope(entityId, scopeType, scopeId) {
+  return db.prepare('SELECT role FROM content_roles WHERE entity_id=? AND scope_type=? AND scope_id=?').all(entityId, scopeType, scopeId).map((r) => r.role);
+}
+// Replace the allowlist for one scope ([] = open to everyone).
+const setContentRoles = db.transaction((entityId, scopeType, scopeId, rolesList) => {
+  db.prepare('DELETE FROM content_roles WHERE entity_id=? AND scope_type=? AND scope_id=?').run(entityId, scopeType, scopeId);
+  const ins = db.prepare('INSERT OR IGNORE INTO content_roles (entity_id, scope_type, scope_id, role) VALUES (?,?,?,?)');
+  for (const r of rolesList || []) if (r) ins.run(entityId, scopeType, scopeId, r);
+});
+// All allowlists for a client, for the admin editor: { sets:{id:[roles]}, dashboards:{id:[roles]} }.
+function contentRolesForEntity(entityId) {
+  const out = { sets: {}, dashboards: {} };
+  for (const r of db.prepare('SELECT scope_type, scope_id, role FROM content_roles WHERE entity_id=?').all(entityId)) {
+    const bucket = r.scope_type === 'set' ? out.sets : out.dashboards;
+    (bucket[r.scope_id] = bucket[r.scope_id] || []).push(r.role);
+  }
+  return out;
+}
+// Visibility decision for a dashboard in a client, given the viewer's role:
+// dashboard rows win, else the set's rows, else open.
+function dashboardVisibleToRole(entityId, setId, dashboardId, role) {
+  const d = rolesForScope(entityId, 'dashboard', dashboardId);
+  if (d.length) return d.includes(role);
+  if (setId) { const s = rolesForScope(entityId, 'set', setId); if (s.length) return s.includes(role); }
+  return true;
+}
+
 // ─── Suites (event context: locks + bundled Sets) ─────────────────────────────
 function suiteSetIds(suiteId) {
   return db.prepare('SELECT set_id FROM suite_sets WHERE suite_id=? ORDER BY position').all(suiteId).map((r) => r.set_id);
@@ -968,6 +1009,7 @@ module.exports = {
   listDashboards, getDashboard, createDashboard, updateDashboard, removeDashboard, dashboardPoolFor, sharedDashboards,
   // sets (reusable collections)
   listSets, listSetsForEntity, getSet, createSet, cloneSetForEntity, updateSet, deleteSet, setSetDashboards, dashboardsInSet,
+  rolesForScope, setContentRoles, contentRolesForEntity, dashboardVisibleToRole,
   // suites (event context)
   listSuites, listSuitesForEntity, getSuite, createSuite, updateSuite, deleteSuite, setSuiteSets, suiteSetIds, dashboardsInSuite, lockedFiltersForSuite,
   // tile library
