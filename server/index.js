@@ -151,6 +151,18 @@ app.delete('/api/admin/users/:id', auth.requireAdmin, (req, res) => {
   auth.deleteUser(req.params.id); res.status(204).end();
 });
 
+// Role catalog (for the role pickers).
+const roles = require('./roles');
+app.get('/api/admin/roles', auth.requireAdmin, (_req, res) => res.json({ roles: roles.catalog() }));
+// Set a login's role WITHIN a specific client (its membership).
+app.put('/api/admin/entities/:id/logins/:userId/role', auth.requireAdmin, (req, res) => {
+  const { id, userId } = req.params;
+  const role = String((req.body || {}).role || '');
+  if (!roles.ROLE_KEYS.includes(role)) return res.status(400).json({ error: 'Unknown role' });
+  if (!db.setMembershipRole(userId, id, role)) return res.status(404).json({ error: 'Membership not found' });
+  res.json({ ok: true, role });
+});
+
 // ─── Admin: entities / sets / suites (the model) ───────────────────────────────
 app.get('/api/admin/entities', auth.requireAdmin, (_req, res) => res.json(db.listEntities()));
 app.post('/api/admin/entities', auth.requireAdmin, (req, res) => res.status(201).json(db.createEntity(req.body || {})));

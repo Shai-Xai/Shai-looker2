@@ -425,15 +425,21 @@ function ClientLinkPicker({ entities, value = [], onChange }) {
 // or delete), add a new client login, or LINK an existing login (client or
 // admin) so one person can hold several profiles.
 function EntityLogins({ entity, users, allUsers = [], onChange }) {
-  const [form, setForm] = useState({ email: '', password: '' });
+  const [form, setForm] = useState({ email: '', password: '', role: 'owner' });
   const [error, setError] = useState(null);
   const [linkId, setLinkId] = useState('');
+  const [linkRole, setLinkRole] = useState('viewer');
+  const [roles, setRoles] = useState([]);
+  useEffect(() => { api.getRoles().then((r) => setRoles(r.roles || [])).catch(() => setRoles([])); }, []);
   const linkable = allUsers.filter((u) => !(u.entityIds || []).includes(entity.id));
+  // This login's role at THIS client (from its membership list).
+  const roleOf = (u) => (u.memberships || []).find((m) => m.entityId === entity.id)?.role || 'owner';
   const add = async () => {
     setError(null);
     try {
-      await api.adminCreateUser({ email: form.email, password: form.password, role: 'client', entityIds: [entity.id] });
-      setForm({ email: '', password: '' });
+      const u = await api.adminCreateUser({ email: form.email, password: form.password, role: 'client', entityIds: [entity.id] });
+      if (form.role !== 'owner') await api.setMembershipRole(entity.id, u.id, form.role); // owner is the default
+      setForm({ email: '', password: '', role: 'owner' });
       onChange();
     } catch (e) { setError(e.message); }
   };
@@ -441,14 +447,17 @@ function EntityLogins({ entity, users, allUsers = [], onChange }) {
     const u = linkable.find((x) => x.id === linkId);
     if (!u) return;
     await api.adminUpdateUser(u.id, { entityIds: [...(u.entityIds || []), entity.id] });
-    setLinkId(''); onChange();
+    await api.setMembershipRole(entity.id, u.id, linkRole);
+    setLinkId(''); setLinkRole('viewer'); onChange();
   };
+  const changeRole = async (u, role) => { await api.setMembershipRole(entity.id, u.id, role); onChange(); };
   const removeAccess = async (u) => {
     const nextIds = (u.entityIds || []).filter((x) => x !== entity.id);
     await api.adminUpdateUser(u.id, { entityIds: nextIds });
     onChange();
   };
   const del = async (u) => { if (confirm(`Delete login ${u.email}? (removes it for all clients)`)) { await api.adminDeleteUser(u.id); onChange(); } };
+  const roleOpts = roles.length ? roles : [{ key: 'owner', label: 'Owner' }];
   return (
     <div>
       {users.length === 0 ? (
@@ -463,6 +472,13 @@ function EntityLogins({ entity, users, allUsers = [], onChange }) {
                   {u.role === 'admin' && <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: 'var(--brand)', border: '1px solid var(--brand)', borderRadius: 980, padding: '1px 7px', verticalAlign: 'middle' }}>HOWLER</span>}
                   {(u.entityIds || []).length > 1 && <span style={{ color: 'var(--muted)', fontSize: 11 }}> · also other clients</span>}
                 </td>
+                <td style={{ ...td, width: 130 }}>
+                  {u.role === 'admin'
+                    ? <span style={{ fontSize: 12, color: 'var(--muted)' }}>Full access</span>
+                    : <select style={{ ...input, padding: '4px 8px', fontSize: 12 }} value={roleOf(u)} onChange={(e) => changeRole(u, e.target.value)} title="Role at this client">
+                        {roleOpts.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
+                      </select>}
+                </td>
                 <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}>
                   <button style={miniBtnOutline} onClick={() => removeAccess(u)}>Remove access</button>
                   <button style={{ ...delBtn, marginLeft: 6 }} onClick={() => del(u)}>Delete</button>
@@ -475,6 +491,7 @@ function EntityLogins({ entity, users, allUsers = [], onChange }) {
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginTop: 8 }}>
         <Field label="Email"><input style={input} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>
         <Field label="Password"><input style={input} type="text" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></Field>
+        <Field label="Role"><select style={input} value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>{roleOpts.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}</select></Field>
         <button style={miniBtn} onClick={add} disabled={!form.email || !form.password}>+ Add login</button>
       </div>
       {linkable.length > 0 && (
@@ -485,8 +502,12 @@ function EntityLogins({ entity, users, allUsers = [], onChange }) {
               {linkable.map((u) => <option key={u.id} value={u.id}>{u.email}{u.role === 'admin' ? ' (Howler admin)' : ''}</option>)}
             </select>
           </Field>
+          <Field label="Role"><select style={input} value={linkRole} onChange={(e) => setLinkRole(e.target.value)}>{roleOpts.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}</select></Field>
           <button style={miniBtn} onClick={link} disabled={!linkId}>Link to {entity.name}</button>
         </div>
+      )}
+      {roles.length > 0 && (
+        <p style={{ ...hint, marginTop: 10 }}>{roleOpts.find((r) => r.key === form.role)?.description || ''}</p>
       )}
       {error && <div style={{ color: 'var(--error)', fontSize: 13, marginTop: 6 }}>{error}</div>}
     </div>
