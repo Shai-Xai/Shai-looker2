@@ -8,7 +8,8 @@ import DigestManager from '../components/DigestManager.jsx';
 export default function DigestsPage() {
   const { user, isAdmin } = useAuth();
   const { previewEntityId } = useOutletContext() || {};
-  const entityId = isAdmin ? previewEntityId : ((user?.entities || [])[0]?.id || (user?.entityIds || [])[0]);
+  // The layout's context carries the active profile (client) or previewed client (admin).
+  const entityId = previewEntityId || (isAdmin ? null : ((user?.entities || [])[0]?.id || (user?.entityIds || [])[0]));
 
   return (
     <main style={{ flex: 1, padding: '26px 22px', maxWidth: 1080, margin: '0 auto', width: '100%', boxSizing: 'border-box', overflowY: 'auto' }}>

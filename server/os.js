@@ -146,7 +146,9 @@ function mount(app, { db, auth, mailer }) {
   // the mailer isn't wired or configured, so this never blocks the API call.
   function emailEntity(entityId, t, body) {
     if (!mailer?.isConfigured()) return;
-    const to = db.listUsers().filter((u) => u.role !== 'admin' && (u.entityIds || []).includes(entityId)).map((u) => u.email);
+    // Every login LINKED to the entity — including admins who are explicitly
+    // linked as part of this client's team (admins are never linked by default).
+    const to = db.listUsers().filter((u) => (u.entityIds || []).includes(entityId)).map((u) => u.email);
     if (!to.length) return;
     const subject = t.priority === 'must_ack' ? `Action needed: ${t.title || 'a message from Howler'}`
       : t.priority === 'needs_reply' ? `Reply needed: ${t.title || 'a message from Howler'}`

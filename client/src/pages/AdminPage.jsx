@@ -155,7 +155,7 @@ function Entities({ fields }) {
   if (loading) return <Muted>Loading…</Muted>;
 
   const suitesOf = (eid) => suites.filter((s) => s.entityId === eid);
-  const loginsOf = (eid) => users.filter((u) => u.role !== 'admin' && (u.entityIds || []).includes(eid));
+  const loginsOf = (eid) => users.filter((u) => (u.entityIds || []).includes(eid)); // any role linked to the client
 
   // Detail view: a single client with its own Settings / Suites / Logins nav.
   const selected = items.find((e) => e.id === selectedId);
@@ -169,6 +169,7 @@ function Entities({ fields }) {
         dashTitle={dashTitle}
         suites={suitesOf(selected.id)}
         users={loginsOf(selected.id)}
+        allUsers={users}
         onChange={load}
         onBack={() => setSelectedId(null)}
       />
@@ -202,7 +203,7 @@ function Entities({ fields }) {
 }
 
 // One client's settings hub: a left nav (Settings / Suites / Logins) + panel.
-function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites, users, onChange, onBack }) {
+function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites, users, allUsers, onChange, onBack }) {
   const [section, setSection] = useState('settings');
   const nav = [['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['sets', 'Custom sets'], ['briefing', 'Briefing'], ['messages', 'Messages'], ['digests', 'Digests'], ['campaigns', 'Actions'], ['settlements', 'Settlements'], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations'], ['email', 'Branding']];
   return (
@@ -242,11 +243,11 @@ function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites,
           {section === 'digests' && (
             <div>
               <p style={hint}>Scheduled, role-personalised briefing emails for <b>{entity.name}</b>. Clients can also manage these themselves.</p>
-              <DigestManager entityId={entity.id} scope="admin" logins={users.filter((u) => u.role !== 'admin' && (u.entityIds || []).includes(entity.id))} />
+              <DigestManager entityId={entity.id} scope="admin" logins={users} />
             </div>
           )}
           {section === 'settlements' && <Settlements entityId={entity.id} />}
-          {section === 'logins' && <EntityLogins entity={entity} users={users} onChange={onChange} />}
+          {section === 'logins' && <EntityLogins entity={entity} users={users} allUsers={allUsers} onChange={onChange} />}
           {section === 'integrations' && <ClientIntegrations entity={entity} />}
           {section === 'email' && (
             <div>
@@ -390,10 +391,13 @@ function AdminLogins({ admins, onChange }) {
   );
 }
 // Compact login management scoped to one client: list its logins (remove access
-// or delete) and add a new client login pre-assigned to this entity.
-function EntityLogins({ entity, users, onChange }) {
+// or delete), add a new client login, or LINK an existing login (client or
+// admin) so one person can hold several profiles.
+function EntityLogins({ entity, users, allUsers = [], onChange }) {
   const [form, setForm] = useState({ email: '', password: '' });
   const [error, setError] = useState(null);
+  const [linkId, setLinkId] = useState('');
+  const linkable = allUsers.filter((u) => !(u.entityIds || []).includes(entity.id));
   const add = async () => {
     setError(null);
     try {
@@ -401,6 +405,12 @@ function EntityLogins({ entity, users, onChange }) {
       setForm({ email: '', password: '' });
       onChange();
     } catch (e) { setError(e.message); }
+  };
+  const link = async () => {
+    const u = linkable.find((x) => x.id === linkId);
+    if (!u) return;
+    await api.adminUpdateUser(u.id, { entityIds: [...(u.entityIds || []), entity.id] });
+    setLinkId(''); onChange();
   };
   const removeAccess = async (u) => {
     const nextIds = (u.entityIds || []).filter((x) => x !== entity.id);
@@ -417,7 +427,11 @@ function EntityLogins({ entity, users, onChange }) {
           <tbody>
             {users.map((u) => (
               <tr key={u.id}>
-                <td style={td}>{u.email}{(u.entityIds || []).length > 1 && <span style={{ color: 'var(--muted)', fontSize: 11 }}> · also other clients</span>}</td>
+                <td style={td}>
+                  {u.email}
+                  {u.role === 'admin' && <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: 'var(--brand)', border: '1px solid var(--brand)', borderRadius: 980, padding: '1px 7px', verticalAlign: 'middle' }}>HOWLER</span>}
+                  {(u.entityIds || []).length > 1 && <span style={{ color: 'var(--muted)', fontSize: 11 }}> · also other clients</span>}
+                </td>
                 <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}>
                   <button style={miniBtnOutline} onClick={() => removeAccess(u)}>Remove access</button>
                   <button style={{ ...delBtn, marginLeft: 6 }} onClick={() => del(u)}>Delete</button>
@@ -432,6 +446,17 @@ function EntityLogins({ entity, users, onChange }) {
         <Field label="Password"><input style={input} type="text" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></Field>
         <button style={miniBtn} onClick={add} disabled={!form.email || !form.password}>+ Add login</button>
       </div>
+      {linkable.length > 0 && (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginTop: 10 }}>
+          <Field label="Or link an existing login (one person, several profiles)">
+            <select style={input} value={linkId} onChange={(e) => setLinkId(e.target.value)}>
+              <option value="">Pick a login…</option>
+              {linkable.map((u) => <option key={u.id} value={u.id}>{u.email}{u.role === 'admin' ? ' (Howler admin)' : ''}</option>)}
+            </select>
+          </Field>
+          <button style={miniBtn} onClick={link} disabled={!linkId}>Link to {entity.name}</button>
+        </div>
+      )}
       {error && <div style={{ color: 'var(--error)', fontSize: 13, marginTop: 6 }}>{error}</div>}
     </div>
   );

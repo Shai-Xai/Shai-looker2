@@ -140,7 +140,15 @@ export default function ClientLayout() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [suiteEntityId]);
-  const activeEntityId = isAdmin ? (suiteEntityId || previewEntityId) : null;
+  // A login can hold several client profiles. The active one drives the whole
+  // shell — nav, theme, home, digests, actions — and persists across visits.
+  const myEntities = user?.entities || [];
+  const [profileId, setProfileId] = useState(() => localStorage.getItem('howler_active_profile') || null);
+  const switchProfile = (id) => { localStorage.setItem('howler_active_profile', id); setProfileId(id); };
+  const clientEntityId = myEntities.length
+    ? (myEntities.some((e) => e.id === profileId) ? profileId : myEntities[0].id)
+    : ((user?.entityIds || [])[0] || null);
+  const activeEntityId = isAdmin ? (suiteEntityId || previewEntityId) : clientEntityId;
   const visibleSuites = activeEntityId ? suites.filter((s) => s.entityId === activeEntityId) : suites;
   const visibleSettlements = activeEntityId ? settlements.filter((s) => s.entityId === activeEntityId) : settlements;
 
@@ -148,7 +156,7 @@ export default function ClientLayout() {
   // the whole shell — UI accents AND chart palettes follow it. Clients theme to
   // their own entity; an admin preview themes to the previewed client (faithful
   // preview). Reverts to Howler on unmount / when no entity is in context.
-  const themeEntityId = isAdmin ? activeEntityId : ((user?.entities || [])[0]?.id || (user?.entityIds || [])[0] || null);
+  const themeEntityId = activeEntityId;
   useEffect(() => {
     let alive = true;
     if (!themeEntityId) { resetBrand(); return; }
@@ -198,6 +206,18 @@ export default function ClientLayout() {
         <div style={brandHeader}>
           {brand.entityLogo && <img src={brand.entityLogo} alt="" style={{ height: 34, maxWidth: 90, objectFit: 'contain', flexShrink: 0 }} />}
           {brand.entityName && <span style={{ fontSize: 14, fontWeight: 700, letterSpacing: '-0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{brand.entityName}</span>}
+        </div>
+      )}
+      {!isAdmin && myEntities.length > 1 && (
+        <div style={{ padding: '0 12px 10px' }}>
+          <select
+            value={clientEntityId || ''}
+            onChange={(e) => switchProfile(e.target.value)}
+            title="Switch profile"
+            style={{ width: '100%', padding: '7px 10px', border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 13, fontWeight: 600, background: 'var(--card)', color: 'var(--text)', cursor: 'pointer' }}
+          >
+            {myEntities.map((en) => <option key={en.id} value={en.id}>{en.name}</option>)}
+          </select>
         </div>
       )}
       <div style={searchWrap}>

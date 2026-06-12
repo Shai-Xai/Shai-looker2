@@ -488,7 +488,7 @@ function createUser({ email, password, role = 'client', entityIds = [] }) {
   const r = role === 'admin' ? 'admin' : 'client';
   db.prepare('INSERT INTO users (id,email,password_hash,role,created_at) VALUES (?,?,?,?,?)')
     .run(id, e, bcrypt.hashSync(password, 10), r, now());
-  setUserEntities(id, r === 'admin' ? [] : entityIds);
+  setUserEntities(id, entityIds); // admins may carry entity links too (team surface)
   return publicUser(getUser(id));
 }
 function updateUser(id, patch) {
@@ -498,7 +498,7 @@ function updateUser(id, patch) {
   const hash = patch.password ? bcrypt.hashSync(patch.password, 10) : cur.password_hash;
   const role = patch.role ? (patch.role === 'admin' ? 'admin' : 'client') : cur.role;
   db.prepare('UPDATE users SET email=?, password_hash=?, role=? WHERE id=?').run(email, hash, role, id);
-  if ('entityIds' in patch) setUserEntities(id, role === 'admin' ? [] : patch.entityIds);
+  if ('entityIds' in patch) setUserEntities(id, patch.entityIds);
   return publicUser(getUser(id));
 }
 function deleteUser(id) { db.prepare('DELETE FROM users WHERE id=?').run(id); }

@@ -188,7 +188,7 @@ export default function ClientHome() {
       )}
 
       {/* Your actions — campaigns taken + how they're performing */}
-      <YourActions entityId={isAdmin ? previewEntityId : ((user?.entities || [])[0]?.id || (user?.entityIds || [])[0])} isMobile={isMobile} onOpen={() => vtNavigate(navigate, '/actions')} />
+      <YourActions entityId={previewEntityId || (isAdmin ? null : ((user?.entities || [])[0]?.id || (user?.entityIds || [])[0]))} isMobile={isMobile} onOpen={() => vtNavigate(navigate, '/actions')} />
 
       {/* Personal shortcuts (browsing-based) */}
       {shortcuts.length > 0 && (

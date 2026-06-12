@@ -46,7 +46,9 @@ function verifyCredentials(email, password) { return db.verifyCredentials(email,
 
 function createUser({ email, password, role = 'client', tenantId = null, entityIds }) {
   const ids = entityIds || (tenantId ? [tenantId] : []);
-  const u = db.createUser({ email, password, role, entityIds: role === 'admin' ? [] : ids });
+  // Admins keep entity links too: full access regardless, but a link makes them
+  // part of that client's team surface (logins list, digests, notifications).
+  const u = db.createUser({ email, password, role, entityIds: ids });
   return publicUser(u);
 }
 function updateUser(id, patch) {

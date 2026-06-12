@@ -8,7 +8,8 @@ import CampaignManager from '../components/CampaignManager.jsx';
 export default function ActionsPage() {
   const { user, isAdmin } = useAuth();
   const { previewEntityId } = useOutletContext() || {};
-  const entityId = isAdmin ? previewEntityId : ((user?.entities || [])[0]?.id || (user?.entityIds || [])[0]);
+  // The layout's context carries the active profile (client) or previewed client (admin).
+  const entityId = previewEntityId || (isAdmin ? null : ((user?.entities || [])[0]?.id || (user?.entityIds || [])[0]));
   // "Make it happen": a briefing/digest suggestion arrives as ?goal=… and
   // opens a new campaign pre-filled with it.
   const [params] = useSearchParams();
