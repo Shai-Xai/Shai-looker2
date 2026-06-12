@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { api } from '../lib/api.js';
+import { extractPaletteFromImage } from '../lib/colorExtract.js';
 
 // Editable email branding/template with a live preview. Used at two scopes:
 //   • platform  (entityId omitted) — Howler's default for all notifications
@@ -61,6 +62,17 @@ export default function MailTemplateEditor({ entityId, scope = 'platform', canTe
     finally { setBusy(false); }
   }
 
+  // Fill the five colour slots from the logo's dominant colours (most prominent
+  // first). Unsaved — the user can tweak each before hitting Save.
+  const applyExtracted = (hexes) => setEdits((e) => {
+    const slots = ['brandColor', 'secondaryColor', 'chart3', 'chart4', 'chart5'];
+    const next = { ...e };
+    // Fill what the logo gave us; clear the rest so they fall back to the
+    // palette generator instead of stale manual picks.
+    slots.forEach((s, i) => { next[s] = hexes[i] || ''; });
+    return next;
+  });
+
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 20, alignItems: 'start' }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -68,7 +80,7 @@ export default function MailTemplateEditor({ entityId, scope = 'platform', canTe
           <div key={key}>
             <div style={lbl}>{label}</div>
             {type === 'logo' ? (
-              <LogoField value={edits[key] || ''} inherited={placeholderFor(key)} onChange={(v) => set(key, v)} />
+              <LogoField value={edits[key] || ''} inherited={placeholderFor(key)} onChange={(v) => set(key, v)} onExtract={applyExtracted} />
             ) : type === 'textarea' ? (
               <textarea value={edits[key] || ''} onChange={(e) => set(key, e.target.value)} placeholder={placeholderFor(key)} rows={2} style={{ ...input, resize: 'vertical', fontFamily: 'inherit' }} />
             ) : type === 'color' ? (
@@ -111,9 +123,19 @@ export default function MailTemplateEditor({ entityId, scope = 'platform', canTe
 // Logo: upload an image (resized client-side to ≤320px, stored as a data-URL —
 // emails reference it via /mail-assets/logo/:scope since Gmail strips data-URLs)
 // or paste a hosted URL. Shows the inherited logo when nothing is set here.
-function LogoField({ value, inherited, onChange }) {
+function LogoField({ value, inherited, onChange, onExtract }) {
   const fileRef = useRef(null);
   const shown = value || inherited;
+  const [extractState, setExtractState] = useState('');
+  const extract = async () => {
+    if (!shown) return;
+    setExtractState('working');
+    try {
+      const hexes = await extractPaletteFromImage(shown, 5);
+      onExtract?.(hexes);
+      setExtractState(`✓ ${hexes.length} colour${hexes.length === 1 ? '' : 's'} applied — tweak & Save`);
+    } catch (e) { setExtractState(`✗ ${e.message}`); }
+  };
   const onFile = (e) => {
     const f = e.target.files?.[0];
     if (!f) return;
@@ -139,9 +161,17 @@ function LogoField({ value, inherited, onChange }) {
           {shown ? <img src={shown} alt="" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', opacity: value ? 1 : 0.45 }} /> : <span style={{ fontSize: 11, color: 'var(--muted)' }}>No logo</span>}
         </div>
         <button type="button" style={smallBtn} onClick={() => fileRef.current?.click()}>Upload image</button>
+        {shown && onExtract && (
+          <button type="button" style={smallBtn} onClick={extract} disabled={extractState === 'working'}>
+            {extractState === 'working' ? 'Reading…' : '🎨 Extract colours'}
+          </button>
+        )}
         {value && <button type="button" style={{ ...smallBtn, background: 'transparent', color: 'var(--error, #ef4444)' }} onClick={() => onChange('')}>Remove</button>}
         <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={onFile} />
       </div>
+      {extractState && extractState !== 'working' && (
+        <div style={{ fontSize: 11.5, color: extractState.startsWith('✓') ? 'var(--success, #10b981)' : 'var(--error, #ef4444)' }}>{extractState}</div>
+      )}
       {!value?.startsWith('data:') && (
         <input value={value || ''} onChange={(e) => onChange(e.target.value)} placeholder={inherited && !inherited.startsWith('data:') ? inherited : 'or paste an image URL: https://…/logo.png'} style={input} />
       )}
