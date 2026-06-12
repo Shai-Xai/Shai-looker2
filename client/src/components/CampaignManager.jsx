@@ -177,7 +177,14 @@ function CampaignEditor({ entityId, isAdmin, action, onClose, onSaved }) {
 
   async function approve() {
     if (!aud?.count) { alert('Audience is empty.'); return; }
-    if (!confirm(`Send this campaign to ${aud.count} recipient${aud.count === 1 ? '' : 's'} now?\n\nThis cannot be undone.`)) return;
+    // Show the actual recipients (not just a count) so the sender sees exactly
+    // who this goes to before it's irreversible.
+    const who = (aud.sample || []).map((s) => s.email);
+    const recipientList = who.length
+      ? `\n\nRecipients:\n• ${who.join('\n• ')}${aud.count > who.length ? `\n• …and ${aud.count - who.length} more` : ''}`
+      : '';
+    const src = f.audienceMode === 'tile' ? `the “${dash?.tiles?.find((t) => t.tileId === f.tileId)?.title || 'selected'}” tile` : 'your pasted list';
+    if (!confirm(`Send this campaign to ${aud.count} recipient${aud.count === 1 ? '' : 's'} from ${src}?${recipientList}\n\nThis sends real emails now and cannot be undone.`)) return;
     setApproveState('working');
     try {
       let id = action?.id;
