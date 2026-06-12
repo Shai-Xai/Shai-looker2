@@ -149,11 +149,19 @@ export default function ClientLayout() {
   // you switch profile). Admin console (no active entity) sees all.
   useEffect(() => {
     let alive = true;
-    const poll = () => api.osInbox(activeEntityId || undefined).then((r) => {
-      if (alive) setInbox((s) => ({ ...s, enabled: true, unread: r.unread, pending: r.threads.filter((t) => t.priority === 'must_ack' && !t.acked) }));
-      // Mirror unread onto the installed app's icon badge (PWA / supported OS).
-      try { if (navigator.setAppBadge) { r.unread ? navigator.setAppBadge(r.unread) : navigator.clearAppBadge(); } } catch { /* unsupported */ }
-    }).catch(() => {});
+    const poll = async () => {
+      try {
+        const r = await api.osInbox(activeEntityId || undefined);
+        // Campaigns awaiting this client's go-ahead also count toward the badge.
+        let pendingApproval = 0;
+        if (activeEntityId) { try { pendingApproval = (await api.getActionsSummary(activeEntityId)).pendingApproval || 0; } catch { /* ignore */ } }
+        if (!alive) return;
+        setInbox((s) => ({ ...s, enabled: true, unread: r.unread, pendingApproval, pending: r.threads.filter((t) => t.priority === 'must_ack' && !t.acked) }));
+        // Mirror unread + pending approvals onto the installed app's icon badge.
+        const total = (r.unread || 0) + pendingApproval;
+        try { if (navigator.setAppBadge) { total ? navigator.setAppBadge(total) : navigator.clearAppBadge(); } } catch { /* unsupported */ }
+      } catch { /* ignore */ }
+    };
     poll();
     const t = setInterval(poll, 60000); // light poll; webhook push later
     window.addEventListener('os-refresh', poll); // instant update after ack/reply

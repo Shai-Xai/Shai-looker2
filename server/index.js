@@ -1745,7 +1745,25 @@ app.post('/api/my/dismiss-thread', auth.requireAuth, (req, res) => {
 app.get('/api/actions-summary/:entityId', auth.requireAuth, (req, res) => {
   const id = req.params.entityId;
   if (req.user.role !== 'admin' && !(req.user.entityIds || []).includes(id)) return res.status(403).json({ error: 'Not allowed' });
-  res.json({ actions: actionsSummaryFor(id, 6) });
+  res.json({ actions: actionsSummaryFor(id, 6), pendingApproval: pendingApprovalCount(id) });
+});
+
+// Campaigns automation has queued and are waiting for a human go-ahead.
+function pendingApprovalCount(entityId) {
+  try { return db.db.prepare("SELECT COUNT(*) n FROM actions WHERE entity_id=? AND status='draft' AND created_by='automation'").get(entityId)?.n || 0; }
+  catch { return 0; }
+}
+
+// Platform notification settings (admin). Small allowlisted key/values.
+app.get('/api/admin/notification-settings', auth.requireAdmin, (_req, res) => {
+  res.json({ ackReminderHours: Number(db.getSetting('ack_reminder_hours', '12')) || 12 });
+});
+app.put('/api/admin/notification-settings', auth.requireAdmin, (req, res) => {
+  let h = Number((req.body || {}).ackReminderHours);
+  if (!Number.isFinite(h)) h = 12;
+  h = Math.min(168, Math.max(1, Math.round(h))); // clamp 1h..7d
+  db.setSetting('ack_reminder_hours', String(h));
+  res.json({ ackReminderHours: h });
 });
 
 // ─── Action capabilities ────────────────────────────────────────────────────────

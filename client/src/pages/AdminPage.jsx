@@ -1293,9 +1293,34 @@ function AdminIntegrations() {
       <h3 style={{ fontSize: 15, fontWeight: 700, margin: '24px 0 4px' }}>Email template — platform default</h3>
       <p style={hint}>The default look of every notification email. Each client can layer their own branding on top (Client → Email branding).</p>
       <MailTemplateEditor scope="platform" canTest />
+      <h3 style={{ fontSize: 15, fontWeight: 700, margin: '28px 0 4px' }}>Notifications</h3>
+      <p style={hint}>How push reminders behave platform-wide.</p>
+      <NotificationSettings />
       <h3 style={{ fontSize: 15, fontWeight: 700, margin: '28px 0 4px' }}>Inbound email — CC the Owl</h3>
       <p style={hint}>Lets emails be captured into client inboxes by CC’ing a per-client address. Set the inbound domain, then point your mail forwarder at the webhook below.</p>
       <InboundConfig />
+    </div>
+  );
+}
+
+// Platform push-reminder cadence: how long a must-acknowledge message can sit
+// unacknowledged before Pulse re-nudges (and keeps re-nudging once per window).
+function NotificationSettings() {
+  const [hours, setHours] = useState('');
+  const [saved, setSaved] = useState(false);
+  useEffect(() => { api.getNotificationSettings().then((s) => setHours(String(s.ackReminderHours))).catch(() => setHours('12')); }, []);
+  if (hours === '') return <Muted>Loading…</Muted>;
+  const save = async () => { const s = await api.setNotificationSettings({ ackReminderHours: Number(hours) }); setHours(String(s.ackReminderHours)); flash(setSaved); };
+  return (
+    <div style={{ ...cardStyle, display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={lblS}>Must-acknowledge reminder</div>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 13, color: 'var(--muted)' }}>Re-nudge if not acknowledged after</span>
+        <input style={{ ...inS, width: 70 }} type="number" min="1" max="168" value={hours} onChange={(e) => setHours(e.target.value)} />
+        <span style={{ fontSize: 13, color: 'var(--muted)' }}>hours (then once per window until acknowledged).</span>
+        <button style={miniBtn} onClick={save}>Save</button>
+        {saved && <span style={{ color: 'var(--success,#10b981)', fontSize: 13, fontWeight: 600 }}>✓</span>}
+      </div>
     </div>
   );
 }
