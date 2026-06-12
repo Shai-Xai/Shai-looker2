@@ -16,7 +16,7 @@ const crypto = require('crypto');
 const MAX_AUDIENCE = 2000;       // v1 safety cap per campaign
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-function mount(app, { db, auth, mailer, resolveAudience, draftCopy, listEvents }) {
+function mount(app, { db, auth, mailer, push, resolveAudience, draftCopy, listEvents }) {
   const sql = db.db;
   const now = () => new Date().toISOString();
   const uuid = () => crypto.randomUUID();
@@ -455,6 +455,19 @@ function mount(app, { db, auth, mailer, resolveAudience, draftCopy, listEvents }
           .run(childId, a.entityId, 'email_campaign', 'draft', `${a.title || 'Campaign'} — ${day} (${fresh.length} new)`.slice(0, 120),
             JSON.stringify(cfg), JSON.stringify(fresh), a.id, 'automation', now(), now());
         console.log(`[actions] automation "${a.title}" queued ${fresh.length} new recipient(s) for approval`);
+        // Nudge the client's team: a campaign is waiting for a human to approve.
+        // Action buttons (Approve/Review) where supported; tap always deep-links
+        // to the campaign. requireInteraction — it's a decision, not an FYI.
+        if (push?.isEnabled?.()) {
+          push.sendToEntity(a.entityId, {
+            title: 'Campaign ready for approval',
+            body: `${a.title || 'A campaign'} — ${fresh.length} new recipient${fresh.length === 1 ? '' : 's'} waiting for your go-ahead.`,
+            url: `/actions?action=${childId}`,
+            tag: `action-${childId}`,
+            requireInteraction: true,
+            actions: [{ action: `approve:${a.entityId}:${childId}`, title: 'Approve' }, { action: 'review', title: 'Review' }],
+          }).catch(() => {});
+        }
       } catch (e) { console.error('[actions] auto-check failed', a.id, e.message); }
     }
   }

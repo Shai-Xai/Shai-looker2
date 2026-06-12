@@ -151,6 +151,8 @@ export default function ClientLayout() {
     let alive = true;
     const poll = () => api.osInbox(activeEntityId || undefined).then((r) => {
       if (alive) setInbox((s) => ({ ...s, enabled: true, unread: r.unread, pending: r.threads.filter((t) => t.priority === 'must_ack' && !t.acked) }));
+      // Mirror unread onto the installed app's icon badge (PWA / supported OS).
+      try { if (navigator.setAppBadge) { r.unread ? navigator.setAppBadge(r.unread) : navigator.clearAppBadge(); } } catch { /* unsupported */ }
     }).catch(() => {});
     poll();
     const t = setInterval(poll, 60000); // light poll; webhook push later

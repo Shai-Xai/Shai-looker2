@@ -13,7 +13,7 @@ const crypto = require('crypto');
 const DEFAULT_TZ = 'Africa/Johannesburg'; // GMT+2
 const ROLES = ['exec', 'marketing', 'finance', 'ops'];
 
-function mount(app, { db, auth, mailer, generateContent, roleLenses }) {
+function mount(app, { db, auth, mailer, push, generateContent, roleLenses }) {
   const sql = db.db;
   const now = () => new Date().toISOString();
   const uuid = () => crypto.randomUUID();
@@ -158,6 +158,26 @@ function mount(app, { db, auth, mailer, generateContent, roleLenses }) {
           if (r.ok) ok += 1; else err = r.error || r.reason || 'send failed';
         }
         result = ok ? { status: 'ok', detail: `sent to ${ok}` } : { status: 'error', detail: err };
+        // Push nudge to the recipients who have push on — "your briefing is
+        // ready", deep-linking home. Collapse tag = one per entity, so a new
+        // day's nudge replaces the previous instead of stacking. Best-effort.
+        if (ok && push?.isEnabled?.()) {
+          try {
+            const byEmail = new Map(db.listUsers().map((u) => [u.email, u]));
+            const lensLabel = lensFor(job).label;
+            for (const to of recipients) {
+              const u = byEmail.get(to);
+              if (u && u.notifyPush !== false) {
+                push.sendToUser(u.id, {
+                  title: 'Your briefing is ready',
+                  body: `${lensLabel} digest for ${db.getEntity(job.entityId)?.name || 'your event'} just landed.`,
+                  url: '/',
+                  tag: `digest-${job.entityId}`,
+                }).catch(() => {});
+              }
+            }
+          } catch { /* push is best-effort */ }
+        }
       } catch (e) { result = { status: 'error', detail: e.message }; }
     }
     if (!manual) {
