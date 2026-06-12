@@ -1288,13 +1288,23 @@ function ClientMessages({ entity }) {
   const [priority, setPriority] = useState('normal');
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState(false);
+  const [files, setFiles] = useState([]); // [{name, mime, size, data}]
+  const fileRef = useRef(null);
   const load = () => { api.osInbox(entity.id).then((r) => setThreads(r.threads)).catch(() => setThreads([])); };
   useEffect(() => { load(); }, [entity.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const addFiles = (list) => {
+    for (const f of Array.from(list || []).slice(0, 5)) {
+      if (f.size > 10 * 1024 * 1024) { alert(`${f.name} is over 10MB`); continue; }
+      const r = new FileReader();
+      r.onload = () => setFiles((cur) => cur.length >= 5 ? cur : [...cur, { name: f.name, mime: f.type || 'application/octet-stream', size: f.size, data: String(r.result).split(',')[1] }]);
+      r.readAsDataURL(f);
+    }
+  };
   async function send() {
-    if (!body.trim()) return;
+    if (!body.trim() && !files.length) return;
     setBusy(true);
-    try { await api.osAnnounce({ entityId: entity.id, title, body, priority }); setTitle(''); setBody(''); setPriority('normal'); flash(setSent); load(); }
+    try { await api.osAnnounce({ entityId: entity.id, title, body, priority, attachments: files }); setTitle(''); setBody(''); setPriority('normal'); setFiles([]); flash(setSent); load(); }
     catch (e) { alert(e.message); } finally { setBusy(false); }
   }
   const PRI = { fyi: 'FYI', normal: 'Normal', needs_reply: 'Needs reply', must_ack: 'Must acknowledge' };
@@ -1307,13 +1317,25 @@ function ClientMessages({ entity }) {
         <input style={{ ...input, width: '100%', fontWeight: 700, marginBottom: 8 }} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Subject (optional)" />
         <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={4} placeholder="Your message to the client…"
           style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 13, outline: 'none', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }} />
+        {files.length > 0 && (
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+            {files.map((f, i) => (
+              <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, background: 'var(--elevated, #f7f7f8)', border: '1px solid var(--hairline)', borderRadius: 980, padding: '4px 10px' }}>
+                📎 {f.name}
+                <button onClick={() => setFiles((cur) => cur.filter((_, j) => j !== i))} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--muted)', padding: 0 }}>✕</button>
+              </span>
+            ))}
+          </div>
+        )}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
           <select style={input} value={priority} onChange={(e) => setPriority(e.target.value)}>
             {Object.entries(PRI).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
           </select>
+          <button style={miniBtn} onClick={() => fileRef.current?.click()}>📎 Attach</button>
+          <input ref={fileRef} type="file" multiple style={{ display: 'none' }} onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }} />
           <span style={{ flex: 1 }} />
           {sent && <SavedChip />}
-          <button style={{ ...saveBtn }} onClick={send} disabled={busy || !body.trim()}>{busy ? 'Sending…' : 'Send message'}</button>
+          <button style={{ ...saveBtn }} onClick={send} disabled={busy || (!body.trim() && !files.length)}>{busy ? 'Sending…' : 'Send message'}</button>
         </div>
       </div>
       <h3 style={{ fontSize: 14, fontWeight: 700, margin: '18px 0 8px' }}>Conversations</h3>

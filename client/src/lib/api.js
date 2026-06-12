@@ -260,7 +260,7 @@ export const api = {
   osInbox: (entityId) => fetch(`/api/os/inbox${entityId ? `?entityId=${encodeURIComponent(entityId)}` : ''}`).then(json),
   osPending: () => fetch('/api/os/pending').then(json),
   osThread: (id) => fetch(`/api/os/threads/${id}`).then(json),
-  osReply: (id, body) => fetch(`/api/os/threads/${id}/messages`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body }) }).then(json),
+  osReply: (id, body, attachments = []) => fetch(`/api/os/threads/${id}/messages`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body, attachments }) }).then(json),
   osAck: (id) => fetch(`/api/os/threads/${id}/ack`, { method: 'POST' }).then(json),
   osAnnounce: (body) => fetch('/api/os/admin/announce', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
   osReceipts: (id) => fetch(`/api/os/admin/threads/${id}/receipts`).then(json),

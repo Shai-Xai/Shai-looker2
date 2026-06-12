@@ -12,11 +12,17 @@
 // grow without reshaping.
 
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
+const express = require('express');
 
 function mount(app, { db, auth, mailer }) {
   const sql = db.db;            // raw better-sqlite3 handle
   const now = () => new Date().toISOString();
   const uuid = () => crypto.randomUUID();
+  // Attachment files live on the persistent disk next to the DB.
+  const ATT_DIR = path.join(process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, 'data'), 'attachments');
+  fs.mkdirSync(ATT_DIR, { recursive: true });
 
   sql.exec(`
     CREATE TABLE IF NOT EXISTS os_threads (
@@ -53,6 +59,19 @@ function mount(app, { db, auth, mailer }) {
       at        TEXT NOT NULL,
       PRIMARY KEY (thread_id, user_id, kind)
     );
+
+    -- Files attached to messages. Bytes live on disk (ATT_DIR/<id>); this row
+    -- is the metadata + the scoping anchor (entity via thread).
+    CREATE TABLE IF NOT EXISTS os_attachments (
+      id         TEXT PRIMARY KEY,
+      message_id TEXT NOT NULL,
+      thread_id  TEXT NOT NULL,
+      name       TEXT NOT NULL,
+      mime       TEXT NOT NULL DEFAULT 'application/octet-stream',
+      size       INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_os_attachments_msg ON os_attachments(message_id);
   `);
 
   // Idempotency for inbound email: store the source Message-ID so webhook
@@ -88,7 +107,31 @@ function mount(app, { db, auth, mailer }) {
   const touch = (id) => sql.prepare('UPDATE os_threads SET updated_at=? WHERE id=?').run(now(), id);
 
   function thread(id) { const r = sql.prepare('SELECT * FROM os_threads WHERE id=?').get(id); return r ? threadRow(r) : null; }
-  function messages(id) { return sql.prepare('SELECT * FROM os_messages WHERE thread_id=? ORDER BY created_at').all(id).map(messageRow); }
+  function messages(id) {
+    const atts = sql.prepare('SELECT id, message_id, name, mime, size FROM os_attachments WHERE thread_id=?').all(id);
+    const byMsg = {};
+    for (const a of atts) (byMsg[a.message_id] = byMsg[a.message_id] || []).push({ id: a.id, name: a.name, mime: a.mime, size: a.size });
+    return sql.prepare('SELECT * FROM os_messages WHERE thread_id=? ORDER BY created_at').all(id)
+      .map((r) => ({ ...messageRow(r), attachments: byMsg[r.id] || [] }));
+  }
+
+  // Persist base64 attachments for a message. Hard limits: 5 files, 10MB each.
+  const MAX_FILES = 5, MAX_BYTES = 10 * 1024 * 1024;
+  function saveAttachments(threadId, messageId, list) {
+    let n = 0;
+    for (const f of (list || []).slice(0, MAX_FILES)) {
+      try {
+        const buf = Buffer.from(String(f.data || ''), 'base64');
+        if (!buf.length || buf.length > MAX_BYTES) continue;
+        const id = uuid();
+        fs.writeFileSync(path.join(ATT_DIR, id), buf);
+        sql.prepare('INSERT INTO os_attachments (id, message_id, thread_id, name, mime, size, created_at) VALUES (?,?,?,?,?,?,?)')
+          .run(id, messageId, threadId, String(f.name || 'file').slice(0, 200), String(f.mime || 'application/octet-stream').slice(0, 100), buf.length, now());
+        n += 1;
+      } catch (e) { console.error('[os] attachment save failed:', e.message); }
+    }
+    return n;
+  }
   function entitiesFilter(u, qEntity) {
     if (isAdmin(u)) return qEntity ? [qEntity] : null; // null = all
     return entityIds(u);
@@ -164,20 +207,38 @@ function mount(app, { db, auth, mailer }) {
     res.json({ thread: { ...t, entityName: db.getEntity(t.entityId)?.name || '' }, messages: messages(t.id), state: threadState(t.id, req.user.id), clientReceipts });
   });
 
-  // Reply / post a message into a thread.
-  app.post('/api/os/threads/:id/messages', auth.requireAuth, requireOn, (req, res) => {
+  // Reply / post a message into a thread (optionally with attachments). Uses
+  // its own JSON parser with a higher limit — base64 file payloads outgrow the
+  // app-wide 5mb cap (index.js excludes this path from the global parser).
+  const bigJson = express.json({ limit: '60mb' });
+  app.post('/api/os/threads/:id/messages', bigJson, auth.requireAuth, requireOn, (req, res) => {
     const t = thread(req.params.id);
     if (!t) return res.status(404).json({ error: 'Not found' });
     if (!canEntity(req.user, t.entityId)) return res.status(403).json({ error: 'Not allowed' });
     const body = String((req.body || {}).body || '').slice(0, 8000).trim();
-    if (!body) return res.status(400).json({ error: 'Empty message' });
+    const files = Array.isArray((req.body || {}).attachments) ? req.body.attachments : [];
+    if (!body && !files.length) return res.status(400).json({ error: 'Empty message' });
     const id = uuid();
     sql.prepare('INSERT INTO os_messages (id, thread_id, author_type, author_email, author_name, channel, body, created_at) VALUES (?,?,?,?,?,?,?,?)')
-      .run(id, t.id, isAdmin(req.user) ? 'howler' : 'client', req.user.email, '', 'pulse', body, now());
+      .run(id, t.id, isAdmin(req.user) ? 'howler' : 'client', req.user.email, '', 'pulse', body || '(attachment)', now());
+    const nAtt = saveAttachments(t.id, id, files);
     touch(t.id);
     sql.prepare('INSERT OR REPLACE INTO os_receipts (thread_id, user_id, kind, at) VALUES (?,?,?,?)').run(t.id, req.user.id, 'read', now());
-    if (isAdmin(req.user)) emailEntity(t.entityId, t, body); // nudge the client when Howler replies
+    if (isAdmin(req.user)) emailEntity(t.entityId, t, nAtt ? `${body || ''}\n\n📎 ${nAtt} attachment${nAtt === 1 ? '' : 's'} — view in Pulse`.trim() : body);
     res.status(201).json({ messages: messages(t.id) });
+  });
+
+  // Download an attachment — scoped exactly like the thread it belongs to.
+  app.get('/api/os/attachments/:id', auth.requireAuth, requireOn, (req, res) => {
+    const a = sql.prepare('SELECT * FROM os_attachments WHERE id=?').get(req.params.id);
+    if (!a) return res.status(404).json({ error: 'Not found' });
+    const t = thread(a.thread_id);
+    if (!t || !canEntity(req.user, t.entityId)) return res.status(403).json({ error: 'Not allowed' });
+    const file = path.join(ATT_DIR, a.id);
+    if (!fs.existsSync(file)) return res.status(404).json({ error: 'File missing' });
+    res.set('Content-Type', a.mime);
+    res.set('Content-Disposition', `${req.query.dl ? 'attachment' : 'inline'}; filename="${encodeURIComponent(a.name)}"`);
+    res.sendFile(file);
   });
 
   // Acknowledge a must-ack thread (captured: who + when).
@@ -200,19 +261,21 @@ function mount(app, { db, auth, mailer }) {
   });
 
   // ── Admin: send an announcement / open a thread to a client ──────────────────
-  app.post('/api/os/admin/announce', auth.requireAdmin, requireOn, (req, res) => {
-    const { entityId, suiteId, title, body, priority } = req.body || {};
+  app.post('/api/os/admin/announce', bigJson, auth.requireAdmin, requireOn, (req, res) => {
+    const { entityId, suiteId, title, body, priority, attachments } = req.body || {};
     if (!entityId || !db.getEntity(entityId)) return res.status(400).json({ error: 'Valid entityId required' });
-    if (!String(body || '').trim()) return res.status(400).json({ error: 'Message body required' });
+    if (!String(body || '').trim() && !(attachments || []).length) return res.status(400).json({ error: 'Message body required' });
     const pri = ['fyi', 'normal', 'needs_reply', 'must_ack'].includes(priority) ? priority : 'normal';
     const id = uuid();
     const ts = now();
     sql.prepare('INSERT INTO os_threads (id, entity_id, suite_id, subject_type, subject_id, title, priority, status, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
       .run(id, entityId, suiteId || '', 'message', '', String(title || '').slice(0, 200), pri, 'open', req.user.email, ts, ts);
+    const mid = uuid();
     sql.prepare('INSERT INTO os_messages (id, thread_id, author_type, author_email, author_name, channel, body, created_at) VALUES (?,?,?,?,?,?,?,?)')
-      .run(uuid(), id, 'howler', req.user.email, '', 'pulse', String(body).slice(0, 8000), ts);
+      .run(mid, id, 'howler', req.user.email, '', 'pulse', String(body || '(attachment)').slice(0, 8000), ts);
+    const nAtt = saveAttachments(id, mid, Array.isArray(attachments) ? attachments : []);
     const t = thread(id);
-    emailEntity(entityId, t, String(body).slice(0, 8000));
+    emailEntity(entityId, t, `${String(body || '').slice(0, 8000)}${nAtt ? `\n\n📎 ${nAtt} attachment${nAtt === 1 ? '' : 's'} — view in Pulse` : ''}`.trim());
     res.status(201).json({ thread: t });
   });
 

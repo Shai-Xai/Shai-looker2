@@ -61,9 +61,20 @@ export default function InboxPage() {
 function ThreadView({ id, isAdmin, isMobile, onBack, onChange }) {
   const [data, setData] = useState(null);
   const [text, setText] = useState('');
+  const [files, setFiles] = useState([]); // [{name, mime, data(base64), size}]
   const [busy, setBusy] = useState(false);
   const [receipts, setReceipts] = useState(null);
   const endRef = useRef(null);
+  const fileRef = useRef(null);
+
+  const addFiles = (list) => {
+    for (const f of Array.from(list || []).slice(0, 5)) {
+      if (f.size > 10 * 1024 * 1024) { alert(`${f.name} is over 10MB`); continue; }
+      const reader = new FileReader();
+      reader.onload = () => setFiles((cur) => cur.length >= 5 ? cur : [...cur, { name: f.name, mime: f.type || 'application/octet-stream', size: f.size, data: String(reader.result).split(',')[1] }]);
+      reader.readAsDataURL(f);
+    }
+  };
 
   const load = () => api.osThread(id).then(setData).catch(() => {});
   useEffect(() => { load(); }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -81,9 +92,9 @@ function ThreadView({ id, isAdmin, isMobile, onBack, onChange }) {
   const readBy = (m) => reads.filter((r) => r.at >= m.createdAt);
 
   const reply = () => {
-    const b = text.trim(); if (!b) return;
+    const b = text.trim(); if (!b && !files.length) return;
     setBusy(true);
-    api.osReply(id, b).then((r) => { setData((d) => ({ ...d, messages: r.messages })); setText(''); }).catch(() => {}).finally(() => setBusy(false));
+    api.osReply(id, b, files).then((r) => { setData((d) => ({ ...d, messages: r.messages })); setText(''); setFiles([]); }).catch((e) => alert(e.message)).finally(() => setBusy(false));
   };
   const ack = () => api.osAck(id).then(() => { load(); onChange?.(); window.dispatchEvent(new Event('os-refresh')); }).catch(() => {});
 
@@ -121,6 +132,19 @@ function ThreadView({ id, isAdmin, isMobile, onBack, onChange }) {
                   {m.authorType === 'howler' ? 'Howler' : m.authorEmail}{m.channel !== 'pulse' ? ` · ${m.channel}` : ''} · {shortDate(m.createdAt)}
                 </div>
                 <div style={{ background: mine ? 'var(--brand)' : 'var(--elevated)', color: mine ? '#fff' : 'var(--text)', borderRadius: mine ? '14px 14px 4px 14px' : '14px 14px 14px 4px', padding: '9px 13px', fontSize: 13.5, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{m.body}</div>
+                {(m.attachments || []).length > 0 && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginTop: 5, alignItems: mine ? 'flex-end' : 'flex-start' }}>
+                    {m.attachments.map((a) => a.mime?.startsWith('image/') ? (
+                      <a key={a.id} href={`/api/os/attachments/${a.id}`} target="_blank" rel="noreferrer">
+                        <img src={`/api/os/attachments/${a.id}`} alt={a.name} style={{ maxWidth: 220, maxHeight: 160, borderRadius: 10, border: '1px solid var(--hairline)', display: 'block' }} />
+                      </a>
+                    ) : (
+                      <a key={a.id} href={`/api/os/attachments/${a.id}?dl=1`} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600, color: 'var(--text)', background: 'var(--elevated)', border: '1px solid var(--hairline)', borderRadius: 980, padding: '5px 11px', textDecoration: 'none' }}>
+                        📎 {a.name} <span style={{ color: 'var(--muted)', fontWeight: 400 }}>{fmtSize(a.size)}</span>
+                      </a>
+                    ))}
+                  </div>
+                )}
                 {seen && (
                   <div style={{ fontSize: 10, marginTop: 3, color: seen.length ? '#2da44e' : 'var(--muted)', fontWeight: 600 }}>
                     {seen.length ? `✓✓ Read by ${seen.map((r) => r.email).join(', ')} · ${shortDate(seen.map((r) => r.at).sort()[0])}` : '✓ Sent · not yet read'}
@@ -140,13 +164,27 @@ function ThreadView({ id, isAdmin, isMobile, onBack, onChange }) {
         </div>
       )}
 
-      <div style={{ padding: 14, borderTop: '1px solid var(--hairline)', display: 'flex', gap: 8, alignItems: 'flex-end' }}>
-        <textarea
-          value={text} onChange={(e) => setText(e.target.value)} rows={1} placeholder="Write a reply…"
-          onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) reply(); }}
-          style={{ flex: 1, border: '1px solid var(--hairline)', borderRadius: 12, padding: '10px 13px', fontSize: 13.5, outline: 'none', resize: 'vertical', fontFamily: 'inherit', background: 'var(--card)', color: 'var(--text)' }}
-        />
-        <button onClick={reply} disabled={busy || !text.trim()} style={primaryBtn}>{busy ? '…' : 'Send'}</button>
+      <div style={{ padding: 14, borderTop: '1px solid var(--hairline)' }}>
+        {files.length > 0 && (
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
+            {files.map((f, i) => (
+              <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, background: 'var(--elevated)', border: '1px solid var(--hairline)', borderRadius: 980, padding: '4px 10px' }}>
+                📎 {f.name} <span style={{ color: 'var(--muted)' }}>{fmtSize(f.size)}</span>
+                <button onClick={() => setFiles((cur) => cur.filter((_, j) => j !== i))} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--muted)', fontSize: 12, padding: 0 }}>✕</button>
+              </span>
+            ))}
+          </div>
+        )}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+          <button onClick={() => fileRef.current?.click()} title="Attach files" aria-label="Attach files" style={{ ...linkBtn, fontSize: 17, padding: '8px 4px' }}>📎</button>
+          <input ref={fileRef} type="file" multiple style={{ display: 'none' }} onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }} />
+          <textarea
+            value={text} onChange={(e) => setText(e.target.value)} rows={1} placeholder="Write a reply…"
+            onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) reply(); }}
+            style={{ flex: 1, border: '1px solid var(--hairline)', borderRadius: 12, padding: '10px 13px', fontSize: 13.5, outline: 'none', resize: 'vertical', fontFamily: 'inherit', background: 'var(--card)', color: 'var(--text)' }}
+          />
+          <button onClick={reply} disabled={busy || (!text.trim() && !files.length)} style={primaryBtn}>{busy ? '…' : 'Send'}</button>
+        </div>
       </div>
     </div>
   );
@@ -162,6 +200,7 @@ function PriorityChip({ priority, acked }) {
 }
 
 const shortDate = (iso) => { try { const d = new Date(iso); const today = new Date().toDateString() === d.toDateString(); return today ? d.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : d.toLocaleDateString('en-ZA', { day: 'numeric', month: 'short' }); } catch { return ''; } };
+const fmtSize = (b) => (b > 1024 * 1024 ? `${(b / 1048576).toFixed(1)}MB` : `${Math.max(1, Math.round(b / 1024))}KB`);
 const rowBtn = { display: 'flex', gap: 9, width: '100%', textAlign: 'left', border: 'none', borderBottom: '1px solid var(--hairline)', cursor: 'pointer', padding: '12px 16px', color: 'var(--text)' };
 const chip = { flexShrink: 0, fontSize: 10, fontWeight: 700, borderRadius: 980, padding: '2px 8px' };
 const linkBtn = { border: 'none', background: 'transparent', color: 'var(--brand)', fontSize: 13, fontWeight: 600, cursor: 'pointer', flexShrink: 0 };

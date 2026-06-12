@@ -23,7 +23,9 @@ if (process.env.NODE_ENV === 'production' || process.env.TRUST_PROXY === '1') ap
 // (backup import, settlement PDF uploads) — those parse themselves with a
 // higher limit.
 const jsonParser = express.json({ limit: '5mb' });
-const parsesOwnBody = (p) => p === '/api/admin/import' || p.startsWith('/api/admin/settlements') || p.startsWith('/api/admin/documents');
+const parsesOwnBody = (p) => p === '/api/admin/import' || p.startsWith('/api/admin/settlements') || p.startsWith('/api/admin/documents')
+  // OS messenger attachment payloads (base64) need a bigger limit — os.js parses these itself.
+  || /^\/api\/os\/threads\/[^/]+\/messages$/.test(p) || p === '/api/os/admin/announce';
 app.use((req, res, next) => (parsesOwnBody(req.path) ? next() : jsonParser(req, res, next)));
 app.use(cookieParser());
 app.use(auth.attachUser);
