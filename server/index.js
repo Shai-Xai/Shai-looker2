@@ -55,9 +55,14 @@ migrate.run();
 auth.seedAdmin();
 // Outbound email (Resend) — disposable module; senders no-op when unconfigured.
 mailer.init({ db });
+// Web Push — installable-app notifications (disposable module, own table +
+// routes under /api/push, kill switch `push_enabled`). Mounted before os so the
+// comms spine can push alongside email.
+const push = require('./push');
+push.mount(app, { db, auth });
 // Experience OS comms spine — self-contained module (own tables + routes under
 // /api/os). Remove this line + server/os.js to fully uninstall the feature.
-require('./os').mount(app, { db, auth, mailer });
+require('./os').mount(app, { db, auth, mailer, push });
 
 // ─── Health ───────────────────────────────────────────────────────────────────
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));

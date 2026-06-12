@@ -1,0 +1,16 @@
+{
+  "name": "Howler : Pulse",
+  "short_name": "Pulse",
+  "description": "Live analytics and updates for your events.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#ffffff",
+  "theme_color": "#ff385c",
+  "icons": [
+    { "src": "/logo.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/logo.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/ai-mark.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

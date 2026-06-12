@@ -16,7 +16,7 @@ const fs = require('fs');
 const path = require('path');
 const express = require('express');
 
-function mount(app, { db, auth, mailer }) {
+function mount(app, { db, auth, mailer, push }) {
   const sql = db.db;            // raw better-sqlite3 handle
   const now = () => new Date().toISOString();
   const uuid = () => crypto.randomUUID();
@@ -171,6 +171,24 @@ function mount(app, { db, auth, mailer }) {
     for (const addr of to) mailer.send({ to: addr, subject, html, text, fromName, kind: 'notification', entity: entityId });
   }
 
+  // ── push nudge (best-effort) ────────────────────────────────────────────────
+  // Same fan-out as email, but to installed devices. Deep-links to the thread.
+  function pushEntity(entityId, t, body) {
+    if (!push?.isEnabled?.()) return;
+    const brand = (mailer?.resolveBranding?.(entityId) || {});
+    const title = brand.senderName ? `${brand.senderName}` : 'Howler : Pulse';
+    push.sendToEntity(entityId, {
+      title: t.title ? `${title}: ${t.title}` : title,
+      body: String(body || '').slice(0, 180),
+      url: `/inbox?thread=${t.id}`,
+      tag: `thread-${t.id}`,
+      icon: brand.logo && !String(brand.logo).startsWith('data:') ? brand.logo : '/logo.png',
+      requireInteraction: t.priority === 'must_ack',
+    }).catch(() => {});
+  }
+  // Notify a client's team across every channel (email + push).
+  function notifyEntity(entityId, t, body) { emailEntity(entityId, t, body); pushEntity(entityId, t, body); }
+
   // ── Client + shared reads ───────────────────────────────────────────────────
   // Inbox: threads for the user's entities (admin: all, or ?entityId=). Includes
   // last message preview + unread/ack flags + pending-ack count for badges.
@@ -230,7 +248,7 @@ function mount(app, { db, auth, mailer }) {
     const nAtt = saveAttachments(t.id, id, files);
     touch(t.id);
     sql.prepare('INSERT OR REPLACE INTO os_receipts (thread_id, user_id, kind, at) VALUES (?,?,?,?)').run(t.id, req.user.id, 'read', now());
-    if (isAdmin(req.user)) emailEntity(t.entityId, t, nAtt ? `${body || ''}\n\n📎 ${nAtt} attachment${nAtt === 1 ? '' : 's'} — view in Pulse`.trim() : body);
+    if (isAdmin(req.user)) notifyEntity(t.entityId, t, nAtt ? `${body || ''}\n\n📎 ${nAtt} attachment${nAtt === 1 ? '' : 's'} — view in Pulse`.trim() : body);
     res.status(201).json({ messages: messages(t.id) });
   });
 
@@ -281,7 +299,7 @@ function mount(app, { db, auth, mailer }) {
       .run(mid, id, 'howler', req.user.email, '', 'pulse', String(body || '(attachment)').slice(0, 8000), ts);
     const nAtt = saveAttachments(id, mid, Array.isArray(attachments) ? attachments : []);
     const t = thread(id);
-    emailEntity(entityId, t, `${String(body || '').slice(0, 8000)}${nAtt ? `\n\n📎 ${nAtt} attachment${nAtt === 1 ? '' : 's'} — view in Pulse` : ''}`.trim());
+    notifyEntity(entityId, t, `${String(body || '').slice(0, 8000)}${nAtt ? `\n\n📎 ${nAtt} attachment${nAtt === 1 ? '' : 's'} — view in Pulse` : ''}`.trim());
     res.status(201).json({ thread: t });
   });
 

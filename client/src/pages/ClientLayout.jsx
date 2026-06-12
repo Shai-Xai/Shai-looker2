@@ -8,6 +8,7 @@ import { useTheme } from '../lib/theme.jsx';
 import { vtNavigate } from '../lib/viewTransition.js';
 import { useSheetDrag } from '../lib/useSheetDrag.js';
 import { applyBrand, resetBrand } from '../lib/brand.js';
+import { pushSupported, isSubscribed, enablePush, disablePush } from '../lib/push.js';
 
 // Persistent client shell: a left sidebar tree of Suites → Sets → Dashboards,
 // with the selected dashboard rendered in the main area.
@@ -504,10 +505,34 @@ function ProfileFooter({ user, isAdmin, brand, onNavigate }) {
   const { theme, toggle } = useTheme();
   const { logout } = useAuth();
   const [open, setOpen] = useState(false);
+  const [notif, setNotif] = useState({ supported: false, on: false, busy: false });
   const entity = user?.entities?.[0];
   const name = isAdmin ? 'Howler · Admin' : (brand?.entityName || entity?.name || (user?.email || '').split('@')[0]);
   const logo = brand?.entityLogo || entity?.logo || '';
   const initial = (name || '?').trim().charAt(0).toUpperCase();
+  // Reflect this device's notification state when the menu opens.
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    (async () => {
+      const on = pushSupported() ? await isSubscribed() : false;
+      if (alive) setNotif((s) => ({ ...s, supported: pushSupported(), on }));
+    })();
+    return () => { alive = false; };
+  }, [open]);
+  const toggleNotif = async () => {
+    setNotif((s) => ({ ...s, busy: true }));
+    try {
+      if (notif.on) { await disablePush(); setNotif((s) => ({ ...s, on: false, busy: false })); }
+      else { await enablePush(); setNotif((s) => ({ ...s, on: true, busy: false })); }
+    } catch (e) {
+      setNotif((s) => ({ ...s, busy: false }));
+      const iosNotInstalled = /iPhone|iPad/.test(navigator.userAgent) && !window.matchMedia('(display-mode: standalone)').matches;
+      alert(iosNotInstalled
+        ? 'On iPhone/iPad, first tap the Share button and "Add to Home Screen", then open Pulse from your home screen to enable notifications.'
+        : (e.message || 'Could not enable notifications.'));
+    }
+  };
   return (
     <div style={{ position: 'relative', borderTop: '1px solid var(--hairline)', padding: 8, flexShrink: 0 }}>
       {open && <div style={{ position: 'fixed', inset: 0, zIndex: 70 }} onClick={() => setOpen(false)} />}
@@ -516,6 +541,12 @@ function ProfileFooter({ user, isAdmin, brand, onNavigate }) {
           {!isAdmin && (
             <button className="nav-row" style={menuItem} onClick={() => { setOpen(false); onNavigate('/settings'); }}>
               <span style={menuIco}>⚙</span> Settings
+            </button>
+          )}
+          {notif.supported && (
+            <button className="nav-row" style={menuItem} onClick={toggleNotif} disabled={notif.busy}>
+              <span style={menuIco}>{notif.on ? '🔔' : '🔕'}</span>
+              {notif.busy ? 'Working…' : notif.on ? 'Notifications on' : 'Enable notifications'}
             </button>
           )}
           <button className="nav-row" style={menuItem} onClick={toggle}>

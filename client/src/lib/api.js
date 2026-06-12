@@ -263,6 +263,12 @@ export const api = {
   // Share links
   createShareLink: (body) => fetch('/api/share', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
 
+  // Web Push (installable-app notifications)
+  getPushKey: () => fetch('/api/push/key').then(json),
+  pushSubscribe: (subscription) => fetch('/api/push/subscribe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subscription }) }).then(json),
+  pushUnsubscribe: (endpoint) => fetch('/api/push/unsubscribe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ endpoint }) }).then(json),
+  pushTest: () => fetch('/api/push/test', { method: 'POST' }).then(json),
+
   // Experience OS — comms spine (isolated /api/os)
   osStatus: () => fetch('/api/os/status').then(json),
   osInbox: (entityId) => fetch(`/api/os/inbox${entityId ? `?entityId=${encodeURIComponent(entityId)}` : ''}`).then(json),
