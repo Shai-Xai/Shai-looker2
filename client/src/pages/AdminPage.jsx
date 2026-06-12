@@ -439,11 +439,13 @@ function EntityLogins({ entity, users, onChange }) {
 
 // ─── Custom sets (a client's bespoke collections, hidden from the shared library) ──
 function CustomSets({ entity }) {
+  const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [cloneId, setCloneId] = useState('');
   const [imp, setImp] = useState({ lookerDashboardId: '', setId: '', title: '', busy: false, err: '' });
   const load = () => api.getEntitySets(entity.id).then(setData).catch(() => setData({ sets: [], pool: [], templates: [] }));
-  useEffect(load, [entity.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Wrap: load returns a promise, and useEffect would call it as a cleanup fn.
+  useEffect(() => { load(); }, [entity.id]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!data) return <Muted>Loading…</Muted>;
 
   const doImport = async () => {
@@ -485,7 +487,20 @@ function CustomSets({ entity }) {
           <button style={miniBtn} onClick={doImport} disabled={imp.busy || !imp.lookerDashboardId.trim()}>{imp.busy ? 'Importing…' : 'Import'}</button>
         </div>
         {imp.err && <div style={{ color: 'var(--error)', fontSize: 13, marginTop: 6 }}>{imp.err}</div>}
-        <div style={hint}>The imported dashboard is private to this client. Add it to a custom set, then bundle that set into one of their suites.</div>
+        <div style={hint}>The imported dashboard is private to this client — it's filed under <b>Custom / {entity.name}</b> in your dashboard library. Add it to a custom set, then bundle that set into one of their suites.</div>
+        {data.pool.some((d) => d.ownerEntityId === entity.id) && (
+          <div style={{ marginTop: 10 }}>
+            <L>This client's custom dashboards</L>
+            {data.pool.filter((d) => d.ownerEntityId === entity.id).map((d) => (
+              <div key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid var(--hairline)', fontSize: 13 }}>
+                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.title}</span>
+                <span style={{ color: 'var(--muted)', fontSize: 12 }}>{d.tileCount} tiles</span>
+                <button style={miniBtnOutline} onClick={() => navigate(`/d/${d.id}`)}>View</button>
+                <button style={miniBtnOutline} onClick={() => navigate(`/d/${d.id}/edit`)}>Edit</button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {data.sets.length === 0 ? <Muted>No custom sets yet.</Muted>
@@ -512,6 +527,7 @@ function Sets() {
   );
 }
 function SetCard({ set, dashboards, onChange }) {
+  const navigate = useNavigate();
   const [name, setName] = useState(set.name);
   const [icon, setIcon] = useState(set.icon || '');
   const [ids, setIds] = useState(set.dashboardIds || []);
@@ -658,6 +674,7 @@ function SetCard({ set, dashboards, onChange }) {
                       <option key={pid} value={pid}>Tab of: {byId[pid]?.title || pid}</option>
                     ))}
                   </select>
+                  <button style={orderBtn} onClick={() => navigate(`/d/${id}`)} title="View dashboard">👁</button>
                   <button style={{ ...orderBtn, color: 'var(--error)' }} onClick={() => removeId(id)} title="Remove from set">✕</button>
                 </div>
               );

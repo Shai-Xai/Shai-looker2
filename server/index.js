@@ -163,7 +163,8 @@ app.post('/api/admin/entities/:id/sets/clone', auth.requireAdmin, (req, res) => 
 // of the client's custom sets.
 app.post('/api/admin/entities/:id/dashboards/import', auth.requireAdmin, async (req, res) => {
   const entityId = req.params.id;
-  if (!db.getEntity(entityId)) return res.status(404).json({ error: 'Not found' });
+  const entity = db.getEntity(entityId);
+  if (!entity) return res.status(404).json({ error: 'Not found' });
   const { lookerDashboardId, title, setId } = req.body || {};
   if (!lookerDashboardId) return res.status(400).json({ error: 'lookerDashboardId is required' });
   try {
@@ -171,7 +172,8 @@ app.post('/api/admin/entities/:id/dashboards/import', auth.requireAdmin, async (
     await looker.resolveElementQueries(source.elements);
     const def = convertDashboard(source);
     if (title) def.title = title;
-    def.folder = (source.dashboard?.folder?.name || '').trim();
+    // Always filed under the client's own folder so it's findable in the library.
+    def.folder = `Custom/${entity.name}`;
     def.ownerEntityId = entityId; // bespoke to this client
     const created = store.create(def);
     try { db.harvestDashboardTiles(created, { sourceDashboardId: created.id }); } catch (e) { console.error('[harvest]', e.message); }
