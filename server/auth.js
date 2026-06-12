@@ -137,11 +137,11 @@ let _nameMap = null, _nameMapAt = 0;
 function filterNameToField(name) {
   const NOW = Date.now();
   if (!_nameMap || NOW - _nameMapAt > 60000) {
-    const map = {};
-    // Shared platform dashboards are authoritative: a client's bespoke import
-    // must NEVER redefine what a shared filter name (e.g. "Organiser") maps to.
-    // Process shared first (first-wins), so custom dashboards only resolve names
-    // that no shared dashboard already defines.
+    // One rogue dashboard (e.g. a bespoke client import reusing the name
+    // "Organiser" for a different field) must not redefine what a filter name
+    // means platform-wide. Majority vote across all dashboards decides; the
+    // canonical organiser field always wins outright; ties break shared-first.
+    const votes = {}; // name -> field -> count
     const all = db.listDashboards();
     const ordered = [...all.filter((d) => !d.ownerEntityId), ...all.filter((d) => d.ownerEntityId)];
     for (const d of ordered) {
@@ -149,8 +149,17 @@ function filterNameToField(name) {
       for (const f of full?.filters || []) {
         const field = f.field || f.dimension;
         const nm = f.name || f.title;
-        if (field && nm && !map[nm]) map[nm] = field;
+        if (!field || !nm) continue;
+        votes[nm] = votes[nm] || new Map();
+        votes[nm].set(field, (votes[nm].get(field) || 0) + 1);
       }
+    }
+    const map = {};
+    for (const [nm, fieldVotes] of Object.entries(votes)) {
+      if (fieldVotes.has(ORG_FIELD)) { map[nm] = ORG_FIELD; continue; }
+      let best = null, bestN = 0;
+      for (const [field, n] of fieldVotes) if (n > bestN) { best = field; bestN = n; } // ties: first seen (shared-first order)
+      if (best) map[nm] = best;
     }
     _nameMap = map; _nameMapAt = NOW;
   }
@@ -261,10 +270,43 @@ function entityOrganiser(entityIds) {
   return value ? { value, directField } : null;
 }
 
+// Authoritative last resort: ask Looker whether the query's explore exposes an
+// organiser dimension (the canonical field first, else any organiser-named
+// dimension, preferring a `.name`). Includes hidden dimensions — they are
+// still filterable. Cached per explore for the process lifetime; lookup
+// failures are NOT cached so a Looker blip doesn't permanently block an
+// explore. Resolves the cashless-style explores whose dashboards never declare
+// an organiser filter but whose model does join core_organisers.
+const _lkOrg = new Map(); // `${model}::${view}` -> field | null (resolved)
+const _lkOrgPending = new Map();
+function lookerOrganiserField(model, view) {
+  if (!model || !view) return Promise.resolve(null);
+  const key = `${model}::${view}`;
+  if (_lkOrg.has(key)) return Promise.resolve(_lkOrg.get(key));
+  if (_lkOrgPending.has(key)) return _lkOrgPending.get(key);
+  const looker = require('./looker'); // lazy: avoids any startup-order surprises
+  const p = looker.lookerRequest('GET',
+    `/lookml_models/${encodeURIComponent(model)}/explores/${encodeURIComponent(view)}?fields=fields(dimensions(name,label,hidden))`)
+    .then((data) => {
+      const dims = data?.fields?.dimensions || [];
+      let field = dims.some((d) => d.name === ORG_FIELD) ? ORG_FIELD : null;
+      if (!field) {
+        const cands = dims.filter((d) => ORG_RE.test(d.name || '') || ORG_RE.test(d.label || ''));
+        field = (cands.find((d) => /\.name$/.test(d.name)) || cands[0])?.name || null;
+      }
+      _lkOrg.set(key, field);
+      return field;
+    })
+    .catch((e) => { console.error('[scope] explore organiser lookup failed', key, e.message); return null; })
+    .finally(() => { _lkOrgPending.delete(key); });
+  _lkOrgPending.set(key, p);
+  return p;
+}
+
 // Forced organiser scope for ONE query, using the organiser field that belongs
 // to the query's explore. Returns a filters object, {} (admin, no suite), or
 // false to block (fail closed).
-function scopeForQuery(query, user, suiteId) {
+async function scopeForQuery(query, user, suiteId) {
   let entityIds;
   if (suiteId) {
     if (!canAccessSuite(user, suiteId)) return false;
@@ -289,6 +331,9 @@ function scopeForQuery(query, user, suiteId) {
     ]);
     if (org.directField && qViews.has(org.directField.split('.')[0])) field = org.directField;
   }
+  // Last resort: Looker's own explore metadata (e.g. cashless explores join
+  // core_organisers but no dashboard ever declares an organiser filter there).
+  if (!field) field = await lookerOrganiserField(query?.model, query?.view);
   if (!field) return false; // can't scope this explore safely → block
   return { [field]: org.value };
 }

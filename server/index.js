@@ -555,8 +555,8 @@ async function runLookerQuery(path, body, ttl = QCACHE_TTL, force = false) {
 // belongs to the query's OWN explore (so GA4 etc. don't get core_organisers.name
 // injected, which Looker rejects). A suite context (client view or admin
 // preview) scopes to that suite's organiser; no suite + admin is unscoped.
-function applyScope(query, user, suiteId) {
-  const scope = auth.scopeForQuery(query, user, suiteId);
+async function applyScope(query, user, suiteId) {
+  const scope = await auth.scopeForQuery(query, user, suiteId);
   if (scope === false) return false; // fail closed
   query.filters = { ...(query.filters || {}), ...scope };
   return true;
@@ -567,7 +567,7 @@ app.post('/api/run-query', auth.requireAuth, async (req, res) => {
     const { query, filterOverrides = {}, suiteId } = req.body;
     if (!query) return res.status(400).json({ error: 'query is required' });
     const queryBody = { ...query, filters: { ...(query.filters || {}), ...filterOverrides } };
-    if (!applyScope(queryBody, req.user, suiteId)) {
+    if (!(await applyScope(queryBody, req.user, suiteId))) {
       return res.status(403).json({ error: 'No data access is configured for your account yet.' });
     }
     const data = await runLookerQuery('/queries/run/json_detail', queryBody);
@@ -582,7 +582,7 @@ app.post('/api/drill', auth.requireAuth, async (req, res) => {
   try {
     const query = parseDrillUrl(req.body?.url);
     if (!query) return res.status(400).json({ error: 'Could not parse drill link' });
-    if (!applyScope(query, req.user, req.body?.suiteId)) {
+    if (!(await applyScope(query, req.user, req.body?.suiteId))) {
       return res.status(403).json({ error: 'No data access is configured for your account yet.' });
     }
     const data = await runLookerQuery('/queries/run/json_detail', query);
@@ -621,7 +621,7 @@ app.post('/api/filter-suggest', auth.requireAuth, async (req, res) => {
         q.filters = { [field]: variants.map((v) => `%${v}%`).join(',') };
       }
     }
-    if (!applyScope(q, req.user, suiteId)) return res.json({ suggestions: [] });
+    if (!(await applyScope(q, req.user, suiteId))) return res.json({ suggestions: [] });
     const rows = await runLookerQuery('/queries/run/json', q);
     const seen = new Set();
     const suggestions = [];
@@ -993,7 +993,7 @@ app.post('/api/dashboard-insight', auth.requireAuth, async (req, res) => {
       if (v && String(v).trim()) overrides[queryField] = String(v).trim();
     }
     const queryBody = { ...q, filters: { ...(q.filters || {}), ...overrides } };
-    if (!applyScope(queryBody, req.user, suiteId)) continue; // skip blocked tiles
+    if (!(await applyScope(queryBody, req.user, suiteId))) continue; // skip blocked tiles
     jobs.push({ title: tile.title, visType: tile.vis?.type, context: tile.aiContext || '', queryBody });
     if (jobs.length >= MAX_TILES) break;
   }
@@ -1381,7 +1381,7 @@ function effectiveFilterValues(def, lockMap = {}) {
   return fv;
 }
 
-function tileQueryBody(tile, def, user, suiteId, lockMap = {}) {
+async function tileQueryBody(tile, def, user, suiteId, lockMap = {}) {
   const q = tile.query;
   if (tile.type === 'text' || !q?.model || !q?.view || !(q.fields || []).length) return null;
   const fv = effectiveFilterValues(def, lockMap);
@@ -1391,7 +1391,7 @@ function tileQueryBody(tile, def, user, suiteId, lockMap = {}) {
     if (v && String(v).trim()) overrides[queryField] = String(v).trim();
   }
   const body = { ...q, filters: { ...(q.filters || {}), ...overrides } };
-  if (!applyScope(body, user, suiteId)) return null;
+  if (!(await applyScope(body, user, suiteId))) return null;
   return body;
 }
 
@@ -1501,7 +1501,7 @@ async function buildFacts(user, entityId, force = false) {
   for (const p of picks) if (p.suiteId && !(p.suiteId in lockMaps)) lockMaps[p.suiteId] = expandLockMap(db.lockedFiltersForSuite(p.suiteId));
 
   const tiles = (await Promise.all(picks.slice(0, FACT_MAX_TILES).map(async (p) => {
-    const body = tileQueryBody(p.tile, p.def, user, p.suiteId, lockMaps[p.suiteId] || {});
+    const body = await tileQueryBody(p.tile, p.def, user, p.suiteId, lockMaps[p.suiteId] || {});
     if (!body) return null;
     try {
       const data = await runLookerQuery('/queries/run/json_detail', body, undefined, force);
@@ -1637,7 +1637,7 @@ async function buildFactsFromTiles(user, entityId, picks) {
   const out = [];
   for (const { tile, def, m } of wanted.slice(0, 24)) {
     if (!(m.suiteId in lockMaps)) lockMaps[m.suiteId] = expandLockMap(db.lockedFiltersForSuite(m.suiteId));
-    const body = tileQueryBody(tile, def, user, m.suiteId, lockMaps[m.suiteId] || {});
+    const body = await tileQueryBody(tile, def, user, m.suiteId, lockMaps[m.suiteId] || {});
     if (!body) continue;
     try {
       const data = await runLookerQuery('/queries/run/json_detail', body, undefined, false);
@@ -1796,7 +1796,7 @@ require('./actions').mount(app, {
     const tile = tiles.find((t) => t.id === tileId);
     if (!tile) throw new Error('Tile not found on that dashboard');
     const lockMap = expandLockMap(db.lockedFiltersForSuite(meta.suiteId));
-    const qBody = tileQueryBody(tile, def, user, meta.suiteId, lockMap);
+    const qBody = await tileQueryBody(tile, def, user, meta.suiteId, lockMap);
     if (!qBody) throw new Error('No data access for that tile');
     const data = await runLookerQuery('/queries/run/json_detail', { ...qBody, limit: '5000' }, undefined, true);
     const fields = [...(data.fields?.dimensions || []), ...(data.fields?.measures || []), ...(data.fields?.table_calculations || [])]
