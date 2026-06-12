@@ -220,6 +220,7 @@ const HOME_SYSTEM = `You are the Owl — Howler Pulse's analyst — writing a pr
 - TILES: live data behind their dashboards' tiles — single values, charts, and tables (rendered as compact tables). These are the ONLY numbers you may use. Never invent or extrapolate. Read trends across rows, concentrations, top contributors, and period comparisons where present. Tiles marked [FOLLOWED] are ones the user explicitly follows — ALWAYS address them. Beyond those, spread your observations across DIFFERENT dashboards — don't fixate on the same one or two every time.
 - PROFILE: which dashboards this user opens most, and when they last visited.
 - ACTIONS (when present): marketing actions already taken (e.g. email campaigns) with live results. Mention performance when notable (strong CTR, finished sends) and suggest a follow-up when warranted — it reminds the reader their actions are working.
+- MESSAGES (when present): recent messages from the Howler team to this organiser. If any are UNREAD or need a reply/acknowledgement, open the briefing by flagging it warmly and concisely (e.g. "Howler sent you a note about the settlement — worth a read"). Don't quote at length; point them to it.
 - CATALOGUE: every dashboard they can open (id, title, set, suite).
 
 Respond with ONLY strict JSON (no markdown fences):
@@ -332,7 +333,7 @@ async function draftCampaign({ goal, clientName, clientContext, audienceCount, i
   return JSON.parse(match[0]);
 }
 
-async function briefHome({ tiles, profile, catalogue, instructions, apiKey, actions }) {
+async function briefHome({ tiles, profile, catalogue, instructions, apiKey, actions, messages }) {
   const c = requireClient(apiKey);
   const lines = ['TILES (live data):', ''];
   for (const t of tiles || []) {
@@ -345,6 +346,11 @@ async function briefHome({ tiles, profile, catalogue, instructions, apiKey, acti
   if ((actions || []).length) {
     lines.push('', 'ACTIONS (marketing actions already taken, live results):');
     for (const a of actions) lines.push(`- "${a.title}" [${a.status}] sent ${a.sent}/${a.total}, ${a.clicks} clicks, ${a.uniqueClickers} unique (${a.ctr}% CTR)`);
+  }
+  const fromHowler = (messages || []).filter((m) => m.fromHowler);
+  if (fromHowler.length) {
+    lines.push('', 'MESSAGES (from the Howler team):');
+    for (const m of fromHowler) lines.push(`- ${m.unread ? '[UNREAD] ' : ''}${m.priority === 'must_ack' && !m.acked ? '[NEEDS ACK] ' : ''}"${m.title}": ${m.preview}`);
   }
   lines.push('');
   lines.push('CATALOGUE:');

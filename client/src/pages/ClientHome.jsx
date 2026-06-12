@@ -27,12 +27,14 @@ export default function ClientHome() {
   const [refreshing, setRefreshing] = useState(false);
   const [refreshErr, setRefreshErr] = useState(false);
   const [tuneOpen, setTuneOpen] = useState(false);
+  const [messages, setMessages] = useState([]);
 
   useEffect(() => { api.mySuites().then(setSuites).catch(() => {}); }, []);
   useEffect(() => {
-    setSnap(null); setBrief(null);
+    setSnap(null); setBrief(null); setMessages([]);
     api.mySnapshot(previewEntityId).then(setSnap).catch(() => setSnap({ kpis: [], shortcuts: [], settlement: null, lastVisit: null }));
     api.myBriefing(previewEntityId).then(setBrief).catch(() => setBrief({ available: false }));
+    api.osInbox(previewEntityId).then((r) => setMessages(r.threads || [])).catch(() => {});
   }, [previewEntityId]);
 
   // Refresh re-pulls the live numbers AND regenerates the briefing — otherwise
@@ -116,6 +118,9 @@ export default function ClientHome() {
           )}
         </div>
       )}
+
+      {/* Messages from Howler — recent threads, surfaced on home. */}
+      <MessagesFromHowler messages={messages} isMobile={isMobile} onOpen={() => vtNavigate(navigate, '/inbox')} />
 
       {/* Pinned tiles — live tiles the user chose to keep on home. Uniform
           cards in a horizontal snap carousel (one row, scroll for more). */}
@@ -343,6 +348,40 @@ function PinnedTile({ p, isMobile, onOpen, onUnpin }) {
 }
 const pinAct = { flexShrink: 0, border: 'none', background: 'rgba(128,128,128,0.12)', color: 'var(--muted-2)', borderRadius: 980, width: 22, height: 22, fontSize: 12, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1 };
 const stripArrow = { position: 'absolute', top: '50%', transform: 'translateY(-50%)', zIndex: 5, width: 30, height: 30, borderRadius: '50%', border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--text)', fontSize: 17, fontWeight: 700, cursor: 'pointer', boxShadow: 'var(--shadow-sm)', display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1 };
+
+// Messages from the Howler team, surfaced on home (the inbox lives in the nav).
+// Shows the few most recent threads with an unread dot + priority chip; hidden
+// when there are none.
+function MessagesFromHowler({ messages, isMobile, onOpen }) {
+  const recent = (messages || []).slice(0, 3);
+  if (!recent.length) return null;
+  const unreadCount = (messages || []).filter((m) => m.unread).length;
+  const chip = (m) => m.priority === 'must_ack'
+    ? (m.acked ? { t: '✓ Acknowledged', c: '#2da44e', bg: 'rgba(52,199,89,0.15)' } : { t: 'Needs ack', c: '#b45309', bg: 'rgba(245,158,11,0.16)' })
+    : m.priority === 'needs_reply' ? { t: 'Needs reply', c: '#0a66c2', bg: 'rgba(10,132,255,0.13)' }
+    : null;
+  return (
+    <>
+      <SectionHead icon="📥">Messages from Howler {unreadCount > 0 && <Faint>{unreadCount} unread</Faint>}</SectionHead>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : `repeat(${Math.min(recent.length, 3)}, 1fr)`, gap: 12 }}>
+        {recent.map((m) => {
+          const c = chip(m);
+          return (
+            <button key={m.id} className="lift" style={cardBtn} onClick={onOpen}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                {m.unread && <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--brand)', flexShrink: 0 }} />}
+                <span style={{ fontSize: 13.5, fontWeight: m.unread ? 800 : 700, lineHeight: 1.4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.title || '(no subject)'}</span>
+                {c && <span style={{ fontSize: 10, fontWeight: 700, borderRadius: 980, padding: '2px 8px', background: c.bg, color: c.c, flexShrink: 0 }}>{c.t}</span>}
+              </div>
+              {m.preview?.body && <div style={{ fontSize: 12, color: 'var(--muted-2)', lineHeight: 1.5, marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.preview.body}</div>}
+              <div style={{ marginTop: 8, fontSize: 12, fontWeight: 700, color: 'var(--brand)' }}>Open inbox →</div>
+            </button>
+          );
+        })}
+      </div>
+    </>
+  );
+}
 
 // "Your actions" — recent campaigns and their live performance, linking to the
 // Actions page. Hidden entirely until the client has taken at least one action.

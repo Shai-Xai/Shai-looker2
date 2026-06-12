@@ -1524,7 +1524,7 @@ app.get('/api/my/briefing', auth.requireAuth, async (req, res) => {
       briefingInstructionsFor(req.user, entityId, suites),
       timeDefaults()[segment],
     ].filter(Boolean).join('\n\n');
-    const raw = await insights.briefHome({ tiles, profile: profileForAi, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId) });
+    const raw = await insights.briefHome({ tiles, profile: profileForAi, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), messages: recentMessages(entityId, req.user.id) });
     const link = (id) => (id && byId[id] ? { dashboardId: id, suiteId: byId[id].suiteId, label: `${byId[id].setName} → ${byId[id].title}` } : null);
     const out = {
       available: true,
@@ -1670,6 +1670,21 @@ function actionsSummaryFor(entityId, limit = 5) {
           ctr: (results.sent || 0) > 0 ? Math.round((clickers / results.sent) * 100) : 0,
         };
       });
+  } catch { return []; }
+}
+
+// Recent Howler→client messages for an entity, with this user's read/ack state.
+// Read-only peek into the OS spine; guarded so removing that module is safe.
+function recentMessages(entityId, userId, limit = 6) {
+  try {
+    const threads = db.db.prepare('SELECT * FROM os_threads WHERE entity_id=? ORDER BY updated_at DESC LIMIT ?').all(entityId, limit);
+    return threads.map((t) => {
+      const last = db.db.prepare('SELECT * FROM os_messages WHERE thread_id=? ORDER BY created_at DESC LIMIT 1').get(t.id);
+      const acked = !!db.db.prepare("SELECT 1 FROM os_receipts WHERE thread_id=? AND user_id=? AND kind='ack'").get(t.id, userId);
+      const readRow = db.db.prepare("SELECT at FROM os_receipts WHERE thread_id=? AND user_id=? AND kind='read'").get(t.id, userId);
+      const unread = !readRow || (last && readRow.at < last.created_at);
+      return { id: t.id, title: t.title || '(no subject)', priority: t.priority, status: t.status, preview: (last?.body || '').slice(0, 180), fromHowler: last?.author_type === 'howler', unread, acked, at: t.updated_at };
+    });
   } catch { return []; }
 }
 
