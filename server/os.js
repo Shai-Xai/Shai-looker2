@@ -119,7 +119,7 @@ function mount(app, { db, auth, mailer }) {
     });
     // One email per recipient so addresses are never exposed to each other.
     const fromName = (mailer.resolveBranding(entityId) || {}).senderName;
-    for (const addr of to) mailer.send({ to: addr, subject, html, text, fromName });
+    for (const addr of to) mailer.send({ to: addr, subject, html, text, fromName, kind: 'notification', entity: entityId });
   }
 
   // ── Client + shared reads ───────────────────────────────────────────────────

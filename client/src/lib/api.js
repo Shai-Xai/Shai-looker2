@@ -158,6 +158,7 @@ export const api = {
   getAdminIntegrations: () => fetch('/api/admin/integrations').then(json),
   saveAdminIntegrations: (p) => fetch('/api/admin/integrations', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),
   sendMailTest: (entityId) => fetch('/api/admin/mail/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entityId }) }).then(json),
+  getMailLog: (params = {}) => fetch(`/api/admin/mail-log?${new URLSearchParams(params)}`).then(json),
   getEntityIntegrations: (id) => fetch(`/api/admin/entities/${id}/integrations`).then(json),
   saveEntityIntegrations: (id, p) => fetch(`/api/admin/entities/${id}/integrations`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),
   getMyIntegrations: () => fetch('/api/my/integrations').then(json),

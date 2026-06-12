@@ -154,7 +154,7 @@ function mount(app, { db, auth, mailer, generateContent, roleLenses }) {
         const { html, text, subject, senderName } = await render(job, recipients[0]);
         let ok = 0, err = '';
         for (const to of recipients) {
-          const r = await mailer.send({ to, subject: subject || `${lensFor(job).label} digest`, html, text, fromName: senderName });
+          const r = await mailer.send({ to, subject: subject || `${lensFor(job).label} digest`, html, text, fromName: senderName, kind: 'digest', entity: job.entityId });
           if (r.ok) ok += 1; else err = r.error || r.reason || 'send failed';
         }
         result = ok ? { status: 'ok', detail: `sent to ${ok}` } : { status: 'error', detail: err };

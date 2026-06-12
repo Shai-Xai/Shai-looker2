@@ -208,7 +208,7 @@ function mount(app, { db, auth, mailer, resolveAudience, draftCopy, listEvents }
     for (const recipient of a.audience) {
       try {
         const { html, text, subject } = renderFor(a, recipient);
-        const r = await mailer.send({ to: recipient.email, subject: subject || a.title || 'An update from your event', html, text, fromName: branding.senderName });
+        const r = await mailer.send({ to: recipient.email, subject: subject || a.title || 'An update from your event', html, text, fromName: branding.senderName, kind: 'campaign', entity: a.entityId });
         if (r.ok) results.sent += 1; else { results.failed += 1; results.lastError = r.error || r.reason || 'send failed'; }
       } catch (e) { results.failed += 1; results.lastError = e.message; }
       if ((results.sent + results.failed) % 20 === 0) saveResults(a.id, results);
@@ -314,7 +314,7 @@ function mount(app, { db, auth, mailer, resolveAudience, draftCopy, listEvents }
     const fake = { id: 'test', entityId: req.params.entityId, config: cleanConfig(req.body || {}) };
     const { html, text, subject } = renderFor(fake, { email: req.user.email, name: '', ticket: 'General Admission' });
     const branding = mailer.resolveBranding(req.params.entityId);
-    const r = await mailer.send({ to: req.user.email, subject: `[TEST] ${subject || 'Campaign'}`, html, text, fromName: branding.senderName });
+    const r = await mailer.send({ to: req.user.email, subject: `[TEST] ${subject || 'Campaign'}`, html, text, fromName: branding.senderName, kind: 'test', entity: req.params.entityId });
     r.ok ? res.json({ ok: true, to: req.user.email }) : res.status(400).json({ error: r.error || r.reason || 'not configured' });
   });
 

@@ -22,27 +22,44 @@ let lastSentAt = '';
 
 function init(deps) {
   db = deps.db;
-  // Tiny send log so admins can see what the mailer did (sent / failed /
-  // skipped) from Admin → Integrations — survives restarts, unlike module
-  // state. Owned by this module; drop mail_log to uninstall.
+  // System-wide send log: every email the mailer attempts (sent / failed /
+  // skipped) with its kind + client, so admins get one place to audit all
+  // outbound mail. Survives restarts. Owned by this module; drop mail_log to
+  // uninstall.
   db.db.exec(`CREATE TABLE IF NOT EXISTS mail_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     at TEXT NOT NULL, recipient TEXT NOT NULL, subject TEXT NOT NULL,
     status TEXT NOT NULL, detail TEXT NOT NULL DEFAULT ''
   )`);
+  // ALTER for DBs created before kind/entity_id existed.
+  try {
+    const cols = db.db.prepare('PRAGMA table_info(mail_log)').all().map((c) => c.name);
+    if (!cols.includes('kind')) db.db.exec("ALTER TABLE mail_log ADD COLUMN kind TEXT NOT NULL DEFAULT 'other'");
+    if (!cols.includes('entity_id')) db.db.exec("ALTER TABLE mail_log ADD COLUMN entity_id TEXT NOT NULL DEFAULT ''");
+  } catch (e) { console.error('[mailer] mail_log migration skipped:', e.message); }
 }
 
-function log(recipient, subject, status, detail = '') {
+function log(recipient, subject, status, detail = '', kind = 'other', entityId = '') {
   try {
-    db.db.prepare('INSERT INTO mail_log (at, recipient, subject, status, detail) VALUES (?,?,?,?,?)')
-      .run(new Date().toISOString(), recipient, subject, status, detail);
-    db.db.prepare('DELETE FROM mail_log WHERE id NOT IN (SELECT id FROM mail_log ORDER BY id DESC LIMIT 50)').run();
+    db.db.prepare('INSERT INTO mail_log (at, recipient, subject, status, detail, kind, entity_id) VALUES (?,?,?,?,?,?,?)')
+      .run(new Date().toISOString(), recipient, subject, status, detail, kind, entityId);
+    // Keep a generous rolling window now that it's the system audit log.
+    db.db.prepare('DELETE FROM mail_log WHERE id NOT IN (SELECT id FROM mail_log ORDER BY id DESC LIMIT 5000)').run();
   } catch { /* logging must never break sending */ }
 }
 
-function recent(limit = 15) {
-  try { return db.db.prepare('SELECT at, recipient, subject, status, detail FROM mail_log ORDER BY id DESC LIMIT ?').all(limit); }
-  catch { return []; }
+// Recent sends, newest first, with optional kind/status/entity filters.
+function recent({ limit = 15, kind = '', status = '', entityId = '' } = {}) {
+  try {
+    const where = [];
+    const args = [];
+    if (kind) { where.push('kind=?'); args.push(kind); }
+    if (status) { where.push("status LIKE ?"); args.push(`${status}%`); }
+    if (entityId) { where.push('entity_id=?'); args.push(entityId); }
+    const sql = `SELECT at, recipient, subject, status, detail, kind, entity_id FROM mail_log ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY id DESC LIMIT ?`;
+    args.push(Math.min(limit, 1000));
+    return db.db.prepare(sql).all(...args);
+  } catch { return []; }
 }
 
 const setting = (key, env) => ((db && db.getSetting(key)) || process.env[env] || '').trim();
@@ -86,21 +103,21 @@ async function deliver({ to, subject, html, text, from: fromOverride }) {
 // Best-effort send. Returns { ok } | { skipped, reason } | { ok:false, error }.
 // `fromName` sets the display name in front of the verified address (per-client
 // branding); the address itself never changes (single verified domain).
-async function send({ to, subject, html, text, fromName }) {
+async function send({ to, subject, html, text, fromName, kind = 'other', entity = '' }) {
   const recipients = (Array.isArray(to) ? to : [to]).filter(Boolean);
   if (!recipients.length) return { skipped: true, reason: 'no recipients' };
-  if (!enabled()) { log(recipients.join(', '), subject, 'skipped', 'mail disabled (mail_enabled=0)'); return { skipped: true, reason: 'mail disabled (mail_enabled=0)' }; }
-  if (!apiKey()) { log(recipients.join(', '), subject, 'skipped', 'no Resend API key configured'); return { skipped: true, reason: 'no Resend API key configured' }; }
+  if (!enabled()) { log(recipients.join(', '), subject, 'skipped', 'mail disabled (mail_enabled=0)', kind, entity); return { skipped: true, reason: 'mail disabled (mail_enabled=0)' }; }
+  if (!apiKey()) { log(recipients.join(', '), subject, 'skipped', 'no Resend API key configured', kind, entity); return { skipped: true, reason: 'no Resend API key configured' }; }
   try {
     const r = await deliver({ to: recipients, subject, html, text, from: fromName ? fromWithName(fromName) : undefined });
     lastSentAt = new Date().toISOString();
     lastError = '';
-    log(recipients.join(', '), subject, 'sent', r.id || '');
+    log(recipients.join(', '), subject, 'sent', r.id || '', kind, entity);
     console.log(`[mailer] sent "${subject}" → ${recipients.join(', ')} (${r.id || 'ok'})`);
     return { ok: true, id: r.id };
   } catch (err) {
     lastError = err.message;
-    log(recipients.join(', '), subject, 'failed', err.message);
+    log(recipients.join(', '), subject, 'failed', err.message, kind, entity);
     console.error(`[mailer] FAILED "${subject}" → ${recipients.join(', ')}: ${err.message}`);
     return { ok: false, error: err.message };
   }

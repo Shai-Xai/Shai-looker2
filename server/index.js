@@ -697,6 +697,28 @@ app.put('/api/admin/integrations', auth.requireAdmin, (req, res) => {
   res.json(adminIntegrationsView());
 });
 
+// ─── System-wide email audit: sent log + upcoming scheduled sends ──────────────
+// One place to see every email the platform sent (notifications, digests,
+// campaigns, tests) and what's scheduled to go out next.
+app.get('/api/admin/mail-log', auth.requireAdmin, (req, res) => {
+  const { kind = '', status = '', entityId = '', limit = 100 } = req.query;
+  const log = mailer.recent({ limit: Number(limit) || 100, kind: String(kind), status: String(status), entityId: String(entityId) })
+    .map((r) => ({ ...r, entityName: r.entity_id ? (db.getEntity(r.entity_id)?.name || '') : '' }));
+  // Upcoming = active scheduled digests with a next run. (Campaigns are
+  // approve-and-send, so nothing is "scheduled" there yet.)
+  let upcoming = [];
+  try {
+    upcoming = db.db.prepare("SELECT id, entity_id, title, role, recipients, cadence, time_of_day, next_run_at FROM scheduled_jobs WHERE status='active' AND next_run_at IS NOT NULL ORDER BY next_run_at LIMIT 50")
+      .all().map((j) => ({
+        id: j.id, title: j.title || `${j.role} digest`, kind: 'digest',
+        entityName: db.getEntity(j.entity_id)?.name || '',
+        recipients: JSON.parse(j.recipients || '[]').length,
+        cadence: j.cadence, timeOfDay: j.time_of_day, nextRunAt: j.next_run_at,
+      }));
+  } catch { /* scheduler module removed — no upcoming */ }
+  res.json({ log, upcoming });
+});
+
 // Send a test email to the signed-in admin to prove the Resend setup works.
 // Optional { entityId } renders with that client's branding so you can preview
 // exactly what a client's recipients will get.
@@ -708,7 +730,7 @@ app.post('/api/admin/mail/test', auth.requireAdmin, async (req, res) => {
     body: 'This is a test from Howler : Pulse. Outbound notifications (must-acknowledge messages, replies from Howler) will arrive like this.',
     ctaText: 'Open Pulse', ctaPath: '/', branding, assetScope: entityId || 'platform',
   });
-  const r = await mailer.send({ to: req.user.email, subject: 'Howler : Pulse — test email', html, text, fromName: branding?.senderName });
+  const r = await mailer.send({ to: req.user.email, subject: 'Howler : Pulse — test email', html, text, fromName: branding?.senderName, kind: 'test', entity: entityId || '' });
   if (r.ok) return res.json({ ok: true, to: req.user.email });
   res.status(400).json({ error: r.error || r.reason || 'Email is not configured yet' });
 });
