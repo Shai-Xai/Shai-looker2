@@ -39,6 +39,8 @@ export default function ClientLayout() {
   useEffect(() => { api.mySettlements().then(setSettlements).catch(() => {}); }, []);
   const onSettlements = location.pathname.startsWith('/settlements');
   const onInbox = location.pathname.startsWith('/inbox');
+  const onDigests = location.pathname.startsWith('/digests');
+  const onActions = location.pathname.startsWith('/actions');
 
   // Experience OS inbox: unread + must-acknowledge counts for the badge/banner.
   const [inbox, setInbox] = useState({ enabled: false, unread: 0, pending: [] });
@@ -268,10 +270,10 @@ export default function ClientLayout() {
       )}
       {/* Settlements — its own section below the suites. Hidden for clients
           with no reports; admins always see it (to preview the feature). */}
-      {(visibleSettlements.length > 0 || isAdmin || inbox.enabled) && (
+      {(
         <>
           <div style={{ borderTop: '1px solid var(--hairline)', margin: '12px 6px 10px' }} />
-          <div style={{ padding: '0 8px 8px 14px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)' }}>Reports</div>
+          <div style={{ padding: '0 8px 8px 14px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)' }}>Workspace</div>
           {(visibleSettlements.length > 0 || isAdmin) && (
           <button
             ref={onSettlements ? activeRef : null}
@@ -295,6 +297,24 @@ export default function ClientLayout() {
               {inbox.unread > 0 && <span style={{ ...countChip, background: 'var(--brand)', color: '#fff' }}>{inbox.unread}</span>}
             </button>
           )}
+          <button
+            ref={onDigests ? activeRef : null}
+            className={`nav-row${onDigests ? ' active' : ''}`}
+            style={{ ...rowBtn, fontWeight: onDigests ? 600 : 500 }}
+            onClick={() => { if (!onDigests) vtNavigate(navigate, '/digests'); if (isMobile) setNavOpen(false); }}
+          >
+            <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>🗓</span>
+            <span style={ellip}>Digests</span>
+          </button>
+          <button
+            ref={onActions ? activeRef : null}
+            className={`nav-row${onActions ? ' active' : ''}`}
+            style={{ ...rowBtn, fontWeight: onActions ? 600 : 500 }}
+            onClick={() => { if (!onActions) vtNavigate(navigate, '/actions'); if (isMobile) setNavOpen(false); }}
+          >
+            <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>⚡</span>
+            <span style={ellip}>Actions</span>
+          </button>
         </>
       )}
     </nav>
@@ -375,7 +395,7 @@ export default function ClientLayout() {
                   </div>
                 );
               })}
-              {(visibleSettlements.length > 0 || isAdmin || inbox.enabled) && (
+              {(
                 <>
                   <div style={{ borderTop: '1px solid var(--hairline)', margin: '10px 4px' }} />
                   {(visibleSettlements.length > 0 || isAdmin) && (
@@ -400,6 +420,22 @@ export default function ClientLayout() {
                       {inbox.unread > 0 && <span style={{ ...countChip, background: 'var(--brand)', color: '#fff' }}>{inbox.unread}</span>}
                     </button>
                   )}
+                  <button
+                    className={`nav-row${onDigests ? ' active' : ''}`}
+                    style={{ ...mRowSuite, fontWeight: onDigests ? 700 : 500 }}
+                    onClick={() => { if (!onDigests) vtNavigate(navigate, '/digests'); setNavOpen(false); }}
+                  >
+                    <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>🗓</span>
+                    <span style={ellip}>Digests</span>
+                  </button>
+                  <button
+                    className={`nav-row${onActions ? ' active' : ''}`}
+                    style={{ ...mRowSuite, fontWeight: onActions ? 700 : 500 }}
+                    onClick={() => { if (!onActions) vtNavigate(navigate, '/actions'); setNavOpen(false); }}
+                  >
+                    <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>⚡</span>
+                    <span style={ellip}>Actions</span>
+                  </button>
                 </>
               )}
             </div>

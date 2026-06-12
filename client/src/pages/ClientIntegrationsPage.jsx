@@ -3,18 +3,14 @@ import { api } from '../lib/api.js';
 import IntegrationsForm from '../components/IntegrationsForm.jsx';
 import MailTemplateEditor from '../components/MailTemplateEditor.jsx';
 import OwlAddressCard from '../components/OwlAddressCard.jsx';
-import DigestManager from '../components/DigestManager.jsx';
-import CampaignManager from '../components/CampaignManager.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
 
 // Client self-service Settings — one place for everything the client manages
-// themselves, organised by a section nav (not stacked): Integrations, Email
-// branding, Scheduled digests, CC-the-Owl inbox address.
+// themselves, organised by a section nav: Integrations, Branding, CC-the-Owl.
+// (Digests + Actions are first-class pages in the left nav, not settings.)
 const SECTIONS = [
   ['integrations', 'Integrations', '🔌'],
   ['email', 'Branding', '🎨'],
-  ['digests', 'Scheduled digests', '🗓'],
-  ['campaigns', 'Actions', '⚡'],
   ['inbox', 'CC the Owl', '📨'],
 ];
 
@@ -27,7 +23,7 @@ export default function ClientIntegrationsPage() {
   return (
     <main style={{ flex: 1, padding: isMobile ? '20px 14px' : '32px 24px', maxWidth: 1080, margin: '0 auto', width: '100%', boxSizing: 'border-box' }}>
       <h1 style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em', marginBottom: 6 }}>Settings</h1>
-      <p style={{ color: 'var(--muted)', marginBottom: 18, fontSize: 14 }}>Manage your integrations, email branding, scheduled digests and inbox address. Anything left blank falls back to Howler's defaults.</p>
+      <p style={{ color: 'var(--muted)', marginBottom: 18, fontSize: 14 }}>Manage your integrations, branding and inbox address. Anything left blank falls back to Howler's defaults.</p>
 
       {/* Section nav */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 22, flexWrap: 'wrap', borderBottom: '1px solid var(--hairline)', paddingBottom: 10 }}>
@@ -68,19 +64,7 @@ export default function ClientIntegrationsPage() {
               </div>
             )}
 
-            {section === 'digests' && (
-              <div>
-                <p style={hint}>Automated briefing emails for your team — personalised by role (exec, marketing, finance…) and sent on your schedule.</p>
-                <DigestManager entityId={it.entityId} scope="my" />
-              </div>
-            )}
 
-            {section === 'campaigns' && (
-              <div>
-                <p style={hint}>Turn your data into action — e.g. email customers who abandoned checkout. Preview the audience and copy, then explicitly approve the send.</p>
-                <CampaignManager entityId={it.entityId} scope="my" />
-              </div>
-            )}
 
             {section === 'inbox' && (
               <div style={{ maxWidth: 680 }}>
