@@ -92,6 +92,7 @@ function CampaignEditor({ entityId, isAdmin, action, onClose, onSaved }) {
     body: cfg.body || '',
     ctaText: cfg.ctaText || 'Complete your order',
     ctaUrl: cfg.ctaUrl || '',
+    utm: { source: cfg.utm?.source || '', medium: cfg.utm?.medium || '', campaign: cfg.utm?.campaign || '', term: cfg.utm?.term || '', content: cfg.utm?.content || '' },
   }));
   const [events, setEvents] = useState([]);
   useEffect(() => { api.listCampaignEvents(entityId).then((r) => setEvents(r.events || [])).catch(() => {}); }, [entityId]);
@@ -109,7 +110,7 @@ function CampaignEditor({ entityId, isAdmin, action, onClose, onSaved }) {
   useEffect(() => { (isAdmin ? api.getDigestTiles(entityId) : api.getMyDigestTiles(entityId)).then(setTiles).catch(() => setTiles({ dashboards: [] })); }, [entityId, isAdmin]);
 
   const payload = () => ({
-    title: f.title, goal: f.goal, subject: f.subject, body: f.body, ctaText: f.ctaText, ctaUrl: f.ctaUrl,
+    title: f.title, goal: f.goal, subject: f.subject, body: f.body, ctaText: f.ctaText, ctaUrl: f.ctaUrl, utm: f.utm,
     eventSuiteId: f.eventSuiteId, contentMode: f.contentMode, heroImage: f.heroImage, customHtml: f.customHtml,
     audience: { mode: f.audienceMode, dashboardId: f.dashboardId, tileId: f.tileId, emailField: f.emailField, nameField: f.nameField, consentField: f.consentField, ticketField: f.ticketField, pasted: f.pasted },
   });
@@ -134,10 +135,35 @@ function CampaignEditor({ entityId, isAdmin, action, onClose, onSaved }) {
     setDrafting(true);
     try {
       const d = await api.actionDraftCopy(entityId, { goal: f.goal, audienceCount: aud?.count || 0 });
-      setF((s) => ({ ...s, subject: d.subject || s.subject, body: d.body || s.body, ctaText: d.ctaText || s.ctaText }));
+      setF((s) => ({
+        ...s,
+        subject: d.subject || s.subject, body: d.body || s.body, ctaText: d.ctaText || s.ctaText,
+        // Magic-fill UTMs from the AI when the user hasn't set them.
+        utm: {
+          source: s.utm.source || d.utm?.source || '',
+          medium: s.utm.medium || d.utm?.medium || '',
+          campaign: s.utm.campaign || d.utm?.campaign || '',
+          term: s.utm.term || d.utm?.term || '',
+          content: s.utm.content || d.utm?.content || '',
+        },
+      }));
     } catch (e) { alert('AI draft failed: ' + e.message); }
     finally { setDrafting(false); }
   };
+
+  // Deterministic UTM auto-fill (no AI needed): sensible defaults from the
+  // campaign's own naming. Only fills blanks.
+  const slug = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60);
+  const autoUtm = () => setF((s) => ({
+    ...s,
+    utm: {
+      source: s.utm.source || 'howler-pulse',
+      medium: s.utm.medium || 'email',
+      campaign: s.utm.campaign || slug(s.title || s.goal) || 'campaign',
+      term: s.utm.term,
+      content: s.utm.content || (slug(s.title || 'email') + '_emailer'),
+    },
+  }));
 
   async function saveDraft() {
     setBusy(true);
@@ -278,6 +304,22 @@ function CampaignEditor({ entityId, isAdmin, action, onClose, onSaved }) {
               <input style={input} value={f.ctaUrl} onChange={(e) => set('ctaUrl', e.target.value)} placeholder="https://… — clicks on {{cta}} are tracked" />
             </Field>
           )}
+
+          <Field label="UTM tracking (appended to the link on every click)">
+            <button type="button" style={{ ...mini, marginBottom: 8 }} onClick={autoUtm}>✨ Auto-fill</button>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              <input style={input} value={f.utm.source} onChange={(e) => set('utm', { ...f.utm, source: e.target.value })} placeholder="utm_source — e.g. howler-pulse" />
+              <input style={input} value={f.utm.medium} onChange={(e) => set('utm', { ...f.utm, medium: e.target.value })} placeholder="utm_medium — e.g. email" />
+              <input style={input} value={f.utm.campaign} onChange={(e) => set('utm', { ...f.utm, campaign: e.target.value })} placeholder="utm_campaign — e.g. kunye_abandoned_cart" />
+              <input style={input} value={f.utm.term} onChange={(e) => set('utm', { ...f.utm, term: e.target.value })} placeholder="utm_term (optional)" />
+            </div>
+            <input style={{ ...input, marginTop: 8 }} value={f.utm.content} onChange={(e) => set('utm', { ...f.utm, content: e.target.value })} placeholder="utm_content — e.g. abandoned_cart_emailer" />
+            {f.ctaUrl && (f.utm.source || f.utm.campaign) && (
+              <div style={{ ...hintS, wordBreak: 'break-all' }}>
+                Lands as: {(() => { try { const u = new URL(f.ctaUrl); const m = { utm_source: f.utm.source, utm_medium: f.utm.medium, utm_campaign: f.utm.campaign, utm_term: f.utm.term, utm_content: f.utm.content }; for (const [k, v] of Object.entries(m)) if (v) u.searchParams.set(k, v); return u.toString(); } catch { return '(enter a full https:// link to preview)'; } })()}
+              </div>
+            )}
+          </Field>
 
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 4, flexWrap: 'wrap' }}>
             <button style={mini} onClick={saveDraft} disabled={busy}>{busy ? 'Saving…' : 'Save draft'}</button>

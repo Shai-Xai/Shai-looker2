@@ -294,7 +294,8 @@ Respond with ONLY strict JSON (no markdown fences):
 {
   "subject": "email subject — punchy, specific, <60 chars, no clickbait",
   "body": "the email body as plain text, 60-130 words. May use **bold** sparingly. Personalisation tokens you may use: {{name}} (recipient first name, once as the greeting) and {{ticketType}} (the ticket they were buying, e.g. 'your {{ticketType}} tickets') — only use {{ticketType}} if it reads naturally. Warm, direct, one clear idea; end before the button (the CTA button is rendered separately).",
-  "ctaText": "button label, 2-4 words"
+  "ctaText": "button label, 2-4 words",
+  "utm": { "source": "lowercase, e.g. howler-pulse", "medium": "email", "campaign": "snake_case slug naming client+goal, e.g. kunye_abandoned_cart", "term": "optional keyword or empty", "content": "snake_case variant id, e.g. abandoned_cart_emailer" }
 }
 
 Rules:

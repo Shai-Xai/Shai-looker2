@@ -104,6 +104,13 @@ function mount(app, { db, auth, mailer, resolveAudience, draftCopy, listEvents }
       body: String(body.body || '').slice(0, 8000),
       ctaText: String(body.ctaText || '').slice(0, 60),
       ctaUrl: String(body.ctaUrl || '').slice(0, 500),
+      utm: {
+        source: String(body.utm?.source || '').slice(0, 100),
+        medium: String(body.utm?.medium || '').slice(0, 100),
+        campaign: String(body.utm?.campaign || '').slice(0, 150),
+        term: String(body.utm?.term || '').slice(0, 100),
+        content: String(body.utm?.content || '').slice(0, 100),
+      },
       goal: String(body.goal || '').slice(0, 1000),
       clickToken: body.clickToken || crypto.randomBytes(6).toString('base64url'),
     };
@@ -330,14 +337,25 @@ function mount(app, { db, auth, mailer, resolveAudience, draftCopy, listEvents }
   });
 
   // ── public routes (no auth; registered before the SPA fallback) ──
-  // Tracked CTA click → count + redirect.
+  // Tracked CTA click → count + redirect, with the campaign's UTM parameters
+  // appended to the destination (clean URL in the email, full attribution in
+  // the client's analytics). Existing query keys on the destination win.
   app.get('/c/:token', (req, res) => {
     const r = sql.prepare(`SELECT * FROM actions WHERE json_extract(config,'$.clickToken')=?`).get(req.params.token);
     if (!r) return res.redirect('/');
     const a = rowToAction(r);
     const results = { ...a.results, clicks: (a.results.clicks || 0) + 1, lastClickAt: now() };
     saveResults(a.id, results);
-    res.redirect(a.config.ctaUrl || '/');
+    let dest = a.config.ctaUrl || '/';
+    try {
+      const u = new URL(dest);
+      const utm = a.config.utm || {};
+      for (const [k, v] of Object.entries({ utm_source: utm.source, utm_medium: utm.medium, utm_campaign: utm.campaign, utm_term: utm.term, utm_content: utm.content })) {
+        if (v && !u.searchParams.has(k)) u.searchParams.set(k, v);
+      }
+      dest = u.toString();
+    } catch { /* relative or odd URL — redirect as-is */ }
+    res.redirect(dest);
   });
   // Unsubscribe → suppression list + tiny confirmation page.
   app.get('/u/:token', (req, res) => {
