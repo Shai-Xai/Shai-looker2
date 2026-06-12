@@ -3,6 +3,7 @@ import { Outlet, useParams, useNavigate, useLocation } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import { useAuth } from '../lib/auth.jsx';
+import { useProfile } from '../lib/profile.jsx';
 import { useTheme } from '../lib/theme.jsx';
 import { vtNavigate } from '../lib/viewTransition.js';
 import { useSheetDrag } from '../lib/useSheetDrag.js';
@@ -140,14 +141,10 @@ export default function ClientLayout() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [suiteEntityId]);
-  // A login can hold several client profiles. The active one drives the whole
-  // shell — nav, theme, home, digests, actions — and persists across visits.
-  const myEntities = user?.entities || [];
-  const [profileId, setProfileId] = useState(() => localStorage.getItem('howler_active_profile') || null);
-  const switchProfile = (id) => { localStorage.setItem('howler_active_profile', id); setProfileId(id); };
-  const clientEntityId = myEntities.length
-    ? (myEntities.some((e) => e.id === profileId) ? profileId : myEntities[0].id)
-    : ((user?.entityIds || [])[0] || null);
+  // A login can hold several client profiles. The active one (shared context,
+  // also surfaced in the top header) drives the whole shell — nav, theme, home,
+  // digests, actions — and persists across visits.
+  const { entities: myEntities, activeEntityId: clientEntityId, setProfile: switchProfile } = useProfile();
   const activeEntityId = isAdmin ? (suiteEntityId || previewEntityId) : clientEntityId;
   const visibleSuites = activeEntityId ? suites.filter((s) => s.entityId === activeEntityId) : suites;
   const visibleSettlements = activeEntityId ? settlements.filter((s) => s.entityId === activeEntityId) : settlements;
@@ -202,23 +199,8 @@ export default function ClientLayout() {
     <div className="howler-sidebar" style={{ ...sidebarShell, ...(isMobile ? mobileSidebar : null) }}>
     <nav ref={navRef} style={sidebarStyle}>
       <div className="nav-indicator" style={{ transform: `translateY(${indicator.y}px)`, height: indicator.h, opacity: indicator.show ? 1 : 0 }} />
-      {brand && (brand.entityLogo || brand.entityName) && (
-        <div style={brandHeader}>
-          {brand.entityLogo && <img src={brand.entityLogo} alt="" style={{ height: 34, maxWidth: 90, objectFit: 'contain', flexShrink: 0 }} />}
-          {brand.entityName && <span style={{ fontSize: 14, fontWeight: 700, letterSpacing: '-0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{brand.entityName}</span>}
-        </div>
-      )}
       {!isAdmin && myEntities.length > 1 && (
-        <div style={{ padding: '0 12px 10px' }}>
-          <select
-            value={clientEntityId || ''}
-            onChange={(e) => switchProfile(e.target.value)}
-            title="Switch profile"
-            style={{ width: '100%', padding: '7px 10px', border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 13, fontWeight: 600, background: 'var(--card)', color: 'var(--text)', cursor: 'pointer' }}
-          >
-            {myEntities.map((en) => <option key={en.id} value={en.id}>{en.name}</option>)}
-          </select>
-        </div>
+        <ProfileSwitcher entities={myEntities} activeId={clientEntityId} onSwitch={switchProfile} />
       )}
       <div style={searchWrap}>
         <span style={{ color: 'var(--muted)', fontSize: 13, flexShrink: 0 }}>⌕</span>
@@ -512,6 +494,51 @@ function readJson(key) {
 // Bottom-left profile: avatar + identity, opening a menu with Integrations
 // (clients), the theme toggle and Log out — everything that used to crowd the
 // top header.
+// Styled profile switcher (custom dropdown) — pinned at the top of the sidebar
+// for logins that hold more than one client. Each row shows the client's logo
+// (or a coloured initial) so switching feels like changing accounts.
+function ProfileSwitcher({ entities, activeId, onSwitch }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  const active = entities.find((e) => e.id === activeId) || entities[0];
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+  const Avatar = ({ e, size }) => (
+    e.logo
+      ? <img src={e.logo} alt="" style={{ width: size, height: size, borderRadius: 7, objectFit: 'cover', flexShrink: 0, background: '#fff' }} />
+      : <span style={{ width: size, height: size, borderRadius: 7, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: size * 0.5, fontWeight: 800, color: '#fff', background: 'var(--brand)' }}>{(e.name || '?').trim().charAt(0).toUpperCase()}</span>
+  );
+  return (
+    <div ref={ref} style={{ position: 'relative', padding: '2px 12px 12px' }}>
+      <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)', margin: '0 2px 6px' }}>Profile</div>
+      <button onClick={() => setOpen((o) => !o)} style={switcherBtn}>
+        <Avatar e={active} size={26} />
+        <span style={{ flex: 1, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 700, fontSize: 14 }}>{active.name}</span>
+        <span style={{ flexShrink: 0, fontSize: 11, color: 'var(--muted)', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}>▾</span>
+      </button>
+      {open && (
+        <div style={switcherMenu}>
+          {entities.map((e) => {
+            const on = e.id === active.id;
+            return (
+              <button key={e.id} onClick={() => { onSwitch(e.id); setOpen(false); }}
+                style={{ ...switcherItem, background: on ? 'var(--brand-tint, rgba(128,128,128,0.08))' : 'transparent' }}>
+                <Avatar e={e} size={24} />
+                <span style={{ flex: 1, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: on ? 700 : 500, fontSize: 13 }}>{e.name}</span>
+                {on && <span style={{ flexShrink: 0, color: 'var(--brand)', fontWeight: 700 }}>✓</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ProfileFooter({ user, isAdmin, brand, onNavigate }) {
   const { theme, toggle } = useTheme();
   const { logout } = useAuth();
@@ -571,7 +598,9 @@ const avatar = { flexShrink: 0, width: 30, height: 30, borderRadius: '50%', disp
 const profileMenu = { position: 'absolute', bottom: 'calc(100% + 6px)', left: 8, right: 8, zIndex: 71, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, boxShadow: '0 10px 36px -8px rgba(0,0,0,0.25)', padding: 6, display: 'flex', flexDirection: 'column', gap: 2 };
 const menuItem = { display: 'flex', alignItems: 'center', gap: 9, width: '100%', border: 'none', background: 'transparent', cursor: 'pointer', padding: '9px 10px', borderRadius: 8, fontSize: 13, fontWeight: 600, color: 'var(--text)', textAlign: 'left' };
 const menuIco = { width: 18, textAlign: 'center', fontSize: 14, flexShrink: 0 };
-const brandHeader = { display: 'flex', alignItems: 'center', gap: 9, padding: '4px 12px 14px', marginBottom: 4, borderBottom: '1px solid var(--hairline)' };
+const switcherBtn = { display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '8px 10px', border: '1.5px solid var(--hairline)', borderRadius: 11, background: 'var(--card)', color: 'var(--text)', cursor: 'pointer', boxShadow: '0 1px 2px rgba(0,0,0,0.04)' };
+const switcherMenu = { position: 'absolute', top: 'calc(100% - 4px)', left: 12, right: 12, zIndex: 72, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, boxShadow: '0 12px 36px -8px rgba(0,0,0,0.28)', padding: 6, display: 'flex', flexDirection: 'column', gap: 2 };
+const switcherItem = { display: 'flex', alignItems: 'center', gap: 10, width: '100%', border: 'none', cursor: 'pointer', padding: '8px 9px', borderRadius: 9, color: 'var(--text)' };
 const mobileSidebar = { position: 'relative', zIndex: 51, height: '100%', width: 'min(290px, 84vw)', boxShadow: '4px 0 24px rgba(0,0,0,0.15)', WebkitOverflowScrolling: 'touch' };
 const menuBar = { position: 'sticky', top: 0, zIndex: 20, display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderBottom: '1px solid var(--hairline)', background: 'var(--frost)', backdropFilter: 'saturate(180%) blur(20px)', WebkitBackdropFilter: 'saturate(180%) blur(20px)' };
 const rowBtn = { display: 'flex', alignItems: 'center', gap: 7, width: '100%', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer', padding: '8px 12px', borderRadius: 9, fontSize: 14, color: 'var(--text)', lineHeight: 1.3 };

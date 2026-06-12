@@ -18,6 +18,7 @@ import Logo from './components/Logo.jsx';
 import RootErrorBoundary from './components/RootErrorBoundary.jsx';
 import { DrillProvider } from './lib/DrillContext.jsx';
 import { AuthProvider, useAuth } from './lib/auth.jsx';
+import { ProfileProvider, useProfile } from './lib/profile.jsx';
 import { ThemeProvider, useTheme } from './lib/theme.jsx';
 import { useIsMobile } from './lib/useIsMobile.js';
 
@@ -25,28 +26,49 @@ function Header() {
   const navigate = useNavigate();
   const { user, isAdmin, logout } = useAuth();
   const { theme, toggle } = useTheme();
+  const { active } = useProfile();
   const isMobile = useIsMobile();
+  // Clients lead with their OWN identity (active profile's logo + name); the
+  // Howler·Pulse platform badge sits on the right as the "powered by". Admins
+  // keep the platform brand on the left + their header controls on the right.
+  const showClientIdentity = !isAdmin && active;
   return (
     <header style={{
       background: 'var(--frost)', backdropFilter: 'saturate(180%) blur(20px)', WebkitBackdropFilter: 'saturate(180%) blur(20px)',
       borderBottom: '1px solid var(--hairline)', padding: isMobile ? '0 14px' : '0 22px',
       height: 56, display: 'flex', alignItems: 'center', gap: isMobile ? 8 : 12, flexShrink: 0, zIndex: 10,
     }}>
-      <div style={{ cursor: 'pointer', display: 'flex' }} onClick={() => navigate('/')}>
-        <Logo size={30} radius={8} />
-      </div>
-      <Link to="/" style={{ fontSize: 17, fontWeight: 700, letterSpacing: '-0.3px', textDecoration: 'none', color: 'var(--text)' }}>Howler&nbsp;:&nbsp;Pulse</Link>
+      {showClientIdentity ? (
+        <button onClick={() => navigate('/')} style={{ display: 'flex', alignItems: 'center', gap: 10, border: 'none', background: 'transparent', cursor: 'pointer', padding: 0, minWidth: 0 }}>
+          {active.logo
+            ? <img src={active.logo} alt="" style={{ height: 30, maxWidth: 84, objectFit: 'contain', flexShrink: 0 }} />
+            : <Logo size={30} radius={8} />}
+          <span style={{ fontSize: 16, fontWeight: 700, letterSpacing: '-0.2px', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{active.name}</span>
+        </button>
+      ) : (
+        <>
+          <div style={{ cursor: 'pointer', display: 'flex' }} onClick={() => navigate('/')}>
+            <Logo size={30} radius={8} />
+          </div>
+          <Link to="/" style={{ fontSize: 17, fontWeight: 700, letterSpacing: '-0.3px', textDecoration: 'none', color: 'var(--text)' }}>Howler&nbsp;:&nbsp;Pulse</Link>
+        </>
+      )}
       <div style={{ flex: 1 }} />
-      {/* Clients get their identity, Integrations, theme and Log out in the
-          sidebar's bottom-left profile menu — the header stays clean. Admin
-          pages have no persistent sidebar, so admins keep the header controls. */}
-      {isAdmin && (
+      {/* Clients get Integrations, theme and Log out in the sidebar's bottom-left
+          profile menu — the header carries only the Howler·Pulse platform badge.
+          Admin pages have no persistent sidebar, so admins keep the controls. */}
+      {isAdmin ? (
         <>
           <Link to="/admin" style={navLink}>Admin</Link>
           <button onClick={toggle} title={theme === 'dark' ? 'Light mode' : 'Dark mode'} aria-label="Toggle theme" style={themeBtn}>{theme === 'dark' ? '☀️' : '🌙'}</button>
           {!isMobile && <UserBadge user={user} isAdmin={isAdmin} />}
           <button onClick={() => logout()} style={logoutBtn}>{isMobile ? 'Exit' : 'Log out'}</button>
         </>
+      ) : showClientIdentity && (
+        <button onClick={() => navigate('/')} title="Powered by Howler Pulse" style={{ display: 'flex', alignItems: 'center', gap: 7, border: 'none', background: 'transparent', cursor: 'pointer', padding: 0, opacity: 0.85 }}>
+          <Logo size={22} radius={6} />
+          {!isMobile && <span style={{ fontSize: 13, fontWeight: 600, letterSpacing: '-0.2px', color: 'var(--muted)' }}>Howler&nbsp;:&nbsp;Pulse</span>}
+        </button>
       )}
     </header>
   );
@@ -136,7 +158,9 @@ export default function App() {
     <RootErrorBoundary>
       <ThemeProvider>
         <AuthProvider>
-          <Shell />
+          <ProfileProvider>
+            <Shell />
+          </ProfileProvider>
         </AuthProvider>
       </ThemeProvider>
     </RootErrorBoundary>
