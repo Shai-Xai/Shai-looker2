@@ -72,7 +72,14 @@ app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 function meUser(user) {
   const pub = auth.publicUser(user);
   if (!pub) return null;
-  const entities = (pub.entityIds || []).map((id) => { const e = db.getEntity(id); return e ? { id: e.id, name: e.name, logo: e.logo || '' } : null; }).filter(Boolean);
+  // Each linked client carries the user's role + resolved permissions there, so
+  // the UI can personalize/gate without extra round-trips. Server still enforces.
+  const entities = (pub.entityIds || []).map((id) => {
+    const e = db.getEntity(id);
+    if (!e) return null;
+    const { role, permissions } = auth.permissionsFor(user, id);
+    return { id: e.id, name: e.name, logo: e.logo || '', role, permissions };
+  }).filter(Boolean);
   return { ...pub, entities };
 }
 app.post('/api/auth/login', (req, res) => {

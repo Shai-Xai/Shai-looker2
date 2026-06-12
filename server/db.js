@@ -138,6 +138,10 @@ addColumn('entities', 'inbox_token', "TEXT NOT NULL DEFAULT ''"); // unique toke
 // Per-user notification channel preferences (1 = receive on that channel).
 addColumn('users', 'notify_email', 'INTEGER NOT NULL DEFAULT 1');
 addColumn('users', 'notify_push', 'INTEGER NOT NULL DEFAULT 1');
+// Per-(user, client) role — the client-side role lives on the MEMBERSHIP, so the
+// same person can hold different roles at different clients. Existing rows
+// become 'owner' (full client access) so nothing loses access on upgrade.
+addColumn('user_entities', 'role', "TEXT NOT NULL DEFAULT 'owner'");
 // Sub-dashboards: within a set, a dashboard may nest one level under a parent
 // from the same set — children render as tabs inside the parent, not as
 // sidebar rows. The relation lives on the membership so the same dashboard can
@@ -466,12 +470,21 @@ function findEntityByInboxToken(token) {
 function entityIdsForUser(userId) {
   return db.prepare('SELECT entity_id FROM user_entities WHERE user_id=?').all(userId).map((r) => r.entity_id);
 }
+// Membership rows with their per-client role.
+function membershipsForUser(userId) {
+  return db.prepare('SELECT entity_id, role FROM user_entities WHERE user_id=?').all(userId).map((r) => ({ entityId: r.entity_id, role: r.role || 'owner' }));
+}
+function roleForMembership(userId, entityId) {
+  return db.prepare('SELECT role FROM user_entities WHERE user_id=? AND entity_id=?').get(userId, entityId)?.role || null;
+}
 function rowToUser(r) {
-  return r && { id: r.id, email: r.email, role: r.role, passwordHash: r.password_hash, entityIds: entityIdsForUser(r.id), notifyEmail: r.notify_email !== 0, notifyPush: r.notify_push !== 0, createdAt: r.created_at };
+  if (!r) return null;
+  const memberships = membershipsForUser(r.id);
+  return { id: r.id, email: r.email, role: r.role, passwordHash: r.password_hash, entityIds: memberships.map((m) => m.entityId), memberships, notifyEmail: r.notify_email !== 0, notifyPush: r.notify_push !== 0, createdAt: r.created_at };
 }
 function publicUser(u) {
   if (!u) return null;
-  return { id: u.id, email: u.email, role: u.role, entityIds: u.entityIds || [], notifyEmail: u.notifyEmail !== false, notifyPush: u.notifyPush !== false };
+  return { id: u.id, email: u.email, role: u.role, entityIds: u.entityIds || [], memberships: u.memberships || [], notifyEmail: u.notifyEmail !== false, notifyPush: u.notifyPush !== false };
 }
 // Update a user's notification channel preferences (partial).
 function setNotificationPrefs(userId, prefs = {}) {
@@ -487,11 +500,22 @@ function getUser(id) { return rowToUser(db.prepare('SELECT * FROM users WHERE id
 function getUserByEmail(email) {
   return rowToUser(db.prepare('SELECT * FROM users WHERE email=?').get((email || '').trim().toLowerCase()));
 }
-const setUserEntities = db.transaction((userId, entityIds) => {
-  db.prepare('DELETE FROM user_entities WHERE user_id=?').run(userId);
-  const ins = db.prepare('INSERT OR IGNORE INTO user_entities (user_id, entity_id) VALUES (?,?)');
-  for (const eid of entityIds || []) if (eid) ins.run(userId, eid);
+// Set a user's memberships. Accepts plain entity ids (strings) or {entityId,role}
+// objects. ROLE-PRESERVING: existing memberships keep their role unless a new one
+// is supplied; removed entities are dropped; brand-new ones default to
+// `defaultRole`. (The old wipe-and-reinsert dropped roles on every edit.)
+const setUserEntities = db.transaction((userId, list, defaultRole = 'owner') => {
+  const items = (list || []).map((x) => (typeof x === 'string' ? { entityId: x } : x)).filter((x) => x && x.entityId);
+  const wanted = new Set(items.map((x) => x.entityId));
+  const existing = new Map(db.prepare('SELECT entity_id, role FROM user_entities WHERE user_id=?').all(userId).map((r) => [r.entity_id, r.role]));
+  for (const eid of existing.keys()) if (!wanted.has(eid)) db.prepare('DELETE FROM user_entities WHERE user_id=? AND entity_id=?').run(userId, eid);
+  const ins = db.prepare('INSERT INTO user_entities (user_id, entity_id, role) VALUES (?,?,?) ON CONFLICT(user_id, entity_id) DO UPDATE SET role=excluded.role');
+  for (const it of items) ins.run(userId, it.entityId, it.role || existing.get(it.entityId) || defaultRole);
 });
+// Update just one membership's role.
+function setMembershipRole(userId, entityId, role) {
+  return db.prepare('UPDATE user_entities SET role=? WHERE user_id=? AND entity_id=?').run(role, userId, entityId).changes > 0;
+}
 function createUser({ email, password, role = 'client', entityIds = [] }) {
   const e = (email || '').trim().toLowerCase();
   if (!e || !password) throw new Error('email and password are required');
@@ -940,6 +964,7 @@ module.exports = {
   getEntityMailBranding, setEntityMailBranding,
   ensureInboxToken, regenerateInboxToken, findEntityByInboxToken,
   listUsers, getUser, getUserByEmail, createUser, updateUser, deleteUser, verifyCredentials, publicUser, setUserEntities, setNotificationPrefs,
+  membershipsForUser, roleForMembership, setMembershipRole,
   listDashboards, getDashboard, createDashboard, updateDashboard, removeDashboard, dashboardPoolFor, sharedDashboards,
   // sets (reusable collections)
   listSets, listSetsForEntity, getSet, createSet, cloneSetForEntity, updateSet, deleteSet, setSetDashboards, dashboardsInSet,

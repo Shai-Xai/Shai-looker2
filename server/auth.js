@@ -10,6 +10,7 @@ const path = require('path');
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const db = require('./db');
+const roles = require('./roles');
 
 const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, 'data');
 const SECRET_FILE = path.join(DATA_DIR, '.session-secret');
@@ -202,6 +203,30 @@ function canAccessSuite(user, suiteId) {
   const su = db.getSuite(suiteId);
   return !!su && (user.entityIds || []).includes(su.entityId);
 }
+// ─── Roles & permissions ──────────────────────────────────────────────────────
+// The user's role WITHIN a given client (its membership). Howler admins are
+// treated as 'owner' everywhere (full access). Returns null if not a member.
+function roleForEntity(user, entityId) {
+  if (!user || !entityId) return null;
+  if (user.role === 'admin') return roles.DEFAULT_ROLE; // owner-equivalent everywhere
+  const m = (user.memberships || []).find((x) => x.entityId === entityId);
+  return m ? (m.role || roles.DEFAULT_ROLE) : null;
+}
+// Resolved access for a user in one client: { role, permissions:[], lens } —
+// admins get every permission; non-members get none.
+function permissionsFor(user, entityId) {
+  if (user && user.role === 'admin') {
+    return { role: 'admin', permissions: Object.values(roles.PERMISSIONS), lens: 'exec' };
+  }
+  const role = roleForEntity(user, entityId);
+  if (!role) return { role: null, permissions: [], lens: 'exec' };
+  return { role, permissions: [...roles.permissionsForRole(role)], lens: roles.lensForRole(role) };
+}
+function hasPermission(user, entityId, perm) {
+  if (user && user.role === 'admin') return true;
+  return roleForEntity(user, entityId) ? roles.permissionsForRole(roleForEntity(user, entityId)).has(perm) : false;
+}
+
 // Merged locks for a suite (entity organiser + suite event/cashless) — used for
 // the UI pre-fill/lock. Only the entity (organiser) part is force-scoped.
 function lockedFiltersForSuite(suiteId) { return db.lockedFiltersForSuite(suiteId); }
@@ -352,4 +377,6 @@ module.exports = {
   // suites / navigation
   suitesForUser, canAccessSuite, lockedFiltersForSuite, forcedScopeForSuite, scopeForQuery,
   filterNameToField,
+  // roles & permissions
+  roleForEntity, permissionsFor, hasPermission,
 };
