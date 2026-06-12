@@ -8,7 +8,7 @@ import { useTheme } from '../lib/theme.jsx';
 import { vtNavigate } from '../lib/viewTransition.js';
 import { useSheetDrag } from '../lib/useSheetDrag.js';
 import { applyBrand, resetBrand } from '../lib/brand.js';
-import { pushSupported, isSubscribed, enablePush, disablePush } from '../lib/push.js';
+import NotificationPrefs from '../components/NotificationPrefs.jsx';
 
 // Persistent client shell: a left sidebar tree of Suites → Sets → Dashboards,
 // with the selected dashboard rendered in the main area.
@@ -515,52 +515,10 @@ function ProfileFooter({ user, isAdmin, brand, onNavigate }) {
   const { theme, toggle } = useTheme();
   const { logout } = useAuth();
   const [open, setOpen] = useState(false);
-  // Notification channel preferences: account-level (email/push prefs) + this
-  // device's push subscription (push needs both the pref on AND this device
-  // subscribed). busy holds which row is mid-flight; testing for the test send.
-  const [notif, setNotif] = useState({ supported: false, pushAvailable: false, email: true, push: false, deviceOn: false, busy: '', testing: false });
   const entity = user?.entities?.[0];
   const name = isAdmin ? 'Howler · Admin' : (brand?.entityName || entity?.name || (user?.email || '').split('@')[0]);
   const logo = brand?.entityLogo || entity?.logo || '';
   const initial = (name || '?').trim().charAt(0).toUpperCase();
-  useEffect(() => {
-    if (!open) return;
-    let alive = true;
-    (async () => {
-      const supported = pushSupported();
-      const [prefs, deviceOn] = await Promise.all([
-        api.getNotifPrefs().catch(() => ({ email: true, push: true, pushAvailable: false })),
-        supported ? isSubscribed() : Promise.resolve(false),
-      ]);
-      if (alive) setNotif((s) => ({ ...s, supported, pushAvailable: !!prefs.pushAvailable, email: prefs.email !== false, push: prefs.push !== false, deviceOn }));
-    })();
-    return () => { alive = false; };
-  }, [open]);
-  const toggleEmail = async () => {
-    const next = !notif.email;
-    setNotif((s) => ({ ...s, busy: 'email', email: next }));
-    try { await api.setNotifPrefs({ email: next }); } catch { setNotif((s) => ({ ...s, email: !next })); }
-    setNotif((s) => ({ ...s, busy: '' }));
-  };
-  // iOS only delivers web push to the installed (Home Screen) app, never a
-  // Safari tab — so in Safari we guide instead of showing a toggle that lies.
-  const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent);
-  const standalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
-  const iosNeedsInstall = isIOS && !standalone;
-  const togglePush = async () => {
-    const turningOn = !(notif.push && notif.deviceOn);
-    setNotif((s) => ({ ...s, busy: 'push' }));
-    try {
-      if (turningOn) { await enablePush(); await api.setNotifPrefs({ push: true }); setNotif((s) => ({ ...s, push: true, deviceOn: true, busy: '' })); }
-      else { await disablePush(); await api.setNotifPrefs({ push: false }); setNotif((s) => ({ ...s, push: false, deviceOn: false, busy: '' })); }
-    } catch (e) {
-      setNotif((s) => ({ ...s, busy: '' }));
-      const iosNotInstalled = /iPhone|iPad/.test(navigator.userAgent) && !window.matchMedia('(display-mode: standalone)').matches;
-      alert(iosNotInstalled
-        ? 'On iPhone/iPad, first tap the Share button and "Add to Home Screen", then open Pulse from your home screen to enable notifications.'
-        : (e.message || 'Could not enable notifications.'));
-    }
-  };
   return (
     <div style={{ position: 'relative', borderTop: '1px solid var(--hairline)', padding: 8, flexShrink: 0 }}>
       {open && <div style={{ position: 'fixed', inset: 0, zIndex: 70 }} onClick={() => setOpen(false)} />}
@@ -572,40 +530,7 @@ function ProfileFooter({ user, isAdmin, brand, onNavigate }) {
             </button>
           )}
           <div style={menuCap}>Notifications</div>
-          <button className="nav-row" style={menuItem} onClick={toggleEmail} disabled={notif.busy === 'email'}>
-            <span style={menuIco}>✉️</span>
-            <span style={{ flex: 1, textAlign: 'left' }}>Email</span>
-            <Switch on={notif.email} busy={notif.busy === 'email'} />
-          </button>
-          {notif.pushAvailable && iosNeedsInstall ? (
-            // iOS Safari can't receive push — only the installed app can. Don't
-            // show a toggle that would lie; guide them to install instead.
-            <button className="nav-row" style={{ ...menuItem, alignItems: 'flex-start' }} onClick={() => alert('To get push notifications on iPhone/iPad:\n\n1. Tap the Share button\n2. Choose “Add to Home Screen”\n3. Open Pulse from the new icon\n\nThen turn on Push from this menu.')}>
-              <span style={menuIco}>🔔</span>
-              <span style={{ flex: 1, textAlign: 'left' }}>Push<div style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 400 }}>Add Pulse to your Home Screen to enable</div></span>
-              <span style={{ fontSize: 13, color: 'var(--muted)' }}>ⓘ</span>
-            </button>
-          ) : notif.supported && notif.pushAvailable ? (
-            <button className="nav-row" style={menuItem} onClick={togglePush} disabled={notif.busy === 'push'}>
-              <span style={menuIco}>🔔</span>
-              <span style={{ flex: 1, textAlign: 'left' }}>Push (this device)</span>
-              <Switch on={notif.push && notif.deviceOn} busy={notif.busy === 'push'} />
-            </button>
-          ) : null}
-          {notif.supported && notif.pushAvailable && notif.push && notif.deviceOn && !iosNeedsInstall && (
-            <button className="nav-row" style={{ ...menuItem, fontSize: 12, color: 'var(--muted)' }} disabled={notif.testing} onClick={async () => {
-              setNotif((s) => ({ ...s, testing: true }));
-              try {
-                const r = await api.pushTest();
-                alert(r.sent
-                  ? `Sent to ${r.sent} device${r.sent === 1 ? '' : 's'} ✓\n\nIf you don't see it, lock your phone or switch apps — iOS hides the banner while Pulse is open.`
-                  : 'No devices are registered yet. Turn Push off and on again on the installed app.');
-              } catch { alert('Test failed — try turning Push off and on again.'); }
-              setNotif((s) => ({ ...s, testing: false }));
-            }}>
-              <span style={menuIco}>📨</span> {notif.testing ? 'Sending…' : 'Send a test notification'}
-            </button>
-          )}
+          {open && <NotificationPrefs compact />}
           <div style={menuDivider} />
           <button className="nav-row" style={menuItem} onClick={toggle}>
             <span style={menuIco}>{theme === 'dark' ? '☀️' : '🌙'}</span> {theme === 'dark' ? 'Light mode' : 'Dark mode'}
@@ -631,14 +556,6 @@ function ProfileFooter({ user, isAdmin, brand, onNavigate }) {
   );
 }
 
-// Small iOS-style on/off pill used in the notifications preferences.
-function Switch({ on, busy }) {
-  return (
-    <span style={{ width: 34, height: 20, borderRadius: 999, background: on ? 'var(--brand)' : 'rgba(128,128,128,0.35)', position: 'relative', flexShrink: 0, transition: 'background 0.15s', opacity: busy ? 0.5 : 1 }}>
-      <span style={{ position: 'absolute', top: 2, left: on ? 16 : 2, width: 16, height: 16, borderRadius: '50%', background: '#fff', transition: 'left 0.15s', boxShadow: '0 1px 2px rgba(0,0,0,0.3)' }} />
-    </span>
-  );
-}
 function Ico({ v, size = 16 }) {
   if (!v) return null;
   return v.startsWith('data:')

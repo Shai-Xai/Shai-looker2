@@ -4,6 +4,7 @@ import IntegrationsForm from '../components/IntegrationsForm.jsx';
 import MailTemplateEditor from '../components/MailTemplateEditor.jsx';
 import OwlAddressCard from '../components/OwlAddressCard.jsx';
 import MailLogView from '../components/MailLogView.jsx';
+import NotificationPrefs from '../components/NotificationPrefs.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
 
 // Client self-service Settings — one place for everything the client manages
@@ -11,6 +12,7 @@ import { useIsMobile } from '../lib/useIsMobile.js';
 // (Digests + Actions are first-class pages in the left nav, not settings.)
 const SECTIONS = [
   ['integrations', 'Integrations', '🔌'],
+  ['notifications', 'Notifications', '🔔'],
   ['email', 'Branding', '🎨'],
   ['sentmail', 'Sent emails', '📤'],
   ['inbox', 'CC the Owl', '📨'],
@@ -36,7 +38,12 @@ export default function ClientIntegrationsPage() {
         ))}
       </div>
 
-      {!items ? (
+      {section === 'notifications' ? (
+        <div style={{ maxWidth: 520 }}>
+          <p style={hint}>Choose how Howler reaches you. These apply to your login across all your profiles — the in-app inbox always receives messages regardless.</p>
+          <NotificationPrefs />
+        </div>
+      ) : !items ? (
         <p style={{ color: 'var(--muted)' }}>Loading…</p>
       ) : items.length === 0 ? (
         <p style={{ color: 'var(--muted)' }}>No client account is linked to your login yet.</p>
