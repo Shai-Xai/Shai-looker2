@@ -6,23 +6,31 @@ import OwlAddressCard from '../components/OwlAddressCard.jsx';
 import MailLogView from '../components/MailLogView.jsx';
 import NotificationPrefs from '../components/NotificationPrefs.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
+import { useAccess, PERMS } from '../lib/access.js';
 
 // Client self-service Settings — one place for everything the client manages
 // themselves, organised by a section nav: Integrations, Branding, CC-the-Owl.
 // (Digests + Actions are first-class pages in the left nav, not settings.)
+// Each section declares the permission that reveals it; Notifications is
+// personal so it's always available.
 const SECTIONS = [
-  ['integrations', 'Integrations', '🔌'],
-  ['notifications', 'Notifications', '🔔'],
-  ['email', 'Branding', '🎨'],
-  ['sentmail', 'Sent emails', '📤'],
-  ['inbox', 'CC the Owl', '📨'],
+  ['integrations', 'Integrations', '🔌', PERMS.INTEGRATIONS_MANAGE],
+  ['notifications', 'Notifications', '🔔', null],
+  ['email', 'Branding', '🎨', PERMS.BRANDING_MANAGE],
+  ['sentmail', 'Sent emails', '📤', PERMS.INTEGRATIONS_MANAGE],
+  ['inbox', 'CC the Owl', '📨', PERMS.INTEGRATIONS_MANAGE],
 ];
 
 export default function ClientIntegrationsPage() {
   const isMobile = useIsMobile();
+  const { can } = useAccess();
   const [items, setItems] = useState(null);
-  const [section, setSection] = useState('integrations');
+  // Only the sections this role can use (Notifications is personal, always on).
+  const sections = SECTIONS.filter(([, , , perm]) => !perm || can(perm));
+  const [section, setSection] = useState(sections[0]?.[0] || 'notifications');
   useEffect(() => { api.getMyIntegrations().then(setItems).catch(() => setItems([])); }, []);
+  // If the active section isn't permitted (e.g. after a profile switch), fall back.
+  useEffect(() => { if (!sections.some(([k]) => k === section)) setSection(sections[0]?.[0] || 'notifications'); }, [sections, section]);
 
   return (
     <main style={{ flex: 1, padding: isMobile ? '20px 14px' : '32px 24px', maxWidth: 1080, margin: '0 auto', width: '100%', boxSizing: 'border-box' }}>
@@ -31,7 +39,7 @@ export default function ClientIntegrationsPage() {
 
       {/* Section nav */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 22, flexWrap: 'wrap', borderBottom: '1px solid var(--hairline)', paddingBottom: 10 }}>
-        {SECTIONS.map(([key, label, icon]) => (
+        {sections.map(([key, label, icon]) => (
           <button key={key} onClick={() => setSection(key)} style={tabBtn(section === key)}>
             <span style={{ marginRight: 6 }}>{icon}</span>{label}
           </button>

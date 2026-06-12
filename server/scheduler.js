@@ -235,18 +235,18 @@ function mount(app, { db, auth, mailer, push, generateContent, roleLenses }) {
 
   // Client self-service — own entity only.
   const ownsEntity = (req) => (req.user.entityIds || []).includes(req.params.entityId);
-  app.get('/api/my/digests/:entityId', auth.requireAuth, (req, res) => { if (!enabled()) return off(res); if (!ownsEntity(req)) return res.status(403).json({ error: 'Not allowed' }); listFor(req.params.entityId, res); });
-  app.post('/api/my/digests/:entityId', auth.requireAuth, (req, res) => { if (!enabled()) return off(res); if (!ownsEntity(req)) return res.status(403).json({ error: 'Not allowed' }); createFor(req.params.entityId, req.body || {}, req.user.email, res); });
-  app.put('/api/my/digests/:entityId/:jobId', auth.requireAuth, (req, res) => { if (!enabled()) return off(res); if (!ownsEntity(req)) return res.status(403).json({ error: 'Not allowed' }); const j = getJob(req.params.jobId); if (!j || j.entityId !== req.params.entityId) return res.status(404).json({ error: 'Not found' }); updateFor(j, req.body || {}, res); });
-  app.delete('/api/my/digests/:entityId/:jobId', auth.requireAuth, (req, res) => { if (!enabled()) return off(res); if (!ownsEntity(req)) return res.status(403).json({ error: 'Not allowed' }); const j = getJob(req.params.jobId); if (!j || j.entityId !== req.params.entityId) return res.status(404).json({ error: 'Not found' }); sql.prepare('DELETE FROM scheduled_jobs WHERE id=?').run(j.id); res.status(204).end(); });
-  app.post('/api/my/digests/:entityId/:jobId/test', auth.requireAuth, async (req, res) => {
+  app.get('/api/my/digests/:entityId', auth.requireAuth, auth.requirePermission('digests.manage'), (req, res) => { if (!enabled()) return off(res); if (!ownsEntity(req)) return res.status(403).json({ error: 'Not allowed' }); listFor(req.params.entityId, res); });
+  app.post('/api/my/digests/:entityId', auth.requireAuth, auth.requirePermission('digests.manage'), (req, res) => { if (!enabled()) return off(res); if (!ownsEntity(req)) return res.status(403).json({ error: 'Not allowed' }); createFor(req.params.entityId, req.body || {}, req.user.email, res); });
+  app.put('/api/my/digests/:entityId/:jobId', auth.requireAuth, auth.requirePermission('digests.manage'), (req, res) => { if (!enabled()) return off(res); if (!ownsEntity(req)) return res.status(403).json({ error: 'Not allowed' }); const j = getJob(req.params.jobId); if (!j || j.entityId !== req.params.entityId) return res.status(404).json({ error: 'Not found' }); updateFor(j, req.body || {}, res); });
+  app.delete('/api/my/digests/:entityId/:jobId', auth.requireAuth, auth.requirePermission('digests.manage'), (req, res) => { if (!enabled()) return off(res); if (!ownsEntity(req)) return res.status(403).json({ error: 'Not allowed' }); const j = getJob(req.params.jobId); if (!j || j.entityId !== req.params.entityId) return res.status(404).json({ error: 'Not found' }); sql.prepare('DELETE FROM scheduled_jobs WHERE id=?').run(j.id); res.status(204).end(); });
+  app.post('/api/my/digests/:entityId/:jobId/test', auth.requireAuth, auth.requirePermission('digests.manage'), async (req, res) => {
     if (!enabled()) return off(res); if (!ownsEntity(req)) return res.status(403).json({ error: 'Not allowed' });
     const j = getJob(req.params.jobId); if (!j || j.entityId !== req.params.entityId) return res.status(404).json({ error: 'Not found' });
     const r = await runJob(j, { manual: true, toOverride: req.user.email });
     r.status === 'ok' ? res.json({ ok: true, to: req.user.email }) : res.status(400).json({ error: r.detail });
   });
-  app.post('/api/my/digests/:entityId/preview', auth.requireAuth, (req, res) => { if (!enabled()) return off(res); if (!ownsEntity(req)) return res.status(403).json({ error: 'Not allowed' }); preview({ ...req.body, entityId: req.params.entityId }, res); });
-  app.post('/api/my/digests/:entityId/test-send', auth.requireAuth, (req, res) => { if (!enabled()) return off(res); if (!ownsEntity(req)) return res.status(403).json({ error: 'Not allowed' }); testSendConfig({ ...req.body, entityId: req.params.entityId }, req.params.entityId, req.user.email, res); });
+  app.post('/api/my/digests/:entityId/preview', auth.requireAuth, auth.requirePermission('digests.manage'), (req, res) => { if (!enabled()) return off(res); if (!ownsEntity(req)) return res.status(403).json({ error: 'Not allowed' }); preview({ ...req.body, entityId: req.params.entityId }, res); });
+  app.post('/api/my/digests/:entityId/test-send', auth.requireAuth, auth.requirePermission('digests.manage'), (req, res) => { if (!enabled()) return off(res); if (!ownsEntity(req)) return res.status(403).json({ error: 'Not allowed' }); testSendConfig({ ...req.body, entityId: req.params.entityId }, req.params.entityId, req.user.email, res); });
 
   // Render + send the current (unsaved) config as a test to one address.
   async function testSendConfig(body, entityId, toEmail, res) {

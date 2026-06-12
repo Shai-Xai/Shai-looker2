@@ -260,12 +260,12 @@ function mount(app, { db, auth, mailer, push, resolveAudience, draftCopy, listEv
   };
 
   // List + CRUD (one set of handlers serves admin and client self-service).
-  app.get('/api/actions/:entityId', auth.requireAuth, (req, res) => {
+  app.get('/api/actions/:entityId', auth.requireAuth, auth.requirePermission('campaigns.view'), (req, res) => {
     if (!guard(req, res, req.params.entityId)) return;
     const rows = sql.prepare('SELECT * FROM actions WHERE entity_id=? ORDER BY created_at DESC LIMIT 100').all(req.params.entityId);
     res.json({ actions: rows.map((r) => publicAction(rowToAction(r))) });
   });
-  app.post('/api/actions/:entityId', auth.requireAuth, (req, res) => {
+  app.post('/api/actions/:entityId', auth.requireAuth, auth.requirePermission('campaigns.approve'), (req, res) => {
     if (!guard(req, res, req.params.entityId)) return;
     const id = uuid();
     const cfg = cleanConfig(req.body || {});
@@ -274,7 +274,7 @@ function mount(app, { db, auth, mailer, push, resolveAudience, draftCopy, listEv
       .run(id, req.params.entityId, 'email_campaign', 'draft', String((req.body || {}).title || '').slice(0, 120), JSON.stringify(cfg), rec, req.user.email, now(), now());
     res.status(201).json({ action: publicAction(getAction(id)) });
   });
-  app.put('/api/actions/:entityId/:id', auth.requireAuth, (req, res) => {
+  app.put('/api/actions/:entityId/:id', auth.requireAuth, auth.requirePermission('campaigns.approve'), (req, res) => {
     if (!guard(req, res, req.params.entityId)) return;
     const a = getAction(req.params.id);
     if (!a || a.entityId !== req.params.entityId) return res.status(404).json({ error: 'Not found' });
@@ -285,7 +285,7 @@ function mount(app, { db, auth, mailer, push, resolveAudience, draftCopy, listEv
       .run(String((req.body || {}).title || a.title).slice(0, 120), JSON.stringify(cfg), rec, now(), a.id);
     res.json({ action: publicAction(getAction(a.id)) });
   });
-  app.delete('/api/actions/:entityId/:id', auth.requireAuth, (req, res) => {
+  app.delete('/api/actions/:entityId/:id', auth.requireAuth, auth.requirePermission('campaigns.approve'), (req, res) => {
     if (!guard(req, res, req.params.entityId)) return;
     const a = getAction(req.params.id);
     if (!a || a.entityId !== req.params.entityId) return res.status(404).json({ error: 'Not found' });
@@ -295,7 +295,7 @@ function mount(app, { db, auth, mailer, push, resolveAudience, draftCopy, listEv
   });
 
   // The client's events (suites) — for optionally linking a campaign to an event.
-  app.get('/api/actions/:entityId/events', auth.requireAuth, (req, res) => {
+  app.get('/api/actions/:entityId/events', auth.requireAuth, auth.requirePermission('campaigns.view'), (req, res) => {
     if (!guard(req, res, req.params.entityId)) return;
     res.json({ events: (listEvents ? listEvents(req.params.entityId) : []) });
   });
@@ -316,7 +316,7 @@ function mount(app, { db, auth, mailer, push, resolveAudience, draftCopy, listEv
   });
 
   // Audience preview for an (unsaved) config: count + sample + field options.
-  app.post('/api/actions/:entityId/audience-preview', auth.requireAuth, async (req, res) => {
+  app.post('/api/actions/:entityId/audience-preview', auth.requireAuth, auth.requirePermission('campaigns.approve'), async (req, res) => {
     if (!guard(req, res, req.params.entityId)) return;
     try {
       const cfg = cleanConfig(req.body || {});
@@ -326,7 +326,7 @@ function mount(app, { db, auth, mailer, push, resolveAudience, draftCopy, listEv
   });
 
   // AI-draft the campaign copy (editable afterwards).
-  app.post('/api/actions/:entityId/draft-copy', auth.requireAuth, async (req, res) => {
+  app.post('/api/actions/:entityId/draft-copy', auth.requireAuth, auth.requirePermission('campaigns.approve'), async (req, res) => {
     if (!guard(req, res, req.params.entityId)) return;
     try {
       const out = await draftCopy({ entityId: req.params.entityId, goal: String((req.body || {}).goal || '').slice(0, 1000), audienceCount: Number((req.body || {}).audienceCount) || 0 });
@@ -335,13 +335,13 @@ function mount(app, { db, auth, mailer, push, resolveAudience, draftCopy, listEv
   });
 
   // Email preview (sample recipient) + test-send to self.
-  app.post('/api/actions/:entityId/preview-email', auth.requireAuth, (req, res) => {
+  app.post('/api/actions/:entityId/preview-email', auth.requireAuth, auth.requirePermission('campaigns.approve'), (req, res) => {
     if (!guard(req, res, req.params.entityId)) return;
     const fake = { id: 'preview', entityId: req.params.entityId, config: cleanConfig(req.body || {}) };
     const { html } = renderFor(fake, { email: 'sam@example.com', name: 'Sam', ticket: 'General Admission' });
     res.json({ html });
   });
-  app.post('/api/actions/:entityId/test-send', auth.requireAuth, async (req, res) => {
+  app.post('/api/actions/:entityId/test-send', auth.requireAuth, auth.requirePermission('campaigns.approve'), async (req, res) => {
     if (!guard(req, res, req.params.entityId)) return;
     const fake = { id: 'test', entityId: req.params.entityId, config: cleanConfig(req.body || {}) };
     const { html, text, subject } = renderFor(fake, { email: req.user.email, name: '', ticket: 'General Admission' });
@@ -352,7 +352,7 @@ function mount(app, { db, auth, mailer, push, resolveAudience, draftCopy, listEv
 
   // APPROVE & SEND — the human gate. Snapshots the audience at this moment and
   // kicks off the send. Both Howler admins and the client's own users may approve.
-  app.post('/api/actions/:entityId/:id/approve', auth.requireAuth, async (req, res) => {
+  app.post('/api/actions/:entityId/:id/approve', auth.requireAuth, auth.requirePermission('campaigns.approve'), async (req, res) => {
     if (!guard(req, res, req.params.entityId)) return;
     const a = getAction(req.params.id);
     if (!a || a.entityId !== req.params.entityId) return res.status(404).json({ error: 'Not found' });
@@ -390,7 +390,7 @@ function mount(app, { db, auth, mailer, push, resolveAudience, draftCopy, listEv
   });
 
   // Pause a recurring automation (back to draft; the check stops).
-  app.post('/api/actions/:entityId/:id/pause', auth.requireAuth, (req, res) => {
+  app.post('/api/actions/:entityId/:id/pause', auth.requireAuth, auth.requirePermission('campaigns.approve'), (req, res) => {
     if (!guard(req, res, req.params.entityId)) return;
     const a = getAction(req.params.id);
     if (!a || a.entityId !== req.params.entityId || a.status !== 'auto') return res.status(400).json({ error: 'Not an active automation' });
@@ -400,7 +400,7 @@ function mount(app, { db, auth, mailer, push, resolveAudience, draftCopy, listEv
 
   // Detailed campaign report: per-recipient clicks (who, how many, when),
   // plus the summary. Names come from the audience snapshot.
-  app.get('/api/actions/:entityId/:id/report', auth.requireAuth, (req, res) => {
+  app.get('/api/actions/:entityId/:id/report', auth.requireAuth, auth.requirePermission('campaigns.view'), (req, res) => {
     if (!guard(req, res, req.params.entityId)) return;
     const a = getAction(req.params.id);
     if (!a || a.entityId !== req.params.entityId) return res.status(404).json({ error: 'Not found' });

@@ -9,6 +9,7 @@ import BriefingTuneModal from '../components/BriefingTuneModal.jsx';
 import OwlQuips from '../components/OwlQuips.jsx';
 import TileFrame from '../components/TileFrame.jsx';
 import { ScopeProvider } from '../lib/ScopeContext.jsx';
+import { useAccess, PERMS } from '../lib/access.js';
 import { fmtR } from '../lib/money.js';
 
 // Personalised landing page (briefing-led): the Owl opens with what changed
@@ -20,6 +21,7 @@ export default function ClientHome() {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const { user, isAdmin } = useAuth();
+  const { can } = useAccess(); // role gates the campaign affordances on home
   const { previewEntityId } = useOutletContext() || {};
   const [suites, setSuites] = useState([]);
   const [snap, setSnap] = useState(null);
@@ -172,7 +174,7 @@ export default function ClientHome() {
                   <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--brand)' }}>{s.link.label} →</span>
                   {/* Only when the suggestion maps to an EXECUTABLE capability
                       (validated server-side) — never a button we can't deliver. */}
-                  {s.action && (
+                  {s.action && can(PERMS.CAMPAIGNS_APPROVE) && (
                     <span
                       role="button" tabIndex={0}
                       title="Turn this suggestion into a campaign"
@@ -187,8 +189,10 @@ export default function ClientHome() {
         </>
       )}
 
-      {/* Your actions — campaigns taken + how they're performing */}
-      <YourActions entityId={previewEntityId || (isAdmin ? null : ((user?.entities || [])[0]?.id || (user?.entityIds || [])[0]))} isMobile={isMobile} onOpen={() => vtNavigate(navigate, '/actions')} />
+      {/* Your actions — campaigns taken + how they're performing (campaigns role only) */}
+      {can(PERMS.CAMPAIGNS_VIEW) && (
+        <YourActions entityId={previewEntityId || (isAdmin ? null : ((user?.entities || [])[0]?.id || (user?.entityIds || [])[0]))} isMobile={isMobile} onOpen={() => vtNavigate(navigate, '/actions')} />
+      )}
 
       {/* Personal shortcuts (browsing-based) */}
       {shortcuts.length > 0 && (

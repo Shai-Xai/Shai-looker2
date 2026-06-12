@@ -226,6 +226,19 @@ function hasPermission(user, entityId, perm) {
   if (user && user.role === 'admin') return true;
   return roleForEntity(user, entityId) ? roles.permissionsForRole(roleForEntity(user, entityId)).has(perm) : false;
 }
+// Express middleware: require `perm` on the entity named in the request. The
+// entity is read from the route param / query / body (`entityFrom` lets a route
+// override how to find it). Admins always pass. The 403 is the real boundary —
+// UI hiding is cosmetic.
+function requirePermission(perm, entityFrom) {
+  return (req, res, next) => {
+    if (req.user?.role === 'admin') return next();
+    const entityId = entityFrom ? entityFrom(req) : (req.params.entityId || req.query.entityId || (req.body || {}).entityId);
+    if (!entityId) return res.status(400).json({ error: 'entityId required' });
+    if (!hasPermission(req.user, entityId, perm)) return res.status(403).json({ error: 'You don’t have access to this.' });
+    next();
+  };
+}
 
 // Merged locks for a suite (entity organiser + suite event/cashless) — used for
 // the UI pre-fill/lock. Only the entity (organiser) part is force-scoped.
@@ -378,5 +391,5 @@ module.exports = {
   suitesForUser, canAccessSuite, lockedFiltersForSuite, forcedScopeForSuite, scopeForQuery,
   filterNameToField,
   // roles & permissions
-  roleForEntity, permissionsFor, hasPermission,
+  roleForEntity, permissionsFor, hasPermission, requirePermission,
 };

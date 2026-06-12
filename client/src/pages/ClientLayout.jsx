@@ -9,6 +9,7 @@ import { vtNavigate } from '../lib/viewTransition.js';
 import { useSheetDrag } from '../lib/useSheetDrag.js';
 import { applyBrand, resetBrand } from '../lib/brand.js';
 import NotificationPrefs from '../components/NotificationPrefs.jsx';
+import { useAccess, PERMS } from '../lib/access.js';
 
 // Persistent client shell: a left sidebar tree of Suites → Sets → Dashboards,
 // with the selected dashboard rendered in the main area.
@@ -137,6 +138,7 @@ export default function ClientLayout() {
   // who opens a suite is "previewing"; an admin who switched INTO a client
   // account (mode 'client') is acting as that client (no preview banner).
   const { activeEntityId: profileEntityId, mode: profileMode } = useProfile();
+  const { can } = useAccess(); // role-gated nav for the active profile (admins: all)
   const previewMode = isAdmin && profileMode === 'console';
   const activeEntityId = isAdmin
     ? (previewMode ? (suiteEntityId || previewEntityId) : (suiteEntityId || profileEntityId))
@@ -293,7 +295,7 @@ export default function ClientLayout() {
         <>
           <div style={{ borderTop: '1px solid var(--hairline)', margin: '12px 6px 10px' }} />
           <div style={{ padding: '0 8px 8px 14px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)' }}>Workspace</div>
-          {(visibleSettlements.length > 0 || isAdmin) && (
+          {can(PERMS.SETTLEMENTS_VIEW) && (visibleSettlements.length > 0 || isAdmin) && (
           <button
             ref={onSettlements ? activeRef : null}
             className={`nav-row${onSettlements ? ' active' : ''}`}
@@ -316,6 +318,7 @@ export default function ClientLayout() {
               {inbox.unread > 0 && <span style={{ ...countChip, background: 'var(--brand)', color: '#fff' }}>{inbox.unread}</span>}
             </button>
           )}
+          {can(PERMS.DIGESTS_MANAGE) && (
           <button
             ref={onDigests ? activeRef : null}
             className={`nav-row${onDigests ? ' active' : ''}`}
@@ -325,6 +328,8 @@ export default function ClientLayout() {
             <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>🗓</span>
             <span style={ellip}>Digests</span>
           </button>
+          )}
+          {can(PERMS.CAMPAIGNS_VIEW) && (
           <button
             ref={onActions ? activeRef : null}
             className={`nav-row${onActions ? ' active' : ''}`}
@@ -334,6 +339,7 @@ export default function ClientLayout() {
             <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>⚡</span>
             <span style={ellip}>Actions</span>
           </button>
+          )}
         </>
       )}
     </nav>
@@ -417,7 +423,7 @@ export default function ClientLayout() {
               {(
                 <>
                   <div style={{ borderTop: '1px solid var(--hairline)', margin: '10px 4px' }} />
-                  {(visibleSettlements.length > 0 || isAdmin) && (
+                  {can(PERMS.SETTLEMENTS_VIEW) && (visibleSettlements.length > 0 || isAdmin) && (
                   <button
                     className={`nav-row${onSettlements ? ' active' : ''}`}
                     style={{ ...mRowSuite, fontWeight: onSettlements ? 700 : 500 }}
@@ -439,6 +445,7 @@ export default function ClientLayout() {
                       {inbox.unread > 0 && <span style={{ ...countChip, background: 'var(--brand)', color: '#fff' }}>{inbox.unread}</span>}
                     </button>
                   )}
+                  {can(PERMS.DIGESTS_MANAGE) && (
                   <button
                     className={`nav-row${onDigests ? ' active' : ''}`}
                     style={{ ...mRowSuite, fontWeight: onDigests ? 700 : 500 }}
@@ -447,6 +454,8 @@ export default function ClientLayout() {
                     <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>🗓</span>
                     <span style={ellip}>Digests</span>
                   </button>
+                  )}
+                  {can(PERMS.CAMPAIGNS_VIEW) && (
                   <button
                     className={`nav-row${onActions ? ' active' : ''}`}
                     style={{ ...mRowSuite, fontWeight: onActions ? 700 : 500 }}
@@ -455,6 +464,7 @@ export default function ClientLayout() {
                     <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>⚡</span>
                     <span style={ellip}>Actions</span>
                   </button>
+                  )}
                 </>
               )}
             </div>

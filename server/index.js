@@ -918,7 +918,7 @@ app.get('/api/my/mail-template/:entityId', auth.requireAuth, (req, res) => {
   if (!(req.user.entityIds || []).includes(req.params.entityId)) return res.status(403).json({ error: 'Not allowed' });
   res.json(clientMailView(req.params.entityId));
 });
-app.put('/api/my/mail-template/:entityId', auth.requireAuth, (req, res) => {
+app.put('/api/my/mail-template/:entityId', auth.requireAuth, auth.requirePermission('branding.manage'), (req, res) => {
   if (!(req.user.entityIds || []).includes(req.params.entityId)) return res.status(403).json({ error: 'Not allowed' });
   db.setEntityMailBranding(req.params.entityId, cleanBrandingPatch(req.body || {}));
   res.json(clientMailView(req.params.entityId));
@@ -973,7 +973,7 @@ app.get('/api/my/integrations', auth.requireAuth, (req, res) => {
   }).filter(Boolean);
   res.json(out);
 });
-app.put('/api/my/integrations/:entityId', auth.requireAuth, (req, res) => {
+app.put('/api/my/integrations/:entityId', auth.requireAuth, auth.requirePermission('integrations.manage'), (req, res) => {
   if (!(req.user.entityIds || []).includes(req.params.entityId)) return res.status(403).json({ error: 'Not allowed' });
   const patch = {};
   applyIntegrationsPatch(req.body || {}, (k, v) => { patch[k] = v; });
