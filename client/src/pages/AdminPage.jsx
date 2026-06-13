@@ -1380,12 +1380,51 @@ function AdminIntegrations() {
       <h3 style={{ fontSize: 15, fontWeight: 700, margin: '24px 0 4px' }}>Email template — platform default</h3>
       <p style={hint}>The default look of every notification email. Each client can layer their own branding on top (Client → Email branding).</p>
       <MailTemplateEditor scope="platform" canTest />
+      <h3 style={{ fontSize: 15, fontWeight: 700, margin: '28px 0 4px' }}>SMS (Clickatell)</h3>
+      <p style={hint}>Your Clickatell One API key powers SMS campaigns. The key is write-only — we only show whether it's set. Sender ID is your approved alphanumeric ID (e.g. a short brand name) or number.</p>
+      <SmsConfig />
       <h3 style={{ fontSize: 15, fontWeight: 700, margin: '28px 0 4px' }}>Notifications</h3>
       <p style={hint}>How push reminders behave platform-wide.</p>
       <NotificationSettings />
       <h3 style={{ fontSize: 15, fontWeight: 700, margin: '28px 0 4px' }}>Inbound email — CC the Owl</h3>
       <p style={hint}>Lets emails be captured into client inboxes by CC’ing a per-client address. Set the inbound domain, then point your mail forwarder at the webhook below.</p>
       <InboundConfig />
+    </div>
+  );
+}
+
+// Clickatell SMS provider config — write-only key + sender ID + a live test.
+function SmsConfig() {
+  const [cfg, setCfg] = useState(null);
+  const [apiKey, setApiKey] = useState('');
+  const [sender, setSender] = useState('');
+  const [saved, setSaved] = useState(false);
+  const [testTo, setTestTo] = useState('');
+  const [testState, setTestState] = useState('');
+  useEffect(() => { api.getSmsConfig().then((c) => { setCfg(c); setSender(c.sender || ''); }).catch(() => setCfg({})); }, []);
+  if (!cfg) return <Muted>Loading…</Muted>;
+  const save = async () => { const c = await api.setSmsConfig({ ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}), sender }); setCfg(c); setApiKey(''); flash(setSaved); };
+  const test = async () => {
+    if (!testTo.trim()) return;
+    setTestState('sending');
+    try { const r = await api.smsTest(testTo.trim()); setTestState(r.ok ? `✓ Sent to ${r.to || testTo}` : `✗ ${r.error?.description || r.error || 'failed'}`); }
+    catch (e) { setTestState(`✗ ${e.message}`); }
+  };
+  return (
+    <div style={{ ...cardStyle, display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        <Field label={`Clickatell API key ${cfg.configured ? `(set · ${cfg.keyHint})` : '(not set)'}`}>
+          <input style={input} type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={cfg.configured ? 'Enter a new key to replace' : 'Paste your One API key'} autoComplete="off" />
+        </Field>
+        <Field label="Sender ID"><input style={input} value={sender} onChange={(e) => setSender(e.target.value)} placeholder="e.g. MTNBush" /></Field>
+        <button style={miniBtn} onClick={save}>Save</button>
+        {saved && <span style={{ color: 'var(--success,#10b981)', fontSize: 13, fontWeight: 600 }}>✓</span>}
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        <Field label="Send a test SMS to"><input style={input} value={testTo} onChange={(e) => setTestTo(e.target.value)} placeholder="082 123 4567" /></Field>
+        <button style={miniBtnOutline} onClick={test} disabled={!cfg.configured || testState === 'sending'}>{testState === 'sending' ? 'Sending…' : 'Send test'}</button>
+        {testState && testState !== 'sending' && <span style={{ fontSize: 13, color: testState.startsWith('✓') ? 'var(--success,#10b981)' : 'var(--error)' }}>{testState}</span>}
+      </div>
     </div>
   );
 }

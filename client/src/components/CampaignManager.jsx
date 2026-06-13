@@ -191,6 +191,8 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
     title: action?.title || (tpl ? tpl.label : ''),
     goal: cfg.goal || tp.goal || initialGoal || 'Re-engage customers who abandoned their ticket checkout and get them to complete the purchase.',
     recurring: action?.recurring || false,
+    channel: cfg.channel || 'email', // email | sms
+    phoneField: cfg.audience?.phoneField || '',
     audienceMode: cfg.audience?.mode || ta.mode || 'tile',
     dashboardId: cfg.audience?.dashboardId || ta.dashboardId || '',
     tileId: cfg.audience?.tileId || ta.tileId || '',
@@ -258,10 +260,11 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
     ctaUrl: f.ctaUrl, utm: f.utm, recurring: f.recurring,
     eventSuiteId: f.eventSuiteId, contentMode: f.contentMode, heroImage: f.heroImage, customHtml: f.customHtml,
     templateKey: f.templateKey, category: f.category, master: f.master,
+    channel: f.channel,
     campaignMode: f.campaignMode, steps: f.steps,
     promo: f.promo,
     promoCodes: promoCodesText.split(/[\s,;]+/).map((c) => c.trim()).filter(Boolean),
-    audience: { mode: f.audienceMode, dashboardId: f.dashboardId, tileId: f.tileId, emailField: f.emailField, nameField: f.nameField, consentField: f.consentField, ticketField: f.ticketField, anchorField: f.anchorField, filters: f.filters, attrDashboardId: f.attrDashboardId, attrTileId: f.attrTileId, pasted: f.pasted },
+    audience: { mode: f.audienceMode, dashboardId: f.dashboardId, tileId: f.tileId, emailField: f.emailField, nameField: f.nameField, consentField: f.consentField, ticketField: f.ticketField, phoneField: f.phoneField, anchorField: f.anchorField, filters: f.filters, attrDashboardId: f.attrDashboardId, attrTileId: f.attrTileId, pasted: f.pasted },
   });
   // Targeting filter helpers.
   const addFilter = () => setF((s) => ({ ...s, filters: [...s.filters, { field: '', op: 'in', values: [], min: '', max: '' }] }));
@@ -414,6 +417,14 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
             <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit' }} rows={2} value={f.goal} onChange={(e) => set('goal', e.target.value)} />
           </Field>
 
+          <Field label="Channel">
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Toggle on={f.channel !== 'sms'} onClick={() => set('channel', 'email')}>✉️ Email</Toggle>
+              <Toggle on={f.channel === 'sms'} onClick={() => set('channel', 'sms')}>💬 SMS</Toggle>
+            </div>
+            {f.channel === 'sms' && <div style={hintS}>SMS is plain text — the subject is ignored, the tracked link + an opt-out link are added automatically. Tokens {'{{name}}'}, {'{{ticketType}}'}, {'{{promo}}'} still work.</div>}
+          </Field>
+
           <Field label="Campaign type">
             <div style={{ display: 'flex', gap: 8 }}>
               <Toggle on={!isSequence} onClick={() => set('campaignMode', 'once')}>Once-off</Toggle>
@@ -463,8 +474,14 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
                       <option value="">Ticket-type column (optional — enables {'{{ticketType}}'})</option>
                       {aud.fields.map((fl) => <option key={fl.name} value={fl.name}>{fl.label}</option>)}
                     </select>
+                    {f.channel === 'sms' && (
+                      <select style={input} value={f.phoneField} onChange={(e) => set('phoneField', e.target.value)}>
+                        <option value="">Mobile-number column (required for SMS)</option>
+                        {aud.fields.map((fl) => <option key={fl.name} value={fl.name}>{fl.label}</option>)}
+                      </select>
+                    )}
                     <select style={input} value={f.consentField} onChange={(e) => set('consentField', e.target.value)}>
-                      <option value="">Consent column — recommended (only email when = Yes)</option>
+                      <option value="">Consent column — recommended (only {f.channel === 'sms' ? 'text' : 'email'} when = Yes)</option>
                       {aud.fields.map((fl) => <option key={fl.name} value={fl.name}>Only if “{fl.label}” = Yes</option>)}
                     </select>
                     {isSequence && (
@@ -589,7 +606,12 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
             <button style={mini} onClick={saveDraft} disabled={busy}>{busy ? 'Saving…' : 'Save draft'}</button>
             <button
               type="button" style={mini} disabled={testState === 'sending'}
-              onClick={async () => { setTestState('sending'); try { const r = await api.actionTestSend(entityId, payload()); setTestState(`✓ Test sent to ${r.to}`); } catch (e) { setTestState(`✗ ${e.message}`); } }}
+              onClick={async () => {
+                let testPhone = '';
+                if (f.channel === 'sms') { testPhone = window.prompt('Send the test SMS to which number?', ''); if (!testPhone) return; }
+                setTestState('sending');
+                try { const r = await api.actionTestSend(entityId, { ...payload(), testPhone }); setTestState(`✓ Test sent to ${r.to}`); } catch (e) { setTestState(`✗ ${e.message}`); }
+              }}
             >{testState === 'sending' ? 'Sending…' : 'Send test to me'}</button>
             <button style={{ ...primary, background: '#15803d' }} onClick={approve} disabled={approveState === 'working' || (!f.recurring && !isSequence && !aud?.count)}>
               {approveState === 'working' ? 'Approving…' : isSequence ? '⚡ Activate sequence' : f.recurring ? '⚙ Activate automation' : `Approve & send${aud?.count ? ` to ${aud.count}` : ''}`}
