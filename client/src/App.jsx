@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { BrowserRouter, Routes, Route, Link, Navigate, useNavigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Link, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import HomePage from './pages/HomePage.jsx';
 import ViewPage from './pages/ViewPage.jsx';
 import EditorPage from './pages/EditorPage.jsx';
@@ -40,6 +40,11 @@ function Header() {
   const canSwitch = isAdmin ? entities.length > 0 : entities.length > 1;
   const enterClient = (id) => { setProfile(id); navigate('/'); };
   const goConsole = () => { enterConsole(); navigate('/admin'); };
+  const location = useLocation();
+  // "Home" for an admin: the dashboard home when you're in a dashboard view
+  // (incl. the editor), otherwise the admin console. Clients always go to '/'.
+  const inDashboards = /^\/(dashboards|d\/|clone)/.test(location.pathname);
+  const goHome = () => navigate(isAdmin && !inClientView ? (inDashboards ? '/dashboards' : '/admin') : '/');
   return (
     <header style={{
       background: 'var(--frost)', backdropFilter: 'saturate(180%) blur(20px)', WebkitBackdropFilter: 'saturate(180%) blur(20px)',
@@ -55,7 +60,7 @@ function Header() {
         canSwitch={canSwitch}
         onEnterClient={enterClient}
         onConsole={goConsole}
-        onHome={() => navigate('/')}
+        onHome={goHome}
       />
       <div style={{ flex: 1 }} />
       {/* Admin console: admin controls on the right. Client experience (client
