@@ -745,6 +745,8 @@ function mount(app, { db, auth, mailer, push, messaging, resolveAudience, draftC
       totalClicks, uniqueClickers: clickers.length, anonClicks,
       // CTR mirrors the card (total clicks / sent) so the two never disagree.
       ctr: sent > 0 ? Math.min(100, Math.round((totalClicks / sent) * 100)) : 0,
+      converted: a.results.converted || 0,
+      convRate: sent > 0 ? Math.round(((a.results.converted || 0) / sent) * 100) : 0,
       clickers,
       nonClickers: a.audience.filter((r) => !clickers.some((c) => c.email === r.email)).length,
       attributed: clickers.length > 0 || tableAnon > 0,
@@ -878,6 +880,32 @@ function mount(app, { db, auth, mailer, push, messaging, resolveAudience, draftC
   const dripTimer = setInterval(() => processSequences().catch(() => {}), 3 * 60000);
   if (dripTimer.unref) dripTimer.unref();
   setTimeout(() => processSequences().catch(() => {}), 30000);
+
+  // ── Conversion tracking for ONCE-OFF campaigns ──────────────────────────────
+  // Sequences track conversions inline (drop-out = bought). For sent once-off
+  // campaigns with a re-runnable tile audience, periodically re-run the abandoned
+  // audience: anyone we emailed who's no longer in it has bought (or expired).
+  // Recompute (idempotent), update results.converted. Bounded to recent sends.
+  async function checkConversions() {
+    if (!enabled()) return;
+    const cutoff = new Date(Date.now() - 14 * 86400e3).toISOString(); // track for 14 days post-send
+    const recheck = new Date(Date.now() - 6 * 3600e3).toISOString();  // at most every 6h per campaign
+    const due = sql.prepare("SELECT id FROM actions WHERE status='done' AND approved_at > ? AND (last_check='' OR last_check < ?)").all(cutoff, recheck);
+    for (const { id } of due) {
+      const a = getAction(id);
+      if (!a || a.config.campaignMode === 'sequence' || a.config.audience?.mode !== 'tile') continue;
+      sql.prepare('UPDATE actions SET last_check=? WHERE id=?').run(now(), a.id);
+      try {
+        const { list } = await audienceFor(a.entityId, a.config, sysUser);
+        const stillAbandoning = new Set(list.map((r) => r.email));
+        const converted = (a.audience || []).filter((r) => !stillAbandoning.has(r.email)).length;
+        if (converted !== (a.results.converted || 0)) saveResults(a.id, { ...a.results, converted });
+      } catch (e) { console.error('[actions] conversion check failed', a.id, e.message); }
+    }
+  }
+  const convTimer = setInterval(() => checkConversions().catch(() => {}), 30 * 60000);
+  if (convTimer.unref) convTimer.unref();
+  setTimeout(() => checkConversions().catch(() => {}), 45000);
 
   // ── public routes (no auth; registered before the SPA fallback) ──
   // Tracked CTA click → count + redirect, with the campaign's UTM parameters

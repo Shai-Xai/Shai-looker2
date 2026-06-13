@@ -99,6 +99,7 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
             {(a.results.failed ?? 0) > 0 && <span style={{ color: 'var(--error,#ef4444)' }}>✗ {a.results.failed} failed</span>}
             <span>🔗 {a.results.clicks ?? 0} clicks</span>
             {a.results.sent > 0 && <span style={{ color: 'var(--muted)' }}>{Math.round(((a.results.clicks || 0) / a.results.sent) * 100)}% CTR</span>}
+            {(a.results.converted ?? 0) > 0 && <span style={{ color: 'var(--success,#10b981)' }}>✓ {a.results.converted} converted</span>}
           </div>
         )}
         {a.results?.lastError && a.status !== 'done' && <div style={{ fontSize: 11, color: 'var(--error,#ef4444)', marginTop: 3 }}>{a.results.lastError}</div>}
@@ -847,6 +848,8 @@ function CampaignReport({ entityId, action, onClose }) {
         {stat('Total clicks', r.totalClicks)}
         {stat('Unique clickers', r.uniqueClickers)}
         {stat('CTR', `${r.ctr}%`, 'var(--brand)')}
+        {(r.converted > 0) && stat('Converted', r.converted, 'var(--success,#10b981)')}
+        {(r.converted > 0) && stat('Conv. rate', `${r.convRate}%`, 'var(--success,#10b981)')}
       </div>
 
       <div style={{ ...card }}>
