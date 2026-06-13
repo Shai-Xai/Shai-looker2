@@ -775,13 +775,29 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
   function notifyApprovers(a) {
     const url = `/actions?action=${a.id}`;
     const title = 'Campaign approval needed';
-    const body = `“${a.title || a.config.subject || 'A campaign'}” is waiting for your approval.`;
+    const name = a.title || a.config.subject || 'A campaign';
+    const body = `“${name}” is waiting for your approval.`;
     try { os?.announce?.({ entityId: a.entityId, title, body, priority: 'needs_reply', createdBy: 'campaigns@pulse', authorType: 'system' }); } catch { /* os optional */ }
     if (push?.isEnabled?.()) {
       for (const ap of a.config.approvers || []) {
         if (ap.type === 'user' && ap.userId) push.sendToUser(ap.userId, { title, body, url, tag: `approve-${a.id}`, requireInteraction: true }).catch(() => {});
       }
       if ((a.config.approvers || []).some((x) => x.type === 'howler')) push.sendToEntity(a.entityId, { title, body, url, tag: `approve-${a.id}` }).catch(() => {});
+    }
+    // Email each approver too — a named person's address, or every Howler admin.
+    if (mailer?.isConfigured?.()) {
+      const emails = new Set();
+      for (const ap of a.config.approvers || []) {
+        if (ap.type === 'howler') db.listUsers().filter((u) => u.role === 'admin').forEach((u) => emails.add(u.email));
+        else if (ap.email) emails.add(ap.email);
+      }
+      if (emails.size) {
+        const html = mailer.notificationEmail({
+          title, body: `${body}<br><br>Review the campaign and approve or send it back to draft.`,
+          ctaText: 'Review & approve', ctaPath: url, preheader: `Approval needed: ${name}`, entityId: a.entityId,
+        });
+        mailer.send({ to: [...emails], subject: `Approval needed: ${name}`, html, kind: 'campaign-approval', entity: a.entityId }).catch(() => {});
+      }
     }
   }
 
