@@ -47,8 +47,7 @@ function Header() {
   const inDashboards = /^\/(dashboards|d\/|clone)/.test(location.pathname);
   const goHome = () => navigate(isAdmin && !inClientView ? (inDashboards ? '/dashboards' : '/admin') : '/');
   return (
-    <header style={{
-      background: 'var(--frost)', backdropFilter: 'saturate(180%) blur(20px)', WebkitBackdropFilter: 'saturate(180%) blur(20px)',
+    <header className="app-chrome" style={{
       borderBottom: '1px solid var(--hairline)', padding: isMobile ? '0 14px' : '0 22px',
       height: 56, display: 'flex', alignItems: 'center', gap: isMobile ? 8 : 12, flexShrink: 0, zIndex: 10,
     }}>
@@ -173,7 +172,7 @@ function UserBadge({ user, isAdmin }) {
 }
 
 const identityBtn = { display: 'flex', alignItems: 'center', gap: 8, border: 'none', background: 'transparent', cursor: 'pointer', padding: '4px 8px 4px 4px', borderRadius: 10, minWidth: 0 };
-const identityMenu = { position: 'absolute', top: 'calc(100% + 6px)', left: 0, minWidth: 220, zIndex: 71, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, boxShadow: '0 12px 36px -8px rgba(0,0,0,0.28)', padding: 6, display: 'flex', flexDirection: 'column', gap: 2 };
+const identityMenu = { position: 'absolute', top: 'calc(100% + 6px)', left: 0, minWidth: 220, zIndex: 71, background: 'var(--glass-bg)', backdropFilter: 'blur(var(--glass-blur)) saturate(180%)', WebkitBackdropFilter: 'blur(var(--glass-blur)) saturate(180%)', border: '1px solid var(--glass-border)', borderRadius: 14, boxShadow: 'var(--glass-shadow), inset 0 1px 0 var(--glass-hi)', padding: 6, display: 'flex', flexDirection: 'column', gap: 2 };
 const identityItem = { display: 'flex', alignItems: 'center', gap: 10, width: '100%', border: 'none', cursor: 'pointer', padding: '8px 10px', borderRadius: 9, color: 'var(--text)' };
 const menuCap = { fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)', padding: '6px 10px 4px' };
 const navLink = { fontSize: 13, fontWeight: 600, color: 'var(--brand)', textDecoration: 'none' };

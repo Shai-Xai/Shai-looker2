@@ -32,6 +32,13 @@
   --skel-hi: rgba(128,128,128,0.24);
   --row-stripe: #fafafa;
   --ai: #6d28d9; --ai-bg: rgba(246,241,255,0.92); --ai-border: #eadfff;
+  /* Liquid Glass — translucent chrome/overlays. Surfaces tint to what's behind
+     them (blur + saturate) with a bright top edge (specular highlight). */
+  --glass-bg: rgba(255, 255, 255, 0.55);
+  --glass-blur: 22px;
+  --glass-border: rgba(255, 255, 255, 0.55);
+  --glass-hi: rgba(255, 255, 255, 0.9);
+  --glass-shadow: 0 10px 34px -10px rgba(0, 0, 0, 0.22);
   /* Motion — one shared language for the whole app */
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);      /* decisive, settles softly */
   --ease-spring: cubic-bezier(0.34, 1.30, 0.64, 1); /* slight overshoot */
@@ -64,6 +71,10 @@
   --skel-hi: rgba(255,255,255,0.14);
   --row-stripe: #202027;
   --ai: #c4b5fd; --ai-bg: rgba(124,58,237,0.20); --ai-border: rgba(124,58,237,0.45);
+  --glass-bg: rgba(28, 28, 34, 0.55);
+  --glass-border: rgba(255, 255, 255, 0.12);
+  --glass-hi: rgba(255, 255, 255, 0.16);
+  --glass-shadow: 0 12px 40px -10px rgba(0, 0, 0, 0.6);
   color-scheme: dark;
 }
 html { transition: background .3s ease; }
@@ -264,12 +275,31 @@ input::placeholder, textarea::placeholder { color: #b0b0b6; }
 }
 @media (prefers-reduced-motion: reduce) { .subtab-underline { transition: none; } }
 
+/* ─── Liquid Glass ───────────────────────────────────────────────────────────
+   Reusable translucent surface for chrome + overlays (menus, modals, toasts,
+   sidebars). Tints to what's behind it, with a bright top edge highlight. */
+.glass {
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-hi);
+}
+/* App header / top chrome — frosted glass with a specular top edge. */
+.app-chrome {
+  background: var(--frost) !important;
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  box-shadow: inset 0 1px 0 var(--glass-hi);
+}
+
 /* Client sidebar — frosted, Apple-like */
 .howler-sidebar {
   background: var(--frost);
-  backdrop-filter: saturate(180%) blur(20px);
-  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(var(--glass-blur));
+  -webkit-backdrop-filter: saturate(180%) blur(var(--glass-blur));
   border-right: 1px solid var(--hairline);
+  box-shadow: inset 1px 0 0 var(--glass-hi);
 }
 .nav-row { transition: background .15s ease, color .15s ease; position: relative; z-index: 1; }
 .nav-row:hover { background: rgba(128,128,128,0.10); }

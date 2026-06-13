@@ -69,7 +69,7 @@ export default function InboxNotifier({ entityId }) {
   );
 }
 
-const nudgeBar = { position: 'fixed', top: 64, left: '50%', transform: 'translateX(-50%)', zIndex: 60, display: 'flex', alignItems: 'center', gap: 10, width: 'min(94vw, 560px)', padding: '9px 14px', borderRadius: 12, background: 'var(--card)', border: '1px solid var(--hairline)', boxShadow: '0 8px 30px rgba(0,0,0,0.18)', fontSize: 13, color: 'var(--text)' };
+const nudgeBar = { position: 'fixed', top: 64, left: '50%', transform: 'translateX(-50%)', zIndex: 60, display: 'flex', alignItems: 'center', gap: 10, width: 'min(94vw, 560px)', padding: '9px 14px', borderRadius: 14, background: 'var(--glass-bg)', backdropFilter: 'blur(var(--glass-blur)) saturate(180%)', WebkitBackdropFilter: 'blur(var(--glass-blur)) saturate(180%)', border: '1px solid var(--glass-border)', boxShadow: 'var(--glass-shadow), inset 0 1px 0 var(--glass-hi)', fontSize: 13, color: 'var(--text)' };
 const nudgeBtn = { flexShrink: 0, border: 'none', background: 'var(--brand)', color: '#fff', borderRadius: 980, padding: '6px 14px', fontWeight: 700, fontSize: 12.5, cursor: 'pointer' };
 const nudgeX = { flexShrink: 0, border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 16 };
 const toastStyle = { position: 'fixed', left: '50%', bottom: 'calc(20px + env(safe-area-inset-bottom))', transform: 'translateX(-50%)', zIndex: 60, display: 'flex', alignItems: 'center', gap: 8, maxWidth: 'min(92vw, 420px)', border: 'none', textAlign: 'left', padding: '11px 16px', borderRadius: 12, background: 'var(--text)', color: 'var(--bg)', fontSize: 13.5, fontWeight: 600, boxShadow: '0 8px 30px rgba(0,0,0,0.28)' };

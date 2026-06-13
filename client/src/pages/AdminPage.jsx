@@ -161,7 +161,7 @@ export default function AdminPage() {
         <Link to="/dashboards" style={dashAdminBtn}>📊 Dashboard admin</Link>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '188px minmax(0,1fr)', gap: 28, alignItems: 'start' }}>
-        <nav style={{ position: 'sticky', top: 12, display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <nav className="glass" style={{ position: 'sticky', top: 12, display: 'flex', flexDirection: 'column', gap: 2, padding: 8, borderRadius: 14 }}>
           {ADMIN_NAV.map(([key, label, icon]) => (
             <button key={key} onClick={() => setTab(key)} style={{
               display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', cursor: 'pointer',
