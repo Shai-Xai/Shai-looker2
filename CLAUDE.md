@@ -5,6 +5,15 @@ current.
 
 ## Product principles
 
+### Mobile-first (always)
+Clients live on their phones. **Every UI must be designed and built mobile-first**
+— it has to look and work great on a phone before we worry about desktop. In
+practice: single-column layouts that stack on small screens (don't ship side-by-side
+grids that squish); tap targets ≥ 40px; no fixed widths that overflow; test the
+narrow viewport first. Use the existing `useIsMobile()` hook to collapse
+multi-column editors/previews into a stack on mobile. The app is an installable
+PWA — treat the phone as the primary surface, not an afterthought.
+
 ### Self-service first (dual-surface rule)
 **Every client-facing feature must ship with BOTH:**
 1. **Back-end / admin management** — Howler staff can configure it on a client's

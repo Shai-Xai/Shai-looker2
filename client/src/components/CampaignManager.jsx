@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { api } from '../lib/api.js';
+import { useIsMobile } from '../lib/useIsMobile.js';
 
 // Action Engine v1 — email campaigns (e.g. abandoned cart). The lifecycle IS
 // the product: draft (AI-written, editable) → preview audience + email →
@@ -79,7 +80,7 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
           No campaigns yet. Try one: target customers who abandoned checkout and bring them back.
         </div>
       ) : data.actions.map((a) => (
-        <div key={a.id} style={{ ...card, display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div key={a.id} style={{ ...card, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
               <span style={{ fontWeight: 700, fontSize: 14 }}>{a.title || a.config.subject || 'Untitled campaign'}</span>
@@ -170,6 +171,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
   // Uploaded unique codes (textarea). Existing pool stats come from the action.
   const [promoCodesText, setPromoCodesText] = useState('');
   const poolStats = action?.promoCodes || null;
+  const isMobile = useIsMobile();
   const [events, setEvents] = useState([]);
   useEffect(() => { api.listCampaignEvents(entityId).then((r) => setEvents(r.events || [])).catch(() => {}); }, [entityId]);
   const [tiles, setTiles] = useState(null);
@@ -323,7 +325,8 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
   return (
     <div>
       <button style={{ ...mini, marginBottom: 12 }} onClick={onClose}>← Back to campaigns</button>
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 20, alignItems: 'start' }}>
+      {/* Mobile-first: controls + preview stack into one column on phones. */}
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0,1fr) minmax(0,1fr)', gap: 20, alignItems: 'start' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <Field label="Campaign name"><input style={input} value={f.title} onChange={(e) => set('title', e.target.value)} placeholder="e.g. Abandoned cart — Pretoria show" /></Field>
 
