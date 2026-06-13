@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
+import { useIsMobile } from '../lib/useIsMobile.js';
 import IntegrationsForm from '../components/IntegrationsForm.jsx';
 import MailTemplateEditor from '../components/MailTemplateEditor.jsx';
 import MailLogView from '../components/MailLogView.jsx';
@@ -103,27 +104,25 @@ function IconPicker({ value, onChange }) {
 //   Templates           – reusable groups of dashboards
 //   Dashboard Sets      – a template applied to an entity, with event/other locks
 //   Logins (Users)      – credentials, assigned to one or more entities
+const ADMIN_NAV = [
+  ['entities', 'Clients', '👥'],
+  ['sets', 'Sets', '🗂️'],
+  ['library', 'Tile library', '🧩'],
+  ['ai', 'AI', '🤖'],
+  ['settlements', 'Settlements', '💰'],
+  ['integrations', 'Integrations', '🔌'],
+  ['email', 'Email', '✉️'],
+  ['backup', 'Backup', '💾'],
+];
+
 export default function AdminPage() {
   const [tab, setTab] = useState('entities');
   const [fields, setFields] = useState([]);
+  const isMobile = useIsMobile();
   useEffect(() => { api.adminFilterFields().then(setFields).catch(() => setFields([])); }, []);
 
-  return (
-    <main style={{ flex: 1, padding: '28px 24px', maxWidth: 1040, margin: '0 auto', width: '100%' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20 }}>
-        <Link to="/" style={{ color: 'var(--muted)', fontSize: 13, textDecoration: 'none' }}>← Back</Link>
-        <h1 style={{ fontSize: 20, fontWeight: 700 }}>Admin</h1>
-      </div>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
-        <Tab active={tab === 'entities'} onClick={() => setTab('entities')}>Clients</Tab>
-        <Tab active={tab === 'sets'} onClick={() => setTab('sets')}>Sets</Tab>
-        <Tab active={tab === 'library'} onClick={() => setTab('library')}>Tile library</Tab>
-        <Tab active={tab === 'ai'} onClick={() => setTab('ai')}>AI</Tab>
-        <Tab active={tab === 'settlements'} onClick={() => setTab('settlements')}>Settlements</Tab>
-        <Tab active={tab === 'integrations'} onClick={() => setTab('integrations')}>Integrations</Tab>
-        <Tab active={tab === 'email'} onClick={() => setTab('email')}>Email</Tab>
-        <Tab active={tab === 'backup'} onClick={() => setTab('backup')}>Backup</Tab>
-      </div>
+  const content = (
+    <>
       {tab === 'entities' && <Entities fields={fields} />}
       {tab === 'sets' && <Sets />}
       {tab === 'library' && <Library />}
@@ -132,6 +131,48 @@ export default function AdminPage() {
       {tab === 'integrations' && <AdminIntegrations />}
       {tab === 'email' && <MailLog />}
       {tab === 'backup' && <BackupRestore />}
+    </>
+  );
+
+  // Mobile-first: a horizontal tab row on phones; a left nav rail on desktop.
+  if (isMobile) {
+    return (
+      <main style={{ flex: 1, padding: '20px 16px', width: '100%' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 16 }}>
+          <Link to="/" style={{ color: 'var(--muted)', fontSize: 13, textDecoration: 'none' }}>← Back</Link>
+          <h1 style={{ fontSize: 20, fontWeight: 700 }}>Admin</h1>
+        </div>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 18, overflowX: 'auto', paddingBottom: 4 }}>
+          {ADMIN_NAV.map(([key, label]) => <Tab key={key} active={tab === key} onClick={() => setTab(key)}>{label}</Tab>)}
+        </div>
+        {content}
+      </main>
+    );
+  }
+
+  return (
+    <main style={{ flex: 1, padding: '28px 24px', maxWidth: 1240, margin: '0 auto', width: '100%' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20 }}>
+        <Link to="/" style={{ color: 'var(--muted)', fontSize: 13, textDecoration: 'none' }}>← Back</Link>
+        <h1 style={{ fontSize: 20, fontWeight: 700 }}>Admin</h1>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '188px minmax(0,1fr)', gap: 28, alignItems: 'start' }}>
+        <nav style={{ position: 'sticky', top: 12, display: 'flex', flexDirection: 'column', gap: 2 }}>
+          {ADMIN_NAV.map(([key, label, icon]) => (
+            <button key={key} onClick={() => setTab(key)} style={{
+              display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', cursor: 'pointer',
+              padding: '9px 12px', borderRadius: 9, border: 'none', fontSize: 13.5,
+              fontWeight: tab === key ? 700 : 500,
+              background: tab === key ? 'var(--brand)' : 'transparent',
+              color: tab === key ? '#fff' : 'var(--text)',
+            }}>
+              <span style={{ fontSize: 15, width: 18, textAlign: 'center', opacity: tab === key ? 1 : 0.8 }}>{icon}</span>
+              {label}
+            </button>
+          ))}
+        </nav>
+        <div style={{ minWidth: 0 }}>{content}</div>
+      </div>
     </main>
   );
 }
