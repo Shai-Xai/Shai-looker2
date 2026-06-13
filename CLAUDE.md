@@ -3,6 +3,16 @@
 Guidance for anyone (human or AI) building on this codebase. Keep it short and
 current.
 
+## What Pulse is (read first)
+Pulse is the **Experience OS** for Howler's clients and internal teams — a
+data-driven system that turns data into **insight → action → results** and makes
+the work more efficient. Today it spans dashboards, AI insights, a messaging
+inbox, digests, settlements/documents and an email/SMS campaign engine; it keeps
+evolving toward that vision. Orient with `PROJECT_OVERVIEW.md` (stack + current
+state) and **`docs/EXPERIENCE_OS_BRIEF.md`** (the North Star: Playbook · Spine ·
+Owl, ingestion, build order, data model). Judge new work by whether it advances
+the insight → action → results → efficiency loop.
+
 ## Product principles
 
 ### Mobile-first (always)

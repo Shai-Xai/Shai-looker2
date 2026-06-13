@@ -104,3 +104,17 @@ Everything keys off `suite_id` (the event) — same spine as briefing phases, se
 - **Extraction over-reach** → suggestions only, human confirms, always cite source.
 - **WhatsApp ToS** → no unofficial bridges on client-facing numbers, ever.
 - **Privacy** → visible Owl, consent toggle, retention policy before first ingest.
+
+---
+
+## How this maps to what's already built (June 2026)
+This brief is the **direction**; parts of the Spine and Owl already exist in code and should be extended, not rebuilt:
+
+- **The Spine** — `server/os.js` ("Experience OS spine") already implements threads, messages, read/ack **receipts**, attachments, priorities (`fyi | needs_reply | must_ack`), the must-acknowledge login banner, and a programmatic `announce()`. The client inbox (`client/src/os/InboxPage.jsx`) has unread, delete / mark-unread, swipe actions, live refresh, push + email notifications, and an app-wide `InboxNotifier` (toast + push nudge).
+- **Email ingestion** — an inbound "CC the Owl" path exists (`OwlAddressCard`, inbound-email config in `os.js` / `index.js`); currently collect-oriented.
+- **Outbound nudges** — `mailer.js` (Resend) + `messaging.js` (Clickatell SMS) are the send chokepoints; the campaign / approval engine (`actions.js`) already drives notify flows (inbox + push + email).
+- **The Owl voice** — briefings / digests (`scheduler.js`, `DigestManager`) and AI insights (`insights.js`, Claude) are the seeds of Narrate / Extract / Recall.
+- **Event spine** — `suite_id` (the event) is already the anchor for briefing phases, settlements and documents — exactly the key this brief builds on.
+
+**Not yet built (the net-new from this brief):** the **Playbook** (`playbooks`, `playbook_tasks`) and **event tasks** (`event_tasks`) — tasks-as-threads with due dates, owners, data-signal verification and blocking — plus the Owl **extraction** layer (`extractions`: suggest → confirm) and grounded **recall**.
+

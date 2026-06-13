@@ -27,6 +27,14 @@ keep growing toward that vision. New capabilities should be judged by whether
 they advance the insight → action → results → efficiency loop for clients and
 internal teams alike.
 
+> **The North Star is `docs/EXPERIENCE_OS_BRIEF.md`** — the working brief for the
+> Experience OS: the **Playbook** (reusable task knowledge), the **Spine**
+> (unified tasks + messages anchored to an event), the **Owl** (narrate /
+> extract / recall over an ingested corpus of every event conversation), the
+> "CC the Owl" ingestion strategy, build order, and data model. Read it for
+> intent before extending Pulse. Companion docs: `docs/TEAM_OVERVIEW.md`,
+> `docs/INBOUND_SETUP.md`, `docs/playbook-capture-template.csv`.
+
 ---
 
 ## What it is today
