@@ -449,7 +449,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
       {/* Mobile-first: controls + preview stack into one column on phones. */}
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0,1fr) minmax(0,1fr)', gap: 20, alignItems: 'start' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <Accordion title="Setup" defaultOpen>
+          <Accordion title="Setup">
           <Field label="Campaign name"><input style={input} value={f.title} onChange={(e) => set('title', e.target.value)} placeholder="e.g. Abandoned cart — Pretoria show" /></Field>
 
           <Field label="Master campaign (optional · groups & reports segments together)">
@@ -472,7 +472,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
           </Field>
           </Accordion>
 
-          <Accordion title="Channel & campaign type" defaultOpen>
+          <Accordion title="Channel & campaign type">
           <Field label="Channel">
             <div style={{ display: 'flex', gap: 8 }}>
               <Toggle on={f.channel !== 'sms'} onClick={() => set('channel', 'email')}>✉️ Email</Toggle>
@@ -492,7 +492,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
           </Field>
           </Accordion>
 
-          <Accordion title="Audience & targeting" defaultOpen>
+          <Accordion title="Audience & targeting">
           <Field label="Audience">
             {f.audienceMode === 'snapshot' ? (
               <div style={{ fontSize: 13, background: 'rgba(124,58,237,0.07)', border: '1px solid rgba(124,58,237,0.25)', borderRadius: 8, padding: '9px 12px' }}>
@@ -579,7 +579,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
           </Field>
           </Accordion>
 
-          <Accordion title="Content & offer" defaultOpen>
+          <Accordion title="Content & offer">
           {isSequence && (
             <Field label="Emails in the sequence">
               <SequenceSteps steps={f.steps} setStep={setStep} addStep={addStep} removeStep={removeStep} />
@@ -637,7 +637,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
           </Accordion>
 
           {!isSequence && f.audienceMode === 'tile' && (
-            <Accordion title="Automation" defaultOpen>
+            <Accordion title="Automation">
             <Field label="Automation">
               <div style={{ display: 'flex', gap: 8 }}>
                 <Toggle on={!f.recurring} onClick={() => set('recurring', false)}>One-off send</Toggle>
@@ -650,7 +650,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
             </Accordion>
           )}
 
-          <Accordion title="Tracking (UTM)" defaultOpen>
+          <Accordion title="Tracking (UTM)">
           <Field label="UTM tracking (appended to the link on every click)">
             <button type="button" style={{ ...mini, marginBottom: 8 }} onClick={autoUtm}>✨ Auto-fill</button>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
@@ -668,7 +668,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
           </Field>
           </Accordion>
 
-          <Accordion title={`Approval${requireApproval ? ' (required for this client)' : ''}`} defaultOpen>
+          <Accordion title={`Approval${requireApproval ? ' (required for this client)' : ''}`}>
             <div style={hintS}>Pick who must sign off before this sends. Each approver gets an inbox message + notification with a link to approve. {requireApproval ? 'This client requires approval, so a campaign can only send once everyone approves.' : 'Optional — leave empty to send directly, or add approvers to route it.'}</div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
               {[...approverCandidates.map((c) => ({ type: 'user', userId: c.userId, email: c.email, name: c.email })), { type: 'howler', name: 'Howler' }].map((c) => {
