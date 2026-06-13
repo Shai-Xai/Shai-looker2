@@ -281,7 +281,8 @@ function mount(app, { db, auth, mailer, push }) {
         .map((r) => { const u = db.getUser(r.user_id); return u && u.role !== 'admin' ? { email: u.email, kind: r.kind, at: r.at } : null; })
         .filter(Boolean);
     }
-    res.json({ thread: { ...t, entityName: db.getEntity(t.entityId)?.name || '' }, messages: messages(t.id), state: threadState(t.id, req.user.id), clientReceipts });
+    const ent = db.getEntity(t.entityId);
+    res.json({ thread: { ...t, entityName: ent?.name || '', entityLogo: ent?.logo || '' }, messages: messages(t.id), state: threadState(t.id, req.user.id), clientReceipts });
   });
 
   // Reply / post a message into a thread (optionally with attachments). Uses

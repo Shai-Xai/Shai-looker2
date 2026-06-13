@@ -170,9 +170,14 @@ function ThreadView({ id, isAdmin, isMobile, onBack, onChange, listCollapsed, on
           const partyBg = isHowler ? 'var(--brand-2)' : 'var(--brand)'; // Howler = orange, client = pink
           const initial = isHowler ? 'H' : (m.authorEmail || '?').trim().charAt(0).toUpperCase();
           const shortName = mine ? 'You' : isHowler ? 'Howler' : (m.authorEmail || 'Someone').split('@')[0];
+          // Avatar: Howler → the Pulse logo; client → their entity logo if set,
+          // otherwise a coloured initial.
+          const logo = isHowler ? '/logo.png' : (data.thread.entityLogo || '');
           return (
             <div key={m.id} style={{ display: 'flex', flexDirection: mine ? 'row-reverse' : 'row', alignItems: 'flex-end', gap: 8 }}>
-              <div title={isHowler ? 'Howler' : m.authorEmail} style={{ width: 28, height: 28, borderRadius: '50%', flexShrink: 0, background: partyBg, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 800 }}>{initial}</div>
+              <div title={isHowler ? 'Howler' : m.authorEmail} style={{ width: 28, height: 28, borderRadius: '50%', flexShrink: 0, overflow: 'hidden', background: logo ? 'var(--card)' : partyBg, border: logo ? '1px solid var(--hairline)' : 'none', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 800 }}>
+                {logo ? <img src={logo} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.parentNode.style.background = partyBg; e.currentTarget.parentNode.textContent = initial; }} /> : initial}
+              </div>
               <div style={{ maxWidth: '74%', minWidth: 0 }}>
                 <div style={{ fontSize: 10.5, color: 'var(--muted)', marginBottom: 3, textAlign: mine ? 'right' : 'left' }}>{shortName}{m.channel !== 'pulse' ? ` · ${m.channel}` : ''} · {shortDate(m.createdAt)}</div>
                 <div style={{ background: mine ? 'var(--brand)' : 'var(--elevated)', color: mine ? '#fff' : 'var(--text)', border: mine ? '1px solid var(--brand)' : '1px solid var(--hairline)', borderLeft: mine ? undefined : `3px solid ${partyBg}`, borderRadius: mine ? '16px 16px 4px 16px' : '16px 16px 16px 4px', padding: '9px 13px', fontSize: 13.5, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{renderBody(m.body, mine)}</div>
