@@ -772,25 +772,36 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
 
   // ── Approval workflow ──
   // Notify the named approvers (inbox message + push, deep-link to the campaign).
+  // The Howler admins who "own" a client = those linked to it (entityIds). They
+  // get the 'Howler' approval pings — not every global admin. If somehow none
+  // are linked, fall back to all admins so an approval is never a dead-end.
+  function howlerAdminsFor(entityId) {
+    const admins = db.listUsers().filter((u) => u.role === 'admin');
+    const linked = admins.filter((u) => (u.entityIds || []).includes(entityId));
+    return linked.length ? linked : admins;
+  }
   function notifyApprovers(a) {
     const url = `/actions?action=${a.id}`;
     const title = 'Campaign approval needed';
     const name = a.title || a.config.subject || 'A campaign';
     const body = `“${name}” is waiting for your approval.`;
+    const wantsHowler = (a.config.approvers || []).some((x) => x.type === 'howler');
+    const howler = wantsHowler ? howlerAdminsFor(a.entityId) : [];
     try { os?.announce?.({ entityId: a.entityId, title, body, priority: 'needs_reply', createdBy: 'campaigns@pulse', authorType: 'system' }); } catch { /* os optional */ }
     if (push?.isEnabled?.()) {
       for (const ap of a.config.approvers || []) {
         if (ap.type === 'user' && ap.userId) push.sendToUser(ap.userId, { title, body, url, tag: `approve-${a.id}`, requireInteraction: true }).catch(() => {});
       }
-      if ((a.config.approvers || []).some((x) => x.type === 'howler')) push.sendToEntity(a.entityId, { title, body, url, tag: `approve-${a.id}` }).catch(() => {});
+      for (const u of howler) push.sendToUser(u.id, { title, body, url, tag: `approve-${a.id}`, requireInteraction: true }).catch(() => {});
     }
-    // Email each approver too — a named person's address, or every Howler admin.
+    // Email each approver too — a named person's address, or the Howler admins
+    // linked to this client.
     if (mailer?.isConfigured?.()) {
       const emails = new Set();
       for (const ap of a.config.approvers || []) {
-        if (ap.type === 'howler') db.listUsers().filter((u) => u.role === 'admin').forEach((u) => emails.add(u.email));
-        else if (ap.email) emails.add(ap.email);
+        if (ap.type !== 'howler' && ap.email) emails.add(ap.email);
       }
+      for (const u of howler) emails.add(u.email);
       if (emails.size) {
         const html = mailer.notificationEmail({
           title, body: `${body}<br><br>Review the campaign and approve or send it back to draft.`,
