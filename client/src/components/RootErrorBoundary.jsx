@@ -26,7 +26,9 @@ export default class RootErrorBoundary extends Component {
       return (
         <div style={{ minHeight: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', background: 'var(--bg, #f5f6f8)' }}>
           <div style={{ maxWidth: 420, textAlign: 'center' }}>
-            <div style={{ width: 52, height: 52, borderRadius: 14, margin: '0 auto 18px', background: 'linear-gradient(135deg, #FF385C 0%, #FF6B35 45%, #7C3AED 100%)' }} />
+            <div style={{ width: 52, height: 52, borderRadius: 14, margin: '0 auto 18px', overflow: 'hidden', background: 'linear-gradient(135deg, #FF385C 0%, #FF6B35 45%, #7C3AED 100%)' }}>
+              <img src="/logo.png" alt="Howler : Pulse" onError={(e) => { e.currentTarget.style.display = 'none'; }} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+            </div>
             <h1 style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Something went wrong</h1>
             <p style={{ fontSize: 14, color: '#86868b', lineHeight: 1.5, marginBottom: 18 }}>
               The app hit an error while loading. Reloading usually fixes it.
