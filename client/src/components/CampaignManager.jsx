@@ -197,7 +197,7 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
   );
 }
 
-function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTemplate = null, initialMaster = '', masterNames = [], onClose, onSaved }) {
+function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTemplate = null, initialMaster = '', masterNames = [], requireApproval = false, approverCandidates = [], onClose, onSaved }) {
   const cfg = action?.config || {};
   const tpl = initialTemplate;           // a resolved template (recipe), when creating from one
   const tp = tpl?.preset || {};          // the template's copy/utm presets
