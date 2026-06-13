@@ -50,6 +50,7 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
   if (editing) {
     return <CampaignEditor entityId={entityId} isAdmin={isAdmin} action={editing === 'new' ? null : editing} initialGoal={editing === 'new' ? initialGoal : ''}
       initialTemplate={editing === 'new' ? tpl : null} initialMaster={editing === 'new' ? presetMaster : ''} masterNames={masterNames}
+      requireApproval={!!data.requireApproval} approverCandidates={data.approverCandidates || []}
       onClose={() => { setEditing(null); setTpl(null); setPresetMaster(''); }} onSaved={() => { setEditing(null); setTpl(null); setPresetMaster(''); load(); loadMasters(); }} />;
   }
   if (reporting) {
@@ -102,12 +103,19 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
             {(a.results.converted ?? 0) > 0 && <span style={{ color: 'var(--success,#10b981)' }}>✓ {a.results.converted} converted</span>}
           </div>
         )}
+        {a.status === 'pending' && a.approval && (
+          <div style={{ fontSize: 12, color: '#b45309', marginTop: 4 }}>
+            {a.approval.approvers.filter((x) => x.approved).length}/{a.approval.approvers.length} approved · waiting on {a.approval.approvers.filter((x) => !x.approved).map((x) => x.label).join(', ') || '—'}
+          </div>
+        )}
         {a.results?.lastError && a.status !== 'done' && <div style={{ fontSize: 11, color: 'var(--error,#ef4444)', marginTop: 3 }}>{a.results.lastError}</div>}
       </div>
       <div style={{ display: 'flex', gap: 6, flexShrink: 0, flexWrap: 'wrap' }}>
         {a.config?.campaignMode === 'sequence' && a.status === 'auto' && <button style={mini} onClick={() => setJourney(a)}>🪜 Journey</button>}
         {(a.status === 'done' || a.status === 'running' || a.status === 'failed') && <button style={mini} onClick={() => setReporting(a)}>📊 Report</button>}
-        {(a.status === 'draft' || a.status === 'auto') && <button style={mini} onClick={() => setEditing(a)}>{a.createdBy === 'automation' ? 'Review & approve' : 'Edit'}</button>}
+        {a.status === 'pending' && <button style={{ ...mini, background: '#15803d', color: '#fff', border: 'none' }} onClick={() => api.approveAction(entityId, a.id).then((r) => { if (r.pending) alert(`Recorded. ${r.remaining} more approval(s) needed.`); load(); }).catch((e) => alert(e.message))}>✓ Approve</button>}
+        {a.status === 'pending' && <button style={mini} onClick={() => { const note = prompt('Send back to draft — reason (optional):'); if (note !== null) api.rejectAction(entityId, a.id, note).then(load).catch((e) => alert(e.message)); }}>Reject</button>}
+        {(a.status === 'draft' || a.status === 'auto' || a.status === 'pending') && <button style={mini} onClick={() => setEditing(a)}>{a.createdBy === 'automation' ? 'Review & approve' : 'Edit'}</button>}
         {a.status === 'auto' && <button style={mini} onClick={() => api.pauseAction(entityId, a.id).then(load)}>⏸ Pause</button>}
         {a.status !== 'running' && <button style={{ ...mini, color: 'var(--error,#ef4444)' }} onClick={() => { if (confirm('Delete this campaign?')) api.deleteAction(entityId, a.id).then(load); }}>Delete</button>}
       </div>
@@ -130,8 +138,14 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 12, flexWrap: 'wrap' }}>
-        <p style={{ fontSize: 13, color: 'var(--muted)', margin: 0 }}>Data-driven email campaigns — e.g. nudge abandoned-cart customers. Nothing sends without an explicit approval.</p>
-        <button style={outline} onClick={startBlank}>+ Blank campaign</button>
+        <p style={{ fontSize: 13, color: 'var(--muted)', margin: 0 }}>Data-driven campaigns — e.g. nudge abandoned-cart customers. Nothing sends without an explicit approval.</p>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: 'var(--muted)', cursor: 'pointer' }} title="When on, campaigns must be approved before they send">
+            <input type="checkbox" checked={!!data.requireApproval} onChange={async (e) => { try { await api.setApprovalSetting(entityId, e.target.checked); load(); } catch { alert('Only an account owner can change this.'); } }} />
+            Require approval
+          </label>
+          <button style={outline} onClick={startBlank}>+ Blank campaign</button>
+        </div>
       </div>
       {/* Start from a template (recipe). Grouped by category. The audience is
           pre-resolved from this client's data; they just finalize. */}
@@ -218,6 +232,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
     templateKey: cfg.templateKey || tpl?.key || '',
     category: cfg.category || tpl?.category || '',
     master: cfg.master || initialMaster || '', // master-campaign group name (links segments)
+    approvers: cfg.approvers || [], // required sign-off [{type,userId,email,name}]
     // Delivery: once-off (single send) or a full automated sequence (drip).
     campaignMode: cfg.campaignMode || 'once',
     anchorField: cfg.audience?.anchorField || '',
@@ -262,7 +277,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
     ctaText: f.campaignMode === 'sequence' ? (f.steps[0]?.ctaText || '') : f.ctaText,
     ctaUrl: f.ctaUrl, utm: f.utm, recurring: f.recurring,
     eventSuiteId: f.eventSuiteId, contentMode: f.contentMode, heroImage: f.heroImage, customHtml: f.customHtml,
-    templateKey: f.templateKey, category: f.category, master: f.master,
+    templateKey: f.templateKey, category: f.category, master: f.master, approvers: f.approvers,
     channel: f.channel,
     campaignMode: f.campaignMode, steps: f.steps,
     promo: f.promo,
@@ -357,6 +372,23 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
       onSaved();
     } catch (e) { alert('Save failed: ' + e.message); }
     finally { setBusy(false); }
+  }
+
+  const toggleApprover = (cand) => setF((s) => {
+    const has = s.approvers.some((a) => (cand.type === 'howler' ? a.type === 'howler' : a.userId === cand.userId));
+    return { ...s, approvers: has ? s.approvers.filter((a) => (cand.type === 'howler' ? a.type !== 'howler' : a.userId !== cand.userId)) : [...s.approvers, cand] };
+  });
+  async function submitForApproval() {
+    if (!f.approvers.length) { alert('Pick at least one approver.'); return; }
+    setApproveState('working');
+    try {
+      let id = action?.id;
+      if (id) await api.updateAction(entityId, id, payload());
+      else { const r = await api.createAction(entityId, payload()); id = r.action.id; }
+      await api.submitAction(entityId, id, { approvers: f.approvers });
+      setApproveState('✓ Sent for approval');
+      setTimeout(onSaved, 900);
+    } catch (e) { setApproveState(`✗ ${e.message}`); }
   }
 
   async function approve() {
@@ -636,6 +668,22 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
           </Field>
           </Accordion>
 
+          <Accordion title={`Approval${requireApproval ? ' (required for this client)' : ''}`} defaultOpen={requireApproval}>
+            <div style={hintS}>Pick who must sign off before this sends. Each approver gets an inbox message + notification with a link to approve. {requireApproval ? 'This client requires approval, so a campaign can only send once everyone approves.' : 'Optional — leave empty to send directly, or add approvers to route it.'}</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+              {[...approverCandidates.map((c) => ({ type: 'user', userId: c.userId, email: c.email, name: c.email })), { type: 'howler', name: 'Howler' }].map((c) => {
+                const on = f.approvers.some((a) => (c.type === 'howler' ? a.type === 'howler' : a.userId === c.userId));
+                return (
+                  <button key={c.userId || 'howler'} type="button" onClick={() => toggleApprover(c)}
+                    style={{ fontSize: 12, fontWeight: on ? 700 : 500, padding: '4px 10px', borderRadius: 980, cursor: 'pointer', border: `1px solid ${on ? 'var(--brand)' : 'var(--hairline)'}`, color: on ? 'var(--brand)' : 'var(--text)', background: on ? 'rgba(var(--brand-rgb,255,56,92),0.08)' : 'transparent' }}>
+                    {on ? '✓ ' : ''}{c.type === 'howler' ? '🦉 Howler' : c.email}
+                  </button>
+                );
+              })}
+              {approverCandidates.length === 0 && <span style={{ fontSize: 12, color: 'var(--muted)' }}>No client approvers yet — you can still require Howler.</span>}
+            </div>
+          </Accordion>
+
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 4, flexWrap: 'wrap' }}>
             <button style={mini} onClick={saveDraft} disabled={busy}>{busy ? 'Saving…' : 'Save draft'}</button>
             <button
@@ -647,8 +695,13 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
                 try { const r = await api.actionTestSend(entityId, { ...payload(), testPhone }); setTestState(`✓ Test sent to ${r.to}`); } catch (e) { setTestState(`✗ ${e.message}`); }
               }}
             >{testState === 'sending' ? 'Sending…' : 'Send test to me'}</button>
-            <button style={{ ...primary, background: '#15803d' }} onClick={approve} disabled={approveState === 'working' || (!f.recurring && !isSequence && !aud?.count)}>
-              {approveState === 'working' ? 'Approving…' : isSequence ? '⚡ Activate sequence' : f.recurring ? '⚙ Activate automation' : `Approve & send${aud?.count ? ` to ${aud.count}` : ''}`}
+            {!requireApproval && (
+              <button style={{ ...primary, background: '#15803d' }} onClick={approve} disabled={approveState === 'working' || (!f.recurring && !isSequence && !aud?.count)}>
+                {approveState === 'working' ? 'Approving…' : isSequence ? '⚡ Activate sequence' : f.recurring ? '⚙ Activate automation' : `Approve & send${aud?.count ? ` to ${aud.count}` : ''}`}
+              </button>
+            )}
+            <button style={{ ...primary, background: requireApproval ? '#15803d' : 'var(--brand)' }} onClick={submitForApproval} disabled={approveState === 'working' || !f.approvers.length}>
+              📩 Send for approval
             </button>
             {(testState && testState !== 'sending') && <span style={{ fontSize: 12, color: testState.startsWith('✓') ? 'var(--success,#10b981)' : 'var(--error,#ef4444)' }}>{testState}</span>}
             {(approveState && approveState !== 'working') && <span style={{ fontSize: 12, color: approveState.startsWith('✓') ? 'var(--success,#10b981)' : 'var(--error,#ef4444)' }}>{approveState}</span>}
@@ -953,6 +1006,7 @@ function StatusChip({ status }) {
     auto: { bg: 'rgba(124,58,237,0.12)', c: '#7c3aed', t: '⚙ Automation' },
     running: { bg: 'rgba(10,132,255,0.13)', c: '#0a66c2', t: 'Sending…' },
     done: { bg: 'rgba(52,199,89,0.15)', c: '#2da44e', t: 'Sent' },
+    pending: { bg: 'rgba(245,158,11,0.16)', c: '#b45309', t: '⏳ Awaiting approval' },
     failed: { bg: 'rgba(239,68,68,0.12)', c: '#dc2626', t: 'Failed' },
   }[status] || { bg: 'rgba(128,128,128,0.14)', c: 'var(--muted)', t: status };
   return <span style={{ fontSize: 10.5, fontWeight: 700, borderRadius: 980, padding: '2px 9px', background: map.bg, color: map.c }}>{map.t}</span>;

@@ -559,7 +559,12 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
   app.get('/api/actions/:entityId', auth.requireAuth, auth.requirePermission('campaigns.view'), (req, res) => {
     if (!guard(req, res, req.params.entityId)) return;
     const rows = sql.prepare('SELECT * FROM actions WHERE entity_id=? ORDER BY created_at DESC LIMIT 100').all(req.params.entityId);
-    res.json({ actions: rows.map((r) => publicAction(rowToAction(r))), requireApproval: requireApprovalFor(req.params.entityId) });
+    // People who can be named as approvers: client members whose role grants
+    // campaigns.approve. (Plus a 'Howler' option offered client-side.)
+    const candidates = db.listUsers()
+      .filter((u) => u.role !== 'admin' && (u.entityIds || []).includes(req.params.entityId) && auth.hasPermission(u, req.params.entityId, 'campaigns.approve'))
+      .map((u) => ({ userId: u.id, email: u.email }));
+    res.json({ actions: rows.map((r) => publicAction(rowToAction(r))), requireApproval: requireApprovalFor(req.params.entityId), approverCandidates: candidates });
   });
   // Per-client "require approval" governance setting. (Before the :id routes so
   // 'approval-setting' isn't swallowed by :id.)
