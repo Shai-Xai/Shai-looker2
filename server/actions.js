@@ -668,8 +668,13 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
   // Email preview (sample recipient) + test-send to self.
   app.post('/api/actions/:entityId/preview-email', auth.requireAuth, auth.requirePermission('campaigns.approve'), (req, res) => {
     if (!guard(req, res, req.params.entityId)) return;
-    const fake = { id: 'preview', entityId: req.params.entityId, config: cleanConfig(req.body || {}) };
-    const { html } = renderFor(fake, { email: 'sam@example.com', name: 'Sam', ticket: 'General Admission' });
+    const cfg = cleanConfig(req.body || {});
+    const fake = { id: 'preview', entityId: req.params.entityId, config: cfg };
+    const recipient = { email: 'sam@example.com', name: 'Sam', ticket: 'General Admission', phone: '+27820000000' };
+    // The client sends the active step's copy in cfg.body, so render from that
+    // (step=null) — works for once-off and per-step sequence previews alike.
+    if (cfg.channel === 'sms') return res.json({ sms: renderSmsFor(fake, recipient, null) });
+    const { html } = renderFor(fake, recipient);
     res.json({ html });
   });
   app.post('/api/actions/:entityId/test-send', auth.requireAuth, auth.requirePermission('campaigns.approve'), async (req, res) => {

@@ -259,7 +259,8 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
   const [preview, setPreview] = useState('');
   const [previewAll, setPreviewAll] = useState(false); // sequence: render every step
   const [activeStep, setActiveStep] = useState(0); // sequence: which step the single preview shows
-  const [stepPreviews, setStepPreviews] = useState([]); // [{label, html}]
+  const [previewSms, setPreviewSms] = useState(''); // rendered SMS text (channel = sms)
+  const [stepPreviews, setStepPreviews] = useState([]); // [{label, html|sms}]
   const [drafting, setDrafting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [testState, setTestState] = useState('');
@@ -294,6 +295,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
   const addStep = (delayHours = 24) => setF((s) => ({ ...s, steps: [...s.steps, { delayHours, subject: '', body: '', ctaText: s.steps[0]?.ctaText || '' }] }));
   const removeStep = (i) => setF((s) => ({ ...s, steps: s.steps.filter((_, j) => j !== i) }));
   const isSequence = f.campaignMode === 'sequence';
+  const sms = f.channel === 'sms';
 
   const refreshAudience = () => {
     // Snapshot children (queued by an automation) carry their audience already.
@@ -311,7 +313,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
       const base = payload();
       const st = isSequence ? (f.steps[activeStep] || f.steps[0]) : null;
       const p = st ? { ...base, subject: st.subject, body: st.body, ctaText: st.ctaText } : base;
-      api.actionPreviewEmail(entityId, p).then((r) => setPreview(r.html)).catch(() => {});
+      api.actionPreviewEmail(entityId, p).then((r) => { setPreview(r.html || ''); setPreviewSms(r.sms || ''); }).catch(() => {});
     }, 350);
     return () => clearTimeout(debounce.current);
   }, [f.subject, f.body, f.ctaText, f.ctaUrl, f.contentMode, f.customHtml, f.heroImage, f.campaignMode, activeStep, JSON.stringify(f.steps), JSON.stringify(f.promo), f.anchorField]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -326,8 +328,8 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
       for (let i = 0; i < f.steps.length; i++) {
         const st = f.steps[i];
         const p = { ...base, subject: st.subject, body: st.body, ctaText: st.ctaText };
-        try { const r = await api.actionPreviewEmail(entityId, p); out.push({ label: `Step ${i + 1} · +${st.delayHours % 24 === 0 && st.delayHours >= 24 ? `${st.delayHours / 24}d` : `${st.delayHours}h`}`, html: r.html }); }
-        catch { out.push({ label: `Step ${i + 1}`, html: '' }); }
+        try { const r = await api.actionPreviewEmail(entityId, p); out.push({ label: `Step ${i + 1} · +${st.delayHours % 24 === 0 && st.delayHours >= 24 ? `${st.delayHours / 24}d` : `${st.delayHours}h`}`, html: r.html || '', sms: r.sms || '' }); }
+        catch { out.push({ label: `Step ${i + 1}`, html: '', sms: '' }); }
       }
       if (alive) setStepPreviews(out);
     })();
@@ -583,14 +585,26 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
           </Field>
           </Accordion>
 
-          <Accordion title="Content & offer">
+          <Accordion title={sms ? 'Message & offer' : 'Content & offer'}>
+          {/* Sequence steps — SMS steps are just delay + text. */}
           {isSequence && (
-            <Field label="Emails in the sequence">
-              <SequenceSteps steps={f.steps} setStep={setStep} addStep={addStep} removeStep={removeStep} activeStep={activeStep} onActive={setActiveStep} />
+            <Field label={sms ? 'Texts in the sequence' : 'Emails in the sequence'}>
+              <SequenceSteps steps={f.steps} setStep={setStep} addStep={addStep} removeStep={removeStep} activeStep={activeStep} onActive={setActiveStep} sms={sms} />
             </Field>
           )}
 
-          {!isSequence && (
+          {/* Once-off SMS — a single plain-text message. */}
+          {!isSequence && sms && (
+            <Field label="Message">
+              <button type="button" style={{ ...mini, marginBottom: 8 }} onClick={draft} disabled={drafting}>{drafting ? 'Writing…' : '✨ Draft copy with AI'}</button>
+              <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit' }} rows={5} value={f.body} onChange={(e) => set('body', e.target.value)} placeholder={'Hi {{name}}, your {{ticketType}} tickets are still waiting — grab them here:'} />
+              <SmsMeter body={f.body} />
+              <div style={hintS}>Plain text — no subject. Tokens <b>{'{{name}}'}</b>, <b>{'{{ticketType}}'}</b>, <b>{'{{promo}}'}</b> work. The tracked link and an opt-out link are added automatically (they add to the length).</div>
+            </Field>
+          )}
+
+          {/* Once-off email — built template or custom HTML. */}
+          {!isSequence && !sms && (
           <Field label="Content">
             <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
               <Toggle on={f.contentMode === 'template'} onClick={() => set('contentMode', 'template')}>Built template</Toggle>
@@ -615,8 +629,9 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
           </Field>
           )}
 
-          {isSequence && (
-            <Field label="Buy link (shared by every step · clicks tracked)">
+          {/* Tracked link — SMS (always) and email sequences share one buy link. */}
+          {(sms || isSequence) && (
+            <Field label={sms ? 'Link (tracked · appended to the text)' : 'Buy link (shared by every step · clicks tracked)'}>
               <input style={input} value={f.ctaUrl} onChange={(e) => set('ctaUrl', e.target.value)} placeholder="https://… the checkout/buy URL" />
             </Field>
           )}
@@ -624,7 +639,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
           {/* Promo / discount code */}
           <PromoEditor promo={f.promo} setPromo={(p) => set('promo', { ...f.promo, ...p })} poolStats={poolStats} promoCodesText={promoCodesText} setPromoCodesText={setPromoCodesText} />
 
-          {!isSequence && f.contentMode === 'template' && (
+          {!isSequence && !sms && f.contentMode === 'template' && (
             <Field label="Call to action">
               <div style={{ display: 'flex', gap: 8 }}>
                 <input style={{ ...input, flex: 1 }} value={f.ctaText} onChange={(e) => set('ctaText', e.target.value)} placeholder="Button text" />
@@ -632,7 +647,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
               </div>
             </Field>
           )}
-          {!isSequence && f.contentMode === 'html' && (
+          {!isSequence && !sms && f.contentMode === 'html' && (
             <Field label="Tracked link (for {{cta}})">
               <input style={input} value={f.ctaUrl} onChange={(e) => set('ctaUrl', e.target.value)} placeholder="https://… — clicks on {{cta}} are tracked" />
             </Field>
@@ -715,7 +730,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
         {/* Preview follows you as you scroll the (long) form on desktop. */}
         <div style={isMobile ? {} : { position: 'sticky', top: 12, alignSelf: 'start' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
-            <span style={hintLbl}>Email preview</span>
+            <span style={hintLbl}>{sms ? 'SMS preview' : 'Email preview'}</span>
             {isSequence && <button type="button" style={{ ...mini, padding: '4px 9px' }} onClick={() => setPreviewAll((v) => !v)}>{previewAll ? 'Show step 1 only' : 'Preview all steps'}</button>}
           </div>
           {previewAll && isSequence ? (
@@ -724,10 +739,12 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
                 : stepPreviews.map((s, i) => (
                   <div key={i}>
                     <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--brand)', margin: '0 0 4px' }}>{s.label}</div>
-                    <iframe title={s.label} srcDoc={s.html} style={{ width: '100%', height: 460, border: '1px solid var(--hairline)', borderRadius: 12, background: '#fff' }} />
+                    {sms ? <SmsPreview text={s.sms} /> : <iframe title={s.label} srcDoc={s.html} style={{ width: '100%', height: 460, border: '1px solid var(--hairline)', borderRadius: 12, background: '#fff' }} />}
                   </div>
                 ))}
             </div>
+          ) : sms ? (
+            <SmsPreview text={previewSms} />
           ) : (
             <iframe title="Campaign preview" srcDoc={preview} style={{ width: '100%', height: 560, border: '1px solid var(--hairline)', borderRadius: 12, background: '#fff' }} />
           )}
@@ -1021,6 +1038,24 @@ function Field({ label, children }) { return <div><div style={hintLbl}>{label}</
 function Toggle({ on, onClick, children }) {
   return <button type="button" onClick={onClick} style={{ flex: 1, padding: '8px 10px', borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', border: on ? '1.5px solid var(--brand)' : '1.5px solid var(--hairline)', background: on ? 'rgba(var(--brand-rgb), 0.08)' : 'transparent', color: on ? 'var(--brand)' : 'var(--text)' }}>{children}</button>;
 }
+// SMS length helper — GSM-7 is 160 chars (153/segment when multipart). The
+// auto-appended tracked link + opt-out add to this, so treat it as a guide.
+function SmsMeter({ body }) {
+  const len = (body || '').length;
+  const seg = len === 0 ? 0 : len <= 160 ? 1 : Math.ceil(len / 153);
+  return <div style={{ fontSize: 11.5, marginTop: 4, color: len > 160 ? '#b45309' : 'var(--muted)' }}>{len} chars{seg ? ` · ~${seg} SMS${seg > 1 ? ' segments' : ''}` : ''}{len > 160 ? ' — longer texts may cost more' : ''} · link & opt-out add length</div>;
+}
+// Phone-style bubble for previewing an SMS.
+function SmsPreview({ text }) {
+  return (
+    <div style={{ background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 18, padding: '16px 14px', minHeight: 200 }}>
+      <div style={{ fontSize: 11, color: 'var(--muted)', textAlign: 'center', marginBottom: 12 }}>Text message</div>
+      <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', background: '#e9e9eb', color: '#000', borderRadius: 16, padding: '10px 13px', fontSize: 14, lineHeight: 1.45, maxWidth: '88%' }}>
+        {text || 'Your message preview will appear here.'}
+      </div>
+    </div>
+  );
+}
 // Collapsible section to keep the long editor tidy — one dropdown per area.
 function Accordion({ title, defaultOpen = false, children }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -1125,7 +1160,7 @@ function FilterRow({ entityId, fields, filter, onChange, onRemove }) {
 }
 
 // The drip timeline: each step has a delay (number + hours/days) and its own copy.
-function SequenceSteps({ steps, setStep, addStep, removeStep, activeStep = 0, onActive }) {
+function SequenceSteps({ steps, setStep, addStep, removeStep, activeStep = 0, onActive, sms = false }) {
   const unitOf = (h) => (h % 24 === 0 && h >= 24 ? 'days' : 'hours');
   const valOf = (h) => (unitOf(h) === 'days' ? h / 24 : h);
   const setDelay = (i, val, unit) => setStep(i, { delayHours: Math.max(0, (Number(val) || 0) * (unit === 'days' ? 24 : 1)) });
@@ -1149,9 +1184,9 @@ function SequenceSteps({ steps, setStep, addStep, removeStep, activeStep = 0, on
               <span style={{ flex: 1 }} />
               {steps.length > 1 && <button type="button" style={{ ...mini, color: 'var(--error,#ef4444)' }} onClick={() => removeStep(i)}>✕</button>}
             </div>
-            <input style={{ ...input, fontWeight: 700, marginBottom: 6 }} value={st.subject} onFocus={focus(i)} onChange={(e) => setStep(i, { subject: e.target.value })} placeholder={`Step ${i + 1} subject`} />
-            <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit', marginBottom: 6 }} rows={4} value={st.body} onFocus={focus(i)} onChange={(e) => setStep(i, { body: e.target.value })} placeholder={'Hi {{name}}, …  (tokens: {{ticketType}}, {{promo}})'} />
-            <input style={input} value={st.ctaText} onFocus={focus(i)} onChange={(e) => setStep(i, { ctaText: e.target.value })} placeholder="Button text (e.g. Complete my purchase)" />
+            {!sms && <input style={{ ...input, fontWeight: 700, marginBottom: 6 }} value={st.subject} onFocus={focus(i)} onChange={(e) => setStep(i, { subject: e.target.value })} placeholder={`Step ${i + 1} subject`} />}
+            <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit', marginBottom: 6 }} rows={4} value={st.body} onFocus={focus(i)} onChange={(e) => setStep(i, { body: e.target.value })} placeholder={sms ? 'Hi {{name}}, your {{ticketType}} tickets are waiting…' : 'Hi {{name}}, …  (tokens: {{ticketType}}, {{promo}})'} />
+            {sms ? <SmsMeter body={st.body} /> : <input style={input} value={st.ctaText} onFocus={focus(i)} onChange={(e) => setStep(i, { ctaText: e.target.value })} placeholder="Button text (e.g. Complete my purchase)" />}
           </div>
         );
       })}
