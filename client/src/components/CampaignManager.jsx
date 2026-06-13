@@ -14,6 +14,7 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
   const [tpl, setTpl] = useState(null); // template chosen for a new campaign
   const [templates, setTemplates] = useState([]);
   const [reporting, setReporting] = useState(null); // action object
+  const [masterReport, setMasterReport] = useState(null); // master campaign name
   useEffect(() => { api.getActionTemplates(entityId).then((r) => setTemplates(r.templates || [])).catch(() => setTemplates([])); }, [entityId]);
   // "Make it happen": arriving with a goal (from a briefing/digest suggestion)
   // opens a fresh campaign — pre-filled from the matching template if ?type names one.
@@ -48,6 +49,10 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
   }
   if (reporting) {
     return <CampaignReport entityId={entityId} action={reporting} onClose={() => setReporting(null)} />;
+  }
+  if (masterReport) {
+    return <MasterReport name={masterReport} campaigns={data.actions.filter((a) => (a.config?.master || '') === masterReport)}
+      onOpen={(a) => { setMasterReport(null); setReporting(a); }} onClose={() => setMasterReport(null)} />;
   }
 
   // One campaign row (shared by grouped + ungrouped rendering).
@@ -145,11 +150,12 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
             const t = agg(list);
             return (
               <div key={name} style={{ marginBottom: 16 }}>
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap', padding: '0 2px 6px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '0 2px 6px' }}>
                   <span style={{ fontSize: 13, fontWeight: 800 }}>🗂 {name}</span>
                   <span style={{ fontSize: 12, color: 'var(--muted)' }}>
                     {list.length} campaign{list.length === 1 ? '' : 's'} · {t.sent} sent · {t.clicks} clicks{t.converted ? ` · ${t.converted} converted` : ''}
                   </span>
+                  <button style={{ ...mini, padding: '4px 10px' }} onClick={() => setMasterReport(name)}>📊 Report</button>
                 </div>
                 <div style={{ borderLeft: '2px solid var(--hairline)', paddingLeft: 10 }}>{list.map(rowFor)}</div>
               </div>
@@ -583,6 +589,62 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
 }
 
 // Detailed campaign report: summary stats + who clicked, how often, when.
+// Master-campaign report: combined totals across all the segment campaigns
+// sharing this master, plus a per-segment breakdown (tap a segment for its own
+// report). Built from data already loaded — no extra fetch.
+function MasterReport({ name, campaigns, onOpen, onClose }) {
+  const t = campaigns.reduce((s, a) => ({
+    sent: s.sent + (a.results?.sent || 0), clicks: s.clicks + (a.results?.clicks || 0),
+    converted: s.converted + (a.results?.converted || 0), enrolled: s.enrolled + (a.results?.enrolled || 0),
+  }), { sent: 0, clicks: 0, converted: 0, enrolled: 0 });
+  const anySeq = campaigns.some((a) => a.config?.campaignMode === 'sequence');
+  const ctr = t.sent > 0 ? Math.round((t.clicks / t.sent) * 100) : 0;
+  const Stat = ({ label, value, accent }) => (
+    <div style={{ ...card, flex: '1 1 120px', margin: 0, textAlign: 'center' }}>
+      <div style={{ fontSize: 22, fontWeight: 800, color: accent || 'var(--text)' }}>{value}</div>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{label}</div>
+    </div>
+  );
+  return (
+    <div>
+      <button style={{ ...mini, marginBottom: 12 }} onClick={onClose}>← Back to campaigns</button>
+      <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 2 }}>🗂 {name}</div>
+      <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 14 }}>{campaigns.length} segment campaign{campaigns.length === 1 ? '' : 's'} in this master.</div>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 18 }}>
+        {anySeq && <Stat label="Enrolled" value={t.enrolled} />}
+        <Stat label="Emails sent" value={t.sent} />
+        <Stat label="Clicks" value={t.clicks} />
+        <Stat label="Click rate" value={`${ctr}%`} />
+        {anySeq && <Stat label="Converted" value={t.converted} accent="var(--success,#10b981)" />}
+      </div>
+      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', margin: '0 2px 8px' }}>By segment</div>
+      {campaigns.map((a) => {
+        const seq = a.config?.campaignMode === 'sequence';
+        const sent = a.results?.sent || 0; const clicks = a.results?.clicks || 0;
+        return (
+          <div key={a.id} style={{ ...card, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', cursor: 'pointer' }} onClick={() => onOpen(a)}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <span style={{ fontWeight: 700, fontSize: 14 }}>{a.title || a.config.subject || 'Untitled'}</span>
+                <StatusChip status={a.status} />
+                {seq && <span style={{ fontSize: 11, color: 'var(--muted)' }}>· {(a.config.steps || []).length}-step sequence</span>}
+              </div>
+              <div style={{ display: 'flex', gap: 14, marginTop: 6, fontSize: 12.5, fontWeight: 600, flexWrap: 'wrap' }}>
+                {seq && <span>👥 {a.results?.enrolled ?? 0}</span>}
+                <span>📤 {sent} sent</span>
+                <span>🔗 {clicks} clicks</span>
+                {sent > 0 && <span style={{ color: 'var(--muted)' }}>{Math.round((clicks / sent) * 100)}% CTR</span>}
+                {seq && <span style={{ color: 'var(--success,#10b981)' }}>✓ {a.results?.converted ?? 0} converted</span>}
+              </div>
+            </div>
+            <span style={{ color: 'var(--muted)', fontSize: 18 }}>›</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function CampaignReport({ entityId, action, onClose }) {
   const [r, setR] = useState(null);
   useEffect(() => { api.actionReport(entityId, action.id).then(setR).catch(() => setR({ error: true })); }, [entityId, action.id]);
