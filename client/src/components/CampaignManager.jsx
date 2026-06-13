@@ -87,13 +87,22 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
               <StatusChip status={a.status} />
             </div>
             <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 3 }}>
-              {a.status === 'auto'
+              {a.config?.campaignMode === 'sequence'
+                ? `Sequence · ${(a.config.steps || []).length} step${(a.config.steps || []).length === 1 ? '' : 's'}${a.status === 'auto' ? ' · running automatically' : ''}${a.results?.codesEmpty ? ' · ⚠ codes exhausted — sign-ups paused' : ''}`
+                : a.status === 'auto'
                 ? `Automation active · checks daily${a.lastCheck ? ` · last check ${fmt(a.lastCheck)}` : ''}`
                 : a.status === 'draft'
                 ? (a.createdBy === 'automation' ? `⏳ Queued by automation · awaiting approval · ${fmt(a.createdAt)}` : `Draft · created ${fmt(a.createdAt)} by ${a.createdBy}`)
                 : `Approved by ${a.approvedBy} · ${fmt(a.approvedAt)}`}
             </div>
-            {a.status !== 'draft' && (
+            {a.config?.campaignMode === 'sequence' && a.status === 'auto' ? (
+              <div style={{ display: 'flex', gap: 14, marginTop: 6, fontSize: 12.5, fontWeight: 600 }}>
+                <span>👥 {a.results?.enrolled ?? 0} enrolled</span>
+                <span>📤 {a.results?.sent ?? 0} sent</span>
+                <span style={{ color: 'var(--success,#10b981)' }}>✓ {a.results?.converted ?? 0} converted</span>
+                {a.promoCodes && <span style={{ color: 'var(--muted)' }}>🎟 {a.promoCodes.available}/{a.promoCodes.total} codes left</span>}
+              </div>
+            ) : a.status !== 'draft' && (
               <div style={{ display: 'flex', gap: 14, marginTop: 6, fontSize: 12.5, fontWeight: 600 }}>
                 <span>📤 {a.results.sent ?? 0}/{a.results.total ?? a.audienceCount} sent</span>
                 {(a.results.failed ?? 0) > 0 && <span style={{ color: 'var(--error,#ef4444)' }}>✗ {a.results.failed} failed</span>}
@@ -144,7 +153,23 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
     // Which recipe this came from — labels & groups the campaign, helps automation.
     templateKey: cfg.templateKey || tpl?.key || '',
     category: cfg.category || tpl?.category || '',
+    // Delivery: once-off (single send) or a full automated sequence (drip).
+    campaignMode: cfg.campaignMode || 'once',
+    anchorField: cfg.audience?.anchorField || '',
+    // Sequence steps. Seed step 1 from the template/campaign copy so it's pre-filled.
+    steps: (cfg.steps && cfg.steps.length) ? cfg.steps : [{ delayHours: 2, subject: cfg.subject || tp.subject || '', body: cfg.body || tp.body || '', ctaText: cfg.ctaText || tp.ctaText || '' }],
+    // Promo / discount code.
+    promo: {
+      source: cfg.promo?.source || 'none',
+      type: cfg.promo?.type || 'promo',
+      code: cfg.promo?.code || '',
+      benefit: cfg.promo?.benefit || '',
+      appendToLink: cfg.promo?.appendToLink !== false,
+    },
   }));
+  // Uploaded unique codes (textarea). Existing pool stats come from the action.
+  const [promoCodesText, setPromoCodesText] = useState('');
+  const poolStats = action?.promoCodes || null;
   const [events, setEvents] = useState([]);
   useEffect(() => { api.listCampaignEvents(entityId).then((r) => setEvents(r.events || [])).catch(() => {}); }, [entityId]);
   const [tiles, setTiles] = useState(null);
@@ -161,11 +186,25 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
   useEffect(() => { (isAdmin ? api.getDigestTiles(entityId) : api.getMyDigestTiles(entityId)).then(setTiles).catch(() => setTiles({ dashboards: [] })); }, [entityId, isAdmin]);
 
   const payload = () => ({
-    title: f.title, goal: f.goal, subject: f.subject, body: f.body, ctaText: f.ctaText, ctaUrl: f.ctaUrl, utm: f.utm, recurring: f.recurring,
+    // In sequence mode the top-level copy mirrors step 1 (drives the preview +
+    // keeps the legacy fields coherent); each step's own copy is in `steps`.
+    title: f.title, goal: f.goal,
+    subject: f.campaignMode === 'sequence' ? (f.steps[0]?.subject || '') : f.subject,
+    body: f.campaignMode === 'sequence' ? (f.steps[0]?.body || '') : f.body,
+    ctaText: f.campaignMode === 'sequence' ? (f.steps[0]?.ctaText || '') : f.ctaText,
+    ctaUrl: f.ctaUrl, utm: f.utm, recurring: f.recurring,
     eventSuiteId: f.eventSuiteId, contentMode: f.contentMode, heroImage: f.heroImage, customHtml: f.customHtml,
     templateKey: f.templateKey, category: f.category,
-    audience: { mode: f.audienceMode, dashboardId: f.dashboardId, tileId: f.tileId, emailField: f.emailField, nameField: f.nameField, consentField: f.consentField, ticketField: f.ticketField, pasted: f.pasted },
+    campaignMode: f.campaignMode, steps: f.steps,
+    promo: f.promo,
+    promoCodes: promoCodesText.split(/[\s,;]+/).map((c) => c.trim()).filter(Boolean),
+    audience: { mode: f.audienceMode, dashboardId: f.dashboardId, tileId: f.tileId, emailField: f.emailField, nameField: f.nameField, consentField: f.consentField, ticketField: f.ticketField, anchorField: f.anchorField, pasted: f.pasted },
   });
+  // Step helpers (sequence mode).
+  const setStep = (i, patch) => setF((s) => ({ ...s, steps: s.steps.map((st, j) => (j === i ? { ...st, ...patch } : st)) }));
+  const addStep = (delayHours = 24) => setF((s) => ({ ...s, steps: [...s.steps, { delayHours, subject: '', body: '', ctaText: s.steps[0]?.ctaText || '' }] }));
+  const removeStep = (i) => setF((s) => ({ ...s, steps: s.steps.filter((_, j) => j !== i) }));
+  const isSequence = f.campaignMode === 'sequence';
 
   const refreshAudience = () => {
     // Snapshot children (queued by an automation) carry their audience already.
@@ -183,7 +222,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
       api.actionPreviewEmail(entityId, payload()).then((r) => setPreview(r.html)).catch(() => {});
     }, 350);
     return () => clearTimeout(debounce.current);
-  }, [f.subject, f.body, f.ctaText, f.ctaUrl, f.contentMode, f.customHtml, f.heroImage]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [f.subject, f.body, f.ctaText, f.ctaUrl, f.contentMode, f.customHtml, f.heroImage, f.campaignMode, JSON.stringify(f.steps), JSON.stringify(f.promo), f.anchorField]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const draft = async () => {
     setDrafting(true);
@@ -230,6 +269,22 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
   }
 
   async function approve() {
+    if (isSequence) {
+      const steps = f.steps || [];
+      if (!steps[0]?.subject || !steps[0]?.body) { alert('Add at least step 1 with a subject and body.'); return; }
+      const n = steps.length;
+      if (!confirm(`Activate this ${n}-step sequence?\n\nEvery new abandoner is enrolled automatically and emailed on your schedule. Anyone who buys (or unsubscribes) stops getting emails. You approve this ONCE — it then runs hands-off.`)) return;
+      setApproveState('working');
+      try {
+        let id = action?.id;
+        if (id) await api.updateAction(entityId, id, payload());
+        else { const r = await api.createAction(entityId, payload()); id = r.action.id; }
+        await api.approveAction(entityId, id);
+        setApproveState('✓ Sequence active');
+        setTimeout(onSaved, 900);
+      } catch (e) { setApproveState(`✗ ${e.message}`); }
+      return;
+    }
     if (f.recurring) {
       if (!confirm('Activate this automation?\n\nIt will check the tile daily and queue any NEW recipients as a draft for your approval. Nothing sends without you approving each batch.')) return;
       setApproveState('working');
@@ -285,6 +340,16 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
             <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit' }} rows={2} value={f.goal} onChange={(e) => set('goal', e.target.value)} />
           </Field>
 
+          <Field label="Campaign type">
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Toggle on={!isSequence} onClick={() => set('campaignMode', 'once')}>Once-off</Toggle>
+              <Toggle on={isSequence} onClick={() => set('campaignMode', 'sequence')}>Full sequence (drip)</Toggle>
+            </div>
+            <div style={hintS}>{isSequence
+              ? 'A series of timed emails that runs automatically per customer — anyone who buys drops out. Approve once.'
+              : 'One email to the current audience when you approve.'}</div>
+          </Field>
+
           <Field label="Audience">
             {f.audienceMode === 'snapshot' ? (
               <div style={{ fontSize: 13, background: 'rgba(124,58,237,0.07)', border: '1px solid rgba(124,58,237,0.25)', borderRadius: 8, padding: '9px 12px' }}>
@@ -328,6 +393,12 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
                       <option value="">Consent column — recommended (only email when = Yes)</option>
                       {aud.fields.map((fl) => <option key={fl.name} value={fl.name}>Only if “{fl.label}” = Yes</option>)}
                     </select>
+                    {isSequence && (
+                      <select style={input} value={f.anchorField} onChange={(e) => set('anchorField', e.target.value)}>
+                        <option value="">Abandonment time column — drip timings count from this (else from detection)</option>
+                        {aud.fields.map((fl) => <option key={fl.name} value={fl.name}>Count from “{fl.label}”</option>)}
+                      </select>
+                    )}
                   </>
                 )}
               </div>
@@ -350,6 +421,13 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
             )}
           </Field>
 
+          {isSequence && (
+            <Field label="Emails in the sequence">
+              <SequenceSteps steps={f.steps} setStep={setStep} addStep={addStep} removeStep={removeStep} />
+            </Field>
+          )}
+
+          {!isSequence && (
           <Field label="Content">
             <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
               <Toggle on={f.contentMode === 'template'} onClick={() => set('contentMode', 'template')}>Built template</Toggle>
@@ -372,8 +450,18 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
               </div>
             )}
           </Field>
+          )}
 
-          {f.contentMode === 'template' && (
+          {isSequence && (
+            <Field label="Buy link (shared by every step · clicks tracked)">
+              <input style={input} value={f.ctaUrl} onChange={(e) => set('ctaUrl', e.target.value)} placeholder="https://… the checkout/buy URL" />
+            </Field>
+          )}
+
+          {/* Promo / discount code */}
+          <PromoEditor promo={f.promo} setPromo={(p) => set('promo', { ...f.promo, ...p })} poolStats={poolStats} promoCodesText={promoCodesText} setPromoCodesText={setPromoCodesText} />
+
+          {!isSequence && f.contentMode === 'template' && (
             <Field label="Call to action">
               <div style={{ display: 'flex', gap: 8 }}>
                 <input style={{ ...input, flex: 1 }} value={f.ctaText} onChange={(e) => set('ctaText', e.target.value)} placeholder="Button text" />
@@ -381,13 +469,13 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
               </div>
             </Field>
           )}
-          {f.contentMode === 'html' && (
+          {!isSequence && f.contentMode === 'html' && (
             <Field label="Tracked link (for {{cta}})">
               <input style={input} value={f.ctaUrl} onChange={(e) => set('ctaUrl', e.target.value)} placeholder="https://… — clicks on {{cta}} are tracked" />
             </Field>
           )}
 
-          {f.audienceMode === 'tile' && (
+          {!isSequence && f.audienceMode === 'tile' && (
             <Field label="Automation">
               <div style={{ display: 'flex', gap: 8 }}>
                 <Toggle on={!f.recurring} onClick={() => set('recurring', false)}>One-off send</Toggle>
@@ -421,8 +509,8 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
               type="button" style={mini} disabled={testState === 'sending'}
               onClick={async () => { setTestState('sending'); try { const r = await api.actionTestSend(entityId, payload()); setTestState(`✓ Test sent to ${r.to}`); } catch (e) { setTestState(`✗ ${e.message}`); } }}
             >{testState === 'sending' ? 'Sending…' : 'Send test to me'}</button>
-            <button style={{ ...primary, background: '#15803d' }} onClick={approve} disabled={approveState === 'working' || (!f.recurring && !aud?.count)}>
-              {approveState === 'working' ? 'Approving…' : f.recurring ? '⚙ Activate automation' : `Approve & send${aud?.count ? ` to ${aud.count}` : ''}`}
+            <button style={{ ...primary, background: '#15803d' }} onClick={approve} disabled={approveState === 'working' || (!f.recurring && !isSequence && !aud?.count)}>
+              {approveState === 'working' ? 'Approving…' : isSequence ? '⚡ Activate sequence' : f.recurring ? '⚙ Activate automation' : `Approve & send${aud?.count ? ` to ${aud.count}` : ''}`}
             </button>
             {(testState && testState !== 'sending') && <span style={{ fontSize: 12, color: testState.startsWith('✓') ? 'var(--success,#10b981)' : 'var(--error,#ef4444)' }}>{testState}</span>}
             {(approveState && approveState !== 'working') && <span style={{ fontSize: 12, color: approveState.startsWith('✓') ? 'var(--success,#10b981)' : 'var(--error,#ef4444)' }}>{approveState}</span>}
@@ -577,6 +665,91 @@ const fmt = (iso) => { try { return new Date(iso).toLocaleString('en-ZA', { day:
 function Field({ label, children }) { return <div><div style={hintLbl}>{label}</div>{children}</div>; }
 function Toggle({ on, onClick, children }) {
   return <button type="button" onClick={onClick} style={{ flex: 1, padding: '8px 10px', borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', border: on ? '1.5px solid var(--brand)' : '1.5px solid var(--hairline)', background: on ? 'rgba(var(--brand-rgb), 0.08)' : 'transparent', color: on ? 'var(--brand)' : 'var(--text)' }}>{children}</button>;
+}
+
+// The drip timeline: each step has a delay (number + hours/days) and its own copy.
+function SequenceSteps({ steps, setStep, addStep, removeStep }) {
+  const unitOf = (h) => (h % 24 === 0 && h >= 24 ? 'days' : 'hours');
+  const valOf = (h) => (unitOf(h) === 'days' ? h / 24 : h);
+  const setDelay = (i, val, unit) => setStep(i, { delayHours: Math.max(0, (Number(val) || 0) * (unit === 'days' ? 24 : 1)) });
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {steps.map((st, i) => {
+        const unit = unitOf(st.delayHours);
+        return (
+          <div key={i} style={{ border: '1px solid var(--hairline)', borderRadius: 10, padding: 12, position: 'relative' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <span style={{ fontWeight: 700, fontSize: 13, color: 'var(--brand)' }}>Step {i + 1}</span>
+              <span style={{ fontSize: 12, color: 'var(--muted)' }}>· send</span>
+              <input type="number" min="0" style={{ ...input, width: 64, padding: '5px 8px' }} value={valOf(st.delayHours)} onChange={(e) => setDelay(i, e.target.value, unit)} />
+              <select style={{ ...input, width: 90, padding: '5px 8px' }} value={unit} onChange={(e) => setDelay(i, valOf(st.delayHours), e.target.value)}>
+                <option value="hours">hours</option>
+                <option value="days">days</option>
+              </select>
+              <span style={{ fontSize: 12, color: 'var(--muted)' }}>after abandonment</span>
+              <span style={{ flex: 1 }} />
+              {steps.length > 1 && <button type="button" style={{ ...mini, color: 'var(--error,#ef4444)' }} onClick={() => removeStep(i)}>✕</button>}
+            </div>
+            <input style={{ ...input, fontWeight: 700, marginBottom: 6 }} value={st.subject} onChange={(e) => setStep(i, { subject: e.target.value })} placeholder={`Step ${i + 1} subject`} />
+            <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit', marginBottom: 6 }} rows={4} value={st.body} onChange={(e) => setStep(i, { body: e.target.value })} placeholder={'Hi {{name}}, …  (tokens: {{ticketType}}, {{promo}})'} />
+            <input style={input} value={st.ctaText} onChange={(e) => setStep(i, { ctaText: e.target.value })} placeholder="Button text (e.g. Complete my purchase)" />
+          </div>
+        );
+      })}
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+        <button type="button" style={mini} onClick={() => addStep(24)}>＋ Add step</button>
+        <span style={{ fontSize: 11, color: 'var(--muted)' }}>Quick add:</span>
+        {[['+2h', 2], ['+24h', 24], ['+72h', 72], ['+5d', 120], ['+10d', 240]].map(([lbl, h]) => (
+          <button key={lbl} type="button" style={{ ...mini, padding: '5px 9px' }} onClick={() => addStep(h)}>{lbl}</button>
+        ))}
+      </div>
+      <div style={hintS}>Steps auto-sort by delay. Tokens <b>{'{{name}}'}</b>, <b>{'{{ticketType}}'}</b>, <b>{'{{promo}}'}</b> work in every step. The preview shows Step 1.</div>
+    </div>
+  );
+}
+
+// Promo / discount code editor: source (none / generic / unique pool), kind
+// (promo = appendable to link · discount = entered at checkout), benefit + codes.
+function PromoEditor({ promo, setPromo, poolStats, promoCodesText, setPromoCodesText }) {
+  const codeCount = promoCodesText.split(/[\s,;]+/).filter(Boolean).length;
+  return (
+    <Field label="Promo / discount code (optional)">
+      <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+        <Toggle on={promo.source === 'none'} onClick={() => setPromo({ source: 'none' })}>None</Toggle>
+        <Toggle on={promo.source === 'generic'} onClick={() => setPromo({ source: 'generic' })}>Generic code</Toggle>
+        <Toggle on={promo.source === 'unique'} onClick={() => setPromo({ source: 'unique' })}>Unique codes</Toggle>
+      </div>
+      {promo.source !== 'none' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Toggle on={promo.type === 'promo'} onClick={() => setPromo({ type: 'promo' })}>Promo (applies via link)</Toggle>
+            <Toggle on={promo.type === 'discount'} onClick={() => setPromo({ type: 'discount', appendToLink: false })}>Discount (enter at checkout)</Toggle>
+          </div>
+          <input style={input} value={promo.benefit} onChange={(e) => setPromo({ benefit: e.target.value })} placeholder="What it gives — e.g. 20% off (shown in the email)" />
+          {promo.source === 'generic'
+            ? <input style={{ ...input, fontFamily: 'ui-monospace, monospace' }} value={promo.code} onChange={(e) => setPromo({ code: e.target.value })} placeholder="The code, e.g. FOMO20" />
+            : (
+              <>
+                <textarea style={{ ...input, resize: 'vertical', fontFamily: 'ui-monospace, monospace' }} rows={3} value={promoCodesText} onChange={(e) => setPromoCodesText(e.target.value)} placeholder={'Paste unique codes, one per line:\nHOWL-A1B2\nHOWL-C3D4\n…'} />
+                <div style={hintS}>
+                  {codeCount > 0 && <span>{codeCount} new code{codeCount === 1 ? '' : 's'} to upload. </span>}
+                  {poolStats && <span><b>{poolStats.available}</b> available · {poolStats.used} used (of {poolStats.total}). </span>}
+                  One code per customer, kept for their whole journey. If the pool empties, new sign-ups pause until you add more.
+                </div>
+              </>
+            )}
+          {promo.type === 'promo' && (
+            <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12.5, color: 'var(--text)', cursor: 'pointer' }}>
+              <input type="checkbox" checked={promo.appendToLink !== false} onChange={(e) => setPromo({ appendToLink: e.target.checked })} />
+              Add the code to the buy link automatically (?promo=CODE)
+            </label>
+          )}
+          {promo.type === 'discount' && <div style={hintS}>Discount codes are shown as “enter this code at checkout” — never attached to the link.</div>}
+          <div style={hintS}>Insert <b>{'{{promo}}'}</b> (the code) and <b>{'{{promo_benefit}}'}</b> anywhere in your copy. A code box is added to the email automatically.</div>
+        </div>
+      )}
+    </Field>
+  );
 }
 
 const card = { background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 12, padding: 14, marginBottom: 10 };
