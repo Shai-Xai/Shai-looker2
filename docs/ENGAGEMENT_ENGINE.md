@@ -139,8 +139,11 @@ relevant). The existing `actions` row becomes a campaign/journey *instance*;
 ## 9. Open decisions
 1. **Naming / IA** — top-level concept: "Actions" vs "Campaigns" vs "Engage"? Client
    sub-areas: *Campaigns · Automations · Segments · Templates · Connections*?
-2. **Schema timing** — introduce `segments` + `journeys` tables now (before more
-   is stuffed into `actions.config`), or defer until P2/P5?
+2. **Schema timing** — **DECIDED (Jun 2026): introduce now, additively.** Create
+   `segments` (+ a source-agnostic resolver) and the `journeys` tables as a
+   foundation before more logic accretes in `actions.config`. Non-destructive:
+   today's campaigns keep working; the abandoned-cart audience just becomes the
+   first thing routed through the resolver / saveable as a segment.
 3. **Self-service depth** — default split of who builds campaigns/segments (client
    vs AM). Dual-surface says both; the default matters.
 4. **Consent & compliance per channel** — WhatsApp opt-in, ad-platform hashing/
