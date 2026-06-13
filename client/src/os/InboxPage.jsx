@@ -81,6 +81,7 @@ function ThreadView({ id, isAdmin, isMobile, onBack, onChange }) {
   const [receipts, setReceipts] = useState(null);
   const endRef = useRef(null);
   const fileRef = useRef(null);
+  const { user } = useAuth();
 
   const addFiles = (list) => {
     for (const f of Array.from(list || []).slice(0, 5)) {
@@ -145,16 +146,27 @@ function ThreadView({ id, isAdmin, isMobile, onBack, onChange }) {
 
       <div style={{ flex: 1, overflowY: 'auto', padding: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
         {data.messages.map((m) => {
-          const mine = m.authorType !== 'howler';
-          // Admin sees, under each Howler message, whether the client has read it
-          // (WhatsApp-style ticks) — read/unread alongside the message itself.
+          // System/Pulse notifications render as a neutral note (not a chat
+          // bubble). Otherwise: my own messages right (brand), everyone else
+          // (Howler, other users, ingested email) left (neutral).
+          const isSystem = m.authorType === 'system';
+          const mine = !isSystem && !!user?.email && (m.authorEmail || '').toLowerCase() === user.email.toLowerCase();
+          const who = m.authorType === 'howler' ? 'Howler' : isSystem ? 'Pulse' : (m.authorEmail || 'Someone');
+          const meta = `${who}${m.channel !== 'pulse' ? ` · ${m.channel}` : ''} · ${shortDate(m.createdAt)}`;
+          if (isSystem) {
+            return (
+              <div key={m.id} style={{ alignSelf: 'stretch' }}>
+                <div style={{ fontSize: 10.5, color: 'var(--muted)', marginBottom: 3 }}>{meta}</div>
+                <div style={{ background: 'var(--elevated)', color: 'var(--text)', border: '1px solid var(--hairline)', borderLeft: '3px solid var(--brand)', borderRadius: 10, padding: '10px 13px', fontSize: 13.5, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{renderBody(m.body, false)}</div>
+              </div>
+            );
+          }
+          // Admin sees, under each Howler message, whether the client has read it.
           const seen = isAdmin && m.authorType === 'howler' ? readBy(m) : null;
           return (
             <div key={m.id} style={{ display: 'flex', justifyContent: mine ? 'flex-end' : 'flex-start' }}>
               <div style={{ maxWidth: '78%' }}>
-                <div style={{ fontSize: 10.5, color: 'var(--muted)', marginBottom: 3, textAlign: mine ? 'right' : 'left' }}>
-                  {m.authorType === 'howler' ? 'Howler' : m.authorEmail}{m.channel !== 'pulse' ? ` · ${m.channel}` : ''} · {shortDate(m.createdAt)}
-                </div>
+                <div style={{ fontSize: 10.5, color: 'var(--muted)', marginBottom: 3, textAlign: mine ? 'right' : 'left' }}>{meta}</div>
                 <div style={{ background: mine ? 'var(--brand)' : 'var(--elevated)', color: mine ? '#fff' : 'var(--text)', borderRadius: mine ? '14px 14px 4px 14px' : '14px 14px 14px 4px', padding: '9px 13px', fontSize: 13.5, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{renderBody(m.body, mine)}</div>
                 {(m.attachments || []).length > 0 && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginTop: 5, alignItems: mine ? 'flex-end' : 'flex-start' }}>
