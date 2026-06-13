@@ -504,14 +504,14 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
           )}
           <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 4 }}>Review the settings and preview below, then:</div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 10, flexWrap: 'wrap' }}>
-            <button style={{ ...primary, background: '#15803d' }} onClick={approvePending} disabled={approveState === 'working'}>✓ Approve</button>
+            <button className="liquid-btn" style={{ ...primary, background: '#15803d' }} onClick={approvePending} disabled={approveState === 'working'}>✓ Approve</button>
             <button style={mini} onClick={() => setRejectOpen((o) => !o)}>Reject…</button>
             {(approveState && approveState !== 'working') && <span style={{ fontSize: 12.5, color: approveState.startsWith('✓') ? 'var(--success,#10b981)' : 'var(--error,#ef4444)' }}>{approveState}</span>}
           </div>
           {rejectOpen && (
             <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
               <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit' }} rows={3} value={rejectNote} onChange={(e) => setRejectNote(e.target.value)} placeholder="Comment for the sender — what needs to change before this can be approved…" />
-              <div><button style={{ ...primary, background: '#dc2626' }} onClick={rejectPending} disabled={approveState === 'working'}>Send back to draft</button></div>
+              <div><button className="liquid-btn" style={{ ...primary, background: '#dc2626' }} onClick={rejectPending} disabled={approveState === 'working'}>Send back to draft</button></div>
             </div>
           )}
         </div>
@@ -784,11 +784,11 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
               }}
             >{testState === 'sending' ? 'Sending…' : 'Send test to me'}</button>
             {!requireApproval && (
-              <button style={{ ...primary, background: '#15803d' }} onClick={approve} disabled={approveState === 'working' || (!f.recurring && !isSequence && !aud?.count)}>
+              <button className="liquid-btn" style={{ ...primary, background: '#15803d' }} onClick={approve} disabled={approveState === 'working' || (!f.recurring && !isSequence && !aud?.count)}>
                 {approveState === 'working' ? 'Approving…' : isSequence ? '⚡ Activate sequence' : f.recurring ? '⚙ Activate automation' : `Approve & send${aud?.count ? ` to ${aud.count}` : ''}`}
               </button>
             )}
-            <button style={{ ...primary, background: requireApproval ? '#15803d' : 'var(--brand)' }} onClick={submitForApproval} disabled={approveState === 'working' || !f.approvers.length}>
+            <button className="liquid-btn" style={{ ...primary, background: requireApproval ? '#15803d' : 'var(--brand)' }} onClick={submitForApproval} disabled={approveState === 'working' || !f.approvers.length}>
               📩 Send for approval
             </button>
             {(testState && testState !== 'sending') && <span style={{ fontSize: 12, color: testState.startsWith('✓') ? 'var(--success,#10b981)' : 'var(--error,#ef4444)' }}>{testState}</span>}

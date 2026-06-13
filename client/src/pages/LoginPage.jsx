@@ -41,7 +41,7 @@ export default function LoginPage() {
 
         {error && <div style={{ color: 'var(--error)', fontSize: 13, marginTop: 10 }}>{error}</div>}
 
-        <button type="submit" disabled={busy} className="btn-key" style={btn}>{busy ? 'Signing in…' : 'Sign in'}</button>
+        <button type="submit" disabled={busy} className="btn-key liquid-btn" style={btn}>{busy ? 'Signing in…' : 'Sign in'}</button>
       </form>
     </div>
   );
