@@ -165,9 +165,12 @@ export default function ClientLayout() {
       } catch { /* ignore */ }
     };
     poll();
-    const t = setInterval(poll, 60000); // light poll; webhook push later
+    const t = setInterval(poll, 20000); // keep the badge fresh
     window.addEventListener('os-refresh', poll); // instant update after ack/reply
-    return () => { alive = false; clearInterval(t); window.removeEventListener('os-refresh', poll); };
+    const onVis = () => { if (document.visibilityState === 'visible') poll(); };
+    document.addEventListener('visibilitychange', onVis);
+    window.addEventListener('focus', onVis);
+    return () => { alive = false; clearInterval(t); window.removeEventListener('os-refresh', poll); document.removeEventListener('visibilitychange', onVis); window.removeEventListener('focus', onVis); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname, activeEntityId]);
 

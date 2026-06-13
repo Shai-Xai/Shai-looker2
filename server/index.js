@@ -1835,9 +1835,10 @@ app.get('/api/actions-summary/:entityId', auth.requireAuth, (req, res) => {
   res.json({ actions: actionsSummaryFor(id, 6), pendingApproval: pendingApprovalCount(id) });
 });
 
-// Campaigns automation has queued and are waiting for a human go-ahead.
+// Campaigns waiting for a human go-ahead: automation-queued drafts AND
+// campaigns submitted for approval (status 'pending'). Drives the inbox badge.
 function pendingApprovalCount(entityId) {
-  try { return db.db.prepare("SELECT COUNT(*) n FROM actions WHERE entity_id=? AND status='draft' AND created_by='automation'").get(entityId)?.n || 0; }
+  try { return db.db.prepare("SELECT COUNT(*) n FROM actions WHERE entity_id=? AND ((status='draft' AND created_by='automation') OR status='pending')").get(entityId)?.n || 0; }
   catch { return 0; }
 }
 
