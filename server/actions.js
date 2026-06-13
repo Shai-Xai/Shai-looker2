@@ -164,6 +164,11 @@ function mount(app, { db, auth, mailer, push, resolveAudience, draftCopy, listEv
         consentField: String(aud.consentField || ''),
         ticketField: String(aud.ticketField || ''),
         anchorField: String(aud.anchorField || ''), // abandonment timestamp column (drip timing)
+        // Optional second source of customer attributes (lifetime spend, loyalty
+        // tier…), joined to the audience by email — its columns become filterable.
+        attrDashboardId: String(aud.attrDashboardId || ''),
+        attrTileId: String(aud.attrTileId || ''),
+        attrEmailField: String(aud.attrEmailField || ''),
         // Optional targeting filters on the tile's own columns (city, age,
         // ticket category, new/returning…). op 'in' = value ∈ values;
         // 'between' = min ≤ numeric ≤ max. All filters AND together.
@@ -252,12 +257,13 @@ function mount(app, { db, auth, mailer, push, resolveAudience, draftCopy, listEv
   async function audienceFor(entityId, cfg, user) {
     let raw = [];
     let fields = [];
+    let filterFields = [];
     let noConsent = 0;
     let filteredOut = 0;
     if (cfg.audience.mode === 'paste') {
       raw = cfg.audience.pasted.split(/[\s,;]+/).map((e) => e.trim().toLowerCase()).filter((e) => EMAIL_RE.test(e)).map((email) => ({ email }));
     } else {
-      if (!cfg.audience.dashboardId || !cfg.audience.tileId) return { list: [], fields: [], excluded: 0, noConsent: 0, filteredOut: 0 };
+      if (!cfg.audience.dashboardId || !cfg.audience.tileId) return { list: [], fields: [], filterFields: [], excluded: 0, noConsent: 0, filteredOut: 0 };
       const res = await resolveAudience({ entityId, dashboardId: cfg.audience.dashboardId, tileId: cfg.audience.tileId, user });
       fields = res.fields;
       const emailField = cfg.audience.emailField || res.fields.find((f) => /email/i.test(f.name) || /email/i.test(f.label))?.name || '';
@@ -266,12 +272,31 @@ function mount(app, { db, auth, mailer, push, resolveAudience, draftCopy, listEv
       const ticketField = cfg.audience.ticketField || '';
       const anchorField = cfg.audience.anchorField || '';
       const filters = cfg.audience.filters || [];
+      // Optional attributes source: resolve once and key by email, so its
+      // columns can be filtered on (joined to each audience row).
+      let attrMap = null; let attrFields = [];
+      if (cfg.audience.attrDashboardId && cfg.audience.attrTileId) {
+        try {
+          const ar = await resolveAudience({ entityId, dashboardId: cfg.audience.attrDashboardId, tileId: cfg.audience.attrTileId, user });
+          attrFields = ar.fields || [];
+          const aEmail = cfg.audience.attrEmailField || attrFields.find((f) => /email/i.test(f.name) || /email/i.test(f.label))?.name || '';
+          if (aEmail) { attrMap = new Map(); for (const r of ar.rows) { const e = cellVal(r[aEmail]).toLowerCase(); if (e) attrMap.set(e, r); } }
+        } catch (e) { console.error('[actions] attributes source failed', e.message); }
+      }
+      // Fields offered for FILTERING = audience tile + attributes tile (tagged
+      // with their source so the UI can fetch each one's distinct values).
+      filterFields = [
+        ...res.fields.map((f) => ({ name: f.name, label: f.label, dashboardId: cfg.audience.dashboardId, tileId: cfg.audience.tileId })),
+        ...attrFields.map((f) => ({ name: f.name, label: `${f.label} (attributes)`, dashboardId: cfg.audience.attrDashboardId, tileId: cfg.audience.attrTileId })),
+      ];
       if (emailField) {
         for (const row of res.rows) {
           const email = cellVal(row[emailField]).toLowerCase();
           if (!EMAIL_RE.test(email)) continue;
-          // Targeting filters (city/age/ticket category/…) — narrow the segment.
-          if (filters.length && !rowPassesFilters(row, filters)) { filteredOut += 1; continue; }
+          // Merge the attributes row (if any) so filters can read its columns.
+          const merged = attrMap ? { ...row, ...(attrMap.get(email) || {}) } : row;
+          // Targeting filters (city/age/ticket category/lifetime spend/…).
+          if (filters.length && !rowPassesFilters(merged, filters)) { filteredOut += 1; continue; }
           // Consent gate: when a consent column is chosen, only include "Yes".
           if (consentField && !isYes(cellVal(row[consentField]))) { noConsent += 1; continue; }
           raw.push({ email, name: nameField ? cellVal(row[nameField]) : '', ticket: ticketField ? cellVal(row[ticketField]) : '', anchorRaw: anchorField ? cellVal(row[anchorField]) : '' });
@@ -290,7 +315,7 @@ function mount(app, { db, auth, mailer, push, resolveAudience, draftCopy, listEv
       list.push(r);
       if (list.length >= MAX_AUDIENCE) break;
     }
-    return { list, fields, excluded, noConsent, filteredOut };
+    return { list, fields, filterFields, excluded, noConsent, filteredOut };
   }
 
   // ── Promo / discount codes ──
@@ -531,8 +556,8 @@ function mount(app, { db, auth, mailer, push, resolveAudience, draftCopy, listEv
     if (!guard(req, res, req.params.entityId)) return;
     try {
       const cfg = cleanConfig(req.body || {});
-      const { list, fields, excluded, noConsent, filteredOut } = await audienceFor(req.params.entityId, cfg, req.user);
-      res.json({ count: list.length, excluded, noConsent, filteredOut, sample: list.slice(0, 8), fields: (fields || []).map((f) => ({ name: f.name, label: f.label })) });
+      const { list, fields, filterFields, excluded, noConsent, filteredOut } = await audienceFor(req.params.entityId, cfg, req.user);
+      res.json({ count: list.length, excluded, noConsent, filteredOut, sample: list.slice(0, 8), fields: (fields || []).map((f) => ({ name: f.name, label: f.label })), filterFields: filterFields || [] });
     } catch (e) { res.status(400).json({ error: e.message }); }
   });
 
