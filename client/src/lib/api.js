@@ -217,6 +217,7 @@ export const api = {
   deleteMaster: (entityId, name) => fetch(`/api/actions/${entityId}/masters/${encodeURIComponent(name)}`, { method: 'DELETE' }).then((r) => (r.ok ? {} : Promise.reject(new Error('Failed')))),
   listActions: (entityId) => fetch(`/api/actions/${entityId}`).then(json),
   submitAction: (entityId, id, body) => fetch(`/api/actions/${entityId}/${id}/submit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
+  actionThread: (entityId, id) => fetch(`/api/actions/${entityId}/${id}/thread`).then(json),
   rejectAction: (entityId, id, note) => fetch(`/api/actions/${entityId}/${id}/reject`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ note }) }).then(json),
   setApprovalSetting: (entityId, requireApproval) => fetch(`/api/actions/${entityId}/approval-setting`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ requireApproval }) }).then(json),
   createAction: (entityId, b) => fetch(`/api/actions/${entityId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),

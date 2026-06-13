@@ -405,6 +405,14 @@ function mount(app, { db, auth, mailer, push }) {
     return t;
   }
 
+  // Read a subject's thread (e.g. a campaign's approval conversation) for embedding
+  // elsewhere. Read-only — does not mark read or mutate receipts.
+  function subjectThread(entityId, subjectType, subjectId) {
+    const r = sql.prepare('SELECT * FROM os_threads WHERE entity_id=? AND subject_type=? AND subject_id=? ORDER BY updated_at DESC LIMIT 1').get(entityId, subjectType, subjectId);
+    if (!r) return null;
+    return { thread: threadRow(r), messages: messages(r.id) };
+  }
+
   // Admin: who has read / acknowledged a thread (the audit the ops team never had).
   app.get('/api/os/admin/threads/:id/receipts', auth.requireAdmin, requireOn, (req, res) => {
     const rows = sql.prepare('SELECT user_id, kind, at FROM os_receipts WHERE thread_id=?').all(req.params.id);
@@ -504,7 +512,7 @@ function mount(app, { db, auth, mailer, push }) {
   });
 
   console.log('[os] Experience OS spine mounted', enabled() ? '(enabled)' : '(disabled — set os_enabled=1)');
-  return { announce };
+  return { announce, subjectThread };
 }
 
 module.exports = { mount };

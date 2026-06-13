@@ -861,19 +861,21 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     const text = `${isEmail && c.subject ? `Subject: ${c.subject}\n` : ''}${c.body || ''}`;
     return { text, html: card(c.subject, c.body, isEmail ? c.heroImage : '') };
   }
-  function notifyApprovers(a) {
+  function notifyApprovers(a, opts = {}) {
+    const note = String(opts.message || '').trim();
     const path = `/actions?action=${a.id}`;
     const link = `${mailer.baseUrl()}${path}`;
     const title = 'Campaign approval needed';
     const name = a.title || a.config.subject || 'A campaign';
     const lines = campaignSummaryLines(a);
     const content = campaignContentPreview(a);
-    const body = `“${name}” is waiting for your approval.\n\n${lines.map((l) => `• ${l}`).join('\n')}\n\n— Content —\n${content.text}\n\nReview, preview & approve (or send back to draft):\n${link}`;
+    const noteBlock = note ? `“${opts.fromName || 'The sender'}” says:\n${note}\n\n` : '';
+    const body = `${noteBlock}“${name}” is waiting for your approval.\n\n${lines.map((l) => `• ${l}`).join('\n')}\n\n— Content —\n${content.text}\n\nReview, preview & approve (or send back to draft):\n${link}`;
     const wantsHowler = (a.config.approvers || []).some((x) => x.type === 'howler');
     const howler = wantsHowler ? howlerAdminsFor(a.entityId) : [];
     try { os?.announce?.({ entityId: a.entityId, title, body, priority: 'needs_reply', createdBy: 'campaigns@pulse', authorType: 'system', subjectType: 'campaign', subjectId: a.id }); } catch { /* os optional */ }
     if (push?.isEnabled?.()) {
-      const pushBody = `“${name}” is waiting for your approval.`;
+      const pushBody = note ? `${note.slice(0, 90)} — “${name}” needs approval.` : `“${name}” is waiting for your approval.`;
       for (const ap of a.config.approvers || []) {
         if (ap.type === 'user' && ap.userId) push.sendToUser(ap.userId, { title, body: pushBody, url: path, tag: `approve-${a.id}`, requireInteraction: true }).catch(() => {});
       }
@@ -889,8 +891,9 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
       for (const u of howler) emails.add(u.email);
       if (emails.size) {
         const summaryHtml = lines.map((l) => { const [k, ...v] = l.split(':'); return `<b>${k}:</b>${v.join(':')}`; }).join('<br>');
+        const noteHtml = note ? `<div style="border-left:3px solid var(--brand,#ff385c);padding:6px 0 6px 12px;margin-bottom:14px;"><b>${esc(opts.fromName || 'The sender')}</b> says:<br>${esc(note)}</div>` : '';
         const html = mailer.notificationEmail({
-          title, body: `“${esc(name)}” is waiting for your approval.<br><br>${summaryHtml}<br><br><b>Preview${a.config.channel === 'sms' ? ' (SMS)' : ''}:</b>${content.html}Open it to approve, or send it back to draft.`,
+          title, body: `${noteHtml}“${esc(name)}” is waiting for your approval.<br><br>${summaryHtml}<br><br><b>Preview${a.config.channel === 'sms' ? ' (SMS)' : ''}:</b>${content.html}Open it to approve, or send it back to draft.`,
           ctaText: 'Review & approve', ctaPath: path, preheader: `Approval needed: ${name}`, entityId: a.entityId,
         });
         mailer.send({ to: [...emails], subject: `Approval needed: ${name}`, html, kind: 'campaign-approval', entity: a.entityId }).catch(() => {});
@@ -925,6 +928,20 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     }
   }
 
+  // The campaign's comms/approval conversation — so anyone viewing the campaign
+  // sees the full log (who submitted, approvals, rejections, comments).
+  app.get('/api/actions/:entityId/:id/thread', auth.requireAuth, auth.requirePermission('campaigns.view'), (req, res) => {
+    if (!guard(req, res, req.params.entityId)) return;
+    const a = getAction(req.params.id);
+    if (!a || a.entityId !== req.params.entityId) return res.status(404).json({ error: 'Not found' });
+    const t = os?.subjectThread?.(a.entityId, 'campaign', a.id);
+    const messages = (t?.messages || []).map((m) => ({
+      author: m.authorType === 'howler' ? 'Howler' : m.authorType === 'system' ? 'Pulse' : (m.authorName || m.authorEmail || 'Someone'),
+      body: m.body, at: m.createdAt,
+    }));
+    res.json({ messages });
+  });
+
   // Submit a draft for approval → status 'pending', notify the named approvers.
   app.post('/api/actions/:entityId/:id/submit', auth.requireAuth, auth.requirePermission('campaigns.approve'), (req, res) => {
     if (!guard(req, res, req.params.entityId)) return;
@@ -936,7 +953,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     const cfg = { ...a.config, approvers: cleanConfig({ ...req.body, approvers }).approvers };
     sql.prepare('DELETE FROM action_approvals WHERE action_id=?').run(a.id);
     sql.prepare('UPDATE actions SET status=?, config=?, updated_at=? WHERE id=?').run('pending', JSON.stringify(cfg), now(), a.id);
-    notifyApprovers(getAction(a.id));
+    notifyApprovers(getAction(a.id), { message: String(req.body?.message || '').slice(0, 2000), fromName: req.user.email });
     res.json({ ok: true, pending: true });
   });
 

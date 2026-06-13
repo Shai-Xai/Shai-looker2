@@ -319,6 +319,12 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
   const isPending = action?.status === 'pending';
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectNote, setRejectNote] = useState('');
+  const [submitMessage, setSubmitMessage] = useState(''); // optional note when sending for approval
+  const [thread, setThread] = useState([]); // campaign comms/approval log
+  useEffect(() => {
+    if (!action?.id) return;
+    api.actionThread(entityId, action.id).then((r) => setThread(r.messages || [])).catch(() => {});
+  }, [action?.id, action?.status, entityId]);
 
   const refreshAudience = () => {
     // Snapshot children (queued by an automation) carry their audience already.
@@ -414,7 +420,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
       let id = action?.id;
       if (id) await api.updateAction(entityId, id, payload());
       else { const r = await api.createAction(entityId, payload()); id = r.action.id; }
-      await api.submitAction(entityId, id, { approvers: f.approvers });
+      await api.submitAction(entityId, id, { approvers: f.approvers, message: submitMessage });
       setApproveState('✓ Sent for approval');
       setTimeout(onSaved, 900);
     } catch (e) { setApproveState(`✗ ${e.message}`); }
@@ -770,7 +776,26 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
               })}
               {approverCandidates.length === 0 && <span style={{ fontSize: 12, color: 'var(--muted)' }}>No client approvers yet — you can still require Howler.</span>}
             </div>
+            <div style={{ marginTop: 12 }}>
+              <div style={hintLbl}>Message to approvers (optional)</div>
+              <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit' }} rows={2} value={submitMessage} onChange={(e) => setSubmitMessage(e.target.value)} placeholder="e.g. Please approve by Friday — sending ahead of the weekend push." />
+              <div style={hintS}>Included in the approval notification (inbox + email) and kept in the campaign's activity log.</div>
+            </div>
           </Accordion>
+
+          {thread.length > 0 && (
+            <Accordion title={`Activity & comms (${thread.length})`} {...acc('activity')}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {thread.map((m, i) => (
+                  <div key={i} style={{ borderLeft: '2px solid var(--hairline)', paddingLeft: 10 }}>
+                    <div style={{ fontSize: 11.5, color: 'var(--muted)' }}><b style={{ color: 'var(--text)' }}>{m.author}</b> · {(() => { try { return new Date(m.at).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch { return ''; } })()}</div>
+                    <div style={{ fontSize: 13, whiteSpace: 'pre-wrap', marginTop: 2 }}>{m.body}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={hintS}>The full approval conversation for this campaign — submissions, approvals, rejections and comments.</div>
+            </Accordion>
+          )}
 
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 4, flexWrap: 'wrap' }}>
             <button style={mini} onClick={saveDraft} disabled={busy}>{busy ? 'Saving…' : 'Save draft'}</button>
