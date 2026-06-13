@@ -38,14 +38,74 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
 
   if (!data) return <p style={{ color: 'var(--muted)', fontSize: 13 }}>Loading…</p>;
 
+  // Existing master-campaign names (for the editor's autocomplete).
+  const masterNames = [...new Set((data.actions || []).map((a) => a.config?.master).filter(Boolean))].sort();
+
   if (editing) {
     return <CampaignEditor entityId={entityId} isAdmin={isAdmin} action={editing === 'new' ? null : editing} initialGoal={editing === 'new' ? initialGoal : ''}
-      initialTemplate={editing === 'new' ? tpl : null}
+      initialTemplate={editing === 'new' ? tpl : null} masterNames={masterNames}
       onClose={() => { setEditing(null); setTpl(null); }} onSaved={() => { setEditing(null); setTpl(null); load(); }} />;
   }
   if (reporting) {
     return <CampaignReport entityId={entityId} action={reporting} onClose={() => setReporting(null)} />;
   }
+
+  // One campaign row (shared by grouped + ungrouped rendering).
+  const rowFor = (a) => (
+    <div key={a.id} style={{ ...card, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <span style={{ fontWeight: 700, fontSize: 14 }}>{a.title || a.config.subject || 'Untitled campaign'}</span>
+          {a.config?.category && <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 980, color: 'var(--brand)', background: 'rgba(var(--brand-rgb,255,56,92),0.10)' }}>{a.config.category}</span>}
+          <StatusChip status={a.status} />
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 3 }}>
+          {a.config?.campaignMode === 'sequence'
+            ? `Sequence · ${(a.config.steps || []).length} step${(a.config.steps || []).length === 1 ? '' : 's'}${a.status === 'auto' ? ' · running automatically' : ''}${a.results?.codesEmpty ? ' · ⚠ codes exhausted — sign-ups paused' : ''}`
+            : a.status === 'auto'
+            ? `Automation active · checks daily${a.lastCheck ? ` · last check ${fmt(a.lastCheck)}` : ''}`
+            : a.status === 'draft'
+            ? (a.createdBy === 'automation' ? `⏳ Queued by automation · awaiting approval · ${fmt(a.createdAt)}` : `Draft · created ${fmt(a.createdAt)} by ${a.createdBy}`)
+            : `Approved by ${a.approvedBy} · ${fmt(a.approvedAt)}`}
+        </div>
+        {a.config?.campaignMode === 'sequence' && a.status === 'auto' ? (
+          <div style={{ display: 'flex', gap: 14, marginTop: 6, fontSize: 12.5, fontWeight: 600, flexWrap: 'wrap' }}>
+            <span>👥 {a.results?.enrolled ?? 0} enrolled</span>
+            <span>📤 {a.results?.sent ?? 0} sent</span>
+            <span style={{ color: 'var(--success,#10b981)' }}>✓ {a.results?.converted ?? 0} converted</span>
+            {a.promoCodes && <span style={{ color: 'var(--muted)' }}>🎟 {a.promoCodes.available}/{a.promoCodes.total} codes left</span>}
+          </div>
+        ) : a.status !== 'draft' && (
+          <div style={{ display: 'flex', gap: 14, marginTop: 6, fontSize: 12.5, fontWeight: 600, flexWrap: 'wrap' }}>
+            <span>📤 {a.results.sent ?? 0}/{a.results.total ?? a.audienceCount} sent</span>
+            {(a.results.failed ?? 0) > 0 && <span style={{ color: 'var(--error,#ef4444)' }}>✗ {a.results.failed} failed</span>}
+            <span>🔗 {a.results.clicks ?? 0} clicks</span>
+            {a.results.sent > 0 && <span style={{ color: 'var(--muted)' }}>{Math.round(((a.results.clicks || 0) / a.results.sent) * 100)}% CTR</span>}
+          </div>
+        )}
+        {a.results?.lastError && a.status !== 'done' && <div style={{ fontSize: 11, color: 'var(--error,#ef4444)', marginTop: 3 }}>{a.results.lastError}</div>}
+      </div>
+      <div style={{ display: 'flex', gap: 6, flexShrink: 0, flexWrap: 'wrap' }}>
+        {(a.status === 'done' || a.status === 'running' || a.status === 'failed') && <button style={mini} onClick={() => setReporting(a)}>📊 Report</button>}
+        {(a.status === 'draft' || a.status === 'auto') && <button style={mini} onClick={() => setEditing(a)}>{a.createdBy === 'automation' ? 'Review & approve' : 'Edit'}</button>}
+        {a.status === 'auto' && <button style={mini} onClick={() => api.pauseAction(entityId, a.id).then(load)}>⏸ Pause</button>}
+        {a.status !== 'running' && <button style={{ ...mini, color: 'var(--error,#ef4444)' }} onClick={() => { if (confirm('Delete this campaign?')) api.deleteAction(entityId, a.id).then(load); }}>Delete</button>}
+      </div>
+    </div>
+  );
+  // Group campaigns by master campaign (ungrouped last). Each group shows
+  // combined stats so a master reports at a glance.
+  const groups = (() => {
+    const m = new Map();
+    for (const a of data.actions) { const k = a.config?.master || ''; if (!m.has(k)) m.set(k, []); m.get(k).push(a); }
+    const named = [...m.entries()].filter(([k]) => k).sort((a, b) => a[0].localeCompare(b[0]));
+    const ungrouped = m.get('') || [];
+    return { named, ungrouped };
+  })();
+  const agg = (list) => list.reduce((s, a) => ({
+    sent: s.sent + (a.results?.sent || 0), converted: s.converted + (a.results?.converted || 0),
+    clicks: s.clicks + (a.results?.clicks || 0), enrolled: s.enrolled + (a.results?.enrolled || 0),
+  }), { sent: 0, converted: 0, clicks: 0, enrolled: 0 });
 
   return (
     <div>
@@ -79,53 +139,30 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
         <div style={{ ...card, textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>
           No campaigns yet. Try one: target customers who abandoned checkout and bring them back.
         </div>
-      ) : data.actions.map((a) => (
-        <div key={a.id} style={{ ...card, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-              <span style={{ fontWeight: 700, fontSize: 14 }}>{a.title || a.config.subject || 'Untitled campaign'}</span>
-              {a.config?.category && <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 980, color: 'var(--brand)', background: 'rgba(var(--brand-rgb,255,56,92),0.10)' }}>{a.config.category}</span>}
-              <StatusChip status={a.status} />
-            </div>
-            <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 3 }}>
-              {a.config?.campaignMode === 'sequence'
-                ? `Sequence · ${(a.config.steps || []).length} step${(a.config.steps || []).length === 1 ? '' : 's'}${a.status === 'auto' ? ' · running automatically' : ''}${a.results?.codesEmpty ? ' · ⚠ codes exhausted — sign-ups paused' : ''}`
-                : a.status === 'auto'
-                ? `Automation active · checks daily${a.lastCheck ? ` · last check ${fmt(a.lastCheck)}` : ''}`
-                : a.status === 'draft'
-                ? (a.createdBy === 'automation' ? `⏳ Queued by automation · awaiting approval · ${fmt(a.createdAt)}` : `Draft · created ${fmt(a.createdAt)} by ${a.createdBy}`)
-                : `Approved by ${a.approvedBy} · ${fmt(a.approvedAt)}`}
-            </div>
-            {a.config?.campaignMode === 'sequence' && a.status === 'auto' ? (
-              <div style={{ display: 'flex', gap: 14, marginTop: 6, fontSize: 12.5, fontWeight: 600 }}>
-                <span>👥 {a.results?.enrolled ?? 0} enrolled</span>
-                <span>📤 {a.results?.sent ?? 0} sent</span>
-                <span style={{ color: 'var(--success,#10b981)' }}>✓ {a.results?.converted ?? 0} converted</span>
-                {a.promoCodes && <span style={{ color: 'var(--muted)' }}>🎟 {a.promoCodes.available}/{a.promoCodes.total} codes left</span>}
+      ) : (
+        <>
+          {groups.named.map(([name, list]) => {
+            const t = agg(list);
+            return (
+              <div key={name} style={{ marginBottom: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap', padding: '0 2px 6px' }}>
+                  <span style={{ fontSize: 13, fontWeight: 800 }}>🗂 {name}</span>
+                  <span style={{ fontSize: 12, color: 'var(--muted)' }}>
+                    {list.length} campaign{list.length === 1 ? '' : 's'} · {t.sent} sent · {t.clicks} clicks{t.converted ? ` · ${t.converted} converted` : ''}
+                  </span>
+                </div>
+                <div style={{ borderLeft: '2px solid var(--hairline)', paddingLeft: 10 }}>{list.map(rowFor)}</div>
               </div>
-            ) : a.status !== 'draft' && (
-              <div style={{ display: 'flex', gap: 14, marginTop: 6, fontSize: 12.5, fontWeight: 600 }}>
-                <span>📤 {a.results.sent ?? 0}/{a.results.total ?? a.audienceCount} sent</span>
-                {(a.results.failed ?? 0) > 0 && <span style={{ color: 'var(--error,#ef4444)' }}>✗ {a.results.failed} failed</span>}
-                <span>🔗 {a.results.clicks ?? 0} clicks</span>
-                {a.results.sent > 0 && <span style={{ color: 'var(--muted)' }}>{Math.round(((a.results.clicks || 0) / a.results.sent) * 100)}% CTR</span>}
-              </div>
-            )}
-            {a.results?.lastError && a.status !== 'done' && <div style={{ fontSize: 11, color: 'var(--error,#ef4444)', marginTop: 3 }}>{a.results.lastError}</div>}
-          </div>
-          <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-            {(a.status === 'done' || a.status === 'running' || a.status === 'failed') && <button style={mini} onClick={() => setReporting(a)}>📊 Report</button>}
-            {(a.status === 'draft' || a.status === 'auto') && <button style={mini} onClick={() => setEditing(a)}>{a.createdBy === 'automation' ? 'Review & approve' : 'Edit'}</button>}
-            {a.status === 'auto' && <button style={mini} onClick={() => api.pauseAction(entityId, a.id).then(load)}>⏸ Pause</button>}
-            {a.status !== 'running' && <button style={{ ...mini, color: 'var(--error,#ef4444)' }} onClick={() => { if (confirm('Delete this campaign?')) api.deleteAction(entityId, a.id).then(load); }}>Delete</button>}
-          </div>
-        </div>
-      ))}
+            );
+          })}
+          {groups.ungrouped.map(rowFor)}
+        </>
+      )}
     </div>
   );
 }
 
-function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTemplate = null, onClose, onSaved }) {
+function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTemplate = null, masterNames = [], onClose, onSaved }) {
   const cfg = action?.config || {};
   const tpl = initialTemplate;           // a resolved template (recipe), when creating from one
   const tp = tpl?.preset || {};          // the template's copy/utm presets
@@ -155,6 +192,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
     // Which recipe this came from — labels & groups the campaign, helps automation.
     templateKey: cfg.templateKey || tpl?.key || '',
     category: cfg.category || tpl?.category || '',
+    master: cfg.master || '', // master-campaign group name (links segments)
     // Delivery: once-off (single send) or a full automated sequence (drip).
     campaignMode: cfg.campaignMode || 'once',
     anchorField: cfg.audience?.anchorField || '',
@@ -197,7 +235,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
     ctaText: f.campaignMode === 'sequence' ? (f.steps[0]?.ctaText || '') : f.ctaText,
     ctaUrl: f.ctaUrl, utm: f.utm, recurring: f.recurring,
     eventSuiteId: f.eventSuiteId, contentMode: f.contentMode, heroImage: f.heroImage, customHtml: f.customHtml,
-    templateKey: f.templateKey, category: f.category,
+    templateKey: f.templateKey, category: f.category, master: f.master,
     campaignMode: f.campaignMode, steps: f.steps,
     promo: f.promo,
     promoCodes: promoCodesText.split(/[\s,;]+/).map((c) => c.trim()).filter(Boolean),
@@ -334,6 +372,12 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0,1fr) minmax(0,1fr)', gap: 20, alignItems: 'start' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <Field label="Campaign name"><input style={input} value={f.title} onChange={(e) => set('title', e.target.value)} placeholder="e.g. Abandoned cart — Pretoria show" /></Field>
+
+          <Field label="Master campaign (optional · groups & reports segments together)">
+            <input style={input} value={f.master} onChange={(e) => set('master', e.target.value)} placeholder="e.g. Bushfire — abandoned cart" list="master-campaign-list" />
+            <datalist id="master-campaign-list">{masterNames.map((m) => <option key={m} value={m} />)}</datalist>
+            <div style={hintS}>Give related segment campaigns (VIP, GA, by city…) the same master to manage and report on them together.</div>
+          </Field>
 
           {events.length > 0 && (
             <Field label="Event (optional)">

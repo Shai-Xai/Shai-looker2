@@ -204,6 +204,10 @@ function mount(app, { db, auth, mailer, push, resolveAudience, draftCopy, listEv
         content: String(body.utm?.content || '').slice(0, 100),
       },
       goal: String(body.goal || '').slice(0, 1000),
+      // Master campaign: a shared group name linking related segment campaigns
+      // (e.g. one master "Bushfire abandoned cart" over VIP / GA / Cape Town
+      // segments) so they manage + report together.
+      master: String(body.master || '').slice(0, 80),
       // Which template (recipe) this campaign came from — labels it and groups
       // it (e.g. 'Abandoned carts'), and helps the automation later.
       templateKey: String(body.templateKey || '').slice(0, 60),
