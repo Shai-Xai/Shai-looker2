@@ -14,6 +14,7 @@ const { recreateDashboard, fetchDashboard } = require('./recreate');
 const { parseDrillUrl } = require('./drill');
 const insights = require('./insights');
 const mailer = require('./mailer');
+const messaging = require('./messaging');
 
 const app = express();
 // Behind a reverse proxy (Caddy/Nginx) in production so Secure cookies + the
@@ -55,6 +56,8 @@ migrate.run();
 auth.seedAdmin();
 // Outbound email (Resend) — disposable module; senders no-op when unconfigured.
 mailer.init({ db });
+// SMS (Clickatell One API) — second channel; no-ops when unconfigured.
+messaging.init({ db });
 // Web Push — installable-app notifications (disposable module, own table +
 // routes under /api/push, kill switch `push_enabled`). Mounted before os so the
 // comms spine can push alongside email.
@@ -1838,6 +1841,27 @@ function pendingApprovalCount(entityId) {
   catch { return 0; }
 }
 
+// SMS provider (Clickatell) config — write-only key (report set + mask only).
+app.get('/api/admin/sms-config', auth.requireAdmin, (_req, res) => {
+  const key = db.getSetting('clickatell_api_key') || '';
+  res.json({ configured: !!key, keyHint: maskSecret(key), sender: db.getSetting('sms_sender', ''), endpoint: db.getSetting('clickatell_endpoint', '') });
+});
+app.put('/api/admin/sms-config', auth.requireAdmin, (req, res) => {
+  const b = req.body || {};
+  if (typeof b.apiKey === 'string' && b.apiKey.trim()) db.setSetting('clickatell_api_key', b.apiKey.trim()); // only overwrite when provided
+  if ('sender' in b) db.setSetting('sms_sender', String(b.sender || '').slice(0, 40));
+  if ('endpoint' in b) db.setSetting('clickatell_endpoint', String(b.endpoint || '').slice(0, 300));
+  const key = db.getSetting('clickatell_api_key') || '';
+  res.json({ configured: !!key, keyHint: maskSecret(key), sender: db.getSetting('sms_sender', ''), endpoint: db.getSetting('clickatell_endpoint', '') });
+});
+// Send a test SMS to a number (admin) — confirms the provider end to end.
+app.post('/api/admin/sms-test', auth.requireAdmin, async (req, res) => {
+  const to = String((req.body || {}).to || '').trim();
+  if (!to) return res.status(400).json({ error: 'A phone number is required' });
+  const r = await messaging.sendSms({ to, text: 'Howler : Pulse — SMS is connected ✓' });
+  res.json(r);
+});
+
 // Platform notification settings (admin). Small allowlisted key/values.
 app.get('/api/admin/notification-settings', auth.requireAdmin, (_req, res) => {
   res.json({ ackReminderHours: Number(db.getSetting('ack_reminder_hours', '12')) || 12 });
@@ -1940,7 +1964,7 @@ require('./scheduler').mount(app, { db, auth, mailer, push, generateContent: bui
 // organiser scoping as the dashboards themselves. Remove this line + actions.js
 // to uninstall.
 require('./actions').mount(app, {
-  db, auth, mailer, push,
+  db, auth, mailer, push, messaging,
   // Run a tile's query (scoped + suite-locked) and return its rows + fields —
   // the campaign audience source.
   resolveAudience: async ({ entityId, dashboardId, tileId, user }) => {
