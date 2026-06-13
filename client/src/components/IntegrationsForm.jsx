@@ -4,7 +4,7 @@ import { useState } from 'react';
 // write-only: the form only knows whether a value is set (value.*.keySet /
 // clientSecretSet); typing a new value changes it, blank leaves it unchanged.
 // `onSave(payload)` receives only the fields that changed.
-export default function IntegrationsForm({ value, onSave, showLooker = true, lookerActive = true, showResend = false, onTestEmail }) {
+export default function IntegrationsForm({ value, onSave, showLooker = true, lookerActive = true, showResend = false, onTestEmail, collapsible = false }) {
   const [baseUrl, setBaseUrl] = useState(value?.looker?.baseUrl || '');
   const [clientId, setClientId] = useState(value?.looker?.clientId || '');
   const [clientSecret, setClientSecret] = useState('');
@@ -53,8 +53,7 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       {/* Anthropic */}
-      <section style={card}>
-        <div style={secTitle}>🤖 Anthropic (AI insights)</div>
+      <Section title="🤖 Anthropic (AI insights)" collapsible={collapsible}>
         <Lbl>API key</Lbl>
         <input
           type="password"
@@ -70,12 +69,11 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
             <input type="checkbox" checked={clearKey} onChange={(e) => setClearKey(e.target.checked)} /> Remove this key
           </label>
         )}
-      </section>
+      </Section>
 
       {/* Resend (email) — platform-level only */}
       {showResend && (
-        <section style={card}>
-          <div style={secTitle}>✉️ Email (Resend)</div>
+        <Section title="✉️ Email (Resend)" collapsible={collapsible}>
           <div style={note}>
             Powers outbound notifications — must-acknowledge messages and Howler replies email the client's logins with a link back into Pulse.
             Until your domain is verified in Resend, the default sender <code>onboarding@resend.dev</code> can only deliver to your own Resend account email.
@@ -138,13 +136,12 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
               {testState && testState !== 'sending' && <span style={{ fontSize: 12.5, color: testState.startsWith('✓') ? 'var(--success, #10b981)' : 'var(--error, #ef4444)' }}>{testState}</span>}
             </div>
           )}
-        </section>
+        </Section>
       )}
 
       {/* Looker */}
       {showLooker && (
-        <section style={card}>
-          <div style={secTitle}>📊 Looker</div>
+        <Section title="📊 Looker" collapsible={collapsible}>
           {!lookerActive && (
             <div style={note}>Per-client Looker isn't active yet — the primary (admin) Looker account is used for now. Your settings here are saved for when it's enabled.</div>
           )}
@@ -167,7 +164,7 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
               <input type="checkbox" checked={clearSecret} onChange={(e) => setClearSecret(e.target.checked)} /> Remove this secret
             </label>
           )}
-        </section>
+        </Section>
       )}
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -180,6 +177,23 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
         )}
       </div>
     </div>
+  );
+}
+
+// A card section that can optionally collapse (admin integrations starts each
+// section collapsed so the long page is scannable).
+function Section({ title, collapsible, children }) {
+  const [open, setOpen] = useState(!collapsible);
+  return (
+    <section style={card}>
+      {collapsible ? (
+        <button type="button" onClick={() => setOpen((o) => !o)} style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', background: 'none', border: 'none', padding: 0, cursor: 'pointer', font: 'inherit', textAlign: 'left' }}>
+          <span style={{ width: 12, fontSize: 10, color: 'var(--muted)', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</span>
+          <span style={secTitle}>{title}</span>
+        </button>
+      ) : <div style={secTitle}>{title}</div>}
+      {open && <div style={collapsible ? { marginTop: 10 } : undefined}>{children}</div>}
+    </section>
   );
 }
 

@@ -1376,7 +1376,7 @@ function AdminIntegrations() {
   return (
     <div>
       <p style={hint}>The primary Looker, Anthropic and email accounts for the whole platform. These override the values in <code>.env</code>. Clients can set their own Looker/Anthropic (Client → Integrations), which take precedence for their data.</p>
-      <IntegrationsForm value={value} showResend onTestEmail={() => api.sendMailTest()} onSave={async (p) => setValue(await api.saveAdminIntegrations(p))} />
+      <IntegrationsForm value={value} showResend collapsible onTestEmail={() => api.sendMailTest()} onSave={async (p) => setValue(await api.saveAdminIntegrations(p))} />
       <h3 style={{ fontSize: 15, fontWeight: 700, margin: '24px 0 4px' }}>Email template — platform default</h3>
       <p style={hint}>The default look of every notification email. Each client can layer their own branding on top (Client → Email branding).</p>
       <MailTemplateEditor scope="platform" canTest />
