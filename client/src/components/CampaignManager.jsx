@@ -258,6 +258,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
   const [audBusy, setAudBusy] = useState(false);
   const [preview, setPreview] = useState('');
   const [previewAll, setPreviewAll] = useState(false); // sequence: render every step
+  const [activeStep, setActiveStep] = useState(0); // sequence: which step the single preview shows
   const [stepPreviews, setStepPreviews] = useState([]); // [{label, html}]
   const [drafting, setDrafting] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -303,14 +304,17 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
   };
   useEffect(() => { refreshAudience(); }, [f.audienceMode, f.dashboardId, f.tileId, f.emailField, f.consentField, f.attrDashboardId, f.attrTileId, JSON.stringify(f.filters)]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Debounced email preview.
+  // Debounced email preview. For a sequence, preview the step you're editing.
   useEffect(() => {
     clearTimeout(debounce.current);
     debounce.current = setTimeout(() => {
-      api.actionPreviewEmail(entityId, payload()).then((r) => setPreview(r.html)).catch(() => {});
+      const base = payload();
+      const st = isSequence ? (f.steps[activeStep] || f.steps[0]) : null;
+      const p = st ? { ...base, subject: st.subject, body: st.body, ctaText: st.ctaText } : base;
+      api.actionPreviewEmail(entityId, p).then((r) => setPreview(r.html)).catch(() => {});
     }, 350);
     return () => clearTimeout(debounce.current);
-  }, [f.subject, f.body, f.ctaText, f.ctaUrl, f.contentMode, f.customHtml, f.heroImage, f.campaignMode, JSON.stringify(f.steps), JSON.stringify(f.promo), f.anchorField]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [f.subject, f.body, f.ctaText, f.ctaUrl, f.contentMode, f.customHtml, f.heroImage, f.campaignMode, activeStep, JSON.stringify(f.steps), JSON.stringify(f.promo), f.anchorField]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Preview EVERY step of a sequence together (rendered each with its own copy).
   useEffect(() => {
@@ -582,7 +586,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
           <Accordion title="Content & offer">
           {isSequence && (
             <Field label="Emails in the sequence">
-              <SequenceSteps steps={f.steps} setStep={setStep} addStep={addStep} removeStep={removeStep} />
+              <SequenceSteps steps={f.steps} setStep={setStep} addStep={addStep} removeStep={removeStep} activeStep={activeStep} onActive={setActiveStep} />
             </Field>
           )}
 
@@ -1121,18 +1125,20 @@ function FilterRow({ entityId, fields, filter, onChange, onRemove }) {
 }
 
 // The drip timeline: each step has a delay (number + hours/days) and its own copy.
-function SequenceSteps({ steps, setStep, addStep, removeStep }) {
+function SequenceSteps({ steps, setStep, addStep, removeStep, activeStep = 0, onActive }) {
   const unitOf = (h) => (h % 24 === 0 && h >= 24 ? 'days' : 'hours');
   const valOf = (h) => (unitOf(h) === 'days' ? h / 24 : h);
   const setDelay = (i, val, unit) => setStep(i, { delayHours: Math.max(0, (Number(val) || 0) * (unit === 'days' ? 24 : 1)) });
+  const focus = (i) => () => onActive?.(i);
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       {steps.map((st, i) => {
         const unit = unitOf(st.delayHours);
+        const isActive = i === activeStep;
         return (
-          <div key={i} style={{ border: '1px solid var(--hairline)', borderRadius: 10, padding: 12, position: 'relative' }}>
+          <div key={i} onClick={focus(i)} style={{ border: `1px solid ${isActive ? 'var(--brand)' : 'var(--hairline)'}`, borderRadius: 10, padding: 12, position: 'relative', cursor: 'pointer' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-              <span style={{ fontWeight: 700, fontSize: 13, color: 'var(--brand)' }}>Step {i + 1}</span>
+              <span style={{ fontWeight: 700, fontSize: 13, color: 'var(--brand)' }}>Step {i + 1}{isActive ? ' · previewing' : ''}</span>
               <span style={{ fontSize: 12, color: 'var(--muted)' }}>· send</span>
               <input type="number" min="0" style={{ ...input, width: 64, padding: '5px 8px' }} value={valOf(st.delayHours)} onChange={(e) => setDelay(i, e.target.value, unit)} />
               <select style={{ ...input, width: 90, padding: '5px 8px' }} value={unit} onChange={(e) => setDelay(i, valOf(st.delayHours), e.target.value)}>
@@ -1143,9 +1149,9 @@ function SequenceSteps({ steps, setStep, addStep, removeStep }) {
               <span style={{ flex: 1 }} />
               {steps.length > 1 && <button type="button" style={{ ...mini, color: 'var(--error,#ef4444)' }} onClick={() => removeStep(i)}>✕</button>}
             </div>
-            <input style={{ ...input, fontWeight: 700, marginBottom: 6 }} value={st.subject} onChange={(e) => setStep(i, { subject: e.target.value })} placeholder={`Step ${i + 1} subject`} />
-            <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit', marginBottom: 6 }} rows={4} value={st.body} onChange={(e) => setStep(i, { body: e.target.value })} placeholder={'Hi {{name}}, …  (tokens: {{ticketType}}, {{promo}})'} />
-            <input style={input} value={st.ctaText} onChange={(e) => setStep(i, { ctaText: e.target.value })} placeholder="Button text (e.g. Complete my purchase)" />
+            <input style={{ ...input, fontWeight: 700, marginBottom: 6 }} value={st.subject} onFocus={focus(i)} onChange={(e) => setStep(i, { subject: e.target.value })} placeholder={`Step ${i + 1} subject`} />
+            <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit', marginBottom: 6 }} rows={4} value={st.body} onFocus={focus(i)} onChange={(e) => setStep(i, { body: e.target.value })} placeholder={'Hi {{name}}, …  (tokens: {{ticketType}}, {{promo}})'} />
+            <input style={input} value={st.ctaText} onFocus={focus(i)} onChange={(e) => setStep(i, { ctaText: e.target.value })} placeholder="Button text (e.g. Complete my purchase)" />
           </div>
         );
       })}
@@ -1156,7 +1162,7 @@ function SequenceSteps({ steps, setStep, addStep, removeStep }) {
           <button key={lbl} type="button" style={{ ...mini, padding: '5px 9px' }} onClick={() => addStep(h)}>{lbl}</button>
         ))}
       </div>
-      <div style={hintS}>Steps auto-sort by delay. Tokens <b>{'{{name}}'}</b>, <b>{'{{ticketType}}'}</b>, <b>{'{{promo}}'}</b> work in every step. The preview shows Step 1.</div>
+      <div style={hintS}>Steps auto-sort by delay. Tokens <b>{'{{name}}'}</b>, <b>{'{{ticketType}}'}</b>, <b>{'{{promo}}'}</b> work in every step. The preview follows the step you’re editing — or use “Preview all steps”.</div>
     </div>
   );
 }
