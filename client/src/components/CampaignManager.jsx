@@ -296,6 +296,9 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
   const removeStep = (i) => setF((s) => ({ ...s, steps: s.steps.filter((_, j) => j !== i) }));
   const isSequence = f.campaignMode === 'sequence';
   const sms = f.channel === 'sms';
+  // Editor sections behave as an exclusive accordion — opening one collapses the rest.
+  const [openSection, setOpenSection] = useState(null);
+  const acc = (key) => ({ open: openSection === key, onToggle: () => setOpenSection((s) => (s === key ? null : key)) });
 
   const refreshAudience = () => {
     // Snapshot children (queued by an automation) carry their audience already.
@@ -455,7 +458,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
       {/* Mobile-first: controls + preview stack into one column on phones. */}
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0,1fr) minmax(0,1fr)', gap: 20, alignItems: 'start' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <Accordion title="Setup">
+          <Accordion title="Setup" {...acc('setup')}>
           <Field label="Campaign name"><input style={input} value={f.title} onChange={(e) => set('title', e.target.value)} placeholder="e.g. Abandoned cart — Pretoria show" /></Field>
 
           <Field label="Master campaign (optional · groups & reports segments together)">
@@ -478,7 +481,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
           </Field>
           </Accordion>
 
-          <Accordion title="Channel & campaign type">
+          <Accordion title="Channel & campaign type" {...acc('channel')}>
           <Field label="Channel">
             <div style={{ display: 'flex', gap: 8 }}>
               <Toggle on={f.channel !== 'sms'} onClick={() => set('channel', 'email')}>✉️ Email</Toggle>
@@ -498,7 +501,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
           </Field>
           </Accordion>
 
-          <Accordion title="Audience & targeting">
+          <Accordion title="Audience & targeting" {...acc('audience')}>
           <Field label="Audience">
             {f.audienceMode === 'snapshot' ? (
               <div style={{ fontSize: 13, background: 'rgba(124,58,237,0.07)', border: '1px solid rgba(124,58,237,0.25)', borderRadius: 8, padding: '9px 12px' }}>
@@ -585,7 +588,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
           </Field>
           </Accordion>
 
-          <Accordion title={sms ? 'Message & offer' : 'Content & offer'}>
+          <Accordion title={sms ? 'Message & offer' : 'Content & offer'} {...acc('content')}>
           {/* Sequence steps — SMS steps are just delay + text. */}
           {isSequence && (
             <Field label={sms ? 'Texts in the sequence' : 'Emails in the sequence'}>
@@ -656,7 +659,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
           </Accordion>
 
           {!isSequence && f.audienceMode === 'tile' && (
-            <Accordion title="Automation">
+            <Accordion title="Automation" {...acc('automation')}>
             <Field label="Automation">
               <div style={{ display: 'flex', gap: 8 }}>
                 <Toggle on={!f.recurring} onClick={() => set('recurring', false)}>One-off send</Toggle>
@@ -669,7 +672,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
             </Accordion>
           )}
 
-          <Accordion title="Tracking (UTM)">
+          <Accordion title="Tracking (UTM)" {...acc('utm')}>
           <Field label="UTM tracking (appended to the link on every click)">
             <button type="button" style={{ ...mini, marginBottom: 8 }} onClick={autoUtm}>✨ Auto-fill</button>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
@@ -687,7 +690,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
           </Field>
           </Accordion>
 
-          <Accordion title={`Approval${requireApproval ? ' (required for this client)' : ''}`}>
+          <Accordion title={`Approval${requireApproval ? ' (required for this client)' : ''}`} {...acc('approval')}>
             <div style={hintS}>Pick who must sign off before this sends. Each approver gets an inbox message + notification with a link to approve. {requireApproval ? 'This client requires approval, so a campaign can only send once everyone approves.' : 'Optional — leave empty to send directly, or add approvers to route it.'}</div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
               {[...approverCandidates.map((c) => ({ type: 'user', userId: c.userId, email: c.email, name: c.email })), { type: 'howler', name: 'Howler' }].map((c) => {
@@ -1057,11 +1060,14 @@ function SmsPreview({ text }) {
   );
 }
 // Collapsible section to keep the long editor tidy — one dropdown per area.
-function Accordion({ title, defaultOpen = false, children }) {
-  const [open, setOpen] = useState(defaultOpen);
+function Accordion({ title, defaultOpen = false, open: controlledOpen, onToggle, children }) {
+  const [localOpen, setLocalOpen] = useState(defaultOpen);
+  const controlled = onToggle !== undefined;
+  const open = controlled ? controlledOpen : localOpen;
+  const toggle = controlled ? onToggle : () => setLocalOpen((o) => !o);
   return (
     <div style={{ border: '1px solid var(--hairline)', borderRadius: 10, overflow: 'hidden' }}>
-      <button type="button" onClick={() => setOpen((o) => !o)} style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left', background: 'var(--card)', border: 'none', cursor: 'pointer', padding: '11px 12px', fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>
+      <button type="button" onClick={toggle} style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left', background: 'var(--card)', border: 'none', cursor: 'pointer', padding: '11px 12px', fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>
         <span style={{ width: 12, color: '#b0b0b6', fontSize: 10, transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</span>
         {title}
       </button>
