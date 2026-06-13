@@ -24,6 +24,7 @@ export default function InboxPage() {
   const isMobile = useIsMobile();
   const { isAdmin } = useAuth();
   const { previewEntityId } = useOutletContext() || {};
+  const [collapsed, setCollapsed] = useState(false); // desktop: hide the thread list for more room
   const [list, setList] = useState(null);
   // Deep links (briefing "Open message →") arrive as /inbox?thread=<id>.
   const [params] = useSearchParams();
@@ -43,8 +44,9 @@ export default function InboxPage() {
 
   if (!list) return <Centered>Loading…</Centered>;
 
-  // On mobile, show the thread full-screen when one is open.
-  const showList = !isMobile || !openId;
+  // On mobile, show the thread full-screen when one is open. On desktop the
+  // list can be collapsed to give the reading pane the full width.
+  const showList = isMobile ? !openId : !collapsed;
   const showThread = !isMobile || !!openId;
 
   return (
@@ -66,14 +68,14 @@ export default function InboxPage() {
       )}
       {showThread && (
         openId
-          ? <ThreadView key={openId} id={openId} isAdmin={isAdmin} isMobile={isMobile} onBack={() => setOpenId(null)} onChange={load} />
+          ? <ThreadView key={openId} id={openId} isAdmin={isAdmin} isMobile={isMobile} onBack={() => setOpenId(null)} onChange={load} listCollapsed={collapsed} onToggleList={() => setCollapsed((c) => !c)} />
           : <Centered>Select a message.</Centered>
       )}
     </div>
   );
 }
 
-function ThreadView({ id, isAdmin, isMobile, onBack, onChange }) {
+function ThreadView({ id, isAdmin, isMobile, onBack, onChange, listCollapsed, onToggleList }) {
   const [data, setData] = useState(null);
   const [text, setText] = useState('');
   const [files, setFiles] = useState([]); // [{name, mime, data(base64), size}]
@@ -127,6 +129,7 @@ function ThreadView({ id, isAdmin, isMobile, onBack, onChange }) {
     <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
       <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--hairline)', display: 'flex', alignItems: 'center', gap: 10 }}>
         {isMobile && <button onClick={onBack} style={linkBtn}>← Inbox</button>}
+        {!isMobile && onToggleList && <button onClick={onToggleList} title={listCollapsed ? 'Show inbox list' : 'Hide inbox list'} style={{ ...linkBtn, fontSize: 16, lineHeight: 1 }}>{listCollapsed ? '☰' : '⟨⟨'}</button>}
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <h2 style={{ fontSize: 16, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.title || '(no subject)'}</h2>
@@ -146,18 +149,18 @@ function ThreadView({ id, isAdmin, isMobile, onBack, onChange }) {
 
       <div style={{ flex: 1, overflowY: 'auto', padding: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
         {data.messages.map((m) => {
-          // System/Pulse notifications render as a neutral note (not a chat
-          // bubble). Otherwise: my own messages right (brand), everyone else
-          // (Howler, other users, ingested email) left (neutral).
+          // System/Pulse notifications render as a centred neutral event note
+          // (not a chat bubble). For real messages, "my side" is right: Howler
+          // for an admin viewer, the client for a client viewer.
           const isSystem = m.authorType === 'system';
-          const mine = !isSystem && !!user?.email && (m.authorEmail || '').toLowerCase() === user.email.toLowerCase();
+          const mine = !isSystem && (isAdmin ? m.authorType === 'howler' : m.authorType === 'user');
           const who = m.authorType === 'howler' ? 'Howler' : isSystem ? 'Pulse' : (m.authorEmail || 'Someone');
           const meta = `${who}${m.channel !== 'pulse' ? ` · ${m.channel}` : ''} · ${shortDate(m.createdAt)}`;
           if (isSystem) {
             return (
-              <div key={m.id} style={{ alignSelf: 'stretch' }}>
-                <div style={{ fontSize: 10.5, color: 'var(--muted)', marginBottom: 3 }}>{meta}</div>
-                <div style={{ background: 'var(--elevated)', color: 'var(--text)', border: '1px solid var(--hairline)', borderLeft: '3px solid var(--brand)', borderRadius: 10, padding: '10px 13px', fontSize: 13.5, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{renderBody(m.body, false)}</div>
+              <div key={m.id} style={{ alignSelf: 'center', maxWidth: '86%', width: '100%' }}>
+                <div style={{ fontSize: 10.5, color: 'var(--muted)', marginBottom: 3, textAlign: 'center' }}>{meta}</div>
+                <div style={{ background: 'var(--elevated)', color: 'var(--text)', border: '1px solid var(--hairline)', borderRadius: 12, padding: '10px 13px', fontSize: 13, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{renderBody(m.body, false)}</div>
               </div>
             );
           }
