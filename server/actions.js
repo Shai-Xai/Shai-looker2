@@ -139,6 +139,10 @@ function mount(app, { db, auth, mailer, push, resolveAudience, draftCopy, listEv
         content: String(body.utm?.content || '').slice(0, 100),
       },
       goal: String(body.goal || '').slice(0, 1000),
+      // Which template (recipe) this campaign came from — labels it and groups
+      // it (e.g. 'Abandoned carts'), and helps the automation later.
+      templateKey: String(body.templateKey || '').slice(0, 60),
+      category: String(body.category || '').slice(0, 80),
       clickToken: body.clickToken || crypto.randomBytes(6).toString('base64url'),
     };
   }

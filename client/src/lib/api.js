@@ -210,6 +210,7 @@ export const api = {
   getEntityTheme: (entityId) => fetch(`/api/theme/${entityId}`).then(json),
 
   // Action Engine — campaigns (one set of endpoints; server enforces entity access)
+  getActionTemplates: (entityId) => fetch(`/api/action-templates/${entityId}`).then(json),
   listActions: (entityId) => fetch(`/api/actions/${entityId}`).then(json),
   createAction: (entityId, b) => fetch(`/api/actions/${entityId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   updateAction: (entityId, id, b) => fetch(`/api/actions/${entityId}/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),

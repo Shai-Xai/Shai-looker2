@@ -1865,6 +1865,36 @@ const ACTION_CAPABILITIES = [
 ];
 const CAPABILITY_KEYS = new Set(ACTION_CAPABILITIES.map((c) => c.key));
 
+// ─── Action templates (recipes) ───────────────────────────────────────────────
+const actionTemplates = require('./actionTemplates');
+// Tile catalogue WITH field names — used to auto-resolve a template's audience
+// source (which dashboard/tile + email/name/ticket columns) from a client's data.
+function tileCatalogueWithFields(entityId) {
+  const { catalogue } = clientCatalogue(entityId);
+  const dashboards = [];
+  for (const c of catalogue) {
+    const def = store.get(c.dashboardId);
+    if (!def) continue;
+    const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((x) => x.tiles || []))]
+      .filter((t) => t.type !== 'text' && t.query?.fields?.length)
+      .map((t) => ({ tileId: t.id, title: t.title || '', fields: (t.query.fields || []).map(String) }));
+    if (tiles.length) dashboards.push({ dashboardId: c.dashboardId, title: c.title, tiles });
+  }
+  return dashboards;
+}
+// The templates a client can run, each with its audience pre-resolved + presets.
+function resolveActionTemplates(entityId) {
+  const dashboards = tileCatalogueWithFields(entityId);
+  return actionTemplates.list().map((meta) => {
+    const t = actionTemplates.get(meta.key);
+    const resolved = actionTemplates.resolveAudience(t, dashboards);
+    return { ...meta, preset: t.preset, ready: resolved.ready, audience: resolved.ready ? { mode: 'tile', ...resolved } : { mode: 'tile' } };
+  });
+}
+app.get('/api/action-templates/:entityId', auth.requireAuth, auth.requirePermission('campaigns.view'), (req, res) => {
+  res.json({ templates: resolveActionTemplates(req.params.entityId) });
+});
+
 // Compact summary of a client's recent marketing actions (non-draft campaigns
 // + results) — shown on the home page and fed to the briefing/digest AI so the
 // analyst can comment on performance.

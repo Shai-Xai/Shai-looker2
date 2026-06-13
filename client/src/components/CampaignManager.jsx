@@ -6,17 +6,26 @@ import { api } from '../lib/api.js';
 // APPROVE (explicit, shows the count) → running → done with results.
 // One component for both surfaces (admin + client self-service) — the server
 // enforces entity access on every call.
-export default function CampaignManager({ entityId, scope = 'admin', initialGoal = '' }) {
+export default function CampaignManager({ entityId, scope = 'admin', initialGoal = '', initialType = '' }) {
   const isAdmin = scope === 'admin';
   const [data, setData] = useState(null);
   const [editing, setEditing] = useState(null); // action object | 'new'
+  const [tpl, setTpl] = useState(null); // template chosen for a new campaign
+  const [templates, setTemplates] = useState([]);
   const [reporting, setReporting] = useState(null); // action object
+  useEffect(() => { api.getActionTemplates(entityId).then((r) => setTemplates(r.templates || [])).catch(() => setTemplates([])); }, [entityId]);
   // "Make it happen": arriving with a goal (from a briefing/digest suggestion)
-  // opens a fresh campaign pre-filled with it.
-  useEffect(() => { if (initialGoal) setEditing('new'); }, [initialGoal]);
+  // opens a fresh campaign — pre-filled from the matching template if ?type names one.
+  useEffect(() => {
+    if (!initialGoal && !initialType) return;
+    const t = templates.find((x) => x.key === initialType || x.capability === initialType);
+    setTpl(t || null); setEditing('new');
+  }, [initialGoal, initialType, templates]);
 
   const load = () => api.listActions(entityId).then(setData).catch(() => setData({ actions: [] }));
   useEffect(() => { load(); }, [entityId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const startTemplate = (t) => { setTpl(t); setEditing('new'); };
+  const startBlank = () => { setTpl(null); setEditing('new'); };
 
   // Poll while anything is running so results tick up live.
   useEffect(() => {
@@ -30,7 +39,8 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
 
   if (editing) {
     return <CampaignEditor entityId={entityId} isAdmin={isAdmin} action={editing === 'new' ? null : editing} initialGoal={editing === 'new' ? initialGoal : ''}
-      onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />;
+      initialTemplate={editing === 'new' ? tpl : null}
+      onClose={() => { setEditing(null); setTpl(null); }} onSaved={() => { setEditing(null); setTpl(null); load(); }} />;
   }
   if (reporting) {
     return <CampaignReport entityId={entityId} action={reporting} onClose={() => setReporting(null)} />;
@@ -38,10 +48,32 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 12, flexWrap: 'wrap' }}>
         <p style={{ fontSize: 13, color: 'var(--muted)', margin: 0 }}>Data-driven email campaigns — e.g. nudge abandoned-cart customers. Nothing sends without an explicit approval.</p>
-        <button style={primary} onClick={() => setEditing('new')}>+ New campaign</button>
+        <button style={outline} onClick={startBlank}>+ Blank campaign</button>
       </div>
+      {/* Start from a template (recipe). Grouped by category. The audience is
+          pre-resolved from this client's data; they just finalize. */}
+      {templates.length > 0 && (
+        <div style={{ marginBottom: 18 }}>
+          {Object.entries(templates.reduce((acc, t) => { (acc[t.category] = acc[t.category] || []).push(t); return acc; }, {})).map(([cat, list]) => (
+            <div key={cat} style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)', margin: '0 0 6px' }}>{cat}</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 10 }}>
+                {list.map((t) => (
+                  <button key={t.key} onClick={() => startTemplate(t)} style={tplCard} title={t.ready ? 'Audience found in your data' : 'We couldn’t auto-find the audience — you’ll pick it'}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontWeight: 700, fontSize: 14, flex: 1 }}>{t.label}</span>
+                      <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 980, color: t.ready ? '#0a7d33' : '#b45309', background: t.ready ? 'rgba(16,185,129,0.12)' : 'rgba(245,158,11,0.14)' }}>{t.ready ? 'Ready' : 'Needs setup'}</span>
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4, lineHeight: 1.4 }}>{t.short}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
       {data.actions.length === 0 ? (
         <div style={{ ...card, textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>
           No campaigns yet. Try one: target customers who abandoned checkout and bring them back.
@@ -51,6 +83,7 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
               <span style={{ fontWeight: 700, fontSize: 14 }}>{a.title || a.config.subject || 'Untitled campaign'}</span>
+              {a.config?.category && <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 980, color: 'var(--brand)', background: 'rgba(var(--brand-rgb,255,56,92),0.10)' }}>{a.config.category}</span>}
               <StatusChip status={a.status} />
             </div>
             <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 3 }}>
@@ -82,29 +115,35 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
   );
 }
 
-function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', onClose, onSaved }) {
+function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTemplate = null, onClose, onSaved }) {
   const cfg = action?.config || {};
+  const tpl = initialTemplate;           // a resolved template (recipe), when creating from one
+  const tp = tpl?.preset || {};          // the template's copy/utm presets
+  const ta = tpl?.audience || {};        // the template's pre-resolved audience source
   const [f, setF] = useState(() => ({
-    title: action?.title || '',
-    goal: cfg.goal || initialGoal || 'Re-engage customers who abandoned their ticket checkout and get them to complete the purchase.',
+    title: action?.title || (tpl ? tpl.label : ''),
+    goal: cfg.goal || tp.goal || initialGoal || 'Re-engage customers who abandoned their ticket checkout and get them to complete the purchase.',
     recurring: action?.recurring || false,
-    audienceMode: cfg.audience?.mode || 'tile',
-    dashboardId: cfg.audience?.dashboardId || '',
-    tileId: cfg.audience?.tileId || '',
-    emailField: cfg.audience?.emailField || '',
-    nameField: cfg.audience?.nameField || '',
-    consentField: cfg.audience?.consentField || '',
-    ticketField: cfg.audience?.ticketField || '',
+    audienceMode: cfg.audience?.mode || ta.mode || 'tile',
+    dashboardId: cfg.audience?.dashboardId || ta.dashboardId || '',
+    tileId: cfg.audience?.tileId || ta.tileId || '',
+    emailField: cfg.audience?.emailField || ta.emailField || '',
+    nameField: cfg.audience?.nameField || ta.nameField || '',
+    consentField: cfg.audience?.consentField || ta.consentField || '',
+    ticketField: cfg.audience?.ticketField || ta.ticketField || '',
     pasted: cfg.audience?.pasted || '',
     eventSuiteId: cfg.eventSuiteId || '',
     contentMode: cfg.contentMode || 'template',
     heroImage: cfg.heroImage || '',
     customHtml: cfg.customHtml || '',
-    subject: cfg.subject || '',
-    body: cfg.body || '',
-    ctaText: cfg.ctaText || 'Complete your order',
+    subject: cfg.subject || tp.subject || '',
+    body: cfg.body || tp.body || '',
+    ctaText: cfg.ctaText || tp.ctaText || 'Complete your order',
     ctaUrl: cfg.ctaUrl || '',
-    utm: { source: cfg.utm?.source || '', medium: cfg.utm?.medium || '', campaign: cfg.utm?.campaign || '', term: cfg.utm?.term || '', content: cfg.utm?.content || '' },
+    utm: { source: cfg.utm?.source || tp.utm?.source || '', medium: cfg.utm?.medium || tp.utm?.medium || '', campaign: cfg.utm?.campaign || tp.utm?.campaign || '', term: cfg.utm?.term || '', content: cfg.utm?.content || '' },
+    // Which recipe this came from — labels & groups the campaign, helps automation.
+    templateKey: cfg.templateKey || tpl?.key || '',
+    category: cfg.category || tpl?.category || '',
   }));
   const [events, setEvents] = useState([]);
   useEffect(() => { api.listCampaignEvents(entityId).then((r) => setEvents(r.events || [])).catch(() => {}); }, [entityId]);
@@ -124,6 +163,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', onClose, 
   const payload = () => ({
     title: f.title, goal: f.goal, subject: f.subject, body: f.body, ctaText: f.ctaText, ctaUrl: f.ctaUrl, utm: f.utm, recurring: f.recurring,
     eventSuiteId: f.eventSuiteId, contentMode: f.contentMode, heroImage: f.heroImage, customHtml: f.customHtml,
+    templateKey: f.templateKey, category: f.category,
     audience: { mode: f.audienceMode, dashboardId: f.dashboardId, tileId: f.tileId, emailField: f.emailField, nameField: f.nameField, consentField: f.consentField, ticketField: f.ticketField, pasted: f.pasted },
   });
 
@@ -543,6 +583,8 @@ const card = { background: 'var(--card)', border: '1px solid var(--hairline)', b
 const tdR = { padding: '7px 8px', verticalAlign: 'top' };
 const input = { width: '100%', boxSizing: 'border-box', padding: '9px 12px', border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 13, outline: 'none', background: 'var(--card)', color: 'var(--text)' };
 const primary = { padding: '9px 18px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer' };
+const outline = { padding: '9px 16px', background: 'transparent', color: 'var(--text)', border: '1.5px solid var(--hairline)', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer' };
+const tplCard = { textAlign: 'left', background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 12, padding: '12px 14px', cursor: 'pointer', boxShadow: 'var(--shadow-sm)' };
 const mini = { padding: '7px 12px', background: 'rgba(128,128,128,0.10)', color: 'var(--text)', border: '1px solid var(--hairline)', borderRadius: 980, fontSize: 12, fontWeight: 600, cursor: 'pointer' };
 const hintLbl = { fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', margin: '0 0 5px' };
 const hintS = { fontSize: 11, color: 'var(--muted)', marginTop: 4, lineHeight: 1.4 };
