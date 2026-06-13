@@ -241,6 +241,8 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
   const [aud, setAud] = useState(null); // { count, excluded, sample, fields }
   const [audBusy, setAudBusy] = useState(false);
   const [preview, setPreview] = useState('');
+  const [previewAll, setPreviewAll] = useState(false); // sequence: render every step
+  const [stepPreviews, setStepPreviews] = useState([]); // [{label, html}]
   const [drafting, setDrafting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [testState, setTestState] = useState('');
@@ -293,6 +295,24 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
     }, 350);
     return () => clearTimeout(debounce.current);
   }, [f.subject, f.body, f.ctaText, f.ctaUrl, f.contentMode, f.customHtml, f.heroImage, f.campaignMode, JSON.stringify(f.steps), JSON.stringify(f.promo), f.anchorField]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Preview EVERY step of a sequence together (rendered each with its own copy).
+  useEffect(() => {
+    if (!previewAll || !isSequence) return;
+    let alive = true;
+    const base = payload();
+    (async () => {
+      const out = [];
+      for (let i = 0; i < f.steps.length; i++) {
+        const st = f.steps[i];
+        const p = { ...base, subject: st.subject, body: st.body, ctaText: st.ctaText };
+        try { const r = await api.actionPreviewEmail(entityId, p); out.push({ label: `Step ${i + 1} · +${st.delayHours % 24 === 0 && st.delayHours >= 24 ? `${st.delayHours / 24}d` : `${st.delayHours}h`}`, html: r.html }); }
+        catch { out.push({ label: `Step ${i + 1}`, html: '' }); }
+      }
+      if (alive) setStepPreviews(out);
+    })();
+    return () => { alive = false; };
+  }, [previewAll, isSequence, JSON.stringify(f.steps), JSON.stringify(f.promo), f.ctaUrl, f.heroImage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const draft = async () => {
     setDrafting(true);
@@ -621,9 +641,25 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
           </div>
         </div>
 
-        <div>
-          <div style={hintLbl}>Email preview</div>
-          <iframe title="Campaign preview" srcDoc={preview} style={{ width: '100%', height: 560, border: '1px solid var(--hairline)', borderRadius: 12, background: '#fff' }} />
+        {/* Preview follows you as you scroll the (long) form on desktop. */}
+        <div style={isMobile ? {} : { position: 'sticky', top: 12, alignSelf: 'start' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+            <span style={hintLbl}>Email preview</span>
+            {isSequence && <button type="button" style={{ ...mini, padding: '4px 9px' }} onClick={() => setPreviewAll((v) => !v)}>{previewAll ? 'Show step 1 only' : 'Preview all steps'}</button>}
+          </div>
+          {previewAll && isSequence ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14, maxHeight: '78vh', overflowY: 'auto', paddingRight: 4 }}>
+              {stepPreviews.length === 0 ? <div style={{ color: 'var(--muted)', fontSize: 13 }}>Rendering steps…</div>
+                : stepPreviews.map((s, i) => (
+                  <div key={i}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--brand)', margin: '0 0 4px' }}>{s.label}</div>
+                    <iframe title={s.label} srcDoc={s.html} style={{ width: '100%', height: 460, border: '1px solid var(--hairline)', borderRadius: 12, background: '#fff' }} />
+                  </div>
+                ))}
+            </div>
+          ) : (
+            <iframe title="Campaign preview" srcDoc={preview} style={{ width: '100%', height: 560, border: '1px solid var(--hairline)', borderRadius: 12, background: '#fff' }} />
+          )}
         </div>
       </div>
     </div>
