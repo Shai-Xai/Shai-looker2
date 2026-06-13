@@ -33,7 +33,9 @@ internal teams alike.
 > extract / recall over an ingested corpus of every event conversation), the
 > "CC the Owl" ingestion strategy, build order, and data model. Read it for
 > intent before extending Pulse. Companion docs: `docs/TEAM_OVERVIEW.md`,
-> `docs/INBOUND_SETUP.md`, `docs/playbook-capture-template.csv`.
+> `docs/INBOUND_SETUP.md`, `docs/playbook-capture-template.csv`,
+> `docs/ROADMAP.md` (backlog), `docs/ENGAGEMENT_ENGINE.md` (the Action layer:
+> segments, journeys, channels), `docs/specs/EVENT_TASKS_SPEC.md`.
 
 ---
 

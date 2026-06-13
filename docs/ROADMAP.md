@@ -112,9 +112,19 @@ organiser boundary). Effort: M.
 
 ### 4.3 Social actions — Meta / X (Twitter) / TikTok
 *"Build out more actions that can link into Meta/Twitter/TikTok."*
-Extend the action engine beyond email/SMS to social channels — e.g. publish/
-schedule posts or sync audiences/ads. Per-channel auth (OAuth) + a send adapter
-mirroring `mailer.js` / `messaging.js`. Effort: L (per channel).
+Mostly **audience-sync** (push a segment → Meta/TikTok Custom Audience for ad
+targeting/exclusion) rather than per-recipient messaging, plus later
+post/ad publishing. Per-channel OAuth + a sync/send adapter mirroring
+`mailer.js` / `messaging.js`. See **`docs/ENGAGEMENT_ENGINE.md`** for the full
+model. Effort: L (per channel).
+
+### 4.5 Howler app push notifications (channel)
+*"Howler app notifications."*
+A message channel that reaches **attendees in Howler's own app** (highest-reach,
+where ticket-holders already are) — distinct from Pulse's web-push (which targets
+Pulse users). Needs the **Howler integration (4.1)** + an attendee-push API and
+an identity link between a Looker person and a Howler app user. Part of the
+Engagement Engine (`docs/ENGAGEMENT_ENGINE.md`). Effort: M (once 4.1 exists).
 
 ### 4.4 Chotu Links integration
 *"Integrate Chotu Links into the platform."*
