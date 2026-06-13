@@ -15,7 +15,11 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
   const [templates, setTemplates] = useState([]);
   const [reporting, setReporting] = useState(null); // action object
   const [masterReport, setMasterReport] = useState(null); // master campaign name
+  const [presetMaster, setPresetMaster] = useState(''); // pre-fill master on a new campaign
+  const [masters, setMasters] = useState([]);
   useEffect(() => { api.getActionTemplates(entityId).then((r) => setTemplates(r.templates || [])).catch(() => setTemplates([])); }, [entityId]);
+  const loadMasters = () => api.getMasters(entityId).then((r) => setMasters(r.masters || [])).catch(() => setMasters([]));
+  useEffect(() => { loadMasters(); }, [entityId]); // eslint-disable-line react-hooks/exhaustive-deps
   // "Make it happen": arriving with a goal (from a briefing/digest suggestion)
   // opens a fresh campaign — pre-filled from the matching template if ?type names one.
   useEffect(() => {
@@ -26,8 +30,8 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
 
   const load = () => api.listActions(entityId).then(setData).catch(() => setData({ actions: [] }));
   useEffect(() => { load(); }, [entityId]); // eslint-disable-line react-hooks/exhaustive-deps
-  const startTemplate = (t) => { setTpl(t); setEditing('new'); };
-  const startBlank = () => { setTpl(null); setEditing('new'); };
+  const startTemplate = (t) => { setTpl(t); setPresetMaster(''); setEditing('new'); };
+  const startBlank = () => { setTpl(null); setPresetMaster(''); setEditing('new'); };
 
   // Poll while anything is running so results tick up live.
   useEffect(() => {
@@ -44,15 +48,20 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
 
   if (editing) {
     return <CampaignEditor entityId={entityId} isAdmin={isAdmin} action={editing === 'new' ? null : editing} initialGoal={editing === 'new' ? initialGoal : ''}
-      initialTemplate={editing === 'new' ? tpl : null} masterNames={masterNames}
-      onClose={() => { setEditing(null); setTpl(null); }} onSaved={() => { setEditing(null); setTpl(null); load(); }} />;
+      initialTemplate={editing === 'new' ? tpl : null} initialMaster={editing === 'new' ? presetMaster : ''} masterNames={masterNames}
+      onClose={() => { setEditing(null); setTpl(null); setPresetMaster(''); }} onSaved={() => { setEditing(null); setTpl(null); setPresetMaster(''); load(); loadMasters(); }} />;
   }
   if (reporting) {
     return <CampaignReport entityId={entityId} action={reporting} onClose={() => setReporting(null)} />;
   }
   if (masterReport) {
-    return <MasterReport name={masterReport} campaigns={data.actions.filter((a) => (a.config?.master || '') === masterReport)}
-      onOpen={(a) => { setMasterReport(null); setReporting(a); }} onClose={() => setMasterReport(null)} />;
+    return <MasterReport entityId={entityId} name={masterReport}
+      master={masters.find((m) => m.name === masterReport)}
+      campaigns={data.actions.filter((a) => (a.config?.master || '') === masterReport)}
+      onOpen={(a) => { setMasterReport(null); setReporting(a); }}
+      onNew={() => { setMasterReport(null); setPresetMaster(masterReport); setTpl(null); setEditing('new'); }}
+      onChanged={(newName) => { setMasterReport(newName ?? null); load(); loadMasters(); }}
+      onClose={() => setMasterReport(null)} />;
   }
 
   // One campaign row (shared by grouped + ungrouped rendering).
@@ -168,7 +177,7 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
   );
 }
 
-function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTemplate = null, masterNames = [], onClose, onSaved }) {
+function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTemplate = null, initialMaster = '', masterNames = [], onClose, onSaved }) {
   const cfg = action?.config || {};
   const tpl = initialTemplate;           // a resolved template (recipe), when creating from one
   const tp = tpl?.preset || {};          // the template's copy/utm presets
@@ -198,7 +207,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
     // Which recipe this came from — labels & groups the campaign, helps automation.
     templateKey: cfg.templateKey || tpl?.key || '',
     category: cfg.category || tpl?.category || '',
-    master: cfg.master || '', // master-campaign group name (links segments)
+    master: cfg.master || initialMaster || '', // master-campaign group name (links segments)
     // Delivery: once-off (single send) or a full automated sequence (drip).
     campaignMode: cfg.campaignMode || 'once',
     anchorField: cfg.audience?.anchorField || '',
@@ -592,13 +601,24 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
 // Master-campaign report: combined totals across all the segment campaigns
 // sharing this master, plus a per-segment breakdown (tap a segment for its own
 // report). Built from data already loaded — no extra fetch.
-function MasterReport({ name, campaigns, onOpen, onClose }) {
+function MasterReport({ entityId, name, master, campaigns, onOpen, onNew, onChanged, onClose }) {
+  const [rename, setRename] = useState(name);
+  const [target, setTarget] = useState(master?.target || 0);
+  const [saved, setSaved] = useState('');
   const t = campaigns.reduce((s, a) => ({
     sent: s.sent + (a.results?.sent || 0), clicks: s.clicks + (a.results?.clicks || 0),
     converted: s.converted + (a.results?.converted || 0), enrolled: s.enrolled + (a.results?.enrolled || 0),
   }), { sent: 0, clicks: 0, converted: 0, enrolled: 0 });
   const anySeq = campaigns.some((a) => a.config?.campaignMode === 'sequence');
   const ctr = t.sent > 0 ? Math.round((t.clicks / t.sent) * 100) : 0;
+  // Target tracks conversions for sequences, else clicks. Progress bar shows it.
+  const progressMetric = anySeq ? t.converted : t.clicks;
+  const pct = target > 0 ? Math.min(100, Math.round((progressMetric / target) * 100)) : 0;
+  const save = async () => {
+    try { const r = await api.saveMaster(entityId, { name, rename: rename.trim() || name, target: Number(target) || 0 }); setSaved('✓ Saved'); setTimeout(() => { setSaved(''); onChanged(r.name); }, 700); }
+    catch { setSaved('✗ Failed'); }
+  };
+  const del = async () => { if (!confirm(`Delete the master “${name}”? Its ${campaigns.length} campaign(s) stay — they’re just ungrouped.`)) return; await api.deleteMaster(entityId, name).catch(() => {}); onChanged(null); };
   const Stat = ({ label, value, accent }) => (
     <div style={{ ...card, flex: '1 1 120px', margin: 0, textAlign: 'center' }}>
       <div style={{ fontSize: 22, fontWeight: 800, color: accent || 'var(--text)' }}>{value}</div>
@@ -610,7 +630,36 @@ function MasterReport({ name, campaigns, onOpen, onClose }) {
       <button style={{ ...mini, marginBottom: 12 }} onClick={onClose}>← Back to campaigns</button>
       <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 2 }}>🗂 {name}</div>
       <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 14 }}>{campaigns.length} segment campaign{campaigns.length === 1 ? '' : 's'} in this master.</div>
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 18 }}>
+
+      {/* Manage: rename, target, add a segment, delete */}
+      <div style={{ ...card, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        <div style={{ flex: '1 1 200px' }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', marginBottom: 4 }}>Master name</div>
+          <input style={input} value={rename} onChange={(e) => setRename(e.target.value)} />
+        </div>
+        <div style={{ width: 150 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', marginBottom: 4 }}>Target ({anySeq ? 'conversions' : 'clicks'})</div>
+          <input type="number" min="0" style={input} value={target} onChange={(e) => setTarget(e.target.value)} placeholder="0 = none" />
+        </div>
+        <button style={mini} onClick={save}>Save</button>
+        {saved && <span style={{ fontSize: 12, color: saved.startsWith('✓') ? 'var(--success,#10b981)' : 'var(--error,#ef4444)' }}>{saved}</span>}
+        <span style={{ flex: 1 }} />
+        <button style={mini} onClick={onNew}>＋ New segment</button>
+        <button style={{ ...mini, color: 'var(--error,#ef4444)' }} onClick={del}>Delete master</button>
+      </div>
+
+      {target > 0 && (
+        <div style={{ margin: '14px 2px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, fontWeight: 600, marginBottom: 4 }}>
+            <span>Target progress</span><span>{progressMetric} / {target} {anySeq ? 'conversions' : 'clicks'} · {pct}%</span>
+          </div>
+          <div style={{ height: 8, borderRadius: 999, background: 'rgba(128,128,128,0.2)', overflow: 'hidden' }}>
+            <div style={{ height: '100%', width: `${pct}%`, background: 'var(--brand)', borderRadius: 999 }} />
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', margin: '16px 0 18px' }}>
         {anySeq && <Stat label="Enrolled" value={t.enrolled} />}
         <Stat label="Emails sent" value={t.sent} />
         <Stat label="Clicks" value={t.clicks} />

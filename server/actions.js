@@ -95,6 +95,16 @@ function mount(app, { db, auth, mailer, push, resolveAudience, draftCopy, listEv
       PRIMARY KEY (action_id, code)
     );
     CREATE INDEX IF NOT EXISTS idx_promo_avail ON action_promo_codes(action_id, email);
+
+    -- Master campaigns: a first-class record per (entity, name) holding metadata
+    -- (a target to track against). Segment campaigns link by config.master = name.
+    CREATE TABLE IF NOT EXISTS campaign_masters (
+      entity_id  TEXT NOT NULL,
+      name       TEXT NOT NULL,
+      target     INTEGER NOT NULL DEFAULT 0,  -- goal (e.g. conversions); 0 = none
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (entity_id, name)
+    );
   `);
   // Recurring-automation columns (ALTER for existing DBs).
   try {
@@ -400,6 +410,63 @@ function mount(app, { db, auth, mailer, push, resolveAudience, draftCopy, listEv
     if (!canEntity(req, entityId)) { res.status(403).json({ error: 'Not allowed' }); return false; }
     return true;
   };
+
+  // ── Master campaigns (first-class) ──
+  // Stats per master = aggregate of its segment campaigns (by config.master).
+  function masterList(entityId) {
+    const actions = sql.prepare('SELECT config, results FROM actions WHERE entity_id=?').all(entityId)
+      .map((r) => ({ config: JSON.parse(r.config || '{}'), results: JSON.parse(r.results || '{}') }));
+    const byName = new Map();
+    for (const a of actions) {
+      const name = a.config.master; if (!name) continue;
+      const s = byName.get(name) || { campaigns: 0, sent: 0, clicks: 0, converted: 0, enrolled: 0 };
+      s.campaigns += 1; s.sent += a.results.sent || 0; s.clicks += a.results.clicks || 0;
+      s.converted += a.results.converted || 0; s.enrolled += a.results.enrolled || 0;
+      byName.set(name, s);
+    }
+    // Union of records (which may have a target but no campaigns yet) + used names.
+    const recs = new Map(sql.prepare('SELECT name, target FROM campaign_masters WHERE entity_id=?').all(entityId).map((r) => [r.name, r.target]));
+    for (const n of byName.keys()) if (!recs.has(n)) recs.set(n, 0);
+    return [...recs.entries()].map(([name, target]) => ({ name, target, stats: byName.get(name) || { campaigns: 0, sent: 0, clicks: 0, converted: 0, enrolled: 0 } }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+  // Repoint every segment campaign from one master name to another (rename).
+  const renameMaster = sql.transaction((entityId, from, to) => {
+    for (const r of sql.prepare('SELECT id, config FROM actions WHERE entity_id=?').all(entityId)) {
+      const c = JSON.parse(r.config || '{}');
+      if (c.master === from) { c.master = to; sql.prepare('UPDATE actions SET config=?, updated_at=? WHERE id=?').run(JSON.stringify(c), now(), r.id); }
+    }
+  });
+
+  app.get('/api/actions/:entityId/masters', auth.requireAuth, auth.requirePermission('campaigns.view'), (req, res) => {
+    if (!guard(req, res, req.params.entityId)) return;
+    res.json({ masters: masterList(req.params.entityId) });
+  });
+  // Create/update a master: set target and/or rename (ripples to its campaigns).
+  app.put('/api/actions/:entityId/masters', auth.requireAuth, auth.requirePermission('campaigns.approve'), (req, res) => {
+    if (!guard(req, res, req.params.entityId)) return;
+    const eId = req.params.entityId;
+    const name = String((req.body || {}).name || '').trim().slice(0, 80);
+    const rename = (req.body || {}).rename != null ? String(req.body.rename).trim().slice(0, 80) : null;
+    const target = Math.max(0, Math.round(Number((req.body || {}).target) || 0));
+    if (!name) return res.status(400).json({ error: 'name required' });
+    if (rename != null && rename !== name) {
+      if (!rename) return res.status(400).json({ error: 'New name cannot be empty' });
+      renameMaster(eId, name, rename);
+      sql.prepare('DELETE FROM campaign_masters WHERE entity_id=? AND name=?').run(eId, name);
+      sql.prepare('INSERT INTO campaign_masters (entity_id, name, target, created_at) VALUES (?,?,?,?) ON CONFLICT(entity_id,name) DO UPDATE SET target=excluded.target').run(eId, rename, target, now());
+      return res.json({ ok: true, name: rename });
+    }
+    sql.prepare('INSERT INTO campaign_masters (entity_id, name, target, created_at) VALUES (?,?,?,?) ON CONFLICT(entity_id,name) DO UPDATE SET target=excluded.target').run(eId, name, target, now());
+    res.json({ ok: true, name });
+  });
+  // Delete a master: ungroup its campaigns (never deletes the campaigns).
+  app.delete('/api/actions/:entityId/masters/:name', auth.requireAuth, auth.requirePermission('campaigns.approve'), (req, res) => {
+    if (!guard(req, res, req.params.entityId)) return;
+    renameMaster(req.params.entityId, req.params.name, '');
+    sql.prepare('DELETE FROM campaign_masters WHERE entity_id=? AND name=?').run(req.params.entityId, req.params.name);
+    res.status(204).end();
+  });
 
   // List + CRUD (one set of handlers serves admin and client self-service).
   app.get('/api/actions/:entityId', auth.requireAuth, auth.requirePermission('campaigns.view'), (req, res) => {
