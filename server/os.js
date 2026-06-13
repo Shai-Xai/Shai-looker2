@@ -352,6 +352,21 @@ function mount(app, { db, auth, mailer, push }) {
     res.status(201).json({ thread: t });
   });
 
+  // Programmatic announce — for other modules (e.g. campaign approval requests)
+  // to post a thread to a client + notify, without going through HTTP.
+  function announce({ entityId, title, body, priority = 'normal', createdBy = 'system', authorType = 'system', channels }) {
+    if (!enabled() || !entityId || !db.getEntity(entityId)) return null;
+    const id = uuid(); const ts = now();
+    const pri = ['fyi', 'normal', 'needs_reply', 'must_ack'].includes(priority) ? priority : 'normal';
+    sql.prepare('INSERT INTO os_threads (id, entity_id, suite_id, subject_type, subject_id, title, priority, status, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
+      .run(id, entityId, '', 'message', '', String(title || '').slice(0, 200), pri, 'open', createdBy, ts, ts);
+    sql.prepare('INSERT INTO os_messages (id, thread_id, author_type, author_email, author_name, channel, body, created_at) VALUES (?,?,?,?,?,?,?,?)')
+      .run(uuid(), id, authorType, createdBy, '', 'pulse', String(body || '').slice(0, 8000), ts);
+    const t = thread(id);
+    notifyEntity(entityId, t, String(body || '').slice(0, 8000), channels);
+    return t;
+  }
+
   // Admin: who has read / acknowledged a thread (the audit the ops team never had).
   app.get('/api/os/admin/threads/:id/receipts', auth.requireAdmin, requireOn, (req, res) => {
     const rows = sql.prepare('SELECT user_id, kind, at FROM os_receipts WHERE thread_id=?').all(req.params.id);
@@ -451,6 +466,7 @@ function mount(app, { db, auth, mailer, push }) {
   });
 
   console.log('[os] Experience OS spine mounted', enabled() ? '(enabled)' : '(disabled — set os_enabled=1)');
+  return { announce };
 }
 
 module.exports = { mount };

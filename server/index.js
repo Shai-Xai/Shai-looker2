@@ -65,7 +65,7 @@ const push = require('./push');
 push.mount(app, { db, auth });
 // Experience OS comms spine — self-contained module (own tables + routes under
 // /api/os). Remove this line + server/os.js to fully uninstall the feature.
-require('./os').mount(app, { db, auth, mailer, push });
+const os = require('./os').mount(app, { db, auth, mailer, push });
 
 // ─── Health ───────────────────────────────────────────────────────────────────
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
@@ -1964,7 +1964,7 @@ require('./scheduler').mount(app, { db, auth, mailer, push, generateContent: bui
 // organiser scoping as the dashboards themselves. Remove this line + actions.js
 // to uninstall.
 require('./actions').mount(app, {
-  db, auth, mailer, push, messaging,
+  db, auth, mailer, push, messaging, os,
   // Run a tile's query (scoped + suite-locked) and return its rows + fields —
   // the campaign audience source.
   resolveAudience: async ({ entityId, dashboardId, tileId, user }) => {

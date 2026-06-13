@@ -16,11 +16,23 @@ const crypto = require('crypto');
 const MAX_AUDIENCE = 2000;       // v1 safety cap per campaign
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-function mount(app, { db, auth, mailer, push, messaging, resolveAudience, draftCopy, listEvents }) {
+function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, draftCopy, listEvents }) {
   const sql = db.db;
   const now = () => new Date().toISOString();
   const uuid = () => crypto.randomUUID();
   const enabled = () => db.getSetting('actions_enabled', '1') !== '0';
+  // Per-client governance: when on, campaigns must be approved before sending.
+  const requireApprovalFor = (entityId) => db.getSetting(`approval_required:${entityId}`, '0') === '1';
+  const approverKey = (a) => (a.type === 'howler' ? 'howler' : `user:${a.userId}`);
+  const approverLabel = (a) => (a.type === 'howler' ? 'Howler' : (a.name || a.email || 'Teammate'));
+  // Approval progress for an action: each required approver + whether they've
+  // signed off, and whether all are in.
+  function approvalSummary(action) {
+    const approvers = action.config.approvers || [];
+    const done = new Map(sql.prepare('SELECT approver_key, by_email, at FROM action_approvals WHERE action_id=?').all(action.id).map((r) => [r.approver_key, r]));
+    const list = approvers.map((a) => { const k = approverKey(a); const d = done.get(k); return { key: k, label: approverLabel(a), type: a.type, approved: !!d, by: d?.by_email || '', at: d?.at || '' }; });
+    return { approvers: list, complete: list.length > 0 && list.every((x) => x.approved), pending: list.filter((x) => !x.approved).length };
+  }
 
   sql.exec(`
     CREATE TABLE IF NOT EXISTS actions (
@@ -98,6 +110,16 @@ function mount(app, { db, auth, mailer, push, messaging, resolveAudience, draftC
 
     -- Master campaigns: a first-class record per (entity, name) holding metadata
     -- (a target to track against). Segment campaigns link by config.master = name.
+    -- Per-recipient approvals for a campaign awaiting sign-off (status 'pending').
+    -- approver_key = 'user:<id>' (a named person) or 'howler' (any Howler admin).
+    CREATE TABLE IF NOT EXISTS action_approvals (
+      action_id    TEXT NOT NULL,
+      approver_key TEXT NOT NULL,
+      by_email     TEXT NOT NULL DEFAULT '',
+      at           TEXT NOT NULL,
+      PRIMARY KEY (action_id, approver_key)
+    );
+
     CREATE TABLE IF NOT EXISTS campaign_masters (
       entity_id  TEXT NOT NULL,
       name       TEXT NOT NULL,
@@ -130,6 +152,7 @@ function mount(app, { db, auth, mailer, push, messaging, resolveAudience, draftC
   const publicAction = (a) => ({
     ...a, audience: undefined, audienceCount: a.audience.length,
     promoCodes: (a.config?.promo || {}).source === 'unique' ? promoStats(a.id) : null,
+    approval: (a.config?.approvers || []).length ? approvalSummary(a) : null,
   });
   const saveResults = (id, results) => sql.prepare('UPDATE actions SET results=?, updated_at=? WHERE id=?').run(JSON.stringify(results), now(), id);
   const setStatus = (id, status) => sql.prepare('UPDATE actions SET status=?, updated_at=? WHERE id=?').run(status, now(), id);
@@ -225,6 +248,11 @@ function mount(app, { db, auth, mailer, push, messaging, resolveAudience, draftC
         content: String(body.utm?.content || '').slice(0, 100),
       },
       goal: String(body.goal || '').slice(0, 1000),
+      // Required approvers (when sent for approval). Each is a named user
+      // {type:'user',userId,email,name} or {type:'howler'} (any Howler admin).
+      approvers: Array.isArray(body.approvers) ? body.approvers.slice(0, 10).map((a) => (
+        a && a.type === 'howler' ? { type: 'howler' } : { type: 'user', userId: String(a.userId || ''), email: String(a.email || ''), name: String(a.name || '') }
+      )).filter((a) => a.type === 'howler' || a.userId) : [],
       // Master campaign: a shared group name linking related segment campaigns
       // (e.g. one master "Bushfire abandoned cart" over VIP / GA / Cape Town
       // segments) so they manage + report together.
@@ -531,7 +559,18 @@ function mount(app, { db, auth, mailer, push, messaging, resolveAudience, draftC
   app.get('/api/actions/:entityId', auth.requireAuth, auth.requirePermission('campaigns.view'), (req, res) => {
     if (!guard(req, res, req.params.entityId)) return;
     const rows = sql.prepare('SELECT * FROM actions WHERE entity_id=? ORDER BY created_at DESC LIMIT 100').all(req.params.entityId);
-    res.json({ actions: rows.map((r) => publicAction(rowToAction(r))) });
+    res.json({ actions: rows.map((r) => publicAction(rowToAction(r))), requireApproval: requireApprovalFor(req.params.entityId) });
+  });
+  // Per-client "require approval" governance setting. (Before the :id routes so
+  // 'approval-setting' isn't swallowed by :id.)
+  app.get('/api/actions/:entityId/approval-setting', auth.requireAuth, auth.requirePermission('campaigns.view'), (req, res) => {
+    if (!guard(req, res, req.params.entityId)) return;
+    res.json({ requireApproval: requireApprovalFor(req.params.entityId) });
+  });
+  app.put('/api/actions/:entityId/approval-setting', auth.requireAuth, auth.requirePermission('team.manage'), (req, res) => {
+    if (!guard(req, res, req.params.entityId)) return;
+    db.setSetting(`approval_required:${req.params.entityId}`, (req.body || {}).requireApproval ? '1' : '0');
+    res.json({ requireApproval: requireApprovalFor(req.params.entityId) });
   });
   app.post('/api/actions/:entityId', auth.requireAuth, auth.requirePermission('campaigns.approve'), (req, res) => {
     if (!guard(req, res, req.params.entityId)) return;
@@ -652,7 +691,26 @@ function mount(app, { db, auth, mailer, push, messaging, resolveAudience, draftC
     if (!guard(req, res, req.params.entityId)) return;
     const a = getAction(req.params.id);
     if (!a || a.entityId !== req.params.entityId) return res.status(404).json({ error: 'Not found' });
-    if (a.status !== 'draft') return res.status(400).json({ error: `Cannot approve a ${a.status} campaign` });
+
+    // PENDING: record this user's sign-off against their approver slot. Only
+    // when ALL required approvers are in does it fall through and actually send.
+    if (a.status === 'pending') {
+      const isAdmin = req.user.role === 'admin';
+      const slots = (a.config.approvers || []).map(approverKey);
+      const myKeys = [`user:${req.user.id}`, ...(isAdmin ? ['howler'] : [])].filter((k) => slots.includes(k));
+      if (!myKeys.length) return res.status(403).json({ error: 'You are not an approver for this campaign' });
+      const ins = sql.prepare('INSERT OR IGNORE INTO action_approvals (action_id, approver_key, by_email, at) VALUES (?,?,?,?)');
+      for (const k of myKeys) ins.run(a.id, k, req.user.email, now());
+      const summ = approvalSummary(getAction(a.id));
+      if (!summ.complete) return res.json({ ok: true, pending: true, remaining: summ.pending });
+      // All approvals in → flip to draft and continue into the send logic below.
+      sql.prepare("UPDATE actions SET status='draft', updated_at=? WHERE id=?").run(now(), a.id);
+    } else if (a.status !== 'draft') {
+      return res.status(400).json({ error: `Cannot approve a ${a.status} campaign` });
+    } else if (requireApprovalFor(a.entityId)) {
+      // Governance: this client requires sign-off — must go through approval.
+      return res.status(400).json({ error: 'This client requires approval — use “Send for approval”.' });
+    }
     const isSequence = a.config.campaignMode === 'sequence';
     if (isSequence) {
       const s0 = (a.config.steps || [])[0];
@@ -699,6 +757,48 @@ function mount(app, { db, auth, mailer, push, messaging, resolveAudience, draftC
     const a = getAction(req.params.id);
     if (!a || a.entityId !== req.params.entityId || a.status !== 'auto') return res.status(400).json({ error: 'Not an active automation' });
     setStatus(a.id, 'draft');
+    res.json({ ok: true });
+  });
+
+  // ── Approval workflow ──
+  // Notify the named approvers (inbox message + push, deep-link to the campaign).
+  function notifyApprovers(a) {
+    const url = `/actions?action=${a.id}`;
+    const title = 'Campaign approval needed';
+    const body = `“${a.title || a.config.subject || 'A campaign'}” is waiting for your approval.`;
+    try { os?.announce?.({ entityId: a.entityId, title, body, priority: 'needs_reply', createdBy: 'campaigns@pulse', authorType: 'system' }); } catch { /* os optional */ }
+    if (push?.isEnabled?.()) {
+      for (const ap of a.config.approvers || []) {
+        if (ap.type === 'user' && ap.userId) push.sendToUser(ap.userId, { title, body, url, tag: `approve-${a.id}`, requireInteraction: true }).catch(() => {});
+      }
+      if ((a.config.approvers || []).some((x) => x.type === 'howler')) push.sendToEntity(a.entityId, { title, body, url, tag: `approve-${a.id}` }).catch(() => {});
+    }
+  }
+
+  // Submit a draft for approval → status 'pending', notify the named approvers.
+  app.post('/api/actions/:entityId/:id/submit', auth.requireAuth, auth.requirePermission('campaigns.approve'), (req, res) => {
+    if (!guard(req, res, req.params.entityId)) return;
+    const a = getAction(req.params.id);
+    if (!a || a.entityId !== req.params.entityId) return res.status(404).json({ error: 'Not found' });
+    if (a.status !== 'draft') return res.status(400).json({ error: `Can't submit a ${a.status} campaign` });
+    const approvers = Array.isArray(req.body?.approvers) ? req.body.approvers : (a.config.approvers || []);
+    if (!approvers.length) return res.status(400).json({ error: 'Add at least one approver' });
+    const cfg = { ...a.config, approvers: cleanConfig({ ...req.body, approvers }).approvers };
+    sql.prepare('DELETE FROM action_approvals WHERE action_id=?').run(a.id);
+    sql.prepare('UPDATE actions SET status=?, config=?, updated_at=? WHERE id=?').run('pending', JSON.stringify(cfg), now(), a.id);
+    notifyApprovers(getAction(a.id));
+    res.json({ ok: true, pending: true });
+  });
+
+  // Reject a pending campaign → back to draft (clears approvals), notify creator.
+  app.post('/api/actions/:entityId/:id/reject', auth.requireAuth, auth.requirePermission('campaigns.approve'), (req, res) => {
+    if (!guard(req, res, req.params.entityId)) return;
+    const a = getAction(req.params.id);
+    if (!a || a.entityId !== req.params.entityId || a.status !== 'pending') return res.status(400).json({ error: 'Not awaiting approval' });
+    sql.prepare('DELETE FROM action_approvals WHERE action_id=?').run(a.id);
+    setStatus(a.id, 'draft');
+    const note = String(req.body?.note || '').slice(0, 500);
+    try { os?.announce?.({ entityId: a.entityId, title: 'Campaign approval declined', body: `“${a.title || 'A campaign'}” was sent back to draft${note ? `: ${note}` : '.'}`, priority: 'normal', createdBy: 'campaigns@pulse', authorType: 'system' }); } catch { /* optional */ }
     res.json({ ok: true });
   });
 
