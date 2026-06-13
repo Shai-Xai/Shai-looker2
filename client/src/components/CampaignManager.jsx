@@ -7,7 +7,7 @@ import { useIsMobile } from '../lib/useIsMobile.js';
 // APPROVE (explicit, shows the count) → running → done with results.
 // One component for both surfaces (admin + client self-service) — the server
 // enforces entity access on every call.
-export default function CampaignManager({ entityId, scope = 'admin', initialGoal = '', initialType = '' }) {
+export default function CampaignManager({ entityId, scope = 'admin', initialGoal = '', initialType = '', initialActionId = '' }) {
   const isAdmin = scope === 'admin';
   const [data, setData] = useState(null);
   const [editing, setEditing] = useState(null); // action object | 'new'
@@ -31,6 +31,14 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
 
   const load = () => api.listActions(entityId).then(setData).catch(() => setData({ actions: [] }));
   useEffect(() => { load(); }, [entityId]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Deep link from an approval notification (?action=<id>) opens that campaign
+  // for review — settings, email preview, and approve/reject in one place.
+  const [deepLinked, setDeepLinked] = useState(false);
+  useEffect(() => {
+    if (deepLinked || !initialActionId || !data?.actions) return;
+    const a = data.actions.find((x) => x.id === initialActionId);
+    if (a) { setEditing(a); setDeepLinked(true); }
+  }, [initialActionId, data, deepLinked]);
   const startTemplate = (t) => { setTpl(t); setPresetMaster(''); setEditing('new'); };
   const startBlank = () => { setTpl(null); setPresetMaster(''); setEditing('new'); };
 
@@ -299,6 +307,9 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
   // Editor sections behave as an exclusive accordion — opening one collapses the rest.
   const [openSection, setOpenSection] = useState(null);
   const acc = (key) => ({ open: openSection === key, onToggle: () => setOpenSection((s) => (s === key ? null : key)) });
+  const isPending = action?.status === 'pending';
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [rejectNote, setRejectNote] = useState('');
 
   const refreshAudience = () => {
     // Snapshot children (queued by an automation) carry their audience already.
@@ -400,6 +411,24 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
     } catch (e) { setApproveState(`✗ ${e.message}`); }
   }
 
+  // Approver acting on a pending campaign (opened via the notification link).
+  async function approvePending() {
+    setApproveState('working');
+    try {
+      const r = await api.approveAction(entityId, action.id);
+      setApproveState(r.pending ? `✓ Approved — ${r.remaining} more approval(s) needed` : '✓ Approved — sending');
+      setTimeout(onSaved, 1000);
+    } catch (e) { setApproveState(`✗ ${e.message}`); }
+  }
+  async function rejectPending() {
+    setApproveState('working');
+    try {
+      await api.rejectAction(entityId, action.id, rejectNote);
+      setApproveState('✓ Sent back to draft');
+      setTimeout(onSaved, 900);
+    } catch (e) { setApproveState(`✗ ${e.message}`); }
+  }
+
   async function approve() {
     if (isSequence) {
       const steps = f.steps || [];
@@ -455,6 +484,29 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
   return (
     <div>
       <button style={{ ...mini, marginBottom: 12 }} onClick={onClose}>← Back to campaigns</button>
+      {/* Approver review banner — when this campaign is awaiting approval. */}
+      {isPending && (
+        <div style={{ border: '1px solid rgba(245,158,11,0.45)', background: 'rgba(245,158,11,0.10)', borderRadius: 12, padding: '12px 14px', marginBottom: 14 }}>
+          <div style={{ fontWeight: 700, fontSize: 14, color: '#b45309' }}>⏳ This campaign is awaiting approval</div>
+          {action.approval && (
+            <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 3 }}>
+              {action.approval.approvers.filter((x) => x.approved).length}/{action.approval.approvers.length} approved · waiting on {action.approval.approvers.filter((x) => !x.approved).map((x) => x.label).join(', ') || '—'}
+            </div>
+          )}
+          <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 4 }}>Review the settings and preview below, then:</div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 10, flexWrap: 'wrap' }}>
+            <button style={{ ...primary, background: '#15803d' }} onClick={approvePending} disabled={approveState === 'working'}>✓ Approve</button>
+            <button style={mini} onClick={() => setRejectOpen((o) => !o)}>Reject…</button>
+            {(approveState && approveState !== 'working') && <span style={{ fontSize: 12.5, color: approveState.startsWith('✓') ? 'var(--success,#10b981)' : 'var(--error,#ef4444)' }}>{approveState}</span>}
+          </div>
+          {rejectOpen && (
+            <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit' }} rows={3} value={rejectNote} onChange={(e) => setRejectNote(e.target.value)} placeholder="Comment for the sender — what needs to change before this can be approved…" />
+              <div><button style={{ ...primary, background: '#dc2626' }} onClick={rejectPending} disabled={approveState === 'working'}>Send back to draft</button></div>
+            </div>
+          )}
+        </div>
+      )}
       {/* Mobile-first: controls + preview stack into one column on phones. */}
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0,1fr) minmax(0,1fr)', gap: 20, alignItems: 'start' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>

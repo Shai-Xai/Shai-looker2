@@ -15,6 +15,7 @@ export default function ActionsPage() {
   const [params] = useSearchParams();
   const initialGoal = params.get('goal') || '';
   const initialType = params.get('type') || ''; // a template/capability key from "Make it happen"
+  const initialActionId = params.get('action') || ''; // deep link from an approval notification
 
   return (
     <main style={{ flex: 1, padding: '26px 22px', maxWidth: 1080, margin: '0 auto', width: '100%', boxSizing: 'border-box', overflowY: 'auto' }}>
@@ -22,7 +23,7 @@ export default function ActionsPage() {
       <p style={{ color: 'var(--muted)', marginBottom: 18, fontSize: 14 }}>Turn your data into action — e.g. email customers who abandoned checkout. Preview the audience and copy, then explicitly approve the send.</p>
       {!entityId
         ? <p style={{ color: 'var(--muted)' }}>{isAdmin ? 'Open a client suite first so the preview knows which client to show.' : 'No client account is linked to your login yet.'}</p>
-        : <CampaignManager entityId={entityId} scope={isAdmin ? 'admin' : 'my'} initialGoal={initialGoal} initialType={initialType} />}
+        : <CampaignManager entityId={entityId} scope={isAdmin ? 'admin' : 'my'} initialGoal={initialGoal} initialType={initialType} initialActionId={initialActionId} />}
     </main>
   );
 }

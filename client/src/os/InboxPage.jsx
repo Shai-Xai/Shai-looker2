@@ -4,6 +4,19 @@ import { api } from '../lib/api.js';
 import { useAuth } from '../lib/auth.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
 
+// Render a message body: plain text with URLs made clickable. A link to a
+// campaign (…/actions?action=…) becomes a prominent "Review & approve" button.
+function renderBody(text, mine) {
+  const parts = String(text || '').split(/(https?:\/\/[^\s]+)/g);
+  return parts.map((p, i) => {
+    if (!/^https?:\/\//.test(p)) return p;
+    if (/\/actions\?action=/.test(p)) {
+      return <a key={i} href={p} style={{ display: 'inline-block', marginTop: 4, background: mine ? '#fff' : 'var(--brand)', color: mine ? 'var(--brand)' : '#fff', borderRadius: 980, padding: '6px 15px', fontSize: 12.5, fontWeight: 700, textDecoration: 'none' }}>Review &amp; approve →</a>;
+    }
+    return <a key={i} href={p} style={{ color: 'inherit', textDecoration: 'underline', fontWeight: 600, wordBreak: 'break-all' }}>{p}</a>;
+  });
+}
+
 // Experience OS inbox — the client's tracked correspondence with Howler.
 // Master list of threads + a reading pane with reply box and acknowledge.
 // Isolated under src/os/ so the whole feature lifts out cleanly.
@@ -133,7 +146,7 @@ function ThreadView({ id, isAdmin, isMobile, onBack, onChange }) {
                 <div style={{ fontSize: 10.5, color: 'var(--muted)', marginBottom: 3, textAlign: mine ? 'right' : 'left' }}>
                   {m.authorType === 'howler' ? 'Howler' : m.authorEmail}{m.channel !== 'pulse' ? ` · ${m.channel}` : ''} · {shortDate(m.createdAt)}
                 </div>
-                <div style={{ background: mine ? 'var(--brand)' : 'var(--elevated)', color: mine ? '#fff' : 'var(--text)', borderRadius: mine ? '14px 14px 4px 14px' : '14px 14px 14px 4px', padding: '9px 13px', fontSize: 13.5, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{m.body}</div>
+                <div style={{ background: mine ? 'var(--brand)' : 'var(--elevated)', color: mine ? '#fff' : 'var(--text)', borderRadius: mine ? '14px 14px 4px 14px' : '14px 14px 14px 4px', padding: '9px 13px', fontSize: 13.5, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{renderBody(m.body, mine)}</div>
                 {(m.attachments || []).length > 0 && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginTop: 5, alignItems: mine ? 'flex-end' : 'flex-start' }}>
                     {m.attachments.map((a) => a.mime?.startsWith('image/') ? (

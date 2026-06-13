@@ -705,15 +705,19 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     // PENDING: record this user's sign-off against their approver slot. Only
     // when ALL required approvers are in does it fall through and actually send.
     if (a.status === 'pending') {
-      const isAdmin = req.user.role === 'admin';
+      // Only a Howler admin LINKED to this client may fill the 'Howler' slot
+      // (mirrors who gets notified; falls back to any admin if none are linked).
+      const canHowler = req.user.role === 'admin' && howlerAdminsFor(a.entityId).some((u) => u.id === req.user.id);
       const slots = (a.config.approvers || []).map(approverKey);
-      const myKeys = [`user:${req.user.id}`, ...(isAdmin ? ['howler'] : [])].filter((k) => slots.includes(k));
+      const myKeys = [`user:${req.user.id}`, ...(canHowler ? ['howler'] : [])].filter((k) => slots.includes(k));
       if (!myKeys.length) return res.status(403).json({ error: 'You are not an approver for this campaign' });
       const ins = sql.prepare('INSERT OR IGNORE INTO action_approvals (action_id, approver_key, by_email, at) VALUES (?,?,?,?)');
       for (const k of myKeys) ins.run(a.id, k, req.user.email, now());
       const summ = approvalSummary(getAction(a.id));
       if (!summ.complete) return res.json({ ok: true, pending: true, remaining: summ.pending });
-      // All approvals in → flip to draft and continue into the send logic below.
+      // All approvals in → tell the sender, then flip to draft and continue
+      // into the send logic below.
+      notifySender(a, { approved: true, by: req.user.email });
       sql.prepare("UPDATE actions SET status='draft', updated_at=? WHERE id=?").run(now(), a.id);
     } else if (a.status !== 'draft') {
       return res.status(400).json({ error: `Cannot approve a ${a.status} campaign` });
@@ -780,19 +784,38 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     const linked = admins.filter((u) => (u.entityIds || []).includes(entityId));
     return linked.length ? linked : admins;
   }
+  // A short, human summary of a campaign's key settings — for the approval
+  // inbox message + email so approvers know what they're signing off.
+  function campaignSummaryLines(a) {
+    const c = a.config;
+    const isSeq = c.campaignMode === 'sequence';
+    const lines = [];
+    lines.push(`Channel: ${c.channel === 'sms' ? 'SMS' : 'Email'}`);
+    lines.push(`Type: ${isSeq ? `Drip sequence — ${(c.steps || []).length} step${(c.steps || []).length === 1 ? '' : 's'}` : a.recurring ? 'Automated (daily check)' : 'One-off send'}`);
+    if (!isSeq && c.subject) lines.push(`Subject: ${c.subject}`);
+    const audSrc = c.audience?.mode === 'paste' ? 'Pasted list' : c.audience?.mode === 'snapshot' ? 'Queued by automation' : 'Dashboard tile';
+    lines.push(`Audience: ${audSrc}`);
+    if (c.master) lines.push(`Master: ${c.master}`);
+    if (c.promo?.source && c.promo.source !== 'none') lines.push(`Offer: ${c.promo.code || c.promo.type}`);
+    lines.push(`Approvers: ${approvalSummary(a).approvers.map((x) => x.label).join(', ') || '—'}`);
+    return lines;
+  }
   function notifyApprovers(a) {
-    const url = `/actions?action=${a.id}`;
+    const path = `/actions?action=${a.id}`;
+    const link = `${mailer.baseUrl()}${path}`;
     const title = 'Campaign approval needed';
     const name = a.title || a.config.subject || 'A campaign';
-    const body = `“${name}” is waiting for your approval.`;
+    const lines = campaignSummaryLines(a);
+    const body = `“${name}” is waiting for your approval.\n\n${lines.map((l) => `• ${l}`).join('\n')}\n\nReview the campaign, preview the emails and approve (or send back to draft):\n${link}`;
     const wantsHowler = (a.config.approvers || []).some((x) => x.type === 'howler');
     const howler = wantsHowler ? howlerAdminsFor(a.entityId) : [];
     try { os?.announce?.({ entityId: a.entityId, title, body, priority: 'needs_reply', createdBy: 'campaigns@pulse', authorType: 'system' }); } catch { /* os optional */ }
     if (push?.isEnabled?.()) {
+      const pushBody = `“${name}” is waiting for your approval.`;
       for (const ap of a.config.approvers || []) {
-        if (ap.type === 'user' && ap.userId) push.sendToUser(ap.userId, { title, body, url, tag: `approve-${a.id}`, requireInteraction: true }).catch(() => {});
+        if (ap.type === 'user' && ap.userId) push.sendToUser(ap.userId, { title, body: pushBody, url: path, tag: `approve-${a.id}`, requireInteraction: true }).catch(() => {});
       }
-      for (const u of howler) push.sendToUser(u.id, { title, body, url, tag: `approve-${a.id}`, requireInteraction: true }).catch(() => {});
+      for (const u of howler) push.sendToUser(u.id, { title, body: pushBody, url: path, tag: `approve-${a.id}`, requireInteraction: true }).catch(() => {});
     }
     // Email each approver too — a named person's address, or the Howler admins
     // linked to this client.
@@ -803,12 +826,40 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
       }
       for (const u of howler) emails.add(u.email);
       if (emails.size) {
+        const summaryHtml = lines.map((l) => { const [k, ...v] = l.split(':'); return `<b>${k}:</b>${v.join(':')}`; }).join('<br>');
         const html = mailer.notificationEmail({
-          title, body: `${body}<br><br>Review the campaign and approve or send it back to draft.`,
-          ctaText: 'Review & approve', ctaPath: url, preheader: `Approval needed: ${name}`, entityId: a.entityId,
+          title, body: `“${name}” is waiting for your approval.<br><br>${summaryHtml}<br><br>Open it to preview the emails and approve, or send it back to draft.`,
+          ctaText: 'Review & approve', ctaPath: path, preheader: `Approval needed: ${name}`, entityId: a.entityId,
         });
         mailer.send({ to: [...emails], subject: `Approval needed: ${name}`, html, kind: 'campaign-approval', entity: a.entityId }).catch(() => {});
       }
+    }
+  }
+
+  // Tell the campaign's creator the outcome — approved (sending) or sent back to
+  // draft (with the reviewer's comment). Inbox + push + email, skipping the
+  // reviewer if they're also the sender.
+  function notifySender(a, { approved, note = '', by = '' }) {
+    const sender = (db.listUsers() || []).find((u) => u.email && a.createdBy && u.email.toLowerCase() === a.createdBy.toLowerCase());
+    if (!sender || sender.email.toLowerCase() === (by || '').toLowerCase()) return;
+    const name = a.title || a.config.subject || 'Your campaign';
+    const path = `/actions?action=${a.id}`;
+    const link = `${mailer.baseUrl()}${path}`;
+    const title = approved ? 'Campaign approved' : 'Campaign sent back to draft';
+    const body = approved
+      ? `“${name}” was approved${by ? ` by ${by}` : ''} and is now sending.`
+      : `“${name}” was sent back to draft${by ? ` by ${by}` : ''}.${note ? `\n\nComment: ${note}` : ''}\n\nOpen it to make changes and resubmit:\n${link}`;
+    try { os?.announce?.({ entityId: a.entityId, title, body, priority: approved ? 'fyi' : 'needs_reply', createdBy: 'campaigns@pulse', authorType: 'system' }); } catch { /* os optional */ }
+    if (push?.isEnabled?.()) push.sendToUser(sender.id, { title, body: approved ? `“${name}” was approved.` : `“${name}” was sent back to draft.`, url: path, tag: `outcome-${a.id}` }).catch(() => {});
+    if (mailer?.isConfigured?.()) {
+      const html = mailer.notificationEmail({
+        title,
+        body: approved
+          ? `Good news — “${name}” was approved${by ? ` by ${by}` : ''} and is now sending.`
+          : `“${name}” was sent back to draft${by ? ` by ${by}` : ''}.${note ? `<br><br><b>Comment:</b> ${note}` : ''}<br><br>Open it to make changes and resubmit.`,
+        ctaText: 'Open campaign', ctaPath: path, preheader: title, entityId: a.entityId,
+      });
+      mailer.send({ to: sender.email, subject: `${title}: ${name}`, html, kind: 'campaign-approval', entity: a.entityId }).catch(() => {});
     }
   }
 
@@ -835,7 +886,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     sql.prepare('DELETE FROM action_approvals WHERE action_id=?').run(a.id);
     setStatus(a.id, 'draft');
     const note = String(req.body?.note || '').slice(0, 500);
-    try { os?.announce?.({ entityId: a.entityId, title: 'Campaign approval declined', body: `“${a.title || 'A campaign'}” was sent back to draft${note ? `: ${note}` : '.'}`, priority: 'normal', createdBy: 'campaigns@pulse', authorType: 'system' }); } catch { /* optional */ }
+    notifySender(a, { approved: false, note, by: req.user.email });
     res.json({ ok: true });
   });
 
