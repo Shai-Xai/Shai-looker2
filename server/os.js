@@ -248,6 +248,10 @@ function mount(app, { db, auth, mailer, push }) {
     else if (!ids.length) rows = [];
     else rows = sql.prepare(`SELECT * FROM os_threads WHERE entity_id IN (${ids.map(() => '?').join(',')}) ORDER BY updated_at DESC LIMIT 200`).all(...ids);
     const admin = isAdmin(req.user);
+    // Per-user "deleted" threads stay hidden until something new arrives (the
+    // thread's updated_at moves past when they hid it).
+    const hidden = new Map(sql.prepare("SELECT thread_id, at FROM os_receipts WHERE user_id=? AND kind='hidden'").all(req.user.id).map((x) => [x.thread_id, x.at]));
+    rows = rows.filter((r) => !(hidden.has(r.id) && hidden.get(r.id) >= r.updated_at));
     const out = rows.map((r) => {
       const last = sql.prepare('SELECT * FROM os_messages WHERE thread_id=? ORDER BY created_at DESC LIMIT 1').get(r.id);
       const st = threadState(r.id, req.user.id);
@@ -320,6 +324,27 @@ function mount(app, { db, auth, mailer, push }) {
     if (!t) return res.status(404).json({ error: 'Not found' });
     if (!canEntity(req.user, t.entityId)) return res.status(403).json({ error: 'Not allowed' });
     sql.prepare('INSERT OR REPLACE INTO os_receipts (thread_id, user_id, kind, at) VALUES (?,?,?,?)').run(t.id, req.user.id, 'ack', now());
+    res.json({ ok: true });
+  });
+
+  // Mark a thread unread for this user (removes their read receipt so it shows
+  // unread again in the list — without opening it).
+  app.post('/api/os/threads/:id/unread', auth.requireAuth, requireOn, (req, res) => {
+    const t = thread(req.params.id);
+    if (!t) return res.status(404).json({ error: 'Not found' });
+    if (!canEntity(req.user, t.entityId)) return res.status(403).json({ error: 'Not allowed' });
+    sql.prepare("DELETE FROM os_receipts WHERE thread_id=? AND user_id=? AND kind='read'").run(t.id, req.user.id);
+    res.json({ ok: true });
+  });
+
+  // Delete a thread FROM THIS USER'S inbox (per-user hide — the shared record
+  // and the other party's view are preserved). It reappears if a new message
+  // arrives after it was hidden.
+  app.delete('/api/os/threads/:id', auth.requireAuth, requireOn, (req, res) => {
+    const t = thread(req.params.id);
+    if (!t) return res.status(404).json({ error: 'Not found' });
+    if (!canEntity(req.user, t.entityId)) return res.status(403).json({ error: 'Not allowed' });
+    sql.prepare('INSERT OR REPLACE INTO os_receipts (thread_id, user_id, kind, at) VALUES (?,?,?,?)').run(t.id, req.user.id, 'hidden', now());
     res.json({ ok: true });
   });
 

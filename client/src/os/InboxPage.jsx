@@ -58,18 +58,9 @@ export default function InboxPage() {
           {list.length === 0 ? (
             <p style={{ padding: 18, color: 'var(--muted)', fontSize: 13 }}>No messages yet.</p>
           ) : list.map((t) => (
-            <button key={t.id} onClick={() => setOpenId(t.id)} className="nav-row" style={{ ...rowBtn, background: openId === t.id ? 'rgba(128,128,128,0.10)' : 'transparent' }}>
-              <span style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0, marginTop: 6, background: t.unread ? 'var(--brand)' : 'transparent' }} />
-              <span style={{ flex: 1, minWidth: 0 }}>
-                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ fontSize: 13.5, fontWeight: t.unread ? 800 : 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.title || '(no subject)'}</span>
-                  <PriorityChip priority={t.priority} acked={t.acked} />
-                </span>
-                {isAdmin && <span style={{ display: 'block', fontSize: 11, color: 'var(--muted)' }}>{t.entityName}</span>}
-                <span style={{ display: 'block', fontSize: 12, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.preview?.body || ''}</span>
-              </span>
-              <span style={{ fontSize: 10.5, color: 'var(--muted)', flexShrink: 0 }}>{shortDate(t.updatedAt)}</span>
-            </button>
+            <ThreadRow key={t.id} t={t} active={openId === t.id} isAdmin={isAdmin} isMobile={isMobile}
+              onOpen={() => setOpenId(t.id)} onChanged={load}
+              onDeleted={() => { if (openId === t.id) setOpenId(null); }} />
           ))}
         </div>
       )}
@@ -222,6 +213,62 @@ function ThreadView({ id, isAdmin, isMobile, onBack, onChange }) {
     </div>
   );
 }
+
+// One inbox row. Desktop: hover reveals Unread/Delete. Mobile: swipe left
+// (Apple Mail style) to reveal the same actions; tap to open.
+function ThreadRow({ t, active, isAdmin, isMobile, onOpen, onChanged, onDeleted }) {
+  const W = 152; // revealed actions width
+  const [dx, setDx] = useState(0);
+  const [hover, setHover] = useState(false);
+  const start = useRef(null);
+  const moved = useRef(false);
+
+  const toggleRead = () => { setDx(0); (t.unread ? api.osThread(t.id) : api.osThreadUnread(t.id)).then(onChanged).catch(() => {}); };
+  const del = () => { setDx(0); api.osThreadDelete(t.id).then(() => { onDeleted?.(); onChanged?.(); }).catch(() => {}); };
+
+  const onTouchStart = (e) => { start.current = { x: e.touches[0].clientX, base: dx }; moved.current = false; };
+  const onTouchMove = (e) => {
+    if (!start.current) return;
+    const nx = Math.min(0, Math.max(-W, start.current.base + (e.touches[0].clientX - start.current.x)));
+    if (Math.abs(nx - start.current.base) > 3) moved.current = true;
+    setDx(nx);
+  };
+  const onTouchEnd = () => { setDx(dx < -W / 2 ? -W : 0); start.current = null; };
+  const tap = () => { if (moved.current) return; if (dx !== 0) { setDx(0); return; } onOpen(); };
+
+  const actionsVisible = isMobile ? dx < -8 : hover;
+  return (
+    <div style={{ position: 'relative', overflow: 'hidden', borderBottom: '1px solid var(--hairline)' }}
+      onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
+      {/* Actions behind the row (revealed by swipe on mobile / hover on desktop) */}
+      <div style={{ position: 'absolute', top: 0, right: 0, bottom: 0, display: 'flex', opacity: actionsVisible ? 1 : 0, transition: 'opacity .15s', pointerEvents: actionsVisible ? 'auto' : 'none' }}>
+        <button onClick={(e) => { e.stopPropagation(); toggleRead(); }} style={{ ...actBtn, background: '#0a66c2' }}>{t.unread ? 'Read' : 'Unread'}</button>
+        <button onClick={(e) => { e.stopPropagation(); del(); }} style={{ ...actBtn, background: '#dc2626' }}>Delete</button>
+      </div>
+      <button
+        onClick={tap}
+        onTouchStart={isMobile ? onTouchStart : undefined}
+        onTouchMove={isMobile ? onTouchMove : undefined}
+        onTouchEnd={isMobile ? onTouchEnd : undefined}
+        className="nav-row"
+        style={{ ...rowBtn, borderBottom: 'none', position: 'relative', transform: `translateX(${isMobile ? dx : 0}px)`, transition: start.current ? 'none' : 'transform .2s', background: active ? 'var(--elevated)' : 'var(--bg)', touchAction: 'pan-y' }}
+      >
+        <span style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0, marginTop: 6, background: t.unread ? 'var(--brand)' : 'transparent' }} />
+        <span style={{ flex: 1, minWidth: 0 }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 13.5, fontWeight: t.unread ? 800 : 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.title || '(no subject)'}</span>
+            <PriorityChip priority={t.priority} acked={t.acked} />
+          </span>
+          {isAdmin && <span style={{ display: 'block', fontSize: 11, color: 'var(--muted)' }}>{t.entityName}</span>}
+          <span style={{ display: 'block', fontSize: 12, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.preview?.body || ''}</span>
+        </span>
+        <span style={{ fontSize: 10.5, color: 'var(--muted)', flexShrink: 0 }}>{shortDate(t.updatedAt)}</span>
+      </button>
+    </div>
+  );
+}
+
+const actBtn = { border: 'none', cursor: 'pointer', color: '#fff', fontSize: 12, fontWeight: 700, width: 76, height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' };
 
 function PriorityChip({ priority, acked }) {
   // Status only — the action lives in the amber bar. Labelling this chip
