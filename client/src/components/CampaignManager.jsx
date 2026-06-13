@@ -416,6 +416,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
       {/* Mobile-first: controls + preview stack into one column on phones. */}
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0,1fr) minmax(0,1fr)', gap: 20, alignItems: 'start' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <Accordion title="Setup" defaultOpen>
           <Field label="Campaign name"><input style={input} value={f.title} onChange={(e) => set('title', e.target.value)} placeholder="e.g. Abandoned cart — Pretoria show" /></Field>
 
           <Field label="Master campaign (optional · groups & reports segments together)">
@@ -436,7 +437,9 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
           <Field label="Goal (steers the AI copy)">
             <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit' }} rows={2} value={f.goal} onChange={(e) => set('goal', e.target.value)} />
           </Field>
+          </Accordion>
 
+          <Accordion title="Channel & campaign type" defaultOpen>
           <Field label="Channel">
             <div style={{ display: 'flex', gap: 8 }}>
               <Toggle on={f.channel !== 'sms'} onClick={() => set('channel', 'email')}>✉️ Email</Toggle>
@@ -454,7 +457,9 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
               ? 'A series of timed emails that runs automatically per customer — anyone who buys drops out. Approve once.'
               : 'One email to the current audience when you approve.'}</div>
           </Field>
+          </Accordion>
 
+          <Accordion title="Audience & targeting" defaultOpen>
           <Field label="Audience">
             {f.audienceMode === 'snapshot' ? (
               <div style={{ fontSize: 13, background: 'rgba(124,58,237,0.07)', border: '1px solid rgba(124,58,237,0.25)', borderRadius: 8, padding: '9px 12px' }}>
@@ -539,7 +544,9 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
             </>
             )}
           </Field>
+          </Accordion>
 
+          <Accordion title="Content & offer" defaultOpen>
           {isSequence && (
             <Field label="Emails in the sequence">
               <SequenceSteps steps={f.steps} setStep={setStep} addStep={addStep} removeStep={removeStep} />
@@ -594,7 +601,10 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
             </Field>
           )}
 
+          </Accordion>
+
           {!isSequence && f.audienceMode === 'tile' && (
+            <Accordion title="Automation">
             <Field label="Automation">
               <div style={{ display: 'flex', gap: 8 }}>
                 <Toggle on={!f.recurring} onClick={() => set('recurring', false)}>One-off send</Toggle>
@@ -604,8 +614,10 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
                 ? 'Checks the tile daily; anyone NEW (never emailed by this campaign, not unsubscribed) is queued as a draft for your approval. Nothing sends on its own.'
                 : 'Sends once to the current audience when you approve.'}</div>
             </Field>
+            </Accordion>
           )}
 
+          <Accordion title="Tracking (UTM)">
           <Field label="UTM tracking (appended to the link on every click)">
             <button type="button" style={{ ...mini, marginBottom: 8 }} onClick={autoUtm}>✨ Auto-fill</button>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
@@ -621,6 +633,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
               </div>
             )}
           </Field>
+          </Accordion>
 
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 4, flexWrap: 'wrap' }}>
             <button style={mini} onClick={saveDraft} disabled={busy}>{busy ? 'Saving…' : 'Save draft'}</button>
@@ -946,6 +959,19 @@ const fmt = (iso) => { try { return new Date(iso).toLocaleString('en-ZA', { day:
 function Field({ label, children }) { return <div><div style={hintLbl}>{label}</div>{children}</div>; }
 function Toggle({ on, onClick, children }) {
   return <button type="button" onClick={onClick} style={{ flex: 1, padding: '8px 10px', borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', border: on ? '1.5px solid var(--brand)' : '1.5px solid var(--hairline)', background: on ? 'rgba(var(--brand-rgb), 0.08)' : 'transparent', color: on ? 'var(--brand)' : 'var(--text)' }}>{children}</button>;
+}
+// Collapsible section to keep the long editor tidy — one dropdown per area.
+function Accordion({ title, defaultOpen = false, children }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div style={{ border: '1px solid var(--hairline)', borderRadius: 10, overflow: 'hidden' }}>
+      <button type="button" onClick={() => setOpen((o) => !o)} style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left', background: 'var(--card)', border: 'none', cursor: 'pointer', padding: '11px 12px', fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>
+        <span style={{ width: 12, color: '#b0b0b6', fontSize: 10, transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</span>
+        {title}
+      </button>
+      {open && <div style={{ padding: '2px 12px 14px', display: 'flex', flexDirection: 'column', gap: 12 }}>{children}</div>}
+    </div>
+  );
 }
 
 // Optional targeting filters on the audience tile's columns (city, age, ticket
