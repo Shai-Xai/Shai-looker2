@@ -66,6 +66,24 @@ function mount(app, { db, auth, mailer, push, resolveAudience, draftCopy, listEv
       at      TEXT NOT NULL,
       PRIMARY KEY (root_id, email)
     );
+
+    -- Drip sequences: one row per enrolled recipient, tracking where they are in
+    -- the sequence and when the next step is due. They drop out (status flips)
+    -- the moment they buy (re-checked against the abandoned audience each step).
+    CREATE TABLE IF NOT EXISTS action_enrollments (
+      action_id   TEXT NOT NULL,
+      email       TEXT NOT NULL,
+      name        TEXT NOT NULL DEFAULT '',
+      ticket      TEXT NOT NULL DEFAULT '',
+      anchor_at   TEXT NOT NULL,                 -- abandonment time (or detection time)
+      step_index  INTEGER NOT NULL DEFAULT 0,    -- next step to send (0-based)
+      next_at     TEXT NOT NULL,                 -- when that step is due
+      status      TEXT NOT NULL DEFAULT 'active',-- active | converted | done | unsubscribed
+      enrolled_at TEXT NOT NULL,
+      updated_at  TEXT NOT NULL,
+      PRIMARY KEY (action_id, email)
+    );
+    CREATE INDEX IF NOT EXISTS idx_enroll_due ON action_enrollments(status, next_at);
   `);
   // Recurring-automation columns (ALTER for existing DBs).
   try {
@@ -121,8 +139,20 @@ function mount(app, { db, auth, mailer, push, resolveAudience, draftCopy, listEv
         nameField: String(aud.nameField || ''),
         consentField: String(aud.consentField || ''),
         ticketField: String(aud.ticketField || ''),
+        anchorField: String(aud.anchorField || ''), // abandonment timestamp column (drip timing)
         pasted: String(aud.pasted || '').slice(0, 200000),
       },
+      // Delivery mode: 'once' = single send to the current list; 'sequence' = an
+      // automated drip (enroll abandoners, send timed steps, drop on purchase).
+      campaignMode: body.campaignMode === 'sequence' ? 'sequence' : 'once',
+      // Sequence steps: each { delayHours, subject, body, ctaText }. delayHours is
+      // measured from the anchor (abandonment) time. Capped + sorted on save.
+      steps: Array.isArray(body.steps) ? body.steps.slice(0, 12).map((s) => ({
+        delayHours: Math.max(0, Number(s.delayHours) || 0),
+        subject: String(s.subject || '').slice(0, 200),
+        body: String(s.body || '').slice(0, 8000),
+        ctaText: String(s.ctaText || '').slice(0, 60),
+      })).sort((a, b) => a.delayHours - b.delayHours) : [],
       contentMode: body.contentMode === 'html' ? 'html' : 'template',
       eventSuiteId: String(body.eventSuiteId || ''),
       heroImage: String(body.heroImage || '').slice(0, 2000000),  // hero image data-URL/URL
@@ -166,13 +196,14 @@ function mount(app, { db, auth, mailer, push, resolveAudience, draftCopy, listEv
       const nameField = cfg.audience.nameField || '';
       const consentField = cfg.audience.consentField || '';
       const ticketField = cfg.audience.ticketField || '';
+      const anchorField = cfg.audience.anchorField || '';
       if (emailField) {
         for (const row of res.rows) {
           const email = cellVal(row[emailField]).toLowerCase();
           if (!EMAIL_RE.test(email)) continue;
           // Consent gate: when a consent column is chosen, only include "Yes".
           if (consentField && !isYes(cellVal(row[consentField]))) { noConsent += 1; continue; }
-          raw.push({ email, name: nameField ? cellVal(row[nameField]) : '', ticket: ticketField ? cellVal(row[ticketField]) : '' });
+          raw.push({ email, name: nameField ? cellVal(row[nameField]) : '', ticket: ticketField ? cellVal(row[ticketField]) : '', anchorRaw: anchorField ? cellVal(row[anchorField]) : '' });
         }
       }
     }
@@ -194,8 +225,13 @@ function mount(app, { db, auth, mailer, push, resolveAudience, draftCopy, listEv
   // Render one recipient's email. Tokens: {{name}}, {{ticketType}}, {{cta}},
   // {{unsubscribe}}. Two modes: the built branded template, or the client's own
   // uploaded HTML (we still inject tracking + a guaranteed unsubscribe link).
-  function renderFor(action, recipient) {
+  function renderFor(action, recipient, step) {
     const cfg = action.config;
+    // A drip step overrides the campaign-level copy (custom-HTML mode is
+    // campaign-level only; steps use the branded template).
+    const useSubject = step ? (step.subject || cfg.subject) : cfg.subject;
+    const useBody = step ? (step.body || cfg.body) : cfg.body;
+    const useCta = step ? (step.ctaText || cfg.ctaText) : cfg.ctaText;
     const firstName = (recipient.name || '').split(/\s+/)[0] || '';
     const ticket = recipient.ticket || '';
     // Per-recipient tracked link: the same signed token used for unsubscribe
@@ -208,9 +244,9 @@ function mount(app, { db, auth, mailer, push, resolveAudience, draftCopy, listEv
       .replace(/\{\{\s*(ticket_?type|ticket)\s*\}\}/gi, ticket || 'your tickets')
       .replace(/\{\{\s*cta(_url)?\s*\}\}/gi, ctaUrl || '#')
       .replace(/\{\{\s*unsubscribe\s*\}\}/gi, unsubUrl);
-    const subject = tok(cfg.subject);
+    const subject = tok(useSubject);
 
-    if (cfg.contentMode === 'html' && (cfg.customHtml || '').trim()) {
+    if (!step && cfg.contentMode === 'html' && (cfg.customHtml || '').trim()) {
       let html = tok(cfg.customHtml);
       // Guarantee an unsubscribe link (compliance) if the author didn't include one.
       if (!/unsubscrib/i.test(html)) {
@@ -227,7 +263,7 @@ function mount(app, { db, auth, mailer, push, resolveAudience, draftCopy, listEv
     const heroImage = cfg.heroImage
       ? (cfg.heroImage.startsWith('data:') && realSend ? `${mailer.baseUrl()}/mail-assets/campaign/${action.id}` : cfg.heroImage)
       : '';
-    const { html, text } = mailer.campaignEmail({ entityId: action.entityId, assetScope: action.entityId, subject, bodyText: tok(cfg.body), ctaText: cfg.ctaText || 'View event', ctaUrl, unsubUrl, heroImage });
+    const { html, text } = mailer.campaignEmail({ entityId: action.entityId, assetScope: action.entityId, subject, bodyText: tok(useBody), ctaText: useCta || 'View event', ctaUrl, unsubUrl, heroImage });
     return { html, text, subject };
   }
 
@@ -273,7 +309,7 @@ function mount(app, { db, auth, mailer, push, resolveAudience, draftCopy, listEv
     if (!guard(req, res, req.params.entityId)) return;
     const id = uuid();
     const cfg = cleanConfig(req.body || {});
-    const rec = (req.body || {}).recurring && cfg.audience.mode === 'tile' ? 1 : 0;
+    const rec = ((req.body || {}).recurring || cfg.campaignMode === 'sequence') && cfg.audience.mode === 'tile' ? 1 : 0;
     sql.prepare('INSERT INTO actions (id, entity_id, type, status, title, config, recurring, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
       .run(id, req.params.entityId, 'email_campaign', 'draft', String((req.body || {}).title || '').slice(0, 120), JSON.stringify(cfg), rec, req.user.email, now(), now());
     res.status(201).json({ action: publicAction(getAction(id)) });
@@ -284,7 +320,7 @@ function mount(app, { db, auth, mailer, push, resolveAudience, draftCopy, listEv
     if (!a || a.entityId !== req.params.entityId) return res.status(404).json({ error: 'Not found' });
     if (a.status !== 'draft' && a.status !== 'auto') return res.status(400).json({ error: 'Only drafts can be edited' });
     const cfg = { ...cleanConfig(req.body || {}), clickToken: a.config.clickToken };
-    const rec = (req.body || {}).recurring && cfg.audience.mode === 'tile' ? 1 : 0;
+    const rec = ((req.body || {}).recurring || cfg.campaignMode === 'sequence') && cfg.audience.mode === 'tile' ? 1 : 0;
     sql.prepare('UPDATE actions SET title=?, config=?, recurring=?, updated_at=? WHERE id=?')
       .run(String((req.body || {}).title || a.title).slice(0, 120), JSON.stringify(cfg), rec, now(), a.id);
     res.json({ action: publicAction(getAction(a.id)) });
@@ -361,13 +397,21 @@ function mount(app, { db, auth, mailer, push, resolveAudience, draftCopy, listEv
     const a = getAction(req.params.id);
     if (!a || a.entityId !== req.params.entityId) return res.status(404).json({ error: 'Not found' });
     if (a.status !== 'draft') return res.status(400).json({ error: `Cannot approve a ${a.status} campaign` });
-    if (!a.config.subject || !a.config.body) return res.status(400).json({ error: 'Subject and body are required' });
+    const isSequence = a.config.campaignMode === 'sequence';
+    if (isSequence) {
+      const s0 = (a.config.steps || [])[0];
+      if (!s0 || !s0.subject || !s0.body) return res.status(400).json({ error: 'Add at least one step with a subject and body' });
+    } else if (!a.config.subject || !a.config.body) {
+      return res.status(400).json({ error: 'Subject and body are required' });
+    }
 
-    // Recurring template: approving ACTIVATES the automation (no send) — the
-    // daily check queues child drafts for explicit approval.
-    if (a.recurring) {
+    // A sequence (drip) or recurring template ACTIVATES on approval and then runs
+    // fully automatically — no per-send approval. The check enrolls new
+    // abandoners (sequence) or queues child drafts (recurring single-send).
+    if (isSequence || a.recurring) {
       sql.prepare('UPDATE actions SET status=?, approved_by=?, approved_at=?, updated_at=? WHERE id=?')
         .run('auto', req.user.email, now(), now(), a.id);
+      if (isSequence) enrollSequence(getAction(a.id)).catch((e) => console.error('[actions] initial enroll failed', a.id, e.message));
       return res.json({ ok: true, activated: true });
     }
 
@@ -446,6 +490,8 @@ function mount(app, { db, auth, mailer, push, resolveAudience, draftCopy, listEv
       const a = getAction(id);
       if (!a) continue;
       sql.prepare('UPDATE actions SET last_check=? WHERE id=?').run(now(), a.id);
+      // Drip sequences enroll new abandoners instead of queuing child drafts.
+      if (a.config.campaignMode === 'sequence') { try { await enrollSequence(a); } catch (e) { console.error('[actions] enroll failed', a.id, e.message); } continue; }
       try {
         const sysUser = { id: 'auto-check', email: 'auto@pulse', role: 'admin', entityIds: [] };
         const { list } = await audienceFor(a.entityId, a.config, sysUser);
@@ -478,6 +524,78 @@ function mount(app, { db, auth, mailer, push, resolveAudience, draftCopy, listEv
   const autoTimer = setInterval(() => autoCheck().catch(() => {}), 10 * 60000);
   if (autoTimer.unref) autoTimer.unref();
   setTimeout(() => autoCheck().catch(() => {}), 20000);
+
+  // ── Drip sequences: enrollment + the per-recipient send tick ─────────────────
+  const sysUser = { id: 'auto-check', email: 'auto@pulse', role: 'admin', entityIds: [] };
+  const parseAnchor = (raw) => { const t = raw ? Date.parse(String(raw)) : NaN; return Number.isFinite(t) ? new Date(t) : null; };
+  const stepDue = (anchorMs, delayHours) => new Date(anchorMs + (delayHours || 0) * 3600e3).toISOString();
+
+  // Enroll any NEW abandoners into the sequence at step 0. Anchor = the row's
+  // abandonment timestamp (if a column is mapped), else now (detection time).
+  async function enrollSequence(a) {
+    const steps = a.config.steps || [];
+    if (!steps.length) return;
+    const { list } = await audienceFor(a.entityId, a.config, sysUser);
+    const enrolled = new Set(sql.prepare('SELECT email FROM action_enrollments WHERE action_id=?').all(a.id).map((r) => r.email));
+    const ins = sql.prepare('INSERT OR IGNORE INTO action_enrollments (action_id, email, name, ticket, anchor_at, step_index, next_at, status, enrolled_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)');
+    let n = 0;
+    for (const r of list) {
+      if (enrolled.has(r.email)) continue;
+      const anchor = parseAnchor(r.anchorRaw) || new Date();
+      ins.run(a.id, r.email, r.name || '', r.ticket || '', anchor.toISOString(), 0, stepDue(anchor.getTime(), steps[0].delayHours), 'active', now(), now());
+      n += 1;
+    }
+    if (n) {
+      const res = a.results || {};
+      saveResults(a.id, { ...res, enrolled: (res.enrolled || 0) + n });
+      console.log(`[actions] sequence "${a.title}" enrolled ${n} new`);
+    }
+  }
+
+  // Process all due steps. Once per action: re-run the audience to know who's
+  // still abandoning (anyone who dropped out has bought/expired → stop them),
+  // then send the due step to those still active and advance them.
+  async function processSequences() {
+    if (!enabled()) return;
+    const dueRows = sql.prepare("SELECT DISTINCT action_id FROM action_enrollments WHERE status='active' AND next_at <= ?").all(now());
+    for (const { action_id } of dueRows) {
+      const a = getAction(action_id);
+      if (!a || a.status !== 'auto' || a.config.campaignMode !== 'sequence') continue;
+      const steps = a.config.steps || [];
+      const branding = mailer.resolveBranding(a.entityId);
+      let stillAbandoning = new Set();
+      try { const { list } = await audienceFor(a.entityId, a.config, sysUser); stillAbandoning = new Set(list.map((r) => r.email)); }
+      catch (e) { console.error('[actions] sequence audience re-check failed', a.id, e.message); continue; }
+      const sup = suppressed(a.entityId);
+      const due = sql.prepare("SELECT * FROM action_enrollments WHERE action_id=? AND status='active' AND next_at <= ?").all(a.id, now());
+      let sent = 0; let converted = 0;
+      for (const e of due) {
+        // Conversion / suppression: gone from the abandoned list = bought (or
+        // expired); unsubscribed = removed. Either way, stop the journey.
+        if (!stillAbandoning.has(e.email)) { sql.prepare("UPDATE action_enrollments SET status='converted', updated_at=? WHERE action_id=? AND email=?").run(now(), a.id, e.email); converted += 1; continue; }
+        if (sup.has(e.email)) { sql.prepare("UPDATE action_enrollments SET status='unsubscribed', updated_at=? WHERE action_id=? AND email=?").run(now(), a.id, e.email); continue; }
+        const step = steps[e.step_index];
+        if (!step) { sql.prepare("UPDATE action_enrollments SET status='done', updated_at=? WHERE action_id=? AND email=?").run(now(), a.id, e.email); continue; }
+        try {
+          const { html, text, subject } = renderFor(a, { email: e.email, name: e.name, ticket: e.ticket }, step);
+          const r = await mailer.send({ to: e.email, subject: subject || a.title || 'A reminder from your event', html, text, fromName: branding.senderName, kind: 'campaign', entity: a.entityId });
+          if (r.ok) sent += 1;
+        } catch (err) { console.error('[actions] sequence send failed', a.id, e.email, err.message); }
+        // Advance to the next step (or finish).
+        const nextIdx = e.step_index + 1;
+        if (nextIdx >= steps.length) sql.prepare("UPDATE action_enrollments SET status='done', step_index=?, updated_at=? WHERE action_id=? AND email=?").run(nextIdx, now(), a.id, e.email);
+        else sql.prepare('UPDATE action_enrollments SET step_index=?, next_at=?, updated_at=? WHERE action_id=? AND email=?').run(nextIdx, stepDue(Date.parse(e.anchor_at), steps[nextIdx].delayHours), now(), a.id, e.email);
+        await new Promise((r) => setTimeout(r, 120)); // gentle rate
+      }
+      if (sent || converted) {
+        const res = a.results || {};
+        saveResults(a.id, { ...res, sent: (res.sent || 0) + sent, converted: (res.converted || 0) + converted });
+      }
+    }
+  }
+  const dripTimer = setInterval(() => processSequences().catch(() => {}), 3 * 60000);
+  if (dripTimer.unref) dripTimer.unref();
+  setTimeout(() => processSequences().catch(() => {}), 30000);
 
   // ── public routes (no auth; registered before the SPA fallback) ──
   // Tracked CTA click → count + redirect, with the campaign's UTM parameters
