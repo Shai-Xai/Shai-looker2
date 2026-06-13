@@ -190,10 +190,24 @@ function mount(app, { db, auth, mailer, push, generateContent, roleLenses }) {
   }
 
   // ── the tick ──
+  // Re-entrancy guard: a digest render does a live Looker pull + AI write that
+  // can take 30-60s (see render()). The tick fires every 60s, so without this
+  // guard a slow run would still be in-flight when the next tick starts, both
+  // ticks would re-select the same still-due job (next_run_at only advances
+  // AFTER runJob finishes, below), and the real recipients would be emailed
+  // twice. The flag makes an overlapping tick a no-op until the current one
+  // drains. Single-instance deployment, so an in-process flag is sufficient.
+  let ticking = false;
   async function tick() {
     if (!enabled()) return;
-    const due = sql.prepare("SELECT * FROM scheduled_jobs WHERE status='active' AND next_run_at IS NOT NULL AND next_run_at <= ?").all(now());
-    for (const r of due) { try { await runJob(rowToJob(r)); } catch (e) { console.error('[scheduler] job failed', r.id, e.message); } }
+    if (ticking) return; // a previous (slow) tick is still running — skip this one
+    ticking = true;
+    try {
+      const due = sql.prepare("SELECT * FROM scheduled_jobs WHERE status='active' AND next_run_at IS NOT NULL AND next_run_at <= ?").all(now());
+      for (const r of due) { try { await runJob(rowToJob(r)); } catch (e) { console.error('[scheduler] job failed', r.id, e.message); } }
+    } finally {
+      ticking = false;
+    }
   }
   const timer = setInterval(() => tick().catch(() => {}), 60000);
   if (timer.unref) timer.unref();

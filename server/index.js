@@ -15,6 +15,7 @@ const { parseDrillUrl } = require('./drill');
 const insights = require('./insights');
 const mailer = require('./mailer');
 const messaging = require('./messaging');
+const rateLimit = require('./ratelimit');
 
 const app = express();
 // Behind a reverse proxy (Caddy/Nginx) in production so Secure cookies + the
@@ -85,7 +86,9 @@ function meUser(user) {
   }).filter(Boolean);
   return { ...pub, entities };
 }
-app.post('/api/auth/login', (req, res) => {
+// Brute-force guard: cap login attempts per IP (fixed 15-minute window). Fails
+// open if the limiter errors, so it can never lock out legitimate traffic.
+app.post('/api/auth/login', rateLimit({ windowMs: 15 * 60_000, max: 10, by: 'ip', scope: 'login' }), (req, res) => {
   const { email, password } = req.body || {};
   const user = auth.verifyCredentials(email, password);
   if (!user) return res.status(401).json({ error: 'Invalid email or password' });
@@ -1044,7 +1047,8 @@ app.put('/api/my/integrations/:entityId', auth.requireAuth, auth.requirePermissi
 });
 
 // Streams the insight back as plain text chunks as Claude writes it.
-app.post('/api/insight', auth.requireAuth, async (req, res) => {
+// Per-user rate limit guards against runaway Anthropic spend (refresh loops etc).
+app.post('/api/insight', auth.requireAuth, rateLimit({ windowMs: 60_000, max: 30, by: 'user', scope: 'insight', message: 'Too many AI insight requests — please wait a moment.' }), async (req, res) => {
   const { title, visType, fields, rows, filters, userContext, history, suiteId, dashboardContext, tileContext } = req.body || {};
   if (!fields || !rows) return res.status(400).json({ error: 'fields and rows are required' });
   const apiKey = anthropicKeyForSuite(suiteId);
@@ -1072,7 +1076,9 @@ app.post('/api/insight', auth.requireAuth, async (req, res) => {
 
 // Whole-dashboard summary: runs every tile's query (same scope + filters as the
 // live view), then streams an executive summary of the whole dashboard.
-app.post('/api/dashboard-insight', auth.requireAuth, async (req, res) => {
+// Tighter per-user limit — each call can fire up to 24 Looker queries + a Claude
+// call, so it's the most expensive AI endpoint.
+app.post('/api/dashboard-insight', auth.requireAuth, rateLimit({ windowMs: 60_000, max: 10, by: 'user', scope: 'dashboard-insight', message: 'Too many dashboard summaries — please wait a moment.' }), async (req, res) => {
   const { dashboardId, filterValues = {}, suiteId } = req.body || {};
   if (!dashboardId) return res.status(400).json({ error: 'dashboardId is required' });
   const apiKey = anthropicKeyForSuite(suiteId);

@@ -1118,8 +1118,18 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
   // Process all due steps. Once per action: re-run the audience to know who's
   // still abandoning (anyone who dropped out has bought/expired → stop them),
   // then send the due step to those still active and advance them.
+  //
+  // Re-entrancy guard: a large batch (~1,500 due recipients paced at 120ms) can
+  // take ~3 min — the same as the timer interval — and a slow audience re-check
+  // adds more. next_at/step_index only advance AFTER each send (below), so an
+  // overlapping run would re-select the same enrollments and send the same drip
+  // step twice. The flag makes an overlapping run a no-op until this one drains.
+  let processing = false;
   async function processSequences() {
     if (!enabled()) return;
+    if (processing) return; // a previous (slow) run is still in flight — skip
+    processing = true;
+    try {
     const dueRows = sql.prepare("SELECT DISTINCT action_id FROM action_enrollments WHERE status='active' AND next_at <= ?").all(now());
     for (const { action_id } of dueRows) {
       const a = getAction(action_id);
@@ -1158,6 +1168,9 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
         const res = a.results || {};
         saveResults(a.id, { ...res, sent: (res.sent || 0) + sent, converted: (res.converted || 0) + converted });
       }
+    }
+    } finally {
+      processing = false;
     }
   }
   const dripTimer = setInterval(() => processSequences().catch(() => {}), 3 * 60000);
