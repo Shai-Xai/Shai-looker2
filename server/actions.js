@@ -636,6 +636,24 @@ function mount(app, { db, auth, mailer, push, resolveAudience, draftCopy, listEv
 
   // Detailed campaign report: per-recipient clicks (who, how many, when),
   // plus the summary. Names come from the audience snapshot.
+  // Journey funnel for a drip sequence: per-step "received" counts (a step is
+  // received once the recipient advances past it) + status breakdown. Shows
+  // where people convert or drop off through the sequence.
+  app.get('/api/actions/:entityId/:id/journey', auth.requireAuth, auth.requirePermission('campaigns.view'), (req, res) => {
+    if (!guard(req, res, req.params.entityId)) return;
+    const a = getAction(req.params.id);
+    if (!a || a.entityId !== req.params.entityId) return res.status(404).json({ error: 'Not found' });
+    const rows = sql.prepare('SELECT step_index, status FROM action_enrollments WHERE action_id=?').all(a.id);
+    const steps = a.config.steps || [];
+    const byStatus = { active: 0, converted: 0, unsubscribed: 0, done: 0 };
+    for (const r of rows) byStatus[r.status] = (byStatus[r.status] || 0) + 1;
+    const stepStats = steps.map((s, k) => ({
+      index: k, delayHours: s.delayHours, subject: s.subject,
+      received: rows.filter((r) => r.step_index > k).length,        // advanced past step k = got it
+      converted: rows.filter((r) => r.status === 'converted' && r.step_index === k + 1).length, // converted right after step k
+    }));
+    res.json({ enrolled: rows.length, ...byStatus, steps: stepStats });
+  });
   app.get('/api/actions/:entityId/:id/report', auth.requireAuth, auth.requirePermission('campaigns.view'), (req, res) => {
     if (!guard(req, res, req.params.entityId)) return;
     const a = getAction(req.params.id);

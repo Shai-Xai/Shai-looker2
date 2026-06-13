@@ -15,6 +15,7 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
   const [templates, setTemplates] = useState([]);
   const [reporting, setReporting] = useState(null); // action object
   const [masterReport, setMasterReport] = useState(null); // master campaign name
+  const [journey, setJourney] = useState(null); // sequence action for the journey funnel
   const [presetMaster, setPresetMaster] = useState(''); // pre-fill master on a new campaign
   const [masters, setMasters] = useState([]);
   useEffect(() => { api.getActionTemplates(entityId).then((r) => setTemplates(r.templates || [])).catch(() => setTemplates([])); }, [entityId]);
@@ -53,6 +54,9 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
   }
   if (reporting) {
     return <CampaignReport entityId={entityId} action={reporting} onClose={() => setReporting(null)} />;
+  }
+  if (journey) {
+    return <JourneyReport entityId={entityId} action={journey} onClose={() => setJourney(null)} />;
   }
   if (masterReport) {
     return <MasterReport entityId={entityId} name={masterReport}
@@ -100,6 +104,7 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
         {a.results?.lastError && a.status !== 'done' && <div style={{ fontSize: 11, color: 'var(--error,#ef4444)', marginTop: 3 }}>{a.results.lastError}</div>}
       </div>
       <div style={{ display: 'flex', gap: 6, flexShrink: 0, flexWrap: 'wrap' }}>
+        {a.config?.campaignMode === 'sequence' && a.status === 'auto' && <button style={mini} onClick={() => setJourney(a)}>🪜 Journey</button>}
         {(a.status === 'done' || a.status === 'running' || a.status === 'failed') && <button style={mini} onClick={() => setReporting(a)}>📊 Report</button>}
         {(a.status === 'draft' || a.status === 'auto') && <button style={mini} onClick={() => setEditing(a)}>{a.createdBy === 'automation' ? 'Review & approve' : 'Edit'}</button>}
         {a.status === 'auto' && <button style={mini} onClick={() => api.pauseAction(entityId, a.id).then(load)}>⏸ Pause</button>}
@@ -598,6 +603,51 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
 }
 
 // Detailed campaign report: summary stats + who clicked, how often, when.
+// Journey funnel for a drip sequence: how many received each step, and where
+// people convert or drop off. The bar widths are relative to the enrolled total.
+function JourneyReport({ entityId, action, onClose }) {
+  const [d, setD] = useState(null);
+  useEffect(() => { api.actionJourney(entityId, action.id).then(setD).catch(() => setD({ error: true })); }, [entityId, action.id]);
+  const unit = (h) => (h % 24 === 0 && h >= 24 ? `${h / 24}d` : `${h}h`);
+  return (
+    <div>
+      <button style={{ ...mini, marginBottom: 12 }} onClick={onClose}>← Back to campaigns</button>
+      <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 2 }}>🪜 {action.title || 'Sequence'} — journey</div>
+      {!d ? <p style={{ color: 'var(--muted)' }}>Loading…</p> : d.error ? <p style={{ color: 'var(--error,#ef4444)' }}>Couldn’t load.</p> : (
+        <>
+          <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 14 }}>
+            <b style={{ color: 'var(--text)' }}>{d.enrolled}</b> enrolled · {d.active} still active · <b style={{ color: 'var(--success,#10b981)' }}>{d.converted}</b> converted · {d.done} completed{d.unsubscribed ? ` · ${d.unsubscribed} unsubscribed` : ''}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {/* Enrolled baseline */}
+            <FunnelBar label="Enrolled" sub="entered the journey" value={d.enrolled} total={d.enrolled} accent="var(--brand)" />
+            {d.steps.map((s) => (
+              <FunnelBar key={s.index} label={`Step ${s.index + 1} · +${unit(s.delayHours)}`} sub={s.subject || ''} value={s.received} total={d.enrolled || 1}
+                note={s.converted ? `${s.converted} converted after this step` : ''} />
+            ))}
+          </div>
+          <div style={hintS}>“Received” counts everyone who advanced past that step. People leave the journey the moment they buy (converted) or unsubscribe.</div>
+        </>
+      )}
+    </div>
+  );
+}
+function FunnelBar({ label, sub, value, total, accent, note }) {
+  const pct = total > 0 ? Math.round((value / total) * 100) : 0;
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 13, fontWeight: 700 }}>{label}{sub && <span style={{ fontWeight: 400, color: 'var(--muted)', fontSize: 12 }}> · {sub}</span>}</span>
+        <span style={{ fontSize: 12.5, fontWeight: 600 }}>{value} <span style={{ color: 'var(--muted)' }}>({pct}%)</span></span>
+      </div>
+      <div style={{ height: 10, borderRadius: 999, background: 'rgba(128,128,128,0.15)', overflow: 'hidden' }}>
+        <div style={{ height: '100%', width: `${pct}%`, background: accent || '#7c3aed', borderRadius: 999, transition: 'width .2s' }} />
+      </div>
+      {note && <div style={{ fontSize: 11, color: 'var(--success,#10b981)', marginTop: 3 }}>✓ {note}</div>}
+    </div>
+  );
+}
+
 // Master-campaign report: combined totals across all the segment campaigns
 // sharing this master, plus a per-segment breakdown (tap a segment for its own
 // report). Built from data already loaded — no extra fetch.
