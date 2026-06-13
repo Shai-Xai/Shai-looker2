@@ -155,12 +155,15 @@ function ThreadView({ id, isAdmin, isMobile, onBack, onChange, listCollapsed, on
           // Howler sit on the left with the Pulse/Howler logo; the client uses
           // their entity logo. System keeps a neutral (not brand) bubble.
           const isSystem = m.authorType === 'system';
-          const isHowlerSide = isSystem || m.authorType === 'howler';
-          const mine = !isSystem && (isAdmin ? m.authorType === 'howler' : m.authorType === 'user');
+          const isHowlerSide = ['system', 'howler', 'owl'].includes(m.authorType);
+          // "My side" is right: Howler for an admin viewer, the client for a
+          // client viewer. (Author types are howler | client | owl | system.)
+          const mine = isAdmin ? m.authorType === 'howler' : m.authorType === 'client';
+          const ownEmail = !!user?.email && (m.authorEmail || '').toLowerCase() === user.email.toLowerCase();
           const seen = isAdmin && m.authorType === 'howler' ? readBy(m) : null;
-          const partyBg = isSystem ? 'var(--brand)' : (m.authorType === 'howler' ? 'var(--brand-2)' : 'var(--brand)');
+          const partyBg = m.authorType === 'howler' ? 'var(--brand-2)' : 'var(--brand)';
           const initial = isSystem ? 'P' : m.authorType === 'howler' ? 'H' : (m.authorEmail || '?').trim().charAt(0).toUpperCase();
-          const shortName = mine ? 'You' : isSystem ? 'Pulse' : m.authorType === 'howler' ? 'Howler' : (m.authorEmail || 'Someone').split('@')[0];
+          const shortName = ownEmail ? 'You' : isSystem ? 'Pulse' : m.authorType === 'owl' ? 'Owl' : m.authorType === 'howler' ? 'Howler' : (m.authorEmail || 'Someone').split('@')[0];
           // Avatar image: Howler/Pulse → the Pulse logo; client → their entity logo.
           const logo = isHowlerSide ? '/logo.png' : (data.thread.entityLogo || '');
           return (
