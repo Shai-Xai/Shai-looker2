@@ -180,9 +180,10 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
   function cleanConfig(body) {
     const aud = body.audience || {};
     return {
-      // Delivery channel: email (default) or sms (Clickatell). One channel per
-      // campaign for now; per-step channels can follow.
-      channel: body.channel === 'sms' ? 'sms' : 'email',
+      // Delivery channel: 'email', 'sms' (Clickatell), or 'both' — when both,
+      // each recipient gets an email (if they have an address) and an SMS (if
+      // they have a number).
+      channel: ['sms', 'both'].includes(body.channel) ? body.channel : 'email',
       audience: {
         mode: ['paste', 'snapshot'].includes(aud.mode) ? aud.mode : 'tile',
         phoneField: String(aud.phoneField || ''), // mobile column (for SMS)
@@ -295,7 +296,19 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     let noConsent = 0;
     let filteredOut = 0;
     if (cfg.audience.mode === 'paste') {
-      raw = cfg.audience.pasted.split(/[\s,;]+/).map((e) => e.trim().toLowerCase()).filter((e) => EMAIL_RE.test(e)).map((email) => ({ email }));
+      // Each token is an email or a mobile number. Emails → email recipients;
+      // numbers (≥7 digits, optional +) → SMS recipients. Deduped.
+      const seen = new Set();
+      raw = [];
+      for (const t of cfg.audience.pasted.split(/[\s,;]+/).map((x) => x.trim()).filter(Boolean)) {
+        if (EMAIL_RE.test(t.toLowerCase())) {
+          const email = t.toLowerCase();
+          if (!seen.has(email)) { seen.add(email); raw.push({ email }); }
+        } else {
+          const phone = t.replace(/[^\d+]/g, '');
+          if (phone.replace(/\D/g, '').length >= 7 && !seen.has(phone)) { seen.add(phone); raw.push({ email: '', phone }); }
+        }
+      }
     } else {
       if (!cfg.audience.dashboardId || !cfg.audience.tileId) return { list: [], fields: [], filterFields: [], excluded: 0, noConsent: 0, filteredOut: 0 };
       const res = await resolveAudience({ entityId, dashboardId: cfg.audience.dashboardId, tileId: cfg.audience.tileId, user });
@@ -344,9 +357,10 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     const list = [];
     let excluded = 0;
     for (const r of raw) {
-      if (seen.has(r.email)) continue;
-      seen.add(r.email);
-      if (sup.has(r.email)) { excluded += 1; continue; }
+      const key = r.email || r.phone; // phone-only recipients have no email
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      if (r.email && sup.has(r.email)) { excluded += 1; continue; }
       list.push(r);
       if (list.length >= MAX_AUDIENCE) break;
     }
@@ -470,16 +484,28 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     const a = getAction(actionId);
     if (!a || a.status !== 'running') return;
     const branding = mailer.resolveBranding(a.entityId);
-    const sms = a.config.channel === 'sms';
+    const wantsEmail = a.config.channel !== 'sms';
+    const wantsSms = a.config.channel !== 'email';
     const results = { sent: 0, failed: 0, clicks: a.results.clicks || 0, total: a.audience.length, startedAt: now() };
     saveResults(a.id, results);
     for (const recipient of a.audience) {
+      // Per recipient: try each channel they qualify for. Reached on ≥1 channel
+      // counts as sent; only count failed if every attempted channel failed.
+      let ok = false, attempted = false, lastErr = '';
       try {
-        const r = sms
-          ? await messaging.sendSms({ to: recipient.phone, text: renderSmsFor(a, recipient) })
-          : await (async () => { const { html, text, subject } = renderFor(a, recipient); return mailer.send({ to: recipient.email, subject: subject || a.title || 'An update from your event', html, text, fromName: branding.senderName, kind: 'campaign', entity: a.entityId }); })();
-        if (r.ok) results.sent += 1; else { results.failed += 1; results.lastError = r.error || r.reason || 'send failed'; }
-      } catch (e) { results.failed += 1; results.lastError = e.message; }
+        if (wantsEmail && recipient.email) {
+          attempted = true;
+          const { html, text, subject } = renderFor(a, recipient);
+          const r = await mailer.send({ to: recipient.email, subject: subject || a.title || 'An update from your event', html, text, fromName: branding.senderName, kind: 'campaign', entity: a.entityId });
+          if (r.ok) ok = true; else lastErr = r.error || r.reason || 'email failed';
+        }
+        if (wantsSms && recipient.phone) {
+          attempted = true;
+          const r = await messaging.sendSms({ to: recipient.phone, text: renderSmsFor(a, recipient) });
+          if (r.ok) ok = true; else lastErr = r.error || r.reason || 'SMS failed';
+        }
+      } catch (e) { lastErr = e.message; }
+      if (ok) results.sent += 1; else if (attempted) { results.failed += 1; results.lastError = lastErr; }
       if ((results.sent + results.failed) % 20 === 0) saveResults(a.id, results);
       await new Promise((res) => setTimeout(res, 120)); // gentle rate (~8/sec)
     }
@@ -673,26 +699,37 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     const recipient = { email: 'sam@example.com', name: 'Sam', ticket: 'General Admission', phone: '+27820000000' };
     // The client sends the active step's copy in cfg.body, so render from that
     // (step=null) — works for once-off and per-step sequence previews alike.
-    if (cfg.channel === 'sms') return res.json({ sms: renderSmsFor(fake, recipient, null) });
-    const { html } = renderFor(fake, recipient);
-    res.json({ html });
+    // Return whichever channel(s) apply: email html, SMS text, or both.
+    const out = {};
+    if (cfg.channel !== 'sms') out.html = renderFor(fake, recipient).html;
+    if (cfg.channel !== 'email') out.sms = renderSmsFor(fake, recipient, null);
+    res.json(out);
   });
   app.post('/api/actions/:entityId/test-send', auth.requireAuth, auth.requirePermission('campaigns.approve'), async (req, res) => {
     if (!guard(req, res, req.params.entityId)) return;
     const cfg = cleanConfig(req.body || {});
     const fake = { id: 'test', entityId: req.params.entityId, config: cfg };
     // SMS test goes to a phone you enter; email test goes to your own address.
-    if (cfg.channel === 'sms') {
+    // For 'both', send whichever the test data supports and report each.
+    const wantsEmail = cfg.channel !== 'sms';
+    const wantsSms = cfg.channel !== 'email';
+    const done = [];
+    if (wantsSms) {
       const to = String((req.body || {}).testPhone || '').trim();
       if (!to) return res.status(400).json({ error: 'Enter a mobile number to test the SMS' });
       const text = renderSmsFor(fake, { email: req.user.email, name: 'Sam', ticket: 'General Admission', phone: to });
       const r = await messaging.sendSms({ to, text: `[TEST] ${text}` });
-      return r.ok ? res.json({ ok: true, to }) : res.status(400).json({ error: r.error || r.reason || 'not configured' });
+      if (!r.ok) return res.status(400).json({ error: r.error || r.reason || 'SMS not configured' });
+      done.push(to);
     }
-    const { html, text, subject } = renderFor(fake, { email: req.user.email, name: '', ticket: 'General Admission' });
-    const branding = mailer.resolveBranding(req.params.entityId);
-    const r = await mailer.send({ to: req.user.email, subject: `[TEST] ${subject || 'Campaign'}`, html, text, fromName: branding.senderName, kind: 'test', entity: req.params.entityId });
-    r.ok ? res.json({ ok: true, to: req.user.email }) : res.status(400).json({ error: r.error || r.reason || 'not configured' });
+    if (wantsEmail) {
+      const { html, text, subject } = renderFor(fake, { email: req.user.email, name: '', ticket: 'General Admission' });
+      const branding = mailer.resolveBranding(req.params.entityId);
+      const r = await mailer.send({ to: req.user.email, subject: `[TEST] ${subject || 'Campaign'}`, html, text, fromName: branding.senderName, kind: 'test', entity: req.params.entityId });
+      if (!r.ok) return res.status(400).json({ error: r.error || r.reason || 'email not configured' });
+      done.push(req.user.email);
+    }
+    res.json({ ok: true, to: done.join(' & ') });
   });
 
   // APPROVE & SEND — the human gate. Snapshots the audience at this moment and
@@ -790,7 +827,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     const c = a.config;
     const isSeq = c.campaignMode === 'sequence';
     const lines = [];
-    lines.push(`Channel: ${c.channel === 'sms' ? 'SMS' : 'Email'}`);
+    lines.push(`Channel: ${c.channel === 'both' ? 'Email + SMS' : c.channel === 'sms' ? 'SMS' : 'Email'}`);
     lines.push(`Type: ${isSeq ? `Drip sequence — ${(c.steps || []).length} step${(c.steps || []).length === 1 ? '' : 's'}` : a.recurring ? 'Automated (daily check)' : 'One-off send'}`);
     if (!isSeq && c.subject) lines.push(`Subject: ${c.subject}`);
     const audSrc = c.audience?.mode === 'paste' ? 'Pasted list' : c.audience?.mode === 'snapshot' ? 'Queued by automation' : 'Dashboard tile';
@@ -1048,10 +1085,12 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
         if (!step) { sql.prepare("UPDATE action_enrollments SET status='done', updated_at=? WHERE action_id=? AND email=?").run(now(), a.id, e.email); continue; }
         try {
           const rcpt = { email: e.email, name: e.name, ticket: e.ticket, phone: e.phone };
-          const r = a.config.channel === 'sms'
-            ? await messaging.sendSms({ to: e.phone, text: renderSmsFor(a, rcpt, step) })
-            : await (async () => { const { html, text, subject } = renderFor(a, rcpt, step); return mailer.send({ to: e.email, subject: subject || a.title || 'A reminder from your event', html, text, fromName: branding.senderName, kind: 'campaign', entity: a.entityId }); })();
-          if (r.ok) sent += 1;
+          const wantsEmail = a.config.channel !== 'sms';
+          const wantsSms = a.config.channel !== 'email';
+          let ok = false;
+          if (wantsEmail && e.email) { const { html, text, subject } = renderFor(a, rcpt, step); const r = await mailer.send({ to: e.email, subject: subject || a.title || 'A reminder from your event', html, text, fromName: branding.senderName, kind: 'campaign', entity: a.entityId }); if (r.ok) ok = true; }
+          if (wantsSms && e.phone) { const r = await messaging.sendSms({ to: e.phone, text: renderSmsFor(a, rcpt, step) }); if (r.ok) ok = true; }
+          if (ok) sent += 1;
         } catch (err) { console.error('[actions] sequence send failed', a.id, e.email, err.message); }
         // Advance to the next step (or finish).
         const nextIdx = e.step_index + 1;

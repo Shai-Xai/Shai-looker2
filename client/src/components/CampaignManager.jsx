@@ -303,7 +303,16 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
   const addStep = (delayHours = 24) => setF((s) => ({ ...s, steps: [...s.steps, { delayHours, subject: '', body: '', ctaText: s.steps[0]?.ctaText || '' }] }));
   const removeStep = (i) => setF((s) => ({ ...s, steps: s.steps.filter((_, j) => j !== i) }));
   const isSequence = f.campaignMode === 'sequence';
-  const sms = f.channel === 'sms';
+  const hasEmail = f.channel !== 'sms';   // email or both
+  const hasSms = f.channel !== 'email';   // sms or both
+  const smsOnly = f.channel === 'sms';
+  // Email/SMS are independent toggles; we keep at least one on.
+  const toggleChannel = (which) => setF((s) => {
+    let e = s.channel !== 'sms'; let m = s.channel !== 'email';
+    if (which === 'email') e = !e; else m = !m;
+    if (!e && !m) { if (which === 'email') m = true; else e = true; }
+    return { ...s, channel: e && m ? 'both' : m ? 'sms' : 'email' };
+  });
   // Editor sections behave as an exclusive accordion — opening one collapses the rest.
   const [openSection, setOpenSection] = useState(null);
   const acc = (key) => ({ open: openSection === key, onToggle: () => setOpenSection((s) => (s === key ? null : key)) });
@@ -534,12 +543,12 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
           </Accordion>
 
           <Accordion title="Channel & campaign type" {...acc('channel')}>
-          <Field label="Channel">
+          <Field label="Channel (pick one or both)">
             <div style={{ display: 'flex', gap: 8 }}>
-              <Toggle on={f.channel !== 'sms'} onClick={() => set('channel', 'email')}>✉️ Email</Toggle>
-              <Toggle on={f.channel === 'sms'} onClick={() => set('channel', 'sms')}>💬 SMS</Toggle>
+              <Toggle on={hasEmail} onClick={() => toggleChannel('email')}>✉️ Email</Toggle>
+              <Toggle on={hasSms} onClick={() => toggleChannel('sms')}>💬 SMS</Toggle>
             </div>
-            {f.channel === 'sms' && <div style={hintS}>SMS is plain text — the subject is ignored, the tracked link + an opt-out link are added automatically. Tokens {'{{name}}'}, {'{{ticketType}}'}, {'{{promo}}'} still work.</div>}
+            {hasSms && <div style={hintS}>SMS is plain text — no subject; the tracked link + an opt-out link are added automatically. Tokens {'{{name}}'}, {'{{ticketType}}'}, {'{{promo}}'} work.{f.channel === 'both' ? ' Each recipient gets an email AND an SMS — the SMS uses the body text.' : ''}</div>}
           </Field>
 
           <Field label="Campaign type">
@@ -593,14 +602,14 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
                       <option value="">Ticket-type column (optional — enables {'{{ticketType}}'})</option>
                       {aud.fields.map((fl) => <option key={fl.name} value={fl.name}>{fl.label}</option>)}
                     </select>
-                    {f.channel === 'sms' && (
+                    {hasSms && (
                       <select style={input} value={f.phoneField} onChange={(e) => set('phoneField', e.target.value)}>
                         <option value="">Mobile-number column (required for SMS)</option>
                         {aud.fields.map((fl) => <option key={fl.name} value={fl.name}>{fl.label}</option>)}
                       </select>
                     )}
                     <select style={input} value={f.consentField} onChange={(e) => set('consentField', e.target.value)}>
-                      <option value="">Consent column — recommended (only {f.channel === 'sms' ? 'text' : 'email'} when = Yes)</option>
+                      <option value="">Consent column — recommended (only {f.channel === 'both' ? 'contact' : smsOnly ? 'text' : 'email'} when = Yes)</option>
                       {aud.fields.map((fl) => <option key={fl.name} value={fl.name}>Only if “{fl.label}” = Yes</option>)}
                     </select>
                     {isSequence && (
@@ -620,7 +629,10 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
                 )}
               </div>
             ) : (
-              <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit' }} rows={3} value={f.pasted} onChange={(e) => set('pasted', e.target.value)} placeholder="one@example.com, two@example.com …" onBlur={refreshAudience} />
+              <>
+                <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit' }} rows={3} value={f.pasted} onChange={(e) => set('pasted', e.target.value)} placeholder={hasSms ? 'one@example.com, +27821234567, two@example.com …' : 'one@example.com, two@example.com …'} onBlur={refreshAudience} />
+                <div style={hintS}>{hasSms ? 'Paste emails and/or mobile numbers (any separator). Numbers get the SMS, emails get the email.' : 'Paste email addresses, separated by spaces, commas or new lines.'}</div>
+              </>
             )}
             <div style={{ marginTop: 8, fontSize: 12.5 }}>
               {audBusy ? <span style={{ color: 'var(--muted)' }}>Counting audience…</span>
@@ -640,16 +652,16 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
           </Field>
           </Accordion>
 
-          <Accordion title={sms ? 'Message & offer' : 'Content & offer'} {...acc('content')}>
-          {/* Sequence steps — SMS steps are just delay + text. */}
+          <Accordion title={smsOnly ? 'Message & offer' : 'Content & offer'} {...acc('content')}>
+          {/* Sequence steps — SMS-only steps are just delay + text. */}
           {isSequence && (
-            <Field label={sms ? 'Texts in the sequence' : 'Emails in the sequence'}>
-              <SequenceSteps steps={f.steps} setStep={setStep} addStep={addStep} removeStep={removeStep} activeStep={activeStep} onActive={setActiveStep} sms={sms} />
+            <Field label={smsOnly ? 'Texts in the sequence' : 'Emails in the sequence'}>
+              <SequenceSteps steps={f.steps} setStep={setStep} addStep={addStep} removeStep={removeStep} activeStep={activeStep} onActive={setActiveStep} sms={smsOnly} />
             </Field>
           )}
 
-          {/* Once-off SMS — a single plain-text message. */}
-          {!isSequence && sms && (
+          {/* Once-off SMS-only — a single plain-text message. */}
+          {!isSequence && smsOnly && (
             <Field label="Message">
               <button type="button" style={{ ...mini, marginBottom: 8 }} onClick={draft} disabled={drafting}>{drafting ? 'Writing…' : '✨ Draft copy with AI'}</button>
               <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit' }} rows={5} value={f.body} onChange={(e) => set('body', e.target.value)} placeholder={'Hi {{name}}, your {{ticketType}} tickets are still waiting — grab them here:'} />
@@ -658,9 +670,10 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
             </Field>
           )}
 
-          {/* Once-off email — built template or custom HTML. */}
-          {!isSequence && !sms && (
+          {/* Once-off email (or email+SMS) — built template or custom HTML. */}
+          {!isSequence && hasEmail && (
           <Field label="Content">
+            {f.channel === 'both' && <div style={{ ...hintS, marginTop: 0, marginBottom: 6 }}>This is the email. The SMS will use the body text below (plus the link &amp; opt-out).</div>}
             <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
               <Toggle on={f.contentMode === 'template'} onClick={() => set('contentMode', 'template')}>Built template</Toggle>
               <Toggle on={f.contentMode === 'html'} onClick={() => set('contentMode', 'html')}>Custom HTML</Toggle>
@@ -684,9 +697,10 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
           </Field>
           )}
 
-          {/* Tracked link — SMS (always) and email sequences share one buy link. */}
-          {(sms || isSequence) && (
-            <Field label={sms ? 'Link (tracked · appended to the text)' : 'Buy link (shared by every step · clicks tracked)'}>
+          {/* Tracked link — SMS-only and sequences share one buy link. (For an
+              email/both once-off, the link lives in the Call-to-action below.) */}
+          {(smsOnly || isSequence) && (
+            <Field label={smsOnly ? 'Link (tracked · appended to the text)' : 'Buy link (shared by every step · clicks tracked)'}>
               <input style={input} value={f.ctaUrl} onChange={(e) => set('ctaUrl', e.target.value)} placeholder="https://… the checkout/buy URL" />
             </Field>
           )}
@@ -694,15 +708,15 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
           {/* Promo / discount code */}
           <PromoEditor promo={f.promo} setPromo={(p) => set('promo', { ...f.promo, ...p })} poolStats={poolStats} promoCodesText={promoCodesText} setPromoCodesText={setPromoCodesText} />
 
-          {!isSequence && !sms && f.contentMode === 'template' && (
-            <Field label="Call to action">
+          {!isSequence && hasEmail && f.contentMode === 'template' && (
+            <Field label={f.channel === 'both' ? 'Call to action (the button link is also the SMS link)' : 'Call to action'}>
               <div style={{ display: 'flex', gap: 8 }}>
                 <input style={{ ...input, flex: 1 }} value={f.ctaText} onChange={(e) => set('ctaText', e.target.value)} placeholder="Button text" />
                 <input style={{ ...input, flex: 2 }} value={f.ctaUrl} onChange={(e) => set('ctaUrl', e.target.value)} placeholder="https://… (clicks are tracked)" />
               </div>
             </Field>
           )}
-          {!isSequence && !sms && f.contentMode === 'html' && (
+          {!isSequence && hasEmail && f.contentMode === 'html' && (
             <Field label="Tracked link (for {{cta}})">
               <input style={input} value={f.ctaUrl} onChange={(e) => set('ctaUrl', e.target.value)} placeholder="https://… — clicks on {{cta}} are tracked" />
             </Field>
@@ -764,7 +778,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
               type="button" style={mini} disabled={testState === 'sending'}
               onClick={async () => {
                 let testPhone = '';
-                if (f.channel === 'sms') { testPhone = window.prompt('Send the test SMS to which number?', ''); if (!testPhone) return; }
+                if (hasSms) { testPhone = window.prompt('Send the test SMS to which number?', ''); if (!testPhone) return; }
                 setTestState('sending');
                 try { const r = await api.actionTestSend(entityId, { ...payload(), testPhone }); setTestState(`✓ Test sent to ${r.to}`); } catch (e) { setTestState(`✗ ${e.message}`); }
               }}
@@ -785,7 +799,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
         {/* Preview follows you as you scroll the (long) form on desktop. */}
         <div style={isMobile ? {} : { position: 'sticky', top: 12, alignSelf: 'start' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
-            <span style={hintLbl}>{sms ? 'SMS preview' : 'Email preview'}</span>
+            <span style={hintLbl}>{hasEmail && hasSms ? 'Email + SMS preview' : smsOnly ? 'SMS preview' : 'Email preview'}</span>
             {isSequence && <button type="button" style={{ ...mini, padding: '4px 9px' }} onClick={() => setPreviewAll((v) => !v)}>{previewAll ? 'Show step 1 only' : 'Preview all steps'}</button>}
           </div>
           {previewAll && isSequence ? (
@@ -794,14 +808,16 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
                 : stepPreviews.map((s, i) => (
                   <div key={i}>
                     <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--brand)', margin: '0 0 4px' }}>{s.label}</div>
-                    {sms ? <SmsPreview text={s.sms} /> : <iframe title={s.label} srcDoc={s.html} style={{ width: '100%', height: 460, border: '1px solid var(--hairline)', borderRadius: 12, background: '#fff' }} />}
+                    {hasEmail && <iframe title={s.label} srcDoc={s.html} style={{ width: '100%', height: 460, border: '1px solid var(--hairline)', borderRadius: 12, background: '#fff' }} />}
+                    {hasSms && <div style={{ marginTop: hasEmail ? 8 : 0 }}><SmsPreview text={s.sms} /></div>}
                   </div>
                 ))}
             </div>
-          ) : sms ? (
-            <SmsPreview text={previewSms} />
           ) : (
-            <iframe title="Campaign preview" srcDoc={preview} style={{ width: '100%', height: 560, border: '1px solid var(--hairline)', borderRadius: 12, background: '#fff' }} />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {hasEmail && <iframe title="Campaign preview" srcDoc={preview} style={{ width: '100%', height: hasSms ? 460 : 560, border: '1px solid var(--hairline)', borderRadius: 12, background: '#fff' }} />}
+              {hasSms && <SmsPreview text={previewSms} />}
+            </div>
           )}
         </div>
       </div>
