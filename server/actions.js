@@ -154,6 +154,16 @@ function mount(app, { db, auth, mailer, push, resolveAudience, draftCopy, listEv
         consentField: String(aud.consentField || ''),
         ticketField: String(aud.ticketField || ''),
         anchorField: String(aud.anchorField || ''), // abandonment timestamp column (drip timing)
+        // Optional targeting filters on the tile's own columns (city, age,
+        // ticket category, new/returning…). op 'in' = value ∈ values;
+        // 'between' = min ≤ numeric ≤ max. All filters AND together.
+        filters: Array.isArray(aud.filters) ? aud.filters.slice(0, 8).map((fl) => ({
+          field: String(fl.field || ''),
+          op: fl.op === 'between' ? 'between' : 'in',
+          values: Array.isArray(fl.values) ? fl.values.map((v) => String(v)).slice(0, 100) : [],
+          min: (fl.min === '' || fl.min == null) ? null : Number(fl.min),
+          max: (fl.max === '' || fl.max == null) ? null : Number(fl.max),
+        })).filter((fl) => fl.field) : [],
         pasted: String(aud.pasted || '').slice(0, 200000),
       },
       // Delivery mode: 'once' = single send to the current list; 'sequence' = an
@@ -207,14 +217,33 @@ function mount(app, { db, auth, mailer, push, resolveAudience, draftCopy, listEv
   const cellVal = (cell) => String((cell && (cell.value ?? cell)) || '').trim();
   const isYes = (v) => ['yes', 'y', 'true', '1', 'consented', 'opted in', 'opt in'].includes(String(v).trim().toLowerCase());
 
+  // Does a tile row pass all the targeting filters? (AND across filters.)
+  function rowPassesFilters(row, filters) {
+    for (const fl of filters || []) {
+      const cell = cellVal(row[fl.field]);
+      if (fl.op === 'between') {
+        const n = Number(String(cell).replace(/[^0-9.\-]/g, ''));
+        if (!Number.isFinite(n)) return false;
+        if (fl.min != null && n < fl.min) return false;
+        if (fl.max != null && n > fl.max) return false;
+      } else { // 'in'
+        if (!fl.values.length) continue; // empty = no constraint
+        const v = cell.toLowerCase();
+        if (!fl.values.some((x) => String(x).trim().toLowerCase() === v)) return false;
+      }
+    }
+    return true;
+  }
+
   async function audienceFor(entityId, cfg, user) {
     let raw = [];
     let fields = [];
     let noConsent = 0;
+    let filteredOut = 0;
     if (cfg.audience.mode === 'paste') {
       raw = cfg.audience.pasted.split(/[\s,;]+/).map((e) => e.trim().toLowerCase()).filter((e) => EMAIL_RE.test(e)).map((email) => ({ email }));
     } else {
-      if (!cfg.audience.dashboardId || !cfg.audience.tileId) return { list: [], fields: [], excluded: 0, noConsent: 0 };
+      if (!cfg.audience.dashboardId || !cfg.audience.tileId) return { list: [], fields: [], excluded: 0, noConsent: 0, filteredOut: 0 };
       const res = await resolveAudience({ entityId, dashboardId: cfg.audience.dashboardId, tileId: cfg.audience.tileId, user });
       fields = res.fields;
       const emailField = cfg.audience.emailField || res.fields.find((f) => /email/i.test(f.name) || /email/i.test(f.label))?.name || '';
@@ -222,10 +251,13 @@ function mount(app, { db, auth, mailer, push, resolveAudience, draftCopy, listEv
       const consentField = cfg.audience.consentField || '';
       const ticketField = cfg.audience.ticketField || '';
       const anchorField = cfg.audience.anchorField || '';
+      const filters = cfg.audience.filters || [];
       if (emailField) {
         for (const row of res.rows) {
           const email = cellVal(row[emailField]).toLowerCase();
           if (!EMAIL_RE.test(email)) continue;
+          // Targeting filters (city/age/ticket category/…) — narrow the segment.
+          if (filters.length && !rowPassesFilters(row, filters)) { filteredOut += 1; continue; }
           // Consent gate: when a consent column is chosen, only include "Yes".
           if (consentField && !isYes(cellVal(row[consentField]))) { noConsent += 1; continue; }
           raw.push({ email, name: nameField ? cellVal(row[nameField]) : '', ticket: ticketField ? cellVal(row[ticketField]) : '', anchorRaw: anchorField ? cellVal(row[anchorField]) : '' });
@@ -244,7 +276,7 @@ function mount(app, { db, auth, mailer, push, resolveAudience, draftCopy, listEv
       list.push(r);
       if (list.length >= MAX_AUDIENCE) break;
     }
-    return { list, fields, excluded, noConsent };
+    return { list, fields, excluded, noConsent, filteredOut };
   }
 
   // ── Promo / discount codes ──
@@ -428,8 +460,25 @@ function mount(app, { db, auth, mailer, push, resolveAudience, draftCopy, listEv
     if (!guard(req, res, req.params.entityId)) return;
     try {
       const cfg = cleanConfig(req.body || {});
-      const { list, fields, excluded, noConsent } = await audienceFor(req.params.entityId, cfg, req.user);
-      res.json({ count: list.length, excluded, noConsent, sample: list.slice(0, 8), fields: (fields || []).map((f) => ({ name: f.name, label: f.label })) });
+      const { list, fields, excluded, noConsent, filteredOut } = await audienceFor(req.params.entityId, cfg, req.user);
+      res.json({ count: list.length, excluded, noConsent, filteredOut, sample: list.slice(0, 8), fields: (fields || []).map((f) => ({ name: f.name, label: f.label })) });
+    } catch (e) { res.status(400).json({ error: e.message }); }
+  });
+
+  // Distinct values for a tile column — powers the targeting filter multi-select.
+  app.post('/api/actions/:entityId/field-values', auth.requireAuth, auth.requirePermission('campaigns.view'), async (req, res) => {
+    if (!guard(req, res, req.params.entityId)) return;
+    const { dashboardId, tileId, field } = req.body || {};
+    if (!dashboardId || !tileId || !field) return res.json({ values: [] });
+    try {
+      const r = await resolveAudience({ entityId: req.params.entityId, dashboardId, tileId, user: req.user });
+      const seen = new Map(); // lower → original
+      for (const row of r.rows || []) {
+        const v = cellVal(row[field]);
+        if (v && !seen.has(v.toLowerCase())) seen.set(v.toLowerCase(), v);
+        if (seen.size >= 200) break;
+      }
+      res.json({ values: [...seen.values()].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).slice(0, 100) });
     } catch (e) { res.status(400).json({ error: e.message }); }
   });
 

@@ -142,6 +142,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
     consentField: cfg.audience?.consentField || ta.consentField || '',
     ticketField: cfg.audience?.ticketField || ta.ticketField || '',
     pasted: cfg.audience?.pasted || '',
+    filters: cfg.audience?.filters || [], // [{field, op:'in'|'between', values:[], min, max}]
     eventSuiteId: cfg.eventSuiteId || '',
     contentMode: cfg.contentMode || 'template',
     heroImage: cfg.heroImage || '',
@@ -200,8 +201,12 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
     campaignMode: f.campaignMode, steps: f.steps,
     promo: f.promo,
     promoCodes: promoCodesText.split(/[\s,;]+/).map((c) => c.trim()).filter(Boolean),
-    audience: { mode: f.audienceMode, dashboardId: f.dashboardId, tileId: f.tileId, emailField: f.emailField, nameField: f.nameField, consentField: f.consentField, ticketField: f.ticketField, anchorField: f.anchorField, pasted: f.pasted },
+    audience: { mode: f.audienceMode, dashboardId: f.dashboardId, tileId: f.tileId, emailField: f.emailField, nameField: f.nameField, consentField: f.consentField, ticketField: f.ticketField, anchorField: f.anchorField, filters: f.filters, pasted: f.pasted },
   });
+  // Targeting filter helpers.
+  const addFilter = () => setF((s) => ({ ...s, filters: [...s.filters, { field: '', op: 'in', values: [], min: '', max: '' }] }));
+  const setFilter = (i, patch) => setF((s) => ({ ...s, filters: s.filters.map((fl, j) => (j === i ? { ...fl, ...patch } : fl)) }));
+  const removeFilter = (i) => setF((s) => ({ ...s, filters: s.filters.filter((_, j) => j !== i) }));
   // Step helpers (sequence mode).
   const setStep = (i, patch) => setF((s) => ({ ...s, steps: s.steps.map((st, j) => (j === i ? { ...st, ...patch } : st)) }));
   const addStep = (delayHours = 24) => setF((s) => ({ ...s, steps: [...s.steps, { delayHours, subject: '', body: '', ctaText: s.steps[0]?.ctaText || '' }] }));
@@ -215,7 +220,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
     setAudBusy(true);
     api.actionAudiencePreview(entityId, payload()).then(setAud).catch((e) => setAud({ error: e.message })).finally(() => setAudBusy(false));
   };
-  useEffect(() => { refreshAudience(); }, [f.audienceMode, f.dashboardId, f.tileId, f.emailField, f.consentField]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { refreshAudience(); }, [f.audienceMode, f.dashboardId, f.tileId, f.emailField, f.consentField, JSON.stringify(f.filters)]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Debounced email preview.
   useEffect(() => {
@@ -404,6 +409,9 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
                     )}
                   </>
                 )}
+                {aud?.fields?.length > 0 && (
+                  <AudienceFilters entityId={entityId} dashboardId={f.dashboardId} tileId={f.tileId} fields={aud.fields} filters={f.filters} addFilter={addFilter} setFilter={setFilter} removeFilter={removeFilter} />
+                )}
               </div>
             ) : (
               <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit' }} rows={3} value={f.pasted} onChange={(e) => set('pasted', e.target.value)} placeholder="one@example.com, two@example.com …" onBlur={refreshAudience} />
@@ -414,6 +422,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
                 : aud ? (
                   <span>
                     <b style={{ color: 'var(--brand)' }}>{aud.count}</b> recipient{aud.count === 1 ? '' : 's'}
+                    {aud.filteredOut > 0 && <span style={{ color: 'var(--muted)' }}> · {aud.filteredOut} filtered out</span>}
                     {aud.noConsent > 0 && <span style={{ color: 'var(--muted)' }}> · {aud.noConsent} excluded (no consent)</span>}
                     {aud.excluded > 0 && <span style={{ color: 'var(--muted)' }}> · {aud.excluded} unsubscribed</span>}
                     {aud.sample?.length > 0 && <span style={{ color: 'var(--muted)' }}> · e.g. {aud.sample.slice(0, 3).map((s) => s.email).join(', ')}</span>}
@@ -668,6 +677,77 @@ const fmt = (iso) => { try { return new Date(iso).toLocaleString('en-ZA', { day:
 function Field({ label, children }) { return <div><div style={hintLbl}>{label}</div>{children}</div>; }
 function Toggle({ on, onClick, children }) {
   return <button type="button" onClick={onClick} style={{ flex: 1, padding: '8px 10px', borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', border: on ? '1.5px solid var(--brand)' : '1.5px solid var(--hairline)', background: on ? 'rgba(var(--brand-rgb), 0.08)' : 'transparent', color: on ? 'var(--brand)' : 'var(--text)' }}>{children}</button>;
+}
+
+// Optional targeting filters on the audience tile's columns (city, age, ticket
+// category, new/returning…). 'is one of' picks real values from the data;
+// 'between' is a numeric range (e.g. age). All filters narrow the segment (AND).
+function AudienceFilters({ entityId, dashboardId, tileId, fields, filters, addFilter, setFilter, removeFilter }) {
+  return (
+    <div style={{ marginTop: 8, borderTop: '1px dashed var(--hairline)', paddingTop: 10 }}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', marginBottom: 6 }}>🎯 Target a segment (optional)</div>
+      {filters.map((fl, i) => (
+        <FilterRow key={i} entityId={entityId} dashboardId={dashboardId} tileId={tileId} fields={fields} filter={fl}
+          onChange={(p) => setFilter(i, p)} onRemove={() => removeFilter(i)} />
+      ))}
+      <button type="button" style={{ ...mini, marginTop: filters.length ? 6 : 0 }} onClick={addFilter}>＋ Add filter</button>
+      {filters.length > 0 && <div style={hintS}>Filters narrow the audience to everyone matching all of them. Make a separate campaign per segment for different messaging.</div>}
+    </div>
+  );
+}
+function FilterRow({ entityId, dashboardId, tileId, fields, filter, onChange, onRemove }) {
+  const [values, setValues] = useState(null); // distinct values for the chosen field
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (filter.op !== 'in' || !filter.field || !dashboardId || !tileId) { setValues(null); return; }
+    let alive = true;
+    api.actionFieldValues(entityId, { dashboardId, tileId, field: filter.field }).then((r) => { if (alive) setValues(r.values || []); }).catch(() => { if (alive) setValues([]); });
+    return () => { alive = false; };
+  }, [filter.field, filter.op, dashboardId, tileId, entityId]);
+  const toggleVal = (v) => onChange({ values: filter.values.includes(v) ? filter.values.filter((x) => x !== v) : [...filter.values, v] });
+  return (
+    <div style={{ border: '1px solid var(--hairline)', borderRadius: 8, padding: 8, marginBottom: 6 }}>
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+        <select style={{ ...input, flex: 1, padding: '5px 8px' }} value={filter.field} onChange={(e) => onChange({ field: e.target.value, values: [] })}>
+          <option value="">Pick a field…</option>
+          {fields.map((fl) => <option key={fl.name} value={fl.name}>{fl.label}</option>)}
+        </select>
+        <select style={{ ...input, width: 110, padding: '5px 8px' }} value={filter.op} onChange={(e) => onChange({ op: e.target.value })}>
+          <option value="in">is one of</option>
+          <option value="between">between</option>
+        </select>
+        <button type="button" style={{ ...mini, color: 'var(--error,#ef4444)' }} onClick={onRemove}>✕</button>
+      </div>
+      {filter.field && filter.op === 'between' && (
+        <div style={{ display: 'flex', gap: 6, marginTop: 6, alignItems: 'center' }}>
+          <input type="number" style={{ ...input, width: 90, padding: '5px 8px' }} value={filter.min} onChange={(e) => onChange({ min: e.target.value })} placeholder="min" />
+          <span style={{ color: 'var(--muted)' }}>–</span>
+          <input type="number" style={{ ...input, width: 90, padding: '5px 8px' }} value={filter.max} onChange={(e) => onChange({ max: e.target.value })} placeholder="max" />
+        </div>
+      )}
+      {filter.field && filter.op === 'in' && (
+        <div style={{ marginTop: 6 }}>
+          {filter.values.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
+              {filter.values.map((v) => <span key={v} onClick={() => toggleVal(v)} style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 980, background: 'rgba(var(--brand-rgb,255,56,92),0.10)', color: 'var(--brand)', cursor: 'pointer' }}>{v} ✕</span>)}
+            </div>
+          )}
+          <button type="button" style={{ ...mini, padding: '4px 9px' }} onClick={() => setOpen((o) => !o)}>{open ? 'Done' : 'Choose values'}</button>
+          {open && (
+            <div style={{ marginTop: 6, maxHeight: 160, overflowY: 'auto', border: '1px solid var(--hairline)', borderRadius: 8, padding: 6 }}>
+              {values == null ? <div style={hintS}>Loading values…</div>
+                : values.length === 0 ? <div style={hintS}>No values found in this column.</div>
+                : values.map((v) => (
+                  <label key={v} style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12.5, padding: '3px 4px', cursor: 'pointer' }}>
+                    <input type="checkbox" checked={filter.values.includes(v)} onChange={() => toggleVal(v)} /> {v}
+                  </label>
+                ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // The drip timeline: each step has a delay (number + hours/days) and its own copy.
