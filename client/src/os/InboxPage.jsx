@@ -31,6 +31,13 @@ export default function InboxPage() {
 
   const load = () => api.osInbox(previewEntityId).then((r) => setList(r.threads)).catch(() => setList([]));
   useEffect(() => { load(); }, [previewEntityId]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Live refresh: poll the thread list so new messages/unread show without a
+  // manual reload. Pauses while the tab is hidden to save requests.
+  useEffect(() => {
+    const tick = () => { if (document.visibilityState === 'visible') api.osInbox(previewEntityId).then((r) => setList(r.threads)).catch(() => {}); };
+    const t = setInterval(tick, 10000);
+    return () => clearInterval(t);
+  }, [previewEntityId]);
 
   if (!list) return <Centered>Loading…</Centered>;
 
@@ -93,6 +100,12 @@ function ThreadView({ id, isAdmin, isMobile, onBack, onChange }) {
 
   const load = () => api.osThread(id).then(setData).catch(() => {});
   useEffect(() => { load(); }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Live refresh of the open conversation so new replies arrive on their own.
+  useEffect(() => {
+    const tick = () => { if (document.visibilityState === 'visible') api.osThread(id).then(setData).catch(() => {}); };
+    const t = setInterval(tick, 5000);
+    return () => clearInterval(t);
+  }, [id]);
   useEffect(() => { endRef.current?.scrollIntoView(); onChange?.(); window.dispatchEvent(new Event('os-refresh')); }, [data?.messages?.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!data) return <Centered>Loading…</Centered>;
