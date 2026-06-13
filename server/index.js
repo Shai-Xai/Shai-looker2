@@ -1832,7 +1832,7 @@ app.post('/api/my/dismiss-thread', auth.requireAuth, (req, res) => {
 app.get('/api/actions-summary/:entityId', auth.requireAuth, (req, res) => {
   const id = req.params.entityId;
   if (req.user.role !== 'admin' && !(req.user.entityIds || []).includes(id)) return res.status(403).json({ error: 'Not allowed' });
-  res.json({ actions: actionsSummaryFor(id, 6), pendingApproval: pendingApprovalCount(id) });
+  res.json({ actions: actionsSummaryFor(id, 6), pendingApproval: pendingApprovalCount(id), awaitingMyApproval: actionsApi.awaitingApprovalFor(req.user, id) });
 });
 
 // Campaigns waiting for a human go-ahead: automation-queued drafts AND
@@ -1964,7 +1964,7 @@ require('./scheduler').mount(app, { db, auth, mailer, push, generateContent: bui
 // e.g. abandoned cart). Audience = a dashboard tile's query, run with the SAME
 // organiser scoping as the dashboards themselves. Remove this line + actions.js
 // to uninstall.
-require('./actions').mount(app, {
+const actionsApi = require('./actions').mount(app, {
   db, auth, mailer, push, messaging, os,
   // Run a tile's query (scoped + suite-locked) and return its rows + fields —
   // the campaign audience source.

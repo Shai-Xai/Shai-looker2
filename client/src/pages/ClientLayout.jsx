@@ -154,11 +154,12 @@ export default function ClientLayout() {
     const poll = async () => {
       try {
         const r = await api.osInbox(activeEntityId || undefined);
-        // Campaigns awaiting this client's go-ahead also count toward the badge.
-        let pendingApproval = 0;
-        if (activeEntityId) { try { pendingApproval = (await api.getActionsSummary(activeEntityId)).pendingApproval || 0; } catch { /* ignore */ } }
+        // Campaigns awaiting this client's go-ahead also count toward the badge,
+        // and ones awaiting THIS user's sign-off drive the approval banner.
+        let pendingApproval = 0; let awaitingMyApproval = { count: 0, first: '' };
+        if (activeEntityId) { try { const sum = await api.getActionsSummary(activeEntityId); pendingApproval = sum.pendingApproval || 0; awaitingMyApproval = sum.awaitingMyApproval || awaitingMyApproval; } catch { /* ignore */ } }
         if (!alive) return;
-        setInbox((s) => ({ ...s, enabled: true, unread: r.unread, pendingApproval, pending: r.threads.filter((t) => t.priority === 'must_ack' && !t.acked) }));
+        setInbox((s) => ({ ...s, enabled: true, unread: r.unread, pendingApproval, awaitingMyApproval, pending: r.threads.filter((t) => t.priority === 'must_ack' && !t.acked) }));
         // Mirror unread + pending approvals onto the installed app's icon badge.
         const total = (r.unread || 0) + pendingApproval;
         try { if (navigator.setAppBadge) { total ? navigator.setAppBadge(total) : navigator.clearAppBadge(); } } catch { /* unsupported */ }
@@ -493,6 +494,19 @@ export default function ClientLayout() {
             {inbox.pending[0]?.title && inbox.pending.length === 1 && <span style={{ opacity: 0.9, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>— {inbox.pending[0].title}</span>}
             <span style={{ flex: 1 }} />
             <span style={{ background: 'rgba(255,255,255,0.25)', borderRadius: 980, padding: '5px 14px', fontWeight: 700, flexShrink: 0 }}>Open →</span>
+          </button>
+        )}
+        {/* Approval banner — campaigns awaiting THIS user's sign-off. Persistent
+            until cleared; taps through to the campaign. */}
+        {!location.pathname.startsWith('/actions') && (inbox.awaitingMyApproval?.count > 0) && (
+          <button
+            onClick={() => vtNavigate(navigate, inbox.awaitingMyApproval.first ? `/actions?action=${inbox.awaitingMyApproval.first}` : '/actions')}
+            style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', border: 'none', cursor: 'pointer', textAlign: 'left', padding: '10px 16px', background: 'linear-gradient(90deg, #f59e0b, #ea580c)', color: '#fff', fontSize: 13 }}
+          >
+            <span style={{ fontSize: 15 }}>⏳</span>
+            <span style={{ fontWeight: 700 }}>{inbox.awaitingMyApproval.count === 1 ? 'A campaign is waiting for your approval' : `${inbox.awaitingMyApproval.count} campaigns are waiting for your approval`}</span>
+            <span style={{ flex: 1 }} />
+            <span style={{ background: 'rgba(255,255,255,0.25)', borderRadius: 980, padding: '5px 14px', fontWeight: 700, flexShrink: 0 }}>Review →</span>
           </button>
         )}
         {previewMode && (

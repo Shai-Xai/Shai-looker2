@@ -821,6 +821,20 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     const linked = admins.filter((u) => (u.entityIds || []).includes(entityId));
     return linked.length ? linked : admins;
   }
+  // Pending campaigns where THIS user is an outstanding approver (hasn't signed
+  // off yet) — drives the "needs your approval" banner. { count, first }.
+  function awaitingApprovalFor(user, entityId) {
+    if (!user) return { count: 0, first: '' };
+    const rows = sql.prepare("SELECT * FROM actions WHERE entity_id=? AND status='pending'").all(entityId).map(rowToAction);
+    const canHowler = user.role === 'admin' && howlerAdminsFor(entityId).some((u) => u.id === user.id);
+    const myKeys = [`user:${user.id}`, ...(canHowler ? ['howler'] : [])];
+    let count = 0; let first = '';
+    for (const a of rows) {
+      const mine = approvalSummary(a).approvers.filter((x) => myKeys.includes(x.key) && !x.approved);
+      if (mine.length) { count += 1; if (!first) first = a.id; }
+    }
+    return { count, first };
+  }
   // A short, human summary of a campaign's key settings — for the approval
   // inbox message + email so approvers know what they're signing off.
   function campaignSummaryLines(a) {
@@ -1216,6 +1230,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
   });
 
   console.log('[actions] action engine mounted', enabled() ? '(enabled)' : '(disabled — set actions_enabled=1)');
+  return { awaitingApprovalFor };
 }
 
 module.exports = { mount };
