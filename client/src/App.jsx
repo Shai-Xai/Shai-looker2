@@ -194,7 +194,8 @@ function Shell() {
           <Header />
           {isAdmin && !actingAsClient ? (
             <Routes>
-              <Route path="/" element={<HomePage />} />
+              <Route path="/" element={<Navigate to="/admin" replace />} />
+              <Route path="/dashboards" element={<HomePage />} />
               <Route path="/d/:id" element={<ViewPage />} />
               <Route path="/d/:id/edit" element={<EditorPage />} />
               <Route path="/clone" element={<ClonePage />} />

@@ -141,8 +141,9 @@ export default function AdminPage() {
     return (
       <main style={{ flex: 1, padding: '20px 16px', width: '100%' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 16 }}>
-          <Link to="/" style={{ color: 'var(--muted)', fontSize: 13, textDecoration: 'none' }}>← Back</Link>
           <h1 style={{ fontSize: 20, fontWeight: 700 }}>Admin</h1>
+          <span style={{ flex: 1 }} />
+          <Link to="/dashboards" style={dashAdminBtn}>📊 Dashboard admin</Link>
         </div>
         <div style={{ display: 'flex', gap: 8, marginBottom: 18, overflowX: 'auto', paddingBottom: 4 }}>
           {ADMIN_NAV.map(([key, label]) => <Tab key={key} active={tab === key} onClick={() => setTab(key)}>{label}</Tab>)}
@@ -155,8 +156,9 @@ export default function AdminPage() {
   return (
     <main style={{ flex: 1, padding: '28px 24px', maxWidth: 1240, margin: '0 auto', width: '100%' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20 }}>
-        <Link to="/" style={{ color: 'var(--muted)', fontSize: 13, textDecoration: 'none' }}>← Back</Link>
         <h1 style={{ fontSize: 20, fontWeight: 700 }}>Admin</h1>
+        <span style={{ flex: 1 }} />
+        <Link to="/dashboards" style={dashAdminBtn}>📊 Dashboard admin</Link>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '188px minmax(0,1fr)', gap: 28, alignItems: 'start' }}>
         <nav style={{ position: 'sticky', top: 12, display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -2233,6 +2235,7 @@ function L({ children }) { return <span style={{ fontSize: 11, fontWeight: 700, 
 function Muted({ children }) { return <p style={{ color: 'var(--muted)' }}>{children}</p>; }
 
 const hint = { fontSize: 13, color: 'var(--muted)', marginBottom: 14 };
+const dashAdminBtn = { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 14px', borderRadius: 980, border: '1.5px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', fontSize: 13, fontWeight: 600, textDecoration: 'none', cursor: 'pointer' };
 const cardStyle = { background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 18, marginBottom: 14, boxShadow: '0 1px 6px rgba(0,0,0,0.05)' };
 const input = { padding: '8px 10px', border: '1.5px solid var(--hairline)', borderRadius: 7, fontSize: 13, outline: 'none', boxSizing: 'border-box', minWidth: 160 };
 const saveBtn = { padding: '8px 16px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 7, fontWeight: 600, fontSize: 13, cursor: 'pointer' };
