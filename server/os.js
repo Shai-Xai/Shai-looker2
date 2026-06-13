@@ -353,13 +353,26 @@ function mount(app, { db, auth, mailer, push }) {
   });
 
   // Programmatic announce — for other modules (e.g. campaign approval requests)
-  // to post a thread to a client + notify, without going through HTTP.
-  function announce({ entityId, title, body, priority = 'normal', createdBy = 'system', authorType = 'system', channels }) {
+  // to post a thread to a client + notify, without going through HTTP. Pass
+  // subjectType+subjectId to keep follow-up messages (submitted → rejected →
+  // approved) in ONE thread per subject instead of starting a new one each time.
+  function announce({ entityId, title, body, priority = 'normal', createdBy = 'system', authorType = 'system', channels, subjectType, subjectId }) {
     if (!enabled() || !entityId || !db.getEntity(entityId)) return null;
-    const id = uuid(); const ts = now();
+    const ts = now();
     const pri = ['fyi', 'normal', 'needs_reply', 'must_ack'].includes(priority) ? priority : 'normal';
-    sql.prepare('INSERT INTO os_threads (id, entity_id, suite_id, subject_type, subject_id, title, priority, status, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
-      .run(id, entityId, '', 'message', '', String(title || '').slice(0, 200), pri, 'open', createdBy, ts, ts);
+    let id;
+    const existing = (subjectType && subjectId)
+      ? sql.prepare('SELECT * FROM os_threads WHERE entity_id=? AND subject_type=? AND subject_id=? ORDER BY updated_at DESC LIMIT 1').get(entityId, subjectType, subjectId)
+      : null;
+    if (existing) {
+      id = existing.id;
+      // Reopen + re-raise priority so it resurfaces in the inbox.
+      sql.prepare('UPDATE os_threads SET status=?, priority=?, title=?, updated_at=? WHERE id=?').run('open', pri, String(title || existing.title).slice(0, 200), ts, id);
+    } else {
+      id = uuid();
+      sql.prepare('INSERT INTO os_threads (id, entity_id, suite_id, subject_type, subject_id, title, priority, status, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
+        .run(id, entityId, '', subjectType || 'message', subjectId || '', String(title || '').slice(0, 200), pri, 'open', createdBy, ts, ts);
+    }
     sql.prepare('INSERT INTO os_messages (id, thread_id, author_type, author_email, author_name, channel, body, created_at) VALUES (?,?,?,?,?,?,?,?)')
       .run(uuid(), id, authorType, createdBy, '', 'pulse', String(body || '').slice(0, 8000), ts);
     const t = thread(id);

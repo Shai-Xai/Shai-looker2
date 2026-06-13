@@ -837,16 +837,41 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     lines.push(`Approvers: ${approvalSummary(a).approvers.map((x) => x.label).join(', ') || '—'}`);
     return lines;
   }
+  // The actual campaign copy, for the approval message + email so approvers can
+  // see what they're signing off without opening the app. Returns plain text
+  // (inbox) and an HTML card that approximates the email (notification email).
+  const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const fmtDelay = (h) => (h % 24 === 0 && h >= 24 ? `+${h / 24}d` : `+${h}h`);
+  function campaignContentPreview(a) {
+    const c = a.config;
+    const isSeq = c.campaignMode === 'sequence';
+    const isEmail = c.channel !== 'sms';
+    const card = (subject, bodyText, hero) => `
+      <div style="border:1px solid #e6e6e6;border-radius:10px;padding:14px;margin:8px 0;background:#fff;">
+        ${hero ? `<img src="${esc(hero)}" alt="" style="max-width:100%;border-radius:6px;margin-bottom:10px;display:block;" />` : ''}
+        ${isEmail && subject ? `<div style="font-weight:700;font-size:15px;margin-bottom:6px;">${esc(subject)}</div>` : ''}
+        <div style="font-size:13px;line-height:1.5;color:#333;white-space:pre-wrap;">${esc(bodyText)}</div>
+      </div>`;
+    if (isSeq) {
+      const steps = c.steps || [];
+      const text = steps.map((s, i) => `— Step ${i + 1} (${fmtDelay(s.delayHours)}) —\n${isEmail && s.subject ? `Subject: ${s.subject}\n` : ''}${s.body || ''}`).join('\n\n');
+      const html = steps.map((s, i) => `<div style="font-size:11px;font-weight:700;color:#7c3aed;margin-top:10px;">Step ${i + 1} · ${fmtDelay(s.delayHours)}</div>${card(s.subject, s.body, i === 0 ? c.heroImage : '')}`).join('');
+      return { text, html };
+    }
+    const text = `${isEmail && c.subject ? `Subject: ${c.subject}\n` : ''}${c.body || ''}`;
+    return { text, html: card(c.subject, c.body, isEmail ? c.heroImage : '') };
+  }
   function notifyApprovers(a) {
     const path = `/actions?action=${a.id}`;
     const link = `${mailer.baseUrl()}${path}`;
     const title = 'Campaign approval needed';
     const name = a.title || a.config.subject || 'A campaign';
     const lines = campaignSummaryLines(a);
-    const body = `“${name}” is waiting for your approval.\n\n${lines.map((l) => `• ${l}`).join('\n')}\n\nReview the campaign, preview the emails and approve (or send back to draft):\n${link}`;
+    const content = campaignContentPreview(a);
+    const body = `“${name}” is waiting for your approval.\n\n${lines.map((l) => `• ${l}`).join('\n')}\n\n— Content —\n${content.text}\n\nReview, preview & approve (or send back to draft):\n${link}`;
     const wantsHowler = (a.config.approvers || []).some((x) => x.type === 'howler');
     const howler = wantsHowler ? howlerAdminsFor(a.entityId) : [];
-    try { os?.announce?.({ entityId: a.entityId, title, body, priority: 'needs_reply', createdBy: 'campaigns@pulse', authorType: 'system' }); } catch { /* os optional */ }
+    try { os?.announce?.({ entityId: a.entityId, title, body, priority: 'needs_reply', createdBy: 'campaigns@pulse', authorType: 'system', subjectType: 'campaign', subjectId: a.id }); } catch { /* os optional */ }
     if (push?.isEnabled?.()) {
       const pushBody = `“${name}” is waiting for your approval.`;
       for (const ap of a.config.approvers || []) {
@@ -865,7 +890,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
       if (emails.size) {
         const summaryHtml = lines.map((l) => { const [k, ...v] = l.split(':'); return `<b>${k}:</b>${v.join(':')}`; }).join('<br>');
         const html = mailer.notificationEmail({
-          title, body: `“${name}” is waiting for your approval.<br><br>${summaryHtml}<br><br>Open it to preview the emails and approve, or send it back to draft.`,
+          title, body: `“${esc(name)}” is waiting for your approval.<br><br>${summaryHtml}<br><br><b>Preview${a.config.channel === 'sms' ? ' (SMS)' : ''}:</b>${content.html}Open it to approve, or send it back to draft.`,
           ctaText: 'Review & approve', ctaPath: path, preheader: `Approval needed: ${name}`, entityId: a.entityId,
         });
         mailer.send({ to: [...emails], subject: `Approval needed: ${name}`, html, kind: 'campaign-approval', entity: a.entityId }).catch(() => {});
@@ -886,7 +911,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     const body = approved
       ? `“${name}” was approved${by ? ` by ${by}` : ''} and is now sending.`
       : `“${name}” was sent back to draft${by ? ` by ${by}` : ''}.${note ? `\n\nComment: ${note}` : ''}\n\nOpen it to make changes and resubmit:\n${link}`;
-    try { os?.announce?.({ entityId: a.entityId, title, body, priority: approved ? 'fyi' : 'needs_reply', createdBy: 'campaigns@pulse', authorType: 'system' }); } catch { /* os optional */ }
+    try { os?.announce?.({ entityId: a.entityId, title, body, priority: approved ? 'fyi' : 'needs_reply', createdBy: 'campaigns@pulse', authorType: 'system', subjectType: 'campaign', subjectId: a.id }); } catch { /* os optional */ }
     if (push?.isEnabled?.()) push.sendToUser(sender.id, { title, body: approved ? `“${name}” was approved.` : `“${name}” was sent back to draft.`, url: path, tag: `outcome-${a.id}` }).catch(() => {});
     if (mailer?.isConfigured?.()) {
       const html = mailer.notificationEmail({
