@@ -106,6 +106,7 @@ function IconPicker({ value, onChange }) {
 //   Logins (Users)      – credentials, assigned to one or more entities
 const ADMIN_NAV = [
   ['entities', 'Clients', '👥'],
+  ['logins', 'Admin logins', '🔑'],
   ['sets', 'Sets', '🗂️'],
   ['library', 'Tile library', '🧩'],
   ['ai', 'AI', '🤖'],
@@ -124,6 +125,7 @@ export default function AdminPage() {
   const content = (
     <>
       {tab === 'entities' && <Entities fields={fields} />}
+      {tab === 'logins' && <AdminLoginsTab />}
       {tab === 'sets' && <Sets />}
       {tab === 'library' && <Library />}
       {tab === 'ai' && <AISettings />}
@@ -234,13 +236,18 @@ function Entities({ fields }) {
         {items.length === 0 && <Muted>No clients yet.</Muted>}
       </div>
       <button style={addBtn} onClick={() => api.adminCreateEntity({ name: 'New client', lockedFilters: {} }).then(load)}>+ Add client</button>
-
-      <div style={{ marginTop: 32 }}>
-        <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>Admin logins</h3>
-        <AdminLogins admins={users.filter((u) => u.role === 'admin')} entities={items} onChange={load} />
-      </div>
     </div>
   );
+}
+
+// Admin team logins — its own top-level admin section (not buried under Clients).
+function AdminLoginsTab() {
+  const [users, setUsers] = useState(null);
+  const [entities, setEntities] = useState([]);
+  const load = () => Promise.all([api.adminListUsers(), api.adminListEntities()]).then(([u, e]) => { setUsers(u); setEntities(e); });
+  useEffect(() => { load(); }, []);
+  if (!users) return <Muted>Loading…</Muted>;
+  return <AdminLogins admins={users.filter((u) => u.role === 'admin')} entities={entities} onChange={load} />;
 }
 
 // One client's settings hub: a left nav (Settings / Suites / Logins) + panel.
@@ -1247,8 +1254,7 @@ function AISettings() {
     <div>
       <p style={hint}>Standing instructions added to every AI prompt — tile insights, the dashboard summary, and tile-library descriptions. Use it for terminology, tone, comparison rules, and anything the AI should always know or avoid.</p>
       {!aiEnabled && <p style={{ color: 'var(--warn, #b45309)', fontSize: 13, marginBottom: 10 }}>⚠ AI is not configured (set ANTHROPIC_API_KEY) — instructions are saved but won't be used until it is.</p>}
-      <div style={cardStyle}>
-        <L>Global AI instructions</L>
+      <Section title="Global AI instructions">
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
@@ -1261,9 +1267,9 @@ function AISettings() {
           {saved && <SavedChip />}
           <span style={{ fontSize: 12, color: 'var(--muted)', marginLeft: 'auto' }}>{text.length} characters</span>
         </div>
-      </div>
-      <BriefingSettings />
-      <BriefingFeedback />
+      </Section>
+      <Section title="Home briefing"><BriefingSettings /></Section>
+      <Section title="Reader feedback"><BriefingFeedback /></Section>
     </div>
   );
 }
@@ -1338,9 +1344,8 @@ function BriefingSettings() {
   if (!data) return null;
   const save = async () => { await api.saveBriefingSettings({ instructions, phaseDefaults: defaults, timeDefaults: timeDefs }); flash(setSaved); };
   return (
-    <div style={{ ...cardStyle, marginTop: 14 }}>
-      <L>Home briefing</L>
-      <p style={{ fontSize: 12, color: 'var(--muted)', margin: '4px 0 8px' }}>
+    <div style={{ ...cardStyle, marginTop: 6 }}>
+      <p style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 8px' }}>
         Rules for the Owl's home-page briefing, plus the default instruction for each event phase.
         The phase is picked automatically from each event's dates (set in the client's briefing panel); clients can override any phase's wording for their event.
       </p>
@@ -1416,20 +1421,26 @@ function AdminIntegrations() {
   if (!value) return <Muted>Loading…</Muted>;
   return (
     <div>
-      <p style={hint}>The primary Looker, Anthropic and email accounts for the whole platform. These override the values in <code>.env</code>. Clients can set their own Looker/Anthropic (Client → Integrations), which take precedence for their data.</p>
-      <IntegrationsForm value={value} showResend collapsible onTestEmail={() => api.sendMailTest()} onSave={async (p) => setValue(await api.saveAdminIntegrations(p))} />
-      <h3 style={{ fontSize: 15, fontWeight: 700, margin: '24px 0 4px' }}>Email template — platform default</h3>
-      <p style={hint}>The default look of every notification email. Each client can layer their own branding on top (Client → Email branding).</p>
-      <MailTemplateEditor scope="platform" canTest />
-      <h3 style={{ fontSize: 15, fontWeight: 700, margin: '28px 0 4px' }}>SMS (Clickatell)</h3>
-      <p style={hint}>Your Clickatell One API key powers SMS campaigns. The key is write-only — we only show whether it's set. Sender ID is your approved alphanumeric ID (e.g. a short brand name) or number.</p>
-      <SmsConfig />
-      <h3 style={{ fontSize: 15, fontWeight: 700, margin: '28px 0 4px' }}>Notifications</h3>
-      <p style={hint}>How push reminders behave platform-wide.</p>
-      <NotificationSettings />
-      <h3 style={{ fontSize: 15, fontWeight: 700, margin: '28px 0 4px' }}>Inbound email — CC the Owl</h3>
-      <p style={hint}>Lets emails be captured into client inboxes by CC’ing a per-client address. Set the inbound domain, then point your mail forwarder at the webhook below.</p>
-      <InboundConfig />
+      <p style={hint}>Everything below is collapsed — tap a section to open it. Accounts override the values in <code>.env</code>; clients can set their own Looker/Anthropic (Client → Integrations), which take precedence for their data.</p>
+      <Section title="🔑 Accounts — Looker · Anthropic · Email">
+        <IntegrationsForm value={value} showResend onTestEmail={() => api.sendMailTest()} onSave={async (p) => setValue(await api.saveAdminIntegrations(p))} />
+      </Section>
+      <Section title="📧 Email template — platform default">
+        <p style={hint}>The default look of every notification email. Each client can layer their own branding on top (Client → Email branding).</p>
+        <MailTemplateEditor scope="platform" canTest />
+      </Section>
+      <Section title="💬 SMS (Clickatell)">
+        <p style={hint}>Your Clickatell One API key powers SMS campaigns. The key is write-only — we only show whether it's set. Sender ID is your approved alphanumeric ID (e.g. a short brand name) or number.</p>
+        <SmsConfig />
+      </Section>
+      <Section title="🔔 Notifications">
+        <p style={hint}>How push reminders behave platform-wide.</p>
+        <NotificationSettings />
+      </Section>
+      <Section title="🦉 Inbound email — CC the Owl">
+        <p style={hint}>Lets emails be captured into client inboxes by CC’ing a per-client address. Set the inbound domain, then point your mail forwarder at the webhook below.</p>
+        <InboundConfig />
+      </Section>
     </div>
   );
 }
@@ -2205,8 +2216,8 @@ function Tab({ active, onClick, children }) {
   return <button onClick={onClick} style={{ padding: '8px 16px', borderRadius: 8, border: active ? '1.5px solid var(--brand)' : '1.5px solid var(--hairline)', background: active ? 'var(--brand)' : 'var(--card)', color: active ? '#fff' : 'var(--text)', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>{children}</button>;
 }
 function Field({ label, children }) { return <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}><L>{label}</L>{children}</div>; }
-// Collapsible labelled section with a caret toggle.
-function Section({ title, children, defaultOpen = true }) {
+// Collapsible labelled section. Admin-panel rule: sections start collapsed.
+function Section({ title, children, defaultOpen = false }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
     <div style={{ marginTop: 14 }}>
