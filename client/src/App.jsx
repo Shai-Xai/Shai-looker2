@@ -5,6 +5,7 @@ import ViewPage from './pages/ViewPage.jsx';
 import EditorPage from './pages/EditorPage.jsx';
 import ClonePage from './pages/ClonePage.jsx';
 import AdminPage from './pages/AdminPage.jsx';
+import InboxNotifier from './components/InboxNotifier.jsx';
 import LoginPage from './pages/LoginPage.jsx';
 import ClientLayout from './pages/ClientLayout.jsx';
 import ClientHome from './pages/ClientHome.jsx';
@@ -197,6 +198,7 @@ function Shell() {
       <DrillProvider>
         <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh' }}>
           <Header />
+          <InboxNotifier entityId={mode === 'client' ? activeEntityId : undefined} />
           {isAdmin && !actingAsClient ? (
             <Routes>
               <Route path="/" element={<Navigate to="/admin" replace />} />

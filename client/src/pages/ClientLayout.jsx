@@ -8,7 +8,6 @@ import { useTheme } from '../lib/theme.jsx';
 import { vtNavigate } from '../lib/viewTransition.js';
 import { useSheetDrag } from '../lib/useSheetDrag.js';
 import { applyBrand, resetBrand } from '../lib/brand.js';
-import { pushSupported, pushPermission, isSubscribed, enablePush } from '../lib/push.js';
 import NotificationPrefs from '../components/NotificationPrefs.jsx';
 import { useAccess, PERMS } from '../lib/access.js';
 
@@ -48,9 +47,6 @@ export default function ClientLayout() {
 
   // Experience OS inbox: unread + must-acknowledge counts for the badge/banner.
   const [inbox, setInbox] = useState({ enabled: false, unread: 0, pending: [] });
-  const [toast, setToast] = useState(null); // {msg, to} — transient in-app alert
-  const prevCounts = useRef(null);           // baseline to detect increases
-  const [pushNudge, setPushNudge] = useState(false); // prompt to enable browser notifications
 
   async function ensureDetail(sid) {
     if (details[sid]) return;
@@ -162,13 +158,6 @@ export default function ClientLayout() {
         let pendingApproval = 0;
         if (activeEntityId) { try { pendingApproval = (await api.getActionsSummary(activeEntityId)).pendingApproval || 0; } catch { /* ignore */ } }
         if (!alive) return;
-        // Surface a transient toast when something NEW arrives (not on first load).
-        const prev = prevCounts.current;
-        if (prev) {
-          if (pendingApproval > prev.pendingApproval) setToast({ msg: '⏳ A campaign is awaiting your approval', to: '/actions' });
-          else if (r.unread > prev.unread) setToast({ msg: '💬 New message in your inbox', to: '/inbox' });
-        }
-        prevCounts.current = { unread: r.unread, pendingApproval };
         setInbox((s) => ({ ...s, enabled: true, unread: r.unread, pendingApproval, pending: r.threads.filter((t) => t.priority === 'must_ack' && !t.acked) }));
         // Mirror unread + pending approvals onto the installed app's icon badge.
         const total = (r.unread || 0) + pendingApproval;
@@ -184,25 +173,6 @@ export default function ClientLayout() {
     return () => { alive = false; clearInterval(t); window.removeEventListener('os-refresh', poll); document.removeEventListener('visibilitychange', onVis); window.removeEventListener('focus', onVis); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname, activeEntityId]);
-
-  // Auto-dismiss the in-app toast.
-  useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(null), 6000); return () => clearTimeout(t); }, [toast]);
-
-  // Nudge to turn on browser notifications — only when supported and the user
-  // hasn't decided yet (permission 'default'), isn't already subscribed, and
-  // hasn't dismissed the nudge before.
-  useEffect(() => {
-    if (!pushSupported() || pushPermission() !== 'default') return;
-    if (localStorage.getItem('howler_push_nudge_dismissed') === '1') return;
-    let alive = true;
-    isSubscribed().then((sub) => { if (alive && !sub) setPushNudge(true); });
-    return () => { alive = false; };
-  }, []);
-  const dismissPushNudge = () => { localStorage.setItem('howler_push_nudge_dismissed', '1'); setPushNudge(false); };
-  const turnOnPush = async () => {
-    try { await enablePush(); setPushNudge(false); setToast({ msg: '🔔 Notifications on — you’ll be alerted on this device', to: '' }); }
-    catch (e) { alert(e.message || 'Could not enable notifications.'); }
-  };
 
   // White-label: apply the active client's brand pair (primary + secondary) to
   // the whole shell — UI accents AND chart palettes follow it. Clients theme to
@@ -525,14 +495,6 @@ export default function ClientLayout() {
             <span style={{ background: 'rgba(255,255,255,0.25)', borderRadius: 980, padding: '5px 14px', fontWeight: 700, flexShrink: 0 }}>Open →</span>
           </button>
         )}
-        {pushNudge && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 16px', background: 'var(--elevated)', borderBottom: '1px solid var(--hairline)', fontSize: 13 }}>
-            <span style={{ fontSize: 15 }}>🔔</span>
-            <span style={{ flex: 1, minWidth: 0 }}>Turn on notifications to get alerted about messages and campaign approvals — even when Pulse is closed.</span>
-            <button onClick={turnOnPush} style={{ flexShrink: 0, border: 'none', background: 'var(--brand)', color: '#fff', borderRadius: 980, padding: '6px 14px', fontWeight: 700, fontSize: 12.5, cursor: 'pointer' }}>Turn on</button>
-            <button onClick={dismissPushNudge} aria-label="Dismiss" style={{ flexShrink: 0, border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 16 }}>✕</button>
-          </div>
-        )}
         {previewMode && (
           <div style={previewBar}>
             <span style={{ fontWeight: 700 }}>👁 Client preview{activeEntityId && (() => { const n = suites.find((s) => s.entityId === activeEntityId)?.entityName; return n ? ` — ${n}` : ''; })()}</span>
@@ -551,17 +513,6 @@ export default function ClientLayout() {
         )}
         <Outlet context={{ previewEntityId: activeEntityId, actionsSlot }} />
       </main>
-      {/* Transient in-app toast for new messages / approvals. Tap to jump there. */}
-      {toast && (
-        <button
-          onClick={() => { const to = toast.to; setToast(null); if (to) vtNavigate(navigate, to); }}
-          style={{ position: 'fixed', left: '50%', bottom: 'calc(20px + env(safe-area-inset-bottom))', transform: 'translateX(-50%)', zIndex: 60, display: 'flex', alignItems: 'center', gap: 8, maxWidth: 'min(92vw, 420px)', border: 'none', cursor: toast.to ? 'pointer' : 'default', textAlign: 'left', padding: '11px 16px', borderRadius: 12, background: 'var(--text)', color: 'var(--bg)', fontSize: 13.5, fontWeight: 600, boxShadow: '0 8px 30px rgba(0,0,0,0.28)' }}
-          className="modal-in"
-        >
-          <span style={{ flex: 1 }}>{toast.msg}</span>
-          {toast.to && <span style={{ opacity: 0.8, flexShrink: 0 }}>Open →</span>}
-        </button>
-      )}
     </div>
   );
 }
