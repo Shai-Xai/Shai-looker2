@@ -150,32 +150,22 @@ function ThreadView({ id, isAdmin, isMobile, onBack, onChange, listCollapsed, on
       <div style={{ flex: 1, overflowY: 'auto', padding: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
         {data.messages.map((m) => {
           // System/Pulse notifications render as a centred neutral event note
-          // (not a chat bubble). For real messages, "my side" is right: Howler
-          // for an admin viewer, the client for a client viewer.
+          // Every message shows an avatar. "My side" is right (Howler for an
+          // admin viewer, the client for a client viewer). System/Pulse and
+          // Howler sit on the left with the Pulse/Howler logo; the client uses
+          // their entity logo. System keeps a neutral (not brand) bubble.
           const isSystem = m.authorType === 'system';
+          const isHowlerSide = isSystem || m.authorType === 'howler';
           const mine = !isSystem && (isAdmin ? m.authorType === 'howler' : m.authorType === 'user');
-          const who = m.authorType === 'howler' ? 'Howler' : isSystem ? 'Pulse' : (m.authorEmail || 'Someone');
-          const meta = `${who}${m.channel !== 'pulse' ? ` · ${m.channel}` : ''} · ${shortDate(m.createdAt)}`;
-          if (isSystem) {
-            return (
-              <div key={m.id} style={{ alignSelf: 'center', maxWidth: '86%', width: '100%' }}>
-                <div style={{ fontSize: 10.5, color: 'var(--muted)', marginBottom: 3, textAlign: 'center' }}>{meta}</div>
-                <div style={{ background: 'var(--elevated)', color: 'var(--text)', border: '1px solid var(--hairline)', borderRadius: 12, padding: '10px 13px', fontSize: 13, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{renderBody(m.body, false)}</div>
-              </div>
-            );
-          }
-          // Admin sees, under each Howler message, whether the client has read it.
           const seen = isAdmin && m.authorType === 'howler' ? readBy(m) : null;
-          const isHowler = m.authorType === 'howler';
-          const partyBg = isHowler ? 'var(--brand-2)' : 'var(--brand)'; // Howler = orange, client = pink
-          const initial = isHowler ? 'H' : (m.authorEmail || '?').trim().charAt(0).toUpperCase();
-          const shortName = mine ? 'You' : isHowler ? 'Howler' : (m.authorEmail || 'Someone').split('@')[0];
-          // Avatar: Howler → the Pulse logo; client → their entity logo if set,
-          // otherwise a coloured initial.
-          const logo = isHowler ? '/logo.png' : (data.thread.entityLogo || '');
+          const partyBg = isSystem ? 'var(--brand)' : (m.authorType === 'howler' ? 'var(--brand-2)' : 'var(--brand)');
+          const initial = isSystem ? 'P' : m.authorType === 'howler' ? 'H' : (m.authorEmail || '?').trim().charAt(0).toUpperCase();
+          const shortName = mine ? 'You' : isSystem ? 'Pulse' : m.authorType === 'howler' ? 'Howler' : (m.authorEmail || 'Someone').split('@')[0];
+          // Avatar image: Howler/Pulse → the Pulse logo; client → their entity logo.
+          const logo = isHowlerSide ? '/logo.png' : (data.thread.entityLogo || '');
           return (
             <div key={m.id} style={{ display: 'flex', flexDirection: mine ? 'row-reverse' : 'row', alignItems: 'flex-end', gap: 8 }}>
-              <div title={isHowler ? 'Howler' : m.authorEmail} style={{ width: 28, height: 28, borderRadius: '50%', flexShrink: 0, overflow: 'hidden', background: logo ? 'var(--card)' : partyBg, border: logo ? '1px solid var(--hairline)' : 'none', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 800 }}>
+              <div title={shortName} style={{ width: 28, height: 28, borderRadius: '50%', flexShrink: 0, overflow: 'hidden', background: logo ? 'var(--card)' : partyBg, border: logo ? '1px solid var(--hairline)' : 'none', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 800 }}>
                 {logo ? <img src={logo} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.parentNode.style.background = partyBg; e.currentTarget.parentNode.textContent = initial; }} /> : initial}
               </div>
               <div style={{ maxWidth: '74%', minWidth: 0 }}>
