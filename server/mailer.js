@@ -305,7 +305,7 @@ function digestEmail({ branding, entityId, assetScope, content, roleLabel, custo
 // campaign copy, a tracked CTA button, and the REQUIRED unsubscribe link.
 // Body is plain text (pre-wrap) with **bold**; personalisation happens before
 // this is called.
-function campaignEmail({ branding, entityId, assetScope, subject, bodyText, ctaText, ctaUrl, unsubUrl, heroImage }) {
+function campaignEmail({ branding, entityId, assetScope, subject, bodyText, ctaText, ctaUrl, unsubUrl, heroImage, promo }) {
   const b = branding || resolveBranding(entityId);
   const scope = assetScope || entityId;
   const logoSrc = b.logo && b.logo.startsWith('data:') && scope ? `${baseUrl()}/mail-assets/logo/${scope}` : b.logo;
@@ -314,6 +314,14 @@ function campaignEmail({ branding, entityId, assetScope, subject, bodyText, ctaT
     : `<div style="font-size:15px;font-weight:800;letter-spacing:-0.02em;color:#111;">${esc(b.wordmark)}</div>`;
   const hero = heroImage ? `<img src="${esc(heroImage)}" alt="" style="width:100%;border-radius:10px;margin-bottom:18px;display:block;" />` : '';
   const cta = ctaUrl ? `<a href="${esc(ctaUrl)}" style="display:inline-block;margin-top:20px;background:${esc(b.brandColor)};color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;border-radius:980px;padding:12px 26px;">${esc(ctaText || 'View event')} →</a>` : '';
+  // Promo/discount code block. 'discount' = enter at checkout; 'promo' = applied
+  // via the button (it rides the link).
+  const promoBox = (promo && promo.code) ? `
+      <div style="margin-top:20px;border:1.5px dashed ${esc(b.brandColor)};border-radius:12px;padding:16px;text-align:center;background:#fafafa;">
+        ${promo.benefit ? `<div style="font-size:13px;font-weight:700;color:#111;margin-bottom:6px;">${esc(promo.benefit)}</div>` : ''}
+        <div style="font-size:22px;font-weight:800;letter-spacing:1px;color:${esc(b.brandColor)};font-family:ui-monospace,Menlo,monospace;">${esc(promo.code)}</div>
+        <div style="font-size:12px;color:#86868b;margin-top:6px;">${promo.type === 'discount' ? 'Enter this code at checkout.' : 'Applied automatically when you tap the button.'}</div>
+      </div>` : '';
   const html = `<!doctype html><html><body style="margin:0;padding:0;background:#f5f5f7;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
   <div style="display:none;max-height:0;overflow:hidden;">${esc(bodyText || '').slice(0, 140)}</div>
   <div style="max-width:600px;margin:0 auto;padding:28px 16px;">
@@ -323,6 +331,7 @@ function campaignEmail({ branding, entityId, assetScope, subject, bodyText, ctaT
       ${subject ? `<div style="font-size:19px;font-weight:800;color:#111;margin-bottom:12px;line-height:1.35;letter-spacing:-0.01em;">${mdBold(subject)}</div>` : ''}
       <div style="font-size:14.5px;line-height:1.65;color:#3a3a3c;white-space:pre-wrap;">${mdBold(bodyText || '')}</div>
       ${cta}
+      ${promoBox}
     </div>
     <div style="font-size:11.5px;color:#86868b;margin-top:14px;line-height:1.5;">
       Sent by ${esc(b.senderName)} via Howler : Pulse · <a href="${esc(unsubUrl)}" style="color:#86868b;">Unsubscribe</a>
@@ -330,7 +339,8 @@ function campaignEmail({ branding, entityId, assetScope, subject, bodyText, ctaT
     ${brandRow()}
   </div>
 </body></html>`;
-  const text = `${subject || ''}\n\n${bodyText || ''}\n\n${ctaUrl ? `${ctaText || 'View event'}: ${ctaUrl}\n\n` : ''}Unsubscribe: ${unsubUrl}`;
+  const promoText = (promo && promo.code) ? `${promo.benefit ? `${promo.benefit}\n` : ''}Code: ${promo.code}${promo.type === 'discount' ? ' (enter at checkout)' : ''}\n\n` : '';
+  const text = `${subject || ''}\n\n${bodyText || ''}\n\n${promoText}${ctaUrl ? `${ctaText || 'View event'}: ${ctaUrl}\n\n` : ''}Unsubscribe: ${unsubUrl}`;
   return { html, text };
 }
 

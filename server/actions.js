@@ -84,6 +84,17 @@ function mount(app, { db, auth, mailer, push, resolveAudience, draftCopy, listEv
       PRIMARY KEY (action_id, email)
     );
     CREATE INDEX IF NOT EXISTS idx_enroll_due ON action_enrollments(status, next_at);
+
+    -- Uploaded promo/discount codes for unique-code campaigns. One code is
+    -- claimed per customer (email) and kept for their whole journey.
+    CREATE TABLE IF NOT EXISTS action_promo_codes (
+      action_id   TEXT NOT NULL,
+      code        TEXT NOT NULL,
+      email       TEXT NOT NULL DEFAULT '',   -- '' = available; else assigned recipient
+      assigned_at TEXT NOT NULL DEFAULT '',
+      PRIMARY KEY (action_id, code)
+    );
+    CREATE INDEX IF NOT EXISTS idx_promo_avail ON action_promo_codes(action_id, email);
   `);
   // Recurring-automation columns (ALTER for existing DBs).
   try {
@@ -104,7 +115,10 @@ function mount(app, { db, auth, mailer, push, resolveAudience, draftCopy, listEv
   });
   const getAction = (id) => { const r = sql.prepare('SELECT * FROM actions WHERE id=?').get(id); return r ? rowToAction(r) : null; };
   // Public list shape: omit the full audience (can be thousands of emails).
-  const publicAction = (a) => ({ ...a, audience: undefined, audienceCount: a.audience.length });
+  const publicAction = (a) => ({
+    ...a, audience: undefined, audienceCount: a.audience.length,
+    promoCodes: (a.config?.promo || {}).source === 'unique' ? promoStats(a.id) : null,
+  });
   const saveResults = (id, results) => sql.prepare('UPDATE actions SET results=?, updated_at=? WHERE id=?').run(JSON.stringify(results), now(), id);
   const setStatus = (id, status) => sql.prepare('UPDATE actions SET status=?, updated_at=? WHERE id=?').run(status, now(), id);
 
@@ -153,6 +167,17 @@ function mount(app, { db, auth, mailer, push, resolveAudience, draftCopy, listEv
         body: String(s.body || '').slice(0, 8000),
         ctaText: String(s.ctaText || '').slice(0, 60),
       })).sort((a, b) => a.delayHours - b.delayHours) : [],
+      // Promo / discount codes. type 'promo' attaches to the ticket (can append
+      // to the buy link); type 'discount' is entered at checkout (never appended,
+      // shown as "enter this code"). source 'unique' draws from an uploaded pool
+      // (one code per customer); 'generic' is one code for all.
+      promo: {
+        source: ['generic', 'unique'].includes((body.promo || {}).source) ? body.promo.source : 'none',
+        type: (body.promo || {}).type === 'discount' ? 'discount' : 'promo',
+        code: String((body.promo || {}).code || '').slice(0, 80),
+        benefit: String((body.promo || {}).benefit || '').slice(0, 140),
+        appendToLink: (body.promo || {}).type === 'discount' ? false : ((body.promo || {}).appendToLink !== false),
+      },
       contentMode: body.contentMode === 'html' ? 'html' : 'template',
       eventSuiteId: String(body.eventSuiteId || ''),
       heroImage: String(body.heroImage || '').slice(0, 2000000),  // hero image data-URL/URL
@@ -222,6 +247,40 @@ function mount(app, { db, auth, mailer, push, resolveAudience, draftCopy, listEv
     return { list, fields, excluded, noConsent };
   }
 
+  // ── Promo / discount codes ──
+  const promoStats = (actionId) => {
+    const total = sql.prepare('SELECT COUNT(*) n FROM action_promo_codes WHERE action_id=?').get(actionId)?.n || 0;
+    const used = sql.prepare("SELECT COUNT(*) n FROM action_promo_codes WHERE action_id=? AND email!=''").get(actionId)?.n || 0;
+    return { total, used, available: total - used };
+  };
+  // Append uploaded codes to the pool (never removes assigned ones).
+  function addPromoCodes(actionId, codes) {
+    const ins = sql.prepare('INSERT OR IGNORE INTO action_promo_codes (action_id, code) VALUES (?,?)');
+    let n = 0;
+    for (const c of codes || []) { const code = String(c || '').trim(); if (code) { ins.run(actionId, code); n += 1; } }
+    return n;
+  }
+  // Claim (or look up) this recipient's unique code. Returns '' if the pool is empty.
+  function assignPromo(actionId, email) {
+    const existing = sql.prepare('SELECT code FROM action_promo_codes WHERE action_id=? AND email=?').get(actionId, email);
+    if (existing) return existing.code;
+    const free = sql.prepare("SELECT code FROM action_promo_codes WHERE action_id=? AND email='' LIMIT 1").get(actionId);
+    if (!free) return '';
+    sql.prepare('UPDATE action_promo_codes SET email=?, assigned_at=? WHERE action_id=? AND code=?').run(email, now(), actionId, free.code);
+    return free.code;
+  }
+  // Resolve the promo a recipient should see (generic = same for all; unique =
+  // their claimed code). For preview/test, a sample code.
+  function promoForRecipient(action, email) {
+    const p = action.config.promo || {};
+    if (p.source === 'none' || !p.source) return null;
+    let code = '';
+    if (p.source === 'generic') code = p.code || '';
+    else if (p.source === 'unique') code = (action.id && !['preview', 'test'].includes(action.id)) ? assignPromo(action.id, email) : 'SAMPLE-CODE';
+    if (!code) return null;
+    return { code, benefit: p.benefit || '', type: p.type || 'promo', appendToLink: !!p.appendToLink };
+  }
+
   // Render one recipient's email. Tokens: {{name}}, {{ticketType}}, {{cta}},
   // {{unsubscribe}}. Two modes: the built branded template, or the client's own
   // uploaded HTML (we still inject tracking + a guaranteed unsubscribe link).
@@ -237,12 +296,19 @@ function mount(app, { db, auth, mailer, push, resolveAudience, draftCopy, listEv
     // Per-recipient tracked link: the same signed token used for unsubscribe
     // identifies WHO clicked, powering the campaign report.
     const rtok = unsubToken(action.entityId, recipient.email);
-    const ctaUrl = cfg.ctaUrl ? `${mailer.baseUrl()}/c/${cfg.clickToken}/${rtok}` : '';
+    // Promo/discount code for this recipient. A 'promo' code can ride the buy
+    // link (?promo=CODE); a 'discount' code is entered manually at checkout.
+    const promo = promoForRecipient(action, recipient.email);
+    const appendPromo = promo && promo.type === 'promo' && promo.appendToLink && promo.code;
+    const baseClick = cfg.ctaUrl ? `${mailer.baseUrl()}/c/${cfg.clickToken}/${rtok}` : '';
+    const ctaUrl = baseClick && appendPromo ? `${baseClick}${baseClick.includes('?') ? '&' : '?'}promo=${encodeURIComponent(promo.code)}` : baseClick;
     const unsubUrl = `${mailer.baseUrl()}/u/${rtok}`;
     const tok = (s) => String(s || '')
       .replace(/\{\{\s*name\s*\}\}/gi, firstName || 'there')
       .replace(/\{\{\s*(ticket_?type|ticket)\s*\}\}/gi, ticket || 'your tickets')
       .replace(/\{\{\s*cta(_url)?\s*\}\}/gi, ctaUrl || '#')
+      .replace(/\{\{\s*promo_benefit\s*\}\}/gi, promo?.benefit || '')
+      .replace(/\{\{\s*promo(_?code)?\s*\}\}/gi, promo?.code || '')
       .replace(/\{\{\s*unsubscribe\s*\}\}/gi, unsubUrl);
     const subject = tok(useSubject);
 
@@ -263,7 +329,7 @@ function mount(app, { db, auth, mailer, push, resolveAudience, draftCopy, listEv
     const heroImage = cfg.heroImage
       ? (cfg.heroImage.startsWith('data:') && realSend ? `${mailer.baseUrl()}/mail-assets/campaign/${action.id}` : cfg.heroImage)
       : '';
-    const { html, text } = mailer.campaignEmail({ entityId: action.entityId, assetScope: action.entityId, subject, bodyText: tok(useBody), ctaText: useCta || 'View event', ctaUrl, unsubUrl, heroImage });
+    const { html, text } = mailer.campaignEmail({ entityId: action.entityId, assetScope: action.entityId, subject, bodyText: tok(useBody), ctaText: useCta || 'View event', ctaUrl, unsubUrl, heroImage, promo });
     return { html, text, subject };
   }
 
@@ -312,6 +378,7 @@ function mount(app, { db, auth, mailer, push, resolveAudience, draftCopy, listEv
     const rec = ((req.body || {}).recurring || cfg.campaignMode === 'sequence') && cfg.audience.mode === 'tile' ? 1 : 0;
     sql.prepare('INSERT INTO actions (id, entity_id, type, status, title, config, recurring, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
       .run(id, req.params.entityId, 'email_campaign', 'draft', String((req.body || {}).title || '').slice(0, 120), JSON.stringify(cfg), rec, req.user.email, now(), now());
+    if (Array.isArray((req.body || {}).promoCodes)) addPromoCodes(id, req.body.promoCodes);
     res.status(201).json({ action: publicAction(getAction(id)) });
   });
   app.put('/api/actions/:entityId/:id', auth.requireAuth, auth.requirePermission('campaigns.approve'), (req, res) => {
@@ -323,6 +390,7 @@ function mount(app, { db, auth, mailer, push, resolveAudience, draftCopy, listEv
     const rec = ((req.body || {}).recurring || cfg.campaignMode === 'sequence') && cfg.audience.mode === 'tile' ? 1 : 0;
     sql.prepare('UPDATE actions SET title=?, config=?, recurring=?, updated_at=? WHERE id=?')
       .run(String((req.body || {}).title || a.title).slice(0, 120), JSON.stringify(cfg), rec, now(), a.id);
+    if (Array.isArray((req.body || {}).promoCodes)) addPromoCodes(a.id, req.body.promoCodes);
     res.json({ action: publicAction(getAction(a.id)) });
   });
   app.delete('/api/actions/:entityId/:id', auth.requireAuth, auth.requirePermission('campaigns.approve'), (req, res) => {
@@ -535,20 +603,26 @@ function mount(app, { db, auth, mailer, push, resolveAudience, draftCopy, listEv
   async function enrollSequence(a) {
     const steps = a.config.steps || [];
     if (!steps.length) return;
+    const usesUniqueCodes = (a.config.promo || {}).source === 'unique';
     const { list } = await audienceFor(a.entityId, a.config, sysUser);
     const enrolled = new Set(sql.prepare('SELECT email FROM action_enrollments WHERE action_id=?').all(a.id).map((r) => r.email));
     const ins = sql.prepare('INSERT OR IGNORE INTO action_enrollments (action_id, email, name, ticket, anchor_at, step_index, next_at, status, enrolled_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)');
-    let n = 0;
+    let n = 0; let pausedForCodes = false;
     for (const r of list) {
       if (enrolled.has(r.email)) continue;
+      // Unique-code campaigns reserve a code at enrollment. If the pool is empty,
+      // PAUSE new enrollments (those already in the journey keep their code).
+      if (usesUniqueCodes && !assignPromo(a.id, r.email)) { pausedForCodes = true; break; }
       const anchor = parseAnchor(r.anchorRaw) || new Date();
       ins.run(a.id, r.email, r.name || '', r.ticket || '', anchor.toISOString(), 0, stepDue(anchor.getTime(), steps[0].delayHours), 'active', now(), now());
       n += 1;
     }
-    if (n) {
-      const res = a.results || {};
-      saveResults(a.id, { ...res, enrolled: (res.enrolled || 0) + n });
-      console.log(`[actions] sequence "${a.title}" enrolled ${n} new`);
+    const res = a.results || {};
+    if (n || res.codesEmpty !== pausedForCodes) saveResults(a.id, { ...res, enrolled: (res.enrolled || 0) + n, codesEmpty: pausedForCodes });
+    if (n) console.log(`[actions] sequence "${a.title}" enrolled ${n} new`);
+    if (pausedForCodes) {
+      console.log(`[actions] sequence "${a.title}" paused enrolment — promo codes exhausted`);
+      if (push?.isEnabled?.()) push.sendToEntity(a.entityId, { title: 'Promo codes running out', body: `"${a.title || 'Your campaign'}" has paused new sign-ups — upload more codes to resume.`, url: `/actions?action=${a.id}`, tag: `codes-${a.id}` }).catch(() => {});
     }
   }
 
