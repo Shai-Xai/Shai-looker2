@@ -37,10 +37,19 @@ segment you can then:
 One click from *seeing* a cohort to *acting* on it. This is the bridge between
 the dashboard (insight) and the engine (action), and it's the thing to nail.
 
+> **Data sources are pluggable — not Looker-only.** Looker is the calculation
+> engine *today*, but Pulse will also integrate **directly into BigQuery (or
+> other sources)**, bypassing Looker. So a segment's source can be a Looker tile
+> **or** a direct query, and resolution goes through a **source-agnostic
+> resolver**. Two non-negotiables hold whatever the source: (a) the per-client
+> **organiser/event scope is enforced server-side** before any query runs, and
+> (b) a recipient maps to the same **identity** (email/phone/app-user/ad-match)
+> regardless of where the row came from. Don't couple the engine to Looker.
+
 ## 3. Core primitives
 | Primitive | What it is |
 |---|---|
-| **Segment** | A saved, named audience: a Looker tile + filters, a rule set, or a pasted list. Resolves to recipients (and/or ad-platform identifiers) at run time, scoped to the client. **Reusable** across campaigns, journeys and syncs. |
+| **Segment** | A saved, named audience: a Looker tile + filters, a **direct query** (e.g. BigQuery), a rule set, or a pasted list. Resolves to recipients (and/or ad-platform identifiers) at run time through a **source-agnostic resolver**, scoped to the client. **Reusable** across campaigns, journeys and syncs. |
 | **Channel** | How we reach them — per-recipient (email, SMS, WhatsApp, Howler app push) or broadcast (social audience-sync / publish). Each plugs into a send/sync adapter. |
 | **Template / content** | The message: email template/HTML, SMS/WhatsApp text, promo codes, CTA, UTM. Channel-aware. |
 | **Trigger** | What starts it: **manual** blast · **scheduled** · **behavioural/data** (entered segment, abandoned cart, bought X, didn't open, N days before event). |
@@ -76,10 +85,11 @@ write-only secrets, graceful no-op when unconfigured, one send/sync chokepoint.
 
 ## 6. Data model sketch (for review — evolve, don't cram into `actions.config`)
 ```
-segments        id, entity_id, name, source(tile|rules|paste),
-                definition(json: {dashboardId,tileId,filters} | rules | pasted),
+segments        id, entity_id, name, source(tile|query|rules|paste),
+                definition(json: {dashboardId,tileId,filters} | {connection,sql} | rules | pasted),
                 email_field, phone_field, consent_field, created_by, created_at
-                -- resolves to recipients/identifiers at run time, scoped per client
+                -- resolves to recipients/identifiers via a SOURCE-AGNOSTIC resolver
+                -- (Looker today; direct BigQuery/other later), scoped per client
 
 channel_connections  id, entity_id, channel(meta|tiktok|google|whatsapp|...),
                      status, secret_ref (write-only), meta(json), connected_by/at

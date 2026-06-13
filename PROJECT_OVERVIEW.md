@@ -96,6 +96,12 @@ Browser (React SPA) ──/api/run-query──▶ Express ──/queries/run─�
   every query is force-filtered to their organiser/events **on the server**
   before it reaches Looker — can't be bypassed from the browser, and it fails
   closed if a client has no scope configured.
+- **Data source is pluggable (not Looker-only):** Looker is the calculation
+  engine today, but Pulse will also integrate **directly into BigQuery (or other
+  sources)**, bypassing Looker. New work should treat the data source as
+  abstracted — the server-side per-client scope must hold whatever the source,
+  and audiences/segments resolve through a source-agnostic resolver (see
+  `docs/ENGAGEMENT_ENGINE.md`).
 
 ## Key server modules (`server/`, ~7.5k LOC)
 
