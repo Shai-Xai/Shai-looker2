@@ -204,13 +204,8 @@ export default function ViewPage() {
             {canSummarize && (
               <button className="btn-key" style={iconAction} onClick={() => setSummaryOpen(true)} title="AI summary" aria-label="AI summary"><AiMark size={20} /></button>
             )}
-            {hasFilters && (
-              <button style={{ ...iconAction, ...(filtersOpen ? { background: 'rgba(128,128,128,0.22)' } : null) }} onClick={() => setFiltersOpen(v => !v)} title="Filters" aria-label="Filters">
-                <span style={{ fontSize: 15 }}>⚲</span>
-                {activeCount > 0 && <span key={activeCount} className="pop" style={countBadge}>{activeCount}</span>}
-              </button>
-            )}
-            <ActionsMenu suiteId={suiteId} dashboardId={id} filterValues={filterValues} />
+            {/* Filters now live inside the ⋯ menu alongside Share / Download PDF. */}
+            <ActionsMenu suiteId={suiteId} dashboardId={id} filterValues={filterValues} hasFilters={hasFilters} activeCount={activeCount} onFilters={() => setFiltersOpen(true)} />
           </>,
           actionsSlot
         )}
@@ -273,7 +268,7 @@ function HomeIcon({ size = 16 }) {
 // "⋯" actions menu next to Filters: Share (mint short link with current
 // filters, copy, flash ✓) and Download PDF (print stylesheet does the rest).
 // A share link is never an auth bypass — recipients log in; scoping applies.
-function ActionsMenu({ suiteId, dashboardId, filterValues }) {
+function ActionsMenu({ suiteId, dashboardId, filterValues, hasFilters, activeCount = 0, onFilters }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState(null);
   const btnRef = useRef(null);
@@ -313,6 +308,15 @@ function ActionsMenu({ suiteId, dashboardId, filterValues }) {
         <>
           <div style={{ position: 'fixed', inset: 0, zIndex: 398 }} onClick={() => setOpen(false)} />
           <div className="modal-in" style={{ ...actionsPanel, top: pos.top, left: pos.left, width: pos.width }}>
+            {hasFilters && onFilters && (
+              <button style={actionItem} onClick={() => { setOpen(false); onFilters(); }}>
+                <span style={{ ...actionIco, color: activeCount > 0 ? 'var(--brand)' : undefined }}>⚲</span>
+                <span style={{ flex: 1, textAlign: 'left' }}>
+                  Filters{activeCount > 0 ? ` · ${activeCount} active` : ''}
+                  <span style={{ display: 'block', fontSize: 11, color: 'var(--muted)', fontWeight: 500 }}>Refine what this dashboard shows</span>
+                </span>
+              </button>
+            )}
             <button style={actionItem} onClick={share} disabled={shareState === 'busy'}>
               <span style={actionIco}>{shareState === 'copied' ? '✓' : '↗'}</span>
               <span style={{ flex: 1, textAlign: 'left' }}>
