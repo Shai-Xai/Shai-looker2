@@ -166,11 +166,16 @@ function ThreadView({ id, isAdmin, isMobile, onBack, onChange, listCollapsed, on
           }
           // Admin sees, under each Howler message, whether the client has read it.
           const seen = isAdmin && m.authorType === 'howler' ? readBy(m) : null;
+          const isHowler = m.authorType === 'howler';
+          const partyBg = isHowler ? 'var(--brand-2)' : 'var(--brand)'; // Howler = orange, client = pink
+          const initial = isHowler ? 'H' : (m.authorEmail || '?').trim().charAt(0).toUpperCase();
+          const shortName = mine ? 'You' : isHowler ? 'Howler' : (m.authorEmail || 'Someone').split('@')[0];
           return (
-            <div key={m.id} style={{ display: 'flex', justifyContent: mine ? 'flex-end' : 'flex-start' }}>
-              <div style={{ maxWidth: '78%' }}>
-                <div style={{ fontSize: 10.5, color: 'var(--muted)', marginBottom: 3, textAlign: mine ? 'right' : 'left' }}>{meta}</div>
-                <div style={{ background: mine ? 'var(--brand)' : 'var(--elevated)', color: mine ? '#fff' : 'var(--text)', borderRadius: mine ? '14px 14px 4px 14px' : '14px 14px 14px 4px', padding: '9px 13px', fontSize: 13.5, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{renderBody(m.body, mine)}</div>
+            <div key={m.id} style={{ display: 'flex', flexDirection: mine ? 'row-reverse' : 'row', alignItems: 'flex-end', gap: 8 }}>
+              <div title={isHowler ? 'Howler' : m.authorEmail} style={{ width: 28, height: 28, borderRadius: '50%', flexShrink: 0, background: partyBg, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 800 }}>{initial}</div>
+              <div style={{ maxWidth: '74%', minWidth: 0 }}>
+                <div style={{ fontSize: 10.5, color: 'var(--muted)', marginBottom: 3, textAlign: mine ? 'right' : 'left' }}>{shortName}{m.channel !== 'pulse' ? ` · ${m.channel}` : ''} · {shortDate(m.createdAt)}</div>
+                <div style={{ background: mine ? 'var(--brand)' : 'var(--elevated)', color: mine ? '#fff' : 'var(--text)', border: mine ? '1px solid var(--brand)' : '1px solid var(--hairline)', borderLeft: mine ? undefined : `3px solid ${partyBg}`, borderRadius: mine ? '16px 16px 4px 16px' : '16px 16px 16px 4px', padding: '9px 13px', fontSize: 13.5, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{renderBody(m.body, mine)}</div>
                 {(m.attachments || []).length > 0 && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginTop: 5, alignItems: mine ? 'flex-end' : 'flex-start' }}>
                     {m.attachments.map((a) => a.mime?.startsWith('image/') ? (
@@ -185,7 +190,7 @@ function ThreadView({ id, isAdmin, isMobile, onBack, onChange, listCollapsed, on
                   </div>
                 )}
                 {seen && (
-                  <div style={{ fontSize: 10, marginTop: 3, color: seen.length ? '#2da44e' : 'var(--muted)', fontWeight: 600 }}>
+                  <div style={{ fontSize: 10, marginTop: 3, color: seen.length ? '#2da44e' : 'var(--muted)', fontWeight: 600, textAlign: mine ? 'right' : 'left' }}>
                     {seen.length ? `✓✓ Read by ${seen.map((r) => r.email).join(', ')} · ${shortDate(seen.map((r) => r.at).sort()[0])}` : '✓ Sent · not yet read'}
                   </div>
                 )}
