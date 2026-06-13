@@ -8,7 +8,6 @@ import { useTheme } from '../lib/theme.jsx';
 import { vtNavigate } from '../lib/viewTransition.js';
 import { useSheetDrag } from '../lib/useSheetDrag.js';
 import { applyBrand, resetBrand } from '../lib/brand.js';
-import NotificationPrefs from '../components/NotificationPrefs.jsx';
 import { useAccess, PERMS } from '../lib/access.js';
 
 // Persistent client shell: a left sidebar tree of Suites → Sets → Dashboards,
@@ -552,13 +551,13 @@ function ProfileFooter({ user, isAdmin, brand, onNavigate }) {
       {open && (
         <div className="modal-in" style={profileMenu}>
           {!isAdmin && (
-            <button className="nav-row" style={menuItem} onClick={() => { setOpen(false); onNavigate('/settings'); }}>
-              <span style={menuIco}>⚙</span> Settings
-            </button>
+            <>
+              <button className="nav-row" style={menuItem} onClick={() => { setOpen(false); onNavigate('/settings'); }}>
+                <span style={menuIco}>⚙</span> Settings
+              </button>
+              <div style={menuDivider} />
+            </>
           )}
-          <div style={menuCap}>Notifications</div>
-          {open && <NotificationPrefs compact />}
-          <div style={menuDivider} />
           <button className="nav-row" style={menuItem} onClick={toggle}>
             <span style={menuIco}>{theme === 'dark' ? '☀️' : '🌙'}</span> {theme === 'dark' ? 'Light mode' : 'Dark mode'}
           </button>
