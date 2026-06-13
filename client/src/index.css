@@ -11,7 +11,7 @@
   --card: #ffffff;
   --elevated: #ffffff;
   --tile-bg: #ffffff;
-  --frost: rgba(255, 255, 255, 0.72); /* frosted headers / sidebar */
+  --frost: rgba(255, 255, 255, 0.82); /* frosted headers / sidebar */
   /* Hairlines & text */
   --border: rgba(0, 0, 0, 0.06);
   --hairline: rgba(0, 0, 0, 0.08);
@@ -33,10 +33,11 @@
   --row-stripe: #fafafa;
   --ai: #6d28d9; --ai-bg: rgba(246,241,255,0.92); --ai-border: #eadfff;
   /* Liquid Glass — translucent chrome/overlays. Surfaces tint to what's behind
-     them (blur + saturate) with a bright top edge (specular highlight). */
-  --glass-bg: rgba(255, 255, 255, 0.55);
-  --glass-blur: 22px;
-  --glass-border: rgba(255, 255, 255, 0.55);
+     them (blur + saturate) with a bright top edge (specular highlight). Kept
+     fairly opaque so text stays crisp; the blur supplies the "glass" feel. */
+  --glass-bg: rgba(255, 255, 255, 0.82);
+  --glass-blur: 18px;
+  --glass-border: rgba(255, 255, 255, 0.6);
   --glass-hi: rgba(255, 255, 255, 0.9);
   --glass-shadow: 0 10px 34px -10px rgba(0, 0, 0, 0.22);
   /* Motion — one shared language for the whole app */
@@ -55,7 +56,7 @@
   --card: #1a1a1f;
   --elevated: #222228;
   --tile-bg: #1a1a1f;
-  --frost: rgba(22, 22, 27, 0.72);
+  --frost: rgba(22, 22, 27, 0.82);
   --border: rgba(255, 255, 255, 0.09);
   --hairline: rgba(255, 255, 255, 0.12);
   --text: #f3f3f6;
@@ -71,7 +72,7 @@
   --skel-hi: rgba(255,255,255,0.14);
   --row-stripe: #202027;
   --ai: #c4b5fd; --ai-bg: rgba(124,58,237,0.20); --ai-border: rgba(124,58,237,0.45);
-  --glass-bg: rgba(28, 28, 34, 0.55);
+  --glass-bg: rgba(30, 30, 36, 0.82);
   --glass-border: rgba(255, 255, 255, 0.12);
   --glass-hi: rgba(255, 255, 255, 0.16);
   --glass-shadow: 0 12px 40px -10px rgba(0, 0, 0, 0.6);
