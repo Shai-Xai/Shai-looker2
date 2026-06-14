@@ -1172,11 +1172,18 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
       // Campaign details (so a sent campaign can be reviewed, not just its stats).
       details: {
         channel: a.config.channel || 'email',
-        type: a.config.campaignMode === 'sequence' ? `Drip sequence (${(a.config.steps || []).length} steps)` : a.recurring ? 'Automated' : 'One-off',
-        subject: a.config.subject || '', body: a.config.body || '',
+        type: a.config.campaignMode === 'sequence' ? `Drip sequence (${(a.config.steps || []).length} steps)` : a.recurring ? 'Automated (daily check)' : a.config.scheduledAt ? 'Scheduled one-off' : 'One-off',
+        subject: a.config.subject || '', body: a.config.body || '', smsBody: a.config.smsBody || '',
+        contentMode: a.config.contentMode || 'template', hasHero: !!a.config.heroImage,
         steps: (a.config.steps || []).map((s) => ({ delayHours: s.delayHours, subject: s.subject, body: s.body })),
         master: a.config.master || '', ctaUrl: a.config.ctaUrl || '',
-        promo: a.config.promo?.source && a.config.promo.source !== 'none' ? (a.config.promo.code || a.config.promo.type) : '',
+        audience: campaignSummaryLines(a).find((l) => l.startsWith('Audience:'))?.replace('Audience: ', '') || '',
+        approvers: approvalSummary(a).approvers.map((x) => x.label),
+        promo: a.config.promo?.source && a.config.promo.source !== 'none'
+          ? { type: a.config.promo.type === 'discount' ? 'Discount' : 'Promo', code: a.config.promo.code || '', benefit: a.config.promo.benefit || '', source: a.config.promo.source }
+          : null,
+        utm: a.config.utm || {},
+        scheduledAt: a.config.scheduledAt || '',
       },
     });
   });

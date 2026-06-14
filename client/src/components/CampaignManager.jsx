@@ -1079,8 +1079,11 @@ function MasterReport({ entityId, name, master, campaigns, onOpen, onNew, onChan
 }
 
 function CampaignReport({ entityId, action, onClose }) {
+  const isMobile = useIsMobile();
   const [r, setR] = useState(null);
+  const [preview, setPreview] = useState(null); // rendered {html, sms}
   useEffect(() => { api.actionReport(entityId, action.id).then(setR).catch(() => setR({ error: true })); }, [entityId, action.id]);
+  useEffect(() => { api.actionPreviewEmail(entityId, action.config).then(setPreview).catch(() => setPreview({})); }, [entityId, action.id]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!r) return <p style={{ color: 'var(--muted)', fontSize: 13 }}>Loading report…</p>;
   if (r.error) return <div><button style={mini} onClick={onClose}>← Back</button><p style={{ color: 'var(--error,#ef4444)', fontSize: 13, marginTop: 10 }}>Could not load the report.</p></div>;
   const stat = (label, value, color) => (
@@ -1110,33 +1113,60 @@ function CampaignReport({ entityId, action, onClose }) {
         {(r.converted > 0) && stat('Conv. rate', `${r.convRate}%`, 'var(--success,#10b981)')}
       </div>
 
-      {r.details && (
-        <div style={{ ...card, marginBottom: 14 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Campaign details</div>
-          <div style={{ fontSize: 12.5, color: 'var(--muted)', display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <div><b style={{ color: 'var(--text)' }}>Channel:</b> {r.details.channel === 'both' ? 'Email + SMS' : r.details.channel === 'sms' ? 'SMS' : 'Email'} · <b style={{ color: 'var(--text)' }}>Type:</b> {r.details.type}</div>
-            {r.details.master && <div><b style={{ color: 'var(--text)' }}>Master:</b> {r.details.master}</div>}
-            {r.details.promo && <div><b style={{ color: 'var(--text)' }}>Offer:</b> {r.details.promo}</div>}
-            {r.details.ctaUrl && <div style={{ wordBreak: 'break-all' }}><b style={{ color: 'var(--text)' }}>Link:</b> {r.details.ctaUrl}</div>}
+      {r.details && (() => {
+        const d = r.details;
+        const utmParts = Object.entries(d.utm || {}).filter(([, v]) => v).map(([k, v]) => `${k}=${v}`);
+        const Row = ({ k, children }) => <div style={{ display: 'flex', gap: 8 }}><span style={{ minWidth: 84, color: 'var(--muted)' }}>{k}</span><span style={{ flex: 1, minWidth: 0, color: 'var(--text)' }}>{children}</span></div>;
+        const hasEmail = d.channel !== 'sms'; const hasSms = d.channel !== 'email';
+        return (
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0,1fr) minmax(0,1fr)', gap: 14, marginBottom: 14, alignItems: 'start' }}>
+          {/* Settings */}
+          <div style={{ ...card }}>
+            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>Settings</div>
+            <div style={{ fontSize: 12.5, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <Row k="Channel">{d.channel === 'both' ? 'Email + SMS' : d.channel === 'sms' ? 'SMS' : 'Email'}</Row>
+              <Row k="Type">{d.type}</Row>
+              <Row k="Audience">{d.audience || '—'}</Row>
+              {d.scheduledAt && <Row k="Scheduled">{new Date(d.scheduledAt).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</Row>}
+              {d.master && <Row k="Master">{d.master}</Row>}
+              {hasEmail && <Row k="Content">{d.contentMode === 'html' ? 'Custom HTML' : 'Built template'}{d.hasHero ? ' · hero image' : ''}</Row>}
+              {hasEmail && d.subject && <Row k="Subject">{d.subject}</Row>}
+              {d.ctaUrl && <Row k="Link"><span style={{ wordBreak: 'break-all' }}>{d.ctaUrl}</span></Row>}
+              {d.promo && <Row k="Offer">{d.promo.type}{d.promo.code ? ` · ${d.promo.code}` : ''}{d.promo.benefit ? ` · ${d.promo.benefit}` : ''}{d.promo.source === 'unique' ? ' · unique codes' : ''}</Row>}
+              {utmParts.length > 0 && <Row k="UTM"><span style={{ wordBreak: 'break-all' }}>{utmParts.join(' · ')}</span></Row>}
+              {d.approvers?.length > 0 && <Row k="Approvers">{d.approvers.join(', ')}</Row>}
+            </div>
+            {/* Copy */}
+            {d.steps?.length > 0 ? (
+              <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {d.steps.map((s, i) => (
+                  <div key={i} style={{ borderLeft: '2px solid var(--hairline)', paddingLeft: 10 }}>
+                    <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--brand)' }}>Step {i + 1} · +{s.delayHours % 24 === 0 && s.delayHours >= 24 ? `${s.delayHours / 24}d` : `${s.delayHours}h`}</div>
+                    {s.subject && <div style={{ fontSize: 13, fontWeight: 600 }}>{s.subject}</div>}
+                    <div style={{ fontSize: 12.5, color: 'var(--muted)', whiteSpace: 'pre-wrap' }}>{s.body}</div>
+                  </div>
+                ))}
+              </div>
+            ) : hasSms && d.smsBody ? (
+              <div style={{ marginTop: 10, borderLeft: '2px solid #15803d', paddingLeft: 10 }}>
+                <div style={{ fontSize: 11.5, fontWeight: 700, color: '#15803d' }}>SMS text</div>
+                <div style={{ fontSize: 12.5, color: 'var(--muted)', whiteSpace: 'pre-wrap' }}>{d.smsBody}</div>
+              </div>
+            ) : null}
           </div>
-          {r.details.steps?.length > 0 ? (
-            <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {r.details.steps.map((s, i) => (
-                <div key={i} style={{ borderLeft: '2px solid var(--hairline)', paddingLeft: 10 }}>
-                  <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--brand)' }}>Step {i + 1} · +{s.delayHours % 24 === 0 && s.delayHours >= 24 ? `${s.delayHours / 24}d` : `${s.delayHours}h`}</div>
-                  {s.subject && <div style={{ fontSize: 13, fontWeight: 600 }}>{s.subject}</div>}
-                  <div style={{ fontSize: 12.5, color: 'var(--muted)', whiteSpace: 'pre-wrap' }}>{s.body}</div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div style={{ marginTop: 8 }}>
-              {r.details.subject && <div style={{ fontSize: 13.5, fontWeight: 700 }}>{r.details.subject}</div>}
-              {r.details.body && <div style={{ fontSize: 12.5, color: 'var(--muted)', whiteSpace: 'pre-wrap', marginTop: 2 }}>{r.details.body}</div>}
-            </div>
-          )}
+          {/* Live preview */}
+          <div style={{ ...card }}>
+            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>Preview</div>
+            {!preview ? <p style={{ color: 'var(--muted)', fontSize: 12.5 }}>Rendering…</p> : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {hasEmail && preview.html && <iframe title="Email preview" srcDoc={preview.html} style={{ width: '100%', height: 380, border: '1px solid var(--hairline)', borderRadius: 10, background: '#fff' }} />}
+                {hasSms && <SmsPreview text={preview.sms || d.smsBody || d.body} />}
+              </div>
+            )}
+          </div>
         </div>
-      )}
+        );
+      })()}
 
       <div style={{ ...card }}>
         <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Who clicked</div>
