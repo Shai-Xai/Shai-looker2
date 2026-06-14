@@ -340,18 +340,26 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     let noConsent = 0;
     let filteredOut = 0;
     if (cfg.audience.mode === 'paste') {
-      // Each token is an email or a mobile number. Emails → email recipients;
-      // numbers (≥7 digits, optional +) → SMS recipients. Deduped.
+      // ONE PERSON PER LINE. Within a line we pull out an email + a mobile number
+      // + a name, so "John Smith, john@x.com, 083…" is one contact with both.
+      // Separate lines are separate people. Deduped by email-or-phone.
       const seen = new Set();
       raw = [];
-      for (const t of cfg.audience.pasted.split(/[\s,;]+/).map((x) => x.trim()).filter(Boolean)) {
-        if (EMAIL_RE.test(t.toLowerCase())) {
-          const email = t.toLowerCase();
-          if (!seen.has(email)) { seen.add(email); raw.push({ email }); }
-        } else {
-          const phone = t.replace(/[^\d+]/g, '');
-          if (phone.replace(/\D/g, '').length >= 7 && !seen.has(phone)) { seen.add(phone); raw.push({ email: '', phone }); }
-        }
+      for (const line of String(cfg.audience.pasted || '').split(/\r?\n/)) {
+        const t = line.trim();
+        if (!t) continue;
+        const em = t.match(/[^\s,;|<>]+@[^\s,;|<>]+\.[^\s,;|<>]+/);
+        const email = em ? em[0].toLowerCase().replace(/[.,;]+$/, '') : '';
+        let rest = em ? t.replace(em[0], ' ') : t;
+        const ph = rest.match(/\+?\d[\d\s().-]{6,}\d/);
+        let phone = '';
+        if (ph && ph[0].replace(/\D/g, '').length >= 7) { phone = ph[0].replace(/[^\d+]/g, ''); rest = rest.replace(ph[0], ' '); }
+        const name = rest.replace(/[,;:|]+/g, ' ').replace(/\s+/g, ' ').trim();
+        if (!email && !phone) continue; // a line with no contactable identifier
+        const key = email || phone;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        raw.push({ email, phone, name });
       }
     } else {
       if (!cfg.audience.dashboardId || !cfg.audience.tileId) return { list: [], fields: [], filterFields: [], excluded: 0, noConsent: 0, filteredOut: 0 };
