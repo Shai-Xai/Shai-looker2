@@ -250,6 +250,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
       customHtml: String(body.customHtml || '').slice(0, 500000), // custom-HTML mode body
       subject: String(body.subject || '').slice(0, 200),
       body: String(body.body || '').slice(0, 8000),
+      smsBody: String(body.smsBody || '').slice(0, 2000), // separate SMS copy when channel = 'both'
       ctaText: String(body.ctaText || '').slice(0, 60),
       ctaUrl: String(body.ctaUrl || '').slice(0, 500),
       utm: {
@@ -492,7 +493,9 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
   // opt-out (alphanumeric sender IDs can't receive STOP replies).
   function renderSmsFor(action, recipient, step) {
     const cfg = action.config;
-    const useBody = step ? (step.body || cfg.body) : cfg.body;
+    // 'both'-channel campaigns have a separate SMS copy; fall back to body for
+    // SMS-only campaigns (which edit body directly).
+    const useBody = step ? (step.body || cfg.smsBody || cfg.body) : (cfg.smsBody || cfg.body);
     const firstName = (recipient.name || '').split(/\s+/)[0] || '';
     const rtok = unsubToken(action.entityId, recipient.email || recipient.phone || '');
     const promo = promoForRecipient(action, recipient.email || '');

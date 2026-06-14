@@ -235,6 +235,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
     customHtml: cfg.customHtml || '',
     subject: cfg.subject || tp.subject || '',
     body: cfg.body || tp.body || '',
+    smsBody: cfg.smsBody || '', // separate SMS copy when channel = 'both'
     ctaText: cfg.ctaText || tp.ctaText || 'Complete your order',
     ctaUrl: cfg.ctaUrl || '',
     utm: { source: cfg.utm?.source || tp.utm?.source || '', medium: cfg.utm?.medium || tp.utm?.medium || '', campaign: cfg.utm?.campaign || tp.utm?.campaign || '', term: cfg.utm?.term || '', content: cfg.utm?.content || '' },
@@ -288,6 +289,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
     title: f.title, goal: f.goal,
     subject: f.campaignMode === 'sequence' ? (f.steps[0]?.subject || '') : f.subject,
     body: f.campaignMode === 'sequence' ? (f.steps[0]?.body || '') : f.body,
+    smsBody: f.smsBody,
     ctaText: f.campaignMode === 'sequence' ? (f.steps[0]?.ctaText || '') : f.ctaText,
     ctaUrl: f.ctaUrl, utm: f.utm, recurring: f.recurring,
     eventSuiteId: f.eventSuiteId, contentMode: f.contentMode, heroImage: f.heroImage, customHtml: f.customHtml,
@@ -350,7 +352,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
       api.actionPreviewEmail(entityId, p).then((r) => { setPreview(r.html || ''); setPreviewSms(r.sms || ''); }).catch(() => {});
     }, 350);
     return () => clearTimeout(debounce.current);
-  }, [f.subject, f.body, f.ctaText, f.ctaUrl, f.contentMode, f.customHtml, f.heroImage, f.campaignMode, activeStep, JSON.stringify(f.steps), JSON.stringify(f.promo), f.anchorField]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [f.subject, f.body, f.smsBody, f.ctaText, f.ctaUrl, f.contentMode, f.customHtml, f.heroImage, f.campaignMode, activeStep, JSON.stringify(f.steps), JSON.stringify(f.promo), f.anchorField]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Preview EVERY step of a sequence together (rendered each with its own copy).
   useEffect(() => {
@@ -715,6 +717,15 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
               </div>
             )}
           </Field>
+          )}
+
+          {/* Both channels, once-off: a SEPARATE SMS message (email copy ≠ SMS copy). */}
+          {!isSequence && f.channel === 'both' && (
+            <Field label="SMS message (separate from the email)">
+              <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit' }} rows={4} value={f.smsBody} onChange={(e) => set('smsBody', e.target.value)} placeholder={'Hi {{name}}, your {{ticketType}} tickets are still waiting — grab them here:'} />
+              <SmsMeter body={f.smsBody} />
+              <div style={hintS}>This text is sent as the SMS. The email above is sent as the email. Tokens <b>{'{{name}}'}</b>, <b>{'{{ticketType}}'}</b>, <b>{'{{promo}}'}</b> work; the tracked link + opt-out are appended automatically.</div>
+            </Field>
           )}
 
           {/* Tracked link — SMS-only and sequences share one buy link. (For an
