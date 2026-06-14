@@ -748,8 +748,8 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     if (!guard(req, res, req.params.entityId)) return;
     try {
       const cfg = cleanConfig(req.body || {});
-      const { list, fields, filterFields, excluded, noConsent, filteredOut } = await audienceFor(req.params.entityId, cfg, req.user);
-      res.json({ count: list.length, excluded, noConsent, filteredOut, sample: list.slice(0, 8), fields: (fields || []).map((f) => ({ name: f.name, label: f.label })), filterFields: filterFields || [] });
+      const { list, fields, filterFields, excluded, noConsent, filteredOut, segmentMissing } = await audienceFor(req.params.entityId, cfg, req.user);
+      res.json({ count: list.length, excluded, noConsent, filteredOut, segmentMissing: !!segmentMissing, sample: list.slice(0, 8), fields: (fields || []).map((f) => ({ name: f.name, label: f.label })), filterFields: filterFields || [] });
     } catch (e) { res.status(400).json({ error: e.message }); }
   });
 

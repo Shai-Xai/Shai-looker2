@@ -702,8 +702,12 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <select style={input} value={f.segmentId} onChange={(e) => set('segmentId', e.target.value)}>
                   <option value="">Pick a saved segment…</option>
+                  {/* If the campaign references a segment that's since been deleted,
+                      keep a placeholder option so the picker isn't silently blank. */}
+                  {f.segmentId && !segments.some((sg) => sg.id === f.segmentId) && <option value={f.segmentId}>⚠ Deleted segment</option>}
                   {segments.map((sg) => <option key={sg.id} value={sg.id}>{sg.name}{sg.count >= 0 ? ` (${sg.count})` : ''}</option>)}
                 </select>
+                {aud?.segmentMissing && <div style={{ fontSize: 12, color: '#b45309', fontWeight: 600 }}>⚠ This segment no longer exists — pick another, or recreate it in Segments. The campaign can't send until it resolves to people.</div>}
                 <div style={hintS}>Always-live — the campaign sends to whoever's in the segment at send time. {segments.length === 0 ? 'No segments yet — create one in Segments.' : 'Manage segments in the Segments area.'}</div>
               </div>
             ) : f.audienceMode === 'tile' ? (
