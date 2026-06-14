@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { api } from '../lib/api.js';
 import TilePicker from './TilePicker.jsx';
+import RefineButton from './RefineButton.jsx';
 
 // Scheduled digests — role-lensed briefing emails on a cadence. One component
 // for both surfaces: admin (manage any client) and client self-service (own
@@ -30,7 +31,7 @@ export default function DigestManager({ entityId, scope = 'admin', logins = [] }
   const roleLabel = (k) => data.roles.find((r) => r.key === k)?.label || k;
 
   if (editing) {
-    return <DigestEditor job={editing === 'new' ? null : editing} roles={data.roles} logins={logins} api={A}
+    return <DigestEditor job={editing === 'new' ? null : editing} roles={data.roles} logins={logins} api={A} entityId={entityId}
       onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />;
   }
 
@@ -59,6 +60,7 @@ export default function DigestManager({ entityId, scope = 'admin', logins = [] }
           <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
             <button style={mini} onClick={() => A.test(j.id).then((r) => alert(r.to ? `Test sent to ${r.to}` : 'Sent')).catch((e) => alert(e.message))}>Test</button>
             <button style={mini} onClick={() => setEditing(j)}>Edit</button>
+            <button style={mini} title="Duplicate as a new digest" onClick={() => setEditing({ ...j, id: undefined, status: 'paused', title: `${j.title || `${roleLabel(j.role)} digest`} (copy)` })}>Duplicate</button>
             <button style={{ ...mini, color: 'var(--error,#ef4444)' }} onClick={() => { if (confirm('Delete this digest?')) A.remove(j.id).then(load); }}>Delete</button>
           </div>
         </div>
@@ -67,7 +69,7 @@ export default function DigestManager({ entityId, scope = 'admin', logins = [] }
   );
 }
 
-function DigestEditor({ job, roles, logins, api: A, onClose, onSaved }) {
+function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }) {
   const [f, setF] = useState(() => ({
     title: job?.title || '', role: job?.role || 'exec', roleFocus: job?.roleFocus || '', focusMode: job?.focusMode || 'override',
     customMessage: job?.customMessage || '',
@@ -109,7 +111,7 @@ function DigestEditor({ job, roles, logins, api: A, onClose, onSaved }) {
 
   async function save() {
     setBusy(true);
-    try { job ? await A.update(job.id, payload()) : await A.create(payload()); onSaved(); }
+    try { job?.id ? await A.update(job.id, payload()) : await A.create(payload()); onSaved(); }
     catch (e) { alert('Save failed: ' + e.message); } finally { setBusy(false); }
   }
   const addRecipient = (email) => { const cur = f.recipients.split(',').map((s) => s.trim()).filter(Boolean); if (!cur.includes(email)) set('recipients', [...cur, email].join(', ')); };
@@ -139,6 +141,7 @@ function DigestEditor({ job, roles, logins, api: A, onClose, onSaved }) {
 
           <Field label="Custom message (optional — a personal note at the top of the email)">
             <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit' }} rows={3} value={f.customMessage} onChange={(e) => set('customMessage', e.target.value)} placeholder="e.g. Hi team — big weekend ahead. Here's where we stand…" />
+            <RefineButton text={f.customMessage} onRefined={(t) => set('customMessage', t)} purpose="a personal intro note at the top of a digest email" entityId={entityId} />
             <div style={hintS}>Sent verbatim above the AI summary. Supports **bold** and line breaks.</div>
           </Field>
 
@@ -185,7 +188,7 @@ function DigestEditor({ job, roles, logins, api: A, onClose, onSaved }) {
           </Field>
 
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 4, flexWrap: 'wrap' }}>
-            <button style={primary} onClick={save} disabled={busy}>{busy ? 'Saving…' : (job ? 'Save changes' : 'Create digest')}</button>
+            <button style={primary} onClick={save} disabled={busy}>{busy ? 'Saving…' : (job?.id ? 'Save changes' : 'Create digest')}</button>
             <button
               type="button" style={mini} disabled={testState === 'sending'}
               onClick={async () => { setTestState('sending'); try { const r = await A.testSend(payload()); setTestState(`✓ Sent to ${r.to}`); } catch (e) { setTestState(`✗ ${e.message}`); } }}

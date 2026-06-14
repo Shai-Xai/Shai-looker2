@@ -2153,6 +2153,21 @@ app.put('/api/my/briefing-config/suite/:id', auth.requireAuth, (req, res) => {
   briefCache.clear(); // next briefing for anyone on this client reflects it
   res.json({ id: updated.id, briefing: updated.briefing, phase: resolvePhase(updated.briefing) });
 });
+// Sharpen a short instruction note (briefing focus, digest intro) with AI —
+// shared by the briefing tuner and the digest editor. Returns improved text.
+app.post('/api/my/refine-text', auth.requireAuth, async (req, res) => {
+  const text = String(req.body?.text || '').trim();
+  if (!text) return res.status(400).json({ error: 'Nothing to refine yet — write a note first.' });
+  if (text.length > 4000) return res.status(400).json({ error: 'That note is too long to refine.' });
+  const entityId = req.body?.entityId || homeEntityFor(req);
+  if (entityId && req.user.role !== 'admin' && !(req.user.entityIds || []).includes(entityId)) return res.status(403).json({ error: 'Not allowed' });
+  const apiKey = anthropicKeyForEntity(entityId);
+  if (!insights.isConfigured(apiKey)) return res.status(400).json({ error: 'AI is not configured for this client.' });
+  try {
+    const refined = await insights.refineText({ text, purpose: String(req.body?.purpose || '').slice(0, 120), instructions: aiInstructionsFor(null), apiKey });
+    res.json({ text: refined });
+  } catch (e) { console.error('[POST /api/my/refine-text]', e.message); res.status(500).json({ error: e.message }); }
+});
 app.put('/api/my/briefing-tune', auth.requireAuth, (req, res) => {
   const entityId = homeEntityFor(req);
   if (!entityId) return res.status(400).json({ error: 'No client context' });

@@ -339,6 +339,24 @@ async function draftCampaign({ goal, clientName, clientContext, audienceCount, i
   return JSON.parse(match[0]);
 }
 
+// Sharpen a short instruction/briefing note the user wrote to steer the Owl.
+// Returns improved PLAIN TEXT (not a report, not JSON) — same intent, clearer
+// and tighter as a prompt.
+const REFINE_SYSTEM = `You sharpen short instruction notes that a user wrote to steer an AI analyst (e.g. a briefing focus or a digest intro message). Rewrite the note so it is clearer, more specific and works better as a prompt — preserve the user's intent and any facts, keep it concise (no padding or filler), plain professional English. Do NOT answer the note, expand it into a report, or add commentary. Return ONLY the rewritten note as plain text — no preamble, no quotes, no markdown.`;
+async function refineText({ text, purpose, instructions, apiKey }) {
+  const c = requireClient(apiKey);
+  const ctx = purpose ? `This note will be used as: ${purpose}.\n\n` : '';
+  const resp = await c.messages.create({
+    model: MODEL,
+    max_tokens: 600,
+    thinking: { type: 'adaptive' },
+    output_config: { effort: 'low' },
+    system: systemWith(REFINE_SYSTEM, instructions),
+    messages: [{ role: 'user', content: `${ctx}NOTE TO IMPROVE:\n${text}` }],
+  });
+  return (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
+}
+
 async function briefHome({ tiles, profile, catalogue, instructions, apiKey, actions, messages, capabilities }) {
   const c = requireClient(apiKey);
   const lines = ['TILES (live data):', ''];
@@ -502,4 +520,4 @@ async function extractInvoice({ pdfBase64, apiKey, onProgress }) {
   return JSON.parse(match[0]);
 }
 
-module.exports = { generateInsight, streamInsight, streamDashboardInsight, describeTile, extractSettlement, extractInvoice, briefHome, digestBrief, draftCampaign, isConfigured: (apiKey) => !!(apiKey || process.env.ANTHROPIC_API_KEY) };
+module.exports = { generateInsight, streamInsight, streamDashboardInsight, describeTile, extractSettlement, extractInvoice, briefHome, digestBrief, draftCampaign, refineText, isConfigured: (apiKey) => !!(apiKey || process.env.ANTHROPIC_API_KEY) };

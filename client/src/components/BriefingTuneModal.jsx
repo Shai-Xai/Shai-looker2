@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { api } from '../lib/api.js';
 import AiMark from './AiMark.jsx';
 import TilePicker from './TilePicker.jsx';
+import RefineButton from './RefineButton.jsx';
 import { useAuth } from '../lib/auth.jsx';
 
 // "Tune your briefing": the controls behind the home briefing.
@@ -88,6 +89,7 @@ export function BriefingConfigForm({ entityId, onSaved, showTune = true }) {
                   placeholder={'e.g. Always mention resale activity. Compare everything to last year. I care most about cashless spend per head.'}
                   style={ta}
                 />
+                <RefineButton text={tune} onRefined={setTune} purpose="a standing focus note that steers an AI briefing" entityId={entityId} />
                 {followed.length > 0 && (
                   <>
                     <Label>Tiles you're following</Label>
