@@ -14,11 +14,12 @@ export function isRunnableQuery(q) {
 // values change. Returns { data, loading, error }. Looker does the calculation;
 // we only receive json_detail rows.
 export function useTileData(tile, filterValues) {
-  const { suiteId } = useScope();
+  const { suiteId, refreshKey = 0 } = useScope();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(tile.type !== 'text' && isRunnableQuery(tile.query));
   const [error, setError] = useState(null);
   const abortRef = useRef(null);
+  const lastRefresh = useRef(refreshKey); // bumping refreshKey forces a live (cache-bypassing) re-fetch
 
   // Build filter overrides for this tile from the dashboard-level filter values,
   // using the tile's listenTo wiring ({ filterName -> queryField }).
@@ -50,7 +51,12 @@ export function useTileData(tile, filterValues) {
     setLoading(true);
     setError(null);
 
-    withLimit(() => api.runQuery(tile.query, overrides, controller.signal, suiteId))
+    // Force a live re-fetch only when refreshKey changed (the Refresh button) —
+    // filter/scope changes use the cache.
+    const force = refreshKey !== lastRefresh.current;
+    lastRefresh.current = refreshKey;
+
+    withLimit(() => api.runQuery(tile.query, overrides, controller.signal, suiteId, force))
       .then((d) => setData(d))
       .catch((err) => {
         if (err.name !== 'AbortError') setError(err.message);
@@ -61,7 +67,7 @@ export function useTileData(tile, filterValues) {
 
     return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tile.type, queryKey, overrideKey, suiteId]);
+  }, [tile.type, queryKey, overrideKey, suiteId, refreshKey]);
 
   return { data, loading, error };
 }

@@ -40,6 +40,8 @@ export default function ViewPage() {
   const [hasUserView, setHasUserView] = useState(false);    // does this user have a saved view?
   const [viewStatus, setViewStatus] = useState('');         // transient "Saved ✓" feedback
   const [daysToGo, setDaysToGo] = useState(null);           // live days-before-event (from the source tile)
+  const [refreshKey, setRefreshKey] = useState(0);          // bump → all tiles re-fetch live (cache-bypassing)
+  const refreshNow = () => setRefreshKey((k) => k + 1);
 
   // Build filter values from the dashboard defaults + suite locks, with an
   // optional saved overlay (entity default then the user's view). Locks always
@@ -214,7 +216,7 @@ export default function ViewPage() {
   const pinsEnabled = !!suiteId && insightsEnabled && (!isAdmin || !!previewEntityId);
 
   return (
-    <ScopeProvider suiteId={suiteId || null} dashboardContext={def.aiContext || ''} entityId={scopeEntityId} dashboardId={id}>
+    <ScopeProvider suiteId={suiteId || null} dashboardContext={def.aiContext || ''} entityId={scopeEntityId} dashboardId={id} refreshKey={refreshKey}>
     <PinProvider dashboardId={id} entityId={previewEntityId || null} isAdmin={isAdmin} enabled={pinsEnabled}>
       <div style={shellStyle}>
         {/* On mobile inside a suite the sticky "☰ Menu" bar already shows the
@@ -226,6 +228,9 @@ export default function ViewPage() {
               {setInfo && <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)' }}>{setInfo.name}</div>}
               <h2 style={{ fontSize: isMobile ? 17 : 21, fontWeight: 600, letterSpacing: '-0.02em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{headerTitle}</h2>
             </div>
+            {hasTiles && !isMobile && (
+              <button className="btn-key no-print" style={summaryBtn} onClick={refreshNow} title="Refresh — pull the latest data now (bypasses cache)" aria-label="Refresh data">↻ Refresh</button>
+            )}
             {canSummarize && !isMobile && (
               <button className="btn-key no-print" style={summaryBtn} onClick={() => setSummaryOpen(true)} title="AI summary of the whole dashboard"><AiMark size={20} /> Summary</button>
             )}
@@ -262,7 +267,7 @@ export default function ViewPage() {
               <button className="btn-key" style={iconAction} onClick={() => setSummaryOpen(true)} title="AI summary" aria-label="AI summary"><AiMark size={20} /></button>
             )}
             {/* Filters now live inside the ⋯ menu alongside Share / Download PDF. */}
-            <ActionsMenu suiteId={suiteId} dashboardId={id} filterValues={filterValues} hasFilters={hasFilters} activeCount={activeCount} onFilters={() => setFiltersOpen(true)} />
+            <ActionsMenu suiteId={suiteId} dashboardId={id} filterValues={filterValues} hasFilters={hasFilters} activeCount={activeCount} onFilters={() => setFiltersOpen(true)} onRefresh={refreshNow} />
           </>,
           actionsSlot
         )}
@@ -330,7 +335,7 @@ function HomeIcon({ size = 16 }) {
 // "⋯" actions menu next to Filters: Share (mint short link with current
 // filters, copy, flash ✓) and Download PDF (print stylesheet does the rest).
 // A share link is never an auth bypass — recipients log in; scoping applies.
-function ActionsMenu({ suiteId, dashboardId, filterValues, hasFilters, activeCount = 0, onFilters }) {
+function ActionsMenu({ suiteId, dashboardId, filterValues, hasFilters, activeCount = 0, onFilters, onRefresh }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState(null);
   const btnRef = useRef(null);
@@ -370,6 +375,15 @@ function ActionsMenu({ suiteId, dashboardId, filterValues, hasFilters, activeCou
         <>
           <div style={{ position: 'fixed', inset: 0, zIndex: 398 }} onClick={() => setOpen(false)} />
           <div className="modal-in" style={{ ...actionsPanel, top: pos.top, left: pos.left, width: pos.width }}>
+            {onRefresh && (
+              <button style={actionItem} onClick={() => { setOpen(false); onRefresh(); }}>
+                <span style={actionIco}>↻</span>
+                <span style={{ flex: 1, textAlign: 'left' }}>
+                  Refresh
+                  <span style={{ display: 'block', fontSize: 11, color: 'var(--muted)', fontWeight: 500 }}>Pull the latest data now</span>
+                </span>
+              </button>
+            )}
             {hasFilters && onFilters && (
               <button style={actionItem} onClick={() => { setOpen(false); onFilters(); }}>
                 <span style={{ ...actionIco, color: activeCount > 0 ? 'var(--brand)' : undefined }}>⚲</span>

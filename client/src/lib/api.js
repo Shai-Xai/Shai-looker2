@@ -123,11 +123,11 @@ export const api = {
     }).then(json),
 
   // Query execution (scoped to the current suite, if any)
-  runQuery: (query, filterOverrides, signal, suiteId) =>
+  runQuery: (query, filterOverrides, signal, suiteId, refresh = false) =>
     fetch('/api/run-query', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query, filterOverrides, suiteId }),
+      body: JSON.stringify({ query, filterOverrides, suiteId, refresh }),
       signal,
     }).then(json),
 

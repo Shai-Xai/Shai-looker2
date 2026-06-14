@@ -659,8 +659,11 @@ app.get('/api/looker/explores/:model/:explore', auth.requireAdmin, async (req, r
 // background refresh, so users never wait on a slow Looker query for repeat
 // views while data still stays reasonably current. Concurrent identical runs
 // are de-duplicated into one Looker call.
-const QCACHE_TTL = (Number(process.env.QUERY_CACHE_TTL) || 60) * 1000;          // fresh window (s)
-const QCACHE_STALE = (Number(process.env.QUERY_CACHE_STALE) || 600) * 1000;     // serve-stale window (s)
+// Data updates on a ~30-min Howler→Looker pipeline, so caching up to that cadence
+// costs no freshness — instant within a cycle, a new run picked up within ~5 min,
+// and the dashboard Refresh button force-bypasses for the latest run on demand.
+const QCACHE_TTL = (Number(process.env.QUERY_CACHE_TTL) || 300) * 1000;         // fresh window (s)
+const QCACHE_STALE = (Number(process.env.QUERY_CACHE_STALE) || 1800) * 1000;    // serve-stale window (s)
 const QCACHE_MAX = Number(process.env.QUERY_CACHE_MAX) || 500;
 const qCache = new Map();    // key -> { at, data }
 const qInflight = new Map(); // key -> Promise
@@ -727,7 +730,7 @@ async function applyScope(query, user, suiteId) {
 
 app.post('/api/run-query', auth.requireAuth, async (req, res) => {
   try {
-    const { query, filterOverrides = {}, suiteId } = req.body;
+    const { query, filterOverrides = {}, suiteId, refresh = false } = req.body;
     if (!query) return res.status(400).json({ error: 'query is required' });
     const queryBody = { ...query, filters: stripAnyValue({ ...(query.filters || {}), ...filterOverrides }) };
     if (!(await applyScope(queryBody, req.user, suiteId))) {
@@ -741,7 +744,7 @@ app.post('/api/run-query', auth.requireAuth, async (req, res) => {
       }
       return res.status(403).json({ error });
     }
-    const data = await runLookerQuery('/queries/run/json_detail', queryBody);
+    const data = await runLookerQuery('/queries/run/json_detail', queryBody, undefined, !!refresh);
     res.json(data);
   } catch (err) {
     console.error('[POST /api/run-query]', err.message);
