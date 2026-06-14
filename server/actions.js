@@ -146,6 +146,8 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     if (!cols.includes('last_check')) sql.exec("ALTER TABLE actions ADD COLUMN last_check TEXT NOT NULL DEFAULT ''");
     const ecols = sql.prepare('PRAGMA table_info(action_enrollments)').all().map((c) => c.name);
     if (!ecols.includes('phone')) sql.exec("ALTER TABLE action_enrollments ADD COLUMN phone TEXT NOT NULL DEFAULT ''"); // for SMS sequences
+    const ccols = sql.prepare('PRAGMA table_info(action_clicks)').all().map((c) => c.name);
+    if (!ccols.includes('channel')) sql.exec("ALTER TABLE action_clicks ADD COLUMN channel TEXT NOT NULL DEFAULT ''"); // email | sms | '' (legacy)
   } catch (e) { console.error('[actions] migration skipped:', e.message); }
 
   // ── helpers ──
@@ -479,7 +481,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     // link (?promo=CODE); a 'discount' code is entered manually at checkout.
     const promo = promoForRecipient(action, recipient.email);
     const appendPromo = promo && promo.type === 'promo' && promo.appendToLink && promo.code;
-    const baseClick = cfg.ctaUrl ? `${mailer.baseUrl()}/c/${cfg.clickToken}/${rtok}` : '';
+    const baseClick = cfg.ctaUrl ? `${mailer.baseUrl()}/c/${cfg.clickToken}/${rtok}/e` : ''; // /e = email channel
     const ctaUrl = baseClick && appendPromo ? `${baseClick}${baseClick.includes('?') ? '&' : '?'}promo=${encodeURIComponent(promo.code)}` : baseClick;
     const unsubUrl = `${mailer.baseUrl()}/u/${rtok}`;
     const tok = (s) => String(s || '')
@@ -523,7 +525,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     const rtok = unsubToken(action.entityId, recipient.email || recipient.phone || '');
     const promo = promoForRecipient(action, recipient.email || '');
     const appendPromo = promo && promo.type === 'promo' && promo.appendToLink && promo.code;
-    const base = cfg.ctaUrl ? `${mailer.baseUrl()}/c/${cfg.clickToken}/${rtok}` : '';
+    const base = cfg.ctaUrl ? `${mailer.baseUrl()}/c/${cfg.clickToken}/${rtok}/s` : ''; // /s = sms channel
     const link = base && appendPromo ? `${base}${base.includes('?') ? '&' : '?'}promo=${encodeURIComponent(promo.code)}` : base;
     const tok = (s) => String(s || '')
       .replace(/\{\{\s*name\s*\}\}/gi, firstName || 'there')
@@ -546,23 +548,25 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     const branding = mailer.resolveBranding(a.entityId);
     const wantsEmail = a.config.channel !== 'sms';
     const wantsSms = a.config.channel !== 'email';
-    const results = { sent: 0, failed: 0, clicks: a.results.clicks || 0, total: a.audience.length, startedAt: now() };
+    const results = { sent: 0, failed: 0, clicks: a.results.clicks || 0, total: a.audience.length, startedAt: now(), emailSent: a.results.emailSent || 0, smsSent: a.results.smsSent || 0 };
     saveResults(a.id, results);
     for (const recipient of a.audience) {
       // Per recipient: try each channel they qualify for. Reached on ≥1 channel
       // counts as sent; only count failed if every attempted channel failed.
+      // We also track per-channel delivered counts so the report can compute an
+      // honest per-channel CTR (clicks/delivered) on both-channel campaigns.
       let ok = false, attempted = false, lastErr = '';
       try {
         if (wantsEmail && recipient.email) {
           attempted = true;
           const { html, text, subject } = renderFor(a, recipient);
           const r = await mailer.send({ to: recipient.email, subject: subject || a.title || 'An update from your event', html, text, fromName: branding.senderName, kind: 'campaign', entity: a.entityId });
-          if (r.ok) ok = true; else lastErr = r.error || r.reason || 'email failed';
+          if (r.ok) { ok = true; results.emailSent += 1; } else lastErr = r.error || r.reason || 'email failed';
         }
         if (wantsSms && recipient.phone) {
           attempted = true;
           const r = await messaging.sendSms({ to: recipient.phone, text: renderSmsFor(a, recipient) });
-          if (r.ok) ok = true; else lastErr = r.error || r.reason || 'SMS failed';
+          if (r.ok) { ok = true; results.smsSent += 1; } else lastErr = r.error || r.reason || 'SMS failed';
         }
       } catch (e) { lastErr = e.message; }
       if (ok) results.sent += 1; else if (attempted) { results.failed += 1; results.lastError = lastErr; }
@@ -1151,6 +1155,22 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     const totalClicks = tableTotal + legacy;
     const anonClicks = tableAnon + legacy;
     const sent = a.results.sent || 0;
+    const channel = a.config.channel || 'email';
+    const both = channel === 'both';
+    // Per-channel click attribution. New sends tag each click with its channel
+    // ('email' via /e links, 'sms' via /s); legacy untagged clicks ('') belong to
+    // the only channel on a single-channel campaign, otherwise stay unattributed.
+    const byCh = sql.prepare("SELECT channel, COUNT(*) n FROM action_clicks WHERE action_id=? GROUP BY channel").all(a.id);
+    const chCount = (c) => byCh.find((r) => r.channel === c)?.n || 0;
+    const untaggedClicks = chCount('');
+    let emailClicks = chCount('email');
+    let smsClicks = chCount('sms');
+    if (channel === 'email') emailClicks += untaggedClicks + legacy;
+    else if (channel === 'sms') smsClicks += untaggedClicks + legacy;
+    // Per-channel delivered counts (fall back to total sent on single-channel).
+    const emailSent = both ? (a.results.emailSent || 0) : (channel === 'email' ? sent : 0);
+    const smsSent = both ? (a.results.smsSent || 0) : (channel === 'sms' ? sent : 0);
+    const pct = (num, den) => (den > 0 ? Math.min(100, Math.round((num / den) * 100)) : 0);
     // Opens (email pixel). Unique openers = distinct attributed emails; total =
     // the counter (incl. anonymous/blocked-token loads).
     const uniqueOpeners = sql.prepare("SELECT COUNT(DISTINCT email) n FROM action_opens WHERE action_id=? AND email!=''").get(a.id)?.n || 0;
@@ -1162,6 +1182,8 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
       totalClicks, uniqueClickers: clickers.length, anonClicks,
       // CTR mirrors the card (total clicks / sent) so the two never disagree.
       ctr: sent > 0 ? Math.min(100, Math.round((totalClicks / sent) * 100)) : 0,
+      // Per-channel split (shown when a campaign uses both channels).
+      perChannel: { email: { sent: emailSent, clicks: emailClicks, ctr: pct(emailClicks, emailSent) }, sms: { sent: smsSent, clicks: smsClicks, ctr: pct(smsClicks, smsSent) } },
       opens: totalOpens, uniqueOpeners, hasOpens: emailChannel,
       openRate: emailChannel && sent > 0 ? Math.min(100, Math.round((uniqueOpeners / sent) * 100)) : 0,
       converted: a.results.converted || 0,
@@ -1295,7 +1317,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
       catch (e) { console.error('[actions] sequence audience re-check failed', a.id, e.message); continue; }
       const sup = suppressed(a.entityId);
       const due = sql.prepare("SELECT * FROM action_enrollments WHERE action_id=? AND status='active' AND next_at <= ?").all(a.id, now());
-      let sent = 0; let converted = 0;
+      let sent = 0; let converted = 0; let emailSent = 0; let smsSent = 0;
       for (const e of due) {
         // Conversion / suppression: gone from the abandoned list = bought (or
         // expired); unsubscribed = removed. Either way, stop the journey.
@@ -1308,8 +1330,8 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
           const wantsEmail = a.config.channel !== 'sms';
           const wantsSms = a.config.channel !== 'email';
           let ok = false;
-          if (wantsEmail && e.email) { const { html, text, subject } = renderFor(a, rcpt, step); const r = await mailer.send({ to: e.email, subject: subject || a.title || 'A reminder from your event', html, text, fromName: branding.senderName, kind: 'campaign', entity: a.entityId }); if (r.ok) ok = true; }
-          if (wantsSms && e.phone) { const r = await messaging.sendSms({ to: e.phone, text: renderSmsFor(a, rcpt, step) }); if (r.ok) ok = true; }
+          if (wantsEmail && e.email) { const { html, text, subject } = renderFor(a, rcpt, step); const r = await mailer.send({ to: e.email, subject: subject || a.title || 'A reminder from your event', html, text, fromName: branding.senderName, kind: 'campaign', entity: a.entityId }); if (r.ok) { ok = true; emailSent += 1; } }
+          if (wantsSms && e.phone) { const r = await messaging.sendSms({ to: e.phone, text: renderSmsFor(a, rcpt, step) }); if (r.ok) { ok = true; smsSent += 1; } }
           if (ok) sent += 1;
         } catch (err) { console.error('[actions] sequence send failed', a.id, e.email, err.message); }
         // Advance to the next step (or finish).
@@ -1320,7 +1342,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
       }
       if (sent || converted) {
         const res = a.results || {};
-        saveResults(a.id, { ...res, sent: (res.sent || 0) + sent, converted: (res.converted || 0) + converted });
+        saveResults(a.id, { ...res, sent: (res.sent || 0) + sent, converted: (res.converted || 0) + converted, emailSent: (res.emailSent || 0) + emailSent, smsSent: (res.smsSent || 0) + smsSent });
       }
     }
     } finally {
@@ -1379,13 +1401,15 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     res.end(OPEN_PIXEL);
   });
 
-  app.get('/c/:token/:rtok?', (req, res) => {
+  app.get('/c/:token/:rtok?/:ch?', (req, res) => {
     const r = sql.prepare(`SELECT * FROM actions WHERE json_extract(config,'$.clickToken')=?`).get(req.params.token);
     if (!r) return res.redirect('/');
     const a = rowToAction(r);
-    // Attribute the click when the link carries a valid recipient token.
+    // Attribute the click when the link carries a valid recipient token, and the
+    // channel from the link suffix (/e = email, /s = sms).
     const who = req.params.rtok ? parseUnsubToken(req.params.rtok) : null;
-    try { sql.prepare('INSERT INTO action_clicks (action_id, email, at) VALUES (?,?,?)').run(a.id, who?.e ? String(who.e).toLowerCase() : '', now()); } catch { /* never block the redirect */ }
+    const channel = req.params.ch === 'e' ? 'email' : req.params.ch === 's' ? 'sms' : '';
+    try { sql.prepare('INSERT INTO action_clicks (action_id, email, at, channel) VALUES (?,?,?,?)').run(a.id, who?.e ? String(who.e).toLowerCase() : '', now(), channel); } catch { /* never block the redirect */ }
     const results = { ...a.results, clicks: (a.results.clicks || 0) + 1, lastClickAt: now() };
     saveResults(a.id, results);
     let dest = a.config.ctaUrl || '/';

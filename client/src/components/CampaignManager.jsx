@@ -19,6 +19,8 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
   const [presetMaster, setPresetMaster] = useState(''); // pre-fill master on a new campaign
   const [masters, setMasters] = useState([]);
   const [openMasters, setOpenMasters] = useState({}); // master name → expanded? (collapsed by default)
+  const [channelFilter, setChannelFilter] = useState('all'); // all | email | sms | both
+  const [stateFilter, setStateFilter] = useState('all'); // all | draft | pending | scheduled | sent | automated
   useEffect(() => { api.getActionTemplates(entityId).then((r) => setTemplates(r.templates || [])).catch(() => setTemplates([])); }, [entityId]);
   const loadMasters = () => api.getMasters(entityId).then((r) => setMasters(r.masters || [])).catch(() => setMasters([]));
   useEffect(() => { loadMasters(); }, [entityId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -108,7 +110,7 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
           <div style={{ display: 'flex', gap: 14, marginTop: 6, fontSize: 12.5, fontWeight: 600, flexWrap: 'wrap' }}>
             <span>📤 {a.results.sent ?? 0}/{a.results.total ?? a.audienceCount} sent</span>
             {(a.results.failed ?? 0) > 0 && <span style={{ color: 'var(--error,#ef4444)' }}>✗ {a.results.failed} failed</span>}
-            {typeof a.openRate === 'number' && <span style={{ color: '#0a66c2' }}>📬 {a.openRate}% open</span>}
+            {typeof a.openRate === 'number' && <span style={{ color: '#0a66c2' }}>📬 {a.openRate}% email open</span>}
             <span>🔗 {a.results.clicks ?? 0} clicks</span>
             {a.results.sent > 0 && <span style={{ color: 'var(--muted)' }}>{Math.round(((a.results.clicks || 0) / a.results.sent) * 100)}% CTR</span>}
             {(a.results.converted ?? 0) > 0 && <span style={{ color: 'var(--success,#10b981)' }}>✓ {a.results.converted} converted</span>}
@@ -147,11 +149,43 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
       })()}
     </div>
   );
+  // Filter pills: narrow by channel and by lifecycle state. 'sent' buckets
+  // running + done (anything that has actually gone out); 'automated' = the
+  // recurring 'auto' status.
+  const stateBucket = (a) => (
+    a.status === 'running' || a.status === 'done' ? 'sent'
+      : a.status === 'auto' ? 'automated'
+      : a.status === 'failed' ? 'sent'
+      : a.status // draft | pending | scheduled
+  );
+  const matchesFilters = (a) => {
+    if (channelFilter !== 'all' && (a.config?.channel || 'email') !== channelFilter) return false;
+    if (stateFilter !== 'all' && stateBucket(a) !== stateFilter) return false;
+    return true;
+  };
+  const filteredActions = data.actions.filter(matchesFilters);
+  // Counts per pill value (computed off the un-filtered list so labels stay stable).
+  const countBy = (pred) => data.actions.filter(pred).length;
+  const channelPills = [
+    { value: 'all', label: 'All channels' },
+    { value: 'email', label: '✉️ Email', n: countBy((a) => (a.config?.channel || 'email') === 'email') },
+    { value: 'sms', label: '💬 SMS', n: countBy((a) => a.config?.channel === 'sms') },
+    { value: 'both', label: 'Email & SMS', n: countBy((a) => a.config?.channel === 'both') },
+  ];
+  const statePills = [
+    { value: 'all', label: 'All' },
+    { value: 'draft', label: 'Drafts', n: countBy((a) => stateBucket(a) === 'draft') },
+    { value: 'pending', label: 'Pending', n: countBy((a) => stateBucket(a) === 'pending') },
+    { value: 'scheduled', label: 'Scheduled', n: countBy((a) => stateBucket(a) === 'scheduled') },
+    { value: 'sent', label: 'Sent', n: countBy((a) => stateBucket(a) === 'sent') },
+    { value: 'automated', label: 'Automated', n: countBy((a) => stateBucket(a) === 'automated') },
+  ];
+
   // Group campaigns by master campaign (ungrouped last). Each group shows
   // combined stats so a master reports at a glance.
   const groups = (() => {
     const m = new Map();
-    for (const a of data.actions) { const k = a.config?.master || ''; if (!m.has(k)) m.set(k, []); m.get(k).push(a); }
+    for (const a of filteredActions) { const k = a.config?.master || ''; if (!m.has(k)) m.set(k, []); m.get(k).push(a); }
     const named = [...m.entries()].filter(([k]) => k).sort((a, b) => a[0].localeCompare(b[0]));
     const ungrouped = m.get('') || [];
     return { named, ungrouped };
@@ -195,9 +229,28 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
           ))}
         </div>
       )}
+      {/* Filter pills — narrow by channel and by state (drafts / sent / …). */}
+      {data.actions.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
+          <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
+            {channelPills.map((p) => (
+              <FilterPill key={p.value} active={channelFilter === p.value} onClick={() => setChannelFilter(p.value)} label={p.label} n={p.n} />
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
+            {statePills.map((p) => (
+              <FilterPill key={p.value} active={stateFilter === p.value} onClick={() => setStateFilter(p.value)} label={p.label} n={p.n} />
+            ))}
+          </div>
+        </div>
+      )}
       {data.actions.length === 0 ? (
         <div style={{ ...card, textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>
           No campaigns yet. Try one: target customers who abandoned checkout and bring them back.
+        </div>
+      ) : filteredActions.length === 0 ? (
+        <div style={{ ...card, textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>
+          No campaigns match these filters. <button style={{ ...mini, marginLeft: 6 }} onClick={() => { setChannelFilter('all'); setStateFilter('all'); }}>Clear filters</button>
         </div>
       ) : (
         <>
@@ -1117,7 +1170,7 @@ function CampaignReport({ entityId, action, onClose }) {
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 18 }}>
         {stat('Sent', `${r.sent}/${r.total}`)}
         {r.failed > 0 && stat('Failed', r.failed, 'var(--error,#ef4444)')}
-        {r.hasOpens && stat('Open rate', `${r.openRate}%`, '#0a66c2')}
+        {r.hasOpens && stat('Email open rate', `${r.openRate}%`, '#0a66c2')}
         {r.hasOpens && stat('Unique opens', r.uniqueOpeners)}
         {stat('Total clicks', r.totalClicks)}
         {stat('Unique clickers', r.uniqueClickers)}
@@ -1125,6 +1178,25 @@ function CampaignReport({ entityId, action, onClose }) {
         {(r.converted > 0) && stat('Converted', r.converted, 'var(--success,#10b981)')}
         {(r.converted > 0) && stat('Conv. rate', `${r.convRate}%`, 'var(--success,#10b981)')}
       </div>
+
+      {/* Per-channel split — only meaningful when a campaign used both channels. */}
+      {r.details?.channel === 'both' && r.perChannel && (
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 12, marginBottom: 18 }}>
+          {[
+            { key: 'email', label: '✉️ Email', accent: '#0a66c2', d: r.perChannel.email },
+            { key: 'sms', label: '💬 SMS', accent: '#15803d', d: r.perChannel.sms },
+          ].map(({ key, label, accent, d }) => (
+            <div key={key} style={{ background: 'var(--elevated, #fafafa)', border: '1px solid var(--hairline)', borderRadius: 12, padding: '12px 16px' }}>
+              <div style={{ fontSize: 12.5, fontWeight: 800, color: accent, marginBottom: 8 }}>{label}</div>
+              <div style={{ display: 'flex', gap: 18, fontSize: 13 }}>
+                <div><div style={{ color: 'var(--muted)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 700 }}>Sent</div><div style={{ fontSize: 19, fontWeight: 800 }}>{d.sent}</div></div>
+                <div><div style={{ color: 'var(--muted)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 700 }}>Clicks</div><div style={{ fontSize: 19, fontWeight: 800 }}>{d.clicks}</div></div>
+                <div><div style={{ color: 'var(--muted)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 700 }}>CTR</div><div style={{ fontSize: 19, fontWeight: 800, color: accent }}>{d.ctr}%</div></div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {r.details && (() => {
         const d = r.details;
@@ -1315,6 +1387,26 @@ function ChannelChip({ channel }) {
     : channel === 'both' ? { t: '✉️ + 💬 Email & SMS', c: '#7c3aed', bg: 'rgba(124,58,237,0.12)' }
     : { t: '✉️ Email', c: '#0a66c2', bg: 'rgba(10,132,255,0.12)' };
   return <span style={{ fontSize: 10.5, fontWeight: 700, borderRadius: 980, padding: '2px 8px', background: m.bg, color: m.c }}>{m.t}</span>;
+}
+
+// A toggleable filter pill. Shows a count when one is provided (and > 0).
+function FilterPill({ active, onClick, label, n }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        fontSize: 12, fontWeight: 700, borderRadius: 980, padding: '5px 12px', cursor: 'pointer',
+        border: active ? '1px solid var(--brand)' : '1px solid var(--hairline)',
+        background: active ? 'var(--brand)' : 'transparent',
+        color: active ? '#fff' : 'var(--text)',
+        display: 'inline-flex', alignItems: 'center', gap: 6,
+      }}
+    >
+      {label}
+      {typeof n === 'number' && <span style={{ fontSize: 11, fontWeight: 700, opacity: active ? 0.85 : 0.6 }}>{n}</span>}
+    </button>
+  );
 }
 
 function StatusChip({ status }) {
