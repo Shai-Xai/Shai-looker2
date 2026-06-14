@@ -131,9 +131,8 @@ function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }
             </select>
             <div style={hintS}>{roles.find((r) => r.key === f.role)?.focus}</div>
           </Field>
-          <Field label="Custom focus (optional)">
+          <Field label="Custom focus (optional)" action={<RefineButton text={f.roleFocus} onRefined={(t) => set('roleFocus', t)} purpose="a focus note that steers what an AI digest emphasises" entityId={entityId} style={{ marginTop: 0 }} />}>
             <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit' }} rows={2} value={f.roleFocus} onChange={(e) => set('roleFocus', e.target.value)} placeholder="Leave blank to use the role default above" />
-            <RefineButton text={f.roleFocus} onRefined={(t) => set('roleFocus', t)} purpose="a focus note that steers what an AI digest emphasises" entityId={entityId} />
             {f.roleFocus.trim() && (
               <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
                 <Toggle on={f.focusMode === 'override'} onClick={() => set('focusMode', 'override')}>Override role</Toggle>
@@ -143,9 +142,8 @@ function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }
             {f.roleFocus.trim() && <div style={hintS}>{f.focusMode === 'override' ? 'Replaces the role lens entirely.' : 'Adds your emphasis on top of the role lens.'}</div>}
           </Field>
 
-          <Field label="Custom message (optional — a personal note at the top of the email)">
+          <Field label="Custom message (optional — a personal note at the top of the email)" action={<RefineButton text={f.customMessage} onRefined={(t) => set('customMessage', t)} purpose="a personal intro note at the top of a digest email" entityId={entityId} style={{ marginTop: 0 }} />}>
             <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit' }} rows={3} value={f.customMessage} onChange={(e) => set('customMessage', e.target.value)} placeholder="e.g. Hi team — big weekend ahead. Here's where we stand…" />
-            <RefineButton text={f.customMessage} onRefined={(t) => set('customMessage', t)} purpose="a personal intro note at the top of a digest email" entityId={entityId} />
             <div style={hintS}>Sent verbatim above the AI summary. Supports **bold** and line breaks.</div>
           </Field>
 
@@ -242,7 +240,9 @@ const scheduleSummary = (j) => j.cadence === 'daily' ? `Every day at ${j.timeOfD
   : j.runAt ? `Once on ${fmt(j.runAt)}` : 'One-off';
 const fmt = (iso) => { try { return new Date(iso).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch { return ''; } };
 
-function Field({ label, children }) { return <div><div style={hintLbl}>{label}</div>{children}</div>; }
+function Field({ label, action, children }) {
+  return <div><div style={{ ...hintLbl, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>{label}{action}</div>{children}</div>;
+}
 function Toggle({ on, onClick, children }) {
   return <button type="button" onClick={onClick} style={{ flex: 1, padding: '8px 10px', borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', border: on ? '1.5px solid var(--brand)' : '1.5px solid var(--hairline)', background: on ? 'rgba(var(--brand-rgb), 0.08)' : 'transparent', color: on ? 'var(--brand)' : 'var(--text)' }}>{children}</button>;
 }

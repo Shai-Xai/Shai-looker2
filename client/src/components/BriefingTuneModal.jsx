@@ -83,13 +83,15 @@ export function BriefingConfigForm({ entityId, onSaved, showTune = true }) {
             {cfg.suites.length === 0 && <p style={{ color: 'var(--muted)', fontSize: 13 }}>No events (suites) on this client yet.</p>}
             {showTune && (
               <>
-                <Label>Your focus — applied to every briefing</Label>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                  <Label>Your focus — applied to every briefing</Label>
+                  <RefineButton text={tune} onRefined={setTune} purpose="a standing focus note that steers an AI briefing" entityId={entityId} style={{ marginTop: 0 }} />
+                </div>
                 <textarea
                   value={tune} onChange={(e) => setTune(e.target.value)} rows={3}
                   placeholder={'e.g. Always mention resale activity. Compare everything to last year. I care most about cashless spend per head.'}
                   style={ta}
                 />
-                <RefineButton text={tune} onRefined={setTune} purpose="a standing focus note that steers an AI briefing" entityId={entityId} />
                 {followed.length > 0 && (
                   <>
                     <Label>Tiles you're following</Label>
@@ -140,13 +142,15 @@ export function BriefingConfigForm({ entityId, onSaved, showTune = true }) {
                         {cfg.phases.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
                       </select>
                       <div style={{ fontSize: 11, color: 'var(--muted)', margin: '4px 0 10px' }}>Pick a phase manually for moments dates can't know — e.g. set Artist Drops during a lineup announcement, then back to Automatic.</div>
-                      <Label>Instructions for this event — always applied</Label>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                        <Label>Instructions for this event — always applied</Label>
+                        <RefineButton text={e.instructions || ''} onRefined={(t) => upd(su.id, { instructions: t })} purpose="event-specific instructions that steer an AI briefing" entityId={entityId} style={{ marginTop: 0 }} />
+                      </div>
                       <textarea
                         value={e.instructions || ''} onChange={(ev) => upd(su.id, { instructions: ev.target.value })} rows={2}
                         placeholder={'e.g. This is our 5th edition — compare against Pretoria IV. VIP is the priority this year.'}
                         style={ta}
                       />
-                      <RefineButton text={e.instructions || ''} onRefined={(t) => upd(su.id, { instructions: t })} purpose="event-specific instructions that steer an AI briefing" entityId={entityId} />
                       <Label>Phase wording for this event (leave blank to use the defaults)</Label>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginTop: 4 }}>
                         {cfg.phases.map((p) => {
