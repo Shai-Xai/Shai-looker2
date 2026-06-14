@@ -293,6 +293,7 @@ export const api = {
   myBriefing: (entityId, refresh) =>
     fetch(`/api/my/briefing?${new URLSearchParams({ hour: new Date().getHours(), ...(entityId ? { entityId } : {}), ...(refresh ? { refresh: 1 } : {}) })}`).then(json),
   myPins: (entityId) => fetch(`/api/my/pins${entityId ? `?entityId=${encodeURIComponent(entityId)}` : ''}`).then(json),
+  savePinOrder: (entityId, order) => fetch('/api/my/pin-order', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entityId, order }) }).then(json),
   togglePin: (body) => fetch('/api/my/pins', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
 
   // Share links

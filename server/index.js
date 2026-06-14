@@ -1615,8 +1615,16 @@ function buildLightSnapshot(user, entityId) {
       tile, suiteId: meta.suiteId, dashboardId: def.id, dashTitle: def.title, setName: meta.setName,
       filterValues: effectiveFilterValues(def, lockCache[meta.suiteId], viewCache[def.id]), scope: m.scope,
     });
-    if (pinnedTiles.length >= 8) break;
   }
+  // Apply the user's chosen pin order (pins not in the list fall to the end by
+  // pin time), THEN cap — so a reordered pin can't be dropped by the cap.
+  let pinOrder = [];
+  try { pinOrder = JSON.parse(db.getUserPref(user.id, `pin_order:${entityId}`) || '[]'); } catch { pinOrder = []; }
+  if (pinOrder.length) {
+    const rank = (p) => { const i = pinOrder.indexOf(`${p.dashboardId}|${p.tile.id}`); return i === -1 ? Number.MAX_SAFE_INTEGER : i; };
+    pinnedTiles.sort((a, b) => rank(a) - rank(b));
+  }
+  pinnedTiles.splice(8); // cap at 8 after ordering
 
   return {
     entity: { id: entity.id, name: entity.name },
@@ -2258,6 +2266,15 @@ function marksFor(req, entityId) {
 }
 app.get('/api/my/pins', auth.requireAuth, (req, res) => {
   res.json(marksFor(req, homeEntityFor(req)));
+});
+// Persist the user's preferred pinned-tile order (keys "dashboardId|tileId").
+app.put('/api/my/pin-order', auth.requireAuth, (req, res) => {
+  const entityId = req.body?.entityId || homeEntityFor(req);
+  if (!entityId) return res.status(400).json({ error: 'No client context' });
+  const order = Array.isArray(req.body?.order) ? req.body.order.slice(0, 50).map(String) : [];
+  db.setUserPref(req.user.id, `pin_order:${entityId}`, JSON.stringify(order));
+  bustHome(req.user.id, entityId);
+  res.json({ ok: true });
 });
 app.post('/api/my/pins', auth.requireAuth, (req, res) => {
   const { dashboardId, tileId, kind, scope } = req.body || {};

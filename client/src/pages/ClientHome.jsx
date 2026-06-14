@@ -44,6 +44,17 @@ export default function ClientHome() {
     setDismissed((d) => [...d, id]); // optimistic
     api.dismissThread(id).catch(() => {});
   };
+  // Reorder pinned tiles (←/→). Optimistic local swap + persist the new order.
+  const movePin = (index, dir) => {
+    setSnap((s) => {
+      const list = [...(s?.pinnedTiles || [])];
+      const j = index + dir;
+      if (j < 0 || j >= list.length) return s;
+      [list[index], list[j]] = [list[j], list[index]];
+      api.savePinOrder(previewEntityId, list.map((p) => `${p.dashboardId}|${p.tile.id}`)).catch(() => {});
+      return { ...s, pinnedTiles: list };
+    });
+  };
 
   // Refresh re-pulls the live numbers AND regenerates the briefing — otherwise
   // the Owl just re-phrases the same cached facts and looks unchanged.
@@ -144,11 +155,14 @@ export default function ClientHome() {
         <>
           <SectionHead icon="📌">Pinned</SectionHead>
           <PinStrip isMobile={isMobile}>
-            {snap.pinnedTiles.map((p) => (
+            {snap.pinnedTiles.map((p, i) => (
               <PinnedTile
                 key={`${p.dashboardId}|${p.tile.id}`}
                 p={p}
                 isMobile={isMobile}
+                index={i}
+                count={snap.pinnedTiles.length}
+                onMove={(dir) => movePin(i, dir)}
                 onOpen={() => go(p.suiteId, p.dashboardId)}
                 onUnpin={() => {
                   api.togglePin({ dashboardId: p.dashboardId, tileId: p.tile.id, kind: 'pin', on: false, scope: isAdmin ? 'entity' : 'user', entityId: previewEntityId })
@@ -350,14 +364,20 @@ function PinStrip({ isMobile, children }) {
 
 // A pinned tile: uniform card (same size whatever the vis), source bar on top,
 // the REAL tile inside, scoped to its suite like the dashboard view.
-function PinnedTile({ p, isMobile, onOpen, onUnpin }) {
+function PinnedTile({ p, isMobile, onOpen, onUnpin, onMove, index = 0, count = 1 }) {
   return (
     <div style={{ flex: `0 0 ${isMobile ? 'min(86vw, 320px)' : '320px'}`, scrollSnapAlign: 'start' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 2px 5px' }}>
         <span style={{ flex: 1, minWidth: 0, fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {p.setName} · {p.dashTitle}
         </span>
-        <button onClick={onOpen} title="Open dashboard" style={pinAct}>→</button>
+        {onMove && count > 1 && (
+          <>
+            <button onClick={() => onMove(-1)} disabled={index === 0} title="Move left" style={{ ...pinAct, opacity: index === 0 ? 0.35 : 1 }}>←</button>
+            <button onClick={() => onMove(1)} disabled={index === count - 1} title="Move right" style={{ ...pinAct, opacity: index === count - 1 ? 0.35 : 1 }}>→</button>
+          </>
+        )}
+        <button onClick={onOpen} title="Open dashboard" style={pinAct}>↗</button>
         <button onClick={onUnpin} title="Unpin from home" style={pinAct}>✕</button>
       </div>
       <div style={{ height: 230 }}>
