@@ -22,16 +22,16 @@ export default function ViewPage() {
   const navigate = useNavigate();
   const { isAdmin, insightsEnabled, user } = useAuth();
   const { previewEntityId, actionsSlot } = useOutletContext() || {};
-  // Entity for tile-level actions (create segment). The suite's own entity is
-  // authoritative (works for admin-preview AND client); fall back to the preview
-  // entity, then the client's own entity. setInfo is the loaded suite.
-  const scopeEntityId = setInfo?.entityId || previewEntityId || (isAdmin ? null : ((user?.entities || [])[0]?.id || (user?.entityIds || [])[0] || null));
   const { theme: appTheme } = useTheme();
   const [def, setDef] = useState(null);
   const [setInfo, setSetInfo] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [filterValues, setFilterValues] = useState({});
+  // Entity for tile-level actions (create segment). The suite's own entity is
+  // authoritative (works for admin-preview AND client); fall back to the preview
+  // entity, then the client's own entity. setInfo is the loaded suite.
+  const scopeEntityId = setInfo?.entityId || previewEntityId || (isAdmin ? null : ((user?.entities || [])[0]?.id || (user?.entityIds || [])[0] || null));
   const [locked, setLocked] = useState({});
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [summaryOpen, setSummaryOpen] = useState(false);
