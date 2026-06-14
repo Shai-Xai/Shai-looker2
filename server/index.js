@@ -663,6 +663,16 @@ async function runLookerQuery(path, body, ttl = QCACHE_TTL, force = false) {
 // belongs to the query's OWN explore (so GA4 etc. don't get core_organisers.name
 // injected, which Looker rejects). A suite context (client view or admin
 // preview) scopes to that suite's organiser; no suite + admin is unscoped.
+// "Is any value" sentinel (mirrors client/src/lib/filterConstants.js ANY_VALUE).
+// A filter set to this means "no constraint" — drop the field from the query
+// entirely. Sending "" instead would make Looker filter for blank values.
+const ANY_VALUE = ' __ANY_VALUE__';
+function stripAnyValue(filters) {
+  const out = {};
+  for (const [k, v] of Object.entries(filters || {})) if (v !== ANY_VALUE) out[k] = v;
+  return out;
+}
+
 async function applyScope(query, user, suiteId) {
   const scope = await auth.scopeForQuery(query, user, suiteId);
   if (scope === false) return false; // fail closed
@@ -674,7 +684,7 @@ app.post('/api/run-query', auth.requireAuth, async (req, res) => {
   try {
     const { query, filterOverrides = {}, suiteId } = req.body;
     if (!query) return res.status(400).json({ error: 'query is required' });
-    const queryBody = { ...query, filters: { ...(query.filters || {}), ...filterOverrides } };
+    const queryBody = { ...query, filters: stripAnyValue({ ...(query.filters || {}), ...filterOverrides }) };
     if (!(await applyScope(queryBody, req.user, suiteId))) {
       return res.status(403).json({ error: 'No data access is configured for your account yet.' });
     }
@@ -1101,9 +1111,10 @@ app.post('/api/dashboard-insight', auth.requireAuth, rateLimit({ windowMs: 60_00
     const overrides = {};
     for (const [filterName, queryField] of Object.entries(tile.listenTo || {})) {
       const v = filterValues[filterName];
-      if (v && String(v).trim()) overrides[queryField] = String(v).trim();
+      if (v === ANY_VALUE) overrides[queryField] = ANY_VALUE; // "any value" → dropped by stripAnyValue
+      else if (v && String(v).trim()) overrides[queryField] = String(v).trim();
     }
-    const queryBody = { ...q, filters: { ...(q.filters || {}), ...overrides } };
+    const queryBody = { ...q, filters: stripAnyValue({ ...(q.filters || {}), ...overrides }) };
     if (!(await applyScope(queryBody, req.user, suiteId))) continue; // skip blocked tiles
     jobs.push({ title: tile.title, visType: tile.vis?.type, context: tile.aiContext || '', queryBody });
     if (jobs.length >= MAX_TILES) break;

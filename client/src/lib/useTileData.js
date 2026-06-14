@@ -25,9 +25,10 @@ export function useTileData(tile, filterValues) {
   const overrides = {};
   for (const [filterName, queryField] of Object.entries(tile.listenTo || {})) {
     const val = filterValues?.[filterName];
-    // "Any value": send an explicit empty override so Looker drops the tile's
-    // baked filter on this field (an unset value would instead fall back to it).
-    if (val === ANY_VALUE) overrides[queryField] = '';
+    // "Any value": send the ANY_VALUE sentinel so the server DROPS this field
+    // from the query entirely (true "is any value"). An empty string wouldn't
+    // work — Looker reads "" as "is blank", not "no constraint".
+    if (val === ANY_VALUE) overrides[queryField] = ANY_VALUE;
     else if (val && String(val).trim()) overrides[queryField] = String(val).trim();
   }
 
