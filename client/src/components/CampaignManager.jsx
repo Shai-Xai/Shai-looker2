@@ -84,6 +84,7 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <span style={{ fontWeight: 700, fontSize: 14 }}>{a.title || a.config.subject || 'Untitled campaign'}</span>
+          <ChannelChip channel={a.config?.channel} />
           {a.config?.category && <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 980, color: 'var(--brand)', background: 'rgba(var(--brand-rgb,255,56,92),0.10)' }}>{a.config.category}</span>}
           <StatusChip status={a.status} />
         </div>
@@ -1070,6 +1071,7 @@ function MasterReport({ entityId, name, master, campaigns, onOpen, onNew, onChan
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                 <span style={{ fontWeight: 700, fontSize: 14 }}>{a.title || a.config.subject || 'Untitled'}</span>
+                <ChannelChip channel={a.config?.channel} />
                 <StatusChip status={a.status} />
                 {seq && <span style={{ fontSize: 11, color: 'var(--muted)' }}>· {(a.config.steps || []).length}-step sequence</span>}
               </div>
@@ -1305,6 +1307,14 @@ function RowMenu({ items }) {
       )}
     </div>
   );
+}
+
+// Channel badge so the list makes the send channel obvious at a glance.
+function ChannelChip({ channel }) {
+  const m = channel === 'sms' ? { t: '💬 SMS', c: '#15803d', bg: 'rgba(21,128,61,0.12)' }
+    : channel === 'both' ? { t: '✉️ + 💬 Email & SMS', c: '#7c3aed', bg: 'rgba(124,58,237,0.12)' }
+    : { t: '✉️ Email', c: '#0a66c2', bg: 'rgba(10,132,255,0.12)' };
+  return <span style={{ fontSize: 10.5, fontWeight: 700, borderRadius: 980, padding: '2px 8px', background: m.bg, color: m.c }}>{m.t}</span>;
 }
 
 function StatusChip({ status }) {
