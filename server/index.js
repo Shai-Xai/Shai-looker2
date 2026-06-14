@@ -1769,36 +1769,30 @@ app.get('/api/my/snapshot', auth.requireAuth, (req, res) => {
   }
 });
 
-// The Owl's home briefing: reads pinned + lead-dashboard tile data (values,
-// charts, tables), grounds the Owl in it, returns strict JSON with deep links
-// validated against the real catalogue.
-app.get('/api/my/briefing', auth.requireAuth, async (req, res) => {
-  const entityId = homeEntityFor(req);
-  if (!entityId) return res.json({ available: false });
-  const apiKey = anthropicKeyForUser(req.user);
-  if (!insights.isConfigured(apiKey)) return res.json({ available: false });
-  // Segment by the reader's local time of day — morning / midday / evening
-  // briefings answer different questions, and each gets its own cache slot.
-  const segment = timeSegment(Number(req.query.hour));
-  const key = `${req.user.id}:${entityId}:${segment}`;
-  if (!req.query.refresh) { const hit = cacheGet(briefCache, key, 6 * 3600e3); if (hit) return res.json(hit); }
-  try {
-    // Explicit refresh waits for live Looker data instead of cached rows.
-    const { tiles, catalogue } = await buildFacts(req.user, entityId, !!req.query.refresh);
-    if (!tiles.length) return res.json({ available: false });
+// The Owl's home briefing: reads pinned + lead-dashboard tile data, grounds the
+// Owl in it, returns strict JSON with deep links validated against the catalogue.
+// Extracted from the endpoint so the login/home PRE-WARM can generate it too,
+// with in-flight de-duplication so the prewarm and the real request never do the
+// same generation twice. Segmented by the reader's local time of day.
+const briefInflight = new Map(); // key -> Promise
+async function generateBriefing(user, entityId, segment, { force = false } = {}) {
+  const apiKey = anthropicKeyForUser(user);
+  if (!insights.isConfigured(apiKey)) return { available: false };
+  const key = `${user.id}:${entityId}:${segment}`;
+  if (!force) { const hit = cacheGet(briefCache, key, 6 * 3600e3); if (hit) return hit; }
+  if (briefInflight.has(key)) return briefInflight.get(key); // coalesce concurrent (prewarm + real)
+  const p = (async () => {
+    const { tiles, catalogue } = await buildFacts(user, entityId, force);
+    if (!tiles.length) return { available: false };
     const byId = Object.fromEntries(catalogue.map((c) => [c.dashboardId, c]));
-    const prof = db.viewProfile(req.user.id);
+    const prof = db.viewProfile(user.id);
     const profileForAi = {
       lastVisit: prof.lastVisit,
       top: prof.top.filter((t) => byId[t.dashboardId]).map((t) => ({ title: byId[t.dashboardId].title, count: t.count })),
     };
     const { suites } = clientCatalogue(entityId);
-    const instructions = [
-      aiInstructionsFor(null),
-      briefingInstructionsFor(req.user, entityId, suites),
-      timeDefaults()[segment],
-    ].filter(Boolean).join('\n\n');
-    const msgs = recentMessages(entityId, req.user.id);
+    const instructions = [aiInstructionsFor(null), briefingInstructionsFor(user, entityId, suites), timeDefaults()[segment]].filter(Boolean).join('\n\n');
+    const msgs = recentMessages(entityId, user.id);
     const raw = await insights.briefHome({ tiles, profile: profileForAi, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), messages: msgs, capabilities: ACTION_CAPABILITIES });
     const link = (id) => (id && byId[id] ? { dashboardId: id, suiteId: byId[id].suiteId, label: `${byId[id].setName} → ${byId[id].title}` } : null);
     const msgIds = new Set(msgs.map((m) => m.id));
@@ -1810,17 +1804,63 @@ app.get('/api/my/briefing', auth.requireAuth, async (req, res) => {
         .map((b) => ({ text: String(b.text || '').slice(0, 400), link: link(b.dashboardId), threadId: msgIds.has(b.threadId) ? b.threadId : null }))
         .filter((b) => b.text),
       suggestions: (raw.suggestions || []).slice(0, 3)
-        // `action` = an executable capability key — only then does the UI offer
-        // "Make it happen". Validated against the registry; AI can't invent one.
         .map((s) => ({ title: String(s.title || '').slice(0, 80), reason: String(s.reason || '').slice(0, 200), link: link(s.dashboardId), action: CAPABILITY_KEYS.has(s.action) ? s.action : null }))
         .filter((s) => s.title && s.link),
     };
     cachePut(briefCache, key, out);
+    return out;
+  })().finally(() => briefInflight.delete(key));
+  briefInflight.set(key, p);
+  return p;
+}
+
+app.get('/api/my/briefing', auth.requireAuth, async (req, res) => {
+  const entityId = homeEntityFor(req);
+  if (!entityId) return res.json({ available: false });
+  try {
+    const out = await generateBriefing(req.user, entityId, timeSegment(Number(req.query.hour)), { force: !!req.query.refresh });
     res.json(out);
   } catch (err) {
     console.error('[GET /api/my/briefing]', err.message);
     res.status(500).json({ error: err.message });
   }
+});
+
+// Pre-warm on home load: generate the briefing (coalesced) and run the top
+// most-visited dashboards' tiles into the query cache, so the first click and
+// the briefing of the session are warm. Fire-and-forget + bounded; queries
+// dedupe via qInflight and match the dashboard view (entity-default filters),
+// so real loads hit the cache. Warmed entries stay hot for the 30-min window.
+function prewarmHome(user, entityId, segment) {
+  generateBriefing(user, entityId, segment).catch(() => {});
+  (async () => {
+    try {
+      const { catalogue } = clientCatalogue(entityId);
+      const metaById = Object.fromEntries(catalogue.map((c) => [c.dashboardId, c]));
+      const prof = db.viewProfile(user.id);
+      const topIds = (prof.top || []).map((t) => t.dashboardId).filter((d) => metaById[d]).slice(0, 3);
+      for (const did of topIds) {
+        const meta = metaById[did];
+        const def = store.get(did);
+        if (!def) continue;
+        const lockMap = expandLockMap(db.lockedFiltersForSuite(meta.suiteId));
+        const view = db.getFilterView('entity', entityId, did);
+        const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))]
+          .filter((t) => t.type !== 'text' && t.query?.fields?.length).slice(0, 10);
+        for (const tile of tiles) {
+          const extra = {};
+          if (view) for (const [fn, qf] of Object.entries(tile.listenTo || {})) if (fn in view) extra[qf] = view[fn];
+          const body = await tileQueryBody(tile, def, user, meta.suiteId, lockMap, extra);
+          if (body) runLookerQuery('/queries/run/json_detail', body).catch(() => {});
+        }
+      }
+    } catch (e) { console.error('[prewarm]', e.message); }
+  })();
+}
+app.post('/api/my/prewarm', auth.requireAuth, (req, res) => {
+  const entityId = homeEntityFor(req);
+  if (entityId) prewarmHome(req.user, entityId, timeSegment(Number(req.body?.hour)));
+  res.json({ ok: true }); // never wait — warming happens in the background
 });
 
 // ─── Scheduled digests: role-lensed content builder ────────────────────────────

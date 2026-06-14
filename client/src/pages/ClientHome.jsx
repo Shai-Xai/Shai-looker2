@@ -35,6 +35,10 @@ export default function ClientHome() {
   useEffect(() => { api.mySuites().then(setSuites).catch(() => {}); }, []);
   useEffect(() => {
     setSnap(null); setBrief(null); setMessages([]);
+    // Pre-warm in the background: top dashboards' tiles into the query cache +
+    // the briefing (coalesced with our own fetch below), so the first click and
+    // briefing of the session are warm. Same hour as the briefing so it hits.
+    api.prewarm(previewEntityId, new Date().getHours());
     api.mySnapshot(previewEntityId).then(setSnap).catch(() => setSnap({ kpis: [], shortcuts: [], settlement: null, lastVisit: null }));
     api.myBriefing(previewEntityId).then(setBrief).catch(() => setBrief({ available: false }));
     api.osInbox(previewEntityId).then((r) => setMessages(r.threads || [])).catch(() => {});
