@@ -51,6 +51,19 @@ angle for Hermes). Tick the boxes as you go.
 - [ ] Collapse it, reload → stays collapsed.
 - ✅ Pass: the choice persists per client across reloads.
 
+### Story 7 — Segment → campaign round-trip (always-live)
+- [ ] Build a segment in Segments; note its count.
+- [ ] Create a campaign, set audience to **🎯 Segment**, pick that segment →
+      the preview count matches the segment.
+- [ ] Send to yourself → you receive it.
+- [ ] Edit the segment's definition (e.g. change a filter) and re-open the
+      campaign preview → the count **tracks the change** (reference, not a
+      frozen copy).
+- [ ] Delete a segment that a draft campaign references → the editor shows a
+      **"⚠ Deleted segment"** placeholder + warning, and Approve stays disabled.
+- ✅ Pass: the campaign resolves the segment live at every step and never sends
+  off a stale snapshot; a missing segment is surfaced, not silently zero.
+
 ---
 
 ## Review stories (Hermes)
@@ -87,3 +100,16 @@ angle for Hermes). Tick the boxes as you go.
       endpoint).
 - [ ] Empty-bucket hiding can't strand a user on an empty filtered view (there's
       a "Clear filters" empty state).
+
+### R6 — Segment-backed audiences resolve live (reference, not copy)
+- [ ] `audienceFor` resolves `mode === 'segment'` by reading the segment's
+      **current** definition on every path: preview, approve-and-send,
+      scheduled send, recurring auto-check, conversion re-check, and sequence
+      re-enrollment (no frozen snapshot stored on the campaign).
+- [ ] Segment read is scoped by the campaign's own `entityId` (not the caller's
+      scope), so scheduled sends under the `scheduler` sys-user resolve the
+      right segment without leaking across entities.
+- [ ] A deleted/missing segment returns `segmentMissing` + an empty list (never
+      a stale send); the flag flows through preview to the editor warning.
+- 🔎 `audienceFor` segment branch, `segmentDefinition`/`segmentRow`, and the
+  `/preview` route in `server/actions.js`.
