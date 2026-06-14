@@ -686,7 +686,15 @@ app.post('/api/run-query', auth.requireAuth, async (req, res) => {
     if (!query) return res.status(400).json({ error: 'query is required' });
     const queryBody = { ...query, filters: stripAnyValue({ ...(query.filters || {}), ...filterOverrides }) };
     if (!(await applyScope(queryBody, req.user, suiteId))) {
-      return res.status(403).json({ error: 'No data access is configured for your account yet.' });
+      // Admins get the specific reason (which explore couldn't be scoped, or no
+      // organiser configured) so a blocked dashboard is diagnosable; clients get
+      // the generic message (don't leak scoping internals).
+      let error = 'No data access is configured for your account yet.';
+      if (req.user.role === 'admin') {
+        const r = await auth.resolveScope(queryBody, req.user, suiteId);
+        if (r.block) error = `Scope blocked: ${r.reason}`;
+      }
+      return res.status(403).json({ error });
     }
     const data = await runLookerQuery('/queries/run/json_detail', queryBody);
     res.json(data);

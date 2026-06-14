@@ -347,20 +347,21 @@ function lookerOrganiserField(model, view) {
   return p;
 }
 
-// Forced organiser scope for ONE query, using the organiser field that belongs
-// to the query's explore. Returns a filters object, {} (admin, no suite), or
-// false to block (fail closed).
-async function scopeForQuery(query, user, suiteId) {
+// Resolve the forced organiser scope for ONE query. Returns either
+// `{ filters }` (the org filter to inject; `{}` = admin, unscoped) or
+// `{ block, reason }` to deny (fail closed). The `reason` is for admin
+// diagnostics/logging — never shown to clients.
+async function resolveScope(query, user, suiteId) {
   let entityIds;
   if (suiteId) {
-    if (!canAccessSuite(user, suiteId)) return false;
+    if (!canAccessSuite(user, suiteId)) return { block: true, reason: 'no access to this suite' };
     const su = db.getSuite(suiteId); entityIds = su ? [su.entityId] : [];
   } else {
-    if (user.role === 'admin') return {};
+    if (user.role === 'admin') return { filters: {} };
     entityIds = user.entityIds || [];
   }
   const org = entityOrganiser(entityIds);
-  if (!org) return false; // fail closed — organiser scope is required
+  if (!org) return { block: true, reason: 'no organiser is configured for this client (set the organiser locked filter on the entity)' };
 
   const idx = exploreScopeIndex();
   const key = `${query?.model}::${query?.view}`;
@@ -378,8 +379,17 @@ async function scopeForQuery(query, user, suiteId) {
   // Last resort: Looker's own explore metadata (e.g. cashless explores join
   // core_organisers but no dashboard ever declares an organiser filter there).
   if (!field) field = await lookerOrganiserField(query?.model, query?.view);
-  if (!field) return false; // can't scope this explore safely → block
-  return { [field]: org.value };
+  if (!field) return { block: true, reason: `couldn't resolve an organiser field for explore ${key} — no dashboard declares an organiser filter there and Looker exposes none (${ORG_FIELD} or an organiser-named dimension)` };
+  return { filters: { [field]: org.value } };
+}
+
+// Forced organiser scope for ONE query. Returns a filters object, {} (admin, no
+// suite), or false to block (fail closed). Logs the reason when blocking so
+// "No data access" failures are traceable in the server logs.
+async function scopeForQuery(query, user, suiteId) {
+  const r = await resolveScope(query, user, suiteId);
+  if (r.block) { console.warn(`[scope] blocked ${query?.model}::${query?.view} for ${user?.email || user?.id} — ${r.reason}`); return false; }
+  return r.filters;
 }
 
 module.exports = {
@@ -392,7 +402,7 @@ module.exports = {
   // scoping
   scopeFiltersForUser, canAccessDashboard,
   // suites / navigation
-  suitesForUser, canAccessSuite, lockedFiltersForSuite, forcedScopeForSuite, scopeForQuery,
+  suitesForUser, canAccessSuite, lockedFiltersForSuite, forcedScopeForSuite, scopeForQuery, resolveScope,
   filterNameToField,
   // roles & permissions
   roleForEntity, permissionsFor, hasPermission, requirePermission,
