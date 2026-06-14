@@ -185,7 +185,8 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
       // they have a number).
       channel: ['sms', 'both'].includes(body.channel) ? body.channel : 'email',
       audience: {
-        mode: ['paste', 'snapshot'].includes(aud.mode) ? aud.mode : 'tile',
+        mode: ['paste', 'snapshot', 'segment'].includes(aud.mode) ? aud.mode : 'tile',
+        segmentId: String(aud.segmentId || ''), // when mode = 'segment' (reference, resolved live)
         phoneField: String(aud.phoneField || ''), // mobile column (for SMS)
         dashboardId: String(aud.dashboardId || ''),
         tileId: String(aud.tileId || ''),
@@ -289,7 +290,24 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     return true;
   }
 
+  // Read a saved segment (owned by segments.js, same SQLite DB). Guarded so the
+  // campaign engine still works if the segments module is absent.
+  function segmentRow(entityId, segmentId) {
+    if (!segmentId) return null;
+    try { return sql.prepare('SELECT name, definition FROM segments WHERE id=? AND entity_id=?').get(segmentId, entityId) || null; }
+    catch { return null; }
+  }
+  const segmentDefinition = (entityId, segmentId) => { const r = segmentRow(entityId, segmentId); return r ? JSON.parse(r.definition || '{}') : null; };
+  const segmentName = (entityId, segmentId) => segmentRow(entityId, segmentId)?.name || '';
+
   async function audienceFor(entityId, cfg, user) {
+    // A segment-backed audience resolves the referenced segment's LIVE definition
+    // each time (segments are always-current; reference, not copy).
+    if (cfg.audience && cfg.audience.mode === 'segment') {
+      const def = segmentDefinition(entityId, cfg.audience.segmentId);
+      if (!def) return { list: [], fields: [], filterFields: [], excluded: 0, noConsent: 0, filteredOut: 0, segmentMissing: true };
+      cfg = { ...cfg, audience: def };
+    }
     let raw = [];
     let fields = [];
     let filterFields = [];
@@ -844,7 +862,10 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     lines.push(`Channel: ${c.channel === 'both' ? 'Email + SMS' : c.channel === 'sms' ? 'SMS' : 'Email'}`);
     lines.push(`Type: ${isSeq ? `Drip sequence — ${(c.steps || []).length} step${(c.steps || []).length === 1 ? '' : 's'}` : a.recurring ? 'Automated (daily check)' : 'One-off send'}`);
     if (!isSeq && c.subject) lines.push(`Subject: ${c.subject}`);
-    const audSrc = c.audience?.mode === 'paste' ? 'Pasted list' : c.audience?.mode === 'snapshot' ? 'Queued by automation' : 'Dashboard tile';
+    const audSrc = c.audience?.mode === 'paste' ? 'Pasted list'
+      : c.audience?.mode === 'snapshot' ? 'Queued by automation'
+      : c.audience?.mode === 'segment' ? `Segment — ${segmentName(a.entityId, c.audience.segmentId) || 'saved'}`
+      : 'Dashboard tile';
     lines.push(`Audience: ${audSrc}`);
     if (c.master) lines.push(`Master: ${c.master}`);
     if (c.promo?.source && c.promo.source !== 'none') lines.push(`Offer: ${c.promo.code || c.promo.type}`);

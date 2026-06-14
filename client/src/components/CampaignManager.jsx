@@ -217,6 +217,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
     channel: cfg.channel || 'email', // email | sms
     phoneField: cfg.audience?.phoneField || '',
     audienceMode: cfg.audience?.mode || ta.mode || 'tile',
+    segmentId: cfg.audience?.segmentId || '', // when audienceMode = 'segment'
     dashboardId: cfg.audience?.dashboardId || ta.dashboardId || '',
     tileId: cfg.audience?.tileId || ta.tileId || '',
     emailField: cfg.audience?.emailField || ta.emailField || '',
@@ -262,6 +263,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
   const [events, setEvents] = useState([]);
   useEffect(() => { api.listCampaignEvents(entityId).then((r) => setEvents(r.events || [])).catch(() => {}); }, [entityId]);
   const [tiles, setTiles] = useState(null);
+  const [segments, setSegments] = useState([]); // saved segments to pick as an audience
   const [aud, setAud] = useState(null); // { count, excluded, sample, fields }
   const [audBusy, setAudBusy] = useState(false);
   const [preview, setPreview] = useState('');
@@ -277,6 +279,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
 
   useEffect(() => { (isAdmin ? api.getDigestTiles(entityId) : api.getMyDigestTiles(entityId)).then(setTiles).catch(() => setTiles({ dashboards: [] })); }, [entityId, isAdmin]);
+  useEffect(() => { api.listSegments(entityId).then((r) => setSegments(r.segments || [])).catch(() => setSegments([])); }, [entityId]);
 
   const payload = () => ({
     // In sequence mode the top-level copy mirrors step 1 (drives the preview +
@@ -292,7 +295,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
     campaignMode: f.campaignMode, steps: f.steps,
     promo: f.promo,
     promoCodes: promoCodesText.split(/[\s,;]+/).map((c) => c.trim()).filter(Boolean),
-    audience: { mode: f.audienceMode, dashboardId: f.dashboardId, tileId: f.tileId, emailField: f.emailField, nameField: f.nameField, consentField: f.consentField, ticketField: f.ticketField, phoneField: f.phoneField, anchorField: f.anchorField, filters: f.filters, attrDashboardId: f.attrDashboardId, attrTileId: f.attrTileId, pasted: f.pasted },
+    audience: { mode: f.audienceMode, segmentId: f.segmentId, dashboardId: f.dashboardId, tileId: f.tileId, emailField: f.emailField, nameField: f.nameField, consentField: f.consentField, ticketField: f.ticketField, phoneField: f.phoneField, anchorField: f.anchorField, filters: f.filters, attrDashboardId: f.attrDashboardId, attrTileId: f.attrTileId, pasted: f.pasted },
   });
   // Targeting filter helpers.
   const addFilter = () => setF((s) => ({ ...s, filters: [...s.filters, { field: '', op: 'in', values: [], min: '', max: '' }] }));
@@ -330,10 +333,11 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
     // Snapshot children (queued by an automation) carry their audience already.
     if (f.audienceMode === 'snapshot') { setAud({ count: action?.audienceCount || 0, excluded: 0, noConsent: 0, sample: [], fields: [] }); return; }
     if (f.audienceMode === 'tile' && (!f.dashboardId || !f.tileId)) { setAud(null); return; }
+    if (f.audienceMode === 'segment' && !f.segmentId) { setAud(null); return; }
     setAudBusy(true);
     api.actionAudiencePreview(entityId, payload()).then(setAud).catch((e) => setAud({ error: e.message })).finally(() => setAudBusy(false));
   };
-  useEffect(() => { refreshAudience(); }, [f.audienceMode, f.dashboardId, f.tileId, f.emailField, f.consentField, f.attrDashboardId, f.attrTileId, JSON.stringify(f.filters)]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { refreshAudience(); }, [f.audienceMode, f.segmentId, f.dashboardId, f.tileId, f.emailField, f.consentField, f.attrDashboardId, f.attrTileId, JSON.stringify(f.filters)]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Debounced email preview. For a sequence, preview the step you're editing.
   useEffect(() => {
@@ -576,11 +580,20 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
               </div>
             ) : (
             <>
-            <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-              <Toggle on={f.audienceMode === 'tile'} onClick={() => set('audienceMode', 'tile')}>From a dashboard tile</Toggle>
-              <Toggle on={f.audienceMode === 'paste'} onClick={() => set('audienceMode', 'paste')}>Paste emails</Toggle>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+              <Toggle on={f.audienceMode === 'segment'} onClick={() => set('audienceMode', 'segment')}>🎯 Segment</Toggle>
+              <Toggle on={f.audienceMode === 'tile'} onClick={() => set('audienceMode', 'tile')}>Dashboard tile</Toggle>
+              <Toggle on={f.audienceMode === 'paste'} onClick={() => set('audienceMode', 'paste')}>Paste</Toggle>
             </div>
-            {f.audienceMode === 'tile' ? (
+            {f.audienceMode === 'segment' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <select style={input} value={f.segmentId} onChange={(e) => set('segmentId', e.target.value)}>
+                  <option value="">Pick a saved segment…</option>
+                  {segments.map((sg) => <option key={sg.id} value={sg.id}>{sg.name}{sg.count >= 0 ? ` (${sg.count})` : ''}</option>)}
+                </select>
+                <div style={hintS}>Always-live — the campaign sends to whoever's in the segment at send time. {segments.length === 0 ? 'No segments yet — create one in Segments.' : 'Manage segments in the Segments area.'}</div>
+              </div>
+            ) : f.audienceMode === 'tile' ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <select style={input} value={f.dashboardId} onChange={(e) => { set('dashboardId', e.target.value); set('tileId', ''); set('emailField', ''); }}>
                   <option value="">Pick a dashboard…</option>
