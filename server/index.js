@@ -1645,6 +1645,20 @@ async function buildFacts(user, entityId, force = false) {
     const tile = tiles.find((t) => t.id === p.tileId);
     if (tile) addTile(def, tile, dashMeta[def.id]?.suiteId, true);
   }
+  // 1b) Explicit briefing focus tiles (reader-chosen, like a digest's curated
+  //     tiles). tileId '*' = the whole dashboard. Prioritised like follows.
+  let focus = [];
+  try { focus = JSON.parse(db.getUserPref(user.id, `briefing_tiles:${entityId}`) || '[]'); } catch { focus = []; }
+  for (const fsel of Array.isArray(focus) ? focus : []) {
+    if (picks.length >= FACT_MAX_TILES) break;
+    const def = store.get(fsel.dashboardId);
+    if (!def || !dashMeta[def.id]) continue; // must be in this client's catalogue
+    const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))];
+    const chosen = fsel.tileId === '*'
+      ? tiles.filter((t) => t.type !== 'text' && t.query?.fields?.length)
+      : tiles.filter((t) => t.id === fsel.tileId);
+    for (const t of chosen) addTile(def, t, dashMeta[def.id]?.suiteId, true);
+  }
   // 2) Fill from EVERY dashboard across the client's sets, round-robin so the
   //    budget spreads over the whole catalogue (Payments, Comps, Resale…)
   //    instead of the first dashboard eating it. A per-dashboard cap keeps any
@@ -1683,9 +1697,18 @@ async function buildFacts(user, entityId, force = false) {
   // and expanded so name-keyed locks also match by field.
   const lockMaps = {};
   for (const p of picks) if (p.suiteId && !(p.suiteId in lockMaps)) lockMaps[p.suiteId] = expandLockMap(db.lockedFiltersForSuite(p.suiteId));
+  // Client-default saved filters per dashboard (e.g. a management board with the
+  // event filter cleared) — so briefing facts match what the dashboard shows
+  // instead of dying on the narrow built-in defaults. Mapped name→query field
+  // via each tile's listenTo (ANY_VALUE rides through, dropped by stripAnyValue).
+  const entityViews = {};
+  for (const p of picks) if (!(p.def.id in entityViews)) entityViews[p.def.id] = db.getFilterView('entity', entityId, p.def.id) || null;
 
   const tiles = (await Promise.all(picks.slice(0, FACT_MAX_TILES).map(async (p) => {
-    const body = await tileQueryBody(p.tile, p.def, user, p.suiteId, lockMaps[p.suiteId] || {});
+    const view = entityViews[p.def.id];
+    const extra = {};
+    if (view) for (const [fname, qfield] of Object.entries(p.tile.listenTo || {})) if (fname in view) extra[qfield] = view[fname];
+    const body = await tileQueryBody(p.tile, p.def, user, p.suiteId, lockMaps[p.suiteId] || {}, extra);
     if (!body) return null;
     try {
       const data = await runLookerQuery('/queries/run/json_detail', body, undefined, force);
@@ -2106,7 +2129,9 @@ app.get('/api/my/briefing-config', auth.requireAuth, (req, res) => {
   const suites = db.listSuitesForEntity(entityId).map((su) => ({
     id: su.id, name: su.name, briefing: su.briefing || {}, phase: resolvePhase(su.briefing || {}),
   }));
-  res.json({ suites, phases: PHASES, phaseDefaults: phaseDefaults(), tune: db.getUserPref(req.user.id, `briefing_tune:${entityId}`) });
+  let tiles = [];
+  try { tiles = JSON.parse(db.getUserPref(req.user.id, `briefing_tiles:${entityId}`) || '[]'); } catch { tiles = []; }
+  res.json({ suites, phases: PHASES, phaseDefaults: phaseDefaults(), tune: db.getUserPref(req.user.id, `briefing_tune:${entityId}`), tiles });
 });
 app.put('/api/my/briefing-config/suite/:id', auth.requireAuth, (req, res) => {
   if (!auth.canAccessSuite(req.user, req.params.id)) return res.status(403).json({ error: 'Not allowed' });
@@ -2131,9 +2156,19 @@ app.put('/api/my/briefing-config/suite/:id', auth.requireAuth, (req, res) => {
 app.put('/api/my/briefing-tune', auth.requireAuth, (req, res) => {
   const entityId = homeEntityFor(req);
   if (!entityId) return res.status(400).json({ error: 'No client context' });
-  db.setUserPref(req.user.id, `briefing_tune:${entityId}`, String((req.body || {}).tune || '').slice(0, 1500));
+  const body = req.body || {};
+  db.setUserPref(req.user.id, `briefing_tune:${entityId}`, String(body.tune || '').slice(0, 1500));
+  // Focus tiles (reader-chosen dashboards/tiles to always feed the briefing).
+  if (Array.isArray(body.tiles)) {
+    const tiles = body.tiles.slice(0, 40)
+      .filter((t) => t && t.dashboardId && t.tileId)
+      .map((t) => ({ dashboardId: String(t.dashboardId), tileId: String(t.tileId) }));
+    db.setUserPref(req.user.id, `briefing_tiles:${entityId}`, JSON.stringify(tiles));
+  }
   bustHome(req.user.id, entityId);
-  res.json({ tune: db.getUserPref(req.user.id, `briefing_tune:${entityId}`) });
+  let tiles = [];
+  try { tiles = JSON.parse(db.getUserPref(req.user.id, `briefing_tiles:${entityId}`) || '[]'); } catch { tiles = []; }
+  res.json({ tune: db.getUserPref(req.user.id, `briefing_tune:${entityId}`), tiles });
 });
 
 // ─── Share links ─────────────────────────────────────────────────────────────

@@ -336,6 +336,6 @@ export const api = {
     fetch(`/api/my/briefing-feedback${entityId ? `?entityId=${encodeURIComponent(entityId)}` : ''}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
   adminListBriefingFeedback: () => fetch('/api/admin/briefing-feedback').then(json),
   adminResolveBriefingFeedback: (id, status) => fetch(`/api/admin/briefing-feedback/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) }).then(json),
-  saveBriefingTune: (tune, entityId) =>
-    fetch(`/api/my/briefing-tune${entityId ? `?entityId=${encodeURIComponent(entityId)}` : ''}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tune }) }).then(json),
+  saveBriefingTune: (tune, tiles, entityId) =>
+    fetch(`/api/my/briefing-tune${entityId ? `?entityId=${encodeURIComponent(entityId)}` : ''}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tune, tiles }) }).then(json),
 };

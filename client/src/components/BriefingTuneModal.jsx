@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../lib/api.js';
 import AiMark from './AiMark.jsx';
+import TilePicker from './TilePicker.jsx';
+import { useAuth } from '../lib/auth.jsx';
 
 // "Tune your briefing": the controls behind the home briefing.
 // - Your focus: standing requests applied to every briefing for this reader.
@@ -11,19 +13,24 @@ import AiMark from './AiMark.jsx';
 // The form is exported standalone so the admin client space can embed it
 // (with showTune=false — the tune text is per-reader, not per-client).
 export function BriefingConfigForm({ entityId, onSaved, showTune = true }) {
+  const { isAdmin } = useAuth();
   const [cfg, setCfg] = useState(null);
   const [tune, setTune] = useState('');
+  const [tiles, setTiles] = useState([]); // reader-chosen focus tiles ({dashboardId, tileId})
   const [suiteEdits, setSuiteEdits] = useState({}); // suiteId -> briefing cfg
   const [openSuite, setOpenSuite] = useState(null);
   const [openPhase, setOpenPhase] = useState(null);
   const [busy, setBusy] = useState(false);
   const [savedAt, setSavedAt] = useState(0);
   const [error, setError] = useState(null);
+  // Catalogue of selectable dashboards/tiles for this client (shared with digests).
+  const loadTiles = () => (isAdmin ? api.getDigestTiles(entityId) : api.getMyDigestTiles(entityId));
 
   useEffect(() => {
     api.myBriefingConfig(entityId).then((r) => {
       setCfg(r);
       setTune(r.tune || '');
+      setTiles(r.tiles || []);
       setSuiteEdits(Object.fromEntries(r.suites.map((s) => [s.id, {
         launchDate: s.briefing.launchDate || '', eventStart: s.briefing.eventStart || '', eventEnd: s.briefing.eventEnd || '',
         manualPhase: s.briefing.manualPhase || 'auto', instructions: s.briefing.instructions || '',
@@ -36,7 +43,7 @@ export function BriefingConfigForm({ entityId, onSaved, showTune = true }) {
   async function saveAll() {
     setBusy(true); setError(null);
     try {
-      if (showTune) await api.saveBriefingTune(tune, entityId);
+      if (showTune) await api.saveBriefingTune(tune, tiles, entityId);
       for (const su of cfg.suites) await api.saveSuiteBriefing(su.id, suiteEdits[su.id], entityId);
       setSavedAt(Date.now());
       onSaved?.();
@@ -62,6 +69,11 @@ export function BriefingConfigForm({ entityId, onSaved, showTune = true }) {
                   placeholder={'e.g. Always mention resale activity. Compare everything to last year. I care most about cashless spend per head.'}
                   style={ta}
                 />
+                <Label>Focus the Owl on specific dashboards &amp; tiles</Label>
+                <div style={{ fontSize: 11, color: 'var(--muted)', margin: '0 0 2px', lineHeight: 1.45 }}>
+                  Optional — for boards that aren't event-driven (e.g. management) point the briefing at the exact tiles that matter. Leave empty to let the Owl sweep the whole catalogue.
+                </div>
+                <TilePicker load={loadTiles} selected={tiles} onChange={setTiles} />
               </>
             )}
 
