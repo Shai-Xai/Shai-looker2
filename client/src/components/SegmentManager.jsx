@@ -74,7 +74,7 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
                   )}
                 </div>
                 <div style={{ display: 'flex', gap: 8, flexShrink: 0, flexWrap: 'wrap' }}>
-                  <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding }} onClick={() => viewPeople(s)}>👥 People</button>
+                  <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding }} onClick={() => viewPeople(s)}>👥 List</button>
                   <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding }} onClick={() => refresh(s)} disabled={busyId === s.id}>{busyId === s.id ? '…' : '↻ Refresh'}</button>
                   <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding }} onClick={() => setEditing(s)}>Edit</button>
                   <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding, color: 'var(--error,#ef4444)' }} onClick={() => del(s)}>Delete</button>

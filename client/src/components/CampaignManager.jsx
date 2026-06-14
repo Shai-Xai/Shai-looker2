@@ -718,6 +718,8 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
             </Field>
           )}
 
+          {/* Both channels: a banner makes it obvious which content is which. */}
+          {!isSequence && f.channel === 'both' && <div style={{ ...chBanner, background: 'rgba(10,132,255,0.12)', color: '#0a66c2' }}>✉️ Email content</div>}
           {/* Once-off email (or email+SMS) — built template or custom HTML. */}
           {!isSequence && hasEmail && (
           <Field label="Content">
@@ -746,6 +748,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
           )}
 
           {/* Both channels, once-off: a SEPARATE SMS message (email copy ≠ SMS copy). */}
+          {!isSequence && f.channel === 'both' && <div style={{ ...chBanner, background: 'rgba(21,128,61,0.12)', color: '#15803d' }}>💬 SMS content</div>}
           {!isSequence && f.channel === 'both' && (
             <Field label="SMS message (separate from the email)">
               <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit' }} rows={4} value={f.smsBody} onChange={(e) => set('smsBody', e.target.value)} placeholder={'Hi {{name}}, your {{ticketType}} tickets are still waiting — grab them here:'} />
@@ -1443,3 +1446,4 @@ const tplCard = { textAlign: 'left', background: 'var(--card)', border: '1px sol
 const mini = { padding: '7px 12px', background: 'rgba(128,128,128,0.10)', color: 'var(--text)', border: '1px solid var(--hairline)', borderRadius: 980, fontSize: 12, fontWeight: 600, cursor: 'pointer' };
 const hintLbl = { fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', margin: '0 0 5px' };
 const hintS = { fontSize: 11, color: 'var(--muted)', marginTop: 4, lineHeight: 1.4 };
+const chBanner = { display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', borderRadius: 8, fontWeight: 700, fontSize: 13, margin: '4px 0 2px' };
