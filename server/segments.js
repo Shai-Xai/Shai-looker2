@@ -32,6 +32,11 @@ function mount(app, { db, auth, resolveAudience }) {
     );
     CREATE INDEX IF NOT EXISTS idx_segments_entity ON segments(entity_id);
   `);
+  // Additive: cached per-channel contactable counts (visible at preview, not a
+  // silent send-time drop). -1 = not yet resolved. Consent-opt-in layers on later.
+  for (const col of ['last_email', 'last_sms']) {
+    try { sql.exec(`ALTER TABLE segments ADD COLUMN ${col} INTEGER NOT NULL DEFAULT -1`); } catch { /* exists */ }
+  }
 
   // Scope: admins see all; clients only their own entities (same boundary as
   // campaigns). Enforced server-side, so a segment can't reach another client.
@@ -73,6 +78,7 @@ function mount(app, { db, auth, resolveAudience }) {
     id: r.id, entityId: r.entity_id, name: r.name, source: r.source,
     definition: JSON.parse(r.definition || '{}'),
     count: r.last_count, lastResolvedAt: r.last_resolved_at,
+    reach: { email: r.last_email, sms: r.last_sms }, // contactable-by-identifier per channel
     createdBy: r.created_by, createdAt: r.created_at, updatedAt: r.updated_at,
   });
 
@@ -128,9 +134,13 @@ function mount(app, { db, auth, resolveAudience }) {
     if (!seg || seg.entity_id !== req.params.entityId) return res.status(404).json({ error: 'Not found' });
     try {
       const r = await resolveDefinition(req.params.entityId, JSON.parse(seg.definition || '{}'), req.user);
-      const count = (r.list || []).length;
-      sql.prepare('UPDATE segments SET last_count=?, last_resolved_at=? WHERE id=?').run(count, now(), req.params.id);
-      res.json({ count, sample: (r.list || []).slice(0, 8).map((x) => ({ email: x.email, name: x.name || '' })), excluded: r.excluded || 0, noConsent: r.noConsent || 0, filteredOut: r.filteredOut || 0 });
+      const list = r.list || [];
+      const count = list.length;
+      // Per-channel contactability (has the identifier). Consent-opt-in filtering
+      // layers on with the per-channel consent mapping.
+      const reach = { email: list.filter((m) => m.email).length, sms: list.filter((m) => m.phone).length };
+      sql.prepare('UPDATE segments SET last_count=?, last_email=?, last_sms=?, last_resolved_at=? WHERE id=?').run(count, reach.email, reach.sms, now(), req.params.id);
+      res.json({ count, reach, sample: list.slice(0, 8).map((x) => ({ email: x.email, name: x.name || '' })), excluded: r.excluded || 0, noConsent: r.noConsent || 0, filteredOut: r.filteredOut || 0 });
     } catch (e) { res.status(400).json({ error: e.message }); }
   });
 

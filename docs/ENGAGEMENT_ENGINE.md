@@ -129,8 +129,15 @@ high-value piece. Contract: `resolveSegment(definition, ctx) → { members, coun
   Email/phone now; `appUserId` (Howler app) + `adMatch` (hashed) reserved — adding
   them later *populates* fields, never *reshapes* the output. So cross-system
   identity is not a blocker for email/SMS segments today.
-- **Consent is NOT applied here** — the resolver returns *who matches*; per-channel
-  consent + unsubscribe apply at **send**.
+- **Consent: stored per-channel, VISIBLE at preview (not a silent send-time drop).**
+  The resolver returns *who matches* plus **per-channel contactable counts** so a
+  segment can show "4,000 people · 3,800 emailable · 1,500 SMS · 1,200 WhatsApp
+  opted-in" *before* a campaign runs. Consent is a per-channel mapping
+  (channel → consent column), surfaced at preview and enforced at send — never an
+  invisible filter. Output: `meta.reach = { email, sms, whatsapp, ... }`.
+  (Where the consent mapping lives — entity-level default vs per-segment override —
+  is the one remaining sub-decision; lean **entity-level**, since a client's
+  consent columns are usually consistent across tiles.)
 
 ## 7. How it maps to what's built
 - `actions.js` already has audiences (tile/paste/snapshot + filters), email/SMS/
@@ -167,10 +174,14 @@ high-value piece. Contract: `resolveSegment(definition, ctx) → { members, coun
      (designing the graph now risks getting it wrong). Today's linear drip stays.
 3. **Self-service depth** — default split of who builds campaigns/segments (client
    vs AM). Dual-surface says both; the default matters. *(still open)*
-4. **Consent & compliance — DECIDED: per-channel, at SEND (not on the segment).**
-   A segment is "who matches"; opt-in differs by channel (email ≠ SMS ≠ WhatsApp),
-   so consent + unsubscribe are enforced at send, modelled per-recipient-per-channel.
-   POPIA-relevant (SA). Removes the single consent field from the segment.
+4. **Consent & compliance — DECIDED: per-channel, stored + VISIBLE at preview,
+   enforced at send.** A segment is "who matches"; opt-in differs by channel
+   (email ≠ SMS ≠ WhatsApp). Consent is a per-channel mapping (channel → column),
+   modelled per-recipient-per-channel, and the resolver surfaces **per-channel
+   contactable counts at preview** (not a silent drop at send). POPIA-relevant (SA).
+   Removed the single consent field from the segment; per-channel reach lands with
+   the resolver formalisation. *Sub-decision:* consent-mapping home = entity-level
+   (default) vs per-segment override — lean entity-level.
 5. **Identity — DECIDED: lock the output SHAPE now, resolve later.** Resolver
    returns `member.identity{ email, phone, appUserId?, adMatch? }` (§6a). We don't
    solve cross-system identity now (needs the Howler integration); we only guarantee
@@ -178,6 +189,12 @@ high-value piece. Contract: `resolveSegment(definition, ctx) → { members, coun
    segments today.
 
 ## 10. Dependencies & risks
+- **Identity ↔ Howler integration (4.1) — tracked future bottleneck.** Cross-system
+  identity (Looker-person → Howler app-user → hashed ad-match) is *deferred* and
+  safe today (the resolver's member shape is identity-extensible). But it flips to
+  **critical-path the moment Meta audience-sync (P4) or app-push (P6) lands** — and
+  it's gated on 4.1, which we don't fully control. Keep 4.1 timing and identity
+  resolution tracked **together** so P4 doesn't get surprised. (No action now.)
 - **Howler integration (4.1)** unlocks app push + purchase/behaviour signals —
   the richest triggers and the highest-reach channel.
 - **OAuth + per-client connections** for social; secrets handled write-only.

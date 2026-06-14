@@ -64,6 +64,12 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
                       ? <span><b style={{ color: 'var(--brand)' }}>{s.count}</b> {s.count === 1 ? 'person' : 'people'}{s.lastResolvedAt ? ` · as of ${new Date(s.lastResolvedAt).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}</span>
                       : <span>Not counted yet — tap refresh</span>}
                   </div>
+                  {s.count >= 0 && s.reach && (s.reach.email >= 0 || s.reach.sms >= 0) && (
+                    <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 3, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                      {s.reach.email >= 0 && <span>✉️ {s.reach.email} with email</span>}
+                      {s.reach.sms >= 0 && <span>💬 {s.reach.sms} with mobile</span>}
+                    </div>
+                  )}
                 </div>
                 <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
                   <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding }} onClick={() => refresh(s)} disabled={busyId === s.id}>{busyId === s.id ? '…' : '↻ Refresh'}</button>
