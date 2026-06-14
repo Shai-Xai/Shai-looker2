@@ -133,6 +133,7 @@ function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }
           </Field>
           <Field label="Custom focus (optional)">
             <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit' }} rows={2} value={f.roleFocus} onChange={(e) => set('roleFocus', e.target.value)} placeholder="Leave blank to use the role default above" />
+            <RefineButton text={f.roleFocus} onRefined={(t) => set('roleFocus', t)} purpose="a focus note that steers what an AI digest emphasises" entityId={entityId} />
             {f.roleFocus.trim() && (
               <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
                 <Toggle on={f.focusMode === 'override'} onClick={() => set('focusMode', 'override')}>Override role</Toggle>

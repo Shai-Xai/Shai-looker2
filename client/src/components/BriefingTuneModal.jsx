@@ -146,6 +146,7 @@ export function BriefingConfigForm({ entityId, onSaved, showTune = true }) {
                         placeholder={'e.g. This is our 5th edition — compare against Pretoria IV. VIP is the priority this year.'}
                         style={ta}
                       />
+                      <RefineButton text={e.instructions || ''} onRefined={(t) => upd(su.id, { instructions: t })} purpose="event-specific instructions that steer an AI briefing" entityId={entityId} />
                       <Label>Phase wording for this event (leave blank to use the defaults)</Label>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginTop: 4 }}>
                         {cfg.phases.map((p) => {
