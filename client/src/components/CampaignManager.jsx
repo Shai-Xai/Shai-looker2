@@ -341,6 +341,9 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
   const acc = (key) => ({ open: openSection === key, onToggle: () => setOpenSection((s) => (s === key ? null : key)) });
   const isPending = action?.status === 'pending';
   const isScheduled = action?.status === 'scheduled';
+  // For Email+SMS campaigns, the two content sub-sections collapse (default closed).
+  const [emailOpen, setEmailOpen] = useState(false);
+  const [smsOpen, setSmsOpen] = useState(false);
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectNote, setRejectNote] = useState('');
   // datetime-local value (local time) — prefill from an existing schedule.
@@ -731,10 +734,15 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
             </Field>
           )}
 
-          {/* Both channels: a banner makes it obvious which content is which. */}
-          {!isSequence && f.channel === 'both' && <div style={{ ...chBanner, background: 'rgba(10,132,255,0.12)', color: '#0a66c2' }}>✉️ Email content</div>}
+          {/* Both channels: collapsible banners make it obvious which content is
+              which (collapsed by default). */}
+          {!isSequence && f.channel === 'both' && (
+            <button type="button" onClick={() => setEmailOpen((v) => !v)} style={{ ...chBanner, background: 'rgba(10,132,255,0.12)', color: '#0a66c2', width: '100%', border: 'none', cursor: 'pointer' }}>
+              <span style={{ width: 12, fontSize: 10, transform: emailOpen ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</span>✉️ Email content
+            </button>
+          )}
           {/* Once-off email (or email+SMS) — built template or custom HTML. */}
-          {!isSequence && hasEmail && (
+          {!isSequence && hasEmail && (f.channel !== 'both' || emailOpen) && (
           <Field label="Content">
             {f.channel === 'both' && <div style={{ ...hintS, marginTop: 0, marginBottom: 6 }}>This is the email. The SMS will use the body text below (plus the link &amp; opt-out).</div>}
             <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
@@ -761,8 +769,12 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
           )}
 
           {/* Both channels, once-off: a SEPARATE SMS message (email copy ≠ SMS copy). */}
-          {!isSequence && f.channel === 'both' && <div style={{ ...chBanner, background: 'rgba(21,128,61,0.12)', color: '#15803d' }}>💬 SMS content</div>}
           {!isSequence && f.channel === 'both' && (
+            <button type="button" onClick={() => setSmsOpen((v) => !v)} style={{ ...chBanner, background: 'rgba(21,128,61,0.12)', color: '#15803d', width: '100%', border: 'none', cursor: 'pointer' }}>
+              <span style={{ width: 12, fontSize: 10, transform: smsOpen ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</span>💬 SMS content
+            </button>
+          )}
+          {!isSequence && f.channel === 'both' && smsOpen && (
             <Field label="SMS message (separate from the email)">
               <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit' }} rows={4} value={f.smsBody} onChange={(e) => set('smsBody', e.target.value)} placeholder={'Hi {{name}}, your {{ticketType}} tickets are still waiting — grab them here:'} />
               <SmsMeter body={f.smsBody} />
