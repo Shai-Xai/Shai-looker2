@@ -156,6 +156,18 @@ high-value piece. Contract: `resolveSegment(definition, ctx) → { members, coun
   several (pre-event reminder, post-event thank-you, win-back, VIP upsell).
 - **P2 — Segments first-class + "Create segment from tile."** Reusable saved
   audiences; the hero flow (§2). Self-service for clients (dual-surface).
+  **Keystone shipped (Jun 2026):** a 🎯 *Create segment* button on any tile that
+  lists people (has an email column) opens a modal — name it + pick email/name/
+  phone columns — and saves a `tile`-source segment. It captures the dashboard
+  filters currently applied (`definition.lookerFilters`, keyed by query field)
+  so the segment resolves *that* cohort live. The resolver applies them in
+  `tileQueryBody` **before** `applyScope`, so the forced organiser/entity scope
+  always wins (a segment can never widen scope); `ANY_VALUE` rides through and is
+  stripped server-side. `lookerFilters` is preserved through `cleanConfig`,
+  `cleanDef` and the segment editor. Gated on `campaigns.approve` (dual-surface:
+  admin-preview + client self-service). From Engage → Segments it can then be
+  messaged/synced/tracked. *Next:* capture for `paste`/`query` sources; surface
+  per-channel reach at the create step.
 - **P3 — WhatsApp outbound** (template messages) as a third message channel.
 - **P4 — Meta audience-sync** (segment → Custom Audience), then TikTok. The first
   social win, and the natural payoff of segments.

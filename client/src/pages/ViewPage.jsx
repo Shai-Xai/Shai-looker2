@@ -20,8 +20,11 @@ export default function ViewPage() {
   const isMobile = useIsMobile();
   const { id, suiteId } = useParams();
   const navigate = useNavigate();
-  const { isAdmin, insightsEnabled } = useAuth();
+  const { isAdmin, insightsEnabled, user } = useAuth();
   const { previewEntityId, actionsSlot } = useOutletContext() || {};
+  // Entity for tile-level actions (create segment): the previewed client for an
+  // admin, else the client's own entity.
+  const scopeEntityId = previewEntityId || (isAdmin ? null : ((user?.entities || [])[0]?.id || (user?.entityIds || [])[0] || null));
   const { theme: appTheme } = useTheme();
   const [def, setDef] = useState(null);
   const [setInfo, setSetInfo] = useState(null);
@@ -157,7 +160,7 @@ export default function ViewPage() {
   const pinsEnabled = !!suiteId && insightsEnabled && (!isAdmin || !!previewEntityId);
 
   return (
-    <ScopeProvider suiteId={suiteId || null} dashboardContext={def.aiContext || ''}>
+    <ScopeProvider suiteId={suiteId || null} dashboardContext={def.aiContext || ''} entityId={scopeEntityId} dashboardId={id}>
     <PinProvider dashboardId={id} entityId={previewEntityId || null} isAdmin={isAdmin} enabled={pinsEnabled}>
       <div style={shellStyle}>
         {/* On mobile inside a suite the sticky "☰ Menu" bar already shows the

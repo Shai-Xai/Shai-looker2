@@ -134,6 +134,9 @@ function SegmentBuilder({ entityId, tiles, segment, onClose, onSaved }) {
     emailField: def.emailField || '', nameField: def.nameField || '', phoneField: def.phoneField || '',
     attrDashboardId: def.attrDashboardId || '', attrTileId: def.attrTileId || '',
     filters: def.filters || [], pasted: def.pasted || '',
+    // Dashboard filters captured when the segment was made from a tile. Not
+    // edited here, but preserved so saving doesn't silently change the cohort.
+    lookerFilters: def.lookerFilters || {},
   });
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
   const [aud, setAud] = useState(null);
@@ -144,6 +147,7 @@ function SegmentBuilder({ entityId, tiles, segment, onClose, onSaved }) {
     mode: f.mode, dashboardId: f.dashboardId, tileId: f.tileId,
     emailField: f.emailField, nameField: f.nameField, phoneField: f.phoneField,
     attrDashboardId: f.attrDashboardId, attrTileId: f.attrTileId, filters: f.filters, pasted: f.pasted,
+    lookerFilters: f.lookerFilters,
   });
 
   const refreshAud = () => {

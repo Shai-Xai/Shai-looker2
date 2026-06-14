@@ -60,6 +60,12 @@ function mount(app, { db, auth, resolveAudience }) {
       // NB: no consent field — a segment is "who matches"; per-channel consent +
       // unsubscribe are applied at SEND (email-opt-in ≠ SMS/WhatsApp). POPIA.
       ticketField: String(d.ticketField || ''),
+      // Dashboard (Looker) filters captured at "create segment from tile" time,
+      // keyed by query field. Applied at resolution so the segment tracks that
+      // cohort live. Capped + stringified; never trusted to widen org scope.
+      lookerFilters: (d.lookerFilters && typeof d.lookerFilters === 'object' && !Array.isArray(d.lookerFilters))
+        ? Object.fromEntries(Object.entries(d.lookerFilters).slice(0, 50).map(([k, v]) => [String(k), String(v)]))
+        : {},
       attrDashboardId: String(d.attrDashboardId || ''),
       attrTileId: String(d.attrTileId || ''),
       attrEmailField: String(d.attrEmailField || ''),

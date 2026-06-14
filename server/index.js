@@ -1509,7 +1509,10 @@ function effectiveFilterValues(def, lockMap = {}) {
   return fv;
 }
 
-async function tileQueryBody(tile, def, user, suiteId, lockMap = {}) {
+// `extraOverrides` (queryField → value) are dashboard filters captured into a
+// saved segment; they override the per-tile defaults. applyScope runs AFTER, so
+// the forced organiser/entity scope always wins — a segment can't widen scope.
+async function tileQueryBody(tile, def, user, suiteId, lockMap = {}, extraOverrides = {}) {
   const q = tile.query;
   if (tile.type === 'text' || !q?.model || !q?.view || !(q.fields || []).length) return null;
   const fv = effectiveFilterValues(def, lockMap);
@@ -1518,7 +1521,7 @@ async function tileQueryBody(tile, def, user, suiteId, lockMap = {}) {
     const v = fv[filterName];
     if (v && String(v).trim()) overrides[queryField] = String(v).trim();
   }
-  const body = { ...q, filters: { ...(q.filters || {}), ...overrides } };
+  const body = { ...q, filters: stripAnyValue({ ...(q.filters || {}), ...overrides, ...extraOverrides }) };
   if (!(await applyScope(body, user, suiteId))) return null;
   return body;
 }
@@ -1985,7 +1988,7 @@ const actionsApi = require('./actions').mount(app, {
   db, auth, mailer, push, messaging, os,
   // Run a tile's query (scoped + suite-locked) and return its rows + fields —
   // the campaign audience source.
-  resolveAudience: async ({ entityId, dashboardId, tileId, user }) => {
+  resolveAudience: async ({ entityId, dashboardId, tileId, user, filterOverrides = {} }) => {
     const { catalogue } = clientCatalogue(entityId);
     const meta = catalogue.find((c) => c.dashboardId === dashboardId);
     const def = store.get(dashboardId);
@@ -1994,7 +1997,7 @@ const actionsApi = require('./actions').mount(app, {
     const tile = tiles.find((t) => t.id === tileId);
     if (!tile) throw new Error('Tile not found on that dashboard');
     const lockMap = expandLockMap(db.lockedFiltersForSuite(meta.suiteId));
-    const qBody = await tileQueryBody(tile, def, user, meta.suiteId, lockMap);
+    const qBody = await tileQueryBody(tile, def, user, meta.suiteId, lockMap, filterOverrides);
     if (!qBody) throw new Error('No data access for that tile');
     const data = await runLookerQuery('/queries/run/json_detail', { ...qBody, limit: '5000' }, undefined, true);
     const fields = [...(data.fields?.dimensions || []), ...(data.fields?.measures || []), ...(data.fields?.table_calculations || [])]

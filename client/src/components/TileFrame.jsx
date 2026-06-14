@@ -11,6 +11,9 @@ import { usePins } from '../lib/PinContext.jsx';
 import { useTileData, isRunnableQuery } from '../lib/useTileData.js';
 import { ANY_VALUE } from '../lib/filterConstants.js';
 import { useAuth } from '../lib/auth.jsx';
+import { useScope } from '../lib/ScopeContext.jsx';
+import { useAccess, PERMS } from '../lib/access.js';
+import CreateSegmentModal from './CreateSegmentModal.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
 
 // Renders a single tile (vis or text). In edit mode it shows hover controls
@@ -18,8 +21,11 @@ import { useIsMobile } from '../lib/useIsMobile.js';
 export default function TileFrame({ tile, filterValues, editable, onEdit, onDuplicate, onRemove }) {
   const { data, loading, error } = useTileData(tile, filterValues);
   const { insightsEnabled } = useAuth();
+  const { entityId, dashboardId } = useScope();
+  const { can } = useAccess();
   const isMobile = useIsMobile();
   const [showInsight, setShowInsight] = useState(false);
+  const [showSegment, setShowSegment] = useState(false);
 
   // The filters in effect for this tile (its own query filters + the dashboard
   // filters it listens to) — passed to the AI for context.
@@ -34,6 +40,24 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
   }
 
   const canInsight = insightsEnabled && tile.type !== 'text' && data && !loading && !error;
+
+  // "Segment from a tile": offer it (view mode only) when the tile lists people —
+  // i.e. its data has an email-like column — and the viewer can manage campaigns.
+  const tileFields = data ? [...(data.fields?.dimensions || []), ...(data.fields?.measures || []), ...(data.fields?.table_calculations || [])].map((f) => ({ name: f.name, label: f.label_short || f.label || f.name })) : [];
+  const hasEmailField = tileFields.some((f) => /email/i.test(f.name) || /email/i.test(f.label));
+  const canSegment = !editable && data && !loading && !error && !!entityId && !!dashboardId && hasEmailField && can(PERMS.CAMPAIGNS_APPROVE);
+  // Dashboard filters currently in effect for this tile, keyed by query field —
+  // captured into the segment so it resolves the same cohort (ANY_VALUE rides
+  // through; the server drops it). Mirrors useTileData's override logic.
+  function capturedFilters() {
+    const o = {};
+    for (const [filterName, queryField] of Object.entries(tile.listenTo || {})) {
+      const val = filterValues?.[filterName];
+      if (val === ANY_VALUE) o[queryField] = ANY_VALUE;
+      else if (val && String(val).trim()) o[queryField] = String(val).trim();
+    }
+    return o;
+  }
 
   // Metric-style tiles (single value, gauge) show their label *below* the
   // number (Looker convention), so they don't get a top title bar in view mode.
@@ -75,6 +99,7 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
           <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             {isMetric ? null : (tile.title || <em style={{ color: '#bbb', fontWeight: 400 }}>Untitled</em>)}
           </span>
+          {canSegment && <SegmentButton onClick={() => setShowSegment(true)} isMobile={isMobile} />}
           {canInsight && (
             <>
               <PinButton tileId={tile.id} isMobile={isMobile} />
@@ -108,6 +133,7 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
             <InsightButton onClick={() => setShowInsight(true)} isMobile={isMobile} corner />
           </>
         )}
+        {canSegment && !showHeader && <SegmentButton onClick={() => setShowSegment(true)} isMobile={isMobile} corner />}
         {tile.type === 'text' ? (
           <TextTile tile={tile} />
         ) : !isRunnableQuery(tile.query) ? (
@@ -134,7 +160,29 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
       {showInsight && (
         <InsightModal tile={tile} data={data} filters={appliedFilters()} onClose={() => setShowInsight(false)} />
       )}
+      {showSegment && (
+        <CreateSegmentModal
+          entityId={entityId}
+          dashboardId={dashboardId}
+          tileId={tile.id}
+          tileTitle={tile.title || ''}
+          fields={tileFields}
+          lookerFilters={capturedFilters()}
+          onClose={() => setShowSegment(false)}
+        />
+      )}
     </div>
+  );
+}
+
+// "Create segment" affordance — same visual language as the insight/pin buttons.
+function SegmentButton({ onClick, isMobile, corner }) {
+  const base = { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--muted)', borderRadius: 7, fontSize: isMobile ? 13 : 12, lineHeight: 1, width: isMobile ? 28 : 24, height: isMobile ? 28 : 24 };
+  // Top-right holds the pin/insight cluster on metric tiles, so the rare corner
+  // segment button sits top-left (free in view mode).
+  const cornerStyle = corner ? { position: 'absolute', top: 6, left: 6, zIndex: 6 } : null;
+  return (
+    <button className="no-print" title="Create a reusable segment from this tile" onClick={onClick} style={{ ...base, ...cornerStyle }}>🎯</button>
   );
 }
 

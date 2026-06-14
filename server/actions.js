@@ -235,6 +235,11 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
         attrDashboardId: String(aud.attrDashboardId || ''),
         attrTileId: String(aud.attrTileId || ''),
         attrEmailField: String(aud.attrEmailField || ''),
+        // Dashboard (Looker) filters captured from a "segment from tile" flow,
+        // keyed by query field — applied at resolution (server drops ANY_VALUE).
+        lookerFilters: (aud.lookerFilters && typeof aud.lookerFilters === 'object' && !Array.isArray(aud.lookerFilters))
+          ? Object.fromEntries(Object.entries(aud.lookerFilters).slice(0, 50).map(([k, v]) => [String(k), String(v)]))
+          : {},
         // Optional targeting filters on the tile's own columns (city, age,
         // ticket category, new/returning…). op 'in' = value ∈ values;
         // 'between' = min ≤ numeric ≤ max. All filters AND together.
@@ -388,7 +393,9 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
       }
     } else {
       if (!cfg.audience.dashboardId || !cfg.audience.tileId) return { list: [], fields: [], filterFields: [], excluded: 0, noConsent: 0, filteredOut: 0 };
-      const res = await resolveAudience({ entityId, dashboardId: cfg.audience.dashboardId, tileId: cfg.audience.tileId, user });
+      // `lookerFilters` are the dashboard filters captured when a segment was made
+      // from a tile — applied at query time so the segment resolves that cohort.
+      const res = await resolveAudience({ entityId, dashboardId: cfg.audience.dashboardId, tileId: cfg.audience.tileId, user, filterOverrides: cfg.audience.lookerFilters || {} });
       fields = res.fields;
       const emailField = cfg.audience.emailField || res.fields.find((f) => /email/i.test(f.name) || /email/i.test(f.label))?.name || '';
       const nameField = cfg.audience.nameField || '';
