@@ -4,10 +4,13 @@ import { useState, useEffect } from 'react';
 // briefing tuner. `load` returns { dashboards: [{ dashboardId, title, setName,
 // tiles: [{ tileId, title, visType }] }] }; `selected` is an array of
 // { dashboardId, tileId } where tileId '*' means the whole dashboard.
-export default function TilePicker({ load, selected, onChange }) {
-  const [cat, setCat] = useState(null);
+export default function TilePicker({ load, catalogue, selected, onChange }) {
+  const [cat, setCat] = useState(catalogue || null);
   const [open, setOpen] = useState({});
-  useEffect(() => { load().then(setCat).catch(() => setCat({ dashboards: [] })); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (catalogue) { setCat(catalogue); return; }
+    load().then(setCat).catch(() => setCat({ dashboards: [] }));
+  }, [catalogue]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!cat) return <div style={{ ...hintS, marginTop: 8 }}>Loading tiles…</div>;
   if (!cat.dashboards.length) return <div style={{ ...hintS, marginTop: 8 }}>No selectable tiles found for this client yet.</div>;
 

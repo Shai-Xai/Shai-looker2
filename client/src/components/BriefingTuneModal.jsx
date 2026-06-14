@@ -23,8 +23,27 @@ export function BriefingConfigForm({ entityId, onSaved, showTune = true }) {
   const [busy, setBusy] = useState(false);
   const [savedAt, setSavedAt] = useState(0);
   const [error, setError] = useState(null);
+  const [cat, setCat] = useState(null);       // tile catalogue (shared with the picker)
+  const [follows, setFollows] = useState([]);  // tiles this reader is following
   // Catalogue of selectable dashboards/tiles for this client (shared with digests).
   const loadTiles = () => (isAdmin ? api.getDigestTiles(entityId) : api.getMyDigestTiles(entityId));
+
+  useEffect(() => {
+    loadTiles().then(setCat).catch(() => setCat({ dashboards: [] }));
+    api.myPins(entityId).then((r) => setFollows(r.follows || [])).catch(() => setFollows([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entityId]);
+
+  // Resolve followed {dashboardId,tileId} marks to titles via the catalogue.
+  const followed = (follows || []).map((f) => {
+    const d = (cat?.dashboards || []).find((x) => x.dashboardId === f.dashboardId);
+    const t = d?.tiles.find((x) => x.tileId === f.tileId);
+    return { ...f, dashTitle: d?.title || '', tileTitle: t?.title || '' };
+  }).filter((f) => f.tileTitle); // only ones we can name (real, queryable tiles)
+  const unfollow = async (f) => {
+    setFollows((cur) => cur.filter((x) => !(x.dashboardId === f.dashboardId && x.tileId === f.tileId)));
+    try { await api.togglePin({ dashboardId: f.dashboardId, tileId: f.tileId, kind: 'follow', on: false, scope: isAdmin ? 'entity' : 'user', entityId }); } catch { /* ignore */ }
+  };
 
   useEffect(() => {
     api.myBriefingConfig(entityId).then((r) => {
@@ -69,11 +88,28 @@ export function BriefingConfigForm({ entityId, onSaved, showTune = true }) {
                   placeholder={'e.g. Always mention resale activity. Compare everything to last year. I care most about cashless spend per head.'}
                   style={ta}
                 />
+                {followed.length > 0 && (
+                  <>
+                    <Label>Tiles you're following</Label>
+                    <div style={{ fontSize: 11, color: 'var(--muted)', margin: '0 0 4px', lineHeight: 1.45 }}>Followed tiles always feed your briefing. Remove any you no longer want it to track.</div>
+                    <div style={{ border: '1px solid var(--hairline)', borderRadius: 10, overflow: 'hidden' }}>
+                      {followed.map((f) => (
+                        <div key={`${f.dashboardId}|${f.tileId}`} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderBottom: '1px solid var(--hairline)' }}>
+                          <span style={{ flex: 1, minWidth: 0, fontSize: 12.5 }}>
+                            <span style={{ fontWeight: 600 }}>{f.tileTitle}</span>
+                            {f.dashTitle && <span style={{ color: 'var(--muted)', marginLeft: 6 }}>{f.dashTitle}</span>}
+                          </span>
+                          <button type="button" onClick={() => unfollow(f)} style={{ flexShrink: 0, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 980, padding: '5px 11px', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Unfollow</button>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
                 <Label>Focus the Owl on specific dashboards &amp; tiles</Label>
                 <div style={{ fontSize: 11, color: 'var(--muted)', margin: '0 0 2px', lineHeight: 1.45 }}>
                   Optional — for boards that aren't event-driven (e.g. management) point the briefing at the exact tiles that matter. Leave empty to let the Owl sweep the whole catalogue.
                 </div>
-                <TilePicker load={loadTiles} selected={tiles} onChange={setTiles} />
+                <TilePicker catalogue={cat} load={loadTiles} selected={tiles} onChange={setTiles} />
               </>
             )}
 
