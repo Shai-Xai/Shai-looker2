@@ -2151,7 +2151,25 @@ const actionsApi = require('./actions').mount(app, {
 
 // Segments — reusable live audiences. Reuses the campaign engine's audience
 // resolver (audienceFor) so resolution logic + the org-scope boundary are shared.
-const segmentsApi = require('./segments').mount(app, { db, auth, resolveAudience: actionsApi.audienceFor });
+const segmentsApi = require('./segments').mount(app, {
+  db, auth, resolveAudience: actionsApi.audienceFor,
+  // Materialise a built-in recipe (e.g. abandoned cart) as a real segment by
+  // auto-resolving its audience source from this client's data.
+  resolveRecipe: (entityId, key) => {
+    const t = actionTemplates.get(key);
+    if (!t) return null;
+    const resolved = actionTemplates.resolveAudience(t, tileCatalogueWithFields(entityId));
+    if (!resolved.ready) return null;
+    return {
+      name: t.category || t.label,
+      definition: {
+        mode: 'tile', dashboardId: resolved.dashboardId, tileId: resolved.tileId,
+        emailField: resolved.emailField, nameField: resolved.nameField || '',
+        ticketField: resolved.ticketField || '', emailConsentField: resolved.consentField || '',
+      },
+    };
+  },
+});
 
 // ─── Briefing configuration ─────────────────────────────────────────────────────
 // Admin: global briefing rules + editable phase defaults.

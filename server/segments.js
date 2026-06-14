@@ -12,7 +12,7 @@
 // Mount: `require('./segments').mount(app, { db, auth, resolveAudience })`.
 const crypto = require('crypto');
 
-function mount(app, { db, auth, resolveAudience }) {
+function mount(app, { db, auth, resolveAudience, resolveRecipe }) {
   const sql = db.db;
   const now = () => new Date().toISOString();
   const uuid = () => crypto.randomUUID();
@@ -112,6 +112,23 @@ function mount(app, { db, auth, resolveAudience }) {
     const id = uuid(); const ts = now();
     sql.prepare('INSERT INTO segments (id, entity_id, name, source, definition, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)')
       .run(id, req.params.entityId, name, source, JSON.stringify(definition), req.user.email, ts, ts);
+    res.status(201).json({ segment: rowToSeg(getSeg(id)) });
+  });
+
+  // Materialise a built-in recipe (e.g. 'abandoned_cart') as a real, live
+  // segment — auto-resolves the audience source from this client's data.
+  app.post('/api/segments/:entityId/recipe/:key', auth.requireAuth, auth.requirePermission('campaigns.approve'), (req, res) => {
+    if (!guard(req, res, req.params.entityId)) return;
+    if (typeof resolveRecipe !== 'function') return res.status(400).json({ error: 'Recipes are not available.' });
+    const r = resolveRecipe(req.params.entityId, req.params.key);
+    if (!r) return res.status(400).json({ error: "Couldn't find this audience in your data yet — create it from a dashboard tile instead." });
+    // Don't duplicate — if one already exists by that name, return it.
+    const existing = sql.prepare('SELECT * FROM segments WHERE entity_id=? AND name=?').get(req.params.entityId, r.name);
+    if (existing) return res.json({ segment: rowToSeg(existing), existed: true });
+    const definition = cleanDef(r.definition);
+    const id = uuid(); const ts = now();
+    sql.prepare('INSERT INTO segments (id, entity_id, name, source, definition, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)')
+      .run(id, req.params.entityId, r.name, 'tile', JSON.stringify(definition), req.user.email, ts, ts);
     res.status(201).json({ segment: rowToSeg(getSeg(id)) });
   });
 

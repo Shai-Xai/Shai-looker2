@@ -3,6 +3,12 @@ import { api } from '../lib/api.js';
 import { AudienceFilters } from './CampaignManager.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
 
+// Built-in recipes we can materialise into a real segment right now by
+// auto-resolving the source from the client's data (key = actionTemplates key).
+const RECIPE_SEGMENTS = [
+  { key: 'abandoned_cart', name: 'Abandoned carts', icon: '🛒', desc: 'Customers who started a ticket purchase but didn’t finish — auto-built from your data.' },
+];
+
 // Visual placeholders shown under the live segments — common audiences we'll
 // auto-build from the client's data. Not yet wired up ("coming soon").
 const SUGGESTED_SEGMENTS = [
@@ -25,8 +31,16 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
   const [editing, setEditing] = useState(null); // null | 'new' | segment object
   const [busyId, setBusyId] = useState(null);
   const [viewing, setViewing] = useState(null); // { segment, data | null } — people modal
+  const [addingKey, setAddingKey] = useState('');
 
   const load = () => api.listSegments(entityId).then((r) => setSegments(r.segments || [])).catch(() => setSegments([]));
+  // Materialise a built-in recipe (e.g. abandoned cart) as a real, live segment.
+  const addRecipe = async (key) => {
+    setAddingKey(key);
+    try { await api.createSegmentFromRecipe(entityId, key); await load(); }
+    catch (e) { alert(e.message || 'Could not add this segment.'); }
+    finally { setAddingKey(''); }
+  };
   useEffect(() => { load(); }, [entityId]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { (isAdmin ? api.getDigestTiles(entityId) : api.getMyDigestTiles(entityId)).then(setTiles).catch(() => setTiles({ dashboards: [] })); }, [entityId, isAdmin]);
 
@@ -93,6 +107,25 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Ready to add — recipes we can auto-build from the client's data now. */}
+      {RECIPE_SEGMENTS.filter((r) => !segments.some((s) => s.name === r.name)).length > 0 && (
+        <div style={{ marginTop: 26 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)', marginBottom: 10 }}>Ready to add</div>
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(260px, 1fr))', gap: 10 }}>
+            {RECIPE_SEGMENTS.filter((r) => !segments.some((s) => s.name === r.name)).map((r) => (
+              <div key={r.key} style={{ border: '1px solid var(--hairline)', borderRadius: 14, padding: '14px 16px', background: 'var(--card)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 18 }}>{r.icon}</span>
+                  <span style={{ fontWeight: 700, fontSize: 14, flex: 1 }}>{r.name}</span>
+                  <button style={{ ...primary, padding: '6px 14px', fontSize: 12.5 }} onClick={() => addRecipe(r.key)} disabled={addingKey === r.key}>{addingKey === r.key ? 'Adding…' : '+ Add'}</button>
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6, lineHeight: 1.45 }}>{r.desc}</div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

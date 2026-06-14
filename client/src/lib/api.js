@@ -238,6 +238,7 @@ export const api = {
   // Segments (reusable live audiences)
   listSegments: (entityId) => fetch(`/api/segments/${entityId}`).then(json),
   createSegment: (entityId, b) => fetch(`/api/segments/${entityId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  createSegmentFromRecipe: (entityId, key) => fetch(`/api/segments/${entityId}/recipe/${key}`, { method: 'POST', headers: { 'Content-Type': 'application/json' } }).then(json),
   updateSegment: (entityId, id, b) => fetch(`/api/segments/${entityId}/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   deleteSegment: (entityId, id) => fetch(`/api/segments/${entityId}/${id}`, { method: 'DELETE' }).then(json),
   previewSegment: (entityId, id) => fetch(`/api/segments/${entityId}/${id}/preview`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(json),
