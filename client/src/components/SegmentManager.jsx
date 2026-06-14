@@ -114,7 +114,7 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
         </div>
       </div>
 
-
+      {viewing && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 80, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} onClick={() => setViewing(null)}>
           <div className="modal-in" style={{ background: 'var(--card)', borderRadius: 16, width: 'min(560px, 100%)', maxHeight: '85vh', display: 'flex', flexDirection: 'column', boxShadow: 'var(--shadow-pop)' }} onClick={(e) => e.stopPropagation()}>
             <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--hairline)', display: 'flex', alignItems: 'center', gap: 10 }}>
