@@ -95,12 +95,36 @@ results then measure against it. Keeps recipes and goals consistent — a recipe
   (source-agnostic, scope-enforced).
 - **Tiles** → the metric source (read the number already shown).
 
+## 8a. Campaign contribution — attribution (DECIDED to include)
+The payoff of linking a campaign's goal `rollsUpTo` a goal: **see how each
+campaign helped reach it.** A campaign's **contribution** is measured by
+*conversion tracking* — which of its recipients did the goal's **conversion
+event** (e.g. *bought*) after receiving it. This is the abandoned-cart
+**conversion re-check, generalised**: every goal carries a `conversion` ref (the
+metric's action — usually "appears in tile X" or a purchase event), and each
+linked campaign checks which recipients converted.
+
+The goal's results view then shows a **breakdown**:
+```
+Sell-through — 16,200 / 25,000 (65%)
+Campaigns drove 3,200:
+  Abandoned-cart 1,100 · VIP upsell 800 · Pre-event reminder 1,300
+  …the rest organic.
+```
+
+**Attribution model — last-touch for v1, labelled "influenced."** When a
+recipient got several campaigns then converted, the **most recent** campaign
+before the conversion gets the credit. We label it *influenced* (never
+"caused") so we don't overstate. Multi-touch / weighted attribution is a later
+refinement. A conversion **window** (e.g. 7 days from send) bounds the credit.
+
 ## 9. Phasing
 - **P1 — Foundation.** Goal object + Looker (tile-sourced) metric resolver +
   **event goals** set upfront per suite + a **Goals widget** on home/dashboard
   with pace. The smallest end-to-end loop.
-- **P2 — Campaign goals + results.** Structured campaign goal; report shows
-  result vs goal; generalise conversions.
+- **P2 — Campaign goals + results + contribution.** Structured campaign goal;
+  link a campaign to a goal; report shows result vs goal AND the goal shows the
+  **per-campaign contribution breakdown** (§8a). Generalise conversions.
 - **P3 — Roles + cascade.** Role goals, `rollsUpTo` rollup, role-lensed goals in
   digests + briefing.
 - **P4 — Third-party sources.** Meta / Google / TikTok metric adapters (the
@@ -117,6 +141,9 @@ results then measure against it. Keeps recipes and goals consistent — a recipe
 5. **Units / currency:** single currency per entity, or multi?
 6. **3rd-party identity/attribution** (ROAS, ad conversions): defer — flag the
    shape so it slots in.
+7. **Conversion window** for campaign contribution (§8a): default 7 days from
+   send? Per-goal override? And confirm **last-touch** for v1 (vs any-touch
+   "influenced by ≥1 campaign").
 
 ## 11. Non-negotiables
 - Goal values are **computed** (resolver); AI only phrases.
