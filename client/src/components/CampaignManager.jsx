@@ -123,16 +123,27 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
         )}
         {a.results?.lastError && a.status !== 'done' && <div style={{ fontSize: 11, color: 'var(--error,#ef4444)', marginTop: 3 }}>{a.results.lastError}</div>}
       </div>
-      <div style={{ display: 'flex', gap: 6, flexShrink: 0, flexWrap: 'wrap' }}>
-        {a.config?.campaignMode === 'sequence' && a.status === 'auto' && <button style={mini} onClick={() => setJourney(a)}>🪜 Journey</button>}
-        {(a.status === 'done' || a.status === 'running' || a.status === 'failed') && <button style={mini} onClick={() => setReporting(a)}>📊 Report</button>}
-        {a.status === 'pending' && <button style={{ ...mini, background: '#15803d', color: '#fff', border: 'none' }} onClick={() => api.approveAction(entityId, a.id).then((r) => { if (r.pending) alert(`Recorded. ${r.remaining} more approval(s) needed.`); load(); }).catch((e) => alert(e.message))}>✓ Approve</button>}
-        {a.status === 'pending' && <button style={mini} onClick={() => { const note = prompt('Send back to draft — reason (optional):'); if (note !== null) api.rejectAction(entityId, a.id, note).then(load).catch((e) => alert(e.message)); }}>Reject</button>}
-        {(a.status === 'draft' || a.status === 'auto' || a.status === 'pending' || a.status === 'scheduled') && <button style={mini} onClick={() => setEditing(a)}>{a.createdBy === 'automation' ? 'Review & approve' : a.status === 'scheduled' ? 'View / reschedule' : 'Edit'}</button>}
-        {a.status === 'auto' && <button style={mini} onClick={() => api.pauseAction(entityId, a.id).then(load)}>⏸ Pause</button>}
-        <button style={mini} onClick={() => api.duplicateAction(entityId, a.id).then((r) => { load(); setEditing(r.action); }).catch((e) => alert(e.message))}>⧉ Duplicate</button>
-        {a.status !== 'running' && <button style={{ ...mini, color: 'var(--error,#ef4444)' }} onClick={() => { if (confirm('Delete this campaign?')) api.deleteAction(entityId, a.id).then(load); }}>Delete</button>}
-      </div>
+      {(() => {
+        // One primary action + a ⋯ overflow menu, to keep rows tidy.
+        const sent = ['done', 'running', 'failed'].includes(a.status);
+        const editable = ['draft', 'auto', 'pending', 'scheduled'].includes(a.status);
+        const primary = sent
+          ? { label: '📊 Report', onClick: () => setReporting(a) }
+          : editable
+            ? { label: a.createdBy === 'automation' || a.status === 'pending' ? 'Review' : a.status === 'scheduled' ? 'Reschedule' : 'Edit', onClick: () => setEditing(a) }
+            : null;
+        const items = [];
+        if (a.config?.campaignMode === 'sequence' && a.status === 'auto') items.push({ label: '🪜 Journey', onClick: () => setJourney(a) });
+        if (a.status === 'auto') items.push({ label: '⏸ Pause', onClick: () => api.pauseAction(entityId, a.id).then(load) });
+        items.push({ label: '⧉ Duplicate', onClick: () => api.duplicateAction(entityId, a.id).then((r) => { load(); setEditing(r.action); }).catch((e) => alert(e.message)) });
+        if (a.status !== 'running') items.push({ label: '🗑 Delete', danger: true, onClick: () => { if (confirm('Delete this campaign?')) api.deleteAction(entityId, a.id).then(load); } });
+        return (
+          <div style={{ display: 'flex', gap: 6, flexShrink: 0, alignItems: 'center' }}>
+            {primary && <button style={mini} onClick={primary.onClick}>{primary.label}</button>}
+            <RowMenu items={items} />
+          </div>
+        );
+      })()}
     </div>
   );
   // Group campaigns by master campaign (ungrouped last). Each group shows
@@ -1259,6 +1270,27 @@ function HtmlField({ value, onChange }) {
         <input ref={ref} type="file" accept=".html,text/html" style={{ display: 'none' }} onChange={onFile} />
       </div>
       <textarea style={{ ...input, resize: 'vertical', fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 12 }} rows={8} value={value} onChange={(e) => onChange(e.target.value)} placeholder="<html>…</html> — or upload a file above" />
+    </div>
+  );
+}
+
+// Overflow menu for a campaign row — keeps the row to one primary button + ⋯.
+function RowMenu({ items }) {
+  const [open, setOpen] = useState(false);
+  if (!items || !items.length) return null;
+  return (
+    <div style={{ position: 'relative' }}>
+      <button style={{ ...mini, padding: '7px 11px', fontWeight: 700 }} onClick={() => setOpen((o) => !o)} aria-label="More actions" title="More">⋯</button>
+      {open && (
+        <>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 40 }} onClick={() => setOpen(false)} />
+          <div className="modal-in" style={{ position: 'absolute', right: 0, top: 'calc(100% + 4px)', zIndex: 41, background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 10, boxShadow: 'var(--shadow-pop, 0 8px 40px rgba(0,0,0,0.16))', minWidth: 150, padding: 4, display: 'flex', flexDirection: 'column' }}>
+            {items.map((it, i) => (
+              <button key={i} className="nav-row" style={{ display: 'flex', width: '100%', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer', padding: '8px 10px', borderRadius: 7, fontSize: 13, fontWeight: 600, color: it.danger ? 'var(--error,#ef4444)' : 'var(--text)' }} onClick={() => { setOpen(false); it.onClick(); }}>{it.label}</button>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }
