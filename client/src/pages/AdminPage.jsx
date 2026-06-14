@@ -648,7 +648,7 @@ function Sets() {
   const [items, setItems] = useState([]);
   const [dashboards, setDashboards] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [collapsed, setCollapsed] = useState({}); // folder -> collapsed? (default open)
+  const [expanded, setExpanded] = useState({}); // folder -> expanded? (default collapsed)
   // Shared library only ever bundles shared dashboards — never a client's bespoke one.
   const load = () => { setLoading(true); Promise.all([api.adminListSets(), api.listDashboards()]).then(([t, d]) => { setItems(t); setDashboards(d.filter((x) => !x.ownerEntityId)); }).finally(() => setLoading(false)); };
   useEffect(load, []);
@@ -657,14 +657,18 @@ function Sets() {
   const folderNames = [...new Set(items.map((s) => s.folder).filter(Boolean))].sort((a, b) => a.localeCompare(b));
   // Named folders (sorted) first, then the ungrouped bucket last.
   const groups = [...folderNames.map((f) => [f, items.filter((s) => s.folder === f)]), ['', items.filter((s) => !s.folder)]];
-  const isOpen = (f) => !collapsed[f];
-  const toggle = (f) => setCollapsed((c) => ({ ...c, [f]: !c[f] }));
-  const addSet = (folder) => api.adminCreateSet({ name: 'New set', folder, dashboardIds: [] }).then(load);
+  const isOpen = (f) => !!expanded[f];
+  const toggle = (f) => setExpanded((e) => ({ ...e, [f]: !e[f] }));
+  const addSet = (folder) => { setExpanded((e) => ({ ...e, [folder]: true })); return api.adminCreateSet({ name: 'New set', folder, dashboardIds: [] }).then(load); };
   const newFolder = () => { const name = prompt('New folder name'); if (name && name.trim()) addSet(name.trim()); };
 
   return (
     <div>
       <p style={hint}>A Set is a reusable group of dashboards (e.g. Ticketing, Cashless). Bundle them into a client's Suite. Group related sets into folders to keep the library tidy.</p>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+        <button style={addBtn} onClick={() => addSet('')}>+ Add set</button>
+        <button style={addBtn} onClick={newFolder}>+ New folder</button>
+      </div>
       {groups.map(([folder, sets]) => {
         if (folder === '' && sets.length === 0) return null;
         const open = isOpen(folder);
@@ -687,10 +691,6 @@ function Sets() {
           </div>
         );
       })}
-      <div style={{ display: 'flex', gap: 8 }}>
-        <button style={addBtn} onClick={() => addSet('')}>+ Add set</button>
-        <button style={addBtn} onClick={newFolder}>+ New folder</button>
-      </div>
     </div>
   );
 }
