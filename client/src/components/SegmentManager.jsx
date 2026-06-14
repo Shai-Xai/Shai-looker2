@@ -132,6 +132,7 @@ function SegmentBuilder({ entityId, tiles, segment, onClose, onSaved }) {
     mode: def.mode || 'tile',
     dashboardId: def.dashboardId || '', tileId: def.tileId || '',
     emailField: def.emailField || '', nameField: def.nameField || '', phoneField: def.phoneField || '',
+    emailConsentField: def.emailConsentField || '', smsConsentField: def.smsConsentField || '',
     attrDashboardId: def.attrDashboardId || '', attrTileId: def.attrTileId || '',
     filters: def.filters || [], pasted: def.pasted || '',
     // Dashboard filters captured when the segment was made from a tile. Not
@@ -146,6 +147,7 @@ function SegmentBuilder({ entityId, tiles, segment, onClose, onSaved }) {
   const definition = () => ({
     mode: f.mode, dashboardId: f.dashboardId, tileId: f.tileId,
     emailField: f.emailField, nameField: f.nameField, phoneField: f.phoneField,
+    emailConsentField: f.emailConsentField, smsConsentField: f.smsConsentField,
     attrDashboardId: f.attrDashboardId, attrTileId: f.attrTileId, filters: f.filters, pasted: f.pasted,
     lookerFilters: f.lookerFilters,
   });
@@ -156,7 +158,7 @@ function SegmentBuilder({ entityId, tiles, segment, onClose, onSaved }) {
   };
   useEffect(() => { clearTimeout(debounce.current); debounce.current = setTimeout(refreshAud, 350); return () => clearTimeout(debounce.current); },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [f.mode, f.dashboardId, f.tileId, f.emailField, f.attrDashboardId, f.attrTileId, JSON.stringify(f.filters), f.pasted]);
+    [f.mode, f.dashboardId, f.tileId, f.emailField, f.phoneField, f.emailConsentField, f.smsConsentField, f.attrDashboardId, f.attrTileId, JSON.stringify(f.filters), f.pasted]);
 
   const addFilter = () => set('filters', [...f.filters, { field: '', op: 'in', values: [] }]);
   const setFilter = (i, patch) => set('filters', f.filters.map((x, j) => (j === i ? { ...x, ...patch } : x)));
@@ -219,7 +221,17 @@ function SegmentBuilder({ entityId, tiles, segment, onClose, onSaved }) {
                     <option value="">Mobile-number column (optional — for SMS)</option>
                     {aud.fields.map((fl) => <option key={fl.name} value={fl.name}>{fl.label}</option>)}
                   </select>
-                  <div style={hintS}>A segment is just <i>who matches</i> — consent &amp; unsubscribes are applied per channel when a campaign sends to it.</div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <select style={{ ...input, flex: 1 }} value={f.emailConsentField} onChange={(e) => set('emailConsentField', e.target.value)}>
+                      <option value="">Email consent column (optional)</option>
+                      {aud.fields.map((fl) => <option key={fl.name} value={fl.name}>{fl.label}</option>)}
+                    </select>
+                    <select style={{ ...input, flex: 1 }} value={f.smsConsentField} onChange={(e) => set('smsConsentField', e.target.value)}>
+                      <option value="">SMS consent column (optional)</option>
+                      {aud.fields.map((fl) => <option key={fl.name} value={fl.name}>{fl.label}</option>)}
+                    </select>
+                  </div>
+                  <div style={hintS}>Set the consent columns to see real reach — emailable / SMS-opted-in. Consent is enforced per channel when a campaign sends (a campaign can override for transactional messages).</div>
                   <AudienceFilters entityId={entityId}
                     fields={(aud.filterFields && aud.filterFields.length) ? aud.filterFields : aud.fields.map((fl) => ({ ...fl, dashboardId: f.dashboardId, tileId: f.tileId }))}
                     filters={f.filters} addFilter={addFilter} setFilter={setFilter} removeFilter={removeFilter}
@@ -238,7 +250,7 @@ function SegmentBuilder({ entityId, tiles, segment, onClose, onSaved }) {
 
         <div style={{ fontSize: 13 }}>
           {aud?.error ? <span style={{ color: 'var(--error,#ef4444)' }}>✗ {aud.error}</span>
-            : aud ? <span><b style={{ color: 'var(--brand)' }}>{aud.count}</b> {aud.count === 1 ? 'person' : 'people'} match right now{aud.filteredOut > 0 ? ` · ${aud.filteredOut} filtered out` : ''}</span>
+            : aud ? <span><b style={{ color: 'var(--brand)' }}>{aud.count}</b> {aud.count === 1 ? 'person' : 'people'} match{aud.reach ? ` · ${aud.reach.email} emailable · ${aud.reach.sms} SMS` : ''}{aud.filteredOut > 0 ? ` · ${aud.filteredOut} filtered out` : ''}</span>
               : <span style={{ color: 'var(--muted)' }}>Pick a source to see the live count.</span>}
         </div>
 

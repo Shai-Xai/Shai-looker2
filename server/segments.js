@@ -57,6 +57,10 @@ function mount(app, { db, auth, resolveAudience }) {
       emailField: String(d.emailField || ''),
       nameField: String(d.nameField || ''),
       phoneField: String(d.phoneField || ''),
+      // Per-channel marketing consent columns — drive the reach figures + are
+      // enforced when a campaign sends from this segment.
+      emailConsentField: String(d.emailConsentField || ''),
+      smsConsentField: String(d.smsConsentField || ''),
       // NB: no consent field — a segment is "who matches"; per-channel consent +
       // unsubscribe are applied at SEND (email-opt-in ≠ SMS/WhatsApp). POPIA.
       ticketField: String(d.ticketField || ''),
@@ -142,9 +146,9 @@ function mount(app, { db, auth, resolveAudience }) {
       const r = await resolveDefinition(req.params.entityId, JSON.parse(seg.definition || '{}'), req.user);
       const list = r.list || [];
       const count = list.length;
-      // Per-channel contactability (has the identifier). Consent-opt-in filtering
-      // layers on with the per-channel consent mapping.
-      const reach = { email: list.filter((m) => m.email).length, sms: list.filter((m) => m.phone).length };
+      // Per-channel reach is consent-aware (identifier present AND opted in on
+      // that channel) — comes straight from the resolver.
+      const reach = r.reach || { email: list.filter((m) => m.email && m.emailOk !== false).length, sms: list.filter((m) => m.phone && m.smsOk !== false).length };
       sql.prepare('UPDATE segments SET last_count=?, last_email=?, last_sms=?, last_resolved_at=? WHERE id=?').run(count, reach.email, reach.sms, now(), req.params.id);
       res.json({ count, reach, sample: list.slice(0, 8).map((x) => ({ email: x.email, name: x.name || '' })), excluded: r.excluded || 0, noConsent: r.noConsent || 0, filteredOut: r.filteredOut || 0 });
     } catch (e) { res.status(400).json({ error: e.message }); }

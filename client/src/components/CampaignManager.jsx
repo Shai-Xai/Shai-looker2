@@ -309,6 +309,9 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
     emailField: cfg.audience?.emailField || ta.emailField || '',
     nameField: cfg.audience?.nameField || ta.nameField || '',
     consentField: cfg.audience?.consentField || ta.consentField || '',
+    emailConsentField: cfg.audience?.emailConsentField || cfg.audience?.consentField || ta.emailConsentField || '',
+    smsConsentField: cfg.audience?.smsConsentField || ta.smsConsentField || '',
+    ignoreConsent: !!cfg.ignoreConsent,
     ticketField: cfg.audience?.ticketField || ta.ticketField || '',
     pasted: cfg.audience?.pasted || '',
     filters: cfg.audience?.filters || [], // [{field, op:'in'|'between', values:[], min, max}]
@@ -381,9 +384,10 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
     templateKey: f.templateKey, category: f.category, master: f.master, approvers: f.approvers,
     channel: f.channel,
     campaignMode: f.campaignMode, steps: f.steps,
+    ignoreConsent: f.ignoreConsent,
     promo: f.promo,
     promoCodes: promoCodesText.split(/[\s,;]+/).map((c) => c.trim()).filter(Boolean),
-    audience: { mode: f.audienceMode, segmentId: f.segmentId, dashboardId: f.dashboardId, tileId: f.tileId, emailField: f.emailField, nameField: f.nameField, consentField: f.consentField, ticketField: f.ticketField, phoneField: f.phoneField, anchorField: f.anchorField, filters: f.filters, attrDashboardId: f.attrDashboardId, attrTileId: f.attrTileId, pasted: f.pasted },
+    audience: { mode: f.audienceMode, segmentId: f.segmentId, dashboardId: f.dashboardId, tileId: f.tileId, emailField: f.emailField, nameField: f.nameField, consentField: f.consentField, emailConsentField: f.emailConsentField, smsConsentField: f.smsConsentField, ticketField: f.ticketField, phoneField: f.phoneField, anchorField: f.anchorField, filters: f.filters, attrDashboardId: f.attrDashboardId, attrTileId: f.attrTileId, pasted: f.pasted },
   });
   // Targeting filter helpers.
   const addFilter = () => setF((s) => ({ ...s, filters: [...s.filters, { field: '', op: 'in', values: [], min: '', max: '' }] }));
@@ -432,7 +436,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
     setAudBusy(true);
     api.actionAudiencePreview(entityId, payload()).then(setAud).catch((e) => setAud({ error: e.message })).finally(() => setAudBusy(false));
   };
-  useEffect(() => { refreshAudience(); }, [f.audienceMode, f.segmentId, f.dashboardId, f.tileId, f.emailField, f.consentField, f.attrDashboardId, f.attrTileId, JSON.stringify(f.filters)]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { refreshAudience(); }, [f.audienceMode, f.segmentId, f.dashboardId, f.tileId, f.emailField, f.consentField, f.emailConsentField, f.smsConsentField, f.ignoreConsent, f.phoneField, f.channel, f.attrDashboardId, f.attrTileId, JSON.stringify(f.filters)]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Debounced email preview. For a sequence, preview the step you're editing.
   useEffect(() => {
@@ -744,10 +748,25 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
                         {aud.fields.map((fl) => <option key={fl.name} value={fl.name}>{fl.label}</option>)}
                       </select>
                     )}
-                    <select style={input} value={f.consentField} onChange={(e) => set('consentField', e.target.value)}>
-                      <option value="">Consent column — recommended (only {f.channel === 'both' ? 'contact' : smsOnly ? 'text' : 'email'} when = Yes)</option>
-                      {aud.fields.map((fl) => <option key={fl.name} value={fl.name}>Only if “{fl.label}” = Yes</option>)}
-                    </select>
+                    {hasEmail && (
+                      <select style={input} value={f.ignoreConsent ? '' : f.emailConsentField} disabled={f.ignoreConsent} onChange={(e) => set('emailConsentField', e.target.value)}>
+                        <option value="">Email consent column — recommended (email only when = Yes)</option>
+                        {aud.fields.map((fl) => <option key={fl.name} value={fl.name}>Email only if “{fl.label}” = Yes</option>)}
+                      </select>
+                    )}
+                    {hasSms && (
+                      <select style={input} value={f.ignoreConsent ? '' : f.smsConsentField} disabled={f.ignoreConsent} onChange={(e) => set('smsConsentField', e.target.value)}>
+                        <option value="">SMS consent column — recommended (SMS only when = Yes)</option>
+                        {aud.fields.map((fl) => <option key={fl.name} value={fl.name}>SMS only if “{fl.label}” = Yes</option>)}
+                      </select>
+                    )}
+                    <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '8px 10px', border: '1px solid var(--hairline)', borderRadius: 9, background: f.ignoreConsent ? 'rgba(245,158,11,0.10)' : 'transparent', cursor: 'pointer' }}>
+                      <input type="checkbox" checked={!!f.ignoreConsent} onChange={(e) => set('ignoreConsent', e.target.checked)} style={{ marginTop: 2 }} />
+                      <span>
+                        <span style={{ fontWeight: 700, fontSize: 13 }}>Transactional / operational — ignore marketing consent</span>
+                        <span style={{ display: 'block', fontSize: 11.5, color: 'var(--muted)', marginTop: 2, lineHeight: 1.45 }}>Sends to everyone with a valid {smsOnly ? 'number' : hasSms ? 'email/number' : 'email'}, bypassing the consent columns. Only for genuinely non-marketing messages (event info, settlement notices).</span>
+                      </span>
+                    </label>
                     {isSequence && (
                       <select style={input} value={f.anchorField} onChange={(e) => set('anchorField', e.target.value)}>
                         <option value="">Abandonment time column — drip timings count from this (else from detection)</option>
@@ -776,8 +795,10 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
                 : aud ? (
                   <span>
                     <b style={{ color: 'var(--brand)' }}>{aud.count}</b> recipient{aud.count === 1 ? '' : 's'}
+                    {aud.reach && hasEmail && <span style={{ color: 'var(--muted)' }}> · {aud.reach.email} emailable</span>}
+                    {aud.reach && hasSms && <span style={{ color: 'var(--muted)' }}> · {aud.reach.sms} SMS</span>}
                     {aud.filteredOut > 0 && <span style={{ color: 'var(--muted)' }}> · {aud.filteredOut} filtered out</span>}
-                    {aud.noConsent > 0 && <span style={{ color: 'var(--muted)' }}> · {aud.noConsent} excluded (no consent)</span>}
+                    {!f.ignoreConsent && aud.noConsent > 0 && <span style={{ color: 'var(--muted)' }}> · {aud.noConsent} no consent</span>}
                     {aud.excluded > 0 && <span style={{ color: 'var(--muted)' }}> · {aud.excluded} unsubscribed</span>}
                     {aud.sample?.length > 0 && <span style={{ color: 'var(--muted)' }}> · e.g. {aud.sample.slice(0, 3).map((s) => s.email).join(', ')}</span>}
                   </span>

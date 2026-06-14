@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { api } from '../lib/api.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
 
@@ -12,24 +12,40 @@ export default function CreateSegmentModal({ entityId, dashboardId, tileId, tile
   const guessEmail = fields.find((f) => /email/i.test(f.name) || /email/i.test(f.label))?.name || '';
   const guessName = fields.find((f) => /(^|[_.])name$|full.?name|first.?name/i.test(f.name) || /name/i.test(f.label))?.name || '';
   const guessPhone = fields.find((f) => /phone|mobile|cell|msisdn/i.test(f.name) || /phone|mobile|cell/i.test(f.label))?.name || '';
+  const guessEmailConsent = fields.find((f) => /allow.*e-?mail|e-?mail.*(consent|opt|allow)|marketing.*e-?mail/i.test(`${f.label} ${f.name}`))?.name || '';
+  const guessSmsConsent = fields.find((f) => /allow.*sms|sms.*(consent|opt|allow)|marketing.*sms/i.test(`${f.label} ${f.name}`))?.name || '';
   const [name, setName] = useState(tileTitle ? `${tileTitle}`.slice(0, 120) : 'New segment');
   const [emailField, setEmailField] = useState(guessEmail);
   const [nameField, setNameField] = useState(guessName);
   const [phoneField, setPhoneField] = useState(guessPhone);
+  const [emailConsentField, setEmailConsentField] = useState(guessEmailConsent);
+  const [smsConsentField, setSmsConsentField] = useState(guessSmsConsent);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [done, setDone] = useState(null); // created segment
+  const [reach, setReach] = useState(null); // live { total, email, sms }
 
   const filterCount = Object.keys(lookerFilters || {}).length;
+  const definition = () => ({ mode: 'tile', dashboardId, tileId, emailField, nameField, phoneField, emailConsentField, smsConsentField, lookerFilters });
+
+  // Live reach preview — "N people · X emailable · Y SMS" before creating.
+  useEffect(() => {
+    if (!emailField) { setReach(null); return; }
+    let cancelled = false;
+    const t = setTimeout(() => {
+      api.actionAudiencePreview(entityId, { audience: definition() })
+        .then((r) => { if (!cancelled) setReach(r.reach || { total: r.count, email: 0, sms: 0 }); })
+        .catch(() => { if (!cancelled) setReach(null); });
+    }, 300);
+    return () => { cancelled = true; clearTimeout(t); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [emailField, nameField, phoneField, emailConsentField, smsConsentField]);
 
   const save = async () => {
     if (!emailField) { setError('Pick which column holds the email address.'); return; }
     setBusy(true); setError('');
     try {
-      const { segment } = await api.createSegment(entityId, {
-        name: name.trim() || 'New segment',
-        definition: { mode: 'tile', dashboardId, tileId, emailField, nameField, phoneField, lookerFilters },
-      });
+      const { segment } = await api.createSegment(entityId, { name: name.trim() || 'New segment', definition: definition() });
       setDone(segment);
     } catch (e) {
       setError(e.message || 'Could not create the segment.');
@@ -78,6 +94,24 @@ export default function CreateSegmentModal({ entityId, dashboardId, tileId, tile
                 <Select value={phoneField} onChange={setPhoneField} fields={fields} placeholder="—" allowEmpty />
               </div>
             </div>
+
+            <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+              <div style={{ flex: 1 }}>
+                <Label>Email consent <span style={opt}>· optional</span></Label>
+                <Select value={emailConsentField} onChange={setEmailConsentField} fields={fields} placeholder="—" allowEmpty />
+              </div>
+              <div style={{ flex: 1 }}>
+                <Label>SMS consent <span style={opt}>· optional</span></Label>
+                <Select value={smsConsentField} onChange={setSmsConsentField} fields={fields} placeholder="—" allowEmpty />
+              </div>
+            </div>
+
+            {reach && (
+              <div style={{ marginTop: 12, padding: '9px 12px', borderRadius: 10, background: 'rgba(var(--brand-rgb),0.08)', fontSize: 13 }}>
+                <b style={{ color: 'var(--brand)' }}>{reach.total}</b> {reach.total === 1 ? 'person' : 'people'} · <b>{reach.email}</b> emailable · <b>{reach.sms}</b> SMS
+                <span style={{ display: 'block', fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Set the consent columns above for accurate reach. Resolves live whenever the segment is used.</span>
+              </div>
+            )}
 
             {error && <p style={{ color: 'var(--error)', fontSize: 13, marginTop: 12 }}>{error}</p>}
 

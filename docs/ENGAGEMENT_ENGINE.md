@@ -135,9 +135,18 @@ high-value piece. Contract: `resolveSegment(definition, ctx) → { members, coun
   opted-in" *before* a campaign runs. Consent is a per-channel mapping
   (channel → consent column), surfaced at preview and enforced at send — never an
   invisible filter. Output: `meta.reach = { email, sms, whatsapp, ... }`.
-  (Where the consent mapping lives — entity-level default vs per-segment override —
-  is the one remaining sub-decision; lean **entity-level**, since a client's
-  consent columns are usually consistent across tiles.)
+
+  **SHIPPED (Jun 2026).** `audienceFor` no longer drops non-consenters; it tags
+  each recipient `emailOk`/`smsOk` from explicit per-channel consent columns
+  (`audience.emailConsentField` / `smsConsentField`; legacy `consentField` → email)
+  and returns `reach = { total, email, sms }`. Consent is enforced **per channel at
+  send** (and live on every drip run) — email-consented-but-not-SMS gets email only.
+  Reach is shown in the create-segment modal, the segment editor, and the campaign
+  preview. Mapping is **per-segment / per-campaign** (with name auto-suggest), not
+  entity-level — explicit beat the entity default for clarity. A per-campaign
+  **`ignoreConsent`** toggle bypasses consent for genuinely transactional/operational
+  messages (event info, settlement notices), clearly labelled. *Next:* WhatsApp
+  consent column + opt-in count when that channel lands.
 
 ## 7. How it maps to what's built
 - `actions.js` already has audiences (tile/paste/snapshot + filters), email/SMS/

@@ -227,7 +227,9 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
         tileId: String(aud.tileId || ''),
         emailField: String(aud.emailField || ''),
         nameField: String(aud.nameField || ''),
-        consentField: String(aud.consentField || ''),
+        consentField: String(aud.consentField || ''), // legacy single consent (→ email)
+        emailConsentField: String(aud.emailConsentField || ''), // per-channel marketing consent columns
+        smsConsentField: String(aud.smsConsentField || ''),
         ticketField: String(aud.ticketField || ''),
         anchorField: String(aud.anchorField || ''), // abandonment timestamp column (drip timing)
         // Optional second source of customer attributes (lifetime spend, loyalty
@@ -255,6 +257,9 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
       // Delivery mode: 'once' = single send to the current list; 'sequence' = an
       // automated drip (enroll abandoners, send timed steps, drop on purchase).
       campaignMode: body.campaignMode === 'sequence' ? 'sequence' : 'once',
+      // Transactional/operational override: bypass marketing-consent gating (for
+      // genuinely non-marketing messages — event info, settlement notices).
+      ignoreConsent: !!body.ignoreConsent,
       // Sequence steps: each { delayHours, subject, body, ctaText }. delayHours is
       // measured from the anchor (abandonment) time. Capped + sorted on save.
       steps: Array.isArray(body.steps) ? body.steps.slice(0, 12).map((s) => ({
@@ -389,7 +394,9 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
         const key = email || phone;
         if (seen.has(key)) continue;
         seen.add(key);
-        raw.push({ email, phone, name });
+        // Pasted lists carry no consent columns — reachable on whatever identifier
+        // was provided (the uploader is asserting they may contact them).
+        raw.push({ email, phone, name, emailOk: !!email, smsOk: !!phone });
       }
     } else {
       if (!cfg.audience.dashboardId || !cfg.audience.tileId) return { list: [], fields: [], filterFields: [], excluded: 0, noConsent: 0, filteredOut: 0 };
@@ -399,7 +406,12 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
       fields = res.fields;
       const emailField = cfg.audience.emailField || res.fields.find((f) => /email/i.test(f.name) || /email/i.test(f.label))?.name || '';
       const nameField = cfg.audience.nameField || '';
-      const consentField = cfg.audience.consentField || '';
+      // Per-channel marketing consent. Explicit columns only (no silent
+      // auto-detect) so existing campaigns don't change behaviour; legacy single
+      // consentField maps to email. ignoreConsent (transactional) bypasses both.
+      const emailConsentField = cfg.audience.emailConsentField || cfg.audience.consentField || '';
+      const smsConsentField = cfg.audience.smsConsentField || '';
+      const ignoreConsent = !!cfg.ignoreConsent;
       const ticketField = cfg.audience.ticketField || '';
       const anchorField = cfg.audience.anchorField || '';
       const phoneField = cfg.audience.phoneField || '';
@@ -429,9 +441,13 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
           const merged = attrMap ? { ...row, ...(attrMap.get(email) || {}) } : row;
           // Targeting filters (city/age/ticket category/lifetime spend/…).
           if (filters.length && !rowPassesFilters(merged, filters)) { filteredOut += 1; continue; }
-          // Consent gate: when a consent column is chosen, only include "Yes".
-          if (consentField && !isYes(cellVal(row[consentField]))) { noConsent += 1; continue; }
-          raw.push({ email, name: nameField ? cellVal(row[nameField]) : '', ticket: ticketField ? cellVal(row[ticketField]) : '', phone: phoneField ? cellVal(row[phoneField]) : '', anchorRaw: anchorField ? cellVal(row[anchorField]) : '' });
+          // Per-channel consent: don't drop — tag each channel so reach can be
+          // shown and consent enforced per channel at send (email-consented but
+          // not SMS-consented → email only). ignoreConsent bypasses (transactional).
+          const phone = phoneField ? cellVal(row[phoneField]) : '';
+          const emailOk = ignoreConsent || !emailConsentField || isYes(cellVal(row[emailConsentField]));
+          const smsOk = ignoreConsent || !smsConsentField || isYes(cellVal(row[smsConsentField]));
+          raw.push({ email, name: nameField ? cellVal(row[nameField]) : '', ticket: ticketField ? cellVal(row[ticketField]) : '', phone, anchorRaw: anchorField ? cellVal(row[anchorField]) : '', emailOk, smsOk });
         }
       }
     }
@@ -448,7 +464,15 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
       list.push(r);
       if (list.length >= MAX_AUDIENCE) break;
     }
-    return { list, fields, filterFields, excluded, noConsent, filteredOut };
+    // Per-channel reach (consent-aware) — surfaced at preview, enforced at send.
+    const reach = {
+      total: list.length,
+      email: list.filter((r) => r.email && r.emailOk).length,
+      sms: list.filter((r) => r.phone && r.smsOk).length,
+    };
+    // noConsent = contactable but reachable on no channel (consent says no everywhere).
+    noConsent = list.filter((r) => !(r.email && r.emailOk) && !(r.phone && r.smsOk)).length;
+    return { list, fields, filterFields, excluded, noConsent, filteredOut, reach };
   }
 
   // ── Promo / discount codes ──
@@ -587,13 +611,16 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
       // honest per-channel CTR (clicks/delivered) on both-channel campaigns.
       let ok = false, attempted = false, lastErr = '';
       try {
-        if (wantsEmail && recipient.email) {
+        // Per-channel consent enforced here (emailOk/smsOk set at resolution;
+        // undefined on legacy audiences = allowed). The transactional toggle
+        // sets both true at resolution, so this stays a simple per-channel check.
+        if (wantsEmail && recipient.email && recipient.emailOk !== false) {
           attempted = true;
           const { html, text, subject } = renderFor(a, recipient);
           const r = await mailer.send({ to: recipient.email, subject: subject || a.title || 'An update from your event', html, text, fromName: branding.senderName, kind: 'campaign', entity: a.entityId });
           if (r.ok) { ok = true; results.emailSent += 1; } else lastErr = r.error || r.reason || 'email failed';
         }
-        if (wantsSms && recipient.phone) {
+        if (wantsSms && recipient.phone && recipient.smsOk !== false) {
           attempted = true;
           const r = await messaging.sendSms({ to: recipient.phone, text: renderSmsFor(a, recipient) });
           if (r.ok) { ok = true; results.smsSent += 1; } else lastErr = r.error || r.reason || 'SMS failed';
@@ -784,8 +811,8 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     if (!guard(req, res, req.params.entityId)) return;
     try {
       const cfg = cleanConfig(req.body || {});
-      const { list, fields, filterFields, excluded, noConsent, filteredOut, segmentMissing } = await audienceFor(req.params.entityId, cfg, req.user);
-      res.json({ count: list.length, excluded, noConsent, filteredOut, segmentMissing: !!segmentMissing, sample: list.slice(0, 8), fields: (fields || []).map((f) => ({ name: f.name, label: f.label })), filterFields: filterFields || [] });
+      const { list, fields, filterFields, excluded, noConsent, filteredOut, segmentMissing, reach } = await audienceFor(req.params.entityId, cfg, req.user);
+      res.json({ count: list.length, excluded, noConsent, filteredOut, segmentMissing: !!segmentMissing, reach: reach || { total: list.length, email: 0, sms: 0 }, sample: list.slice(0, 8), fields: (fields || []).map((f) => ({ name: f.name, label: f.label })), filterFields: filterFields || [] });
     } catch (e) { res.status(400).json({ error: e.message }); }
   });
 
@@ -1349,8 +1376,8 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
       if (!a || a.status !== 'auto' || a.config.campaignMode !== 'sequence') continue;
       const steps = a.config.steps || [];
       const branding = mailer.resolveBranding(a.entityId);
-      let stillAbandoning = new Set();
-      try { const { list } = await audienceFor(a.entityId, a.config, sysUser); stillAbandoning = new Set(list.map((r) => r.email)); }
+      let reachable = new Map(); // email -> { emailOk, smsOk } (re-evaluated live, so consent changes apply mid-journey)
+      try { const { list } = await audienceFor(a.entityId, a.config, sysUser); for (const r of list) reachable.set(r.email, r); }
       catch (e) { console.error('[actions] sequence audience re-check failed', a.id, e.message); continue; }
       const sup = suppressed(a.entityId);
       const due = sql.prepare("SELECT * FROM action_enrollments WHERE action_id=? AND status='active' AND next_at <= ?").all(a.id, now());
@@ -1358,17 +1385,18 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
       for (const e of due) {
         // Conversion / suppression: gone from the abandoned list = bought (or
         // expired); unsubscribed = removed. Either way, stop the journey.
-        if (!stillAbandoning.has(e.email)) { sql.prepare("UPDATE action_enrollments SET status='converted', updated_at=? WHERE action_id=? AND email=?").run(now(), a.id, e.email); converted += 1; continue; }
+        if (!reachable.has(e.email)) { sql.prepare("UPDATE action_enrollments SET status='converted', updated_at=? WHERE action_id=? AND email=?").run(now(), a.id, e.email); converted += 1; continue; }
         if (sup.has(e.email)) { sql.prepare("UPDATE action_enrollments SET status='unsubscribed', updated_at=? WHERE action_id=? AND email=?").run(now(), a.id, e.email); continue; }
         const step = steps[e.step_index];
         if (!step) { sql.prepare("UPDATE action_enrollments SET status='done', updated_at=? WHERE action_id=? AND email=?").run(now(), a.id, e.email); continue; }
         try {
           const rcpt = { email: e.email, name: e.name, ticket: e.ticket, phone: e.phone };
+          const consent = reachable.get(e.email) || {};
           const wantsEmail = a.config.channel !== 'sms';
           const wantsSms = a.config.channel !== 'email';
           let ok = false;
-          if (wantsEmail && e.email) { const { html, text, subject } = renderFor(a, rcpt, step); const r = await mailer.send({ to: e.email, subject: subject || a.title || 'A reminder from your event', html, text, fromName: branding.senderName, kind: 'campaign', entity: a.entityId }); if (r.ok) { ok = true; emailSent += 1; } }
-          if (wantsSms && e.phone) { const r = await messaging.sendSms({ to: e.phone, text: renderSmsFor(a, rcpt, step) }); if (r.ok) { ok = true; smsSent += 1; } }
+          if (wantsEmail && e.email && consent.emailOk !== false) { const { html, text, subject } = renderFor(a, rcpt, step); const r = await mailer.send({ to: e.email, subject: subject || a.title || 'A reminder from your event', html, text, fromName: branding.senderName, kind: 'campaign', entity: a.entityId }); if (r.ok) { ok = true; emailSent += 1; } }
+          if (wantsSms && e.phone && consent.smsOk !== false) { const r = await messaging.sendSms({ to: e.phone, text: renderSmsFor(a, rcpt, step) }); if (r.ok) { ok = true; smsSent += 1; } }
           if (ok) sent += 1;
         } catch (err) { console.error('[actions] sequence send failed', a.id, e.email, err.message); }
         // Advance to the next step (or finish).
