@@ -191,7 +191,7 @@ export default function ClientHome() {
 
       {/* Your actions — campaigns taken + how they're performing (campaigns role only) */}
       {can(PERMS.CAMPAIGNS_VIEW) && (
-        <YourActions entityId={previewEntityId || (isAdmin ? null : ((user?.entities || [])[0]?.id || (user?.entityIds || [])[0]))} isMobile={isMobile} onOpen={() => vtNavigate(navigate, '/actions')} />
+        <YourActions entityId={previewEntityId || (isAdmin ? null : ((user?.entities || [])[0]?.id || (user?.entityIds || [])[0]))} isMobile={isMobile} onOpen={() => vtNavigate(navigate, '/engage/campaigns')} />
       )}
 
       {/* Personal shortcuts (browsing-based) */}

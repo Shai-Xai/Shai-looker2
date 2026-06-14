@@ -164,14 +164,16 @@ high-value piece. Contract: `resolveSegment(definition, ctx) → { members, coun
   did-not-X) — gated on the Howler/Looker signal integration (roadmap 4.1).
 
 ## 9. Open decisions
-1. **Naming / IA — DECIDED (Jun 2026): top-level concept is "Engage."** The
-   nav now has an **Engage** section grouping the engagement surfaces; the old
-   "Actions" item became **Campaigns** (same page/route `/actions`, label only —
-   deep links preserved), and **Segments** sits beside it. *Automations ·
-   Templates · Connections* are reserved sub-areas to add under Engage as they
-   ship. "Actions" is freed up for a future user action-center. Dual-surface:
-   admin manages a client's Campaigns + Segments under Admin → client detail;
-   clients self-serve the same in their own Engage area.
+1. **Naming / IA — DECIDED (Jun 2026): top-level concept is "Engage", built as
+   a unified hub.** Engage is one first-class area at `/engage` with **tabs**:
+   **Campaigns** (`/engage/campaigns`) and **Segments** (`/engage/segments`)
+   today, plus *Automations · Templates · Connections* shown as **"soon"** so the
+   shape of the area is legible before each ships. The nav "Engage" group points
+   into these tabs. Legacy `/actions` and `/segments` **redirect** into the hub
+   (query strings preserved, so approval/`?action=` and "make it happen"/`?goal=`
+   deep links survive). "Actions" is freed up for a future user action-center.
+   Dual-surface: admin manages a client's Campaigns + Segments under Admin →
+   client detail; clients self-serve the same in the Engage hub.
 2. **Schema timing** — **DECIDED (Jun 2026), split per Hermes review:**
    - **2a. Segments + resolver — DONE.** `segments` table + source-agnostic
      resolver shipped (keystone for §2). Additive; campaigns untouched.

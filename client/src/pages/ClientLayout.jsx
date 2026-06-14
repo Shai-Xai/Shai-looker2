@@ -42,8 +42,9 @@ export default function ClientLayout() {
   const onSettlements = location.pathname.startsWith('/settlements');
   const onInbox = location.pathname.startsWith('/inbox');
   const onDigests = location.pathname.startsWith('/digests');
-  const onActions = location.pathname.startsWith('/actions');
-  const onSegments = location.pathname.startsWith('/segments');
+  // Engage hub tabs: Campaigns (/engage/campaigns, default /engage) + Segments.
+  const onSegments = location.pathname.startsWith('/segments') || location.pathname.startsWith('/engage/segments');
+  const onActions = (location.pathname.startsWith('/actions') || location.pathname.startsWith('/engage')) && !onSegments;
 
   // Experience OS inbox: unread + must-acknowledge counts for the badge/banner.
   const [inbox, setInbox] = useState({ enabled: false, unread: 0, pending: [] });
@@ -341,7 +342,7 @@ export default function ClientLayout() {
             ref={onActions ? activeRef : null}
             className={`nav-row${onActions ? ' active' : ''}`}
             style={{ ...rowBtn, fontWeight: onActions ? 600 : 500 }}
-            onClick={() => { if (!onActions) vtNavigate(navigate, '/actions'); if (isMobile) setNavOpen(false); }}
+            onClick={() => { if (!onActions) vtNavigate(navigate, '/engage/campaigns'); if (isMobile) setNavOpen(false); }}
           >
             <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>📣</span>
             <span style={ellip}>Campaigns</span>
@@ -350,7 +351,7 @@ export default function ClientLayout() {
             ref={onSegments ? activeRef : null}
             className={`nav-row${onSegments ? ' active' : ''}`}
             style={{ ...rowBtn, fontWeight: onSegments ? 600 : 500 }}
-            onClick={() => { if (!onSegments) vtNavigate(navigate, '/segments'); if (isMobile) setNavOpen(false); }}
+            onClick={() => { if (!onSegments) vtNavigate(navigate, '/engage/segments'); if (isMobile) setNavOpen(false); }}
           >
             <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>🎯</span>
             <span style={ellip}>Segments</span>
@@ -478,7 +479,7 @@ export default function ClientLayout() {
                   <button
                     className={`nav-row${onActions ? ' active' : ''}`}
                     style={{ ...mRowSuite, fontWeight: onActions ? 700 : 500 }}
-                    onClick={() => { if (!onActions) vtNavigate(navigate, '/actions'); setNavOpen(false); }}
+                    onClick={() => { if (!onActions) vtNavigate(navigate, '/engage/campaigns'); setNavOpen(false); }}
                   >
                     <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>📣</span>
                     <span style={ellip}>Campaigns</span>
@@ -486,7 +487,7 @@ export default function ClientLayout() {
                   <button
                     className={`nav-row${onSegments ? ' active' : ''}`}
                     style={{ ...mRowSuite, fontWeight: onSegments ? 700 : 500 }}
-                    onClick={() => { if (!onSegments) vtNavigate(navigate, '/segments'); setNavOpen(false); }}
+                    onClick={() => { if (!onSegments) vtNavigate(navigate, '/engage/segments'); setNavOpen(false); }}
                   >
                     <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>🎯</span>
                     <span style={ellip}>Segments</span>

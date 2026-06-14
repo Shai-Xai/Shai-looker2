@@ -15,8 +15,7 @@ import SettlementViewPage from './pages/SettlementViewPage.jsx';
 import DocumentViewPage from './pages/DocumentViewPage.jsx';
 import InboxPage from './os/InboxPage.jsx';
 import DigestsPage from './pages/DigestsPage.jsx';
-import ActionsPage from './pages/ActionsPage.jsx';
-import SegmentsPage from './pages/SegmentsPage.jsx';
+import EngagePage from './pages/EngagePage.jsx';
 import Logo from './components/Logo.jsx';
 import RootErrorBoundary from './components/RootErrorBoundary.jsx';
 import { DrillProvider } from './lib/DrillContext.jsx';
@@ -24,6 +23,13 @@ import { AuthProvider, useAuth } from './lib/auth.jsx';
 import { ProfileProvider, useProfile } from './lib/profile.jsx';
 import { ThemeProvider, useTheme } from './lib/theme.jsx';
 import { useIsMobile } from './lib/useIsMobile.js';
+
+// Legacy /actions and /segments now live as tabs under the Engage hub. Redirect
+// while preserving the query string so deep links (?action=, ?goal=) survive.
+function RedirectTo({ to }) {
+  const location = useLocation();
+  return <Navigate to={{ pathname: to, search: location.search }} replace />;
+}
 
 function Header() {
   const navigate = useNavigate();
@@ -216,8 +222,10 @@ function Shell() {
                 <Route path="/documents/:id" element={<DocumentViewPage />} />
                 <Route path="/inbox" element={<InboxPage />} />
                 <Route path="/digests" element={<DigestsPage />} />
-                <Route path="/actions" element={<ActionsPage />} />
-                <Route path="/segments" element={<SegmentsPage />} />
+                <Route path="/engage" element={<EngagePage />} />
+                <Route path="/engage/:tab" element={<EngagePage />} />
+                <Route path="/actions" element={<RedirectTo to="/engage/campaigns" />} />
+                <Route path="/segments" element={<RedirectTo to="/engage/segments" />} />
               </Route>
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
@@ -233,8 +241,10 @@ function Shell() {
                 <Route path="/documents/:id" element={<DocumentViewPage />} />
                 <Route path="/inbox" element={<InboxPage />} />
                 <Route path="/digests" element={<DigestsPage />} />
-                <Route path="/actions" element={<ActionsPage />} />
-                <Route path="/segments" element={<SegmentsPage />} />
+                <Route path="/engage" element={<EngagePage />} />
+                <Route path="/engage/:tab" element={<EngagePage />} />
+                <Route path="/actions" element={<RedirectTo to="/engage/campaigns" />} />
+                <Route path="/segments" element={<RedirectTo to="/engage/segments" />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Route>
             </Routes>
