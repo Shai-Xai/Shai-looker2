@@ -144,6 +144,18 @@ function mount(app, { db, auth, resolveAudience }) {
     } catch (e) { res.status(400).json({ error: e.message }); }
   });
 
+  // The people in a segment — resolved live, capped for display.
+  app.get('/api/segments/:entityId/:id/members', auth.requireAuth, auth.requirePermission('campaigns.view'), async (req, res) => {
+    if (!guard(req, res, req.params.entityId)) return;
+    const seg = getSeg(req.params.id);
+    if (!seg || seg.entity_id !== req.params.entityId) return res.status(404).json({ error: 'Not found' });
+    try {
+      const r = await resolveDefinition(req.params.entityId, JSON.parse(seg.definition || '{}'), req.user);
+      const list = r.list || [];
+      res.json({ name: seg.name, count: list.length, capped: list.length > 2000, members: list.slice(0, 2000).map((m) => ({ email: m.email || '', name: m.name || '', phone: m.phone || '', ticket: m.ticket || '' })) });
+    } catch (e) { res.status(400).json({ error: e.message }); }
+  });
+
   console.log('[segments] segments module mounted');
 
   // For the Action layer (campaigns/journeys) to resolve a segment by id.

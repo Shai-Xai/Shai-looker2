@@ -13,6 +13,7 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
   const [tiles, setTiles] = useState(null);
   const [editing, setEditing] = useState(null); // null | 'new' | segment object
   const [busyId, setBusyId] = useState(null);
+  const [viewing, setViewing] = useState(null); // { segment, data | null } — people modal
 
   const load = () => api.listSegments(entityId).then((r) => setSegments(r.segments || [])).catch(() => setSegments([]));
   useEffect(() => { load(); }, [entityId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -36,6 +37,7 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
 
   const refresh = (s) => { setBusyId(s.id); api.previewSegment(entityId, s.id).then(load).catch(() => {}).finally(() => setBusyId(null)); };
   const del = (s) => { if (confirm(`Delete segment “${s.name}”?`)) api.deleteSegment(entityId, s.id).then(load); };
+  const viewPeople = (s) => { setViewing({ segment: s, data: null }); api.segmentMembers(entityId, s.id).then((d) => setViewing({ segment: s, data: d })).catch((e) => setViewing({ segment: s, data: { error: e.message } })); };
 
   return (
     <div>
@@ -71,7 +73,8 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
                     </div>
                   )}
                 </div>
-                <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+                <div style={{ display: 'flex', gap: 8, flexShrink: 0, flexWrap: 'wrap' }}>
+                  <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding }} onClick={() => viewPeople(s)}>👥 People</button>
                   <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding }} onClick={() => refresh(s)} disabled={busyId === s.id}>{busyId === s.id ? '…' : '↻ Refresh'}</button>
                   <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding }} onClick={() => setEditing(s)}>Edit</button>
                   <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding, color: 'var(--error,#ef4444)' }} onClick={() => del(s)}>Delete</button>
@@ -79,6 +82,43 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {viewing && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 80, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} onClick={() => setViewing(null)}>
+          <div className="modal-in" style={{ background: 'var(--card)', borderRadius: 16, width: 'min(560px, 100%)', maxHeight: '85vh', display: 'flex', flexDirection: 'column', boxShadow: 'var(--shadow-pop)' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--hairline)', display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 700, fontSize: 15 }}>{viewing.segment.name}</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)' }}>{viewing.data ? (viewing.data.error ? viewing.data.error : `${viewing.data.count} ${viewing.data.count === 1 ? 'person' : 'people'}${viewing.data.capped ? ' · showing first 2,000' : ''}`) : 'Resolving live…'}</div>
+              </div>
+              <button style={mini} onClick={() => setViewing(null)}>Close</button>
+            </div>
+            <div style={{ overflowY: 'auto', padding: '4px 0' }}>
+              {!viewing.data ? <p style={{ color: 'var(--muted)', fontSize: 13, padding: 16 }}>Loading…</p>
+                : viewing.data.error ? <p style={{ color: 'var(--error,#ef4444)', fontSize: 13, padding: 16 }}>{viewing.data.error}</p>
+                : viewing.data.members.length === 0 ? <p style={{ color: 'var(--muted)', fontSize: 13, padding: 16 }}>No people match right now.</p>
+                : (
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+                    <thead><tr style={{ color: 'var(--muted)', textAlign: 'left' }}>
+                      <th style={{ padding: '6px 16px', fontWeight: 600 }}>Name</th>
+                      <th style={{ padding: '6px 16px', fontWeight: 600 }}>Email</th>
+                      <th style={{ padding: '6px 16px', fontWeight: 600 }}>Mobile</th>
+                    </tr></thead>
+                    <tbody>
+                      {viewing.data.members.map((m, i) => (
+                        <tr key={i} style={{ borderTop: '1px solid var(--hairline)' }}>
+                          <td style={{ padding: '6px 16px' }}>{m.name || '—'}</td>
+                          <td style={{ padding: '6px 16px', wordBreak: 'break-all' }}>{m.email || '—'}</td>
+                          <td style={{ padding: '6px 16px' }}>{m.phone || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+            </div>
+          </div>
         </div>
       )}
     </div>

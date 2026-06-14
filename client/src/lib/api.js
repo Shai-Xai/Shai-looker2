@@ -232,6 +232,7 @@ export const api = {
   updateSegment: (entityId, id, b) => fetch(`/api/segments/${entityId}/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   deleteSegment: (entityId, id) => fetch(`/api/segments/${entityId}/${id}`, { method: 'DELETE' }).then(json),
   previewSegment: (entityId, id) => fetch(`/api/segments/${entityId}/${id}/preview`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(json),
+  segmentMembers: (entityId, id) => fetch(`/api/segments/${entityId}/${id}/members`).then(json),
   actionFieldValues: (entityId, b) => fetch(`/api/actions/${entityId}/field-values`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   actionDraftCopy: (entityId, b) => fetch(`/api/actions/${entityId}/draft-copy`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   actionPreviewEmail: (entityId, b) => fetch(`/api/actions/${entityId}/preview-email`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
