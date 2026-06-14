@@ -229,20 +229,14 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
           ))}
         </div>
       )}
-      {/* Filter pills — one quiet row: channel · state. Only the buckets that
-          actually have campaigns show, and the whole bar hides when there's
-          nothing meaningful to filter. */}
+      {/* Filter popover — collapses channel + state into one quiet control so
+          the list stays clean. Shows a count badge when filters are active. */}
       {(channelPills.length > 1 || statePills.length > 1) && (
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 14 }}>
-          {channelPills.length > 1 && channelPills.map((p) => (
-            <FilterPill key={`c-${p.value}`} active={channelFilter === p.value} onClick={() => setChannelFilter(p.value)} label={p.label} n={p.n} />
-          ))}
-          {channelPills.length > 1 && statePills.length > 1 && (
-            <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--hairline)', margin: '2px 4px' }} />
-          )}
-          {statePills.length > 1 && statePills.map((p) => (
-            <FilterPill key={`s-${p.value}`} active={stateFilter === p.value} onClick={() => setStateFilter(p.value)} label={p.label} n={p.n} />
-          ))}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+          <FilterMenu
+            channelPills={channelPills} channelFilter={channelFilter} setChannelFilter={setChannelFilter}
+            statePills={statePills} stateFilter={stateFilter} setStateFilter={setStateFilter}
+          />
         </div>
       )}
       {data.actions.length === 0 ? (
@@ -1390,23 +1384,52 @@ function ChannelChip({ channel }) {
   return <span style={{ fontSize: 10.5, fontWeight: 700, borderRadius: 980, padding: '2px 8px', background: m.bg, color: m.c }}>{m.t}</span>;
 }
 
-// A toggleable filter pill. Quiet by default; a light brand tint when active.
-function FilterPill({ active, onClick, label, n }) {
+// One quiet "Filter" control that opens a popover with channel + state choices.
+// Keeps the list clean; a badge shows how many filters are active.
+function FilterMenu({ channelPills, channelFilter, setChannelFilter, statePills, stateFilter, setStateFilter }) {
+  const [open, setOpen] = useState(false);
+  const activeCount = (channelFilter !== 'all' ? 1 : 0) + (stateFilter !== 'all' ? 1 : 0);
+  const labelFor = (pills, value) => pills.find((p) => p.value === value)?.label || '';
+  const Group = ({ title, pills, value, onPick }) => (
+    <div style={{ padding: '6px 4px' }}>
+      <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)', padding: '0 8px 4px' }}>{title}</div>
+      {pills.map((p) => {
+        const active = value === p.value;
+        return (
+          <button key={p.value} className="nav-row" onClick={() => { onPick(p.value); }}
+            style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left', border: 'none', background: active ? 'rgba(var(--brand-rgb,255,56,92),0.10)' : 'transparent', cursor: 'pointer', padding: '7px 10px', borderRadius: 7, fontSize: 13, fontWeight: active ? 700 : 600, color: active ? 'var(--brand)' : 'var(--text)' }}>
+            <span style={{ flex: 1 }}>{p.label}</span>
+            {typeof p.n === 'number' && <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)' }}>{p.n}</span>}
+            {active && <span style={{ color: 'var(--brand)' }}>✓</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{
-        fontSize: 12, fontWeight: 600, borderRadius: 980, padding: '4px 11px', cursor: 'pointer',
-        border: active ? '1px solid var(--brand)' : '1px solid transparent',
-        background: active ? 'rgba(var(--brand-rgb,255,56,92),0.10)' : 'transparent',
-        color: active ? 'var(--brand)' : 'var(--muted)',
-        display: 'inline-flex', alignItems: 'center', gap: 5,
-      }}
-    >
-      {label}
-      {typeof n === 'number' && <span style={{ fontSize: 10.5, fontWeight: 700, opacity: 0.6 }}>{n}</span>}
-    </button>
+    <div style={{ position: 'relative' }}>
+      <button style={{ ...outline, display: 'inline-flex', alignItems: 'center', gap: 7 }} onClick={() => setOpen((o) => !o)} title="Filter campaigns">
+        <span>⚲ Filter</span>
+        {activeCount > 0 && <span style={{ fontSize: 10.5, fontWeight: 800, background: 'var(--brand)', color: '#fff', borderRadius: 980, padding: '1px 7px' }}>{activeCount}</span>}
+      </button>
+      {open && (
+        <>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 40 }} onClick={() => setOpen(false)} />
+          <div className="modal-in" style={{ position: 'absolute', right: 0, top: 'calc(100% + 4px)', zIndex: 41, background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 12, boxShadow: 'var(--shadow-pop, 0 8px 40px rgba(0,0,0,0.16))', minWidth: 200, padding: 4 }}>
+            {channelPills.length > 1 && <Group title="Channel" pills={channelPills} value={channelFilter} onPick={setChannelFilter} />}
+            {channelPills.length > 1 && statePills.length > 1 && <div style={{ height: 1, background: 'var(--hairline)', margin: '2px 6px' }} />}
+            {statePills.length > 1 && <Group title="State" pills={statePills} value={stateFilter} onPick={setStateFilter} />}
+            {activeCount > 0 && (
+              <>
+                <div style={{ height: 1, background: 'var(--hairline)', margin: '2px 6px' }} />
+                <button className="nav-row" onClick={() => { setChannelFilter('all'); setStateFilter('all'); setOpen(false); }}
+                  style={{ display: 'block', width: '100%', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer', padding: '8px 10px', borderRadius: 7, fontSize: 12.5, fontWeight: 600, color: 'var(--muted)' }}>Clear filters</button>
+              </>
+            )}
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 
