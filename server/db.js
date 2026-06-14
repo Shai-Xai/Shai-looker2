@@ -136,6 +136,7 @@ addColumn('entities', 'ai_context', "TEXT NOT NULL DEFAULT ''"); // client-speci
 addColumn('entities', 'integrations', "TEXT NOT NULL DEFAULT '{}'"); // per-client API credentials (Looker / Anthropic)
 addColumn('entities', 'mail_branding', "TEXT NOT NULL DEFAULT '{}'"); // per-client email branding (logo/colour/sender/wording)
 addColumn('entities', 'inbox_token', "TEXT NOT NULL DEFAULT ''"); // unique token for the client's CC-the-Owl inbound address
+addColumn('entities', 'all_organisers', "INTEGER NOT NULL DEFAULT 0"); // internal/management client: sees ALL organisers' data (deliberately unscoped)
 // Per-user notification channel preferences (1 = receive on that channel).
 addColumn('users', 'notify_email', 'INTEGER NOT NULL DEFAULT 1');
 addColumn('users', 'notify_push', 'INTEGER NOT NULL DEFAULT 1');
@@ -403,7 +404,7 @@ CREATE INDEX IF NOT EXISTS idx_tile_library_category ON tile_library(category);
 
 // ─── Entities ─────────────────────────────────────────────────────────────────
 function rowToEntity(r) {
-  return r && { id: r.id, name: r.name, logo: r.logo || '', aiContext: r.ai_context || '', lockedFilters: J(r.locked_filters, {}), scopeFields: J(r.scope_fields, {}), createdAt: r.created_at };
+  return r && { id: r.id, name: r.name, logo: r.logo || '', aiContext: r.ai_context || '', lockedFilters: J(r.locked_filters, {}), scopeFields: J(r.scope_fields, {}), allOrganisers: !!r.all_organisers, createdAt: r.created_at };
 }
 function listEntities() { return db.prepare('SELECT * FROM entities ORDER BY name').all().map(rowToEntity); }
 function getEntity(id) { return rowToEntity(db.prepare('SELECT * FROM entities WHERE id=?').get(id)); }
@@ -421,7 +422,8 @@ function updateEntity(id, patch) {
   const aiContext = patch.aiContext !== undefined ? (patch.aiContext || '') : (cur.ai_context || '');
   const lf = patch.lockedFilters !== undefined ? JSON.stringify(patch.lockedFilters) : cur.locked_filters;
   const sf = patch.scopeFields !== undefined ? JSON.stringify(patch.scopeFields) : cur.scope_fields;
-  db.prepare('UPDATE entities SET name=?, logo=?, ai_context=?, locked_filters=?, scope_fields=? WHERE id=?').run(name, logo, aiContext, lf, sf, id);
+  const allOrg = patch.allOrganisers !== undefined ? (patch.allOrganisers ? 1 : 0) : cur.all_organisers;
+  db.prepare('UPDATE entities SET name=?, logo=?, ai_context=?, locked_filters=?, scope_fields=?, all_organisers=? WHERE id=?').run(name, logo, aiContext, lf, sf, allOrg, id);
   return getEntity(id);
 }
 function deleteEntity(id) { db.prepare('DELETE FROM entities WHERE id=?').run(id); }

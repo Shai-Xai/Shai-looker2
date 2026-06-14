@@ -173,6 +173,8 @@ function filterNameToField(name) {
 // their entities' organiser locks; nothing configured → fail closed).
 function scopeFiltersForUser(user) {
   if (!user || user.role === 'admin') return null;
+  // Internal/management clients are intentionally unscoped (see resolveScope).
+  if ((user.entityIds || []).length && user.entityIds.every((eid) => db.getEntity(eid)?.allOrganisers)) return null;
   return fieldLocksFromEntities(user.entityIds) || { __block: true };
 }
 
@@ -360,8 +362,14 @@ async function resolveScope(query, user, suiteId) {
     if (user.role === 'admin') return { filters: {} };
     entityIds = user.entityIds || [];
   }
+  // Internal/management clients are deliberately UNSCOPED — they see every
+  // organiser's data. Only an admin can set this flag on an entity, so a client
+  // can't self-elevate. Requires EVERY resolved entity to be flagged (mixed →
+  // fall through to normal scoping, never silently widen).
+  if (entityIds.length && entityIds.every((eid) => db.getEntity(eid)?.allOrganisers)) return { filters: {} };
+
   const org = entityOrganiser(entityIds);
-  if (!org) return { block: true, reason: 'no organiser is configured for this client (set the organiser locked filter on the entity)' };
+  if (!org) return { block: true, reason: 'no organiser is configured for this client (set the organiser locked filter on the entity, or mark it "all organisers" if it is an internal/management client)' };
 
   const idx = exploreScopeIndex();
   const key = `${query?.model}::${query?.view}`;

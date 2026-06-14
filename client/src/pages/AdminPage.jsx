@@ -325,8 +325,9 @@ function ClientSettings({ entity, suites, fields, onChange, onBack }) {
   const [logo, setLogo] = useState(entity.logo || '');
   const [aiContext, setAiContext] = useState(entity.aiContext || '');
   const [locks, setLocks] = useState(entity.lockedFilters || {});
+  const [allOrganisers, setAllOrganisers] = useState(!!entity.allOrganisers);
   const [saved, setSaved] = useState(false);
-  const save = async () => { await api.adminUpdateEntity(entity.id, { name, logo, aiContext, lockedFilters: locks }); flash(setSaved); onChange(); };
+  const save = async () => { await api.adminUpdateEntity(entity.id, { name, logo, aiContext, lockedFilters: locks, allOrganisers }); flash(setSaved); onChange(); };
   const remove = async () => { if (confirm(`Delete client "${entity.name}"? This removes its sets too.`)) { await api.adminDeleteEntity(entity.id); onBack(); onChange(); } };
   const preview = async () => {
     if (!suites.length) { alert('This client has no suites yet.'); return; }
@@ -350,8 +351,21 @@ function ClientSettings({ entity, suites, fields, onChange, onBack }) {
         <L>Client logo</L>
         <div style={{ marginTop: 6 }}><LogoPicker value={logo} onChange={setLogo} /></div>
       </div>
+      {/* Internal/management clients see every organiser's data — no scope. A
+          deliberate, admin-only opt-out of the organiser boundary. */}
+      <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 12px', border: '1px solid var(--hairline)', borderRadius: 10, margin: '4px 0 12px', cursor: 'pointer', background: allOrganisers ? 'rgba(var(--brand-rgb),0.08)' : 'transparent' }}>
+        <input type="checkbox" checked={allOrganisers} onChange={(e) => setAllOrganisers(e.target.checked)} style={{ marginTop: 2 }} />
+        <span>
+          <span style={{ fontWeight: 700, fontSize: 13.5 }}>🌐 All organisers (internal / management)</span>
+          <span style={{ display: 'block', fontSize: 12, color: 'var(--muted)', marginTop: 2, lineHeight: 1.45 }}>
+            This client sees <b>every organiser's</b> data — no organiser scope is applied. Use only for Howler-internal/management logins. Leave off for a normal client.
+          </span>
+        </span>
+      </label>
       <L>Locked filters (organiser-level — apply across all this client's sets)</L>
-      <LockedFilterEditor value={locks} onChange={setLocks} fields={fields} />
+      {allOrganisers
+        ? <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: '4px 0' }}>Not needed — “All organisers” is on, so this client is intentionally unscoped.</p>
+        : <LockedFilterEditor value={locks} onChange={setLocks} fields={fields} />}
       <div style={{ marginTop: 12 }}>
         <L>Client AI context</L>
         <div style={{ fontSize: 12, color: 'var(--muted)', margin: '4px 0 4px' }}>Added to the AI for this client's insights & dashboard summaries (on top of the global AI instructions).</div>
