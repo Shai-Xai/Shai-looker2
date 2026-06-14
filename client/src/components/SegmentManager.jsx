@@ -3,6 +3,17 @@ import { api } from '../lib/api.js';
 import { AudienceFilters } from './CampaignManager.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
 
+// Visual placeholders shown under the live segments — common audiences we'll
+// auto-build from the client's data. Not yet wired up ("coming soon").
+const SUGGESTED_SEGMENTS = [
+  { name: 'New customers', icon: '✨', desc: 'First-time buyers — never purchased before this event.' },
+  { name: 'Returning customers', icon: '🔁', desc: 'Bought at a previous event too — your repeat base.' },
+  { name: 'Most loyal', icon: '💛', desc: 'Attended the most events over time.' },
+  { name: 'Top spenders', icon: '💎', desc: 'Highest lifetime spend across all events.' },
+  { name: 'Lapsed buyers', icon: '😴', desc: "Bought before but haven't in a while — ripe for win-back." },
+  { name: 'VIP ticket holders', icon: '🎟️', desc: 'Bought VIP / premium tiers.' },
+];
+
 // Segments — reusable LIVE audiences. List + a builder that re-uses the campaign
 // audience picker (tile + columns + filters) and the audience-preview endpoint
 // for the live count. Same component serves admin + client self-service.
@@ -85,7 +96,25 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
         </div>
       )}
 
-      {viewing && (
+      {/* Suggested segments — visual placeholders for common audiences we'll
+          auto-build from the client's data. Non-interactive (coming soon). */}
+      <div style={{ marginTop: 26 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)', marginBottom: 10 }}>Suggested segments · coming soon</div>
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
+          {SUGGESTED_SEGMENTS.map((s) => (
+            <div key={s.name} title="Coming soon — we'll auto-build this from your data" style={{ border: '1px dashed var(--hairline)', borderRadius: 14, padding: '14px 16px', background: 'var(--card)', opacity: 0.7, cursor: 'default' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 18 }}>{s.icon}</span>
+                <span style={{ fontWeight: 700, fontSize: 14, flex: 1 }}>{s.name}</span>
+                <span style={{ fontSize: 9.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', background: 'rgba(128,128,128,0.16)', color: 'var(--muted)', borderRadius: 980, padding: '2px 7px' }}>soon</span>
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6, lineHeight: 1.45 }}>{s.desc}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+
         <div style={{ position: 'fixed', inset: 0, zIndex: 80, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} onClick={() => setViewing(null)}>
           <div className="modal-in" style={{ background: 'var(--card)', borderRadius: 16, width: 'min(560px, 100%)', maxHeight: '85vh', display: 'flex', flexDirection: 'column', boxShadow: 'var(--shadow-pop)' }} onClick={(e) => e.stopPropagation()}>
             <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--hairline)', display: 'flex', alignItems: 'center', gap: 10 }}>
