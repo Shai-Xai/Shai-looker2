@@ -43,6 +43,7 @@ export default function ClientLayout() {
   const onInbox = location.pathname.startsWith('/inbox');
   const onDigests = location.pathname.startsWith('/digests');
   const onActions = location.pathname.startsWith('/actions');
+  const onSegments = location.pathname.startsWith('/segments');
 
   // Experience OS inbox: unread + must-acknowledge counts for the badge/banner.
   const [inbox, setInbox] = useState({ enabled: false, unread: 0, pending: [] });
@@ -343,6 +344,17 @@ export default function ClientLayout() {
             <span style={ellip}>Actions</span>
           </button>
           )}
+          {can(PERMS.CAMPAIGNS_VIEW) && (
+          <button
+            ref={onSegments ? activeRef : null}
+            className={`nav-row${onSegments ? ' active' : ''}`}
+            style={{ ...rowBtn, fontWeight: onSegments ? 600 : 500 }}
+            onClick={() => { if (!onSegments) vtNavigate(navigate, '/segments'); if (isMobile) setNavOpen(false); }}
+          >
+            <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>🎯</span>
+            <span style={ellip}>Segments</span>
+          </button>
+          )}
         </>
       )}
     </nav>
@@ -466,6 +478,16 @@ export default function ClientLayout() {
                   >
                     <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>⚡</span>
                     <span style={ellip}>Actions</span>
+                  </button>
+                  )}
+                  {can(PERMS.CAMPAIGNS_VIEW) && (
+                  <button
+                    className={`nav-row${onSegments ? ' active' : ''}`}
+                    style={{ ...mRowSuite, fontWeight: onSegments ? 700 : 500 }}
+                    onClick={() => { if (!onSegments) vtNavigate(navigate, '/segments'); setNavOpen(false); }}
+                  >
+                    <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>🎯</span>
+                    <span style={ellip}>Segments</span>
                   </button>
                   )}
                 </>

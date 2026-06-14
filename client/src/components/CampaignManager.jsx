@@ -1172,7 +1172,7 @@ function Accordion({ title, defaultOpen = false, open: controlledOpen, onToggle,
 // Optional targeting filters on the audience tile's columns (city, age, ticket
 // category, new/returning…). 'is one of' picks real values from the data;
 // 'between' is a numeric range (e.g. age). All filters narrow the segment (AND).
-function AudienceFilters({ entityId, fields, filters, addFilter, setFilter, removeFilter, attr, tiles, onAttr }) {
+export function AudienceFilters({ entityId, fields, filters, addFilter, setFilter, removeFilter, attr, tiles, onAttr }) {
   const attrDash = tiles?.dashboards?.find((d) => d.dashboardId === attr?.dashboardId);
   return (
     <div style={{ marginTop: 8, borderTop: '1px dashed var(--hairline)', paddingTop: 10 }}>
