@@ -18,7 +18,15 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
   const [journey, setJourney] = useState(null); // sequence action for the journey funnel
   const [presetMaster, setPresetMaster] = useState(''); // pre-fill master on a new campaign
   const [masters, setMasters] = useState([]);
-  const [openMasters, setOpenMasters] = useState({}); // master name → expanded? (collapsed by default)
+  // Master name → expanded? (collapsed by default). Persisted per entity so the
+  // expand/collapse choice survives reloads.
+  const mastersKey = `pulse.openMasters.${entityId}`;
+  const [openMasters, setOpenMasters] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(mastersKey) || '{}'); } catch { return {}; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem(mastersKey, JSON.stringify(openMasters)); } catch { /* private mode / quota */ }
+  }, [openMasters, mastersKey]);
   const [channelFilter, setChannelFilter] = useState('all'); // all | email | sms | both
   const [stateFilter, setStateFilter] = useState('all'); // all | draft | pending | scheduled | sent | automated
   useEffect(() => { api.getActionTemplates(entityId).then((r) => setTemplates(r.templates || [])).catch(() => setTemplates([])); }, [entityId]);
@@ -1052,7 +1060,12 @@ function MasterReport({ entityId, name, master, campaigns, onOpen, onNew, onChan
   const t = campaigns.reduce((s, a) => ({
     sent: s.sent + (a.results?.sent || 0), clicks: s.clicks + (a.results?.clicks || 0),
     converted: s.converted + (a.results?.converted || 0), enrolled: s.enrolled + (a.results?.enrolled || 0),
-  }), { sent: 0, clicks: 0, converted: 0, enrolled: 0 });
+    emailSent: s.emailSent + (a.results?.emailSent || 0), smsSent: s.smsSent + (a.results?.smsSent || 0),
+    emailClicks: s.emailClicks + (a.results?.emailClicks || 0), smsClicks: s.smsClicks + (a.results?.smsClicks || 0),
+  }), { sent: 0, clicks: 0, converted: 0, enrolled: 0, emailSent: 0, smsSent: 0, emailClicks: 0, smsClicks: 0 });
+  // Per-channel rollup is only meaningful once this master mixes channels.
+  const channels = new Set(campaigns.map((a) => a.config?.channel || 'email'));
+  const showPerChannel = channels.has('both') || channels.size > 1;
   const anySeq = campaigns.some((a) => a.config?.campaignMode === 'sequence');
   const ctr = t.sent > 0 ? Math.round((t.clicks / t.sent) * 100) : 0;
   // Target tracks conversions for sequences, else clicks. Progress bar shows it.
@@ -1110,6 +1123,26 @@ function MasterReport({ entityId, name, master, campaigns, onOpen, onNew, onChan
         <Stat label="Click rate" value={`${ctr}%`} />
         {anySeq && <Stat label="Converted" value={t.converted} accent="var(--success,#10b981)" />}
       </div>
+
+      {/* Per-channel rollup across all segment campaigns in this master. */}
+      {showPerChannel && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, margin: '0 0 18px' }}>
+          {[
+            { key: 'email', label: '✉️ Email', accent: '#0a66c2', sent: t.emailSent, clicks: t.emailClicks },
+            { key: 'sms', label: '💬 SMS', accent: '#15803d', sent: t.smsSent, clicks: t.smsClicks },
+          ].map((c) => (
+            <div key={c.key} style={{ background: 'var(--elevated, #fafafa)', border: '1px solid var(--hairline)', borderRadius: 12, padding: '12px 16px' }}>
+              <div style={{ fontSize: 12.5, fontWeight: 800, color: c.accent, marginBottom: 8 }}>{c.label}</div>
+              <div style={{ display: 'flex', gap: 18, fontSize: 13 }}>
+                <div><div style={{ color: 'var(--muted)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 700 }}>Sent</div><div style={{ fontSize: 19, fontWeight: 800 }}>{c.sent}</div></div>
+                <div><div style={{ color: 'var(--muted)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 700 }}>Clicks</div><div style={{ fontSize: 19, fontWeight: 800 }}>{c.clicks}</div></div>
+                <div><div style={{ color: 'var(--muted)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 700 }}>CTR</div><div style={{ fontSize: 19, fontWeight: 800, color: c.accent }}>{c.sent > 0 ? Math.min(100, Math.round((c.clicks / c.sent) * 100)) : 0}%</div></div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', margin: '0 2px 8px' }}>By segment</div>
       {campaigns.map((a) => {
         const seq = a.config?.campaignMode === 'sequence';
@@ -1142,9 +1175,19 @@ function MasterReport({ entityId, name, master, campaigns, onOpen, onNew, onChan
 function CampaignReport({ entityId, action, onClose }) {
   const isMobile = useIsMobile();
   const [r, setR] = useState(null);
-  const [preview, setPreview] = useState(null); // rendered {html, sms}
+  const [previews, setPreviews] = useState(null); // [{ label, html, sms }] — one per step (or one for once-off)
   useEffect(() => { api.actionReport(entityId, action.id).then(setR).catch(() => setR({ error: true })); }, [entityId, action.id]);
-  useEffect(() => { api.actionPreviewEmail(entityId, action.config).then(setPreview).catch(() => setPreview({})); }, [entityId, action.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    // Sequences render every step (so the whole journey can be reviewed); a
+    // once-off renders just its single message.
+    const steps = action.config?.steps || [];
+    const unit = (h) => (h % 24 === 0 && h >= 24 ? `${h / 24}d` : `${h}h`);
+    const jobs = steps.length > 0
+      ? steps.map((s, i) => ({ label: `Step ${i + 1} · +${unit(s.delayHours || 0)}`, cfg: { ...action.config, subject: s.subject || action.config.subject, body: s.body || '', smsBody: s.body || action.config.smsBody } }))
+      : [{ label: '', cfg: action.config }];
+    Promise.all(jobs.map((j) => api.actionPreviewEmail(entityId, j.cfg).then((p) => ({ label: j.label, ...p })).catch(() => ({ label: j.label }))))
+      .then(setPreviews).catch(() => setPreviews([]));
+  }, [entityId, action.id]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!r) return <p style={{ color: 'var(--muted)', fontSize: 13 }}>Loading report…</p>;
   if (r.error) return <div><button style={mini} onClick={onClose}>← Back</button><p style={{ color: 'var(--error,#ef4444)', fontSize: 13, marginTop: 10 }}>Could not load the report.</p></div>;
   const stat = (label, value, color) => (
@@ -1233,12 +1276,17 @@ function CampaignReport({ entityId, action, onClose }) {
               </div>
             ) : null}
           </ReportSection>
-          {/* Live preview */}
-          <ReportSection title="Preview" meta={hasEmail && hasSms ? 'Email + SMS' : hasSms ? 'SMS' : 'Email'}>
-            {!preview ? <p style={{ color: 'var(--muted)', fontSize: 12.5 }}>Rendering…</p> : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {hasEmail && preview.html && <iframe title="Email preview" srcDoc={preview.html} style={{ width: '100%', height: 420, border: '1px solid var(--hairline)', borderRadius: 10, background: '#fff' }} />}
-                {hasSms && <SmsPreview text={preview.sms || d.smsBody || d.body} />}
+          {/* Live preview — one block per step for sequences, one for once-offs. */}
+          <ReportSection title="Preview" meta={(hasEmail && hasSms ? 'Email + SMS' : hasSms ? 'SMS' : 'Email') + (previews?.length > 1 ? ` · ${previews.length} steps` : '')}>
+            {!previews ? <p style={{ color: 'var(--muted)', fontSize: 12.5 }}>Rendering…</p> : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+                {previews.map((p, i) => (
+                  <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {p.label && <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--brand)' }}>{p.label}</div>}
+                    {hasEmail && p.html && <iframe title={`Email preview ${i + 1}`} srcDoc={p.html} style={{ width: '100%', height: 420, border: '1px solid var(--hairline)', borderRadius: 10, background: '#fff' }} />}
+                    {hasSms && <SmsPreview text={p.sms || d.smsBody || d.body} />}
+                  </div>
+                ))}
               </div>
             )}
           </ReportSection>

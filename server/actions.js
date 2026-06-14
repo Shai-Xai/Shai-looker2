@@ -1410,7 +1410,11 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     const who = req.params.rtok ? parseUnsubToken(req.params.rtok) : null;
     const channel = req.params.ch === 'e' ? 'email' : req.params.ch === 's' ? 'sms' : '';
     try { sql.prepare('INSERT INTO action_clicks (action_id, email, at, channel) VALUES (?,?,?,?)').run(a.id, who?.e ? String(who.e).toLowerCase() : '', now(), channel); } catch { /* never block the redirect */ }
+    // Bump total + per-channel counters in results so rollups (list/master) get
+    // per-channel clicks cheaply without re-querying action_clicks.
     const results = { ...a.results, clicks: (a.results.clicks || 0) + 1, lastClickAt: now() };
+    if (channel === 'email') results.emailClicks = (a.results.emailClicks || 0) + 1;
+    else if (channel === 'sms') results.smsClicks = (a.results.smsClicks || 0) + 1;
     saveResults(a.id, results);
     let dest = a.config.ctaUrl || '/';
     try {
