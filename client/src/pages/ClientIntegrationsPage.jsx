@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { api } from '../lib/api.js';
+import HomeButton from '../components/HomeButton.jsx';
 import IntegrationsForm from '../components/IntegrationsForm.jsx';
 import MailTemplateEditor from '../components/MailTemplateEditor.jsx';
 import OwlAddressCard from '../components/OwlAddressCard.jsx';
@@ -38,7 +39,10 @@ export default function ClientIntegrationsPage() {
 
   return (
     <main style={{ flex: 1, padding: isMobile ? '20px 14px' : '32px 24px', maxWidth: 1080, margin: '0 auto', width: '100%', boxSizing: 'border-box' }}>
-      <h1 style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em', marginBottom: 6 }}>Settings</h1>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6 }}>
+        <HomeButton />
+        <h1 style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em' }}>Settings</h1>
+      </div>
       <p style={{ color: 'var(--muted)', marginBottom: 18, fontSize: 14 }}>Manage your integrations, branding and inbox address. Anything left blank falls back to Howler's defaults.</p>
 
       {/* Section nav */}

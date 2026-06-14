@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useOutletContext, useSearchParams } from 'react-router-dom';
+import HomeButton from '../components/HomeButton.jsx';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/auth.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
@@ -54,8 +55,11 @@ export default function InboxPage() {
       {showList && (
         <div style={{ width: isMobile ? '100%' : 340, flexShrink: 0, borderRight: isMobile ? 'none' : '1px solid var(--hairline)', overflowY: 'auto' }}>
           <div style={{ padding: '18px 18px 8px' }}>
-            <h1 style={{ fontSize: 20, fontWeight: 800, letterSpacing: '-0.02em' }}>Inbox</h1>
-            <p style={{ fontSize: 12, color: 'var(--muted)' }}>Messages between you and Howler — all in one place.</p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <HomeButton />
+              <h1 style={{ fontSize: 20, fontWeight: 800, letterSpacing: '-0.02em' }}>Inbox</h1>
+            </div>
+            <p style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>Messages between you and Howler — all in one place.</p>
           </div>
           {list.length === 0 ? (
             <p style={{ padding: 18, color: 'var(--muted)', fontSize: 13 }}>No messages yet.</p>

@@ -1,6 +1,7 @@
 import { useParams, useSearchParams, useNavigate, useOutletContext } from 'react-router-dom';
 import { useAuth } from '../lib/auth.jsx';
 import { vtNavigate } from '../lib/viewTransition.js';
+import HomeButton from '../components/HomeButton.jsx';
 import CampaignManager from '../components/CampaignManager.jsx';
 import SegmentManager from '../components/SegmentManager.jsx';
 
@@ -34,8 +35,13 @@ export default function EngagePage() {
 
   return (
     <main style={{ flex: 1, padding: '26px 22px', maxWidth: 1080, margin: '0 auto', width: '100%', boxSizing: 'border-box', overflowY: 'auto' }}>
-      <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)', marginBottom: 2 }}>Engage</div>
-      <h1 style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em', marginBottom: 12 }}>Turn data into action</h1>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+        <HomeButton />
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)', marginBottom: 2 }}>Engage</div>
+          <h1 style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em' }}>Turn data into action</h1>
+        </div>
+      </div>
 
       {/* Tab bar — scrolls horizontally on small screens (mobile-first) and
           sticks to the top of the scroll area so it stays in reach while the
