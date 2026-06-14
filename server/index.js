@@ -393,7 +393,51 @@ app.get('/api/my/suites/:id', auth.requireAuth, (req, res) => {
   });
 });
 
-// A lock keyed by a filter NAME only matches dashboards using that exact name.
+// ── Saved dashboard filter views (dual-surface) ──────────────────────────────
+// Per-user "save my view" (client self-service) + the client default an admin
+// sets. Resolution on load is user view > entity default > the dashboard's own
+// default_value (applied client-side in ViewPage). Locks always still win.
+const cleanFilterMap = (f) => {
+  const out = {};
+  if (f && typeof f === 'object' && !Array.isArray(f)) {
+    for (const [k, v] of Object.entries(f).slice(0, 60)) if (typeof v === 'string') out[String(k).slice(0, 200)] = v.slice(0, 2000);
+  }
+  return out;
+};
+
+app.get('/api/my/dashboard-filters/:dashboardId', auth.requireAuth, (req, res) => {
+  const { dashboardId } = req.params;
+  // The entity whose default applies: the suite's entity (if accessible), else
+  // the user's own first entity.
+  let entityId = null;
+  const suiteId = req.query.suiteId;
+  if (suiteId && auth.canAccessSuite(req.user, suiteId)) entityId = db.getSuite(suiteId)?.entityId || null;
+  if (!entityId && req.user.role !== 'admin') entityId = (req.user.entityIds || [])[0] || null;
+  res.json({
+    user: db.getFilterView('user', req.user.id, dashboardId),
+    entityDefault: entityId ? db.getFilterView('entity', entityId, dashboardId) : null,
+  });
+});
+app.put('/api/my/dashboard-filters/:dashboardId', auth.requireAuth, (req, res) => {
+  db.setFilterView('user', req.user.id, req.params.dashboardId, cleanFilterMap(req.body?.filters));
+  res.json({ ok: true });
+});
+app.delete('/api/my/dashboard-filters/:dashboardId', auth.requireAuth, (req, res) => {
+  db.deleteFilterView('user', req.user.id, req.params.dashboardId);
+  res.json({ ok: true });
+});
+// Admin: set/clear the CLIENT default for a dashboard (applies to everyone on
+// that entity until a user saves their own view).
+app.put('/api/admin/entities/:entityId/dashboard-filters/:dashboardId', auth.requireAdmin, (req, res) => {
+  db.setFilterView('entity', req.params.entityId, req.params.dashboardId, cleanFilterMap(req.body?.filters));
+  res.json({ ok: true });
+});
+app.delete('/api/admin/entities/:entityId/dashboard-filters/:dashboardId', auth.requireAdmin, (req, res) => {
+  db.deleteFilterView('entity', req.params.entityId, req.params.dashboardId);
+  res.json({ ok: true });
+});
+
+
 // Expand the map so each name-keyed lock also appears under its resolved field
 // — then a dashboard whose organiser filter is named differently still locks.
 // Name keys stay (and win client-side) so same-field filters (Current/Past

@@ -30,7 +30,7 @@ export function activeFilterCount(filters, values) {
 // `onClose`); this component then renders only the panel of controls when open.
 // On mobile it stays self-contained: a "Filters" trigger + bottom sheet, since
 // the suite view hides its header there.
-export default function FilterBar({ filters, values, onChange, locked = {}, open = false, onClose }) {
+export default function FilterBar({ filters, values, onChange, locked = {}, open = false, onClose, viewActions = null }) {
   const isMobile = useIsMobile();
 
   const controls = filters.map(filter => (
@@ -46,7 +46,7 @@ export default function FilterBar({ filters, values, onChange, locked = {}, open
   // Mobile: the trigger now lives in the ☰ Menu bar (ViewPage drives `open`),
   // so here we only render the bottom sheet itself.
   if (isMobile) {
-    return open ? <FilterSheet onClose={onClose}>{controls}</FilterSheet> : null;
+    return open ? <FilterSheet onClose={onClose}>{controls}<FilterViewFooter va={viewActions} /></FilterSheet> : null;
   }
 
   // Desktop: the header owns the toggle. Render nothing until opened, then drop
@@ -61,6 +61,21 @@ export default function FilterBar({ filters, values, onChange, locked = {}, open
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'flex-end' }}>
         {controls}
       </div>
+      <FilterViewFooter va={viewActions} />
+    </div>
+  );
+}
+
+// Save/reset the current filter selection: a per-user "save my view" (re-opens
+// with these next time), and — for admins — set them as the client's default.
+function FilterViewFooter({ va }) {
+  if (!va) return null;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--hairline)' }}>
+      <button onClick={va.onSave} style={saveViewBtn}>Save filters</button>
+      {va.hasSaved && <button onClick={va.onReset} style={linkBtn}>Reset to default</button>}
+      {va.canSetDefault && <button onClick={va.onSetDefault} style={linkBtn} title="Make these the default for everyone on this client">Set as client default</button>}
+      {va.status && <span style={{ fontSize: 12.5, color: 'var(--muted)', marginLeft: 'auto' }}>{va.status}</span>}
     </div>
   );
 }
@@ -70,6 +85,8 @@ const countPill = { background: 'var(--brand)', color: '#fff', fontSize: 11, fon
 const sheetBackdrop = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 1000, display: 'flex', alignItems: 'flex-end' };
 const sheet = { background: 'var(--card)', width: '100%', maxHeight: '80dvh', overflowY: 'auto', borderRadius: '18px 18px 0 0', padding: '18px 18px calc(18px + env(safe-area-inset-bottom))', boxShadow: '0 -4px 24px rgba(0,0,0,0.2)' };
 const doneBtn = { padding: '7px 16px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer' };
+const saveViewBtn = { minHeight: 40, padding: '8px 18px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 980, fontSize: 13.5, fontWeight: 600, cursor: 'pointer' };
+const linkBtn = { minHeight: 40, padding: '8px 12px', background: 'transparent', color: 'var(--text)', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer' };
 
 // A scoped, non-editable filter (the client's organiser/event). Shows the
 // value with a lock so it's clear it's fixed to their account.

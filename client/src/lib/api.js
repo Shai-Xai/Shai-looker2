@@ -148,6 +148,13 @@ export const api = {
   mySuites: () => fetch('/api/my/suites').then(json),
   mySuite: (id) => fetch(`/api/my/suites/${id}`).then(json),
 
+  // Saved dashboard filter views (per-user "save my view" + admin client default)
+  getDashboardFilters: (dashboardId, suiteId) => fetch(`/api/my/dashboard-filters/${dashboardId}${suiteId ? `?suiteId=${suiteId}` : ''}`).then(json),
+  saveMyDashboardFilters: (dashboardId, filters) => fetch(`/api/my/dashboard-filters/${dashboardId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filters }) }).then(json),
+  resetMyDashboardFilters: (dashboardId) => fetch(`/api/my/dashboard-filters/${dashboardId}`, { method: 'DELETE' }).then(json),
+  setClientDashboardFilters: (entityId, dashboardId, filters) => fetch(`/api/admin/entities/${entityId}/dashboard-filters/${dashboardId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filters }) }).then(json),
+  resetClientDashboardFilters: (entityId, dashboardId) => fetch(`/api/admin/entities/${entityId}/dashboard-filters/${dashboardId}`, { method: 'DELETE' }).then(json),
+
   // Tile library
   libraryList: (params = {}) => {
     const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v)).toString();

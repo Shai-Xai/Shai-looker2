@@ -329,7 +329,34 @@ function listMarks({ userId, entityId, kind }) {
 }
 
 // ─── Settings (simple key/value) ──────────────────────────────────────────────
-db.exec(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '');`);function getSetting(key, fallback = '') {
+db.exec(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '');`);
+
+// Saved dashboard filter views. scope='user' (owner=userId, personal) or
+// 'entity' (owner=entityId, the client default an admin sets). Resolution on
+// load: user view > entity default > the dashboard's own default_value.
+db.exec(`CREATE TABLE IF NOT EXISTS dashboard_filter_views (
+  scope        TEXT NOT NULL,
+  owner_id     TEXT NOT NULL,
+  dashboard_id TEXT NOT NULL,
+  filters      TEXT NOT NULL DEFAULT '{}',
+  updated_at   TEXT NOT NULL,
+  PRIMARY KEY (scope, owner_id, dashboard_id)
+);`);
+function getFilterView(scope, ownerId, dashboardId) {
+  if (!ownerId || !dashboardId) return null;
+  const r = db.prepare('SELECT filters FROM dashboard_filter_views WHERE scope=? AND owner_id=? AND dashboard_id=?').get(scope, ownerId, dashboardId);
+  return r ? J(r.filters, {}) : null;
+}
+function setFilterView(scope, ownerId, dashboardId, filters) {
+  db.prepare(`INSERT INTO dashboard_filter_views (scope, owner_id, dashboard_id, filters, updated_at) VALUES (?,?,?,?,?)
+    ON CONFLICT(scope, owner_id, dashboard_id) DO UPDATE SET filters=excluded.filters, updated_at=excluded.updated_at`)
+    .run(scope, ownerId, dashboardId, JSON.stringify(filters || {}), now());
+}
+function deleteFilterView(scope, ownerId, dashboardId) {
+  db.prepare('DELETE FROM dashboard_filter_views WHERE scope=? AND owner_id=? AND dashboard_id=?').run(scope, ownerId, dashboardId);
+}
+
+function getSetting(key, fallback = '') {
   const r = db.prepare('SELECT value FROM settings WHERE key=?').get(key);
   return r ? r.value : fallback;
 }
@@ -1009,6 +1036,7 @@ module.exports = {
   db,
   defaultTheme,
   exportAll, importAll,
+  getFilterView, setFilterView, deleteFilterView,
   listEntities, getEntity, createEntity, updateEntity, deleteEntity, getEntityIntegrations, setEntityIntegrations,
   getEntityMailBranding, setEntityMailBranding,
   ensureInboxToken, regenerateInboxToken, findEntityByInboxToken,

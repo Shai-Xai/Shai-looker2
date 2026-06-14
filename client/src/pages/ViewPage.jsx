@@ -35,55 +35,77 @@ export default function ViewPage() {
   const [locked, setLocked] = useState({});
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [summaryOpen, setSummaryOpen] = useState(false);
+  const [entityDefault, setEntityDefault] = useState(null); // the client default (if any), for reset
+  const [hasUserView, setHasUserView] = useState(false);    // does this user have a saved view?
+  const [viewStatus, setViewStatus] = useState('');         // transient "Saved ✓" feedback
+
+  // Build filter values from the dashboard defaults + suite locks, with an
+  // optional saved overlay (entity default then the user's view). Locks always
+  // win; a shared link (?f=) overrides any non-locked filter last.
+  function buildFilters(data, suite, overlay) {
+    const lockMap = suite?.lockedFilters || {};
+    const norm = {};
+    for (const [k, v] of Object.entries(lockMap)) norm[k.trim().toLowerCase()] = v;
+    const vals = {};
+    const lockedMap = {};
+    for (const f of data.filters || []) {
+      vals[f.name] = f.default_value || '';
+      const field = (f.field || f.dimension || '').trim().toLowerCase();
+      const nameKey = (f.name || '').trim().toLowerCase();
+      const v = norm[nameKey] != null ? norm[nameKey] : (field ? norm[field] : undefined);
+      if (v != null && v !== '') { vals[f.name] = v; lockedMap[f.name] = true; }
+    }
+    if (overlay) for (const [k, v] of Object.entries(overlay)) { if (k in vals && !lockedMap[k] && typeof v === 'string') vals[k] = v; }
+    try {
+      const f = new URLSearchParams(window.location.search).get('f');
+      if (f) { const shared = JSON.parse(decodeURIComponent(f)); for (const [k, v] of Object.entries(shared || {})) if (k in vals && !lockedMap[k] && typeof v === 'string') vals[k] = v; }
+    } catch { /* malformed share param — ignore */ }
+    return { vals, lockedMap };
+  }
 
   useEffect(() => {
     setLoading(true);
     setError(null);
     const suiteP = suiteId ? api.mySuite(suiteId).catch(() => null) : Promise.resolve(null);
-    Promise.all([api.getDashboard(id), suiteP])
-      .then(([data, suite]) => {
+    // Saved views: a user's "save my view" beats the client default beats the
+    // dashboard's own default_value. Failure is non-fatal — fall back to defaults.
+    const savedP = api.getDashboardFilters(id, suiteId).catch(() => ({ user: null, entityDefault: null }));
+    Promise.all([api.getDashboard(id), suiteP, savedP])
+      .then(([data, suite, saved]) => {
         setDef(data);
         setSetInfo(suite);
-        // Lock filters from the suite's locks. A lock keyed by the filter NAME
-        // (e.g. "Past Event") wins over one keyed by the field, so the
-        // Current/Past/Comparison event filters lock independently. Matching is
-        // case/whitespace-insensitive — dashboards name the same filter
-        // inconsistently ("Organiser Name" vs "organiser name").
-        const lockMap = suite?.lockedFilters || {};
-        const norm = {};
-        for (const [k, v] of Object.entries(lockMap)) norm[k.trim().toLowerCase()] = v;
-        const defaults = {};
-        const lockedMap = {};
-        for (const f of data.filters || []) {
-          defaults[f.name] = f.default_value || '';
-          const field = (f.field || f.dimension || '').trim().toLowerCase();
-          const nameKey = (f.name || '').trim().toLowerCase();
-          const v = norm[nameKey] != null ? norm[nameKey] : (field ? norm[field] : undefined);
-          if (v != null && v !== '') {
-            defaults[f.name] = v;
-            lockedMap[f.name] = true;
-          }
-        }
-        // Shared-link filters (?f=) override the defaults — but never a lock.
-        try {
-          const f = new URLSearchParams(window.location.search).get('f');
-          if (f) {
-            const shared = JSON.parse(decodeURIComponent(f));
-            for (const [k, v] of Object.entries(shared || {})) {
-              if (k in defaults && !lockedMap[k] && typeof v === 'string') defaults[k] = v;
-            }
-          }
-        } catch { /* malformed share param — ignore */ }
-        setFilterValues(defaults);
+        setEntityDefault(saved?.entityDefault || null);
+        setHasUserView(!!saved?.user);
+        const overlay = { ...(saved?.entityDefault || {}), ...(saved?.user || {}) }; // user wins
+        const { vals, lockedMap } = buildFilters(data, suite, overlay);
+        setFilterValues(vals);
         setLocked(lockedMap);
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, suiteId]);
 
   const handleFilterChange = useCallback((name, value) => {
     setFilterValues((prev) => ({ ...prev, [name]: value }));
   }, []);
+
+  // Saved filter views. We persist only non-locked values (locks are enforced on
+  // load anyway). A flash gives quick "Saved ✓" feedback.
+  const flashView = (msg) => { setViewStatus(msg); setTimeout(() => setViewStatus(''), 1800); };
+  const savableFilters = () => Object.fromEntries(Object.entries(filterValues).filter(([k]) => !locked[k]));
+  const saveMyView = async () => { try { await api.saveMyDashboardFilters(id, savableFilters()); setHasUserView(true); flashView('Saved ✓'); } catch { flashView('Could not save'); } };
+  const resetMyView = async () => {
+    try { await api.resetMyDashboardFilters(id); } catch { /* ignore */ }
+    setHasUserView(false);
+    const { vals, lockedMap } = buildFilters(def, setInfo, entityDefault || {});
+    setFilterValues(vals); setLocked(lockedMap); flashView('Reset to default');
+  };
+  const setClientDefault = async () => {
+    if (!scopeEntityId) { flashView('No client in context'); return; }
+    try { const f = savableFilters(); await api.setClientDashboardFilters(scopeEntityId, id, f); setEntityDefault(f); flashView('Set as client default ✓'); } catch (e) { flashView('Could not set default'); }
+  };
+  const viewActions = { onSave: saveMyView, onReset: resetMyView, hasSaved: hasUserView, canSetDefault: isAdmin, onSetDefault: setClientDefault, status: viewStatus };
 
   // View tracking (fire-and-forget) — powers home-page personalisation.
   useEffect(() => { if (suiteId && id) api.track(suiteId, id); }, [suiteId, id]);
@@ -217,7 +239,7 @@ export default function ViewPage() {
         {hasFilters && (
           <FilterBar
             filters={def.filters} values={filterValues} onChange={handleFilterChange} locked={locked}
-            open={filtersOpen} onClose={() => setFiltersOpen(false)}
+            open={filtersOpen} onClose={() => setFiltersOpen(false)} viewActions={viewActions}
           />
         )}
 
