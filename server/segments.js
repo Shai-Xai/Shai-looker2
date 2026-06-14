@@ -52,7 +52,8 @@ function mount(app, { db, auth, resolveAudience }) {
       emailField: String(d.emailField || ''),
       nameField: String(d.nameField || ''),
       phoneField: String(d.phoneField || ''),
-      consentField: String(d.consentField || ''),
+      // NB: no consent field — a segment is "who matches"; per-channel consent +
+      // unsubscribe are applied at SEND (email-opt-in ≠ SMS/WhatsApp). POPIA.
       ticketField: String(d.ticketField || ''),
       attrDashboardId: String(d.attrDashboardId || ''),
       attrTileId: String(d.attrTileId || ''),

@@ -85,7 +85,7 @@ function SegmentBuilder({ entityId, tiles, segment, onClose, onSaved }) {
   const [f, setF] = useState({
     mode: def.mode || 'tile',
     dashboardId: def.dashboardId || '', tileId: def.tileId || '',
-    emailField: def.emailField || '', nameField: def.nameField || '', consentField: def.consentField || '', phoneField: def.phoneField || '',
+    emailField: def.emailField || '', nameField: def.nameField || '', phoneField: def.phoneField || '',
     attrDashboardId: def.attrDashboardId || '', attrTileId: def.attrTileId || '',
     filters: def.filters || [], pasted: def.pasted || '',
   });
@@ -96,7 +96,7 @@ function SegmentBuilder({ entityId, tiles, segment, onClose, onSaved }) {
 
   const definition = () => ({
     mode: f.mode, dashboardId: f.dashboardId, tileId: f.tileId,
-    emailField: f.emailField, nameField: f.nameField, consentField: f.consentField, phoneField: f.phoneField,
+    emailField: f.emailField, nameField: f.nameField, phoneField: f.phoneField,
     attrDashboardId: f.attrDashboardId, attrTileId: f.attrTileId, filters: f.filters, pasted: f.pasted,
   });
 
@@ -106,7 +106,7 @@ function SegmentBuilder({ entityId, tiles, segment, onClose, onSaved }) {
   };
   useEffect(() => { clearTimeout(debounce.current); debounce.current = setTimeout(refreshAud, 350); return () => clearTimeout(debounce.current); },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [f.mode, f.dashboardId, f.tileId, f.emailField, f.consentField, f.attrDashboardId, f.attrTileId, JSON.stringify(f.filters), f.pasted]);
+    [f.mode, f.dashboardId, f.tileId, f.emailField, f.attrDashboardId, f.attrTileId, JSON.stringify(f.filters), f.pasted]);
 
   const addFilter = () => set('filters', [...f.filters, { field: '', op: 'in', values: [] }]);
   const setFilter = (i, patch) => set('filters', f.filters.map((x, j) => (j === i ? { ...x, ...patch } : x)));
@@ -169,10 +169,7 @@ function SegmentBuilder({ entityId, tiles, segment, onClose, onSaved }) {
                     <option value="">Mobile-number column (optional — for SMS)</option>
                     {aud.fields.map((fl) => <option key={fl.name} value={fl.name}>{fl.label}</option>)}
                   </select>
-                  <select style={input} value={f.consentField} onChange={(e) => set('consentField', e.target.value)}>
-                    <option value="">Consent column (optional — only contact when = Yes)</option>
-                    {aud.fields.map((fl) => <option key={fl.name} value={fl.name}>Only if “{fl.label}” = Yes</option>)}
-                  </select>
+                  <div style={hintS}>A segment is just <i>who matches</i> — consent &amp; unsubscribes are applied per channel when a campaign sends to it.</div>
                   <AudienceFilters entityId={entityId}
                     fields={(aud.filterFields && aud.filterFields.length) ? aud.filterFields : aud.fields.map((fl) => ({ ...fl, dashboardId: f.dashboardId, tileId: f.tileId }))}
                     filters={f.filters} addFilter={addFilter} setFilter={setFilter} removeFilter={removeFilter}
