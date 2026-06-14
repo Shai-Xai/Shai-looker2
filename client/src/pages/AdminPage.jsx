@@ -8,6 +8,7 @@ import MailLogView from '../components/MailLogView.jsx';
 import OwlAddressCard from '../components/OwlAddressCard.jsx';
 import DigestManager from '../components/DigestManager.jsx';
 import CampaignManager from '../components/CampaignManager.jsx';
+import SegmentManager from '../components/SegmentManager.jsx';
 import { BriefingConfigForm } from '../components/BriefingTuneModal.jsx';
 
 // Icon control: an emoji, or an uploaded image (downscaled to a small data-URL).
@@ -255,7 +256,7 @@ function AdminLoginsTab() {
 // One client's settings hub: a left nav (Settings / Suites / Logins) + panel.
 function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites, users, allUsers, onChange, onBack }) {
   const [section, setSection] = useState('settings');
-  const nav = [['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['sets', 'Custom sets'], ['briefing', 'Briefing'], ['messages', 'Messages'], ['digests', 'Digests'], ['campaigns', 'Actions'], ['settlements', 'Settlements'], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations'], ['email', 'Branding']];
+  const nav = [['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['sets', 'Custom sets'], ['briefing', 'Briefing'], ['messages', 'Messages'], ['digests', 'Digests'], ['campaigns', 'Campaigns'], ['segments', 'Segments'], ['settlements', 'Settlements'], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations'], ['email', 'Branding']];
   return (
     <div>
       <button style={miniBtnOutline} onClick={onBack}>← All clients</button>
@@ -288,6 +289,12 @@ function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites,
             <div>
               <p style={hint}>Turn data into action for <b>{entity.name}</b> — e.g. email customers who abandoned checkout. Preview the audience and copy, then explicitly approve the send.</p>
               <CampaignManager entityId={entity.id} scope="admin" />
+            </div>
+          )}
+          {section === 'segments' && (
+            <div>
+              <p style={hint}>Reusable, always-live audiences for <b>{entity.name}</b> — built from their data and used by campaigns. Clients can also manage these themselves.</p>
+              <SegmentManager entityId={entity.id} scope="admin" />
             </div>
           )}
           {section === 'digests' && (

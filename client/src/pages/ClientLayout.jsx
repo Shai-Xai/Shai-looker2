@@ -333,18 +333,19 @@ export default function ClientLayout() {
             <span style={ellip}>Digests</span>
           </button>
           )}
-          {can(PERMS.CAMPAIGNS_VIEW) && (
+          {(can(PERMS.CAMPAIGNS_VIEW)) && (
+          <>
+          <div style={{ borderTop: '1px solid var(--hairline)', margin: '12px 6px 10px' }} />
+          <div style={{ padding: '0 8px 8px 14px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)' }}>Engage</div>
           <button
             ref={onActions ? activeRef : null}
             className={`nav-row${onActions ? ' active' : ''}`}
             style={{ ...rowBtn, fontWeight: onActions ? 600 : 500 }}
             onClick={() => { if (!onActions) vtNavigate(navigate, '/actions'); if (isMobile) setNavOpen(false); }}
           >
-            <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>⚡</span>
-            <span style={ellip}>Actions</span>
+            <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>📣</span>
+            <span style={ellip}>Campaigns</span>
           </button>
-          )}
-          {can(PERMS.CAMPAIGNS_VIEW) && (
           <button
             ref={onSegments ? activeRef : null}
             className={`nav-row${onSegments ? ' active' : ''}`}
@@ -354,6 +355,7 @@ export default function ClientLayout() {
             <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>🎯</span>
             <span style={ellip}>Segments</span>
           </button>
+          </>
           )}
         </>
       )}
@@ -471,16 +473,16 @@ export default function ClientLayout() {
                   </button>
                   )}
                   {can(PERMS.CAMPAIGNS_VIEW) && (
+                  <>
+                  <div style={{ padding: '8px 8px 6px 14px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)' }}>Engage</div>
                   <button
                     className={`nav-row${onActions ? ' active' : ''}`}
                     style={{ ...mRowSuite, fontWeight: onActions ? 700 : 500 }}
                     onClick={() => { if (!onActions) vtNavigate(navigate, '/actions'); setNavOpen(false); }}
                   >
-                    <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>⚡</span>
-                    <span style={ellip}>Actions</span>
+                    <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>📣</span>
+                    <span style={ellip}>Campaigns</span>
                   </button>
-                  )}
-                  {can(PERMS.CAMPAIGNS_VIEW) && (
                   <button
                     className={`nav-row${onSegments ? ' active' : ''}`}
                     style={{ ...mRowSuite, fontWeight: onSegments ? 700 : 500 }}
@@ -489,6 +491,7 @@ export default function ClientLayout() {
                     <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>🎯</span>
                     <span style={ellip}>Segments</span>
                   </button>
+                  </>
                   )}
                 </>
               )}

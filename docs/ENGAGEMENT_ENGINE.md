@@ -164,8 +164,14 @@ high-value piece. Contract: `resolveSegment(definition, ctx) → { members, coun
   did-not-X) — gated on the Howler/Looker signal integration (roadmap 4.1).
 
 ## 9. Open decisions
-1. **Naming / IA** — top-level concept: "Actions" vs "Campaigns" vs "Engage"? Client
-   sub-areas: *Campaigns · Automations · Segments · Templates · Connections*?
+1. **Naming / IA — DECIDED (Jun 2026): top-level concept is "Engage."** The
+   nav now has an **Engage** section grouping the engagement surfaces; the old
+   "Actions" item became **Campaigns** (same page/route `/actions`, label only —
+   deep links preserved), and **Segments** sits beside it. *Automations ·
+   Templates · Connections* are reserved sub-areas to add under Engage as they
+   ship. "Actions" is freed up for a future user action-center. Dual-surface:
+   admin manages a client's Campaigns + Segments under Admin → client detail;
+   clients self-serve the same in their own Engage area.
 2. **Schema timing** — **DECIDED (Jun 2026), split per Hermes review:**
    - **2a. Segments + resolver — DONE.** `segments` table + source-agnostic
      resolver shipped (keystone for §2). Additive; campaigns untouched.

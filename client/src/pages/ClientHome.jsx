@@ -428,7 +428,7 @@ function YourActions({ entityId, isMobile, onOpen }) {
     : { t: 'Failed', c: '#dc2626', bg: 'rgba(239,68,68,0.12)' };
   return (
     <>
-      <SectionHead icon="⚡">Your actions <Faint>campaigns you've taken and how they're performing</Faint></SectionHead>
+      <SectionHead icon="📣">Your campaigns <Faint>campaigns you've sent and how they're performing</Faint></SectionHead>
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : `repeat(${Math.min(actions.length, 3)}, 1fr)`, gap: 12 }}>
         {actions.slice(0, 3).map((a) => {
           const c = chip(a.status);
