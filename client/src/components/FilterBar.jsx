@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import { useScope } from '../lib/ScopeContext.jsx';
 import { useSheetDrag } from '../lib/useSheetDrag.js';
+import { ANY_VALUE, ANY_VALUE_LABEL } from '../lib/filterConstants.js';
 
 // Mobile filter bottom sheet: animated entrance + drag-to-dismiss via the grip.
 function FilterSheet({ onClose, children }) {
@@ -156,7 +157,8 @@ function FilterDropdown({ filter, value, onChange, multi = false }) {
   const [query, setQuery] = useState('');
   const boxRef = useRef(null);
 
-  const selected = multi ? String(value || '').split(',').map(s => s.trim()).filter(Boolean) : [];
+  const isAny = value === ANY_VALUE;
+  const selected = multi && !isAny ? String(value || '').split(',').map(s => s.trim()).filter(Boolean) : [];
 
   async function load() {
     if (loaded || loading) return;
@@ -196,12 +198,16 @@ function FilterDropdown({ filter, value, onChange, multi = false }) {
     onChange(next.join(','));
   };
 
-  const summary = multi
-    ? (selected.length === 0 ? '' : selected.length === 1 ? selected[0] : `${selected.length} selected`)
-    : value;
-  const placeholder = multi
-    ? (selected.length ? `${selected.length} selected` : 'Select…')
-    : (value || 'Select…');
+  const summary = isAny
+    ? ANY_VALUE_LABEL
+    : multi
+      ? (selected.length === 0 ? '' : selected.length === 1 ? selected[0] : `${selected.length} selected`)
+      : value;
+  const placeholder = isAny
+    ? ANY_VALUE_LABEL
+    : multi
+      ? (selected.length ? `${selected.length} selected` : 'Select…')
+      : (value || 'Select…');
 
   return (
     <div ref={boxRef} style={{ position: 'relative' }}>
@@ -219,7 +225,17 @@ function FilterDropdown({ filter, value, onChange, multi = false }) {
       >▾</span>
       {open && (
         <ul style={dropdownList}>
-          {(multi ? selected.length > 0 : !!value) && (
+          {/* "Any value" overrides the tile's own default to show every value —
+              distinct from Clear, which reverts to that default. */}
+          <li
+            onMouseDown={(e) => { e.preventDefault(); onChange(ANY_VALUE); setOpen(false); setQuery(''); }}
+            style={{ ...optStyle, display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600, ...(isAny ? { background: 'rgba(var(--brand-rgb), 0.15)', color: 'var(--brand)' } : null) }}
+            onMouseEnter={e => { if (!isAny) e.currentTarget.style.background = 'rgba(128,128,128,0.12)'; }}
+            onMouseLeave={e => { if (!isAny) e.currentTarget.style.background = 'transparent'; }}
+          >
+            <span>✲</span><span>{ANY_VALUE_LABEL}</span><span style={{ color: 'var(--muted)', fontWeight: 400 }}>· show all</span>
+          </li>
+          {(isAny || (multi ? selected.length > 0 : !!value)) && (
             <li onMouseDown={() => { onChange(''); if (!multi) setOpen(false); }} style={{ ...optStyle, color: 'var(--muted)' }}>
               ✕ Clear{multi && selected.length > 1 ? ' all' : ''}
             </li>

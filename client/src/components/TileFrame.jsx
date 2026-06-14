@@ -9,6 +9,7 @@ import InsightModal from './InsightModal.jsx';
 import AiMark from './AiMark.jsx';
 import { usePins } from '../lib/PinContext.jsx';
 import { useTileData, isRunnableQuery } from '../lib/useTileData.js';
+import { ANY_VALUE } from '../lib/filterConstants.js';
 import { useAuth } from '../lib/auth.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
 
@@ -26,7 +27,8 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
     const f = { ...(tile.query?.filters || {}) };
     for (const [filterName, queryField] of Object.entries(tile.listenTo || {})) {
       const val = filterValues?.[filterName];
-      if (val && String(val).trim()) f[queryField] = String(val).trim();
+      if (val === ANY_VALUE) delete f[queryField]; // "any value" → no restriction on this field
+      else if (val && String(val).trim()) f[queryField] = String(val).trim();
     }
     return f;
   }

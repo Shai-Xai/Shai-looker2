@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { api } from './api.js';
 import { withLimit } from './limit.js';
 import { useScope } from './ScopeContext.jsx';
+import { ANY_VALUE } from './filterConstants.js';
 
 // A query is only worth running once it has a model, an explore (view) and at
 // least one field — otherwise Looker returns a validation error.
@@ -24,7 +25,10 @@ export function useTileData(tile, filterValues) {
   const overrides = {};
   for (const [filterName, queryField] of Object.entries(tile.listenTo || {})) {
     const val = filterValues?.[filterName];
-    if (val && String(val).trim()) overrides[queryField] = String(val).trim();
+    // "Any value": send an explicit empty override so Looker drops the tile's
+    // baked filter on this field (an unset value would instead fall back to it).
+    if (val === ANY_VALUE) overrides[queryField] = '';
+    else if (val && String(val).trim()) overrides[queryField] = String(val).trim();
   }
 
   const queryKey = JSON.stringify(tile.query);
