@@ -311,6 +311,21 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
   const segmentDefinition = (entityId, segmentId) => { const r = segmentRow(entityId, segmentId); return r ? JSON.parse(r.definition || '{}') : null; };
   const segmentName = (entityId, segmentId) => segmentRow(entityId, segmentId)?.name || '';
 
+  // Channel-aware content validation. SMS has no subject; email/both need one.
+  // For 'both', the SMS uses smsBody (falls back to body), so body+subject suffice.
+  function contentError(cfg) {
+    const needsSubject = cfg.channel !== 'sms';
+    if (cfg.campaignMode === 'sequence') {
+      const s0 = (cfg.steps || [])[0];
+      if (!s0 || !s0.body) return 'Add at least one step with a message';
+      if (needsSubject && !s0.subject) return 'Add a subject to step 1';
+      return null;
+    }
+    if (!cfg.body) return 'A message is required';
+    if (needsSubject && !cfg.subject) return 'A subject is required';
+    return null;
+  }
+
   async function audienceFor(entityId, cfg, user) {
     // A segment-backed audience resolves the referenced segment's LIVE definition
     // each time (segments are always-current; reference, not copy).
@@ -824,12 +839,8 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
       return res.status(400).json({ error: 'This client requires approval — use “Send for approval”.' });
     }
     const isSequence = a.config.campaignMode === 'sequence';
-    if (isSequence) {
-      const s0 = (a.config.steps || [])[0];
-      if (!s0 || !s0.subject || !s0.body) return res.status(400).json({ error: 'Add at least one step with a subject and body' });
-    } else if (!a.config.subject || !a.config.body) {
-      return res.status(400).json({ error: 'Subject and body are required' });
-    }
+    const cErr = contentError(a.config);
+    if (cErr) return res.status(400).json({ error: cErr });
 
     // A sequence (drip) or recurring template ACTIVATES on approval and then runs
     // fully automatically — no per-send approval. The check enrolls new
@@ -862,6 +873,54 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
       res.json({ ok: true, sendingTo: list.length });
     } catch (e) { res.status(400).json({ error: e.message }); }
   });
+
+  // Schedule a one-off campaign to send at a future time (or unschedule → draft).
+  // A tick sends it when due, resolving the audience LIVE at that moment.
+  app.post('/api/actions/:entityId/:id/schedule', auth.requireAuth, auth.requirePermission('campaigns.approve'), (req, res) => {
+    if (!guard(req, res, req.params.entityId)) return;
+    const a = getAction(req.params.id);
+    if (!a || a.entityId !== req.params.entityId) return res.status(404).json({ error: 'Not found' });
+    const at = String(req.body?.at || '').trim();
+    // Empty `at` cancels a schedule → back to draft.
+    if (!at) {
+      if (a.status !== 'scheduled') return res.status(400).json({ error: 'Not scheduled' });
+      sql.prepare('UPDATE actions SET status=?, config=?, updated_at=? WHERE id=?').run('draft', JSON.stringify({ ...a.config, scheduledAt: '' }), now(), a.id);
+      return res.json({ ok: true, unscheduled: true });
+    }
+    if (!['draft', 'scheduled'].includes(a.status)) return res.status(400).json({ error: `Can't schedule a ${a.status} campaign` });
+    if (a.config.campaignMode === 'sequence' || a.recurring) return res.status(400).json({ error: 'Scheduling is for one-off sends (sequences/automations run continuously).' });
+    const cErr = contentError(a.config);
+    if (cErr) return res.status(400).json({ error: cErr });
+    const when = new Date(at);
+    if (isNaN(when.getTime())) return res.status(400).json({ error: 'Invalid date/time' });
+    if (when.getTime() < Date.now() + 30000) return res.status(400).json({ error: 'Pick a time at least a minute from now' });
+    if (requireApprovalFor(a.entityId)) return res.status(400).json({ error: 'This client requires approval — submit for approval, then schedule.' });
+    sql.prepare('UPDATE actions SET status=?, config=?, approved_by=?, approved_at=?, updated_at=? WHERE id=?')
+      .run('scheduled', JSON.stringify({ ...a.config, scheduledAt: when.toISOString() }), req.user.email, now(), now(), a.id);
+    res.json({ ok: true, scheduledAt: when.toISOString() });
+  });
+
+  // Send a due scheduled campaign — resolves the audience live, then runs.
+  async function runScheduledSend(a) {
+    let list;
+    if (a.config.audience.mode === 'snapshot') { const sup = suppressed(a.entityId); list = a.audience.filter((r) => !sup.has(r.email)); }
+    else { ({ list } = await audienceFor(a.entityId, a.config, { id: 'scheduler', email: 'scheduler@pulse', role: 'admin', entityIds: [] })); }
+    if (!list.length) { saveResults(a.id, { ...a.results, lastError: 'Audience was empty at the scheduled time' }); setStatus(a.id, 'failed'); return; }
+    sql.prepare("UPDATE actions SET status='running', audience=?, updated_at=? WHERE id=?").run(JSON.stringify(list), now(), a.id);
+    const rootId = a.parentId || a.id;
+    const ins = sql.prepare('INSERT OR IGNORE INTO action_sent (root_id, email, at) VALUES (?,?,?)');
+    for (const r of list) ins.run(rootId, r.email, now());
+    runCampaign(a.id).catch((e) => { console.error('[actions] scheduled run failed', a.id, e.message); setStatus(a.id, 'failed'); });
+  }
+  async function processScheduled() {
+    if (!enabled()) return;
+    const nowIso = now();
+    const due = sql.prepare("SELECT id FROM actions WHERE status='scheduled' AND json_extract(config,'$.scheduledAt') <= ?").all(nowIso);
+    for (const { id } of due) { const a = getAction(id); if (a && a.status === 'scheduled') await runScheduledSend(a).catch((e) => console.error('[actions] schedule tick', id, e.message)); }
+  }
+  const schedTimer = setInterval(() => processScheduled().catch(() => {}), 60000);
+  if (schedTimer.unref) schedTimer.unref();
+  setTimeout(() => processScheduled().catch(() => {}), 20000);
 
   // Pause a recurring automation (back to draft; the check stops).
   app.post('/api/actions/:entityId/:id/pause', auth.requireAuth, auth.requirePermission('campaigns.approve'), (req, res) => {

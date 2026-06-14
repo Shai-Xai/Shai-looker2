@@ -217,6 +217,7 @@ export const api = {
   deleteMaster: (entityId, name) => fetch(`/api/actions/${entityId}/masters/${encodeURIComponent(name)}`, { method: 'DELETE' }).then((r) => (r.ok ? {} : Promise.reject(new Error('Failed')))),
   listActions: (entityId) => fetch(`/api/actions/${entityId}`).then(json),
   duplicateAction: (entityId, id) => fetch(`/api/actions/${entityId}/${id}/duplicate`, { method: 'POST' }).then(json),
+  scheduleAction: (entityId, id, at) => fetch(`/api/actions/${entityId}/${id}/schedule`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ at }) }).then(json),
   submitAction: (entityId, id, body) => fetch(`/api/actions/${entityId}/${id}/submit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
   actionThread: (entityId, id) => fetch(`/api/actions/${entityId}/${id}/thread`).then(json),
   rejectAction: (entityId, id, note) => fetch(`/api/actions/${entityId}/${id}/reject`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ note }) }).then(json),

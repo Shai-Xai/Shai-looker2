@@ -117,6 +117,9 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
             {a.approval.approvers.filter((x) => x.approved).length}/{a.approval.approvers.length} approved · waiting on {a.approval.approvers.filter((x) => !x.approved).map((x) => x.label).join(', ') || '—'}
           </div>
         )}
+        {a.status === 'scheduled' && a.config?.scheduledAt && (
+          <div style={{ fontSize: 12, color: '#0a66c2', marginTop: 4 }}>🕒 Sends {new Date(a.config.scheduledAt).toLocaleString('en-ZA', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>
+        )}
         {a.results?.lastError && a.status !== 'done' && <div style={{ fontSize: 11, color: 'var(--error,#ef4444)', marginTop: 3 }}>{a.results.lastError}</div>}
       </div>
       <div style={{ display: 'flex', gap: 6, flexShrink: 0, flexWrap: 'wrap' }}>
@@ -124,7 +127,7 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
         {(a.status === 'done' || a.status === 'running' || a.status === 'failed') && <button style={mini} onClick={() => setReporting(a)}>📊 Report</button>}
         {a.status === 'pending' && <button style={{ ...mini, background: '#15803d', color: '#fff', border: 'none' }} onClick={() => api.approveAction(entityId, a.id).then((r) => { if (r.pending) alert(`Recorded. ${r.remaining} more approval(s) needed.`); load(); }).catch((e) => alert(e.message))}>✓ Approve</button>}
         {a.status === 'pending' && <button style={mini} onClick={() => { const note = prompt('Send back to draft — reason (optional):'); if (note !== null) api.rejectAction(entityId, a.id, note).then(load).catch((e) => alert(e.message)); }}>Reject</button>}
-        {(a.status === 'draft' || a.status === 'auto' || a.status === 'pending') && <button style={mini} onClick={() => setEditing(a)}>{a.createdBy === 'automation' ? 'Review & approve' : 'Edit'}</button>}
+        {(a.status === 'draft' || a.status === 'auto' || a.status === 'pending' || a.status === 'scheduled') && <button style={mini} onClick={() => setEditing(a)}>{a.createdBy === 'automation' ? 'Review & approve' : a.status === 'scheduled' ? 'View / reschedule' : 'Edit'}</button>}
         {a.status === 'auto' && <button style={mini} onClick={() => api.pauseAction(entityId, a.id).then(load)}>⏸ Pause</button>}
         <button style={mini} onClick={() => api.duplicateAction(entityId, a.id).then((r) => { load(); setEditing(r.action); }).catch((e) => alert(e.message))}>⧉ Duplicate</button>
         {a.status !== 'running' && <button style={{ ...mini, color: 'var(--error,#ef4444)' }} onClick={() => { if (confirm('Delete this campaign?')) api.deleteAction(entityId, a.id).then(load); }}>Delete</button>}
@@ -324,8 +327,12 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
   const [openSection, setOpenSection] = useState(null);
   const acc = (key) => ({ open: openSection === key, onToggle: () => setOpenSection((s) => (s === key ? null : key)) });
   const isPending = action?.status === 'pending';
+  const isScheduled = action?.status === 'scheduled';
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectNote, setRejectNote] = useState('');
+  // datetime-local value (local time) — prefill from an existing schedule.
+  const toLocalInput = (iso) => { try { const d = new Date(iso); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16); } catch { return ''; } };
+  const [scheduleAt, setScheduleAt] = useState(isScheduled && action?.config?.scheduledAt ? toLocalInput(action.config.scheduledAt) : '');
   const [submitMessage, setSubmitMessage] = useState(''); // optional note when sending for approval
   const [thread, setThread] = useState([]); // campaign comms/approval log
   useEffect(() => {
@@ -432,6 +439,24 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
       setApproveState('✓ Sent for approval');
       setTimeout(onSaved, 900);
     } catch (e) { setApproveState(`✗ ${e.message}`); }
+  }
+
+  async function scheduleSend() {
+    if (!scheduleAt) { alert('Pick a date & time to send.'); return; }
+    setApproveState('working');
+    try {
+      let id = action?.id;
+      if (id) await api.updateAction(entityId, id, payload());
+      else { const r = await api.createAction(entityId, payload()); id = r.action.id; }
+      await api.scheduleAction(entityId, id, new Date(scheduleAt).toISOString());
+      setApproveState('✓ Scheduled');
+      setTimeout(onSaved, 900);
+    } catch (e) { setApproveState(`✗ ${e.message}`); }
+  }
+  async function cancelSchedule() {
+    setApproveState('working');
+    try { await api.scheduleAction(entityId, action.id, ''); setApproveState('✓ Schedule cancelled'); setTimeout(onSaved, 800); }
+    catch (e) { setApproveState(`✗ ${e.message}`); }
   }
 
   // Approver acting on a pending campaign (opened via the notification link).
@@ -842,6 +867,13 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
             <button className="liquid-btn" style={{ ...primary, background: requireApproval ? '#15803d' : 'var(--brand)' }} onClick={submitForApproval} disabled={approveState === 'working' || !f.approvers.length}>
               📩 Send for approval
             </button>
+            {!requireApproval && !isSequence && !f.recurring && (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                <input type="datetime-local" value={scheduleAt} onChange={(e) => setScheduleAt(e.target.value)} style={{ ...input, width: 'auto', padding: '7px 10px' }} />
+                <button style={mini} onClick={scheduleSend} disabled={approveState === 'working' || !aud?.count}>🕒 {isScheduled ? 'Reschedule' : 'Schedule'}</button>
+                {isScheduled && <button style={{ ...mini, color: 'var(--error,#ef4444)' }} onClick={cancelSchedule}>Cancel schedule</button>}
+              </span>
+            )}
             {(testState && testState !== 'sending') && <span style={{ fontSize: 12, color: testState.startsWith('✓') ? 'var(--success,#10b981)' : 'var(--error,#ef4444)' }}>{testState}</span>}
             {(approveState && approveState !== 'working') && <span style={{ fontSize: 12, color: approveState.startsWith('✓') ? 'var(--success,#10b981)' : 'var(--error,#ef4444)' }}>{approveState}</span>}
           </div>
@@ -1179,6 +1211,7 @@ function StatusChip({ status }) {
     auto: { bg: 'rgba(124,58,237,0.12)', c: '#7c3aed', t: '⚙ Automation' },
     running: { bg: 'rgba(10,132,255,0.13)', c: '#0a66c2', t: 'Sending…' },
     done: { bg: 'rgba(52,199,89,0.15)', c: '#2da44e', t: 'Sent' },
+    scheduled: { bg: 'rgba(10,132,255,0.13)', c: '#0a66c2', t: '🕒 Scheduled' },
     pending: { bg: 'rgba(245,158,11,0.16)', c: '#b45309', t: '⏳ Awaiting approval' },
     failed: { bg: 'rgba(239,68,68,0.12)', c: '#dc2626', t: 'Failed' },
   }[status] || { bg: 'rgba(128,128,128,0.14)', c: 'var(--muted)', t: status };
