@@ -8,6 +8,7 @@ import DashboardInsightModal from '../components/DashboardInsightModal.jsx';
 import AiMark from '../components/AiMark.jsx';
 import EditableGrid from '../components/EditableGrid.jsx';
 import { api } from '../lib/api.js';
+import { ANY_VALUE } from '../lib/filterConstants.js';
 import { useAuth } from '../lib/auth.jsx';
 import { useTheme } from '../lib/theme.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
@@ -38,6 +39,7 @@ export default function ViewPage() {
   const [entityDefault, setEntityDefault] = useState(null); // the client default (if any), for reset
   const [hasUserView, setHasUserView] = useState(false);    // does this user have a saved view?
   const [viewStatus, setViewStatus] = useState('');         // transient "Saved ✓" feedback
+  const [daysToGo, setDaysToGo] = useState(null);           // live days-before-event (from the source tile)
 
   // Build filter values from the dashboard defaults + suite locks, with an
   // optional saved overlay (entity default then the user's view). Locks always
@@ -66,6 +68,7 @@ export default function ViewPage() {
   useEffect(() => {
     setLoading(true);
     setError(null);
+    setDaysToGo(null);
     const suiteP = suiteId ? api.mySuite(suiteId).catch(() => null) : Promise.resolve(null);
     // Saved views: a user's "save my view" beats the client default beats the
     // dashboard's own default_value. Failure is non-fatal — fall back to defaults.
@@ -80,11 +83,39 @@ export default function ViewPage() {
         const { vals, lockedMap } = buildFilters(data, suite, overlay);
         setFilterValues(vals);
         setLocked(lockedMap);
+        applyDaysToGo(data, vals); // live "days to go" + optional auto-apply (non-blocking)
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, suiteId]);
+
+  // Read the current days-before-event number live from the configured source
+  // tile, surface it as "N days to go", and (in apply mode) set the days-before
+  // filter so YoY tiles align to today's point in the cycle. Non-blocking.
+  async function applyDaysToGo(data, baseVals) {
+    const sync = data.daysBeforeSync;
+    if (!sync || sync.mode === 'off' || !sync.sourceTileId) return;
+    const tiles = [...(data.tiles || []), ...((data.carousels || []).flatMap((c) => c.tiles || []))];
+    const src = tiles.find((t) => t.id === sync.sourceTileId);
+    if (!src?.query) return;
+    const overrides = {};
+    for (const [fname, qfield] of Object.entries(src.listenTo || {})) {
+      const v = baseVals[fname];
+      if (v === ANY_VALUE) overrides[qfield] = ANY_VALUE;
+      else if (v && String(v).trim()) overrides[qfield] = String(v).trim();
+    }
+    try {
+      const res = await api.runQuery(src.query, overrides, undefined, suiteId);
+      const n = firstNumber(res);
+      if (n == null) return;
+      setDaysToGo(n);
+      if (sync.mode === 'apply' && sync.filterName) {
+        const expr = String(sync.expr || '>={n}').replace('{n}', String(n));
+        setFilterValues((p) => ({ ...p, [sync.filterName]: expr }));
+      }
+    } catch { /* leave days-to-go hidden on failure */ }
+  }
 
   const handleFilterChange = useCallback((name, value) => {
     setFilterValues((prev) => ({ ...prev, [name]: value }));
@@ -251,6 +282,11 @@ export default function ViewPage() {
           {/* Keyed by dashboard id so the grid animates in on each tab switch
               (sliding in the swipe/click direction); dimmed while the next
               dashboard's definition loads. */}
+          {daysToGo != null && (
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 12, padding: '5px 12px', borderRadius: 980, background: 'rgba(var(--brand-rgb), 0.12)', color: 'var(--brand)', fontSize: 13, fontWeight: 700 }}>
+              ⏳ {daysToGo} {daysToGo === 1 ? 'day' : 'days'} to go
+            </div>
+          )}
           <div key={id} className={swapClass} style={{ opacity: loading ? 0.45 : 1, transition: 'opacity .18s ease', pointerEvents: loading ? 'none' : 'auto' }}>
             {def.tiles?.length || def.carousels?.length ? (
               <EditableGrid tiles={def.tiles || []} carousels={def.carousels || []} filterValues={filterValues} editable={false} />
@@ -395,6 +431,19 @@ function SubTabs({ tabs, activeId, onSelect, isMobile }) {
       <span className="subtab-underline" style={{ transform: `translateX(${u.left}px)`, width: u.width, opacity: u.show ? 1 : 0 }} />
     </div>
   );
+}
+
+// First numeric value in a json_detail result — the days-before-event number
+// from the source tile (single-value tiles surface it as the lone measure).
+function firstNumber(res) {
+  const row = res?.data?.[0];
+  if (!row) return null;
+  const fields = [...(res.fields?.measures || []), ...(res.fields?.table_calculations || []), ...(res.fields?.dimensions || [])];
+  for (const f of fields) {
+    const v = row[f.name]?.value;
+    if (v != null && v !== '' && !Number.isNaN(Number(v))) return Math.round(Number(v));
+  }
+  return null;
 }
 
 function Centered({ children, error }) {

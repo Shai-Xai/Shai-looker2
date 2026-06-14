@@ -19,6 +19,7 @@ export default function EditorPage() {
   const [showFilters, setShowFilters] = useState(false);
   const [showLibrary, setShowLibrary] = useState(false);
   const [showAiContext, setShowAiContext] = useState(false);
+  const [showDaysSync, setShowDaysSync] = useState(false);
   const [filterValues, setFilterValues] = useState({});
 
   useEffect(() => {
@@ -244,6 +245,7 @@ export default function EditorPage() {
         <button style={btn} onClick={addCarousel}>+ Carousel</button>
         <button style={btn} onClick={() => setShowFilters(true)}>Filters ({def.filters?.length || 0})</button>
         <button style={btn} onClick={() => setShowAiContext(true)}>✨ AI context</button>
+        <button style={btn} onClick={() => setShowDaysSync(true)}>⏳ Days-to-go{def.daysBeforeSync?.mode && def.daysBeforeSync.mode !== 'off' ? ' ●' : ''}</button>
         <div style={{ flex: 1 }} />
         <span style={{ fontSize: 12, color: dirty ? 'var(--warn)' : 'var(--muted)' }}>
           {dirty ? '● Unsaved changes' : '✓ Saved'}
@@ -319,9 +321,72 @@ export default function EditorPage() {
           </div>
         </div>
       )}
+
+      {showDaysSync && (
+        <DaysBeforeSyncModal def={def} onChange={(sync) => mutate((d) => ({ ...d, daysBeforeSync: sync }))} onClose={() => setShowDaysSync(false)} />
+      )}
     </div>
   );
 }
+
+// Per-dashboard "days to go" sync. Reads the current days-before-event number
+// live from a source tile (no manual date), shows it next to the title, and —
+// when set to Auto-apply — sets the days-before filter so YoY tiles align to
+// today's point in the sales cycle.
+function DaysBeforeSyncModal({ def, onChange, onClose }) {
+  const sync = def.daysBeforeSync || { mode: 'off', filterName: '', sourceTileId: '', expr: '>={n}' };
+  const set = (patch) => onChange({ ...sync, ...patch });
+  const visTiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))]
+    .filter((t) => t.type !== 'text' && t.query?.fields?.length);
+  return (
+    <div style={aiOverlay} onClick={onClose}>
+      <div style={aiCard} onClick={(e) => e.stopPropagation()}>
+        <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>⏳ Days-to-go sync</div>
+        <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 14 }}>
+          Reads the current days-before-event number live from a tile and shows it as “N days to go”. Auto-apply also sets the days-before filter so YoY comparisons align to today’s point in the cycle.
+        </div>
+
+        <L>Mode</L>
+        <select style={fInput} value={sync.mode} onChange={(e) => set({ mode: e.target.value })}>
+          <option value="off">Off</option>
+          <option value="heading">Show “N days to go” only</option>
+          <option value="apply">Auto-apply to the days-before filter (+ show)</option>
+        </select>
+
+        {sync.mode !== 'off' && (
+          <>
+            <L>Source tile — its single value is the days-to-go</L>
+            <select style={fInput} value={sync.sourceTileId} onChange={(e) => set({ sourceTileId: e.target.value })}>
+              <option value="">Select a tile…</option>
+              {visTiles.map((t) => <option key={t.id} value={t.id}>{t.title || '(untitled)'}</option>)}
+            </select>
+          </>
+        )}
+
+        {sync.mode === 'apply' && (
+          <>
+            <L>Days-before filter to set</L>
+            <select style={fInput} value={sync.filterName} onChange={(e) => set({ filterName: e.target.value })}>
+              <option value="">Select a filter…</option>
+              {(def.filters || []).map((f) => <option key={f.id || f.name} value={f.name}>{f.title || f.name}</option>)}
+            </select>
+            <L>Filter expression — {'{n}'} is replaced with the number</L>
+            <input style={fInput} value={sync.expr || '>={n}'} onChange={(e) => set({ expr: e.target.value })} placeholder=">={n}" />
+            <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 4 }}>e.g. <code>{'>={n}'}</code> includes everything from N+ days out (usual YoY-to-date); or <code>{'<={n}'}</code>, or just <code>{'{n}'}</code>.</div>
+          </>
+        )}
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
+          <button style={saveBtn} onClick={onClose}>Done</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+function L({ children }) {
+  return <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', margin: '10px 0 4px' }}>{children}</div>;
+}
+const fInput = { width: '100%', boxSizing: 'border-box', padding: '8px 11px', border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 13, outline: 'none', fontFamily: 'inherit', background: 'var(--card)', color: 'var(--text)' };
 
 function Centered({ children, error }) {
   return (
