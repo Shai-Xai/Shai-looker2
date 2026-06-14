@@ -1130,10 +1130,9 @@ function CampaignReport({ entityId, action, onClose }) {
         const Row = ({ k, children }) => <div style={{ display: 'flex', gap: 8 }}><span style={{ minWidth: 84, color: 'var(--muted)' }}>{k}</span><span style={{ flex: 1, minWidth: 0, color: 'var(--text)' }}>{children}</span></div>;
         const hasEmail = d.channel !== 'sms'; const hasSms = d.channel !== 'email';
         return (
-        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0,1fr) minmax(0,1fr)', gap: 14, marginBottom: 14, alignItems: 'start' }}>
+        <>
           {/* Settings */}
-          <div style={{ ...card }}>
-            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>Settings</div>
+          <ReportSection title="Settings" meta={d.channel === 'both' ? 'Email + SMS' : d.channel === 'sms' ? 'SMS' : 'Email'}>
             <div style={{ fontSize: 12.5, display: 'flex', flexDirection: 'column', gap: 6 }}>
               <Row k="Channel">{d.channel === 'both' ? 'Email + SMS' : d.channel === 'sms' ? 'SMS' : 'Email'}</Row>
               <Row k="Type">{d.type}</Row>
@@ -1164,23 +1163,21 @@ function CampaignReport({ entityId, action, onClose }) {
                 <div style={{ fontSize: 12.5, color: 'var(--muted)', whiteSpace: 'pre-wrap' }}>{d.smsBody}</div>
               </div>
             ) : null}
-          </div>
+          </ReportSection>
           {/* Live preview */}
-          <div style={{ ...card }}>
-            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>Preview</div>
+          <ReportSection title="Preview" meta={hasEmail && hasSms ? 'Email + SMS' : hasSms ? 'SMS' : 'Email'}>
             {!preview ? <p style={{ color: 'var(--muted)', fontSize: 12.5 }}>Rendering…</p> : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {hasEmail && preview.html && <iframe title="Email preview" srcDoc={preview.html} style={{ width: '100%', height: 380, border: '1px solid var(--hairline)', borderRadius: 10, background: '#fff' }} />}
+                {hasEmail && preview.html && <iframe title="Email preview" srcDoc={preview.html} style={{ width: '100%', height: 420, border: '1px solid var(--hairline)', borderRadius: 10, background: '#fff' }} />}
                 {hasSms && <SmsPreview text={preview.sms || d.smsBody || d.body} />}
               </div>
             )}
-          </div>
-        </div>
+          </ReportSection>
+        </>
         );
       })()}
 
-      <div style={{ ...card }}>
-        <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Who clicked</div>
+      <ReportSection title="Who clicked" meta={r.uniqueClickers > 0 ? `${r.uniqueClickers} clicker${r.uniqueClickers === 1 ? '' : 's'}` : ''}>
         {r.clickers.length === 0 ? (
           <p style={{ color: 'var(--muted)', fontSize: 13 }}>
             {r.totalClicks > 0
@@ -1211,7 +1208,7 @@ function CampaignReport({ entityId, action, onClose }) {
           {r.anonClicks > 0 && <span>{r.anonClicks} click{r.anonClicks === 1 ? '' : 's'} couldn't be attributed to a person (older/forwarded links). </span>}
           Forwarded links count toward the original recipient.
         </div>
-      </div>
+      </ReportSection>
     </div>
   );
 }
@@ -1270,6 +1267,21 @@ function HtmlField({ value, onChange }) {
         <input ref={ref} type="file" accept=".html,text/html" style={{ display: 'none' }} onChange={onFile} />
       </div>
       <textarea style={{ ...input, resize: 'vertical', fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 12 }} rows={8} value={value} onChange={(e) => onChange(e.target.value)} placeholder="<html>…</html> — or upload a file above" />
+    </div>
+  );
+}
+
+// Collapsible card section in the campaign report (collapsed by default).
+function ReportSection({ title, meta, children, defaultOpen = false }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div style={{ ...card, marginBottom: 14 }}>
+      <button onClick={() => setOpen((o) => !o)} style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: 'var(--text)' }}>
+        <span style={{ width: 12, fontSize: 10, color: 'var(--muted)', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</span>
+        <span style={{ fontSize: 13, fontWeight: 700 }}>{title}</span>
+        {meta && <span style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 500 }}>{meta}</span>}
+      </button>
+      {open && <div style={{ marginTop: 12 }}>{children}</div>}
     </div>
   );
 }
