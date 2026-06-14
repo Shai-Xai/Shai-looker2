@@ -42,6 +42,7 @@ export default function ViewPage() {
   const [daysToGo, setDaysToGo] = useState(null);           // live days-before-event (from the source tile)
   const [refreshKey, setRefreshKey] = useState(0);          // bump → all tiles re-fetch live (cache-bypassing)
   const refreshNow = () => setRefreshKey((k) => k + 1);
+  const [softKey, setSoftKey] = useState(0);                // bump → silent, cache-friendly re-fetch (focus/interval)
 
   // Build filter values from the dashboard defaults + suite locks, with an
   // optional saved overlay (entity default then the user's view). Locks always
@@ -121,6 +122,17 @@ export default function ViewPage() {
 
   const handleFilterChange = useCallback((name, value) => {
     setFilterValues((prev) => ({ ...prev, [name]: value }));
+  }, []);
+
+  // Keep an open dashboard current: soft-refresh when the tab regains focus and
+  // on a light interval (data moves on a ~30-min pipeline). Silent + cache-
+  // friendly — no skeleton flash, no forced Looker hits (the cache serves it).
+  useEffect(() => {
+    const soft = () => { if (document.visibilityState === 'visible') setSoftKey((k) => k + 1); };
+    document.addEventListener('visibilitychange', soft);
+    window.addEventListener('focus', soft);
+    const iv = setInterval(soft, 5 * 60 * 1000);
+    return () => { document.removeEventListener('visibilitychange', soft); window.removeEventListener('focus', soft); clearInterval(iv); };
   }, []);
 
   // Saved filter views. We persist only non-locked values (locks are enforced on
@@ -216,7 +228,7 @@ export default function ViewPage() {
   const pinsEnabled = !!suiteId && insightsEnabled && (!isAdmin || !!previewEntityId);
 
   return (
-    <ScopeProvider suiteId={suiteId || null} dashboardContext={def.aiContext || ''} entityId={scopeEntityId} dashboardId={id} refreshKey={refreshKey}>
+    <ScopeProvider suiteId={suiteId || null} dashboardContext={def.aiContext || ''} entityId={scopeEntityId} dashboardId={id} refreshKey={refreshKey} softKey={softKey}>
     <PinProvider dashboardId={id} entityId={previewEntityId || null} isAdmin={isAdmin} enabled={pinsEnabled}>
       <div style={shellStyle}>
         {/* On mobile inside a suite the sticky "☰ Menu" bar already shows the
