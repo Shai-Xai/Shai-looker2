@@ -387,6 +387,7 @@ app.get('/api/my/suites/:id', auth.requireAuth, (req, res) => {
   const ent = db.getEntity(su.entityId);
   res.json({
     id: su.id, name: su.name, icon: su.icon || '',
+    entityId: su.entityId, // the suite's client — authoritative scope for tile actions (e.g. create segment)
     entityName: ent?.name || '', entityLogo: ent?.logo || '',
     lockedFilters: expandLockMap(auth.lockedFiltersForSuite(su.id)), sets,
   });
