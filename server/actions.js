@@ -659,6 +659,21 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     if (Array.isArray((req.body || {}).promoCodes)) addPromoCodes(id, req.body.promoCodes);
     res.status(201).json({ action: publicAction(getAction(id)) });
   });
+  // Duplicate any campaign → a fresh draft (cloned content/audience, new tracking
+  // token, reset stats/approvals). Lets a sent campaign be re-run or tweaked.
+  app.post('/api/actions/:entityId/:id/duplicate', auth.requireAuth, auth.requirePermission('campaigns.approve'), (req, res) => {
+    if (!guard(req, res, req.params.entityId)) return;
+    const a = getAction(req.params.id);
+    if (!a || a.entityId !== req.params.entityId) return res.status(404).json({ error: 'Not found' });
+    const id = uuid();
+    // Fresh clickToken so the copy's opens/clicks track separately; drop any
+    // approver sign-offs from the source.
+    const cfg = { ...a.config, clickToken: crypto.randomBytes(6).toString('base64url'), approvers: [] };
+    const rec = (a.recurring || cfg.campaignMode === 'sequence') && cfg.audience?.mode === 'tile' ? 1 : 0;
+    sql.prepare('INSERT INTO actions (id, entity_id, type, status, title, config, recurring, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
+      .run(id, req.params.entityId, 'email_campaign', 'draft', `Copy of ${a.title || a.config.subject || 'campaign'}`.slice(0, 120), JSON.stringify(cfg), rec, req.user.email, now(), now());
+    res.status(201).json({ action: publicAction(getAction(id)) });
+  });
   app.put('/api/actions/:entityId/:id', auth.requireAuth, auth.requirePermission('campaigns.approve'), (req, res) => {
     if (!guard(req, res, req.params.entityId)) return;
     const a = getAction(req.params.id);

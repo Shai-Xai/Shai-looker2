@@ -126,6 +126,7 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
         {a.status === 'pending' && <button style={mini} onClick={() => { const note = prompt('Send back to draft — reason (optional):'); if (note !== null) api.rejectAction(entityId, a.id, note).then(load).catch((e) => alert(e.message)); }}>Reject</button>}
         {(a.status === 'draft' || a.status === 'auto' || a.status === 'pending') && <button style={mini} onClick={() => setEditing(a)}>{a.createdBy === 'automation' ? 'Review & approve' : 'Edit'}</button>}
         {a.status === 'auto' && <button style={mini} onClick={() => api.pauseAction(entityId, a.id).then(load)}>⏸ Pause</button>}
+        <button style={mini} onClick={() => api.duplicateAction(entityId, a.id).then((r) => { load(); setEditing(r.action); }).catch((e) => alert(e.message))}>⧉ Duplicate</button>
         {a.status !== 'running' && <button style={{ ...mini, color: 'var(--error,#ef4444)' }} onClick={() => { if (confirm('Delete this campaign?')) api.deleteAction(entityId, a.id).then(load); }}>Delete</button>}
       </div>
     </div>
