@@ -113,3 +113,54 @@ angle for Hermes). Tick the boxes as you go.
       a stale send); the flag flows through preview to the editor warning.
 - 🔎 `audienceFor` segment branch, `segmentDefinition`/`segmentRow`, and the
   `/preview` route in `server/actions.js`.
+
+### R7 — Counter vs. clicks-table reconciliation *(new — raised in review)*
+- [ ] Decide source-of-truth: click counts live in **both** `results.*` (cached
+      counter, bumped in the `/c/...` route) **and** the `action_clicks` table.
+- [ ] No reconciliation today if a click row writes but the `saveResults` counter
+      bump fails (or vice versa) — the two can silently drift.
+- [ ] Proposal: treat `action_clicks` as the source of truth and the `results.*`
+      counter as a cache that can be **rebuilt** from it; the master rollup keeps
+      reading the cheap counter, but a rebuild path guarantees they can't diverge.
+- 🔎 `/c/:token/:rtok?/:ch?` counter bump vs. `action_clicks` INSERT, and the
+  master rollup reducer in `CampaignManager.jsx`.
+
+---
+
+## Hermes review — findings (2026-06-14)
+
+Verified the review stories against the code on this branch (not just the doc).
+
+- **R1 — Click attribution & legacy data — ✅ PASS.** Channel derives from the
+  link suffix (`/e`→email, `/s`→sms) exactly as specced; untagged + legacy clicks
+  fold into the only channel on single-channel campaigns and stay unattributed on
+  `both`. The click INSERT is wrapped in try/catch so tracking never blocks the
+  redirect.
+- **R2 — Per-channel counters honest — ✅ PASS, with a flag.** `emailSent`/`smsSent`
+  increment only on a successful send in both `runCampaign` and the drip sender;
+  CTR is correctly clicks ÷ that channel's sent, never ÷ total. **Flag:** counts
+  are held in two places (counter + table) with no reconciliation — they can drift
+  on partial-write. See **R7**.
+- **R3 — Rollup avoids extra queries — ✅ PASS.** Master rollup reduces over
+  `results.*` counters; no per-campaign report fan-out. (Inherits the R2/R7
+  counter-as-truth caveat.)
+- **R4 — Persisted UI state — ✅ PASS.** `localStorage` key is
+  `pulse.openMasters.${entityId}` — per-entity, no cross-client bleed. Read + write
+  are wrapped for private-mode/quota. Minor: stale keys for deleted masters
+  accumulate (trivial, unbounded-but-tiny) — acceptable.
+- **R5 — Filter popover scope — ⚠ MANUAL.** Client-side over already-loaded
+  actions (no new endpoint), consistent with the declutter commits. The
+  "can't strand on an empty filtered view" check is really a UX thing to confirm
+  live — suggest moving R5 up to the manual acceptance set.
+- **R6 — Segment audiences resolve live — ✅ PASS (the important one).**
+  `audienceFor` reads the segment's **current** definition on every path (preview,
+  approve-and-send, scheduled, auto-check, conversion re-check, re-enrolment) — no
+  frozen snapshot. Scope follows the **campaign's own `entityId`**, not the
+  caller's, so scheduler/sys-user sends (with empty `entityIds`) resolve the right
+  segment and can't leak across entities. Missing segment returns `segmentMissing`
+  + empty list, surfaced through `/preview` to the editor warning — never a stale
+  send. Clean.
+
+**Net:** the batch does what the stories claim. Only substantive item is the
+R2/R3 counter-vs-table duality, tracked as **R7**. Two doc tweaks suggested:
+(1) move R5 into manual acceptance; (2) R7 added above.
