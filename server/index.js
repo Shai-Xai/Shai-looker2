@@ -2001,6 +2001,10 @@ const actionsApi = require('./actions').mount(app, {
   },
 });
 
+// Segments — reusable live audiences. Reuses the campaign engine's audience
+// resolver (audienceFor) so resolution logic + the org-scope boundary are shared.
+const segmentsApi = require('./segments').mount(app, { db, auth, resolveAudience: actionsApi.audienceFor });
+
 // ─── Briefing configuration ─────────────────────────────────────────────────────
 // Admin: global briefing rules + editable phase defaults.
 app.get('/api/admin/briefing-settings', auth.requireAdmin, (_req, res) => {

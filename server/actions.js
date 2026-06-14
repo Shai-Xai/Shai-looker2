@@ -1243,7 +1243,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
   });
 
   console.log('[actions] action engine mounted', enabled() ? '(enabled)' : '(disabled — set actions_enabled=1)');
-  return { awaitingApprovalFor };
+  return { awaitingApprovalFor, audienceFor };
 }
 
 module.exports = { mount };
