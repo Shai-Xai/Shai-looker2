@@ -129,6 +129,7 @@ function addColumn(table, col, decl) {
 }
 addColumn('sets', 'icon', "TEXT NOT NULL DEFAULT ''");   // emoji or image data-URL
 addColumn('sets', 'owner_entity_id', "TEXT NOT NULL DEFAULT ''"); // '' = shared template; else a client's CUSTOM set
+addColumn('sets', 'folder', "TEXT NOT NULL DEFAULT ''"); // optional grouping label in the Sets library ('' = ungrouped)
 addColumn('suites', 'icon', "TEXT NOT NULL DEFAULT ''");
 addColumn('entities', 'logo', "TEXT NOT NULL DEFAULT ''"); // client brand image data-URL / emoji
 addColumn('entities', 'ai_context', "TEXT NOT NULL DEFAULT ''"); // client-specific AI background
@@ -617,9 +618,9 @@ function setDashboardEntries(setId) {
   return db.prepare('SELECT dashboard_id, parent_dashboard_id FROM set_dashboards WHERE set_id=? ORDER BY position').all(setId)
     .map((r) => ({ id: r.dashboard_id, parentId: r.parent_dashboard_id || null }));
 }
-function rowToSet(r) { return r && { id: r.id, name: r.name, icon: r.icon || '', ownerEntityId: r.owner_entity_id || '', dashboardIds: setDashboardIds(r.id), dashboards: setDashboardEntries(r.id), createdAt: r.created_at }; }
+function rowToSet(r) { return r && { id: r.id, name: r.name, icon: r.icon || '', folder: r.folder || '', ownerEntityId: r.owner_entity_id || '', dashboardIds: setDashboardIds(r.id), dashboards: setDashboardEntries(r.id), createdAt: r.created_at }; }
 // Shared library only (custom client sets are hidden here).
-function listSets() { return db.prepare("SELECT * FROM sets WHERE owner_entity_id='' ORDER BY name").all().map(rowToSet); }
+function listSets() { return db.prepare("SELECT * FROM sets WHERE owner_entity_id='' ORDER BY folder, name").all().map(rowToSet); }
 // A client's CUSTOM sets.
 function listSetsForEntity(entityId) { return db.prepare('SELECT * FROM sets WHERE owner_entity_id=? ORDER BY name').all(entityId).map(rowToSet); }
 function getSet(id) { return rowToSet(db.prepare('SELECT * FROM sets WHERE id=?').get(id)); }
@@ -639,9 +640,9 @@ const setSetDashboards = db.transaction((setId, items) => {
     ins.run(setId, x.id, i, p);
   });
 });
-function createSet({ name, icon = '', dashboardIds = [], ownerEntityId = '' }) {
+function createSet({ name, icon = '', folder = '', dashboardIds = [], ownerEntityId = '' }) {
   const id = uuid();
-  db.prepare('INSERT INTO sets (id,name,icon,owner_entity_id,created_at) VALUES (?,?,?,?,?)').run(id, name || 'Untitled set', icon || '', ownerEntityId || '', now());
+  db.prepare('INSERT INTO sets (id,name,icon,folder,owner_entity_id,created_at) VALUES (?,?,?,?,?,?)').run(id, name || 'Untitled set', icon || '', folder || '', ownerEntityId || '', now());
   setSetDashboards(id, dashboardIds);
   return getSet(id);
 }
@@ -659,6 +660,7 @@ function updateSet(id, patch) {
   if (!cur) return null;
   if (patch.name !== undefined) db.prepare('UPDATE sets SET name=? WHERE id=?').run(patch.name, id);
   if (patch.icon !== undefined) db.prepare('UPDATE sets SET icon=? WHERE id=?').run(patch.icon || '', id);
+  if (patch.folder !== undefined) db.prepare('UPDATE sets SET folder=? WHERE id=?').run(patch.folder || '', id);
   // `dashboards` ({id,parentId} entries) wins over the legacy flat id list.
   if (patch.dashboards !== undefined) setSetDashboards(id, patch.dashboards);
   else if (patch.dashboardIds !== undefined) setSetDashboards(id, patch.dashboardIds);

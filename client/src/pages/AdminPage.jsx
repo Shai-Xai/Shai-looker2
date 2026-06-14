@@ -648,22 +648,57 @@ function Sets() {
   const [items, setItems] = useState([]);
   const [dashboards, setDashboards] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [collapsed, setCollapsed] = useState({}); // folder -> collapsed? (default open)
   // Shared library only ever bundles shared dashboards — never a client's bespoke one.
   const load = () => { setLoading(true); Promise.all([api.adminListSets(), api.listDashboards()]).then(([t, d]) => { setItems(t); setDashboards(d.filter((x) => !x.ownerEntityId)); }).finally(() => setLoading(false)); };
   useEffect(load, []);
   if (loading) return <Muted>Loading…</Muted>;
+
+  const folderNames = [...new Set(items.map((s) => s.folder).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  // Named folders (sorted) first, then the ungrouped bucket last.
+  const groups = [...folderNames.map((f) => [f, items.filter((s) => s.folder === f)]), ['', items.filter((s) => !s.folder)]];
+  const isOpen = (f) => !collapsed[f];
+  const toggle = (f) => setCollapsed((c) => ({ ...c, [f]: !c[f] }));
+  const addSet = (folder) => api.adminCreateSet({ name: 'New set', folder, dashboardIds: [] }).then(load);
+  const newFolder = () => { const name = prompt('New folder name'); if (name && name.trim()) addSet(name.trim()); };
+
   return (
     <div>
-      <p style={hint}>A Set is a reusable group of dashboards (e.g. Ticketing, Cashless). Bundle them into a client's Suite.</p>
-      {items.map((t) => <SetCard key={t.id} set={t} dashboards={dashboards} onChange={load} />)}
-      <button style={addBtn} onClick={() => api.adminCreateSet({ name: 'New set', dashboardIds: [] }).then(load)}>+ Add set</button>
+      <p style={hint}>A Set is a reusable group of dashboards (e.g. Ticketing, Cashless). Bundle them into a client's Suite. Group related sets into folders to keep the library tidy.</p>
+      {groups.map(([folder, sets]) => {
+        if (folder === '' && sets.length === 0) return null;
+        const open = isOpen(folder);
+        return (
+          <div key={folder || '__ungrouped__'} style={{ marginBottom: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 2px' }}>
+              <button onClick={() => toggle(folder)} style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer', padding: 0, color: 'var(--text)' }}>
+                <span style={{ width: 12, color: '#b0b0b6', fontSize: 11, transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</span>
+                <span style={{ fontSize: 13, fontWeight: 800, textTransform: folder ? 'none' : 'uppercase', letterSpacing: folder ? 0 : '0.06em', color: folder ? 'var(--text)' : 'var(--muted)' }}>{folder ? `📁 ${folder}` : 'Ungrouped'}</span>
+                <span style={{ color: 'var(--muted)', fontSize: 12, fontWeight: 400 }}>· {sets.length} set{sets.length === 1 ? '' : 's'}</span>
+              </button>
+              <button style={{ ...addBtn, margin: 0, padding: '5px 10px', fontSize: 12 }} onClick={() => addSet(folder)}>+ Set</button>
+            </div>
+            {open && (
+              <div style={{ borderLeft: folder ? '2px solid var(--hairline)' : 'none', paddingLeft: folder ? 10 : 0 }}>
+                {sets.length === 0 ? <Muted>Empty — add a set.</Muted>
+                  : sets.map((t) => <SetCard key={t.id} set={t} dashboards={dashboards} folders={folderNames} showFolder onChange={load} />)}
+              </div>
+            )}
+          </div>
+        );
+      })}
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button style={addBtn} onClick={() => addSet('')}>+ Add set</button>
+        <button style={addBtn} onClick={newFolder}>+ New folder</button>
+      </div>
     </div>
   );
 }
-function SetCard({ set, dashboards, onChange }) {
+function SetCard({ set, dashboards, onChange, folders = [], showFolder = false }) {
   const navigate = useNavigate();
   const [name, setName] = useState(set.name);
   const [icon, setIcon] = useState(set.icon || '');
+  const [folder, setFolder] = useState(set.folder || '');
   const [ids, setIds] = useState(set.dashboardIds || []);
   // Sub-dashboards: id -> parentId for ids nested as tabs of another dashboard.
   const [parents, setParents] = useState(() => {
@@ -682,7 +717,9 @@ function SetCard({ set, dashboards, onChange }) {
     return next;
   });
   const save = async () => {
-    await api.adminUpdateSet(set.id, { name, icon, dashboards: ids.map((id) => ({ id, parentId: parents[id] || null })) });
+    const patch = { name, icon, dashboards: ids.map((id) => ({ id, parentId: parents[id] || null })) };
+    if (showFolder) patch.folder = folder.trim();
+    await api.adminUpdateSet(set.id, patch);
     flash(setSaved); onChange();
   };
   const remove = async () => { if (confirm(`Delete set "${set.name}"?`)) { await api.adminDeleteSet(set.id); onChange(); } };
@@ -739,6 +776,13 @@ function SetCard({ set, dashboards, onChange }) {
       {!open ? null : (<>
       <L>Name</L>
       <input style={{ ...input, fontWeight: 700, width: '100%' }} value={name} onChange={(e) => setName(e.target.value)} />
+      {showFolder && (
+        <>
+          <L>Folder</L>
+          <input list={`folders-${set.id}`} style={{ ...input, width: '100%' }} value={folder} onChange={(e) => setFolder(e.target.value)} placeholder="Ungrouped — type a name to file it in a folder" />
+          <datalist id={`folders-${set.id}`}>{folders.map((f) => <option key={f} value={f} />)}</datalist>
+        </>
+      )}
       <Field label="Icon"><IconPicker value={icon} onChange={setIcon} /></Field>
       <Section title="Add dashboards from folder">
       <div style={{ border: '1px solid var(--hairline)', borderRadius: 8, padding: 10, margin: '6px 0' }}>
