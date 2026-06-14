@@ -225,7 +225,12 @@ export default function ViewPage() {
           <div style={{ background: 'var(--frost)', backdropFilter: 'saturate(180%) blur(20px)', WebkitBackdropFilter: 'saturate(180%) blur(20px)', borderBottom: '1px solid var(--hairline)', padding: isMobile ? '12px 14px' : '16px 22px', display: 'flex', alignItems: 'center', gap: isMobile ? 10 : 16 }}>
             <Link to={backTo} title="Home" aria-label="Home" className="btn-key" style={homeBtn}><HomeIcon /></Link>
             <div style={{ flex: 1, minWidth: 0 }}>
-              {setInfo && <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)' }}>{setInfo.name}</div>}
+              {(setInfo || daysToGo != null) && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  {setInfo && <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)' }}>{setInfo.name}</span>}
+                  {daysToGo != null && <span style={daysChip}>⏳ {daysToGoLabel(daysToGo)}</span>}
+                </div>
+              )}
               <h2 style={{ fontSize: isMobile ? 17 : 21, fontWeight: 600, letterSpacing: '-0.02em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{headerTitle}</h2>
             </div>
             {hasTiles && !isMobile && (
@@ -287,9 +292,11 @@ export default function ViewPage() {
           {/* Keyed by dashboard id so the grid animates in on each tab switch
               (sliding in the swipe/click direction); dimmed while the next
               dashboard's definition loads. */}
-          {daysToGo != null && (
+          {/* Above the grid only when the header is hidden (mobile inside a
+              suite) — otherwise it lives in the header next to the event name. */}
+          {daysToGo != null && isMobile && suiteId && (
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 12, padding: '5px 12px', borderRadius: 980, background: 'rgba(var(--brand-rgb), 0.12)', color: 'var(--brand)', fontSize: 13, fontWeight: 700 }}>
-              ⏳ {daysToGo} {daysToGo === 1 ? 'day' : 'days'} to go
+              ⏳ {daysToGoLabel(daysToGo)}
             </div>
           )}
           <div key={id} className={swapClass} style={{ opacity: loading ? 0.45 : 1, transition: 'opacity .18s ease', pointerEvents: loading ? 'none' : 'auto' }}>
@@ -446,6 +453,15 @@ function SubTabs({ tabs, activeId, onSelect, isMobile }) {
     </div>
   );
 }
+
+// Natural-language days-to-go, sign-aware (positive = upcoming, negative = past).
+function daysToGoLabel(n) {
+  if (n > 0) return `${n} ${n === 1 ? 'day' : 'days'} to go`;
+  if (n === 0) return 'Today';
+  const a = Math.abs(n);
+  return `${a} ${a === 1 ? 'day' : 'days'} ago`;
+}
+const daysChip = { display: 'inline-flex', alignItems: 'center', gap: 5, padding: '2px 9px', borderRadius: 980, background: 'rgba(var(--brand-rgb), 0.12)', color: 'var(--brand)', fontSize: 11.5, fontWeight: 700, whiteSpace: 'nowrap' };
 
 // First numeric value in a json_detail result — the days-before-event number
 // from the source tile (single-value tiles surface it as the lone measure).
