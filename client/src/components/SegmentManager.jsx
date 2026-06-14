@@ -1,12 +1,14 @@
 import { useState, useEffect, useRef } from 'react';
 import { api } from '../lib/api.js';
 import { AudienceFilters } from './CampaignManager.jsx';
+import { useIsMobile } from '../lib/useIsMobile.js';
 
 // Segments — reusable LIVE audiences. List + a builder that re-uses the campaign
 // audience picker (tile + columns + filters) and the audience-preview endpoint
 // for the live count. Same component serves admin + client self-service.
 export default function SegmentManager({ entityId, scope = 'admin' }) {
   const isAdmin = scope === 'admin';
+  const isMobile = useIsMobile();
   const [segments, setSegments] = useState(null);
   const [tiles, setTiles] = useState(null);
   const [editing, setEditing] = useState(null); // null | 'new' | segment object
@@ -15,6 +17,15 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
   const load = () => api.listSegments(entityId).then((r) => setSegments(r.segments || [])).catch(() => setSegments([]));
   useEffect(() => { load(); }, [entityId]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { (isAdmin ? api.getDigestTiles(entityId) : api.getMyDigestTiles(entityId)).then(setTiles).catch(() => setTiles({ dashboards: [] })); }, [entityId, isAdmin]);
+
+  // Resolve the source labels (event / dashboard / tile) from the tiles catalog.
+  const sourceLabel = (s) => {
+    const d = s.definition || {};
+    if (d.mode === 'paste') return { event: '', detail: 'Pasted list' };
+    const dash = tiles?.dashboards?.find((x) => x.dashboardId === d.dashboardId);
+    const tile = dash?.tiles?.find((t) => t.tileId === d.tileId);
+    return { event: dash?.suiteName || '', detail: tile?.title || dash?.title || '' };
+  };
 
   if (!segments) return <p style={{ color: 'var(--muted)', fontSize: 13 }}>Loading…</p>;
 
@@ -36,27 +47,32 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
       {segments.length === 0 ? (
         <p style={{ color: 'var(--muted)', fontSize: 13, padding: '20px 0' }}>No segments yet. Create one from a dashboard tile or a pasted list.</p>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {segments.map((s) => (
-            <div key={s.id} style={{ border: '1px solid var(--hairline)', borderRadius: 12, padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', background: 'var(--card)' }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ fontWeight: 700, fontSize: 14.5 }}>{s.name}</span>
-                  <span style={{ fontSize: 10.5, fontWeight: 700, borderRadius: 980, padding: '2px 9px', background: 'rgba(128,128,128,0.14)', color: 'var(--muted)' }}>{s.source === 'paste' ? 'Pasted list' : 'Dashboard tile'}</span>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {segments.map((s) => {
+            const lbl = sourceLabel(s);
+            return (
+              <div key={s.id} style={{ border: '1px solid var(--hairline)', borderRadius: 14, padding: isMobile ? '16px' : '14px 16px', display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'stretch' : 'center', gap: isMobile ? 12 : 14, background: 'var(--card)' }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <span style={{ fontWeight: 700, fontSize: isMobile ? 17 : 15 }}>{s.name}</span>
+                    <span style={{ fontSize: 10.5, fontWeight: 700, borderRadius: 980, padding: '2px 9px', background: 'rgba(128,128,128,0.14)', color: 'var(--muted)' }}>{s.source === 'paste' ? 'Pasted list' : 'Dashboard tile'}</span>
+                  </div>
+                  {lbl.event && <div style={{ fontSize: 12.5, color: 'var(--text)', marginTop: 5, fontWeight: 600 }}>🗓 {lbl.event}</div>}
+                  {lbl.detail && <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lbl.detail}</div>}
+                  <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 6 }}>
+                    {s.count >= 0
+                      ? <span><b style={{ color: 'var(--brand)' }}>{s.count}</b> {s.count === 1 ? 'person' : 'people'}{s.lastResolvedAt ? ` · as of ${new Date(s.lastResolvedAt).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}</span>
+                      : <span>Not counted yet — tap refresh</span>}
+                  </div>
                 </div>
-                <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 4 }}>
-                  {s.count >= 0
-                    ? <span><b style={{ color: 'var(--brand)' }}>{s.count}</b> {s.count === 1 ? 'person' : 'people'}{s.lastResolvedAt ? ` · as of ${new Date(s.lastResolvedAt).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}</span>
-                    : <span>Not counted yet — tap refresh</span>}
+                <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+                  <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding }} onClick={() => refresh(s)} disabled={busyId === s.id}>{busyId === s.id ? '…' : '↻ Refresh'}</button>
+                  <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding }} onClick={() => setEditing(s)}>Edit</button>
+                  <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding, color: 'var(--error,#ef4444)' }} onClick={() => del(s)}>Delete</button>
                 </div>
               </div>
-              <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-                <button style={mini} onClick={() => refresh(s)} disabled={busyId === s.id}>{busyId === s.id ? '…' : '↻ Refresh'}</button>
-                <button style={mini} onClick={() => setEditing(s)}>Edit</button>
-                <button style={{ ...mini, color: 'var(--error,#ef4444)' }} onClick={() => del(s)}>Delete</button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
