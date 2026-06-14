@@ -169,6 +169,29 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
   const saveResults = (id, results) => sql.prepare('UPDATE actions SET results=?, updated_at=? WHERE id=?').run(JSON.stringify(results), now(), id);
   const setStatus = (id, status) => sql.prepare('UPDATE actions SET status=?, updated_at=? WHERE id=?').run(status, now(), id);
 
+  // `action_clicks` is the SOURCE OF TRUTH for clicks; the `results.{clicks,
+  // emailClicks,smsClicks}` counters are a CACHE the `/c/...` route bumps for
+  // instant feedback. They can drift on a partial write (row inserted but the
+  // counter save fails, or vice versa), so reconcile the cache from the table.
+  // `byChannel` lets a caller pass an already-computed GROUP BY (avoids a query
+  // per action when reconciling a whole list). Returns the action with healed
+  // results. NB: the TOTAL counter may legitimately exceed the table (legacy
+  // clicks counted before per-recipient rows existed), so total only heals
+  // UPWARD; per-channel counts mirror the table (legacy clicks are untagged).
+  function reconcileClicks(action, byChannel) {
+    const rows = byChannel || sql.prepare('SELECT channel, COUNT(*) n FROM action_clicks WHERE action_id=? GROUP BY channel').all(action.id);
+    let total = 0, email = 0, sms = 0;
+    for (const r of rows) { total += r.n; if (r.channel === 'email') email += r.n; else if (r.channel === 'sms') sms += r.n; }
+    const res = action.results || {};
+    const clicks = Math.max(res.clicks || 0, total);
+    if ((res.clicks || 0) !== clicks || (res.emailClicks || 0) !== email || (res.smsClicks || 0) !== sms) {
+      const next = { ...res, clicks, emailClicks: email, smsClicks: sms };
+      try { saveResults(action.id, next); } catch { /* read-path heal; ignore write hiccup */ }
+      action.results = next;
+    }
+    return action;
+  }
+
   const suppressed = (entityId) => new Set(sql.prepare('SELECT email FROM action_suppressions WHERE entity_id=?').all(entityId).map((r) => r.email));
   const unsubSecret = () => {
     let s = db.getSetting('unsub_secret', '');
@@ -657,11 +680,17 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     // Unique openers per campaign (one grouped query) → open rate on the list.
     const openMap = {};
     try { for (const o of sql.prepare("SELECT action_id, COUNT(DISTINCT email) n FROM action_opens WHERE email!='' GROUP BY action_id").all()) openMap[o.action_id] = o.n; } catch { /* table may be new */ }
+    // Per-channel clicks per campaign (one grouped query) → reconcile the cached
+    // counters from the source-of-truth table so the list + master rollup can't
+    // drift from it (the counter is just a cache; see reconcileClicks).
+    const clickMap = {};
+    try { for (const c of sql.prepare('SELECT action_id, channel, COUNT(*) n FROM action_clicks GROUP BY action_id, channel').all()) (clickMap[c.action_id] = clickMap[c.action_id] || []).push({ channel: c.channel, n: c.n }); } catch { /* table may be new */ }
     const actions = rows.map((r) => {
-      const a = publicAction(rowToAction(r));
-      const sent = a.results?.sent || 0;
-      if (a.config?.channel !== 'sms' && sent > 0) a.openRate = Math.min(100, Math.round(((openMap[a.id] || 0) / sent) * 100));
-      return a;
+      const a = reconcileClicks(rowToAction(r), clickMap[r.id] || []);
+      const pub = publicAction(a);
+      const sent = pub.results?.sent || 0;
+      if (pub.config?.channel !== 'sms' && sent > 0) pub.openRate = Math.min(100, Math.round(((openMap[pub.id] || 0) / sent) * 100));
+      return pub;
     });
     res.json({ actions, requireApproval: requireApprovalFor(req.params.entityId), approverCandidates: candidates });
   });
@@ -1161,6 +1190,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     // ('email' via /e links, 'sms' via /s); legacy untagged clicks ('') belong to
     // the only channel on a single-channel campaign, otherwise stay unattributed.
     const byCh = sql.prepare("SELECT channel, COUNT(*) n FROM action_clicks WHERE action_id=? GROUP BY channel").all(a.id);
+    reconcileClicks(a, byCh); // heal the cached counters from the source-of-truth table on view
     const chCount = (c) => byCh.find((r) => r.channel === c)?.n || 0;
     const untaggedClicks = chCount('');
     let emailClicks = chCount('email');

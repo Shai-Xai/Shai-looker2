@@ -125,6 +125,19 @@ angle for Hermes). Tick the boxes as you go.
 - 🔎 `/c/:token/:rtok?/:ch?` counter bump vs. `action_clicks` INSERT, and the
   master rollup reducer in `CampaignManager.jsx`.
 
+**✅ RESOLVED (2026-06-14).** Adopted the proposal: `action_clicks` is the
+source of truth, `results.{clicks,emailClicks,smsClicks}` is a rebuildable cache.
+Added `reconcileClicks(action, byChannel)` in `server/actions.js` which recomputes
+the per-channel counts from the table and persists them if they drifted. It runs:
+(a) on the **report** view (reusing the report's existing GROUP BY), and (b) on
+the **list** endpoint via one extra grouped query (`GROUP BY action_id, channel`,
+mirroring the opens query) so the list + master rollup are healed on every load.
+The `/c/...` route still bumps the cache for instant feedback. The **total**
+counter only heals *upward* (max of counter vs table) so legacy clicks counted
+before per-recipient rows existed are preserved; per-channel counts mirror the
+table (legacy clicks are untagged). Master rollup keeps reading the cheap counter
+— now guaranteed reconciled.
+
 ---
 
 ## Hermes review — findings (2026-06-14)
