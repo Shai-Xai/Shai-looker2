@@ -1547,7 +1547,11 @@ function clientCatalogue(entityId) {
 // Effective value per dashboard filter (suite lock wins over default), keyed
 // by filter NAME — the shape the client's listenTo plumbing expects. Matching
 // is case/whitespace-insensitive, mirroring the dashboard view.
-function effectiveFilterValues(def, lockMap = {}) {
+// `overlay` (filter name → value) is the client's saved DEFAULT view for this
+// dashboard — applied between the built-in default_value and the suite lock, so
+// it overrides the narrow defaults (e.g. a management board's event filter) but
+// a hard lock still wins.
+function effectiveFilterValues(def, lockMap = {}, overlay = null) {
   const norm = {};
   for (const [k, v] of Object.entries(lockMap)) norm[k.trim().toLowerCase()] = v;
   const fv = {};
@@ -1555,6 +1559,7 @@ function effectiveFilterValues(def, lockMap = {}) {
     const field = (f.field || f.dimension || '').trim().toLowerCase();
     const nameKey = (f.name || '').trim().toLowerCase();
     let v = f.default_value || '';
+    if (overlay && typeof overlay[f.name] === 'string') v = overlay[f.name];
     const locked = norm[nameKey] != null ? norm[nameKey] : (field ? norm[field] : undefined);
     if (locked != null && locked !== '') v = locked;
     fv[f.name] = v;
@@ -1596,6 +1601,7 @@ function buildLightSnapshot(user, entityId) {
   // client runs them exactly like the dashboard view would.
   const pinnedTiles = [];
   const lockCache = {};
+  const viewCache = {}; // dashboardId -> client-default saved filter view
   for (const m of db.listMarks({ userId: user.id, entityId, kind: 'pin' })) {
     const meta = byId[m.dashboardId];
     const def = meta && store.get(m.dashboardId);
@@ -1604,9 +1610,10 @@ function buildLightSnapshot(user, entityId) {
     const tile = tiles.find((t) => t.id === m.tileId);
     if (!tile || tile.type === 'text') continue;
     lockCache[meta.suiteId] = lockCache[meta.suiteId] || expandLockMap(db.lockedFiltersForSuite(meta.suiteId));
+    if (!(def.id in viewCache)) viewCache[def.id] = db.getFilterView('entity', entityId, def.id);
     pinnedTiles.push({
       tile, suiteId: meta.suiteId, dashboardId: def.id, dashTitle: def.title, setName: meta.setName,
-      filterValues: effectiveFilterValues(def, lockCache[meta.suiteId]), scope: m.scope,
+      filterValues: effectiveFilterValues(def, lockCache[meta.suiteId], viewCache[def.id]), scope: m.scope,
     });
     if (pinnedTiles.length >= 8) break;
   }
