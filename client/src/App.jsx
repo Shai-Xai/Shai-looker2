@@ -56,7 +56,10 @@ function Header() {
   return (
     <header className="app-chrome" style={{
       borderBottom: '1px solid var(--hairline)', padding: isMobile ? '0 14px' : '0 22px',
-      height: 56, display: 'flex', alignItems: 'center', gap: isMobile ? 8 : 12, flexShrink: 0, zIndex: 10,
+      // position+zIndex so the header's stacking context (its backdrop-filter
+      // creates one) sits ABOVE the client menu bar (z20) — otherwise the
+      // workspace dropdown's top items (Admin console) hide behind that bar.
+      height: 56, display: 'flex', alignItems: 'center', gap: isMobile ? 8 : 12, flexShrink: 0, position: 'relative', zIndex: 30,
     }}>
       <WorkspaceSwitcher
         inClientView={inClientView}

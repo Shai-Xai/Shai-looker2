@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { api } from '../lib/api.js';
 import TilePicker from './TilePicker.jsx';
 import RefineButton from './RefineButton.jsx';
+import { useIsMobile } from '../lib/useIsMobile.js';
 
 // Scheduled digests — role-lensed briefing emails on a cadence. One component
 // for both surfaces: admin (manage any client) and client self-service (own
@@ -10,6 +11,7 @@ const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 
 
 export default function DigestManager({ entityId, scope = 'admin', logins = [] }) {
   const isAdmin = scope === 'admin';
+  const isMobile = useIsMobile();
   const A = {
     list: () => (isAdmin ? api.getDigests(entityId) : api.getMyDigests(entityId)),
     create: (b) => (isAdmin ? api.createDigest(entityId, b) : api.createMyDigest(entityId, b)),
@@ -44,7 +46,7 @@ export default function DigestManager({ entityId, scope = 'admin', logins = [] }
       {data.jobs.length === 0 ? (
         <div style={{ ...card, textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>No digests yet. Create one to send a scheduled, role-personalised briefing.</div>
       ) : data.jobs.map((j) => (
-        <div key={j.id} style={{ ...card, display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div key={j.id} style={{ ...card, display: 'flex', alignItems: isMobile ? 'stretch' : 'center', flexDirection: isMobile ? 'column' : 'row', gap: isMobile ? 10 : 12 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ fontWeight: 700, fontSize: 14 }}>{j.title || `${roleLabel(j.role)} digest`}</span>
@@ -57,7 +59,7 @@ export default function DigestManager({ entityId, scope = 'admin', logins = [] }
             </div>
             {j.lastStatus && <div style={{ fontSize: 11, color: j.lastStatus.startsWith('ok') ? 'var(--success,#10b981)' : 'var(--muted)', marginTop: 2 }}>Last: {j.lastStatus}{j.lastRunAt ? ` (${fmt(j.lastRunAt)})` : ''}</div>}
           </div>
-          <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+          <div style={{ display: 'flex', gap: 6, flexShrink: 0, flexWrap: 'wrap', ...(isMobile ? { borderTop: '1px solid var(--hairline)', paddingTop: 10 } : null) }}>
             <button style={mini} onClick={() => A.test(j.id).then((r) => alert(r.to ? `Test sent to ${r.to}` : 'Sent')).catch((e) => alert(e.message))}>Test</button>
             <button style={mini} onClick={() => setEditing(j)}>Edit</button>
             <button style={mini} title="Duplicate as a new digest" onClick={() => setEditing({ ...j, id: undefined, status: 'paused', title: `${j.title || `${roleLabel(j.role)} digest`} (copy)` })}>Duplicate</button>
@@ -70,6 +72,7 @@ export default function DigestManager({ entityId, scope = 'admin', logins = [] }
 }
 
 function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }) {
+  const isMobile = useIsMobile();
   const [f, setF] = useState(() => ({
     title: job?.title || '', role: job?.role || 'exec', roleFocus: job?.roleFocus || '', focusMode: job?.focusMode || 'override',
     customMessage: job?.customMessage || '',
@@ -119,7 +122,7 @@ function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }
   return (
     <div>
       <button style={{ ...mini, marginBottom: 12 }} onClick={onClose}>← Back to digests</button>
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 20, alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0,1fr) minmax(0,1fr)', gap: 20, alignItems: 'start' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <Field label="Name"><input style={input} value={f.title} onChange={(e) => set('title', e.target.value)} placeholder="e.g. Exec daily" /></Field>
           <Field label="Role lens — personalises the whole email">
@@ -216,7 +219,7 @@ function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }
             </div>
           )}
           <div style={{ position: 'relative' }}>
-            <iframe title="Digest preview" srcDoc={preview.html} style={{ width: '100%', height: 540, border: '1px solid var(--hairline)', borderRadius: 12, background: '#fff', opacity: previewBusy ? 0.45 : 1, transition: 'opacity 0.2s' }} />
+            <iframe title="Digest preview" srcDoc={preview.html} style={{ width: '100%', height: isMobile ? 420 : 540, border: '1px solid var(--hairline)', borderRadius: 12, background: '#fff', opacity: previewBusy ? 0.45 : 1, transition: 'opacity 0.2s' }} />
             {previewBusy && (
               <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
                 <div style={{ background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 12, padding: '14px 20px', fontSize: 13, fontWeight: 600, boxShadow: '0 4px 18px rgba(0,0,0,0.08)' }}>
