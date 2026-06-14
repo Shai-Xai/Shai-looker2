@@ -171,7 +171,7 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
     { value: 'email', label: '✉️ Email', n: countBy((a) => (a.config?.channel || 'email') === 'email') },
     { value: 'sms', label: '💬 SMS', n: countBy((a) => a.config?.channel === 'sms') },
     { value: 'both', label: 'Email & SMS', n: countBy((a) => a.config?.channel === 'both') },
-  ];
+  ].filter((p) => p.value === 'all' || p.n > 0); // hide channels with no campaigns
   const statePills = [
     { value: 'all', label: 'All' },
     { value: 'draft', label: 'Drafts', n: countBy((a) => stateBucket(a) === 'draft') },
@@ -179,7 +179,7 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
     { value: 'scheduled', label: 'Scheduled', n: countBy((a) => stateBucket(a) === 'scheduled') },
     { value: 'sent', label: 'Sent', n: countBy((a) => stateBucket(a) === 'sent') },
     { value: 'automated', label: 'Automated', n: countBy((a) => stateBucket(a) === 'automated') },
-  ];
+  ].filter((p) => p.value === 'all' || p.n > 0); // hide states with no campaigns
 
   // Group campaigns by master campaign (ungrouped last). Each group shows
   // combined stats so a master reports at a glance.
@@ -229,19 +229,20 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
           ))}
         </div>
       )}
-      {/* Filter pills — narrow by channel and by state (drafts / sent / …). */}
-      {data.actions.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
-          <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
-            {channelPills.map((p) => (
-              <FilterPill key={p.value} active={channelFilter === p.value} onClick={() => setChannelFilter(p.value)} label={p.label} n={p.n} />
-            ))}
-          </div>
-          <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
-            {statePills.map((p) => (
-              <FilterPill key={p.value} active={stateFilter === p.value} onClick={() => setStateFilter(p.value)} label={p.label} n={p.n} />
-            ))}
-          </div>
+      {/* Filter pills — one quiet row: channel · state. Only the buckets that
+          actually have campaigns show, and the whole bar hides when there's
+          nothing meaningful to filter. */}
+      {(channelPills.length > 1 || statePills.length > 1) && (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 14 }}>
+          {channelPills.length > 1 && channelPills.map((p) => (
+            <FilterPill key={`c-${p.value}`} active={channelFilter === p.value} onClick={() => setChannelFilter(p.value)} label={p.label} n={p.n} />
+          ))}
+          {channelPills.length > 1 && statePills.length > 1 && (
+            <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--hairline)', margin: '2px 4px' }} />
+          )}
+          {statePills.length > 1 && statePills.map((p) => (
+            <FilterPill key={`s-${p.value}`} active={stateFilter === p.value} onClick={() => setStateFilter(p.value)} label={p.label} n={p.n} />
+          ))}
         </div>
       )}
       {data.actions.length === 0 ? (
@@ -1389,22 +1390,22 @@ function ChannelChip({ channel }) {
   return <span style={{ fontSize: 10.5, fontWeight: 700, borderRadius: 980, padding: '2px 8px', background: m.bg, color: m.c }}>{m.t}</span>;
 }
 
-// A toggleable filter pill. Shows a count when one is provided (and > 0).
+// A toggleable filter pill. Quiet by default; a light brand tint when active.
 function FilterPill({ active, onClick, label, n }) {
   return (
     <button
       type="button"
       onClick={onClick}
       style={{
-        fontSize: 12, fontWeight: 700, borderRadius: 980, padding: '5px 12px', cursor: 'pointer',
-        border: active ? '1px solid var(--brand)' : '1px solid var(--hairline)',
-        background: active ? 'var(--brand)' : 'transparent',
-        color: active ? '#fff' : 'var(--text)',
-        display: 'inline-flex', alignItems: 'center', gap: 6,
+        fontSize: 12, fontWeight: 600, borderRadius: 980, padding: '4px 11px', cursor: 'pointer',
+        border: active ? '1px solid var(--brand)' : '1px solid transparent',
+        background: active ? 'rgba(var(--brand-rgb,255,56,92),0.10)' : 'transparent',
+        color: active ? 'var(--brand)' : 'var(--muted)',
+        display: 'inline-flex', alignItems: 'center', gap: 5,
       }}
     >
       {label}
-      {typeof n === 'number' && <span style={{ fontSize: 11, fontWeight: 700, opacity: active ? 0.85 : 0.6 }}>{n}</span>}
+      {typeof n === 'number' && <span style={{ fontSize: 10.5, fontWeight: 700, opacity: 0.6 }}>{n}</span>}
     </button>
   );
 }
