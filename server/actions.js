@@ -70,6 +70,16 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     );
     CREATE INDEX IF NOT EXISTS idx_action_clicks ON action_clicks(action_id, email);
 
+    -- Email opens, captured by a 1x1 tracking pixel (one row per open event;
+    -- unique openers = distinct emails). Email only; imperfect (image-blocking /
+    -- Apple Mail Privacy Protection) but the standard open-rate signal.
+    CREATE TABLE IF NOT EXISTS action_opens (
+      action_id TEXT NOT NULL,
+      email     TEXT NOT NULL DEFAULT '',
+      at        TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_action_opens ON action_opens(action_id, email);
+
     -- Memory for recurring automations: who a campaign family has already
     -- emailed, so the daily check only queues NEW people.
     CREATE TABLE IF NOT EXISTS action_sent (
@@ -424,6 +434,13 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
   // uploaded HTML (we still inject tracking + a guaranteed unsubscribe link).
   function renderFor(action, recipient, step) {
     const cfg = action.config;
+    const realSend = action.id && !['preview', 'test'].includes(action.id);
+    // Open-tracking pixel — only on real sends (never preview/test). Uses the
+    // same per-recipient token as clicks so opens attribute to a person.
+    const openPixel = (rtok) => (realSend && cfg.clickToken
+      ? `<img src="${mailer.baseUrl()}/o/${cfg.clickToken}/${rtok}" width="1" height="1" alt="" style="display:none;max-height:0;max-width:0;overflow:hidden;" />`
+      : '');
+    const withPixel = (html, rtok) => { const p = openPixel(rtok); if (!p) return html; return /<\/body>/i.test(html) ? html.replace(/<\/body>/i, `${p}</body>`) : html + p; };
     // A drip step overrides the campaign-level copy (custom-HTML mode is
     // campaign-level only; steps use the branded template).
     const useSubject = step ? (step.subject || cfg.subject) : cfg.subject;
@@ -458,17 +475,16 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
         html = /<\/body>/i.test(html) ? html.replace(/<\/body>/i, `${footer}</body>`) : html + footer;
       }
       const text = `${tok(cfg.customHtml).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 4000)}\n\nUnsubscribe: ${unsubUrl}`;
-      return { html, text, subject };
+      return { html: withPixel(html, rtok), text, subject };
     }
 
     // Hero image: hosted by action id for real sends (email clients strip
     // data-URLs); inline for preview/test so it shows live.
-    const realSend = action.id && !['preview', 'test'].includes(action.id);
     const heroImage = cfg.heroImage
       ? (cfg.heroImage.startsWith('data:') && realSend ? `${mailer.baseUrl()}/mail-assets/campaign/${action.id}` : cfg.heroImage)
       : '';
     const { html, text } = mailer.campaignEmail({ entityId: action.entityId, assetScope: action.entityId, subject, bodyText: tok(useBody), ctaText: useCta || 'View event', ctaUrl, unsubUrl, heroImage, promo });
-    return { html, text, subject };
+    return { html: withPixel(html, rtok), text, subject };
   }
 
   // Render an SMS for a recipient: plain text with tokens, a tracked short link
@@ -608,7 +624,16 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     const candidates = db.listUsers()
       .filter((u) => u.role !== 'admin' && (u.entityIds || []).includes(req.params.entityId) && auth.hasPermission(u, req.params.entityId, 'campaigns.approve'))
       .map((u) => ({ userId: u.id, email: u.email }));
-    res.json({ actions: rows.map((r) => publicAction(rowToAction(r))), requireApproval: requireApprovalFor(req.params.entityId), approverCandidates: candidates });
+    // Unique openers per campaign (one grouped query) → open rate on the list.
+    const openMap = {};
+    try { for (const o of sql.prepare("SELECT action_id, COUNT(DISTINCT email) n FROM action_opens WHERE email!='' GROUP BY action_id").all()) openMap[o.action_id] = o.n; } catch { /* table may be new */ }
+    const actions = rows.map((r) => {
+      const a = publicAction(rowToAction(r));
+      const sent = a.results?.sent || 0;
+      if (a.config?.channel !== 'sms' && sent > 0) a.openRate = Math.min(100, Math.round(((openMap[a.id] || 0) / sent) * 100));
+      return a;
+    });
+    res.json({ actions, requireApproval: requireApprovalFor(req.params.entityId), approverCandidates: candidates });
   });
   // Per-client "require approval" governance setting. (Before the :id routes so
   // 'approval-setting' isn't swallowed by :id.)
@@ -1041,17 +1066,33 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     const totalClicks = tableTotal + legacy;
     const anonClicks = tableAnon + legacy;
     const sent = a.results.sent || 0;
+    // Opens (email pixel). Unique openers = distinct attributed emails; total =
+    // the counter (incl. anonymous/blocked-token loads).
+    const uniqueOpeners = sql.prepare("SELECT COUNT(DISTINCT email) n FROM action_opens WHERE action_id=? AND email!=''").get(a.id)?.n || 0;
+    const totalOpens = a.results.opens || 0;
+    const emailChannel = a.config.channel !== 'sms'; // opens only meaningful for email
     res.json({
       title: a.title || a.config.subject, status: a.status, approvedBy: a.approvedBy, approvedAt: a.approvedAt,
       sent, failed: a.results.failed || 0, total: a.results.total ?? a.audience.length,
       totalClicks, uniqueClickers: clickers.length, anonClicks,
       // CTR mirrors the card (total clicks / sent) so the two never disagree.
       ctr: sent > 0 ? Math.min(100, Math.round((totalClicks / sent) * 100)) : 0,
+      opens: totalOpens, uniqueOpeners, hasOpens: emailChannel,
+      openRate: emailChannel && sent > 0 ? Math.min(100, Math.round((uniqueOpeners / sent) * 100)) : 0,
       converted: a.results.converted || 0,
       convRate: sent > 0 ? Math.round(((a.results.converted || 0) / sent) * 100) : 0,
       clickers,
       nonClickers: a.audience.filter((r) => !clickers.some((c) => c.email === r.email)).length,
       attributed: clickers.length > 0 || tableAnon > 0,
+      // Campaign details (so a sent campaign can be reviewed, not just its stats).
+      details: {
+        channel: a.config.channel || 'email',
+        type: a.config.campaignMode === 'sequence' ? `Drip sequence (${(a.config.steps || []).length} steps)` : a.recurring ? 'Automated' : 'One-off',
+        subject: a.config.subject || '', body: a.config.body || '',
+        steps: (a.config.steps || []).map((s) => ({ delayHours: s.delayHours, subject: s.subject, body: s.body })),
+        master: a.config.master || '', ctaUrl: a.config.ctaUrl || '',
+        promo: a.config.promo?.source && a.config.promo.source !== 'none' ? (a.config.promo.code || a.config.promo.type) : '',
+      },
     });
   });
 
@@ -1228,6 +1269,24 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
   // Tracked CTA click → count + redirect, with the campaign's UTM parameters
   // appended to the destination (clean URL in the email, full attribution in
   // the client's analytics). Existing query keys on the destination win.
+  // Open-tracking pixel — records an email open (attributed when the recipient
+  // token is present), then returns a 1x1 transparent GIF. Never blocks/errors.
+  const OPEN_PIXEL = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
+  app.get('/o/:token/:rtok?', (req, res) => {
+    try {
+      const r = sql.prepare(`SELECT * FROM actions WHERE json_extract(config,'$.clickToken')=?`).get(req.params.token);
+      if (r) {
+        const a = rowToAction(r);
+        const who = req.params.rtok ? parseUnsubToken(req.params.rtok) : null;
+        sql.prepare('INSERT INTO action_opens (action_id, email, at) VALUES (?,?,?)').run(a.id, who?.e ? String(who.e).toLowerCase() : '', now());
+        saveResults(a.id, { ...a.results, opens: (a.results.opens || 0) + 1, lastOpenAt: now() });
+      }
+    } catch { /* never block the pixel */ }
+    res.set('Content-Type', 'image/gif');
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    res.end(OPEN_PIXEL);
+  });
+
   app.get('/c/:token/:rtok?', (req, res) => {
     const r = sql.prepare(`SELECT * FROM actions WHERE json_extract(config,'$.clickToken')=?`).get(req.params.token);
     if (!r) return res.redirect('/');

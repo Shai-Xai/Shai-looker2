@@ -106,6 +106,7 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
           <div style={{ display: 'flex', gap: 14, marginTop: 6, fontSize: 12.5, fontWeight: 600, flexWrap: 'wrap' }}>
             <span>📤 {a.results.sent ?? 0}/{a.results.total ?? a.audienceCount} sent</span>
             {(a.results.failed ?? 0) > 0 && <span style={{ color: 'var(--error,#ef4444)' }}>✗ {a.results.failed} failed</span>}
+            {typeof a.openRate === 'number' && <span style={{ color: '#0a66c2' }}>📬 {a.openRate}% open</span>}
             <span>🔗 {a.results.clicks ?? 0} clicks</span>
             {a.results.sent > 0 && <span style={{ color: 'var(--muted)' }}>{Math.round(((a.results.clicks || 0) / a.results.sent) * 100)}% CTR</span>}
             {(a.results.converted ?? 0) > 0 && <span style={{ color: 'var(--success,#10b981)' }}>✓ {a.results.converted} converted</span>}
@@ -1028,12 +1029,42 @@ function CampaignReport({ entityId, action, onClose }) {
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 18 }}>
         {stat('Sent', `${r.sent}/${r.total}`)}
         {r.failed > 0 && stat('Failed', r.failed, 'var(--error,#ef4444)')}
+        {r.hasOpens && stat('Open rate', `${r.openRate}%`, '#0a66c2')}
+        {r.hasOpens && stat('Unique opens', r.uniqueOpeners)}
         {stat('Total clicks', r.totalClicks)}
         {stat('Unique clickers', r.uniqueClickers)}
         {stat('CTR', `${r.ctr}%`, 'var(--brand)')}
         {(r.converted > 0) && stat('Converted', r.converted, 'var(--success,#10b981)')}
         {(r.converted > 0) && stat('Conv. rate', `${r.convRate}%`, 'var(--success,#10b981)')}
       </div>
+
+      {r.details && (
+        <div style={{ ...card, marginBottom: 14 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Campaign details</div>
+          <div style={{ fontSize: 12.5, color: 'var(--muted)', display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <div><b style={{ color: 'var(--text)' }}>Channel:</b> {r.details.channel === 'both' ? 'Email + SMS' : r.details.channel === 'sms' ? 'SMS' : 'Email'} · <b style={{ color: 'var(--text)' }}>Type:</b> {r.details.type}</div>
+            {r.details.master && <div><b style={{ color: 'var(--text)' }}>Master:</b> {r.details.master}</div>}
+            {r.details.promo && <div><b style={{ color: 'var(--text)' }}>Offer:</b> {r.details.promo}</div>}
+            {r.details.ctaUrl && <div style={{ wordBreak: 'break-all' }}><b style={{ color: 'var(--text)' }}>Link:</b> {r.details.ctaUrl}</div>}
+          </div>
+          {r.details.steps?.length > 0 ? (
+            <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {r.details.steps.map((s, i) => (
+                <div key={i} style={{ borderLeft: '2px solid var(--hairline)', paddingLeft: 10 }}>
+                  <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--brand)' }}>Step {i + 1} · +{s.delayHours % 24 === 0 && s.delayHours >= 24 ? `${s.delayHours / 24}d` : `${s.delayHours}h`}</div>
+                  {s.subject && <div style={{ fontSize: 13, fontWeight: 600 }}>{s.subject}</div>}
+                  <div style={{ fontSize: 12.5, color: 'var(--muted)', whiteSpace: 'pre-wrap' }}>{s.body}</div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{ marginTop: 8 }}>
+              {r.details.subject && <div style={{ fontSize: 13.5, fontWeight: 700 }}>{r.details.subject}</div>}
+              {r.details.body && <div style={{ fontSize: 12.5, color: 'var(--muted)', whiteSpace: 'pre-wrap', marginTop: 2 }}>{r.details.body}</div>}
+            </div>
+          )}
+        </div>
+      )}
 
       <div style={{ ...card }}>
         <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Who clicked</div>
