@@ -18,6 +18,7 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
   const [journey, setJourney] = useState(null); // sequence action for the journey funnel
   const [presetMaster, setPresetMaster] = useState(''); // pre-fill master on a new campaign
   const [masters, setMasters] = useState([]);
+  const [openMasters, setOpenMasters] = useState({}); // master name → expanded? (collapsed by default)
   useEffect(() => { api.getActionTemplates(entityId).then((r) => setTemplates(r.templates || [])).catch(() => setTemplates([])); }, [entityId]);
   const loadMasters = () => api.getMasters(entityId).then((r) => setMasters(r.masters || [])).catch(() => setMasters([]));
   useEffect(() => { loadMasters(); }, [entityId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -190,16 +191,28 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
         <>
           {groups.named.map(([name, list]) => {
             const t = agg(list);
+            const open = !!openMasters[name];
             return (
               <div key={name} style={{ marginBottom: 16 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '0 2px 6px' }}>
-                  <span style={{ fontSize: 13, fontWeight: 800 }}>🗂 {name}</span>
+                  <button onClick={() => setOpenMasters((s) => ({ ...s, [name]: !s[name] }))} style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: 'var(--text)' }}>
+                    <span style={{ width: 12, fontSize: 10, color: 'var(--muted)', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</span>
+                    <span style={{ fontSize: 13, fontWeight: 800 }}>🗂 {name}</span>
+                  </button>
                   <span style={{ fontSize: 12, color: 'var(--muted)' }}>
                     {list.length} campaign{list.length === 1 ? '' : 's'} · {t.sent} sent · {t.clicks} clicks{t.converted ? ` · ${t.converted} converted` : ''}
                   </span>
                   <button style={{ ...mini, padding: '4px 10px' }} onClick={() => setMasterReport(name)}>📊 Report</button>
                 </div>
-                <div style={{ borderLeft: '2px solid var(--hairline)', paddingLeft: 10 }}>{list.map(rowFor)}</div>
+                {open ? (
+                  <div style={{ borderLeft: '2px solid var(--hairline)', paddingLeft: 10 }}>{list.map(rowFor)}</div>
+                ) : (
+                  <button onClick={() => setOpenMasters((s) => ({ ...s, [name]: true }))} style={stackedCard} title="Tap to expand">
+                    <span style={{ fontSize: 13, fontWeight: 700 }}>{list.length} campaign{list.length === 1 ? '' : 's'} stacked</span>
+                    <span style={{ fontSize: 12, color: 'var(--muted)', marginLeft: 8 }}>{list.slice(0, 2).map((a) => a.title || a.config?.subject || 'Untitled').join(' · ')}{list.length > 2 ? ` +${list.length - 2}` : ''}</span>
+                    <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--brand)', fontWeight: 700 }}>Expand ▾</span>
+                  </button>
+                )}
               </div>
             );
           })}
@@ -1447,3 +1460,10 @@ const mini = { padding: '7px 12px', background: 'rgba(128,128,128,0.10)', color:
 const hintLbl = { fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', margin: '0 0 5px' };
 const hintS = { fontSize: 11, color: 'var(--muted)', marginTop: 4, lineHeight: 1.4 };
 const chBanner = { display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', borderRadius: 8, fontWeight: 700, fontSize: 13, margin: '4px 0 2px' };
+// Collapsed master group: a card with two faux cards peeking behind = "stacked".
+const stackedCard = {
+  display: 'flex', alignItems: 'center', gap: 4, width: 'calc(100% - 8px)', textAlign: 'left', cursor: 'pointer',
+  background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 12, padding: '14px 16px',
+  marginLeft: 0, color: 'var(--text)',
+  boxShadow: '4px 4px 0 -1px var(--bg), 4px 4px 0 0 var(--hairline), 8px 8px 0 -2px var(--bg), 8px 8px 0 -1px var(--hairline)',
+};
