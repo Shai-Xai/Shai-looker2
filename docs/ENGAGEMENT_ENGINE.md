@@ -86,10 +86,12 @@ write-only secrets, graceful no-op when unconfigured, one send/sync chokepoint.
 ## 6. Data model sketch (for review — evolve, don't cram into `actions.config`)
 ```
 segments        id, entity_id, name, source(tile|query|rules|paste),
-                definition(json: {dashboardId,tileId,filters} | {connection,sql} | rules | pasted),
-                email_field, phone_field, consent_field, created_by, created_at
-                -- resolves to recipients/identifiers via a SOURCE-AGNOSTIC resolver
-                -- (Looker today; direct BigQuery/other later), scoped per client
+                definition(json: identity-column mapping + {dashboardId,tileId,filters}
+                           | {connection,sql} | rules | pasted),
+                last_count, last_resolved_at, created_by, created_at
+                -- NO consent column — a segment is "who matches"; consent is
+                -- per-channel, applied at SEND (see §9.4). Resolves via the
+                -- source-agnostic resolver (§6a), HARD entity/event-scoped.
 
 channel_connections  id, entity_id, channel(meta|tiktok|google|whatsapp|...),
                      status, secret_ref (write-only), meta(json), connected_by/at
@@ -111,6 +113,24 @@ audience_syncs  id, action_id, channel, segment_id, pushed_count, last_synced_at
 Everything stays **entity-scoped** (and event-scoped via the segment's tile where
 relevant). The existing `actions` row becomes a campaign/journey *instance*;
 `segments` and `journeys` become first-class.
+
+## 6a. The resolver — the real deliverable (not the table)
+*Per Hermes review:* the table is easy; the **source-agnostic resolver** is the
+high-value piece. Contract: `resolveSegment(definition, ctx) → { members, count, meta }`.
+- **Source adapters:** `tile` (Looker) + `paste` today (the tile adapter delegates
+  to the campaign engine's `audienceFor`); `query` (direct BigQuery) and `rules`
+  later. Adding a source = adding an adapter; callers don't change.
+- **Hard scope gate (not a convention):** the resolver **refuses** to run any
+  source that isn't entity/event-scoped. `tile` is scoped by the client catalogue;
+  for `query` the org filter is injected/enforced *inside* the resolver — a raw SQL
+  segment is never trusted to scope itself. Enforced in the resolver, not per caller.
+- **Stable member output shape (lock now, populate later):**
+  `member = { identity:{ email, phone, appUserId?, adMatch? }, name, attributes:{} }`.
+  Email/phone now; `appUserId` (Howler app) + `adMatch` (hashed) reserved — adding
+  them later *populates* fields, never *reshapes* the output. So cross-system
+  identity is not a blocker for email/SMS segments today.
+- **Consent is NOT applied here** — the resolver returns *who matches*; per-channel
+  consent + unsubscribe apply at **send**.
 
 ## 7. How it maps to what's built
 - `actions.js` already has audiences (tile/paste/snapshot + filters), email/SMS/
@@ -139,17 +159,23 @@ relevant). The existing `actions` row becomes a campaign/journey *instance*;
 ## 9. Open decisions
 1. **Naming / IA** — top-level concept: "Actions" vs "Campaigns" vs "Engage"? Client
    sub-areas: *Campaigns · Automations · Segments · Templates · Connections*?
-2. **Schema timing** — **DECIDED (Jun 2026): introduce now, additively.** Create
-   `segments` (+ a source-agnostic resolver) and the `journeys` tables as a
-   foundation before more logic accretes in `actions.config`. Non-destructive:
-   today's campaigns keep working; the abandoned-cart audience just becomes the
-   first thing routed through the resolver / saveable as a segment.
+2. **Schema timing** — **DECIDED (Jun 2026), split per Hermes review:**
+   - **2a. Segments + resolver — DONE.** `segments` table + source-agnostic
+     resolver shipped (keystone for §2). Additive; campaigns untouched.
+   - **2b. Journeys schema — DEFERRED to P5.** Don't design `journey_nodes` /
+     `enrolments` until the visual builder, when the node types are actually known
+     (designing the graph now risks getting it wrong). Today's linear drip stays.
 3. **Self-service depth** — default split of who builds campaigns/segments (client
-   vs AM). Dual-surface says both; the default matters.
-4. **Consent & compliance per channel** — WhatsApp opt-in, ad-platform hashing/
-   consent, POPIA/GDPR for audience export. Needs a consent model per channel.
-5. **Identity for app push / social match** — what identifier links a Pulse/Looker
-   person to a Howler app user and to a hashed ad-platform match? (Ties to 4.1.)
+   vs AM). Dual-surface says both; the default matters. *(still open)*
+4. **Consent & compliance — DECIDED: per-channel, at SEND (not on the segment).**
+   A segment is "who matches"; opt-in differs by channel (email ≠ SMS ≠ WhatsApp),
+   so consent + unsubscribe are enforced at send, modelled per-recipient-per-channel.
+   POPIA-relevant (SA). Removes the single consent field from the segment.
+5. **Identity — DECIDED: lock the output SHAPE now, resolve later.** Resolver
+   returns `member.identity{ email, phone, appUserId?, adMatch? }` (§6a). We don't
+   solve cross-system identity now (needs the Howler integration); we only guarantee
+   adding those keys won't reshape the output — so it's not a blocker for email/SMS
+   segments today.
 
 ## 10. Dependencies & risks
 - **Howler integration (4.1)** unlocks app push + purchase/behaviour signals —
