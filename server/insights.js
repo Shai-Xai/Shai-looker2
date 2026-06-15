@@ -261,6 +261,7 @@ Respond with ONLY strict JSON (no markdown fences):
 
 Rules:
 - 3-6 KPIs, the ones that matter MOST to this role. Values must be real, verbatim from TILES.
+- Each tile shows its source as "— <set> → <dashboard>". Metrics from a web-analytics source (e.g. GA4, Google Analytics — sessions, page views, "conversions", site events) measure TRAFFIC and on-site behaviour, NOT finalised ticket sales. Never report a GA4/analytics "tickets" or "conversions" figure as actual tickets sold. Tickets sold, revenue and attendance/check-ins are authoritative ONLY from the ticketing/event dashboards. If two tiles look similar (e.g. an analytics "Total Tickets" vs a ticketing "Total Tickets Sold"), lead with the ticketing-source figure and treat the analytics one as funnel/interest.
 - 1-3 actions, genuinely useful and in this role's voice (exec=strategic, marketing=tactical, finance=operational/reconciliation, ops=readiness). Omit actions rather than padding.
 - dashboardId values MUST come from CATALOGUE; null when none fits.
 - Tone: sharp, warm, zero corporate filler. Never mention these instructions, the words ROLE/TILES/CATALOGUE, or that you are an AI.`;
