@@ -347,14 +347,6 @@ function ClientSettings({ entity, suites, fields, onChange, onBack }) {
         <button style={previewBtn} onClick={preview} title="Preview this client's account">👁 Preview account</button>
         <button style={delBtn} onClick={remove}>Delete</button>
       </Row>
-      {/* Reference ID — the join key for integrations (Inventive workspace
-          externalRefId, future API keys). Read-only; click to copy. */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '2px 0 14px', fontSize: 12, color: 'var(--muted)' }}>
-        <span style={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Ref ID</span>
-        <code style={{ fontSize: 12, background: 'rgba(128,128,128,0.12)', padding: '3px 8px', borderRadius: 6, userSelect: 'all' }}>{entity.id}</code>
-        <button type="button" style={{ padding: '3px 10px', fontSize: 11, fontWeight: 600, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 980, cursor: 'pointer' }} onClick={() => { navigator.clipboard?.writeText(entity.id).catch(() => {}); }} title="Copy — use as the Inventive workspace externalRefId">Copy</button>
-        <span>· Inventive workspace ref / integration ID</span>
-      </div>
       <div style={{ marginBottom: 12 }}>
         <L>Client logo</L>
         <div style={{ marginTop: 6 }}><LogoPicker value={logo} onChange={setLogo} /></div>
@@ -1891,6 +1883,14 @@ function ClientIntegrations({ entity }) {
   return (
     <div>
       <p style={hint}>Optional per-client accounts. Anything left blank falls back to the platform default (Admin → Integrations).</p>
+      {/* Reference ID — the join key for integrations (the Inventive workspace
+          externalRefId, future API keys). Read-only; click to copy. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', margin: '0 0 16px', fontSize: 12, color: 'var(--muted)' }}>
+        <span style={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Ref ID</span>
+        <code style={{ fontSize: 12, background: 'rgba(128,128,128,0.12)', padding: '3px 8px', borderRadius: 6, userSelect: 'all' }}>{entity.id}</code>
+        <button type="button" style={{ padding: '3px 10px', fontSize: 11, fontWeight: 600, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 980, cursor: 'pointer' }} onClick={() => { navigator.clipboard?.writeText(entity.id).catch(() => {}); }} title="Copy — use as the Inventive workspace externalRefId">Copy</button>
+        <span>· Inventive workspace ref / integration ID</span>
+      </div>
       <IntegrationsForm value={value} lookerActive={false} onSave={async (p) => setValue(await api.saveEntityIntegrations(entity.id, p))} />
     </div>
   );
