@@ -42,6 +42,7 @@ export default function ClientLayout() {
   const onSettlements = location.pathname.startsWith('/settlements');
   const onInbox = location.pathname.startsWith('/inbox');
   const onDigests = location.pathname.startsWith('/digests');
+  const onAsk = location.pathname.startsWith('/ask');
   // Engage hub tabs: Campaigns (/engage/campaigns, default /engage) + Segments.
   const onSegments = location.pathname.startsWith('/segments') || location.pathname.startsWith('/engage/segments');
   const onActions = (location.pathname.startsWith('/actions') || location.pathname.startsWith('/engage')) && !onSegments;
@@ -323,6 +324,14 @@ export default function ClientLayout() {
               {inbox.unread > 0 && <span style={{ ...countChip, background: 'var(--brand)', color: '#fff' }}>{inbox.unread}</span>}
             </button>
           )}
+          <button
+            className={`nav-row${onAsk ? ' active' : ''}`}
+            style={{ ...rowBtn, fontWeight: onAsk ? 600 : 500 }}
+            onClick={() => { if (!onAsk) vtNavigate(navigate, '/ask'); if (isMobile) setNavOpen(false); }}
+          >
+            <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>✨</span>
+            <span style={ellip}>Ask</span>
+          </button>
           {can(PERMS.DIGESTS_MANAGE) && (
           <button
             ref={onDigests ? activeRef : null}
@@ -463,6 +472,14 @@ export default function ClientLayout() {
                       {inbox.unread > 0 && <span style={{ ...countChip, background: 'var(--brand)', color: '#fff' }}>{inbox.unread}</span>}
                     </button>
                   )}
+                  <button
+                    className={`nav-row${onAsk ? ' active' : ''}`}
+                    style={{ ...mRowSuite, fontWeight: onAsk ? 700 : 500 }}
+                    onClick={() => { if (!onAsk) vtNavigate(navigate, '/ask'); setNavOpen(false); }}
+                  >
+                    <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>✨</span>
+                    <span style={ellip}>Ask</span>
+                  </button>
                   {can(PERMS.DIGESTS_MANAGE) && (
                   <button
                     className={`nav-row${onDigests ? ' active' : ''}`}

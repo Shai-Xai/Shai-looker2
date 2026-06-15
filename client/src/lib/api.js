@@ -148,6 +148,10 @@ export const api = {
   mySuites: () => fetch('/api/my/suites').then(json),
   mySuite: (id) => fetch(`/api/my/suites/${id}`).then(json),
 
+  // Inventive embedded AI analyst (server-proxied; key stays server-side).
+  inventiveStatus: () => fetch('/api/inventive/status').then(json),
+  inventiveEmbedUrl: (entityId, options) => fetch('/api/inventive/embed-url', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entityId, options }) }).then(json),
+
   // Saved dashboard filter views (per-user "save my view" + admin client default)
   getDashboardFilters: (dashboardId, suiteId) => fetch(`/api/my/dashboard-filters/${dashboardId}${suiteId ? `?suiteId=${suiteId}` : ''}`).then(json),
   saveMyDashboardFilters: (dashboardId, filters) => fetch(`/api/my/dashboard-filters/${dashboardId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filters }) }).then(json),

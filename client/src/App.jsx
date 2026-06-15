@@ -16,6 +16,7 @@ import DocumentViewPage from './pages/DocumentViewPage.jsx';
 import InboxPage from './os/InboxPage.jsx';
 import DigestsPage from './pages/DigestsPage.jsx';
 import EngagePage from './pages/EngagePage.jsx';
+import InventiveAskPage from './pages/InventiveAskPage.jsx';
 import Logo from './components/Logo.jsx';
 import RootErrorBoundary from './components/RootErrorBoundary.jsx';
 import { DrillProvider } from './lib/DrillContext.jsx';
@@ -226,6 +227,7 @@ function Shell() {
                 <Route path="/inbox" element={<InboxPage />} />
                 <Route path="/digests" element={<DigestsPage />} />
                 <Route path="/engage" element={<EngagePage />} />
+                <Route path="/ask" element={<InventiveAskPage />} />
                 <Route path="/engage/:tab" element={<EngagePage />} />
                 <Route path="/actions" element={<RedirectTo to="/engage/campaigns" />} />
                 <Route path="/segments" element={<RedirectTo to="/engage/segments" />} />
@@ -245,6 +247,7 @@ function Shell() {
                 <Route path="/inbox" element={<InboxPage />} />
                 <Route path="/digests" element={<DigestsPage />} />
                 <Route path="/engage" element={<EngagePage />} />
+                <Route path="/ask" element={<InventiveAskPage />} />
                 <Route path="/engage/:tab" element={<EngagePage />} />
                 <Route path="/actions" element={<RedirectTo to="/engage/campaigns" />} />
                 <Route path="/segments" element={<RedirectTo to="/engage/segments" />} />
