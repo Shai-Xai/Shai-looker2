@@ -268,6 +268,26 @@ function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }
               </div>
             )}
           </div>
+
+          {!preview.sample && (preview.facts?.length > 0) && (
+            <details style={{ marginTop: 10, border: '1px solid var(--hairline)', borderRadius: 10, background: 'var(--card)' }}>
+              <summary style={{ cursor: 'pointer', padding: '8px 12px', fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>
+                🔎 Data the analyst read ({preview.facts.length} tile{preview.facts.length === 1 ? '' : 's'})
+              </summary>
+              <div style={{ padding: '4px 12px 10px' }}>
+                <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8, lineHeight: 1.4 }}>The exact tiles and values fed to the digest, under its scope. If a number here differs from the dashboard, the digest is reading a different tile or missing a filter — pin the right tile via “Curated tiles”.</div>
+                {preview.facts.map((fct, i) => (
+                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '6px 0', borderTop: i ? '1px solid var(--hairline)' : 'none' }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{fct.title}</div>
+                      <div style={{ fontSize: 10.5, color: 'var(--muted)' }}>{[fct.suiteName, fct.dashTitle, fct.setName].filter(Boolean).join(' › ')}</div>
+                    </div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--brand)', whiteSpace: 'nowrap' }}>{fct.value}</div>
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
         </div>
       </div>
     </div>

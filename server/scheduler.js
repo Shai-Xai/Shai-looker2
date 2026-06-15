@@ -144,9 +144,10 @@ function mount(app, { db, auth, mailer, messaging, push, generateContent, roleLe
   }
 
   // Render a job's email (real content; throws if generation fails).
-  async function render(job, recipientEmail) {
+  // `debug` asks generateContent to attach the fact tiles it read (preview only).
+  async function render(job, recipientEmail, { debug = false } = {}) {
     const lens = lensFor(job);
-    const content = await generateContent({ entityId: job.entityId, role: job.role, roleFocus: job.roleFocus, focusMode: job.focusMode, contentMode: job.contentMode, tiles: job.tiles, alignDaysBefore: !!job.alignDaysBefore, recipientEmail });
+    const content = await generateContent({ entityId: job.entityId, role: job.role, roleFocus: job.roleFocus, focusMode: job.focusMode, contentMode: job.contentMode, tiles: job.tiles, alignDaysBefore: !!job.alignDaysBefore, recipientEmail, debug });
     const branding = mailer.resolveBranding(job.entityId);
     const email = mailer.digestEmail({ branding, entityId: job.entityId, assetScope: job.entityId, content, roleLabel: lens.label, customMessage: job.customMessage });
     return { ...email, content, senderName: branding.senderName };
@@ -336,8 +337,8 @@ function mount(app, { db, auth, mailer, messaging, push, generateContent, roleLe
     };
     if (!body.live) return sample('');
     try {
-      const { html, subject } = await render(job, (job.recipients[0] || ''));
-      res.json({ html, subject, sample: false, generatedAt: new Date().toISOString() });
+      const { html, subject, content } = await render(job, (job.recipients[0] || ''), { debug: true });
+      res.json({ html, subject, sample: false, generatedAt: new Date().toISOString(), facts: content?.facts || [] });
     } catch (e) {
       // Fall back to the sample layout, but SURFACE the reason so the editor
       // can show why live data didn't come back.

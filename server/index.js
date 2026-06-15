@@ -2048,7 +2048,7 @@ async function buildFactsFromTiles(user, entityId, picks, alignDaysBefore = fals
 
 // Produce a role-lensed digest's structured content (links resolved). Throws if
 // AI/Looker isn't configured or there's no data — callers decide how to surface.
-async function buildDigestContent({ entityId, role, roleFocus, focusMode, contentMode, tiles, alignDaysBefore = false, recipientEmail }) {
+async function buildDigestContent({ entityId, role, roleFocus, focusMode, contentMode, tiles, alignDaysBefore = false, recipientEmail, debug = false }) {
   const apiKey = anthropicKeyForEntity(entityId);
   if (!insights.isConfigured(apiKey)) throw new Error('AI is not configured for this client');
   const lens = ROLE_LENSES[role] || ROLE_LENSES.exec;
@@ -2072,13 +2072,32 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
   const actionHref = (a) => (CAPABILITY_KEYS.has(a.action)
     ? `${mailer.baseUrl()}/engage/campaigns?type=${encodeURIComponent(a.action)}&goal=${encodeURIComponent(String(a.text || '').slice(0, 200))}`
     : href(a.dashboardId));
-  return {
+  const out = {
     subject: String(raw.subject || '').slice(0, 120),
     headline: String(raw.headline || '').slice(0, 600),
     narrative: (raw.narrative || []).slice(0, 5).map((s) => String(s).slice(0, 800)).filter(Boolean),
     kpis: (raw.kpis || []).slice(0, 6).map((k) => ({ label: String(k.label || '').slice(0, 40), value: String(k.value || '').slice(0, 30), delta: String(k.delta || '').slice(0, 40), href: href(k.dashboardId) })).filter((k) => k.label && k.value),
     actions: (raw.actions || []).slice(0, 3).map((a) => ({ text: String(a.text || '').slice(0, 200), href: actionHref(a), action: CAPABILITY_KEYS.has(a.action) ? a.action : null })).filter((a) => a.text),
   };
+  // Diagnostic: the exact tiles the analyst read + the value each returned under
+  // the digest's scope — so a mismatch with the dashboard (wrong tile / missing
+  // event lock) is visible at a glance. Only attached when explicitly requested.
+  if (debug) out.facts = factTiles.map((t) => ({ dashTitle: t.dashTitle, setName: t.setName, title: t.title, value: factValueLabel(t), suiteName: byId[t.dashboardId]?.suiteName || '' }));
+  return out;
+}
+
+// Best display value for a fact tile (first measure → table calc → dimension of
+// the first row), preferring Looker's rendered string. Used by the digest
+// facts inspector to show what each tile resolved to.
+function factValueLabel(t) {
+  const row = (t.rows || [])[0];
+  if (!row) return '—';
+  const fields = [...(t.fields?.measures || []), ...(t.fields?.table_calculations || []), ...(t.fields?.dimensions || [])];
+  for (const f of fields) {
+    const cell = row[f.name];
+    if (cell && (cell.rendered != null || cell.value != null)) return String(cell.rendered != null ? cell.rendered : cell.value);
+  }
+  return '—';
 }
 
 // Selectable tiles per client, grouped by dashboard — drives the curated
