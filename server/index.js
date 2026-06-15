@@ -923,6 +923,47 @@ app.get('/api/admin/ai-overview', auth.requireAdmin, (req, res) => {
   res.json({ builtins, global, clients, dashContexts, tileContexts });
 });
 
+// The literal system prompt sent for one feature, with the configured layers
+// resolved for a chosen client/role — exactly as composed at runtime
+// (systemWith(base, instructions)). For digest/home the role lens (sent in the
+// message, not the system prompt) is shown alongside. Read-only.
+function resolveAiPrompt({ feature, entityId, role }) {
+  const entry = insights.promptRegistry().find((p) => p.key === feature);
+  if (!entry) return null;
+  const ent = entityId ? db.getEntity(entityId) : null;
+  const note = [];
+  let extra = '';
+  if (feature === 'tile' || feature === 'dashboard') {
+    const suiteId = ent ? (db.listSuitesForEntity(ent.id)[0]?.id || null) : null;
+    extra = aiInstructionsFor(suiteId);
+    note.push('The per-request dashboard/tile context is appended at runtime and not shown here.');
+    if (!ent) note.push('Pick a client to include its AI context.');
+  } else if (feature === 'library' || feature === 'campaign' || feature === 'refine') {
+    extra = aiInstructionsFor(null); // global instructions only
+  } else if (feature === 'settlement' || feature === 'invoice') {
+    note.push('Extraction prompts are sent as-is — no standing instructions are appended.');
+  } else if (feature === 'home' || feature === 'digest') {
+    if (!ent) { note.push('Pick a client to resolve the client / event / reader layers.'); }
+    const suites = ent ? clientCatalogue(ent.id).suites : [];
+    const user = { id: `audit:${entityId || 'none'}`, email: '', role: 'client', entityIds: ent ? [ent.id] : [], memberships: ent && role ? [{ entityId: ent.id, role }] : [] };
+    const layers = [aiInstructionsFor(null)];
+    if (ent) layers.push(briefingInstructionsFor(user, ent.id, suites));
+    if (feature === 'home') { layers.push(timeDefaults().morning); note.push('Resolved for the MORNING time-of-day lens (midday/evening differ).'); }
+    extra = layers.filter(Boolean).join('\n\n');
+  }
+  let text = `── SYSTEM PROMPT ──\n${insights.systemWith(entry.text, extra)}`;
+  if (feature === 'digest' || feature === 'home') {
+    const lens = ROLE_LENSES[role] || ROLE_LENSES.exec;
+    text += `\n\n── ROLE LENS (sent in the message, not the system prompt) ──\nROLE: ${lens.label}. Focus: ${lens.focus}`;
+  }
+  return { feature, label: entry.label, text, note: note.join(' ') };
+}
+app.get('/api/admin/ai-resolved-prompt', auth.requireAdmin, (req, res) => {
+  const out = resolveAiPrompt({ feature: String(req.query.feature || ''), entityId: req.query.entityId ? String(req.query.entityId) : null, role: req.query.role ? String(req.query.role) : null });
+  if (!out) return res.status(400).json({ error: 'Unknown feature' });
+  res.json(out);
+});
+
 // ─── Integrations ──────────────────────────────────────────────────────────────
 // Admin sets the PRIMARY Looker + Anthropic accounts (override .env). Clients can
 // set their own, which take precedence for their data. Secrets are write-only:

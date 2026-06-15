@@ -539,4 +539,4 @@ function promptRegistry() {
   ];
 }
 
-module.exports = { generateInsight, streamInsight, streamDashboardInsight, describeTile, extractSettlement, extractInvoice, briefHome, digestBrief, draftCampaign, refineText, promptRegistry, isConfigured: (apiKey) => !!(apiKey || process.env.ANTHROPIC_API_KEY) };
+module.exports = { generateInsight, streamInsight, streamDashboardInsight, describeTile, extractSettlement, extractInvoice, briefHome, digestBrief, draftCampaign, refineText, promptRegistry, systemWith, isConfigured: (apiKey) => !!(apiKey || process.env.ANTHROPIC_API_KEY) };

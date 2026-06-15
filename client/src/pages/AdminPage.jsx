@@ -1381,6 +1381,9 @@ function AIOverview() {
       <div style={lbl}>Built-in system prompts (code)</div>
       {d.builtins.systemPrompts.map((p) => <Item key={p.key} title={p.label} scope={p.scope} text={p.text} />)}
 
+      <div style={lbl}>Resolved prompt — exactly what's sent for a feature</div>
+      <ResolvedPromptTool features={d.builtins.systemPrompts} clients={d.clients} roles={d.builtins.roleLenses} preStyle={pre} />
+
       <div style={lbl}>Role lenses (code) — personalise every briefing & digest</div>
       {d.builtins.roleLenses.map((r) => <Item key={r.key} title={r.label} text={r.focus} />)}
 
@@ -1422,6 +1425,41 @@ function AIOverview() {
       {d.dashContexts.map((x, i) => <Item key={i} title={x.dashTitle} text={x.context} />)}
       <div style={lbl}>Tile AI context ({d.tileContexts.length})</div>
       {d.tileContexts.map((x, i) => <Item key={i} title={`${x.dashTitle} › ${x.tileTitle}`} text={x.context} />)}
+    </div>
+  );
+}
+
+// Composes the literal prompt sent for one feature (built-in + the resolved
+// configured layers) for a chosen client/role — so you can see/copy exactly what
+// the AI gets, e.g. for a specific client's digest.
+function ResolvedPromptTool({ features, clients, roles, preStyle }) {
+  const [feature, setFeature] = useState('digest');
+  const [entityId, setEntityId] = useState(clients[0]?.id || '');
+  const [role, setRole] = useState('exec');
+  const [out, setOut] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const needsClient = ['tile', 'dashboard', 'home', 'digest'].includes(feature);
+  const needsRole = ['home', 'digest'].includes(feature);
+  const resolve = async () => {
+    setBusy(true); setCopied(false);
+    try { setOut(await api.getResolvedPrompt({ feature, entityId: needsClient ? entityId : null, role: needsRole ? role : null })); }
+    catch (e) { setOut({ text: 'Could not resolve: ' + e.message, note: '' }); }
+    finally { setBusy(false); }
+  };
+  const copy = () => { if (out?.text && navigator.clipboard) navigator.clipboard.writeText(out.text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); }); };
+  const sel = { padding: '6px 9px', border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 12.5, background: 'var(--card)', color: 'var(--text)' };
+  return (
+    <div style={{ border: '1px solid var(--hairline)', borderRadius: 10, padding: 12, marginBottom: 8, background: 'var(--card)' }}>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <select style={sel} value={feature} onChange={(e) => setFeature(e.target.value)}>{features.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}</select>
+        {needsClient && <select style={sel} value={entityId} onChange={(e) => setEntityId(e.target.value)}>{clients.length === 0 && <option value="">No clients</option>}{clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>}
+        {needsRole && <select style={sel} value={role} onChange={(e) => setRole(e.target.value)}>{roles.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}</select>}
+        <button style={saveBtn} onClick={resolve} disabled={busy || (needsClient && !entityId)}>{busy ? 'Resolving…' : 'Resolve'}</button>
+        {out && <button style={miniBtn} onClick={copy}>{copied ? '✓ Copied' : 'Copy'}</button>}
+      </div>
+      {out?.note && <p style={{ fontSize: 11, color: 'var(--muted)', margin: '8px 0 0' }}>{out.note}</p>}
+      {out && <pre style={preStyle}>{out.text}</pre>}
     </div>
   );
 }

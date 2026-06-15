@@ -174,6 +174,7 @@ export const api = {
   getAiInstructions: () => fetch('/api/admin/ai-instructions').then(json),
   saveAiInstructions: (instructions) => fetch('/api/admin/ai-instructions', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instructions }) }).then(json),
   getAiOverview: () => fetch('/api/admin/ai-overview').then(json),
+  getResolvedPrompt: ({ feature, entityId, role }) => fetch(`/api/admin/ai-resolved-prompt?feature=${encodeURIComponent(feature)}${entityId ? `&entityId=${encodeURIComponent(entityId)}` : ''}${role ? `&role=${encodeURIComponent(role)}` : ''}`).then(json),
 
   // Integrations
   getAdminIntegrations: () => fetch('/api/admin/integrations').then(json),
