@@ -2,6 +2,8 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
+import { useAuth } from '../lib/auth.jsx';
+import { useTheme } from '../lib/theme.jsx';
 import IntegrationsForm from '../components/IntegrationsForm.jsx';
 import MailTemplateEditor from '../components/MailTemplateEditor.jsx';
 import MailLogView from '../components/MailLogView.jsx';
@@ -175,6 +177,9 @@ export default function AdminPage() {
               {label}
             </button>
           ))}
+          {/* Account (theme · Log out) pinned at the bottom of the rail, mirroring
+              the client sidebar's bottom-left profile menu. */}
+          <AdminProfileFooter />
         </nav>
         <div style={{ minWidth: 0 }}>{content}</div>
       </div>
@@ -317,6 +322,39 @@ function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites,
     </div>
   );
 }
+
+// Account menu for the admin console, pinned at the bottom of the left nav rail
+// (mirrors the client sidebar's bottom-left profile). Holds the theme toggle and
+// Log out; the top bar drops these on the console so they live in one place.
+function AdminProfileFooter() {
+  const { user, logout } = useAuth();
+  const { theme, toggle } = useTheme();
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ position: 'relative', marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--hairline)' }}>
+      {open && <div style={{ position: 'fixed', inset: 0, zIndex: 70 }} onClick={() => setOpen(false)} />}
+      {open && (
+        <div className="modal-in" style={{ position: 'absolute', bottom: 'calc(100% + 6px)', left: 0, right: 0, zIndex: 71, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, boxShadow: '0 10px 36px -8px rgba(0,0,0,0.25)', padding: 6, display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <button className="nav-row" style={adminMenuItem} onClick={toggle}>
+            <span style={{ width: 18, textAlign: 'center' }}>{theme === 'dark' ? '☀️' : '🌙'}</span> {theme === 'dark' ? 'Light mode' : 'Dark mode'}
+          </button>
+          <button className="nav-row" style={{ ...adminMenuItem, color: 'var(--error)' }} onClick={() => logout()}>
+            <span style={{ width: 18, textAlign: 'center' }}>↪</span> Log out
+          </button>
+        </div>
+      )}
+      <button className="nav-row" style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', border: 'none', background: 'transparent', cursor: 'pointer', padding: '8px', borderRadius: 10, color: 'var(--text)' }} onClick={() => setOpen((v) => !v)} title="Account">
+        <span style={{ flexShrink: 0, width: 30, height: 30, borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 800, color: '#fff', background: 'linear-gradient(135deg, var(--brand) 0%, var(--brand-2) 45%, #7C3AED 100%)' }}>H</span>
+        <span style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+          <span style={{ display: 'block', fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Howler · Admin</span>
+          <span style={{ display: 'block', fontSize: 11, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user?.email}</span>
+        </span>
+        <span style={{ color: 'var(--muted)', fontSize: 14, flexShrink: 0 }}>⋯</span>
+      </button>
+    </div>
+  );
+}
+const adminMenuItem = { display: 'flex', alignItems: 'center', gap: 9, width: '100%', border: 'none', background: 'transparent', cursor: 'pointer', padding: '9px 10px', borderRadius: 8, fontSize: 13, fontWeight: 600, color: 'var(--text)', textAlign: 'left' };
 
 // Client settings: name, organiser locks, preview, delete.
 function ClientSettings({ entity, suites, fields, onChange, onBack }) {

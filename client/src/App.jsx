@@ -78,12 +78,17 @@ function Header() {
           login OR admin acting as a client): just the Howler·Pulse badge — the
           account actions live in the sidebar's bottom-left profile menu. */}
       {isAdmin && !inClientView ? (
+        // On the desktop Admin console these controls live in the left rail's
+        // bottom profile menu, so drop them from the top bar there. Elsewhere
+        // (Dashboards, editor) and on mobile, keep them in the top bar.
+        (!isMobile && location.pathname === '/admin') ? null : (
         <>
           <Link to="/admin" style={navLink}>Admin</Link>
           <button onClick={toggle} title={theme === 'dark' ? 'Light mode' : 'Dark mode'} aria-label="Toggle theme" style={themeBtn}>{theme === 'dark' ? '☀️' : '🌙'}</button>
           {!isMobile && <UserBadge user={user} isAdmin={isAdmin} />}
           <button onClick={() => logout()} style={logoutBtn}>{isMobile ? 'Exit' : 'Log out'}</button>
         </>
+        )
       ) : inClientView && (
         <button onClick={() => navigate('/')} title="Powered by Howler Pulse" style={{ display: 'flex', alignItems: 'center', gap: 7, border: 'none', background: 'transparent', cursor: 'pointer', padding: 0, opacity: 0.85 }}>
           <Logo size={22} radius={6} />
