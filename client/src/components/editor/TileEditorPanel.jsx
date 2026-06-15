@@ -136,6 +136,8 @@ export default function TileEditorPanel({ tile, dashboardFilters, onChange, onCl
               </>
             )}
 
+            <TableCalcEditor query={tile.query} onChange={patchQuery} />
+
             <div style={divider} />
             <Label>AI context (for insights)</Label>
             <textarea
@@ -148,6 +150,50 @@ export default function TileEditorPanel({ tile, dashboardFilters, onChange, onCl
         )}
       </div>
     </div>
+  );
+}
+
+// Surface Looker table calculations (the query's dynamic_fields) so their
+// expressions can be read and fixed in-app — e.g. correcting a change formula's
+// operand order ("${past} - ${current}" → "${current} - ${past}").
+function TableCalcEditor({ query, onChange }) {
+  const raw = query?.dynamic_fields;
+  let list = [];
+  if (Array.isArray(raw)) list = raw;
+  else if (typeof raw === 'string' && raw.trim()) {
+    try { const p = JSON.parse(raw); if (Array.isArray(p)) list = p; } catch { /* leave empty */ }
+  }
+  const calcs = list.filter((d) => d && typeof d.expression === 'string');
+  if (!calcs.length) return null;
+  const setExpr = (idx, expr) => {
+    const next = list.map((d, i) => (i === idx ? { ...d, expression: expr } : d));
+    // Looker expects dynamic_fields as a JSON string; keep that form so the
+    // preview's query (and a later sync) stay valid.
+    onChange({ dynamic_fields: JSON.stringify(next) });
+  };
+  return (
+    <>
+      <div style={divider} />
+      <SectionTitle>Table calculations</SectionTitle>
+      <div style={{ fontSize: 11.5, color: 'var(--muted)', margin: '5px 0 2px', lineHeight: 1.45 }}>
+        Formulas computed on the results (e.g. a change / % difference). Fields are referenced as <code>{'${field}'}</code>. Editing re-runs the preview.
+      </div>
+      {calcs.map((c) => {
+        const idx = list.indexOf(c);
+        const name = c.label || c.table_calculation || c.measure || c.dimension || `Calculation ${idx + 1}`;
+        return (
+          <div key={idx} style={{ marginTop: 8 }}>
+            <Label>{name}</Label>
+            <textarea
+              style={{ ...input, minHeight: 54, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12, resize: 'vertical', whiteSpace: 'pre-wrap' }}
+              value={c.expression}
+              spellCheck={false}
+              onChange={(e) => setExpr(idx, e.target.value)}
+            />
+          </div>
+        );
+      })}
+    </>
   );
 }
 
