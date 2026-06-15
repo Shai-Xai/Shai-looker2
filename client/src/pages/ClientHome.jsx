@@ -415,13 +415,15 @@ function MessagesFromHowler({ messages, isMobile, onOpen, onDismiss }) {
           // A pending must-ack can't be cleared off home — acknowledge it first.
           const dismissible = !(m.priority === 'must_ack' && !m.acked);
           return (
-            <button key={m.id} className="lift" style={{ ...cardBtn, position: 'relative' }} onClick={() => onOpen(m.id)}>
+            <div key={m.id} className="lift" role="button" tabIndex={0} style={{ ...cardBtn, position: 'relative', textAlign: 'left', cursor: 'pointer' }}
+              onClick={() => onOpen(m.id)}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(m.id); } }}>
               {dismissible && (
-                <span
-                  role="button" title="Clear from home (stays in your inbox)"
+                <button
+                  type="button" title="Clear from home (stays in your inbox)" aria-label="Clear from home"
                   onClick={(e) => { e.stopPropagation(); onDismiss(m.id); }}
-                  style={{ position: 'absolute', top: 8, right: 10, fontSize: 13, color: 'var(--muted)', lineHeight: 1, padding: 3 }}
-                >✕</span>
+                  style={{ position: 'absolute', top: 4, right: 4, width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, color: 'var(--muted)', lineHeight: 1, border: 'none', background: 'transparent', borderRadius: 8, cursor: 'pointer' }}
+                >✕</button>
               )}
               <div style={{ display: 'flex', alignItems: 'center', gap: 7, paddingRight: 16 }}>
                 {m.unread && <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--brand)', flexShrink: 0 }} />}
@@ -430,7 +432,7 @@ function MessagesFromHowler({ messages, isMobile, onOpen, onDismiss }) {
               </div>
               {m.preview?.body && <div style={{ fontSize: 12, color: 'var(--muted-2)', lineHeight: 1.5, marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.preview.body}</div>}
               <div style={{ marginTop: 8, fontSize: 12, fontWeight: 700, color: 'var(--brand)' }}>Open message →</div>
-            </button>
+            </div>
           );
         })}
       </div>
