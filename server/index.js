@@ -1652,10 +1652,18 @@ function briefingInstructionsFor(user, entityId, suites) {
     const cfg = su.briefing || {};
     const ph = resolvePhase(cfg);
     const lines = [];
+    // Always surface the event's start/end dates so the briefing can anchor
+    // timing (days to go, windows, comparisons) — independent of the phase.
+    if (cfg.eventStart || cfg.eventEnd) {
+      const range = cfg.eventStart && cfg.eventEnd && cfg.eventEnd !== cfg.eventStart
+        ? `${cfg.eventStart} to ${cfg.eventEnd}`
+        : (cfg.eventStart || cfg.eventEnd);
+      lines.push(`Event dates: ${range}.`);
+    }
     if (ph.key) {
       const label = PHASES.find((p) => p.key === ph.key)?.label || ph.key;
       const text = (cfg.phaseOverrides?.[ph.key] || '').trim() || defaults[ph.key];
-      lines.push(`Current phase: ${label}${cfg.eventStart ? ` (event ${cfg.eventStart}${cfg.eventEnd ? ` – ${cfg.eventEnd}` : ''})` : ''}. ${text}`);
+      lines.push(`Current phase: ${label}. ${text}`);
     }
     if ((cfg.instructions || '').trim()) lines.push(cfg.instructions.trim());
     if (lines.length) parts.push(`For the event "${su.name}":\n${lines.join('\n')}`);
