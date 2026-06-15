@@ -1659,6 +1659,19 @@ function buildLightSnapshot(user, entityId) {
 // covered), then the lead dashboards' value/chart/table tiles, capped, with
 // row-limited data. Bounded for scale + behind the briefing cache.
 const FACT_MAX_TILES = 18;
+// Within a dashboard, prefer the headline/cumulative tiles (Total sold, Gross
+// revenue, Orders…) over noisy time-windowed ones (last hour, per-minute) that
+// are often ~0 at digest time — so the briefing/digest leads with the numbers
+// that matter, not whatever happens to sit first on the board.
+const NOISY_TILE = /\b(last|current|this)\s*(hour|min(ute)?s?)\b|per\s*(minute|min|hour|sec)|\/\s*(min|hour|sec)\b|minute\s*10|real[-\s]?time|\blive\b/i;
+const SUMMARY_TILE = /\b(total|gross|cumulative|overall|net|sold|revenue|orders?|sell[-\s]?through|attendance|to[-\s]?date|lifetime|ytd)\b/i;
+function tilePriority(t) {
+  const title = t.title || '';
+  let s = 0;
+  if (NOISY_TILE.test(title)) s += 100;   // pick later
+  if (SUMMARY_TILE.test(title)) s -= 10;  // pick first
+  return s;
+}
 async function buildFacts(user, entityId, force = false) {
   const { catalogue } = clientCatalogue(entityId);
   const follows = db.listMarks({ userId: user.id, entityId, kind: 'follow' });
@@ -1709,7 +1722,8 @@ async function buildFacts(user, entityId, force = false) {
     const def = store.get(c.dashboardId);
     if (!def) continue;
     const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((t) => t.tiles || []))]
-      .filter((t) => t.type !== 'text' && t.query?.fields?.length);
+      .filter((t) => t.type !== 'text' && t.query?.fields?.length)
+      .sort((a, b) => tilePriority(a) - tilePriority(b)); // headline/cumulative tiles first, noisy time-windowed last
     if (tiles.length) pools.push({ def, suiteId: c.suiteId, tiles, idx: 0, taken: 0 });
   }
   const offset = pools.length ? Math.floor(Date.now() / 864e5) % pools.length : 0;
