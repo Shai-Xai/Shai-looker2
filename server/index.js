@@ -2096,7 +2096,10 @@ async function generateBriefing(user, entityId, segment, { force = false } = {})
   if (!force) { const hit = cacheGet(briefCache, key, 6 * 3600e3); if (hit) return hit; }
   if (briefInflight.has(key)) return briefInflight.get(key); // coalesce concurrent (prewarm + real)
   const p = (async () => {
-    const { tiles, catalogue } = await buildFacts(user, entityId, force);
+    // Read facts days-before-aligned (like-for-like to the same point in the
+    // past event's cycle) wherever a dashboard has that sync configured — so the
+    // briefing's comparisons match what the aligned dashboard shows.
+    const { tiles, catalogue } = await buildFacts(user, entityId, force, true);
     if (!tiles.length) return { available: false };
     const byId = Object.fromEntries(catalogue.map((c) => [c.dashboardId, c]));
     const prof = db.viewProfile(user.id);
