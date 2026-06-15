@@ -1181,9 +1181,8 @@ function LockedFilterEditor({ value, onChange, fields, categories }) {
 
   return (
     <div style={{ margin: '6px 0 4px' }}>
-      {/* Same per-filter row as before (select + value side by side); two rows sit
-          next to each other on wider screens, one-up when narrow. */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 460px), 1fr))', gap: '4px 24px', alignItems: 'start' }}>
+      {/* One filter per row, stacked. */}
+      <div>
         {rows.map((r, i) => {
           const known = fields.find((f) => f.field === r.field);
           const isCustom = r.custom || (!!r.field && !known && !presetByKey[r.field]);
