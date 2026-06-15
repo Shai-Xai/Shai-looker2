@@ -757,6 +757,26 @@ async function applyScope(query, user, suiteId) {
   return true;
 }
 
+// Row-order-sensitive comparison tiles (offset() table calcs over current-vs-past
+// events) must return the CURRENT (most recent) event first, or the comparison
+// reads backwards (the −83%/−865 bug). Sorting by event NAME is unreliable
+// (naming conventions vary, e.g. "Event" vs "Event 2025"), so force a sort by the
+// event start date, newest first. Returns a modified query, or null if N/A.
+function currentFirstEventSort(query) {
+  try {
+    if (!query) return null;
+    const raw = query.dynamic_fields;
+    const dyn = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    const hasOffset = Array.isArray(dyn) && dyn.some((d) => typeof d?.expression === 'string' && /\boffset\s*\(/i.test(d.expression));
+    if (!hasOffset) return null;
+    const fields = query.fields || [];
+    if (!fields.some((f) => /^core_events\./.test(String(f)))) return null;
+    const DATE = 'core_events.start_date';
+    const nextFields = fields.includes(DATE) ? fields : [...fields, DATE];
+    return { ...query, fields: nextFields, sorts: [`${DATE} desc`] };
+  } catch { return null; }
+}
+
 app.post('/api/run-query', auth.requireAuth, async (req, res) => {
   try {
     const { query, filterOverrides = {}, suiteId, refresh = false } = req.body;
@@ -773,7 +793,16 @@ app.post('/api/run-query', auth.requireAuth, async (req, res) => {
       }
       return res.status(403).json({ error });
     }
-    const data = await runLookerQuery('/queries/run/json_detail', queryBody, undefined, !!refresh);
+    // Force current-event-first ordering for offset comparison tiles; fall back
+    // to the original query if the explore doesn't expose the event date field.
+    const altered = currentFirstEventSort(queryBody);
+    let data;
+    if (altered) {
+      try { data = await runLookerQuery('/queries/run/json_detail', altered, undefined, !!refresh); }
+      catch (e) { console.warn('[run-query] event-date sort fallback:', e.message); data = await runLookerQuery('/queries/run/json_detail', queryBody, undefined, !!refresh); }
+    } else {
+      data = await runLookerQuery('/queries/run/json_detail', queryBody, undefined, !!refresh);
+    }
     res.json(data);
   } catch (err) {
     console.error('[POST /api/run-query]', err.message);
