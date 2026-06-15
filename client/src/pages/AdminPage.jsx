@@ -921,6 +921,7 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
   const [entityId, setEntityId] = useState(suite.entityId);
   const [setIds, setSetIds] = useState(suite.setIds || []);
   const [locks, setLocks] = useState(suite.lockedFilters || {});
+  const [eventUrl, setEventUrl] = useState(suite.eventUrl || '');
   const [saved, setSaved] = useState(false);
   // Role-based visibility for this client (keyed to the suite's entity).
   const [cr, setCr] = useState({ sets: {}, dashboards: {} });
@@ -943,7 +944,7 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
     setSetIds((cur) => { const n = cur.slice(); const [m] = n.splice(from, 1); n.splice(i, 0, m); return n; });
     dragFrom.current = i; setDragOver(i);
   };
-  const save = async () => { await api.adminUpdateSuite(suite.id, { name, icon, entityId, setIds, lockedFilters: locks }); flash(setSaved); onChange(); };
+  const save = async () => { await api.adminUpdateSuite(suite.id, { name, icon, entityId, setIds, lockedFilters: locks, eventUrl }); flash(setSaved); onChange(); };
   const remove = async () => { if (confirm(`Delete suite "${suite.name}"?`)) { await api.adminDeleteSuite(suite.id); onChange(); } };
   // Open this suite exactly as the client sees it (preview), jumping to its
   // first dashboard. Uses the client suite endpoint (admins can read any suite).
@@ -1051,6 +1052,11 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
       <Section title="Locked filters (the event, cashless events…)">
         <LockedFilterEditor value={locks} onChange={setLocks} fields={fields} />
       </Section>
+      <div style={{ marginTop: 12 }}>
+        <L>Ticket / checkout link</L>
+        <div style={{ fontSize: 12, color: 'var(--muted)', margin: '2px 0 6px' }}>The event's buy / checkout URL. Campaigns linked to this event auto-fill it as the call-to-action link.</div>
+        <input style={{ ...input, width: '100%' }} value={eventUrl} onChange={(e) => setEventUrl(e.target.value)} placeholder="https://tickets.example.com/your-event" />
+      </div>
       <SaveRow onSave={save} saved={saved} id={suite.id} />
     </div>
   );

@@ -2211,7 +2211,7 @@ const actionsApi = require('./actions').mount(app, {
     return { rows: data.data || [], fields };
   },
   // The client's events (suites) — for optionally linking a campaign to one.
-  listEvents: (entityId) => db.listSuitesForEntity(entityId).map((s) => ({ id: s.id, name: s.name })),
+  listEvents: (entityId) => db.listSuitesForEntity(entityId).map((s) => ({ id: s.id, name: s.name, url: s.eventUrl || '' })),
   // AI-draft campaign copy, grounded in the client's context.
   draftCopy: async ({ entityId, goal, audienceCount }) => {
     const apiKey = anthropicKeyForEntity(entityId);

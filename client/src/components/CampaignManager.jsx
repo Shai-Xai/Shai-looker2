@@ -352,6 +352,20 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
   const isMobile = useIsMobile();
   const [events, setEvents] = useState([]);
   useEffect(() => { api.listCampaignEvents(entityId).then((r) => setEvents(r.events || [])).catch(() => {}); }, [entityId]);
+  // Auto-select the event when there's exactly one and none is chosen yet — so
+  // "Event (optional)" isn't left blank on a single-event client.
+  useEffect(() => {
+    if (events.length === 1 && !f.eventSuiteId) set('eventSuiteId', events[0].id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [events]);
+  // Default the call-to-action link from the selected event's ticket/checkout
+  // URL — but only when the CTA is still blank (never clobber a typed link).
+  useEffect(() => {
+    if (!f.eventSuiteId) return;
+    const ev = events.find((e) => e.id === f.eventSuiteId);
+    if (ev?.url && !f.ctaUrl) set('ctaUrl', ev.url);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [f.eventSuiteId, events]);
   const [tiles, setTiles] = useState(null);
   const [segments, setSegments] = useState([]); // saved segments to pick as an audience
   const [aud, setAud] = useState(null); // { count, excluded, sample, fields }
