@@ -521,4 +521,22 @@ async function extractInvoice({ pdfBase64, apiKey, onProgress }) {
   return JSON.parse(match[0]);
 }
 
-module.exports = { generateInsight, streamInsight, streamDashboardInsight, describeTile, extractSettlement, extractInvoice, briefHome, digestBrief, draftCampaign, refineText, isConfigured: (apiKey) => !!(apiKey || process.env.ANTHROPIC_API_KEY) };
+// Read-only registry of the hardcoded system prompts — the fixed base each AI
+// feature is built on (the configurable instructions are appended via
+// systemWith). Surfaced in the admin "AI instructions" audit so the whole prompt
+// stack is visible in one place. Edit the consts above to change them.
+function promptRegistry() {
+  return [
+    { key: 'tile', label: 'Tile insight', scope: 'Per-tile "Explain this" insight', text: SYSTEM },
+    { key: 'dashboard', label: 'Dashboard summary', scope: 'Whole-dashboard AI summary', text: DASHBOARD_SYSTEM },
+    { key: 'library', label: 'Tile-library descriptions', scope: 'Auto-describing tiles in the library', text: LIBRARY_SYSTEM },
+    { key: 'home', label: 'Home briefing', scope: 'Personalised home-page briefing', text: HOME_SYSTEM },
+    { key: 'digest', label: 'Scheduled digest', scope: 'Role-lensed digest emails', text: DIGEST_SYSTEM },
+    { key: 'campaign', label: 'Campaign copy', scope: 'Marketing email drafting', text: CAMPAIGN_SYSTEM },
+    { key: 'refine', label: 'Refine note', scope: 'The ✨ refine button', text: REFINE_SYSTEM },
+    { key: 'settlement', label: 'Settlement extraction', scope: 'PDF settlement → JSON', text: SETTLEMENT_SYSTEM },
+    { key: 'invoice', label: 'Invoice extraction', scope: 'PDF invoice → JSON', text: INVOICE_SYSTEM },
+  ];
+}
+
+module.exports = { generateInsight, streamInsight, streamDashboardInsight, describeTile, extractSettlement, extractInvoice, briefHome, digestBrief, draftCampaign, refineText, promptRegistry, isConfigured: (apiKey) => !!(apiKey || process.env.ANTHROPIC_API_KEY) };

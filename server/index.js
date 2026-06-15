@@ -867,6 +867,62 @@ app.put('/api/admin/ai-instructions', auth.requireAdmin, (req, res) => {
   res.json({ instructions: db.setSetting('ai_instructions', (req.body || {}).instructions || '') });
 });
 
+// Read-only audit: EVERYTHING the AI is told across the platform, in one place —
+// the hardcoded system prompts + role lenses (code), the resolved phase/time
+// briefing defaults, the global instructions, and every per-client / per-event /
+// per-digest / per-reader / per-tile instruction that's been configured.
+app.get('/api/admin/ai-overview', auth.requireAdmin, (req, res) => {
+  const savedPhase = JSON.parse(db.getSetting('briefing_phase_defaults', '{}') || '{}');
+  const savedTime = JSON.parse(db.getSetting('briefing_time_defaults', '{}') || '{}');
+  const pd = phaseDefaults(); const td = timeDefaults();
+
+  // Built-in (code) layers — read-only.
+  const builtins = {
+    systemPrompts: insights.promptRegistry(),
+    roleLenses: Object.entries(ROLE_LENSES).map(([key, v]) => ({ key, label: v.label, focus: v.focus })),
+    phaseDefaults: PHASES.map((p) => ({ key: p.key, label: p.label, text: pd[p.key] || '', overridden: !!(savedPhase[p.key] || '').trim() })),
+    timeDefaults: TIMES.map((t) => ({ key: t.key, label: t.label, text: td[t.key] || '', overridden: !!(savedTime[t.key] || '').trim() })),
+  };
+
+  // Global configured layers.
+  const global = {
+    aiInstructions: (db.getSetting('ai_instructions') || '').trim(),
+    briefingInstructions: (db.getSetting('briefing_instructions') || '').trim(),
+  };
+
+  // Per-client: AI context + each event's briefing wording + digest focuses.
+  let jobsByEntity = {};
+  try {
+    for (const j of db.db.prepare("SELECT entity_id, title, role, role_focus, focus_mode, custom_message FROM scheduled_jobs WHERE type='digest'").all()) {
+      (jobsByEntity[j.entity_id] = jobsByEntity[j.entity_id] || []).push({ title: j.title || '', role: j.role, roleFocus: (j.role_focus || '').trim(), focusMode: j.focus_mode || 'override', customMessage: (j.custom_message || '').trim() });
+    }
+  } catch { /* scheduler table may not exist */ }
+  const users = db.listUsers();
+  const clients = db.listEntities().map((ent) => {
+    const events = db.listSuitesForEntity(ent.id).map((su) => {
+      const b = su.briefing || {};
+      const overrides = Object.entries(b.phaseOverrides || {}).filter(([, v]) => (v || '').trim()).map(([k, v]) => ({ phase: k, text: v.trim() }));
+      return { suiteName: su.name, eventStart: b.eventStart || '', eventEnd: b.eventEnd || '', phase: b.phase || '', instructions: (b.instructions || '').trim(), phaseOverrides: overrides };
+    }).filter((e) => e.instructions || e.phaseOverrides.length || e.phase || e.eventStart);
+    const tunes = users
+      .filter((u) => (u.entityIds || []).includes(ent.id))
+      .map((u) => ({ email: u.email, tune: (db.getUserPref(u.id, `briefing_tune:${ent.id}`) || '').trim() }))
+      .filter((t) => t.tune);
+    return { id: ent.id, name: ent.name, aiContext: (ent.aiContext || '').trim(), events, digests: jobsByEntity[ent.id] || [], readerTunes: tunes };
+  });
+
+  // Tiles & dashboards with custom AI context (count + list, capped).
+  const tileContexts = []; const dashContexts = [];
+  for (const d of store.list()) {
+    const def = store.get(d.id); if (!def) continue;
+    if ((def.aiContext || '').trim()) dashContexts.push({ dashboardId: d.id, dashTitle: def.title || d.title, context: def.aiContext.trim() });
+    const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))];
+    for (const t of tiles) if ((t.aiContext || '').trim()) tileContexts.push({ dashTitle: def.title || d.title, tileTitle: t.title || '(untitled)', context: t.aiContext.trim() });
+  }
+
+  res.json({ builtins, global, clients, dashContexts, tileContexts });
+});
+
 // ─── Integrations ──────────────────────────────────────────────────────────────
 // Admin sets the PRIMARY Looker + Anthropic accounts (override .env). Clients can
 // set their own, which take precedence for their data. Secrets are write-only:

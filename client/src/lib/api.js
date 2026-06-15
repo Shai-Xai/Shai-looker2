@@ -173,6 +173,7 @@ export const api = {
   // Global AI instructions
   getAiInstructions: () => fetch('/api/admin/ai-instructions').then(json),
   saveAiInstructions: (instructions) => fetch('/api/admin/ai-instructions', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instructions }) }).then(json),
+  getAiOverview: () => fetch('/api/admin/ai-overview').then(json),
 
   // Integrations
   getAdminIntegrations: () => fetch('/api/admin/integrations').then(json),

@@ -1351,6 +1351,77 @@ function AISettings() {
       </Section>
       <Section title="Home briefing"><BriefingSettings /></Section>
       <Section title="Reader feedback"><BriefingFeedback /></Section>
+      <Section title="Everything the AI is told (audit)"><AIOverview /></Section>
+    </div>
+  );
+}
+
+// Read-only audit of every AI instruction across the platform: the hardcoded
+// system prompts + role lenses (code), the resolved briefing defaults, and every
+// configured layer (global, per-client, per-event, per-digest, per-reader,
+// per-tile). One screen to see exactly what the AI is told everywhere.
+function AIOverview() {
+  const [d, setD] = useState(null);
+  const [err, setErr] = useState('');
+  useEffect(() => { api.getAiOverview().then(setD).catch((e) => setErr(e.message)); }, []);
+  if (err) return <Muted>Could not load: {err}</Muted>;
+  if (!d) return <Muted>Loading…</Muted>;
+  const pre = { whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: 11.5, lineHeight: 1.5, fontFamily: 'ui-monospace, Menlo, monospace', background: 'var(--bg, #f6f6f7)', border: '1px solid var(--hairline)', borderRadius: 8, padding: '8px 10px', margin: '4px 0 0', color: 'var(--text)' };
+  const grp = { border: '1px solid var(--hairline)', borderRadius: 10, padding: '4px 12px', marginBottom: 8, background: 'var(--card)' };
+  const sum = { cursor: 'pointer', padding: '8px 2px', fontSize: 13, fontWeight: 700, color: 'var(--text)' };
+  const lbl = { fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.04em', margin: '12px 0 4px' };
+  const meta = { fontSize: 11, color: 'var(--muted)' };
+  const Item = ({ title, scope, text }) => (
+    <details style={grp}><summary style={sum}>{title}{scope ? <span style={{ ...meta, fontWeight: 400 }}> — {scope}</span> : null}</summary><pre style={pre}>{text || '—'}</pre></details>
+  );
+  return (
+    <div>
+      <p style={hint}>Read-only. The runtime prompt for any feature = its built-in system prompt + the global instructions + the matching client / event / reader layers below. Built-in prompts are edited in code (<code>server/insights.js</code>, <code>server/index.js</code>); everything else is editable in the screens noted.</p>
+
+      <div style={lbl}>Built-in system prompts (code)</div>
+      {d.builtins.systemPrompts.map((p) => <Item key={p.key} title={p.label} scope={p.scope} text={p.text} />)}
+
+      <div style={lbl}>Role lenses (code) — personalise every briefing & digest</div>
+      {d.builtins.roleLenses.map((r) => <Item key={r.key} title={r.label} text={r.focus} />)}
+
+      <div style={lbl}>Briefing phase defaults (Admin → AI → Home briefing)</div>
+      {d.builtins.phaseDefaults.map((p) => <Item key={p.key} title={`${p.label}${p.overridden ? ' • overridden' : ' • code default'}`} text={p.text} />)}
+      <div style={lbl}>Time-of-day defaults</div>
+      {d.builtins.timeDefaults.map((t) => <Item key={t.key} title={`${t.label}${t.overridden ? ' • overridden' : ' • code default'}`} text={t.text} />)}
+
+      <div style={lbl}>Global instructions (Admin → AI)</div>
+      <Item title="Global AI instructions" scope="appended to every AI prompt" text={d.global.aiInstructions} />
+      <Item title="Global briefing rules" scope="home briefing & digests" text={d.global.briefingInstructions} />
+
+      <div style={lbl}>Per-client (Admin → Clients → [client])</div>
+      {d.clients.length === 0 && <Muted>No clients.</Muted>}
+      {d.clients.map((c) => {
+        const has = c.aiContext || c.events.length || c.digests.length || c.readerTunes.length;
+        return (
+          <details key={c.id} style={grp}>
+            <summary style={sum}>{c.name}{!has ? <span style={{ ...meta, fontWeight: 400 }}> — no custom AI instructions</span> : null}</summary>
+            {c.aiContext && (<><div style={lbl}>Client AI context</div><pre style={pre}>{c.aiContext}</pre></>)}
+            {c.events.map((e, i) => (
+              <div key={i}>
+                <div style={lbl}>Event: {e.suiteName}{e.phase ? ` — phase: ${e.phase}` : ''}{e.eventStart ? ` (${e.eventStart}${e.eventEnd ? `–${e.eventEnd}` : ''})` : ''}</div>
+                {e.instructions && <pre style={pre}>{e.instructions}</pre>}
+                {e.phaseOverrides.map((po, j) => <pre key={j} style={pre}>[{po.phase}] {po.text}</pre>)}
+              </div>
+            ))}
+            {c.digests.length > 0 && <div style={lbl}>Digest focuses</div>}
+            {c.digests.map((j, i) => (
+              <pre key={i} style={pre}>{`${j.title || j.role} [${j.role}]`}{j.roleFocus ? `\nfocus (${j.focusMode}): ${j.roleFocus}` : ''}{j.customMessage ? `\nnote: ${j.customMessage}` : ''}{!j.roleFocus && !j.customMessage ? '\n(role lens only)' : ''}</pre>
+            ))}
+            {c.readerTunes.length > 0 && <div style={lbl}>Reader tunes (personal standing requests)</div>}
+            {c.readerTunes.map((t, i) => <pre key={i} style={pre}>{`${t.email}:\n${t.tune}`}</pre>)}
+          </details>
+        );
+      })}
+
+      <div style={lbl}>Dashboard AI context ({d.dashContexts.length})</div>
+      {d.dashContexts.map((x, i) => <Item key={i} title={x.dashTitle} text={x.context} />)}
+      <div style={lbl}>Tile AI context ({d.tileContexts.length})</div>
+      {d.tileContexts.map((x, i) => <Item key={i} title={`${x.dashTitle} › ${x.tileTitle}`} text={x.context} />)}
     </div>
   );
 }
