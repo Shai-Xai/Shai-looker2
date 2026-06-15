@@ -1076,13 +1076,15 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
 // type so the picker isn't a wall of every Looker field. Source filters
 // (Current/Past) auto-fill the derived comparison filters listed in `feeds`.
 const LOCK_PRESETS = [
+  // Event Name is the primary input — typing it cascades into Current Event and
+  // the comparison filters below.
+  { title: 'Event Name', category: 'Event', feeds: ['Current Event', 'Current & Past Events', 'Comparison Events'] },
   { title: 'Current Event', category: 'Event', feeds: ['Current & Past Events', 'Comparison Events'] },
   { title: 'Past Event', category: 'Event', feeds: ['Current & Past Events', 'Comparison Events'] },
   { title: 'Current & Past Events', category: 'Event' },
   { title: 'Comparison Events', category: 'Event' },
-  { title: 'Event Slug', category: 'Event' },
-  { title: 'Organiser Name', category: 'Event' },
-  { title: 'Event Name', category: 'Event' },
+  { title: 'Event Slug', category: 'Event', slugOf: 'Organiser Name' }, // suggestions scoped to the chosen organiser
+  { title: 'Organiser Name', label: 'Organiser Name (GA4)', category: 'Event' },
   { title: 'Current Cashless Event', category: 'Cashless', feeds: ['Comparison Cashless Events'] },
   { title: 'Past Cashless Event', category: 'Cashless', feeds: ['Comparison Cashless Events'] },
   { title: 'Comparison Cashless Events', category: 'Cashless' },
@@ -1153,54 +1155,71 @@ function LockedFilterEditor({ value, onChange, fields, categories }) {
   const defModel = fields.find((f) => f.model)?.model;
   const defExplore = fields.find((f) => f.explore)?.explore;
   const otherFields = fields.filter((f) => !presetKeys.has(f.field));
+  // Event Slug suggestions are scoped to the chosen Organiser (slug is a subset
+  // of an organiser's events). Only when both live in the same explore.
+  const orgKey = keyFor('Organiser Name');
+  const slugKey = keyFor('Event Slug');
+  const orgRow = rows.find((x) => x.field === orgKey);
+  const orgVals = orgRow ? splitVals(orgRow.vals) : [];
+  const orgKnown = fields.find((f) => f.field === orgKey);
+  const slugKnown = fields.find((f) => f.field === slugKey);
+  const slugScopable = orgVals.length && orgKnown && slugKnown && slugKnown.model === orgKnown.model && slugKnown.explore === orgKnown.explore;
+  const slugFilters = slugScopable ? { [orgKnown.suggestField || orgKnown.field]: orgVals.join(',') } : null;
 
+  const cell = { border: '1px solid var(--hairline)', borderRadius: 8, padding: 10, background: 'var(--card)', display: 'flex', flexDirection: 'column', gap: 6 };
   return (
     <div style={{ margin: '6px 0 4px' }}>
-      {rows.map((r, i) => {
-        const known = fields.find((f) => f.field === r.field);
-        const isCustom = r.custom || (!!r.field && !known && !presetByKey[r.field]);
-        const meta = known
-          ? { field: known.suggestField || known.field, model: known.model, explore: known.explore }
-          : (r.field ? { field: r.field, model: defModel, explore: defExplore } : null);
-        const preset = presetByKey[r.field];
-        return (
-          <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <select
-                style={{ ...input, minWidth: 240 }}
-                value={isCustom ? '__custom' : r.field}
-                onChange={(e) => (e.target.value === '__custom' ? setRow(i, { custom: true, field: '' }) : setRow(i, { custom: false, field: e.target.value }))}
-              >
-                <option value="">Choose a filter…</option>
-                {LOCK_CATEGORIES.map((cat) => (
-                  <optgroup key={cat} label={cat}>
-                    {presets.filter((p) => p.category === cat).map((p) => <option key={p.key} value={p.key}>{p.title}{p.feeds ? ' →' : ''}</option>)}
-                  </optgroup>
-                ))}
-                {otherFields.length > 0 && (
-                  <optgroup label="Other fields">
-                    {otherFields.map((f) => <option key={f.field} value={f.field}>{f.byName ? `${f.title} — filter` : `${f.title} (${f.field})`}</option>)}
-                  </optgroup>
-                )}
-                <option value="__custom">✎ Custom field…</option>
-              </select>
-              {isCustom && (
-                <input
-                  style={{ ...input, minWidth: 220 }}
-                  value={r.field}
-                  onChange={(e) => setRow(i, { field: e.target.value, custom: true })}
-                  placeholder="Looker field, e.g. core_events.is_past"
-                />
-              )}
-              {fedBy[r.field] && <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>↳ auto-filled from {fedBy[r.field].join(' + ')} (editable)</span>}
-              {preset?.feeds && <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>also fills {preset.feeds.join(', ')}</span>}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 10, alignItems: 'start' }}>
+        {rows.map((r, i) => {
+          const known = fields.find((f) => f.field === r.field);
+          const isCustom = r.custom || (!!r.field && !known && !presetByKey[r.field]);
+          const meta = known
+            ? { field: known.suggestField || known.field, model: known.model, explore: known.explore }
+            : (r.field ? { field: r.field, model: defModel, explore: defExplore } : null);
+          const preset = presetByKey[r.field];
+          const isSlug = !!preset?.slugOf;
+          return (
+            <div key={i} style={cell}>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1, minWidth: 0 }}>
+                  <select
+                    style={{ ...input, width: '100%', minWidth: 0 }}
+                    value={isCustom ? '__custom' : r.field}
+                    onChange={(e) => (e.target.value === '__custom' ? setRow(i, { custom: true, field: '' }) : setRow(i, { custom: false, field: e.target.value }))}
+                  >
+                    <option value="">Choose a filter…</option>
+                    {LOCK_CATEGORIES.map((cat) => (
+                      <optgroup key={cat} label={cat}>
+                        {presets.filter((p) => p.category === cat).map((p) => <option key={p.key} value={p.key}>{p.label || p.title}{p.feeds ? ' →' : ''}</option>)}
+                      </optgroup>
+                    ))}
+                    {otherFields.length > 0 && (
+                      <optgroup label="Other fields">
+                        {otherFields.map((f) => <option key={f.field} value={f.field}>{f.byName ? `${f.title} — filter` : `${f.title} (${f.field})`}</option>)}
+                      </optgroup>
+                    )}
+                    <option value="__custom">✎ Custom field…</option>
+                  </select>
+                  {isCustom && (
+                    <input
+                      style={{ ...input, width: '100%', minWidth: 0 }}
+                      value={r.field}
+                      onChange={(e) => setRow(i, { field: e.target.value, custom: true })}
+                      placeholder="Looker field, e.g. core_events.is_past"
+                    />
+                  )}
+                  {fedBy[r.field] && <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>↳ auto-filled from {fedBy[r.field].join(' + ')} (editable)</span>}
+                  {preset?.feeds && <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>also fills {preset.feeds.join(', ')}</span>}
+                  {isSlug && <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>{slugScopable ? `↳ showing slugs for ${orgVals.join(', ')}` : `set ${preset.slugOf} above to filter slugs`}</span>}
+                </div>
+                <button style={delBtn} onClick={() => removeRow(i)} title="Remove">✕</button>
+              </div>
+              <ValuePicker meta={meta} value={r.vals} extraFilters={isSlug ? slugFilters : null} onChange={(v) => setRow(i, { vals: v })} />
             </div>
-            <ValuePicker meta={meta} value={r.vals} onChange={(v) => setRow(i, { vals: v })} />
-            <button style={delBtn} onClick={() => removeRow(i)} title="Remove">✕</button>
-          </div>
-        );
-      })}
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          );
+        })}
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
         <button style={miniBtn} onClick={addRow}>+ Add locked filter</button>
         <button style={miniBtn} onClick={() => seedDefaults(categories && categories.length ? categories : LOCK_CATEGORIES, { force: true })}>+ Add default filters</button>
       </div>
@@ -1210,7 +1229,7 @@ function LockedFilterEditor({ value, onChange, fields, categories }) {
 
 // Value picker for a locked filter: selected values shown as chips, plus a
 // search box that queries Looker server-side (works with thousands of values).
-function ValuePicker({ meta, value, onChange }) {
+function ValuePicker({ meta, value, onChange, extraFilters = null }) {
   const [q, setQ] = useState('');
   const [open, setOpen] = useState(false);
   const [results, setResults] = useState([]);
@@ -1224,12 +1243,12 @@ function ValuePicker({ meta, value, onChange }) {
     let alive = true;
     setLoading(true);
     const t = setTimeout(async () => {
-      try { const d = await api.filterSuggest({ model: meta.model, explore: meta.explore, field: meta.field, q, pair: true }); if (alive) setResults(d.suggestions || []); }
+      try { const d = await api.filterSuggest({ model: meta.model, explore: meta.explore, field: meta.field, q, pair: true, filters: extraFilters || undefined }); if (alive) setResults(d.suggestions || []); }
       catch { if (alive) setResults([]); }
       finally { if (alive) setLoading(false); }
     }, 300);
     return () => { alive = false; clearTimeout(t); };
-  }, [q, open, canSuggest, meta]);
+  }, [q, open, canSuggest, meta, JSON.stringify(extraFilters)]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const add = (s) => { if (s && !selected.includes(s)) onChange([...selected, s].join(',')); };
   const remove = (s) => onChange(selected.filter((x) => x !== s).join(','));

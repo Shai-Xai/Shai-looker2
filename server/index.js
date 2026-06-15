@@ -769,7 +769,7 @@ app.post('/api/drill', auth.requireAuth, async (req, res) => {
 
 app.post('/api/filter-suggest', auth.requireAuth, async (req, res) => {
   try {
-    const { model, explore, field, suiteId, q: term, pair } = req.body;
+    const { model, explore, field, suiteId, q: term, pair, filters: extraFilters } = req.body;
     if (!model || !explore || !field) return res.json({ suggestions: [] });
     // Get distinct values by running an inline query for just this dimension.
     // A search term filters server-side (contains for text, exact for numeric
@@ -794,6 +794,12 @@ app.post('/api/filter-suggest', auth.requireAuth, async (req, res) => {
         const variants = [...new Set([t, t.toLowerCase(), t.toUpperCase(), tc])];
         q.filters = { [field]: variants.map((v) => `%${v}%`).join(',') };
       }
+    }
+    // Optional companion scoping (e.g. Event Slug suggestions limited to the
+    // chosen Organiser). Merged before applyScope, so the client's own scope
+    // still wins and can't be widened from the browser.
+    if (extraFilters && typeof extraFilters === 'object') {
+      for (const [k, v] of Object.entries(extraFilters)) if (k && v != null && String(v).trim()) q.filters = { ...(q.filters || {}), [k]: String(v) };
     }
     if (!(await applyScope(q, req.user, suiteId))) return res.json({ suggestions: [] });
     const rows = await runLookerQuery('/queries/run/json', q);
