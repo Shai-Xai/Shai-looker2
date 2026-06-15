@@ -373,7 +373,7 @@ function ClientSettings({ entity, suites, fields, onChange, onBack }) {
       <L>Locked filters (organiser-level — apply across all this client's sets)</L>
       {allOrganisers
         ? <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: '4px 0' }}>Not needed — “All organisers” is on, so this client is intentionally unscoped.</p>
-        : <LockedFilterEditor value={locks} onChange={setLocks} fields={fields} />}
+        : <LockedFilterEditor value={locks} onChange={setLocks} fields={fields} restrictTo={['Organiser Name']} />}
       <div style={{ marginTop: 12 }}>
         <L>Client AI context</L>
         <div style={{ fontSize: 12, color: 'var(--muted)', margin: '4px 0 4px' }}>Added to the AI for this client's insights & dashboard summaries (on top of the global AI instructions).</div>
@@ -1093,14 +1093,17 @@ const LOCK_CATEGORIES = ['Event', 'Cashless'];
 const splitVals = (v) => String(v || '').split(',').map((s) => s.trim()).filter(Boolean);
 const uniqJoin = (arr) => [...new Set(arr)].join(',');
 
-function LockedFilterEditor({ value, onChange, fields, categories }) {
+function LockedFilterEditor({ value, onChange, fields, categories, restrictTo = null }) {
+  // restrictTo limits the offered filters (e.g. the organiser-level editor only
+  // exposes Organiser Name — scope is set once per client there).
+  const PRESETS = restrictTo ? LOCK_PRESETS.filter((p) => restrictTo.includes(p.title)) : LOCK_PRESETS;
   // Resolve each preset title to the lock key as it appears in `fields` (byName
   // filters key on their name; real fields on their field id). Fallback to the
   // title so a preset still works if its field isn't in the catalogue.
   const keyByTitle = {};
   for (const f of fields) keyByTitle[(f.title || '').toLowerCase()] = f.field;
   const keyFor = (title) => keyByTitle[title.toLowerCase()] || title;
-  const presets = LOCK_PRESETS.map((p) => ({ ...p, key: keyFor(p.title), feedKeys: (p.feeds || []).map(keyFor) }));
+  const presets = PRESETS.map((p) => ({ ...p, key: keyFor(p.title), feedKeys: (p.feeds || []).map(keyFor) }));
   const presetByKey = Object.fromEntries(presets.map((p) => [p.key, p]));
   const presetKeys = new Set(presets.map((p) => p.key));
   // targetKey -> [feeder titles] (for the "auto-filled from …" hint)
@@ -1154,7 +1157,8 @@ function LockedFilterEditor({ value, onChange, fields, categories }) {
 
   const defModel = fields.find((f) => f.model)?.model;
   const defExplore = fields.find((f) => f.explore)?.explore;
-  const otherFields = fields.filter((f) => !presetKeys.has(f.field));
+  const otherFields = restrictTo ? [] : fields.filter((f) => !presetKeys.has(f.field));
+  const showCustom = !restrictTo;
   // Scope Event-category pickers to the chosen organiser: when Organiser Name has
   // a value, every other Event filter (Event Name, Current/Past/Comparison, Slug)
   // only suggests events for that organiser. Each explore has its own organiser
@@ -1200,7 +1204,7 @@ function LockedFilterEditor({ value, onChange, fields, categories }) {
                   onChange={(e) => (e.target.value === '__custom' ? setRow(i, { custom: true, field: '' }) : setRow(i, { custom: false, field: e.target.value }))}
                 >
                   <option value="">Choose a filter…</option>
-                  {LOCK_CATEGORIES.map((cat) => (
+                  {LOCK_CATEGORIES.filter((cat) => presets.some((p) => p.category === cat)).map((cat) => (
                     <optgroup key={cat} label={cat}>
                       {presets.filter((p) => p.category === cat).map((p) => <option key={p.key} value={p.key}>{p.label || p.title}{p.feeds ? ' →' : ''}</option>)}
                     </optgroup>
@@ -1210,7 +1214,7 @@ function LockedFilterEditor({ value, onChange, fields, categories }) {
                       {otherFields.map((f) => <option key={f.field} value={f.field}>{f.byName ? `${f.title} — filter` : `${f.title} (${f.field})`}</option>)}
                     </optgroup>
                   )}
-                  <option value="__custom">✎ Custom field…</option>
+                  {showCustom && <option value="__custom">✎ Custom field…</option>}
                 </select>
                 {isCustom && (
                   <input
