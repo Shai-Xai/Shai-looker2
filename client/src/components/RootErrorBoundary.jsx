@@ -11,7 +11,10 @@ export default class RootErrorBoundary extends Component {
   static getDerivedStateFromError(error) {
     return { error };
   }
-  componentDidCatch(error) {
+  componentDidCatch(error, info) {
+    // Keep the React component stack so the screen below can show WHERE it
+    // broke (with keepNames in the build, these are real component names).
+    this.setState({ info });
     // A dynamic-import/chunk failure means the HTML references assets that no
     // longer exist (post-deploy). Force one fresh reload to pull the new build.
     const msg = String(error?.message || error);
@@ -40,6 +43,13 @@ export default class RootErrorBoundary extends Component {
               Reload
             </button>
             <p style={{ fontSize: 11, color: '#b0b0b6', marginTop: 16, wordBreak: 'break-word' }}>{String(this.state.error.message || this.state.error)}</p>
+            <details style={{ marginTop: 14, textAlign: 'left' }}>
+              <summary style={{ cursor: 'pointer', fontSize: 12, color: '#86868b', textAlign: 'center' }}>Technical details</summary>
+              <pre style={{ marginTop: 8, maxHeight: 260, overflow: 'auto', fontSize: 10.5, lineHeight: 1.45, background: 'rgba(0,0,0,0.05)', padding: 10, borderRadius: 8, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: '#555' }}>
+                {String(this.state.error.stack || this.state.error.message || this.state.error)}
+                {this.state.info?.componentStack ? `\n— component stack —${this.state.info.componentStack}` : ''}
+              </pre>
+            </details>
           </div>
         </div>
       );
