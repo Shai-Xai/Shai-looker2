@@ -4,7 +4,7 @@ import { useState } from 'react';
 // write-only: the form only knows whether a value is set (value.*.keySet /
 // clientSecretSet); typing a new value changes it, blank leaves it unchanged.
 // `onSave(payload)` receives only the fields that changed.
-export default function IntegrationsForm({ value, onSave, showLooker = true, lookerActive = true, showResend = false, onTestEmail, collapsible = false }) {
+export default function IntegrationsForm({ value, onSave, showLooker = true, lookerActive = true, showResend = false, showInventive = false, onTestEmail, collapsible = false }) {
   const [baseUrl, setBaseUrl] = useState(value?.looker?.baseUrl || '');
   const [clientId, setClientId] = useState(value?.looker?.clientId || '');
   const [clientSecret, setClientSecret] = useState('');
@@ -14,6 +14,11 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
   const [resendKey, setResendKey] = useState('');
   const [clearResendKey, setClearResendKey] = useState(false);
   const [mailFrom, setMailFrom] = useState(value?.resend?.from || '');
+  const [invKey, setInvKey] = useState('');
+  const [clearInvKey, setClearInvKey] = useState(false);
+  const [invToken, setInvToken] = useState('');
+  const [clearInvToken, setClearInvToken] = useState(false);
+  const [invEndpoint, setInvEndpoint] = useState(value?.inventive?.endpoint || '');
   const [testState, setTestState] = useState('');
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -42,9 +47,17 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
         if (resendKey) payload.resend.apiKey = resendKey;
         if (clearResendKey) payload.resend.clearApiKey = true;
       }
+      if (showInventive) {
+        payload.inventive = { endpoint: invEndpoint };
+        if (invKey) payload.inventive.apiKey = invKey;
+        if (clearInvKey) payload.inventive.clearApiKey = true;
+        if (invToken) payload.inventive.embedToken = invToken;
+        if (clearInvToken) payload.inventive.clearEmbedToken = true;
+      }
       await onSave(payload);
       setClientSecret(''); setAnthropicKey(''); setClearSecret(false); setClearKey(false);
       setResendKey(''); setClearResendKey(false);
+      setInvKey(''); setInvToken(''); setClearInvKey(false); setClearInvToken(false);
       setSaved(true); setTimeout(() => setSaved(false), 1600);
     } catch (e) { alert('Save failed: ' + e.message); }
     finally { setBusy(false); }
@@ -136,6 +149,38 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
               {testState && testState !== 'sending' && <span style={{ fontSize: 12.5, color: testState.startsWith('✓') ? 'var(--success, #10b981)' : 'var(--error, #ef4444)' }}>{testState}</span>}
             </div>
           )}
+        </Section>
+      )}
+
+      {/* Inventive (embedded AI analyst) — platform-level, one account → per-client workspaces */}
+      {showInventive && (
+        <Section title="✨ Inventive (AI analyst)" collapsible={collapsible}>
+          <div style={note}>
+            Powers the <b>Ask</b> conversational analyst embedded per client. Set the API key + the embed auth token you generated for the host URL <code>{`${typeof window !== 'undefined' ? window.location.origin : ''}/ask`}</code>.
+          </div>
+          <Lbl>API key</Lbl>
+          <input
+            type="password" autoComplete="off"
+            value={invKey} onChange={(e) => setInvKey(e.target.value)}
+            placeholder={value?.inventive?.keySet ? `Set (${value.inventive.keyHint || '••••'}) — leave blank to keep` : (value?.inventive?.envFallback ? 'Using .env key — type to override' : 'Inventive API key')}
+            style={input} disabled={clearInvKey}
+          />
+          {value?.inventive?.keySet && (
+            <label style={clearRow}><input type="checkbox" checked={clearInvKey} onChange={(e) => setClearInvKey(e.target.checked)} /> Remove this key</label>
+          )}
+          <Lbl>Embed auth token</Lbl>
+          <input
+            type="password" autoComplete="off"
+            value={invToken} onChange={(e) => setInvToken(e.target.value)}
+            placeholder={value?.inventive?.tokenSet ? `Set (${value.inventive.tokenHint || '••••'}) — leave blank to keep` : 'Embed auth token (per host URL)'}
+            style={input} disabled={clearInvToken}
+          />
+          {value?.inventive?.tokenSet && (
+            <label style={clearRow}><input type="checkbox" checked={clearInvToken} onChange={(e) => setClearInvToken(e.target.checked)} /> Remove this token</label>
+          )}
+          <Lbl>API endpoint <span style={{ textTransform: 'none', fontWeight: 400 }}>· optional</span></Lbl>
+          <input value={invEndpoint} onChange={(e) => setInvEndpoint(e.target.value)} placeholder="https://app-api.madeinventive.com" style={input} autoComplete="off" />
+          {value?.inventive?.configured && <div style={{ ...note, color: 'var(--success, #10b981)', marginTop: 8 }}>✓ Connected — the Ask analyst is live.</div>}
         </Section>
       )}
 

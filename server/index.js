@@ -899,6 +899,16 @@ function adminIntegrationsView() {
     },
     // Email (Resend) is platform-level only — it sends from Howler's domain.
     resend: { ...mailer.status(), recent: mailer.recent() },
+    // Inventive embedded AI analyst (platform-level: one account, per-client workspaces).
+    inventive: {
+      keySet: !!db.getSetting('inventive_api_key'),
+      keyHint: maskSecret(db.getSetting('inventive_api_key')),
+      tokenSet: !!db.getSetting('inventive_embed_auth_token'),
+      tokenHint: maskSecret(db.getSetting('inventive_embed_auth_token')),
+      endpoint: db.getSetting('inventive_api_endpoint') || '',
+      envFallback: !db.getSetting('inventive_api_key') && !!process.env.INVENTIVE_API_KEY,
+      configured: !!((db.getSetting('inventive_api_key') || process.env.INVENTIVE_API_KEY) && (db.getSetting('inventive_embed_auth_token') || process.env.INVENTIVE_EMBED_AUTH_TOKEN)),
+    },
   };
 }
 function entityIntegrationsView(entityId) {
@@ -919,6 +929,13 @@ app.put('/api/admin/integrations', auth.requireAdmin, (req, res) => {
   if (re.apiKey) db.setSetting('resend_api_key', String(re.apiKey));
   if (re.clearApiKey) db.setSetting('resend_api_key', '');
   if (re.from !== undefined) db.setSetting('mail_from', String(re.from || '').trim());
+  // Inventive (embedded AI analyst) — admin-only, platform-level.
+  const inv = (req.body || {}).inventive || {};
+  if (inv.apiKey) db.setSetting('inventive_api_key', String(inv.apiKey));
+  if (inv.clearApiKey) db.setSetting('inventive_api_key', '');
+  if (inv.embedToken) db.setSetting('inventive_embed_auth_token', String(inv.embedToken));
+  if (inv.clearEmbedToken) db.setSetting('inventive_embed_auth_token', '');
+  if (inv.endpoint !== undefined) db.setSetting('inventive_api_endpoint', String(inv.endpoint || '').trim());
   res.json(adminIntegrationsView());
 });
 
