@@ -1166,10 +1166,11 @@ function LockedFilterEditor({ value, onChange, fields, categories }) {
   const slugScopable = orgVals.length && orgKnown && slugKnown && slugKnown.model === orgKnown.model && slugKnown.explore === orgKnown.explore;
   const slugFilters = slugScopable ? { [orgKnown.suggestField || orgKnown.field]: orgVals.join(',') } : null;
 
-  const cell = { border: '1px solid var(--hairline)', borderRadius: 8, padding: 10, background: 'var(--card)', display: 'flex', flexDirection: 'column', gap: 6 };
   return (
     <div style={{ margin: '6px 0 4px' }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 10, alignItems: 'start' }}>
+      {/* Same per-filter row as before (select + value side by side); two rows sit
+          next to each other on wider screens, one-up when narrow. */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 460px), 1fr))', gap: '4px 24px', alignItems: 'start' }}>
         {rows.map((r, i) => {
           const known = fields.find((f) => f.field === r.field);
           const isCustom = r.custom || (!!r.field && !known && !presetByKey[r.field]);
@@ -1179,47 +1180,45 @@ function LockedFilterEditor({ value, onChange, fields, categories }) {
           const preset = presetByKey[r.field];
           const isSlug = !!preset?.slugOf;
           return (
-            <div key={i} style={cell}>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1, minWidth: 0 }}>
-                  <select
-                    style={{ ...input, width: '100%', minWidth: 0 }}
-                    value={isCustom ? '__custom' : r.field}
-                    onChange={(e) => (e.target.value === '__custom' ? setRow(i, { custom: true, field: '' }) : setRow(i, { custom: false, field: e.target.value }))}
-                  >
-                    <option value="">Choose a filter…</option>
-                    {LOCK_CATEGORIES.map((cat) => (
-                      <optgroup key={cat} label={cat}>
-                        {presets.filter((p) => p.category === cat).map((p) => <option key={p.key} value={p.key}>{p.label || p.title}{p.feeds ? ' →' : ''}</option>)}
-                      </optgroup>
-                    ))}
-                    {otherFields.length > 0 && (
-                      <optgroup label="Other fields">
-                        {otherFields.map((f) => <option key={f.field} value={f.field}>{f.byName ? `${f.title} — filter` : `${f.title} (${f.field})`}</option>)}
-                      </optgroup>
-                    )}
-                    <option value="__custom">✎ Custom field…</option>
-                  </select>
-                  {isCustom && (
-                    <input
-                      style={{ ...input, width: '100%', minWidth: 0 }}
-                      value={r.field}
-                      onChange={(e) => setRow(i, { field: e.target.value, custom: true })}
-                      placeholder="Looker field, e.g. core_events.is_past"
-                    />
+            <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <select
+                  style={{ ...input, minWidth: 240 }}
+                  value={isCustom ? '__custom' : r.field}
+                  onChange={(e) => (e.target.value === '__custom' ? setRow(i, { custom: true, field: '' }) : setRow(i, { custom: false, field: e.target.value }))}
+                >
+                  <option value="">Choose a filter…</option>
+                  {LOCK_CATEGORIES.map((cat) => (
+                    <optgroup key={cat} label={cat}>
+                      {presets.filter((p) => p.category === cat).map((p) => <option key={p.key} value={p.key}>{p.label || p.title}{p.feeds ? ' →' : ''}</option>)}
+                    </optgroup>
+                  ))}
+                  {otherFields.length > 0 && (
+                    <optgroup label="Other fields">
+                      {otherFields.map((f) => <option key={f.field} value={f.field}>{f.byName ? `${f.title} — filter` : `${f.title} (${f.field})`}</option>)}
+                    </optgroup>
                   )}
-                  {fedBy[r.field] && <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>↳ auto-filled from {fedBy[r.field].join(' + ')} (editable)</span>}
-                  {preset?.feeds && <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>also fills {preset.feeds.join(', ')}</span>}
-                  {isSlug && <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>{slugScopable ? `↳ showing slugs for ${orgVals.join(', ')}` : `set ${preset.slugOf} above to filter slugs`}</span>}
-                </div>
-                <button style={delBtn} onClick={() => removeRow(i)} title="Remove">✕</button>
+                  <option value="__custom">✎ Custom field…</option>
+                </select>
+                {isCustom && (
+                  <input
+                    style={{ ...input, minWidth: 220 }}
+                    value={r.field}
+                    onChange={(e) => setRow(i, { field: e.target.value, custom: true })}
+                    placeholder="Looker field, e.g. core_events.is_past"
+                  />
+                )}
+                {fedBy[r.field] && <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>↳ auto-filled from {fedBy[r.field].join(' + ')} (editable)</span>}
+                {preset?.feeds && <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>also fills {preset.feeds.join(', ')}</span>}
+                {isSlug && <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>{slugScopable ? `↳ showing slugs for ${orgVals.join(', ')}` : `set ${preset.slugOf} above to filter slugs`}</span>}
               </div>
               <ValuePicker meta={meta} value={r.vals} extraFilters={isSlug ? slugFilters : null} onChange={(v) => setRow(i, { vals: v })} />
+              <button style={delBtn} onClick={() => removeRow(i)} title="Remove">✕</button>
             </div>
           );
         })}
       </div>
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
         <button style={miniBtn} onClick={addRow}>+ Add locked filter</button>
         <button style={miniBtn} onClick={() => seedDefaults(categories && categories.length ? categories : LOCK_CATEGORIES, { force: true })}>+ Add default filters</button>
       </div>
