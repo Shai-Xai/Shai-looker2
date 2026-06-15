@@ -193,7 +193,7 @@ function Entities({ fields }) {
   const [selectedId, setSelectedId] = useState(null);
   const load = () => {
     setLoading(true);
-    Promise.all([api.adminListEntities(), api.adminListSuites(), api.adminListSets(), api.adminListUsers(), api.listDashboards()])
+    return Promise.all([api.adminListEntities(), api.adminListSuites(), api.adminListSets(), api.adminListUsers(), api.listDashboards()])
       .then(([e, su, s, u, d]) => { setItems(e); setSuites(su); setSets(s); setUsers(u); setDashTitle(Object.fromEntries(d.map((x) => [x.id, x.title]))); })
       .finally(() => setLoading(false));
   };
@@ -238,7 +238,7 @@ function Entities({ fields }) {
         ))}
         {items.length === 0 && <Muted>No clients yet.</Muted>}
       </div>
-      <button style={addBtn} onClick={() => api.adminCreateEntity({ name: 'New client', lockedFilters: {} }).then(load)}>+ Add client</button>
+      <button style={addBtn} onClick={async () => { const ent = await api.adminCreateEntity({ name: 'New client', lockedFilters: {} }); await load(); setSelectedId(ent.id); }}>+ Add client</button>
     </div>
   );
 }
