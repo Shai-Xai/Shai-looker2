@@ -1416,7 +1416,7 @@ function Library() {
       .finally(() => setLoading(false));
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(load, [search, category]);
+  useEffect(() => { load(); }, [search, category]);
 
   async function backfill() {
     setBackfilling(true);
@@ -2116,7 +2116,7 @@ function Settlements({ entityId = null }) {
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   };
-  useEffect(load, [entityId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, [entityId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function onFile(e) {
     const file = e.target.files?.[0];

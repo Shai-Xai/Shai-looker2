@@ -26,7 +26,7 @@ export default function HomePage() {
     setLoading(true);
     api.listDashboards().then(setDashboards).catch((e) => setError(e.message)).finally(() => setLoading(false));
   }
-  useEffect(load, []);
+  useEffect(() => { load(); }, []);
 
   // Nested-folder navigation. Folders are stored as "/"-separated paths on each
   // dashboard (e.g. "Festivals/MTN Bushfire/Cashless").
