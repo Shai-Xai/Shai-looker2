@@ -1999,12 +1999,18 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
   const instructions = [aiInstructionsFor(null), briefingInstructionsFor(user, entityId, clientCatalogue(entityId).suites)].filter(Boolean).join('\n\n');
   const raw = await insights.digestBrief({ tiles: factTiles, roleLabel: lens.label, roleFocus: effectiveFocus, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), capabilities: ACTION_CAPABILITIES });
   const href = (id) => { const c = id && byId[id]; return c ? `${mailer.baseUrl()}/suite/${c.suiteId}/d/${id}` : ''; };
+  // A suggested action with an executable capability deep-links into the
+  // pre-filled "Make it happen" campaign editor (recipe auto-resolves the
+  // audience + copy); otherwise it links to the relevant dashboard.
+  const actionHref = (a) => (CAPABILITY_KEYS.has(a.action)
+    ? `${mailer.baseUrl()}/engage/campaigns?type=${encodeURIComponent(a.action)}&goal=${encodeURIComponent(String(a.text || '').slice(0, 200))}`
+    : href(a.dashboardId));
   return {
     subject: String(raw.subject || '').slice(0, 120),
     headline: String(raw.headline || '').slice(0, 600),
     narrative: (raw.narrative || []).slice(0, 5).map((s) => String(s).slice(0, 800)).filter(Boolean),
     kpis: (raw.kpis || []).slice(0, 6).map((k) => ({ label: String(k.label || '').slice(0, 40), value: String(k.value || '').slice(0, 30), delta: String(k.delta || '').slice(0, 40), href: href(k.dashboardId) })).filter((k) => k.label && k.value),
-    actions: (raw.actions || []).slice(0, 3).map((a) => ({ text: String(a.text || '').slice(0, 200), href: href(a.dashboardId), action: CAPABILITY_KEYS.has(a.action) ? a.action : null })).filter((a) => a.text),
+    actions: (raw.actions || []).slice(0, 3).map((a) => ({ text: String(a.text || '').slice(0, 200), href: actionHref(a), action: CAPABILITY_KEYS.has(a.action) ? a.action : null })).filter((a) => a.text),
   };
 }
 
