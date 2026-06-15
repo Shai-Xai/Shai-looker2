@@ -13,7 +13,7 @@ const crypto = require('crypto');
 const DEFAULT_TZ = 'Africa/Johannesburg'; // GMT+2
 const ROLES = ['exec', 'marketing', 'finance', 'ops'];
 
-function mount(app, { db, auth, mailer, push, generateContent, roleLenses }) {
+function mount(app, { db, auth, mailer, messaging, push, generateContent, roleLenses }) {
   const sql = db.db;
   const now = () => new Date().toISOString();
   const uuid = () => crypto.randomUUID();
@@ -52,6 +52,8 @@ function mount(app, { db, auth, mailer, push, generateContent, roleLenses }) {
     const cols = sql.prepare('PRAGMA table_info(scheduled_jobs)').all().map((c) => c.name);
     if (!cols.includes('focus_mode')) sql.exec("ALTER TABLE scheduled_jobs ADD COLUMN focus_mode TEXT NOT NULL DEFAULT 'override'");
     if (!cols.includes('custom_message')) sql.exec("ALTER TABLE scheduled_jobs ADD COLUMN custom_message TEXT NOT NULL DEFAULT ''");
+    if (!cols.includes('channel')) sql.exec("ALTER TABLE scheduled_jobs ADD COLUMN channel TEXT NOT NULL DEFAULT 'email'");           // email | sms | both
+    if (!cols.includes('sms_recipients')) sql.exec("ALTER TABLE scheduled_jobs ADD COLUMN sms_recipients TEXT NOT NULL DEFAULT '[]'"); // phone numbers
   } catch (e) { console.error('[scheduler] column migration skipped:', e.message); }
 
   // ── timezone-aware schedule maths ──
@@ -90,6 +92,7 @@ function mount(app, { db, auth, mailer, push, generateContent, roleLenses }) {
     id: r.id, entityId: r.entity_id, type: r.type, title: r.title, role: r.role, roleFocus: r.role_focus, focusMode: r.focus_mode || 'override',
     customMessage: r.custom_message || '',
     contentMode: r.content_mode, tiles: JSON.parse(r.tiles || '[]'), recipients: JSON.parse(r.recipients || '[]'),
+    channel: r.channel || 'email', smsRecipients: JSON.parse(r.sms_recipients || '[]'),
     cadence: r.cadence, timeOfDay: r.time_of_day, weekday: r.weekday, runAt: r.run_at, timezone: r.timezone,
     status: r.status, lastRunAt: r.last_run_at, lastStatus: r.last_status, nextRunAt: r.next_run_at,
     createdBy: r.created_by, createdAt: r.created_at, updatedAt: r.updated_at,
@@ -111,6 +114,8 @@ function mount(app, { db, auth, mailer, push, generateContent, roleLenses }) {
       contentMode: body.contentMode === 'curated' ? 'curated' : 'ai',
       tiles: Array.isArray(body.tiles) ? body.tiles.filter((t) => t && t.dashboardId && t.tileId).slice(0, 40).map((t) => ({ dashboardId: String(t.dashboardId), tileId: String(t.tileId) })) : [],
       recipients: Array.isArray(body.recipients) ? [...new Set(body.recipients.map((e) => String(e).trim().toLowerCase()).filter(Boolean))].slice(0, 25) : [],
+      channel: ['sms', 'both'].includes(body.channel) ? body.channel : 'email',
+      smsRecipients: Array.isArray(body.smsRecipients) ? [...new Set(body.smsRecipients.map((p) => String(p).replace(/[^\d+]/g, '').trim()).filter((p) => p.replace(/\D/g, '').length >= 7))].slice(0, 25) : [],
       cadence,
       timeOfDay: /^\d{1,2}:\d{2}$/.test(body.timeOfDay || '') ? body.timeOfDay : '07:00',
       weekday: Number.isInteger(body.weekday) && body.weekday >= 0 && body.weekday <= 6 ? body.weekday : 1,
@@ -125,13 +130,13 @@ function mount(app, { db, auth, mailer, push, generateContent, roleLenses }) {
     const next = j.status === 'active' ? computeNextRun(j) : null;
     const nextIso = next ? next.toISOString() : (j.status === 'active' && j.cadence === 'once' && j.runAt ? new Date(j.runAt).toISOString() : null);
     if (id) {
-      sql.prepare(`UPDATE scheduled_jobs SET title=?, role=?, role_focus=?, focus_mode=?, custom_message=?, content_mode=?, tiles=?, recipients=?, cadence=?, time_of_day=?, weekday=?, run_at=?, timezone=?, status=?, next_run_at=?, updated_at=? WHERE id=?`)
-        .run(j.title, j.role, j.roleFocus, j.focusMode, j.customMessage, j.contentMode, JSON.stringify(j.tiles), JSON.stringify(j.recipients), j.cadence, j.timeOfDay, j.weekday, j.runAt, j.timezone, j.status, nextIso, ts, id);
+      sql.prepare(`UPDATE scheduled_jobs SET title=?, role=?, role_focus=?, focus_mode=?, custom_message=?, content_mode=?, tiles=?, recipients=?, channel=?, sms_recipients=?, cadence=?, time_of_day=?, weekday=?, run_at=?, timezone=?, status=?, next_run_at=?, updated_at=? WHERE id=?`)
+        .run(j.title, j.role, j.roleFocus, j.focusMode, j.customMessage, j.contentMode, JSON.stringify(j.tiles), JSON.stringify(j.recipients), j.channel, JSON.stringify(j.smsRecipients), j.cadence, j.timeOfDay, j.weekday, j.runAt, j.timezone, j.status, nextIso, ts, id);
       return getJob(id);
     }
     const nid = uuid();
-    sql.prepare(`INSERT INTO scheduled_jobs (id, entity_id, type, title, role, role_focus, focus_mode, custom_message, content_mode, tiles, recipients, cadence, time_of_day, weekday, run_at, timezone, status, next_run_at, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-      .run(nid, j.entityId, 'digest', j.title, j.role, j.roleFocus, j.focusMode, j.customMessage, j.contentMode, JSON.stringify(j.tiles), JSON.stringify(j.recipients), j.cadence, j.timeOfDay, j.weekday, j.runAt, j.timezone, j.status, nextIso, createdBy || '', ts, ts);
+    sql.prepare(`INSERT INTO scheduled_jobs (id, entity_id, type, title, role, role_focus, focus_mode, custom_message, content_mode, tiles, recipients, channel, sms_recipients, cadence, time_of_day, weekday, run_at, timezone, status, next_run_at, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(nid, j.entityId, 'digest', j.title, j.role, j.roleFocus, j.focusMode, j.customMessage, j.contentMode, JSON.stringify(j.tiles), JSON.stringify(j.recipients), j.channel, JSON.stringify(j.smsRecipients), j.cadence, j.timeOfDay, j.weekday, j.runAt, j.timezone, j.status, nextIso, createdBy || '', ts, ts);
     return getJob(nid);
   }
 
@@ -144,28 +149,52 @@ function mount(app, { db, auth, mailer, push, generateContent, roleLenses }) {
     return { ...email, content, senderName: branding.senderName };
   }
 
-  // Run a job: render once, send to all recipients. `manual` skips rescheduling.
+  // A short SMS version of the digest — the one-line headline (+ custom note),
+  // with a link back into Pulse. Email stays the rich version.
+  function buildDigestSms(job, content) {
+    const headline = String(content?.headline || `${lensFor(job).label} digest`).replace(/\s+/g, ' ').trim();
+    const note = String(job.customMessage || '').replace(/\s+/g, ' ').trim();
+    let body = (note ? `${note} — ${headline}` : headline).slice(0, 300);
+    const link = mailer.baseUrl ? mailer.baseUrl() : '';
+    return link ? `${body}\n${link}` : body;
+  }
+
+  // Run a job: render once, send to email + SMS recipients per the job's channel.
+  // `manual` skips rescheduling; a test `toOverride` is email-only.
   async function runJob(job, { manual, toOverride } = {}) {
-    const recipients = toOverride ? [toOverride] : job.recipients.filter(Boolean);
+    const wantsEmail = (job.channel || 'email') !== 'sms';
+    const wantsSms = (job.channel || 'email') !== 'email';
+    const emailTo = toOverride ? [toOverride] : (job.recipients || []).filter(Boolean);
+    const smsTo = toOverride ? [] : (job.smsRecipients || []).filter(Boolean);
     let result;
-    if (!recipients.length) { result = { status: 'skipped', detail: 'no recipients' }; }
-    else {
+    if (!(wantsEmail && emailTo.length) && !(wantsSms && smsTo.length)) {
+      result = { status: 'skipped', detail: 'no recipients' };
+    } else {
       try {
-        const { html, text, subject, senderName } = await render(job, recipients[0]);
+        const { html, text, subject, senderName, content } = await render(job, emailTo[0] || smsTo[0] || '');
         let ok = 0, err = '';
-        for (const to of recipients) {
-          const r = await mailer.send({ to, subject: subject || `${lensFor(job).label} digest`, html, text, fromName: senderName, kind: 'digest', entity: job.entityId });
-          if (r.ok) ok += 1; else err = r.error || r.reason || 'send failed';
+        if (wantsEmail) {
+          for (const to of emailTo) {
+            const r = await mailer.send({ to, subject: subject || `${lensFor(job).label} digest`, html, text, fromName: senderName, kind: 'digest', entity: job.entityId });
+            if (r.ok) ok += 1; else err = r.error || r.reason || 'email failed';
+          }
         }
-        result = ok ? { status: 'ok', detail: `sent to ${ok}` } : { status: 'error', detail: err };
-        // Push nudge to the recipients who have push on — "your briefing is
+        if (wantsSms && messaging?.sendSms) {
+          const smsText = buildDigestSms(job, content);
+          for (const to of smsTo) {
+            const r = await messaging.sendSms({ to, text: smsText });
+            if (r.ok) ok += 1; else err = r.error || r.reason || 'SMS failed';
+          }
+        }
+        result = ok ? { status: 'ok', detail: `sent to ${ok}` } : { status: 'error', detail: err || 'send failed' };
+        // Push nudge to the EMAIL recipients who have push on — "your briefing is
         // ready", deep-linking home. Collapse tag = one per entity, so a new
         // day's nudge replaces the previous instead of stacking. Best-effort.
-        if (ok && push?.isEnabled?.()) {
+        if (ok && wantsEmail && push?.isEnabled?.()) {
           try {
             const byEmail = new Map(db.listUsers().map((u) => [u.email, u]));
             const lensLabel = lensFor(job).label;
-            for (const to of recipients) {
+            for (const to of emailTo) {
               const u = byEmail.get(to);
               if (u && u.notifyPush !== false) {
                 push.sendToUser(u.id, {

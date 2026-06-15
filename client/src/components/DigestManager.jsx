@@ -79,6 +79,7 @@ function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }
     cadence: job?.cadence || 'daily', timeOfDay: job?.timeOfDay || '07:00', weekday: job?.weekday ?? 1,
     runAt: job?.runAt || '', recipients: (job?.recipients || []).join(', '), status: job?.status || 'active',
     contentMode: job?.contentMode || 'ai', tiles: job?.tiles || [],
+    channel: job?.channel || 'email', smsRecipients: (job?.smsRecipients || []).join(', '),
   }));
   const [preview, setPreview] = useState({ html: '', sample: false });
   const [previewBusy, setPreviewBusy] = useState(false);
@@ -86,11 +87,14 @@ function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }
   const [testState, setTestState] = useState('');
   const debounce = useRef(null);
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
+  const hasEmail = f.channel !== 'sms';
+  const hasSms = f.channel !== 'email';
 
   const payload = () => ({
     title: f.title, role: f.role, roleFocus: f.roleFocus, focusMode: f.focusMode, customMessage: f.customMessage, cadence: f.cadence, timeOfDay: f.timeOfDay,
     weekday: Number(f.weekday), runAt: f.runAt ? new Date(f.runAt).toISOString() : '', status: f.status,
     contentMode: f.contentMode, tiles: f.tiles, recipients: f.recipients.split(',').map((s) => s.trim()).filter(Boolean),
+    channel: f.channel, smsRecipients: f.smsRecipients.split(/[\s,;]+/).map((s) => s.trim()).filter(Boolean),
   });
 
   // Two preview paths: the debounced auto-preview renders the SAMPLE layout
@@ -173,14 +177,32 @@ function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }
             <div style={hintS}>Times are SAST (GMT+2).</div>
           </Field>
 
-          <Field label="Recipients (comma-separated)">
-            <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit' }} rows={2} value={f.recipients} onChange={(e) => set('recipients', e.target.value)} placeholder="name@client.co.za, ceo@client.co.za" />
-            {logins.length > 0 && (
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
-                {logins.map((u) => <button key={u.id || u.email} type="button" style={chipBtn} onClick={() => addRecipient(u.email)}>+ {u.email}</button>)}
-              </div>
-            )}
+          <Field label="Channel">
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Toggle on={f.channel === 'email'} onClick={() => set('channel', 'email')}>✉️ Email</Toggle>
+              <Toggle on={f.channel === 'sms'} onClick={() => set('channel', 'sms')}>💬 SMS</Toggle>
+              <Toggle on={f.channel === 'both'} onClick={() => set('channel', 'both')}>Both</Toggle>
+            </div>
+            <div style={hintS}>Email sends the full briefing; SMS sends a short headline + a link back into Pulse.</div>
           </Field>
+
+          {hasEmail && (
+            <Field label="Email recipients (comma-separated)">
+              <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit' }} rows={2} value={f.recipients} onChange={(e) => set('recipients', e.target.value)} placeholder="name@client.co.za, ceo@client.co.za" />
+              {logins.length > 0 && (
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
+                  {logins.map((u) => <button key={u.id || u.email} type="button" style={chipBtn} onClick={() => addRecipient(u.email)}>+ {u.email}</button>)}
+                </div>
+              )}
+            </Field>
+          )}
+
+          {hasSms && (
+            <Field label="SMS recipients (mobile numbers)">
+              <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit' }} rows={2} value={f.smsRecipients} onChange={(e) => set('smsRecipients', e.target.value)} placeholder="+27821234567, +27831234568" />
+              <div style={hintS}>Any separator. SMS needs the client's Clickatell SMS to be configured.</div>
+            </Field>
+          )}
 
           <Field label="Status">
             <div style={{ display: 'flex', gap: 8 }}>

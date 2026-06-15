@@ -2178,7 +2178,7 @@ function recentMessages(entityId, userId, limit = 6) {
 // Scheduler — recurring/one-off digest jobs (own table + routes). Mounted here,
 // after its content builder + role lenses exist. Remove this line + scheduler.js
 // to uninstall. The 60s tick lives inside the module.
-require('./scheduler').mount(app, { db, auth, mailer, push, generateContent: buildDigestContent, roleLenses: ROLE_LENSES });
+require('./scheduler').mount(app, { db, auth, mailer, messaging, push, generateContent: buildDigestContent, roleLenses: ROLE_LENSES });
 
 // Action Engine — suggested actions → executed automations (v1: email campaigns,
 // e.g. abandoned cart). Audience = a dashboard tile's query, run with the SAME
