@@ -1,5 +1,6 @@
 import { useParams, useSearchParams, useNavigate, useOutletContext } from 'react-router-dom';
 import { useAuth } from '../lib/auth.jsx';
+import { useProfile } from '../lib/profile.jsx';
 import { vtNavigate } from '../lib/viewTransition.js';
 import HomeButton from '../components/HomeButton.jsx';
 import CampaignManager from '../components/CampaignManager.jsx';
@@ -20,9 +21,12 @@ const TABS = [
 export default function EngagePage() {
   const { tab } = useParams();
   const navigate = useNavigate();
-  const { user, isAdmin } = useAuth();
+  const { isAdmin } = useAuth();
+  const { activeEntityId } = useProfile();
   const { previewEntityId } = useOutletContext() || {};
-  const entityId = previewEntityId || (isAdmin ? null : ((user?.entities || [])[0]?.id || (user?.entityIds || [])[0]));
+  // Always the client in context: the previewed client (admin) or the active
+  // profile (client). Switching profile is how a multi-client login changes here.
+  const entityId = previewEntityId || (isAdmin ? null : activeEntityId);
   const [params] = useSearchParams();
 
   const active = TABS.find((t) => t.key === tab && t.ready) ? tab : 'campaigns';

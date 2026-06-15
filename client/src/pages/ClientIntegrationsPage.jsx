@@ -28,8 +28,11 @@ const SECTIONS = [
 export default function ClientIntegrationsPage() {
   const isMobile = useIsMobile();
   const { can } = useAccess();
-  const { active } = useProfile(); // team management is scoped to the active client
+  const { active } = useProfile(); // every section is scoped to the active client profile
   const [items, setItems] = useState(null);
+  // Settings only ever show the profile in context — switching profile (top header)
+  // is how you reach another client's settings. Never list multiple clients at once.
+  const activeItem = items && active ? items.find((it) => it.entityId === active.id) : null;
   // Only the sections this role can use (Notifications is personal, always on).
   const sections = SECTIONS.filter(([, , , perm]) => !perm || can(perm));
   const [section, setSection] = useState(sections[0]?.[0] || 'notifications');
@@ -70,49 +73,47 @@ export default function ClientIntegrationsPage() {
         <p style={{ color: 'var(--muted)' }}>Loading…</p>
       ) : items.length === 0 ? (
         <p style={{ color: 'var(--muted)' }}>No client account is linked to your login yet.</p>
+      ) : !activeItem ? (
+        <p style={{ color: 'var(--muted)' }}>Switch to a client profile to manage its settings.</p>
       ) : (
-        items.map((it) => (
-          <div key={it.entityId} style={{ marginBottom: 36 }}>
-            {items.length > 1 && <h2 style={{ fontSize: 17, fontWeight: 700, marginBottom: 12 }}>{it.name}</h2>}
+        <div style={{ marginBottom: 36 }}>
+          {items.length > 1 && <h2 style={{ fontSize: 17, fontWeight: 700, marginBottom: 12 }}>{activeItem.name}</h2>}
 
-            {section === 'integrations' && (
-              <div style={{ maxWidth: 680 }}>
-                <p style={hint}>Connect your own Looker and Anthropic accounts. Leave blank to use Howler's.</p>
-                <IntegrationsForm
-                  value={it}
-                  lookerActive={false}
-                  onSave={async (p) => {
-                    const v = await api.saveMyIntegrations(it.entityId, p);
-                    setItems((arr) => arr.map((x) => (x.entityId === it.entityId ? { ...x, ...v } : x)));
-                  }}
-                />
-              </div>
-            )}
+          {section === 'integrations' && (
+            <div style={{ maxWidth: 680 }}>
+              <p style={hint}>Connect your own Looker and Anthropic accounts. Leave blank to use Howler's.</p>
+              <IntegrationsForm
+                value={activeItem}
+                lookerActive={false}
+                onSave={async (p) => {
+                  const v = await api.saveMyIntegrations(activeItem.entityId, p);
+                  setItems((arr) => arr.map((x) => (x.entityId === activeItem.entityId ? { ...x, ...v } : x)));
+                }}
+              />
+            </div>
+          )}
 
-            {section === 'email' && (
-              <div>
-                <p style={hint}>Your colours and logo — they style your whole Pulse platform (buttons, accents, charts) and your notification emails. Blank fields keep Howler's defaults.</p>
-                <MailTemplateEditor scope="my" entityId={it.entityId} />
-              </div>
-            )}
+          {section === 'email' && (
+            <div>
+              <p style={hint}>Your colours and logo — they style your whole Pulse platform (buttons, accents, charts) and your notification emails. Blank fields keep Howler's defaults.</p>
+              <MailTemplateEditor scope="my" entityId={activeItem.entityId} />
+            </div>
+          )}
 
+          {section === 'sentmail' && (
+            <div>
+              <p style={hint}>Every email sent on your behalf — digests, campaigns and notifications — and what's scheduled next.</p>
+              <MailLogView load={(params) => api.getMyMailLog(activeItem.entityId, params)} />
+            </div>
+          )}
 
-
-            {section === 'sentmail' && (
-              <div>
-                <p style={hint}>Every email sent on your behalf — digests, campaigns and notifications — and what's scheduled next.</p>
-                <MailLogView load={(params) => api.getMyMailLog(it.entityId, params)} />
-              </div>
-            )}
-
-            {section === 'inbox' && (
-              <div style={{ maxWidth: 680 }}>
-                <p style={hint}>CC this address on any email and the conversation is captured in your Pulse inbox — nothing lives only in someone's mailbox.</p>
-                <OwlAddressCard entityId={it.entityId} />
-              </div>
-            )}
-          </div>
-        ))
+          {section === 'inbox' && (
+            <div style={{ maxWidth: 680 }}>
+              <p style={hint}>CC this address on any email and the conversation is captured in your Pulse inbox — nothing lives only in someone's mailbox.</p>
+              <OwlAddressCard entityId={activeItem.entityId} />
+            </div>
+          )}
+        </div>
       )}
     </main>
   );

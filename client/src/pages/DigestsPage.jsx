@@ -1,5 +1,6 @@
 import { useOutletContext } from 'react-router-dom';
 import { useAuth } from '../lib/auth.jsx';
+import { useProfile } from '../lib/profile.jsx';
 import DigestManager from '../components/DigestManager.jsx';
 import HomeButton from '../components/HomeButton.jsx';
 
@@ -7,10 +8,12 @@ import HomeButton from '../components/HomeButton.jsx';
 // Settings). Clients manage their own entity; an admin in preview manages the
 // previewed client's.
 export default function DigestsPage() {
-  const { user, isAdmin } = useAuth();
+  const { isAdmin } = useAuth();
+  const { activeEntityId } = useProfile();
   const { previewEntityId } = useOutletContext() || {};
-  // The layout's context carries the active profile (client) or previewed client (admin).
-  const entityId = previewEntityId || (isAdmin ? null : ((user?.entities || [])[0]?.id || (user?.entityIds || [])[0]));
+  // Always the client in context: the previewed client (admin) or the active
+  // profile (client). Switching profile is how a multi-client login changes here.
+  const entityId = previewEntityId || (isAdmin ? null : activeEntityId);
 
   return (
     <main style={{ flex: 1, padding: '26px 22px', maxWidth: 1080, margin: '0 auto', width: '100%', boxSizing: 'border-box', overflowY: 'auto' }}>
