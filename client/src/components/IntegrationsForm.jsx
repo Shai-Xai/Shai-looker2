@@ -4,7 +4,7 @@ import { useState } from 'react';
 // write-only: the form only knows whether a value is set (value.*.keySet /
 // clientSecretSet); typing a new value changes it, blank leaves it unchanged.
 // `onSave(payload)` receives only the fields that changed.
-export default function IntegrationsForm({ value, onSave, showLooker = true, lookerActive = true, showResend = false, showInventive = false, onTestEmail, collapsible = false }) {
+export default function IntegrationsForm({ value, onSave, showLooker = true, lookerActive = true, showResend = false, showInventive = false, clients = [], onTestEmail, collapsible = false }) {
   const [baseUrl, setBaseUrl] = useState(value?.looker?.baseUrl || '');
   const [clientId, setClientId] = useState(value?.looker?.clientId || '');
   const [clientSecret, setClientSecret] = useState('');
@@ -181,6 +181,22 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
           <Lbl>API endpoint <span style={{ textTransform: 'none', fontWeight: 400 }}>· optional</span></Lbl>
           <input value={invEndpoint} onChange={(e) => setInvEndpoint(e.target.value)} placeholder="https://app-api.madeinventive.com" style={input} autoComplete="off" />
           {value?.inventive?.configured && <div style={{ ...note, color: 'var(--success, #10b981)', marginTop: 8 }}>✓ Connected — the Ask analyst is live.</div>}
+
+          {clients.length > 0 && (
+            <>
+              <Lbl>Client workspace refs <span style={{ textTransform: 'none', fontWeight: 400 }}>· for provisioning</span></Lbl>
+              <div style={note}>Give your Inventive PoC each client's <b>name + email + this Ref ID</b> as the workspace <code>externalRefId</code> (manual mode). One Ref per client.</div>
+              <div style={{ border: '1px solid var(--hairline)', borderRadius: 10, overflow: 'hidden', marginTop: 6 }}>
+                {clients.map((c) => (
+                  <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', borderBottom: '1px solid var(--hairline)' }}>
+                    <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
+                    <code style={{ fontSize: 11.5, color: 'var(--muted)', background: 'rgba(128,128,128,0.12)', padding: '2px 7px', borderRadius: 6, userSelect: 'all' }}>{c.id}</code>
+                    <button type="button" style={{ flexShrink: 0, padding: '3px 9px', fontSize: 11, fontWeight: 600, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 980, cursor: 'pointer' }} onClick={() => { navigator.clipboard?.writeText(c.id).catch(() => {}); }}>Copy</button>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </Section>
       )}
 

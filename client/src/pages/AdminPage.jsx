@@ -1492,13 +1492,15 @@ function MailLog() {
 // ─── Integrations (admin: primary Looker + Anthropic accounts) ─────────────────
 function AdminIntegrations() {
   const [value, setValue] = useState(null);
+  const [clients, setClients] = useState([]);
   useEffect(() => { api.getAdminIntegrations().then(setValue); }, []);
+  useEffect(() => { api.adminListEntities().then((e) => setClients((e || []).map((x) => ({ id: x.id, name: x.name })))).catch(() => {}); }, []);
   if (!value) return <Muted>Loading…</Muted>;
   return (
     <div>
       <p style={hint}>Everything below is collapsed — tap a section to open it. Accounts override the values in <code>.env</code>; clients can set their own Looker/Anthropic (Client → Integrations), which take precedence for their data.</p>
       <Section title="🔑 Accounts — Looker · Anthropic · Email · Inventive">
-        <IntegrationsForm value={value} showResend showInventive onTestEmail={() => api.sendMailTest()} onSave={async (p) => setValue(await api.saveAdminIntegrations(p))} />
+        <IntegrationsForm value={value} showResend showInventive clients={clients} onTestEmail={() => api.sendMailTest()} onSave={async (p) => setValue(await api.saveAdminIntegrations(p))} />
       </Section>
       <Section title="📧 Email template — platform default">
         <p style={hint}>The default look of every notification email. Each client can layer their own branding on top (Client → Email branding).</p>
