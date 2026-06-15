@@ -163,11 +163,15 @@ function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }
             <div style={hintS}>{f.contentMode === 'ai' ? 'The analyst picks what matters for this role.' : 'Pick the exact tiles to feed the digest — the analyst writes the email around them, through the role lens.'}</div>
             {f.contentMode === 'curated' && <TilePicker load={A.tiles} selected={f.tiles} onChange={(t) => set('tiles', t)} />}
             {f.contentMode === 'ai' && (
-              <div style={{ marginTop: 10 }}>
-                <div style={{ ...hintLbl, marginBottom: 5 }}>Always include these dashboards</div>
-                <div style={{ ...hintS, marginTop: 0, marginBottom: 8 }}>The analyst still picks the story, but these boards are guaranteed into the data it reads — so key numbers (e.g. ticketing, audience) are never crowded out by busier dashboards.</div>
-                <DashboardMultiPicker load={A.tiles} selected={f.priorityDashboards} onChange={(d) => set('priorityDashboards', d)} />
-              </div>
+              <details style={{ marginTop: 10, border: '1px solid var(--hairline)', borderRadius: 8, padding: '0 10px' }}>
+                <summary style={{ cursor: 'pointer', padding: '9px 2px', fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)' }}>
+                  Always include these dashboards{f.priorityDashboards.length ? <span style={{ color: 'var(--brand)' }}> · {f.priorityDashboards.length} selected</span> : ''}
+                </summary>
+                <div style={{ padding: '2px 0 10px' }}>
+                  <div style={{ ...hintS, marginTop: 0, marginBottom: 8 }}>The analyst still picks the story, but these boards are guaranteed into the data it reads — so key numbers (e.g. ticketing, audience) are never crowded out by busier dashboards.</div>
+                  <DashboardMultiPicker load={A.tiles} selected={f.priorityDashboards} onChange={(d) => set('priorityDashboards', d)} />
+                </div>
+              </details>
             )}
           </Field>
 
@@ -322,16 +326,34 @@ function DashboardMultiPicker({ load, selected, onChange }) {
   if (!dashboards) return <p style={{ ...hintS, marginTop: 0 }}>Loading dashboards…</p>;
   if (!dashboards.length) return <p style={{ ...hintS, marginTop: 0 }}>No dashboards available for this client yet.</p>;
   const toggle = (id) => onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
+  // Group dashboards by their set (and suite, when this client spans more than
+  // one) so the picker reads as tidy sections instead of one long wall of chips.
+  const multiSuite = new Set(dashboards.map((d) => d.suiteName)).size > 1;
+  const groups = [];
+  const byKey = new Map();
+  for (const d of dashboards) {
+    const label = multiSuite ? `${d.suiteName || '—'} › ${d.setName || 'Other'}` : (d.setName || 'Other');
+    if (!byKey.has(label)) { const g = { label, items: [] }; byKey.set(label, g); groups.push(g); }
+    byKey.get(label).items.push(d);
+  }
+  const chip = (d) => {
+    const on = selected.includes(d.dashboardId);
+    return (
+      <button key={d.dashboardId} type="button" onClick={() => toggle(d.dashboardId)} title={[d.suiteName, d.setName].filter(Boolean).join(' › ')}
+        style={{ padding: '5px 11px', borderRadius: 980, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: on ? '1.5px solid var(--brand)' : '1.5px solid var(--hairline)', background: on ? 'rgba(var(--brand-rgb), 0.08)' : 'transparent', color: on ? 'var(--brand)' : 'var(--text)' }}>
+        {on ? '✓ ' : ''}{d.title}
+      </button>
+    );
+  };
   return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-      {dashboards.map((d) => {
-        const on = selected.includes(d.dashboardId);
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {groups.map((g) => {
+        const sel = g.items.filter((d) => selected.includes(d.dashboardId)).length;
         return (
-          <button key={d.dashboardId} type="button" onClick={() => toggle(d.dashboardId)}
-            title={[d.suiteName, d.setName].filter(Boolean).join(' › ')}
-            style={{ padding: '5px 11px', borderRadius: 980, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: on ? '1.5px solid var(--brand)' : '1.5px solid var(--hairline)', background: on ? 'rgba(var(--brand-rgb), 0.08)' : 'transparent', color: on ? 'var(--brand)' : 'var(--text)' }}>
-            {on ? '✓ ' : ''}{d.title}
-          </button>
+          <div key={g.label}>
+            <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--muted)', marginBottom: 5 }}>{g.label}{sel ? <span style={{ color: 'var(--brand)' }}> · {sel}</span> : ''}</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>{g.items.map(chip)}</div>
+          </div>
         );
       })}
     </div>
