@@ -202,7 +202,7 @@ function Entities({ fields }) {
       .then(([e, su, s, u, d]) => { setItems(e); setSuites(su); setSets(s); setUsers(u); setDashTitle(Object.fromEntries(d.map((x) => [x.id, x.title]))); })
       .finally(() => setLoading(false));
   };
-  useEffect(load, []);
+  useEffect(() => { load(); }, []);
   if (loading) return <Muted>Loading…</Muted>;
 
   const suitesOf = (eid) => suites.filter((s) => s.entityId === eid);
@@ -703,7 +703,7 @@ function Sets() {
   const [expanded, setExpanded] = useState({}); // folder -> expanded? (default collapsed)
   // Shared library only ever bundles shared dashboards — never a client's bespoke one.
   const load = () => { setLoading(true); Promise.all([api.adminListSets(), api.listDashboards()]).then(([t, d]) => { setItems(t); setDashboards(d.filter((x) => !x.ownerEntityId)); }).finally(() => setLoading(false)); };
-  useEffect(load, []);
+  useEffect(() => { load(); }, []);
   if (loading) return <Muted>Loading…</Muted>;
 
   const folderNames = [...new Set(items.map((s) => s.folder).filter(Boolean))].sort((a, b) => a.localeCompare(b));
