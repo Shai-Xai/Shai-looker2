@@ -81,6 +81,7 @@ function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }
     runAt: job?.runAt || '', recipients: (job?.recipients || []).join(', '), status: job?.status || 'active',
     contentMode: job?.contentMode || 'ai', tiles: job?.tiles || [],
     channel: job?.channel || 'email', smsRecipients: (job?.smsRecipients || []).join(', '),
+    alignDaysBefore: job?.alignDaysBefore || false,
   }));
   const [preview, setPreview] = useState({ html: '', sample: false });
   const [previewBusy, setPreviewBusy] = useState(false);
@@ -96,6 +97,7 @@ function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }
     weekday: Number(f.weekday), runAt: f.runAt ? new Date(f.runAt).toISOString() : '', status: f.status,
     contentMode: f.contentMode, tiles: f.tiles, recipients: f.recipients.split(',').map((s) => s.trim()).filter(Boolean),
     channel: f.channel, smsRecipients: f.smsRecipients.split(/[\s,;]+/).map((s) => s.trim()).filter(Boolean),
+    alignDaysBefore: f.alignDaysBefore,
   });
 
   // Two preview paths: the debounced auto-preview renders the SAMPLE layout
@@ -159,6 +161,13 @@ function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }
             </div>
             <div style={hintS}>{f.contentMode === 'ai' ? 'The analyst picks what matters for this role.' : 'Pick the exact tiles to feed the digest — the analyst writes the email around them, through the role lens.'}</div>
             {f.contentMode === 'curated' && <TilePicker load={A.tiles} selected={f.tiles} onChange={(t) => set('tiles', t)} />}
+          </Field>
+
+          <Field label="Event-aligned comparisons">
+            <Toggle on={f.alignDaysBefore} onClick={() => set('alignDaysBefore', !f.alignDaysBefore)}>
+              ⏳ {f.alignDaysBefore ? 'Aligning to days-to-go' : 'Off — use each tile’s own dates'}
+            </Toggle>
+            <div style={hintS}>When on, dashboards with a days-to-go countdown compare like-for-like to the same point in last year’s cycle (e.g. “42 days out”) — matching what you see on the dashboard. Tiles without a countdown are unaffected.</div>
           </Field>
 
           <Field label="Schedule">

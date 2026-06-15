@@ -1604,6 +1604,41 @@ async function tileQueryBody(tile, def, user, suiteId, lockMap = {}, extraOverri
   return body;
 }
 
+// First numeric value in a json_detail result (measures → table calcs → dims) —
+// the days-before-event number a single-value source tile surfaces.
+function firstNumberFromDetail(res) {
+  const row = res?.data?.[0];
+  if (!row) return null;
+  const fields = [...(res.fields?.measures || []), ...(res.fields?.table_calculations || []), ...(res.fields?.dimensions || [])];
+  for (const f of fields) {
+    const v = row[f.name]?.value;
+    if (v != null && v !== '' && !Number.isNaN(Number(v))) return Math.round(Number(v));
+  }
+  return null;
+}
+
+// Server mirror of ViewPage.applyDaysToGo: for a dashboard whose days-to-go sync
+// is in APPLY mode, read the live days-before-event number from its source tile
+// and return a { filterName: expr } overlay (e.g. { "Days Before": ">=42" }) so
+// digest facts compare like-for-like to the same point in last year's cycle —
+// matching what the dashboard shows. Returns null when there's no sync to apply
+// (or the number can't be read), leaving the tile queries untouched.
+async function daysBeforeOverlayFor(def, user, suiteId, lockMap) {
+  const sync = def.daysBeforeSync;
+  if (!sync || sync.mode !== 'apply' || !sync.sourceTileId || !sync.filterName) return null;
+  const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))];
+  const src = tiles.find((t) => t.id === sync.sourceTileId);
+  if (!src?.query) return null;
+  const body = await tileQueryBody(src, def, user, suiteId, lockMap);
+  if (!body) return null;
+  try {
+    const data = await runLookerQuery('/queries/run/json_detail', body, undefined, false);
+    const n = firstNumberFromDetail(data);
+    if (n == null) return null;
+    return { [sync.filterName]: String(sync.expr || '>={n}').replace('{n}', String(n)) };
+  } catch { return null; }
+}
+
 // Cheap home data (no Looker): greeting context, browsing shortcuts, settlement
 // teaser, dashboard catalogue. Called on every home load.
 function buildLightSnapshot(user, entityId) {
@@ -1672,7 +1707,7 @@ function tilePriority(t) {
   if (SUMMARY_TILE.test(title)) s -= 10;  // pick first
   return s;
 }
-async function buildFacts(user, entityId, force = false) {
+async function buildFacts(user, entityId, force = false, alignDaysBefore = false) {
   const { catalogue } = clientCatalogue(entityId);
   const follows = db.listMarks({ userId: user.id, entityId, kind: 'follow' });
   const dashMeta = Object.fromEntries(catalogue.map((c) => [c.dashboardId, c]));
@@ -1752,12 +1787,18 @@ async function buildFacts(user, entityId, force = false) {
   // via each tile's listenTo (ANY_VALUE rides through, dropped by stripAnyValue).
   const entityViews = {};
   for (const p of picks) if (!(p.def.id in entityViews)) entityViews[p.def.id] = db.getFilterView('entity', entityId, p.def.id) || null;
+  // Days-to-go alignment (opt-in): per dashboard with a days-before sync in apply
+  // mode, resolve { filterName: expr } once and layer it onto each tile's query.
+  const daysBeforeOverlays = {};
+  if (alignDaysBefore) for (const p of picks) if (!(p.def.id in daysBeforeOverlays)) daysBeforeOverlays[p.def.id] = await daysBeforeOverlayFor(p.def, user, p.suiteId, lockMaps[p.suiteId] || {});
 
   const dropped = []; // tiles excluded from the facts, with the reason (logged below)
   const tiles = (await Promise.all(picks.slice(0, FACT_MAX_TILES).map(async (p) => {
     const view = entityViews[p.def.id];
     const extra = {};
     if (view) for (const [fname, qfield] of Object.entries(p.tile.listenTo || {})) if (fname in view) extra[qfield] = view[fname];
+    const dbo = daysBeforeOverlays[p.def.id];
+    if (dbo) for (const [fname, qfield] of Object.entries(p.tile.listenTo || {})) if (fname in dbo) extra[qfield] = dbo[fname];
     const body = await tileQueryBody(p.tile, p.def, user, p.suiteId, lockMaps[p.suiteId] || {}, extra);
     if (!body) { dropped.push(`${p.dashTitle} › ${p.tile.title || '?'} (scope blocked / unrunnable)`); return null; }
     try {
@@ -1962,7 +2003,7 @@ const ROLE_LENSES = {
 
 // Curated mode: fetch a specific set of tiles (by dashboard+tile id) instead of
 // the round-robin sweep buildFacts does.
-async function buildFactsFromTiles(user, entityId, picks) {
+async function buildFactsFromTiles(user, entityId, picks, alignDaysBefore = false) {
   const { catalogue } = clientCatalogue(entityId);
   const meta = Object.fromEntries(catalogue.map((c) => [c.dashboardId, c]));
   // Resolve the picks into a concrete tile list. tileId '*' = the whole
@@ -1986,10 +2027,15 @@ async function buildFactsFromTiles(user, entityId, picks) {
     }
   }
   const lockMaps = {};
+  const daysBeforeOverlays = {};
   const out = [];
   for (const { tile, def, m } of wanted.slice(0, 24)) {
     if (!(m.suiteId in lockMaps)) lockMaps[m.suiteId] = expandLockMap(db.lockedFiltersForSuite(m.suiteId));
-    const body = await tileQueryBody(tile, def, user, m.suiteId, lockMaps[m.suiteId] || {});
+    if (alignDaysBefore && !(def.id in daysBeforeOverlays)) daysBeforeOverlays[def.id] = await daysBeforeOverlayFor(def, user, m.suiteId, lockMaps[m.suiteId] || {});
+    const dbo = daysBeforeOverlays[def.id];
+    const extra = {};
+    if (dbo) for (const [fname, qfield] of Object.entries(tile.listenTo || {})) if (fname in dbo) extra[qfield] = dbo[fname];
+    const body = await tileQueryBody(tile, def, user, m.suiteId, lockMaps[m.suiteId] || {}, extra);
     if (!body) continue;
     try {
       const data = await runLookerQuery('/queries/run/json_detail', body, undefined, false);
@@ -2002,7 +2048,7 @@ async function buildFactsFromTiles(user, entityId, picks) {
 
 // Produce a role-lensed digest's structured content (links resolved). Throws if
 // AI/Looker isn't configured or there's no data — callers decide how to surface.
-async function buildDigestContent({ entityId, role, roleFocus, focusMode, contentMode, tiles, recipientEmail }) {
+async function buildDigestContent({ entityId, role, roleFocus, focusMode, contentMode, tiles, alignDaysBefore = false, recipientEmail }) {
   const apiKey = anthropicKeyForEntity(entityId);
   if (!insights.isConfigured(apiKey)) throw new Error('AI is not configured for this client');
   const lens = ROLE_LENSES[role] || ROLE_LENSES.exec;
@@ -2013,8 +2059,8 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
   let user = recipientEmail ? db.getUserByEmail(recipientEmail) : null;
   if (!user || !(user.entityIds || []).includes(entityId)) user = { id: `digest:${entityId}`, email: recipientEmail || '', role: 'client', entityIds: [entityId] };
   const { tiles: factTiles, catalogue } = (contentMode === 'curated' && (tiles || []).length)
-    ? await buildFactsFromTiles(user, entityId, tiles)
-    : await buildFacts(user, entityId, false);
+    ? await buildFactsFromTiles(user, entityId, tiles, alignDaysBefore)
+    : await buildFacts(user, entityId, false, alignDaysBefore);
   if (!factTiles.length) throw new Error('No tile data available to summarise');
   const byId = Object.fromEntries(catalogue.map((c) => [c.dashboardId, c]));
   const instructions = [aiInstructionsFor(null), briefingInstructionsFor(user, entityId, clientCatalogue(entityId).suites)].filter(Boolean).join('\n\n');
