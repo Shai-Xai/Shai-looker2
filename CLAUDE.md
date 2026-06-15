@@ -49,6 +49,14 @@ should inherit the tier below, and the UI should show what's inherited.
   the value. Branding/presentation (non-secret) can ride to the browser freely.
 - Email sends from one verified Resend domain; per-client "branding" is the look
   (logo/colour/sender display name/wording), not the sending address.
+- AI prompts are auditable: every hardcoded system prompt lives in `server/insights.js`
+  and MUST be exposed via `promptRegistry()` (it powers the Admin → AI "Everything
+  the AI is told" audit + the resolved-prompt tool). When you add a new prompt
+  const, add it to `promptRegistry()` in the same change — `test/prompts.test.js`
+  fails the build otherwise. Configurable instruction layers (global, per-client
+  `aiContext`, per-event briefing, role lenses, phase/time defaults, digest focus,
+  reader tunes) are aggregated by `GET /api/admin/ai-overview`; surface new layers
+  there too.
 
 ## Git
 - Develop on the assigned `claude/*` branch; push to it AND to `main`

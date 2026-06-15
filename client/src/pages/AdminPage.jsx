@@ -1374,57 +1374,71 @@ function AIOverview() {
   const Item = ({ title, scope, text }) => (
     <details style={grp}><summary style={sum}>{title}{scope ? <span style={{ ...meta, fontWeight: 400 }}> — {scope}</span> : null}</summary><pre style={pre}>{text || '—'}</pre></details>
   );
+  // Each top-level group is collapsible and collapsed by default — the audit is
+  // long, so you open only the layer you're inspecting.
+  const Sec = ({ title, count, children }) => (
+    <details style={{ ...grp, padding: '0 12px' }}>
+      <summary style={{ ...sum, padding: '11px 2px' }}>{title}{count != null ? <span style={{ ...meta, fontWeight: 400 }}> ({count})</span> : null}</summary>
+      <div style={{ padding: '2px 0 12px' }}>{children}</div>
+    </details>
+  );
   return (
     <div>
-      <p style={hint}>Read-only. The runtime prompt for any feature = its built-in system prompt + the global instructions + the matching client / event / reader layers below. Built-in prompts are edited in code (<code>server/insights.js</code>, <code>server/index.js</code>); everything else is editable in the screens noted.</p>
+      <p style={hint}>Read-only. The runtime prompt for any feature = its built-in system prompt + the global instructions + the matching client / event / reader layers. Built-in prompts are edited in code (<code>server/insights.js</code>, <code>server/index.js</code>); everything else is editable in the screens noted. Sections are collapsed — open the one you need.</p>
 
-      <div style={lbl}>Built-in system prompts (code)</div>
-      {d.builtins.systemPrompts.map((p) => <Item key={p.key} title={p.label} scope={p.scope} text={p.text} />)}
+      <Sec title="Built-in system prompts (code)" count={d.builtins.systemPrompts.length}>
+        {d.builtins.systemPrompts.map((p) => <Item key={p.key} title={p.label} scope={p.scope} text={p.text} />)}
+      </Sec>
 
-      <div style={lbl}>Resolved prompt — exactly what's sent for a feature</div>
-      <ResolvedPromptTool features={d.builtins.systemPrompts} clients={d.clients} roles={d.builtins.roleLenses} preStyle={pre} />
+      <Sec title="Resolved prompt — exactly what's sent for a feature">
+        <ResolvedPromptTool features={d.builtins.systemPrompts} clients={d.clients} roles={d.builtins.roleLenses} preStyle={pre} />
+      </Sec>
 
-      <div style={lbl}>Role lenses (code) — personalise every briefing & digest</div>
-      {d.builtins.roleLenses.map((r) => <Item key={r.key} title={r.label} text={r.focus} />)}
+      <Sec title="Role lenses (code) — personalise every briefing & digest" count={d.builtins.roleLenses.length}>
+        {d.builtins.roleLenses.map((r) => <Item key={r.key} title={r.label} text={r.focus} />)}
+      </Sec>
 
-      <div style={lbl}>Briefing phase defaults (Admin → AI → Home briefing)</div>
-      {d.builtins.phaseDefaults.map((p) => <Item key={p.key} title={`${p.label}${p.overridden ? ' • overridden' : ' • code default'}`} text={p.text} />)}
-      <div style={lbl}>Time-of-day defaults</div>
-      {d.builtins.timeDefaults.map((t) => <Item key={t.key} title={`${t.label}${t.overridden ? ' • overridden' : ' • code default'}`} text={t.text} />)}
+      <Sec title="Briefing phase & time-of-day defaults">
+        {d.builtins.phaseDefaults.map((p) => <Item key={p.key} title={`${p.label}${p.overridden ? ' • overridden' : ' • code default'}`} text={p.text} />)}
+        {d.builtins.timeDefaults.map((t) => <Item key={t.key} title={`${t.label}${t.overridden ? ' • overridden' : ' • code default'}`} text={t.text} />)}
+      </Sec>
 
-      <div style={lbl}>Global instructions (Admin → AI)</div>
-      <Item title="Global AI instructions" scope="appended to every AI prompt" text={d.global.aiInstructions} />
-      <Item title="Global briefing rules" scope="home briefing & digests" text={d.global.briefingInstructions} />
+      <Sec title="Global instructions (Admin → AI)">
+        <Item title="Global AI instructions" scope="appended to every AI prompt" text={d.global.aiInstructions} />
+        <Item title="Global briefing rules" scope="home briefing & digests" text={d.global.briefingInstructions} />
+      </Sec>
 
-      <div style={lbl}>Per-client (Admin → Clients → [client])</div>
-      {d.clients.length === 0 && <Muted>No clients.</Muted>}
-      {d.clients.map((c) => {
-        const has = c.aiContext || c.events.length || c.digests.length || c.readerTunes.length;
-        return (
-          <details key={c.id} style={grp}>
-            <summary style={sum}>{c.name}{!has ? <span style={{ ...meta, fontWeight: 400 }}> — no custom AI instructions</span> : null}</summary>
-            {c.aiContext && (<><div style={lbl}>Client AI context</div><pre style={pre}>{c.aiContext}</pre></>)}
-            {c.events.map((e, i) => (
-              <div key={i}>
-                <div style={lbl}>Event: {e.suiteName}{e.phase ? ` — phase: ${e.phase}` : ''}{e.eventStart ? ` (${e.eventStart}${e.eventEnd ? `–${e.eventEnd}` : ''})` : ''}</div>
-                {e.instructions && <pre style={pre}>{e.instructions}</pre>}
-                {e.phaseOverrides.map((po, j) => <pre key={j} style={pre}>[{po.phase}] {po.text}</pre>)}
-              </div>
-            ))}
-            {c.digests.length > 0 && <div style={lbl}>Digest focuses</div>}
-            {c.digests.map((j, i) => (
-              <pre key={i} style={pre}>{`${j.title || j.role} [${j.role}]`}{j.roleFocus ? `\nfocus (${j.focusMode}): ${j.roleFocus}` : ''}{j.customMessage ? `\nnote: ${j.customMessage}` : ''}{!j.roleFocus && !j.customMessage ? '\n(role lens only)' : ''}</pre>
-            ))}
-            {c.readerTunes.length > 0 && <div style={lbl}>Reader tunes (personal standing requests)</div>}
-            {c.readerTunes.map((t, i) => <pre key={i} style={pre}>{`${t.email}:\n${t.tune}`}</pre>)}
-          </details>
-        );
-      })}
+      <Sec title="Per-client (Admin → Clients → [client])" count={d.clients.length}>
+        {d.clients.map((c) => {
+          const has = c.aiContext || c.events.length || c.digests.length || c.readerTunes.length;
+          return (
+            <details key={c.id} style={grp}>
+              <summary style={sum}>{c.name}{!has ? <span style={{ ...meta, fontWeight: 400 }}> — no custom AI instructions</span> : null}</summary>
+              {c.aiContext && (<><div style={lbl}>Client AI context</div><pre style={pre}>{c.aiContext}</pre></>)}
+              {c.events.map((e, i) => (
+                <div key={i}>
+                  <div style={lbl}>Event: {e.suiteName}{e.phase ? ` — phase: ${e.phase}` : ''}{e.eventStart ? ` (${e.eventStart}${e.eventEnd ? `–${e.eventEnd}` : ''})` : ''}</div>
+                  {e.instructions && <pre style={pre}>{e.instructions}</pre>}
+                  {e.phaseOverrides.map((po, j) => <pre key={j} style={pre}>[{po.phase}] {po.text}</pre>)}
+                </div>
+              ))}
+              {c.digests.length > 0 && <div style={lbl}>Digest focuses</div>}
+              {c.digests.map((j, i) => (
+                <pre key={i} style={pre}>{`${j.title || j.role} [${j.role}]`}{j.roleFocus ? `\nfocus (${j.focusMode}): ${j.roleFocus}` : ''}{j.customMessage ? `\nnote: ${j.customMessage}` : ''}{!j.roleFocus && !j.customMessage ? '\n(role lens only)' : ''}</pre>
+              ))}
+              {c.readerTunes.length > 0 && <div style={lbl}>Reader tunes (personal standing requests)</div>}
+              {c.readerTunes.map((t, i) => <pre key={i} style={pre}>{`${t.email}:\n${t.tune}`}</pre>)}
+            </details>
+          );
+        })}
+      </Sec>
 
-      <div style={lbl}>Dashboard AI context ({d.dashContexts.length})</div>
-      {d.dashContexts.map((x, i) => <Item key={i} title={x.dashTitle} text={x.context} />)}
-      <div style={lbl}>Tile AI context ({d.tileContexts.length})</div>
-      {d.tileContexts.map((x, i) => <Item key={i} title={`${x.dashTitle} › ${x.tileTitle}`} text={x.context} />)}
+      <Sec title="Dashboard AI context" count={d.dashContexts.length}>
+        {d.dashContexts.map((x, i) => <Item key={i} title={x.dashTitle} text={x.context} />)}
+      </Sec>
+      <Sec title="Tile AI context" count={d.tileContexts.length}>
+        {d.tileContexts.map((x, i) => <Item key={i} title={`${x.dashTitle} › ${x.tileTitle}`} text={x.context} />)}
+      </Sec>
     </div>
   );
 }
