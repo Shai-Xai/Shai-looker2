@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
@@ -936,6 +936,13 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
   };
   const toggleSet = (id) => setSetIds((cur) => cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]);
   const setById = Object.fromEntries(sets.map((s) => [s.id, s]));
+  // Which standard filter groups this suite needs — cashless dashboards bring the
+  // cashless filters, every other dashboard type uses the event filters.
+  const lockCategories = useMemo(() => {
+    const cats = new Set();
+    for (const id of setIds) cats.add(/cashless/i.test(setById[id]?.name || '') ? 'Cashless' : 'Event');
+    return [...cats];
+  }, [setIds, sets]); // eslint-disable-line react-hooks/exhaustive-deps
   const dragFrom = useRef(null);
   const [dragOver, setDragOver] = useState(null);
   const onDragOverRow = (i) => {
@@ -1050,7 +1057,7 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
         </Section>
       )}
       <Section title="Locked filters (the event, cashless events…)">
-        <LockedFilterEditor value={locks} onChange={setLocks} fields={fields} />
+        <LockedFilterEditor value={locks} onChange={setLocks} fields={fields} categories={lockCategories} />
       </Section>
       <div style={{ marginTop: 12 }}>
         <L>Ticket / checkout link</L>
@@ -1065,32 +1072,97 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
 // ─── Locked-filter editor (field → value(s)) ──────────────────────────────────
 // Keeps its own row state so in-progress (empty) rows persist; pushes only
 // completed rows (with a field) up to the parent as a { field: "v1,v2" } map.
-function LockedFilterEditor({ value, onChange, fields }) {
+// Standard locked filters for the known Howler dashboards, grouped by dashboard
+// type so the picker isn't a wall of every Looker field. Source filters
+// (Current/Past) auto-fill the derived comparison filters listed in `feeds`.
+const LOCK_PRESETS = [
+  { title: 'Current Event', category: 'Event', feeds: ['Current & Past Events', 'Comparison Events'] },
+  { title: 'Past Event', category: 'Event', feeds: ['Current & Past Events', 'Comparison Events'] },
+  { title: 'Current & Past Events', category: 'Event' },
+  { title: 'Comparison Events', category: 'Event' },
+  { title: 'Event Slug', category: 'Event' },
+  { title: 'Organiser Name', category: 'Event' },
+  { title: 'Event Name', category: 'Event' },
+  { title: 'Current Cashless Event', category: 'Cashless', feeds: ['Comparison Cashless Events'] },
+  { title: 'Past Cashless Event', category: 'Cashless', feeds: ['Comparison Cashless Events'] },
+  { title: 'Comparison Cashless Events', category: 'Cashless' },
+];
+const LOCK_CATEGORIES = ['Event', 'Cashless'];
+const splitVals = (v) => String(v || '').split(',').map((s) => s.trim()).filter(Boolean);
+const uniqJoin = (arr) => [...new Set(arr)].join(',');
+
+function LockedFilterEditor({ value, onChange, fields, categories }) {
+  // Resolve each preset title to the lock key as it appears in `fields` (byName
+  // filters key on their name; real fields on their field id). Fallback to the
+  // title so a preset still works if its field isn't in the catalogue.
+  const keyByTitle = {};
+  for (const f of fields) keyByTitle[(f.title || '').toLowerCase()] = f.field;
+  const keyFor = (title) => keyByTitle[title.toLowerCase()] || title;
+  const presets = LOCK_PRESETS.map((p) => ({ ...p, key: keyFor(p.title), feedKeys: (p.feeds || []).map(keyFor) }));
+  const presetByKey = Object.fromEntries(presets.map((p) => [p.key, p]));
+  const presetKeys = new Set(presets.map((p) => p.key));
+  // targetKey -> [feeder titles] (for the "auto-filled from …" hint)
+  const fedBy = {};
+  for (const p of presets) for (const tk of p.feedKeys) (fedBy[tk] = fedBy[tk] || []).push(p.title);
+
   const [rows, setRows] = useState(() => Object.entries(value || {}).map(([field, vals]) => ({ field, vals })));
+  // Track which categories we've already seeded so we never disturb a suite
+  // that's already configured; brand-new suites seed as their types appear.
+  const seeded = useRef(null);
+  if (seeded.current === null) {
+    const s = new Set();
+    for (const p of presets) if ((value || {})[p.key] != null) s.add(p.category);
+    seeded.current = s;
+  }
+
   const push = (next) => {
-    setRows(next);
+    const cleaned = next.map((r) => ({ ...r, vals: uniqJoin(splitVals(r.vals)) }));
+    setRows(cleaned);
     const map = {};
-    for (const r of next) if (r.field) map[r.field] = r.vals || '';
+    for (const r of cleaned) if (r.field) map[r.field] = r.vals || '';
     onChange(map);
   };
-  const setRow = (i, patch) => push(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
-  const addRow = () => setRows([...rows, { field: '', vals: '' }]); // empty row → no map change yet
+  const setRow = (i, patch) => {
+    const before = rows[i];
+    let next = rows.map((r, j) => (j === i ? { ...r, ...patch } : r));
+    // A source filter gaining values also fills its comparison targets (only
+    // newly-added values — manual removals on a target are left alone).
+    const src = before && presetByKey[before.field];
+    if (src?.feedKeys?.length && patch.vals !== undefined) {
+      const added = splitVals(patch.vals).filter((v) => !splitVals(before.vals).includes(v));
+      if (added.length) next = next.map((r) => (src.feedKeys.includes(r.field) ? { ...r, vals: uniqJoin([...splitVals(r.vals), ...added]) } : r));
+    }
+    push(next);
+  };
+  const addRow = () => setRows([...rows, { field: '', vals: '' }]);
   const removeRow = (i) => push(rows.filter((_, j) => j !== i));
+  const seedDefaults = (cats, { force } = {}) => {
+    const next = rows.slice(); let changed = false;
+    for (const cat of cats) {
+      if (!force && seeded.current.has(cat)) continue;
+      seeded.current.add(cat);
+      for (const p of presets.filter((x) => x.category === cat)) if (!next.some((r) => r.field === p.key)) { next.push({ field: p.key, vals: '' }); changed = true; }
+    }
+    if (changed) push(next);
+  };
+  // Seed standard filters as a suite's dashboard types appear (auto-seed on new
+  // suites). The organiser-level editor passes no categories → no auto-seed.
+  const catKey = (categories || []).join(',');
+  useEffect(() => { if (categories && categories.length) seedDefaults(categories); }, [catKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Custom (typed) fields get value suggestions from the main explore.
   const defModel = fields.find((f) => f.model)?.model;
   const defExplore = fields.find((f) => f.explore)?.explore;
+  const otherFields = fields.filter((f) => !presetKeys.has(f.field));
 
   return (
     <div style={{ margin: '6px 0 4px' }}>
       {rows.map((r, i) => {
         const known = fields.find((f) => f.field === r.field);
-        const isCustom = r.custom || (!!r.field && !known);
-        // meta drives value suggestions — use the option's suggestField (a real
-        // Looker dimension) even when the lock key is a filter name.
+        const isCustom = r.custom || (!!r.field && !known && !presetByKey[r.field]);
         const meta = known
           ? { field: known.suggestField || known.field, model: known.model, explore: known.explore }
           : (r.field ? { field: r.field, model: defModel, explore: defExplore } : null);
+        const preset = presetByKey[r.field];
         return (
           <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -1099,8 +1171,17 @@ function LockedFilterEditor({ value, onChange, fields }) {
                 value={isCustom ? '__custom' : r.field}
                 onChange={(e) => (e.target.value === '__custom' ? setRow(i, { custom: true, field: '' }) : setRow(i, { custom: false, field: e.target.value }))}
               >
-                <option value="">Choose a field…</option>
-                {fields.map((f) => <option key={f.field} value={f.field}>{f.byName ? `${f.title} — filter` : `${f.title} (${f.field})`}</option>)}
+                <option value="">Choose a filter…</option>
+                {LOCK_CATEGORIES.map((cat) => (
+                  <optgroup key={cat} label={cat}>
+                    {presets.filter((p) => p.category === cat).map((p) => <option key={p.key} value={p.key}>{p.title}{p.feeds ? ' →' : ''}</option>)}
+                  </optgroup>
+                ))}
+                {otherFields.length > 0 && (
+                  <optgroup label="Other fields">
+                    {otherFields.map((f) => <option key={f.field} value={f.field}>{f.byName ? `${f.title} — filter` : `${f.title} (${f.field})`}</option>)}
+                  </optgroup>
+                )}
                 <option value="__custom">✎ Custom field…</option>
               </select>
               {isCustom && (
@@ -1111,13 +1192,18 @@ function LockedFilterEditor({ value, onChange, fields }) {
                   placeholder="Looker field, e.g. core_events.is_past"
                 />
               )}
+              {fedBy[r.field] && <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>↳ auto-filled from {fedBy[r.field].join(' + ')} (editable)</span>}
+              {preset?.feeds && <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>also fills {preset.feeds.join(', ')}</span>}
             </div>
             <ValuePicker meta={meta} value={r.vals} onChange={(v) => setRow(i, { vals: v })} />
             <button style={delBtn} onClick={() => removeRow(i)} title="Remove">✕</button>
           </div>
         );
       })}
-      <button style={miniBtn} onClick={addRow}>+ Add locked filter</button>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <button style={miniBtn} onClick={addRow}>+ Add locked filter</button>
+        <button style={miniBtn} onClick={() => seedDefaults(categories && categories.length ? categories : LOCK_CATEGORIES, { force: true })}>+ Add default filters</button>
+      </div>
     </div>
   );
 }
