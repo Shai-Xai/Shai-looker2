@@ -98,6 +98,14 @@ export default function ClientLayout() {
   const measure = () => {
     const btn = activeRef.current; const nav = navRef.current;
     if (!btn || !nav) { setIndicator((i) => ({ ...i, show: false })); return; }
+    // Hide the indicator when the active row lives inside a COLLAPSED section
+    // (its suite/set is closed) — otherwise it strands itself at the collapsed
+    // row's position, overlapping the headers below it.
+    for (let el = btn; el && el !== nav; el = el.parentElement) {
+      if (el.classList?.contains('collapsey') && !el.classList.contains('open')) {
+        setIndicator((i) => ({ ...i, show: false })); return;
+      }
+    }
     setIndicator({ y: btn.offsetTop, h: btn.offsetHeight, show: true });
   };
   useLayoutEffect(() => {
