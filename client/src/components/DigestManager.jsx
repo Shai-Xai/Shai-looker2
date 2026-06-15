@@ -21,6 +21,7 @@ export default function DigestManager({ entityId, scope = 'admin', logins = [] }
     run: (id) => api.runDigest(id),
     preview: (b) => (isAdmin ? api.previewDigest({ ...b, entityId }) : api.previewMyDigest(entityId, b)),
     testSend: (b) => (isAdmin ? api.testSendDigest({ ...b, entityId }) : api.testSendMyDigest(entityId, b)),
+    testSendSms: (b) => (isAdmin ? api.testSendDigestSms({ ...b, entityId }) : api.testSendMyDigestSms(entityId, b)),
     tiles: () => (isAdmin ? api.getDigestTiles(entityId) : api.getMyDigestTiles(entityId)),
   };
   const [data, setData] = useState(null);
@@ -213,10 +214,18 @@ function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }
 
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 4, flexWrap: 'wrap' }}>
             <button style={primary} onClick={save} disabled={busy}>{busy ? 'Saving…' : (job?.id ? 'Save changes' : 'Create digest')}</button>
-            <button
-              type="button" style={mini} disabled={testState === 'sending'}
-              onClick={async () => { setTestState('sending'); try { const r = await A.testSend(payload()); setTestState(`✓ Sent to ${r.to}`); } catch (e) { setTestState(`✗ ${e.message}`); } }}
-            >{testState === 'sending' ? 'Sending…' : 'Send test to me'}</button>
+            {hasEmail && (
+              <button
+                type="button" style={mini} disabled={testState === 'sending'}
+                onClick={async () => { setTestState('sending'); try { const r = await A.testSend(payload()); setTestState(`✓ Sent to ${r.to}`); } catch (e) { setTestState(`✗ ${e.message}`); } }}
+              >{testState === 'sending' ? 'Sending…' : 'Email me a test'}</button>
+            )}
+            {hasSms && (
+              <button
+                type="button" style={mini} disabled={testState === 'sending'}
+                onClick={async () => { const phone = prompt('Text a test of this digest to which mobile number?'); if (!phone) return; setTestState('sending'); try { const r = await A.testSendSms({ ...payload(), phone }); setTestState(`✓ SMS sent to ${r.to}`); } catch (e) { setTestState(`✗ ${e.message}`); } }}
+              >{testState === 'sending' ? 'Sending…' : 'Text me a test'}</button>
+            )}
             <button style={mini} onClick={onClose}>Cancel</button>
             {testState && testState !== 'sending' && <span style={{ fontSize: 12, color: testState.startsWith('✓') ? 'var(--success,#10b981)' : 'var(--error,#ef4444)' }}>{testState}</span>}
           </div>

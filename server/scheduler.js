@@ -275,6 +275,7 @@ function mount(app, { db, auth, mailer, messaging, push, generateContent, roleLe
   app.post('/api/admin/digests/preview', auth.requireAdmin, (req, res) => preview(req.body || {}, res));
   // Send a test of the CURRENT (possibly unsaved) editor config to the admin.
   app.post('/api/admin/digests/test-send', auth.requireAdmin, (req, res) => testSendConfig(req.body || {}, (req.body || {}).entityId, req.user.email, res));
+  app.post('/api/admin/digests/test-send-sms', auth.requireAdmin, (req, res) => { if (!enabled()) return off(res); testSendSms(req.body || {}, (req.body || {}).entityId, (req.body || {}).phone, res); });
 
   // Client self-service — own entity only.
   const ownsEntity = (req) => (req.user.entityIds || []).includes(req.params.entityId);
@@ -290,6 +291,7 @@ function mount(app, { db, auth, mailer, messaging, push, generateContent, roleLe
   });
   app.post('/api/my/digests/:entityId/preview', auth.requireAuth, auth.requirePermission('digests.manage'), (req, res) => { if (!enabled()) return off(res); if (!ownsEntity(req)) return res.status(403).json({ error: 'Not allowed' }); preview({ ...req.body, entityId: req.params.entityId }, res); });
   app.post('/api/my/digests/:entityId/test-send', auth.requireAuth, auth.requirePermission('digests.manage'), (req, res) => { if (!enabled()) return off(res); if (!ownsEntity(req)) return res.status(403).json({ error: 'Not allowed' }); testSendConfig({ ...req.body, entityId: req.params.entityId }, req.params.entityId, req.user.email, res); });
+  app.post('/api/my/digests/:entityId/test-send-sms', auth.requireAuth, auth.requirePermission('digests.manage'), (req, res) => { if (!enabled()) return off(res); if (!ownsEntity(req)) return res.status(403).json({ error: 'Not allowed' }); testSendSms({ ...req.body, entityId: req.params.entityId }, req.params.entityId, (req.body || {}).phone, res); });
 
   // Render + send the current (unsaved) config as a test to one address.
   async function testSendConfig(body, entityId, toEmail, res) {
@@ -297,6 +299,20 @@ function mount(app, { db, auth, mailer, messaging, push, generateContent, roleLe
     const job = { ...clean(body, entityId), id: 'test' };
     const r = await runJob(job, { manual: true, toOverride: toEmail });
     return r.status === 'ok' ? res.json({ ok: true, to: toEmail }) : res.status(400).json({ error: r.detail });
+  }
+
+  // Send the SMS version of the current (unsaved) config to one mobile number.
+  async function testSendSms(body, entityId, toPhone, res) {
+    if (!entityId) return res.status(400).json({ error: 'entityId required' });
+    if (!messaging?.sendSms) return res.status(400).json({ error: 'SMS is not configured for this client.' });
+    const phone = String(toPhone || '').replace(/[^\d+]/g, '');
+    if (phone.replace(/\D/g, '').length < 7) return res.status(400).json({ error: 'Enter a valid mobile number.' });
+    const job = { ...clean(body, entityId), id: 'test' };
+    try {
+      const { content } = await render(job, '');
+      const r = await messaging.sendSms({ to: phone, text: buildDigestSms(job, content) });
+      return r.ok ? res.json({ ok: true, to: phone }) : res.status(502).json({ error: r.error || r.reason || 'SMS failed' });
+    } catch (e) { return res.status(500).json({ error: e.message }); }
   }
 
   // Render a preview email from an (unsaved) job config.
