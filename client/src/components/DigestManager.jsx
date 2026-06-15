@@ -284,15 +284,27 @@ function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }
               </summary>
               <div style={{ padding: '4px 12px 10px' }}>
                 <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8, lineHeight: 1.4 }}>The exact tiles and values fed to the digest, under its scope. If a number here differs from the dashboard, the digest is reading a different tile or missing a filter — pin the right tile via “Curated tiles”.</div>
-                {preview.facts.map((fct, i) => (
-                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '6px 0', borderTop: i ? '1px solid var(--hairline)' : 'none' }}>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{fct.title}</div>
-                      <div style={{ fontSize: 10.5, color: 'var(--muted)' }}>{[fct.suiteName, fct.dashTitle, fct.setName].filter(Boolean).join(' › ')}</div>
+                {preview.facts.map((fct, i) => {
+                  const filterPairs = Object.entries(fct.filters || {}).filter(([, v]) => v != null && String(v).trim());
+                  return (
+                    <div key={i} style={{ padding: '6px 0', borderTop: i ? '1px solid var(--hairline)' : 'none' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{fct.title}</div>
+                          <div style={{ fontSize: 10.5, color: 'var(--muted)' }}>{[fct.suiteName, fct.dashTitle, fct.setName].filter(Boolean).join(' › ')}</div>
+                        </div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--brand)', whiteSpace: 'nowrap' }}>{fct.value}</div>
+                      </div>
+                      {filterPairs.length > 0 && (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
+                          {filterPairs.map(([k, v]) => (
+                            <span key={k} style={{ fontSize: 10, color: 'var(--muted)', background: 'rgba(128,128,128,0.10)', borderRadius: 5, padding: '1px 6px' }}>{k}: {String(v)}</span>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--brand)', whiteSpace: 'nowrap' }}>{fct.value}</div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </details>
           )}

@@ -1917,7 +1917,7 @@ async function buildFacts(user, entityId, force = false, alignDaysBefore = false
       if (!data?.data?.length) { dropped.push(`${p.dashTitle} › ${p.tile.title || '?'} (no rows for the default filters)`); return null; }
       return {
         title: p.tile.title || '(untitled)', visType: p.tile.vis?.type, context: p.tile.aiContext || '',
-        fields: data.fields, rows: data.data,
+        fields: data.fields, rows: data.data, filters: body.filters || {},
         dashboardId: p.def.id, suiteId: p.suiteId, setName: p.setName, dashTitle: p.dashTitle, pinned: p.pinned,
       };
     } catch (e) { dropped.push(`${p.dashTitle} › ${p.tile.title || '?'} (error: ${e.message})`); return null; }
@@ -2151,7 +2151,7 @@ async function buildFactsFromTiles(user, entityId, picks, alignDaysBefore = fals
     try {
       const data = await runLookerQuery('/queries/run/json_detail', body, undefined, false);
       if (!data?.data?.length) continue;
-      out.push({ title: tile.title || '(untitled)', visType: tile.vis?.type, context: tile.aiContext || '', fields: data.fields, rows: data.data, dashboardId: def.id, suiteId: m.suiteId, setName: m.setName, dashTitle: def.title, pinned: false });
+      out.push({ title: tile.title || '(untitled)', visType: tile.vis?.type, context: tile.aiContext || '', fields: data.fields, rows: data.data, filters: body.filters || {}, dashboardId: def.id, suiteId: m.suiteId, setName: m.setName, dashTitle: def.title, pinned: false });
     } catch { /* skip tile on error */ }
   }
   return { tiles: out, catalogue };
@@ -2193,7 +2193,7 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
   // Diagnostic: the exact tiles the analyst read + the value each returned under
   // the digest's scope — so a mismatch with the dashboard (wrong tile / missing
   // event lock) is visible at a glance. Only attached when explicitly requested.
-  if (debug) out.facts = factTiles.map((t) => ({ dashTitle: t.dashTitle, setName: t.setName, title: t.title, value: factValueLabel(t), suiteName: byId[t.dashboardId]?.suiteName || '' }));
+  if (debug) out.facts = factTiles.map((t) => ({ dashTitle: t.dashTitle, setName: t.setName, title: t.title, value: factValueLabel(t), suiteName: byId[t.dashboardId]?.suiteName || '', filters: t.filters || {} }));
   return out;
 }
 
