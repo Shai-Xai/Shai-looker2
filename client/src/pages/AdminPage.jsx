@@ -1152,6 +1152,18 @@ function LockedFilterEditor({ value, onChange, fields, categories, restrictTo = 
   // suites). The organiser-level editor passes no categories → no auto-seed.
   const catKey = (categories || []).join(',');
   useEffect(() => { if (categories && categories.length) seedDefaults(categories); }, [catKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The organiser-level editor (restrictTo) always surfaces its preset row(s) —
+  // e.g. Organiser Name — even before a value is set, so a brand-new client
+  // shows the organiser picker straight away instead of an empty section.
+  const restrictedKeys = restrictTo ? presets.map((p) => p.key).join('|') : '';
+  useEffect(() => {
+    if (!restrictTo) return;
+    setRows((cur) => {
+      const have = new Set(cur.map((r) => r.field));
+      const add = presets.filter((p) => !have.has(p.key)).map((p) => ({ field: p.key, vals: '' }));
+      return add.length ? [...cur, ...add] : cur;
+    });
+  }, [restrictedKeys]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const defModel = fields.find((f) => f.model)?.model;
   const defExplore = fields.find((f) => f.explore)?.explore;
