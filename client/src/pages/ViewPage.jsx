@@ -58,7 +58,10 @@ export default function ViewPage() {
       const field = (f.field || f.dimension || '').trim().toLowerCase();
       const nameKey = (f.name || '').trim().toLowerCase();
       const v = norm[nameKey] != null ? norm[nameKey] : (field ? norm[field] : undefined);
-      if (v != null && v !== '') { vals[f.name] = v; lockedMap[f.name] = true; }
+      // A lock/default entry wins over the dashboard's own default_value. An
+      // explicitly EMPTY entry CLEARS the filter (so the template's baked default
+      // doesn't leak through) but leaves it editable; a non-empty value also locks it.
+      if (v != null) { vals[f.name] = v; if (v !== '') lockedMap[f.name] = true; }
     }
     if (overlay) for (const [k, v] of Object.entries(overlay)) { if (k in vals && !lockedMap[k] && typeof v === 'string') vals[k] = v; }
     try {
