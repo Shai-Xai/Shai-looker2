@@ -1083,7 +1083,7 @@ const LOCK_PRESETS = [
   { title: 'Past Event', category: 'Event', feeds: ['Current & Past Events', 'Comparison Events'] },
   { title: 'Current & Past Events', category: 'Event' },
   { title: 'Comparison Events', category: 'Event' },
-  { title: 'Event Slug', category: 'Event', slugOf: 'Organiser Name' }, // suggestions scoped to the chosen organiser
+  { title: 'Event Slug', category: 'Event' }, // suggestions scoped to the chosen organiser (see orgScopeFor)
   { title: 'Organiser Name', label: 'Organiser Name (GA4)', category: 'Event' },
   { title: 'Current Cashless Event', category: 'Cashless', feeds: ['Comparison Cashless Events'] },
   { title: 'Past Cashless Event', category: 'Cashless', feeds: ['Comparison Cashless Events'] },
@@ -1155,16 +1155,29 @@ function LockedFilterEditor({ value, onChange, fields, categories }) {
   const defModel = fields.find((f) => f.model)?.model;
   const defExplore = fields.find((f) => f.explore)?.explore;
   const otherFields = fields.filter((f) => !presetKeys.has(f.field));
-  // Event Slug suggestions are scoped to the chosen Organiser (slug is a subset
-  // of an organiser's events). Only when both live in the same explore.
+  // Scope Event-category pickers to the chosen organiser: when Organiser Name has
+  // a value, every other Event filter (Event Name, Current/Past/Comparison, Slug)
+  // only suggests events for that organiser. Each explore has its own organiser
+  // field — slug lives in a different explore from the organiser — so we resolve
+  // the organiser field PER explore from the catalogue and filter within it.
+  const ORG_RE = /(^|[._])organiser_?name$|organisers?\.name$/i;
+  const orgFieldByExplore = {};
+  for (const f of fields) {
+    const isOrg = (f.title || '').toLowerCase() === 'organiser name' || ORG_RE.test(f.suggestField || f.field || '');
+    if (!isOrg) continue;
+    const ex = `${f.model || ''}::${f.explore || ''}`;
+    if (!orgFieldByExplore[ex] || (f.title || '').toLowerCase() === 'organiser name') orgFieldByExplore[ex] = f.suggestField || f.field;
+  }
   const orgKey = keyFor('Organiser Name');
-  const slugKey = keyFor('Event Slug');
   const orgRow = rows.find((x) => x.field === orgKey);
   const orgVals = orgRow ? splitVals(orgRow.vals) : [];
-  const orgKnown = fields.find((f) => f.field === orgKey);
-  const slugKnown = fields.find((f) => f.field === slugKey);
-  const slugScopable = orgVals.length && orgKnown && slugKnown && slugKnown.model === orgKnown.model && slugKnown.explore === orgKnown.explore;
-  const slugFilters = slugScopable ? { [orgKnown.suggestField || orgKnown.field]: orgVals.join(',') } : null;
+  // The organiser filter for a target picker's explore (null if none / it IS the
+  // organiser row / no organiser value set).
+  const orgScopeFor = (meta, field, category) => {
+    if (category !== 'Event' || field === orgKey || !orgVals.length || !meta) return null;
+    const orgField = orgFieldByExplore[`${meta.model || ''}::${meta.explore || ''}`];
+    return orgField ? { [orgField]: orgVals.join(',') } : null;
+  };
 
   return (
     <div style={{ margin: '6px 0 4px' }}>
@@ -1178,7 +1191,7 @@ function LockedFilterEditor({ value, onChange, fields, categories }) {
             ? { field: known.suggestField || known.field, model: known.model, explore: known.explore }
             : (r.field ? { field: r.field, model: defModel, explore: defExplore } : null);
           const preset = presetByKey[r.field];
-          const isSlug = !!preset?.slugOf;
+          const orgScope = orgScopeFor(meta, r.field, preset?.category);
           return (
             <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -1210,9 +1223,9 @@ function LockedFilterEditor({ value, onChange, fields, categories }) {
                 )}
                 {fedBy[r.field] && <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>↳ auto-filled from {fedBy[r.field].join(' + ')} (editable)</span>}
                 {preset?.feeds && <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>also fills {preset.feeds.join(', ')}</span>}
-                {isSlug && <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>{slugScopable ? `↳ showing slugs for ${orgVals.join(', ')}` : `set ${preset.slugOf} above to filter slugs`}</span>}
+                {orgScope && <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>↳ showing only {orgVals.join(', ')} events</span>}
               </div>
-              <ValuePicker meta={meta} value={r.vals} extraFilters={isSlug ? slugFilters : null} onChange={(v) => setRow(i, { vals: v })} />
+              <ValuePicker meta={meta} value={r.vals} extraFilters={orgScope} onChange={(v) => setRow(i, { vals: v })} />
               <button style={delBtn} onClick={() => removeRow(i)} title="Remove">✕</button>
             </div>
           );
