@@ -767,6 +767,16 @@ app.post('/api/drill', auth.requireAuth, async (req, res) => {
   }
 });
 
+// Format a Looker date value ("2026-05-29" / ISO) as "29 May 2026" for the
+// event dropdowns. Falls back to the raw string if it isn't a parseable date.
+function fmtEventDate(v) {
+  const s = String(v);
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return s;
+  const d = new Date(`${m[1]}-${m[2]}-${m[3]}T00:00:00Z`);
+  return isNaN(d) ? `${m[3]}/${m[2]}/${m[1]}` : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+}
+
 app.post('/api/filter-suggest', auth.requireAuth, async (req, res) => {
   try {
     const { model, explore, field, suiteId, q: term, pair, filters: extraFilters } = req.body;
@@ -782,7 +792,10 @@ app.post('/api/filter-suggest', auth.requireAuth, async (req, res) => {
       'core_events.name': 'core_events.id', 'core_events.id': 'core_events.name',
     };
     const comp = pair ? COMPANION[field] : null;
-    const q = { model, view: explore, fields: comp ? [field, comp] : [field], sorts: [field], limit: 100 };
+    // Event names also show the event's start date in the dropdown, e.g.
+    // "Ultra South Africa  —  29 May 2026", pulled from the same explore.
+    const dateField = field === 'core_events.name' ? 'core_events.start_date' : null;
+    const q = { model, view: explore, fields: [field, comp, dateField].filter(Boolean), sorts: [field], limit: 100 };
     const t = (term || '').trim();
     if (t) {
       if (/^\d+$/.test(t)) {
@@ -802,7 +815,16 @@ app.post('/api/filter-suggest', auth.requireAuth, async (req, res) => {
       for (const [k, v] of Object.entries(extraFilters)) if (k && v != null && String(v).trim()) q.filters = { ...(q.filters || {}), [k]: String(v) };
     }
     if (!(await applyScope(q, req.user, suiteId))) return res.json({ suggestions: [] });
-    const rows = await runLookerQuery('/queries/run/json', q);
+    let rows;
+    try {
+      rows = await runLookerQuery('/queries/run/json', q);
+    } catch (err) {
+      // Some explores expose the event name but not core_events.start_date —
+      // drop the date field and retry so suggestions still work everywhere.
+      if (!dateField) throw err;
+      q.fields = q.fields.filter((f) => f !== dateField);
+      rows = await runLookerQuery('/queries/run/json', q);
+    }
     const seen = new Set();
     const suggestions = [];
     const isId = field.endsWith('.id');
@@ -812,9 +834,14 @@ app.post('/api/filter-suggest', auth.requireAuth, async (req, res) => {
       const s = String(v);
       if (seen.has(s)) continue;
       seen.add(s);
+      const date = dateField && r[dateField] != null && r[dateField] !== '' ? fmtEventDate(r[dateField]) : '';
       if (comp) {
         const other = r[comp] == null ? '' : String(r[comp]);
-        suggestions.push({ value: s, label: isId ? `${s} — ${other}` : `${s}  (id: ${other})` });
+        let label = isId ? `${s} — ${other}` : `${s}  (id: ${other})`;
+        if (date) label += `  ·  ${date}`;
+        suggestions.push({ value: s, label });
+      } else if (date) {
+        suggestions.push({ value: s, label: `${s}  —  ${date}` });
       } else {
         suggestions.push(s);
       }

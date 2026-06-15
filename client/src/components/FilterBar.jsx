@@ -187,7 +187,12 @@ function FilterDropdown({ filter, value, onChange, multi = false }) {
         body: JSON.stringify({ model: filter.model, explore: filter.explore, field: filter.field || filter.dimension, suiteId }),
       });
       const data = await res.json();
-      setAll(data.suggestions || []);
+      // Suggestions are either plain strings or { value, label } objects (e.g.
+      // events that show their start date). Normalise to objects so the list
+      // logic below is uniform; `value` is always what gets selected.
+      setAll((data.suggestions || []).map((s) => (
+        typeof s === 'string' ? { value: s, label: s } : { value: String(s.value), label: s.label || String(s.value) }
+      )));
     } catch (_) {
       setAll([]);
     } finally {
@@ -205,7 +210,8 @@ function FilterDropdown({ filter, value, onChange, multi = false }) {
     return () => document.removeEventListener('mousedown', h);
   }, [open]);
 
-  const filtered = query ? all.filter(s => s.toLowerCase().includes(query.toLowerCase())) : all;
+  const ql = query.toLowerCase();
+  const filtered = query ? all.filter(o => o.label.toLowerCase().includes(ql) || o.value.toLowerCase().includes(ql)) : all;
 
   // Single-select: pick replaces value and closes. Multi-select: toggle the
   // value in/out and keep the list open so several can be chosen.
@@ -262,18 +268,18 @@ function FilterDropdown({ filter, value, onChange, multi = false }) {
           ) : filtered.length === 0 ? (
             <li style={optMuted}>{query ? 'No matches' : 'No options'}</li>
           ) : (
-            filtered.slice(0, 300).map((s, i) => {
-              const isSel = multi ? selected.includes(s) : s === value;
+            filtered.slice(0, 300).map((o, i) => {
+              const isSel = multi ? selected.includes(o.value) : o.value === value;
               return (
                 <li
                   key={i}
-                  onMouseDown={(e) => { e.preventDefault(); multi ? toggleMulti(s) : pickSingle(s); }}
+                  onMouseDown={(e) => { e.preventDefault(); multi ? toggleMulti(o.value) : pickSingle(o.value); }}
                   style={{ ...optStyle, display: 'flex', alignItems: 'center', gap: 8, ...(isSel ? { background: 'rgba(var(--brand-rgb), 0.15)', fontWeight: 600 } : null) }}
                   onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = 'rgba(128,128,128,0.12)'; }}
                   onMouseLeave={e => { if (!isSel) e.currentTarget.style.background = 'transparent'; }}
                 >
                   {multi && <span style={{ color: isSel ? 'var(--brand)' : '#bbb' }}>{isSel ? '☑' : '☐'}</span>}
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{s}</span>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{o.label}</span>
                 </li>
               );
             })
