@@ -442,9 +442,38 @@ app.delete('/api/admin/entities/:entityId/dashboard-filters/:dashboardId', auth.
 // — then a dashboard whose organiser filter is named differently still locks.
 // Name keys stay (and win client-side) so same-field filters (Current/Past
 // Event) keep locking independently.
+// The offset()-based "change" tiles are row-order sensitive: a single-value
+// tile shows the FIRST row, so the CURRENT event must lead the combined event
+// filters or the comparison reads backwards (the −83% vs +83% bug). Reorder
+// "Current & Past Events" / "Comparison Events" (+ cashless) so the Current
+// Event value(s) come first — deterministic regardless of how an admin entered
+// them, and harmless when a tile sorts its own rows (just reorders the IN-list).
+const COMBO_EVENT_FILTERS = {
+  'Current & Past Events': ['Current Event', 'Event Name'],
+  'Comparison Events': ['Current Event', 'Event Name'],
+  'Comparison Cashless Events': ['Current Cashless Event'],
+};
+function orderCurrentFirst(lockMap) {
+  const splitV = (v) => String(v == null ? '' : v).split(',').map((s) => s.trim()).filter(Boolean);
+  const out = { ...lockMap };
+  for (const [combo, currentNames] of Object.entries(COMBO_EVENT_FILTERS)) {
+    if (out[combo] == null || out[combo] === '') continue;
+    const vals = splitV(out[combo]);
+    if (vals.length < 2) continue;
+    let currentVals = [];
+    for (const n of currentNames) { currentVals = splitV(lockMap[n]); if (currentVals.length) break; }
+    if (!currentVals.length) continue;
+    const lead = vals.filter((v) => currentVals.includes(v));
+    const rest = vals.filter((v) => !currentVals.includes(v));
+    if (lead.length && rest.length) out[combo] = [...lead, ...rest].join(',');
+  }
+  return out;
+}
+
 function expandLockMap(lockMap) {
-  const out = { ...(lockMap || {}) };
-  for (const [k, v] of Object.entries(lockMap || {})) {
+  const ordered = orderCurrentFirst(lockMap || {});
+  const out = { ...ordered };
+  for (const [k, v] of Object.entries(ordered)) {
     if (k.includes('.')) continue;
     const field = auth.filterNameToField(k);
     if (field && out[field] == null) out[field] = v;
