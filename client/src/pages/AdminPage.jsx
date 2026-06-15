@@ -1076,7 +1076,7 @@ const LOCK_PRESETS = [
   { title: 'Current & Past Events', category: 'Event' },
   { title: 'Comparison Events', category: 'Event' },
   { title: 'Event Slug', category: 'Event' }, // suggestions scoped to the chosen organiser (see orgScopeFor)
-  { title: 'Organiser Name', label: 'Organiser Name (GA4)', category: 'Event' },
+  { title: 'Organiser Name', category: 'Event' },
   { title: 'Current Cashless Event', category: 'Cashless', feeds: ['Comparison Cashless Events'] },
   { title: 'Past Cashless Event', category: 'Cashless', feeds: ['Comparison Cashless Events'] },
   { title: 'Comparison Cashless Events', category: 'Cashless' },
