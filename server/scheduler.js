@@ -55,6 +55,7 @@ function mount(app, { db, auth, mailer, messaging, push, generateContent, roleLe
     if (!cols.includes('channel')) sql.exec("ALTER TABLE scheduled_jobs ADD COLUMN channel TEXT NOT NULL DEFAULT 'email'");           // email | sms | both
     if (!cols.includes('sms_recipients')) sql.exec("ALTER TABLE scheduled_jobs ADD COLUMN sms_recipients TEXT NOT NULL DEFAULT '[]'"); // phone numbers
     if (!cols.includes('align_days_before')) sql.exec("ALTER TABLE scheduled_jobs ADD COLUMN align_days_before INTEGER NOT NULL DEFAULT 0"); // honour each dashboard's days-to-go sync
+    if (!cols.includes('priority_dashboards')) sql.exec("ALTER TABLE scheduled_jobs ADD COLUMN priority_dashboards TEXT NOT NULL DEFAULT '[]'"); // dashboards always swept into AI-mode facts
   } catch (e) { console.error('[scheduler] column migration skipped:', e.message); }
 
   // ── timezone-aware schedule maths ──
@@ -95,6 +96,7 @@ function mount(app, { db, auth, mailer, messaging, push, generateContent, roleLe
     contentMode: r.content_mode, tiles: JSON.parse(r.tiles || '[]'), recipients: JSON.parse(r.recipients || '[]'),
     channel: r.channel || 'email', smsRecipients: JSON.parse(r.sms_recipients || '[]'),
     alignDaysBefore: r.align_days_before === 1,
+    priorityDashboards: JSON.parse(r.priority_dashboards || '[]'),
     cadence: r.cadence, timeOfDay: r.time_of_day, weekday: r.weekday, runAt: r.run_at, timezone: r.timezone,
     status: r.status, lastRunAt: r.last_run_at, lastStatus: r.last_status, nextRunAt: r.next_run_at,
     createdBy: r.created_by, createdAt: r.created_at, updatedAt: r.updated_at,
@@ -119,6 +121,7 @@ function mount(app, { db, auth, mailer, messaging, push, generateContent, roleLe
       channel: ['sms', 'both'].includes(body.channel) ? body.channel : 'email',
       smsRecipients: Array.isArray(body.smsRecipients) ? [...new Set(body.smsRecipients.map((p) => String(p).replace(/[^\d+]/g, '').trim()).filter((p) => p.replace(/\D/g, '').length >= 7))].slice(0, 25) : [],
       alignDaysBefore: body.alignDaysBefore ? 1 : 0,
+      priorityDashboards: Array.isArray(body.priorityDashboards) ? [...new Set(body.priorityDashboards.map((d) => String(d)).filter(Boolean))].slice(0, 20) : [],
       cadence,
       timeOfDay: /^\d{1,2}:\d{2}$/.test(body.timeOfDay || '') ? body.timeOfDay : '07:00',
       weekday: Number.isInteger(body.weekday) && body.weekday >= 0 && body.weekday <= 6 ? body.weekday : 1,
@@ -133,13 +136,13 @@ function mount(app, { db, auth, mailer, messaging, push, generateContent, roleLe
     const next = j.status === 'active' ? computeNextRun(j) : null;
     const nextIso = next ? next.toISOString() : (j.status === 'active' && j.cadence === 'once' && j.runAt ? new Date(j.runAt).toISOString() : null);
     if (id) {
-      sql.prepare(`UPDATE scheduled_jobs SET title=?, role=?, role_focus=?, focus_mode=?, custom_message=?, content_mode=?, tiles=?, recipients=?, channel=?, sms_recipients=?, align_days_before=?, cadence=?, time_of_day=?, weekday=?, run_at=?, timezone=?, status=?, next_run_at=?, updated_at=? WHERE id=?`)
-        .run(j.title, j.role, j.roleFocus, j.focusMode, j.customMessage, j.contentMode, JSON.stringify(j.tiles), JSON.stringify(j.recipients), j.channel, JSON.stringify(j.smsRecipients), j.alignDaysBefore, j.cadence, j.timeOfDay, j.weekday, j.runAt, j.timezone, j.status, nextIso, ts, id);
+      sql.prepare(`UPDATE scheduled_jobs SET title=?, role=?, role_focus=?, focus_mode=?, custom_message=?, content_mode=?, tiles=?, recipients=?, channel=?, sms_recipients=?, align_days_before=?, priority_dashboards=?, cadence=?, time_of_day=?, weekday=?, run_at=?, timezone=?, status=?, next_run_at=?, updated_at=? WHERE id=?`)
+        .run(j.title, j.role, j.roleFocus, j.focusMode, j.customMessage, j.contentMode, JSON.stringify(j.tiles), JSON.stringify(j.recipients), j.channel, JSON.stringify(j.smsRecipients), j.alignDaysBefore, JSON.stringify(j.priorityDashboards), j.cadence, j.timeOfDay, j.weekday, j.runAt, j.timezone, j.status, nextIso, ts, id);
       return getJob(id);
     }
     const nid = uuid();
-    sql.prepare(`INSERT INTO scheduled_jobs (id, entity_id, type, title, role, role_focus, focus_mode, custom_message, content_mode, tiles, recipients, channel, sms_recipients, align_days_before, cadence, time_of_day, weekday, run_at, timezone, status, next_run_at, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-      .run(nid, j.entityId, 'digest', j.title, j.role, j.roleFocus, j.focusMode, j.customMessage, j.contentMode, JSON.stringify(j.tiles), JSON.stringify(j.recipients), j.channel, JSON.stringify(j.smsRecipients), j.alignDaysBefore, j.cadence, j.timeOfDay, j.weekday, j.runAt, j.timezone, j.status, nextIso, createdBy || '', ts, ts);
+    sql.prepare(`INSERT INTO scheduled_jobs (id, entity_id, type, title, role, role_focus, focus_mode, custom_message, content_mode, tiles, recipients, channel, sms_recipients, align_days_before, priority_dashboards, cadence, time_of_day, weekday, run_at, timezone, status, next_run_at, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(nid, j.entityId, 'digest', j.title, j.role, j.roleFocus, j.focusMode, j.customMessage, j.contentMode, JSON.stringify(j.tiles), JSON.stringify(j.recipients), j.channel, JSON.stringify(j.smsRecipients), j.alignDaysBefore, JSON.stringify(j.priorityDashboards), j.cadence, j.timeOfDay, j.weekday, j.runAt, j.timezone, j.status, nextIso, createdBy || '', ts, ts);
     return getJob(nid);
   }
 
@@ -147,7 +150,7 @@ function mount(app, { db, auth, mailer, messaging, push, generateContent, roleLe
   // `debug` asks generateContent to attach the fact tiles it read (preview only).
   async function render(job, recipientEmail, { debug = false } = {}) {
     const lens = lensFor(job);
-    const content = await generateContent({ entityId: job.entityId, role: job.role, roleFocus: job.roleFocus, focusMode: job.focusMode, contentMode: job.contentMode, tiles: job.tiles, alignDaysBefore: !!job.alignDaysBefore, recipientEmail, debug });
+    const content = await generateContent({ entityId: job.entityId, role: job.role, roleFocus: job.roleFocus, focusMode: job.focusMode, contentMode: job.contentMode, tiles: job.tiles, alignDaysBefore: !!job.alignDaysBefore, priorityDashboards: job.priorityDashboards || [], recipientEmail, debug });
     const branding = mailer.resolveBranding(job.entityId);
     const email = mailer.digestEmail({ branding, entityId: job.entityId, assetScope: job.entityId, content, roleLabel: lens.label, customMessage: job.customMessage });
     return { ...email, content, senderName: branding.senderName };

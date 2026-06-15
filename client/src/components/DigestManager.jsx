@@ -82,6 +82,7 @@ function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }
     contentMode: job?.contentMode || 'ai', tiles: job?.tiles || [],
     channel: job?.channel || 'email', smsRecipients: (job?.smsRecipients || []).join(', '),
     alignDaysBefore: job?.alignDaysBefore || false,
+    priorityDashboards: job?.priorityDashboards || [],
   }));
   const [preview, setPreview] = useState({ html: '', sample: false });
   const [previewBusy, setPreviewBusy] = useState(false);
@@ -97,7 +98,7 @@ function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }
     weekday: Number(f.weekday), runAt: f.runAt ? new Date(f.runAt).toISOString() : '', status: f.status,
     contentMode: f.contentMode, tiles: f.tiles, recipients: f.recipients.split(',').map((s) => s.trim()).filter(Boolean),
     channel: f.channel, smsRecipients: f.smsRecipients.split(/[\s,;]+/).map((s) => s.trim()).filter(Boolean),
-    alignDaysBefore: f.alignDaysBefore,
+    alignDaysBefore: f.alignDaysBefore, priorityDashboards: f.priorityDashboards,
   });
 
   // Two preview paths: the debounced auto-preview renders the SAMPLE layout
@@ -161,6 +162,13 @@ function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }
             </div>
             <div style={hintS}>{f.contentMode === 'ai' ? 'The analyst picks what matters for this role.' : 'Pick the exact tiles to feed the digest — the analyst writes the email around them, through the role lens.'}</div>
             {f.contentMode === 'curated' && <TilePicker load={A.tiles} selected={f.tiles} onChange={(t) => set('tiles', t)} />}
+            {f.contentMode === 'ai' && (
+              <div style={{ marginTop: 10 }}>
+                <div style={{ ...hintLbl, marginBottom: 5 }}>Always include these dashboards</div>
+                <div style={{ ...hintS, marginTop: 0, marginBottom: 8 }}>The analyst still picks the story, but these boards are guaranteed into the data it reads — so key numbers (e.g. ticketing, audience) are never crowded out by busier dashboards.</div>
+                <DashboardMultiPicker load={A.tiles} selected={f.priorityDashboards} onChange={(d) => set('priorityDashboards', d)} />
+              </div>
+            )}
           </Field>
 
           <Field label="Event-aligned comparisons">
@@ -290,6 +298,30 @@ function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+// Multi-select of whole dashboards (for AI mode's "always include" list). Loads
+// the same grouped catalogue the curated tile picker uses, one chip per board.
+function DashboardMultiPicker({ load, selected, onChange }) {
+  const [dashboards, setDashboards] = useState(null);
+  useEffect(() => { load().then((r) => setDashboards(r.dashboards || [])).catch(() => setDashboards([])); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!dashboards) return <p style={{ ...hintS, marginTop: 0 }}>Loading dashboards…</p>;
+  if (!dashboards.length) return <p style={{ ...hintS, marginTop: 0 }}>No dashboards available for this client yet.</p>;
+  const toggle = (id) => onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+      {dashboards.map((d) => {
+        const on = selected.includes(d.dashboardId);
+        return (
+          <button key={d.dashboardId} type="button" onClick={() => toggle(d.dashboardId)}
+            title={[d.suiteName, d.setName].filter(Boolean).join(' › ')}
+            style={{ padding: '5px 11px', borderRadius: 980, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: on ? '1.5px solid var(--brand)' : '1.5px solid var(--hairline)', background: on ? 'rgba(var(--brand-rgb), 0.08)' : 'transparent', color: on ? 'var(--brand)' : 'var(--text)' }}>
+            {on ? '✓ ' : ''}{d.title}
+          </button>
+        );
+      })}
     </div>
   );
 }

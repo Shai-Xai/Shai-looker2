@@ -1707,7 +1707,7 @@ function tilePriority(t) {
   if (SUMMARY_TILE.test(title)) s -= 10;  // pick first
   return s;
 }
-async function buildFacts(user, entityId, force = false, alignDaysBefore = false) {
+async function buildFacts(user, entityId, force = false, alignDaysBefore = false, priorityDashboards = []) {
   const { catalogue } = clientCatalogue(entityId);
   const follows = db.listMarks({ userId: user.id, entityId, kind: 'follow' });
   const dashMeta = Object.fromEntries(catalogue.map((c) => [c.dashboardId, c]));
@@ -1742,13 +1742,27 @@ async function buildFacts(user, entityId, force = false, alignDaysBefore = false
       : tiles.filter((t) => t.id === fsel.tileId);
     for (const t of chosen) addTile(def, t, dashMeta[def.id]?.suiteId, true);
   }
+  const PER_DASH = 4; // per-dashboard cap, shared by the priority seed + rotation fill
+  // 1c) "Always include" dashboards (digest config) — their headline/cumulative
+  //     tiles are guaranteed in, ahead of the rotation, so the boards that
+  //     matter (e.g. ticketing, audience) are never crowded out by busier ones
+  //     (e.g. GA4). Capped per dashboard like the rotation fill.
+  for (const did of Array.isArray(priorityDashboards) ? priorityDashboards : []) {
+    if (picks.length >= FACT_MAX_TILES) break;
+    const def = store.get(did);
+    if (!def || !dashMeta[did]) continue; // must be in this client's catalogue
+    const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))]
+      .filter((t) => t.type !== 'text' && t.query?.fields?.length)
+      .sort((a, b) => tilePriority(a) - tilePriority(b));
+    let taken = 0;
+    for (const t of tiles) { if (taken >= PER_DASH || picks.length >= FACT_MAX_TILES) break; const before = picks.length; addTile(def, t, dashMeta[did]?.suiteId, true); if (picks.length > before) taken += 1; }
+  }
   // 2) Fill from EVERY dashboard across the client's sets, round-robin so the
   //    budget spreads over the whole catalogue (Payments, Comps, Resale…)
   //    instead of the first dashboard eating it. A per-dashboard cap keeps any
   //    one dashboard from dominating, and a daily rotation offset starts the
   //    sweep at a different dashboard each day — so the briefing's coverage
   //    (and therefore its story) naturally varies day to day.
-  const PER_DASH = 4;
   const pools = [];
   const pooled = new Set();
   for (const c of catalogue) {
@@ -2048,7 +2062,7 @@ async function buildFactsFromTiles(user, entityId, picks, alignDaysBefore = fals
 
 // Produce a role-lensed digest's structured content (links resolved). Throws if
 // AI/Looker isn't configured or there's no data — callers decide how to surface.
-async function buildDigestContent({ entityId, role, roleFocus, focusMode, contentMode, tiles, alignDaysBefore = false, recipientEmail, debug = false }) {
+async function buildDigestContent({ entityId, role, roleFocus, focusMode, contentMode, tiles, alignDaysBefore = false, priorityDashboards = [], recipientEmail, debug = false }) {
   const apiKey = anthropicKeyForEntity(entityId);
   if (!insights.isConfigured(apiKey)) throw new Error('AI is not configured for this client');
   const lens = ROLE_LENSES[role] || ROLE_LENSES.exec;
@@ -2060,7 +2074,7 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
   if (!user || !(user.entityIds || []).includes(entityId)) user = { id: `digest:${entityId}`, email: recipientEmail || '', role: 'client', entityIds: [entityId] };
   const { tiles: factTiles, catalogue } = (contentMode === 'curated' && (tiles || []).length)
     ? await buildFactsFromTiles(user, entityId, tiles, alignDaysBefore)
-    : await buildFacts(user, entityId, false, alignDaysBefore);
+    : await buildFacts(user, entityId, false, alignDaysBefore, priorityDashboards);
   if (!factTiles.length) throw new Error('No tile data available to summarise');
   const byId = Object.fromEntries(catalogue.map((c) => [c.dashboardId, c]));
   const instructions = [aiInstructionsFor(null), briefingInstructionsFor(user, entityId, clientCatalogue(entityId).suites)].filter(Boolean).join('\n\n');
