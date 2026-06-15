@@ -1904,7 +1904,7 @@ function tilePriority(t) {
   return s;
 }
 async function buildFacts(user, entityId, force = false, alignDaysBefore = false, priorityDashboards = []) {
-  const { catalogue } = clientCatalogue(entityId);
+  const { catalogue, leads } = clientCatalogue(entityId);
   const follows = db.listMarks({ userId: user.id, entityId, kind: 'follow' });
   const dashMeta = Object.fromEntries(catalogue.map((c) => [c.dashboardId, c]));
   const picks = []; // { tile, def, suiteId, setName, dashTitle, pinned }
@@ -1952,6 +1952,31 @@ async function buildFacts(user, entityId, force = false, alignDaysBefore = false
       .sort((a, b) => tilePriority(a) - tilePriority(b));
     let taken = 0;
     for (const t of tiles) { if (taken >= PER_DASH || picks.length >= FACT_MAX_TILES) break; const before = picks.length; addTile(def, t, dashMeta[did]?.suiteId, true); if (picks.length > before) taken += 1; }
+  }
+  // 1d) ALWAYS lead with TICKETING. Guarantee the ticketing set's lead (Overview)
+  //     headline tiles in every briefing — the authoritative sales source (tickets
+  //     sold, revenue, orders) — so GA4/analytics can never crowd them out. Capped
+  //     (TKT_BUDGET) so the other boards still get plenty of the budget. Detected
+  //     by set name; analytics/GA4 sets are excluded.
+  const isTicketingSet = (name) => /ticket/i.test(name || '') && !/\bga4\b|analytics|google/i.test(name || '');
+  let tkt = 0; const TKT_BUDGET = 8;
+  for (const lead of leads) {
+    if (tkt >= TKT_BUDGET || picks.length >= FACT_MAX_TILES) break;
+    if (!isTicketingSet(lead.setName)) continue;
+    for (const did of lead.dashboardIds) {
+      if (tkt >= TKT_BUDGET || picks.length >= FACT_MAX_TILES) break;
+      const def = store.get(did);
+      if (!def || !dashMeta[did]) continue;
+      const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((t) => t.tiles || []))]
+        .filter((t) => t.type !== 'text' && t.query?.fields?.length)
+        .sort((a, b) => tilePriority(a) - tilePriority(b));
+      let taken = 0;
+      for (const t of tiles) {
+        if (taken >= PER_DASH || tkt >= TKT_BUDGET || picks.length >= FACT_MAX_TILES) break;
+        const before = picks.length; addTile(def, t, lead.suiteId, true);
+        if (picks.length > before) { taken += 1; tkt += 1; }
+      }
+    }
   }
   // 2) Fill from EVERY dashboard across the client's sets, round-robin so the
   //    budget spreads over the whole catalogue (Payments, Comps, Resale…)
