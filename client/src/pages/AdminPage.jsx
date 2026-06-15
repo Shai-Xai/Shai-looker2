@@ -352,7 +352,7 @@ function ClientSettings({ entity, suites, fields, onChange, onBack }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '2px 0 14px', fontSize: 12, color: 'var(--muted)' }}>
         <span style={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Ref ID</span>
         <code style={{ fontSize: 12, background: 'rgba(128,128,128,0.12)', padding: '3px 8px', borderRadius: 6, userSelect: 'all' }}>{entity.id}</code>
-        <button type="button" style={{ ...mini, padding: '3px 9px' }} onClick={() => { navigator.clipboard?.writeText(entity.id).catch(() => {}); }} title="Copy — use as the Inventive workspace externalRefId">Copy</button>
+        <button type="button" style={{ padding: '3px 10px', fontSize: 11, fontWeight: 600, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 980, cursor: 'pointer' }} onClick={() => { navigator.clipboard?.writeText(entity.id).catch(() => {}); }} title="Copy — use as the Inventive workspace externalRefId">Copy</button>
         <span>· Inventive workspace ref / integration ID</span>
       </div>
       <div style={{ marginBottom: 12 }}>
