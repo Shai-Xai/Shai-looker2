@@ -1739,22 +1739,29 @@ async function buildFacts(user, entityId, force = false) {
   const entityViews = {};
   for (const p of picks) if (!(p.def.id in entityViews)) entityViews[p.def.id] = db.getFilterView('entity', entityId, p.def.id) || null;
 
+  const dropped = []; // tiles excluded from the facts, with the reason (logged below)
   const tiles = (await Promise.all(picks.slice(0, FACT_MAX_TILES).map(async (p) => {
     const view = entityViews[p.def.id];
     const extra = {};
     if (view) for (const [fname, qfield] of Object.entries(p.tile.listenTo || {})) if (fname in view) extra[qfield] = view[fname];
     const body = await tileQueryBody(p.tile, p.def, user, p.suiteId, lockMaps[p.suiteId] || {}, extra);
-    if (!body) return null;
+    if (!body) { dropped.push(`${p.dashTitle} › ${p.tile.title || '?'} (scope blocked / unrunnable)`); return null; }
     try {
       const data = await runLookerQuery('/queries/run/json_detail', body, undefined, force);
-      if (!data?.data?.length) return null;
+      if (!data?.data?.length) { dropped.push(`${p.dashTitle} › ${p.tile.title || '?'} (no rows for the default filters)`); return null; }
       return {
         title: p.tile.title || '(untitled)', visType: p.tile.vis?.type, context: p.tile.aiContext || '',
         fields: data.fields, rows: data.data,
         dashboardId: p.def.id, suiteId: p.suiteId, setName: p.setName, dashTitle: p.dashTitle, pinned: p.pinned,
       };
-    } catch { return null; }
+    } catch (e) { dropped.push(`${p.dashTitle} › ${p.tile.title || '?'} (error: ${e.message})`); return null; }
   }))).filter(Boolean);
+
+  // Why a dashboard might be missing from a briefing/digest: tiles drop when the
+  // explore can't be scoped, or the query returns no rows. Log it so it's not a
+  // mystery (visible in the server logs when a digest is built/tested).
+  if (dropped.length) console.warn(`[facts] entity=${entityId} kept ${tiles.length} tiles, dropped ${dropped.length}: ${dropped.slice(0, 25).join(' · ')}`);
+  if (tiles.length) console.log(`[facts] entity=${entityId} dashboards in facts: ${[...new Set(tiles.map((t) => t.dashTitle))].join(' · ')}`);
 
   return { tiles, catalogue };
 }
