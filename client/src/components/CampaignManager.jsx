@@ -309,7 +309,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
     emailField: cfg.audience?.emailField || ta.emailField || '',
     nameField: cfg.audience?.nameField || ta.nameField || '',
     consentField: cfg.audience?.consentField || ta.consentField || '',
-    emailConsentField: cfg.audience?.emailConsentField || cfg.audience?.consentField || ta.emailConsentField || '',
+    emailConsentField: cfg.audience?.emailConsentField || cfg.audience?.consentField || ta.emailConsentField || ta.consentField || '',
     smsConsentField: cfg.audience?.smsConsentField || ta.smsConsentField || '',
     ignoreConsent: !!cfg.ignoreConsent,
     ticketField: cfg.audience?.ticketField || ta.ticketField || '',

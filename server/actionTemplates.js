@@ -19,15 +19,18 @@ const TEMPLATES = [
     type: 'email_campaign',
     capability: 'email_campaign',
     recurringSuggested: true,
-    // Find the audience source in the client's dashboards (title regexes).
-    match: { dashboard: /abandon/i, tile: /abandon/i },
+    // Find the audience source by TILE title — the "abandoned" people-list tile
+    // usually lives on a broader dashboard (e.g. "Ticketing Overview"), so we
+    // don't require the dashboard title to match too (an email column is still
+    // required, so only the right tile resolves).
+    match: { tile: /abandon/i },
     // Pick the email / name / ticket / consent columns by field-name hints
     // (first match wins). Resolved against the matched tile's query fields.
     fieldHints: {
       emailField: [/e-?mail/i],
       nameField: [/(^|[._])name/i, /customer/i],
       ticketField: [/ticket.?type/i, /ticket.?name/i, /product/i],
-      consentField: [/consent/i, /opt.?in/i, /marketing/i, /subscrib/i],
+      consentField: [/allow.*e-?mail/i, /e-?mail.*(consent|opt|allow|subscrib)/i, /consent/i, /opt.?in/i, /marketing/i, /subscrib/i],
     },
     preset: {
       goal: 'Re-engage customers who abandoned their ticket checkout and get them to complete the purchase.',
