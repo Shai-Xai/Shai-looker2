@@ -1225,6 +1225,11 @@ function LockedFilterEditor({ value, onChange, fields, categories, restrictTo = 
   // client-level organiser (set in the client's Settings), so suite event pickers
   // are scoped to the client's organiser without re-entering it here.
   const orgVals = (orgRow ? splitVals(orgRow.vals) : []).length ? splitVals(orgRow.vals) : (clientOrganiser || []);
+  // Warn (but don't block) when this suite sets its OWN organiser to something
+  // other than the client's Settings organiser — an easy-to-miss override.
+  const suiteOrgVals = orgRow ? splitVals(orgRow.vals) : [];
+  const orgMismatch = (clientOrganiser || []).length > 0 && suiteOrgVals.length > 0
+    && (suiteOrgVals.length !== clientOrganiser.length || suiteOrgVals.some((v) => !clientOrganiser.includes(v)));
   // The organiser filter for a target picker's explore (null if none / it IS the
   // organiser row / no organiser value set).
   const orgScopeFor = (meta, field, category) => {
@@ -1235,6 +1240,12 @@ function LockedFilterEditor({ value, onChange, fields, categories, restrictTo = 
 
   return (
     <div style={{ margin: '6px 0 4px' }}>
+      {orgMismatch && (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '8px 11px', margin: '0 0 10px', borderRadius: 9, background: 'rgba(245,158,11,0.10)', border: '1px solid rgba(245,158,11,0.35)', fontSize: 12, color: 'var(--text)', lineHeight: 1.45 }}>
+          <span style={{ flexShrink: 0 }}>⚠️</span>
+          <span>This suite's <b>Organiser Name</b> ({suiteOrgVals.join(', ')}) differs from the client's Settings organiser ({(clientOrganiser || []).join(', ')}). The suite value overrides it here — make sure that's intended.</span>
+        </div>
+      )}
       {/* One filter per row, stacked. */}
       <div>
         {rows.map((r, i) => {
