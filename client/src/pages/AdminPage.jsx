@@ -1057,7 +1057,7 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
         </Section>
       )}
       <Section title="Locked filters (the event, cashless events…)">
-        <LockedFilterEditor value={locks} onChange={setLocks} fields={fields} categories={lockCategories} />
+        <LockedFilterEditor value={locks} onChange={setLocks} fields={fields} categories={lockCategories} clientOrganiser={organiserValsFromLocks(entities.find((e) => e.id === entityId)?.lockedFilters)} />
       </Section>
       <div style={{ marginTop: 12 }}>
         <L>Ticket / checkout link</L>
@@ -1092,8 +1092,14 @@ const LOCK_PRESETS = [
 const LOCK_CATEGORIES = ['Event', 'Cashless'];
 const splitVals = (v) => String(v || '').split(',').map((s) => s.trim()).filter(Boolean);
 const uniqJoin = (arr) => [...new Set(arr)].join(',');
+// Organiser-name field matcher + extracting the organiser value(s) from a locks
+// map (used to carry the client-level organiser scope into the suite editor).
+const ORG_NAME_RE = /(^|[._])organiser_?name$|organisers?\.name$/i;
+const organiserValsFromLocks = (locks) => Object.entries(locks || {})
+  .filter(([k]) => k.toLowerCase() === 'organiser name' || ORG_NAME_RE.test(k))
+  .flatMap(([, v]) => splitVals(v));
 
-function LockedFilterEditor({ value, onChange, fields, categories, restrictTo = null }) {
+function LockedFilterEditor({ value, onChange, fields, categories, restrictTo = null, clientOrganiser = [] }) {
   // restrictTo limits the offered filters (e.g. the organiser-level editor only
   // exposes Organiser Name — scope is set once per client there).
   const PRESETS = restrictTo ? LOCK_PRESETS.filter((p) => restrictTo.includes(p.title)) : LOCK_PRESETS;
@@ -1164,17 +1170,19 @@ function LockedFilterEditor({ value, onChange, fields, categories, restrictTo = 
   // only suggests events for that organiser. Each explore has its own organiser
   // field — slug lives in a different explore from the organiser — so we resolve
   // the organiser field PER explore from the catalogue and filter within it.
-  const ORG_RE = /(^|[._])organiser_?name$|organisers?\.name$/i;
   const orgFieldByExplore = {};
   for (const f of fields) {
-    const isOrg = (f.title || '').toLowerCase() === 'organiser name' || ORG_RE.test(f.suggestField || f.field || '');
+    const isOrg = (f.title || '').toLowerCase() === 'organiser name' || ORG_NAME_RE.test(f.suggestField || f.field || '');
     if (!isOrg) continue;
     const ex = `${f.model || ''}::${f.explore || ''}`;
     if (!orgFieldByExplore[ex] || (f.title || '').toLowerCase() === 'organiser name') orgFieldByExplore[ex] = f.suggestField || f.field;
   }
   const orgKey = keyFor('Organiser Name');
   const orgRow = rows.find((x) => x.field === orgKey);
-  const orgVals = orgRow ? splitVals(orgRow.vals) : [];
+  // Organiser scope: a value set in THIS editor wins; otherwise fall back to the
+  // client-level organiser (set in the client's Settings), so suite event pickers
+  // are scoped to the client's organiser without re-entering it here.
+  const orgVals = (orgRow ? splitVals(orgRow.vals) : []).length ? splitVals(orgRow.vals) : (clientOrganiser || []);
   // The organiser filter for a target picker's explore (null if none / it IS the
   // organiser row / no organiser value set).
   const orgScopeFor = (meta, field, category) => {
