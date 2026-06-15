@@ -2255,7 +2255,7 @@ app.post('/api/my/dismiss-thread', auth.requireAuth, (req, res) => {
 app.get('/api/actions-summary/:entityId', auth.requireAuth, (req, res) => {
   const id = req.params.entityId;
   if (req.user.role !== 'admin' && !(req.user.entityIds || []).includes(id)) return res.status(403).json({ error: 'Not allowed' });
-  res.json({ actions: actionsSummaryFor(id, 6), pendingApproval: pendingApprovalCount(id), awaitingMyApproval: actionsApi.awaitingApprovalFor(req.user, id) });
+  res.json({ actions: actionsSummaryFor(id, 6), pendingApproval: pendingApprovalCount(id), awaitingMyApproval: actionsApi.awaitingApprovalFor(req.user, id), myOutcomes: actionsApi.unseenOutcomesFor(req.user, id) });
 });
 
 // Campaigns waiting for a human go-ahead: automation-queued drafts AND

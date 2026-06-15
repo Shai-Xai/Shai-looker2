@@ -158,10 +158,10 @@ export default function ClientLayout() {
         const r = await api.osInbox(activeEntityId || undefined);
         // Campaigns awaiting this client's go-ahead also count toward the badge,
         // and ones awaiting THIS user's sign-off drive the approval banner.
-        let pendingApproval = 0; let awaitingMyApproval = { count: 0, first: '' };
-        if (activeEntityId) { try { const sum = await api.getActionsSummary(activeEntityId); pendingApproval = sum.pendingApproval || 0; awaitingMyApproval = sum.awaitingMyApproval || awaitingMyApproval; } catch { /* ignore */ } }
+        let pendingApproval = 0; let awaitingMyApproval = { count: 0, first: '' }; let myOutcomes = [];
+        if (activeEntityId) { try { const sum = await api.getActionsSummary(activeEntityId); pendingApproval = sum.pendingApproval || 0; awaitingMyApproval = sum.awaitingMyApproval || awaitingMyApproval; myOutcomes = sum.myOutcomes || []; } catch { /* ignore */ } }
         if (!alive) return;
-        setInbox((s) => ({ ...s, enabled: true, unread: r.unread, pendingApproval, awaitingMyApproval, pending: r.threads.filter((t) => t.priority === 'must_ack' && !t.acked) }));
+        setInbox((s) => ({ ...s, enabled: true, unread: r.unread, pendingApproval, awaitingMyApproval, myOutcomes, pending: r.threads.filter((t) => t.priority === 'must_ack' && !t.acked) }));
         // Mirror unread + pending approvals onto the installed app's icon badge.
         const total = (r.unread || 0) + pendingApproval;
         try { if (navigator.setAppBadge) { total ? navigator.setAppBadge(total) : navigator.clearAppBadge(); } } catch { /* unsupported */ }
@@ -551,6 +551,23 @@ export default function ClientLayout() {
             <span style={{ background: 'rgba(255,255,255,0.25)', borderRadius: 980, padding: '5px 14px', fontWeight: 700, flexShrink: 0 }}>Review →</span>
           </button>
         )}
+        {/* Approval-outcome banner — ALWAYS shown to the campaign's creator when a
+            request is approved or sent back, until they acknowledge it. */}
+        {(inbox.myOutcomes || []).map((o) => {
+          const approved = o.outcome === 'approved';
+          const ack = () => { api.ackCampaignOutcome(activeEntityId, o.id).catch(() => {}); setInbox((s) => ({ ...s, myOutcomes: (s.myOutcomes || []).filter((x) => x.id !== o.id) })); };
+          return (
+            <div key={o.id} style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '10px 16px', color: '#fff', fontSize: 13, background: approved ? 'linear-gradient(90deg, #16a34a, #15803d)' : 'linear-gradient(90deg, #f59e0b, #dc2626)' }}>
+              <span style={{ fontSize: 15 }}>{approved ? '✅' : '↩️'}</span>
+              <button onClick={() => { ack(); vtNavigate(navigate, `/actions?action=${o.id}`); }} style={{ flex: 1, textAlign: 'left', background: 'none', border: 'none', color: '#fff', cursor: 'pointer', padding: 0, fontSize: 13 }}>
+                <span style={{ fontWeight: 700 }}>“{o.title}” was {approved ? 'approved' : 'sent back to draft'}{o.by ? ` by ${o.by}` : ''}{approved ? ' — now sending' : ''}.</span>
+                {!approved && o.note ? <span style={{ opacity: 0.9 }}> {o.note}</span> : null}
+              </button>
+              <span onClick={() => { ack(); vtNavigate(navigate, `/actions?action=${o.id}`); }} style={{ background: 'rgba(255,255,255,0.25)', borderRadius: 980, padding: '5px 14px', fontWeight: 700, flexShrink: 0, cursor: 'pointer' }}>Open →</span>
+              <button onClick={ack} title="Dismiss" style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 17, lineHeight: 1, flexShrink: 0, opacity: 0.85 }}>×</button>
+            </div>
+          );
+        })}
         {previewMode && (
           <div style={previewBar}>
             <span style={{ fontWeight: 700 }}>👁 Client preview{activeEntityId && (() => { const n = suites.find((s) => s.entityId === activeEntityId)?.entityName; return n ? ` — ${n}` : ''; })()}</span>

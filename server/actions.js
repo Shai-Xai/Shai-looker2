@@ -144,6 +144,13 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     if (!cols.includes('recurring')) sql.exec('ALTER TABLE actions ADD COLUMN recurring INTEGER NOT NULL DEFAULT 0');
     if (!cols.includes('parent_id')) sql.exec("ALTER TABLE actions ADD COLUMN parent_id TEXT NOT NULL DEFAULT ''");
     if (!cols.includes('last_check')) sql.exec("ALTER TABLE actions ADD COLUMN last_check TEXT NOT NULL DEFAULT ''");
+    // Approval outcome the creator hasn't seen yet — drives a guaranteed in-app
+    // banner (existing rows default to seen so no historical banners appear).
+    if (!cols.includes('outcome')) sql.exec("ALTER TABLE actions ADD COLUMN outcome TEXT NOT NULL DEFAULT ''");          // '' | approved | rejected
+    if (!cols.includes('outcome_by')) sql.exec("ALTER TABLE actions ADD COLUMN outcome_by TEXT NOT NULL DEFAULT ''");
+    if (!cols.includes('outcome_note')) sql.exec("ALTER TABLE actions ADD COLUMN outcome_note TEXT NOT NULL DEFAULT ''");
+    if (!cols.includes('outcome_at')) sql.exec("ALTER TABLE actions ADD COLUMN outcome_at TEXT NOT NULL DEFAULT ''");
+    if (!cols.includes('outcome_seen')) sql.exec('ALTER TABLE actions ADD COLUMN outcome_seen INTEGER NOT NULL DEFAULT 1');
     const ecols = sql.prepare('PRAGMA table_info(action_enrollments)').all().map((c) => c.name);
     if (!ecols.includes('phone')) sql.exec("ALTER TABLE action_enrollments ADD COLUMN phone TEXT NOT NULL DEFAULT ''"); // for SMS sequences
     const ccols = sql.prepare('PRAGMA table_info(action_clicks)').all().map((c) => c.name);
@@ -1030,6 +1037,15 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     }
     return { count, first };
   }
+
+  // Approval outcomes the signed-in user (the campaign creator) hasn't seen yet
+  // — drives a guaranteed "your campaign was approved / sent back" banner.
+  function unseenOutcomesFor(user, entityId) {
+    if (!user?.email) return [];
+    return sql.prepare("SELECT id, title, config, outcome, outcome_by, outcome_note FROM actions WHERE entity_id=? AND outcome!='' AND outcome_seen=0 AND lower(created_by)=lower(?) ORDER BY outcome_at DESC")
+      .all(entityId, user.email)
+      .map((r) => ({ id: r.id, title: r.title || JSON.parse(r.config || '{}').subject || 'Your campaign', outcome: r.outcome, by: r.outcome_by || '', note: r.outcome_note || '' }));
+  }
   // A short, human summary of a campaign's key settings — for the approval
   // inbox message + email so approvers know what they're signing off.
   function campaignSummaryLines(a) {
@@ -1119,6 +1135,11 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
   function notifySender(a, { approved, note = '', by = '' }) {
     const sender = (db.listUsers() || []).find((u) => u.email && a.createdBy && u.email.toLowerCase() === a.createdBy.toLowerCase());
     if (!sender || sender.email.toLowerCase() === (by || '').toLowerCase()) return;
+    // Record the unseen outcome on the campaign — this drives a banner that
+    // ALWAYS shows to the creator next time they load Pulse, independent of
+    // whether push/email reached them.
+    sql.prepare("UPDATE actions SET outcome=?, outcome_by=?, outcome_note=?, outcome_at=?, outcome_seen=0 WHERE id=?")
+      .run(approved ? 'approved' : 'rejected', by || '', String(note || '').slice(0, 500), now(), a.id);
     const name = a.title || a.config.subject || 'Your campaign';
     const path = `/actions?action=${a.id}`;
     const link = `${mailer.baseUrl()}${path}`;
@@ -1178,6 +1199,16 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     setStatus(a.id, 'draft');
     const note = String(req.body?.note || '').slice(0, 500);
     notifySender(a, { approved: false, note, by: req.user.email });
+    res.json({ ok: true });
+  });
+
+  // Creator acknowledges an approval-outcome banner → clears it.
+  app.post('/api/actions/:entityId/:id/ack-outcome', auth.requireAuth, auth.requirePermission('campaigns.view'), (req, res) => {
+    if (!guard(req, res, req.params.entityId)) return;
+    const a = getAction(req.params.id);
+    if (!a || a.entityId !== req.params.entityId) return res.status(404).json({ error: 'Not found' });
+    if ((a.createdBy || '').toLowerCase() !== (req.user.email || '').toLowerCase()) return res.status(403).json({ error: 'Not allowed' });
+    sql.prepare('UPDATE actions SET outcome_seen=1 WHERE id=?').run(a.id);
     res.json({ ok: true });
   });
 
@@ -1508,7 +1539,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
   });
 
   console.log('[actions] action engine mounted', enabled() ? '(enabled)' : '(disabled — set actions_enabled=1)');
-  return { awaitingApprovalFor, audienceFor };
+  return { awaitingApprovalFor, unseenOutcomesFor, audienceFor };
 }
 
 module.exports = { mount };

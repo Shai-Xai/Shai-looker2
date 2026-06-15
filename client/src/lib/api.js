@@ -258,6 +258,7 @@ export const api = {
   listCampaignEvents: (entityId) => fetch(`/api/actions/${entityId}/events`).then(json),
   actionReport: (entityId, id) => fetch(`/api/actions/${entityId}/${id}/report`).then(json),
   getActionsSummary: (entityId) => fetch(`/api/actions-summary/${entityId}`).then(json),
+  ackCampaignOutcome: (entityId, id) => fetch(`/api/actions/${entityId}/${id}/ack-outcome`, { method: 'POST' }).then(json),
   getNotificationSettings: () => fetch('/api/admin/notification-settings').then(json),
   getSmsConfig: () => fetch('/api/admin/sms-config').then(json),
   setSmsConfig: (b) => fetch('/api/admin/sms-config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
