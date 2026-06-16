@@ -416,7 +416,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
   const removeFilter = (i) => setF((s) => ({ ...s, filters: s.filters.filter((_, j) => j !== i) }));
   // Step helpers (sequence mode).
   const setStep = (i, patch) => setF((s) => ({ ...s, steps: s.steps.map((st, j) => (j === i ? { ...st, ...patch } : st)) }));
-  const addStep = (delayHours = 24) => setF((s) => ({ ...s, steps: [...s.steps, { delayHours, subject: '', body: '', ctaText: s.steps[0]?.ctaText || '' }] }));
+  const addStep = (delayHours = 24) => setF((s) => ({ ...s, steps: [...s.steps, { delayHours, subject: '', body: '', ctaText: s.steps[0]?.ctaText || '', contentMode: 'template', customHtml: '', heroImage: '' }] }));
   const removeStep = (i) => setF((s) => ({ ...s, steps: s.steps.filter((_, j) => j !== i) }));
   const isSequence = f.campaignMode === 'sequence';
   // Columns available to pick the abandonment-time anchor from (tile fields or a list's headers).
@@ -467,7 +467,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
     debounce.current = setTimeout(() => {
       const base = payload();
       const st = isSequence ? (f.steps[activeStep] || f.steps[0]) : null;
-      const p = st ? { ...base, subject: st.subject, body: st.body, ctaText: st.ctaText } : base;
+      const p = st ? { ...base, subject: st.subject, body: st.body, ctaText: st.ctaText, contentMode: st.contentMode || 'template', customHtml: st.customHtml || '', heroImage: st.heroImage || '' } : base;
       api.actionPreviewEmail(entityId, p).then((r) => { setPreview(r.html || ''); setPreviewSms(r.sms || ''); }).catch(() => {});
     }, 350);
     return () => clearTimeout(debounce.current);
@@ -482,7 +482,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
       const out = [];
       for (let i = 0; i < f.steps.length; i++) {
         const st = f.steps[i];
-        const p = { ...base, subject: st.subject, body: st.body, ctaText: st.ctaText };
+        const p = { ...base, subject: st.subject, body: st.body, ctaText: st.ctaText, contentMode: st.contentMode || 'template', customHtml: st.customHtml || '', heroImage: st.heroImage || '' };
         try { const r = await api.actionPreviewEmail(entityId, p); out.push({ label: `Step ${i + 1} · +${st.delayHours % 24 === 0 && st.delayHours >= 24 ? `${st.delayHours / 24}d` : `${st.delayHours}h`}`, html: r.html || '', sms: r.sms || '' }); }
         catch { out.push({ label: `Step ${i + 1}`, html: '', sms: '' }); }
       }
@@ -1753,9 +1753,32 @@ function SequenceSteps({ steps, setStep, addStep, removeStep, activeStep = 0, on
               <span style={{ flex: 1 }} />
               {steps.length > 1 && <button type="button" style={{ ...mini, color: 'var(--error,#ef4444)' }} onClick={() => removeStep(i)}>✕</button>}
             </div>
-            {!sms && <input style={{ ...input, fontWeight: 700, marginBottom: 6 }} value={st.subject} onFocus={focus(i)} onChange={(e) => setStep(i, { subject: e.target.value })} placeholder={`Step ${i + 1} subject`} />}
-            <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit', marginBottom: 6 }} rows={4} value={st.body} onFocus={focus(i)} onChange={(e) => setStep(i, { body: e.target.value })} placeholder={sms ? 'Hi {{name}}, your {{ticketType}} tickets are waiting…' : 'Hi {{name}}, …  (tokens: {{ticketType}}, {{promo}})'} />
-            {sms ? <SmsMeter body={st.body} /> : <input style={input} value={st.ctaText} onFocus={focus(i)} onChange={(e) => setStep(i, { ctaText: e.target.value })} placeholder="Button text (e.g. Complete my purchase)" />}
+            {sms ? (
+              <>
+                <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit', marginBottom: 6 }} rows={4} value={st.body} onFocus={focus(i)} onChange={(e) => setStep(i, { body: e.target.value })} placeholder={'Hi {{name}}, your {{ticketType}} tickets are waiting…'} />
+                <SmsMeter body={st.body} />
+              </>
+            ) : (
+              <>
+                <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                  <Toggle on={(st.contentMode || 'template') === 'template'} onClick={() => { focus(i)(); setStep(i, { contentMode: 'template' }); }}>Built template</Toggle>
+                  <Toggle on={st.contentMode === 'html'} onClick={() => { focus(i)(); setStep(i, { contentMode: 'html' }); }}>Custom HTML</Toggle>
+                </div>
+                <input style={{ ...input, fontWeight: 700, marginBottom: 6 }} value={st.subject} onFocus={focus(i)} onChange={(e) => setStep(i, { subject: e.target.value })} placeholder={`Step ${i + 1} subject`} />
+                {(st.contentMode || 'template') === 'template' ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <ImageField label="Hero image (optional)" value={st.heroImage || ''} onChange={(v) => setStep(i, { heroImage: v })} />
+                    <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit' }} rows={4} value={st.body} onFocus={focus(i)} onChange={(e) => setStep(i, { body: e.target.value })} placeholder={'Hi {{name}}, …  (tokens: {{ticketType}}, {{promo}})'} />
+                    <input style={input} value={st.ctaText} onFocus={focus(i)} onChange={(e) => setStep(i, { ctaText: e.target.value })} placeholder="Button text (e.g. Complete my purchase)" />
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }} onClick={focus(i)}>
+                    <HtmlField value={st.customHtml || ''} onChange={(v) => setStep(i, { customHtml: v })} />
+                    <div style={hintS}>Tokens work inside your HTML: <b>{'{{name}}'}</b>, <b>{'{{ticketType}}'}</b>, <b>{'{{cta}}'}</b> (the shared tracked buy link), <b>{'{{unsubscribe}}'}</b>. An unsubscribe link is added if you omit one.</div>
+                  </div>
+                )}
+              </>
+            )}
           </div>
         );
       })}

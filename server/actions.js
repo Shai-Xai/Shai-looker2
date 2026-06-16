@@ -402,6 +402,10 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
         subject: String(s.subject || '').slice(0, 200),
         body: String(s.body || '').slice(0, 8000),
         ctaText: String(s.ctaText || '').slice(0, 60),
+        // Per-step content parity with once-off: template vs custom HTML + hero image.
+        contentMode: s.contentMode === 'html' ? 'html' : 'template',
+        customHtml: String(s.customHtml || '').slice(0, 100000),
+        heroImage: String(s.heroImage || '').slice(0, 1500000),
       })).sort((a, b) => a.delayHours - b.delayHours) : [],
       // Promo / discount codes. type 'promo' attaches to the ticket (can append
       // to the buy link); type 'discount' is entered at checkout (never appended,
@@ -728,11 +732,14 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
       ? `<img src="${mailer.baseUrl()}/o/${cfg.clickToken}/${rtok}/${stepIndex}" width="1" height="1" alt="" style="display:none;max-height:0;max-width:0;overflow:hidden;" />`
       : '');
     const withPixel = (html, rtok) => { const p = openPixel(rtok); if (!p) return html; return /<\/body>/i.test(html) ? html.replace(/<\/body>/i, `${p}</body>`) : html + p; };
-    // A drip step overrides the campaign-level copy (custom-HTML mode is
-    // campaign-level only; steps use the branded template).
-    const useSubject = step ? (step.subject || cfg.subject) : cfg.subject;
-    const useBody = step ? (step.body || cfg.body) : cfg.body;
-    const useCta = step ? (step.ctaText || cfg.ctaText) : cfg.ctaText;
+    // A drip step carries its OWN content (subject/body/cta + contentMode/customHtml/
+    // heroImage), exactly like a once-off — so each step has the full editor.
+    const src = step || cfg;
+    const useSubject = src.subject || cfg.subject;
+    const useBody = src.body || (step ? '' : cfg.body);
+    const useCta = src.ctaText || cfg.ctaText;
+    const useContentMode = src.contentMode || 'template';
+    const useHtml = src.customHtml || '';
     const firstName = (recipient.name || '').split(/\s+/)[0] || '';
     const ticket = recipient.ticket || '';
     // Per-recipient tracked link: the same signed token used for unsubscribe
@@ -754,21 +761,23 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
       .replace(/\{\{\s*unsubscribe\s*\}\}/gi, unsubUrl), recipient);
     const subject = tok(useSubject);
 
-    if (!step && cfg.contentMode === 'html' && (cfg.customHtml || '').trim()) {
-      let html = tok(cfg.customHtml);
+    if (useContentMode === 'html' && useHtml.trim()) {
+      let html = tok(useHtml);
       // Guarantee an unsubscribe link (compliance) if the author didn't include one.
       if (!/unsubscrib/i.test(html)) {
         const footer = `<div style="font-size:11px;color:#888;text-align:center;padding:18px;font-family:-apple-system,Segoe UI,Roboto,sans-serif;">Sent via Howler : Pulse · <a href="${unsubUrl}" style="color:#888;">Unsubscribe</a></div>`;
         html = /<\/body>/i.test(html) ? html.replace(/<\/body>/i, `${footer}</body>`) : html + footer;
       }
-      const text = `${tok(cfg.customHtml).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 4000)}\n\nUnsubscribe: ${unsubUrl}`;
+      const text = `${tok(useHtml).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 4000)}\n\nUnsubscribe: ${unsubUrl}`;
       return { html: withPixel(html, rtok), text, subject };
     }
 
-    // Hero image: hosted by action id for real sends (email clients strip
-    // data-URLs); inline for preview/test so it shows live.
-    const heroImage = cfg.heroImage
-      ? (cfg.heroImage.startsWith('data:') && realSend ? `${mailer.baseUrl()}/mail-assets/campaign/${action.id}` : cfg.heroImage)
+    // Hero image: hosted by action id (+ step index) for real sends (email clients
+    // strip data-URLs); inline for preview/test so it shows live.
+    const heroRaw = src.heroImage || '';
+    const heroPath = step ? `/mail-assets/campaign/${action.id}/${stepIndex}` : `/mail-assets/campaign/${action.id}`;
+    const heroImage = heroRaw
+      ? (heroRaw.startsWith('data:') && realSend ? `${mailer.baseUrl()}${heroPath}` : heroRaw)
       : '';
     const { html, text } = mailer.campaignEmail({ entityId: action.entityId, assetScope: action.entityId, subject, bodyText: tok(useBody), ctaText: useCta || 'View event', ctaUrl, unsubUrl, heroImage, promo });
     return { html: withPixel(html, rtok), text, subject };
@@ -1000,9 +1009,11 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
 
   // Public: serve a campaign's hero image (data-URL stored on the action) so
   // real sends reference a URL, not an embedded data-URL clients would strip.
-  app.get('/mail-assets/campaign/:id', (req, res) => {
+  app.get('/mail-assets/campaign/:id/:step?', (req, res) => {
     const a = getAction(req.params.id);
-    const img = a?.config?.heroImage || '';
+    // Per-step hero for drip sequences (/:step), else the campaign-level hero.
+    const stepIdx = req.params.step != null && Number.isInteger(Number(req.params.step)) ? Number(req.params.step) : -1;
+    const img = (stepIdx >= 0 ? (a?.config?.steps?.[stepIdx]?.heroImage) : a?.config?.heroImage) || '';
     if (!img) return res.status(404).end();
     if (!img.startsWith('data:')) return res.redirect(302, img);
     const m = img.match(/^data:([^;,]+)?(;base64)?,(.*)$/s);

@@ -197,6 +197,11 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-16 (later)** — Drip steps now have the **full content editor per step**
+  (built template *or* custom HTML, hero image, subject/body/CTA) — same as a once-off
+  email. Digest fix: send up to 40 tile rows so daily series isn't truncated mid-month.
+  Dashboard library: name sort + Tile/List view (List default); persistent folder-level
+  "imported filters".
 - **2026-06-16** — Engage hardening: multi-source segments (Union/Intersect/
   Exclude) incl. CSV/Sheet/saved-segment blocks with per-block filters; column
   matching + target-any-column on uploaded/Sheet lists; merge fields from any
