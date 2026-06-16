@@ -12,7 +12,7 @@
 // Mount: `require('./segments').mount(app, { db, auth, resolveAudience })`.
 const crypto = require('crypto');
 
-function mount(app, { db, auth, resolveAudience, resolveRecipe }) {
+function mount(app, { db, auth, resolveAudience, resolveRecipe, meta }) {
   const sql = db.db;
   const now = () => new Date().toISOString();
   const uuid = () => crypto.randomUUID();
@@ -180,6 +180,24 @@ function mount(app, { db, auth, resolveAudience, resolveRecipe }) {
       const r = await resolveDefinition(req.params.entityId, JSON.parse(seg.definition || '{}'), req.user);
       const list = r.list || [];
       res.json({ name: seg.name, count: list.length, capped: list.length > 2000, members: list.slice(0, 2000).map((m) => ({ email: m.email || '', name: m.name || '', phone: m.phone || '', ticket: m.ticket || '' })) });
+    } catch (e) { res.status(400).json({ error: e.message }); }
+  });
+
+  // Audience-sync: push a segment to a Meta Custom Audience (hashed match). The
+  // resolver enforces the client's org/event scope, so a sync can't leak another
+  // client's people; identities are hashed inside the connector before they leave.
+  app.post('/api/segments/:entityId/:id/sync/meta', auth.requireAuth, auth.requirePermission('campaigns.approve'), async (req, res) => {
+    if (!guard(req, res, req.params.entityId)) return;
+    if (!meta?.isConfigured?.(req.params.entityId)) return res.status(400).json({ error: 'Meta isn’t connected for this client — add a Meta access token + ad account in Integrations.' });
+    const seg = getSeg(req.params.id);
+    if (!seg || seg.entity_id !== req.params.entityId) return res.status(404).json({ error: 'Not found' });
+    try {
+      const r = await resolveDefinition(req.params.entityId, JSON.parse(seg.definition || '{}'), req.user);
+      const members = (r.list || []).map((m) => ({ email: m.email, phone: m.phone }));
+      if (!members.length) return res.status(400).json({ error: 'This segment resolved to nobody right now.' });
+      const out = await meta.syncAudience({ entityId: req.params.entityId, name: seg.name, members });
+      if (!out.ok) return res.status(502).json({ error: out.error || 'Meta sync failed' });
+      res.json({ ok: true, audienceId: out.audienceId, pushed: out.pushed, matched: out.matched });
     } catch (e) { res.status(400).json({ error: e.message }); }
   });
 

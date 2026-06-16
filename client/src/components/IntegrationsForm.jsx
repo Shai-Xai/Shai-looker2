@@ -4,7 +4,7 @@ import { useState } from 'react';
 // write-only: the form only knows whether a value is set (value.*.keySet /
 // clientSecretSet); typing a new value changes it, blank leaves it unchanged.
 // `onSave(payload)` receives only the fields that changed.
-export default function IntegrationsForm({ value, onSave, showLooker = true, lookerActive = true, showResend = false, showInventive = false, clients = [], onTestEmail, collapsible = false }) {
+export default function IntegrationsForm({ value, onSave, showLooker = true, lookerActive = true, showResend = false, showInventive = false, showMeta = false, clients = [], onTestEmail, collapsible = false }) {
   const [baseUrl, setBaseUrl] = useState(value?.looker?.baseUrl || '');
   const [clientId, setClientId] = useState(value?.looker?.clientId || '');
   const [clientSecret, setClientSecret] = useState('');
@@ -19,6 +19,10 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
   const [invToken, setInvToken] = useState('');
   const [clearInvToken, setClearInvToken] = useState(false);
   const [invEndpoint, setInvEndpoint] = useState(value?.inventive?.endpoint || '');
+  const [metaToken, setMetaToken] = useState('');
+  const [clearMetaToken, setClearMetaToken] = useState(false);
+  const [metaAdAccount, setMetaAdAccount] = useState(value?.meta?.adAccountId || '');
+  const [metaBusiness, setMetaBusiness] = useState(value?.meta?.businessId || '');
   const [testState, setTestState] = useState('');
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -54,10 +58,16 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
         if (invToken) payload.inventive.embedToken = invToken;
         if (clearInvToken) payload.inventive.clearEmbedToken = true;
       }
+      if (showMeta) {
+        payload.meta = { adAccountId: metaAdAccount, businessId: metaBusiness };
+        if (metaToken) payload.meta.accessToken = metaToken;
+        if (clearMetaToken) payload.meta.clearAccessToken = true;
+      }
       await onSave(payload);
       setClientSecret(''); setAnthropicKey(''); setClearSecret(false); setClearKey(false);
       setResendKey(''); setClearResendKey(false);
       setInvKey(''); setInvToken(''); setClearInvKey(false); setClearInvToken(false);
+      setMetaToken(''); setClearMetaToken(false);
       setSaved(true); setTimeout(() => setSaved(false), 1600);
     } catch (e) { alert('Save failed: ' + e.message); }
     finally { setBusy(false); }
@@ -83,6 +93,30 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
           </label>
         )}
       </Section>
+
+      {/* Meta (FB/IG) — per-client audience sync */}
+      {showMeta && (
+        <Section title="◇ Meta (Facebook / Instagram)" collapsible={collapsible}>
+          <div style={note}>
+            Push a <b>segment</b> to a Meta <b>Custom Audience</b> for ad targeting or exclusion. Emails/phones are hashed before they leave Pulse. Use a system-user / long-lived token with <code>ads_management</code>.
+          </div>
+          <Lbl>Access token</Lbl>
+          <input
+            type="password" autoComplete="off"
+            value={metaToken} onChange={(e) => setMetaToken(e.target.value)}
+            placeholder={value?.meta?.tokenSet ? `Set (${value.meta.tokenHint || '••••'}) — leave blank to keep` : 'Meta access token'}
+            style={input} disabled={clearMetaToken}
+          />
+          {value?.meta?.tokenSet && (
+            <label style={clearRow}><input type="checkbox" checked={clearMetaToken} onChange={(e) => setClearMetaToken(e.target.checked)} /> Remove this token</label>
+          )}
+          <Lbl>Ad account ID</Lbl>
+          <input value={metaAdAccount} onChange={(e) => setMetaAdAccount(e.target.value)} placeholder="act_1234567890" style={input} autoComplete="off" />
+          <Lbl>Business ID <span style={{ textTransform: 'none', fontWeight: 400 }}>· optional</span></Lbl>
+          <input value={metaBusiness} onChange={(e) => setMetaBusiness(e.target.value)} placeholder="Meta Business Manager ID" style={input} autoComplete="off" />
+          {value?.meta?.tokenSet && value?.meta?.adAccountId && <div style={{ ...note, color: 'var(--success, #10b981)', marginTop: 8 }}>✓ Connected — sync segments from Engage → Segments.</div>}
+        </Section>
+      )}
 
       {/* Resend (email) — platform-level only */}
       {showResend && (

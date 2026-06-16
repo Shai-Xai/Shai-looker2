@@ -85,6 +85,7 @@ export default function ClientIntegrationsPage() {
               <IntegrationsForm
                 value={activeItem}
                 lookerActive={false}
+                showMeta
                 onSave={async (p) => {
                   const v = await api.saveMyIntegrations(activeItem.entityId, p);
                   setItems((arr) => arr.map((x) => (x.entityId === activeItem.entityId ? { ...x, ...v } : x)));

@@ -59,6 +59,9 @@ auth.seedAdmin();
 mailer.init({ db });
 // SMS (Clickatell One API) — second channel; no-ops when unconfigured.
 messaging.init({ db });
+// Meta (FB/IG) audience-sync — push a segment to a Custom Audience; per-client.
+const meta = require('./meta');
+meta.init({ db });
 // Web Push — installable-app notifications (disposable module, own table +
 // routes under /api/push, kill switch `push_enabled`). Mounted before os so the
 // comms spine can push alongside email.
@@ -1069,6 +1072,11 @@ function applyIntegrationsPatch(body, set) {
   const an = body.anthropic || {};
   if (an.apiKey) set('anthropicApiKey', String(an.apiKey));
   if (an.clearApiKey) set('anthropicApiKey', '');
+  const mt = body.meta || {};
+  if (mt.accessToken) set('metaAccessToken', String(mt.accessToken));
+  if (mt.clearAccessToken) set('metaAccessToken', '');
+  if (mt.adAccountId !== undefined) set('metaAdAccountId', String(mt.adAccountId || ''));
+  if (mt.businessId !== undefined) set('metaBusinessId', String(mt.businessId || ''));
 }
 function adminIntegrationsView() {
   return {
@@ -1104,6 +1112,7 @@ function entityIntegrationsView(entityId) {
   return {
     looker: { baseUrl: i.lookerBaseUrl || '', clientId: i.lookerClientId || '', clientSecretSet: !!i.lookerClientSecret },
     anthropic: { keySet: !!i.anthropicApiKey, keyHint: maskSecret(i.anthropicApiKey) },
+    meta: { tokenSet: !!i.metaAccessToken, tokenHint: maskSecret(i.metaAccessToken), adAccountId: i.metaAdAccountId || '', businessId: i.metaBusinessId || '' },
   };
 }
 
@@ -2548,7 +2557,7 @@ const actionsApi = require('./actions').mount(app, {
 // Segments — reusable live audiences. Reuses the campaign engine's audience
 // resolver (audienceFor) so resolution logic + the org-scope boundary are shared.
 const segmentsApi = require('./segments').mount(app, {
-  db, auth, resolveAudience: actionsApi.audienceFor,
+  db, auth, meta, resolveAudience: actionsApi.audienceFor,
   // Materialise a built-in recipe (e.g. abandoned cart) as a real segment by
   // auto-resolving its audience source from this client's data.
   resolveRecipe: (entityId, key) => {

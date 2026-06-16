@@ -32,6 +32,7 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
   const [busyId, setBusyId] = useState(null);
   const [viewing, setViewing] = useState(null); // { segment, data | null } — people modal
   const [addingKey, setAddingKey] = useState('');
+  const [syncMsg, setSyncMsg] = useState({}); // segmentId -> last Meta-sync status line
 
   const load = () => api.listSegments(entityId).then((r) => setSegments(r.segments || [])).catch(() => setSegments([]));
   // Materialise a built-in recipe (e.g. abandoned cart) as a real, live segment.
@@ -63,6 +64,12 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
   const refresh = (s) => { setBusyId(s.id); api.previewSegment(entityId, s.id).then(load).catch(() => {}).finally(() => setBusyId(null)); };
   const del = (s) => { if (confirm(`Delete segment “${s.name}”?`)) api.deleteSegment(entityId, s.id).then(load); };
   const viewPeople = (s) => { setViewing({ segment: s, data: null }); api.segmentMembers(entityId, s.id).then((d) => setViewing({ segment: s, data: d })).catch((e) => setViewing({ segment: s, data: { error: e.message } })); };
+  const syncMeta = async (s) => {
+    setSyncMsg((m) => ({ ...m, [s.id]: '…syncing to Meta' })); setBusyId(s.id);
+    try { const r = await api.syncSegmentMeta(entityId, s.id); setSyncMsg((m) => ({ ...m, [s.id]: `✓ Synced ${r.pushed} to Meta Custom Audience` })); }
+    catch (e) { setSyncMsg((m) => ({ ...m, [s.id]: `✗ ${e.message}` })); }
+    finally { setBusyId(null); }
+  };
 
   return (
     <div>
@@ -101,9 +108,11 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
                 <div style={{ display: 'flex', gap: 8, flexShrink: 0, flexWrap: 'wrap' }}>
                   <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding }} onClick={() => viewPeople(s)}>👥 List</button>
                   <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding }} onClick={() => refresh(s)} disabled={busyId === s.id}>{busyId === s.id ? '…' : '↻ Refresh'}</button>
+                  <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding }} onClick={() => syncMeta(s)} disabled={busyId === s.id} title="Push this audience to a Meta Custom Audience (hashed match)">◇ Sync to Meta</button>
                   <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding }} onClick={() => setEditing(s)}>Edit</button>
                   <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding, color: 'var(--error,#ef4444)' }} onClick={() => del(s)}>Delete</button>
                 </div>
+                {syncMsg[s.id] && <div style={{ fontSize: 11.5, color: syncMsg[s.id].startsWith('✗') ? 'var(--error,#ef4444)' : 'var(--muted)', flexBasis: '100%', marginTop: isMobile ? 0 : 4 }}>{syncMsg[s.id]}</div>}
               </div>
             );
           })}
