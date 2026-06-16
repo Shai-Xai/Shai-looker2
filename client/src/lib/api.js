@@ -93,11 +93,11 @@ export const api = {
       body: JSON.stringify(def),
     }).then(json),
   deleteDashboard: (id) => fetch(`/api/dashboards/${id}`, { method: 'DELETE' }),
-  importDashboard: (lookerDashboardId, title, folder) =>
+  importDashboard: (lookerDashboardId, title, folder, keepImportedFilters = false) =>
     fetch('/api/dashboards/import', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ lookerDashboardId, title, folder }),
+      body: JSON.stringify({ lookerDashboardId, title, folder, keepImportedFilters }),
     }).then(json),
 
   // LookML metadata

@@ -14,6 +14,7 @@ export default function HomePage() {
   const [importTitle, setImportTitle] = useState('');
   const [importing, setImporting] = useState(false);
   const [importFolderName, setImportFolderName] = useState('');
+  const [importKeepFilters, setImportKeepFilters] = useState(false);
   const [path, setPath] = useState(''); // current folder path; '' = top level
   // Looker-folder import
   const [lookerFolderId, setLookerFolderId] = useState('');
@@ -64,7 +65,7 @@ export default function HomePage() {
     if (!importId.trim()) return;
     setImporting(true);
     try {
-      const d = await api.importDashboard(importId.trim(), importTitle.trim() || undefined, importFolderName.trim() || undefined);
+      const d = await api.importDashboard(importId.trim(), importTitle.trim() || undefined, importFolderName.trim() || undefined, importKeepFilters);
       navigate(`/d/${d.id}/edit`);
     } catch (e) { alert('Import failed: ' + e.message); }
     finally { setImporting(false); }
@@ -138,6 +139,10 @@ export default function HomePage() {
             <input style={inputStyle} placeholder="Folder (optional)" value={importFolderName} onChange={(e) => setImportFolderName(e.target.value)} list="folder-list" />
             <button style={primaryBtn} onClick={handleImport} disabled={importing || !importId.trim()}>{importing ? 'Importing…' : 'Import'}</button>
           </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12, color: 'var(--muted)', marginTop: 10, cursor: 'pointer' }}>
+            <input type="checkbox" checked={importKeepFilters} onChange={(e) => setImportKeepFilters(e.target.checked)} />
+            📌 Keep Looker's default filters (client/user/lock settings won't override them)
+          </label>
           <div style={{ marginTop: 10, fontSize: 12 }}><Link to="/clone" style={{ color: 'var(--muted)' }}>Or clone directly inside Looker →</Link></div>
         </div>
 

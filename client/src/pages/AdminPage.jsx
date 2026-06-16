@@ -628,7 +628,7 @@ function CustomSets({ entity }) {
   const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [cloneId, setCloneId] = useState('');
-  const [imp, setImp] = useState({ lookerDashboardId: '', setId: '', title: '', busy: false, err: '' });
+  const [imp, setImp] = useState({ lookerDashboardId: '', setId: '', title: '', keepImportedFilters: true, busy: false, err: '' });
   const load = () => api.getEntitySets(entity.id).then(setData).catch(() => setData({ sets: [], pool: [], templates: [] }));
   // Wrap: load returns a promise, and useEffect would call it as a cleanup fn.
   useEffect(() => { load(); }, [entity.id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -637,7 +637,7 @@ function CustomSets({ entity }) {
   const doImport = async () => {
     if (!imp.lookerDashboardId.trim()) return;
     setImp((s) => ({ ...s, busy: true, err: '' }));
-    try { await api.importEntityDashboard(entity.id, { lookerDashboardId: imp.lookerDashboardId.trim(), setId: imp.setId || undefined, title: imp.title || undefined }); setImp({ lookerDashboardId: '', setId: '', title: '', busy: false, err: '' }); load(); }
+    try { await api.importEntityDashboard(entity.id, { lookerDashboardId: imp.lookerDashboardId.trim(), setId: imp.setId || undefined, title: imp.title || undefined, keepImportedFilters: imp.keepImportedFilters }); setImp({ lookerDashboardId: '', setId: '', title: '', keepImportedFilters: true, busy: false, err: '' }); load(); }
     catch (e) { setImp((s) => ({ ...s, busy: false, err: e.message })); }
   };
 
@@ -672,6 +672,10 @@ function CustomSets({ entity }) {
           </Field>
           <button style={miniBtn} onClick={doImport} disabled={imp.busy || !imp.lookerDashboardId.trim()}>{imp.busy ? 'Importing…' : 'Import'}</button>
         </div>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12.5, color: 'var(--muted)', marginTop: 10, cursor: 'pointer' }}>
+          <input type="checkbox" checked={imp.keepImportedFilters} onChange={(e) => setImp({ ...imp, keepImportedFilters: e.target.checked })} />
+          📌 Keep Looker's default filters (don't let client/user/lock settings override them)
+        </label>
         {imp.err && <div style={{ color: 'var(--error)', fontSize: 13, marginTop: 6 }}>{imp.err}</div>}
         <div style={hint}>The imported dashboard is private to this client — it's filed under <b>Custom / {entity.name}</b> in your dashboard library. Add it to a custom set, then bundle that set into one of their suites.</div>
         {data.pool.some((d) => d.ownerEntityId === entity.id) && (

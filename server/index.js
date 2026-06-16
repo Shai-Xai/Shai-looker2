@@ -282,6 +282,7 @@ app.post('/api/admin/entities/:id/dashboards/import', auth.requireAdmin, async (
     await looker.resolveElementQueries(source.elements);
     const def = convertDashboard(source);
     if (title) def.title = title;
+    if (req.body?.keepImportedFilters) def.keepImportedFilters = true; // Looker defaults stay authoritative
     // Always filed under the client's own folder so it's findable in the library.
     def.folder = `Custom/${entity.name}`;
     def.ownerEntityId = entityId; // bespoke to this client
@@ -520,6 +521,7 @@ app.post('/api/dashboards/import', auth.requireAdmin, async (req, res) => {
     await looker.resolveElementQueries(source.elements);
     const def = convertDashboard(source);
     if (title) def.title = title;
+    if (req.body?.keepImportedFilters) def.keepImportedFilters = true; // Looker defaults stay authoritative
     // Folder: explicit choice, else the dashboard's Looker folder.
     def.folder = (folder || source.dashboard?.folder?.name || '').trim();
     const created = store.create(def);
@@ -584,7 +586,7 @@ async function collectFolderTree(folderId, maxDepth = 6) {
 // imported and each dashboard is filed under its own Looker (sub)folder name.
 // Sequential — can take a while for big folders.
 app.post('/api/dashboards/import-folder', auth.requireAdmin, async (req, res) => {
-  const { folderId, folder: folderName, includeSubfolders = true } = req.body || {};
+  const { folderId, folder: folderName, includeSubfolders = true, keepImportedFilters = false } = req.body || {};
   if (!folderId) return res.status(400).json({ error: 'folderId is required' });
   try {
     const root = await looker.lookerRequest('GET', `/folders/${encodeURIComponent(folderId)}?fields=id,name,dashboards(id,title)`);
@@ -599,6 +601,7 @@ app.post('/api/dashboards/import-folder', auth.requireAdmin, async (req, res) =>
         const source = await fetchDashboard(String(d.id));
         await looker.resolveElementQueries(source.elements);
         const def = convertDashboard(source);
+        if (keepImportedFilters) def.keepImportedFilters = true; // Looker defaults stay authoritative
         // Nested folder path; the root segment honours the optional name override.
         const path = (d.path || [root.name]).slice();
         path[0] = rootName;
