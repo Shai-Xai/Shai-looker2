@@ -86,6 +86,7 @@ export default function ClientIntegrationsPage() {
                 value={activeItem}
                 lookerActive={false}
                 showMeta
+                showTikTok
                 onSave={async (p) => {
                   const v = await api.saveMyIntegrations(activeItem.entityId, p);
                   setItems((arr) => arr.map((x) => (x.entityId === activeItem.entityId ? { ...x, ...v } : x)));

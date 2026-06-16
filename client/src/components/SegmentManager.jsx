@@ -34,8 +34,9 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
   const [addingKey, setAddingKey] = useState('');
   const [syncMsg, setSyncMsg] = useState({}); // segmentId -> last Meta-sync status line
   const [metaConnected, setMetaConnected] = useState(false);
+  const [tiktokConnected, setTiktokConnected] = useState(false);
 
-  const load = () => api.listSegments(entityId).then((r) => { setSegments(r.segments || []); setMetaConnected(!!r.metaConnected); }).catch(() => setSegments([]));
+  const load = () => api.listSegments(entityId).then((r) => { setSegments(r.segments || []); setMetaConnected(!!r.metaConnected); setTiktokConnected(!!r.tiktokConnected); }).catch(() => setSegments([]));
   // Materialise a built-in recipe (e.g. abandoned cart) as a real, live segment.
   const addRecipe = async (key) => {
     setAddingKey(key);
@@ -68,6 +69,12 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
   const syncMeta = async (s) => {
     setSyncMsg((m) => ({ ...m, [s.id]: '…mirroring to Meta' })); setBusyId(s.id);
     try { const r = await api.syncSegmentMeta(entityId, s.id); setSyncMsg((m) => ({ ...m, [s.id]: `✓ Sent ${r.received ?? r.pushed} to Meta — matching runs on Meta’s side` })); await load(); }
+    catch (e) { setSyncMsg((m) => ({ ...m, [s.id]: `✗ ${e.message}` })); }
+    finally { setBusyId(null); }
+  };
+  const syncTikTok = async (s) => {
+    setSyncMsg((m) => ({ ...m, [s.id]: '…syncing to TikTok' })); setBusyId(s.id);
+    try { const r = await api.syncSegmentTikTok(entityId, s.id); setSyncMsg((m) => ({ ...m, [s.id]: `✓ Sent ${r.received ?? r.pushed} to TikTok — matching runs on TikTok’s side` })); await load(); }
     catch (e) { setSyncMsg((m) => ({ ...m, [s.id]: `✗ ${e.message}` })); }
     finally { setBusyId(null); }
   };
@@ -112,12 +119,18 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
                   <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding }} onClick={() => refresh(s)} disabled={busyId === s.id}>{busyId === s.id ? '…' : '↻ Refresh'}</button>
                   {metaConnected && <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding }} onClick={() => syncMeta(s)} disabled={busyId === s.id} title="Mirror this audience to a Meta Custom Audience (hashed match)">◇ Sync to Meta</button>}
                   {metaConnected && <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding, ...(s.metaAuto ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }} onClick={() => api.setSegmentMetaAuto(entityId, s.id, !s.metaAuto).then(load)} title="Keep the Meta audience mirrored automatically (~daily)">{s.metaAuto ? '◇ Auto: on' : '◇ Auto: off'}</button>}
+                  {tiktokConnected && <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding }} onClick={() => syncTikTok(s)} disabled={busyId === s.id} title="Push this audience to a TikTok Custom Audience (hashed match)">♪ Sync to TikTok</button>}
                   <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding }} onClick={() => setEditing(s)}>Edit</button>
                   <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding, color: 'var(--error,#ef4444)' }} onClick={() => del(s)}>Delete</button>
                 </div>
                 {syncMsg[s.id]
                   ? <div style={{ fontSize: 11.5, color: syncMsg[s.id].startsWith('✗') ? 'var(--error,#ef4444)' : 'var(--muted)', flexBasis: '100%', marginTop: isMobile ? 0 : 4 }}>{syncMsg[s.id]}</div>
-                  : s.metaSync && <div style={{ fontSize: 11.5, color: s.metaSync.status === 'error' ? 'var(--error,#ef4444)' : 'var(--muted)', flexBasis: '100%', marginTop: isMobile ? 0 : 4 }}>◇ Meta: {s.metaSync.status === 'error' ? `last sync failed — ${s.metaSync.error}` : `${s.metaSync.received} mirrored · ${fmtWhen(s.metaSync.at)}`}</div>}
+                  : (s.metaSync || s.tiktokSync) && (
+                    <div style={{ flexBasis: '100%', marginTop: isMobile ? 0 : 4, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      {s.metaSync && <div style={{ fontSize: 11.5, color: s.metaSync.status === 'error' ? 'var(--error,#ef4444)' : 'var(--muted)' }}>◇ Meta: {s.metaSync.status === 'error' ? `last sync failed — ${s.metaSync.error}` : `${s.metaSync.received} mirrored · ${fmtWhen(s.metaSync.at)}`}</div>}
+                      {s.tiktokSync && <div style={{ fontSize: 11.5, color: s.tiktokSync.status === 'error' ? 'var(--error,#ef4444)' : 'var(--muted)' }}>♪ TikTok: {s.tiktokSync.status === 'error' ? `last sync failed — ${s.tiktokSync.error}` : `${s.tiktokSync.received} sent · ${fmtWhen(s.tiktokSync.at)}`}</div>}
+                    </div>
+                  )}
               </div>
             );
           })}

@@ -62,6 +62,9 @@ messaging.init({ db });
 // Meta (FB/IG) audience-sync — push a segment to a Custom Audience; per-client.
 const meta = require('./meta');
 meta.init({ db });
+// TikTok audience-sync — same pattern as Meta; per-client pasted token.
+const tiktok = require('./tiktok');
+tiktok.init({ db });
 // Web Push — installable-app notifications (disposable module, own table +
 // routes under /api/push, kill switch `push_enabled`). Mounted before os so the
 // comms spine can push alongside email.
@@ -1077,6 +1080,10 @@ function applyIntegrationsPatch(body, set) {
   if (mt.clearAccessToken) set('metaAccessToken', '');
   if (mt.adAccountId !== undefined) set('metaAdAccountId', String(mt.adAccountId || ''));
   if (mt.businessId !== undefined) set('metaBusinessId', String(mt.businessId || ''));
+  const tt = body.tiktok || {};
+  if (tt.accessToken) set('tiktokAccessToken', String(tt.accessToken));
+  if (tt.clearAccessToken) set('tiktokAccessToken', '');
+  if (tt.advertiserId !== undefined) set('tiktokAdvertiserId', String(tt.advertiserId || ''));
 }
 function adminIntegrationsView() {
   return {
@@ -1113,6 +1120,7 @@ function entityIntegrationsView(entityId) {
     looker: { baseUrl: i.lookerBaseUrl || '', clientId: i.lookerClientId || '', clientSecretSet: !!i.lookerClientSecret },
     anthropic: { keySet: !!i.anthropicApiKey, keyHint: maskSecret(i.anthropicApiKey) },
     meta: { tokenSet: !!i.metaAccessToken, tokenHint: maskSecret(i.metaAccessToken), adAccountId: i.metaAdAccountId || '', businessId: i.metaBusinessId || '' },
+    tiktok: { tokenSet: !!i.tiktokAccessToken, tokenHint: maskSecret(i.tiktokAccessToken), advertiserId: i.tiktokAdvertiserId || '' },
   };
 }
 
@@ -2564,7 +2572,7 @@ const actionsApi = require('./actions').mount(app, {
 // Segments — reusable live audiences. Reuses the campaign engine's audience
 // resolver (audienceFor) so resolution logic + the org-scope boundary are shared.
 const segmentsApi = require('./segments').mount(app, {
-  db, auth, meta, resolveAudience: actionsApi.audienceFor,
+  db, auth, meta, tiktok, resolveAudience: actionsApi.audienceFor,
   // Materialise a built-in recipe (e.g. abandoned cart) as a real segment by
   // auto-resolving its audience source from this client's data.
   resolveRecipe: (entityId, key) => {

@@ -4,7 +4,7 @@ import { useState } from 'react';
 // write-only: the form only knows whether a value is set (value.*.keySet /
 // clientSecretSet); typing a new value changes it, blank leaves it unchanged.
 // `onSave(payload)` receives only the fields that changed.
-export default function IntegrationsForm({ value, onSave, showLooker = true, lookerActive = true, showResend = false, showInventive = false, showMeta = false, clients = [], onTestEmail, collapsible = false }) {
+export default function IntegrationsForm({ value, onSave, showLooker = true, lookerActive = true, showResend = false, showInventive = false, showMeta = false, showTikTok = false, clients = [], onTestEmail, collapsible = false }) {
   const [baseUrl, setBaseUrl] = useState(value?.looker?.baseUrl || '');
   const [clientId, setClientId] = useState(value?.looker?.clientId || '');
   const [clientSecret, setClientSecret] = useState('');
@@ -23,6 +23,9 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
   const [clearMetaToken, setClearMetaToken] = useState(false);
   const [metaAdAccount, setMetaAdAccount] = useState(value?.meta?.adAccountId || '');
   const [metaBusiness, setMetaBusiness] = useState(value?.meta?.businessId || '');
+  const [ttToken, setTtToken] = useState('');
+  const [clearTtToken, setClearTtToken] = useState(false);
+  const [ttAdvertiser, setTtAdvertiser] = useState(value?.tiktok?.advertiserId || '');
   const [testState, setTestState] = useState('');
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -63,11 +66,17 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
         if (metaToken) payload.meta.accessToken = metaToken;
         if (clearMetaToken) payload.meta.clearAccessToken = true;
       }
+      if (showTikTok) {
+        payload.tiktok = { advertiserId: ttAdvertiser };
+        if (ttToken) payload.tiktok.accessToken = ttToken;
+        if (clearTtToken) payload.tiktok.clearAccessToken = true;
+      }
       await onSave(payload);
       setClientSecret(''); setAnthropicKey(''); setClearSecret(false); setClearKey(false);
       setResendKey(''); setClearResendKey(false);
       setInvKey(''); setInvToken(''); setClearInvKey(false); setClearInvToken(false);
       setMetaToken(''); setClearMetaToken(false);
+      setTtToken(''); setClearTtToken(false);
       setSaved(true); setTimeout(() => setSaved(false), 1600);
     } catch (e) { alert('Save failed: ' + e.message); }
     finally { setBusy(false); }
@@ -115,6 +124,28 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
           <Lbl>Business ID <span style={{ textTransform: 'none', fontWeight: 400 }}>· optional</span></Lbl>
           <input value={metaBusiness} onChange={(e) => setMetaBusiness(e.target.value)} placeholder="Meta Business Manager ID" style={input} autoComplete="off" />
           {value?.meta?.tokenSet && value?.meta?.adAccountId && <div style={{ ...note, color: 'var(--success, #10b981)', marginTop: 8 }}>✓ Connected — sync segments from Engage → Segments.</div>}
+        </Section>
+      )}
+
+      {/* TikTok — per-client audience sync */}
+      {showTikTok && (
+        <Section title="♪ TikTok" collapsible={collapsible}>
+          <div style={note}>
+            Push a <b>segment</b> to a TikTok <b>Custom Audience</b> for ad targeting. Emails/phones are hashed before they leave Pulse. Use an access token with audience (DMP) scope and the advertiser ID the audience should live under.
+          </div>
+          <Lbl>Access token</Lbl>
+          <input
+            type="password" autoComplete="off"
+            value={ttToken} onChange={(e) => setTtToken(e.target.value)}
+            placeholder={value?.tiktok?.tokenSet ? `Set (${value.tiktok.tokenHint || '••••'}) — leave blank to keep` : 'TikTok access token'}
+            style={input} disabled={clearTtToken}
+          />
+          {value?.tiktok?.tokenSet && (
+            <label style={clearRow}><input type="checkbox" checked={clearTtToken} onChange={(e) => setClearTtToken(e.target.checked)} /> Remove this token</label>
+          )}
+          <Lbl>Advertiser ID</Lbl>
+          <input value={ttAdvertiser} onChange={(e) => setTtAdvertiser(e.target.value)} placeholder="TikTok advertiser ID" style={input} autoComplete="off" />
+          {value?.tiktok?.tokenSet && value?.tiktok?.advertiserId && <div style={{ ...note, color: 'var(--success, #10b981)', marginTop: 8 }}>✓ Connected — sync segments from Engage → Segments.</div>}
         </Section>
       )}
 

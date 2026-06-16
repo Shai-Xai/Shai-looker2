@@ -12,7 +12,7 @@
 // Mount: `require('./segments').mount(app, { db, auth, resolveAudience })`.
 const crypto = require('crypto');
 
-function mount(app, { db, auth, resolveAudience, resolveRecipe, meta }) {
+function mount(app, { db, auth, resolveAudience, resolveRecipe, meta, tiktok }) {
   const sql = db.db;
   const now = () => new Date().toISOString();
   const uuid = () => crypto.randomUUID();
@@ -104,7 +104,15 @@ function mount(app, { db, auth, resolveAudience, resolveRecipe, meta }) {
   app.get('/api/segments/:entityId', auth.requireAuth, auth.requirePermission('campaigns.view'), (req, res) => {
     if (!guard(req, res, req.params.entityId)) return;
     const rows = sql.prepare('SELECT * FROM segments WHERE entity_id=? ORDER BY updated_at DESC LIMIT 200').all(req.params.entityId);
-    res.json({ segments: rows.map((r) => ({ ...rowToSeg(r), metaSync: meta?.lastSyncFor?.(req.params.entityId, r.id) || null })), metaConnected: !!meta?.isConfigured?.(req.params.entityId) });
+    res.json({
+      segments: rows.map((r) => ({
+        ...rowToSeg(r),
+        metaSync: meta?.lastSyncFor?.(req.params.entityId, r.id) || null,
+        tiktokSync: tiktok?.lastSyncFor?.(req.params.entityId, r.id) || null,
+      })),
+      metaConnected: !!meta?.isConfigured?.(req.params.entityId),
+      tiktokConnected: !!tiktok?.isConfigured?.(req.params.entityId),
+    });
   });
 
   app.post('/api/segments/:entityId', auth.requireAuth, auth.requirePermission('campaigns.approve'), (req, res) => {
@@ -202,6 +210,23 @@ function mount(app, { db, auth, resolveAudience, resolveRecipe, meta }) {
       const out = await meta.syncAudience({ entityId: req.params.entityId, segmentId: seg.id, name: seg.name, members, mode, by: req.user.email });
       if (!out.ok) return res.status(502).json({ error: out.error || 'Meta sync failed' });
       res.json({ ok: true, audienceId: out.audienceId, pushed: out.pushed, received: out.received, mode: out.mode });
+    } catch (e) { res.status(400).json({ error: e.message }); }
+  });
+
+  // Audience-sync: push a segment to a TikTok Custom Audience (hashed match,
+  // append-only for v1). Same org-scope guarantee as the Meta route.
+  app.post('/api/segments/:entityId/:id/sync/tiktok', auth.requireAuth, auth.requirePermission('campaigns.approve'), async (req, res) => {
+    if (!guard(req, res, req.params.entityId)) return;
+    if (!tiktok?.isConfigured?.(req.params.entityId)) return res.status(400).json({ error: 'TikTok isn’t connected for this client — add a TikTok access token + advertiser ID in Integrations.' });
+    const seg = getSeg(req.params.id);
+    if (!seg || seg.entity_id !== req.params.entityId) return res.status(404).json({ error: 'Not found' });
+    try {
+      const r = await resolveDefinition(req.params.entityId, JSON.parse(seg.definition || '{}'), req.user);
+      const members = (r.list || []).map((m) => ({ email: m.email, phone: m.phone }));
+      if (!members.length) return res.status(400).json({ error: 'This segment resolved to nobody right now.' });
+      const out = await tiktok.syncAudience({ entityId: req.params.entityId, segmentId: seg.id, name: seg.name, members, by: req.user.email });
+      if (!out.ok) return res.status(502).json({ error: out.error || 'TikTok sync failed' });
+      res.json({ ok: true, audienceId: out.audienceId, pushed: out.pushed, received: out.received });
     } catch (e) { res.status(400).json({ error: e.message }); }
   });
 

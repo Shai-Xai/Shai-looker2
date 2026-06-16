@@ -1952,7 +1952,7 @@ function ClientIntegrations({ entity }) {
         <button type="button" style={{ padding: '3px 10px', fontSize: 11, fontWeight: 600, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 980, cursor: 'pointer' }} onClick={() => { navigator.clipboard?.writeText(entity.id).catch(() => {}); }} title="Copy — use as the Inventive workspace externalRefId">Copy</button>
         <span>· Inventive workspace ref / integration ID</span>
       </div>
-      <IntegrationsForm value={value} lookerActive={false} showMeta onSave={async (p) => setValue(await api.saveEntityIntegrations(entity.id, p))} />
+      <IntegrationsForm value={value} lookerActive={false} showMeta showTikTok onSave={async (p) => setValue(await api.saveEntityIntegrations(entity.id, p))} />
     </div>
   );
 }
