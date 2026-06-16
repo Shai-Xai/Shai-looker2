@@ -261,6 +261,10 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     if (!ecols.includes('phone')) sql.exec("ALTER TABLE action_enrollments ADD COLUMN phone TEXT NOT NULL DEFAULT ''"); // for SMS sequences
     const ccols = sql.prepare('PRAGMA table_info(action_clicks)').all().map((c) => c.name);
     if (!ccols.includes('channel')) sql.exec("ALTER TABLE action_clicks ADD COLUMN channel TEXT NOT NULL DEFAULT ''"); // email | sms | '' (legacy)
+    // Drip step index the open/click belongs to (-1 = once-off/legacy/unknown).
+    if (!ccols.includes('step')) sql.exec('ALTER TABLE action_clicks ADD COLUMN step INTEGER NOT NULL DEFAULT -1');
+    const ocols = sql.prepare('PRAGMA table_info(action_opens)').all().map((c) => c.name);
+    if (!ocols.includes('step')) sql.exec('ALTER TABLE action_opens ADD COLUMN step INTEGER NOT NULL DEFAULT -1');
   } catch (e) { console.error('[actions] migration skipped:', e.message); }
 
   // ── helpers ──
@@ -715,13 +719,13 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     });
   }
 
-  function renderFor(action, recipient, step) {
+  function renderFor(action, recipient, step, stepIndex = 0) {
     const cfg = action.config;
     const realSend = action.id && !['preview', 'test'].includes(action.id);
     // Open-tracking pixel — only on real sends (never preview/test). Uses the
     // same per-recipient token as clicks so opens attribute to a person.
     const openPixel = (rtok) => (realSend && cfg.clickToken
-      ? `<img src="${mailer.baseUrl()}/o/${cfg.clickToken}/${rtok}" width="1" height="1" alt="" style="display:none;max-height:0;max-width:0;overflow:hidden;" />`
+      ? `<img src="${mailer.baseUrl()}/o/${cfg.clickToken}/${rtok}/${stepIndex}" width="1" height="1" alt="" style="display:none;max-height:0;max-width:0;overflow:hidden;" />`
       : '');
     const withPixel = (html, rtok) => { const p = openPixel(rtok); if (!p) return html; return /<\/body>/i.test(html) ? html.replace(/<\/body>/i, `${p}</body>`) : html + p; };
     // A drip step overrides the campaign-level copy (custom-HTML mode is
@@ -738,7 +742,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     // link (?promo=CODE); a 'discount' code is entered manually at checkout.
     const promo = promoForRecipient(action, recipient.email);
     const appendPromo = promo && promo.type === 'promo' && promo.appendToLink && promo.code;
-    const baseClick = cfg.ctaUrl ? `${mailer.baseUrl()}/c/${cfg.clickToken}/${rtok}/e` : ''; // /e = email channel
+    const baseClick = cfg.ctaUrl ? `${mailer.baseUrl()}/c/${cfg.clickToken}/${rtok}/e/${stepIndex}` : ''; // /e = email channel, then step index
     const ctaUrl = baseClick && appendPromo ? `${baseClick}${baseClick.includes('?') ? '&' : '?'}promo=${encodeURIComponent(promo.code)}` : baseClick;
     const unsubUrl = `${mailer.baseUrl()}/u/${rtok}`;
     const tok = (s) => fillAttrs(String(s || '')
@@ -773,7 +777,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
   // Render an SMS for a recipient: plain text with tokens, a tracked short link
   // (clicks attributed like email), the promo code inline, and a link-based
   // opt-out (alphanumeric sender IDs can't receive STOP replies).
-  function renderSmsFor(action, recipient, step) {
+  function renderSmsFor(action, recipient, step, stepIndex = 0) {
     const cfg = action.config;
     // 'both'-channel campaigns have a separate SMS copy; fall back to body for
     // SMS-only campaigns (which edit body directly).
@@ -782,7 +786,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     const rtok = unsubToken(action.entityId, recipient.email || recipient.phone || '');
     const promo = promoForRecipient(action, recipient.email || '');
     const appendPromo = promo && promo.type === 'promo' && promo.appendToLink && promo.code;
-    const base = cfg.ctaUrl ? `${mailer.baseUrl()}/c/${cfg.clickToken}/${rtok}/s` : ''; // /s = sms channel
+    const base = cfg.ctaUrl ? `${mailer.baseUrl()}/c/${cfg.clickToken}/${rtok}/s/${stepIndex}` : ''; // /s = sms channel, then step index
     const link = base && appendPromo ? `${base}${base.includes('?') ? '&' : '?'}promo=${encodeURIComponent(promo.code)}` : base;
     const tok = (s) => fillAttrs(String(s || '')
       .replace(/\{\{\s*name\s*\}\}/gi, firstName || 'there')
@@ -1424,9 +1428,15 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     const steps = a.config.steps || [];
     const byStatus = { active: 0, converted: 0, unsubscribed: 0, done: 0 };
     for (const r of rows) byStatus[r.status] = (byStatus[r.status] || 0) + 1;
+    // Per-step engagement: distinct people who opened / clicked each step's message.
+    const openByStep = {}; const clickByStep = {};
+    try { for (const o of sql.prepare("SELECT step, COUNT(DISTINCT email) n FROM action_opens WHERE action_id=? AND email!='' GROUP BY step").all(a.id)) openByStep[o.step] = o.n; } catch { /* legacy */ }
+    try { for (const c of sql.prepare("SELECT step, COUNT(DISTINCT email) n FROM action_clicks WHERE action_id=? AND email!='' GROUP BY step").all(a.id)) clickByStep[c.step] = c.n; } catch { /* legacy */ }
     const stepStats = steps.map((s, k) => ({
       index: k, delayHours: s.delayHours, subject: s.subject,
       received: rows.filter((r) => r.step_index > k).length,        // advanced past step k = got it
+      opened: openByStep[k] || 0,
+      clicked: clickByStep[k] || 0,
       converted: rows.filter((r) => r.status === 'converted' && r.step_index === k + 1).length, // converted right after step k
     }));
     res.json({ enrolled: rows.length, ...byStatus, steps: stepStats });
@@ -1634,8 +1644,8 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
           const wantsEmail = a.config.channel !== 'sms';
           const wantsSms = a.config.channel !== 'email';
           let ok = false;
-          if (wantsEmail && e.email && consent.emailOk !== false) { const { html, text, subject } = renderFor(a, rcpt, step); const r = await mailer.send({ to: e.email, subject: subject || a.title || 'A reminder from your event', html, text, fromName: branding.senderName, kind: 'campaign', entity: a.entityId }); if (r.ok) { ok = true; emailSent += 1; } }
-          if (wantsSms && e.phone && consent.smsOk !== false) { const r = await messaging.sendSms({ to: e.phone, text: renderSmsFor(a, rcpt, step) }); if (r.ok) { ok = true; smsSent += 1; } }
+          if (wantsEmail && e.email && consent.emailOk !== false) { const { html, text, subject } = renderFor(a, rcpt, step, e.step_index); const r = await mailer.send({ to: e.email, subject: subject || a.title || 'A reminder from your event', html, text, fromName: branding.senderName, kind: 'campaign', entity: a.entityId }); if (r.ok) { ok = true; emailSent += 1; } }
+          if (wantsSms && e.phone && consent.smsOk !== false) { const r = await messaging.sendSms({ to: e.phone, text: renderSmsFor(a, rcpt, step, e.step_index) }); if (r.ok) { ok = true; smsSent += 1; } }
           if (ok) sent += 1;
         } catch (err) { console.error('[actions] sequence send failed', a.id, e.email, err.message); }
         // Advance to the next step (or finish).
@@ -1690,13 +1700,14 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
   // Open-tracking pixel — records an email open (attributed when the recipient
   // token is present), then returns a 1x1 transparent GIF. Never blocks/errors.
   const OPEN_PIXEL = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
-  app.get('/o/:token/:rtok?', (req, res) => {
+  app.get('/o/:token/:rtok?/:step?', (req, res) => {
     try {
       const r = sql.prepare(`SELECT * FROM actions WHERE json_extract(config,'$.clickToken')=?`).get(req.params.token);
       if (r) {
         const a = rowToAction(r);
         const who = req.params.rtok ? parseUnsubToken(req.params.rtok) : null;
-        sql.prepare('INSERT INTO action_opens (action_id, email, at) VALUES (?,?,?)').run(a.id, who?.e ? String(who.e).toLowerCase() : '', now());
+        const step = Number.isInteger(Number(req.params.step)) ? Number(req.params.step) : -1;
+        sql.prepare('INSERT INTO action_opens (action_id, email, at, step) VALUES (?,?,?,?)').run(a.id, who?.e ? String(who.e).toLowerCase() : '', now(), step);
         saveResults(a.id, { ...a.results, opens: (a.results.opens || 0) + 1, lastOpenAt: now() });
       }
     } catch { /* never block the pixel */ }
@@ -1705,15 +1716,16 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     res.end(OPEN_PIXEL);
   });
 
-  app.get('/c/:token/:rtok?/:ch?', (req, res) => {
+  app.get('/c/:token/:rtok?/:ch?/:step?', (req, res) => {
     const r = sql.prepare(`SELECT * FROM actions WHERE json_extract(config,'$.clickToken')=?`).get(req.params.token);
     if (!r) return res.redirect('/');
     const a = rowToAction(r);
     // Attribute the click when the link carries a valid recipient token, and the
-    // channel from the link suffix (/e = email, /s = sms).
+    // channel from the link suffix (/e = email, /s = sms), and the drip step index.
     const who = req.params.rtok ? parseUnsubToken(req.params.rtok) : null;
     const channel = req.params.ch === 'e' ? 'email' : req.params.ch === 's' ? 'sms' : '';
-    try { sql.prepare('INSERT INTO action_clicks (action_id, email, at, channel) VALUES (?,?,?,?)').run(a.id, who?.e ? String(who.e).toLowerCase() : '', now(), channel); } catch { /* never block the redirect */ }
+    const step = Number.isInteger(Number(req.params.step)) ? Number(req.params.step) : -1;
+    try { sql.prepare('INSERT INTO action_clicks (action_id, email, at, channel, step) VALUES (?,?,?,?,?)').run(a.id, who?.e ? String(who.e).toLowerCase() : '', now(), channel, step); } catch { /* never block the redirect */ }
     // Bump total + per-channel counters in results so rollups (list/master) get
     // per-channel clicks cheaply without re-querying action_clicks.
     const results = { ...a.results, clicks: (a.results.clicks || 0) + 1, lastClickAt: now() };

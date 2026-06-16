@@ -1112,16 +1112,17 @@ function JourneyReport({ entityId, action, onClose }) {
             <FunnelBar label="Enrolled" sub="entered the journey" value={d.enrolled} total={d.enrolled} accent="var(--brand)" />
             {d.steps.map((s) => (
               <FunnelBar key={s.index} label={`Step ${s.index + 1} · +${unit(s.delayHours)}`} sub={s.subject || ''} value={s.received} total={d.enrolled || 1}
+                engage={[s.opened ? `📨 ${s.opened} opened` : '', s.clicked ? `👆 ${s.clicked} clicked` : ''].filter(Boolean).join(' · ')}
                 note={s.converted ? `${s.converted} converted after this step` : ''} />
             ))}
           </div>
-          <div style={hintS}>“Received” counts everyone who advanced past that step. People leave the journey the moment they buy (converted) or unsubscribe.</div>
+          <div style={hintS}>“Received” counts everyone who advanced past that step; opened/clicked are tracked per step. People leave the journey the moment they buy (converted) or unsubscribe.</div>
         </>
       )}
     </div>
   );
 }
-function FunnelBar({ label, sub, value, total, accent, note }) {
+function FunnelBar({ label, sub, value, total, accent, note, engage }) {
   const pct = total > 0 ? Math.round((value / total) * 100) : 0;
   return (
     <div>
@@ -1132,6 +1133,7 @@ function FunnelBar({ label, sub, value, total, accent, note }) {
       <div style={{ height: 10, borderRadius: 999, background: 'rgba(128,128,128,0.15)', overflow: 'hidden' }}>
         <div style={{ height: '100%', width: `${pct}%`, background: accent || '#7c3aed', borderRadius: 999, transition: 'width .2s' }} />
       </div>
+      {engage && <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 3 }}>{engage}</div>}
       {note && <div style={{ fontSize: 11, color: 'var(--success,#10b981)', marginTop: 3 }}>✓ {note}</div>}
     </div>
   );
