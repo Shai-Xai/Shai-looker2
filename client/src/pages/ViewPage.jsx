@@ -51,7 +51,7 @@ export default function ViewPage() {
     // "Keep imported filters": the dashboard's own (Looker-imported) default_value
     // is authoritative — ignore suite locks, the client default AND saved user
     // views. Only live in-session changes (and the days-to-go sync) apply on top.
-    if (data?.keepImportedFilters) {
+    if (data?.keepImportedFilters || data?.folderKeepImported) {
       const vals = {};
       for (const f of data.filters || []) vals[f.name] = f.default_value || '';
       return { vals, lockedMap: {} };
@@ -163,7 +163,7 @@ export default function ViewPage() {
   };
   // On a "keep imported filters" dashboard, saved views/client defaults are
   // ignored on load — so don't offer to save them (it would silently do nothing).
-  const keepImported = !!def?.keepImportedFilters;
+  const keepImported = !!(def?.keepImportedFilters || def?.folderKeepImported);
   const viewActions = { onSave: keepImported ? null : saveMyView, onReset: resetMyView, hasSaved: hasUserView && !keepImported, canSetDefault: isAdmin && !keepImported, onSetDefault: setClientDefault, status: viewStatus, note: keepImported ? '🔒 Filters follow this dashboard’s imported defaults.' : '' };
 
   // View tracking (fire-and-forget) — powers home-page personalisation.

@@ -246,7 +246,12 @@ export default function EditorPage() {
         <button style={btn} onClick={() => setShowFilters(true)}>Filters ({def.filters?.length || 0})</button>
         <button style={btn} onClick={() => setShowAiContext(true)}>✨ AI context</button>
         <button style={btn} onClick={() => setShowDaysSync(true)}>⏳ Days-to-go{def.daysBeforeSync?.mode && def.daysBeforeSync.mode !== 'off' ? ' ●' : ''}</button>
-        <button style={btn} onClick={() => mutate((d) => ({ ...d, keepImportedFilters: !d.keepImportedFilters }))} title="Use this dashboard's imported (Looker) default filters as authoritative — client defaults, saved user views and suite locks won't override them. Live in-session changes still apply.">📌 Imported filters{def.keepImportedFilters ? ' ●' : ''}</button>
+        <button
+          style={{ ...btn, ...(def.keepImportedFilters ? { background: 'var(--success,#10b981)', borderColor: 'var(--success,#10b981)', color: '#fff' } : null) }}
+          onClick={() => mutate((d) => ({ ...d, keepImportedFilters: !d.keepImportedFilters }))}
+          title={`Use this dashboard's imported (Looker) default filters as authoritative — client defaults, saved user views and suite locks won't override them. Live in-session changes still apply.${def.folderKeepImported ? '\n\nNote: its folder also pins imported filters, so this stays ON for viewers regardless.' : ''}`}>
+          📌 Imported filters: {def.keepImportedFilters ? 'On' : 'Off'}{def.folderKeepImported && !def.keepImportedFilters ? ' (on via folder)' : ''}
+        </button>
         <div style={{ flex: 1 }} />
         <span style={{ fontSize: 12, color: dirty ? 'var(--warn)' : 'var(--muted)' }}>
           {dirty ? '● Unsaved changes' : '✓ Saved'}

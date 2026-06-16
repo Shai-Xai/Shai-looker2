@@ -22,12 +22,15 @@ export default function HomePage() {
   const [folderBusy, setFolderBusy] = useState(false);
   const [includeSubfolders, setIncludeSubfolders] = useState(true);
   const [showFolderModal, setShowFolderModal] = useState(false);
+  const [folderSettings, setFolderSettings] = useState({}); // { "<path>": { keepImported } } — persistent, cascading
 
   function load() {
     setLoading(true);
     api.listDashboards().then(setDashboards).catch((e) => setError(e.message)).finally(() => setLoading(false));
   }
+  const loadFolderSettings = () => { if (isAdmin) api.getFolderSettings().then(setFolderSettings).catch(() => {}); };
   useEffect(() => { load(); }, []);
+  useEffect(() => { loadFolderSettings(); }, [isAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Nested-folder navigation. Folders are stored as "/"-separated paths on each
   // dashboard (e.g. "Festivals/MTN Bushfire/Cashless").
@@ -46,11 +49,11 @@ export default function HomePage() {
   const folderCountOf = (fp) => dashboards.filter((d) => { const f = d.folder || ''; return f === fp || f.startsWith(fp + '/'); }).length;
   const segs = path ? path.split('/') : [];
 
-  // Apply (or clear) "📌 Imported filters" on every dashboard in the current folder.
-  async function applyFolderKeepImported(on) {
-    const n = folderCountOf(path);
-    if (!confirm(`${on ? 'Pin' : 'Unpin'} imported filters on all ${n} dashboard${n === 1 ? '' : 's'} in “${path}” (including subfolders)?`)) return;
-    try { const r = await api.setFolderKeepImported(path, on); await load(); alert(`${on ? 'Pinned' : 'Unpinned'} imported filters on ${r.updated} dashboard${r.updated === 1 ? '' : 's'}.`); }
+  // Persistent per-folder "📌 Imported filters": one toggle that cascades to every
+  // dashboard in this folder (+ subfolders), including ones added later.
+  const folderKeepOn = !!folderSettings[path]?.keepImported;
+  async function toggleFolderKeepImported() {
+    try { await api.setFolderKeepImported(path, !folderKeepOn); loadFolderSettings(); }
     catch (e) { alert('Could not update folder: ' + (e.message || e)); }
   }
 
@@ -186,8 +189,12 @@ export default function HomePage() {
         {isAdmin && path && (
           <>
             <button style={{ ...miniBtnOutline, fontSize: 12 }} onClick={(e) => renameFolder(path, e)} title="Rename this folder">✎ Rename</button>
-            <button style={{ ...miniBtnOutline, fontSize: 12 }} onClick={() => applyFolderKeepImported(true)} title="Make the imported (Looker) default filters authoritative on EVERY dashboard in this folder (incl. subfolders) — client defaults, saved views & suite locks won't override them.">📌 Pin imported filters</button>
-            <button style={{ ...miniBtnOutline, fontSize: 12 }} onClick={() => applyFolderKeepImported(false)} title="Clear 'imported filters' on every dashboard in this folder (incl. subfolders) — normal filter behaviour resumes.">📌 Unpin (folder)</button>
+            <button
+              style={{ ...miniBtnOutline, fontSize: 12, ...(folderKeepOn ? { background: 'var(--success,#10b981)', borderColor: 'var(--success,#10b981)', color: '#fff' } : null) }}
+              onClick={toggleFolderKeepImported}
+              title="When ON, the imported (Looker) default filters are authoritative for EVERY dashboard in this folder (incl. subfolders, and ones added later) — client defaults, saved views & suite locks won't override them.">
+              📌 Imported filters: {folderKeepOn ? 'On' : 'Off'}
+            </button>
             <button style={{ ...miniBtnOutline, fontSize: 12, color: 'var(--error)' }} onClick={(e) => deleteFolderAction(path, e)} title="Delete this folder">🗑 Delete</button>
           </>
         )}

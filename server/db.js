@@ -140,6 +140,10 @@ addColumn('entities', 'all_organisers', "INTEGER NOT NULL DEFAULT 0"); // intern
 // Per-user notification channel preferences (1 = receive on that channel).
 addColumn('users', 'notify_email', 'INTEGER NOT NULL DEFAULT 1');
 addColumn('users', 'notify_push', 'INTEGER NOT NULL DEFAULT 1');
+// Persistent per-folder settings for the dashboard library. Folders are "/"-path
+// strings on each dashboard (not records), so a setting keyed by path cascades to
+// every dashboard in that folder + subfolders — and to ones added later.
+db.exec("CREATE TABLE IF NOT EXISTS folder_settings (folder TEXT PRIMARY KEY, keep_imported INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL DEFAULT '')");
 // Per-(user, client) role — the client-side role lives on the MEMBERSHIP, so the
 // same person can hold different roles at different clients. Existing rows
 // become 'owner' (full client access) so nothing loses access on upgrade.
@@ -634,8 +638,26 @@ function updateDashboard(id, patch) {
   const cur = getDashboard(id);
   if (!cur) return null;
   const merged = { ...cur, ...patch, id: cur.id, createdAt: cur.createdAt, updatedAt: now() };
+  delete merged.folderKeepImported; // transient view-time hint — never persist it onto the dashboard
   db.prepare('UPDATE dashboards SET title=?, def=?, updated_at=? WHERE id=?').run(merged.title, JSON.stringify(stripMeta(merged)), merged.updatedAt, id);
   return merged;
+}
+
+// ─── Folder settings (persistent, cascade to all dashboards in the folder) ──────
+function setFolderKeepImported(folder, on) {
+  db.prepare("INSERT INTO folder_settings (folder, keep_imported, updated_at) VALUES (?,?,?) ON CONFLICT(folder) DO UPDATE SET keep_imported=excluded.keep_imported, updated_at=excluded.updated_at")
+    .run(String(folder || ''), on ? 1 : 0, now());
+}
+function folderSettingsMap() {
+  const m = {};
+  for (const r of db.prepare('SELECT folder, keep_imported FROM folder_settings').all()) m[r.folder] = { keepImported: !!r.keep_imported };
+  return m;
+}
+// Does this dashboard's folder path (or any ancestor folder) pin imported filters?
+function folderKeepImportedFor(path) {
+  const p = String(path || '');
+  const rows = db.prepare('SELECT folder FROM folder_settings WHERE keep_imported=1').all();
+  return rows.some((r) => { const f = r.folder; return f === '' ? p === '' : (p === f || p.startsWith(`${f}/`)); });
 }
 function removeDashboard(id) { return db.prepare('DELETE FROM dashboards WHERE id=?').run(id).changes > 0; }
 
@@ -1045,6 +1067,7 @@ module.exports = {
   listUsers, getUser, getUserByEmail, createUser, updateUser, deleteUser, verifyCredentials, publicUser, setUserEntities, setNotificationPrefs,
   membershipsForUser, roleForMembership, setMembershipRole, removeMembership,
   listDashboards, getDashboard, createDashboard, updateDashboard, removeDashboard, dashboardPoolFor, sharedDashboards,
+  setFolderKeepImported, folderSettingsMap, folderKeepImportedFor,
   // sets (reusable collections)
   listSets, listSetsForEntity, getSet, createSet, cloneSetForEntity, updateSet, deleteSet, setSetDashboards, dashboardsInSet,
   rolesForScope, setContentRoles, contentRolesForEntity, dashboardVisibleToRole,

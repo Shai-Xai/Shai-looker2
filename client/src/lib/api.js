@@ -93,7 +93,8 @@ export const api = {
       body: JSON.stringify(def),
     }).then(json),
   deleteDashboard: (id) => fetch(`/api/dashboards/${id}`, { method: 'DELETE' }),
-  setFolderKeepImported: (folder, on, includeSubfolders = true) => fetch('/api/dashboards/folder/keep-imported', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folder, on, includeSubfolders }) }).then(json),
+  getFolderSettings: () => fetch('/api/dashboards/folder-settings').then(json),
+  setFolderKeepImported: (folder, on) => fetch('/api/dashboards/folder/keep-imported', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folder, on }) }).then(json),
   importDashboard: (lookerDashboardId, title, folder, keepImportedFilters = false) =>
     fetch('/api/dashboards/import', {
       method: 'POST',
