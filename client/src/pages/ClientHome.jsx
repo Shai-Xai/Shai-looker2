@@ -34,15 +34,21 @@ export default function ClientHome() {
 
   useEffect(() => { api.mySuites().then(setSuites).catch(() => {}); }, []);
   useEffect(() => {
+    // Guard against a stale profile's responses landing after the active profile
+    // changed: a multi-profile login (e.g. an admin previewing several clients)
+    // otherwise shows the WRONG client's briefing/snapshot when an older, slower
+    // fetch resolves last. Only the current entity's responses are applied.
+    let alive = true;
     setSnap(null); setBrief(null); setMessages([]);
     // Pre-warm in the background: top dashboards' tiles into the query cache +
     // the briefing (coalesced with our own fetch below), so the first click and
     // briefing of the session are warm. Same hour as the briefing so it hits.
     api.prewarm(previewEntityId, new Date().getHours());
-    api.mySnapshot(previewEntityId).then(setSnap).catch(() => setSnap({ kpis: [], shortcuts: [], settlement: null, lastVisit: null }));
-    api.myBriefing(previewEntityId).then(setBrief).catch(() => setBrief({ available: false }));
-    api.osInbox(previewEntityId).then((r) => setMessages(r.threads || [])).catch(() => {});
-    api.getDismissedThreads().then((r) => setDismissed(r.dismissed || [])).catch(() => {});
+    api.mySnapshot(previewEntityId).then((s) => { if (alive) setSnap(s); }).catch(() => { if (alive) setSnap({ kpis: [], shortcuts: [], settlement: null, lastVisit: null }); });
+    api.myBriefing(previewEntityId).then((b) => { if (alive) setBrief(b); }).catch(() => { if (alive) setBrief({ available: false }); });
+    api.osInbox(previewEntityId).then((r) => { if (alive) setMessages(r.threads || []); }).catch(() => {});
+    api.getDismissedThreads().then((r) => { if (alive) setDismissed(r.dismissed || []); }).catch(() => {});
+    return () => { alive = false; };
   }, [previewEntityId]);
   const dismissMessage = (id) => {
     setDismissed((d) => [...d, id]); // optimistic
