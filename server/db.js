@@ -382,18 +382,20 @@ db.exec(`CREATE TABLE IF NOT EXISTS release_notes (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );`);
+addColumn('release_notes', 'source', "TEXT NOT NULL DEFAULT 'manual'"); // 'manual' | 'auto' (AI-summarised from commits)
+addColumn('release_notes', 'last_sha', "TEXT NOT NULL DEFAULT ''");     // newest commit sha summarised for that day
 function rowToReleaseNote(r) {
-  return r && { id: r.id, date: r.date, title: r.title, body: r.body, published: !!r.published, createdAt: r.created_at, updatedAt: r.updated_at };
+  return r && { id: r.id, date: r.date, title: r.title, body: r.body, published: !!r.published, source: r.source || 'manual', lastSha: r.last_sha || '', createdAt: r.created_at, updatedAt: r.updated_at };
 }
 // Newest day first; ties broken by most-recently created.
 function listReleaseNotes() {
   return db.prepare('SELECT * FROM release_notes ORDER BY date DESC, created_at DESC').all().map(rowToReleaseNote);
 }
 function getReleaseNote(id) { return rowToReleaseNote(db.prepare('SELECT * FROM release_notes WHERE id=?').get(id)); }
-function createReleaseNote({ date = '', title = '', body = '', published = true } = {}) {
+function createReleaseNote({ date = '', title = '', body = '', published = true, source = 'manual', lastSha = '' } = {}) {
   const id = uuid(); const ts = now();
-  db.prepare('INSERT INTO release_notes (id,date,title,body,published,created_at,updated_at) VALUES (?,?,?,?,?,?,?)')
-    .run(id, date || ts.slice(0, 10), title || '', body || '', published ? 1 : 0, ts, ts);
+  db.prepare('INSERT INTO release_notes (id,date,title,body,published,source,last_sha,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)')
+    .run(id, date || ts.slice(0, 10), title || '', body || '', published ? 1 : 0, source === 'auto' ? 'auto' : 'manual', lastSha || '', ts, ts);
   return getReleaseNote(id);
 }
 function updateReleaseNote(id, patch = {}) {

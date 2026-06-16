@@ -60,6 +60,7 @@ export const api = {
   adminCreateReleaseNote: (n) => fetch('/api/admin/release-notes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(n) }).then(json),
   adminUpdateReleaseNote: (id, n) => fetch(`/api/admin/release-notes/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(n) }).then(json),
   adminDeleteReleaseNote: (id) => fetch(`/api/admin/release-notes/${id}`, { method: 'DELETE' }),
+  adminGenerateReleaseNotes: (days) => fetch('/api/admin/release-notes/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ days }) }).then(json),
   // Custom (client-owned) sets
   getRoles: () => fetch('/api/admin/roles').then(json),
   getEntityContentRoles: (entityId) => fetch(`/api/admin/entities/${entityId}/content-roles`).then(json),

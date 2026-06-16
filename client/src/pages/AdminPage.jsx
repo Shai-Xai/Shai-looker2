@@ -365,8 +365,17 @@ function ProductReleaseNotes() {
   const [draft, setDraft] = useState({ date: today(), title: '', body: '', published: true });
   const [editing, setEditing] = useState(null); // { id, date, title, body, published }
   const [err, setErr] = useState('');
+  const [gen, setGen] = useState({ busy: false, msg: '' });
   const load = () => api.adminListReleaseNotes().then(setItems).catch(() => setItems([]));
   useEffect(() => { load(); }, []);
+  const generate = async () => {
+    setGen({ busy: true, msg: '' });
+    try {
+      const r = await api.adminGenerateReleaseNotes(14);
+      await load();
+      setGen({ busy: false, msg: r.created ? `Added ${r.created} draft${r.created === 1 ? '' : 's'} from recent commits — review and publish below.` : (r.message || 'Nothing new to add.') });
+    } catch (e) { setGen({ busy: false, msg: e.message }); }
+  };
   const add = async () => {
     setErr('');
     try { await api.adminCreateReleaseNote(draft); setDraft({ date: today(), title: '', body: '', published: true }); load(); }
@@ -379,8 +388,15 @@ function ProductReleaseNotes() {
 
   return (
     <div style={cardStyle}>
-      <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>Daily release notes</div>
-      <p style={hint}>Post what shipped each day. Drafts stay hidden until you publish them.</p>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 4 }}>
+        <div style={{ fontSize: 15, fontWeight: 700 }}>Daily release notes</div>
+        <span style={{ flex: 1 }} />
+        <button style={miniBtn} onClick={generate} disabled={gen.busy} title="Summarise the last 14 days of git commits into draft notes for days not yet covered">
+          {gen.busy ? 'Generating…' : '✨ Generate from commits'}
+        </button>
+      </div>
+      <p style={hint}>Post what shipped each day, or auto-generate drafts from commits. Drafts stay hidden until you publish them.</p>
+      {gen.msg && <div style={{ fontSize: 12.5, color: 'var(--muted)', margin: '-6px 0 12px' }}>{gen.msg}</div>}
 
       {/* Composer */}
       <div style={{ border: '1px solid var(--hairline)', borderRadius: 10, padding: 12, marginBottom: 16 }}>
@@ -427,6 +443,7 @@ function ProductReleaseNotes() {
                   <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)' }}>{fmtDate(n.date)}</span>
                   <span style={{ fontSize: 14, fontWeight: 700 }}>{n.title || '(untitled)'}</span>
                   {!n.published && <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', border: '1px solid var(--hairline)', borderRadius: 980, padding: '1px 7px' }}>DRAFT</span>}
+                  {n.source === 'auto' && <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--brand)', border: '1px solid var(--brand)', borderRadius: 980, padding: '1px 7px' }}>AUTO</span>}
                   <span style={{ flex: 1 }} />
                   <button style={miniBtnOutline} onClick={() => togglePub(n)}>{n.published ? 'Unpublish' : 'Publish'}</button>
                   <button style={miniBtnOutline} onClick={() => setEditing({ id: n.id, date: n.date, title: n.title, body: n.body, published: n.published })}>Edit</button>
