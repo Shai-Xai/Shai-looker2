@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Fragment } from 'react';
 import { api } from '../lib/api.js';
 
 // Engage → Journeys. The easy-setup front door for branching journeys: the
@@ -39,41 +39,55 @@ function channelChip(channel) {
   );
 }
 
-function MessageNode({ node }) {
+// Connector lines for the horizontal tree (pseudo-elements need real CSS).
+const TREE_CSS = `
+.jt-scroll { overflow-x: auto; padding: 4px 2px 10px; }
+.jt-col { display: inline-flex; flex-direction: column; align-items: center; }
+.jt-link { width: 2px; height: 18px; background: var(--hairline); flex: none; }
+.jt-stem { width: 2px; height: 16px; background: var(--hairline); }
+.jt-branches { display: flex; align-items: flex-start; justify-content: center; }
+.jt-branch { position: relative; padding: 18px 14px 0; display: flex; flex-direction: column; align-items: center; }
+.jt-branch::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: var(--hairline); }
+.jt-branch:first-child::before { left: 50%; }
+.jt-branch:last-child::before { right: 50%; }
+.jt-branch:only-child::before { display: none; }
+.jt-branch::after { content: ''; position: absolute; top: 0; left: calc(50% - 1px); width: 2px; height: 18px; background: var(--hairline); }
+.jt-card { width: 240px; box-sizing: border-box; }
+`;
+
+function MessageCard({ node }) {
   return (
-    <div style={{ padding: 13, border: '1px solid var(--hairline)', borderRadius: 12, background: 'var(--card)' }}>
+    <div style={{ padding: 13, border: '1px solid var(--hairline)', borderRadius: 12, background: 'var(--card)', width: '100%', boxSizing: 'border-box', textAlign: 'left' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
         {channelChip(node.channel)}
         <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)' }}>{fmtDelay(node.delayHours)}</span>
       </div>
-      {node.channel === 'email' && node.subject && <div style={{ fontSize: 13.5, fontWeight: 700, marginBottom: 3 }}>{node.subject}</div>}
-      {node.body && <div style={{ fontSize: 13, lineHeight: 1.5, whiteSpace: 'pre-wrap', color: 'var(--text)' }}>{node.body}</div>}
-      {node.ctaText && <div style={{ marginTop: 8 }}><span style={{ display: 'inline-block', fontSize: 12, fontWeight: 700, color: 'var(--brand)', border: '1px solid var(--brand)', borderRadius: 8, padding: '3px 10px' }}>{node.ctaText} →</span></div>}
+      {node.channel === 'email' && node.subject && <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 3 }}>{node.subject}</div>}
+      {node.body && <div style={{ fontSize: 12.5, lineHeight: 1.45, whiteSpace: 'pre-wrap', color: 'var(--text)' }}>{node.body}</div>}
+      {node.ctaText && <div style={{ marginTop: 8 }}><span style={{ display: 'inline-block', fontSize: 11.5, fontWeight: 700, color: 'var(--brand)', border: '1px solid var(--brand)', borderRadius: 8, padding: '3px 9px' }}>{node.ctaText} →</span></div>}
     </div>
   );
 }
 
-function DecisionNode({ node, depth }) {
+function DecisionSplit({ node }) {
   return (
-    <div>
-      {/* the decision diamond/question */}
-      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '8px 13px', borderRadius: 10, background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.4)' }}>
+    <div className="jt-col">
+      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '8px 13px', borderRadius: 10, background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.4)', maxWidth: 280, textAlign: 'left' }}>
         <span style={{ fontSize: 14 }}>◆</span>
-        <span style={{ fontSize: 13.5, fontWeight: 700 }}>{node.question}</span>
-        {node.waitHours ? <span style={{ fontSize: 11.5, color: 'var(--muted)', fontWeight: 600 }}>· {fmtWait(node.waitHours)}</span> : null}
+        <span style={{ fontSize: 13, fontWeight: 700 }}>{node.question}</span>
+        {node.waitHours ? <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600, whiteSpace: 'nowrap' }}>· {fmtWait(node.waitHours)}</span> : null}
       </div>
-      {/* the branches */}
-      <div style={{ marginTop: 8 }}>
+      <div className="jt-stem" />
+      <div className="jt-branches">
         {(node.branches || []).map((b, i) => {
           const color = BRANCH_COLORS[i % BRANCH_COLORS.length];
           return (
-            <div key={i} style={{ marginTop: 10 }}>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11.5, fontWeight: 700, color: '#fff', background: color, borderRadius: 980, padding: '2px 10px' }}>
+            <div className="jt-branch" key={i}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11.5, fontWeight: 700, color: '#fff', background: color, borderRadius: 980, padding: '2px 10px', whiteSpace: 'nowrap' }}>
                 <span style={{ opacity: 0.85 }}>if</span> {b.label}
               </span>
-              <div style={{ marginTop: 8, marginLeft: 7, paddingLeft: 14, borderLeft: `2px solid ${color}` }}>
-                <NodeTree nodes={b.nodes || []} depth={depth + 1} />
-              </div>
+              <div className="jt-link" />
+              <NodeColumn nodes={b.nodes || []} />
             </div>
           );
         })}
@@ -82,19 +96,24 @@ function DecisionNode({ node, depth }) {
   );
 }
 
-function NodeTree({ nodes, depth = 0 }) {
+function NodeColumn({ nodes }) {
   return (
-    <div>
+    <div className="jt-col">
       {(nodes || []).map((n, i) => (
-        <div key={i}>
-          {i > 0 && (
-            <div style={{ display: 'flex', justifyContent: 'flex-start', marginLeft: 13 }}>
-              <div style={{ width: 2, height: 14, background: 'var(--hairline)' }} />
-            </div>
-          )}
-          {n.type === 'decision' ? <DecisionNode node={n} depth={depth} /> : <MessageNode node={n} />}
-        </div>
+        <Fragment key={i}>
+          {i > 0 && <div className="jt-link" />}
+          {n.type === 'decision' ? <DecisionSplit node={n} /> : <div className="jt-card"><MessageCard node={n} /></div>}
+        </Fragment>
       ))}
+    </div>
+  );
+}
+
+function NodeTree({ nodes }) {
+  return (
+    <div className="jt-scroll">
+      <style>{TREE_CSS}</style>
+      <NodeColumn nodes={nodes} />
     </div>
   );
 }
