@@ -629,7 +629,11 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
           const phone = phoneField ? cellVal(row[phoneField]) : '';
           const emailOk = ignoreConsent || !emailConsentField || isYes(cellVal(row[emailConsentField]));
           const smsOk = ignoreConsent || !smsConsentField || isYes(cellVal(row[smsConsentField]));
-          raw.push({ email, name: nameField ? cellVal(row[nameField]) : '', ticket: ticketField ? cellVal(row[ticketField]) : '', phone, anchorRaw: anchorField ? cellVal(row[anchorField]) : '', emailOk, smsOk });
+          // Every column as a merge-field attribute (by field label AND name) so
+          // copy can use {{Ticket Type}}, {{City}}, etc.
+          const attributes = {};
+          for (const fl of [...res.fields, ...attrFields]) { const v = cellVal(merged[fl.name]); attributes[fl.name] = v; if (fl.label) attributes[fl.label] = v; }
+          raw.push({ email, name: nameField ? cellVal(row[nameField]) : '', ticket: ticketField ? cellVal(row[ticketField]) : '', phone, anchorRaw: anchorField ? cellVal(row[anchorField]) : '', emailOk, smsOk, attributes });
         }
       }
     }
@@ -694,6 +698,23 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
   // Render one recipient's email. Tokens: {{name}}, {{ticketType}}, {{cta}},
   // {{unsubscribe}}. Two modes: the built branded template, or the client's own
   // uploaded HTML (we still inject tracking + a guaranteed unsubscribe link).
+  // Generic merge fields: fill any remaining {{Column}} from the recipient's
+  // attributes (case-insensitive, by header/field label or name). Applied AFTER the
+  // special tokens. A known column with an empty cell → '' ; an UNKNOWN token (typo)
+  // is left untouched so it's caught in preview. Every resolved column is present in
+  // attributes, so valid tokens never leak braces.
+  function fillAttrs(s, recipient) {
+    const attrs = (recipient && recipient.attributes) || {};
+    const keys = Object.keys(attrs);
+    if (!keys.length) return String(s || '');
+    const lut = {};
+    for (const k of keys) lut[k.toLowerCase().trim()] = attrs[k];
+    return String(s || '').replace(/\{\{\s*([\w .\-/()]+?)\s*\}\}/g, (m, key) => {
+      const lk = String(key).toLowerCase().trim();
+      return Object.prototype.hasOwnProperty.call(lut, lk) ? String(lut[lk] ?? '') : m;
+    });
+  }
+
   function renderFor(action, recipient, step) {
     const cfg = action.config;
     const realSend = action.id && !['preview', 'test'].includes(action.id);
@@ -720,13 +741,13 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     const baseClick = cfg.ctaUrl ? `${mailer.baseUrl()}/c/${cfg.clickToken}/${rtok}/e` : ''; // /e = email channel
     const ctaUrl = baseClick && appendPromo ? `${baseClick}${baseClick.includes('?') ? '&' : '?'}promo=${encodeURIComponent(promo.code)}` : baseClick;
     const unsubUrl = `${mailer.baseUrl()}/u/${rtok}`;
-    const tok = (s) => String(s || '')
+    const tok = (s) => fillAttrs(String(s || '')
       .replace(/\{\{\s*name\s*\}\}/gi, firstName || 'there')
       .replace(/\{\{\s*(ticket_?type|ticket)\s*\}\}/gi, ticket || 'your tickets')
       .replace(/\{\{\s*cta(_url)?\s*\}\}/gi, ctaUrl || '#')
       .replace(/\{\{\s*promo_benefit\s*\}\}/gi, promo?.benefit || '')
       .replace(/\{\{\s*promo(_?code)?\s*\}\}/gi, promo?.code || '')
-      .replace(/\{\{\s*unsubscribe\s*\}\}/gi, unsubUrl);
+      .replace(/\{\{\s*unsubscribe\s*\}\}/gi, unsubUrl), recipient);
     const subject = tok(useSubject);
 
     if (!step && cfg.contentMode === 'html' && (cfg.customHtml || '').trim()) {
@@ -763,12 +784,12 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     const appendPromo = promo && promo.type === 'promo' && promo.appendToLink && promo.code;
     const base = cfg.ctaUrl ? `${mailer.baseUrl()}/c/${cfg.clickToken}/${rtok}/s` : ''; // /s = sms channel
     const link = base && appendPromo ? `${base}${base.includes('?') ? '&' : '?'}promo=${encodeURIComponent(promo.code)}` : base;
-    const tok = (s) => String(s || '')
+    const tok = (s) => fillAttrs(String(s || '')
       .replace(/\{\{\s*name\s*\}\}/gi, firstName || 'there')
       .replace(/\{\{\s*(ticket_?type|ticket)\s*\}\}/gi, recipient.ticket || 'your tickets')
       .replace(/\{\{\s*cta(_url)?\s*\}\}/gi, link || '')
       .replace(/\{\{\s*promo_benefit\s*\}\}/gi, promo?.benefit || '')
-      .replace(/\{\{\s*promo(_?code)?\s*\}\}/gi, promo?.code || '');
+      .replace(/\{\{\s*promo(_?code)?\s*\}\}/gi, promo?.code || ''), recipient);
     let text = tok(useBody);
     if (promo && !/\{\{\s*promo/i.test(useBody)) text += `\nCode: ${promo.code}${promo.type === 'discount' ? ' (enter at checkout)' : ''}`;
     if (link && !/\{\{\s*cta/i.test(useBody)) text += `\n${link}`;
@@ -1029,7 +1050,10 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     if (!guard(req, res, req.params.entityId)) return;
     const cfg = cleanConfig(req.body || {});
     const fake = { id: 'preview', entityId: req.params.entityId, config: cfg };
-    const recipient = { email: 'sam@example.com', name: 'Sam', ticket: 'General Admission', phone: '+27820000000' };
+    // Use a real sample recipient (from the audience preview) when the client sends
+    // one, so merge fields ({{Ticket Type}}, {{City}}…) render with actual values.
+    const s = (req.body || {}).sample || {};
+    const recipient = { email: s.email || 'sam@example.com', name: s.name || 'Sam', ticket: s.ticket || 'General Admission', phone: s.phone || '+27820000000', attributes: s.attributes || {} };
     // The client sends the active step's copy in cfg.body, so render from that
     // (step=null) — works for once-off and per-step sequence previews alike.
     // Return whichever channel(s) apply: email html, SMS text, or both.
@@ -1604,8 +1628,9 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
         const step = steps[e.step_index];
         if (!step) { sql.prepare("UPDATE action_enrollments SET status='done', updated_at=? WHERE action_id=? AND email=?").run(now(), a.id, e.email); continue; }
         try {
-          const rcpt = { email: e.email, name: e.name, ticket: e.ticket, phone: e.phone };
           const consent = reachable.get(e.email) || {};
+          // Merge fields resolve live from the re-checked audience row's attributes.
+          const rcpt = { email: e.email, name: e.name, ticket: e.ticket, phone: e.phone, attributes: consent.attributes || {} };
           const wantsEmail = a.config.channel !== 'sms';
           const wantsSms = a.config.channel !== 'email';
           let ok = false;

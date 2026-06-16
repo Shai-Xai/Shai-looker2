@@ -404,6 +404,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
     channel: f.channel,
     campaignMode: f.campaignMode, steps: f.steps,
     dripStart: f.dripStart, freshHours: f.freshHours,
+    sample: aud?.sample?.[0] || null, // a real recipient for merge-field previews (ignored on save)
     ignoreConsent: f.ignoreConsent,
     promo: f.promo,
     promoCodes: promoCodesText.split(/[\s,;]+/).map((c) => c.trim()).filter(Boolean),
@@ -840,6 +841,12 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
           </Accordion>
 
           <Accordion title={smsOnly ? 'Message & offer' : 'Content & offer'} {...acc('content')}>
+          {/* Merge fields available from the audience — personalise the copy. */}
+          {(anchorOptions.length > 0) && (
+            <div style={{ ...hintS, marginBottom: 8 }}>
+              Merge fields: <code>{'{{name}}'}</code>, <code>{'{{promo}}'}</code>{anchorOptions.slice(0, 8).map((o) => <span key={o.value}> · <code>{`{{${o.label}}}`}</code></span>)}. Insert any into the subject/body; blank if missing.
+            </div>
+          )}
           {/* Sequence steps — SMS-only steps are just delay + text. */}
           {isSequence && (
             <Field label="Drip timing">
