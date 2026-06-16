@@ -545,11 +545,15 @@ function ExtraBlock({ entityId, block, allSegments, onChange, onRemove }) {
       {/* Column match + filters for a list source (so you can target this block too). */}
       {fileFields && aud?.columns?.length > 0 && (
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          <select value={b.emailField || ''} onChange={(e) => setB({ emailField: e.target.value })} style={{ ...input, flex: 1, minWidth: 130, padding: '6px 8px' }}>
+          <select value={b.emailField || ''} onChange={(e) => setB({ emailField: e.target.value })} style={{ ...input, flex: 1, minWidth: 120, padding: '6px 8px' }}>
             <option value="">Email column (auto-detect)</option>
             {aud.columns.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
-          <select value={b.phoneField || ''} onChange={(e) => setB({ phoneField: e.target.value })} style={{ ...input, flex: 1, minWidth: 130, padding: '6px 8px' }}>
+          <select value={b.nameField || ''} onChange={(e) => setB({ nameField: e.target.value })} style={{ ...input, flex: 1, minWidth: 120, padding: '6px 8px' }}>
+            <option value="">Name column (optional)</option>
+            {aud.columns.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+          <select value={b.phoneField || ''} onChange={(e) => setB({ phoneField: e.target.value })} style={{ ...input, flex: 1, minWidth: 120, padding: '6px 8px' }}>
             <option value="">Mobile column (auto-detect)</option>
             {aud.columns.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>

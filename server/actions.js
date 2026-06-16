@@ -506,9 +506,11 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     const combine = ['union', 'intersect', 'exclude'].includes(cfg.audience.combine) ? cfg.audience.combine : 'union';
     const blocks = (cfg.audience.sources || []).slice(0, 10);
     const keyOf = (m) => String(m.email || m.phone || '').toLowerCase();
+    const subs = [];
     const lists = [];
     for (const b of blocks) {
       const sub = await audienceFor(entityId, { ...cfg, audience: b }, user, depth + 1);
+      subs.push(sub);
       lists.push(sub.list || []);
     }
     const out = new Map();
@@ -526,7 +528,10 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     const list = [...out.values()].slice(0, MAX_AUDIENCE);
     const reach = { total: list.length, email: list.filter((r) => r.email && r.emailOk).length, sms: list.filter((r) => r.phone && r.smsOk).length };
     const noConsent = list.filter((r) => !(r.email && r.emailOk) && !(r.phone && r.smsOk)).length;
-    return { list, fields: [], filterFields: [], columns: [], excluded: 0, noConsent, filteredOut: 0, reach, combined: combine };
+    // Surface the PRIMARY block's fields/columns so the editor keeps the primary
+    // source's column-match + targeting filters even once combine blocks are added.
+    const p = subs[0] || {};
+    return { list, fields: p.fields || [], filterFields: p.filterFields || [], columns: p.columns || [], excluded: 0, noConsent, filteredOut: 0, reach, combined: combine };
   }
 
   async function audienceFor(entityId, cfg, user, depth = 0) {
