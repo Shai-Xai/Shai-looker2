@@ -37,8 +37,9 @@ function mount(app, { db, auth, resolveAudience, resolveRecipe, meta, tiktok }) 
   for (const col of ['last_email', 'last_sms']) {
     try { sql.exec(`ALTER TABLE segments ADD COLUMN ${col} INTEGER NOT NULL DEFAULT -1`); } catch { /* exists */ }
   }
-  // Opt-in: keep this segment's Meta Custom Audience mirrored automatically (~daily).
+  // Opt-in: keep this segment's Meta / TikTok Custom Audience mirrored automatically (~daily).
   try { sql.exec('ALTER TABLE segments ADD COLUMN meta_auto INTEGER NOT NULL DEFAULT 0'); } catch { /* exists */ }
+  try { sql.exec('ALTER TABLE segments ADD COLUMN tiktok_auto INTEGER NOT NULL DEFAULT 0'); } catch { /* exists */ }
 
   // Scope: admins see all; clients only their own entities (same boundary as
   // campaigns). Enforced server-side, so a segment can't reach another client.
@@ -92,6 +93,7 @@ function mount(app, { db, auth, resolveAudience, resolveRecipe, meta, tiktok }) 
     count: r.last_count, lastResolvedAt: r.last_resolved_at,
     reach: { email: r.last_email, sms: r.last_sms }, // contactable-by-identifier per channel
     metaAuto: !!r.meta_auto,
+    tiktokAuto: !!r.tiktok_auto,
     createdBy: r.created_by, createdAt: r.created_at, updatedAt: r.updated_at,
   });
 
@@ -234,36 +236,41 @@ function mount(app, { db, auth, resolveAudience, resolveRecipe, meta, tiktok }) 
     } catch (e) { res.status(400).json({ error: e.message }); }
   });
 
-  // Toggle daily auto-mirror to Meta for a segment.
-  app.put('/api/segments/:entityId/:id/sync/meta/auto', auth.requireAuth, auth.requirePermission('campaigns.approve'), (req, res) => {
+  // Toggle daily auto-mirror to a channel (meta | tiktok) for a segment.
+  app.put('/api/segments/:entityId/:id/sync/:channel/auto', auth.requireAuth, auth.requirePermission('campaigns.approve'), (req, res) => {
     if (!guard(req, res, req.params.entityId)) return;
+    const col = req.params.channel === 'tiktok' ? 'tiktok_auto' : (req.params.channel === 'meta' ? 'meta_auto' : null);
+    if (!col) return res.status(400).json({ error: 'Unknown channel' });
     const seg = getSeg(req.params.id);
     if (!seg || seg.entity_id !== req.params.entityId) return res.status(404).json({ error: 'Not found' });
     const on = !!(req.body && req.body.on);
-    sql.prepare('UPDATE segments SET meta_auto=? WHERE id=?').run(on ? 1 : 0, req.params.id);
-    res.json({ ok: true, metaAuto: on });
+    sql.prepare(`UPDATE segments SET ${col}=? WHERE id=?`).run(on ? 1 : 0, req.params.id);
+    res.json({ ok: true, channel: req.params.channel, auto: on });
   });
 
-  // Background mirror: re-push auto-enabled segments to Meta ~daily. Best-effort,
-  // throttled per segment (skip if mirrored in the last 20h). Uses a synthetic
-  // system user so the SAME server-side org/event scope is enforced.
+  // Background mirror: re-push auto-enabled segments to Meta/TikTok ~daily.
+  // Best-effort, throttled per (segment, channel) — skip if mirrored in the last
+  // 20h. Resolves the audience ONCE per segment and pushes to each auto channel.
+  // Uses a synthetic system user so the SAME server-side org/event scope applies.
+  const stale = (last) => !(last?.at && (Date.now() - new Date(last.at).getTime()) < 20 * 3600 * 1000);
   async function autoMirrorTick() {
-    if (!meta?.isConfigured) return;
     let rows = [];
-    try { rows = sql.prepare('SELECT id, entity_id, name, definition FROM segments WHERE meta_auto=1').all(); } catch { return; }
+    try { rows = sql.prepare('SELECT id, entity_id, name, definition, meta_auto, tiktok_auto FROM segments WHERE meta_auto=1 OR tiktok_auto=1').all(); } catch { return; }
     for (const s of rows) {
+      const doMeta = s.meta_auto && meta?.isConfigured?.(s.entity_id) && stale(meta.lastSyncFor?.(s.entity_id, s.id));
+      const doTiktok = s.tiktok_auto && tiktok?.isConfigured?.(s.entity_id) && stale(tiktok.lastSyncFor?.(s.entity_id, s.id));
+      if (!doMeta && !doTiktok) continue;
       try {
-        if (!meta.isConfigured(s.entity_id)) continue;
-        const last = meta.lastSyncFor?.(s.entity_id, s.id);
-        if (last?.at && (Date.now() - new Date(last.at).getTime()) < 20 * 3600 * 1000) continue;
         const user = { id: `autosync:${s.entity_id}`, email: 'autosync@pulse', role: 'client', entityIds: [s.entity_id], memberships: [{ entityId: s.entity_id, role: 'owner' }] };
         const r = await resolveDefinition(s.entity_id, JSON.parse(s.definition || '{}'), user);
         const members = (r.list || []).map((m) => ({ email: m.email, phone: m.phone }));
-        if (members.length) await meta.syncAudience({ entityId: s.entity_id, segmentId: s.id, name: s.name, members, mode: 'replace', by: 'auto' });
-      } catch (e) { console.error('[segments] auto meta-mirror failed', s.id, e.message); }
+        if (!members.length) continue;
+        if (doMeta) await meta.syncAudience({ entityId: s.entity_id, segmentId: s.id, name: s.name, members, mode: 'replace', by: 'auto' });
+        if (doTiktok) await tiktok.syncAudience({ entityId: s.entity_id, segmentId: s.id, name: s.name, members, by: 'auto' });
+      } catch (e) { console.error('[segments] auto-mirror failed', s.id, e.message); }
     }
   }
-  if (meta) {
+  if (meta || tiktok) {
     const tick = setInterval(() => autoMirrorTick().catch(() => {}), 3600 * 1000);
     if (tick.unref) tick.unref();
     setTimeout(() => autoMirrorTick().catch(() => {}), 30000); // shortly after boot
