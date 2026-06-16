@@ -116,6 +116,7 @@ const ADMIN_NAV = [
   ['settlements', 'Settlements', '💰'],
   ['integrations', 'Integrations', '🔌'],
   ['email', 'Email', '✉️'],
+  ['product', 'Product', '📦'],
   ['backup', 'Backup', '💾'],
 ];
 
@@ -135,6 +136,7 @@ export default function AdminPage() {
       {tab === 'settlements' && <Settlements />}
       {tab === 'integrations' && <AdminIntegrations />}
       {tab === 'email' && <MailLog />}
+      {tab === 'product' && <Product />}
       {tab === 'backup' && <BackupRestore />}
     </>
   );
@@ -186,6 +188,259 @@ export default function AdminPage() {
     </main>
   );
 }
+
+// ─── Product ──────────────────────────────────────────────────────────────────
+// One home for product collateral: the living sales overview (HTML that renders
+// docs/PRODUCT_OVERVIEW_SALES.md), a curated feature matrix, and the daily
+// release notes the team authors here (persisted, newest-first).
+
+// Status key mirrors the sales overview doc.
+const PRODUCT_STATUS = {
+  live: { icon: '✅', label: 'Live', color: '#1a8a4a', bg: 'rgba(26,138,74,0.12)' },
+  setup: { icon: '🟡', label: 'Needs setup', color: '#9a6a00', bg: 'rgba(214,158,46,0.16)' },
+  beta: { icon: '🧪', label: 'Beta', color: '#7C3AED', bg: 'rgba(124,58,237,0.12)' },
+  soon: { icon: '🔜', label: 'Coming soon', color: '#5a6270', bg: 'rgba(110,110,115,0.14)' },
+};
+// Curated catalogue — keep in step with docs/PRODUCT_OVERVIEW_SALES.md.
+const PRODUCT_FEATURES = [
+  ['Dashboards & insight', [
+    ['Live dashboards (KPIs, tables & charts on real data)', 'live'],
+    ['Per-tile AI insight + follow-up questions', 'live'],
+    ['Personalised home briefing', 'live'],
+    ['Mobile-first, installable PWA', 'live'],
+  ]],
+  ['Scheduled digests', [
+    ['Role-written email digests (exec / marketing / finance / ops)', 'live'],
+    ['Configurable cadence & focus', 'live'],
+    ['Admin-managed + client self-service', 'live'],
+  ]],
+  ['Messaging inbox', [
+    ['Two-way client ↔ Howler threads (read/unread, attachments)', 'live'],
+    ['Must-acknowledge messages', 'live'],
+    ['In-app, web-push & email notifications', 'live'],
+  ]],
+  ['Settlements & documents', [
+    ['Settlement PDF → interactive statement', 'live'],
+    ['Event documents area', 'live'],
+  ]],
+  ['Engage · Segments', [
+    ['Always-live audiences (tile / CSV / paste / Google Sheet)', 'live'],
+    ['Column matching (email / name / mobile)', 'live'],
+    ['Target on any column', 'live'],
+    ['Multi-source combine (Union / Intersect / Exclude)', 'live'],
+  ]],
+  ['Engage · Campaigns', [
+    ['Email, SMS or both to a segment / tile / list', 'live'],
+    ['AI-drafted copy, branded templates, hero image', 'live'],
+    ['Merge fields from any column', 'live'],
+    ['Promo / discount codes', 'live'],
+    ['UTM + per-recipient open & click tracking', 'live'],
+    ['Consent-aware (POPIA), one-click unsubscribe', 'live'],
+    ['Approval workflow', 'live'],
+  ]],
+  ['Engage · Drip sequences', [
+    ['Multi-step journeys with delays', 'live'],
+    ['Timing modes (fresh-abandonment / forward-from-send)', 'live'],
+    ['Auto-stop on purchase or unsubscribe', 'live'],
+    ['Journey waterfall (open / click / convert + drop-off)', 'live'],
+  ]],
+  ['Engage · Ad audience sync', [
+    ['Push a segment to Meta / TikTok Custom Audiences', 'setup'],
+    ['Mirror membership + daily auto-sync', 'setup'],
+    ['Hashed identities before they leave Pulse', 'setup'],
+  ]],
+  ['Branding & integrations', [
+    ['Per-client branding (logo / colours / sender)', 'live'],
+    ['Looker / Anthropic keys', 'live'],
+    ['Email (Resend) / SMS (Clickatell)', 'live'],
+    ['Meta / TikTok ad accounts', 'setup'],
+    ['Inventive embedded AI analyst ("Ask")', 'beta'],
+  ]],
+  ['Admin console', [
+    ['Manage clients, sets/suites, tile library, AI, settlements', 'live'],
+    ['Preview as a client', 'live'],
+    ['AI audit ("Everything the AI is told")', 'live'],
+  ]],
+  ['Trust, security & scope', [
+    ['Server-side multi-tenant scoping (fails closed)', 'live'],
+    ['POPIA-minded consent + hashed ad sync', 'live'],
+    ['Roles & permissions', 'live'],
+  ]],
+  ['On the horizon', [
+    ['Conversational / agentic Owl', 'soon'],
+    ['Portfolio / "all events" view', 'soon'],
+    ['Event tasks + AM cockpit', 'soon'],
+    ['WhatsApp & app-push channels', 'soon'],
+  ]],
+];
+
+function StatusBadge({ status }) {
+  const s = PRODUCT_STATUS[status] || PRODUCT_STATUS.live;
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '2px 9px', borderRadius: 980, fontSize: 11.5, fontWeight: 700, color: s.color, background: s.bg, whiteSpace: 'nowrap' }}>
+      <span aria-hidden>{s.icon}</span>{s.label}
+    </span>
+  );
+}
+
+function Product() {
+  return (
+    <div>
+      <p style={hint}>Product collateral in one place — the living sales overview, the feature matrix, and the daily release notes the team posts.</p>
+      <ProductOverviewCard />
+      <ProductFeatureTable />
+      <ProductReleaseNotes />
+    </div>
+  );
+}
+
+// The living overview opens in a new tab — it renders docs/PRODUCT_OVERVIEW_SALES.md
+// live, so it always reflects the current doc.
+function ProductOverviewCard() {
+  return (
+    <div style={cardStyle}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 26 }}>📄</span>
+        <div style={{ flex: 1, minWidth: 200 }}>
+          <div style={{ fontSize: 15, fontWeight: 700 }}>Product overview (sales)</div>
+          <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 2 }}>
+            Living page — renders <code style={codeChip}>docs/PRODUCT_OVERVIEW_SALES.md</code> live, so edits to the doc show up automatically.
+          </div>
+        </div>
+        <a href="/product-overview-sales" target="_blank" rel="noopener noreferrer" style={{ ...miniBtn, textDecoration: 'none', color: 'var(--text)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          Open page ↗
+        </a>
+      </div>
+    </div>
+  );
+}
+
+// Curated feature matrix: each section with its features + status. Grouped rows
+// on desktop; the wrapper scrolls horizontally on narrow phones.
+function ProductFeatureTable() {
+  const legend = ['live', 'setup', 'beta', 'soon'];
+  return (
+    <div style={cardStyle}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
+        <div style={{ fontSize: 15, fontWeight: 700 }}>Feature matrix</div>
+        <span style={{ flex: 1 }} />
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {legend.map((k) => <StatusBadge key={k} status={k} />)}
+        </div>
+      </div>
+      <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 360 }}>
+          <tbody>
+            {PRODUCT_FEATURES.map(([section, feats]) => (
+              <FeatureSection key={section} section={section} feats={feats} />
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+function FeatureSection({ section, feats }) {
+  return (
+    <>
+      <tr>
+        <th colSpan={2} style={{ textAlign: 'left', padding: '14px 10px 6px', fontSize: 12, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--brand)' }}>
+          {section}
+        </th>
+      </tr>
+      {feats.map(([feature, status]) => (
+        <tr key={feature}>
+          <td style={{ ...td, width: '100%' }}>{feature}</td>
+          <td style={{ ...td, textAlign: 'right' }}><StatusBadge status={status} /></td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
+// Daily release notes — authored here, persisted server-side, newest day first.
+function ProductReleaseNotes() {
+  const today = () => new Date().toISOString().slice(0, 10);
+  const [items, setItems] = useState(null);
+  const [draft, setDraft] = useState({ date: today(), title: '', body: '', published: true });
+  const [editing, setEditing] = useState(null); // { id, date, title, body, published }
+  const [err, setErr] = useState('');
+  const load = () => api.adminListReleaseNotes().then(setItems).catch(() => setItems([]));
+  useEffect(() => { load(); }, []);
+  const add = async () => {
+    setErr('');
+    try { await api.adminCreateReleaseNote(draft); setDraft({ date: today(), title: '', body: '', published: true }); load(); }
+    catch (e) { setErr(e.message); }
+  };
+  const save = async () => { await api.adminUpdateReleaseNote(editing.id, editing); setEditing(null); load(); };
+  const del = async (n) => { if (confirm(`Delete release note "${n.title || n.date}"?`)) { await api.adminDeleteReleaseNote(n.id); load(); } };
+  const togglePub = async (n) => { await api.adminUpdateReleaseNote(n.id, { published: !n.published }); load(); };
+  const fmtDate = (d) => { const dt = new Date(d); return isNaN(dt) ? d : dt.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }); };
+
+  return (
+    <div style={cardStyle}>
+      <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>Daily release notes</div>
+      <p style={hint}>Post what shipped each day. Drafts stay hidden until you publish them.</p>
+
+      {/* Composer */}
+      <div style={{ border: '1px solid var(--hairline)', borderRadius: 10, padding: 12, marginBottom: 16 }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+          <Field label="Date"><input type="date" style={{ ...input, minWidth: 150 }} value={draft.date} onChange={(e) => setDraft({ ...draft, date: e.target.value })} /></Field>
+          <Field label="Title"><input style={{ ...input, minWidth: 240 }} placeholder="e.g. Engage hardening" value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} /></Field>
+        </div>
+        <div style={{ marginTop: 8 }}>
+          <L>What shipped (Markdown supported)</L>
+          <textarea rows={4} value={draft.body} onChange={(e) => setDraft({ ...draft, body: e.target.value })}
+            placeholder={'- New: …\n- Fixed: …'}
+            style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 13, outline: 'none', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5, marginTop: 4 }} />
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 8, flexWrap: 'wrap' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12.5, color: 'var(--muted)', cursor: 'pointer' }}>
+            <input type="checkbox" checked={draft.published} onChange={(e) => setDraft({ ...draft, published: e.target.checked })} /> Publish now
+          </label>
+          <button style={miniBtn} onClick={add} disabled={!draft.title.trim() && !draft.body.trim()}>+ Add release note</button>
+          {err && <span style={{ color: 'var(--error)', fontSize: 12.5 }}>{err}</span>}
+        </div>
+      </div>
+
+      {/* List */}
+      {items === null ? <Muted>Loading…</Muted>
+        : items.length === 0 ? <Muted>No release notes yet — add the first above.</Muted>
+        : items.map((n) => (
+          <div key={n.id} style={{ borderTop: '1px solid var(--hairline)', padding: '12px 0' }}>
+            {editing?.id === n.id ? (
+              <div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                  <Field label="Date"><input type="date" style={{ ...input, minWidth: 150 }} value={editing.date} onChange={(e) => setEditing({ ...editing, date: e.target.value })} /></Field>
+                  <Field label="Title"><input style={{ ...input, minWidth: 240 }} value={editing.title} onChange={(e) => setEditing({ ...editing, title: e.target.value })} /></Field>
+                </div>
+                <textarea rows={4} value={editing.body} onChange={(e) => setEditing({ ...editing, body: e.target.value })}
+                  style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 13, outline: 'none', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5, marginTop: 8 }} />
+                <div style={{ marginTop: 8 }}>
+                  <button style={miniBtn} onClick={save}>Save</button>{' '}
+                  <button style={miniBtnOutline} onClick={() => setEditing(null)}>Cancel</button>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)' }}>{fmtDate(n.date)}</span>
+                  <span style={{ fontSize: 14, fontWeight: 700 }}>{n.title || '(untitled)'}</span>
+                  {!n.published && <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', border: '1px solid var(--hairline)', borderRadius: 980, padding: '1px 7px' }}>DRAFT</span>}
+                  <span style={{ flex: 1 }} />
+                  <button style={miniBtnOutline} onClick={() => togglePub(n)}>{n.published ? 'Unpublish' : 'Publish'}</button>
+                  <button style={miniBtnOutline} onClick={() => setEditing({ id: n.id, date: n.date, title: n.title, body: n.body, published: n.published })}>Edit</button>
+                  <button style={delBtn} onClick={() => del(n)}>Delete</button>
+                </div>
+                {n.body && <div style={{ fontSize: 13, color: 'var(--text)', marginTop: 6, whiteSpace: 'pre-wrap', lineHeight: 1.55 }}>{n.body}</div>}
+              </div>
+            )}
+          </div>
+        ))}
+    </div>
+  );
+}
+const codeChip = { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '0.85em', background: 'var(--elevated)', padding: '1px 6px', borderRadius: 5 };
 
 // ─── Clients (Entities) ───────────────────────────────────────────────────────
 function Entities({ fields }) {

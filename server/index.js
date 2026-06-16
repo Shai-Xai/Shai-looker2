@@ -250,6 +250,16 @@ app.put('/api/admin/sets/:id', auth.requireAdmin, (req, res) => {
 });
 app.delete('/api/admin/sets/:id', auth.requireAdmin, (req, res) => { db.deleteSet(req.params.id); res.status(204).end(); });
 
+// ─── Release notes (daily product changelog — Admin → Product) ───────────────
+app.get('/api/admin/release-notes', auth.requireAdmin, (_req, res) => res.json(db.listReleaseNotes()));
+app.post('/api/admin/release-notes', auth.requireAdmin, (req, res) => res.status(201).json(db.createReleaseNote(req.body || {})));
+app.put('/api/admin/release-notes/:id', auth.requireAdmin, (req, res) => {
+  const n = db.updateReleaseNote(req.params.id, req.body || {});
+  if (!n) return res.status(404).json({ error: 'Release note not found' });
+  res.json(n);
+});
+app.delete('/api/admin/release-notes/:id', auth.requireAdmin, (req, res) => { db.deleteReleaseNote(req.params.id); res.status(204).end(); });
+
 // ─── Custom sets: a client's bespoke collections (hidden from the shared library) ──
 // A client's custom sets + the dashboard pool available to build them with
 // (shared dashboards + this client's own bespoke dashboards).
