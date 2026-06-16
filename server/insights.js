@@ -322,7 +322,7 @@ async function digestBrief({ tiles, roleLabel, roleFocus, catalogue, instruction
   for (const t of tiles || []) {
     lines.push(`### ${t.title}${t.pinned ? ' [FOLLOWED]' : ''}${t.visType ? ` (${t.visType})` : ''} — ${t.setName} → ${t.dashTitle}`);
     if (t.context && t.context.trim()) lines.push(`(context: ${t.context.trim()})`);
-    lines.push(compactTable(t.fields, t.rows, 12));
+    lines.push(compactTable(t.fields, t.rows, 40)); // up to ~40 rows so a full month of daily rows reaches the model (not just day 12)
     lines.push('');
   }
   if ((actions || []).length) {
@@ -414,7 +414,7 @@ async function briefHome({ tiles, profile, catalogue, instructions, apiKey, acti
   for (const t of tiles || []) {
     lines.push(`### ${t.title}${t.pinned ? ' [FOLLOWED]' : ''}${t.visType ? ` (${t.visType})` : ''} — ${t.setName} → ${t.dashTitle}`);
     if (t.context && t.context.trim()) lines.push(`(context: ${t.context.trim()})`);
-    lines.push(compactTable(t.fields, t.rows, 12));
+    lines.push(compactTable(t.fields, t.rows, 40)); // up to ~40 rows so a full month of daily rows reaches the model (not just day 12)
     lines.push('');
   }
   lines.push(`PROFILE: last visit ${profile?.lastVisit || 'unknown'}; most-opened dashboards: ${(profile?.top || []).map((t) => `${t.title || t.dashboardId} (${t.count}×)`).join(', ') || 'none yet'}`);
