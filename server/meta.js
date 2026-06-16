@@ -183,6 +183,27 @@ async function syncAudience({ entityId, segmentId, name, members = [], descripti
   }
 }
 
+// Live connection check — is the token valid right now? Hits the ad account.
+// Best-effort; never throws. status: ok | not_configured | token_invalid | forbidden | error.
+async function verify(entityId) {
+  const checkedAt = new Date().toISOString();
+  if (!isConfigured(entityId)) return { ok: false, status: 'not_configured', detail: 'No access token / ad account set.', checkedAt };
+  const { accessToken: token, adAccountId } = connection(entityId);
+  try {
+    const d = await graph(`${adAccountId}?fields=name,account_status`, { token });
+    return { ok: true, status: 'ok', account: d.name || adAccountId, accountStatus: d.account_status, checkedAt };
+  } catch (e) {
+    const status = e.metaCode === 190 ? 'token_invalid' : (e.httpStatus === 403 ? 'forbidden' : 'error');
+    return { ok: false, status, detail: e.message, checkedAt };
+  }
+}
+
+// Best-effort deep link to this ad account's audiences in Meta Ads Manager.
+function audiencesUrl(entityId) {
+  const acc = connection(entityId).adAccountId; if (!acc) return '';
+  return `https://business.facebook.com/adsmanager/audiences?act=${acc.replace(/^act_/, '')}`;
+}
+
 // Per-client health/audience summary for the admin monitoring view.
 function summary(entityId) {
   const rows = db ? db.db.prepare('SELECT * FROM meta_audiences WHERE entity_id=?').all(entityId) : [];
@@ -190,7 +211,7 @@ function summary(entityId) {
   const errors = audiences.filter((a) => a.status === 'error').length;
   const lastAt = audiences.reduce((m, a) => (a.at > m ? a.at : m), '');
   const lastError = audiences.filter((a) => a.status === 'error').sort((a, b) => String(b.at).localeCompare(String(a.at)))[0] || null;
-  return { channel: 'meta', configured: isConfigured(entityId), audienceCount: audiences.length, ok: audiences.length - errors, errors, lastAt, lastError: lastError ? { at: lastError.at, error: lastError.error, segmentId: lastError.segmentId } : null, audiences };
+  return { channel: 'meta', configured: isConfigured(entityId), adAccountId: connection(entityId).adAccountId, audiencesUrl: audiencesUrl(entityId), audienceCount: audiences.length, ok: audiences.length - errors, errors, lastAt, lastError: lastError ? { at: lastError.at, error: lastError.error, segmentId: lastError.segmentId } : null, audiences };
 }
 
-module.exports = { init, isConfigured, status, connection, syncAudience, lastSyncFor, summary, hashEmail, hashPhone };
+module.exports = { init, isConfigured, status, connection, syncAudience, lastSyncFor, verify, audiencesUrl, summary, hashEmail, hashPhone };

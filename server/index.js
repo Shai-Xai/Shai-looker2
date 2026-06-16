@@ -1333,6 +1333,14 @@ app.get('/api/admin/integrations/health', auth.requireAdmin, (_req, res) => {
   res.json({ clients });
 });
 
+// Live token check for one client's connector (makes a real API call).
+app.post('/api/admin/integrations/:entityId/verify', auth.requireAdmin, async (req, res) => {
+  if (!db.getEntity(req.params.entityId)) return res.status(404).json({ error: 'Not found' });
+  const channel = req.body?.channel === 'tiktok' ? tiktok : (req.body?.channel === 'meta' ? meta : null);
+  if (!channel) return res.status(400).json({ error: 'Unknown channel' });
+  res.json(await channel.verify(req.params.entityId));
+});
+
 // Client self-service: the logged-in user's own client(s).
 app.get('/api/my/integrations', auth.requireAuth, (req, res) => {
   const out = (req.user.entityIds || []).map((id) => {

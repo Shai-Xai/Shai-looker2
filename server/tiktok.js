@@ -219,6 +219,31 @@ async function syncAudience({ entityId, segmentId, name, members = [], by = '' }
   }
 }
 
+// Live connection check — is the token valid right now? Hits advertiser info.
+// Best-effort; never throws. status: ok | not_configured | token_invalid | error.
+async function verify(entityId) {
+  const checkedAt = new Date().toISOString();
+  if (!isConfigured(entityId)) return { ok: false, status: 'not_configured', detail: 'No access token / advertiser ID set.', checkedAt };
+  const { accessToken: token, advertiserId } = connection(entityId);
+  try {
+    const url = `${BASE}/advertiser/info/?advertiser_ids=${encodeURIComponent(JSON.stringify([advertiserId]))}&fields=${encodeURIComponent(JSON.stringify(['name', 'status']))}`;
+    const res = await fetch(url, { headers: { 'Access-Token': token } });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || (data && data.code)) {
+      const status = data && (data.code === 40105 || data.code === 40100) ? 'token_invalid' : 'error';
+      return { ok: false, status, detail: (data && data.message) || `TikTok HTTP ${res.status}`, checkedAt };
+    }
+    const adv = (data.data && (data.data.list || [])[0]) || {};
+    return { ok: true, status: 'ok', account: adv.name || advertiserId, accountStatus: adv.status, checkedAt };
+  } catch (e) { return { ok: false, status: 'error', detail: e.message, checkedAt }; }
+}
+
+// Best-effort deep link to this advertiser's audiences in TikTok Ads.
+function audiencesUrl(entityId) {
+  const adv = connection(entityId).advertiserId; if (!adv) return '';
+  return `https://ads.tiktok.com/i18n/dmp/audience/list?aadvid=${adv}`;
+}
+
 // Per-client health/audience summary for the admin monitoring view.
 function summary(entityId) {
   const rows = db ? db.db.prepare('SELECT * FROM tiktok_audiences WHERE entity_id=?').all(entityId) : [];
@@ -226,7 +251,7 @@ function summary(entityId) {
   const errors = audiences.filter((a) => a.status === 'error').length;
   const lastAt = audiences.reduce((m, a) => (a.at > m ? a.at : m), '');
   const lastError = audiences.filter((a) => a.status === 'error').sort((a, b) => String(b.at).localeCompare(String(a.at)))[0] || null;
-  return { channel: 'tiktok', configured: isConfigured(entityId), audienceCount: audiences.length, ok: audiences.length - errors, errors, lastAt, lastError: lastError ? { at: lastError.at, error: lastError.error, segmentId: lastError.segmentId } : null, audiences };
+  return { channel: 'tiktok', configured: isConfigured(entityId), advertiserId: connection(entityId).advertiserId, audiencesUrl: audiencesUrl(entityId), audienceCount: audiences.length, ok: audiences.length - errors, errors, lastAt, lastError: lastError ? { at: lastError.at, error: lastError.error, segmentId: lastError.segmentId } : null, audiences };
 }
 
-module.exports = { init, isConfigured, status, connection, syncAudience, lastSyncFor, clearMembers, summary, hashEmail, hashPhone };
+module.exports = { init, isConfigured, status, connection, syncAudience, lastSyncFor, clearMembers, verify, audiencesUrl, summary, hashEmail, hashPhone };

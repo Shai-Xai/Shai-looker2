@@ -35,8 +35,9 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
   const [syncMsg, setSyncMsg] = useState({}); // segmentId -> last Meta-sync status line
   const [metaConnected, setMetaConnected] = useState(false);
   const [tiktokConnected, setTiktokConnected] = useState(false);
+  const [connectors, setConnectors] = useState({});
 
-  const load = () => api.listSegments(entityId).then((r) => { setSegments(r.segments || []); setMetaConnected(!!r.metaConnected); setTiktokConnected(!!r.tiktokConnected); }).catch(() => setSegments([]));
+  const load = () => api.listSegments(entityId).then((r) => { setSegments(r.segments || []); setMetaConnected(!!r.metaConnected); setTiktokConnected(!!r.tiktokConnected); setConnectors(r.connectors || {}); }).catch(() => setSegments([]));
   // Materialise a built-in recipe (e.g. abandoned cart) as a real, live segment.
   const addRecipe = async (key) => {
     setAddingKey(key);
@@ -82,6 +83,14 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
     finally { setBusyId(null); }
   };
   const fmtWhen = (iso) => { try { return new Date(iso).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch { return ''; } };
+  // One connector's line under a segment: sync status (or "not synced yet") + a link out.
+  const connLine = (icon, label, sync, url) => (
+    <div style={{ fontSize: 11.5, display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap', color: sync?.status === 'error' ? 'var(--error,#ef4444)' : 'var(--muted)' }}>
+      <span>{icon} {label}:</span>
+      <span>{sync ? (sync.status === 'error' ? `last sync failed — ${sync.error}` : `${sync.received} mirrored · ${fmtWhen(sync.at)}${sync.audienceId ? ` · audience ${sync.audienceId}` : ''}`) : 'connected · not synced yet'}</span>
+      {url && <a href={url} target="_blank" rel="noreferrer" style={{ color: 'var(--brand)', fontWeight: 600 }}>open ↗</a>}
+    </div>
+  );
 
   return (
     <div>
@@ -128,10 +137,10 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
                 </div>
                 {syncMsg[s.id]
                   ? <div style={{ fontSize: 11.5, color: syncMsg[s.id].startsWith('✗') ? 'var(--error,#ef4444)' : 'var(--muted)', flexBasis: '100%', marginTop: isMobile ? 0 : 4 }}>{syncMsg[s.id]}</div>
-                  : (s.metaSync || s.tiktokSync) && (
+                  : (connectors.meta?.connected || connectors.tiktok?.connected || s.metaSync || s.tiktokSync) && (
                     <div style={{ flexBasis: '100%', marginTop: isMobile ? 0 : 4, display: 'flex', flexDirection: 'column', gap: 2 }}>
-                      {s.metaSync && <div style={{ fontSize: 11.5, color: s.metaSync.status === 'error' ? 'var(--error,#ef4444)' : 'var(--muted)' }}>◇ Meta: {s.metaSync.status === 'error' ? `last sync failed — ${s.metaSync.error}` : `${s.metaSync.received} mirrored · ${fmtWhen(s.metaSync.at)}`}</div>}
-                      {s.tiktokSync && <div style={{ fontSize: 11.5, color: s.tiktokSync.status === 'error' ? 'var(--error,#ef4444)' : 'var(--muted)' }}>♪ TikTok: {s.tiktokSync.status === 'error' ? `last sync failed — ${s.tiktokSync.error}` : `${s.tiktokSync.received} mirrored · ${fmtWhen(s.tiktokSync.at)}`}</div>}
+                      {(connectors.meta?.connected || s.metaSync) && connLine('◇', 'Meta', s.metaSync, connectors.meta?.audiencesUrl)}
+                      {(connectors.tiktok?.connected || s.tiktokSync) && connLine('♪', 'TikTok', s.tiktokSync, connectors.tiktok?.audiencesUrl)}
                     </div>
                   )}
               </div>

@@ -112,6 +112,10 @@ function mount(app, { db, auth, resolveAudience, resolveRecipe, meta, tiktok }) 
       })),
       metaConnected: !!meta?.isConfigured?.(req.params.entityId),
       tiktokConnected: !!tiktok?.isConfigured?.(req.params.entityId),
+      connectors: {
+        meta: { connected: !!meta?.isConfigured?.(req.params.entityId), audiencesUrl: meta?.audiencesUrl?.(req.params.entityId) || '' },
+        tiktok: { connected: !!tiktok?.isConfigured?.(req.params.entityId), audiencesUrl: tiktok?.audiencesUrl?.(req.params.entityId) || '' },
+      },
     });
   });
 
