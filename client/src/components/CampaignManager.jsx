@@ -983,7 +983,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
             <input style={{ ...input, marginTop: 8 }} value={f.utm.content} onChange={(e) => set('utm', { ...f.utm, content: e.target.value })} placeholder="utm_content — e.g. abandoned_cart_emailer" />
             {f.ctaUrl && (f.utm.source || f.utm.campaign) && (
               <div style={{ ...hintS, wordBreak: 'break-all' }}>
-                Lands as: {(() => { try { const u = new URL(f.ctaUrl); const m = { utm_source: f.utm.source, utm_medium: f.utm.medium, utm_campaign: f.utm.campaign, utm_term: f.utm.term, utm_content: f.utm.content }; for (const [k, v] of Object.entries(m)) if (v) u.searchParams.set(k, v); return u.toString(); } catch { return '(enter a full https:// link to preview)'; } })()}
+                Lands as: {(() => { try { const u = new URL(f.ctaUrl); if (f.promo?.type === 'promo' && f.promo?.appendToLink && f.promo?.code) u.searchParams.set('promo', f.promo.code); const m = { utm_source: f.utm.source, utm_medium: f.utm.medium, utm_campaign: f.utm.campaign, utm_term: f.utm.term, utm_content: f.utm.content }; for (const [k, v] of Object.entries(m)) if (v) u.searchParams.set(k, v); return u.toString(); } catch { return '(enter a full https:// link to preview)'; } })()}
               </div>
             )}
           </Field>
