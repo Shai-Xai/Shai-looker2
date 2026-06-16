@@ -23,6 +23,8 @@ export default function HomePage() {
   const [includeSubfolders, setIncludeSubfolders] = useState(true);
   const [showFolderModal, setShowFolderModal] = useState(false);
   const [folderSettings, setFolderSettings] = useState({}); // { "<path>": { keepImported } } — persistent, cascading
+  const [view, setView] = useState(() => localStorage.getItem('howler_lib_view') || 'tile'); // 'tile' | 'list'
+  const setViewMode = (v) => { setView(v); localStorage.setItem('howler_lib_view', v); };
 
   function load() {
     setLoading(true);
@@ -45,7 +47,8 @@ export default function HomePage() {
     }
     return [...set].sort((a, b) => a.localeCompare(b));
   })();
-  const dashHere = dashboards.filter((d) => (d.folder || '') === path); // dashboards directly in this folder
+  // Dashboards directly in this folder, sorted by name (A→Z).
+  const dashHere = dashboards.filter((d) => (d.folder || '') === path).sort((a, b) => (a.title || '').localeCompare(b.title || '', undefined, { numeric: true }));
   const folderCountOf = (fp) => dashboards.filter((d) => { const f = d.folder || ''; return f === fp || f.startsWith(fp + '/'); }).length;
   const segs = path ? path.split('/') : [];
 
@@ -201,6 +204,12 @@ export default function HomePage() {
         {isAdmin && !path && dashboards.some((d) => !d.folder) && (
           <button style={{ ...miniBtnOutline, fontSize: 12 }} onClick={syncFolders} title="Look up each imported dashboard's Looker folder">↻ Sync folders from Looker</button>
         )}
+        <div style={{ flex: 1 }} />
+        {/* Tile / List view toggle for the dashboard list. */}
+        <div style={{ display: 'inline-flex', border: '1px solid var(--hairline)', borderRadius: 8, overflow: 'hidden' }}>
+          <button style={{ ...viewToggleBtn, ...(view === 'tile' ? viewToggleOn : null) }} onClick={() => setViewMode('tile')} title="Tile view">▦ Tiles</button>
+          <button style={{ ...viewToggleBtn, ...(view === 'list' ? viewToggleOn : null) }} onClick={() => setViewMode('list')} title="List view">☰ List</button>
+        </div>
       </div>
 
       {loading ? (
@@ -235,8 +244,8 @@ export default function HomePage() {
             </div>
           )}
 
-          {/* Dashboards directly in the current folder */}
-          {dashHere.length > 0 && (
+          {/* Dashboards directly in the current folder — tile cards or compact list */}
+          {dashHere.length > 0 && view === 'tile' && (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 16 }}>
               {dashHere.map((d) => (
                 <div key={d.id} style={listCardStyle} onClick={() => navigate(`/d/${d.id}`)}>
@@ -250,6 +259,25 @@ export default function HomePage() {
                     <button style={miniBtn} onClick={(e) => { e.stopPropagation(); navigate(`/d/${d.id}`); }}>View</button>
                     {isAdmin && <button style={miniBtnOutline} onClick={(e) => { e.stopPropagation(); navigate(`/d/${d.id}/edit`); }}>Edit</button>}
                     {isAdmin && <button style={miniBtnOutline} onClick={(e) => moveToFolder(d, e)}>📁 Move</button>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {dashHere.length > 0 && view === 'list' && (
+            <div style={{ display: 'flex', flexDirection: 'column', border: '1px solid var(--hairline)', borderRadius: 12, overflow: 'hidden' }}>
+              {dashHere.map((d, i) => (
+                <div key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderTop: i ? '1px solid var(--hairline)' : 'none', background: 'var(--card)', cursor: 'pointer' }} onClick={() => navigate(`/d/${d.id}`)}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.title}</div>
+                    {d.description && <div style={{ fontSize: 12, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.description}</div>}
+                  </div>
+                  <span style={{ fontSize: 12, color: 'var(--muted)', flexShrink: 0 }}>{d.tileCount} tiles</span>
+                  <div style={{ display: 'flex', gap: 6, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
+                    <button style={miniBtn} onClick={() => navigate(`/d/${d.id}`)}>View</button>
+                    {isAdmin && <button style={miniBtnOutline} onClick={() => navigate(`/d/${d.id}/edit`)}>Edit</button>}
+                    {isAdmin && <button style={miniBtnOutline} onClick={(e) => moveToFolder(d, e)}>📁</button>}
+                    {isAdmin && <button style={deleteBtn} title="Delete" onClick={(e) => handleDelete(d.id, e)}>✕</button>}
                   </div>
                 </div>
               ))}
@@ -281,6 +309,8 @@ const primaryBtn = { padding: '9px 18px', background: 'var(--brand)', color: '#f
 const inputStyle = { flex: '1 1 140px', padding: '9px 12px', border: '1px solid var(--hairline)', borderRadius: 10, fontSize: 13, outline: 'none', background: 'var(--card)' };
 const miniBtn = { padding: '7px 16px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer' };
 const miniBtnOutline = { padding: '7px 14px', background: 'rgba(0,0,0,0.05)', color: 'var(--text)', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer' };
+const viewToggleBtn = { padding: '6px 12px', background: 'var(--card)', color: 'var(--muted)', border: 'none', fontSize: 12.5, fontWeight: 600, cursor: 'pointer' };
+const viewToggleOn = { background: 'var(--brand)', color: '#fff' };
 const deleteBtn = { border: 'none', background: 'transparent', color: '#bbb', cursor: 'pointer', fontSize: 14, padding: 2 };
 const folderEditBtn = { border: 'none', background: 'rgba(0,0,0,0.05)', color: 'var(--muted)', cursor: 'pointer', fontSize: 13, borderRadius: 8, width: 28, height: 28, flexShrink: 0 };
 const crumbBtn = { border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 18, fontWeight: 700, color: 'var(--text)', padding: 0 };
