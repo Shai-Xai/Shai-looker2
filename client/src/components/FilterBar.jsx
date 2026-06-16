@@ -70,11 +70,13 @@ export default function FilterBar({ filters, values, onChange, locked = {}, open
 // with these next time), and — for admins — set them as the client's default.
 function FilterViewFooter({ va }) {
   if (!va) return null;
+  if (!va.onSave && !va.hasSaved && !va.canSetDefault && !va.note && !va.status) return null;
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--hairline)' }}>
-      <button onClick={va.onSave} style={saveViewBtn}>Save filters</button>
+      {va.onSave && <button onClick={va.onSave} style={saveViewBtn}>Save filters</button>}
       {va.hasSaved && <button onClick={va.onReset} style={linkBtn}>Reset to default</button>}
       {va.canSetDefault && <button onClick={va.onSetDefault} style={linkBtn} title="Make these the default for everyone on this client">Set as client default</button>}
+      {va.note && <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>{va.note}</span>}
       {va.status && <span style={{ fontSize: 12.5, color: 'var(--muted)', marginLeft: 'auto' }}>{va.status}</span>}
     </div>
   );

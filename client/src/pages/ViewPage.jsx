@@ -48,6 +48,14 @@ export default function ViewPage() {
   // optional saved overlay (entity default then the user's view). Locks always
   // win; a shared link (?f=) overrides any non-locked filter last.
   function buildFilters(data, suite, overlay) {
+    // "Keep imported filters": the dashboard's own (Looker-imported) default_value
+    // is authoritative — ignore suite locks, the client default AND saved user
+    // views. Only live in-session changes (and the days-to-go sync) apply on top.
+    if (data?.keepImportedFilters) {
+      const vals = {};
+      for (const f of data.filters || []) vals[f.name] = f.default_value || '';
+      return { vals, lockedMap: {} };
+    }
     const lockMap = suite?.lockedFilters || {};
     const norm = {};
     for (const [k, v] of Object.entries(lockMap)) norm[k.trim().toLowerCase()] = v;
@@ -153,7 +161,10 @@ export default function ViewPage() {
     if (!scopeEntityId) { flashView('No client in context'); return; }
     try { const f = savableFilters(); await api.setClientDashboardFilters(scopeEntityId, id, f); setEntityDefault(f); flashView('Set as client default ✓'); } catch (e) { flashView('Could not set default'); }
   };
-  const viewActions = { onSave: saveMyView, onReset: resetMyView, hasSaved: hasUserView, canSetDefault: isAdmin, onSetDefault: setClientDefault, status: viewStatus };
+  // On a "keep imported filters" dashboard, saved views/client defaults are
+  // ignored on load — so don't offer to save them (it would silently do nothing).
+  const keepImported = !!def?.keepImportedFilters;
+  const viewActions = { onSave: keepImported ? null : saveMyView, onReset: resetMyView, hasSaved: hasUserView && !keepImported, canSetDefault: isAdmin && !keepImported, onSetDefault: setClientDefault, status: viewStatus, note: keepImported ? '🔒 Filters follow this dashboard’s imported defaults.' : '' };
 
   // View tracking (fire-and-forget) — powers home-page personalisation.
   useEffect(() => { if (suiteId && id) api.track(suiteId, id); }, [suiteId, id]);

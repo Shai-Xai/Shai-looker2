@@ -246,6 +246,7 @@ export default function EditorPage() {
         <button style={btn} onClick={() => setShowFilters(true)}>Filters ({def.filters?.length || 0})</button>
         <button style={btn} onClick={() => setShowAiContext(true)}>✨ AI context</button>
         <button style={btn} onClick={() => setShowDaysSync(true)}>⏳ Days-to-go{def.daysBeforeSync?.mode && def.daysBeforeSync.mode !== 'off' ? ' ●' : ''}</button>
+        <button style={btn} onClick={() => mutate((d) => ({ ...d, keepImportedFilters: !d.keepImportedFilters }))} title="Use this dashboard's imported (Looker) default filters as authoritative — client defaults, saved user views and suite locks won't override them. Live in-session changes still apply.">📌 Imported filters{def.keepImportedFilters ? ' ●' : ''}</button>
         <div style={{ flex: 1 }} />
         <span style={{ fontSize: 12, color: dirty ? 'var(--warn)' : 'var(--muted)' }}>
           {dirty ? '● Unsaved changes' : '✓ Saved'}
