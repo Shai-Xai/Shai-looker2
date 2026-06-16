@@ -98,6 +98,49 @@ function requireClient(apiKey) {
   return c;
 }
 
+// ─── Tolerant JSON parsing for model output ─────────────────────────────────────
+// Models occasionally emit slightly invalid JSON (raw newlines inside strings,
+// trailing commas, a missing comma between array elements). Try the raw parse, then
+// a few safe static repairs; the caller can fall back to a model "fix this JSON" pass.
+function escapeCtrlInStrings(s) {
+  let out = ''; let inStr = false; let esc = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (esc) { out += ch; esc = false; continue; }
+    if (ch === '\\') { out += ch; esc = true; continue; }
+    if (ch === '"') { inStr = !inStr; out += ch; continue; }
+    if (inStr && (ch === '\n' || ch === '\r' || ch === '\t')) { out += ch === '\n' ? '\\n' : ch === '\r' ? '\\r' : '\\t'; continue; }
+    out += ch;
+  }
+  return out;
+}
+function parseModelJson(text, what = 'response') {
+  let s = String(text || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
+  const a = s.indexOf('{'); const b = s.lastIndexOf('}');
+  if (a < 0 || b <= a) throw new Error(`AI did not return JSON for the ${what}`);
+  s = s.slice(a, b + 1);
+  const noTrailingCommas = (x) => x.replace(/,(\s*[}\]])/g, '$1');
+  const missingCommas = (x) => x.replace(/(["\]}])\s*\n(\s*)(["{[])/g, '$1,\n$2$3'); // value\n value → value,\n value
+  const fixes = [(x) => x, noTrailingCommas, escapeCtrlInStrings, (x) => noTrailingCommas(escapeCtrlInStrings(x)), (x) => noTrailingCommas(escapeCtrlInStrings(missingCommas(x)))];
+  let lastErr;
+  for (const fix of fixes) { try { return JSON.parse(fix(s)); } catch (e) { lastErr = e; } }
+  throw lastErr;
+}
+// Last-resort: ask the model to repair its own malformed JSON (only on parse failure).
+async function repairJsonViaModel(c, broken) {
+  const resp = await c.messages.create({
+    model: MODEL, max_tokens: 2400, output_config: { effort: 'low' },
+    system: 'You fix malformed JSON. Return ONLY the corrected, valid JSON — no prose, no markdown fences. Preserve all content and keys; fix only syntax (missing commas, unescaped quotes/newlines, trailing commas).',
+    messages: [{ role: 'user', content: String(broken || '').slice(0, 24000) }],
+  });
+  return (resp.content || []).filter((bk) => bk.type === 'text').map((bk) => bk.text).join('');
+}
+// Parse model JSON with static repairs, then a single model-repair fallback.
+async function parseModelJsonResilient(c, text, what) {
+  try { return parseModelJson(text, what); }
+  catch { return parseModelJson(await repairJsonViaModel(c, text), what); }
+}
+
 const REQUEST = (messages, system) => ({
   model: MODEL,
   max_tokens: 1024,
@@ -301,9 +344,7 @@ async function digestBrief({ tiles, roleLabel, roleFocus, catalogue, instruction
     messages: [{ role: 'user', content: lines.join('\n') }],
   });
   const text = (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
-  const match = text.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error('AI did not return JSON for the digest');
-  return JSON.parse(match[0]);
+  return parseModelJsonResilient(c, text, 'digest');
 }
 
 // ─── Campaign copy drafting (Action Engine) ────────────────────────────────────
@@ -402,9 +443,7 @@ async function briefHome({ tiles, profile, catalogue, instructions, apiKey, acti
     messages: [{ role: 'user', content: lines.join('\n') }],
   });
   const text = (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
-  const match = text.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error('AI did not return JSON for the briefing');
-  return JSON.parse(match[0]);
+  return parseModelJsonResilient(c, text, 'briefing');
 }
 
 // ─── Settlement report extraction ──────────────────────────────────────────────
