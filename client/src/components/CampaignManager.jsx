@@ -1110,13 +1110,24 @@ function JourneyReport({ entityId, action, onClose }) {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {/* Enrolled baseline */}
             <FunnelBar label="Enrolled" sub="entered the journey" value={d.enrolled} total={d.enrolled} accent="var(--brand)" />
-            {d.steps.map((s) => (
-              <FunnelBar key={s.index} label={`Step ${s.index + 1} · +${unit(s.delayHours)}`} sub={s.subject || ''} value={s.received} total={d.enrolled || 1}
-                engage={[s.opened ? `📨 ${s.opened} opened` : '', s.clicked ? `👆 ${s.clicked} clicked` : ''].filter(Boolean).join(' · ')}
-                note={s.converted ? `${s.converted} converted after this step` : ''} />
-            ))}
+            {d.steps.map((s, i) => {
+              const prev = i === 0 ? d.enrolled : d.steps[i - 1].received;
+              const dropped = Math.max(0, prev - s.received);
+              const dropPct = prev > 0 ? Math.round((dropped / prev) * 100) : 0;
+              const rate = (n) => (s.received > 0 ? Math.min(100, Math.round((n / s.received) * 100)) : 0);
+              return (
+                <div key={s.index} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {dropped > 0 && (
+                    <div style={{ fontSize: 11, color: 'var(--muted)', paddingLeft: 2 }} title="Fewer people reached this step than the previous one — they converted, unsubscribed, or are still en route.">↓ {dropped} didn’t reach this step ({dropPct}%)</div>
+                  )}
+                  <FunnelBar label={`Step ${s.index + 1} · +${unit(s.delayHours)}`} sub={s.subject || ''} value={s.received} total={d.enrolled || 1}
+                    engage={[s.opened ? `📨 ${s.opened} opened (${rate(s.opened)}%)` : '', s.clicked ? `👆 ${s.clicked} clicked (${rate(s.clicked)}%)` : ''].filter(Boolean).join(' · ')}
+                    note={s.converted ? `${s.converted} converted after this step` : ''} />
+                </div>
+              );
+            })}
           </div>
-          <div style={hintS}>“Received” counts everyone who advanced past that step; opened/clicked are tracked per step. People leave the journey the moment they buy (converted) or unsubscribe.</div>
+          <div style={hintS}>“Received” counts everyone who advanced past that step; opened/clicked (% of received) are tracked per step. People leave the journey the moment they buy (converted) or unsubscribe.</div>
         </>
       )}
     </div>
