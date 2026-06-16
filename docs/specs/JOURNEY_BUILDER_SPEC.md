@@ -216,16 +216,24 @@ prompts in `insights.js`, registered via `promptRegistry()`, aggregated in
 - **J6 — Visual canvas** (React Flow / `@xyflow/react`) for view + light edit;
   full drag-build last, once node types are stable.
 
-## 10. Open questions
-1. **Multi-journey membership** — can a person be in several journeys at once? If
-   yes, need cross-journey frequency capping (don't send 3 emails one morning).
-2. **Re-entry** — can the same person run a journey twice, and on what cooldown?
-3. **Canvas now or later** — is the plain-language review + read-only graph enough
-   for v1, deferring full drag-edit? (Lean: yes.)
-4. **AI autonomy** — does the AI-drafted journey always require human review before
-   launch (lean: yes, always), and does it need approval-workflow sign-off too?
+## 10. Decisions & open questions
+
+**Decided (2026-06-16):**
+1. **Multi-journey membership — allowed, no cap (for now).** A person can be in
+   several journeys at once. Cross-journey frequency capping is **deferred** (flag
+   over-messaging as a known risk to revisit before scale).
+2. **Re-entry — allowed, with a cooldown.** A person can run a journey again after
+   a configurable wait (default e.g. 30 days), so win-backs etc. can re-fire. Each
+   journey carries a `reentryCooldownDays`; enrolment checks last-exit time.
+3. **AI autonomy — always human review.** An AI-drafted journey is *never*
+   auto-launched; a person must review and hit launch. (Approval-workflow sign-off
+   stays separate/optional, as today.)
+4. **Canvas scope (v1) — plain-language summary + read-only diagram.** No
+   drag-to-build in v1; editing is via wizard / AI. Full editable canvas is J6.
+
+**Still open:**
 5. **Recipe ownership** — platform-curated only, or can AMs/clients save their own
-   journeys as reusable recipes?
+   journeys as reusable recipes? (Lean: platform + AM-curated first.)
 
 ## 11. How it maps to what's built
 - `server/actions.js` — drips, enrolments, auto-check triggers, promos,
