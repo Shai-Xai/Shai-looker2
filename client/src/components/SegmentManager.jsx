@@ -258,12 +258,16 @@ function SegmentBuilder({ entityId, tiles, segment, onClose, onSaved }) {
   // Parse an uploaded CSV/Excel into the pasted-list text (SheetJS is loaded on
   // demand so it never bloats the main bundle). Stored as a 'paste' snapshot.
   const [uploadInfo, setUploadInfo] = useState('');
+  // Switching source clears the column mapping so header names from one source
+  // (a CSV) never silently apply to another (a tile / a different sheet).
+  const pickMode = (m) => setF((s) => ({ ...s, mode: m, emailField: '', nameField: '', phoneField: '' }));
   const onFile = async (file) => {
     try {
       const XLSX = await import('xlsx');
       const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
       const csv = XLSX.utils.sheet_to_csv(wb.Sheets[wb.SheetNames[0]] || {});
-      setF((s) => ({ ...s, mode: 'paste', pasted: csv }));
+      // New file → clear any prior column mapping so it can't apply to the wrong headers.
+      setF((s) => ({ ...s, mode: 'paste', pasted: csv, emailField: '', nameField: '', phoneField: '' }));
       setUploadInfo(`Loaded ${file.name}`);
     } catch (e) { alert('Could not read that file: ' + (e.message || e)); }
   };
@@ -275,7 +279,7 @@ function SegmentBuilder({ entityId, tiles, segment, onClose, onSaved }) {
   };
   useEffect(() => { clearTimeout(debounce.current); debounce.current = setTimeout(refreshAud, 350); return () => clearTimeout(debounce.current); },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [f.mode, f.dashboardId, f.tileId, f.emailField, f.phoneField, f.emailConsentField, f.smsConsentField, f.attrDashboardId, f.attrTileId, JSON.stringify(f.filters), f.pasted, f.gsheetUrl]);
+    [f.mode, f.dashboardId, f.tileId, f.emailField, f.nameField, f.phoneField, f.emailConsentField, f.smsConsentField, f.attrDashboardId, f.attrTileId, JSON.stringify(f.filters), f.pasted, f.gsheetUrl]);
 
   const addFilter = () => set('filters', [...f.filters, { field: '', op: 'in', values: [] }]);
   const setFilter = (i, patch) => set('filters', f.filters.map((x, j) => (j === i ? { ...x, ...patch } : x)));
@@ -304,9 +308,9 @@ function SegmentBuilder({ entityId, tiles, segment, onClose, onSaved }) {
 
         <Field label="Source">
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <Toggle on={f.mode === 'tile'} onClick={() => set('mode', 'tile')}>From a dashboard tile</Toggle>
-            <Toggle on={f.mode === 'paste'} onClick={() => set('mode', 'paste')}>Paste / upload a list</Toggle>
-            <Toggle on={f.mode === 'gsheet'} onClick={() => set('mode', 'gsheet')}>Link a Google Sheet</Toggle>
+            <Toggle on={f.mode === 'tile'} onClick={() => pickMode('tile')}>From a dashboard tile</Toggle>
+            <Toggle on={f.mode === 'paste'} onClick={() => pickMode('paste')}>Paste / upload a list</Toggle>
+            <Toggle on={f.mode === 'gsheet'} onClick={() => pickMode('gsheet')}>Link a Google Sheet</Toggle>
           </div>
         </Field>
 
@@ -362,7 +366,7 @@ function SegmentBuilder({ entityId, tiles, segment, onClose, onSaved }) {
         ) : f.mode === 'gsheet' ? (
           <Field label="Google Sheet link">
             <input style={input} value={f.gsheetUrl} onChange={(e) => set('gsheetUrl', e.target.value)} placeholder="https://docs.google.com/spreadsheets/d/…/edit#gid=0" onBlur={refreshAud} />
-            <div style={hintS}>The sheet must be shared <b>“Anyone with the link”</b> (or published to the web). We read it <b>live</b> each time and pick out the email, mobile and name columns — a header row is ignored.</div>
+            <div style={hintS}>The sheet must be shared <b>“Anyone with the link”</b> (or published to the web). We read it <b>live</b> each time — auto-detecting the email, mobile and name, or use <b>Match columns</b> below to pin them by header.</div>
           </Field>
         ) : (
           <Field label="Paste a list, or upload a CSV / Excel file">
@@ -373,7 +377,29 @@ function SegmentBuilder({ entityId, tiles, segment, onClose, onSaved }) {
               {uploadInfo && <span style={hintS}>{uploadInfo}</span>}
             </div>
             <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit' }} rows={4} value={f.pasted} onChange={(e) => { set('pasted', e.target.value); setUploadInfo(''); }} placeholder="one@example.com, +27821234567, two@example.com …" onBlur={refreshAud} />
-            <div style={hintS}>One person per line — we pick out the email, mobile and name; a header row is ignored. Numbers become SMS-reachable; emails email-reachable.</div>
+            <div style={hintS}>One person per line — we auto-detect the email, mobile and name. For a spreadsheet with headers, use <b>Match columns</b> below to pin which column is which. Numbers become SMS-reachable; emails email-reachable.</div>
+          </Field>
+        )}
+
+        {(f.mode === 'paste' || f.mode === 'gsheet') && aud?.columns?.length > 0 && (
+          <Field label="Match columns (optional)">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <select style={{ ...input, flex: 1 }} value={f.emailField} onChange={(e) => set('emailField', e.target.value)}>
+                  <option value="">Email column (auto-detect)</option>
+                  {aud.columns.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+                <select style={{ ...input, flex: 1 }} value={f.nameField} onChange={(e) => set('nameField', e.target.value)}>
+                  <option value="">Name column (optional)</option>
+                  {aud.columns.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+              <select style={input} value={f.phoneField} onChange={(e) => set('phoneField', e.target.value)}>
+                <option value="">Mobile-number column (auto-detect)</option>
+                {aud.columns.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+              <div style={hintS}>Tell us which columns hold the email, name and mobile — useful when a row has several number-like values. Leave on <b>auto-detect</b> to let us guess from each row.</div>
+            </div>
           </Field>
         )}
 
