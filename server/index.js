@@ -2610,6 +2610,13 @@ const actionsApi = require('./actions').mount(app, {
     const ent = db.getEntity(entityId);
     return insights.draftCampaign({ goal, clientName: ent?.name, clientContext: ent?.aiContext || '', audienceCount, instructions: aiInstructionsFor(null), apiKey });
   },
+  // AI-draft a multi-step journey from a plain-language description (Journeys J1).
+  draftJourney: async ({ entityId, description, audienceCount }) => {
+    const apiKey = anthropicKeyForEntity(entityId);
+    if (!insights.isConfigured(apiKey)) throw new Error('AI is not configured for this client');
+    const ent = db.getEntity(entityId);
+    return insights.draftJourney({ description, clientName: ent?.name, clientContext: ent?.aiContext || '', audienceCount, instructions: aiInstructionsFor(null), apiKey });
+  },
 });
 
 // Segments — reusable live audiences. Reuses the campaign engine's audience

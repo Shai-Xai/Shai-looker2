@@ -347,6 +347,62 @@ async function draftCampaign({ goal, clientName, clientContext, audienceCount, i
   return JSON.parse(match[0]);
 }
 
+// ─── Journey drafting (Engage → Journeys, J1) ─────────────────────────────────
+// Turns a promoter's plain-language description ("when someone opens but doesn't
+// buy in 2 days, text them a code") into a STRUCTURED multi-step journey the
+// promoter reviews before anything is created. J1 executes as a linear, timed
+// sequence on the existing drip engine; behavioural intent (opened/clicked) is
+// captured per step in `reactsTo` for the review summary and the branching
+// engine that lands later. The AI proposes; a human always reviews and launches.
+const JOURNEY_SYSTEM = `You design short multi-step marketing journeys for event organisers (tickets, festivals, live events). South African audience; amounts in Rand. A journey is a sequence of timed messages across email and SMS that nudges a customer toward a goal (e.g. completing a purchase, coming back, attending).
+
+The user describes, in plain language, what they want to happen — including conditions like "if they open but don't buy" or "follow up on SMS". Turn it into a concrete journey.
+
+Respond with ONLY strict JSON (no markdown fences):
+{
+  "name": "short journey name, <40 chars, e.g. 'Win back lapsed buyers'",
+  "goal": "one sentence: the outcome this journey drives",
+  "summary": "2-3 plain sentences a non-technical promoter can read to understand exactly what will happen and when",
+  "steps": [
+    {
+      "channel": "email" | "sms",
+      "delayHours": 0,
+      "reactsTo": "what behaviour this step is a response to, in plain words, e.g. 'sent right away', 'if they haven't bought after 2 days', 'if they opened but didn't click' — describe the intent even though J1 sends on a timer",
+      "subject": "email subject (<60 chars); empty string for SMS steps",
+      "body": "message copy. Email: 50-120 words, may use **bold** sparingly. SMS: <=300 chars, plain, no links spelled out (a CTA button/link is added separately). You may use {{name}} once as a greeting and {{ticketType}} only if it reads naturally.",
+      "ctaText": "button label, 2-4 words (email); short for SMS"
+    }
+  ]
+}
+
+Rules:
+- 2 to 5 steps. First step delayHours is usually 0. Later steps space out sensibly (e.g. 24, 48, 72).
+- Choose channel per step to match the description (e.g. escalate to SMS for urgency/follow-up).
+- Never invent prices, dates or discounts not given. No spam tropes (ALL CAPS, !!!, "act now"); one tasteful emoji max.
+- Tone: human, confident, like a great event brand — not corporate.`;
+
+async function draftJourney({ description, clientName, clientContext, audienceCount, instructions, apiKey }) {
+  const c = requireClient(apiKey);
+  const lines = [
+    `CLIENT: ${clientName || 'an event organiser'}`,
+    clientContext ? `CONTEXT: ${clientContext}` : '',
+    audienceCount ? `AUDIENCE: ~${audienceCount} people` : '',
+    `WHAT THEY WANT: ${description || 'A short win-back journey: email lapsed customers, and if they do not respond, follow up with an SMS offer.'}`,
+  ].filter(Boolean);
+  const resp = await c.messages.create({
+    model: MODEL,
+    max_tokens: 1500,
+    thinking: { type: 'adaptive' },
+    output_config: { effort: 'low' },
+    system: systemWith(JOURNEY_SYSTEM, instructions),
+    messages: [{ role: 'user', content: lines.join('\n') }],
+  });
+  const text = (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error('AI did not return JSON for the journey draft');
+  return JSON.parse(match[0]);
+}
+
 // Sharpen a short instruction/briefing note the user wrote to steer the Owl.
 // Returns improved PLAIN TEXT (not a report, not JSON) — same intent, clearer
 // and tighter as a prompt.
@@ -542,10 +598,11 @@ function promptRegistry() {
     { key: 'home', label: 'Home briefing', scope: 'Personalised home-page briefing', text: HOME_SYSTEM },
     { key: 'digest', label: 'Scheduled digest', scope: 'Role-lensed digest emails', text: DIGEST_SYSTEM },
     { key: 'campaign', label: 'Campaign copy', scope: 'Marketing email drafting', text: CAMPAIGN_SYSTEM },
+    { key: 'journey', label: 'Journey draft', scope: 'Engage → Journeys: plain-language → multi-step journey', text: JOURNEY_SYSTEM },
     { key: 'refine', label: 'Refine note', scope: 'The ✨ refine button', text: REFINE_SYSTEM },
     { key: 'settlement', label: 'Settlement extraction', scope: 'PDF settlement → JSON', text: SETTLEMENT_SYSTEM },
     { key: 'invoice', label: 'Invoice extraction', scope: 'PDF invoice → JSON', text: INVOICE_SYSTEM },
   ];
 }
 
-module.exports = { generateInsight, streamInsight, streamDashboardInsight, describeTile, extractSettlement, extractInvoice, briefHome, digestBrief, draftCampaign, refineText, promptRegistry, systemWith, isConfigured: (apiKey) => !!(apiKey || process.env.ANTHROPIC_API_KEY) };
+module.exports = { generateInsight, streamInsight, streamDashboardInsight, describeTile, extractSettlement, extractInvoice, briefHome, digestBrief, draftCampaign, draftJourney, refineText, promptRegistry, systemWith, isConfigured: (apiKey) => !!(apiKey || process.env.ANTHROPIC_API_KEY) };

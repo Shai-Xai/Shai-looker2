@@ -122,7 +122,8 @@ async function fetchGoogleSheetCsv(url) {
 const MAX_AUDIENCE = 2000;       // v1 safety cap per campaign
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, draftCopy, listEvents }) {
+function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, draftCopy, draftJourney, listEvents }) {
+  const actionTemplates = require('./actionTemplates');
   const sql = db.db;
   const now = () => new Date().toISOString();
   const uuid = () => crypto.randomUUID();
@@ -1045,6 +1046,27 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     if (!guard(req, res, req.params.entityId)) return;
     try {
       const out = await draftCopy({ entityId: req.params.entityId, goal: String((req.body || {}).goal || '').slice(0, 1000), audienceCount: Number((req.body || {}).audienceCount) || 0 });
+      res.json(out);
+    } catch (e) { res.status(400).json({ error: e.message }); }
+  });
+
+  // ── Journeys (Engage → Journeys, J1) ──────────────────────────────────────
+  // Pre-wired multi-step journey recipes (whole sequences, not single emails).
+  app.get('/api/actions/:entityId/journey-recipes', auth.requireAuth, auth.requirePermission('campaigns.view'), (req, res) => {
+    if (!guard(req, res, req.params.entityId)) return;
+    res.json({ recipes: actionTemplates.listJourneys() });
+  });
+  // AI drafter: a promoter's plain-language description → a structured journey
+  // they then review. Proposes only — nothing is created until they choose to.
+  app.post('/api/actions/:entityId/draft-journey', auth.requireAuth, auth.requirePermission('campaigns.approve'), async (req, res) => {
+    if (!guard(req, res, req.params.entityId)) return;
+    if (!draftJourney) return res.status(400).json({ error: 'AI journey drafting is not configured' });
+    try {
+      const out = await draftJourney({
+        entityId: req.params.entityId,
+        description: String((req.body || {}).description || '').slice(0, 1000),
+        audienceCount: Number((req.body || {}).audienceCount) || 0,
+      });
       res.json(out);
     } catch (e) { res.status(400).json({ error: e.message }); }
   });
