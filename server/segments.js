@@ -37,6 +37,8 @@ function mount(app, { db, auth, resolveAudience, resolveRecipe, meta }) {
   for (const col of ['last_email', 'last_sms']) {
     try { sql.exec(`ALTER TABLE segments ADD COLUMN ${col} INTEGER NOT NULL DEFAULT -1`); } catch { /* exists */ }
   }
+  // Opt-in: keep this segment's Meta Custom Audience mirrored automatically (~daily).
+  try { sql.exec('ALTER TABLE segments ADD COLUMN meta_auto INTEGER NOT NULL DEFAULT 0'); } catch { /* exists */ }
 
   // Scope: admins see all; clients only their own entities (same boundary as
   // campaigns). Enforced server-side, so a segment can't reach another client.
@@ -89,6 +91,7 @@ function mount(app, { db, auth, resolveAudience, resolveRecipe, meta }) {
     definition: JSON.parse(r.definition || '{}'),
     count: r.last_count, lastResolvedAt: r.last_resolved_at,
     reach: { email: r.last_email, sms: r.last_sms }, // contactable-by-identifier per channel
+    metaAuto: !!r.meta_auto,
     createdBy: r.created_by, createdAt: r.created_at, updatedAt: r.updated_at,
   });
 
@@ -201,6 +204,41 @@ function mount(app, { db, auth, resolveAudience, resolveRecipe, meta }) {
       res.json({ ok: true, audienceId: out.audienceId, pushed: out.pushed, received: out.received, mode: out.mode });
     } catch (e) { res.status(400).json({ error: e.message }); }
   });
+
+  // Toggle daily auto-mirror to Meta for a segment.
+  app.put('/api/segments/:entityId/:id/sync/meta/auto', auth.requireAuth, auth.requirePermission('campaigns.approve'), (req, res) => {
+    if (!guard(req, res, req.params.entityId)) return;
+    const seg = getSeg(req.params.id);
+    if (!seg || seg.entity_id !== req.params.entityId) return res.status(404).json({ error: 'Not found' });
+    const on = !!(req.body && req.body.on);
+    sql.prepare('UPDATE segments SET meta_auto=? WHERE id=?').run(on ? 1 : 0, req.params.id);
+    res.json({ ok: true, metaAuto: on });
+  });
+
+  // Background mirror: re-push auto-enabled segments to Meta ~daily. Best-effort,
+  // throttled per segment (skip if mirrored in the last 20h). Uses a synthetic
+  // system user so the SAME server-side org/event scope is enforced.
+  async function autoMirrorTick() {
+    if (!meta?.isConfigured) return;
+    let rows = [];
+    try { rows = sql.prepare('SELECT id, entity_id, name, definition FROM segments WHERE meta_auto=1').all(); } catch { return; }
+    for (const s of rows) {
+      try {
+        if (!meta.isConfigured(s.entity_id)) continue;
+        const last = meta.lastSyncFor?.(s.entity_id, s.id);
+        if (last?.at && (Date.now() - new Date(last.at).getTime()) < 20 * 3600 * 1000) continue;
+        const user = { id: `autosync:${s.entity_id}`, email: 'autosync@pulse', role: 'client', entityIds: [s.entity_id], memberships: [{ entityId: s.entity_id, role: 'owner' }] };
+        const r = await resolveDefinition(s.entity_id, JSON.parse(s.definition || '{}'), user);
+        const members = (r.list || []).map((m) => ({ email: m.email, phone: m.phone }));
+        if (members.length) await meta.syncAudience({ entityId: s.entity_id, segmentId: s.id, name: s.name, members, mode: 'replace', by: 'auto' });
+      } catch (e) { console.error('[segments] auto meta-mirror failed', s.id, e.message); }
+    }
+  }
+  if (meta) {
+    const tick = setInterval(() => autoMirrorTick().catch(() => {}), 3600 * 1000);
+    if (tick.unref) tick.unref();
+    setTimeout(() => autoMirrorTick().catch(() => {}), 30000); // shortly after boot
+  }
 
   console.log('[segments] segments module mounted');
 
