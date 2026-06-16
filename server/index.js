@@ -495,6 +495,18 @@ app.get('/api/dashboards', auth.requireAuth, (req, res) => {
   res.json(store.list().filter((d) => auth.canAccessDashboard(req.user, d)));
 });
 
+// Folder-level "📌 Imported filters" — a PERSISTENT setting on the folder path that
+// cascades to every dashboard in it (+ subfolders), including ones added later.
+// Applied at view time (see GET /api/dashboards/:id); never written onto dashboards.
+// MUST be declared before `/api/dashboards/:id` or it'd match id="folder-settings".
+app.get('/api/dashboards/folder-settings', auth.requireAdmin, (_req, res) => res.json(db.folderSettingsMap()));
+app.post('/api/dashboards/folder/keep-imported', auth.requireAdmin, (req, res) => {
+  const folder = String((req.body || {}).folder || '');
+  const on = !!(req.body || {}).on;
+  db.setFolderKeepImported(folder, on);
+  res.json({ ok: true, folder, on });
+});
+
 app.get('/api/dashboards/:id', auth.requireAuth, (req, res) => {
   const d = store.get(req.params.id);
   if (!d) return res.status(404).json({ error: 'Dashboard not found' });
@@ -514,17 +526,6 @@ app.put('/api/dashboards/:id', auth.requireAdmin, (req, res) => {
 });
 app.delete('/api/dashboards/:id', auth.requireAdmin, (req, res) => {
   res.status(store.remove(req.params.id) ? 204 : 404).end();
-});
-
-// Folder-level "📌 Imported filters" — a PERSISTENT setting on the folder path that
-// cascades to every dashboard in it (+ subfolders), including ones added later.
-// Applied at view time (see GET /api/dashboards/:id); never written onto dashboards.
-app.get('/api/dashboards/folder-settings', auth.requireAdmin, (_req, res) => res.json(db.folderSettingsMap()));
-app.post('/api/dashboards/folder/keep-imported', auth.requireAdmin, (req, res) => {
-  const folder = String((req.body || {}).folder || '');
-  const on = !!(req.body || {}).on;
-  db.setFolderKeepImported(folder, on);
-  res.json({ ok: true, folder, on });
 });
 
 app.post('/api/dashboards/import', auth.requireAdmin, async (req, res) => {
