@@ -101,7 +101,7 @@ function mount(app, { db, auth, resolveAudience, resolveRecipe, meta }) {
   app.get('/api/segments/:entityId', auth.requireAuth, auth.requirePermission('campaigns.view'), (req, res) => {
     if (!guard(req, res, req.params.entityId)) return;
     const rows = sql.prepare('SELECT * FROM segments WHERE entity_id=? ORDER BY updated_at DESC LIMIT 200').all(req.params.entityId);
-    res.json({ segments: rows.map(rowToSeg) });
+    res.json({ segments: rows.map((r) => ({ ...rowToSeg(r), metaSync: meta?.lastSyncFor?.(req.params.entityId, r.id) || null })), metaConnected: !!meta?.isConfigured?.(req.params.entityId) });
   });
 
   app.post('/api/segments/:entityId', auth.requireAuth, auth.requirePermission('campaigns.approve'), (req, res) => {
@@ -195,9 +195,10 @@ function mount(app, { db, auth, resolveAudience, resolveRecipe, meta }) {
       const r = await resolveDefinition(req.params.entityId, JSON.parse(seg.definition || '{}'), req.user);
       const members = (r.list || []).map((m) => ({ email: m.email, phone: m.phone }));
       if (!members.length) return res.status(400).json({ error: 'This segment resolved to nobody right now.' });
-      const out = await meta.syncAudience({ entityId: req.params.entityId, name: seg.name, members });
+      const mode = req.body?.mode === 'append' ? 'append' : 'replace';
+      const out = await meta.syncAudience({ entityId: req.params.entityId, segmentId: seg.id, name: seg.name, members, mode, by: req.user.email });
       if (!out.ok) return res.status(502).json({ error: out.error || 'Meta sync failed' });
-      res.json({ ok: true, audienceId: out.audienceId, pushed: out.pushed, matched: out.matched });
+      res.json({ ok: true, audienceId: out.audienceId, pushed: out.pushed, received: out.received, mode: out.mode });
     } catch (e) { res.status(400).json({ error: e.message }); }
   });
 
