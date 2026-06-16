@@ -52,9 +52,10 @@ function mount(app, { db, auth, resolveAudience, resolveRecipe, meta, tiktok }) 
   // Light shaping of a segment definition (the audience config). We don't trust
   // the client shape blindly, but we keep it source-agnostic — only known keys.
   const cleanDef = (d = {}) => {
-    const mode = ['paste'].includes(d.mode) ? d.mode : 'tile';
+    const mode = ['paste', 'gsheet'].includes(d.mode) ? d.mode : 'tile';
     const out = {
       mode,
+      gsheetUrl: String(d.gsheetUrl || '').slice(0, 1000), // linked Google Sheet (shared/published)
       dashboardId: String(d.dashboardId || ''),
       tileId: String(d.tileId || ''),
       emailField: String(d.emailField || ''),
@@ -125,7 +126,7 @@ function mount(app, { db, auth, resolveAudience, resolveRecipe, meta, tiktok }) 
     if (!guard(req, res, req.params.entityId)) return;
     const name = String(req.body?.name || '').trim().slice(0, 120) || 'Untitled segment';
     const definition = cleanDef(req.body?.definition || {});
-    const source = definition.mode === 'paste' ? 'paste' : 'tile';
+    const source = ['paste', 'gsheet'].includes(definition.mode) ? definition.mode : 'tile';
     const id = uuid(); const ts = now();
     sql.prepare('INSERT INTO segments (id, entity_id, name, source, definition, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)')
       .run(id, req.params.entityId, name, source, JSON.stringify(definition), req.user.email, ts, ts);
@@ -155,7 +156,7 @@ function mount(app, { db, auth, resolveAudience, resolveRecipe, meta, tiktok }) 
     if (!seg || seg.entity_id !== req.params.entityId) return res.status(404).json({ error: 'Not found' });
     const name = req.body?.name !== undefined ? String(req.body.name).trim().slice(0, 120) || seg.name : seg.name;
     const definition = req.body?.definition !== undefined ? cleanDef(req.body.definition) : JSON.parse(seg.definition || '{}');
-    const source = definition.mode === 'paste' ? 'paste' : 'tile';
+    const source = ['paste', 'gsheet'].includes(definition.mode) ? definition.mode : 'tile';
     // A changed definition invalidates the cached count.
     const changed = JSON.stringify(definition) !== seg.definition;
     sql.prepare('UPDATE segments SET name=?, source=?, definition=?, updated_at=?' + (changed ? ', last_count=-1, last_resolved_at=\'\'' : '') + ' WHERE id=?')

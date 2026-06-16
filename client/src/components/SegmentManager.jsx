@@ -51,7 +51,8 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
   // Resolve the source labels (event / dashboard / tile) from the tiles catalog.
   const sourceLabel = (s) => {
     const d = s.definition || {};
-    if (d.mode === 'paste') return { event: '', detail: 'Pasted list' };
+    if (d.mode === 'paste') return { event: '', detail: 'Uploaded / pasted list' };
+    if (d.mode === 'gsheet') return { event: '', detail: 'Linked Google Sheet (live)' };
     const dash = tiles?.dashboards?.find((x) => x.dashboardId === d.dashboardId);
     const tile = dash?.tiles?.find((t) => t.tileId === d.tileId);
     return { event: dash?.suiteName || '', detail: tile?.title || dash?.title || '' };
@@ -110,7 +111,7 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                     <span style={{ fontWeight: 700, fontSize: isMobile ? 17 : 15 }}>{s.name}</span>
-                    <span style={{ fontSize: 10.5, fontWeight: 700, borderRadius: 980, padding: '2px 9px', background: 'rgba(128,128,128,0.14)', color: 'var(--muted)' }}>{s.source === 'paste' ? 'Pasted list' : 'Dashboard tile'}</span>
+                    <span style={{ fontSize: 10.5, fontWeight: 700, borderRadius: 980, padding: '2px 9px', background: 'rgba(128,128,128,0.14)', color: 'var(--muted)' }}>{s.source === 'paste' ? 'Uploaded / pasted' : s.source === 'gsheet' ? 'Google Sheet' : 'Dashboard tile'}</span>
                   </div>
                   {lbl.event && <div style={{ fontSize: 12.5, color: 'var(--text)', marginTop: 5, fontWeight: 600 }}>🗓 {lbl.event}</div>}
                   {lbl.detail && <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lbl.detail}</div>}
@@ -236,7 +237,7 @@ function SegmentBuilder({ entityId, tiles, segment, onClose, onSaved }) {
     emailField: def.emailField || '', nameField: def.nameField || '', phoneField: def.phoneField || '',
     emailConsentField: def.emailConsentField || '', smsConsentField: def.smsConsentField || '',
     attrDashboardId: def.attrDashboardId || '', attrTileId: def.attrTileId || '',
-    filters: def.filters || [], pasted: def.pasted || '',
+    filters: def.filters || [], pasted: def.pasted || '', gsheetUrl: def.gsheetUrl || '',
     // Dashboard filters captured when the segment was made from a tile. Not
     // edited here, but preserved so saving doesn't silently change the cohort.
     lookerFilters: def.lookerFilters || {},
@@ -251,16 +252,30 @@ function SegmentBuilder({ entityId, tiles, segment, onClose, onSaved }) {
     emailField: f.emailField, nameField: f.nameField, phoneField: f.phoneField,
     emailConsentField: f.emailConsentField, smsConsentField: f.smsConsentField,
     attrDashboardId: f.attrDashboardId, attrTileId: f.attrTileId, filters: f.filters, pasted: f.pasted,
-    lookerFilters: f.lookerFilters,
+    gsheetUrl: f.gsheetUrl, lookerFilters: f.lookerFilters,
   });
+
+  // Parse an uploaded CSV/Excel into the pasted-list text (SheetJS is loaded on
+  // demand so it never bloats the main bundle). Stored as a 'paste' snapshot.
+  const [uploadInfo, setUploadInfo] = useState('');
+  const onFile = async (file) => {
+    try {
+      const XLSX = await import('xlsx');
+      const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+      const csv = XLSX.utils.sheet_to_csv(wb.Sheets[wb.SheetNames[0]] || {});
+      setF((s) => ({ ...s, mode: 'paste', pasted: csv }));
+      setUploadInfo(`Loaded ${file.name}`);
+    } catch (e) { alert('Could not read that file: ' + (e.message || e)); }
+  };
 
   const refreshAud = () => {
     if (f.mode === 'tile' && (!f.dashboardId || !f.tileId)) { setAud(null); return; }
+    if (f.mode === 'gsheet' && !f.gsheetUrl.trim()) { setAud(null); return; }
     api.actionAudiencePreview(entityId, { audience: definition() }).then(setAud).catch((e) => setAud({ error: e.message }));
   };
   useEffect(() => { clearTimeout(debounce.current); debounce.current = setTimeout(refreshAud, 350); return () => clearTimeout(debounce.current); },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [f.mode, f.dashboardId, f.tileId, f.emailField, f.phoneField, f.emailConsentField, f.smsConsentField, f.attrDashboardId, f.attrTileId, JSON.stringify(f.filters), f.pasted]);
+    [f.mode, f.dashboardId, f.tileId, f.emailField, f.phoneField, f.emailConsentField, f.smsConsentField, f.attrDashboardId, f.attrTileId, JSON.stringify(f.filters), f.pasted, f.gsheetUrl]);
 
   const addFilter = () => set('filters', [...f.filters, { field: '', op: 'in', values: [] }]);
   const setFilter = (i, patch) => set('filters', f.filters.map((x, j) => (j === i ? { ...x, ...patch } : x)));
@@ -288,9 +303,10 @@ function SegmentBuilder({ entityId, tiles, segment, onClose, onSaved }) {
         </Field>
 
         <Field label="Source">
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <Toggle on={f.mode === 'tile'} onClick={() => set('mode', 'tile')}>From a dashboard tile</Toggle>
-            <Toggle on={f.mode === 'paste'} onClick={() => set('mode', 'paste')}>Paste a list</Toggle>
+            <Toggle on={f.mode === 'paste'} onClick={() => set('mode', 'paste')}>Paste / upload a list</Toggle>
+            <Toggle on={f.mode === 'gsheet'} onClick={() => set('mode', 'gsheet')}>Link a Google Sheet</Toggle>
           </div>
         </Field>
 
@@ -343,10 +359,21 @@ function SegmentBuilder({ entityId, tiles, segment, onClose, onSaved }) {
               )}
             </div>
           </Field>
+        ) : f.mode === 'gsheet' ? (
+          <Field label="Google Sheet link">
+            <input style={input} value={f.gsheetUrl} onChange={(e) => set('gsheetUrl', e.target.value)} placeholder="https://docs.google.com/spreadsheets/d/…/edit#gid=0" onBlur={refreshAud} />
+            <div style={hintS}>The sheet must be shared <b>“Anyone with the link”</b> (or published to the web). We read it <b>live</b> each time and pick out the email, mobile and name columns — a header row is ignored.</div>
+          </Field>
         ) : (
-          <Field label="Paste emails and/or mobile numbers">
-            <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit' }} rows={4} value={f.pasted} onChange={(e) => set('pasted', e.target.value)} placeholder="one@example.com, +27821234567, two@example.com …" onBlur={refreshAud} />
-            <div style={hintS}>Numbers become SMS-reachable; emails become email-reachable. Any separator.</div>
+          <Field label="Paste a list, or upload a CSV / Excel file">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8, flexWrap: 'wrap' }}>
+              <label style={{ ...mini, cursor: 'pointer' }}>📄 Upload CSV / Excel
+                <input type="file" accept=".csv,.xlsx,.xls" style={{ display: 'none' }} onChange={(e) => { const file = e.target.files?.[0]; if (file) onFile(file); e.target.value = ''; }} />
+              </label>
+              {uploadInfo && <span style={hintS}>{uploadInfo}</span>}
+            </div>
+            <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit' }} rows={4} value={f.pasted} onChange={(e) => { set('pasted', e.target.value); setUploadInfo(''); }} placeholder="one@example.com, +27821234567, two@example.com …" onBlur={refreshAud} />
+            <div style={hintS}>One person per line — we pick out the email, mobile and name; a header row is ignored. Numbers become SMS-reachable; emails email-reachable.</div>
           </Field>
         )}
 

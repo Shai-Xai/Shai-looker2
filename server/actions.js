@@ -12,6 +12,55 @@
 // lifecycle.
 
 const crypto = require('crypto');
+const fetch = require('node-fetch');
+
+// Parse a free-text contact list — ONE PERSON PER LINE. Within a line we pull out
+// an email + a mobile + a name, so "John Smith, john@x.com, 083…" is one contact.
+// A header row (no email/phone) is naturally skipped. Deduped by email-or-phone.
+// Shared by the pasted-list, uploaded-file (CSV/Excel) and Google-Sheet sources.
+function parseContactLines(text) {
+  const seen = new Set();
+  const out = [];
+  for (const line of String(text || '').split(/\r?\n/)) {
+    const t = line.trim();
+    if (!t) continue;
+    const em = t.match(/[^\s,;|<>]+@[^\s,;|<>]+\.[^\s,;|<>]+/);
+    const email = em ? em[0].toLowerCase().replace(/[.,;]+$/, '') : '';
+    let rest = em ? t.replace(em[0], ' ') : t;
+    const ph = rest.match(/\+?\d[\d\s().-]{6,}\d/);
+    let phone = '';
+    if (ph && ph[0].replace(/\D/g, '').length >= 7) { phone = ph[0].replace(/[^\d+]/g, ''); rest = rest.replace(ph[0], ' '); }
+    const name = rest.replace(/[,;:|]+/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!email && !phone) continue; // a line with no contactable identifier (e.g. a header)
+    const key = email || phone;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    // Uploaded/pasted/sheet lists carry no consent columns — reachable on whatever
+    // identifier was provided (the uploader asserts they may contact them).
+    out.push({ email, phone, name, emailOk: !!email, smsOk: !!phone });
+  }
+  return out;
+}
+
+// A Google Sheets link → its CSV export URL (works when the sheet is shared
+// "anyone with the link" or published to web — no OAuth needed).
+function googleSheetCsvUrl(url) {
+  const m = String(url || '').match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  if (!m) return '';
+  const g = String(url).match(/[#&?]gid=(\d+)/);
+  return `https://docs.google.com/spreadsheets/d/${m[1]}/export?format=csv&gid=${g ? g[1] : '0'}`;
+}
+async function fetchGoogleSheetCsv(url) {
+  const csvUrl = googleSheetCsvUrl(url);
+  if (!csvUrl) throw new Error('That doesn’t look like a Google Sheets link.');
+  const res = await fetch(csvUrl, { redirect: 'follow' });
+  const text = res.ok ? await res.text() : '';
+  // A non-public sheet returns 401/403 or an HTML sign-in page rather than CSV.
+  if (!res.ok || /^\s*<(!doctype|html)/i.test(text)) {
+    throw new Error('Couldn’t read that sheet — set its sharing to “anyone with the link” (or publish it to the web).');
+  }
+  return text;
+}
 
 const MAX_AUDIENCE = 2000;       // v1 safety cap per campaign
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -227,7 +276,8 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
       // they have a number).
       channel: ['sms', 'both'].includes(body.channel) ? body.channel : 'email',
       audience: {
-        mode: ['paste', 'snapshot', 'segment'].includes(aud.mode) ? aud.mode : 'tile',
+        mode: ['paste', 'gsheet', 'snapshot', 'segment'].includes(aud.mode) ? aud.mode : 'tile',
+        gsheetUrl: String(aud.gsheetUrl || '').slice(0, 1000), // when mode = 'gsheet' (linked Google Sheet, read live)
         segmentId: String(aud.segmentId || ''), // when mode = 'segment' (reference, resolved live)
         phoneField: String(aud.phoneField || ''), // mobile column (for SMS)
         dashboardId: String(aud.dashboardId || ''),
@@ -382,29 +432,13 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     let noConsent = 0;
     let filteredOut = 0;
     if (cfg.audience.mode === 'paste') {
-      // ONE PERSON PER LINE. Within a line we pull out an email + a mobile number
-      // + a name, so "John Smith, john@x.com, 083…" is one contact with both.
-      // Separate lines are separate people. Deduped by email-or-phone.
-      const seen = new Set();
-      raw = [];
-      for (const line of String(cfg.audience.pasted || '').split(/\r?\n/)) {
-        const t = line.trim();
-        if (!t) continue;
-        const em = t.match(/[^\s,;|<>]+@[^\s,;|<>]+\.[^\s,;|<>]+/);
-        const email = em ? em[0].toLowerCase().replace(/[.,;]+$/, '') : '';
-        let rest = em ? t.replace(em[0], ' ') : t;
-        const ph = rest.match(/\+?\d[\d\s().-]{6,}\d/);
-        let phone = '';
-        if (ph && ph[0].replace(/\D/g, '').length >= 7) { phone = ph[0].replace(/[^\d+]/g, ''); rest = rest.replace(ph[0], ' '); }
-        const name = rest.replace(/[,;:|]+/g, ' ').replace(/\s+/g, ' ').trim();
-        if (!email && !phone) continue; // a line with no contactable identifier
-        const key = email || phone;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        // Pasted lists carry no consent columns — reachable on whatever identifier
-        // was provided (the uploader is asserting they may contact them).
-        raw.push({ email, phone, name, emailOk: !!email, smsOk: !!phone });
-      }
+      // Pasted text or an uploaded CSV/Excel (the file is parsed to this text client-side).
+      raw = parseContactLines(cfg.audience.pasted || '');
+    } else if (cfg.audience.mode === 'gsheet') {
+      // A linked Google Sheet — fetched LIVE (CSV export) each resolve, so the
+      // segment tracks the sheet. Requires the sheet to be shared/published.
+      const text = await fetchGoogleSheetCsv(cfg.audience.gsheetUrl);
+      raw = parseContactLines(text);
     } else {
       if (!cfg.audience.dashboardId || !cfg.audience.tileId) return { list: [], fields: [], filterFields: [], excluded: 0, noConsent: 0, filteredOut: 0 };
       // `lookerFilters` are the dashboard filters captured when a segment was made
@@ -1542,4 +1576,5 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
   return { awaitingApprovalFor, unseenOutcomesFor, audienceFor };
 }
 
-module.exports = { mount };
+// Pure helpers exported for unit testing (list parsing + Google Sheet URL).
+module.exports = { mount, parseContactLines, googleSheetCsvUrl };
