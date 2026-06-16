@@ -23,7 +23,7 @@ const TEMPLATES = [
     // usually lives on a broader dashboard (e.g. "Ticketing Overview"), so we
     // don't require the dashboard title to match too (an email column is still
     // required, so only the right tile resolves).
-    match: { tile: /abandon/i },
+    match: { tile: /abandon|incomplete|unfinished|drop.?off|didn.?t.*(finish|complet)|started.*(checkout|purchase)|pending.*(order|checkout|payment)/i },
     // Pick the email / name / ticket / consent columns by field-name hints
     // (first match wins). Resolved against the matched tile's query fields.
     fieldHints: {

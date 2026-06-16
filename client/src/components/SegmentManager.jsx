@@ -39,10 +39,14 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
 
   const load = () => api.listSegments(entityId).then((r) => { setSegments(r.segments || []); setMetaConnected(!!r.metaConnected); setTiktokConnected(!!r.tiktokConnected); setConnectors(r.connectors || {}); }).catch(() => setSegments([]));
   // Materialise a built-in recipe (e.g. abandoned cart) as a real, live segment.
-  const addRecipe = async (key) => {
-    setAddingKey(key);
-    try { await api.createSegmentFromRecipe(entityId, key); await load(); }
-    catch (e) { alert(e.message || 'Could not add this segment.'); }
+  const addRecipe = async (r) => {
+    setAddingKey(r.key);
+    try { await api.createSegmentFromRecipe(entityId, r.key); await load(); }
+    catch {
+      // Couldn't auto-find the source tile in this client's data — don't dead-end;
+      // open the editor prefilled so they can pick the tile themselves.
+      setEditing({ name: r.name, definition: { mode: 'tile' } });
+    }
     finally { setAddingKey(''); }
   };
   useEffect(() => { load(); }, [entityId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -161,7 +165,7 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span style={{ fontSize: 18 }}>{r.icon}</span>
                   <span style={{ fontWeight: 700, fontSize: 14, flex: 1 }}>{r.name}</span>
-                  <button style={{ ...primary, padding: '6px 14px', fontSize: 12.5 }} onClick={() => addRecipe(r.key)} disabled={addingKey === r.key}>{addingKey === r.key ? 'Adding…' : '+ Add'}</button>
+                  <button style={{ ...primary, padding: '6px 14px', fontSize: 12.5 }} onClick={() => addRecipe(r)} disabled={addingKey === r.key}>{addingKey === r.key ? 'Adding…' : '+ Add'}</button>
                 </div>
                 <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6, lineHeight: 1.45 }}>{r.desc}</div>
               </div>
@@ -289,7 +293,7 @@ function SegmentBuilder({ entityId, tiles, segment, onClose, onSaved }) {
     if (!name.trim()) { alert('Give the segment a name.'); return; }
     setBusy(true);
     try {
-      if (segment) await api.updateSegment(entityId, segment.id, { name, definition: definition() });
+      if (segment?.id) await api.updateSegment(entityId, segment.id, { name, definition: definition() });
       else await api.createSegment(entityId, { name, definition: definition() });
       onSaved();
     } catch (e) { alert('Save failed: ' + e.message); }
@@ -403,10 +407,14 @@ function SegmentBuilder({ entityId, tiles, segment, onClose, onSaved }) {
           </Field>
         )}
 
-        <div style={{ fontSize: 13 }}>
+        <div style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           {aud?.error ? <span style={{ color: 'var(--error,#ef4444)' }}>✗ {aud.error}</span>
             : aud ? <span><b style={{ color: 'var(--brand)' }}>{aud.count}</b> {aud.count === 1 ? 'person' : 'people'} match{aud.reach ? ` · ${aud.reach.email} emailable · ${aud.reach.sms} SMS` : ''}{aud.filteredOut > 0 ? ` · ${aud.filteredOut} filtered out` : ''}</span>
               : <span style={{ color: 'var(--muted)' }}>Pick a source to see the live count.</span>}
+          {/* Re-read the live source now (e.g. a linked Google Sheet edited since). */}
+          {aud && !aud.error && (
+            <button type="button" style={{ ...mini, padding: '3px 9px' }} onClick={refreshAud} title="Re-read the live source (e.g. a linked Google Sheet) and recount now">↻ Refresh</button>
+          )}
         </div>
 
         <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
