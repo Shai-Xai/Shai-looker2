@@ -4,18 +4,23 @@
 // unconfigured, one sync chokepoint, never throws. Remembers the audience id per
 // (client, segment) in `tiktok_audiences` so repeat syncs hit the same audience.
 //
-// IMPORTANT — TikTok differs from Meta in two ways that shape this v1:
-//   1. The customer-file flow is multipart: upload a file of hashed ids → get a
-//      file_path → create/update the audience from that path. (We build the
-//      multipart body by hand to avoid a form-data dependency.)
-//   2. TikTok has no one-call "replace" like Meta's usersreplace, so this is
-//      APPEND-only for now (stable audience id, adds without removing). True
-//      mirroring needs membership diffing — a documented follow-up.
+// TRUE MIRROR via diffing. TikTok has no one-call "replace" like Meta's
+// usersreplace — only APPEND and DELETE on a customer-file audience — and it won't
+// read an audience's contents back. So we remember the exact hashed membership we
+// last pushed (in `tiktok_audience_members`), and on each sync compute:
+//   to-add    = in the segment now, not last time   → APPEND
+//   to-remove = synced last time, gone from segment → DELETE
+// The audience id stays stable (ads keep pointing at it) while membership tracks
+// the segment. People who leave the segment are removed — not stranded.
+//
+// The customer-file flow is multipart: upload a file of hashed ids of ONE type →
+// get a file_path → create / update the audience from it. (We build the multipart
+// body by hand to avoid a form-data dependency.)
 //
 // The exact endpoint paths / field names of the TikTok Marketing API move between
 // versions — VERIFY against current docs before going live. Untested here (no
 // TikTok app/creds in this environment); the reusable scaffolding around it
-// (connection, hashing, route, UI, history) is the deliverable.
+// (connection, hashing, diffing, route, UI, history) is the deliverable.
 //
 // Per-client connection (Admin → client → Integrations, or client self-service):
 //   tiktokAccessToken    — long-lived access token (write-only)
@@ -41,6 +46,14 @@ function init(deps) {
       last_at       TEXT NOT NULL DEFAULT '',
       PRIMARY KEY (entity_id, segment_id)
     );
+    CREATE TABLE IF NOT EXISTS tiktok_audience_members (
+      entity_id  TEXT NOT NULL,
+      segment_id TEXT NOT NULL,
+      kind       TEXT NOT NULL,         -- 'email' | 'phone'
+      id_hash    TEXT NOT NULL,         -- SHA-256 hex of the normalised id
+      PRIMARY KEY (entity_id, segment_id, kind, id_hash)
+    );
+    CREATE INDEX IF NOT EXISTS idx_tiktok_members ON tiktok_audience_members(entity_id, segment_id, kind);
   `);
 }
 
@@ -67,6 +80,25 @@ function lastSyncFor(entityId, segmentId) {
   return { audienceId: r.audience_id, name: r.audience_name, received: r.last_received, status: r.last_status, error: r.last_error, by: r.last_by, at: r.last_at };
 }
 
+// ── last-synced membership baseline (for diffing) ──
+function memberSet(entityId, segmentId, kind) {
+  const rows = db.db.prepare('SELECT id_hash FROM tiktok_audience_members WHERE entity_id=? AND segment_id=? AND kind=?').all(entityId, segmentId, kind);
+  return new Set(rows.map((r) => r.id_hash));
+}
+// Replace the stored baseline for a kind with the given set (transactional).
+function replaceMemberSet(entityId, segmentId, kind, set) {
+  const del = db.db.prepare('DELETE FROM tiktok_audience_members WHERE entity_id=? AND segment_id=? AND kind=?');
+  const ins = db.db.prepare('INSERT OR IGNORE INTO tiktok_audience_members (entity_id, segment_id, kind, id_hash) VALUES (?,?,?,?)');
+  const tx = db.db.transaction((hashes) => {
+    del.run(entityId, segmentId, kind);
+    for (const h of hashes) ins.run(entityId, segmentId, kind, h);
+  });
+  tx([...set]);
+}
+function clearMembers(entityId, segmentId) {
+  db.db.prepare('DELETE FROM tiktok_audience_members WHERE entity_id=? AND segment_id=?').run(entityId, segmentId);
+}
+
 // ── hashing (SHA-256 of normalised id, same spec as Meta) ──
 const sha256 = (s) => crypto.createHash('sha256').update(s, 'utf8').digest('hex');
 const hashEmail = (e) => { const v = String(e || '').trim().toLowerCase(); return v ? sha256(v) : ''; };
@@ -80,14 +112,10 @@ function hashPhone(raw, defaultCc = '27') {
 }
 
 // TikTok responses are { code, message, data }; code 0 = OK.
-async function api(path, { method = 'POST', token, body, headers } = {}) {
-  const res = await fetch(`${BASE}/${path}`, {
-    method,
-    headers: { 'Access-Token': token, 'Content-Type': 'application/json', ...(headers || {}) },
-    body: body !== undefined ? body : undefined,
-  });
+async function api(path, { token, body } = {}) {
+  const res = await fetch(`${BASE}/${path}`, { method: 'POST', headers: { 'Access-Token': token, 'Content-Type': 'application/json' }, body });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok || (data && data.code !== 0 && data.code !== undefined)) {
+  if (!res.ok || (data && data.code)) {
     const err = new Error((data && data.message) || `TikTok HTTP ${res.status}`);
     err.tiktokCode = data && data.code; err.httpStatus = res.status;
     throw err;
@@ -95,8 +123,7 @@ async function api(path, { method = 'POST', token, body, headers } = {}) {
   return data.data || {};
 }
 
-// Build a multipart/form-data body by hand (no form-data dependency). `file` is
-// { field, filename, content }. Returns { body: Buffer, contentType }.
+// Build a multipart/form-data body by hand (no form-data dependency).
 function multipart(fields, file) {
   const boundary = '----pulse' + crypto.randomBytes(8).toString('hex');
   const parts = [];
@@ -112,9 +139,10 @@ function multipart(fields, file) {
 // Upload a file of hashed ids of one type → returns a file_path TikTok references.
 // calculateType: 'EMAIL_SHA256' | 'PHONE_SHA256'.
 async function uploadFile({ advertiserId, token, calculateType, values }) {
+  const content = values.join('\n');
   const { body, contentType } = multipart(
-    { advertiser_id: advertiserId, calculate_type: calculateType, file_signature: sha256(values.join('\n')) },
-    { field: 'file', filename: 'audience.csv', content: values.join('\n') },
+    { advertiser_id: advertiserId, calculate_type: calculateType, file_signature: sha256(content) },
+    { field: 'file', filename: 'audience.csv', content },
   );
   const res = await fetch(`${BASE}/dmp/custom_audience/file/upload/`, { method: 'POST', headers: { 'Access-Token': token, 'Content-Type': contentType }, body });
   const data = await res.json().catch(() => ({}));
@@ -126,39 +154,69 @@ async function createAudience({ advertiserId, token, name, filePaths }) {
   const d = await api('dmp/custom_audience/create/', { token, body: JSON.stringify({ advertiser_id: advertiserId, custom_audience_name: name, file_paths: filePaths }) });
   return d.custom_audience_id || d.audience_id || '';
 }
-async function appendAudience({ advertiserId, token, audienceId, filePaths }) {
-  await api('dmp/custom_audience/update/', { token, body: JSON.stringify({ advertiser_id: advertiserId, custom_audience_id: audienceId, action: 'APPEND', file_paths: filePaths }) });
+// action: 'APPEND' | 'DELETE'.
+async function updateAudience({ advertiserId, token, audienceId, action, filePaths }) {
+  await api('dmp/custom_audience/update/', { token, body: JSON.stringify({ advertiser_id: advertiserId, custom_audience_id: audienceId, action, file_paths: filePaths }) });
 }
 
-// Push a segment's members to a TikTok Custom Audience. members: [{email, phone}].
-// APPEND-only for v1 (see header). Best-effort: { ok, audienceId, pushed, received, error }. Never throws.
+// Upload the given hashes of a kind and apply them to the audience with `action`.
+async function applyDelta({ advertiserId, token, audienceId, kind, hashes, action }) {
+  if (!hashes.length) return;
+  const calculateType = kind === 'phone' ? 'PHONE_SHA256' : 'EMAIL_SHA256';
+  const path = await uploadFile({ advertiserId, token, calculateType, values: hashes });
+  if (path) await updateAudience({ advertiserId, token, audienceId, action, filePaths: [path] });
+}
+
+// Mirror a segment's members into a TikTok Custom Audience. members: [{email,phone}].
+// Best-effort: { ok, audienceId, pushed, received, added, removed, error }. Never throws.
 async function syncAudience({ entityId, segmentId, name, members = [], by = '' }) {
   if (!isConfigured(entityId)) return { ok: false, reason: 'not_configured', error: 'TikTok is not connected for this client.' };
   const { accessToken: token, advertiserId } = connection(entityId);
-  const emails = []; const phones = [];
-  for (const m of members) { const e = hashEmail(m.email); const p = hashPhone(m.phone); if (e) emails.push(e); if (p) phones.push(p); }
-  const count = emails.length + phones.length;
+  const newEmails = new Set(); const newPhones = new Set();
+  for (const m of members) { const e = hashEmail(m.email); const p = hashPhone(m.phone); if (e) newEmails.add(e); if (p) newPhones.add(p); }
+  const count = newEmails.size + newPhones.size;
   if (!count) return { ok: false, error: 'No matchable email or phone in this segment.' };
   const audienceName = `${name} (Pulse)`;
+  // Diff against the last-synced baseline.
+  const oldEmails = memberSet(entityId, segmentId, 'email');
+  const oldPhones = memberSet(entityId, segmentId, 'phone');
+  const diff = (next, prev) => ({ add: [...next].filter((h) => !prev.has(h)), remove: [...prev].filter((h) => !next.has(h)) });
+  const eD = diff(newEmails, oldEmails); const pD = diff(newPhones, oldPhones);
   try {
-    const filePaths = [];
-    if (emails.length) filePaths.push(await uploadFile({ advertiserId, token, calculateType: 'EMAIL_SHA256', values: emails }));
-    if (phones.length) filePaths.push(await uploadFile({ advertiserId, token, calculateType: 'PHONE_SHA256', values: phones }));
-    const clean = filePaths.filter(Boolean);
-    if (!clean.length) throw new Error('TikTok accepted no files for this segment.');
     let audienceId = mapRow(entityId, segmentId)?.audience_id || '';
+    const createFresh = async () => {
+      const paths = [];
+      if (newEmails.size) paths.push(await uploadFile({ advertiserId, token, calculateType: 'EMAIL_SHA256', values: [...newEmails] }));
+      if (newPhones.size) paths.push(await uploadFile({ advertiserId, token, calculateType: 'PHONE_SHA256', values: [...newPhones] }));
+      const clean = paths.filter(Boolean);
+      if (!clean.length) throw new Error('TikTok accepted no files for this segment.');
+      return createAudience({ advertiserId, token, name: audienceName, filePaths: clean });
+    };
+    let added = count; let removed = 0;
     if (audienceId) {
-      try { await appendAudience({ advertiserId, token, audienceId, filePaths: clean }); }
-      catch { audienceId = await createAudience({ advertiserId, token, name: audienceName, filePaths: clean }); } // recreate if the mapped audience is gone
+      try {
+        // APPEND new, DELETE departed — true mirror on a stable audience.
+        await applyDelta({ advertiserId, token, audienceId, kind: 'email', hashes: eD.add, action: 'APPEND' });
+        await applyDelta({ advertiserId, token, audienceId, kind: 'phone', hashes: pD.add, action: 'APPEND' });
+        await applyDelta({ advertiserId, token, audienceId, kind: 'email', hashes: eD.remove, action: 'DELETE' });
+        await applyDelta({ advertiserId, token, audienceId, kind: 'phone', hashes: pD.remove, action: 'DELETE' });
+        added = eD.add.length + pD.add.length; removed = eD.remove.length + pD.remove.length;
+      } catch {
+        // Mapped audience likely gone — recreate from the full current set.
+        audienceId = await createFresh(); added = count; removed = 0;
+      }
     } else {
-      audienceId = await createAudience({ advertiserId, token, name: audienceName, filePaths: clean });
+      audienceId = await createFresh();
     }
+    // Commit the new baseline only after the platform calls succeeded.
+    replaceMemberSet(entityId, segmentId, 'email', newEmails);
+    replaceMemberSet(entityId, segmentId, 'phone', newPhones);
     rememberSync({ entityId, segmentId, audienceId, name: audienceName, received: count, status: 'ok', error: '', by });
-    return { ok: true, audienceId, pushed: count, received: count };
+    return { ok: true, audienceId, pushed: count, received: count, added, removed };
   } catch (e) {
     rememberSync({ entityId, segmentId, audienceId: mapRow(entityId, segmentId)?.audience_id || '', name: audienceName, received: 0, status: 'error', error: e.message, by });
     return { ok: false, error: e.message };
   }
 }
 
-module.exports = { init, isConfigured, status, connection, syncAudience, lastSyncFor, hashEmail, hashPhone };
+module.exports = { init, isConfigured, status, connection, syncAudience, lastSyncFor, clearMembers, hashEmail, hashPhone };

@@ -226,7 +226,7 @@ function mount(app, { db, auth, resolveAudience, resolveRecipe, meta, tiktok }) 
       if (!members.length) return res.status(400).json({ error: 'This segment resolved to nobody right now.' });
       const out = await tiktok.syncAudience({ entityId: req.params.entityId, segmentId: seg.id, name: seg.name, members, by: req.user.email });
       if (!out.ok) return res.status(502).json({ error: out.error || 'TikTok sync failed' });
-      res.json({ ok: true, audienceId: out.audienceId, pushed: out.pushed, received: out.received });
+      res.json({ ok: true, audienceId: out.audienceId, pushed: out.pushed, received: out.received, added: out.added, removed: out.removed });
     } catch (e) { res.status(400).json({ error: e.message }); }
   });
 

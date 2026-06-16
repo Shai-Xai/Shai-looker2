@@ -73,9 +73,12 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
     finally { setBusyId(null); }
   };
   const syncTikTok = async (s) => {
-    setSyncMsg((m) => ({ ...m, [s.id]: '…syncing to TikTok' })); setBusyId(s.id);
-    try { const r = await api.syncSegmentTikTok(entityId, s.id); setSyncMsg((m) => ({ ...m, [s.id]: `✓ Sent ${r.received ?? r.pushed} to TikTok — matching runs on TikTok’s side` })); await load(); }
-    catch (e) { setSyncMsg((m) => ({ ...m, [s.id]: `✗ ${e.message}` })); }
+    setSyncMsg((m) => ({ ...m, [s.id]: '…mirroring to TikTok' })); setBusyId(s.id);
+    try {
+      const r = await api.syncSegmentTikTok(entityId, s.id);
+      const delta = (r.added || r.removed) ? ` (+${r.added || 0} −${r.removed || 0})` : '';
+      setSyncMsg((m) => ({ ...m, [s.id]: `✓ ${r.received ?? r.pushed} mirrored to TikTok${delta} — matching runs on TikTok’s side` })); await load();
+    } catch (e) { setSyncMsg((m) => ({ ...m, [s.id]: `✗ ${e.message}` })); }
     finally { setBusyId(null); }
   };
   const fmtWhen = (iso) => { try { return new Date(iso).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch { return ''; } };
@@ -119,7 +122,7 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
                   <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding }} onClick={() => refresh(s)} disabled={busyId === s.id}>{busyId === s.id ? '…' : '↻ Refresh'}</button>
                   {metaConnected && <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding }} onClick={() => syncMeta(s)} disabled={busyId === s.id} title="Mirror this audience to a Meta Custom Audience (hashed match)">◇ Sync to Meta</button>}
                   {metaConnected && <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding, ...(s.metaAuto ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }} onClick={() => api.setSegmentMetaAuto(entityId, s.id, !s.metaAuto).then(load)} title="Keep the Meta audience mirrored automatically (~daily)">{s.metaAuto ? '◇ Auto: on' : '◇ Auto: off'}</button>}
-                  {tiktokConnected && <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding }} onClick={() => syncTikTok(s)} disabled={busyId === s.id} title="Push this audience to a TikTok Custom Audience (hashed match)">♪ Sync to TikTok</button>}
+                  {tiktokConnected && <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding }} onClick={() => syncTikTok(s)} disabled={busyId === s.id} title="Mirror this audience to a TikTok Custom Audience (hashed match)">♪ Sync to TikTok</button>}
                   <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding }} onClick={() => setEditing(s)}>Edit</button>
                   <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding, color: 'var(--error,#ef4444)' }} onClick={() => del(s)}>Delete</button>
                 </div>
@@ -128,7 +131,7 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
                   : (s.metaSync || s.tiktokSync) && (
                     <div style={{ flexBasis: '100%', marginTop: isMobile ? 0 : 4, display: 'flex', flexDirection: 'column', gap: 2 }}>
                       {s.metaSync && <div style={{ fontSize: 11.5, color: s.metaSync.status === 'error' ? 'var(--error,#ef4444)' : 'var(--muted)' }}>◇ Meta: {s.metaSync.status === 'error' ? `last sync failed — ${s.metaSync.error}` : `${s.metaSync.received} mirrored · ${fmtWhen(s.metaSync.at)}`}</div>}
-                      {s.tiktokSync && <div style={{ fontSize: 11.5, color: s.tiktokSync.status === 'error' ? 'var(--error,#ef4444)' : 'var(--muted)' }}>♪ TikTok: {s.tiktokSync.status === 'error' ? `last sync failed — ${s.tiktokSync.error}` : `${s.tiktokSync.received} sent · ${fmtWhen(s.tiktokSync.at)}`}</div>}
+                      {s.tiktokSync && <div style={{ fontSize: 11.5, color: s.tiktokSync.status === 'error' ? 'var(--error,#ef4444)' : 'var(--muted)' }}>♪ TikTok: {s.tiktokSync.status === 'error' ? `last sync failed — ${s.tiktokSync.error}` : `${s.tiktokSync.received} mirrored · ${fmtWhen(s.tiktokSync.at)}`}</div>}
                     </div>
                   )}
               </div>
