@@ -23,7 +23,7 @@ export default function HomePage() {
   const [includeSubfolders, setIncludeSubfolders] = useState(true);
   const [showFolderModal, setShowFolderModal] = useState(false);
   const [folderSettings, setFolderSettings] = useState({}); // { "<path>": { keepImported } } — persistent, cascading
-  const [view, setView] = useState(() => localStorage.getItem('howler_lib_view') || 'tile'); // 'tile' | 'list'
+  const [view, setView] = useState(() => localStorage.getItem('howler_lib_view') || 'list'); // 'tile' | 'list'
   const setViewMode = (v) => { setView(v); localStorage.setItem('howler_lib_view', v); };
 
   function load() {
