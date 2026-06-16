@@ -335,6 +335,11 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
     // Delivery: once-off (single send) or a full automated sequence (drip).
     campaignMode: cfg.campaignMode || 'once',
     anchorField: cfg.audience?.anchorField || '',
+    // Drip timing: 'abandonment' = time each step from the abandonment timestamp
+    // and only enrol FRESH abandoners; 'send' = run the drip forward from when the
+    // person is enrolled (good for an old list). '' = legacy (anchor if mapped, all).
+    dripStart: cfg.dripStart || 'abandonment',
+    freshHours: cfg.freshHours || 48, // freshness window for 'abandonment' mode
     // Sequence steps. Seed step 1 from the template/campaign copy so it's pre-filled.
     steps: (cfg.steps && cfg.steps.length) ? cfg.steps : [{ delayHours: 2, subject: cfg.subject || tp.subject || '', body: cfg.body || tp.body || '', ctaText: cfg.ctaText || tp.ctaText || '' }],
     // Promo / discount code.
@@ -398,6 +403,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
     templateKey: f.templateKey, category: f.category, master: f.master, approvers: f.approvers,
     channel: f.channel,
     campaignMode: f.campaignMode, steps: f.steps,
+    dripStart: f.dripStart, freshHours: f.freshHours,
     ignoreConsent: f.ignoreConsent,
     promo: f.promo,
     promoCodes: promoCodesText.split(/[\s,;]+/).map((c) => c.trim()).filter(Boolean),
@@ -412,6 +418,8 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
   const addStep = (delayHours = 24) => setF((s) => ({ ...s, steps: [...s.steps, { delayHours, subject: '', body: '', ctaText: s.steps[0]?.ctaText || '' }] }));
   const removeStep = (i) => setF((s) => ({ ...s, steps: s.steps.filter((_, j) => j !== i) }));
   const isSequence = f.campaignMode === 'sequence';
+  // Columns available to pick the abandonment-time anchor from (tile fields or a list's headers).
+  const anchorOptions = (aud?.fields?.length ? aud.fields.map((fl) => ({ value: fl.name, label: fl.label })) : (aud?.columns || []).map((c) => ({ value: c, label: c })));
   const hasEmail = f.channel !== 'sms';   // email or both
   const hasSms = f.channel !== 'email';   // sms or both
   const smsOnly = f.channel === 'sms';
@@ -833,6 +841,31 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
 
           <Accordion title={smsOnly ? 'Message & offer' : 'Content & offer'} {...acc('content')}>
           {/* Sequence steps — SMS-only steps are just delay + text. */}
+          {isSequence && (
+            <Field label="Drip timing">
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <Toggle on={f.dripStart !== 'send'} onClick={() => set('dripStart', 'abandonment')}>From abandonment · fresh only</Toggle>
+                <Toggle on={f.dripStart === 'send'} onClick={() => set('dripStart', 'send')}>Forward from send · whole list</Toggle>
+              </div>
+              {f.dripStart !== 'send' ? (
+                <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <select style={input} value={f.anchorField} onChange={(e) => set('anchorField', e.target.value)}>
+                    <option value="">Abandonment-time column (else uses enrolment time)</option>
+                    {anchorOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <span style={hintS}>Only enrol people who abandoned within</span>
+                    <input type="number" min="1" style={{ ...input, width: 90 }} value={f.freshHours} onChange={(e) => set('freshHours', Number(e.target.value) || 48)} />
+                    <span style={hintS}>hours</span>
+                  </div>
+                  <div style={hintS}>Each step is timed from the person’s abandonment moment; anyone older than the window isn’t enrolled. Real-time abandoned-cart mode.</div>
+                </div>
+              ) : (
+                <div style={hintS}>Ignores when they abandoned — the drip runs forward from when each person is enrolled (step 1 now, then your delays: 2h, 4h…). Use this for an existing/old list.</div>
+              )}
+            </Field>
+          )}
+
           {isSequence && (
             <Field label={smsOnly ? 'Texts in the sequence' : 'Emails in the sequence'}>
               <SequenceSteps steps={f.steps} setStep={setStep} addStep={addStep} removeStep={removeStep} activeStep={activeStep} onActive={setActiveStep} sms={smsOnly} />

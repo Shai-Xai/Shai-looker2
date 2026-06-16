@@ -383,6 +383,11 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
       // Delivery mode: 'once' = single send to the current list; 'sequence' = an
       // automated drip (enroll abandoners, send timed steps, drop on purchase).
       campaignMode: body.campaignMode === 'sequence' ? 'sequence' : 'once',
+      // Drip timing: 'abandonment' = anchor each person on their abandonment time
+      // and only enrol FRESH ones (within freshHours); 'send' = run forward from
+      // enrolment for the whole list; '' = legacy (anchor if mapped, enrol all).
+      dripStart: ['abandonment', 'send'].includes(body.dripStart) ? body.dripStart : '',
+      freshHours: Math.min(8760, Math.max(1, Number(body.freshHours) || 48)),
       // Transactional/operational override: bypass marketing-consent gating (for
       // genuinely non-marketing messages — event info, settlement notices).
       ignoreConsent: !!body.ignoreConsent,
@@ -1537,16 +1542,24 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     const { list } = await audienceFor(a.entityId, a.config, sysUser);
     const enrolled = new Set(sql.prepare('SELECT email FROM action_enrollments WHERE action_id=?').all(a.id).map((r) => r.email));
     const ins = sql.prepare('INSERT OR IGNORE INTO action_enrollments (action_id, email, name, ticket, phone, anchor_at, step_index, next_at, status, enrolled_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)');
-    let n = 0; let pausedForCodes = false;
+    // Drip timing mode (see cleanConfig): 'send' runs forward from enrolment for
+    // the whole list; 'abandonment' anchors on each person's abandonment time and
+    // enrols only FRESH ones (within freshHours); '' is legacy (anchor if mapped).
+    const dripStart = a.config.dripStart || '';
+    const freshMs = (Number(a.config.freshHours) || 48) * 3600e3;
+    let n = 0; let pausedForCodes = false; let skippedStale = 0;
     for (const r of list) {
       if (enrolled.has(r.email)) continue;
       // Unique-code campaigns reserve a code at enrollment. If the pool is empty,
       // PAUSE new enrollments (those already in the journey keep their code).
       if (usesUniqueCodes && !assignPromo(a.id, r.email)) { pausedForCodes = true; break; }
-      const anchor = parseAnchor(r.anchorRaw) || new Date();
-      ins.run(a.id, r.email, r.name || '', r.ticket || '', r.phone || '', anchor.toISOString(), 0, stepDue(anchor.getTime(), steps[0].delayHours), 'active', now(), now());
+      const anchorMs = dripStart === 'send' ? Date.now() : (parseAnchor(r.anchorRaw) || new Date()).getTime();
+      // Fresh-only: in abandonment mode, don't enrol anyone past the window.
+      if (dripStart === 'abandonment' && (Date.now() - anchorMs) > freshMs) { skippedStale += 1; continue; }
+      ins.run(a.id, r.email, r.name || '', r.ticket || '', r.phone || '', new Date(anchorMs).toISOString(), 0, stepDue(anchorMs, steps[0].delayHours), 'active', now(), now());
       n += 1;
     }
+    if (skippedStale) console.log(`[actions] sequence "${a.title}" skipped ${skippedStale} stale (outside ${a.config.freshHours || 48}h fresh window)`);
     const res = a.results || {};
     if (n || res.codesEmpty !== pausedForCodes) saveResults(a.id, { ...res, enrolled: (res.enrolled || 0) + n, codesEmpty: pausedForCodes });
     if (n) console.log(`[actions] sequence "${a.title}" enrolled ${n} new`);
