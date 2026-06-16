@@ -513,6 +513,25 @@ app.delete('/api/dashboards/:id', auth.requireAdmin, (req, res) => {
   res.status(store.remove(req.params.id) ? 204 : 404).end();
 });
 
+// Folder-level "📌 Imported filters": apply (or clear) keepImportedFilters on EVERY
+// dashboard in a folder path (optionally including subfolders). Folders are just
+// "/"-separated path strings on each dashboard, so this sets the flag per dashboard.
+app.post('/api/dashboards/folder/keep-imported', auth.requireAdmin, (req, res) => {
+  const folder = String((req.body || {}).folder || '');
+  const on = !!(req.body || {}).on;
+  const includeSubfolders = (req.body || {}).includeSubfolders !== false;
+  const inFolder = (f) => { const x = f || ''; return x === folder || (includeSubfolders && x.startsWith(folder ? `${folder}/` : '')); };
+  let updated = 0;
+  for (const d of store.list()) {
+    if (!inFolder(d.folder)) continue;
+    const cur = store.get(d.id);
+    if (!cur || !!cur.keepImportedFilters === on) continue; // no-op if already in the wanted state
+    store.update(d.id, { keepImportedFilters: on });
+    updated += 1;
+  }
+  res.json({ ok: true, updated, on, folder });
+});
+
 app.post('/api/dashboards/import', auth.requireAdmin, async (req, res) => {
   const { lookerDashboardId, title, folder } = req.body || {};
   if (!lookerDashboardId) return res.status(400).json({ error: 'lookerDashboardId is required' });

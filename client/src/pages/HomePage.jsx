@@ -46,6 +46,14 @@ export default function HomePage() {
   const folderCountOf = (fp) => dashboards.filter((d) => { const f = d.folder || ''; return f === fp || f.startsWith(fp + '/'); }).length;
   const segs = path ? path.split('/') : [];
 
+  // Apply (or clear) "📌 Imported filters" on every dashboard in the current folder.
+  async function applyFolderKeepImported(on) {
+    const n = folderCountOf(path);
+    if (!confirm(`${on ? 'Pin' : 'Unpin'} imported filters on all ${n} dashboard${n === 1 ? '' : 's'} in “${path}” (including subfolders)?`)) return;
+    try { const r = await api.setFolderKeepImported(path, on); await load(); alert(`${on ? 'Pinned' : 'Unpinned'} imported filters on ${r.updated} dashboard${r.updated === 1 ? '' : 's'}.`); }
+    catch (e) { alert('Could not update folder: ' + (e.message || e)); }
+  }
+
   async function previewFolder() {
     if (!lookerFolderId.trim()) return;
     setFolderBusy(true);
@@ -178,6 +186,8 @@ export default function HomePage() {
         {isAdmin && path && (
           <>
             <button style={{ ...miniBtnOutline, fontSize: 12 }} onClick={(e) => renameFolder(path, e)} title="Rename this folder">✎ Rename</button>
+            <button style={{ ...miniBtnOutline, fontSize: 12 }} onClick={() => applyFolderKeepImported(true)} title="Make the imported (Looker) default filters authoritative on EVERY dashboard in this folder (incl. subfolders) — client defaults, saved views & suite locks won't override them.">📌 Pin imported filters</button>
+            <button style={{ ...miniBtnOutline, fontSize: 12 }} onClick={() => applyFolderKeepImported(false)} title="Clear 'imported filters' on every dashboard in this folder (incl. subfolders) — normal filter behaviour resumes.">📌 Unpin (folder)</button>
             <button style={{ ...miniBtnOutline, fontSize: 12, color: 'var(--error)' }} onClick={(e) => deleteFolderAction(path, e)} title="Delete this folder">🗑 Delete</button>
           </>
         )}
