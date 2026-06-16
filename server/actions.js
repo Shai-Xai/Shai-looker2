@@ -324,6 +324,53 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     try { const j = JSON.parse(Buffer.from(payload, 'base64url').toString()); return j.e && j.n ? j : null; } catch { return null; }
   };
 
+  // Sanitise an audience config (one source). At depth 0 it also carries a
+  // multi-source `sources`/`combine` (each block shaped recursively, one level deep).
+  function shapeAudience(aud = {}, depth = 0) {
+    const out = {
+      mode: ['paste', 'gsheet', 'snapshot', 'segment'].includes(aud.mode) ? aud.mode : 'tile',
+      gsheetUrl: String(aud.gsheetUrl || '').slice(0, 1000), // when mode = 'gsheet' (linked Google Sheet, read live)
+      segmentId: String(aud.segmentId || ''), // when mode = 'segment' (reference, resolved live)
+      phoneField: String(aud.phoneField || ''), // mobile column (for SMS)
+      dashboardId: String(aud.dashboardId || ''),
+      tileId: String(aud.tileId || ''),
+      emailField: String(aud.emailField || ''),
+      nameField: String(aud.nameField || ''),
+      consentField: String(aud.consentField || ''), // legacy single consent (→ email)
+      emailConsentField: String(aud.emailConsentField || ''), // per-channel marketing consent columns
+      smsConsentField: String(aud.smsConsentField || ''),
+      ticketField: String(aud.ticketField || ''),
+      anchorField: String(aud.anchorField || ''), // abandonment timestamp column (drip timing)
+      // Optional second source of customer attributes (lifetime spend, loyalty
+      // tier…), joined to the audience by email — its columns become filterable.
+      attrDashboardId: String(aud.attrDashboardId || ''),
+      attrTileId: String(aud.attrTileId || ''),
+      attrEmailField: String(aud.attrEmailField || ''),
+      // Dashboard (Looker) filters captured from a "segment from tile" flow,
+      // keyed by query field — applied at resolution (server drops ANY_VALUE).
+      lookerFilters: (aud.lookerFilters && typeof aud.lookerFilters === 'object' && !Array.isArray(aud.lookerFilters))
+        ? Object.fromEntries(Object.entries(aud.lookerFilters).slice(0, 50).map(([k, v]) => [String(k), String(v)]))
+        : {},
+      // Optional targeting filters on the tile's own columns (city, age,
+      // ticket category, new/returning…). op 'in' = value ∈ values;
+      // 'between' = min ≤ numeric ≤ max. All filters AND together.
+      filters: Array.isArray(aud.filters) ? aud.filters.slice(0, 8).map((fl) => ({
+        field: String(fl.field || ''),
+        op: fl.op === 'between' ? 'between' : 'in',
+        values: Array.isArray(fl.values) ? fl.values.map((v) => String(v)).slice(0, 100) : [],
+        min: (fl.min === '' || fl.min == null) ? null : Number(fl.min),
+        max: (fl.max === '' || fl.max == null) ? null : Number(fl.max),
+      })).filter((fl) => fl.field) : [],
+      pasted: String(aud.pasted || '').slice(0, 200000),
+    };
+    // Multi-source: combine several blocks (Union / Intersect / Exclude).
+    if (depth === 0 && Array.isArray(aud.sources) && aud.sources.length) {
+      out.sources = aud.sources.slice(0, 10).map((b) => shapeAudience(b, 1));
+      out.combine = ['union', 'intersect', 'exclude'].includes(aud.combine) ? aud.combine : 'union';
+    }
+    return out;
+  }
+
   // Sanitise a draft config from the client.
   function cleanConfig(body) {
     const aud = body.audience || {};
@@ -332,42 +379,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
       // each recipient gets an email (if they have an address) and an SMS (if
       // they have a number).
       channel: ['sms', 'both'].includes(body.channel) ? body.channel : 'email',
-      audience: {
-        mode: ['paste', 'gsheet', 'snapshot', 'segment'].includes(aud.mode) ? aud.mode : 'tile',
-        gsheetUrl: String(aud.gsheetUrl || '').slice(0, 1000), // when mode = 'gsheet' (linked Google Sheet, read live)
-        segmentId: String(aud.segmentId || ''), // when mode = 'segment' (reference, resolved live)
-        phoneField: String(aud.phoneField || ''), // mobile column (for SMS)
-        dashboardId: String(aud.dashboardId || ''),
-        tileId: String(aud.tileId || ''),
-        emailField: String(aud.emailField || ''),
-        nameField: String(aud.nameField || ''),
-        consentField: String(aud.consentField || ''), // legacy single consent (→ email)
-        emailConsentField: String(aud.emailConsentField || ''), // per-channel marketing consent columns
-        smsConsentField: String(aud.smsConsentField || ''),
-        ticketField: String(aud.ticketField || ''),
-        anchorField: String(aud.anchorField || ''), // abandonment timestamp column (drip timing)
-        // Optional second source of customer attributes (lifetime spend, loyalty
-        // tier…), joined to the audience by email — its columns become filterable.
-        attrDashboardId: String(aud.attrDashboardId || ''),
-        attrTileId: String(aud.attrTileId || ''),
-        attrEmailField: String(aud.attrEmailField || ''),
-        // Dashboard (Looker) filters captured from a "segment from tile" flow,
-        // keyed by query field — applied at resolution (server drops ANY_VALUE).
-        lookerFilters: (aud.lookerFilters && typeof aud.lookerFilters === 'object' && !Array.isArray(aud.lookerFilters))
-          ? Object.fromEntries(Object.entries(aud.lookerFilters).slice(0, 50).map(([k, v]) => [String(k), String(v)]))
-          : {},
-        // Optional targeting filters on the tile's own columns (city, age,
-        // ticket category, new/returning…). op 'in' = value ∈ values;
-        // 'between' = min ≤ numeric ≤ max. All filters AND together.
-        filters: Array.isArray(aud.filters) ? aud.filters.slice(0, 8).map((fl) => ({
-          field: String(fl.field || ''),
-          op: fl.op === 'between' ? 'between' : 'in',
-          values: Array.isArray(fl.values) ? fl.values.map((v) => String(v)).slice(0, 100) : [],
-          min: (fl.min === '' || fl.min == null) ? null : Number(fl.min),
-          max: (fl.max === '' || fl.max == null) ? null : Number(fl.max),
-        })).filter((fl) => fl.field) : [],
-        pasted: String(aud.pasted || '').slice(0, 200000),
-      },
+      audience: shapeAudience(aud),
       // Delivery mode: 'once' = single send to the current list; 'sequence' = an
       // automated drip (enroll abandoners, send timed steps, drop on purchase).
       campaignMode: body.campaignMode === 'sequence' ? 'sequence' : 'once',
