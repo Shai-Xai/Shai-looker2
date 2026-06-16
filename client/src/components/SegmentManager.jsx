@@ -276,6 +276,15 @@ function SegmentBuilder({ entityId, tiles, segment, onClose, onSaved }) {
   const addExtra = () => setExtras((a) => [...a, { mode: 'segment', segmentId: '' }]);
   const setExtra = (i, patch) => setExtras((a) => a.map((b, j) => (j === i ? { ...b, ...patch } : b)));
   const removeExtra = (i) => setExtras((a) => a.filter((_, j) => j !== i));
+  // Parse an uploaded CSV/Excel into a combine block's list (mode 'paste').
+  const onExtraFile = async (i, file) => {
+    try {
+      const XLSX = await import('xlsx');
+      const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+      const csv = XLSX.utils.sheet_to_csv(wb.Sheets[wb.SheetNames[0]] || {});
+      setExtra(i, { mode: 'paste', pasted: csv });
+    } catch (e) { alert('Could not read that file: ' + (e.message || e)); }
+  };
 
   // Parse an uploaded CSV/Excel into the pasted-list text (SheetJS is loaded on
   // demand so it never bloats the main bundle). Stored as a 'paste' snapshot.
@@ -442,7 +451,7 @@ function SegmentBuilder({ entityId, tiles, segment, onClose, onSaved }) {
                 <select value={b.mode} onChange={(e) => setExtra(i, { mode: e.target.value, segmentId: '', gsheetUrl: '', pasted: '' })} style={{ ...input, flex: '0 0 140px' }}>
                   <option value="segment">Saved segment</option>
                   <option value="gsheet">Google Sheet</option>
-                  <option value="paste">Pasted list</option>
+                  <option value="paste">Paste / upload</option>
                 </select>
                 {b.mode === 'segment' ? (
                   <select value={b.segmentId || ''} onChange={(e) => setExtra(i, { segmentId: e.target.value })} style={{ ...input, flex: 1, minWidth: 160 }}>
@@ -452,7 +461,14 @@ function SegmentBuilder({ entityId, tiles, segment, onClose, onSaved }) {
                 ) : b.mode === 'gsheet' ? (
                   <input value={b.gsheetUrl || ''} onChange={(e) => setExtra(i, { gsheetUrl: e.target.value })} placeholder="Google Sheet link" style={{ ...input, flex: 1, minWidth: 160 }} />
                 ) : (
-                  <input value={b.pasted || ''} onChange={(e) => setExtra(i, { pasted: e.target.value })} placeholder="emails / numbers, comma or line separated" style={{ ...input, flex: 1, minWidth: 160 }} />
+                  <div style={{ display: 'flex', gap: 6, flex: 1, minWidth: 160, alignItems: 'center' }}>
+                    <label style={{ ...mini, cursor: 'pointer', flexShrink: 0 }}>📄 Upload
+                      <input type="file" accept=".csv,.xlsx,.xls" style={{ display: 'none' }} onChange={(e) => { const file = e.target.files?.[0]; if (file) onExtraFile(i, file); e.target.value = ''; }} />
+                    </label>
+                    {/\n/.test(b.pasted || '')
+                      ? <span style={{ ...hintS, marginTop: 0, flex: 1 }}>✓ List loaded ({(b.pasted.match(/\n/g) || []).length} rows) <button type="button" style={{ ...mini, padding: '2px 8px', marginLeft: 4 }} onClick={() => setExtra(i, { pasted: '' })}>Clear</button></span>
+                      : <input value={b.pasted || ''} onChange={(e) => setExtra(i, { pasted: e.target.value })} placeholder="emails / numbers, or upload a file" style={{ ...input, flex: 1 }} />}
+                  </div>
                 )}
                 <button type="button" style={{ ...mini, color: 'var(--error,#ef4444)' }} onClick={() => removeExtra(i)}>✕</button>
               </div>
