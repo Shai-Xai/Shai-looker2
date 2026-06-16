@@ -55,6 +55,7 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
   // Resolve the source labels (event / dashboard / tile) from the tiles catalog.
   const sourceLabel = (s) => {
     const d = s.definition || {};
+    if (d.sources && d.sources.length) return { event: '', detail: `Combined · ${d.combine || 'union'} of ${d.sources.length} sources` };
     if (d.mode === 'paste') return { event: '', detail: 'Uploaded / pasted list' };
     if (d.mode === 'gsheet') return { event: '', detail: 'Linked Google Sheet (live)' };
     const dash = tiles?.dashboards?.find((x) => x.dashboardId === d.dashboardId);
@@ -115,7 +116,7 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                     <span style={{ fontWeight: 700, fontSize: isMobile ? 17 : 15 }}>{s.name}</span>
-                    <span style={{ fontSize: 10.5, fontWeight: 700, borderRadius: 980, padding: '2px 9px', background: 'rgba(128,128,128,0.14)', color: 'var(--muted)' }}>{s.source === 'paste' ? 'Uploaded / pasted' : s.source === 'gsheet' ? 'Google Sheet' : 'Dashboard tile'}</span>
+                    <span style={{ fontSize: 10.5, fontWeight: 700, borderRadius: 980, padding: '2px 9px', background: 'rgba(128,128,128,0.14)', color: 'var(--muted)' }}>{s.source === 'mix' ? 'Combined' : s.source === 'paste' ? 'Uploaded / pasted' : s.source === 'gsheet' ? 'Google Sheet' : 'Dashboard tile'}</span>
                   </div>
                   {lbl.event && <div style={{ fontSize: 12.5, color: 'var(--text)', marginTop: 5, fontWeight: 600 }}>🗓 {lbl.event}</div>}
                   {lbl.detail && <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lbl.detail}</div>}
@@ -233,8 +234,15 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
 }
 
 function SegmentBuilder({ entityId, tiles, segment, onClose, onSaved }) {
-  const def = segment?.definition || {};
+  const def0 = segment?.definition || {};
+  // A multi-source segment stores its blocks in `sources` (block 0 is the primary,
+  // edited with the full source picker; the rest are the "combine with" blocks).
+  const def = (def0.sources && def0.sources.length) ? def0.sources[0] : def0;
   const [name, setName] = useState(segment?.name || '');
+  const [extras, setExtras] = useState(() => ((def0.sources && def0.sources.length > 1) ? def0.sources.slice(1) : []));
+  const [combine, setCombine] = useState(def0.combine || 'union');
+  const [allSegments, setAllSegments] = useState([]); // saved segments available as combine blocks
+  useEffect(() => { api.listSegments(entityId).then((r) => setAllSegments((r.segments || []).filter((s) => s.id !== segment?.id))).catch(() => {}); }, [entityId, segment?.id]);
   const [f, setF] = useState({
     mode: def.mode || 'tile',
     dashboardId: def.dashboardId || '', tileId: def.tileId || '',
@@ -251,13 +259,23 @@ function SegmentBuilder({ entityId, tiles, segment, onClose, onSaved }) {
   const [busy, setBusy] = useState(false);
   const debounce = useRef();
 
-  const definition = () => ({
+  const primaryDef = () => ({
     mode: f.mode, dashboardId: f.dashboardId, tileId: f.tileId,
     emailField: f.emailField, nameField: f.nameField, phoneField: f.phoneField,
     emailConsentField: f.emailConsentField, smsConsentField: f.smsConsentField,
     attrDashboardId: f.attrDashboardId, attrTileId: f.attrTileId, filters: f.filters, pasted: f.pasted,
     gsheetUrl: f.gsheetUrl, lookerFilters: f.lookerFilters,
   });
+  // Keep only fully-specified combine blocks.
+  const validExtras = () => extras.filter((b) => (b.mode === 'segment' && b.segmentId) || (b.mode === 'gsheet' && (b.gsheetUrl || '').trim()) || (b.mode === 'paste' && (b.pasted || '').trim()));
+  const definition = () => {
+    const base = primaryDef();
+    const ex = validExtras();
+    return ex.length ? { ...base, sources: [base, ...ex], combine } : base;
+  };
+  const addExtra = () => setExtras((a) => [...a, { mode: 'segment', segmentId: '' }]);
+  const setExtra = (i, patch) => setExtras((a) => a.map((b, j) => (j === i ? { ...b, ...patch } : b)));
+  const removeExtra = (i) => setExtras((a) => a.filter((_, j) => j !== i));
 
   // Parse an uploaded CSV/Excel into the pasted-list text (SheetJS is loaded on
   // demand so it never bloats the main bundle). Stored as a 'paste' snapshot.
@@ -283,7 +301,7 @@ function SegmentBuilder({ entityId, tiles, segment, onClose, onSaved }) {
   };
   useEffect(() => { clearTimeout(debounce.current); debounce.current = setTimeout(refreshAud, 350); return () => clearTimeout(debounce.current); },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [f.mode, f.dashboardId, f.tileId, f.emailField, f.nameField, f.phoneField, f.emailConsentField, f.smsConsentField, f.attrDashboardId, f.attrTileId, JSON.stringify(f.filters), f.pasted, f.gsheetUrl]);
+    [f.mode, f.dashboardId, f.tileId, f.emailField, f.nameField, f.phoneField, f.emailConsentField, f.smsConsentField, f.attrDashboardId, f.attrTileId, JSON.stringify(f.filters), f.pasted, f.gsheetUrl, JSON.stringify(extras), combine]);
 
   const addFilter = () => set('filters', [...f.filters, { field: '', op: 'in', values: [] }]);
   const setFilter = (i, patch) => set('filters', f.filters.map((x, j) => (j === i ? { ...x, ...patch } : x)));
@@ -415,6 +433,45 @@ function SegmentBuilder({ entityId, tiles, segment, onClose, onSaved }) {
             </div>
           </Field>
         )}
+
+        {/* Multi-source: combine the primary source above with other sources. */}
+        <Field label="Combine with other sources (optional)">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {extras.map((b, i) => (
+              <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                <select value={b.mode} onChange={(e) => setExtra(i, { mode: e.target.value, segmentId: '', gsheetUrl: '', pasted: '' })} style={{ ...input, flex: '0 0 140px' }}>
+                  <option value="segment">Saved segment</option>
+                  <option value="gsheet">Google Sheet</option>
+                  <option value="paste">Pasted list</option>
+                </select>
+                {b.mode === 'segment' ? (
+                  <select value={b.segmentId || ''} onChange={(e) => setExtra(i, { segmentId: e.target.value })} style={{ ...input, flex: 1, minWidth: 160 }}>
+                    <option value="">Pick a segment…</option>
+                    {allSegments.map((s) => <option key={s.id} value={s.id}>{s.name}{s.count >= 0 ? ` (${s.count})` : ''}</option>)}
+                  </select>
+                ) : b.mode === 'gsheet' ? (
+                  <input value={b.gsheetUrl || ''} onChange={(e) => setExtra(i, { gsheetUrl: e.target.value })} placeholder="Google Sheet link" style={{ ...input, flex: 1, minWidth: 160 }} />
+                ) : (
+                  <input value={b.pasted || ''} onChange={(e) => setExtra(i, { pasted: e.target.value })} placeholder="emails / numbers, comma or line separated" style={{ ...input, flex: 1, minWidth: 160 }} />
+                )}
+                <button type="button" style={{ ...mini, color: 'var(--error,#ef4444)' }} onClick={() => removeExtra(i)}>✕</button>
+              </div>
+            ))}
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <button type="button" style={mini} onClick={addExtra}>＋ Add a source</button>
+              {extras.length > 0 && (
+                <select value={combine} onChange={(e) => setCombine(e.target.value)} style={{ ...input, width: 'auto', flex: '0 0 auto' }}>
+                  <option value="union">Union — anyone in any source</option>
+                  <option value="intersect">Intersect — only people in every source</option>
+                  <option value="exclude">Exclude — in the main source, not the others</option>
+                </select>
+              )}
+            </div>
+            {extras.length > 0 && (
+              <div style={hintS}>The primary source above is the main one. {combine === 'exclude' ? 'Exclude removes anyone who also appears in the sources below — great for suppression.' : combine === 'intersect' ? 'Intersect keeps only people in the main source AND every source below.' : 'Union merges everyone across all sources (deduped by email/mobile).'}</div>
+            )}
+          </div>
+        </Field>
 
         <div style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           {aud?.error ? <span style={{ color: 'var(--error,#ef4444)' }}>✗ {aud.error}</span>

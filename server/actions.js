@@ -487,13 +487,48 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     return null;
   }
 
-  async function audienceFor(entityId, cfg, user) {
+  // Combine several source blocks into one audience (Union / Intersect / Exclude).
+  // Each block is resolved with its OWN filters via audienceFor; we then merge by
+  // identity (email, else phone). Exclude = first block MINUS the rest.
+  async function combineSources(entityId, cfg, user, depth) {
+    const combine = ['union', 'intersect', 'exclude'].includes(cfg.audience.combine) ? cfg.audience.combine : 'union';
+    const blocks = (cfg.audience.sources || []).slice(0, 10);
+    const keyOf = (m) => String(m.email || m.phone || '').toLowerCase();
+    const lists = [];
+    for (const b of blocks) {
+      const sub = await audienceFor(entityId, { ...cfg, audience: b }, user, depth + 1);
+      lists.push(sub.list || []);
+    }
+    const out = new Map();
+    if (combine === 'intersect') {
+      const [first = [], ...rest] = lists;
+      const sets = rest.map((l) => new Set(l.map(keyOf)));
+      for (const m of first) { const k = keyOf(m); if (k && sets.every((s) => s.has(k)) && !out.has(k)) out.set(k, m); }
+    } else if (combine === 'exclude') {
+      const [first = [], ...rest] = lists;
+      const bad = new Set(rest.flatMap((l) => l.map(keyOf)));
+      for (const m of first) { const k = keyOf(m); if (k && !bad.has(k) && !out.has(k)) out.set(k, m); }
+    } else { // union
+      for (const l of lists) for (const m of l) { const k = keyOf(m); if (k && !out.has(k)) out.set(k, m); }
+    }
+    const list = [...out.values()].slice(0, MAX_AUDIENCE);
+    const reach = { total: list.length, email: list.filter((r) => r.email && r.emailOk).length, sms: list.filter((r) => r.phone && r.smsOk).length };
+    const noConsent = list.filter((r) => !(r.email && r.emailOk) && !(r.phone && r.smsOk)).length;
+    return { list, fields: [], filterFields: [], columns: [], excluded: 0, noConsent, filteredOut: 0, reach, combined: combine };
+  }
+
+  async function audienceFor(entityId, cfg, user, depth = 0) {
+    if (depth > 5) return { list: [], fields: [], filterFields: [], excluded: 0, noConsent: 0, filteredOut: 0 }; // cycle guard
     // A segment-backed audience resolves the referenced segment's LIVE definition
     // each time (segments are always-current; reference, not copy).
     if (cfg.audience && cfg.audience.mode === 'segment') {
       const def = segmentDefinition(entityId, cfg.audience.segmentId);
       if (!def) return { list: [], fields: [], filterFields: [], excluded: 0, noConsent: 0, filteredOut: 0, segmentMissing: true };
       cfg = { ...cfg, audience: def };
+    }
+    // Multi-source: combine several blocks (Union / Intersect / Exclude).
+    if (cfg.audience && Array.isArray(cfg.audience.sources) && cfg.audience.sources.length) {
+      return combineSources(entityId, cfg, user, depth);
     }
     let raw = [];
     let fields = [];

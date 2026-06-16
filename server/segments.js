@@ -51,10 +51,11 @@ function mount(app, { db, auth, resolveAudience, resolveRecipe, meta, tiktok }) 
 
   // Light shaping of a segment definition (the audience config). We don't trust
   // the client shape blindly, but we keep it source-agnostic — only known keys.
-  const cleanDef = (d = {}) => {
-    const mode = ['paste', 'gsheet'].includes(d.mode) ? d.mode : 'tile';
+  const cleanDef = (d = {}, depth = 0) => {
+    const mode = ['paste', 'gsheet', 'segment'].includes(d.mode) ? d.mode : 'tile';
     const out = {
       mode,
+      segmentId: String(d.segmentId || ''), // when mode='segment' (a block referencing another segment)
       gsheetUrl: String(d.gsheetUrl || '').slice(0, 1000), // linked Google Sheet (shared/published)
       dashboardId: String(d.dashboardId || ''),
       tileId: String(d.tileId || ''),
@@ -84,6 +85,12 @@ function mount(app, { db, auth, resolveAudience, resolveRecipe, meta, tiktok }) 
         min: f.min, max: f.max, dashboardId: String(f.dashboardId || ''), tileId: String(f.tileId || ''),
       })) : [],
     };
+    // Multi-source: combine several blocks (Union / Intersect / Exclude). Blocks are
+    // themselves flat source defs (one level deep — a block can't nest more sources).
+    if (depth === 0 && Array.isArray(d.sources) && d.sources.length) {
+      out.sources = d.sources.slice(0, 10).map((b) => cleanDef(b, 1));
+      out.combine = ['union', 'intersect', 'exclude'].includes(d.combine) ? d.combine : 'union';
+    }
     return out;
   };
 
@@ -126,7 +133,7 @@ function mount(app, { db, auth, resolveAudience, resolveRecipe, meta, tiktok }) 
     if (!guard(req, res, req.params.entityId)) return;
     const name = String(req.body?.name || '').trim().slice(0, 120) || 'Untitled segment';
     const definition = cleanDef(req.body?.definition || {});
-    const source = ['paste', 'gsheet'].includes(definition.mode) ? definition.mode : 'tile';
+    const source = definition.sources && definition.sources.length ? 'mix' : (['paste', 'gsheet'].includes(definition.mode) ? definition.mode : 'tile');
     const id = uuid(); const ts = now();
     sql.prepare('INSERT INTO segments (id, entity_id, name, source, definition, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)')
       .run(id, req.params.entityId, name, source, JSON.stringify(definition), req.user.email, ts, ts);
@@ -156,7 +163,7 @@ function mount(app, { db, auth, resolveAudience, resolveRecipe, meta, tiktok }) 
     if (!seg || seg.entity_id !== req.params.entityId) return res.status(404).json({ error: 'Not found' });
     const name = req.body?.name !== undefined ? String(req.body.name).trim().slice(0, 120) || seg.name : seg.name;
     const definition = req.body?.definition !== undefined ? cleanDef(req.body.definition) : JSON.parse(seg.definition || '{}');
-    const source = ['paste', 'gsheet'].includes(definition.mode) ? definition.mode : 'tile';
+    const source = definition.sources && definition.sources.length ? 'mix' : (['paste', 'gsheet'].includes(definition.mode) ? definition.mode : 'tile');
     // A changed definition invalidates the cached count.
     const changed = JSON.stringify(definition) !== seg.definition;
     sql.prepare('UPDATE segments SET name=?, source=?, definition=?, updated_at=?' + (changed ? ', last_count=-1, last_resolved_at=\'\'' : '') + ' WHERE id=?')
