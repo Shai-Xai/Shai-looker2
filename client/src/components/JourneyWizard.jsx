@@ -46,13 +46,13 @@ const TREE_CSS = `
 .jt-link { width: 2px; height: 18px; background: var(--hairline); flex: none; }
 .jt-stem { width: 2px; height: 16px; background: var(--hairline); }
 .jt-branches { display: flex; align-items: flex-start; justify-content: center; }
-.jt-branch { position: relative; padding: 18px 14px 0; display: flex; flex-direction: column; align-items: center; }
+.jt-branch { position: relative; padding: 18px 9px 0; display: flex; flex-direction: column; align-items: center; }
 .jt-branch::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: var(--hairline); }
 .jt-branch:first-child::before { left: 50%; }
 .jt-branch:last-child::before { right: 50%; }
 .jt-branch:only-child::before { display: none; }
 .jt-branch::after { content: ''; position: absolute; top: 0; left: calc(50% - 1px); width: 2px; height: 18px; background: var(--hairline); }
-.jt-card { width: 240px; box-sizing: border-box; }
+.jt-card { width: 210px; box-sizing: border-box; }
 `;
 
 function MessageCard({ node }) {
@@ -182,9 +182,9 @@ export default function JourneyWizard({ entityId }) {
   if (stage === 'review' && journey) {
     const decisions = countDecisions(journey.nodes);
     return (
-      <div style={{ maxWidth: 660 }}>
+      <div>
         <button onClick={startOver} style={linkBtn}>← Start over</button>
-        <div style={{ marginTop: 10, padding: '16px 16px 10px', border: '1px solid var(--hairline)', borderRadius: 14, background: 'var(--card)' }}>
+        <div style={{ maxWidth: 660, marginTop: 10, padding: '16px 16px 10px', border: '1px solid var(--hairline)', borderRadius: 14, background: 'var(--card)' }}>
           <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)' }}>
             {journey.source === 'ai' ? '✨ AI-drafted journey' : '📋 Recipe'} · review before creating
           </div>
@@ -193,12 +193,13 @@ export default function JourneyWizard({ entityId }) {
           {journey.summary && <p style={{ fontSize: 14, lineHeight: 1.5, margin: 0 }}>{journey.summary}</p>}
         </div>
 
+        {/* Tree uses the full page width (scrolls if wider) — not capped to the text column. */}
         <div style={{ marginTop: 16 }}>
           <NodeTree nodes={journey.nodes} />
         </div>
 
         {decisions > 0 && (
-          <div style={{ fontSize: 12.5, color: 'var(--muted)', background: 'rgba(128,128,128,0.08)', borderRadius: 8, padding: '9px 11px', margin: '16px 0 12px' }}>
+          <div style={{ maxWidth: 660, fontSize: 12.5, color: 'var(--muted)', background: 'rgba(128,128,128,0.08)', borderRadius: 8, padding: '9px 11px', margin: '16px 0 12px' }}>
             This journey has {decisions} decision point{decisions === 1 ? '' : 's'}. The tree above is the design; running the branches (routing people by what they opened, clicked or bought) is the journey engine we’re building next. For now, <strong>Create as draft</strong> sets up the opening sequence as a campaign you can finish and send.
           </div>
         )}
