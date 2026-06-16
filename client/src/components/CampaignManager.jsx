@@ -1584,7 +1584,7 @@ function Accordion({ title, defaultOpen = false, open: controlledOpen, onToggle,
 // Optional targeting filters on the audience tile's columns (city, age, ticket
 // category, new/returning…). 'is one of' picks real values from the data;
 // 'between' is a numeric range (e.g. age). All filters narrow the segment (AND).
-export function AudienceFilters({ entityId, fields, filters, addFilter, setFilter, removeFilter, attr, tiles, onAttr }) {
+export function AudienceFilters({ entityId, fields, filters, addFilter, setFilter, removeFilter, attr, tiles, onAttr, hideAttrSource }) {
   const attrDash = tiles?.dashboards?.find((d) => d.dashboardId === attr?.dashboardId);
   return (
     <div style={{ marginTop: 8, borderTop: '1px dashed var(--hairline)', paddingTop: 10 }}>
@@ -1595,6 +1595,7 @@ export function AudienceFilters({ entityId, fields, filters, addFilter, setFilte
       ))}
       <button type="button" style={{ ...mini, marginTop: filters.length ? 6 : 0 }} onClick={addFilter}>＋ Add filter</button>
       {/* Optional second source of customer attributes — its columns join in by email. */}
+      {!hideAttrSource && (
       <div style={{ marginTop: 8 }}>
         <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>Extra attributes source (optional — adds more fields to filter on, joined by email):</div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -1610,6 +1611,7 @@ export function AudienceFilters({ entityId, fields, filters, addFilter, setFilte
           )}
         </div>
       </div>
+      )}
       {filters.length > 0 && <div style={hintS}>Filters narrow the audience to everyone matching all of them. Make a separate campaign per segment for different messaging.</div>}
     </div>
   );
@@ -1619,11 +1621,14 @@ function FilterRow({ entityId, fields, filter, onChange, onRemove }) {
   const [open, setOpen] = useState(false);
   const fieldDef = fields.find((fl) => fl.name === filter.field);
   useEffect(() => {
-    if (filter.op !== 'in' || !fieldDef?.dashboardId || !fieldDef?.tileId) { setValues(null); return; }
+    if (filter.op !== 'in') { setValues(null); return; }
+    // Pasted/Sheet columns carry their distinct values inline (no tile to query).
+    if (fieldDef?.values) { setValues(fieldDef.values); return; }
+    if (!fieldDef?.dashboardId || !fieldDef?.tileId) { setValues(null); return; }
     let alive = true;
     api.actionFieldValues(entityId, { dashboardId: fieldDef.dashboardId, tileId: fieldDef.tileId, field: filter.field }).then((r) => { if (alive) setValues(r.values || []); }).catch(() => { if (alive) setValues([]); });
     return () => { alive = false; };
-  }, [filter.field, filter.op, fieldDef?.dashboardId, fieldDef?.tileId, entityId]);
+  }, [filter.field, filter.op, fieldDef?.dashboardId, fieldDef?.tileId, fieldDef?.values, entityId]);
   const toggleVal = (v) => onChange({ values: filter.values.includes(v) ? filter.values.filter((x) => x !== v) : [...filter.values, v] });
   return (
     <div style={{ border: '1px solid var(--hairline)', borderRadius: 8, padding: 8, marginBottom: 6 }}>

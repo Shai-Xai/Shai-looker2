@@ -72,7 +72,8 @@ function parseContactTable(text, { emailField, nameField, phoneField } = {}) {
   if (!emailField && !phoneField) return null;
   const rows = parseCsv(text);
   if (rows.length < 2) return null;
-  const header = rows[0].map((h) => h.trim().toLowerCase());
+  const rawHeader = rows[0].map((h) => h.trim());
+  const header = rawHeader.map((h) => h.toLowerCase());
   const col = (n) => (n ? header.indexOf(String(n).trim().toLowerCase()) : -1);
   const ei = col(emailField); const pi = col(phoneField); const ni = col(nameField);
   if (ei < 0 && pi < 0) return null; // mapped column(s) not in the header → fall back
@@ -89,7 +90,11 @@ function parseContactTable(text, { emailField, nameField, phoneField } = {}) {
     const key = email || phone;
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({ email, phone, name, emailOk: !!email, smsOk: !!phone });
+    // Keep EVERY column as an attribute (ticket type, city, age, gender…) so the
+    // list can be targeted/filtered on them, keyed by the original header name.
+    const attributes = {};
+    for (let c = 0; c < rawHeader.length; c++) if (rawHeader[c]) attributes[rawHeader[c]] = String(cells[c] || '').trim();
+    out.push({ email, phone, name, emailOk: !!email, smsOk: !!phone, attributes });
   }
   return out;
 }
@@ -427,6 +432,18 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
   const cellVal = (cell) => String((cell && (cell.value ?? cell)) || '').trim();
   const isYes = (v) => ['yes', 'y', 'true', '1', 'consented', 'opted in', 'opt in'].includes(String(v).trim().toLowerCase());
 
+  // Distinct values of an attribute across parsed members (capped) — powers the
+  // "is one of" multi-select for pasted/Sheet lists without a tile to query.
+  function distinctValues(members, name) {
+    const set = new Set();
+    for (const m of members) {
+      const v = (m.attributes && m.attributes[name] != null) ? String(m.attributes[name]).trim() : '';
+      if (v) set.add(v);
+      if (set.size >= 200) break;
+    }
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }
+
   // Does a tile row pass all the targeting filters? (AND across filters.)
   function rowPassesFilters(row, filters) {
     for (const fl of filters || []) {
@@ -484,18 +501,28 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     let columns = []; // header columns of a delimited list (paste/gsheet) — for column-mapping
     let noConsent = 0;
     let filteredOut = 0;
-    if (cfg.audience.mode === 'paste') {
-      // Pasted text or an uploaded CSV/Excel (the file is parsed to this text client-side).
-      const text = cfg.audience.pasted || '';
+    if (cfg.audience.mode === 'paste' || cfg.audience.mode === 'gsheet') {
+      // Pasted text / uploaded CSV-Excel (parsed to text client-side), or a linked
+      // Google Sheet fetched LIVE each resolve so the segment tracks the sheet.
+      const text = cfg.audience.mode === 'gsheet'
+        ? await fetchGoogleSheetCsv(cfg.audience.gsheetUrl)
+        : (cfg.audience.pasted || '');
       columns = csvHeader(text);
-      // Use the explicit column mapping when given; else the per-line heuristic.
-      raw = parseContactTable(text, cfg.audience) || parseContactLines(text);
-    } else if (cfg.audience.mode === 'gsheet') {
-      // A linked Google Sheet — fetched LIVE (CSV export) each resolve, so the
-      // segment tracks the sheet. Requires the sheet to be shared/published.
-      const text = await fetchGoogleSheetCsv(cfg.audience.gsheetUrl);
-      columns = csvHeader(text);
-      raw = parseContactTable(text, cfg.audience) || parseContactLines(text);
+      // Explicit column mapping when given; else the per-line heuristic (no attrs).
+      let parsed = parseContactTable(text, cfg.audience) || parseContactLines(text);
+      // Offer EVERY column as a filterable field (with its distinct values) so the
+      // list can be targeted on ticket type / city / age / gender etc.
+      if (columns.length && parsed.some((m) => m.attributes)) {
+        filterFields = columns.map((name) => ({ name, label: name, values: distinctValues(parsed, name) }));
+      }
+      // Apply targeting filters on the row attributes (AND across filters).
+      const fl = cfg.audience.filters || [];
+      if (fl.length) {
+        const before = parsed.length;
+        parsed = parsed.filter((m) => rowPassesFilters(m.attributes || {}, fl));
+        filteredOut = before - parsed.length;
+      }
+      raw = parsed;
     } else {
       if (!cfg.audience.dashboardId || !cfg.audience.tileId) return { list: [], fields: [], filterFields: [], excluded: 0, noConsent: 0, filteredOut: 0 };
       // `lookerFilters` are the dashboard filters captured when a segment was made

@@ -293,8 +293,13 @@ function SegmentBuilder({ entityId, tiles, segment, onClose, onSaved }) {
     if (!name.trim()) { alert('Give the segment a name.'); return; }
     setBusy(true);
     try {
-      if (segment?.id) await api.updateSegment(entityId, segment.id, { name, definition: definition() });
-      else await api.createSegment(entityId, { name, definition: definition() });
+      const r = segment?.id
+        ? await api.updateSegment(entityId, segment.id, { name, definition: definition() })
+        : await api.createSegment(entityId, { name, definition: definition() });
+      // Resolve once on save so the list shows a live count immediately (a new or
+      // re-defined segment is otherwise "not counted yet" until a manual refresh).
+      const sid = r?.segment?.id || segment?.id;
+      if (sid) await api.previewSegment(entityId, sid).catch(() => {});
       onSaved();
     } catch (e) { alert('Save failed: ' + e.message); }
     finally { setBusy(false); }
@@ -403,6 +408,10 @@ function SegmentBuilder({ entityId, tiles, segment, onClose, onSaved }) {
                 {aud.columns.map((c) => <option key={c} value={c}>{c}</option>)}
               </select>
               <div style={hintS}>Tell us which columns hold the email, name and mobile — useful when a row has several number-like values. Leave on <b>auto-detect</b> to let us guess from each row.</div>
+              {aud?.filterFields?.length > 0 && (
+                <AudienceFilters entityId={entityId} fields={aud.filterFields}
+                  filters={f.filters} addFilter={addFilter} setFilter={setFilter} removeFilter={removeFilter} hideAttrSource />
+              )}
             </div>
           </Field>
         )}
