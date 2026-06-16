@@ -370,6 +370,44 @@ function setSetting(key, value) {
   return getSetting(key);
 }
 
+// ─── Release notes (daily product changelog, authored in Admin → Product) ─────
+// Each row is one dated entry (title + markdown body). Drafts (`published`=0) are
+// hidden from any client-facing surface but kept for the team to finish later.
+db.exec(`CREATE TABLE IF NOT EXISTS release_notes (
+  id         TEXT PRIMARY KEY,
+  date       TEXT NOT NULL DEFAULT '',
+  title      TEXT NOT NULL DEFAULT '',
+  body       TEXT NOT NULL DEFAULT '',
+  published  INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);`);
+function rowToReleaseNote(r) {
+  return r && { id: r.id, date: r.date, title: r.title, body: r.body, published: !!r.published, createdAt: r.created_at, updatedAt: r.updated_at };
+}
+// Newest day first; ties broken by most-recently created.
+function listReleaseNotes() {
+  return db.prepare('SELECT * FROM release_notes ORDER BY date DESC, created_at DESC').all().map(rowToReleaseNote);
+}
+function getReleaseNote(id) { return rowToReleaseNote(db.prepare('SELECT * FROM release_notes WHERE id=?').get(id)); }
+function createReleaseNote({ date = '', title = '', body = '', published = true } = {}) {
+  const id = uuid(); const ts = now();
+  db.prepare('INSERT INTO release_notes (id,date,title,body,published,created_at,updated_at) VALUES (?,?,?,?,?,?,?)')
+    .run(id, date || ts.slice(0, 10), title || '', body || '', published ? 1 : 0, ts, ts);
+  return getReleaseNote(id);
+}
+function updateReleaseNote(id, patch = {}) {
+  const cur = db.prepare('SELECT * FROM release_notes WHERE id=?').get(id);
+  if (!cur) return null;
+  const date = patch.date !== undefined ? (patch.date || '') : cur.date;
+  const title = patch.title !== undefined ? (patch.title || '') : cur.title;
+  const body = patch.body !== undefined ? (patch.body || '') : cur.body;
+  const published = patch.published !== undefined ? (patch.published ? 1 : 0) : cur.published;
+  db.prepare('UPDATE release_notes SET date=?, title=?, body=?, published=?, updated_at=? WHERE id=?').run(date, title, body, published, now(), id);
+  return getReleaseNote(id);
+}
+function deleteReleaseNote(id) { return db.prepare('DELETE FROM release_notes WHERE id=?').run(id).changes > 0; }
+
 // ─── Settlements ──────────────────────────────────────────────────────────────
 // Event settlement reports for clients. The original PDF is uploaded by an
 // admin, AI-extracted into a structured JSON blob (`data`), and rendered as an
@@ -1077,6 +1115,8 @@ module.exports = {
   listLibraryTiles, listLibraryCategories, getLibraryTile, harvestTile, harvestDashboardTiles, updateLibraryTile, deleteLibraryTile, bumpLibraryUsage,
   // settings (key/value)
   getSetting, setSetting,
+  // release notes (daily product changelog)
+  listReleaseNotes, getReleaseNote, createReleaseNote, updateReleaseNote, deleteReleaseNote,
   // settlements
   listSettlements, getSettlement, getSettlementFile, createSettlement, updateSettlement, deleteSettlement, setSettlementNotes,
   // event documents (invoices etc.)
