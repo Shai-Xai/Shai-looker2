@@ -803,7 +803,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
                 <div style={hintS}>{hasSms ? 'Paste emails and/or mobile numbers (any separator). Numbers get the SMS, emails get the email.' : 'Paste email addresses, separated by spaces, commas or new lines.'}</div>
               </>
             )}
-            <div style={{ marginTop: 8, fontSize: 12.5 }}>
+            <div style={{ marginTop: 8, fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
               {audBusy ? <span style={{ color: 'var(--muted)' }}>Counting audience…</span>
                 : aud?.error ? <span style={{ color: 'var(--error,#ef4444)' }}>✗ {aud.error}</span>
                 : aud ? (
@@ -817,7 +817,15 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
                     {aud.sample?.length > 0 && <span style={{ color: 'var(--muted)' }}> · e.g. {aud.sample.slice(0, 3).map((s) => s.email).join(', ')}</span>}
                   </span>
                 ) : <span style={{ color: 'var(--muted)' }}>Pick an audience source to see the count.</span>}
+              {/* Re-read the live source NOW (e.g. a linked Google Sheet that's been
+                  edited mid-build). The actual send always re-resolves at send time. */}
+              {aud && !aud.error && f.audienceMode !== 'snapshot' && (
+                <button type="button" style={{ ...mini, padding: '3px 9px' }} onClick={refreshAudience} disabled={audBusy} title="Re-read the live source (e.g. a linked Google Sheet) and recount now">↻ Refresh</button>
+              )}
             </div>
+            {aud && !aud.error && f.audienceMode !== 'snapshot' && (
+              <div style={hintS}>Counts a live snapshot now — the actual send always re-reads the latest at send time.</div>
+            )}
             </>
             )}
           </Field>
