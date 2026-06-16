@@ -63,7 +63,9 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
   // number (Looker convention), so they don't get a top title bar in view mode.
   const visType = tile.vis?.type;
   const isMetric = visType === 'single_value' || visType === 'single_value_period_over_period' || (visType || '').includes('bar_gauge');
-  const showHeader = editable || (!!tile.title && !isMetric);
+  // Metric (single-value) tiles never take a header row — even in edit mode — so the
+  // big number stays fully visible; their edit controls float in the corners instead.
+  const showHeader = !isMetric && (editable || !!tile.title);
 
   return (
     <div
@@ -99,8 +101,8 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
           <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             {isMetric ? null : (tile.title || <em style={{ color: '#bbb', fontWeight: 400 }}>Untitled</em>)}
           </span>
-          {canSegment && <SegmentButton onClick={() => setShowSegment(true)} isMobile={isMobile} />}
-          {canInsight && (
+          {!editable && canSegment && <SegmentButton onClick={() => setShowSegment(true)} isMobile={isMobile} />}
+          {!editable && canInsight && (
             <>
               <PinButton tileId={tile.id} isMobile={isMobile} />
               <InsightButton onClick={() => setShowInsight(true)} isMobile={isMobile} />
@@ -126,14 +128,24 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
           >⠿</span>
         )}
         {/* No header (metric tiles): the insight button floats in the corner,
-            with the pin just left of it. */}
-        {canInsight && !showHeader && (
+            with the pin just left of it. Hidden while editing to free the corners. */}
+        {!editable && canInsight && !showHeader && (
           <>
             <PinButton tileId={tile.id} isMobile={isMobile} corner />
             <InsightButton onClick={() => setShowInsight(true)} isMobile={isMobile} corner />
           </>
         )}
-        {canSegment && !showHeader && <SegmentButton onClick={() => setShowSegment(true)} isMobile={isMobile} corner />}
+        {!editable && canSegment && !showHeader && <SegmentButton onClick={() => setShowSegment(true)} isMobile={isMobile} corner />}
+        {/* Editable metric tile (no header): a move handle + edit controls float in
+            the top corners, so the value below stays fully visible. */}
+        {editable && !showHeader && (
+          <span style={{ position: 'absolute', top: 6, right: 6, zIndex: 7, display: 'flex', gap: 4, alignItems: 'center', background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 8, padding: 2 }}>
+            <span className="tile-drag-handle" title="Drag to move" style={{ cursor: 'move', color: '#999', fontSize: 13, padding: '2px 5px', lineHeight: 1.2 }}>✥</span>
+            <IconBtn title="Edit" onClick={onEdit}>✎</IconBtn>
+            <IconBtn title="Duplicate" onClick={onDuplicate}>⧉</IconBtn>
+            <IconBtn title="Delete" onClick={onRemove} danger>✕</IconBtn>
+          </span>
+        )}
         {tile.type === 'text' ? (
           <TextTile tile={tile} />
         ) : !isRunnableQuery(tile.query) ? (
