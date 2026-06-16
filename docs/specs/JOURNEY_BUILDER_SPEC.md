@@ -185,6 +185,45 @@ enrolments      id, journey_id, person_ref, node_id (CURRENT node, not a scalar)
 (pure internal refactor, no user-visible change) *before* adding condition/split —
 de-risks everything after.
 
+### 6b. Concrete node shape — SHIPPED IN SANDBOX (prototype)
+The recipes (`server/actionTemplates.js`), the AI drafter (`JOURNEY_SYSTEM` in
+`server/insights.js`) and the wizard renderer (`client/.../JourneyWizard.jsx`) all
+speak the same **tree** JSON. A journey is `{ name, goal, summary, nodes[] }`,
+where each node is one of:
+```
+{ type:'message',  channel:'email'|'sms', delayHours, subject, body, ctaText }
+{ type:'decision', question, waitHours,
+  branches:[ { label, nodes:[ ...nodes... ] }, ... ] }   // nested ≤ 2 deep
+```
+- `decision` branches on behaviour the engine already records: **bought** (left
+  the segment), **clicked** (`action_clicks`), **opened** (`action_opens`), or
+  **no response** (timeout). Branch `label` is the human outcome ("Bought",
+  "Clicked but didn't buy", "No response").
+- The wizard renders this as a read-only **decision tree** (indented, colour-coded
+  branches) — the visual the promoter reviews.
+- This tree maps onto §6's `journey_nodes` rows: a `message` → a `send` node; a
+  `decision` → a `condition` node whose `branches` become `next[]` edges. So the
+  prototype's JSON is the design-time form of the persisted graph.
+
+### 6c. J3 execution plan (turning the tree into routing)
+The prototype renders + drafts branches; **executing** them is the next build, and
+it touches the live drip loop (`processSequences`, `server/actions.js`) so it gets
+its own careful, test-backed pass:
+1. **Persist the tree** (J2): add `journey_nodes` + move `action_enrollments` from
+   scalar `step_index` to `node_id` (current node). Re-express the linear drip as
+   `send`/`wait` nodes first — no behaviour change — then ship.
+2. **Evaluate decisions** (J3): when a token reaches a `decision`, set `next_at =
+   now + waitHours` and, on the tick, resolve the branch by querying the signals
+   already written — `action_clicks`/`action_opens` for this person+step, and the
+   audience re-check for "bought" — first-match-wins, else the timeout/default
+   branch. Advance `node_id` to the chosen branch's first node.
+3. **Goal/exit + journey-position segment** fall out once `node_id` is queryable
+   (§6). "Bought" routes to a thank-you branch instead of silently exiting.
+4. **Caveat — real purchase signal:** today "bought" = "left the source segment"
+   (works for abandoned-cart). A true *"they bought → send X"* branch wants a
+   purchase event from Howler's data (roadmap 4.1); until then the buy-branch
+   triggers off segment-exit.
+
 ## 7. Relationship to the platform AI (the Owl) — complementary, not duplicate
 Same brain, new surface. The Owl / `insights.js` does the **insight** side
 (narrate / extract / recall / draft copy); the journey drafter is the **action**

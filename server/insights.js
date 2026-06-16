@@ -347,39 +347,51 @@ async function draftCampaign({ goal, clientName, clientContext, audienceCount, i
   return JSON.parse(match[0]);
 }
 
-// ─── Journey drafting (Engage → Journeys, J1) ─────────────────────────────────
-// Turns a promoter's plain-language description ("when someone opens but doesn't
-// buy in 2 days, text them a code") into a STRUCTURED multi-step journey the
-// promoter reviews before anything is created. J1 executes as a linear, timed
-// sequence on the existing drip engine; behavioural intent (opened/clicked) is
-// captured per step in `reactsTo` for the review summary and the branching
-// engine that lands later. The AI proposes; a human always reviews and launches.
-const JOURNEY_SYSTEM = `You design short multi-step marketing journeys for event organisers (tickets, festivals, live events). South African audience; amounts in Rand. A journey is a sequence of timed messages across email and SMS that nudges a customer toward a goal (e.g. completing a purchase, coming back, attending).
+// ─── Journey drafting (Engage → Journeys) ─────────────────────────────────────
+// Turns a promoter's plain-language description ("if they open but don't buy in
+// 2 days, text them a code; if they buy, thank them") into a STRUCTURED
+// BRANCHING journey (a decision tree) the promoter reviews before anything is
+// created. Messages are nodes; decisions branch on behaviour (opened / clicked /
+// bought / no response). The AI proposes; a human always reviews and launches.
+const JOURNEY_SYSTEM = `You design multi-step, multi-channel marketing journeys for event organisers (tickets, festivals, live events). South African audience; amounts in Rand. A journey is a DECISION TREE: messages (email/SMS) interleaved with decision points that branch on what the customer did (opened, clicked, bought, or didn't respond).
 
-The user describes, in plain language, what they want to happen — including conditions like "if they open but don't buy" or "follow up on SMS". Turn it into a concrete journey.
+The user describes, in plain language, what they want — including conditions like "if they open but don't click", "if they buy", "keep following up if they don't". Turn it into a concrete branching journey.
 
-Respond with ONLY strict JSON (no markdown fences):
+Respond with ONLY strict JSON (no markdown fences). A journey has a tree of NODES. Every node is one of two types:
+
 {
-  "name": "short journey name, <40 chars, e.g. 'Win back lapsed buyers'",
+  "name": "short journey name, <40 chars",
   "goal": "one sentence: the outcome this journey drives",
-  "summary": "2-3 plain sentences a non-technical promoter can read to understand exactly what will happen and when",
-  "steps": [
-    {
-      "channel": "email" | "sms",
-      "delayHours": 0,
-      "reactsTo": "what behaviour this step is a response to, in plain words, e.g. 'sent right away', 'if they haven't bought after 2 days', 'if they opened but didn't click' — describe the intent even though J1 sends on a timer",
-      "subject": "email subject (<60 chars); empty string for SMS steps",
-      "body": "message copy. Email: 50-120 words, may use **bold** sparingly. SMS: <=300 chars, plain, no links spelled out (a CTA button/link is added separately). You may use {{name}} once as a greeting and {{ticketType}} only if it reads naturally.",
-      "ctaText": "button label, 2-4 words (email); short for SMS"
-    }
+  "summary": "2-3 plain sentences a non-technical promoter can read to understand what happens and how it branches",
+  "nodes": [ <node>, <node>, ... ]
+}
+
+A <node> is either a MESSAGE:
+{
+  "type": "message",
+  "channel": "email" | "sms",
+  "delayHours": 0,
+  "subject": "email subject (<60 chars); empty string for SMS",
+  "body": "copy. Email: 50-120 words, **bold** sparingly. SMS: <=300 chars, plain. You may use {{name}} once as a greeting and {{ticketType}} only if natural. A CTA button/link is rendered separately.",
+  "ctaText": "button label, 2-4 words"
+}
+
+…or a DECISION:
+{
+  "type": "decision",
+  "question": "the behaviour being checked, as a short question, e.g. 'After 2 days, did they buy?' or 'Did they click?'",
+  "waitHours": 48,
+  "branches": [
+    { "label": "short outcome label, e.g. 'Bought', 'Clicked but didn't buy', 'No response'", "nodes": [ <node>, ... ] }
   ]
 }
 
 Rules:
-- 2 to 5 steps. First step delayHours is usually 0. Later steps space out sensibly (e.g. 24, 48, 72).
-- Choose channel per step to match the description (e.g. escalate to SMS for urgency/follow-up).
-- Never invent prices, dates or discounts not given. No spam tropes (ALL CAPS, !!!, "act now"); one tasteful emoji max.
-- Tone: human, confident, like a great event brand — not corporate.`;
+- Model the user's conditions as DECISION nodes. Use decisions for "if they open/click/buy/don't respond".
+- Each decision has 2-3 branches; each branch holds its own follow-on nodes (which may include further decisions, nested at most 2 levels deep).
+- Keep it tight: aim for ~6-10 nodes total. First message usually delayHours 0; decisions wait a sensible window (24/48/72h).
+- A "bought" branch should usually thank them and stop; a "no response" branch can keep nurturing.
+- Never invent prices, dates or discounts not given. No spam tropes (ALL CAPS, !!!, "act now"); one tasteful emoji max. Tone: human, confident, like a great event brand.`;
 
 async function draftJourney({ description, clientName, clientContext, audienceCount, instructions, apiKey }) {
   const c = requireClient(apiKey);
