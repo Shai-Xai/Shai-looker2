@@ -1,0 +1,207 @@
+# Pulse — Product Overview (Sales & Account Managers)
+
+> **Audience:** Howler sales & account-management teams. Plain-language guide to
+> what Pulse does and the value to pitch. For the technical/architecture view see
+> `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
+>
+> **Last updated:** 2026-06-16 · **Maintained:** updated as features ship (see the
+> Changelog at the bottom). If a date here is stale, check the Changelog for the
+> latest entry.
+>
+> **Status key:** ✅ Live · 🟡 Live, needs setup/connection · 🧪 Beta/limited ·
+> 🔜 Coming soon (on the roadmap, not yet usable)
+
+---
+
+## The one-liner
+**Pulse is Howler's Experience OS** — a white-label platform that turns an
+organiser's data into **insight → action → results**: live dashboards, AI reads,
+scheduled digests, a client↔Howler inbox, settlements, and a full email/SMS
+**campaign engine** with audiences, automations and ad-platform sync. It's
+**mobile-first**, **installable (PWA)**, and every client sees **only their own
+data** (enforced server-side).
+
+**Why it's different from Mailchimp/Klaviyo/Looker:** the audiences and campaigns
+are powered by the **same governed data that drives the dashboards** — clients go
+from *seeing* a cohort to *acting* on it in one place, scoped and branded to them.
+
+---
+
+## 1. Dashboards & insight  ✅
+- **Live dashboards** — KPIs, tables and charts built on the client's real
+  ticketing/GA4 data. Howler builds the metrics; Pulse owns the whole interface
+  (no clunky Looker embeds). Drill-through into detail.
+- **Per-tile AI insight** ✅ — tap any tile and the Owl explains what the numbers
+  mean in plain English, and answers follow-up questions, grounded in that data.
+- **Personalised home briefing** ✅ — each client lands on an AI-written summary of
+  what matters right now (leads with ticketing/revenue), tailored to what they
+  follow and view.
+- **Mobile-first + installable** ✅ — works great on a phone, installs as an app.
+
+**Pitch:** "Your data, read for you — no digging. Open the app and you already
+know what changed and what to do."
+
+## 2. Scheduled digests  ✅
+- Automated **email digests** (e.g. morning briefing) written for a **named role**
+  (exec / marketing / finance / ops), with headline KPIs, a short narrative and
+  suggested actions.
+- Configurable cadence and focus; dates are anchored to the **send day**.
+- **Dual-surface:** Howler can set these up for a client, and clients can manage
+  their own.
+
+**Pitch:** "A sharp, role-specific briefing in their inbox on schedule — they stay
+on top of the event without logging in."
+
+## 3. Messaging inbox (client ↔ Howler)  ✅
+- A two-way **inbox** anchored to the client: threads, read/unread, attachments,
+  and **must-acknowledge** messages for things that need sign-off.
+- **Notifications** via in-app toast, **web push** (even when Pulse is closed) and
+  email.
+
+**Pitch:** "Stop chasing over WhatsApp/email — important notes, approvals and
+receipts live in one place with a clear read/ack trail."
+
+## 4. Settlements & documents  ✅
+- Upload a **settlement PDF** → Pulse extracts it into a clean, interactive
+  statement the client can read; plus an event **documents** area.
+
+**Pitch:** "Settlements clients can actually read, not a PDF buried in email."
+
+## 5. Engage — the campaign engine
+The "action" half of Pulse. Turn any audience into branded email/SMS outreach,
+with approvals and full tracking.
+
+### 5a. Segments (reusable audiences)  ✅
+- Build a **named, always-live audience** from: a **dashboard tile** (+ filters),
+  an **uploaded CSV/Excel**, a **pasted list**, or a **linked Google Sheet** (read
+  live each time).
+- **Column matching** ✅ — pin which column is email / name / mobile (auto-detect
+  by default).
+- **Target on any column** ✅ — filter by ticket type, city, age, gender, status,
+  etc. (with each column's values).
+- **Multi-source combine** ✅ — **Union** (anyone in any source), **Intersect**
+  (in all), or **Exclude** (in A but not B — e.g. "abandoned cart **minus** an
+  uploaded 'already called' list"). Each source keeps its own filters.
+- **Always-live** — segments re-resolve at use/send time, so a linked Sheet stays
+  current; counts and email/SMS reach show up front.
+
+**Pitch:** "Build the exact audience from your own data or a spreadsheet — combine
+lists, subtract a suppression list, and it stays live."
+
+### 5b. Campaigns — email & SMS  ✅
+- Send **email, SMS, or both** to a segment, tile or pasted list.
+- **AI-drafted copy** you can edit; branded template or custom HTML; hero image.
+- **Merge fields** ✅ — personalise with `{{name}}`, `{{ticketType}}`, and **any
+  column** from the audience (`{{City}}`, `{{Ticket Type}}`…). Preview renders with
+  a real sample recipient.
+- **Promo / discount codes** ✅ — generic or unique-per-person codes; a promo code
+  rides the buy link (`?promo=CODE`, placed before UTM params); discount codes
+  shown for manual entry.
+- **UTM tracking** ✅ and per-recipient **click + open tracking** ✅.
+- **Consent-aware (POPIA)** ✅ — per-channel marketing consent is surfaced at
+  preview and enforced at send; one-click unsubscribe; a transactional override
+  for genuinely non-marketing messages.
+- **Approval workflow** ✅ — nothing sends without explicit approval; route to
+  named or "Howler" approvers, notified via inbox/push/email.
+
+**Pitch:** "Personalised, on-brand email + SMS to a precise audience — with
+approval gates and real tracking, all from the same data."
+
+### 5c. Drip sequences (automations)  ✅
+- Multi-step **journeys** (e.g. abandoned-cart recovery): timed steps with their
+  own copy, promo and delays.
+- **Two timing modes** ✅ (a setup toggle):
+  - **From abandonment · fresh only** — times each step from the person's
+    abandonment moment; only enrols people who abandoned within a window (e.g.
+    48h). True real-time abandoned-cart.
+  - **Forward from send · whole list** — runs the drip forward from enrolment
+    (step 1 now, then 2h, 4h…); ideal for an existing/old list.
+- **Auto-stop** ✅ — anyone who buys (leaves the audience) or unsubscribes drops
+  out of the journey automatically.
+- **Journey waterfall** ✅ — per-step **received, opened %, clicked %, converted**,
+  plus a **drop-off** indicator between steps.
+
+**Pitch:** "Set up an automated recovery sequence once — it catches new abandoners
+in real time (or works an old list), stops when they buy, and shows you exactly
+where people open, click and convert."
+
+### 5d. Audience sync to ad platforms  🟡 (needs connection)
+- Push a **segment to Meta (Facebook/Instagram)** or **TikTok** as a **Custom
+  Audience** for ad targeting or exclusion.
+- **Mirrors membership** (people who leave the segment are removed on next sync),
+  with optional **daily auto-sync**.
+- **Privacy-safe** — emails/phones are **hashed before they leave Pulse**.
+- Requires connecting the client's ad account (access token + ad account) in
+  Integrations. *Note: end-to-end push is pending live verification with a real ad
+  account.*
+
+**Pitch:** "Turn a Pulse audience into a Meta/TikTok ad audience in a click — keep
+it auto-synced, and exclude people who already bought."
+
+## 6. White-label branding & integrations  ✅ / 🟡
+- **Per-client branding** ✅ — logo, colours, email sender display name and
+  wording. Emails look like the client, sent from Howler's verified domain.
+- **Integrations** (dual-surface: Howler-managed *and* client self-service):
+  - **Looker** / **Anthropic (AI)** keys ✅ (fall back to Howler defaults)
+  - **Email (Resend)** ✅, **SMS (Clickatell)** ✅
+  - **Meta / TikTok** ad accounts 🟡
+  - **Inventive** embedded AI analyst 🧪 ("Ask")
+- **Secrets are write-only** — Pulse shows only whether a value is set, never the
+  value.
+
+**Pitch:** "It's their brand, their accounts, their data — Howler just powers it."
+
+## 7. Admin console (Howler internal)  ✅
+- Manage **clients**, their **dashboards/sets/suites**, the **tile library**, **AI
+  instructions**, **integrations**, **settlements**, **logins/roles**, backups.
+- **Preview as a client** to see exactly what they see.
+- **AI audit** — every system prompt the AI is given is viewable ("Everything the
+  AI is told").
+
+## 8. Trust, security & scope  ✅
+- **Multi-tenant, server-side scoping** — every data query is force-filtered to
+  the client's organiser/events on the server; it **can't be bypassed** and **fails
+  closed** if no scope is set. One client can never see another's data or audiences.
+- **POPIA-minded** — per-channel consent, unsubscribe, hashed identities for ad
+  sync, no cross-client data pooling.
+- **Roles & permissions** — granular control over who can view/approve/send.
+
+---
+
+## On the horizon (🔜 — not yet usable; for roadmap conversations only)
+Use these to set direction, **not** to promise dates.
+- **Conversational/agentic Owl** — chat that answers, analyses and *executes*
+  (draft a campaign, remind an organiser…). The flagship.
+- **Portfolio / "all events" view** — roll up KPIs and audiences across a client's
+  many events/profiles (today everything is per-event).
+- **Automations · Templates · Connections** tabs (shown as "SOON" in Engage).
+- **Event tasks + AM cockpit** — owners, due dates, readiness % across clients.
+- **Packages/tiers with feature gating**, **API-cost visibility per client**.
+- **WhatsApp** and **Howler app push** as message channels.
+
+(See `docs/ROADMAP.md` for the full backlog.)
+
+---
+
+## How to position Pulse (quick cheat-sheet)
+- **For organisers:** "See what's happening, act on it, and prove the results —
+  on your phone, in your brand, without exporting to five tools."
+- **vs. a BI tool (Looker/Tableau):** Pulse *acts* on the data (campaigns,
+  approvals, sync), not just charts.
+- **vs. an email tool (Mailchimp/Klaviyo):** Pulse's audiences come from the
+  client's live ticketing data and are governed/scoped — no CSV gymnastics.
+- **The hook:** "insight → action → results, in one governed place."
+
+---
+
+## Changelog (newest first)
+> Keep this current — add a dated line whenever a client-relevant feature ships.
+
+- **2026-06-16** — Engage hardening: multi-source segments (Union/Intersect/
+  Exclude) incl. CSV/Sheet/saved-segment blocks with per-block filters; column
+  matching + target-any-column on uploaded/Sheet lists; merge fields from any
+  column; drip **timing toggle** (fresh-abandonment vs forward-from-send); per-step
+  **open/click rates + drop-off** in the journey waterfall; promo code now appended
+  correctly to the buy link (before UTM); Meta **and** TikTok audience sync
+  (mirror + daily auto-sync); digests/briefings anchor to the send date. Initial
+  version of this overview.

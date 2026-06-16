@@ -58,6 +58,13 @@ should inherit the tier below, and the UI should show what's inherited.
   reader tunes) are aggregated by `GET /api/admin/ai-overview`; surface new layers
   there too.
 
+## Keep the sales overview current
+`docs/PRODUCT_OVERVIEW_SALES.md` is the sales/AM-facing feature guide. Whenever you
+ship (or change the status of) a **client-relevant** feature, update it in the SAME
+change: adjust the relevant section + status tag, bump **Last updated**, and add a
+dated **Changelog** line. Keep it benefit-led and honest (don't overclaim — use the
+status key: ✅ Live · 🟡 needs setup · 🧪 beta · 🔜 coming soon).
+
 ## Git
 - Develop on the assigned `claude/*` branch; push to it AND to `main`
   (`git push -u origin <branch> && git push origin <branch>:main`). Render

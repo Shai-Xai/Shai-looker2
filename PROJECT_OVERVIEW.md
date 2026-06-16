@@ -35,7 +35,8 @@ internal teams alike.
 > intent before extending Pulse. Companion docs: `docs/TEAM_OVERVIEW.md`,
 > `docs/INBOUND_SETUP.md`, `docs/playbook-capture-template.csv`,
 > `docs/ROADMAP.md` (backlog), `docs/ENGAGEMENT_ENGINE.md` (the Action layer:
-> segments, journeys, channels), `docs/specs/EVENT_TASKS_SPEC.md`.
+> segments, journeys, channels), `docs/specs/EVENT_TASKS_SPEC.md`,
+> `docs/PRODUCT_OVERVIEW_SALES.md` (sales/AM-facing feature guide, kept current).
 
 ---
 
