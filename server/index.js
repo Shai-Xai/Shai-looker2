@@ -1341,6 +1341,23 @@ app.post('/api/admin/integrations/:entityId/verify', auth.requireAdmin, async (r
   res.json(await channel.verify(req.params.entityId));
 });
 
+// Live audience size/status read-back from the platform (real API call).
+app.post('/api/admin/integrations/:entityId/audience-status', auth.requireAdmin, async (req, res) => {
+  if (!db.getEntity(req.params.entityId)) return res.status(404).json({ error: 'Not found' });
+  const channel = req.body?.channel === 'tiktok' ? tiktok : (req.body?.channel === 'meta' ? meta : null);
+  if (!channel) return res.status(400).json({ error: 'Unknown channel' });
+  res.json(await channel.audienceStatus(req.params.entityId, String(req.body?.audienceId || '')));
+});
+
+// Append-only change-log timeline for a client's audience syncs.
+app.get('/api/admin/integrations/:entityId/log', auth.requireAdmin, (req, res) => {
+  if (!db.getEntity(req.params.entityId)) return res.status(404).json({ error: 'Not found' });
+  const limit = Math.min(Number(req.query.limit) || 50, 200);
+  let rows = [];
+  try { rows = db.db.prepare('SELECT entity_id, segment_id, channel, audience_id, received, added, removed, status, error, by, at FROM audience_sync_log WHERE entity_id=? ORDER BY id DESC LIMIT ?').all(req.params.entityId, limit); } catch { /* table may not exist yet */ }
+  res.json({ log: rows });
+});
+
 // Client self-service: the logged-in user's own client(s).
 app.get('/api/my/integrations', auth.requireAuth, (req, res) => {
   const out = (req.user.entityIds || []).map((id) => {

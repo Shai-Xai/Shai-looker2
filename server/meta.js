@@ -44,7 +44,30 @@ function init(deps) {
       last_at       TEXT NOT NULL DEFAULT '',
       PRIMARY KEY (entity_id, segment_id)
     );
+    CREATE TABLE IF NOT EXISTS audience_sync_log (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      entity_id   TEXT NOT NULL,
+      segment_id  TEXT NOT NULL,
+      channel     TEXT NOT NULL,        -- 'meta' | 'tiktok'
+      audience_id TEXT NOT NULL DEFAULT '',
+      received    INTEGER,
+      added       INTEGER,
+      removed     INTEGER,
+      status      TEXT NOT NULL DEFAULT '',
+      error       TEXT NOT NULL DEFAULT '',
+      by          TEXT NOT NULL DEFAULT '',
+      at          TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_audience_log_entity ON audience_sync_log(entity_id, at);
   `);
+}
+
+// Append a row to the shared change-log. Best-effort; never throws.
+function logSync({ entityId, segmentId, audienceId, received, added, removed, status, error, by }) {
+  try {
+    db.db.prepare('INSERT INTO audience_sync_log (entity_id, segment_id, channel, audience_id, received, added, removed, status, error, by, at) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
+      .run(entityId, segmentId, 'meta', audienceId || '', received ?? null, added ?? null, removed ?? null, status, error || '', by || '', new Date().toISOString());
+  } catch { /* logging must never break a sync */ }
 }
 
 function connection(entityId) {
@@ -176,11 +199,25 @@ async function syncAudience({ entityId, segmentId, name, members = [], descripti
       } else throw e;
     }
     rememberSync({ entityId, segmentId, audienceId, name: audienceName, mode: replace ? 'replace' : 'append', received, status: 'ok', error: '', by });
+    logSync({ entityId, segmentId, audienceId, received, status: 'ok', by });
     return { ok: true, audienceId, pushed: rows.length, received, mode: replace ? 'replace' : 'append' };
   } catch (e) {
     rememberSync({ entityId, segmentId, audienceId: mapRow(entityId, segmentId)?.audience_id || '', name: audienceName, mode: replace ? 'replace' : 'append', received: 0, status: 'error', error: e.message, by });
+    logSync({ entityId, segmentId, audienceId: mapRow(entityId, segmentId)?.audience_id || '', received: 0, status: 'error', error: e.message, by });
     return { ok: false, error: e.message };
   }
+}
+
+// Live audience size/status from Meta (computes asynchronously on their side, so
+// it can read 'processing'/-1 shortly after a push). Best-effort; never throws.
+async function audienceStatus(entityId, audienceId) {
+  if (!isConfigured(entityId) || !audienceId) return { ok: false, error: 'not connected / no audience' };
+  const { accessToken: token } = connection(entityId);
+  try {
+    const d = await graph(`${audienceId}?fields=name,approximate_count_lower_bound,approximate_count_upper_bound,operation_status,delivery_status`, { token });
+    const size = d.approximate_count_upper_bound ?? d.approximate_count_lower_bound ?? d.approximate_count ?? null;
+    return { ok: true, name: d.name, size, operation: d.operation_status?.description || d.operation_status?.code || '', delivery: d.delivery_status?.description || '', checkedAt: new Date().toISOString() };
+  } catch (e) { return { ok: false, error: e.message }; }
 }
 
 // Live connection check — is the token valid right now? Hits the ad account.
@@ -214,4 +251,4 @@ function summary(entityId) {
   return { channel: 'meta', configured: isConfigured(entityId), adAccountId: connection(entityId).adAccountId, audiencesUrl: audiencesUrl(entityId), audienceCount: audiences.length, ok: audiences.length - errors, errors, lastAt, lastError: lastError ? { at: lastError.at, error: lastError.error, segmentId: lastError.segmentId } : null, audiences };
 }
 
-module.exports = { init, isConfigured, status, connection, syncAudience, lastSyncFor, verify, audiencesUrl, summary, hashEmail, hashPhone };
+module.exports = { init, isConfigured, status, connection, syncAudience, lastSyncFor, verify, audienceStatus, audiencesUrl, summary, hashEmail, hashPhone };

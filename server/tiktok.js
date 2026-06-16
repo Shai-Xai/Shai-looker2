@@ -54,7 +54,30 @@ function init(deps) {
       PRIMARY KEY (entity_id, segment_id, kind, id_hash)
     );
     CREATE INDEX IF NOT EXISTS idx_tiktok_members ON tiktok_audience_members(entity_id, segment_id, kind);
+    CREATE TABLE IF NOT EXISTS audience_sync_log (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      entity_id   TEXT NOT NULL,
+      segment_id  TEXT NOT NULL,
+      channel     TEXT NOT NULL,
+      audience_id TEXT NOT NULL DEFAULT '',
+      received    INTEGER,
+      added       INTEGER,
+      removed     INTEGER,
+      status      TEXT NOT NULL DEFAULT '',
+      error       TEXT NOT NULL DEFAULT '',
+      by          TEXT NOT NULL DEFAULT '',
+      at          TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_audience_log_entity ON audience_sync_log(entity_id, at);
   `);
+}
+
+// Append a row to the shared change-log. Best-effort; never throws.
+function logSync({ entityId, segmentId, audienceId, received, added, removed, status, error, by }) {
+  try {
+    db.db.prepare('INSERT INTO audience_sync_log (entity_id, segment_id, channel, audience_id, received, added, removed, status, error, by, at) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
+      .run(entityId, segmentId, 'tiktok', audienceId || '', received ?? null, added ?? null, removed ?? null, status, error || '', by || '', new Date().toISOString());
+  } catch { /* logging must never break a sync */ }
 }
 
 function connection(entityId) {
@@ -212,11 +235,27 @@ async function syncAudience({ entityId, segmentId, name, members = [], by = '' }
     replaceMemberSet(entityId, segmentId, 'email', newEmails);
     replaceMemberSet(entityId, segmentId, 'phone', newPhones);
     rememberSync({ entityId, segmentId, audienceId, name: audienceName, received: count, status: 'ok', error: '', by });
+    logSync({ entityId, segmentId, audienceId, received: count, added, removed, status: 'ok', by });
     return { ok: true, audienceId, pushed: count, received: count, added, removed };
   } catch (e) {
     rememberSync({ entityId, segmentId, audienceId: mapRow(entityId, segmentId)?.audience_id || '', name: audienceName, received: 0, status: 'error', error: e.message, by });
+    logSync({ entityId, segmentId, audienceId: mapRow(entityId, segmentId)?.audience_id || '', received: 0, status: 'error', error: e.message, by });
     return { ok: false, error: e.message };
   }
+}
+
+// Live audience size/status from TikTok. Best-effort; never throws.
+async function audienceStatus(entityId, audienceId) {
+  if (!isConfigured(entityId) || !audienceId) return { ok: false, error: 'not connected / no audience' };
+  const { accessToken: token, advertiserId } = connection(entityId);
+  try {
+    const url = `${BASE}/dmp/custom_audience/get/?advertiser_id=${encodeURIComponent(advertiserId)}&custom_audience_ids=${encodeURIComponent(JSON.stringify([audienceId]))}`;
+    const res = await fetch(url, { headers: { 'Access-Token': token } });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || (data && data.code)) return { ok: false, error: (data && data.message) || `TikTok HTTP ${res.status}` };
+    const a = (data.data && (data.data.list || [])[0]) || {};
+    return { ok: true, name: a.name, size: a.cover_num ?? a.audience_size ?? null, operation: a.is_valid === false ? 'invalid' : 'valid', checkedAt: new Date().toISOString() };
+  } catch (e) { return { ok: false, error: e.message }; }
 }
 
 // Live connection check — is the token valid right now? Hits advertiser info.
@@ -254,4 +293,4 @@ function summary(entityId) {
   return { channel: 'tiktok', configured: isConfigured(entityId), advertiserId: connection(entityId).advertiserId, audiencesUrl: audiencesUrl(entityId), audienceCount: audiences.length, ok: audiences.length - errors, errors, lastAt, lastError: lastError ? { at: lastError.at, error: lastError.error, segmentId: lastError.segmentId } : null, audiences };
 }
 
-module.exports = { init, isConfigured, status, connection, syncAudience, lastSyncFor, clearMembers, verify, audiencesUrl, summary, hashEmail, hashPhone };
+module.exports = { init, isConfigured, status, connection, syncAudience, lastSyncFor, clearMembers, verify, audienceStatus, audiencesUrl, summary, hashEmail, hashPhone };

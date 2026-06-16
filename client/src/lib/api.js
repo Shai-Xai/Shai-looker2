@@ -180,6 +180,8 @@ export const api = {
   getAdminIntegrations: () => fetch('/api/admin/integrations').then(json),
   getIntegrationsHealth: () => fetch('/api/admin/integrations/health').then(json),
   verifyConnector: (entityId, channel) => fetch(`/api/admin/integrations/${entityId}/verify`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ channel }) }).then(json),
+  audienceStatus: (entityId, channel, audienceId) => fetch(`/api/admin/integrations/${entityId}/audience-status`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ channel, audienceId }) }).then(json),
+  getAudienceSyncLog: (entityId, limit = 50) => fetch(`/api/admin/integrations/${entityId}/log?limit=${limit}`).then(json),
   saveAdminIntegrations: (p) => fetch('/api/admin/integrations', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),
   sendMailTest: (entityId) => fetch('/api/admin/mail/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entityId }) }).then(json),
   getMailLog: (params = {}) => fetch(`/api/admin/mail-log?${new URLSearchParams(params)}`).then(json),

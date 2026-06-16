@@ -1843,6 +1843,8 @@ function AudienceSyncHealth() {
   const [open, setOpen] = useState({});
   const [err, setErr] = useState('');
   const [verify, setVerify] = useState({}); // `${entityId}:${channel}` -> result | 'checking'
+  const [sizes, setSizes] = useState({}); // `${entityId}:${channel}:${audienceId}` -> result | 'checking'
+  const [logs, setLogs] = useState({}); // entityId -> log rows
   const load = () => api.getIntegrationsHealth().then((r) => setData(r.clients || [])).catch((e) => setErr(e.message));
   useEffect(() => { load(); }, []);
   const doVerify = async (entityId, channel) => {
@@ -1850,6 +1852,16 @@ function AudienceSyncHealth() {
     setVerify((v) => ({ ...v, [k]: 'checking' }));
     try { const r = await api.verifyConnector(entityId, channel); setVerify((v) => ({ ...v, [k]: r })); }
     catch (e) { setVerify((v) => ({ ...v, [k]: { ok: false, status: 'error', detail: e.message } })); }
+  };
+  const doSize = async (entityId, channel, audienceId) => {
+    const k = `${entityId}:${channel}:${audienceId}`;
+    setSizes((s) => ({ ...s, [k]: 'checking' }));
+    try { const r = await api.audienceStatus(entityId, channel, audienceId); setSizes((s) => ({ ...s, [k]: r })); }
+    catch (e) { setSizes((s) => ({ ...s, [k]: { ok: false, error: e.message } })); }
+  };
+  const toggleClient = (entityId) => {
+    setOpen((o) => ({ ...o, [entityId]: !o[entityId] }));
+    if (!logs[entityId]) api.getAudienceSyncLog(entityId).then((r) => setLogs((l) => ({ ...l, [entityId]: r.log || [] }))).catch(() => {});
   };
   if (err) return <Muted>Couldn’t load health: {err}</Muted>;
   if (!data) return <Muted>Loading…</Muted>;
@@ -1872,7 +1884,7 @@ function AudienceSyncHealth() {
         const isOpen = open[c.entityId];
         return (
           <div key={c.entityId} style={{ border: '1px solid var(--hairline)', borderRadius: 12, background: 'var(--card)' }}>
-            <button onClick={() => setOpen((o) => ({ ...o, [c.entityId]: !o[c.entityId] }))} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '11px 14px', border: 'none', background: 'none', cursor: 'pointer', textAlign: 'left' }}>
+            <button onClick={() => toggleClient(c.entityId)} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '11px 14px', border: 'none', background: 'none', cursor: 'pointer', textAlign: 'left' }}>
               <span style={{ width: 12, fontSize: 9, color: 'var(--muted)', transform: isOpen ? 'rotate(90deg)' : 'none' }}>▶</span>
               <span style={{ flex: 1, minWidth: 0, fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
               {channels.filter(([, , , ch]) => ch.configured || ch.audienceCount).map(([label, icon, , ch]) => (
@@ -1900,18 +1912,40 @@ function AudienceSyncHealth() {
                       ? <Muted>No audiences synced yet.</Muted>
                       : (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                          {ch.audiences.sort((a, b) => String(b.at).localeCompare(String(a.at))).map((a) => (
-                            <div key={a.segmentId} style={{ display: 'flex', alignItems: 'baseline', gap: 8, fontSize: 12 }}>
+                          {ch.audiences.sort((a, b) => String(b.at).localeCompare(String(a.at))).map((a) => {
+                            const sk = `${c.entityId}:${key}:${a.audienceId}`; const sr = sizes[sk];
+                            return (
+                            <div key={a.segmentId} style={{ display: 'flex', alignItems: 'baseline', gap: 8, fontSize: 12, flexWrap: 'wrap' }}>
                               <span style={{ flexShrink: 0, color: a.status === 'error' ? 'var(--error,#ef4444)' : 'var(--success,#10b981)', fontWeight: 700 }}>{a.status === 'error' ? '✗' : '✓'}</span>
                               <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name || a.segmentId}{a.status === 'error' ? <span style={{ color: 'var(--error,#ef4444)' }}> — {a.error}</span> : <span style={{ color: 'var(--muted)' }}> · {a.received} synced{a.audienceId ? ` · audience ${a.audienceId}` : ''}</span>}</span>
                               <span style={{ flexShrink: 0, color: 'var(--muted)', fontSize: 11 }}>{when(a.at)}</span>
+                              {a.audienceId && a.status !== 'error' && <button onClick={() => doSize(c.entityId, key, a.audienceId)} style={{ ...healthRefreshBtn, padding: '1px 8px', fontSize: 10.5 }} disabled={sr === 'checking'}>{sr === 'checking' ? '…' : 'size?'}</button>}
+                              {sr && sr !== 'checking' && <span style={{ flexBasis: '100%', fontSize: 11, color: sr.ok ? 'var(--muted)' : 'var(--error,#ef4444)', paddingLeft: 20 }}>{sr.ok ? `↳ ${sr.size == null || sr.size < 0 ? 'still processing on platform' : `~${sr.size} on platform`}${sr.operation ? ` · ${sr.operation}` : ''}` : `↳ ${sr.error}`}</span>}
                             </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       )}
                   </div>
                   );
                 })}
+                {(logs[c.entityId] || []).length > 0 && (
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>Recent activity</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      {logs[c.entityId].map((row, i) => (
+                        <div key={i} style={{ fontSize: 11.5, display: 'flex', gap: 8, alignItems: 'baseline' }}>
+                          <span style={{ flexShrink: 0, color: row.status === 'error' ? 'var(--error,#ef4444)' : 'var(--success,#10b981)', fontWeight: 700 }}>{row.status === 'error' ? '✗' : '✓'}</span>
+                          <span style={{ flexShrink: 0, color: 'var(--muted)' }}>{row.channel === 'tiktok' ? '♪' : '◇'}</span>
+                          <span style={{ flex: 1, minWidth: 0, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {row.status === 'error' ? row.error : `${row.received} synced${(row.added != null || row.removed != null) ? ` (+${row.added || 0} −${row.removed || 0})` : ''}${row.by ? ` · ${row.by}` : ''}`}
+                          </span>
+                          <span style={{ flexShrink: 0, color: 'var(--muted)' }}>{when(row.at)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
