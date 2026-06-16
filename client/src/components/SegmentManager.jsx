@@ -52,6 +52,20 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
   useEffect(() => { load(); }, [entityId]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { (isAdmin ? api.getDigestTiles(entityId) : api.getMyDigestTiles(entityId)).then(setTiles).catch(() => setTiles({ dashboards: [] })); }, [entityId, isAdmin]);
 
+  // Auto-count: when the list loads, resolve any segment that's never been counted
+  // (count === -1) in the background so its size shows without a manual refresh —
+  // e.g. a just-added abandoned-cart recipe. Each id is attempted once per visit
+  // (errored/empty ones won't loop); capped per cycle to avoid a thundering herd.
+  const warmedRef = useRef(new Set());
+  useEffect(() => {
+    if (!segments || !segments.length) return;
+    const todo = segments.filter((s) => s.count < 0 && !warmedRef.current.has(s.id)).slice(0, 8);
+    if (!todo.length) return;
+    todo.forEach((s) => warmedRef.current.add(s.id));
+    (async () => { await Promise.all(todo.map((s) => api.previewSegment(entityId, s.id).catch(() => {}))); load(); })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [segments]);
+
   // Resolve the source labels (event / dashboard / tile) from the tiles catalog.
   const sourceLabel = (s) => {
     const d = s.definition || {};
@@ -274,17 +288,7 @@ function SegmentBuilder({ entityId, tiles, segment, onClose, onSaved }) {
     return ex.length ? { ...base, sources: [base, ...ex], combine } : base;
   };
   const addExtra = () => setExtras((a) => [...a, { mode: 'segment', segmentId: '' }]);
-  const setExtra = (i, patch) => setExtras((a) => a.map((b, j) => (j === i ? { ...b, ...patch } : b)));
   const removeExtra = (i) => setExtras((a) => a.filter((_, j) => j !== i));
-  // Parse an uploaded CSV/Excel into a combine block's list (mode 'paste').
-  const onExtraFile = async (i, file) => {
-    try {
-      const XLSX = await import('xlsx');
-      const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
-      const csv = XLSX.utils.sheet_to_csv(wb.Sheets[wb.SheetNames[0]] || {});
-      setExtra(i, { mode: 'paste', pasted: csv });
-    } catch (e) { alert('Could not read that file: ' + (e.message || e)); }
-  };
 
   // Parse an uploaded CSV/Excel into the pasted-list text (SheetJS is loaded on
   // demand so it never bloats the main bundle). Stored as a 'paste' snapshot.
@@ -447,31 +451,8 @@ function SegmentBuilder({ entityId, tiles, segment, onClose, onSaved }) {
         <Field label="Combine with other sources (optional)">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {extras.map((b, i) => (
-              <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-                <select value={b.mode} onChange={(e) => setExtra(i, { mode: e.target.value, segmentId: '', gsheetUrl: '', pasted: '' })} style={{ ...input, flex: '0 0 140px' }}>
-                  <option value="segment">Saved segment</option>
-                  <option value="gsheet">Google Sheet</option>
-                  <option value="paste">Paste / upload</option>
-                </select>
-                {b.mode === 'segment' ? (
-                  <select value={b.segmentId || ''} onChange={(e) => setExtra(i, { segmentId: e.target.value })} style={{ ...input, flex: 1, minWidth: 160 }}>
-                    <option value="">Pick a segment…</option>
-                    {allSegments.map((s) => <option key={s.id} value={s.id}>{s.name}{s.count >= 0 ? ` (${s.count})` : ''}</option>)}
-                  </select>
-                ) : b.mode === 'gsheet' ? (
-                  <input value={b.gsheetUrl || ''} onChange={(e) => setExtra(i, { gsheetUrl: e.target.value })} placeholder="Google Sheet link" style={{ ...input, flex: 1, minWidth: 160 }} />
-                ) : (
-                  <div style={{ display: 'flex', gap: 6, flex: 1, minWidth: 160, alignItems: 'center' }}>
-                    <label style={{ ...mini, cursor: 'pointer', flexShrink: 0 }}>📄 Upload
-                      <input type="file" accept=".csv,.xlsx,.xls" style={{ display: 'none' }} onChange={(e) => { const file = e.target.files?.[0]; if (file) onExtraFile(i, file); e.target.value = ''; }} />
-                    </label>
-                    {/\n/.test(b.pasted || '')
-                      ? <span style={{ ...hintS, marginTop: 0, flex: 1 }}>✓ List loaded ({(b.pasted.match(/\n/g) || []).length} rows) <button type="button" style={{ ...mini, padding: '2px 8px', marginLeft: 4 }} onClick={() => setExtra(i, { pasted: '' })}>Clear</button></span>
-                      : <input value={b.pasted || ''} onChange={(e) => setExtra(i, { pasted: e.target.value })} placeholder="emails / numbers, or upload a file" style={{ ...input, flex: 1 }} />}
-                  </div>
-                )}
-                <button type="button" style={{ ...mini, color: 'var(--error,#ef4444)' }} onClick={() => removeExtra(i)}>✕</button>
-              </div>
+              <ExtraBlock key={i} entityId={entityId} block={b} allSegments={allSegments}
+                onChange={(nb) => setExtras((a) => a.map((x, j) => (j === i ? nb : x)))} onRemove={() => removeExtra(i)} />
             ))}
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
               <button type="button" style={mini} onClick={addExtra}>＋ Add a source</button>
@@ -504,6 +485,88 @@ function SegmentBuilder({ entityId, tiles, segment, onClose, onSaved }) {
           <button style={mini} onClick={onClose}>Cancel</button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// One "combine with" source block: picks its type + source, and (for a Sheet or
+// uploaded/pasted list) lets you pin its email/mobile columns and add its OWN
+// targeting filters — resolved independently, then merged by the combine rule.
+function ExtraBlock({ entityId, block, allSegments, onChange, onRemove }) {
+  const b = block;
+  const setB = (patch) => onChange({ ...b, ...patch });
+  const [aud, setAud] = useState(null);
+  const debounce = useRef();
+  const fileFields = b.mode === 'gsheet' || b.mode === 'paste';
+  useEffect(() => {
+    clearTimeout(debounce.current);
+    const ready = (b.mode === 'segment' && b.segmentId) || (b.mode === 'gsheet' && (b.gsheetUrl || '').trim()) || (b.mode === 'paste' && (b.pasted || '').trim());
+    if (!ready) { setAud(null); return; }
+    debounce.current = setTimeout(() => {
+      api.actionAudiencePreview(entityId, { audience: b }).then(setAud).catch((e) => setAud({ error: e.message }));
+    }, 350);
+    return () => clearTimeout(debounce.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entityId, b.mode, b.segmentId, b.gsheetUrl, b.pasted, b.emailField, b.phoneField, JSON.stringify(b.filters)]);
+  const onFile = async (file) => {
+    try { const XLSX = await import('xlsx'); const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' }); setB({ mode: 'paste', pasted: XLSX.utils.sheet_to_csv(wb.Sheets[wb.SheetNames[0]] || {}) }); }
+    catch (e) { alert('Could not read that file: ' + (e.message || e)); }
+  };
+  const addFilter = () => setB({ filters: [...(b.filters || []), { field: '', op: 'in', values: [] }] });
+  const setFilter = (i, p) => setB({ filters: (b.filters || []).map((x, j) => (j === i ? { ...x, ...p } : x)) });
+  const removeFilter = (i) => setB({ filters: (b.filters || []).filter((_, j) => j !== i) });
+  return (
+    <div style={{ border: '1px solid var(--hairline)', borderRadius: 10, padding: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+        <select value={b.mode} onChange={(e) => onChange({ mode: e.target.value, segmentId: '', gsheetUrl: '', pasted: '', emailField: '', nameField: '', phoneField: '', filters: [] })} style={{ ...input, flex: '0 0 140px' }}>
+          <option value="segment">Saved segment</option>
+          <option value="gsheet">Google Sheet</option>
+          <option value="paste">Paste / upload</option>
+        </select>
+        {b.mode === 'segment' ? (
+          <select value={b.segmentId || ''} onChange={(e) => setB({ segmentId: e.target.value })} style={{ ...input, flex: 1, minWidth: 160 }}>
+            <option value="">Pick a segment…</option>
+            {allSegments.map((s) => <option key={s.id} value={s.id}>{s.name}{s.count >= 0 ? ` (${s.count})` : ''}</option>)}
+          </select>
+        ) : b.mode === 'gsheet' ? (
+          <input value={b.gsheetUrl || ''} onChange={(e) => setB({ gsheetUrl: e.target.value })} placeholder="Google Sheet link" style={{ ...input, flex: 1, minWidth: 160 }} />
+        ) : (
+          <div style={{ display: 'flex', gap: 6, flex: 1, minWidth: 160, alignItems: 'center' }}>
+            <label style={{ ...mini, cursor: 'pointer', flexShrink: 0 }}>📄 Upload
+              <input type="file" accept=".csv,.xlsx,.xls" style={{ display: 'none' }} onChange={(e) => { const file = e.target.files?.[0]; if (file) onFile(file); e.target.value = ''; }} />
+            </label>
+            {/\n/.test(b.pasted || '')
+              ? <span style={{ ...hintS, marginTop: 0, flex: 1 }}>✓ List loaded ({(b.pasted.match(/\n/g) || []).length} rows) <button type="button" style={{ ...mini, padding: '2px 8px', marginLeft: 4 }} onClick={() => setB({ pasted: '' })}>Clear</button></span>
+              : <input value={b.pasted || ''} onChange={(e) => setB({ pasted: e.target.value })} placeholder="emails / numbers, or upload a file" style={{ ...input, flex: 1 }} />}
+          </div>
+        )}
+        <button type="button" style={{ ...mini, color: 'var(--error,#ef4444)' }} onClick={onRemove}>✕</button>
+      </div>
+      {/* Column match + filters for a list source (so you can target this block too). */}
+      {fileFields && aud?.columns?.length > 0 && (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <select value={b.emailField || ''} onChange={(e) => setB({ emailField: e.target.value })} style={{ ...input, flex: 1, minWidth: 130, padding: '6px 8px' }}>
+            <option value="">Email column (auto-detect)</option>
+            {aud.columns.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+          <select value={b.phoneField || ''} onChange={(e) => setB({ phoneField: e.target.value })} style={{ ...input, flex: 1, minWidth: 130, padding: '6px 8px' }}>
+            <option value="">Mobile column (auto-detect)</option>
+            {aud.columns.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+      )}
+      {fileFields && aud?.columns?.length > 0 && !(aud?.filterFields?.length > 0) && (
+        <div style={hintS}>Pick the email or mobile column above to filter this list by its other columns (ticket type, city…).</div>
+      )}
+      {fileFields && aud?.filterFields?.length > 0 && (
+        <AudienceFilters entityId={entityId} fields={aud.filterFields} filters={b.filters || []} addFilter={addFilter} setFilter={setFilter} removeFilter={removeFilter} hideAttrSource />
+      )}
+      {aud && (
+        <div style={{ ...hintS, marginTop: 0 }}>
+          {aud.error ? <span style={{ color: 'var(--error,#ef4444)' }}>✗ {aud.error}</span>
+            : <span><b style={{ color: 'var(--brand)' }}>{aud.count}</b> in this source{aud.filteredOut > 0 ? ` · ${aud.filteredOut} filtered out` : ''}</span>}
+        </div>
+      )}
     </div>
   );
 }
