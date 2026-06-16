@@ -868,7 +868,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
 
           {isSequence && (
             <Field label={smsOnly ? 'Texts in the sequence' : 'Emails in the sequence'}>
-              <SequenceSteps steps={f.steps} setStep={setStep} addStep={addStep} removeStep={removeStep} activeStep={activeStep} onActive={setActiveStep} sms={smsOnly} />
+              <SequenceSteps steps={f.steps} setStep={setStep} addStep={addStep} removeStep={removeStep} activeStep={activeStep} onActive={setActiveStep} sms={smsOnly} anchorLabel={f.dripStart === 'send' ? 'from start of campaign' : 'after abandonment'} />
             </Field>
           )}
 
@@ -1709,7 +1709,7 @@ function FilterRow({ entityId, fields, filter, onChange, onRemove }) {
 }
 
 // The drip timeline: each step has a delay (number + hours/days) and its own copy.
-function SequenceSteps({ steps, setStep, addStep, removeStep, activeStep = 0, onActive, sms = false }) {
+function SequenceSteps({ steps, setStep, addStep, removeStep, activeStep = 0, onActive, sms = false, anchorLabel = 'after abandonment' }) {
   const unitOf = (h) => (h % 24 === 0 && h >= 24 ? 'days' : 'hours');
   const valOf = (h) => (unitOf(h) === 'days' ? h / 24 : h);
   const setDelay = (i, val, unit) => setStep(i, { delayHours: Math.max(0, (Number(val) || 0) * (unit === 'days' ? 24 : 1)) });
@@ -1729,7 +1729,7 @@ function SequenceSteps({ steps, setStep, addStep, removeStep, activeStep = 0, on
                 <option value="hours">hours</option>
                 <option value="days">days</option>
               </select>
-              <span style={{ fontSize: 12, color: 'var(--muted)' }}>after abandonment</span>
+              <span style={{ fontSize: 12, color: 'var(--muted)' }}>{anchorLabel}</span>
               <span style={{ flex: 1 }} />
               {steps.length > 1 && <button type="button" style={{ ...mini, color: 'var(--error,#ef4444)' }} onClick={() => removeStep(i)}>✕</button>}
             </div>

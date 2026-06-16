@@ -1696,14 +1696,19 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     else if (channel === 'sms') results.smsClicks = (a.results.smsClicks || 0) + 1;
     saveResults(a.id, results);
     let dest = a.config.ctaUrl || '/';
+    const promo = req.query.promo ? String(req.query.promo) : ''; // promo code rides the tracked link → forward to the destination
     try {
       const u = new URL(dest);
       const utm = a.config.utm || {};
       for (const [k, v] of Object.entries({ utm_source: utm.source, utm_medium: utm.medium, utm_campaign: utm.campaign, utm_term: utm.term, utm_content: utm.content })) {
         if (v && !u.searchParams.has(k)) u.searchParams.set(k, v);
       }
+      if (promo && !u.searchParams.has('promo')) u.searchParams.set('promo', promo);
       dest = u.toString();
-    } catch { /* relative or odd URL — redirect as-is */ }
+    } catch {
+      // relative or odd URL — still carry the promo code through if present.
+      if (promo && !/[?&]promo=/.test(dest)) dest += (dest.includes('?') ? '&' : '?') + 'promo=' + encodeURIComponent(promo);
+    }
     res.redirect(dest);
   });
   // Unsubscribe → suppression list + tiny confirmation page.
