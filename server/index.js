@@ -1318,6 +1318,21 @@ app.put('/api/admin/entities/:id/integrations', auth.requireAdmin, (req, res) =>
   res.json(entityIntegrationsView(req.params.id));
 });
 
+// Audience-sync health across all clients — connection state + per-channel sync
+// outcomes (ok/errors, last activity, last error). Surfaces what the connectors
+// already record so failures are visible without opening each client.
+app.get('/api/admin/integrations/health', auth.requireAdmin, (_req, res) => {
+  const clients = [];
+  for (const e of db.listEntities()) {
+    const m = meta.summary(e.id); const t = tiktok.summary(e.id);
+    if (!(m.configured || t.configured || m.audienceCount || t.audienceCount)) continue;
+    clients.push({ entityId: e.id, name: e.name, channels: { meta: m, tiktok: t } });
+  }
+  // Most recently active (or failing) clients first.
+  clients.sort((a, b) => String(b.channels.meta.lastAt || b.channels.tiktok.lastAt || '').localeCompare(String(a.channels.meta.lastAt || a.channels.tiktok.lastAt || '')));
+  res.json({ clients });
+});
+
 // Client self-service: the logged-in user's own client(s).
 app.get('/api/my/integrations', auth.requireAuth, (req, res) => {
   const out = (req.user.entityIds || []).map((id) => {

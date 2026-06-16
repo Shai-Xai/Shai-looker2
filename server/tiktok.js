@@ -219,4 +219,14 @@ async function syncAudience({ entityId, segmentId, name, members = [], by = '' }
   }
 }
 
-module.exports = { init, isConfigured, status, connection, syncAudience, lastSyncFor, clearMembers, hashEmail, hashPhone };
+// Per-client health/audience summary for the admin monitoring view.
+function summary(entityId) {
+  const rows = db ? db.db.prepare('SELECT * FROM tiktok_audiences WHERE entity_id=?').all(entityId) : [];
+  const audiences = rows.filter((r) => r.last_at).map((r) => ({ segmentId: r.segment_id, audienceId: r.audience_id, name: r.audience_name, status: r.last_status, error: r.last_error, received: r.last_received, at: r.last_at, by: r.last_by }));
+  const errors = audiences.filter((a) => a.status === 'error').length;
+  const lastAt = audiences.reduce((m, a) => (a.at > m ? a.at : m), '');
+  const lastError = audiences.filter((a) => a.status === 'error').sort((a, b) => String(b.at).localeCompare(String(a.at)))[0] || null;
+  return { channel: 'tiktok', configured: isConfigured(entityId), audienceCount: audiences.length, ok: audiences.length - errors, errors, lastAt, lastError: lastError ? { at: lastError.at, error: lastError.error, segmentId: lastError.segmentId } : null, audiences };
+}
+
+module.exports = { init, isConfigured, status, connection, syncAudience, lastSyncFor, clearMembers, summary, hashEmail, hashPhone };

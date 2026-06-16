@@ -1812,6 +1812,10 @@ function AdminIntegrations() {
       <Section title="🔑 Accounts — Looker · Anthropic · Email · Inventive">
         <IntegrationsForm value={value} showResend showInventive clients={clients} onTestEmail={() => api.sendMailTest()} onSave={async (p) => setValue(await api.saveAdminIntegrations(p))} />
       </Section>
+      <Section title="◇ Audience sync — connector health">
+        <p style={hint}>Per-client status of the Meta / TikTok audience syncs: which clients are connected, how many audiences are live, and any recent failures. Drill into a client to see each segment's audience.</p>
+        <AudienceSyncHealth />
+      </Section>
       <Section title="📧 Email template — platform default">
         <p style={hint}>The default look of every notification email. Each client can layer their own branding on top (Client → Email branding).</p>
         <MailTemplateEditor scope="platform" canTest />
@@ -1831,6 +1835,73 @@ function AdminIntegrations() {
     </div>
   );
 }
+
+// Audience-sync health: per-client Meta/TikTok connection + sync outcomes, drawn
+// from what the connectors record on each push. Expand a client for per-segment detail.
+function AudienceSyncHealth() {
+  const [data, setData] = useState(null);
+  const [open, setOpen] = useState({});
+  const [err, setErr] = useState('');
+  const load = () => api.getIntegrationsHealth().then((r) => setData(r.clients || [])).catch((e) => setErr(e.message));
+  useEffect(() => { load(); }, []);
+  if (err) return <Muted>Couldn’t load health: {err}</Muted>;
+  if (!data) return <Muted>Loading…</Muted>;
+  if (!data.length) return <Muted>No client has a Meta or TikTok connection or sync yet.</Muted>;
+
+  const when = (iso) => { if (!iso) return 'never'; try { return new Date(iso).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch { return iso; } };
+  const Pill = ({ ch }) => {
+    const tone = !ch.configured ? ['#9ca3af', 'not connected']
+      : ch.errors > 0 ? ['var(--error,#ef4444)', `${ch.errors} failing`]
+        : ch.audienceCount > 0 ? ['var(--success,#10b981)', `${ch.audienceCount} ok`]
+          : ['var(--brand)', 'connected'];
+    return <span style={{ fontSize: 11, fontWeight: 700, color: tone[0], border: `1px solid ${tone[0]}`, borderRadius: 980, padding: '2px 9px', whiteSpace: 'nowrap' }}>{tone[1]}</span>;
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}><button onClick={load} style={{ ...healthRefreshBtn }}>↻ Refresh</button></div>
+      {data.map((c) => {
+        const channels = [['Meta', '◇', c.channels.meta], ['TikTok', '♪', c.channels.tiktok]];
+        const isOpen = open[c.entityId];
+        return (
+          <div key={c.entityId} style={{ border: '1px solid var(--hairline)', borderRadius: 12, background: 'var(--card)' }}>
+            <button onClick={() => setOpen((o) => ({ ...o, [c.entityId]: !o[c.entityId] }))} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '11px 14px', border: 'none', background: 'none', cursor: 'pointer', textAlign: 'left' }}>
+              <span style={{ width: 12, fontSize: 9, color: 'var(--muted)', transform: isOpen ? 'rotate(90deg)' : 'none' }}>▶</span>
+              <span style={{ flex: 1, minWidth: 0, fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
+              {channels.filter(([, , ch]) => ch.configured || ch.audienceCount).map(([label, icon, ch]) => (
+                <span key={label} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, color: 'var(--muted)' }}>{icon} {label} <Pill ch={ch} /></span>
+              ))}
+            </button>
+            {isOpen && (
+              <div style={{ padding: '0 14px 12px 38px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {channels.map(([label, icon, ch]) => (
+                  <div key={label}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>{icon} {label} — {ch.configured ? 'connected' : 'not connected'}{ch.lastAt ? ` · last activity ${when(ch.lastAt)}` : ''}</div>
+                    {ch.lastError && <div style={{ fontSize: 11.5, color: 'var(--error,#ef4444)', marginBottom: 4 }}>Last error ({when(ch.lastError.at)}): {ch.lastError.error}</div>}
+                    {ch.audiences.length === 0
+                      ? <Muted>No audiences synced yet.</Muted>
+                      : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                          {ch.audiences.sort((a, b) => String(b.at).localeCompare(String(a.at))).map((a) => (
+                            <div key={a.segmentId} style={{ display: 'flex', alignItems: 'baseline', gap: 8, fontSize: 12 }}>
+                              <span style={{ flexShrink: 0, color: a.status === 'error' ? 'var(--error,#ef4444)' : 'var(--success,#10b981)', fontWeight: 700 }}>{a.status === 'error' ? '✗' : '✓'}</span>
+                              <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name || a.segmentId}{a.status === 'error' ? <span style={{ color: 'var(--error,#ef4444)' }}> — {a.error}</span> : <span style={{ color: 'var(--muted)' }}> · {a.received} synced{a.audienceId ? ` · audience ${a.audienceId}` : ''}</span>}</span>
+                              <span style={{ flexShrink: 0, color: 'var(--muted)', fontSize: 11 }}>{when(a.at)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+const healthRefreshBtn = { padding: '5px 11px', fontSize: 12, fontWeight: 600, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 980, cursor: 'pointer' };
 
 // Clickatell SMS provider config — write-only key + sender ID + a live test.
 function SmsConfig() {
