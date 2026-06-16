@@ -2098,6 +2098,13 @@ app.get('/api/my/snapshot', auth.requireAuth, (req, res) => {
 // with in-flight de-duplication so the prewarm and the real request never do the
 // same generation twice. Segmented by the reader's local time of day.
 const briefInflight = new Map(); // key -> Promise
+// Current calendar date in the client's timezone, e.g. "Tuesday, 16 June 2026".
+// Passed to the AI so the digest/briefing anchor "today/yesterday/month-to-date"
+// to the SEND date — not the latest (possibly lagging) date in the data.
+function todayLabel(tz = 'Africa/Johannesburg') {
+  try { return new Date().toLocaleDateString('en-ZA', { timeZone: tz, weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }); }
+  catch { return new Date().toISOString().slice(0, 10); }
+}
 async function generateBriefing(user, entityId, segment, { force = false } = {}) {
   const apiKey = anthropicKeyForUser(user);
   if (!insights.isConfigured(apiKey)) return { available: false };
@@ -2119,7 +2126,7 @@ async function generateBriefing(user, entityId, segment, { force = false } = {})
     const { suites } = clientCatalogue(entityId);
     const instructions = [aiInstructionsFor(null), briefingInstructionsFor(user, entityId, suites), timeDefaults()[segment]].filter(Boolean).join('\n\n');
     const msgs = recentMessages(entityId, user.id);
-    const raw = await insights.briefHome({ tiles, profile: profileForAi, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), messages: msgs, capabilities: ACTION_CAPABILITIES });
+    const raw = await insights.briefHome({ tiles, profile: profileForAi, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), messages: msgs, capabilities: ACTION_CAPABILITIES, today: todayLabel() });
     const link = (id) => (id && byId[id] ? { dashboardId: id, suiteId: byId[id].suiteId, label: `${byId[id].setName} → ${byId[id].title}` } : null);
     const msgIds = new Set(msgs.map((m) => m.id));
     const out = {
@@ -2311,7 +2318,7 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
   if (!factTiles.length) throw new Error('No tile data available to summarise');
   const byId = Object.fromEntries(catalogue.map((c) => [c.dashboardId, c]));
   const instructions = [aiInstructionsFor(null), briefingInstructionsFor(user, entityId, clientCatalogue(entityId).suites)].filter(Boolean).join('\n\n');
-  const raw = await insights.digestBrief({ tiles: factTiles, roleLabel: lens.label, roleFocus: effectiveFocus, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), capabilities: ACTION_CAPABILITIES });
+  const raw = await insights.digestBrief({ tiles: factTiles, roleLabel: lens.label, roleFocus: effectiveFocus, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), capabilities: ACTION_CAPABILITIES, today: todayLabel() });
   const href = (id) => { const c = id && byId[id]; return c ? `${mailer.baseUrl()}/suite/${c.suiteId}/d/${id}` : ''; };
   // A suggested action with an executable capability deep-links into the
   // pre-filled "Make it happen" campaign editor (recipe auto-resolves the

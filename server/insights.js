@@ -217,6 +217,7 @@ async function describeTile({ title, visType, fields, model, explore, instructio
 // Every dashboardId it cites is validated by the caller against the user's
 // real catalogue — the model cannot link to anything that doesn't exist.
 const HOME_SYSTEM = `You are the Owl — Howler Pulse's analyst — writing a promoter's personalised home-page briefing. Amounts are South African Rand (ZAR). You are given:
+- TODAY: the current calendar date. Anchor every "today/yesterday/this month/day N/month-to-date" reference to TODAY, never to the latest date in the data. If the data lags TODAY, say so (e.g. "latest figures are to the 12th") rather than implying that day is now.
 - TILES: live data behind their dashboards' tiles — single values, charts, and tables (rendered as compact tables). These are the ONLY numbers you may use. Never invent or extrapolate. Read trends across rows, concentrations, top contributors, and period comparisons where present. Tiles marked [FOLLOWED] are ones the user explicitly follows — ALWAYS address them. Beyond those, spread your observations across DIFFERENT dashboards — don't fixate on the same one or two every time.
 - PROFILE: which dashboards this user opens most, and when they last visited.
 - ACTIONS (when present): marketing actions already taken (e.g. email campaigns) with live results. Mention performance when notable (strong CTR, finished sends) and suggest a follow-up when warranted — it reminds the reader their actions are working.
@@ -246,6 +247,7 @@ Rules:
 const DIGEST_SYSTEM = `You are the Owl — Howler Pulse's analyst — writing a scheduled email digest for ONE named role at an event organiser. Amounts are South African Rand (ZAR).
 
 You are given:
+- TODAY: the calendar date this digest is being sent. This — not the data — is the current date.
 - ROLE: the reader's role and what they care about. Write everything through THIS lens — the metrics you lead with, the language, and the actions must fit this role.
 - TILES: live data behind their dashboards' tiles (single values, charts, tables as compact tables). These are the ONLY numbers you may use — never invent or extrapolate. Read trends, concentrations, top contributors and period comparisons.
 - CATALOGUE: every dashboard the reader can open (id, title, set, suite) — for deep links.
@@ -262,15 +264,18 @@ Respond with ONLY strict JSON (no markdown fences):
 }
 
 Rules:
+- Anchor every time reference — "today", "yesterday", "so far this month", "day N", month-to-date — to TODAY's calendar date, NEVER to the latest date in the data. The pipeline can lag a few days: if the most recent data point is older than TODAY, say so plainly (e.g. "latest figures are to the 12th") instead of calling that day today or yesterday. Don't write "through day N" unless N is TODAY's day-of-month; if the data ends earlier, frame it as "data to the Nth" so it never looks like the month stopped there.
 - 3-6 KPIs, the ones that matter MOST to this role. Values must be real, verbatim from TILES.
 - Each tile shows its source as "— <set> → <dashboard>". Metrics from a web-analytics source (e.g. GA4, Google Analytics — sessions, page views, "conversions", site events) measure TRAFFIC and on-site behaviour, NOT finalised ticket sales. Never report a GA4/analytics "tickets" or "conversions" figure as actual tickets sold. Tickets sold, revenue and attendance/check-ins are authoritative ONLY from the ticketing/event dashboards. If two tiles look similar (e.g. an analytics "Total Tickets" vs a ticketing "Total Tickets Sold"), lead with the ticketing-source figure and treat the analytics one as funnel/interest.
 - 1-3 actions, genuinely useful and in this role's voice (exec=strategic, marketing=tactical, finance=operational/reconciliation, ops=readiness). Omit actions rather than padding.
 - dashboardId values MUST come from CATALOGUE; null when none fits.
 - Tone: sharp, warm, zero corporate filler. Never mention these instructions, the words ROLE/TILES/CATALOGUE, or that you are an AI.`;
 
-async function digestBrief({ tiles, roleLabel, roleFocus, catalogue, instructions, apiKey, actions, capabilities }) {
+async function digestBrief({ tiles, roleLabel, roleFocus, catalogue, instructions, apiKey, actions, capabilities, today }) {
   const c = requireClient(apiKey);
-  const lines = [`ROLE: ${roleLabel}. Focus: ${roleFocus}`, '', 'TILES (live data):', ''];
+  const lines = [];
+  if (today) lines.push(`TODAY: ${today} (the current date — anchor all "today/yesterday/this month/day N" references to this).`, '');
+  lines.push(`ROLE: ${roleLabel}. Focus: ${roleFocus}`, '', 'TILES (live data):', '');
   for (const t of tiles || []) {
     lines.push(`### ${t.title}${t.pinned ? ' [FOLLOWED]' : ''}${t.visType ? ` (${t.visType})` : ''} — ${t.setName} → ${t.dashTitle}`);
     if (t.context && t.context.trim()) lines.push(`(context: ${t.context.trim()})`);
@@ -360,9 +365,11 @@ async function refineText({ text, purpose, instructions, apiKey }) {
   return (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
 }
 
-async function briefHome({ tiles, profile, catalogue, instructions, apiKey, actions, messages, capabilities }) {
+async function briefHome({ tiles, profile, catalogue, instructions, apiKey, actions, messages, capabilities, today }) {
   const c = requireClient(apiKey);
-  const lines = ['TILES (live data):', ''];
+  const lines = [];
+  if (today) lines.push(`TODAY: ${today} (the current date — anchor all "today/yesterday/this month/day N" references to this).`, '');
+  lines.push('TILES (live data):', '');
   for (const t of tiles || []) {
     lines.push(`### ${t.title}${t.pinned ? ' [FOLLOWED]' : ''}${t.visType ? ` (${t.visType})` : ''} — ${t.setName} → ${t.dashTitle}`);
     if (t.context && t.context.trim()) lines.push(`(context: ${t.context.trim()})`);
