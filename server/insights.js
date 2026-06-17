@@ -573,6 +573,24 @@ async function extractInvoice({ pdfBase64, apiKey, onProgress }) {
 // feature is built on (the configurable instructions are appended via
 // systemWith). Surfaced in the admin "AI instructions" audit so the whole prompt
 // stack is visible in one place. Edit the consts above to change them.
+// ─── Digest preferences (the feedback knowledge-base loop) ──────────────────────
+// Distil a client's accumulated digest/briefing feedback into a short, durable
+// "preferences" note that future digests + briefings honour (injected as a layer).
+const DIGEST_PREFS_SYSTEM = `You maintain a short "reader preferences" note for an events client, learned from their feedback on automated digest emails and home briefings. You are given the CURRENT note (may be empty) and a batch of new feedback items — likes, dislikes, and free-text comments.
+
+Produce an UPDATED note: a tight, deduplicated list of concrete, durable preferences the digest writer should always honour — what to emphasise, what to avoid, tone, length, structure, and which metrics/comparisons they care about. Merge the new feedback into the current note; drop anything newer feedback contradicts. At most ~10 short one-line bullets, specific and actionable. No preamble, no headings. If nothing useful can be derived, return the current note unchanged.`;
+
+async function distilPreferences({ items, previous, apiKey }) {
+  const c = requireClient(apiKey);
+  const msg = `CURRENT NOTE:\n${previous || '(empty)'}\n\nNEW FEEDBACK:\n${(items || []).map((s, i) => `${i + 1}. ${s}`).join('\n')}`;
+  const resp = await c.messages.create({
+    model: MODEL, max_tokens: 800, output_config: { effort: 'low' },
+    system: DIGEST_PREFS_SYSTEM,
+    messages: [{ role: 'user', content: msg }],
+  });
+  return (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim().slice(0, 4000);
+}
+
 function promptRegistry() {
   return [
     { key: 'tile', label: 'Tile insight', scope: 'Per-tile "Explain this" insight', text: SYSTEM },
@@ -584,7 +602,8 @@ function promptRegistry() {
     { key: 'refine', label: 'Refine note', scope: 'The ✨ refine button', text: REFINE_SYSTEM },
     { key: 'settlement', label: 'Settlement extraction', scope: 'PDF settlement → JSON', text: SETTLEMENT_SYSTEM },
     { key: 'invoice', label: 'Invoice extraction', scope: 'PDF invoice → JSON', text: INVOICE_SYSTEM },
+    { key: 'digest_prefs', label: 'Digest preferences', scope: 'Distilling digest/briefing feedback into a learned preferences note', text: DIGEST_PREFS_SYSTEM },
   ];
 }
 
-module.exports = { generateInsight, streamInsight, streamDashboardInsight, describeTile, extractSettlement, extractInvoice, briefHome, digestBrief, draftCampaign, refineText, promptRegistry, systemWith, isConfigured: (apiKey) => !!(apiKey || process.env.ANTHROPIC_API_KEY) };
+module.exports = { generateInsight, streamInsight, streamDashboardInsight, describeTile, extractSettlement, extractInvoice, briefHome, digestBrief, draftCampaign, refineText, distilPreferences, promptRegistry, systemWith, isConfigured: (apiKey) => !!(apiKey || process.env.ANTHROPIC_API_KEY) };

@@ -89,11 +89,13 @@ function fromAddress() { const m = from().match(/<([^>]+)>/); return m ? m[1] : 
 function fromWithName(name) { const a = fromAddress(); return name && name.trim() ? `${name.trim()} <${a}>` : from(); }
 
 // The provider call. ALL Resend specifics live here.
-async function deliver({ to, subject, html, text, from: fromOverride }) {
+async function deliver({ to, subject, html, text, from: fromOverride, replyTo }) {
+  const body = { from: fromOverride || from(), to: Array.isArray(to) ? to : [to], subject, html, text };
+  if (replyTo) body.reply_to = replyTo; // e.g. the client's CC-the-Owl inbound address
   const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey()}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ from: fromOverride || from(), to: Array.isArray(to) ? to : [to], subject, html, text }),
+    body: JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data?.message || `Resend responded ${res.status}`);
@@ -103,13 +105,13 @@ async function deliver({ to, subject, html, text, from: fromOverride }) {
 // Best-effort send. Returns { ok } | { skipped, reason } | { ok:false, error }.
 // `fromName` sets the display name in front of the verified address (per-client
 // branding); the address itself never changes (single verified domain).
-async function send({ to, subject, html, text, fromName, kind = 'other', entity = '' }) {
+async function send({ to, subject, html, text, fromName, kind = 'other', entity = '', replyTo }) {
   const recipients = (Array.isArray(to) ? to : [to]).filter(Boolean);
   if (!recipients.length) return { skipped: true, reason: 'no recipients' };
   if (!enabled()) { log(recipients.join(', '), subject, 'skipped', 'mail disabled (mail_enabled=0)', kind, entity); return { skipped: true, reason: 'mail disabled (mail_enabled=0)' }; }
   if (!apiKey()) { log(recipients.join(', '), subject, 'skipped', 'no Resend API key configured', kind, entity); return { skipped: true, reason: 'no Resend API key configured' }; }
   try {
-    const r = await deliver({ to: recipients, subject, html, text, from: fromName ? fromWithName(fromName) : undefined });
+    const r = await deliver({ to: recipients, subject, html, text, from: fromName ? fromWithName(fromName) : undefined, replyTo });
     lastSentAt = new Date().toISOString();
     lastError = '';
     log(recipients.join(', '), subject, 'sent', r.id || '', kind, entity);
@@ -225,7 +227,7 @@ function mdBold(s) { return esc(s).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</stro
 // analytical narrative, and role-appropriate suggested actions (each may deep
 // link into Pulse). `content` is the structured output of insights.digestBrief
 // with links already resolved ({label/value/delta/href} kpis, {text/href} actions).
-function digestEmail({ branding, entityId, assetScope, content, roleLabel, customMessage, ctaPath = '/' }) {
+function digestEmail({ branding, entityId, assetScope, content, roleLabel, customMessage, ctaPath = '/', feedbackUrl = '' }) {
   const b = branding || resolveBranding(entityId);
   const scope = assetScope || entityId;
   const logoSrc = b.logo && b.logo.startsWith('data:') && scope ? `${baseUrl()}/mail-assets/logo/${scope}` : b.logo;
@@ -285,6 +287,13 @@ function digestEmail({ branding, entityId, assetScope, content, roleLabel, custo
       ${actionsBlock}
       <a href="${url}" style="display:inline-block;margin-top:20px;background:${esc(b.brandColor)};color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;border-radius:980px;padding:11px 22px;">Open Pulse →</a>
     </div>
+    ${feedbackUrl ? `<div style="text-align:center;margin-top:16px;font-size:13px;color:#86868b;">
+      Was this useful?
+      <a href="${esc(feedbackUrl)}&amp;v=up" style="text-decoration:none;font-size:16px;margin:0 4px;">👍</a>
+      <a href="${esc(feedbackUrl)}&amp;v=down" style="text-decoration:none;font-size:16px;margin:0 4px;">👎</a>
+      <a href="${esc(feedbackUrl)}" style="color:${esc(b.brandColor)};text-decoration:none;font-weight:600;margin-left:6px;">💬 Add a comment</a>
+      <div style="font-size:11.5px;color:#a1a1a6;margin-top:6px;">…or just reply to this email — it reaches the team.</div>
+    </div>` : ''}
     <div style="font-size:11.5px;color:#86868b;margin-top:14px;line-height:1.5;white-space:pre-wrap;">${esc(b.footer)}</div>
     ${brandRow()}
   </div>

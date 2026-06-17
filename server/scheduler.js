@@ -13,7 +13,7 @@ const crypto = require('crypto');
 const DEFAULT_TZ = 'Africa/Johannesburg'; // GMT+2
 const ROLES = ['exec', 'marketing', 'finance', 'ops'];
 
-function mount(app, { db, auth, mailer, messaging, push, generateContent, roleLenses }) {
+function mount(app, { db, auth, mailer, messaging, push, generateContent, roleLenses, recordDigest, feedbackUrl, replyTo }) {
   const sql = db.db;
   const now = () => new Date().toISOString();
   const uuid = () => crypto.randomUUID();
@@ -147,13 +147,23 @@ function mount(app, { db, auth, mailer, messaging, push, generateContent, roleLe
   }
 
   // Render a job's email (real content; throws if generation fails).
+  // Generate the structured digest content (the one expensive AI call).
   // `debug` asks generateContent to attach the fact tiles it read (preview only).
-  async function render(job, recipientEmail, { debug = false } = {}) {
+  async function buildContent(job, recipientEmail, { debug = false } = {}) {
+    return generateContent({ entityId: job.entityId, role: job.role, roleFocus: job.roleFocus, focusMode: job.focusMode, contentMode: job.contentMode, tiles: job.tiles, alignDaysBefore: !!job.alignDaysBefore, priorityDashboards: job.priorityDashboards || [], recipientEmail, debug });
+  }
+  // Render the email for already-generated content (cheap — no AI). A per-recipient
+  // feedbackUrl embeds 👍/👎/comment links back into Pulse.
+  function emailFor(job, content, { feedbackUrl: fbUrl = '' } = {}) {
     const lens = lensFor(job);
-    const content = await generateContent({ entityId: job.entityId, role: job.role, roleFocus: job.roleFocus, focusMode: job.focusMode, contentMode: job.contentMode, tiles: job.tiles, alignDaysBefore: !!job.alignDaysBefore, priorityDashboards: job.priorityDashboards || [], recipientEmail, debug });
     const branding = mailer.resolveBranding(job.entityId);
-    const email = mailer.digestEmail({ branding, entityId: job.entityId, assetScope: job.entityId, content, roleLabel: lens.label, customMessage: job.customMessage });
+    const email = mailer.digestEmail({ branding, entityId: job.entityId, assetScope: job.entityId, content, roleLabel: lens.label, customMessage: job.customMessage, feedbackUrl: fbUrl });
     return { ...email, content, senderName: branding.senderName };
+  }
+  // Preview/back-compat: generate + render in one go (no feedback link).
+  async function render(job, recipientEmail, opts = {}) {
+    const content = await buildContent(job, recipientEmail, opts);
+    return emailFor(job, content, {});
   }
 
   // A short SMS version of the digest — the one-line headline (+ custom note),
@@ -178,11 +188,19 @@ function mount(app, { db, auth, mailer, messaging, push, generateContent, roleLe
       result = { status: 'skipped', detail: 'no recipients' };
     } else {
       try {
-        const { html, text, subject, senderName, content } = await render(job, emailTo[0] || smsTo[0] || '');
+        const content = await buildContent(job, emailTo[0] || smsTo[0] || '');
+        const lens = lensFor(job);
+        const senderName = mailer.resolveBranding(job.entityId).senderName;
+        const subject = content.subject;
         let ok = 0, err = '';
-        if (wantsEmail) {
+        if (wantsEmail && emailTo.length) {
+          // Archive this digest (so it's browsable + feedback-able) and reply-route.
+          const digestId = recordDigest ? recordDigest({ entityId: job.entityId, jobId: job.id, role: job.role, roleLabel: lens.label, subject, headline: content.headline, content, recipients: emailTo }) : '';
+          const reply = replyTo ? replyTo(job.entityId) : null;
           for (const to of emailTo) {
-            const r = await mailer.send({ to, subject: subject || `${lensFor(job).label} digest`, html, text, fromName: senderName, kind: 'digest', entity: job.entityId });
+            const fbUrl = (digestId && feedbackUrl) ? feedbackUrl(digestId, to) : '';
+            const { html, text } = emailFor(job, content, { feedbackUrl: fbUrl });
+            const r = await mailer.send({ to, subject: subject || `${lens.label} digest`, html, text, fromName: senderName, kind: 'digest', entity: job.entityId, replyTo: reply });
             if (r.ok) ok += 1; else err = r.error || r.reason || 'email failed';
           }
         }

@@ -271,6 +271,72 @@ function setBriefingFeedbackStatus(id, status) {
   db.prepare('UPDATE briefing_feedback SET status=? WHERE id=?').run(status === 'resolved' ? 'resolved' : 'new', id);
 }
 
+// ─── Digest history + feedback (the knowledge-base loop) ──────────────────────
+// Every digest we send is archived (so it's browsable in-app), and feedback on it
+// — from in-email buttons, an email reply, or in-app — is collected and periodically
+// DISTILLED into a per-client "digest preferences" note that future digests honour.
+db.exec(`
+CREATE TABLE IF NOT EXISTS digest_history (
+  id          TEXT PRIMARY KEY,
+  entity_id   TEXT NOT NULL,
+  job_id      TEXT NOT NULL DEFAULT '',
+  role        TEXT NOT NULL DEFAULT '',
+  role_label  TEXT NOT NULL DEFAULT '',
+  subject     TEXT NOT NULL DEFAULT '',
+  headline    TEXT NOT NULL DEFAULT '',
+  content     TEXT NOT NULL DEFAULT '{}',
+  recipients  TEXT NOT NULL DEFAULT '[]',
+  created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_digest_history_entity ON digest_history(entity_id, created_at);
+CREATE TABLE IF NOT EXISTS digest_feedback (
+  id          TEXT PRIMARY KEY,
+  entity_id   TEXT NOT NULL,
+  digest_id   TEXT NOT NULL DEFAULT '',
+  source      TEXT NOT NULL DEFAULT '',   -- email | inapp | reply | briefing
+  email       TEXT NOT NULL DEFAULT '',
+  kind        TEXT NOT NULL DEFAULT '',   -- up | down | comment
+  comment     TEXT NOT NULL DEFAULT '',
+  distilled   INTEGER NOT NULL DEFAULT 0, -- 0 = not yet folded into the prefs note
+  created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_digest_feedback_entity ON digest_feedback(entity_id, created_at);
+`);
+function addDigestHistory({ entityId, jobId, role, roleLabel, subject, headline, content, recipients }) {
+  const id = uuid();
+  db.prepare('INSERT INTO digest_history (id,entity_id,job_id,role,role_label,subject,headline,content,recipients,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
+    .run(id, entityId, jobId || '', role || '', roleLabel || '', (subject || '').slice(0, 200), (headline || '').slice(0, 600), JSON.stringify(content || {}), JSON.stringify(recipients || []), now());
+  // Keep the archive bounded per client (latest 200).
+  db.prepare('DELETE FROM digest_history WHERE entity_id=? AND id NOT IN (SELECT id FROM digest_history WHERE entity_id=? ORDER BY created_at DESC LIMIT 200)').run(entityId, entityId);
+  return id;
+}
+const rowToDigest = (r) => r && ({ id: r.id, entityId: r.entity_id, jobId: r.job_id, role: r.role, roleLabel: r.role_label, subject: r.subject, headline: r.headline, content: J(r.content, {}), recipients: J(r.recipients, []), createdAt: r.created_at });
+function getDigestHistory(id) { return rowToDigest(db.prepare('SELECT * FROM digest_history WHERE id=?').get(id)); }
+function listDigestHistory(entityId, limit = 60) {
+  return db.prepare('SELECT * FROM digest_history WHERE entity_id=? ORDER BY created_at DESC LIMIT ?').all(entityId, Math.min(200, limit)).map(rowToDigest);
+}
+function addDigestFeedback({ entityId, digestId, source, email, kind, comment }) {
+  const id = uuid();
+  const k = ['up', 'down', 'comment'].includes(kind) ? kind : 'comment';
+  db.prepare('INSERT INTO digest_feedback (id,entity_id,digest_id,source,email,kind,comment,distilled,created_at) VALUES (?,?,?,?,?,?,?,0,?)')
+    .run(id, entityId || '', digestId || '', source || 'inapp', (email || '').toLowerCase(), k, (comment || '').slice(0, 2000), now());
+  return id;
+}
+function listDigestFeedback(entityId, { limit = 200, onlyUndistilled = false } = {}) {
+  const where = onlyUndistilled ? 'entity_id=? AND distilled=0' : 'entity_id=?';
+  return db.prepare(`SELECT * FROM digest_feedback WHERE ${where} ORDER BY created_at DESC LIMIT ?`).all(entityId, Math.min(500, limit))
+    .map((r) => ({ id: r.id, entityId: r.entity_id, digestId: r.digest_id, source: r.source, email: r.email, kind: r.kind, comment: r.comment, distilled: !!r.distilled, createdAt: r.created_at }));
+}
+function feedbackForDigest(digestId) {
+  return db.prepare('SELECT kind, comment, source, email, created_at FROM digest_feedback WHERE digest_id=? ORDER BY created_at').all(digestId)
+    .map((r) => ({ kind: r.kind, comment: r.comment, source: r.source, email: r.email, createdAt: r.created_at }));
+}
+function markDigestFeedbackDistilled(entityId) { db.prepare('UPDATE digest_feedback SET distilled=1 WHERE entity_id=? AND distilled=0').run(entityId); }
+// Per-client distilled "digest preferences" note (the knowledge base), in settings.
+function getDigestPrefs(entityId) { try { return JSON.parse(getSetting(`digest_prefs:${entityId}`, '') || '{}'); } catch { return {}; } }
+function setDigestPrefs(entityId, prefs) { setSetting(`digest_prefs:${entityId}`, JSON.stringify({ note: String(prefs.note || '').slice(0, 4000), updatedAt: now(), fromCount: prefs.fromCount || 0 })); }
+
+
 // ─── User preferences (small k/v per user — e.g. briefing tune text) ─────────
 db.exec(`
 CREATE TABLE IF NOT EXISTS user_prefs (
@@ -1129,6 +1195,10 @@ module.exports = {
   getUserPref, setUserPref,
   // briefing feedback
   addBriefingFeedback, listBriefingFeedback, setBriefingFeedbackStatus,
+  // digest history + feedback (knowledge-base loop)
+  addDigestHistory, getDigestHistory, listDigestHistory,
+  addDigestFeedback, listDigestFeedback, feedbackForDigest, markDigestFeedbackDistilled,
+  getDigestPrefs, setDigestPrefs,
   // share links
   createShareLink, getShareLink,
 };
