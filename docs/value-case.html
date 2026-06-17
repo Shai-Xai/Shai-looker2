@@ -121,12 +121,66 @@ tfoot .saved{background:var(--g);-webkit-background-clip:text;background-clip:te
 .print button:hover{border-color:var(--brand);color:var(--brand);}
 
 @media print{
-  header.bar,.bar .cta,.print{display:none;}
-  body{font-size:12px;}
-  .card,.tbl,.band,.callout{box-shadow:none;}
-  .callout{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
-  .sec{margin-top:34px;break-inside:avoid;}
-  .card{break-inside:avoid;}
+  /* force every background, gradient and dark fill to actually print */
+  *{ -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important; }
+  @page{ size:A4 portrait; margin:11mm; }
+  header.bar,.bar .cta,.print,.note{ display:none !important; }
+  html,body{ font-size:10px; line-height:1.38; }
+  main{ max-width:none; padding:0; }
+  .card,.tbl,.band,.callout,.shift{ box-shadow:none !important; }
+
+  /* compact hero + metric band */
+  .hero{ padding:2px 0 8px; }
+  .eyebrow{ margin-bottom:7px; font-size:9.5px; }
+  .hero h1{ font-size:25px; margin:0 0 7px; max-width:none; }
+  .hero p.lead{ font-size:11px; max-width:none; }
+  .band{ margin:12px 0 0; }
+  .band .cell{ padding:11px 9px; }
+  .band .big{ font-size:19px; }
+  .band .lbl{ font-size:8.5px; margin-top:5px; }
+
+  /* tight section heads */
+  .sec{ margin-top:15px; }
+  .sec > h2{ font-size:16px; }
+  .sec > .sub{ font-size:9.5px; margin-bottom:8px; }
+  .sec-rule{ margin-bottom:10px; }
+
+  /* comparison cards: 2-up grid, compact, never split a card */
+  .cards{ grid-template-columns:1fr 1fr; gap:7px; }
+  .card{ break-inside:avoid; }
+  .card .head{ padding:7px 10px; gap:7px; }
+  .card .num{ width:19px;height:19px;font-size:10px;border-radius:6px; }
+  .card .head h3{ font-size:11px; }
+  .card .save{ font-size:8.5px; padding:3px 6px; }
+  .vs{ grid-template-columns:1fr 20px 1fr; }
+  .vs .side{ padding:8px 10px; }
+  .vs .side .tag{ font-size:7.5px; margin-bottom:3px; }
+  .vs .time{ font-size:13px; }
+  .vs .desc{ font-size:8.5px; margin-top:3px; line-height:1.28; }
+  .vs .arrow{ font-size:11px; }
+
+  /* cumulative table */
+  .tbl{ break-inside:avoid; }
+  table{ font-size:9.5px; }
+  thead th{ padding:6px 9px; font-size:9px; }
+  tbody td{ padding:5px 9px; }
+  tfoot td{ padding:7px 9px; font-size:11.5px; }
+
+  /* shifts + capacity callout */
+  .shifts{ gap:7px; }
+  .shift{ padding:11px; break-inside:avoid; }
+  .shift h4{ font-size:11.5px; }
+  .shift p{ font-size:9px; }
+  .callout{ padding:18px 16px; break-inside:avoid; }
+  .callout .x{ font-size:38px; }
+  .callout h3{ font-size:15px; margin:4px 0 8px; }
+  .callout p{ font-size:10.5px; max-width:none; }
+  .callout li{ font-size:10px; }
+
+  /* gradient-clipped text is unreliable in print — fall back to solid brand */
+  .hero h1 .grad,.band .big,tfoot .saved{
+    -webkit-text-fill-color:#FF385C !important;color:#FF385C !important;background:none !important;
+  }
 }
 </style>
 </head>
@@ -166,7 +220,7 @@ tfoot .saved{background:var(--g);-webkit-background-clip:text;background-clip:te
   <!-- TASK BY TASK -->
   <section class="sec" id="tasks">
     <h2>Task by task: current vs Pulse OS</h2>
-    <div class="sub">The same eight recurring jobs an account manager does every week.</div>
+    <div class="sub">The same nine recurring jobs an account manager does every week.</div>
     <div class="sec-rule"></div>
 
     <div class="cards">
