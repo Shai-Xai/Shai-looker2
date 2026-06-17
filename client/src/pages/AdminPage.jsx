@@ -468,6 +468,7 @@ function Entities({ fields }) {
   const [dashTitle, setDashTitle] = useState({});
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState(null);
+  const [q, setQ] = useState(''); // client search
   const load = () => {
     setLoading(true);
     return Promise.all([api.adminListEntities(), api.adminListSuites(), api.adminListSets(), api.adminListUsers(), api.listDashboards()])
@@ -499,12 +500,20 @@ function Entities({ fields }) {
     );
   }
 
-  // List view: client names only.
+  // List view: client names only, sorted alphabetically and filtered by search.
+  const ql = q.trim().toLowerCase();
+  const sorted = [...items].sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }));
+  const shown = ql ? sorted.filter((e) => (e.name || '').toLowerCase().includes(ql)) : sorted;
   return (
     <div>
       <p style={hint}>Pick a client to manage its settings, suites and logins.</p>
+      <div style={searchWrap}>
+        <span style={{ color: 'var(--muted)', fontSize: 13, flexShrink: 0 }}>⌕</span>
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search clients…" style={searchInput} />
+        {ql && <button onClick={() => setQ('')} style={searchClear} aria-label="Clear search">✕</button>}
+      </div>
       <div style={clientList}>
-        {items.map((e) => (
+        {shown.map((e) => (
           <button key={e.id} className="lift" style={clientRow} onClick={() => setSelectedId(e.id)}>
             <span style={{ fontWeight: 600, fontSize: 15 }}>{e.name}</span>
             <span style={{ marginLeft: 'auto', color: 'var(--muted)', fontSize: 12 }}>
@@ -514,6 +523,7 @@ function Entities({ fields }) {
           </button>
         ))}
         {items.length === 0 && <Muted>No clients yet.</Muted>}
+        {items.length > 0 && shown.length === 0 && <Muted>No clients match “{q.trim()}”.</Muted>}
       </div>
       <button style={addBtn} onClick={async () => { const ent = await api.adminCreateEntity({ name: 'New client', lockedFilters: {} }); await load(); setSelectedId(ent.id); }}>+ Add client</button>
     </div>
@@ -3036,6 +3046,9 @@ const addBtn = { padding: '9px 16px', background: 'var(--elevated)', border: '1.
 const miniBtn = { padding: '6px 12px', background: 'var(--elevated)', border: '1.5px solid var(--hairline)', borderRadius: 6, fontWeight: 600, fontSize: 12, cursor: 'pointer' };
 const miniBtnOutline = { padding: '5px 11px', background: 'var(--card)', border: '1.5px solid var(--hairline)', borderRadius: 6, fontWeight: 600, fontSize: 12, cursor: 'pointer', color: 'var(--text)' };
 const clientList = { display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 };
+const searchWrap = { display: 'flex', alignItems: 'center', gap: 8, background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 10, padding: '9px 12px', marginBottom: 12, maxWidth: 360 };
+const searchInput = { flex: 1, minWidth: 0, border: 'none', background: 'transparent', outline: 'none', fontSize: 14, color: 'var(--text)', fontFamily: 'inherit' };
+const searchClear = { flexShrink: 0, border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 13, padding: 0, lineHeight: 1 };
 const clientRow = { display: 'flex', alignItems: 'center', width: '100%', textAlign: 'left', background: 'var(--card)', border: '1px solid #e6e6e6', borderRadius: 10, padding: '14px 16px', cursor: 'pointer', boxShadow: '0 1px 4px rgba(0,0,0,0.04)' };
 const detailNav = { display: 'flex', flexDirection: 'column', gap: 4, width: 170, flexShrink: 0 };
 const detailNavItem = { textAlign: 'left', padding: '9px 13px', border: 'none', background: 'transparent', borderRadius: 8, fontSize: 14, fontWeight: 600, color: 'var(--muted-2, #555)', cursor: 'pointer' };
