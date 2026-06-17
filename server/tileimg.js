@@ -31,13 +31,18 @@ function optionFor(tile, fact, palette) {
   const dims = fact.fields?.dimensions || [];
   const meas = [...(fact.fields?.measures || []), ...(fact.fields?.table_calculations || [])];
   if (!dims.length || !meas.length) return null;
-  const rows = (fact.rows || []).slice(0, 12);
-  const dimName = dims[0].name;
-  const cats = rows.map((r) => cellLabel(r[dimName]) || '—');
   const t = String(tile?.vis?.type || fact?.visType || '').toLowerCase();
   const isPie = /pie|donut/.test(t);
   const isLine = /line|area/.test(t);
   const isArea = /area/.test(t);
+  // Row cap: line/area are time-series (e.g. cumulative "days before event") — keep
+  // the whole curve, else truncating to the first few points shows only the flat
+  // near-zero start and the chart looks empty. Bars/pie get fewer (many bars/slices
+  // are unreadable in a small email image).
+  const cap = isPie ? 12 : (isLine ? 400 : 20);
+  const rows = (fact.rows || []).slice(0, cap);
+  const dimName = dims[0].name;
+  const cats = rows.map((r) => cellLabel(r[dimName]) || '—');
 
   if (isPie) {
     const m = meas[0];
@@ -50,6 +55,7 @@ function optionFor(tile, fact, palette) {
     };
   }
 
+  const manyPoints = rows.length > 24;
   const series = meas.slice(0, 5).map((m, idx) => ({
     name: m.label || m.name,
     type: isLine ? 'line' : 'bar',
@@ -57,7 +63,9 @@ function optionFor(tile, fact, palette) {
     smooth: isLine, areaStyle: isArea ? {} : undefined,
     itemStyle: { color: palette[idx % palette.length], borderRadius: isLine ? 0 : [3, 3, 0, 0] },
     lineStyle: isLine ? { width: 2.5 } : undefined,
-    symbol: isLine ? 'circle' : undefined, symbolSize: 5,
+    showSymbol: isLine ? !manyPoints : undefined, // dots clutter a long line
+    symbol: 'circle', symbolSize: 5,
+    connectNulls: true,
   }));
   return {
     animation: false, color: palette,

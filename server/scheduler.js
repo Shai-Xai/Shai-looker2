@@ -159,7 +159,7 @@ function mount(app, { db, auth, mailer, messaging, push, generateContent, roleLe
   // Generate the structured digest content (the one expensive AI call).
   // `debug` asks generateContent to attach the fact tiles it read (preview only).
   async function buildContent(job, recipientEmail, { debug = false } = {}) {
-    return generateContent({ entityId: job.entityId, role: job.role, roleFocus: job.roleFocus, focusMode: job.focusMode, contentMode: job.contentMode, tiles: job.tiles, alignDaysBefore: !!job.alignDaysBefore, priorityDashboards: job.priorityDashboards || [], includeFollowed: !!job.includeFollowed, followedVisual: !!job.followedVisual, followedTiles: job.followedTiles || [], recipientEmail, debug });
+    return generateContent({ entityId: job.entityId, role: job.role, roleFocus: job.roleFocus, focusMode: job.focusMode, contentMode: job.contentMode, tiles: job.tiles, alignDaysBefore: !!job.alignDaysBefore, priorityDashboards: job.priorityDashboards || [], includeFollowed: !!job.includeFollowed, followedVisual: !!job.followedVisual, followedTiles: job.followedTiles || [], creatorEmail: job.createdBy || '', recipientEmail, debug });
   }
   // Render the email for already-generated content (cheap — no AI). A per-recipient
   // feedbackUrl embeds 👍/👎/comment links back into Pulse.
@@ -306,7 +306,7 @@ function mount(app, { db, auth, mailer, messaging, push, generateContent, roleLe
   });
   // Live preview (renders real content; falls back to a labelled sample if AI
   // isn't configured yet, so the layout is always viewable).
-  app.post('/api/admin/digests/preview', auth.requireAdmin, (req, res) => preview(req.body || {}, res));
+  app.post('/api/admin/digests/preview', auth.requireAdmin, (req, res) => preview(req.body || {}, res, req.user.email));
   // Send a test of the CURRENT (possibly unsaved) editor config to the admin.
   app.post('/api/admin/digests/test-send', auth.requireAdmin, (req, res) => testSendConfig(req.body || {}, (req.body || {}).entityId, req.user.email, res));
   app.post('/api/admin/digests/test-send-sms', auth.requireAdmin, (req, res) => { if (!enabled()) return off(res); testSendSms(req.body || {}, (req.body || {}).entityId, (req.body || {}).phone, res); });
@@ -323,14 +323,14 @@ function mount(app, { db, auth, mailer, messaging, push, generateContent, roleLe
     const r = await runJob(j, { manual: true, toOverride: req.user.email });
     r.status === 'ok' ? res.json({ ok: true, to: req.user.email }) : res.status(400).json({ error: r.detail });
   });
-  app.post('/api/my/digests/:entityId/preview', auth.requireAuth, auth.requirePermission('digests.manage'), (req, res) => { if (!enabled()) return off(res); if (!ownsEntity(req)) return res.status(403).json({ error: 'Not allowed' }); preview({ ...req.body, entityId: req.params.entityId }, res); });
+  app.post('/api/my/digests/:entityId/preview', auth.requireAuth, auth.requirePermission('digests.manage'), (req, res) => { if (!enabled()) return off(res); if (!ownsEntity(req)) return res.status(403).json({ error: 'Not allowed' }); preview({ ...req.body, entityId: req.params.entityId }, res, req.user.email); });
   app.post('/api/my/digests/:entityId/test-send', auth.requireAuth, auth.requirePermission('digests.manage'), (req, res) => { if (!enabled()) return off(res); if (!ownsEntity(req)) return res.status(403).json({ error: 'Not allowed' }); testSendConfig({ ...req.body, entityId: req.params.entityId }, req.params.entityId, req.user.email, res); });
   app.post('/api/my/digests/:entityId/test-send-sms', auth.requireAuth, auth.requirePermission('digests.manage'), (req, res) => { if (!enabled()) return off(res); if (!ownsEntity(req)) return res.status(403).json({ error: 'Not allowed' }); testSendSms({ ...req.body, entityId: req.params.entityId }, req.params.entityId, (req.body || {}).phone, res); });
 
   // Render + send the current (unsaved) config as a test to one address.
   async function testSendConfig(body, entityId, toEmail, res) {
     if (!entityId) return res.status(400).json({ error: 'entityId required' });
-    const job = { ...clean(body, entityId), id: 'test' };
+    const job = { ...clean(body, entityId), id: 'test', createdBy: toEmail };
     const r = await runJob(job, { manual: true, toOverride: toEmail });
     return r.status === 'ok' ? res.json({ ok: true, to: toEmail }) : res.status(400).json({ error: r.detail });
   }
@@ -354,10 +354,10 @@ function mount(app, { db, auth, mailer, messaging, push, generateContent, roleLe
   // the editor's debounced auto-preview so layout/branding updates are free.
   // body.live=true does the real thing (Looker pulls + AI write — can take
   // 30-60s, costs tokens) — used by the explicit Refresh button.
-  async function preview(body, res) {
+  async function preview(body, res, whoEmail = '') {
     const entityId = body.entityId;
     if (!entityId) return res.status(400).json({ error: 'entityId required' });
-    const job = { ...clean(body, entityId), id: 'preview' };
+    const job = { ...clean(body, entityId), id: 'preview', createdBy: whoEmail };
     const lens = lensFor(job);
     const sample = (reason) => {
       const content = sampleContent(lens.label);

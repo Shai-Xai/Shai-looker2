@@ -2446,7 +2446,7 @@ async function buildFactsFromTiles(user, entityId, picks, alignDaysBefore = fals
 
 // Produce a role-lensed digest's structured content (links resolved). Throws if
 // AI/Looker isn't configured or there's no data — callers decide how to surface.
-async function buildDigestContent({ entityId, role, roleFocus, focusMode, contentMode, tiles, alignDaysBefore = false, priorityDashboards = [], includeFollowed = false, followedVisual = false, followedTiles = [], recipientEmail, debug = false }) {
+async function buildDigestContent({ entityId, role, roleFocus, focusMode, contentMode, tiles, alignDaysBefore = false, priorityDashboards = [], includeFollowed = false, followedVisual = false, followedTiles = [], creatorEmail = '', recipientEmail, debug = false }) {
   const apiKey = anthropicKeyForEntity(entityId);
   if (!insights.isConfigured(apiKey)) throw new Error('AI is not configured for this client');
   const lens = ROLE_LENSES[role] || ROLE_LENSES.exec;
@@ -2460,17 +2460,22 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
     ? await buildFactsFromTiles(user, entityId, tiles, alignDaysBefore)
     : await buildFacts(user, entityId, false, alignDaysBefore, priorityDashboards);
 
-  // Saved tiles: the client's (entity-scoped) 📌 pinned + ⭐ followed tiles — the
-  // ones marked as mattering. Pulled in on top of whatever the mode produced, so
-  // they ride along in BOTH AI-led and curated digests. They're added to the
-  // facts the analyst reads, and (when followedVisual) rendered as charts/metric
-  // chips. `followedTiles` (optional) narrows to a chosen subset; empty = all.
+  // Saved tiles: the 📌 pinned + ⭐ followed tiles marked as mattering. Pulled in
+  // on top of whatever the mode produced, so they ride along in BOTH AI-led and
+  // curated digests — added to the facts the analyst reads, and (when
+  // followedVisual) rendered as charts/metric chips. When the digest names an
+  // explicit subset (`followedTiles`) we use those tiles DIRECTLY (no re-resolving
+  // marks, so the editor's checklist and the send never disagree — buildFacts
+  // still validates each against the client's catalogue + scope). Empty subset =
+  // all of the creator's saved tiles for this client.
   let followedFacts = [];
   if (includeFollowed) {
-    let followPicks = savedTileMarks(entityId).map((m) => ({ dashboardId: m.dashboardId, tileId: m.tileId }));
+    let followPicks;
     if (Array.isArray(followedTiles) && followedTiles.length) {
-      const want = new Set(followedTiles.map((t) => `${t.dashboardId}|${t.tileId}`));
-      followPicks = followPicks.filter((p) => want.has(`${p.dashboardId}|${p.tileId}`));
+      followPicks = followedTiles.map((t) => ({ dashboardId: String(t.dashboardId), tileId: String(t.tileId) }));
+    } else {
+      const creatorId = creatorEmail ? (db.getUserByEmail(creatorEmail)?.id || '') : '';
+      followPicks = savedTileMarks(entityId, creatorId).map((m) => ({ dashboardId: m.dashboardId, tileId: m.tileId }));
     }
     if (followPicks.length) {
       try { followedFacts = (await buildFactsFromTiles(user, entityId, followPicks, alignDaysBefore)).tiles || []; }
@@ -2571,14 +2576,13 @@ app.get('/api/my/digest-tiles/:entityId', auth.requireAuth, (req, res) => {
   res.json(digestTileCatalogue(req.params.entityId));
 });
 
-// The entity's SAVED tiles — the ones marked as mattering for this client,
-// whether 📌 pinned (shown on home) or ⭐ followed (always read by the briefing).
-// Entity-scoped (userId:'' → just the 'entity' marks, which is what an admin sets
-// for the client), deduped across kinds, resolved to titles for the digest
-// editor's per-tile selection. Used by both the editor and the digest build, so
-// they always agree.
-function savedTileMarks(entityId) {
-  const marks = [...db.listMarks({ userId: '', entityId, kind: 'pin' }), ...db.listMarks({ userId: '', entityId, kind: 'follow' })];
+// The SAVED tiles for a viewer — the ones marked as mattering, whether 📌 pinned
+// (shown on home) or ⭐ followed (always read by the briefing). `userId` returns
+// that viewer's own ('user') marks PLUS the client's ('entity') marks — exactly
+// what the home Pinned/briefing sees — so the digest checklist matches what you
+// actually see pinned. Deduped across kinds.
+function savedTileMarks(entityId, userId = '') {
+  const marks = [...db.listMarks({ userId, entityId, kind: 'pin' }), ...db.listMarks({ userId, entityId, kind: 'follow' })];
   const byKey = new Map();
   for (const m of marks) {
     const key = `${m.dashboardId}|${m.tileId}`;
@@ -2587,11 +2591,11 @@ function savedTileMarks(entityId) {
   }
   return [...byKey.values()];
 }
-function followedTilesFor(entityId) {
+function followedTilesFor(entityId, userId = '') {
   const { catalogue } = clientCatalogue(entityId);
   const meta = Object.fromEntries(catalogue.map((c) => [c.dashboardId, c]));
   const out = [];
-  for (const m of savedTileMarks(entityId)) {
+  for (const m of savedTileMarks(entityId, userId)) {
     const def = store.get(m.dashboardId);
     const c = meta[m.dashboardId];
     if (!def || !c) continue; // only tiles still in this client's catalogue
@@ -2603,11 +2607,11 @@ function followedTilesFor(entityId) {
 }
 app.get('/api/admin/entities/:id/followed-tiles', auth.requireAdmin, (req, res) => {
   if (!db.getEntity(req.params.id)) return res.status(404).json({ error: 'Not found' });
-  res.json(followedTilesFor(req.params.id));
+  res.json(followedTilesFor(req.params.id, req.user.id));
 });
 app.get('/api/my/followed-tiles/:entityId', auth.requireAuth, (req, res) => {
   if (!(req.user.entityIds || []).includes(req.params.entityId)) return res.status(403).json({ error: 'Not allowed' });
-  res.json(followedTilesFor(req.params.entityId));
+  res.json(followedTilesFor(req.params.entityId, req.user.id));
 });
 
 // Home message-card dismissals: per-user, so a handled message can be cleared
