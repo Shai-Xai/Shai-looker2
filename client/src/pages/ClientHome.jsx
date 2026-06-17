@@ -48,13 +48,13 @@ export default function ClientHome() {
     // Pre-warm in the background: top dashboards' tiles into the query cache +
     // the briefing (coalesced with our own fetch below), so the first click and
     // briefing of the session are warm. Same hour as the briefing so it hits.
-    api.prewarm(previewEntityId, new Date().getHours());
-    api.mySnapshot(previewEntityId).then((s) => { if (alive) setSnap(s); }).catch(() => { if (alive) setSnap({ kpis: [], shortcuts: [], settlement: null, lastVisit: null }); });
-    api.myBriefing(previewEntityId).then((b) => { if (alive) setBrief(b); }).catch(() => { if (alive) setBrief({ available: false }); });
-    api.osInbox(previewEntityId).then((r) => { if (alive) setMessages(r.threads || []); }).catch(() => {});
+    api.prewarm(homeEntityId, new Date().getHours());
+    api.mySnapshot(homeEntityId).then((s) => { if (alive) setSnap(s); }).catch(() => { if (alive) setSnap({ kpis: [], shortcuts: [], settlement: null, lastVisit: null }); });
+    api.myBriefing(homeEntityId).then((b) => { if (alive) setBrief(b); }).catch(() => { if (alive) setBrief({ available: false }); });
+    api.osInbox(homeEntityId).then((r) => { if (alive) setMessages(r.threads || []); }).catch(() => {});
     api.getDismissedThreads().then((r) => { if (alive) setDismissed(r.dismissed || []); }).catch(() => {});
     return () => { alive = false; };
-  }, [previewEntityId]);
+  }, [homeEntityId]);
   const dismissMessage = (id) => {
     setDismissed((d) => [...d, id]); // optimistic
     api.dismissThread(id).catch(() => {});
@@ -66,7 +66,7 @@ export default function ClientHome() {
       const j = index + dir;
       if (j < 0 || j >= list.length) return s;
       [list[index], list[j]] = [list[j], list[index]];
-      api.savePinOrder(previewEntityId, list.map((p) => `${p.dashboardId}|${p.tile.id}`)).catch(() => {});
+      api.savePinOrder(homeEntityId, list.map((p) => `${p.dashboardId}|${p.tile.id}`)).catch(() => {});
       return { ...s, pinnedTiles: list };
     });
   };
@@ -76,8 +76,8 @@ export default function ClientHome() {
   const refreshBrief = () => {
     setRefreshing(true);
     setRefreshErr(false);
-    api.mySnapshot(previewEntityId, true).then(setSnap).catch(() => {});
-    api.myBriefing(previewEntityId, true)
+    api.mySnapshot(homeEntityId, true).then(setSnap).catch(() => {});
+    api.myBriefing(homeEntityId, true)
       .then((b) => setBrief(b))
       .catch(() => setRefreshErr(true))
       .finally(() => setRefreshing(false));
@@ -93,7 +93,7 @@ export default function ClientHome() {
   }
 
   const firstName = deriveFirstName(user?.email);
-  const visibleSuites = previewEntityId ? suites.filter((s) => s.entityId === previewEntityId) : suites;
+  const visibleSuites = homeEntityId ? suites.filter((s) => s.entityId === homeEntityId) : suites;
   const shortcuts = snap?.shortcuts || [];
 
   return (
@@ -152,7 +152,7 @@ export default function ClientHome() {
                   ))}
                 </div>
               )}
-              <FeedbackRow brief={brief} entityId={previewEntityId} />
+              <FeedbackRow brief={brief} entityId={homeEntityId} />
             </>
           )}
         </div>
@@ -186,8 +186,8 @@ export default function ClientHome() {
                 onMove={(dir) => movePin(i, dir)}
                 onOpen={() => go(p.suiteId, p.dashboardId)}
                 onUnpin={() => {
-                  api.togglePin({ dashboardId: p.dashboardId, tileId: p.tile.id, kind: 'pin', on: false, scope: isAdmin ? 'entity' : 'user', entityId: previewEntityId })
-                    .then(() => api.mySnapshot(previewEntityId, true).then(setSnap))
+                  api.togglePin({ dashboardId: p.dashboardId, tileId: p.tile.id, kind: 'pin', on: false, scope: isAdmin ? 'entity' : 'user', entityId: homeEntityId })
+                    .then(() => api.mySnapshot(homeEntityId, true).then(setSnap))
                     .catch(() => {});
                 }}
               />
@@ -226,7 +226,7 @@ export default function ClientHome() {
 
       {/* Your actions — campaigns taken + how they're performing (campaigns role only) */}
       {can(PERMS.CAMPAIGNS_VIEW) && (
-        <YourActions entityId={previewEntityId || (isAdmin ? null : ((user?.entities || [])[0]?.id || (user?.entityIds || [])[0]))} isMobile={isMobile} onOpen={() => vtNavigate(navigate, '/engage/campaigns')} />
+        <YourActions entityId={homeEntityId || (isAdmin ? null : ((user?.entities || [])[0]?.id || (user?.entityIds || [])[0]))} isMobile={isMobile} onOpen={() => vtNavigate(navigate, '/engage/campaigns')} />
       )}
 
       {/* Personal shortcuts (browsing-based) */}
@@ -263,7 +263,7 @@ export default function ClientHome() {
       )}
 
       {tuneOpen && (
-        <BriefingTuneModal entityId={previewEntityId} onClose={() => setTuneOpen(false)} onSaved={refreshBrief} />
+        <BriefingTuneModal entityId={homeEntityId} onClose={() => setTuneOpen(false)} onSaved={refreshBrief} />
       )}
 
       {/* Suites */}
