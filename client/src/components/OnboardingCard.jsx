@@ -7,10 +7,16 @@ import { api } from '../lib/api.js';
 export default function OnboardingCard({ entityId }) {
   const navigate = useNavigate();
   const [data, setData] = useState(null);
+  // Collapsed by default — it's a nudge, not the main event. The header (progress
+  // bar + "N of M done") stays visible; the steps reveal on tap. Remembered per
+  // entity so it stays the way you left it.
+  const [open, setOpen] = useState(false);
   useEffect(() => {
     if (!entityId) { setData(null); return; }
+    setOpen(localStorage.getItem(`howler_onboarding_open:${entityId}`) === '1');
     api.getMyOnboarding(entityId).then(setData).catch(() => setData(null));
   }, [entityId]);
+  const toggle = () => setOpen((v) => { const n = !v; localStorage.setItem(`howler_onboarding_open:${entityId}`, n ? '1' : '0'); return n; });
 
   if (!entityId || !data || data.dismissed || data.complete || !(data.steps || []).length) return null;
 
@@ -21,14 +27,18 @@ export default function OnboardingCard({ entityId }) {
   return (
     <section style={{ background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 16, padding: 18, marginBottom: 18, boxShadow: 'var(--shadow-sm)' }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 15, fontWeight: 800, letterSpacing: '-0.01em' }}>🚀 Getting started</span>
-        <span style={{ fontSize: 12.5, color: 'var(--muted)', fontWeight: 600 }}>{data.done} of {data.total} done</span>
+        <button type="button" onClick={toggle} style={{ display: 'flex', alignItems: 'baseline', gap: 10, background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--text)', textAlign: 'left' }} aria-expanded={open}>
+          <span style={{ fontSize: 11, color: 'var(--muted)', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s', display: 'inline-block' }}>▶</span>
+          <span style={{ fontSize: 15, fontWeight: 800, letterSpacing: '-0.01em' }}>🚀 Getting started</span>
+          <span style={{ fontSize: 12.5, color: 'var(--muted)', fontWeight: 600 }}>{data.done} of {data.total} done</span>
+        </button>
         <span style={{ flex: 1 }} />
         <button type="button" onClick={dismiss} style={{ background: 'none', border: 'none', color: 'var(--muted)', fontSize: 12.5, cursor: 'pointer' }}>Dismiss</button>
       </div>
-      <div style={{ height: 6, borderRadius: 999, background: 'rgba(128,128,128,0.15)', overflow: 'hidden', marginBottom: 14 }}>
+      <div style={{ height: 6, borderRadius: 999, background: 'rgba(128,128,128,0.15)', overflow: 'hidden', marginBottom: open ? 14 : 0 }}>
         <div style={{ height: '100%', width: `${pct}%`, background: 'var(--brand)', borderRadius: 999, transition: 'width .25s' }} />
       </div>
+      {open && (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {data.steps.map((s) => (
           <div key={s.key} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 4px', opacity: s.done ? 0.62 : 1 }}>
@@ -46,6 +56,7 @@ export default function OnboardingCard({ entityId }) {
           </div>
         ))}
       </div>
+      )}
     </section>
   );
 }

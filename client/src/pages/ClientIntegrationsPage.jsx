@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useOutletContext } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import HomeButton from '../components/HomeButton.jsx';
 import IntegrationsForm from '../components/IntegrationsForm.jsx';
@@ -29,10 +30,18 @@ export default function ClientIntegrationsPage() {
   const isMobile = useIsMobile();
   const { can } = useAccess();
   const { active } = useProfile(); // every section is scoped to the active client profile
+  const ctx = useOutletContext() || {};
   const [items, setItems] = useState(null);
   // Settings only ever show the profile in context — switching profile (top header)
   // is how you reach another client's settings. Never list multiple clients at once.
-  const activeItem = items && active ? items.find((it) => it.entityId === active.id) : null;
+  // For an admin PREVIEWING a client (console mode) there's no `active` profile,
+  // so fall back to the entity the shell resolved (previewEntityId) — that's the
+  // client they opened — so admins who own the account can manage its settings.
+  const scopeId = active?.id || ctx.previewEntityId || null;
+  const activeItem = items && scopeId ? items.find((it) => it.entityId === scopeId) : null;
+  // The entity (id + name) the page acts on — from the profile if present, else
+  // derived from the resolved settings row.
+  const ent = active || (activeItem ? { id: activeItem.entityId, name: activeItem.name } : null);
   // Only the sections this role can use (Notifications is personal, always on).
   const sections = SECTIONS.filter(([, , , perm]) => !perm || can(perm));
   const [section, setSection] = useState(sections[0]?.[0] || 'notifications');
@@ -58,10 +67,10 @@ export default function ClientIntegrationsPage() {
       </div>
 
       {section === 'team' ? (
-        active ? (
+        ent ? (
           <div>
-            <h2 style={{ fontSize: 17, fontWeight: 700, marginBottom: 8 }}>{active.name} · Team</h2>
-            <TeamManager entityId={active.id} entityName={active.name} />
+            <h2 style={{ fontSize: 17, fontWeight: 700, marginBottom: 8 }}>{ent.name} · Team</h2>
+            <TeamManager entityId={ent.id} entityName={ent.name} />
           </div>
         ) : <p style={{ color: 'var(--muted)' }}>Switch to a client to manage its team.</p>
       ) : section === 'notifications' ? (

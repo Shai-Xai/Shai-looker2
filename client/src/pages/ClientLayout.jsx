@@ -381,6 +381,7 @@ export default function ClientLayout() {
     <ProfileFooter
       user={user}
       isAdmin={isAdmin}
+      activeEntityId={activeEntityId}
       brand={brand}
       onNavigate={(path) => { navigate(path); if (isMobile) setNavOpen(false); }}
     />
@@ -525,6 +526,7 @@ export default function ClientLayout() {
             <ProfileFooter
               user={user}
               isAdmin={isAdmin}
+              activeEntityId={activeEntityId}
               brand={brand}
               onNavigate={(path) => { navigate(path); setNavOpen(false); }}
             />
@@ -611,7 +613,7 @@ function readJson(key) {
 // Bottom-left profile: avatar + identity, opening a menu with Integrations
 // (clients), the theme toggle and Log out — everything that used to crowd the
 // top header.
-function ProfileFooter({ user, isAdmin, brand, onNavigate }) {
+function ProfileFooter({ user, isAdmin, activeEntityId, brand, onNavigate }) {
   const { theme, toggle } = useTheme();
   const { logout } = useAuth();
   const [open, setOpen] = useState(false);
@@ -624,7 +626,13 @@ function ProfileFooter({ user, isAdmin, brand, onNavigate }) {
       {open && <div style={{ position: 'fixed', inset: 0, zIndex: 70 }} onClick={() => setOpen(false)} />}
       {open && (
         <div className="modal-in" style={profileMenu}>
-          {!isAdmin && (
+          {/* Settings is a client self-service page scoped to the active entity.
+              Show it whenever a client profile is in context — for pure clients
+              always, and for an admin acting as / previewing a client (so an
+              admin who's also an owner of the account can manage it). Admins in
+              the bare console (no client in context) don't see it — they use the
+              Admin console. */}
+          {activeEntityId && (
             <>
               <button className="nav-row" style={menuItem} onClick={() => { setOpen(false); onNavigate('/settings'); }}>
                 <span style={menuIco}>⚙</span> Settings
