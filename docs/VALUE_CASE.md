@@ -34,13 +34,14 @@ that are **impossible today** become **live and automatic**.
 
 | Metric | Current | Pulse |
 |---|---|---|
-| Full new-client setup | **~5 hours** | **~10 minutes** |
+| Full new-client setup | **~7 hours** | **~10 minutes** |
 | Per-client custom branding | **Impossible** | **~2 minutes** |
 | Abandoned-cart campaign build | **~2 hours** | **~10 minutes** |
 | Abandoned-cart reporting | **~1 hour** | **Live (0 min)** |
 | Email to a custom list | **Not possible / 30–60 min export-import** | **~5 min, live** |
 | Custom audience → Meta / TikTok | **Not possible / ~1 hour manual** | **Live** |
 | Multi-campaign email reporting | **Not possible / 1–2 hours manual** | **Automatic** |
+| Invoices & settlements | **~1 hour each, repeated** | **~10 min, live + client notification** |
 | Daily insight email | **No insights** | **Insights + suggested actions** |
 
 ---
@@ -51,12 +52,12 @@ that are **impossible today** become **live and automatic**.
 
 | | Current Process | Pulse |
 |---|---|---|
-| **Time** | ~5 hours | ~10 minutes |
+| **Time** | ~7 hours | ~10 minutes |
 | **How** | Manual configuration across systems, dashboard setup, filters and tiles rebuilt by hand | Guided setup; dashboard and analytics provisioned programmatically per client |
-| **Saving** | **~4h 50m per client (≈98%)** | |
+| **Saving** | **~6h 50m per client (≈98%)** | |
 
-> At 5 hours each, onboarding 10 new clients consumes **a full working week** of
-> AM time. Pulse does the same in **under 2 hours total**.
+> At 7 hours each, onboarding 10 new clients consumes **nearly two working weeks**
+> of AM time. Pulse does the same in **under 2 hours total**.
 
 ---
 
@@ -142,6 +143,16 @@ that are **impossible today** become **live and automatic**.
 
 ---
 
+### 2.9 Sending invoices & settlements
+
+| | Current Process | Pulse |
+|---|---|---|
+| **Time** | ~1 hour each — and repeated for every run | ~10 minutes, live |
+| **How** | Assembled and sent manually, over and over for each settlement run | Generated and sent live with automatic client notification — no manual re-runs |
+| **Saving** | **~50 min every time, multiplied across repeated runs** | |
+
+---
+
 ## 3. The Cumulative Picture
 
 Add up a **single typical servicing cycle** for one client — onboarding, one
@@ -150,16 +161,17 @@ multi-campaign report:
 
 | Task | Current | Pulse | Saved |
 |---|---|---|---|
-| New client setup | 5h 00m | 10m | 4h 50m |
+| New client setup | 7h 00m | 10m | 6h 50m |
 | Branding | (impossible) | 2m | new capability |
 | Abandoned-cart build | 2h 00m | 10m | 1h 50m |
 | Abandoned-cart reporting | 1h 00m | live | 1h 00m |
 | Custom-list email | 0h 45m | 5m | 0h 40m |
 | Audience → Meta/TikTok | 1h 00m | live | 1h 00m |
 | Multi-campaign report | 1h 30m | auto | 1h 30m |
-| **Total** | **~11h 15m** | **~27m** | **~10h 48m** |
+| Invoices & settlements | 1h 00m | 10m | 0h 50m |
+| **Total** | **~14h 15m** | **~37m** | **~13h 38m** |
 
-> **One client servicing cycle drops from ~11 hours to under 30 minutes — a ~96%
+> **One client servicing cycle drops from ~14 hours to under 40 minutes — a ~96%
 > reduction in AM time, before counting the tasks that were previously
 > impossible.**
 
@@ -185,7 +197,7 @@ much:
 
 ## 5. The Capacity Argument
 
-If a full servicing cycle drops from ~11 hours to ~30 minutes, a single AM's
+If a full servicing cycle drops from ~14 hours to ~37 minutes, a single AM's
 effective capacity increases by roughly **20×** on these tasks. In practice this
 means:
 
