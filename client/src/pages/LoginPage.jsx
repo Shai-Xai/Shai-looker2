@@ -29,7 +29,7 @@ export default function LoginPage() {
           <Logo size={40} radius={11} />
           <div>
             <div style={{ fontSize: 18, fontWeight: 700, letterSpacing: '-0.3px' }}>Howler : Pulse</div>
-            <div style={{ fontSize: 12, color: 'var(--muted)' }}>Analytics Studio</div>
+            <div style={{ fontSize: 12, color: 'var(--muted)' }}>Intelligent OS</div>
           </div>
         </div>
 
