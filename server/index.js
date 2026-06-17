@@ -2438,7 +2438,7 @@ async function buildFactsFromTiles(user, entityId, picks, alignDaysBefore = fals
     try {
       const data = await runLookerQuery('/queries/run/json_detail', body, undefined, false);
       if (!data?.data?.length) continue;
-      out.push({ title: tile.title || '(untitled)', visType: tile.vis?.type, context: tile.aiContext || '', fields: data.fields, rows: data.data, filters: body.filters || {}, dashboardId: def.id, suiteId: m.suiteId, setName: m.setName, dashTitle: def.title, pinned: false });
+      out.push({ title: tile.title || '(untitled)', visType: tile.vis?.type, context: tile.aiContext || '', fields: data.fields, rows: data.data, pivots: data.pivots || [], filters: body.filters || {}, dashboardId: def.id, suiteId: m.suiteId, setName: m.setName, dashTitle: def.title, pinned: false });
     } catch { /* skip tile on error */ }
   }
   return { tiles: out, catalogue };
