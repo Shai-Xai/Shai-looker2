@@ -58,11 +58,33 @@ function optionFor(tile, fact, palette) {
   const dimName = dims[0].name;
   const cats = rows.map((r) => cellLabel(r[dimName]) || '—');
 
-  const pivots = fact.pivots || [];
+  // Pivot labels from the query meta (key → friendly label), but the KEYS we use
+  // are read straight from the data cells below — so this works even if the
+  // reported pivot keys don't line up exactly with the cell keys.
+  const pivotLabels = {};
+  for (const p of (fact.pivots || [])) pivotLabels[p.key] = p.data ? Object.values(p.data).join(' / ') : p.key;
+  // Inspect a measure's first non-null cell to see whether it's pivoted. A flat
+  // cell has value/rendered directly; a pivoted cell is keyed by pivot value
+  // (each holding its own {value,rendered}). Returns the pivot keys, or null.
+  const pivotKeysOf = (mName) => {
+    const sample = rows.find((r) => r[mName] != null)?.[mName];
+    if (!sample || typeof sample !== 'object') return null;
+    if ('value' in sample || 'rendered' in sample) return null; // flat measure
+    const keys = Object.keys(sample);
+    return keys.length ? keys : null;
+  };
+  const valAt = (row, mName, key) => {
+    const cell = row?.[mName];
+    if (cell == null) return null;
+    const c = key == null ? cell : cell[key];
+    if (c == null) return null;
+    return num(c.value != null ? c.value : c.rendered);
+  };
 
   if (isPie) {
     const m = meas[0];
-    const data = rows.map((r, i) => ({ name: cats[i], value: measureValue(r, m.name, pivots[0]?.key) ?? 0 }));
+    const key = (pivotKeysOf(m.name) || [null])[0];
+    const data = rows.map((r, i) => ({ name: cats[i], value: valAt(r, m.name, key) ?? 0 }));
     return {
       animation: false, color: palette,
       series: [{ type: 'pie', radius: /donut/.test(t) ? ['42%', '70%'] : '70%', center: ['50%', '54%'],
@@ -83,22 +105,24 @@ function optionFor(tile, fact, palette) {
     symbol: 'circle', symbolSize: 5,
     connectNulls: true,
   });
-  // Pivoted data (e.g. a YoY tile pivoted on event/year) → one series per
-  // pivot × measure, mirroring the dashboard; otherwise one series per measure.
+  // One series per measure × (detected) pivot key. Pivot keys come from the cells
+  // themselves, so a YoY tile (pivoted on event/year) renders a line per event.
+  const multiMeas = meas.length > 1;
   let series = [];
-  if (pivots.length > 0) {
-    const multi = meas.length > 1;
-    pivots.forEach((pivot, pi) => {
-      const plabel = pivot.data ? Object.values(pivot.data).join(' / ') : pivot.key;
-      meas.forEach((m, mi) => {
-        const name = multi ? `${plabel} — ${m.label || m.name}` : plabel;
-        series.push(mkSeries(name, rows.map((r) => measureValue(r, m.name, pivot.key)), pi * meas.length + mi));
-      });
-    });
-  } else {
-    series = meas.slice(0, 5).map((m, idx) => mkSeries(m.label || m.name, rows.map((r) => measureValue(r, m.name, null)), idx));
+  for (const m of meas) {
+    const keys = pivotKeysOf(m.name);
+    if (keys) {
+      for (const key of keys) {
+        const label = pivotLabels[key] || key;
+        series.push(mkSeries(multiMeas ? `${label} — ${m.label || m.name}` : label, rows.map((r) => valAt(r, m.name, key)), series.length));
+      }
+    } else {
+      series.push(mkSeries(m.label || m.name, rows.map((r) => valAt(r, m.name, null)), series.length));
+    }
   }
-  series = series.slice(0, 8); // keep an email thumbnail readable
+  // Drop series with no data; if nothing has data, bail (caller shows a metric).
+  series = series.filter((s) => s.data.some((v) => v != null)).slice(0, 8);
+  if (!series.length) return null;
   const hasLegend = series.length > 1;
   return {
     animation: false, color: palette,
@@ -118,7 +142,14 @@ function renderTilePng(tile, fact, branding = {}) {
     if (!isChartTile(tile, fact)) return null;
     const palette = [branding.brandColor || '#FF2D55', branding.secondaryColor || '#FF6B35', '#FFB020', '#06B6D4', '#7C3AED'];
     const option = optionFor(tile, fact, palette);
-    if (!option) return null;
+    if (!option) {
+      // Couldn't extract any series — log the data shape so the real json_detail
+      // structure is visible (otherwise an empty chart is a black box).
+      const sampleRow = (fact.rows || [])[0] || {};
+      const sampleCell = fact.fields?.measures?.[0]?.name ? sampleRow[fact.fields.measures[0].name] : undefined;
+      console.warn(`[tileimg] no series for "${fact.title}": fields=${JSON.stringify({ d: (fact.fields?.dimensions || []).map((x) => x.name), m: (fact.fields?.measures || []).map((x) => x.name), tc: (fact.fields?.table_calculations || []).map((x) => x.name) })} pivots=${JSON.stringify((fact.pivots || []).map((p) => p.key))} sampleCell=${JSON.stringify(sampleCell)?.slice(0, 300)}`);
+      return null;
+    }
     const W = 520, H = 300;
     const chart = echarts.init(null, null, { renderer: 'svg', ssr: true, width: W, height: H });
     chart.setOption(option);
