@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Business Case for Pulse OS — AM Efficiency</title>
+<meta name="description" content="Account-management efficiency gains: current Looker/Howler/manual workflows vs Pulse, Howler's Experience OS.">
+<style>
+:root{
+  --brand:#FF385C;
+  --g:linear-gradient(120deg,#FF385C 0%,#FF6B35 45%,#7C3AED 100%);
+  --ink:#1d1d1f; --muted:#6e6e73; --line:#ececef; --bg:#fff; --soft:#f7f7f9;
+  --green:#0a8f4e; --red:#c2334d; --card-shadow:0 18px 50px -28px rgba(20,20,40,.45);
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+html{scroll-behavior:smooth;}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  color:var(--ink);background:var(--bg);line-height:1.6;-webkit-font-smoothing:antialiased;
+}
+
+/* sticky header */
+header.bar{
+  position:sticky;top:0;z-index:30;background:rgba(255,255,255,.82);
+  backdrop-filter:saturate(180%) blur(14px);border-bottom:1px solid var(--line);
+}
+.bar .wrap{display:flex;align-items:center;gap:14px;max-width:1040px;margin:0 auto;padding:13px 24px;}
+.mark{width:34px;height:34px;border-radius:10px;background:var(--g);box-shadow:0 8px 22px -8px rgba(124,58,237,.55);flex:none;}
+.bar b{font-size:16px;font-weight:800;letter-spacing:-.02em;}
+.bar .sub{font-size:12px;color:var(--muted);font-weight:600;}
+.bar .cta{margin-left:auto;font-size:13px;font-weight:700;color:#fff;background:var(--ink);padding:9px 16px;border-radius:999px;text-decoration:none;}
+.bar .cta:hover{background:#000;}
+
+main{max-width:1040px;margin:0 auto;padding:0 24px 120px;}
+
+/* hero */
+.hero{padding:64px 0 30px;}
+.eyebrow{display:inline-flex;align-items:center;gap:8px;font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--brand);margin-bottom:18px;}
+.eyebrow .dot{width:8px;height:8px;border-radius:50%;background:var(--brand);}
+.hero h1{font-size:clamp(34px,6vw,60px);line-height:1.04;letter-spacing:-.035em;font-weight:850;margin:0 0 18px;max-width:14ch;}
+.hero h1 .grad{background:var(--g);-webkit-background-clip:text;background-clip:text;color:transparent;}
+.hero p.lead{font-size:clamp(17px,2.3vw,21px);color:#3a3a3e;max-width:62ch;}
+.hero p.lead strong{font-weight:760;}
+
+/* big metric band */
+.band{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:20px;overflow:hidden;margin:44px 0 10px;box-shadow:var(--card-shadow);}
+.band .cell{background:#fff;padding:24px 22px;text-align:center;}
+.band .big{font-size:clamp(28px,4vw,40px);font-weight:850;letter-spacing:-.03em;line-height:1;background:var(--g);-webkit-background-clip:text;background-clip:text;color:transparent;}
+.band .lbl{font-size:12.5px;color:var(--muted);font-weight:650;margin-top:9px;line-height:1.35;}
+@media(max-width:760px){.band{grid-template-columns:repeat(2,1fr);}}
+
+/* section heads */
+.sec{margin:78px 0 0;}
+.sec > h2{font-size:clamp(24px,3.4vw,34px);letter-spacing:-.025em;font-weight:830;margin:0 0 6px;}
+.sec > .sub{color:var(--muted);font-size:15px;font-weight:550;margin-bottom:26px;}
+.sec-rule{height:1px;background:var(--line);margin:0 0 30px;}
+
+/* comparison cards */
+.cards{display:grid;gap:18px;}
+.card{border:1px solid var(--line);border-radius:18px;overflow:hidden;background:#fff;box-shadow:0 10px 34px -26px rgba(20,20,40,.4);}
+.card .head{display:flex;align-items:center;gap:14px;padding:18px 22px;border-bottom:1px solid var(--line);}
+.card .num{flex:none;width:30px;height:30px;border-radius:9px;background:var(--soft);display:grid;place-items:center;font-weight:800;font-size:14px;color:var(--brand);}
+.card .head h3{font-size:17.5px;font-weight:780;letter-spacing:-.01em;}
+.card .save{margin-left:auto;font-size:12.5px;font-weight:800;color:var(--green);background:rgba(10,143,78,.09);padding:6px 12px;border-radius:999px;white-space:nowrap;}
+.card .save.new{color:#7C3AED;background:rgba(124,58,237,.10);}
+.vs{display:grid;grid-template-columns:1fr 46px 1fr;align-items:stretch;}
+.vs .side{padding:20px 22px;}
+.vs .side .tag{font-size:11px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;margin-bottom:8px;}
+.vs .now .tag{color:var(--red);}
+.vs .new .tag{color:var(--green);}
+.vs .time{font-size:25px;font-weight:840;letter-spacing:-.02em;line-height:1.1;}
+.vs .now .time{color:#88323f;}
+.vs .new .time{color:var(--green);}
+.vs .desc{font-size:13.5px;color:var(--muted);margin-top:7px;line-height:1.45;}
+.vs .arrow{display:grid;place-items:center;background:var(--soft);color:var(--muted);font-size:18px;}
+.vs .new{background:linear-gradient(180deg,rgba(10,143,78,.05),rgba(124,58,237,.04));}
+@media(max-width:640px){
+  .vs{grid-template-columns:1fr;}
+  .vs .arrow{padding:6px;}
+  .vs .arrow span{transform:rotate(90deg);display:inline-block;}
+}
+
+/* cumulative table */
+.tbl{border:1px solid var(--line);border-radius:18px;overflow:hidden;box-shadow:var(--card-shadow);}
+table{width:100%;border-collapse:collapse;font-size:14.5px;}
+thead th{background:var(--ink);color:#fff;text-align:left;padding:14px 18px;font-weight:700;font-size:13px;letter-spacing:.02em;}
+thead th:not(:first-child){text-align:right;}
+tbody td{padding:13px 18px;border-top:1px solid var(--line);}
+tbody td:not(:first-child){text-align:right;font-variant-numeric:tabular-nums;}
+tbody tr:nth-child(even){background:var(--soft);}
+tbody td.now{color:#88323f;font-weight:600;}
+tbody td.new{color:var(--green);font-weight:700;}
+tbody td.saved{color:var(--brand);font-weight:750;}
+tfoot td{padding:16px 18px;border-top:2px solid var(--ink);font-weight:850;font-size:16px;}
+tfoot td:not(:first-child){text-align:right;}
+tfoot .new{color:var(--green);}
+tfoot .saved{background:var(--g);-webkit-background-clip:text;background-clip:text;color:transparent;}
+
+/* takeaway / shifts */
+.shifts{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;}
+.shift{border:1px solid var(--line);border-radius:16px;padding:22px;background:#fff;}
+.shift .k{font-size:13px;font-weight:800;color:var(--brand);letter-spacing:.02em;margin-bottom:10px;}
+.shift h4{font-size:16px;font-weight:780;margin-bottom:7px;letter-spacing:-.01em;}
+.shift p{font-size:13.5px;color:var(--muted);line-height:1.5;}
+@media(max-width:760px){.shifts{grid-template-columns:1fr;}}
+
+/* capacity callout */
+.callout{margin-top:30px;border-radius:22px;padding:40px 34px;background:var(--g);color:#fff;box-shadow:0 26px 70px -34px rgba(124,58,237,.7);}
+.callout .x{font-size:clamp(40px,7vw,68px);font-weight:880;letter-spacing:-.03em;line-height:.95;}
+.callout h3{font-size:clamp(20px,3vw,26px);font-weight:800;margin:6px 0 14px;letter-spacing:-.02em;}
+.callout p{font-size:15.5px;max-width:58ch;opacity:.96;line-height:1.55;}
+.callout ul{margin:16px 0 0;padding-left:0;list-style:none;display:grid;gap:9px;}
+.callout li{font-size:14.5px;padding-left:26px;position:relative;}
+.callout li::before{content:"→";position:absolute;left:0;font-weight:800;}
+
+/* footnote */
+.note{margin-top:54px;padding-top:22px;border-top:1px solid var(--line);font-size:12.5px;color:var(--muted);line-height:1.55;}
+.note a{color:var(--brand);text-decoration:none;}
+.print{margin-top:14px;}
+.print button{font:inherit;font-size:13px;font-weight:700;color:var(--ink);background:#fff;border:1px solid var(--line);padding:9px 16px;border-radius:999px;cursor:pointer;}
+.print button:hover{border-color:var(--brand);color:var(--brand);}
+
+@media print{
+  header.bar,.bar .cta,.print{display:none;}
+  body{font-size:12px;}
+  .card,.tbl,.band,.callout{box-shadow:none;}
+  .callout{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  .sec{margin-top:34px;break-inside:avoid;}
+  .card{break-inside:avoid;}
+}
+</style>
+</head>
+<body>
+<header class="bar">
+  <div class="wrap">
+    <div class="mark"></div>
+    <div>
+      <b>Pulse OS</b>
+      <div class="sub">The Business Case · AM Efficiency</div>
+    </div>
+    <a class="cta" href="#cumulative">See the numbers</a>
+  </div>
+</header>
+
+<main>
+  <!-- HERO -->
+  <section class="hero">
+    <span class="eyebrow"><span class="dot"></span> Back-office efficiency · Account management</span>
+    <h1>Hours of manual work, done in <span class="grad">minutes.</span></h1>
+    <p class="lead">
+      Today, servicing a client means hopping between <strong>Looker, Howler and manual exports</strong>
+      into Meta &amp; TikTok. Every handoff costs an account manager time — and several tasks are
+      <strong>simply impossible</strong> without a workaround. <strong>Pulse OS</strong> collapses it all into
+      one governed platform, where the audiences and campaigns run on the same data that powers the dashboards.
+    </p>
+
+    <div class="band">
+      <div class="cell"><div class="big">~96%</div><div class="lbl">less AM time per client servicing cycle</div></div>
+      <div class="cell"><div class="big">5h → 10m</div><div class="lbl">to onboard a full new client</div></div>
+      <div class="cell"><div class="big">4</div><div class="lbl">tasks go from <em>impossible</em> to standard</div></div>
+      <div class="cell"><div class="big">~20×</div><div class="lbl">effective AM capacity on these tasks</div></div>
+    </div>
+  </section>
+
+  <!-- TASK BY TASK -->
+  <section class="sec" id="tasks">
+    <h2>Task by task: current vs Pulse OS</h2>
+    <div class="sub">The same eight recurring jobs an account manager does every week.</div>
+    <div class="sec-rule"></div>
+
+    <div class="cards">
+
+      <div class="card">
+        <div class="head"><div class="num">1</div><h3>Onboarding a new full client</h3><span class="save">saves ~4h 50m</span></div>
+        <div class="vs">
+          <div class="side now"><div class="tag">Current</div><div class="time">~5 hours</div><div class="desc">Manual config across systems; dashboard, filters and tiles rebuilt by hand.</div></div>
+          <div class="arrow"><span>→</span></div>
+          <div class="side new"><div class="tag">Pulse OS</div><div class="time">~10 min</div><div class="desc">Guided setup — dashboard and analytics provisioned programmatically per client.</div></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="head"><div class="num">2</div><h3>Custom branding per client</h3><span class="save new">new capability</span></div>
+        <div class="vs">
+          <div class="side now"><div class="tag">Current — Looker</div><div class="time">Impossible</div><div class="desc">No per-client branding — every client sees a generic dashboard.</div></div>
+          <div class="arrow"><span>→</span></div>
+          <div class="side new"><div class="tag">Pulse OS</div><div class="time">~2 min</div><div class="desc">White-label branding per client, out of the box. A revenue &amp; retention lever, not just a time save.</div></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="head"><div class="num">3</div><h3>Building an abandoned-cart campaign</h3><span class="save">saves ~1h 50m</span></div>
+        <div class="vs">
+          <div class="side now"><div class="tag">Current</div><div class="time">~2 hours</div><div class="desc">Logic implemented in a third platform, then set up and tested.</div></div>
+          <div class="arrow"><span>→</span></div>
+          <div class="side new"><div class="tag">Pulse OS</div><div class="time">~10 min</div><div class="desc">Native engagement engine — one recipe of <em>segment + trigger + journey + goal</em>. No integration, no test cycle.</div></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="head"><div class="num">4</div><h3>Reporting on abandoned-cart performance</h3><span class="save">saves ~1h each time</span></div>
+        <div class="vs">
+          <div class="side now"><div class="tag">Current</div><div class="time">~1 hour</div><div class="desc">Data pulled and assembled manually for every report.</div></div>
+          <div class="arrow"><span>→</span></div>
+          <div class="side new"><div class="tag">Pulse OS</div><div class="time">Live</div><div class="desc">Reporting is live and continuous the moment the campaign runs.</div></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="head"><div class="num">5</div><h3>Daily insight email</h3><span class="save new">insight upgrade</span></div>
+        <div class="vs">
+          <div class="side now"><div class="tag">Current — Looker</div><div class="time">No insights</div><div class="desc">A wall of raw numbers the client must interpret themselves.</div></div>
+          <div class="arrow"><span>→</span></div>
+          <div class="side new"><div class="tag">Pulse OS</div><div class="time">Insights + actions</div><div class="desc">The Owl reads the data and tells the client <em>what changed and what to do about it</em>.</div></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="head"><div class="num">6</div><h3>Emailing a custom list / segment</h3><span class="save">saves 25–55 min</span></div>
+        <div class="vs">
+          <div class="side now"><div class="tag">Current — Howler</div><div class="time">30–60 min</div><div class="desc">Not possible natively — export from Howler, import elsewhere, rebuild the list.</div></div>
+          <div class="arrow"><span>→</span></div>
+          <div class="side new"><div class="tag">Pulse OS</div><div class="time">~5 min · live</div><div class="desc">Build the segment inside Pulse; it goes live immediately. Zero export/import errors.</div></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="head"><div class="num">7</div><h3>Custom audiences → Meta / TikTok</h3><span class="save new">new capability</span></div>
+        <div class="vs">
+          <div class="side now"><div class="tag">Current — Howler</div><div class="time">≥1 hour</div><div class="desc">No native path — the AM manually assembles and uploads each audience.</div></div>
+          <div class="arrow"><span>→</span></div>
+          <div class="side new"><div class="tag">Pulse OS</div><div class="time">Live</div><div class="desc">Audiences sync live to Meta &amp; TikTok — unlocking paid-social retargeting we couldn't offer before.</div></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="head"><div class="num">8</div><h3>Reporting across multiple email campaigns</h3><span class="save">saves 1–2 hours</span></div>
+        <div class="vs">
+          <div class="side now"><div class="tag">Current — Howler</div><div class="time">1–2 hours</div><div class="desc">Not possible natively — the AM pulls and stitches each campaign's numbers by hand.</div></div>
+          <div class="arrow"><span>→</span></div>
+          <div class="side new"><div class="tag">Pulse OS</div><div class="time">Automatic</div><div class="desc">Consolidated multi-campaign reporting, generated automatically. No manual errors.</div></div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- CUMULATIVE -->
+  <section class="sec" id="cumulative">
+    <h2>The cumulative picture</h2>
+    <div class="sub">One typical servicing cycle for a single client — every job above, added up.</div>
+    <div class="sec-rule"></div>
+    <div class="tbl">
+      <table>
+        <thead><tr><th>Task</th><th>Current</th><th>Pulse OS</th><th>Saved</th></tr></thead>
+        <tbody>
+          <tr><td>New client setup</td><td class="now">5h 00m</td><td class="new">10m</td><td class="saved">4h 50m</td></tr>
+          <tr><td>Branding</td><td class="now">impossible</td><td class="new">2m</td><td class="saved">new capability</td></tr>
+          <tr><td>Abandoned-cart build</td><td class="now">2h 00m</td><td class="new">10m</td><td class="saved">1h 50m</td></tr>
+          <tr><td>Abandoned-cart reporting</td><td class="now">1h 00m</td><td class="new">live</td><td class="saved">1h 00m</td></tr>
+          <tr><td>Custom-list email</td><td class="now">0h 45m</td><td class="new">5m</td><td class="saved">0h 40m</td></tr>
+          <tr><td>Audience → Meta/TikTok</td><td class="now">1h 00m</td><td class="new">live</td><td class="saved">1h 00m</td></tr>
+          <tr><td>Multi-campaign report</td><td class="now">1h 30m</td><td class="new">auto</td><td class="saved">1h 30m</td></tr>
+        </tbody>
+        <tfoot><tr><td>Total per cycle</td><td>~11h 15m</td><td class="new">~27m</td><td class="saved">~10h 48m</td></tr></tfoot>
+      </table>
+    </div>
+  </section>
+
+  <!-- SHIFTS -->
+  <section class="sec" id="why">
+    <h2>Why this matters beyond the clock</h2>
+    <div class="sub">The time savings are the headline — but three structural shifts matter just as much.</div>
+    <div class="sec-rule"></div>
+    <div class="shifts">
+      <div class="shift"><div class="k">01</div><h4>Impossible → standard</h4><p>Per-client branding, custom-list email, paid-social audience sync and multi-campaign reporting weren't slow before — they didn't exist. Pulse makes them one-click and repeatable.</p></div>
+      <div class="shift"><div class="k">02</div><h4>Reactive → proactive</h4><p>The daily email no longer just reports — it recommends actions. AMs move from data janitors to strategic advisors.</p></div>
+      <div class="shift"><div class="k">03</div><h4>Fragmented → unified</h4><p>Removing the Looker → Howler → export → Meta/TikTok handoffs removes the error surface entirely. Live segments, live reporting, no version drift.</p></div>
+    </div>
+  </section>
+
+  <!-- CAPACITY -->
+  <section class="sec" id="capacity">
+    <h2>The capacity argument</h2>
+    <div class="sub">What ~11 hours → ~30 minutes actually means for the business.</div>
+    <div class="sec-rule"></div>
+    <div class="callout">
+      <div class="x">~20×</div>
+      <h3>more AM capacity on these tasks</h3>
+      <p>If a full servicing cycle drops from ~11 hours to ~30 minutes, a single account manager's effective capacity on this work multiplies. In practice that means:</p>
+      <ul>
+        <li>Onboard more clients without hiring.</li>
+        <li>Reallocate AM time from manual assembly to client strategy and upsell.</li>
+        <li>Offer new paid services — branded dashboards, retargeting audiences, proactive insights — that were previously undeliverable.</li>
+      </ul>
+    </div>
+  </section>
+
+  <div class="note">
+    Figures are AM-estimated from current operational workflows and Pulse's demonstrated capabilities — intended to
+    illustrate order-of-magnitude gains rather than audited timings. For what Pulse does see
+    <a href="PRODUCT_OVERVIEW_SALES.md">PRODUCT_OVERVIEW_SALES.md</a>, for the vision
+    <a href="EXPERIENCE_OS_BRIEF.md">EXPERIENCE_OS_BRIEF.md</a>, and for the engagement layer
+    <a href="ENGAGEMENT_ENGINE.md">ENGAGEMENT_ENGINE.md</a>. Full source: <a href="VALUE_CASE.md">VALUE_CASE.md</a>.
+    <div class="print"><button onclick="window.print()">Print / Save as PDF</button></div>
+  </div>
+</main>
+</body>
+</html>
