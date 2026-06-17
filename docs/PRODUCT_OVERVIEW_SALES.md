@@ -237,6 +237,11 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-17** — **Digest feedback loop**: every digest is archived in-app, with
+  👍/👎/💬 feedback buttons in the email (no login), reply-to-the-Owl, and an in-app
+  archive to react to past digests. All feedback is AI-distilled into a per-client
+  "preferences" note that future digests **and** briefings honour — the digest gets
+  smarter the more it's used.
 - **2026-06-16** — Added **"The continuous comms loop"** section (live data →
   briefing/digest + suggested actions → campaigns → tracked results → next read),
   and called out the **installable web app (PWA) with push notifications** as the

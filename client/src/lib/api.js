@@ -99,6 +99,10 @@ export const api = {
       body: JSON.stringify(def),
     }).then(json),
   deleteDashboard: (id) => fetch(`/api/dashboards/${id}`, { method: 'DELETE' }),
+  // Digest archive + feedback (the knowledge-base loop)
+  myDigests: () => fetch('/api/my/digests').then(json),
+  myDigest: (id) => fetch(`/api/my/digests/${id}`).then(json),
+  myDigestFeedback: (id, body) => fetch(`/api/my/digests/${id}/feedback`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
   getFolderSettings: () => fetch('/api/dashboards/folder-settings').then(json),
   setFolderKeepImported: (folder, on) => fetch('/api/dashboards/folder/keep-imported', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folder, on }) }).then(json),
   importDashboard: (lookerDashboardId, title, folder, keepImportedFilters = false) =>
