@@ -619,7 +619,12 @@ function ProfileFooter({ user, isAdmin, activeEntityId, brand, onNavigate }) {
   const [open, setOpen] = useState(false);
   const entity = user?.entities?.[0];
   const name = isAdmin ? 'Howler · Admin' : (brand?.entityName || entity?.name || (user?.email || '').split('@')[0]);
-  const logo = brand?.entityLogo || entity?.logo || '';
+  // The footer identifies the LOGIN, not the active client (the top-left switcher
+  // shows the client). For an admin that's "Howler · Admin" — never a client's
+  // logo. Without this gate the logo falls back to user.entities[0].logo (the
+  // admin's FIRST linked client, e.g. Kappa), which bleeds the wrong brand in
+  // next to "Howler · Admin".
+  const logo = isAdmin ? '' : (brand?.entityLogo || entity?.logo || '');
   const initial = (name || '?').trim().charAt(0).toUpperCase();
   return (
     <div style={{ position: 'relative', borderTop: '1px solid var(--hairline)', padding: 8, flexShrink: 0 }}>
