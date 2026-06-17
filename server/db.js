@@ -328,8 +328,13 @@ function listDigestFeedback(entityId, { limit = 200, onlyUndistilled = false } =
     .map((r) => ({ id: r.id, entityId: r.entity_id, digestId: r.digest_id, source: r.source, email: r.email, kind: r.kind, comment: r.comment, distilled: !!r.distilled, createdAt: r.created_at }));
 }
 function feedbackForDigest(digestId) {
-  return db.prepare('SELECT kind, comment, source, email, created_at FROM digest_feedback WHERE digest_id=? ORDER BY created_at').all(digestId)
-    .map((r) => ({ kind: r.kind, comment: r.comment, source: r.source, email: r.email, createdAt: r.created_at }));
+  return db.prepare('SELECT id, kind, comment, source, email, created_at FROM digest_feedback WHERE digest_id=? ORDER BY created_at').all(digestId)
+    .map((r) => ({ id: r.id, kind: r.kind, comment: r.comment, source: r.source, email: r.email, createdAt: r.created_at }));
+}
+function getDigestFeedbackRow(id) { const r = db.prepare('SELECT * FROM digest_feedback WHERE id=?').get(id); return r && { id: r.id, entityId: r.entity_id, digestId: r.digest_id, email: r.email, kind: r.kind, comment: r.comment }; }
+// Edit a feedback comment — reset distilled so the change is reconsidered next pass.
+function updateDigestFeedback(id, comment) {
+  db.prepare('UPDATE digest_feedback SET comment=?, kind=?, distilled=0 WHERE id=?').run(String(comment || '').slice(0, 2000), 'comment', id);
 }
 function markDigestFeedbackDistilled(entityId) { db.prepare('UPDATE digest_feedback SET distilled=1 WHERE entity_id=? AND distilled=0').run(entityId); }
 // Per-client distilled "digest preferences" note (the knowledge base), in settings.
@@ -1200,6 +1205,7 @@ module.exports = {
   // digest history + feedback (knowledge-base loop)
   addDigestHistory, getDigestHistory, listDigestHistory,
   addDigestFeedback, listDigestFeedback, feedbackForDigest, markDigestFeedbackDistilled,
+  getDigestFeedbackRow, updateDigestFeedback,
   getDigestPrefs, setDigestPrefs,
   // share links
   createShareLink, getShareLink,

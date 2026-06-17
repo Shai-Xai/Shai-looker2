@@ -2756,6 +2756,16 @@ app.post('/api/my/digest-history/:entityId/:id/feedback', auth.requireAuth, (req
   saveDigestFeedback({ entityId: req.params.entityId, digestId: d.id, source: 'inapp', email: req.user.email, kind, comment: String(req.body?.comment || '') });
   res.json({ ok: true });
 });
+// Edit a feedback comment (own comments; admins may edit any) — re-feeds the loop.
+app.put('/api/my/digest-history/:entityId/:id/feedback/:fbId', auth.requireAuth, (req, res) => {
+  if (!canEntityReq(req, req.params.entityId)) return res.status(403).json({ error: 'Not allowed' });
+  const row = db.getDigestFeedbackRow(req.params.fbId);
+  if (!row || row.entityId !== req.params.entityId || row.digestId !== req.params.id) return res.status(404).json({ error: 'Not found' });
+  if (req.user.role !== 'admin' && (row.email || '') !== (req.user.email || '').toLowerCase()) return res.status(403).json({ error: 'Not your comment' });
+  db.updateDigestFeedback(req.params.fbId, String(req.body?.comment || ''));
+  maybeLearn(req.params.entityId);
+  res.json({ ok: true });
+});
 // Admin: review feedback + the learned preferences note (+ trigger a re-distil / edit).
 app.get('/api/admin/entities/:id/digest-feedback', auth.requireAdmin, (req, res) => {
   res.json({ feedback: db.listDigestFeedback(req.params.id, { limit: 200 }), prefs: db.getDigestPrefs(req.params.id) });

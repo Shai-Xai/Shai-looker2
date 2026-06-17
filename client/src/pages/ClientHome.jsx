@@ -7,6 +7,7 @@ import { vtNavigate } from '../lib/viewTransition.js';
 import AiMark from '../components/AiMark.jsx';
 import BriefingTuneModal from '../components/BriefingTuneModal.jsx';
 import OnboardingCard from '../components/OnboardingCard.jsx';
+import DigestHistory from '../components/DigestHistory.jsx';
 import { useProfile } from '../lib/profile.jsx';
 import OwlQuips from '../components/OwlQuips.jsx';
 import TileFrame from '../components/TileFrame.jsx';
@@ -156,6 +157,9 @@ export default function ClientHome() {
           )}
         </div>
       )}
+
+      {/* Past digests — react/comment to tune future ones. Hidden until any exist. */}
+      <DigestHistory entityId={homeEntityId} compact />
 
       {/* Messages from Howler — recent threads, surfaced on home. Handled ones
           can be dismissed (per-user; the inbox record is untouched). */}
