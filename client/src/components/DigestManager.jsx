@@ -61,6 +61,13 @@ export default function DigestManager({ entityId, scope = 'admin', logins = [] }
             {j.lastStatus && <div style={{ fontSize: 11, color: j.lastStatus.startsWith('ok') ? 'var(--success,#10b981)' : 'var(--muted)', marginTop: 2 }}>Last: {j.lastStatus}{j.lastRunAt ? ` (${fmt(j.lastRunAt)})` : ''}</div>}
           </div>
           <div style={{ display: 'flex', gap: 6, flexShrink: 0, flexWrap: 'wrap', ...(isMobile ? { borderTop: '1px solid var(--hairline)', paddingTop: 10 } : null) }}>
+            {(j.status === 'active' || j.status === 'paused') && (
+              <button
+                style={j.status === 'active' ? mini : { ...mini, color: 'var(--success,#10b981)' }}
+                title={j.status === 'active' ? 'Pause — stop sending until resumed' : 'Resume sending on schedule'}
+                onClick={() => A.update(j.id, { ...j, status: j.status === 'active' ? 'paused' : 'active' }).then(load).catch((e) => alert(e.message))}
+              >{j.status === 'active' ? '⏸ Pause' : '▶ Resume'}</button>
+            )}
             <button style={mini} onClick={() => A.test(j.id).then((r) => alert(r.to ? `Test sent to ${r.to}` : 'Sent')).catch((e) => alert(e.message))}>Test</button>
             <button style={mini} onClick={() => setEditing(j)}>Edit</button>
             <button style={mini} title="Duplicate as a new digest" onClick={() => setEditing({ ...j, id: undefined, status: 'paused', title: `${j.title || `${roleLabel(j.role)} digest`} (copy)` })}>Duplicate</button>
