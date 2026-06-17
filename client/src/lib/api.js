@@ -103,10 +103,10 @@ export const api = {
   getMyOnboarding: (entityId) => fetch(`/api/my/onboarding/${entityId}`).then(json),
   setMyOnboardingStep: (entityId, key, done) => fetch(`/api/my/onboarding/${entityId}/${key}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ done }) }).then(json),
   dismissMyOnboarding: (entityId) => fetch(`/api/my/onboarding/${entityId}/dismiss`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dismissed: true }) }).then(json),
-  // Digest archive + feedback (the knowledge-base loop)
-  myDigests: () => fetch('/api/my/digests').then(json),
-  myDigest: (id) => fetch(`/api/my/digests/${id}`).then(json),
-  myDigestFeedback: (id, body) => fetch(`/api/my/digests/${id}/feedback`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
+  // Digest archive + feedback (the knowledge-base loop) — entity-aware
+  myDigests: (entityId) => fetch(`/api/my/digest-history/${entityId}`).then(json),
+  myDigest: (entityId, id) => fetch(`/api/my/digest-history/${entityId}/${id}`).then(json),
+  myDigestFeedback: (entityId, id, body) => fetch(`/api/my/digest-history/${entityId}/${id}/feedback`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
   getFolderSettings: () => fetch('/api/dashboards/folder-settings').then(json),
   setFolderKeepImported: (folder, on) => fetch('/api/dashboards/folder/keep-imported', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folder, on }) }).then(json),
   importDashboard: (lookerDashboardId, title, folder, keepImportedFilters = false) =>

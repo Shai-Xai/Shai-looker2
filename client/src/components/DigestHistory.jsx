@@ -11,17 +11,17 @@ export default function DigestHistory({ entityId }) {
   const [sent, setSent] = useState('');
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => { setList(null); api.myDigests().then((r) => setList(r.digests || [])).catch(() => setList([])); }, [entityId]);
+  useEffect(() => { setList(null); if (!entityId) { setList([]); return; } api.myDigests(entityId).then((r) => setList(r.digests || [])).catch(() => setList([])); }, [entityId]);
 
   const open = (d) => {
     if (openId === d.id) { setOpenId(null); return; }
     setOpenId(d.id); setDetail(null); setComment(''); setSent('');
-    api.myDigest(d.id).then(setDetail).catch(() => setDetail({ error: true }));
+    api.myDigest(entityId, d.id).then(setDetail).catch(() => setDetail({ error: true }));
   };
   const react = async (kind) => {
     if (!openId || busy) return;
     setBusy(true);
-    try { await api.myDigestFeedback(openId, { kind, comment: kind === 'comment' ? comment : '' }); setSent(kind === 'comment' ? 'comment' : kind); if (kind === 'comment') setComment(''); }
+    try { await api.myDigestFeedback(entityId, openId, { kind, comment: kind === 'comment' ? comment : '' }); setSent(kind === 'comment' ? 'comment' : kind); if (kind === 'comment') setComment(''); }
     catch { /* ignore */ } finally { setBusy(false); }
   };
   const when = (iso) => { try { return new Date(iso).toLocaleString('en-ZA', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch { return ''; } };

@@ -286,14 +286,14 @@ function digestEmail({ branding, entityId, assetScope, content, roleLabel, custo
       <div style="margin-top:14px;">${narrative}</div>
       ${actionsBlock}
       <a href="${url}" style="display:inline-block;margin-top:20px;background:${esc(b.brandColor)};color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;border-radius:980px;padding:11px 22px;">Open Pulse →</a>
+      ${feedbackUrl ? `<div style="margin-top:20px;padding-top:16px;border-top:1px solid #ececf0;text-align:center;font-size:13px;color:#6e6e73;">
+        Was this digest useful?
+        <a href="${esc(feedbackUrl)}&amp;v=up" style="text-decoration:none;font-size:17px;margin:0 5px;">👍</a>
+        <a href="${esc(feedbackUrl)}&amp;v=down" style="text-decoration:none;font-size:17px;margin:0 5px;">👎</a>
+        <a href="${esc(feedbackUrl)}" style="color:${esc(b.brandColor)};text-decoration:none;font-weight:600;margin-left:6px;">💬 Add a comment</a>
+        <div style="font-size:11.5px;color:#a1a1a6;margin-top:6px;">…or just reply to this email — it reaches the team and tunes future digests.</div>
+      </div>` : ''}
     </div>
-    ${feedbackUrl ? `<div style="text-align:center;margin-top:16px;font-size:13px;color:#86868b;">
-      Was this useful?
-      <a href="${esc(feedbackUrl)}&amp;v=up" style="text-decoration:none;font-size:16px;margin:0 4px;">👍</a>
-      <a href="${esc(feedbackUrl)}&amp;v=down" style="text-decoration:none;font-size:16px;margin:0 4px;">👎</a>
-      <a href="${esc(feedbackUrl)}" style="color:${esc(b.brandColor)};text-decoration:none;font-weight:600;margin-left:6px;">💬 Add a comment</a>
-      <div style="font-size:11.5px;color:#a1a1a6;margin-top:6px;">…or just reply to this email — it reaches the team.</div>
-    </div>` : ''}
     <div style="font-size:11.5px;color:#86868b;margin-top:14px;line-height:1.5;white-space:pre-wrap;">${esc(b.footer)}</div>
     ${brandRow()}
   </div>

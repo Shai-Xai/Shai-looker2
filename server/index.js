@@ -2734,24 +2734,26 @@ app.post('/df/:token', (req, res) => {
   res.json({ ok: true });
 });
 
-// In-app digest archive + feedback (the home entity in context).
-app.get('/api/my/digests', auth.requireAuth, (req, res) => {
-  const entityId = homeEntityFor(req);
-  if (!entityId) return res.json({ digests: [] });
-  res.json({ digests: db.listDigestHistory(entityId, 60).map((d) => ({ id: d.id, role: d.roleLabel || d.role, subject: d.subject, headline: d.headline, createdAt: d.createdAt })) });
+// In-app digest archive + feedback. Entity-aware (works for an admin previewing a
+// client too) — distinct path so it never collides with the scheduler's
+// /api/my/digests/:entityId job routes.
+const canEntityReq = (req, entityId) => req.user.role === 'admin' || (req.user.entityIds || []).includes(entityId);
+app.get('/api/my/digest-history/:entityId', auth.requireAuth, (req, res) => {
+  if (!canEntityReq(req, req.params.entityId)) return res.status(403).json({ error: 'Not allowed' });
+  res.json({ digests: db.listDigestHistory(req.params.entityId, 60).map((d) => ({ id: d.id, role: d.roleLabel || d.role, subject: d.subject, headline: d.headline, createdAt: d.createdAt })) });
 });
-app.get('/api/my/digests/:id', auth.requireAuth, (req, res) => {
-  const entityId = homeEntityFor(req);
+app.get('/api/my/digest-history/:entityId/:id', auth.requireAuth, (req, res) => {
+  if (!canEntityReq(req, req.params.entityId)) return res.status(403).json({ error: 'Not allowed' });
   const d = db.getDigestHistory(req.params.id);
-  if (!d || d.entityId !== entityId) return res.status(404).json({ error: 'Not found' });
+  if (!d || d.entityId !== req.params.entityId) return res.status(404).json({ error: 'Not found' });
   res.json({ ...d, feedback: db.feedbackForDigest(d.id) });
 });
-app.post('/api/my/digests/:id/feedback', auth.requireAuth, (req, res) => {
-  const entityId = homeEntityFor(req);
+app.post('/api/my/digest-history/:entityId/:id/feedback', auth.requireAuth, (req, res) => {
+  if (!canEntityReq(req, req.params.entityId)) return res.status(403).json({ error: 'Not allowed' });
   const d = db.getDigestHistory(req.params.id);
-  if (!d || d.entityId !== entityId) return res.status(404).json({ error: 'Not found' });
+  if (!d || d.entityId !== req.params.entityId) return res.status(404).json({ error: 'Not found' });
   const kind = ['up', 'down'].includes(req.body?.kind) ? req.body.kind : 'comment';
-  saveDigestFeedback({ entityId, digestId: d.id, source: 'inapp', email: req.user.email, kind, comment: String(req.body?.comment || '') });
+  saveDigestFeedback({ entityId: req.params.entityId, digestId: d.id, source: 'inapp', email: req.user.email, kind, comment: String(req.body?.comment || '') });
   res.json({ ok: true });
 });
 // Admin: review feedback + the learned preferences note (+ trigger a re-distil / edit).
