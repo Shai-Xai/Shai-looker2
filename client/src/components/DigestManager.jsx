@@ -23,6 +23,7 @@ export default function DigestManager({ entityId, scope = 'admin', logins = [] }
     testSend: (b) => (isAdmin ? api.testSendDigest({ ...b, entityId }) : api.testSendMyDigest(entityId, b)),
     testSendSms: (b) => (isAdmin ? api.testSendDigestSms({ ...b, entityId }) : api.testSendMyDigestSms(entityId, b)),
     tiles: () => (isAdmin ? api.getDigestTiles(entityId) : api.getMyDigestTiles(entityId)),
+    followed: () => (isAdmin ? api.getFollowedTiles(entityId) : api.getMyFollowedTiles(entityId)),
   };
   const [data, setData] = useState(null);
   const [editing, setEditing] = useState(null); // job object or 'new'
@@ -92,7 +93,11 @@ function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }
     priorityDashboards: job?.priorityDashboards || [],
     includeFollowed: job?.includeFollowed || false,
     followedVisual: job?.followedVisual || false,
+    followedTiles: job?.followedTiles || [], // chosen subset; [] = all followed tiles
   }));
+  // The client's followed tiles available to pick from (loaded when the option
+  // is switched on). [] selection = include them all.
+  const [followedList, setFollowedList] = useState(null);
   const [preview, setPreview] = useState({ html: '', sample: false });
   const [previewBusy, setPreviewBusy] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -128,7 +133,26 @@ function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }
     clearTimeout(debounce.current);
     debounce.current = setTimeout(() => refreshPreview(false), 350);
     return () => clearTimeout(debounce.current);
-  }, [f.role, f.roleFocus, f.focusMode, f.customMessage, f.contentMode, JSON.stringify(f.tiles), f.includeFollowed, f.followedVisual]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [f.role, f.roleFocus, f.focusMode, f.customMessage, f.contentMode, JSON.stringify(f.tiles), f.includeFollowed, f.followedVisual, JSON.stringify(f.followedTiles)]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Load the client's followed tiles once the option is switched on.
+  useEffect(() => {
+    if (!f.includeFollowed || followedList) return;
+    A.followed().then((r) => setFollowedList(r.tiles || [])).catch(() => setFollowedList([]));
+  }, [f.includeFollowed]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Per-tile selection. [] = all selected (the default). Toggling collapses back
+  // to [] when every tile ends up selected, so "all" stays the simple default.
+  const sameTile = (a, b) => a.dashboardId === b.dashboardId && a.tileId === b.tileId;
+  const tileSelected = (t) => f.followedTiles.length === 0 || f.followedTiles.some((x) => sameTile(x, t));
+  const toggleFollowedTile = (t) => {
+    const all = (followedList || []).map((x) => ({ dashboardId: x.dashboardId, tileId: x.tileId }));
+    const cur = f.followedTiles.length === 0 ? all : f.followedTiles;
+    const has = cur.some((x) => sameTile(x, t));
+    let next = has ? cur.filter((x) => !sameTile(x, t)) : [...cur, { dashboardId: t.dashboardId, tileId: t.tileId }];
+    if (next.length === 0 || next.length === all.length) next = []; // all selected (or none) → "all"
+    set('followedTiles', next);
+  };
 
   async function save() {
     setBusy(true);
@@ -193,10 +217,31 @@ function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }
               <div style={hintS}>Adds the tiles this client follows (the ⭐ “always read this” tiles) to the digest{f.contentMode === 'curated' ? ' — on top of the curated picks above.' : ' — guaranteed into the analyst’s facts.'}</div>
               {f.includeFollowed && (
                 <div style={{ marginTop: 8 }}>
-                  <Toggle on={f.followedVisual} onClick={() => set('followedVisual', !f.followedVisual)}>
-                    📊 {f.followedVisual ? 'Showing as charts & metrics' : 'Show as charts & metrics'}
-                  </Toggle>
-                  <div style={hintS}>When on, each followed tile is rendered into the email — chart tiles as a graph image, single-value tiles as a metric chip.</div>
+                  {/* Pick which followed tiles to include — there may be several. */}
+                  {followedList == null ? (
+                    <div style={{ ...hintS, marginTop: 0 }}>Loading followed tiles…</div>
+                  ) : followedList.length === 0 ? (
+                    <div style={{ ...hintS, marginTop: 0 }}>This client isn’t following any tiles yet. Open a dashboard tile’s ⋯ menu and choose “Follow” to make it available here.</div>
+                  ) : (
+                    <div style={{ border: '1px solid var(--hairline)', borderRadius: 8, padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>{f.followedTiles.length === 0 ? `All ${followedList.length} followed tile${followedList.length === 1 ? '' : 's'} included` : `${f.followedTiles.length} of ${followedList.length} selected`}</div>
+                      {followedList.map((t) => (
+                        <label key={`${t.dashboardId}|${t.tileId}`} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 2px', cursor: 'pointer', fontSize: 13 }}>
+                          <input type="checkbox" checked={tileSelected(t)} onChange={() => toggleFollowedTile(t)} />
+                          <span style={{ flex: 1, minWidth: 0 }}>
+                            <span style={{ fontWeight: 600 }}>{t.title}</span>
+                            <span style={{ color: 'var(--muted)', fontSize: 11.5 }}> · {t.setName ? `${t.setName} → ` : ''}{t.dashTitle}</span>
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  <div style={{ marginTop: 8 }}>
+                    <Toggle on={f.followedVisual} onClick={() => set('followedVisual', !f.followedVisual)}>
+                      📊 {f.followedVisual ? 'Showing as charts & metrics' : 'Show as charts & metrics'}
+                    </Toggle>
+                    <div style={hintS}>When on, each followed tile is rendered into the email — chart tiles as a graph image, single-value tiles as a metric chip.</div>
+                  </div>
                 </div>
               )}
             </div>

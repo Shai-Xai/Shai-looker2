@@ -58,6 +58,7 @@ function mount(app, { db, auth, mailer, messaging, push, generateContent, roleLe
     if (!cols.includes('priority_dashboards')) sql.exec("ALTER TABLE scheduled_jobs ADD COLUMN priority_dashboards TEXT NOT NULL DEFAULT '[]'"); // dashboards always swept into AI-mode facts
     if (!cols.includes('include_followed')) sql.exec("ALTER TABLE scheduled_jobs ADD COLUMN include_followed INTEGER NOT NULL DEFAULT 0"); // pull the client's followed tiles into the digest (both modes)
     if (!cols.includes('followed_visual')) sql.exec("ALTER TABLE scheduled_jobs ADD COLUMN followed_visual INTEGER NOT NULL DEFAULT 0"); // render followed tiles as charts/metric chips in the email
+    if (!cols.includes('followed_tiles')) sql.exec("ALTER TABLE scheduled_jobs ADD COLUMN followed_tiles TEXT NOT NULL DEFAULT '[]'"); // chosen subset of followed tiles ([] = all)
   } catch (e) { console.error('[scheduler] column migration skipped:', e.message); }
 
   // ── timezone-aware schedule maths ──
@@ -101,6 +102,7 @@ function mount(app, { db, auth, mailer, messaging, push, generateContent, roleLe
     priorityDashboards: JSON.parse(r.priority_dashboards || '[]'),
     includeFollowed: r.include_followed === 1,
     followedVisual: r.followed_visual === 1,
+    followedTiles: JSON.parse(r.followed_tiles || '[]'),
     cadence: r.cadence, timeOfDay: r.time_of_day, weekday: r.weekday, runAt: r.run_at, timezone: r.timezone,
     status: r.status, lastRunAt: r.last_run_at, lastStatus: r.last_status, nextRunAt: r.next_run_at,
     createdBy: r.created_by, createdAt: r.created_at, updatedAt: r.updated_at,
@@ -128,6 +130,7 @@ function mount(app, { db, auth, mailer, messaging, push, generateContent, roleLe
       priorityDashboards: Array.isArray(body.priorityDashboards) ? [...new Set(body.priorityDashboards.map((d) => String(d)).filter(Boolean))].slice(0, 20) : [],
       includeFollowed: body.includeFollowed ? 1 : 0,
       followedVisual: body.followedVisual ? 1 : 0,
+      followedTiles: Array.isArray(body.followedTiles) ? body.followedTiles.filter((t) => t && t.dashboardId && t.tileId).slice(0, 40).map((t) => ({ dashboardId: String(t.dashboardId), tileId: String(t.tileId) })) : [],
       cadence,
       timeOfDay: /^\d{1,2}:\d{2}$/.test(body.timeOfDay || '') ? body.timeOfDay : '07:00',
       weekday: Number.isInteger(body.weekday) && body.weekday >= 0 && body.weekday <= 6 ? body.weekday : 1,
@@ -142,13 +145,13 @@ function mount(app, { db, auth, mailer, messaging, push, generateContent, roleLe
     const next = j.status === 'active' ? computeNextRun(j) : null;
     const nextIso = next ? next.toISOString() : (j.status === 'active' && j.cadence === 'once' && j.runAt ? new Date(j.runAt).toISOString() : null);
     if (id) {
-      sql.prepare(`UPDATE scheduled_jobs SET title=?, role=?, role_focus=?, focus_mode=?, custom_message=?, content_mode=?, tiles=?, recipients=?, channel=?, sms_recipients=?, align_days_before=?, priority_dashboards=?, include_followed=?, followed_visual=?, cadence=?, time_of_day=?, weekday=?, run_at=?, timezone=?, status=?, next_run_at=?, updated_at=? WHERE id=?`)
-        .run(j.title, j.role, j.roleFocus, j.focusMode, j.customMessage, j.contentMode, JSON.stringify(j.tiles), JSON.stringify(j.recipients), j.channel, JSON.stringify(j.smsRecipients), j.alignDaysBefore, JSON.stringify(j.priorityDashboards), j.includeFollowed, j.followedVisual, j.cadence, j.timeOfDay, j.weekday, j.runAt, j.timezone, j.status, nextIso, ts, id);
+      sql.prepare(`UPDATE scheduled_jobs SET title=?, role=?, role_focus=?, focus_mode=?, custom_message=?, content_mode=?, tiles=?, recipients=?, channel=?, sms_recipients=?, align_days_before=?, priority_dashboards=?, include_followed=?, followed_visual=?, followed_tiles=?, cadence=?, time_of_day=?, weekday=?, run_at=?, timezone=?, status=?, next_run_at=?, updated_at=? WHERE id=?`)
+        .run(j.title, j.role, j.roleFocus, j.focusMode, j.customMessage, j.contentMode, JSON.stringify(j.tiles), JSON.stringify(j.recipients), j.channel, JSON.stringify(j.smsRecipients), j.alignDaysBefore, JSON.stringify(j.priorityDashboards), j.includeFollowed, j.followedVisual, JSON.stringify(j.followedTiles), j.cadence, j.timeOfDay, j.weekday, j.runAt, j.timezone, j.status, nextIso, ts, id);
       return getJob(id);
     }
     const nid = uuid();
-    sql.prepare(`INSERT INTO scheduled_jobs (id, entity_id, type, title, role, role_focus, focus_mode, custom_message, content_mode, tiles, recipients, channel, sms_recipients, align_days_before, priority_dashboards, include_followed, followed_visual, cadence, time_of_day, weekday, run_at, timezone, status, next_run_at, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-      .run(nid, j.entityId, 'digest', j.title, j.role, j.roleFocus, j.focusMode, j.customMessage, j.contentMode, JSON.stringify(j.tiles), JSON.stringify(j.recipients), j.channel, JSON.stringify(j.smsRecipients), j.alignDaysBefore, JSON.stringify(j.priorityDashboards), j.includeFollowed, j.followedVisual, j.cadence, j.timeOfDay, j.weekday, j.runAt, j.timezone, j.status, nextIso, createdBy || '', ts, ts);
+    sql.prepare(`INSERT INTO scheduled_jobs (id, entity_id, type, title, role, role_focus, focus_mode, custom_message, content_mode, tiles, recipients, channel, sms_recipients, align_days_before, priority_dashboards, include_followed, followed_visual, followed_tiles, cadence, time_of_day, weekday, run_at, timezone, status, next_run_at, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(nid, j.entityId, 'digest', j.title, j.role, j.roleFocus, j.focusMode, j.customMessage, j.contentMode, JSON.stringify(j.tiles), JSON.stringify(j.recipients), j.channel, JSON.stringify(j.smsRecipients), j.alignDaysBefore, JSON.stringify(j.priorityDashboards), j.includeFollowed, j.followedVisual, JSON.stringify(j.followedTiles), j.cadence, j.timeOfDay, j.weekday, j.runAt, j.timezone, j.status, nextIso, createdBy || '', ts, ts);
     return getJob(nid);
   }
 
@@ -156,7 +159,7 @@ function mount(app, { db, auth, mailer, messaging, push, generateContent, roleLe
   // Generate the structured digest content (the one expensive AI call).
   // `debug` asks generateContent to attach the fact tiles it read (preview only).
   async function buildContent(job, recipientEmail, { debug = false } = {}) {
-    return generateContent({ entityId: job.entityId, role: job.role, roleFocus: job.roleFocus, focusMode: job.focusMode, contentMode: job.contentMode, tiles: job.tiles, alignDaysBefore: !!job.alignDaysBefore, priorityDashboards: job.priorityDashboards || [], includeFollowed: !!job.includeFollowed, followedVisual: !!job.followedVisual, recipientEmail, debug });
+    return generateContent({ entityId: job.entityId, role: job.role, roleFocus: job.roleFocus, focusMode: job.focusMode, contentMode: job.contentMode, tiles: job.tiles, alignDaysBefore: !!job.alignDaysBefore, priorityDashboards: job.priorityDashboards || [], includeFollowed: !!job.includeFollowed, followedVisual: !!job.followedVisual, followedTiles: job.followedTiles || [], recipientEmail, debug });
   }
   // Render the email for already-generated content (cheap — no AI). A per-recipient
   // feedbackUrl embeds 👍/👎/comment links back into Pulse.

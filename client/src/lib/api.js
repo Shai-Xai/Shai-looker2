@@ -248,6 +248,8 @@ export const api = {
   testSendMyDigest: (entityId, b) => fetch(`/api/my/digests/${entityId}/test-send`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   testSendMyDigestSms: (entityId, b) => fetch(`/api/my/digests/${entityId}/test-send-sms`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   getDigestTiles: (entityId) => fetch(`/api/admin/entities/${entityId}/digest-tiles`).then(json),
+  getFollowedTiles: (entityId) => fetch(`/api/admin/entities/${entityId}/followed-tiles`).then(json),
+  getMyFollowedTiles: (entityId) => fetch(`/api/my/followed-tiles/${entityId}`).then(json),
   getEntityTheme: (entityId) => fetch(`/api/theme/${entityId}`).then(json),
 
   // Action Engine — campaigns (one set of endpoints; server enforces entity access)

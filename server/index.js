@@ -2446,7 +2446,7 @@ async function buildFactsFromTiles(user, entityId, picks, alignDaysBefore = fals
 
 // Produce a role-lensed digest's structured content (links resolved). Throws if
 // AI/Looker isn't configured or there's no data — callers decide how to surface.
-async function buildDigestContent({ entityId, role, roleFocus, focusMode, contentMode, tiles, alignDaysBefore = false, priorityDashboards = [], includeFollowed = false, followedVisual = false, recipientEmail, debug = false }) {
+async function buildDigestContent({ entityId, role, roleFocus, focusMode, contentMode, tiles, alignDaysBefore = false, priorityDashboards = [], includeFollowed = false, followedVisual = false, followedTiles = [], recipientEmail, debug = false }) {
   const apiKey = anthropicKeyForEntity(entityId);
   if (!insights.isConfigured(apiKey)) throw new Error('AI is not configured for this client');
   const lens = ROLE_LENSES[role] || ROLE_LENSES.exec;
@@ -2464,9 +2464,14 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
   // "always read this". Pulled in on top of whatever the mode produced, so they
   // ride along in BOTH AI-led and curated digests. They're added to the facts the
   // analyst reads, and (when followedVisual) rendered as charts/metric chips.
+  // `followedTiles` (optional) narrows to a chosen subset; empty = all follows.
   let followedFacts = [];
   if (includeFollowed) {
-    const followPicks = db.listMarks({ userId: user.id, entityId, kind: 'follow' }).map((m) => ({ dashboardId: m.dashboardId, tileId: m.tileId }));
+    let followPicks = db.listMarks({ userId: '', entityId, kind: 'follow' }).map((m) => ({ dashboardId: m.dashboardId, tileId: m.tileId }));
+    if (Array.isArray(followedTiles) && followedTiles.length) {
+      const want = new Set(followedTiles.map((t) => `${t.dashboardId}|${t.tileId}`));
+      followPicks = followPicks.filter((p) => want.has(`${p.dashboardId}|${p.tileId}`));
+    }
     if (followPicks.length) {
       try { followedFacts = (await buildFactsFromTiles(user, entityId, followPicks, alignDaysBefore)).tiles || []; }
       catch (e) { console.error('[digest] followed facts failed', e.message); }
@@ -2564,6 +2569,33 @@ app.get('/api/admin/entities/:id/digest-tiles', auth.requireAdmin, (req, res) =>
 app.get('/api/my/digest-tiles/:entityId', auth.requireAuth, (req, res) => {
   if (!(req.user.entityIds || []).includes(req.params.entityId)) return res.status(403).json({ error: 'Not allowed' });
   res.json(digestTileCatalogue(req.params.entityId));
+});
+
+// The entity's FOLLOWED tiles (the client-level "always read this" marks),
+// resolved to titles for the digest editor's per-tile selection. Entity-scoped
+// only (userId:'' returns just the 'entity' marks) — so the list a digest offers
+// is the client's, not whoever happens to be configuring it.
+function followedTilesFor(entityId) {
+  const { catalogue } = clientCatalogue(entityId);
+  const meta = Object.fromEntries(catalogue.map((c) => [c.dashboardId, c]));
+  const out = [];
+  for (const m of db.listMarks({ userId: '', entityId, kind: 'follow' })) {
+    const def = store.get(m.dashboardId);
+    const c = meta[m.dashboardId];
+    if (!def || !c) continue; // only tiles still in this client's catalogue
+    const tile = [...(def.tiles || []), ...((def.carousels || []).flatMap((x) => x.tiles || []))].find((t) => t.id === m.tileId);
+    if (!tile || tile.type === 'text') continue;
+    out.push({ dashboardId: m.dashboardId, tileId: m.tileId, title: tile.title || '(untitled)', visType: tile.vis?.type || '', dashTitle: c.title, setName: c.setName, suiteName: c.suiteName });
+  }
+  return { tiles: out };
+}
+app.get('/api/admin/entities/:id/followed-tiles', auth.requireAdmin, (req, res) => {
+  if (!db.getEntity(req.params.id)) return res.status(404).json({ error: 'Not found' });
+  res.json(followedTilesFor(req.params.id));
+});
+app.get('/api/my/followed-tiles/:entityId', auth.requireAuth, (req, res) => {
+  if (!(req.user.entityIds || []).includes(req.params.entityId)) return res.status(403).json({ error: 'Not allowed' });
+  res.json(followedTilesFor(req.params.entityId));
 });
 
 // Home message-card dismissals: per-user, so a handled message can be cleared
