@@ -14,8 +14,9 @@
 ## 1. Executive Summary
 
 Today, almost every recurring account-management task is performed across
-**three or more disconnected systems** (Looker, Howler, plus manual exports into
-Meta / TikTok). Each handoff costs an Account Manager (AM) time, introduces
+**three or more disconnected systems** (Looker, Howler, multiple third-party
+mailing platforms — each bolted on for a different function — plus manual exports
+into Meta / TikTok). Each handoff costs an Account Manager (AM) time, introduces
 error, and — in several cases — is simply **not possible at all** without a
 manual workaround.
 
