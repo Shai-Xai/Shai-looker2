@@ -99,6 +99,10 @@ export const api = {
       body: JSON.stringify(def),
     }).then(json),
   deleteDashboard: (id) => fetch(`/api/dashboards/${id}`, { method: 'DELETE' }),
+  // Onboarding checklist
+  getMyOnboarding: (entityId) => fetch(`/api/my/onboarding/${entityId}`).then(json),
+  setMyOnboardingStep: (entityId, key, done) => fetch(`/api/my/onboarding/${entityId}/${key}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ done }) }).then(json),
+  dismissMyOnboarding: (entityId) => fetch(`/api/my/onboarding/${entityId}/dismiss`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dismissed: true }) }).then(json),
   // Digest archive + feedback (the knowledge-base loop)
   myDigests: () => fetch('/api/my/digests').then(json),
   myDigest: (id) => fetch(`/api/my/digests/${id}`).then(json),

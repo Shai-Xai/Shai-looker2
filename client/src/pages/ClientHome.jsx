@@ -6,6 +6,8 @@ import { useIsMobile } from '../lib/useIsMobile.js';
 import { vtNavigate } from '../lib/viewTransition.js';
 import AiMark from '../components/AiMark.jsx';
 import BriefingTuneModal from '../components/BriefingTuneModal.jsx';
+import OnboardingCard from '../components/OnboardingCard.jsx';
+import { useProfile } from '../lib/profile.jsx';
 import OwlQuips from '../components/OwlQuips.jsx';
 import TileFrame from '../components/TileFrame.jsx';
 import { ScopeProvider } from '../lib/ScopeContext.jsx';
@@ -22,7 +24,9 @@ export default function ClientHome() {
   const isMobile = useIsMobile();
   const { user, isAdmin } = useAuth();
   const { can } = useAccess(); // role gates the campaign affordances on home
+  const { activeEntityId } = useProfile();
   const { previewEntityId } = useOutletContext() || {};
+  const homeEntityId = previewEntityId || activeEntityId || (user?.entityIds || [])[0] || '';
   const [suites, setSuites] = useState([]);
   const [snap, setSnap] = useState(null);
   const [brief, setBrief] = useState(null); // null=loading, {available:false}=hidden
@@ -104,6 +108,9 @@ export default function ClientHome() {
           </p>
         </div>
       </div>
+
+      {/* Getting-started checklist — hides once complete or dismissed */}
+      <div style={{ marginTop: 16 }}><OnboardingCard entityId={homeEntityId} /></div>
 
       {/* The Owl's briefing */}
       {brief?.available !== false && (

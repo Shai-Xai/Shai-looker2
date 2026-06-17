@@ -237,6 +237,10 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-17** — **Onboarding checklist**: a light-touch "Getting started" card on
+  the client home — steps auto-tick as they're done (branding saved, team invited,
+  first segment/campaign, digest scheduled…) with deep-link CTAs + manual ticks;
+  hides once complete/dismissed. Admins can read any client's setup progress.
 - **2026-06-17** — **Digest feedback loop**: every digest is archived in-app, with
   👍/👎/💬 feedback buttons in the email (no login), reply-to-the-Owl, and an in-app
   archive to react to past digests. All feedback is AI-distilled into a per-client

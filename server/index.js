@@ -2769,6 +2769,9 @@ app.put('/api/admin/entities/:id/digest-prefs', auth.requireAdmin, (req, res) =>
 
 require('./scheduler').mount(app, { db, auth, mailer, messaging, push, generateContent: buildDigestContent, roleLenses: ROLE_LENSES, recordDigest: recordDigestHistory, feedbackUrl: digestFeedbackUrl, replyTo: digestReplyTo });
 
+// Onboarding checklist — light-touch "Getting started" guide (auto-detect + manual).
+require('./onboarding').mount(app, { db, auth });
+
 // Action Engine — suggested actions → executed automations (v1: email campaigns,
 // e.g. abandoned cart). Audience = a dashboard tile's query, run with the SAME
 // organiser scoping as the dashboards themselves. Remove this line + actions.js
