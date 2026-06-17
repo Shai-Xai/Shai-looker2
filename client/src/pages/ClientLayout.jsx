@@ -9,6 +9,7 @@ import { vtNavigate } from '../lib/viewTransition.js';
 import { useSheetDrag } from '../lib/useSheetDrag.js';
 import { applyBrand, resetBrand } from '../lib/brand.js';
 import { useAccess, PERMS } from '../lib/access.js';
+import { FEATURES } from '../lib/features.js';
 
 // Persistent client shell: a left sidebar tree of Suites → Sets → Dashboards,
 // with the selected dashboard rendered in the main area.
@@ -332,6 +333,7 @@ export default function ClientLayout() {
               {inbox.unread > 0 && <span style={{ ...countChip, background: 'var(--brand)', color: '#fff' }}>{inbox.unread}</span>}
             </button>
           )}
+          {FEATURES.ask && (
           <button
             className={`nav-row${onAsk ? ' active' : ''}`}
             style={{ ...rowBtn, fontWeight: onAsk ? 600 : 500 }}
@@ -340,6 +342,7 @@ export default function ClientLayout() {
             <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>✨</span>
             <span style={ellip}>Ask</span>
           </button>
+          )}
           {can(PERMS.DIGESTS_MANAGE) && (
           <button
             ref={onDigests ? activeRef : null}
@@ -481,6 +484,7 @@ export default function ClientLayout() {
                       {inbox.unread > 0 && <span style={{ ...countChip, background: 'var(--brand)', color: '#fff' }}>{inbox.unread}</span>}
                     </button>
                   )}
+                  {FEATURES.ask && (
                   <button
                     className={`nav-row${onAsk ? ' active' : ''}`}
                     style={{ ...mRowSuite, fontWeight: onAsk ? 700 : 500 }}
@@ -489,6 +493,7 @@ export default function ClientLayout() {
                     <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>✨</span>
                     <span style={ellip}>Ask</span>
                   </button>
+                  )}
                   {can(PERMS.DIGESTS_MANAGE) && (
                   <button
                     className={`nav-row${onDigests ? ' active' : ''}`}
