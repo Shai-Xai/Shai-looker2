@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useMemo, useCallback } from 'react';
+import { createContext, useContext, useState, useMemo, useCallback, useEffect } from 'react';
 import { useAuth } from './auth.jsx';
 
 // The active "workspace" for the signed-in login. A client login moves between
@@ -11,7 +11,7 @@ const KEY = 'howler_active_profile';
 const MODE_KEY = 'howler_active_mode'; // admins only: 'console' | 'client'
 
 export function ProfileProvider({ children }) {
-  const { user, isAdmin } = useAuth();
+  const { user, isAdmin, refresh } = useAuth();
   const entities = user?.entities || [];
   const [activeId, setActiveId] = useState(() => localStorage.getItem(KEY) || null);
   // Admins default to the console; clients are always in client mode.
@@ -28,18 +28,35 @@ export function ProfileProvider({ children }) {
   const active = useMemo(() => entities.find((e) => e.id === activeEntityId) || null, [entities, activeEntityId]);
 
   // Act as a client (a client login switching profile, or an admin entering a
-  // client experience).
+  // client experience). Re-pull /auth/me so the new profile's role/permissions
+  // are fresh — a role change made elsewhere applies without a re-login.
   const setProfile = useCallback((id) => {
     localStorage.setItem(KEY, id);
     localStorage.setItem(MODE_KEY, 'client');
     setActiveId(id);
     setMode('client');
-  }, []);
+    refresh?.();
+  }, [refresh]);
   // Admins: return to the admin console.
   const enterConsole = useCallback(() => {
     localStorage.setItem(MODE_KEY, 'console');
     setMode('console');
-  }, []);
+    refresh?.();
+  }, [refresh]);
+
+  // Refresh permissions when the tab regains focus (throttled), so role/access
+  // changes made in another session take effect without logging out.
+  useEffect(() => {
+    let last = Date.now();
+    const maybeRefresh = () => {
+      if (document.visibilityState !== 'visible') return;
+      const now = Date.now();
+      if (now - last > 30000) { last = now; refresh?.(); }
+    };
+    window.addEventListener('focus', maybeRefresh);
+    document.addEventListener('visibilitychange', maybeRefresh);
+    return () => { window.removeEventListener('focus', maybeRefresh); document.removeEventListener('visibilitychange', maybeRefresh); };
+  }, [refresh]);
 
   const value = useMemo(
     () => ({ entities, activeEntityId, active, mode: effectiveMode, isAdmin, setProfile, enterConsole }),
