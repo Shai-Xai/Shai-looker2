@@ -146,6 +146,8 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
         const items = [];
         if (a.config?.campaignMode === 'sequence' && a.status === 'auto') items.push({ label: '🪜 Journey', onClick: () => setJourney(a) });
         if (a.status === 'auto') items.push({ label: '⏸ Pause', onClick: () => api.pauseAction(entityId, a.id).then(load) });
+        if (a.status === 'scheduled') items.push({ label: '✖ Cancel schedule', onClick: () => { if (confirm('Cancel the scheduled send? It moves back to draft.')) api.pauseAction(entityId, a.id).then(load); } });
+        if (a.status === 'running') items.push({ label: '⛔ Stop sending', danger: true, onClick: () => { if (confirm('Stop this send now? It halts within a few seconds — already-sent emails can’t be recalled.')) api.pauseAction(entityId, a.id).then(load); } });
         items.push({ label: '⧉ Duplicate', onClick: () => api.duplicateAction(entityId, a.id).then((r) => { load(); setEditing(r.action); }).catch((e) => alert(e.message)) });
         if (a.status !== 'running') items.push({ label: '🗑 Delete', danger: true, onClick: () => { if (confirm('Delete this campaign?')) api.deleteAction(entityId, a.id).then(load); } });
         return (

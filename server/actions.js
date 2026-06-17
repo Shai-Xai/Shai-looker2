@@ -820,7 +820,19 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
     const wantsSms = a.config.channel !== 'email';
     const results = { sent: 0, failed: 0, clicks: a.results.clicks || 0, total: a.audience.length, startedAt: now(), emailSent: a.results.emailSent || 0, smsSent: a.results.smsSent || 0 };
     saveResults(a.id, results);
+    let processed = 0;
     for (const recipient of a.audience) {
+      // Kill switch: re-read the live status every 20 recipients so a pause/delete
+      // takes effect mid-blast (within ~2.5s) instead of running to completion.
+      if (processed > 0 && processed % 20 === 0) {
+        const live = getAction(a.id);
+        if (!live || live.status !== 'running') {
+          results.finishedAt = now(); saveResults(a.id, results);
+          console.log(`[actions] campaign ${a.id} STOPPED mid-send (status now ${live ? live.status : 'deleted'}) after ${results.sent} sent`);
+          return;
+        }
+      }
+      processed += 1;
       // Per recipient: try each channel they qualify for. Reached on ≥1 channel
       // counts as sent; only count failed if every attempted channel failed.
       // We also track per-channel delivered counts so the report can compute an
@@ -1218,13 +1230,17 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
   if (schedTimer.unref) schedTimer.unref();
   setTimeout(() => processScheduled().catch(() => {}), 20000);
 
-  // Pause a recurring automation (back to draft; the check stops).
+  // Stop a campaign — works for an automation/drip (auto), a scheduled send, OR a
+  // once-off blast already in flight (running). The send loops re-check status, so
+  // a 'running' campaign halts mid-blast within ~20 recipients; auto/scheduled stop
+  // before the next tick fires. Returns the resulting status.
   app.post('/api/actions/:entityId/:id/pause', auth.requireAuth, auth.requirePermission('campaigns.approve'), (req, res) => {
     if (!guard(req, res, req.params.entityId)) return;
     const a = getAction(req.params.id);
-    if (!a || a.entityId !== req.params.entityId || a.status !== 'auto') return res.status(400).json({ error: 'Not an active automation' });
-    setStatus(a.id, 'draft');
-    res.json({ ok: true });
+    if (!a || a.entityId !== req.params.entityId) return res.status(404).json({ error: 'Not found' });
+    if (a.status === 'auto' || a.status === 'scheduled') { setStatus(a.id, 'draft'); return res.json({ ok: true, status: 'draft' }); }
+    if (a.status === 'running') { setStatus(a.id, 'paused'); return res.json({ ok: true, status: 'paused' }); } // the in-flight loop sees this and stops
+    return res.status(400).json({ error: `Nothing to stop — this campaign is ${a.status}.` });
   });
 
   // ── Approval workflow ──
@@ -1641,7 +1657,12 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
       const sup = suppressed(a.entityId);
       const due = sql.prepare("SELECT * FROM action_enrollments WHERE action_id=? AND status='active' AND next_at <= ?").all(a.id, now());
       let sent = 0; let converted = 0; let emailSent = 0; let smsSent = 0;
+      let n2 = 0;
       for (const e of due) {
+        // Kill switch: if the sequence is paused mid-batch, stop sending now
+        // (re-checked every 20) rather than draining the whole due list.
+        if (n2 > 0 && n2 % 20 === 0 && getAction(a.id)?.status !== 'auto') break;
+        n2 += 1;
         // Conversion / suppression: gone from the abandoned list = bought (or
         // expired); unsubscribed = removed. Either way, stop the journey.
         if (!reachable.has(e.email)) { sql.prepare("UPDATE action_enrollments SET status='converted', updated_at=? WHERE action_id=? AND email=?").run(now(), a.id, e.email); converted += 1; continue; }
