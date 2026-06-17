@@ -2784,6 +2784,9 @@ require('./scheduler').mount(app, { db, auth, mailer, messaging, push, generateC
 // Onboarding checklist — light-touch "Getting started" guide (auto-detect + manual).
 require('./onboarding').mount(app, { db, auth });
 
+// Campaign email templates — reusable email content, applied when building a campaign.
+require('./campaignTemplates').mount(app, { db, auth });
+
 // Action Engine — suggested actions → executed automations (v1: email campaigns,
 // e.g. abandoned cart). Audience = a dashboard tile's query, run with the SAME
 // organiser scoping as the dashboards themselves. Remove this line + actions.js

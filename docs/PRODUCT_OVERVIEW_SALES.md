@@ -210,7 +210,7 @@ Use these to set direction, **not** to promise dates.
   (draft a campaign, remind an organiser…). The flagship.
 - **Portfolio / "all events" view** — roll up KPIs and audiences across a client's
   many events/profiles (today everything is per-event).
-- **Automations · Templates · Connections** tabs (shown as "SOON" in Engage).
+- **Automations · Connections** tabs (shown as "SOON" in Engage). *(Templates is now live — see §5.)*
 - **Event tasks + AM cockpit** — owners, due dates, readiness % across clients.
 - **Packages/tiers with feature gating**, **API-cost visibility per client**.
 - **WhatsApp** and **Howler app push** as message channels.
@@ -236,6 +236,10 @@ Use these to set direction, **not** to promise dates.
 
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
+
+- **2026-06-17** — **Email templates** (Engage → Templates ✅): save reusable email
+  content (subject + body or custom HTML + hero + CTA) with a live preview, then
+  "Start from a template" or "Save as template" right inside the campaign builder.
 
 - **2026-06-17** — **Onboarding checklist**: a light-touch "Getting started" card on
   the client home — steps auto-tick as they're done (branding saved, team invited,

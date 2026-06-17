@@ -108,6 +108,11 @@ export const api = {
   myDigest: (entityId, id) => fetch(`/api/my/digest-history/${entityId}/${id}`).then(json),
   myDigestFeedback: (entityId, id, body) => fetch(`/api/my/digest-history/${entityId}/${id}/feedback`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
   editDigestFeedback: (entityId, id, fbId, comment) => fetch(`/api/my/digest-history/${entityId}/${id}/feedback/${fbId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ comment }) }).then(json),
+  // Campaign email templates
+  listCampaignTemplates: (entityId) => fetch(`/api/campaign-templates/${entityId}`).then(json),
+  createCampaignTemplate: (entityId, b) => fetch(`/api/campaign-templates/${entityId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  updateCampaignTemplate: (entityId, id, b) => fetch(`/api/campaign-templates/${entityId}/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  deleteCampaignTemplate: (entityId, id) => fetch(`/api/campaign-templates/${entityId}/${id}`, { method: 'DELETE' }).then(json),
   getFolderSettings: () => fetch('/api/dashboards/folder-settings').then(json),
   setFolderKeepImported: (folder, on) => fetch('/api/dashboards/folder/keep-imported', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folder, on }) }).then(json),
   importDashboard: (lookerDashboardId, title, folder, keepImportedFilters = false) =>

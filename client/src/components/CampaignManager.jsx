@@ -357,6 +357,21 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
   const isMobile = useIsMobile();
   const [events, setEvents] = useState([]);
   useEffect(() => { api.listCampaignEvents(entityId).then((r) => setEvents(r.events || [])).catch(() => {}); }, [entityId]);
+  // Saved email templates — apply one as a starting point, or save current content.
+  const [templates, setTemplates] = useState([]);
+  const loadTemplates = () => api.listCampaignTemplates(entityId).then((r) => setTemplates(r.templates || [])).catch(() => {});
+  useEffect(() => { loadTemplates(); }, [entityId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const applyTemplate = (id) => {
+    const t = templates.find((x) => x.id === id);
+    if (!t) return;
+    setF((s) => ({ ...s, contentMode: t.contentMode || 'template', subject: t.subject || s.subject, body: t.body || s.body, customHtml: t.customHtml || s.customHtml, heroImage: t.heroImage || s.heroImage, ctaText: t.ctaText || s.ctaText }));
+  };
+  const saveAsTemplate = async () => {
+    const name = (window.prompt('Save this email as a template — name it:') || '').trim();
+    if (!name) return;
+    try { await api.createCampaignTemplate(entityId, { name, subject: f.subject, contentMode: f.contentMode, body: f.body, customHtml: f.customHtml, heroImage: f.heroImage, ctaText: f.ctaText }); await loadTemplates(); alert('Saved to Templates ✓'); }
+    catch (e) { alert('Could not save template: ' + e.message); }
+  };
   // Auto-select the event when there's exactly one and none is chosen yet — so
   // "Event (optional)" isn't left blank on a single-event client.
   useEffect(() => {
@@ -900,6 +915,16 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
           {!isSequence && hasEmail && (f.channel !== 'both' || emailOpen) && (
           <Field label="Content">
             {f.channel === 'both' && <div style={{ ...hintS, marginTop: 0, marginBottom: 6 }}>This is the email. The SMS will use the body text below (plus the link &amp; opt-out).</div>}
+            {/* Templates: start from a saved one, or save the current content. */}
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
+              {templates.length > 0 && (
+                <select style={{ ...input, flex: '1 1 200px' }} value="" onChange={(e) => { if (e.target.value) applyTemplate(e.target.value); }}>
+                  <option value="">📝 Start from a template…</option>
+                  {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+              )}
+              <button type="button" style={mini} onClick={saveAsTemplate} title="Save this email as a reusable template">💾 Save as template</button>
+            </div>
             <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
               <Toggle on={f.contentMode === 'template'} onClick={() => set('contentMode', 'template')}>Built template</Toggle>
               <Toggle on={f.contentMode === 'html'} onClick={() => set('contentMode', 'html')}>Custom HTML</Toggle>
@@ -1431,7 +1456,7 @@ function CampaignReport({ entityId, action, onClose }) {
 }
 
 // Hero image: upload (resized ≤1000px wide, data-URL) or paste a URL.
-function ImageField({ label, value, onChange }) {
+export function ImageField({ label, value, onChange }) {
   const ref = useRef(null);
   const onFile = (e) => {
     const file = e.target.files?.[0]; if (!file) return;
@@ -1467,7 +1492,7 @@ function ImageField({ label, value, onChange }) {
 }
 
 // Custom HTML: upload an .html file or paste/edit markup directly.
-function HtmlField({ value, onChange }) {
+export function HtmlField({ value, onChange }) {
   const ref = useRef(null);
   const onFile = (e) => {
     const file = e.target.files?.[0]; if (!file) return;
@@ -1596,7 +1621,7 @@ function StatusChip({ status }) {
 
 const fmt = (iso) => { try { return new Date(iso).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch { return ''; } };
 function Field({ label, children }) { return <div><div style={hintLbl}>{label}</div>{children}</div>; }
-function Toggle({ on, onClick, children }) {
+export function Toggle({ on, onClick, children }) {
   return <button type="button" onClick={onClick} style={{ flex: 1, padding: '8px 10px', borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', border: on ? '1.5px solid var(--brand)' : '1.5px solid var(--hairline)', background: on ? 'rgba(var(--brand-rgb), 0.08)' : 'transparent', color: on ? 'var(--brand)' : 'var(--text)' }}>{children}</button>;
 }
 // SMS length helper — GSM-7 is 160 chars (153/segment when multipart). The
