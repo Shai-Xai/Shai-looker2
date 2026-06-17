@@ -83,6 +83,8 @@ function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }
     channel: job?.channel || 'email', smsRecipients: (job?.smsRecipients || []).join(', '),
     alignDaysBefore: job?.alignDaysBefore || false,
     priorityDashboards: job?.priorityDashboards || [],
+    includeFollowed: job?.includeFollowed || false,
+    followedVisual: job?.followedVisual || false,
   }));
   const [preview, setPreview] = useState({ html: '', sample: false });
   const [previewBusy, setPreviewBusy] = useState(false);
@@ -99,6 +101,7 @@ function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }
     contentMode: f.contentMode, tiles: f.tiles, recipients: f.recipients.split(',').map((s) => s.trim()).filter(Boolean),
     channel: f.channel, smsRecipients: f.smsRecipients.split(/[\s,;]+/).map((s) => s.trim()).filter(Boolean),
     alignDaysBefore: f.alignDaysBefore, priorityDashboards: f.priorityDashboards,
+    includeFollowed: f.includeFollowed, followedVisual: f.followedVisual,
   });
 
   // Two preview paths: the debounced auto-preview renders the SAMPLE layout
@@ -118,7 +121,7 @@ function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }
     clearTimeout(debounce.current);
     debounce.current = setTimeout(() => refreshPreview(false), 350);
     return () => clearTimeout(debounce.current);
-  }, [f.role, f.roleFocus, f.focusMode, f.customMessage, f.contentMode, JSON.stringify(f.tiles)]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [f.role, f.roleFocus, f.focusMode, f.customMessage, f.contentMode, JSON.stringify(f.tiles), f.includeFollowed, f.followedVisual]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function save() {
     setBusy(true);
@@ -173,6 +176,23 @@ function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }
                 </div>
               </details>
             )}
+            {/* Followed tiles — works alongside both modes. Pulls in the tiles
+                this client follows ("always read this"), and can render them as
+                charts/metrics in the email. */}
+            <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--hairline)' }}>
+              <Toggle on={f.includeFollowed} onClick={() => set('includeFollowed', !f.includeFollowed)}>
+                📌 {f.includeFollowed ? 'Including followed tiles' : 'Include followed tiles'}
+              </Toggle>
+              <div style={hintS}>Adds the tiles this client follows (the ⭐ “always read this” tiles) to the digest{f.contentMode === 'curated' ? ' — on top of the curated picks above.' : ' — guaranteed into the analyst’s facts.'}</div>
+              {f.includeFollowed && (
+                <div style={{ marginTop: 8 }}>
+                  <Toggle on={f.followedVisual} onClick={() => set('followedVisual', !f.followedVisual)}>
+                    📊 {f.followedVisual ? 'Showing as charts & metrics' : 'Show as charts & metrics'}
+                  </Toggle>
+                  <div style={hintS}>When on, each followed tile is rendered into the email — chart tiles as a graph image, single-value tiles as a metric chip.</div>
+                </div>
+              )}
+            </div>
           </Field>
 
           <Field label="Event-aligned comparisons">

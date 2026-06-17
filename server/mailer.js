@@ -252,6 +252,15 @@ function digestEmail({ branding, entityId, assetScope, content, roleLabel, custo
   }
   const kpiTable = kpis.length ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:6px 0 4px;border-collapse:collapse;">${kpiHtml}</table>` : '';
 
+  // Chart images (e.g. followed tiles rendered server-side to PNG). Full-width,
+  // titled, linking to the dashboard. Each image already includes its own title,
+  // so we only add the link affordance below it.
+  const charts = (content.charts || []).filter((c) => c.imageUrl);
+  const chartsBlock = charts.length ? charts.map((c) => {
+    const img = `<img src="${esc(c.imageUrl)}" alt="${esc(c.title || '')}" width="100%" style="width:100%;max-width:520px;border:1px solid #ececf0;border-radius:12px;display:block;margin:0 auto;" />`;
+    return `<div style="margin:14px 0;">${c.href ? `<a href="${esc(c.href)}" style="text-decoration:none;">${img}</a>` : img}</div>`;
+  }).join('') : '';
+
   const narrative = (content.narrative || []).map((p) => `<p style="font-size:14px;line-height:1.6;color:#3a3a3c;margin:0 0 12px;">${mdBold(p)}</p>`).join('');
   const actions = (content.actions || []).filter((a) => a.text).map((a) => {
     const txt = `<span style="color:#111;font-weight:600;">${esc(a.text)}</span>`;
@@ -283,6 +292,7 @@ function digestEmail({ branding, entityId, assetScope, content, roleLabel, custo
       ${note}
       ${content.headline ? `<div style="font-size:18px;font-weight:800;color:#111;margin-bottom:14px;line-height:1.35;letter-spacing:-0.01em;">${mdBold(content.headline)}</div>` : ''}
       ${kpiTable}
+      ${chartsBlock}
       <div style="margin-top:14px;">${narrative}</div>
       ${actionsBlock}
       <a href="${url}" style="display:inline-block;margin-top:20px;background:${esc(b.brandColor)};color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;border-radius:980px;padding:11px 22px;">Open Pulse →</a>
@@ -303,6 +313,7 @@ function digestEmail({ branding, entityId, assetScope, content, roleLabel, custo
   if ((customMessage || '').trim()) textParts.push(customMessage.trim(), '');
   textParts.push(content.headline || '');
   for (const k of kpis) textParts.push(`• ${k.label}: ${k.value}${k.delta ? ` (${k.delta})` : ''}`);
+  for (const c of charts) textParts.push(`• ${c.title || 'Chart'}${c.href ? `: ${c.href}` : ''}`);
   textParts.push('', ...(content.narrative || []));
   if (content.actions?.length) { textParts.push('', 'Suggested actions:'); for (const a of content.actions) textParts.push(`- ${a.text}`); }
   textParts.push('', `Open Pulse: ${url}`, '', b.footer);

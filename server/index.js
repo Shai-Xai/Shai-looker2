@@ -1306,6 +1306,17 @@ app.get('/mail-assets/logo/:scope', (req, res) => {
   res.send(buf);
 });
 
+// Email-embedded images (e.g. digest tile charts) — served by unguessable token
+// so a sent digest's <img> keeps resolving. Public (it's an email asset); the
+// token is the capability. Cached long since the bytes never change.
+app.get('/mail-assets/img/:token', (req, res) => {
+  const a = db.getMailAsset(String(req.params.token || ''));
+  if (!a) return res.status(404).end();
+  res.set('Content-Type', a.mime || 'image/png');
+  res.set('Cache-Control', 'public, max-age=2592000, immutable');
+  res.send(Buffer.isBuffer(a.bytes) ? a.bytes : Buffer.from(a.bytes));
+});
+
 app.get('/api/admin/mail-template', auth.requireAdmin, (_req, res) =>
   res.json({ template: mailer.getPlatformTemplate(), defaults: mailer.DEFAULTS }));
 app.put('/api/admin/mail-template', auth.requireAdmin, (req, res) =>
@@ -2435,7 +2446,7 @@ async function buildFactsFromTiles(user, entityId, picks, alignDaysBefore = fals
 
 // Produce a role-lensed digest's structured content (links resolved). Throws if
 // AI/Looker isn't configured or there's no data — callers decide how to surface.
-async function buildDigestContent({ entityId, role, roleFocus, focusMode, contentMode, tiles, alignDaysBefore = false, priorityDashboards = [], recipientEmail, debug = false }) {
+async function buildDigestContent({ entityId, role, roleFocus, focusMode, contentMode, tiles, alignDaysBefore = false, priorityDashboards = [], includeFollowed = false, followedVisual = false, recipientEmail, debug = false }) {
   const apiKey = anthropicKeyForEntity(entityId);
   if (!insights.isConfigured(apiKey)) throw new Error('AI is not configured for this client');
   const lens = ROLE_LENSES[role] || ROLE_LENSES.exec;
@@ -2448,10 +2459,27 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
   const { tiles: factTiles, catalogue } = (contentMode === 'curated' && (tiles || []).length)
     ? await buildFactsFromTiles(user, entityId, tiles, alignDaysBefore)
     : await buildFacts(user, entityId, false, alignDaysBefore, priorityDashboards);
-  if (!factTiles.length) throw new Error('No tile data available to summarise');
+
+  // Followed tiles: the client's (entity-scoped) follows — the tiles they've said
+  // "always read this". Pulled in on top of whatever the mode produced, so they
+  // ride along in BOTH AI-led and curated digests. They're added to the facts the
+  // analyst reads, and (when followedVisual) rendered as charts/metric chips.
+  let followedFacts = [];
+  if (includeFollowed) {
+    const followPicks = db.listMarks({ userId: user.id, entityId, kind: 'follow' }).map((m) => ({ dashboardId: m.dashboardId, tileId: m.tileId }));
+    if (followPicks.length) {
+      try { followedFacts = (await buildFactsFromTiles(user, entityId, followPicks, alignDaysBefore)).tiles || []; }
+      catch (e) { console.error('[digest] followed facts failed', e.message); }
+    }
+  }
+  const factTilesAll = [...factTiles];
+  const seenSig = new Set(factTiles.map((t) => `${t.dashboardId}|${t.title}`));
+  for (const t of followedFacts) { const s = `${t.dashboardId}|${t.title}`; if (!seenSig.has(s)) { factTilesAll.push(t); seenSig.add(s); } }
+  if (!factTilesAll.length) throw new Error('No tile data available to summarise');
+
   const byId = Object.fromEntries(catalogue.map((c) => [c.dashboardId, c]));
   const instructions = [aiInstructionsFor(null), briefingInstructionsFor(user, entityId, clientCatalogue(entityId).suites)].filter(Boolean).join('\n\n');
-  const raw = await insights.digestBrief({ tiles: factTiles, roleLabel: lens.label, roleFocus: effectiveFocus, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), capabilities: ACTION_CAPABILITIES, today: todayLabel() });
+  const raw = await insights.digestBrief({ tiles: factTilesAll, roleLabel: lens.label, roleFocus: effectiveFocus, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), capabilities: ACTION_CAPABILITIES, today: todayLabel() });
   const href = (id) => { const c = id && byId[id]; return c ? `${mailer.baseUrl()}/suite/${c.suiteId}/d/${id}` : ''; };
   // A suggested action with an executable capability deep-links into the
   // pre-filled "Make it happen" campaign editor (recipe auto-resolves the
@@ -2466,10 +2494,37 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
     kpis: (raw.kpis || []).slice(0, 6).map((k) => ({ label: String(k.label || '').slice(0, 40), value: String(k.value || '').slice(0, 30), delta: String(k.delta || '').slice(0, 40), href: href(k.dashboardId) })).filter((k) => k.label && k.value),
     actions: (raw.actions || []).slice(0, 3).map((a) => ({ text: String(a.text || '').slice(0, 200), href: actionHref(a), action: CAPABILITY_KEYS.has(a.action) ? a.action : null })).filter((a) => a.text),
   };
+
+  // Render followed tiles as visuals: chart-type tiles become a PNG embedded in
+  // the email (stored as a mail asset, served by token); single-value/table tiles
+  // become a metric chip that leads the KPI strip. Best-effort — a tile that
+  // can't render just falls back to the metric (or is skipped).
+  if (followedVisual && followedFacts.length) {
+    const branding = mailer.resolveBranding(entityId);
+    const base = mailer.baseUrl();
+    let tileimg = null;
+    try { tileimg = require('./tileimg'); } catch (e) { console.error('[digest] tileimg load failed', e.message); }
+    const charts = []; const followKpis = [];
+    for (const ft of followedFacts) {
+      const tileShim = { title: ft.title, vis: { type: ft.visType } };
+      const png = tileimg ? tileimg.renderTilePng(tileShim, ft, branding) : null;
+      if (png) {
+        const token = crypto.randomUUID();
+        db.putMailAsset(token, 'image/png', png);
+        charts.push({ title: ft.title, imageUrl: `${base}/mail-assets/img/${token}`, href: href(ft.dashboardId) });
+      } else {
+        const v = factValueLabel(ft);
+        if (v && v !== '—') followKpis.push({ label: String(ft.title || '').slice(0, 40), value: String(v).slice(0, 30), delta: '', href: href(ft.dashboardId) });
+      }
+    }
+    if (charts.length) out.charts = charts.slice(0, 6);
+    if (followKpis.length) out.kpis = [...followKpis, ...out.kpis].slice(0, 9); // followed metrics lead the strip
+  }
+
   // Diagnostic: the exact tiles the analyst read + the value each returned under
   // the digest's scope — so a mismatch with the dashboard (wrong tile / missing
   // event lock) is visible at a glance. Only attached when explicitly requested.
-  if (debug) out.facts = factTiles.map((t) => ({ dashTitle: t.dashTitle, setName: t.setName, title: t.title, value: factValueLabel(t), suiteName: byId[t.dashboardId]?.suiteName || '', filters: t.filters || {} }));
+  if (debug) out.facts = factTilesAll.map((t) => ({ dashTitle: t.dashTitle, setName: t.setName, title: t.title, value: factValueLabel(t), suiteName: byId[t.dashboardId]?.suiteName || '', filters: t.filters || {} }));
   return out;
 }
 

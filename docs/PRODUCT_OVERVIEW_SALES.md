@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-06-16 · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-06-17 · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -82,6 +82,10 @@ know what changed and what to do."
   (exec / marketing / finance / ops), with headline KPIs, a short narrative and
   suggested actions.
 - Configurable cadence and focus; dates are anchored to the **send day**.
+- **Content modes:** *AI-led* (the analyst picks the story) or *curated* (pick the
+  exact tiles). Either way you can also **include followed tiles** — the tiles a
+  client has marked "always read this" — and optionally render them right in the
+  email: **chart tiles as a graph image, single-value tiles as a metric chip**.
 - **Dual-surface:** Howler can set these up for a client, and clients can manage
   their own.
 
@@ -237,6 +241,10 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-17** — **Digests can carry followed tiles** ✅: a digest (AI-led *or*
+  curated) can now **include the client's followed tiles**, and optionally render
+  them in the email — chart tiles as a **graph image** (rendered server-side),
+  single-value tiles as a **metric chip**. Set per digest in the editor.
 - **2026-06-17** — **Email templates** (Engage → Templates ✅): save reusable email
   content (subject + body or custom HTML + hero + CTA) with a live preview, then
   "Start from a template" or "Save as template" right inside the campaign builder.

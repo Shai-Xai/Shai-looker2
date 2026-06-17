@@ -407,6 +407,25 @@ function listMarks({ userId, entityId, kind }) {
 // ─── Settings (simple key/value) ──────────────────────────────────────────────
 db.exec(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '');`);
 
+// ─── Mail assets: rendered images embedded in emails (e.g. digest tile charts) ─
+// Stored as bytes + served by an unguessable token, so a digest's chart <img>
+// keeps resolving long after it was sent. Pruned by age on write.
+db.exec(`CREATE TABLE IF NOT EXISTS mail_assets (
+  token      TEXT PRIMARY KEY,
+  mime       TEXT NOT NULL DEFAULT 'image/png',
+  bytes      BLOB NOT NULL,
+  created_at TEXT NOT NULL
+);`);
+function putMailAsset(token, mime, bytes) {
+  db.prepare('INSERT OR REPLACE INTO mail_assets (token, mime, bytes, created_at) VALUES (?,?,?,?)').run(token, mime || 'image/png', bytes, now());
+  // Best-effort prune of assets older than 60 days.
+  try { db.prepare("DELETE FROM mail_assets WHERE created_at < ?").run(new Date(Date.now() - 60 * 864e5).toISOString()); } catch { /* ignore */ }
+}
+function getMailAsset(token) {
+  return db.prepare('SELECT token, mime, bytes FROM mail_assets WHERE token=?').get(token) || null;
+}
+
+
 // Saved dashboard filter views. scope='user' (owner=userId, personal) or
 // 'entity' (owner=entityId, the client default an admin sets). Resolution on
 // load: user view > entity default > the dashboard's own default_value.
@@ -1198,6 +1217,8 @@ module.exports = {
   recordView, viewProfile,
   // tile marks (pins + follows)
   setMark, listMarks,
+  // mail assets (email-embedded images)
+  putMailAsset, getMailAsset,
   // user prefs
   getUserPref, setUserPref,
   // briefing feedback
