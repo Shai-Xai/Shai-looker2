@@ -1213,6 +1213,8 @@ app.put('/api/admin/integrations', auth.requireAdmin, (req, res) => {
   if (re.apiKey) db.setSetting('resend_api_key', String(re.apiKey));
   if (re.clearApiKey) db.setSetting('resend_api_key', '');
   if (re.from !== undefined) db.setSetting('mail_from', String(re.from || '').trim());
+  // Global kill switch: '0' makes every outbound email a no-op (all clients).
+  if (re.enabled !== undefined) db.setSetting('mail_enabled', re.enabled ? '1' : '0');
   // Inventive (embedded AI analyst) — admin-only, platform-level.
   const inv = (req.body || {}).inventive || {};
   if (inv.apiKey) db.setSetting('inventive_api_key', String(inv.apiKey));

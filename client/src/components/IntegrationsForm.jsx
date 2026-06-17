@@ -152,6 +152,17 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
       {/* Resend (email) — platform-level only */}
       {showResend && (
         <Section title="✉️ Email (Resend)" collapsible={collapsible}>
+          {/* Emergency brake: instantly no-ops ALL outbound email (every client,
+              every campaign/digest/notification) without touching Resend keys. */}
+          <div style={{ border: `1.5px solid ${value?.resend?.enabled === false ? 'var(--error,#ef4444)' : 'var(--hairline)'}`, background: value?.resend?.enabled === false ? 'rgba(239,68,68,0.08)' : 'transparent', borderRadius: 10, padding: '10px 12px', marginBottom: 12 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>
+              <input type="checkbox" checked={value?.resend?.enabled === false} onChange={(e) => onSave({ resend: { enabled: !e.target.checked } })} />
+              ⏸ Pause ALL outbound email (emergency stop)
+            </label>
+            <div style={{ fontSize: 12, color: value?.resend?.enabled === false ? 'var(--error,#ef4444)' : 'var(--muted)', marginTop: 4 }}>
+              {value?.resend?.enabled === false ? '⛔ Email is OFF — nothing is being sent. Untick to resume.' : 'Takes effect immediately, across all clients. Already-sent emails can’t be recalled.'}
+            </div>
+          </div>
           <div style={note}>
             Powers outbound notifications — must-acknowledge messages and Howler replies email the client's logins with a link back into Pulse.
             Until your domain is verified in Resend, the default sender <code>onboarding@resend.dev</code> can only deliver to your own Resend account email.
