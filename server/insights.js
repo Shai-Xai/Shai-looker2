@@ -406,6 +406,37 @@ async function refineText({ text, purpose, instructions, apiKey }) {
   return (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
 }
 
+// Summarise raw git commits into clean, customer-readable daily release notes.
+const RELEASE_NOTES_SYSTEM = `You turn a software team's raw git commit messages into clean, customer-readable DAILY release notes for Howler Pulse (an events analytics + comms platform used by event organisers). You are given commits grouped by calendar day.
+
+Respond with ONLY strict JSON (no markdown fences) of the form:
+{ "days": [ { "date": "YYYY-MM-DD", "title": "short headline for the day, <8 words", "body": "markdown bullet list of what shipped" } ] }
+
+Rules:
+- One object per day that has meaningful, user-noticeable changes. Use the exact date string given.
+- Group related commits; merge duplicates. Each bullet starts with a verb (Added / Improved / Fixed / Faster …).
+- Write for a non-technical reader: describe the BENEFIT, not the code. Translate jargon (e.g. "fix 422 on dashboard_elements" → "Fixed an error when recreating some dashboards").
+- DROP pure noise: merge commits, version bumps, formatting/lint, CI, refactors with no visible effect, WIP. If a day has only noise, omit that day entirely.
+- Never invent features or claims not supported by the commits. Be concise and honest. No emojis.
+- Keep each day to at most ~6 bullets; combine the rest.`;
+async function summariseReleaseNotes({ days, apiKey, instructions }) {
+  const c = requireClient(apiKey);
+  const payload = (days || [])
+    .map((d) => `## ${d.date}\n${(d.commits || []).map((m) => `- ${m}`).join('\n')}`)
+    .join('\n\n');
+  const resp = await c.messages.create({
+    model: MODEL,
+    max_tokens: 2000,
+    thinking: { type: 'adaptive' },
+    output_config: { effort: 'low' },
+    system: systemWith(RELEASE_NOTES_SYSTEM, instructions),
+    messages: [{ role: 'user', content: `COMMITS BY DAY:\n\n${payload}` }],
+  });
+  const text = (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
+  const parsed = await parseModelJsonResilient(c, text, 'release notes');
+  return Array.isArray(parsed?.days) ? parsed.days : [];
+}
+
 async function briefHome({ tiles, profile, catalogue, instructions, apiKey, actions, messages, capabilities, today }) {
   const c = requireClient(apiKey);
   const lines = [];
@@ -600,10 +631,11 @@ function promptRegistry() {
     { key: 'digest', label: 'Scheduled digest', scope: 'Role-lensed digest emails', text: DIGEST_SYSTEM },
     { key: 'campaign', label: 'Campaign copy', scope: 'Marketing email drafting', text: CAMPAIGN_SYSTEM },
     { key: 'refine', label: 'Refine note', scope: 'The ✨ refine button', text: REFINE_SYSTEM },
+    { key: 'releaseNotes', label: 'Release notes', scope: 'Daily release notes summarised from git commits', text: RELEASE_NOTES_SYSTEM },
     { key: 'settlement', label: 'Settlement extraction', scope: 'PDF settlement → JSON', text: SETTLEMENT_SYSTEM },
     { key: 'invoice', label: 'Invoice extraction', scope: 'PDF invoice → JSON', text: INVOICE_SYSTEM },
     { key: 'digest_prefs', label: 'Digest preferences', scope: 'Distilling digest/briefing feedback into a learned preferences note', text: DIGEST_PREFS_SYSTEM },
   ];
 }
 
-module.exports = { generateInsight, streamInsight, streamDashboardInsight, describeTile, extractSettlement, extractInvoice, briefHome, digestBrief, draftCampaign, refineText, distilPreferences, promptRegistry, systemWith, isConfigured: (apiKey) => !!(apiKey || process.env.ANTHROPIC_API_KEY) };
+module.exports = { generateInsight, streamInsight, streamDashboardInsight, describeTile, extractSettlement, extractInvoice, briefHome, digestBrief, draftCampaign, refineText, distilPreferences, summariseReleaseNotes, promptRegistry, systemWith, isConfigured: (apiKey) => !!(apiKey || process.env.ANTHROPIC_API_KEY) };

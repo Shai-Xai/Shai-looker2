@@ -27,6 +27,42 @@ from *seeing* a cohort to *acting* on it in one place, scoped and branded to the
 
 ---
 
+## The continuous comms loop  ✅ (one-tap "Owl auto-pilot" 🔜)
+Pulse isn't a pile of separate tools — it's **one loop that never stops turning.**
+Every part feeds the next, so insight becomes action and results become the next
+insight:
+
+1. **Live data lands** — ticketing, cashless and GA4 flow in continuously.
+2. **The Owl reads it** — the home **briefing** and scheduled **digests** push the
+   key updates *and* **what to do about them** (suggested actions, "worth a look"
+   cards), tailored to each reader and role.
+3. **You act** — turn a suggested action into a branded **email/SMS campaign** or
+   an automated **drip** to the exact segment, in a click.
+4. **Results come back as data** — opens, clicks, conversions and revenue are
+   tracked per recipient and per journey step, and flow right back into the
+   dashboards.
+5. **The loop tightens** — those results shape the **next** briefing, digest and
+   message, and the next suggested action. Every cycle is sharper than the last.
+
+So there's a **constant flow of comms**: key updates pushed through digests, seen
+on the briefing, acted on through campaigns, measured — and fed straight back into
+the next read and the next action. **Insight → action → results → improvement, on
+repeat.** And because it's an **installable web app (PWA) that receives push
+notifications even when it's closed**, that flow reaches people on their phone
+without them having to log in — a nudge lands, they tap, they're in the right
+place to act.
+
+> Today Pulse **surfaces** the insight + suggested action and **measures** the
+> result. Closing the loop with a single tap — the **agentic Owl** drafting the
+> campaign straight from a suggestion — is the flagship roadmap item (🔜).
+
+**Pitch:** "It's not dashboards *and* email *and* reports — it's one living loop.
+Your data tells you what to do, you do it in the same place, the result makes the
+next call smarter — and it pings the client's phone to keep the loop moving. The
+longer they use Pulse, the better it gets."
+
+---
+
 ## 1. Dashboards & insight  ✅
 - **Live dashboards** — KPIs, tables and charts built on the client's real
   ticketing/GA4 data. Howler builds the metrics; Pulse owns the whole interface
@@ -190,13 +226,22 @@ Use these to set direction, **not** to promise dates.
   approvals, sync), not just charts.
 - **vs. an email tool (Mailchimp/Klaviyo):** Pulse's audiences come from the
   client's live ticketing data and are governed/scoped — no CSV gymnastics.
-- **The hook:** "insight → action → results, in one governed place."
+- **The continuous loop:** "Updates flow through digests, land on the briefing,
+  get acted on as campaigns, and the results feed the next call — and it pings
+  their phone (installable app + push) to keep it moving."
+- **The hook:** "insight → action → results → improvement, on a loop, in one
+  governed place."
 
 ---
 
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-16** — Added **"The continuous comms loop"** section (live data →
+  briefing/digest + suggested actions → campaigns → tracked results → next read),
+  and called out the **installable web app (PWA) with push notifications** as the
+  channel that keeps the loop moving on the client's phone. Updated the positioning
+  cheat-sheet (the loop + improved hook).
 - **2026-06-16 (later)** — Drip steps now have the **full content editor per step**
   (built template *or* custom HTML, hero image, subject/body/CTA) — same as a once-off
   email. Digest fix: send up to 40 tile rows so daily series isn't truncated mid-month.

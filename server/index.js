@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
+const { execFile } = require('child_process');
 const cookieParser = require('cookie-parser');
 
 const looker = require('./looker');
@@ -259,6 +260,56 @@ app.put('/api/admin/release-notes/:id', auth.requireAdmin, (req, res) => {
   res.json(n);
 });
 app.delete('/api/admin/release-notes/:id', auth.requireAdmin, (req, res) => { db.deleteReleaseNote(req.params.id); res.status(204).end(); });
+
+// Read recent commits grouped by calendar day (most recent day first). Returns
+// [{ date, sha (newest that day), commits: [subjects] }]. Skips merge commits.
+const REPO_ROOT = path.join(__dirname, '..');
+function recentCommitsByDay(days = 14) {
+  return new Promise((resolve, reject) => {
+    const since = `${Math.max(1, Math.min(90, days))} days ago`;
+    const args = ['log', '--no-merges', `--since=${since}`, '--date=short', '--pretty=format:%cd%x1f%h%x1f%s'];
+    execFile('git', args, { cwd: REPO_ROOT, maxBuffer: 4 * 1024 * 1024 }, (err, stdout) => {
+      if (err) return reject(new Error('Could not read git history in this environment.'));
+      const byDay = new Map(); // date -> { date, sha, commits[] }
+      for (const line of String(stdout || '').split('\n')) {
+        if (!line.trim()) continue;
+        const [date, sha, subject] = line.split('');
+        if (!date || !subject) continue;
+        if (!byDay.has(date)) byDay.set(date, { date, sha, commits: [] }); // first line of a day = newest sha
+        byDay.get(date).commits.push(subject);
+      }
+      resolve([...byDay.values()]); // git log is newest-first, so insertion order = newest day first
+    });
+  });
+}
+
+// Auto-populate: summarise the last N days of commits into draft release notes.
+// Only fills days that don't already have a note (manual or auto) — never
+// clobbers edits. New entries are drafts for an admin to review + publish.
+app.post('/api/admin/release-notes/generate', auth.requireAdmin, async (req, res) => {
+  const apiKey = adminAnthropicKey();
+  if (!insights.isConfigured(apiKey)) return res.status(400).json({ error: 'Set an Anthropic API key in Admin → Integrations to auto-generate release notes.' });
+  const days = Number(req.body?.days) || 14;
+  try {
+    const commitDays = await recentCommitsByDay(days);
+    const have = new Set(db.listReleaseNotes().map((n) => n.date));
+    const todo = commitDays.filter((d) => !have.has(d.date));
+    if (todo.length === 0) {
+      return res.json({ created: 0, items: [], message: commitDays.length ? 'Release notes already cover every day with commits.' : 'No recent commits found.' });
+    }
+    const summaries = await insights.summariseReleaseNotes({ days: todo, apiKey, instructions: db.getSetting('ai_instructions') });
+    const shaForDate = Object.fromEntries(todo.map((d) => [d.date, d.sha]));
+    const created = [];
+    for (const s of summaries) {
+      if (!s?.date || have.has(s.date)) continue; // guard against the model echoing a covered day
+      created.push(db.createReleaseNote({ date: s.date, title: s.title || '', body: s.body || '', published: false, source: 'auto', lastSha: shaForDate[s.date] || '' }));
+    }
+    res.json({ created: created.length, items: created });
+  } catch (err) {
+    console.error('[release-notes/generate]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // ─── Custom sets: a client's bespoke collections (hidden from the shared library) ──
 // A client's custom sets + the dashboard pool available to build them with
