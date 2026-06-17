@@ -83,9 +83,10 @@ know what changed and what to do."
   suggested actions.
 - Configurable cadence and focus; dates are anchored to the **send day**.
 - **Content modes:** *AI-led* (the analyst picks the story) or *curated* (pick the
-  exact tiles). Either way you can also **include followed tiles** — the tiles a
-  client has marked "always read this" — and optionally render them right in the
-  email: **chart tiles as a graph image, single-value tiles as a metric chip**.
+  exact tiles). Either way you can also **include saved tiles** — the tiles a client
+  has 📌 pinned or ⭐ followed, chosen from a checklist — and optionally render them
+  right in the email: **chart tiles as a graph image, single-value tiles as a
+  metric chip**.
 - **Dual-surface:** Howler can set these up for a client, and clients can manage
   their own.
 

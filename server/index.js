@@ -2460,14 +2460,14 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
     ? await buildFactsFromTiles(user, entityId, tiles, alignDaysBefore)
     : await buildFacts(user, entityId, false, alignDaysBefore, priorityDashboards);
 
-  // Followed tiles: the client's (entity-scoped) follows — the tiles they've said
-  // "always read this". Pulled in on top of whatever the mode produced, so they
-  // ride along in BOTH AI-led and curated digests. They're added to the facts the
-  // analyst reads, and (when followedVisual) rendered as charts/metric chips.
-  // `followedTiles` (optional) narrows to a chosen subset; empty = all follows.
+  // Saved tiles: the client's (entity-scoped) 📌 pinned + ⭐ followed tiles — the
+  // ones marked as mattering. Pulled in on top of whatever the mode produced, so
+  // they ride along in BOTH AI-led and curated digests. They're added to the
+  // facts the analyst reads, and (when followedVisual) rendered as charts/metric
+  // chips. `followedTiles` (optional) narrows to a chosen subset; empty = all.
   let followedFacts = [];
   if (includeFollowed) {
-    let followPicks = db.listMarks({ userId: '', entityId, kind: 'follow' }).map((m) => ({ dashboardId: m.dashboardId, tileId: m.tileId }));
+    let followPicks = savedTileMarks(entityId).map((m) => ({ dashboardId: m.dashboardId, tileId: m.tileId }));
     if (Array.isArray(followedTiles) && followedTiles.length) {
       const want = new Set(followedTiles.map((t) => `${t.dashboardId}|${t.tileId}`));
       followPicks = followPicks.filter((p) => want.has(`${p.dashboardId}|${p.tileId}`));
@@ -2571,21 +2571,33 @@ app.get('/api/my/digest-tiles/:entityId', auth.requireAuth, (req, res) => {
   res.json(digestTileCatalogue(req.params.entityId));
 });
 
-// The entity's FOLLOWED tiles (the client-level "always read this" marks),
-// resolved to titles for the digest editor's per-tile selection. Entity-scoped
-// only (userId:'' returns just the 'entity' marks) — so the list a digest offers
-// is the client's, not whoever happens to be configuring it.
+// The entity's SAVED tiles — the ones marked as mattering for this client,
+// whether 📌 pinned (shown on home) or ⭐ followed (always read by the briefing).
+// Entity-scoped (userId:'' → just the 'entity' marks, which is what an admin sets
+// for the client), deduped across kinds, resolved to titles for the digest
+// editor's per-tile selection. Used by both the editor and the digest build, so
+// they always agree.
+function savedTileMarks(entityId) {
+  const marks = [...db.listMarks({ userId: '', entityId, kind: 'pin' }), ...db.listMarks({ userId: '', entityId, kind: 'follow' })];
+  const byKey = new Map();
+  for (const m of marks) {
+    const key = `${m.dashboardId}|${m.tileId}`;
+    if (!byKey.has(key)) byKey.set(key, { dashboardId: m.dashboardId, tileId: m.tileId, kinds: new Set() });
+    byKey.get(key).kinds.add(m.kind === 'follow' ? 'follow' : 'pin');
+  }
+  return [...byKey.values()];
+}
 function followedTilesFor(entityId) {
   const { catalogue } = clientCatalogue(entityId);
   const meta = Object.fromEntries(catalogue.map((c) => [c.dashboardId, c]));
   const out = [];
-  for (const m of db.listMarks({ userId: '', entityId, kind: 'follow' })) {
+  for (const m of savedTileMarks(entityId)) {
     const def = store.get(m.dashboardId);
     const c = meta[m.dashboardId];
     if (!def || !c) continue; // only tiles still in this client's catalogue
     const tile = [...(def.tiles || []), ...((def.carousels || []).flatMap((x) => x.tiles || []))].find((t) => t.id === m.tileId);
     if (!tile || tile.type === 'text') continue;
-    out.push({ dashboardId: m.dashboardId, tileId: m.tileId, title: tile.title || '(untitled)', visType: tile.vis?.type || '', dashTitle: c.title, setName: c.setName, suiteName: c.suiteName });
+    out.push({ dashboardId: m.dashboardId, tileId: m.tileId, title: tile.title || '(untitled)', visType: tile.vis?.type || '', dashTitle: c.title, setName: c.setName, suiteName: c.suiteName, kinds: [...m.kinds] });
   }
   return { tiles: out };
 }

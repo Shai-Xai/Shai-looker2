@@ -212,23 +212,24 @@ function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }
                 charts/metrics in the email. */}
             <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--hairline)' }}>
               <Toggle on={f.includeFollowed} onClick={() => set('includeFollowed', !f.includeFollowed)}>
-                📌 {f.includeFollowed ? 'Including followed tiles' : 'Include followed tiles'}
+                📌 {f.includeFollowed ? 'Including saved tiles' : 'Include saved tiles'}
               </Toggle>
-              <div style={hintS}>Adds the tiles this client follows (the ⭐ “always read this” tiles) to the digest{f.contentMode === 'curated' ? ' — on top of the curated picks above.' : ' — guaranteed into the analyst’s facts.'}</div>
+              <div style={hintS}>Adds the tiles this client has saved — 📌 pinned (on home) or ⭐ followed — to the digest{f.contentMode === 'curated' ? ' — on top of the curated picks above.' : ' — guaranteed into the analyst’s facts.'}</div>
               {f.includeFollowed && (
                 <div style={{ marginTop: 8 }}>
                   {/* Pick which followed tiles to include — there may be several. */}
                   {followedList == null ? (
                     <div style={{ ...hintS, marginTop: 0 }}>Loading followed tiles…</div>
                   ) : followedList.length === 0 ? (
-                    <div style={{ ...hintS, marginTop: 0 }}>This client isn’t following any tiles yet. Open a dashboard tile’s ⋯ menu and choose “Follow” to make it available here.</div>
+                    <div style={{ ...hintS, marginTop: 0 }}>This client hasn’t saved any tiles yet. Open a dashboard tile’s ⋯ menu and choose “📌 Pin” or “⭐ Follow” to make it available here.</div>
                   ) : (
                     <div style={{ border: '1px solid var(--hairline)', borderRadius: 8, padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 2 }}>
-                      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>{f.followedTiles.length === 0 ? `All ${followedList.length} followed tile${followedList.length === 1 ? '' : 's'} included` : `${f.followedTiles.length} of ${followedList.length} selected`}</div>
+                      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>{f.followedTiles.length === 0 ? `All ${followedList.length} saved tile${followedList.length === 1 ? '' : 's'} included` : `${f.followedTiles.length} of ${followedList.length} selected`}</div>
                       {followedList.map((t) => (
                         <label key={`${t.dashboardId}|${t.tileId}`} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 2px', cursor: 'pointer', fontSize: 13 }}>
                           <input type="checkbox" checked={tileSelected(t)} onChange={() => toggleFollowedTile(t)} />
                           <span style={{ flex: 1, minWidth: 0 }}>
+                            <span style={{ marginRight: 5 }}>{(t.kinds || []).includes('pin') ? '📌' : ''}{(t.kinds || []).includes('follow') ? '⭐' : ''}</span>
                             <span style={{ fontWeight: 600 }}>{t.title}</span>
                             <span style={{ color: 'var(--muted)', fontSize: 11.5 }}> · {t.setName ? `${t.setName} → ` : ''}{t.dashTitle}</span>
                           </span>
