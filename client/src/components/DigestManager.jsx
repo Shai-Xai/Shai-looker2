@@ -334,7 +334,7 @@ function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }
               </button>
             </div>
             {preview.sample
-              ? <span style={{ fontSize: 11, color: '#b45309', fontWeight: 600 }}>Sample layout — press refresh for live data</span>
+              ? <span style={{ fontSize: 11, color: '#b45309', fontWeight: 600 }}>Sample layout — press refresh for live data{f.includeFollowed ? ' (your saved tiles only show here)' : ''}</span>
               : preview.generatedAt && <span style={{ fontSize: 11, color: 'var(--success,#10b981)', fontWeight: 600 }}>✓ Live data · {new Date(preview.generatedAt).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}</span>}
           </div>
           {preview.sample && preview.reason && (
