@@ -432,7 +432,7 @@ function MessagesFromHowler({ messages, isMobile, onOpen, onDismiss }) {
           // A pending must-ack can't be cleared off home — acknowledge it first.
           const dismissible = !(m.priority === 'must_ack' && !m.acked);
           return (
-            <div key={m.id} className="lift" role="button" tabIndex={0} style={{ ...cardBtn, position: 'relative', textAlign: 'left', cursor: 'pointer' }}
+            <div key={m.id} className="lift" role="button" tabIndex={0} style={{ ...cardBtn, position: 'relative', textAlign: 'left', cursor: 'pointer', minWidth: 0 }}
               onClick={() => onOpen(m.id)}
               onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(m.id); } }}>
               {dismissible && (

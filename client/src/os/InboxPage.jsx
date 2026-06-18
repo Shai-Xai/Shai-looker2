@@ -177,7 +177,7 @@ function ThreadView({ id, isAdmin, isMobile, onBack, onChange, listCollapsed, on
               </div>
               <div style={{ maxWidth: '74%', minWidth: 0 }}>
                 <div style={{ fontSize: 10.5, color: 'var(--muted)', marginBottom: 3, textAlign: mine ? 'right' : 'left' }}>{shortName}{m.channel !== 'pulse' ? ` · ${m.channel}` : ''} · {shortDate(m.createdAt)}</div>
-                <div style={{ background: mine ? 'var(--brand)' : 'var(--elevated)', color: mine ? '#fff' : 'var(--text)', border: mine ? '1px solid var(--brand)' : '1px solid var(--hairline)', borderLeft: mine ? undefined : `3px solid ${partyBg}`, borderRadius: mine ? '16px 16px 4px 16px' : '16px 16px 16px 4px', padding: '9px 13px', fontSize: 13.5, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{renderBody(m.body, mine)}</div>
+                <div style={{ background: mine ? 'var(--brand)' : 'var(--elevated)', color: mine ? '#fff' : 'var(--text)', border: mine ? '1px solid var(--brand)' : '1px solid var(--hairline)', borderLeft: mine ? undefined : `3px solid ${partyBg}`, borderRadius: mine ? '16px 16px 4px 16px' : '16px 16px 16px 4px', padding: '9px 13px', fontSize: 13.5, lineHeight: 1.5, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>{renderBody(m.body, mine)}</div>
                 {(m.attachments || []).length > 0 && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginTop: 5, alignItems: mine ? 'flex-end' : 'flex-start' }}>
                     {m.attachments.map((a) => a.mime?.startsWith('image/') ? (
