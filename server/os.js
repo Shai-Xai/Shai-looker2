@@ -556,6 +556,30 @@ function mount(app, { db, auth, mailer, push }) {
     return { ok: true, threadId, entityId: ent.id, created: !t };
   }
 
+  // One-time cleanup of messages/threads ingested before MIME decoding existed —
+  // re-decodes raw multipart bodies and encoded-word subjects already in the DB.
+  // Idempotent (only touches rows that still look raw) and guarded by a flag so
+  // it scans once.
+  function fixupLegacyInbound() {
+    if (db.getSetting('inbound_mime_fixup_v1', '') === 'done') return;
+    try {
+      const msgs = sql.prepare("SELECT id, body FROM os_messages WHERE channel='email' AND (body LIKE '%Content-Type:%' OR body LIKE '%=?%?=%')").all();
+      const upd = sql.prepare('UPDATE os_messages SET body=? WHERE id=?');
+      let n = 0;
+      for (const m of msgs) {
+        const fixed = decodeEncodedWords(String(mimeToText(m.body) || '')).slice(0, 16000).trim();
+        if (fixed && fixed !== m.body) { upd.run(fixed, m.id); n += 1; }
+      }
+      const ths = sql.prepare("SELECT id, title FROM os_threads WHERE title LIKE '%=?%?=%'").all();
+      const updT = sql.prepare('UPDATE os_threads SET title=? WHERE id=?');
+      let tn = 0;
+      for (const th of ths) { const d = normSubject(th.title); if (d && d !== th.title) { updT.run(d, th.id); tn += 1; } }
+      db.setSetting('inbound_mime_fixup_v1', 'done');
+      if (n || tn) console.log(`[os] inbound MIME cleanup: fixed ${n} message(s), ${tn} subject(s)`);
+    } catch (e) { console.error('[os] inbound MIME cleanup failed:', e.message); }
+  }
+  fixupLegacyInbound();
+
   // The webhook. NOT cookie-authed — protected by a shared secret (header
   // `x-owl-secret` or `?secret=`) that whatever forwards mail must include.
   // Transport-agnostic: Cloudflare Email Worker, SendGrid Parse, Resend inbound,
