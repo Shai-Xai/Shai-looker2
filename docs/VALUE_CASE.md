@@ -11,6 +11,27 @@
 
 ---
 
+## Background — why a new Pulse
+
+**The constraint.** A key pain point on the current version of Pulse has been the
+**time it takes to set up and manage new clients** — every onboarding and change
+was slow and manual. The original vision depended on a **headless integration**,
+and that wasn't achievable on the existing platform. Without it we couldn't shape
+the interface or the data flow the way the product needed, which **halted our
+ability to deliver 100% on the vision.**
+
+**The breakthrough.** We've now built a **new Pulse MVP as a headless solution** —
+giving us far greater control over the **user interface and the integration**
+layer. That unlocks **richer features** and moves us decisively toward a **greater
+self-service solution** for clients. The report below represents the efficiency
+gains this new product makes possible.
+
+> **See it in action:** product screenshots accompany the HTML version of this
+> report (`value-case.html` → "See it in action"). Source images live in
+> `docs/screenshots/`.
+
+---
+
 ## 1. Executive Summary
 
 Today, almost every recurring account-management task is performed across

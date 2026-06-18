@@ -120,6 +120,36 @@ tfoot .saved{background:var(--g);-webkit-background-clip:text;background-clip:te
 .print button{font:inherit;font-size:13px;font-weight:700;color:var(--ink);background:#fff;border:1px solid var(--line);padding:9px 16px;border-radius:999px;cursor:pointer;}
 .print button:hover{border-color:var(--brand);color:var(--brand);}
 
+/* context: constraint -> breakthrough */
+.context{display:grid;grid-template-columns:1fr 1fr;gap:18px;}
+.ctx{border:1px solid var(--line);border-radius:18px;padding:24px;background:#fff;position:relative;}
+.ctx.then{background:var(--soft);}
+.ctx.then{border-left:4px solid var(--red);}
+.ctx.nowx{border-left:4px solid var(--green);background:linear-gradient(180deg,rgba(10,143,78,.05),rgba(124,58,237,.04));}
+.ctx .k{font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;margin-bottom:12px;}
+.ctx.then .k{color:var(--red);}
+.ctx.nowx .k{color:var(--green);}
+.ctx p{font-size:14.5px;color:#3a3a3e;margin:0 0 10px;line-height:1.55;}
+.ctx p:last-child{margin-bottom:0;}
+.ctx strong{font-weight:740;}
+@media(max-width:760px){.context{grid-template-columns:1fr;}}
+
+/* screenshot gallery */
+.gallery{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;}
+.shot{margin:0;border:1px solid var(--line);border-radius:16px;overflow:hidden;background:#fff;box-shadow:0 10px 34px -26px rgba(20,20,40,.4);}
+.shot .frame{position:relative;aspect-ratio:16/10;background:var(--soft);display:block;overflow:hidden;}
+.shot img{width:100%;height:100%;object-fit:cover;object-position:top center;display:block;}
+.shot .ph{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:var(--muted);text-align:center;padding:18px;
+  background:repeating-linear-gradient(135deg,#fafafc,#fafafc 12px,#f3f3f6 12px,#f3f3f6 24px);}
+.shot.empty img{display:none;}
+.shot.empty .ph{display:flex;}
+.shot .ph .ico{width:34px;height:34px;border-radius:9px;background:var(--g);opacity:.85;}
+.shot .ph small{font-size:11px;font-weight:700;letter-spacing:.02em;}
+.shot figcaption{padding:13px 16px;font-size:13px;font-weight:650;color:var(--ink);border-top:1px solid var(--line);}
+.shot figcaption span{display:block;font-weight:500;color:var(--muted);font-size:12px;margin-top:2px;}
+@media(max-width:860px){.gallery{grid-template-columns:repeat(2,1fr);}}
+@media(max-width:540px){.gallery{grid-template-columns:1fr;}}
+
 @media print{
   /* force every background, gradient and dark fill to actually print */
   *{ -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important; }
@@ -181,6 +211,16 @@ tfoot .saved{background:var(--g);-webkit-background-clip:text;background-clip:te
   .hero h1 .grad,.band .big,tfoot .saved{
     -webkit-text-fill-color:#FF385C !important;color:#FF385C !important;background:none !important;
   }
+
+  /* context + gallery compaction */
+  .context{ gap:9px; }
+  .ctx{ padding:12px 13px;break-inside:avoid; }
+  .ctx .k{ font-size:9px;margin-bottom:6px; }
+  .ctx p{ font-size:9px;margin-bottom:6px; }
+  .gallery{ gap:8px; }
+  .shot{ break-inside:avoid; }
+  .shot figcaption{ padding:7px 10px;font-size:9px; }
+  .shot figcaption span{ font-size:8px; }
 }
 </style>
 </head>
@@ -214,6 +254,64 @@ tfoot .saved{background:var(--g);-webkit-background-clip:text;background-clip:te
       <div class="cell"><div class="big">7h → 10m</div><div class="lbl">to onboard a full new client</div></div>
       <div class="cell"><div class="big">4</div><div class="lbl">tasks go from <em>impossible</em> to standard</div></div>
       <div class="cell"><div class="big">~20×</div><div class="lbl">effective AM capacity on these tasks</div></div>
+    </div>
+  </section>
+
+  <!-- CONTEXT / WHY -->
+  <section class="sec" id="context">
+    <h2>Why a new Pulse</h2>
+    <div class="sub">The constraint that held the original vision back — and what changed.</div>
+    <div class="sec-rule"></div>
+    <div class="context">
+      <div class="ctx then">
+        <div class="k">The constraint</div>
+        <p>A key pain point on the current version of Pulse has been the <strong>time it takes to set
+          up and manage new clients</strong> — every onboarding and change was slow and manual.</p>
+        <p>The original vision depended on a <strong>headless integration</strong>, and that wasn't
+          achievable on the existing platform. Without it, we couldn't shape the interface or the data
+          flow the way the product needed — which <strong>halted our ability to deliver 100% on the vision.</strong></p>
+      </div>
+      <div class="ctx nowx">
+        <div class="k">The breakthrough</div>
+        <p>We've now built a <strong>new Pulse MVP as a headless solution</strong> — giving us far greater
+          control over the <strong>user interface and the integration</strong> layer.</p>
+        <p>That unlocks <strong>richer features</strong> and moves us decisively toward a
+          <strong>greater self-service solution</strong> for clients. The report below represents the
+          efficiency gains this new product makes possible.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- SCREENSHOTS -->
+  <section class="sec" id="screens">
+    <h2>See it in action</h2>
+    <div class="sub">The new headless Pulse MVP. (Screenshots drop in automatically once added to <code>docs/screenshots/</code>.)</div>
+    <div class="sec-rule"></div>
+    <div class="gallery">
+      <figure class="shot">
+        <span class="frame"><img src="screenshots/01-onboarding.png" alt="Client onboarding" onerror="this.closest('.shot').classList.add('empty')"><span class="ph"><span class="ico"></span><small>01-onboarding.png</small></span></span>
+        <figcaption>Client onboarding<span>Spin up a full new client in minutes</span></figcaption>
+      </figure>
+      <figure class="shot">
+        <span class="frame"><img src="screenshots/02-branded-dashboard.png" alt="Branded dashboard" onerror="this.closest('.shot').classList.add('empty')"><span class="ph"><span class="ico"></span><small>02-branded-dashboard.png</small></span></span>
+        <figcaption>White-label dashboard<span>Per-client branding, out of the box</span></figcaption>
+      </figure>
+      <figure class="shot">
+        <span class="frame"><img src="screenshots/03-engagement-engine.png" alt="Engagement engine" onerror="this.closest('.shot').classList.add('empty')"><span class="ph"><span class="ico"></span><small>03-engagement-engine.png</small></span></span>
+        <figcaption>Engagement engine<span>Abandoned-cart &amp; campaigns, built natively</span></figcaption>
+      </figure>
+      <figure class="shot">
+        <span class="frame"><img src="screenshots/04-segments-audiences.png" alt="Segments and audiences" onerror="this.closest('.shot').classList.add('empty')"><span class="ph"><span class="ico"></span><small>04-segments-audiences.png</small></span></span>
+        <figcaption>Segments &amp; audiences<span>Live segments, synced to Meta &amp; TikTok</span></figcaption>
+      </figure>
+      <figure class="shot">
+        <span class="frame"><img src="screenshots/05-insight-digest.png" alt="Insight digest" onerror="this.closest('.shot').classList.add('empty')"><span class="ph"><span class="ico"></span><small>05-insight-digest.png</small></span></span>
+        <figcaption>Insight digest<span>What changed — and what to do about it</span></figcaption>
+      </figure>
+      <figure class="shot">
+        <span class="frame"><img src="screenshots/06-settlements.png" alt="Settlements and invoices" onerror="this.closest('.shot').classList.add('empty')"><span class="ph"><span class="ico"></span><small>06-settlements.png</small></span></span>
+        <figcaption>Settlements &amp; invoices<span>Sent live, with client notification</span></figcaption>
+      </figure>
     </div>
   </section>
 
