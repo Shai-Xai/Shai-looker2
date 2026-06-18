@@ -55,7 +55,7 @@ export default function DigestHistory({ entityId, compact = false }) {
           <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: 10 }}>No digests sent yet — they’ll appear here once your schedule runs (or you send a test).</p>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: compact ? 10 : 0 }}>
-            {(compact ? list.slice(0, 5) : list).map((d) => (
+            {(compact ? list.slice(0, 1) : list).map((d) => (
               <div key={d.id} style={{ border: '1px solid var(--hairline)', borderRadius: 12, background: 'var(--card)', overflow: 'hidden' }}>
                 <button type="button" onClick={() => open(d)} style={{ display: 'flex', width: '100%', alignItems: 'center', gap: 10, padding: '11px 14px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', font: 'inherit', color: 'var(--text)' }}>
                   <span style={{ flex: 1, minWidth: 0 }}>
