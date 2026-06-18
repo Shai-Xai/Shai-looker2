@@ -280,7 +280,11 @@ function digestEmail({ branding, entityId, assetScope, content, roleLabel, custo
     ? `<div style="background:${esc(b.brandColor)}12;border-left:3px solid ${esc(b.brandColor)};border-radius:8px;padding:13px 15px;margin-bottom:16px;font-size:14px;line-height:1.55;color:#2a2a2c;white-space:pre-wrap;">${mdBold(customMessage)}</div>`
     : '';
 
-  const url = `${baseUrl()}${ctaPath}`;
+  // Open Pulse on the RIGHT client: carry the entity so the app switches to that
+  // profile after login (a multi-profile login otherwise lands on its default).
+  const url = (ctaPath === '/' && entityId)
+    ? `${baseUrl()}/?entity=${encodeURIComponent(entityId)}`
+    : `${baseUrl()}${ctaPath}`;
   const html = `<!doctype html><html><body style="margin:0;padding:0;background:#f5f5f7;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
   <div style="display:none;max-height:0;overflow:hidden;">${esc((customMessage || content.headline || '')).slice(0, 140)}</div>
   <div style="max-width:600px;margin:0 auto;padding:28px 16px;">

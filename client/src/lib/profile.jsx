@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useMemo, useCallback, useEffect } from 'react';
+import { createContext, useContext, useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useAuth } from './auth.jsx';
 
 // The active "workspace" for the signed-in login. A client login moves between
@@ -43,6 +43,31 @@ export function ProfileProvider({ children }) {
     setMode('console');
     refresh?.();
   }, [refresh]);
+
+  // Deep-link from an email (e.g. a digest's "Open Pulse"): ?entity=<id> opens
+  // ON that client's profile, so a multi-profile login doesn't land on its
+  // default. Applied once entities have loaded (after /auth/me), then the param
+  // is stripped so it doesn't re-fire on later navigation.
+  const entityParamDone = useRef(false);
+  useEffect(() => {
+    if (entityParamDone.current) return;
+    let want = '';
+    try { want = new URLSearchParams(window.location.search).get('entity') || ''; } catch { want = ''; }
+    if (!want) { entityParamDone.current = true; return; }
+    if (!entities.length) return; // wait for the profile list to load
+    entityParamDone.current = true;
+    if (entities.some((e) => e.id === want)) {
+      localStorage.setItem(KEY, want);
+      localStorage.setItem(MODE_KEY, 'client');
+      setActiveId(want);
+      setMode('client');
+    }
+    try {
+      const u = new URL(window.location.href);
+      u.searchParams.delete('entity');
+      window.history.replaceState({}, '', u.pathname + u.search + u.hash);
+    } catch { /* ignore */ }
+  }, [entities]);
 
   // Refresh permissions when the tab regains focus (throttled), so role/access
   // changes made in another session take effect without logging out.

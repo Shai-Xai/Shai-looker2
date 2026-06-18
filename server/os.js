@@ -436,7 +436,73 @@ function mount(app, { db, auth, mailer, push }) {
   };
   // Local part of any recipient that matches a known client token wins.
   const tokenFromAddress = (addr) => String(addr || '').split('@')[0].trim().toLowerCase();
-  const normSubject = (s) => String(s || '').replace(/^((re|fwd|fw)\s*:\s*)+/i, '').trim().slice(0, 200);
+
+  // ── MIME tolerance ──
+  // Some forwarders hand us the RAW message (encoded-word subject + multipart
+  // body) instead of clean fields. Decode those so a CC'd email reads as plain
+  // text in the inbox, not "=?UTF-8?Q?…" / "--boundary Content-Type: …".
+  const decodeQP = (s, isWord = false) => String(s || '')
+    .replace(/=\r?\n/g, '') // soft line breaks (body only; harmless for words)
+    .replace(/_/g, isWord ? ' ' : '_') // '_' is space in encoded-words
+    .replace(/=([0-9A-Fa-f]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
+  const decodeWordChunk = (charset, enc, data) => {
+    try {
+      const bytes = enc.toUpperCase() === 'B'
+        ? Buffer.from(data, 'base64')
+        : Buffer.from(decodeQP(data, true), 'binary');
+      return bytes.toString(/utf-?8/i.test(charset) ? 'utf8' : 'latin1');
+    } catch { return data; }
+  };
+  // Decode RFC 2047 "encoded-words" (subjects/headers), incl. adjacent chunks.
+  const decodeEncodedWords = (s) => String(s || '')
+    .replace(/=\?([^?]+)\?([BbQq])\?([^?]*)\?=(\s+)(?==\?)/g, (_, c, e, d) => decodeWordChunk(c, e, d))
+    .replace(/=\?([^?]+)\?([BbQq])\?([^?]*)\?=/g, (_, c, e, d) => decodeWordChunk(c, e, d));
+  const stripHtml = (h) => String(h || '')
+    .replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<\/(p|div|br|tr|li|h[1-6])>/gi, '\n').replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>')
+    .replace(/\n{3,}/g, '\n\n').trim();
+  // Decode one MIME part's body per its transfer-encoding + charset (so multi-byte
+  // UTF-8 like em-dashes/emoji come through, not mojibake).
+  const decodePart = (headers, raw) => {
+    const cte = (headers.match(/content-transfer-encoding:\s*([^\r\n;]+)/i) || [])[1]?.trim().toLowerCase();
+    const charset = (headers.match(/charset="?([^"\r\n;]+)"?/i) || [])[1] || 'utf-8';
+    const toStr = (buf) => buf.toString(/utf-?8/i.test(charset) ? 'utf8' : 'latin1');
+    if (cte === 'base64') { try { return toStr(Buffer.from(raw.replace(/\s+/g, ''), 'base64')); } catch { return raw; } }
+    if (cte === 'quoted-printable') return toStr(Buffer.from(decodeQP(raw), 'binary'));
+    return raw;
+  };
+  // Turn a raw (possibly multipart) MIME body into readable text. Prefers the
+  // text/plain part; falls back to a stripped text/html part. Non-MIME passes
+  // through untouched.
+  const mimeToText = (body) => {
+    const s = String(body || '');
+    const boundary = (s.match(/boundary="?([^"\r\n;]+)"?/i) || [])[1];
+    if (boundary) {
+      const parts = s.split(new RegExp(`--${boundary.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:--)?`));
+      let plain = '', html = '';
+      for (const part of parts) {
+        const split = part.search(/\r?\n\r?\n/);
+        if (split === -1) continue;
+        const headers = part.slice(0, split);
+        const raw = part.slice(split).replace(/^\r?\n\r?\n/, '');
+        if (/content-type:\s*text\/plain/i.test(headers)) plain = plain || decodePart(headers, raw);
+        else if (/content-type:\s*text\/html/i.test(headers)) html = html || decodePart(headers, raw);
+        else if (/content-type:\s*multipart/i.test(headers)) { const inner = mimeToText(raw); if (inner) plain = plain || inner; }
+      }
+      const out = (plain || stripHtml(html)).trim();
+      if (out) return out;
+    }
+    // A single part that still carries its own headers (Content-Type + a blank line).
+    if (/^content-type:/im.test(s) && /\r?\n\r?\n/.test(s)) {
+      const split = s.search(/\r?\n\r?\n/);
+      const headers = s.slice(0, split); const raw = s.slice(split).replace(/^\r?\n\r?\n/, '');
+      const decoded = decodePart(headers, raw);
+      return /content-type:\s*text\/html/i.test(headers) ? stripHtml(decoded) : decoded;
+    }
+    return s;
+  };
+  const normSubject = (s) => decodeEncodedWords(String(s || '')).replace(/^((re|fwd|fw)\s*:\s*)+/i, '').trim().slice(0, 200);
   const stripAngle = (a) => String(a || '').replace(/.*<([^>]+)>.*/, '$1').trim().toLowerCase();
   const asList = (v) => (Array.isArray(v) ? v : String(v || '').split(',')).map(stripAngle).filter(Boolean);
 
@@ -456,7 +522,7 @@ function mount(app, { db, auth, mailer, push }) {
   }
 
   // Idempotent ingest. Returns { ok, threadId } | { skipped } | { error }.
-  function ingestInbound({ from, to, cc, subject, text, html, messageId }) {
+  function ingestInbound({ from, to, cc, subject, text, html, raw, email, messageId }) {
     const fromEmail = stripAngle(from);
     const recipients = [...asList(to), ...asList(cc)];
     const ent = routeEntity(recipients);
@@ -465,7 +531,13 @@ function mount(app, { db, auth, mailer, push }) {
       const dup = sql.prepare('SELECT 1 FROM os_messages WHERE ext_id=? LIMIT 1').get(String(messageId));
       if (dup) return { skipped: true, reason: 'duplicate message-id' };
     }
-    const body = String(text || html || '').slice(0, 16000).trim() || '(no body)';
+    // Prefer a clean text part; fall back to stripped html, then to parsing a raw
+    // MIME payload (some forwarders dump the whole message into one field).
+    const looksRaw = (v) => /content-type:\s*(multipart|text)\//i.test(String(v || '')) || /boundary=/i.test(String(v || ''));
+    let bodySrc = text && !looksRaw(text) ? text
+      : (html ? stripHtml(html) : '');
+    if (!bodySrc) bodySrc = mimeToText(text || html || raw || email || '');
+    const body = String(bodySrc || '').slice(0, 16000).trim() || '(no body)';
     const subj = normSubject(subject) || '(no subject)';
     const ts = now();
     // Thread by normalised subject within the client; else open a new one.
