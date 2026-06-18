@@ -73,9 +73,17 @@ tiktok.init({ db });
 // comms spine can push alongside email.
 const push = require('./push');
 push.mount(app, { db, auth });
+// Owl auto-ingest — settlements/invoices that arrive by CC-the-Owl email
+// (disposable module; no tables/routes of its own). Triggered by the os inbound
+// hook below. Safe by default: does nothing unless the sender is on the allowlist
+// and the kill-switch is on.
+const owlIngest = require('./owlIngest').mount({ db, insights, anthropicKeyForEntity });
 // Experience OS comms spine — self-contained module (own tables + routes under
 // /api/os). Remove this line + server/os.js to fully uninstall the feature.
-const os = require('./os').mount(app, { db, auth, mailer, push });
+let osApi;
+const os = require('./os').mount(app, { db, auth, mailer, push,
+  onInbound: (p) => owlIngest.handle({ ...p, getAttachmentBuffer: osApi.getAttachmentBuffer }) });
+osApi = os;
 
 // ─── Health ───────────────────────────────────────────────────────────────────
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
@@ -1571,12 +1579,14 @@ const settlementJson = express.json({ limit: '40mb' });
 function canAccessSettlement(user, s) {
   if (!s) return false;
   if (user.role === 'admin') return true;
+  if (s.needsReview) return false; // Owl-drafted (failed cross-check) — hidden until a human publishes
   return !!s.entityId && (user.entityIds || []).includes(s.entityId);
 }
 
-// Client list: settlements for the user's entities (admin sees all).
+// Client list: settlements for the user's entities (admin sees all). Admins also
+// see Owl-drafted ones (needs_review) so they can review/publish; clients don't.
 app.get('/api/my/settlements', auth.requireAuth, (req, res) => {
-  const list = req.user.role === 'admin' ? db.listSettlements() : db.listSettlements({ entityIds: req.user.entityIds || [] });
+  const list = req.user.role === 'admin' ? db.listSettlements({ includeDrafts: true }) : db.listSettlements({ entityIds: req.user.entityIds || [] });
   res.json(list);
 });
 
@@ -1621,27 +1631,44 @@ app.get('/api/settlements/:id/file', auth.requireAuth, (req, res) => {
 
 // Admin: list all (with entity names for the management table).
 app.get('/api/admin/settlements', auth.requireAdmin, (_req, res) => {
-  res.json(db.listSettlements().map((s) => ({ ...s, entityName: s.entityId ? (db.getEntity(s.entityId)?.name || '') : '' })));
+  res.json(db.listSettlements({ includeDrafts: true }).map((s) => ({ ...s, entityName: s.entityId ? (db.getEntity(s.entityId)?.name || '') : '' })));
+});
+
+// Owl auto-ingest config: kill-switch + the trusted-sender allowlist (emails or
+// bare domains) that may trigger settlement/invoice auto-publish from email.
+app.get('/api/admin/owl-ingest', auth.requireAdmin, (_req, res) => {
+  res.json({
+    enabled: db.getSetting('owl_ingest_enabled', '1') !== '0',
+    senders: db.getSetting('settlement_ingest_senders', 'howler.co.za'),
+  });
+});
+app.put('/api/admin/owl-ingest', auth.requireAdmin, (req, res) => {
+  if (req.body?.enabled !== undefined) db.setSetting('owl_ingest_enabled', req.body.enabled ? '1' : '0');
+  if (req.body?.senders !== undefined) db.setSetting('settlement_ingest_senders', String(req.body.senders || '').slice(0, 2000));
+  res.json({
+    enabled: db.getSetting('owl_ingest_enabled', '1') !== '0',
+    senders: db.getSetting('settlement_ingest_senders', 'howler.co.za'),
+  });
 });
 
 // ─── Event documents (invoices etc.) ───────────────────────────────────────────
 // Plain file storage per client/event — uploaded by admins, downloadable by the
 // assigned client. No extraction.
 app.get('/api/my/documents', auth.requireAuth, (req, res) => {
-  const list = req.user.role === 'admin' ? db.listDocuments() : db.listDocuments({ entityIds: req.user.entityIds || [] });
+  const list = req.user.role === 'admin' ? db.listDocuments({ includeDrafts: true }) : db.listDocuments({ entityIds: req.user.entityIds || [] });
   res.json(list);
 });
 app.get('/api/documents/:id', auth.requireAuth, (req, res) => {
   const doc = db.getDocument(req.params.id);
   if (!doc) return res.status(404).json({ error: 'Document not found' });
-  const allowed = req.user.role === 'admin' || (doc.entityId && (req.user.entityIds || []).includes(doc.entityId));
+  const allowed = req.user.role === 'admin' || (!doc.needsReview && doc.entityId && (req.user.entityIds || []).includes(doc.entityId));
   if (!allowed) return res.status(403).json({ error: 'Not allowed' });
   res.json({ ...doc, entityName: doc.entityId ? (db.getEntity(doc.entityId)?.name || '') : '' });
 });
 app.get('/api/documents/:id/file', auth.requireAuth, (req, res) => {
   const doc = db.getDocument(req.params.id);
   if (!doc) return res.status(404).json({ error: 'Document not found' });
-  const allowed = req.user.role === 'admin' || (doc.entityId && (req.user.entityIds || []).includes(doc.entityId));
+  const allowed = req.user.role === 'admin' || (!doc.needsReview && doc.entityId && (req.user.entityIds || []).includes(doc.entityId));
   if (!allowed) return res.status(403).json({ error: 'Not allowed' });
   const f = db.getDocumentFile(req.params.id);
   if (!f) return res.status(404).json({ error: 'No file attached' });
@@ -1652,7 +1679,7 @@ app.get('/api/documents/:id/file', auth.requireAuth, (req, res) => {
   res.send(Buffer.from(f.file, 'base64'));
 });
 app.get('/api/admin/documents', auth.requireAdmin, (req, res) => {
-  res.json(db.listDocuments(req.query.entityId ? { entityId: req.query.entityId } : {}));
+  res.json(db.listDocuments({ includeDrafts: true, ...(req.query.entityId ? { entityId: req.query.entityId } : {}) }));
 });
 app.post('/api/admin/documents', auth.requireAdmin, settlementJson, (req, res) => {
   const { entityId, eventName, title, category, data, fileBase64, fileName, fileType } = req.body || {};

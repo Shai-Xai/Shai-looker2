@@ -622,6 +622,34 @@ async function distilPreferences({ items, previous, apiKey }) {
   return (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim().slice(0, 4000);
 }
 
+// ─── Document classification (Owl email auto-ingest) ────────────────────────────
+// A cheap one-word triage so the Owl knows which extractor to run on a PDF that
+// arrived by email. Only called when the subject/filename heuristic is ambiguous.
+const CLASSIFY_SYSTEM = `You classify a single Howler PDF. Reply with EXACTLY one lowercase word and nothing else:
+- "settlement" — an event settlement / reconciliation report (turnover, Howler commissions, advances, value due to the client).
+- "invoice" — a tax invoice (line items, VAT, a total amount due).
+- "other" — anything else.
+One word only. If unsure, answer "other".`;
+
+async function classifyDocument({ pdfBase64, apiKey }) {
+  const c = requireClient(apiKey);
+  const resp = await c.messages.create({
+    model: MODEL, max_tokens: 8, output_config: { effort: 'low' },
+    system: CLASSIFY_SYSTEM,
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: pdfBase64 } },
+        { type: 'text', text: 'Classify this document. One word: settlement, invoice, or other.' },
+      ],
+    }],
+  });
+  const t = (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').toLowerCase();
+  if (t.includes('settlement')) return 'settlement';
+  if (t.includes('invoice')) return 'invoice';
+  return 'other';
+}
+
 function promptRegistry() {
   return [
     { key: 'tile', label: 'Tile insight', scope: 'Per-tile "Explain this" insight', text: SYSTEM },
@@ -635,7 +663,8 @@ function promptRegistry() {
     { key: 'settlement', label: 'Settlement extraction', scope: 'PDF settlement → JSON', text: SETTLEMENT_SYSTEM },
     { key: 'invoice', label: 'Invoice extraction', scope: 'PDF invoice → JSON', text: INVOICE_SYSTEM },
     { key: 'digest_prefs', label: 'Digest preferences', scope: 'Distilling digest/briefing feedback into a learned preferences note', text: DIGEST_PREFS_SYSTEM },
+    { key: 'classify', label: 'Document classification', scope: 'Owl email ingest: settlement vs invoice vs other', text: CLASSIFY_SYSTEM },
   ];
 }
 
-module.exports = { generateInsight, streamInsight, streamDashboardInsight, describeTile, extractSettlement, extractInvoice, briefHome, digestBrief, draftCampaign, refineText, distilPreferences, summariseReleaseNotes, promptRegistry, systemWith, isConfigured: (apiKey) => !!(apiKey || process.env.ANTHROPIC_API_KEY) };
+module.exports = { generateInsight, streamInsight, streamDashboardInsight, describeTile, extractSettlement, extractInvoice, classifyDocument, briefHome, digestBrief, draftCampaign, refineText, distilPreferences, summariseReleaseNotes, promptRegistry, systemWith, isConfigured: (apiKey) => !!(apiKey || process.env.ANTHROPIC_API_KEY) };

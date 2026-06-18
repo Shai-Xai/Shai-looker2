@@ -16,7 +16,7 @@ const fs = require('fs');
 const path = require('path');
 const express = require('express');
 
-function mount(app, { db, auth, mailer, push }) {
+function mount(app, { db, auth, mailer, push, onInbound }) {
   const sql = db.db;            // raw better-sqlite3 handle
   const now = () => new Date().toISOString();
   const uuid = () => crypto.randomUUID();
@@ -586,6 +586,14 @@ function mount(app, { db, auth, mailer, push }) {
     // are the files the Owl's settlement auto-ingest (next slice) reads.
     const nAtt = saveAttachments(threadId, mid, Array.isArray(attachments) ? attachments : [], { maxFiles: 10, maxBytes: 25 * 1024 * 1024 });
     touch(threadId);
+    // Hand stored attachments to the Owl auto-ingest (settlements/invoices), if
+    // wired. Fire-and-forget: extraction is slow (AI) and must never block or
+    // break the webhook response. Errors are swallowed + logged downstream.
+    if (nAtt && typeof onInbound === 'function') {
+      const meta = sql.prepare('SELECT id, name, mime, size FROM os_attachments WHERE message_id=?').all(mid);
+      Promise.resolve().then(() => onInbound({ entityId: ent.id, threadId, messageId: mid, from: fromEmail, subject: subj, attachments: meta }))
+        .catch((e) => console.error('[os] onInbound handler error:', e.message));
+    }
     return { ok: true, threadId, messageId: mid, entityId: ent.id, created: !t, attachments: nAtt };
   }
 
@@ -641,8 +649,17 @@ function mount(app, { db, auth, mailer, push }) {
     res.json({ domain: db.getSetting('inbound_domain', ''), secret: inboundSecret(), webhookPath: '/api/inbound/email' });
   });
 
+  // Read a stored attachment's bytes (for the Owl auto-ingest to extract PDFs).
+  // Scoped by the caller (the inbound hook only hands ids it just stored).
+  function getAttachmentBuffer(id) {
+    const a = sql.prepare('SELECT id, name, mime FROM os_attachments WHERE id=?').get(id);
+    if (!a) return null;
+    try { return { buf: fs.readFileSync(path.join(ATT_DIR, a.id)), name: a.name, mime: a.mime }; }
+    catch (e) { console.error('[os] attachment read failed:', e.message); return null; }
+  }
+
   console.log('[os] Experience OS spine mounted', enabled() ? '(enabled)' : '(disabled — set os_enabled=1)');
-  return { announce, subjectThread };
+  return { announce, subjectThread, getAttachmentBuffer };
 }
 
 module.exports = { mount };
