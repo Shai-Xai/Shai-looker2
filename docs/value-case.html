@@ -134,22 +134,6 @@ tfoot .saved{background:var(--g);-webkit-background-clip:text;background-clip:te
 .ctx strong{font-weight:740;}
 @media(max-width:760px){.context{grid-template-columns:1fr;}}
 
-/* screenshot gallery */
-.gallery{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;}
-.shot{margin:0;border:1px solid var(--line);border-radius:16px;overflow:hidden;background:#fff;box-shadow:0 10px 34px -26px rgba(20,20,40,.4);}
-.shot .frame{position:relative;aspect-ratio:16/10;background:var(--soft);display:block;overflow:hidden;}
-.shot img{width:100%;height:100%;object-fit:cover;object-position:top center;display:block;}
-.shot .ph{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:var(--muted);text-align:center;padding:18px;
-  background:repeating-linear-gradient(135deg,#fafafc,#fafafc 12px,#f3f3f6 12px,#f3f3f6 24px);}
-.shot.empty img{display:none;}
-.shot.empty .ph{display:flex;}
-.shot .ph .ico{width:34px;height:34px;border-radius:9px;background:var(--g);opacity:.85;}
-.shot .ph small{font-size:11px;font-weight:700;letter-spacing:.02em;}
-.shot figcaption{padding:13px 16px;font-size:13px;font-weight:650;color:var(--ink);border-top:1px solid var(--line);}
-.shot figcaption span{display:block;font-weight:500;color:var(--muted);font-size:12px;margin-top:2px;}
-@media(max-width:860px){.gallery{grid-template-columns:repeat(2,1fr);}}
-@media(max-width:540px){.gallery{grid-template-columns:1fr;}}
-
 @media print{
   /* force every background, gradient and dark fill to actually print */
   *{ -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important; }
@@ -212,15 +196,11 @@ tfoot .saved{background:var(--g);-webkit-background-clip:text;background-clip:te
     -webkit-text-fill-color:#FF385C !important;color:#FF385C !important;background:none !important;
   }
 
-  /* context + gallery compaction */
+  /* context compaction */
   .context{ gap:9px; }
   .ctx{ padding:12px 13px;break-inside:avoid; }
   .ctx .k{ font-size:9px;margin-bottom:6px; }
   .ctx p{ font-size:9px;margin-bottom:6px; }
-  .gallery{ gap:8px; }
-  .shot{ break-inside:avoid; }
-  .shot figcaption{ padding:7px 10px;font-size:9px; }
-  .shot figcaption span{ font-size:8px; }
 }
 </style>
 </head>
@@ -279,39 +259,6 @@ tfoot .saved{background:var(--g);-webkit-background-clip:text;background-clip:te
           <strong>greater self-service solution</strong> for clients. The report below represents the
           efficiency gains this new product makes possible.</p>
       </div>
-    </div>
-  </section>
-
-  <!-- SCREENSHOTS -->
-  <section class="sec" id="screens">
-    <h2>See it in action</h2>
-    <div class="sub">The new headless Pulse MVP. (Screenshots drop in automatically once added to <code>docs/screenshots/</code>.)</div>
-    <div class="sec-rule"></div>
-    <div class="gallery">
-      <figure class="shot">
-        <span class="frame"><img src="screenshots/01-onboarding.png" alt="Client onboarding" onerror="this.closest('.shot').classList.add('empty')"><span class="ph"><span class="ico"></span><small>01-onboarding.png</small></span></span>
-        <figcaption>Client onboarding<span>Spin up a full new client in minutes</span></figcaption>
-      </figure>
-      <figure class="shot">
-        <span class="frame"><img src="screenshots/02-branded-dashboard.png" alt="Branded dashboard" onerror="this.closest('.shot').classList.add('empty')"><span class="ph"><span class="ico"></span><small>02-branded-dashboard.png</small></span></span>
-        <figcaption>White-label dashboard<span>Per-client branding, out of the box</span></figcaption>
-      </figure>
-      <figure class="shot">
-        <span class="frame"><img src="screenshots/03-engagement-engine.png" alt="Engagement engine" onerror="this.closest('.shot').classList.add('empty')"><span class="ph"><span class="ico"></span><small>03-engagement-engine.png</small></span></span>
-        <figcaption>Engagement engine<span>Abandoned-cart &amp; campaigns, built natively</span></figcaption>
-      </figure>
-      <figure class="shot">
-        <span class="frame"><img src="screenshots/04-segments-audiences.png" alt="Segments and audiences" onerror="this.closest('.shot').classList.add('empty')"><span class="ph"><span class="ico"></span><small>04-segments-audiences.png</small></span></span>
-        <figcaption>Segments &amp; audiences<span>Live segments, synced to Meta &amp; TikTok</span></figcaption>
-      </figure>
-      <figure class="shot">
-        <span class="frame"><img src="screenshots/05-insight-digest.png" alt="Insight digest" onerror="this.closest('.shot').classList.add('empty')"><span class="ph"><span class="ico"></span><small>05-insight-digest.png</small></span></span>
-        <figcaption>Insight digest<span>What changed — and what to do about it</span></figcaption>
-      </figure>
-      <figure class="shot">
-        <span class="frame"><img src="screenshots/06-settlements.png" alt="Settlements and invoices" onerror="this.closest('.shot').classList.add('empty')"><span class="ph"><span class="ico"></span><small>06-settlements.png</small></span></span>
-        <figcaption>Settlements &amp; invoices<span>Sent live, with client notification</span></figcaption>
-      </figure>
     </div>
   </section>
 

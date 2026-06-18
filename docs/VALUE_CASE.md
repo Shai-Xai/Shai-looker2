@@ -26,10 +26,6 @@ layer. That unlocks **richer features** and moves us decisively toward a **great
 self-service solution** for clients. The report below represents the efficiency
 gains this new product makes possible.
 
-> **See it in action:** product screenshots accompany the HTML version of this
-> report (`value-case.html` → "See it in action"). Source images live in
-> `docs/screenshots/`.
-
 ---
 
 ## 1. Executive Summary
