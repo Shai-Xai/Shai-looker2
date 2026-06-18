@@ -28,7 +28,9 @@ if (process.env.NODE_ENV === 'production' || process.env.TRUST_PROXY === '1') ap
 const jsonParser = express.json({ limit: '5mb' });
 const parsesOwnBody = (p) => p === '/api/admin/import' || p.startsWith('/api/admin/settlements') || p.startsWith('/api/admin/documents')
   // OS messenger attachment payloads (base64) need a bigger limit — os.js parses these itself.
-  || /^\/api\/os\/threads\/[^/]+\/messages$/.test(p) || p === '/api/os/admin/announce';
+  || /^\/api\/os\/threads\/[^/]+\/messages$/.test(p) || p === '/api/os/admin/announce'
+  // Inbound email may carry attachment PDFs (base64) — os.js parses it with a bigger limit.
+  || p === '/api/inbound/email';
 app.use((req, res, next) => (parsesOwnBody(req.path) ? next() : jsonParser(req, res, next)));
 // API responses are personal and live (suites, branding, icons…). Without an
 // explicit header some browsers (Safari especially) heuristically cache GETs,
