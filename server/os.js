@@ -503,6 +503,32 @@ function mount(app, { db, auth, mailer, push }) {
     return s;
   };
   const normSubject = (s) => decodeEncodedWords(String(s || '')).replace(/^((re|fwd|fw)\s*:\s*)+/i, '').trim().slice(0, 200);
+
+  // Trim a reply email down to just the NEW text: cut the quoted original
+  // ("On <date>, <name> wrote:", Outlook "From:" headers, "-----Original
+  // Message-----", a ">" quote block) and common signature delimiters. Keeps the
+  // inbox readable instead of carrying the whole thread each time. Conservative —
+  // only trims when there's still meaningful text above the cut.
+  const stripQuotedReply = (text) => {
+    const s = String(text || '').replace(/\r\n/g, '\n');
+    const lines = s.split('\n');
+    let cut = -1;
+    for (let i = 0; i < lines.length; i++) {
+      const ln = lines[i].trim();
+      if (/^on\b.*\bwrote:\s*$/i.test(ln) // "On Wed, 17 Jun 2026 … wrote:"
+        || /^-{2,}\s*original message\s*-{2,}/i.test(ln)
+        || /^_{5,}\s*$/.test(ln) // Outlook divider
+        || /^from:\s.+/i.test(ln) && /sent:|to:|subject:/i.test(lines.slice(i, i + 4).join(' ')) // Outlook header block
+        || /^>\s?/.test(lines[i])) { cut = i; break; }
+    }
+    let body = cut >= 0 ? lines.slice(0, cut).join('\n') : s;
+    // Strip a trailing signature ("-- " delimiter, or "Sent from my…").
+    body = body.replace(/\n-- \n[\s\S]*$/,'').replace(/\n+sent from my [^\n]*$/i, '');
+    body = body.replace(/\n{3,}/g, '\n\n').trim();
+    // Only use the trimmed version if something substantial remains; else keep the
+    // original (don't blank a message that's mostly a forward/quote).
+    return body.length >= 2 ? body : s.trim();
+  };
   const stripAngle = (a) => String(a || '').replace(/.*<([^>]+)>.*/, '$1').trim().toLowerCase();
   const asList = (v) => (Array.isArray(v) ? v : String(v || '').split(',')).map(stripAngle).filter(Boolean);
 
@@ -537,7 +563,7 @@ function mount(app, { db, auth, mailer, push }) {
     let bodySrc = text && !looksRaw(text) ? text
       : (html ? stripHtml(html) : '');
     if (!bodySrc) bodySrc = mimeToText(text || html || raw || email || '');
-    const body = String(bodySrc || '').slice(0, 16000).trim() || '(no body)';
+    const body = stripQuotedReply(String(bodySrc || '')).slice(0, 16000).trim() || '(no body)';
     const subj = normSubject(subject) || '(no subject)';
     const ts = now();
     // Thread by normalised subject within the client; else open a new one.
