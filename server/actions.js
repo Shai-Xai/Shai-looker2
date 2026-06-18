@@ -881,15 +881,24 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     const byName = new Map();
     for (const a of actions) {
       const name = a.config.master; if (!name) continue;
-      const s = byName.get(name) || { campaigns: 0, sent: 0, clicks: 0, converted: 0, enrolled: 0 };
+      const s = byName.get(name) || { campaigns: 0, sent: 0, clicks: 0, converted: 0, enrolled: 0, cost: 0 };
       s.campaigns += 1; s.sent += a.results.sent || 0; s.clicks += a.results.clicks || 0;
       s.converted += a.results.converted || 0; s.enrolled += a.results.enrolled || 0;
+      // Cost: per-channel sends × the client's effective rate (same basis as the
+      // single-campaign report), summed across the master's campaigns.
+      if (billing) {
+        const ch = a.config.channel || 'email'; const both = ch === 'both';
+        const emailSent = both ? (a.results.emailSent || 0) : (ch === 'email' ? (a.results.sent || 0) : 0);
+        const smsSent = both ? (a.results.smsSent || 0) : (ch === 'sms' ? (a.results.sent || 0) : 0);
+        s.cost += billing.costFor(entityId, { email: emailSent, sms: smsSent }).total;
+      }
       byName.set(name, s);
     }
     // Union of records (which may have a target but no campaigns yet) + used names.
     const recs = new Map(sql.prepare('SELECT name, target FROM campaign_masters WHERE entity_id=?').all(entityId).map((r) => [r.name, r.target]));
     for (const n of byName.keys()) if (!recs.has(n)) recs.set(n, 0);
-    return [...recs.entries()].map(([name, target]) => ({ name, target, stats: byName.get(name) || { campaigns: 0, sent: 0, clicks: 0, converted: 0, enrolled: 0 } }))
+    const currency = billing ? (billing.masterRates().currency || 'ZAR') : 'ZAR';
+    return [...recs.entries()].map(([name, target]) => ({ name, target, currency, stats: byName.get(name) || { campaigns: 0, sent: 0, clicks: 0, converted: 0, enrolled: 0, cost: 0 } }))
       .sort((a, b) => a.name.localeCompare(b.name));
   }
   // Repoint every segment campaign from one master name to another (rename).

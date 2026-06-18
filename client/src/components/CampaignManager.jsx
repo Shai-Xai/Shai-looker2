@@ -264,6 +264,7 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
         <>
           {groups.named.map(([name, list]) => {
             const t = agg(list);
+            const mc = masters.find((mm) => mm.name === name); // server rollup (incl. cost)
             const open = !!openMasters[name];
             return (
               <div key={name} style={{ marginBottom: 16 }}>
@@ -273,7 +274,7 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
                     <span style={{ fontSize: 13, fontWeight: 800 }}>🗂 {name}</span>
                   </button>
                   <span style={{ fontSize: 12, color: 'var(--muted)' }}>
-                    {list.length} campaign{list.length === 1 ? '' : 's'} · {t.sent} sent · {t.clicks} clicks{t.converted ? ` · ${t.converted} converted` : ''}
+                    {list.length} campaign{list.length === 1 ? '' : 's'} · {t.sent} sent · {t.clicks} clicks{t.converted ? ` · ${t.converted} converted` : ''}{mc?.stats?.cost > 0 ? ` · ${money(mc.currency, mc.stats.cost)}` : ''}
                   </span>
                   <button style={{ ...mini, padding: '4px 10px' }} onClick={() => setMasterReport(name)}>📊 Report</button>
                 </div>
@@ -1260,6 +1261,7 @@ function MasterReport({ entityId, name, master, campaigns, onOpen, onNew, onChan
         <Stat label="Clicks" value={t.clicks} />
         <Stat label="Click rate" value={`${ctr}%`} />
         {anySeq && <Stat label="Converted" value={t.converted} accent="var(--success,#10b981)" />}
+        {master?.stats?.cost > 0 && <Stat label="Cost" value={money(master.currency, master.stats.cost)} />}
       </div>
 
       {/* Per-channel rollup across all segment campaigns in this master. */}
