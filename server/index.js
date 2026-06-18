@@ -3268,6 +3268,14 @@ app.get('/product-overview-sales.md', (_req, res) => {
   res.sendFile(PRODUCT_OVERVIEW_MD);
 });
 
+// The Experience OS pitch — a self-contained HTML deck. Served at a clean URL so
+// it's shareable. (Scoped to this one doc; the rest of docs/ stays internal.)
+const PITCH_HTML = path.join(__dirname, '../docs/experience-os-pitch.html');
+app.get(['/pitch', '/experience-os-pitch', '/experience-os-pitch.html'], (_req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+  res.sendFile(PITCH_HTML);
+});
+
 // ─── SPA fallback ───────────────────────────────────────────────────────────
 app.get('*', (_req, res) => {
   res.setHeader('Cache-Control', 'no-cache, must-revalidate');
