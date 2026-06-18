@@ -258,7 +258,7 @@ TRACKER_SHEET = 'Tracker'
 MODULE_ROWS = 100  # pre-built formula rows in Tracker (auto-blank past the data)
 
 
-def write_xlsx(rows, path, rate, hours, locday):
+def write_xlsx(rows, path, rate, hours, locday, mult=2.0):
     try:
         import openpyxl
     except ImportError:
@@ -282,7 +282,7 @@ def write_xlsx(rows, path, rate, hours, locday):
     _style_data(ws)
     # Build the Tracker tab if it's missing (first run / fresh file).
     if TRACKER_SHEET not in wb.sheetnames:
-        _build_tracker(wb, rate, hours, locday)
+        _build_tracker(wb, rate, hours, locday, mult)
     # Force Excel/Sheets to recalculate formulas on open (we write none cached).
     try:
         wb.calculation.fullCalcOnLoad = True
@@ -303,7 +303,7 @@ def _style_data(ws):
         row[0].number_format = '0.000'
 
 
-def _build_tracker(wb, rate, hours, locday):
+def _build_tracker(wb, rate, hours, locday, mult=2.0):
     from openpyxl.styles import Font, PatternFill, Alignment
     ws = wb.create_sheet(TRACKER_SHEET)
     yellow = PatternFill('solid', fgColor='FFF2CC')
@@ -316,13 +316,15 @@ def _build_tracker(wb, rate, hours, locday):
     ws['A1'].font = big
     ws['A2'] = ('What it would plausibly cost to commission this build from a senior '
                 'contractor at the rate below. This is a REPLACEMENT-COST estimate — '
-                'NOT revenue, NOT realised value. Always read it with the sensitivity '
-                'band: the Net LOC/day assumption moves the answer more than the rate, '
-                'so quote the band, never a single headline figure.')
+                'NOT revenue, NOT realised value. "Build only" = writing the code; '
+                '"Full delivery" applies the delivery multiplier for design, testing, '
+                'QA, UAT and PM. Always read it with the sensitivity band: the Net '
+                'LOC/day assumption moves the answer more than the rate, so quote the '
+                'band, never a single headline figure.')
     ws['A2'].font = muted
     ws['A2'].alignment = wrap
     ws.merge_cells('A2:E2')
-    ws.row_dimensions[2].height = 58
+    ws.row_dimensions[2].height = 72
 
     # Assumptions (yellow, editable)
     ws['A4'] = 'Assumptions — edit these'
@@ -331,6 +333,7 @@ def _build_tracker(wb, rate, hours, locday):
         ('Hourly rate (R/hour)', rate, '"R"#,##0'),
         ('Hours per day', hours, '0'),
         ('Net LOC per day', locday, '0'),
+        ('Delivery multiplier (design, test, QA, UAT, PM)', mult, '0.0"x"'),
     ], start=5):
         ws.cell(r, 1, label)
         c = ws.cell(r, 2, val)
@@ -338,12 +341,12 @@ def _build_tracker(wb, rate, hours, locday):
         c.font = bold
         c.number_format = fmt
     # named refs used below
-    RATE, HRS, LOCDAY = '$B$5', '$B$6', '$B$7'
+    RATE, HRS, LOCDAY, MULT = '$B$5', '$B$6', '$B$7', '$B$8'
 
     # Per-module table (formulas pull live from the Data tab)
-    hdr = 10
+    hdr = 11
     ws.cell(hdr - 1, 1, 'Per-module value').font = bold
-    headers = ['Module', 'Equiv LOC', 'Engineer-days', 'Engineer-hours', 'Value (R)']
+    headers = ['Module', 'Equiv LOC', 'Engineer-days', 'Engineer-hours', 'Build value (R)']
     for ci, h in enumerate(headers, start=1):
         c = ws.cell(hdr, ci, h)
         c.font = bold
@@ -370,12 +373,22 @@ def _build_tracker(wb, rate, hours, locday):
         c = ws.cell(tot, ci, f'=SUM({col}{first}:{col}{last})')
         c.font = bold
         c.number_format = fmt
-    equiv_total = f'$B${tot}'  # total equiv LOC cell
+    equiv_total = f'$B${tot}'   # total equiv LOC cell
+    build_total = f'$E${tot}'   # total build-only value cell
 
-    # Sensitivity band — total value at 100 / 150 / 250 net LOC/day
-    s0 = tot + 3
+    # Headline (current assumptions): build-only vs full delivery.
+    hh = tot + 2
+    ws.cell(hh, 1, 'Headline — current assumptions').font = bold
+    ws.cell(hh + 1, 1, 'Build only (writing the code)')
+    cb = ws.cell(hh + 1, 2, f'={build_total}'); cb.number_format = '"R"#,##0'; cb.font = bold
+    ws.cell(hh + 2, 1, 'Full delivery (× delivery multiplier)')
+    cf = ws.cell(hh + 2, 2, f'={build_total}*{MULT}'); cf.number_format = '"R"#,##0'; cf.font = bold
+    ws.cell(hh + 2, 3, '= design, testing, QA, UAT, PM on top of build').font = muted
+
+    # Sensitivity band — total value at 100 / 150 / 250 net LOC/day, both scopes.
+    s0 = hh + 5
     ws.cell(s0 - 1, 1, 'Sensitivity — total value by Net LOC/day (the dominant assumption)').font = bold
-    for ci, h in enumerate(['Net LOC/day', 'Engineer-days', 'Total value (R)', ''], start=1):
+    for ci, h in enumerate(['Net LOC/day', 'Engineer-days', 'Build value (R)', 'Full delivery (R)'], start=1):
         ws.cell(s0, ci, h).font = bold
     for k, ld in enumerate([100, 150, 250], start=1):
         r = s0 + k
@@ -384,9 +397,10 @@ def _build_tracker(wb, rate, hours, locday):
         ws.cell(r, 2).number_format = '#,##0.0'
         ws.cell(r, 3, f'={equiv_total}/{ld}*{HRS}*{RATE}')
         ws.cell(r, 3).number_format = '"R"#,##0'
-        note = ' ← current assumption' if ld == locday else ''
-        if note:
-            ws.cell(r, 4, note).font = muted
+        ws.cell(r, 4, f'={equiv_total}/{ld}*{HRS}*{RATE}*{MULT}')
+        ws.cell(r, 4).number_format = '"R"#,##0'
+        if ld == locday:
+            ws.cell(r, 5, '← current').font = muted
 
     # How to update
     h0 = s0 + 6
@@ -396,9 +410,12 @@ def _build_tracker(wb, rate, hours, locday):
         '2. The script rewrites the Data tab (Module, Raw LOC, Code LOC, Effort factor) and writes loc_data.csv.',
         '3. This Tracker tab recalculates automatically when the file is (re)opened.',
         '4. Google Sheets: import loc_data.csv into the Data tab (replace existing data); this tab recalculates the same way.',
-        '5. Adjust the yellow cells (rate, hours/day, net LOC/day) at any time — everything below updates.',
+        '5. Adjust the yellow cells (rate, hours/day, net LOC/day, delivery multiplier) at any time — everything below updates.',
         '6. Effort factors discount generated/repetitive content (SVG ~0.30, JSON ~0.30, HTML ~0.55, CSS/MD ~0.60, app logic 1.0),',
         '   so the figure is a defensible replacement cost, not a vanity line count.',
+        '7. Delivery multiplier: "Build only" is just writing code; "Full delivery" multiplies it for design, testing, QA, UAT and PM.',
+        '   Coding is ~40-50% of total project effort, so ~1.8x (lean) to ~2.5x (thorough); default 2.0x. This compounds uncertainty —',
+        '   keep build-only as the defensible core and present full delivery as a range.',
     ]
     for k, s in enumerate(steps, start=1):
         ws.cell(h0 + k, 1, s)
@@ -417,6 +434,7 @@ def main():
     ap.add_argument('--rate', type=float, default=650, help='Hourly rate (R) for a fresh workbook (default 650)')
     ap.add_argument('--hours', type=float, default=8, help='Hours/day for a fresh workbook (default 8)')
     ap.add_argument('--locday', type=float, default=150, help='Net LOC/day for a fresh workbook (default 150)')
+    ap.add_argument('--multiplier', type=float, default=2.0, help='Delivery multiplier — design/test/QA/UAT/PM on top of build (default 2.0)')
     ap.add_argument('--exclude', nargs='*', default=[], help='Extra directory names to skip')
     args = ap.parse_args()
 
@@ -438,17 +456,21 @@ def main():
     print(f'  -> {args.csv} ({len(rows)} modules)')
 
     if args.xlsx:
-        if write_xlsx(rows, args.xlsx, args.rate, args.hours, args.locday):
+        if write_xlsx(rows, args.xlsx, args.rate, args.hours, args.locday, args.multiplier):
             print(f'  -> {args.xlsx} (Data tab written; Tracker recalculates on open)')
 
-    # Headline + band (never a single figure).
-    def value_at(ld):
+    # Headline + band (never a single figure). Build-only and full delivery
+    # (× the delivery multiplier for design/testing/QA/UAT/PM).
+    def build_at(ld):
         return total_equiv / ld * args.hours * args.rate
-    print('\nReplacement-cost estimate (NOT revenue) at R%g/hour, %g h/day:' % (args.rate, args.hours))
+    print(f'\nReplacement-cost estimate (NOT revenue) at R{args.rate:g}/hour, {args.hours:g} h/day:')
+    print(f'  {"Net LOC/day":<14}{"Build only":>16}{f"Full delivery (x{args.multiplier:g})":>20}')
     for ld in (100, 150, 250):
         marker = '  <- current' if ld == args.locday else ''
-        print(f'  @ {ld:>3} net LOC/day: R{value_at(ld):,.0f}{marker}')
-    print('Quote the band, not a single number — Net LOC/day is the dominant variable.')
+        b = build_at(ld)
+        print(f'  @ {ld:<12}{("R" + format(b, ",.0f")):>16}{("R" + format(b * args.multiplier, ",.0f")):>20}{marker}')
+    print('Quote the band, not a single number. Build-only is the defensible core;')
+    print('full delivery adds design/testing/QA/UAT/PM and compounds uncertainty.')
 
 
 if __name__ == '__main__':
