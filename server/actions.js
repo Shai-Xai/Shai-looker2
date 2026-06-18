@@ -122,7 +122,7 @@ async function fetchGoogleSheetCsv(url) {
 const MAX_AUDIENCE = 2000;       // v1 safety cap per campaign
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, draftCopy, listEvents }) {
+function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAudience, draftCopy, listEvents }) {
   const sql = db.db;
   const now = () => new Date().toISOString();
   const uuid = () => crypto.randomUUID();
@@ -1515,6 +1515,8 @@ function mount(app, { db, auth, mailer, push, messaging, os, resolveAudience, dr
       ctr: sent > 0 ? Math.min(100, Math.round((totalClicks / sent) * 100)) : 0,
       // Per-channel split (shown when a campaign uses both channels).
       perChannel: { email: { sent: emailSent, clicks: emailClicks, ctr: pct(emailClicks, emailSent) }, sms: { sent: smsSent, clicks: smsClicks, ctr: pct(smsClicks, smsSent) } },
+      // Actual spend: per-channel sends × the client's effective rate.
+      cost: billing ? billing.costFor(a.entityId, { email: emailSent, sms: smsSent }) : null,
       opens: totalOpens, uniqueOpeners, hasOpens: emailChannel,
       openRate: emailChannel && sent > 0 ? Math.min(100, Math.round((uniqueOpeners / sent) * 100)) : 0,
       converted: a.results.converted || 0,

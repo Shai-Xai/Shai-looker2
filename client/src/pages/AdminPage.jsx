@@ -11,6 +11,7 @@ import OwlAddressCard from '../components/OwlAddressCard.jsx';
 import DigestManager from '../components/DigestManager.jsx';
 import CampaignManager from '../components/CampaignManager.jsx';
 import SegmentManager from '../components/SegmentManager.jsx';
+import RateCard from '../components/RateCard.jsx';
 import { BriefingConfigForm } from '../components/BriefingTuneModal.jsx';
 
 // Icon control: an emoji, or an uploaded image (downscaled to a small data-URL).
@@ -114,6 +115,7 @@ const ADMIN_NAV = [
   ['library', 'Tile library', '🧩'],
   ['ai', 'AI', '🤖'],
   ['settlements', 'Settlements', '💰'],
+  ['billing', 'Billing', '💳'],
   ['integrations', 'Integrations', '🔌'],
   ['email', 'Email', '✉️'],
   ['product', 'Product', '📦'],
@@ -134,6 +136,7 @@ export default function AdminPage() {
       {tab === 'library' && <Library />}
       {tab === 'ai' && <AISettings />}
       {tab === 'settlements' && <Settlements />}
+      {tab === 'billing' && <Billing />}
       {tab === 'integrations' && <AdminIntegrations />}
       {tab === 'email' && <MailLog />}
       {tab === 'product' && <Product />}
@@ -459,6 +462,39 @@ function ProductReleaseNotes() {
 }
 const codeChip = { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '0.85em', background: 'var(--elevated)', padding: '1px 6px', borderRadius: 5 };
 
+// ─── Billing (master rate card + spend rollup) ────────────────────────────────
+function Billing() {
+  const [rollup, setRollup] = useState(null);
+  useEffect(() => { api.getBillingRollup().then(setRollup).catch(() => setRollup({ clients: [], total: 0 })); }, []);
+  const cur = rollup?.currency || 'ZAR';
+  const money = (n) => `${cur === 'ZAR' ? 'R' : `${cur} `}${Number(n || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return (
+    <div style={{ maxWidth: 720 }}>
+      <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 4 }}>Campaign billing</h2>
+      <p style={{ ...hint }}>Set the platform master rates per channel. Each client inherits these unless you set a client-specific fee under <b>Clients → [client] → Fees</b>. Costs are per message sent.</p>
+      <RateCard scope="master" />
+      <div style={{ borderTop: '1px solid var(--hairline)', margin: '24px 0 16px' }} />
+      <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>Spend rollup — all clients</h3>
+      {!rollup ? <p style={{ color: 'var(--muted)', fontSize: 13 }}>Loading…</p> : (
+        <>
+          <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: '-0.02em', marginBottom: 12 }}>{money(rollup.total)}<span style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 600, marginLeft: 8 }}>total across {rollup.clients?.length || 0} client{rollup.clients?.length === 1 ? '' : 's'}</span></div>
+          {(rollup.clients || []).length === 0 ? <p style={{ color: 'var(--muted)', fontSize: 13 }}>No campaign spend yet.</p> : (
+            <div style={{ border: '1px solid var(--hairline)', borderRadius: 10, overflow: 'hidden' }}>
+              {rollup.clients.map((c) => (
+                <div key={c.entityId} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderBottom: '1px solid var(--hairline)', fontSize: 13 }}>
+                  <span style={{ flex: 1, minWidth: 0, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
+                  <span style={{ color: 'var(--muted)', fontSize: 12, flexShrink: 0 }}>{c.campaigns} campaign{c.campaigns === 1 ? '' : 's'}</span>
+                  <span style={{ fontWeight: 800, flexShrink: 0, minWidth: 90, textAlign: 'right' }}>{money(c.total)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── Clients (Entities) ───────────────────────────────────────────────────────
 function Entities({ fields }) {
   const [items, setItems] = useState([]);
@@ -543,7 +579,7 @@ function AdminLoginsTab() {
 // One client's settings hub: a left nav (Settings / Suites / Logins) + panel.
 function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites, users, allUsers, onChange, onBack }) {
   const [section, setSection] = useState('settings');
-  const nav = [['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['sets', 'Custom sets'], ['briefing', 'Briefing'], ['messages', 'Messages'], ['digests', 'Digests'], ['campaigns', 'Campaigns'], ['segments', 'Segments'], ['settlements', 'Settlements'], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations'], ['email', 'Branding']];
+  const nav = [['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['sets', 'Custom sets'], ['briefing', 'Briefing'], ['messages', 'Messages'], ['digests', 'Digests'], ['campaigns', 'Campaigns'], ['segments', 'Segments'], ['fees', 'Fees'], ['settlements', 'Settlements'], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations'], ['email', 'Branding']];
   return (
     <div>
       <button style={miniBtnOutline} onClick={onBack}>← All clients</button>
@@ -572,6 +608,12 @@ function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites,
             </>
           )}
           {section === 'messages' && <ClientMessages entity={entity} />}
+          {section === 'fees' && (
+            <div>
+              <p style={hint}>Per-message campaign fees for <b>{entity.name}</b>. Leave a channel blank to inherit the platform master rate (set under the top-level <b>Billing</b> tab).</p>
+              <RateCard scope="admin-client" entityId={entity.id} />
+            </div>
+          )}
           {section === 'campaigns' && (
             <div>
               <p style={hint}>Turn data into action for <b>{entity.name}</b> — e.g. email customers who abandoned checkout. Preview the audience and copy, then explicitly approve the send.</p>

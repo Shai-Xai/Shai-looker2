@@ -2922,12 +2922,16 @@ require('./onboarding').mount(app, { db, auth });
 // Campaign email templates — reusable email content, applied when building a campaign.
 require('./campaignTemplates').mount(app, { db, auth });
 
+// Campaign billing — per-channel rate card (master + per-client) + cost math.
+// Mounted before the action engine so its cost helpers can be passed in.
+const billing = require('./billing').mount(app, { db, auth });
+
 // Action Engine — suggested actions → executed automations (v1: email campaigns,
 // e.g. abandoned cart). Audience = a dashboard tile's query, run with the SAME
 // organiser scoping as the dashboards themselves. Remove this line + actions.js
 // to uninstall.
 const actionsApi = require('./actions').mount(app, {
-  db, auth, mailer, push, messaging, os,
+  db, auth, mailer, push, messaging, os, billing,
   // Run a tile's query (scoped + suite-locked) and return its rows + fields —
   // the campaign audience source.
   resolveAudience: async ({ entityId, dashboardId, tileId, user, filterOverrides = {} }) => {

@@ -250,6 +250,13 @@ export const api = {
   getDigestTiles: (entityId) => fetch(`/api/admin/entities/${entityId}/digest-tiles`).then(json),
   getFollowedTiles: (entityId) => fetch(`/api/admin/entities/${entityId}/followed-tiles`).then(json),
   getMyFollowedTiles: (entityId) => fetch(`/api/my/followed-tiles/${entityId}`).then(json),
+  // Campaign billing — per-channel rate card + cost rollups.
+  getBillingMaster: () => fetch('/api/billing/master').then(json),
+  saveBillingMaster: (b) => fetch('/api/billing/master', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  getBillingEntityRates: (entityId) => fetch(`/api/billing/admin/entities/${entityId}/rates`).then(json),
+  saveBillingEntityRates: (entityId, b) => fetch(`/api/billing/admin/entities/${entityId}/rates`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  getMyBilling: (entityId) => fetch(`/api/billing/my/${entityId}`).then(json),
+  getBillingRollup: () => fetch('/api/billing/rollup').then(json),
   getEntityTheme: (entityId) => fetch(`/api/theme/${entityId}`).then(json),
 
   // Action Engine — campaigns (one set of endpoints; server enforces entity access)

@@ -242,6 +242,13 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-18** — **Campaign costs & billing** 🟡: per-channel rate card — a
+  platform **master** rate (Admin → Billing) with optional **per-client** fees
+  (Admin → client → Fees; blank inherits master). Campaigns show an **estimated
+  cost before sending** (audience reach × rate) and **actual cost** on the report;
+  clients see their rates + spend under **Settings → Fees & billing**, and Howler
+  gets a **spend rollup** across all clients. Per message sent, ZAR. (ROI/revenue
+  attribution is a planned follow-up.)
 - **2026-06-17** — **Digests can carry followed tiles** ✅: a digest (AI-led *or*
   curated) can now **include the client's followed tiles**, and optionally render
   them in the email — chart tiles as a **graph image** (rendered server-side),

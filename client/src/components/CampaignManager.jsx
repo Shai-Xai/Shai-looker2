@@ -2,6 +2,9 @@ import { useState, useEffect, useRef } from 'react';
 import { api } from '../lib/api.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
 
+// Format a money amount in the campaign's currency (ZAR → "R1,234.00").
+const money = (cur, n) => `${cur === 'ZAR' || !cur ? 'R' : `${cur} `}${Number(n || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
 // Action Engine v1 — email campaigns (e.g. abandoned cart). The lifecycle IS
 // the product: draft (AI-written, editable) → preview audience + email →
 // APPROVE (explicit, shows the count) → running → done with results.
@@ -392,6 +395,8 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
   const [segments, setSegments] = useState([]); // saved segments to pick as an audience
   const [aud, setAud] = useState(null); // { count, excluded, sample, fields }
   const [audBusy, setAudBusy] = useState(false);
+  const [rates, setRates] = useState(null); // per-channel rate card → estimated cost before send
+  useEffect(() => { api.getMyBilling(entityId).then(setRates).catch(() => setRates(null)); }, [entityId]);
   const [preview, setPreview] = useState('');
   const [previewAll, setPreviewAll] = useState(false); // sequence: render every step
   const [activeStep, setActiveStep] = useState(0); // sequence: which step the single preview shows
@@ -837,6 +842,12 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
                     <b style={{ color: 'var(--brand)' }}>{aud.count}</b> recipient{aud.count === 1 ? '' : 's'}
                     {aud.reach && hasEmail && <span style={{ color: 'var(--muted)' }}> · {aud.reach.email} emailable</span>}
                     {aud.reach && hasSms && <span style={{ color: 'var(--muted)' }}> · {aud.reach.sms} SMS</span>}
+                    {(() => {
+                      // Estimated cost before send: reach on each active channel × its rate.
+                      if (!rates?.rates || !aud.reach) return null;
+                      const est = (hasEmail ? (aud.reach.email || 0) * (rates.rates.email || 0) : 0) + (hasSms ? (aud.reach.sms || 0) * (rates.rates.sms || 0) : 0);
+                      return est > 0 ? <span style={{ color: 'var(--brand)', fontWeight: 700 }}> · est. {money(rates.currency, est)}</span> : null;
+                    })()}
                     {aud.filteredOut > 0 && <span style={{ color: 'var(--muted)' }}> · {aud.filteredOut} filtered out</span>}
                     {!f.ignoreConsent && aud.noConsent > 0 && <span style={{ color: 'var(--muted)' }}> · {aud.noConsent} no consent</span>}
                     {aud.excluded > 0 && <span style={{ color: 'var(--muted)' }}> · {aud.excluded} unsubscribed</span>}
@@ -1342,6 +1353,7 @@ function CampaignReport({ entityId, action, onClose }) {
         {stat('CTR', `${r.ctr}%`, 'var(--brand)')}
         {(r.converted > 0) && stat('Converted', r.converted, 'var(--success,#10b981)')}
         {(r.converted > 0) && stat('Conv. rate', `${r.convRate}%`, 'var(--success,#10b981)')}
+        {r.cost && r.cost.total > 0 && stat('Cost', money(r.cost.currency, r.cost.total))}
       </div>
 
       {/* Per-channel split — only meaningful when a campaign used both channels. */}

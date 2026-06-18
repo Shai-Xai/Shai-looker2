@@ -8,6 +8,7 @@ import OwlAddressCard from '../components/OwlAddressCard.jsx';
 import MailLogView from '../components/MailLogView.jsx';
 import NotificationPrefs from '../components/NotificationPrefs.jsx';
 import TeamManager from '../components/TeamManager.jsx';
+import RateCard from '../components/RateCard.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import { useProfile } from '../lib/profile.jsx';
 import { useAccess, PERMS } from '../lib/access.js';
@@ -22,6 +23,7 @@ const SECTIONS = [
   ['integrations', 'Integrations', '🔌', PERMS.INTEGRATIONS_MANAGE],
   ['notifications', 'Notifications', '🔔', null],
   ['email', 'Branding', '🎨', PERMS.BRANDING_MANAGE],
+  ['fees', 'Fees & billing', '💳', PERMS.CAMPAIGNS_VIEW],
   ['sentmail', 'Sent emails', '📤', PERMS.INTEGRATIONS_MANAGE],
   ['inbox', 'CC the Owl', '📨', PERMS.INTEGRATIONS_MANAGE],
 ];
@@ -108,6 +110,13 @@ export default function ClientIntegrationsPage() {
             <div>
               <p style={hint}>Your colours and logo — they style your whole Pulse platform (buttons, accents, charts) and your notification emails. Blank fields keep Howler's defaults.</p>
               <MailTemplateEditor scope="my" entityId={activeItem.entityId} />
+            </div>
+          )}
+
+          {section === 'fees' && (
+            <div style={{ maxWidth: 680 }}>
+              <p style={hint}>Your per-message campaign rates and what you’ve spent so far.</p>
+              <RateCard scope="my" entityId={activeItem.entityId} />
             </div>
           )}
 
