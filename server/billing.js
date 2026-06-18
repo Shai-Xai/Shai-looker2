@@ -14,7 +14,9 @@ function mount(app, { db, auth }) {
   const sql = db.db;
   const now = () => new Date().toISOString();
   const MASTER_KEY = 'billing_rates_master';
-  const DEFAULTS = { email: 0, sms: 0, whatsapp: 0, currency: 'ZAR' };
+  // Platform-default master rates (ZAR per message) until an admin overrides them
+  // in Admin → Billing: email 3c, SMS 25c, WhatsApp 70c.
+  const DEFAULTS = { email: 0.03, sms: 0.25, whatsapp: 0.70, currency: 'ZAR' };
 
   sql.exec(`CREATE TABLE IF NOT EXISTS billing_entity_rates (
     entity_id  TEXT PRIMARY KEY,
