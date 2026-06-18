@@ -368,7 +368,7 @@ function mount(app, { db, auth, mailer, messaging, push, generateContent, roleLe
     if (!body.live) return sample('');
     try {
       const { html, subject, content } = await render(job, (job.recipients[0] || ''), { debug: true });
-      res.json({ html, subject, sample: false, generatedAt: new Date().toISOString(), facts: content?.facts || [] });
+      res.json({ html, subject, sample: false, generatedAt: new Date().toISOString(), facts: content?.facts || [], dropped: content?.dropped || [] });
     } catch (e) {
       // Fall back to the sample layout, but SURFACE the reason so the editor
       // can show why live data didn't come back.

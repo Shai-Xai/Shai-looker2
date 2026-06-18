@@ -385,6 +385,22 @@ function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }
               </div>
             </details>
           )}
+          {/* Tiles that were EXCLUDED and why — so a missing source (e.g. GA4) is
+              diagnosable: "scope blocked" = config/connector; "no rows" = the
+              query returned nothing (often GA4's daily processing lag early in
+              the day). */}
+          {!preview.sample && (preview.dropped?.length > 0) && (
+            <details style={{ marginTop: 8, border: '1px solid #f0c674', borderRadius: 10, background: 'rgba(245,158,11,0.06)' }}>
+              <summary style={{ cursor: 'pointer', padding: '8px 12px', fontSize: 12, fontWeight: 700, color: '#b45309' }}>
+                ⚠ {preview.dropped.length} tile{preview.dropped.length === 1 ? '' : 's'} excluded (no data / scope)
+              </summary>
+              <div style={{ padding: '4px 12px 10px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {preview.dropped.map((d, i) => (
+                  <div key={i} style={{ fontSize: 11.5, color: 'var(--muted-2,#555)' }}>{d}</div>
+                ))}
+              </div>
+            </details>
+          )}
         </div>
       </div>
     </div>

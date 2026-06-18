@@ -2206,7 +2206,7 @@ async function buildFacts(user, entityId, force = false, alignDaysBefore = false
   if (dropped.length) console.warn(`[facts] entity=${entityId} kept ${tiles.length} tiles, dropped ${dropped.length}: ${dropped.slice(0, 25).join(' · ')}`);
   if (tiles.length) console.log(`[facts] entity=${entityId} dashboards in facts: ${[...new Set(tiles.map((t) => t.dashTitle))].join(' · ')}`);
 
-  return { tiles, catalogue };
+  return { tiles, catalogue, dropped };
 }
 
 // In-memory caches: light snapshot (10 min) and briefing (6 h) per user+entity.
@@ -2427,6 +2427,7 @@ async function buildFactsFromTiles(user, entityId, picks, alignDaysBefore = fals
   const lockMaps = {};
   const daysBeforeOverlays = {};
   const out = [];
+  const dropped = [];
   for (const { tile, def, m } of wanted.slice(0, 24)) {
     if (!(m.suiteId in lockMaps)) lockMaps[m.suiteId] = expandLockMap(db.lockedFiltersForSuite(m.suiteId));
     if (alignDaysBefore && !(def.id in daysBeforeOverlays)) daysBeforeOverlays[def.id] = await daysBeforeOverlayFor(def, user, m.suiteId, lockMaps[m.suiteId] || {});
@@ -2434,14 +2435,15 @@ async function buildFactsFromTiles(user, entityId, picks, alignDaysBefore = fals
     const extra = {};
     if (dbo) for (const [fname, qfield] of Object.entries(tile.listenTo || {})) if (fname in dbo) extra[qfield] = dbo[fname];
     const body = await tileQueryBody(tile, def, user, m.suiteId, lockMaps[m.suiteId] || {}, extra);
-    if (!body) continue;
+    if (!body) { dropped.push(`${def.title} › ${tile.title || '?'} (scope blocked / unrunnable)`); continue; }
     try {
       const data = await runLookerQuery('/queries/run/json_detail', body, undefined, false);
-      if (!data?.data?.length) continue;
+      if (!data?.data?.length) { dropped.push(`${def.title} › ${tile.title || '?'} (no rows for the default filters)`); continue; }
       out.push({ title: tile.title || '(untitled)', visType: tile.vis?.type, context: tile.aiContext || '', fields: data.fields, rows: data.data, pivots: data.pivots || [], filters: body.filters || {}, dashboardId: def.id, suiteId: m.suiteId, setName: m.setName, dashTitle: def.title, pinned: false });
-    } catch { /* skip tile on error */ }
+    } catch (e) { dropped.push(`${def.title} › ${tile.title || '?'} (error: ${e.message})`); }
   }
-  return { tiles: out, catalogue };
+  if (dropped.length) console.warn(`[facts:curated] entity=${entityId} kept ${out.length}, dropped ${dropped.length}: ${dropped.slice(0, 25).join(' · ')}`);
+  return { tiles: out, catalogue, dropped };
 }
 
 // Produce a role-lensed digest's structured content (links resolved). Throws if
@@ -2456,7 +2458,7 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
     : (focusMode === 'blend' ? `${lens.focus}\n\nExtra emphasis for this digest: ${customFocus}` : customFocus);
   let user = recipientEmail ? db.getUserByEmail(recipientEmail) : null;
   if (!user || !(user.entityIds || []).includes(entityId)) user = { id: `digest:${entityId}`, email: recipientEmail || '', role: 'client', entityIds: [entityId] };
-  const { tiles: factTiles, catalogue } = (contentMode === 'curated' && (tiles || []).length)
+  const { tiles: factTiles, catalogue, dropped = [] } = (contentMode === 'curated' && (tiles || []).length)
     ? await buildFactsFromTiles(user, entityId, tiles, alignDaysBefore)
     : await buildFacts(user, entityId, false, alignDaysBefore, priorityDashboards);
 
@@ -2533,8 +2535,13 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
 
   // Diagnostic: the exact tiles the analyst read + the value each returned under
   // the digest's scope — so a mismatch with the dashboard (wrong tile / missing
-  // event lock) is visible at a glance. Only attached when explicitly requested.
-  if (debug) out.facts = factTilesAll.map((t) => ({ dashTitle: t.dashTitle, setName: t.setName, title: t.title, value: factValueLabel(t), suiteName: byId[t.dashboardId]?.suiteName || '', filters: t.filters || {} }));
+  // event lock) is visible at a glance. `dropped` lists the tiles that were
+  // EXCLUDED and why (scope blocked vs no rows vs error) — so a missing source
+  // (e.g. GA4) isn't a black box. Only attached when explicitly requested.
+  if (debug) {
+    out.facts = factTilesAll.map((t) => ({ dashTitle: t.dashTitle, setName: t.setName, title: t.title, value: factValueLabel(t), suiteName: byId[t.dashboardId]?.suiteName || '', filters: t.filters || {} }));
+    out.dropped = dropped;
+  }
   return out;
 }
 
