@@ -3276,6 +3276,15 @@ app.get(['/pitch', '/experience-os-pitch', '/experience-os-pitch.html'], (_req, 
   res.sendFile(PITCH_HTML);
 });
 
+// Session handoff doc — so a new Claude Code workspace (or person) can read the
+// project context/decisions at a URL when it can't see the repo directly.
+const HANDOFF_MD = path.join(__dirname, '../docs/SESSION_HANDOFF.md');
+app.get(['/handoff', '/handoff.md', '/session-handoff'], (_req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+  res.type('text/markdown; charset=utf-8');
+  res.sendFile(HANDOFF_MD);
+});
+
 // ─── SPA fallback ───────────────────────────────────────────────────────────
 app.get('*', (_req, res) => {
   res.setHeader('Cache-Control', 'no-cache, must-revalidate');
