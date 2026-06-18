@@ -1,0 +1,27 @@
+Module,Raw LOC,Code LOC,Effort factor
+Client — Pages,7305,6387,1.0
+Client — Components,6876,5916,1.0
+"Server — Core, auth & API",3848,2982,1.0
+Server — Dashboard configs (data),9346,9346,0.3
+Server — Campaign engine,2406,1875,1.0
+Docs,3117,2603,0.593
+Server — Data & Looker,1842,1503,1.0
+Client — Lib & shell,1343,1004,1.0
+Client — Tiles,924,749,1.0
+Server — Messaging & email,739,545,1.0
+Server — AI & insights,641,525,1.0
+Server — Experience OS spine,641,493,1.0
+Client — Editor,516,459,1.0
+Server — Ad-platform sync,550,420,1.0
+Other,566,465,0.887
+Docs — Product overview,651,551,0.589
+Server — Digests & scheduler,393,318,1.0
+Client — Inbox (OS),313,262,1.0
+Client — App shell,296,255,1.0
+Tests,337,243,1.0
+Docs — Specs,459,398,0.6
+Client — Styles,425,327,0.6
+Client — Config,180,159,0.741
+Docs — Experience OS pitch,164,152,0.55
+Server — Onboarding,78,55,1.0
+Server — Fixtures & data,127,127,0.3
