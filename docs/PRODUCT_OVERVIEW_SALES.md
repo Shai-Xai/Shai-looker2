@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-06-17 · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-06-18 · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -105,8 +105,14 @@ receipts live in one place with a clear read/ack trail."
 ## 4. Settlements & documents  ✅
 - Upload a **settlement PDF** → Pulse extracts it into a clean, interactive
   statement the client can read; plus an event **documents** area.
+- **Owl auto-ingest** 🧪 — **CC the Owl** on the settlement/invoice email you
+  already send the client, and Pulse files it for you: it reads the PDF, checks
+  the totals add up, and **publishes the settlement to the client automatically**
+  (from trusted Howler senders). If the numbers don't reconcile it's held as a
+  draft for a quick human review — never published unchecked. No manual upload.
 
-**Pitch:** "Settlements clients can actually read, not a PDF buried in email."
+**Pitch:** "Settlements clients can actually read, not a PDF buried in email —
+and now they file themselves: just CC the Owl."
 
 ## 5. Engage — the campaign engine
 The "action" half of Pulse. Turn any audience into branded email/SMS outreach,
@@ -242,6 +248,12 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-18** — **Owl auto-ingest for settlements & invoices** 🧪: CC the Owl
+  on the settlement/invoice email you send a client and Pulse files it
+  automatically — reads the PDF, cross-checks the totals, and **auto-publishes**
+  to the client (trusted Howler senders only); anything that doesn't reconcile is
+  held as a draft for review. Configurable under Admin → Integrations (kill-switch
+  + trusted-sender allowlist). No manual upload step.
 - **2026-06-18** — **Campaign costs & billing** 🟡: per-channel rate card — a
   platform **master** rate (Admin → Billing) with optional **per-client** fees
   (Admin → client → Fees; blank inherits master). Campaigns show an **estimated

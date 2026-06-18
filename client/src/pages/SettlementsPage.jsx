@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useOutletContext } from 'react-router-dom';
 import HomeButton from '../components/HomeButton.jsx';
+import { useAuth } from '../lib/auth.jsx';
 import { api } from '../lib/api.js';
 import { useCountUp } from '../lib/useCountUp.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
@@ -15,12 +16,14 @@ export default function SettlementsPage() {
   // In an admin client-preview the layout passes the previewed entity — scope
   // both lists to it so the preview never leaks other clients' reports.
   const { previewEntityId } = useOutletContext() || {};
+  const { isAdmin } = useAuth();
   const [rawList, setRawList] = useState(null);
   const [rawDocs, setRawDocs] = useState([]);
   const [error, setError] = useState(null);
 
+  const reload = () => api.mySettlements().then(setRawList).catch((e) => setError(e.message));
   useEffect(() => {
-    api.mySettlements().then(setRawList).catch((e) => setError(e.message));
+    reload();
     api.myDocuments().then(setRawDocs).catch(() => {});
   }, []);
 
@@ -62,8 +65,9 @@ export default function SettlementsPage() {
         <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(360px, 1fr))', gap: 16, alignItems: 'start' }}>
           {groups.map((g, i) => (
             <div key={g.key} className="tile-enter" style={{ animationDelay: `${i * 60}ms`, display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <SettlementCard s={g.hero} onOpen={() => open(g.hero)} />
-              {g.rest.length > 0 && <HistoryList items={g.rest} onOpen={open} />}
+              {isAdmin && g.hero.needsReview && <DraftBanner s={g.hero} onOpen={() => open(g.hero)} onPublished={reload} />}
+              <SettlementCard s={g.hero} onOpen={() => open(g.hero)} isAdmin={isAdmin} />
+              {g.rest.length > 0 && <HistoryList items={g.rest} onOpen={open} isAdmin={isAdmin} />}
             </div>
           ))}
         </div>
@@ -112,7 +116,7 @@ function DocumentsSection({ docs, isMobile }) {
 
 // Compact history under an event's hero card — typically the weekly
 // settlements leading up to the final.
-function HistoryList({ items, onOpen }) {
+function HistoryList({ items, onOpen, isAdmin }) {
   const [open, setOpen] = useState(items.length <= 3);
   const weeklies = items.filter((s) => s.status === 'weekly').length;
   const label = weeklies === items.length
@@ -129,6 +133,8 @@ function HistoryList({ items, onOpen }) {
           <div style={{ padding: '0 6px 6px' }}>
             {items.map((s) => (
               <button key={s.id} className="nav-row" onClick={() => onOpen(s)} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left', padding: '7px 8px', borderRadius: 8, fontSize: 12.5, color: 'var(--text)' }}>
+                {isAdmin && s.needsReview && <span title="Needs review — hidden from the client">⚠️</span>}
+                {isAdmin && s.source === 'email' && <span title="Auto-ingested from email">📥</span>}
                 <StatusBadge status={s.status} />
                 <span style={{ color: 'var(--muted)' }}>{s.settlementDate || ''}</span>
                 <span style={{ flex: 1 }} />
@@ -143,7 +149,7 @@ function HistoryList({ items, onOpen }) {
   );
 }
 
-function SettlementCard({ s, onOpen }) {
+function SettlementCard({ s, onOpen, isAdmin }) {
   const due = useCountUp(s.valueDue != null ? fmtR(s.valueDue) : '—');
   return (
     <button
@@ -163,6 +169,7 @@ function SettlementCard({ s, onOpen }) {
             {[s.venue, s.eventDates].filter(Boolean).join(' · ')}
           </div>
         </div>
+        {isAdmin && s.source === 'email' && <SourceBadge />}
         <KindBadge kind={s.kind} />
         <StatusBadge status={s.status} />
       </div>
@@ -177,6 +184,37 @@ function SettlementCard({ s, onOpen }) {
         <span style={{ color: 'var(--brand)', fontWeight: 600 }}>View →</span>
       </div>
     </button>
+  );
+}
+
+// Admin-only banner on an Owl-drafted settlement (auto-ingested from email, but
+// the totals didn't reconcile). Hidden from the client until an admin publishes.
+// Rendered as a sibling of the card (not inside it) to avoid a nested button.
+function DraftBanner({ s, onOpen, onPublished }) {
+  const [busy, setBusy] = useState(false);
+  const publish = async () => {
+    if (!window.confirm(`Publish "${s.eventName || s.title}" to the client? They'll see it immediately.`)) return;
+    setBusy(true);
+    try { await api.adminUpdateSettlement(s.id, { needsReview: 0 }); await onPublished(); }
+    catch (err) { window.alert('Could not publish: ' + err.message); } finally { setBusy(false); }
+  };
+  return (
+    <div style={{ background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.4)', borderRadius: 'var(--radius-md)', padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+      <span style={{ fontSize: 12.5, fontWeight: 600, color: '#b45309', flex: 1, minWidth: 150 }}>📥 Auto-ingested from email — the totals didn't reconcile, so it's <b>hidden from the client</b>. Review, then publish.</span>
+      <button onClick={onOpen} style={{ ...miniBtn, background: 'transparent', color: '#b45309', border: '1px solid rgba(245,158,11,0.5)' }}>Review</button>
+      <button onClick={publish} disabled={busy} style={{ ...miniBtn, background: '#b45309', color: '#fff', border: 'none' }}>{busy ? 'Publishing…' : 'Publish to client'}</button>
+    </div>
+  );
+}
+const miniBtn = { fontSize: 12, fontWeight: 700, padding: '6px 12px', borderRadius: 980, cursor: 'pointer' };
+
+// Provenance chip: this report was auto-ingested from a CC-the-Owl email. Admin-only.
+function SourceBadge() {
+  return (
+    <span title="Auto-ingested from a CC-the-Owl email" style={{
+      flexShrink: 0, fontSize: 11, fontWeight: 700, padding: '3px 8px', borderRadius: 980,
+      background: 'rgba(10,132,255,0.13)', color: '#0a66c2',
+    }}>📥 Email</span>
   );
 }
 

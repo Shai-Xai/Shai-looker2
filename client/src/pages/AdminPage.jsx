@@ -2160,6 +2160,10 @@ function AdminIntegrations() {
         <p style={hint}>Lets emails be captured into client inboxes by CC’ing a per-client address. Set the inbound domain, then point your mail forwarder at the webhook below.</p>
         <InboundConfig />
       </Section>
+      <Section title="📥 Owl auto-ingest — settlements & invoices">
+        <p style={hint}>When a PDF settlement or invoice is CC’d to a client’s Owl address from a trusted sender, the Owl extracts it, cross-checks the totals, and auto-publishes it — or holds a draft for review if the numbers don’t reconcile.</p>
+        <OwlIngestConfig />
+      </Section>
     </div>
   );
 }
@@ -2387,6 +2391,38 @@ function InboundConfig() {
 }
 const lblS = { fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', marginBottom: 5 };
 const inS = { flex: 1, boxSizing: 'border-box', padding: '9px 12px', border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 13, outline: 'none', background: 'var(--card)', color: 'var(--text)' };
+
+// Owl auto-ingest config: the kill-switch + the trusted-sender allowlist that may
+// trigger settlement/invoice auto-publish from email. Backed by /api/admin/owl-ingest.
+function OwlIngestConfig() {
+  const [cfg, setCfg] = useState(null);
+  const [senders, setSenders] = useState('');
+  const [saved, setSaved] = useState(false);
+  useEffect(() => { api.getOwlIngest().then((c) => { setCfg(c); setSenders(c.senders || ''); }); }, []);
+  if (!cfg) return <Muted>Loading…</Muted>;
+  const save = async (patch) => {
+    const c = await api.saveOwlIngest(patch);
+    setCfg(c); setSenders(c.senders || ''); setSaved(true); setTimeout(() => setSaved(false), 1600);
+  };
+  return (
+    <div style={{ ...cardStyle, display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
+        <input type="checkbox" checked={cfg.enabled} onChange={(e) => save({ enabled: e.target.checked })} />
+        <span style={{ fontSize: 13, fontWeight: 600 }}>Auto-ingest enabled</span>
+        <span style={{ fontSize: 12, color: 'var(--muted)' }}>{cfg.enabled ? 'on' : 'off — emailed PDFs are captured to the inbox only'}</span>
+      </label>
+      <div>
+        <div style={lblS}>Trusted senders</div>
+        <textarea style={{ ...inS, minHeight: 60, resize: 'vertical', fontFamily: 'inherit' }} value={senders} onChange={(e) => setSenders(e.target.value)} placeholder="howler.co.za, settlements@howler.co.za" />
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 6 }}>
+          <button style={miniBtn} onClick={() => save({ senders })}>Save</button>
+          {saved && <span style={{ color: 'var(--success,#10b981)', fontSize: 13, fontWeight: 600 }}>✓</span>}
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>Emails or bare domains, comma/space-separated. Only PDFs from these senders are auto-ingested; everything else is just captured to the inbox. A settlement only auto-<b>publishes</b> when its totals reconcile — otherwise it’s held as a draft for review.</div>
+      </div>
+    </div>
+  );
+}
 
 // Per-client integrations (admin), shown inside a client's detail nav.
 function ClientIntegrations({ entity }) {

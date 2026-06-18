@@ -225,6 +225,9 @@ export const api = {
   // CC-the-Owl: inbound email addresses + config
   getInboundConfig: () => fetch('/api/os/admin/inbound').then(json),
   saveInboundConfig: (p) => fetch('/api/os/admin/inbound', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),
+  // Owl auto-ingest (settlements/invoices from CC-the-Owl email): kill-switch + sender allowlist
+  getOwlIngest: () => fetch('/api/admin/owl-ingest').then(json),
+  saveOwlIngest: (p) => fetch('/api/admin/owl-ingest', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),
   getEntityInbox: (id) => fetch(`/api/admin/entities/${id}/inbox`).then(json),
   regenEntityInbox: (id) => fetch(`/api/admin/entities/${id}/inbox/regenerate`, { method: 'POST' }).then(json),
   getMyInbox: (entityId) => fetch(`/api/my/inbox/${entityId}`).then(json),

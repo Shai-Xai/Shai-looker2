@@ -1114,8 +1114,11 @@ function updateSettlement(id, patch) {
   const file = patch.file !== undefined ? patch.file : cur.file;
   const fileName = patch.fileName !== undefined ? patch.fileName : cur.file_name;
   const fileType = patch.fileType !== undefined ? patch.fileType : cur.file_type;
-  db.prepare('UPDATE settlements SET entity_id=?, title=?, status=?, kind=?, settlement_date=?, data=?, file=?, file_name=?, file_type=?, updated_at=? WHERE id=?')
-    .run(entityId, title, status, kind, date, data, file, fileName, fileType, now(), id);
+  // Publishing an Owl-drafted settlement = clearing needs_review (provenance
+  // `source`/`source_ref` stay put).
+  const needsReview = patch.needsReview !== undefined ? (patch.needsReview ? 1 : 0) : cur.needs_review;
+  db.prepare('UPDATE settlements SET entity_id=?, title=?, status=?, kind=?, settlement_date=?, data=?, file=?, file_name=?, file_type=?, needs_review=?, updated_at=? WHERE id=?')
+    .run(entityId, title, status, kind, date, data, file, fileName, fileType, needsReview, now(), id);
   return getSettlement(id);
 }
 function deleteSettlement(id) { return db.prepare('DELETE FROM settlements WHERE id=?').run(id).changes > 0; }
@@ -1171,7 +1174,8 @@ function updateDocument(id, patch) {
   const eventName = patch.eventName !== undefined ? (patch.eventName || '') : cur.event_name;
   const title = patch.title ?? cur.title;
   const category = patch.category ?? cur.category;
-  db.prepare('UPDATE event_documents SET entity_id=?, event_name=?, title=?, category=? WHERE id=?').run(entityId, eventName, title, category, id);
+  const needsReview = patch.needsReview !== undefined ? (patch.needsReview ? 1 : 0) : (db.prepare('SELECT needs_review FROM event_documents WHERE id=?').get(id)?.needs_review || 0);
+  db.prepare('UPDATE event_documents SET entity_id=?, event_name=?, title=?, category=?, needs_review=? WHERE id=?').run(entityId, eventName, title, category, needsReview, id);
   return getDocument(id);
 }
 function deleteDocument(id) { return db.prepare('DELETE FROM event_documents WHERE id=?').run(id).changes > 0; }
