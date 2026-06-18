@@ -2131,6 +2131,29 @@ async function buildFacts(user, entityId, force = false, alignDaysBefore = false
       }
     }
   }
+  // 1e) Guarantee a little GA4/ANALYTICS — but ONLY if the client actually has an
+  //     analytics set (else this is a no-op). A small budget so the traffic/
+  //     funnel headline tiles always make the cut without crowding out ticketing.
+  const isAnalyticsSet = (name) => /\bga4\b|analytics|google/i.test(name || '');
+  let ga = 0; const GA_BUDGET = 3;
+  for (const lead of leads) {
+    if (ga >= GA_BUDGET || picks.length >= FACT_MAX_TILES) break;
+    if (!isAnalyticsSet(lead.setName)) continue;
+    for (const did of lead.dashboardIds) {
+      if (ga >= GA_BUDGET || picks.length >= FACT_MAX_TILES) break;
+      const def = store.get(did);
+      if (!def || !dashMeta[did]) continue;
+      const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((t) => t.tiles || []))]
+        .filter((t) => t.type !== 'text' && t.query?.fields?.length)
+        .sort((a, b) => tilePriority(a) - tilePriority(b));
+      let taken = 0;
+      for (const t of tiles) {
+        if (taken >= PER_DASH || ga >= GA_BUDGET || picks.length >= FACT_MAX_TILES) break;
+        const before = picks.length; addTile(def, t, lead.suiteId, true);
+        if (picks.length > before) { taken += 1; ga += 1; }
+      }
+    }
+  }
   // 2) Fill from EVERY dashboard across the client's sets, round-robin so the
   //    budget spreads over the whole catalogue (Payments, Comps, Resale…)
   //    instead of the first dashboard eating it. A per-dashboard cap keeps any
