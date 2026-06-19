@@ -72,7 +72,9 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
 
   return (
     <div
-      className="howler-tile"
+      // Hover-lift in view mode (matches the home cards). Not while editing — it
+      // would fight the drag-to-rearrange transform.
+      className={`howler-tile${editable ? '' : ' lift'}`}
       style={{
         background: 'var(--tile-bg, #fff)',
         border: '1px solid var(--border)',
