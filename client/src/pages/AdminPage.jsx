@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useId } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
@@ -3013,48 +3013,30 @@ function SettlementChecks({ data }) {
 // Assign-to-event control: a select fed by the client's known events (from
 // their settlements), with an "Other / new event…" escape hatch to type a name
 // that doesn't exist yet. Values not in the list show as "(custom)".
-// onChange fires per keystroke (update display); onCommit (optional) fires only
-// when the value is "settled" — input blur / Enter, or a dropdown pick — so a
-// consumer that SAVES can do so once, not on every character.
+// Free-text event name with autocomplete suggestions from known events. A plain
+// input (no select↔input mode-switching, which kept breaking focus/typing) — so
+// it ALWAYS accepts typing. Picking a suggestion or typing a new name both just
+// set the value; onCommit (optional) fires on blur/Enter so a consumer saves once.
 function EventPicker({ value, onChange, onCommit, eventNames, style }) {
   const known = [...new Set((eventNames || []).filter(Boolean))];
-  const custom = !!value && !known.includes(value);
-  const [typing, setTyping] = useState(false);
-  const inputRef = useRef(null);
-  // Focus the input via a ref when we switch into typing mode — autoFocus is
-  // unreliable across the select→input swap (the native select can keep focus),
-  // which made the "Other / new event" box impossible to type into.
-  useEffect(() => { if (typing && inputRef.current) inputRef.current.focus(); }, [typing]);
-  if (typing || known.length === 0) {
-    return (
-      <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
-        <input
-          ref={inputRef}
-          style={style}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          onBlur={(e) => onCommit && onCommit(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); } }}
-          placeholder="Event name"
-        />
-        {known.length > 0 && <button style={miniBtnOutline} title="Pick from known events" onClick={() => setTyping(false)}>▾</button>}
-      </span>
-    );
-  }
+  const listId = useId();
   return (
-    <select
-      style={style}
-      value={custom ? '__custom' : value}
-      onChange={(e) => {
-        if (e.target.value === '__other') { setTyping(true); onChange(''); }
-        else if (e.target.value !== '__custom') { onChange(e.target.value); if (onCommit) onCommit(e.target.value); }
-      }}
-    >
-      <option value="">— Assign to event —</option>
-      {known.map((n) => <option key={n} value={n}>{n}</option>)}
-      {custom && <option value="__custom">{value} (custom)</option>}
-      <option value="__other">Other / new event…</option>
-    </select>
+    <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+      <input
+        style={style}
+        value={value}
+        list={known.length ? listId : undefined}
+        placeholder="Event name"
+        onChange={(e) => onChange(e.target.value)}
+        onBlur={(e) => onCommit && onCommit(e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); } }}
+      />
+      {known.length > 0 && (
+        <datalist id={listId}>
+          {known.map((n) => <option key={n} value={n} />)}
+        </datalist>
+      )}
+    </span>
   );
 }
 
