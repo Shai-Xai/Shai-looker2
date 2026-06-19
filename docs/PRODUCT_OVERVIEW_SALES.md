@@ -248,6 +248,12 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-19** — **Onboarding that learns** 🧪 (internal): the wizards now record
+  a usage **funnel** (open → step → skip/complete) and **feature usage**, surfaced
+  in **Admin → Onboarding** with plain recommendations ("most people drop at step
+  X — simplify it"). Two safe automatic touches: the welcome wizard **skips steps a
+  client has already done**. Bigger flow changes stay human-decided on purpose (no
+  silent auto-rewriting from a noisy signal).
 - **2026-06-19** — **Guided onboarding & in-app walkthroughs** 🧪: the "Getting
   started" checklist is now a **guided-learning layer**. Brand-new clients get a
   one-time **welcome wizard** (branding → team → notifications) on first login;

@@ -6,6 +6,30 @@ async function json(res) {
   return data;
 }
 
+// Usage telemetry: buffer events and flush in small batches (after a short idle,
+// when the buffer fills, or when the tab is hidden). Fire-and-forget — a failed
+// flush is dropped silently so it can never affect the UI.
+let _trackBuf = [];
+let _trackEntity = null;
+let _trackTimer = null;
+function flushTrack() {
+  clearTimeout(_trackTimer); _trackTimer = null;
+  if (!_trackBuf.length || !_trackEntity) return;
+  const body = JSON.stringify({ entityId: _trackEntity, events: _trackBuf });
+  _trackBuf = [];
+  fetch('/api/my/track', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body }).catch(() => {});
+}
+function queueTrack(entityId, event) {
+  if (!entityId || !event || !event.kind || !event.event || !event.name) return;
+  if (_trackEntity && _trackEntity !== entityId) flushTrack(); // don't mix entities in a batch
+  _trackEntity = entityId;
+  _trackBuf.push(event);
+  if (_trackBuf.length >= 25) return flushTrack();
+  clearTimeout(_trackTimer);
+  _trackTimer = setTimeout(flushTrack, 1500);
+}
+if (typeof window !== 'undefined') window.addEventListener('pagehide', flushTrack);
+
 // POST to an AI-extraction endpoint that streams ndjson progress events
 // ({type:'progress'|'done'|'error'}); calls onProgress per event and resolves
 // with the extracted data.
@@ -99,6 +123,11 @@ export const api = {
       body: JSON.stringify(def),
     }).then(json),
   deleteDashboard: (id) => fetch(`/api/dashboards/${id}`, { method: 'DELETE' }),
+  // Usage telemetry — fire-and-forget, batched (see _trackBuf below). Never throws.
+  track: (entityId, event) => queueTrack(entityId, event),
+  // Admin: onboarding funnel + feature-usage aggregates.
+  adminOnboardingStats: () => fetch('/api/admin/onboarding/stats').then(json),
+
   // Onboarding checklist
   getMyOnboarding: (entityId) => fetch(`/api/my/onboarding/${entityId}`).then(json),
   setMyOnboardingStep: (entityId, key, done) => fetch(`/api/my/onboarding/${entityId}/${key}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ done }) }).then(json),

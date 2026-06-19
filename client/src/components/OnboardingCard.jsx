@@ -76,7 +76,7 @@ export default function OnboardingCard({ entityId }) {
         ))}
       </div>
       )}
-      {guide && <GuideModal guide={guide} onClose={() => setGuide(null)} />}
+      {guide && <GuideModal guide={guide} entityId={entityId} onClose={() => setGuide(null)} />}
     </section>
   );
 }

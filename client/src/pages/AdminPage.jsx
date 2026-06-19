@@ -13,6 +13,7 @@ import CampaignManager from '../components/CampaignManager.jsx';
 import SegmentManager from '../components/SegmentManager.jsx';
 import RateCard from '../components/RateCard.jsx';
 import { BriefingConfigForm } from '../components/BriefingTuneModal.jsx';
+import { GUIDES } from '../lib/guides.js';
 
 // Icon control: an emoji, or an uploaded image (downscaled to a small data-URL).
 // Offers a palette of common dashboard-category icons for quick picking.
@@ -114,6 +115,7 @@ const ADMIN_NAV = [
   ['sets', 'Sets', '🗂️'],
   ['library', 'Tile library', '🧩'],
   ['ai', 'AI', '🤖'],
+  ['onboarding', 'Onboarding', '🚀'],
   ['settlements', 'Settlements', '💰'],
   ['billing', 'Billing', '💳'],
   ['integrations', 'Integrations', '🔌'],
@@ -135,6 +137,7 @@ export default function AdminPage() {
       {tab === 'sets' && <Sets />}
       {tab === 'library' && <Library />}
       {tab === 'ai' && <AISettings />}
+      {tab === 'onboarding' && <OnboardingInsights />}
       {tab === 'settlements' && <Settlements />}
       {tab === 'billing' && <Billing />}
       {tab === 'integrations' && <AdminIntegrations />}
@@ -189,6 +192,126 @@ export default function AdminPage() {
         <div style={{ minWidth: 0 }}>{content}</div>
       </div>
     </main>
+  );
+}
+
+// ─── Onboarding insights ───────────────────────────────────────────────────────
+// Learn from how clients actually use the onboarding wizards: the funnel (where
+// people open, advance, skip or complete each guide) and which features they use.
+// Measure → recommend → a human decides what to change in guides.js. We don't
+// auto-rewrite the flow: a noisy signal silently steering copy is exactly the
+// failure mode we want to avoid.
+
+const FEATURE_LABELS = {
+  pin: '📌 Pinned a tile', follow: '👁 Followed a tile', briefing_tune: '⚙ Tuned the briefing',
+  insight: '🦉 Asked for an insight',
+};
+
+function OnboardingInsights() {
+  const [stats, setStats] = useState(null);
+  const [err, setErr] = useState(false);
+  useEffect(() => { api.adminOnboardingStats().then(setStats).catch(() => setErr(true)); }, []);
+
+  if (err) return <p style={{ color: 'var(--muted)', fontSize: 13 }}>Couldn’t load usage stats.</p>;
+  if (!stats) return <p style={{ color: 'var(--muted)', fontSize: 13 }}>Loading…</p>;
+
+  // Build an ordered funnel per guide using the real step order from guides.js.
+  const guideIds = Object.keys(stats.guides || {}).filter((id) => GUIDES[id]).sort((a, b) => (stats.guides[b].opens || 0) - (stats.guides[a].opens || 0));
+  const recs = [];
+  for (const id of guideIds) {
+    const g = stats.guides[id];
+    const steps = GUIDES[id].steps;
+    const baseline = g.opens || (g.steps['0']?.viewed || 0);
+    if (baseline < 5) continue; // too little signal to advise on
+    let worst = null;
+    for (let n = 1; n < steps.length; n++) {
+      const prev = g.steps[String(n - 1)]?.viewed || 0;
+      const here = g.steps[String(n)]?.viewed || 0;
+      const drop = prev - here;
+      if (prev > 0 && (!worst || drop > worst.drop)) worst = { n, drop, prev, here };
+    }
+    if (worst && worst.drop > 0 && worst.drop / (worst.prev || 1) >= 0.4) {
+      recs.push(`In “${GUIDES[id].title}”, ${worst.drop} of ${worst.prev} people drop at “${steps[worst.n].title}”. Consider simplifying that step or moving it later.`);
+    }
+    const rate = g.opens ? Math.round((g.completes / g.opens) * 100) : 0;
+    if (g.opens >= 5 && rate < 50) recs.push(`Only ${rate}% finish “${GUIDES[id].title}” (${g.completes}/${g.opens}). It may be too long — trim it.`);
+  }
+  const features = stats.features || [];
+  const topFeature = features[0];
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18, maxWidth: 720 }}>
+      <div>
+        <h2 style={{ fontSize: 17, fontWeight: 800 }}>Onboarding insights</h2>
+        <p style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 3 }}>
+          How clients use the welcome wizard and guides. Use this to refine the steps in <code>client/src/lib/guides.js</code>. {stats.total === 0 && 'No usage recorded yet — check back once clients have started using the wizards.'}
+        </p>
+      </div>
+
+      {recs.length > 0 && (
+        <div style={{ background: 'rgba(124,58,237,0.07)', border: '1px solid rgba(124,58,237,0.25)', borderRadius: 12, padding: 14 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 800, color: '#7c3aed', marginBottom: 8 }}>💡 Recommendations</div>
+          <ul style={{ margin: 0, paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {recs.map((r, i) => <li key={i} style={{ fontSize: 13, lineHeight: 1.5 }}>{r}</li>)}
+          </ul>
+        </div>
+      )}
+
+      {guideIds.map((id) => {
+        const g = stats.guides[id];
+        const steps = GUIDES[id].steps;
+        const baseline = Math.max(g.opens || 0, g.steps['0']?.viewed || 0, 1);
+        const rate = g.opens ? Math.round((g.completes / g.opens) * 100) : 0;
+        return (
+          <div key={id} style={{ border: '1px solid var(--border)', borderRadius: 14, padding: 16, background: 'var(--card)' }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
+              <span style={{ fontSize: 14.5, fontWeight: 800 }}>{GUIDES[id].title}</span>
+              <span style={{ fontSize: 12, color: 'var(--muted)' }}>{g.opens} opened · {g.completes} finished · {rate}% completion</span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {steps.map((s, n) => {
+                const st = g.steps[String(n)] || { viewed: 0, cta: 0, skip: 0 };
+                const pct = Math.round((st.viewed / baseline) * 100);
+                return (
+                  <div key={n} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span style={{ flex: '0 0 38%', minWidth: 0, fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{n + 1}. {s.title}</span>
+                    <div style={{ flex: 1, height: 16, borderRadius: 6, background: 'rgba(128,128,128,0.13)', overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${pct}%`, background: 'var(--brand)', borderRadius: 6, transition: 'width .25s' }} />
+                    </div>
+                    <span style={{ flex: '0 0 auto', fontSize: 11.5, color: 'var(--muted)', minWidth: 92, textAlign: 'right' }}>
+                      {st.viewed} seen{st.cta ? ` · ${st.cta} acted` : ''}{st.skip ? ` · ${st.skip} left` : ''}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+
+      <div style={{ border: '1px solid var(--border)', borderRadius: 14, padding: 16, background: 'var(--card)' }}>
+        <div style={{ fontSize: 14.5, fontWeight: 800, marginBottom: 4 }}>Feature usage</div>
+        <p style={{ fontSize: 12, color: 'var(--muted)', marginTop: 0, marginBottom: 12 }}>What clients actually do — the most-used features are the ones worth teaching in the wizard.</p>
+        {features.length === 0 ? (
+          <p style={{ fontSize: 12.5, color: 'var(--muted)' }}>No feature usage recorded yet.</p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {features.map((f) => {
+              const pct = Math.round((f.people / (topFeature.people || 1)) * 100);
+              return (
+                <div key={f.name} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ flex: '0 0 38%', minWidth: 0, fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{FEATURE_LABELS[f.name] || f.name}</span>
+                  <div style={{ flex: 1, height: 16, borderRadius: 6, background: 'rgba(128,128,128,0.13)', overflow: 'hidden' }}>
+                    <div style={{ height: '100%', width: `${pct}%`, background: '#2da44e', borderRadius: 6 }} />
+                  </div>
+                  <span style={{ flex: '0 0 auto', fontSize: 11.5, color: 'var(--muted)', minWidth: 92, textAlign: 'right' }}>{f.people} {f.people === 1 ? 'client' : 'clients'} · {f.hits}×</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 

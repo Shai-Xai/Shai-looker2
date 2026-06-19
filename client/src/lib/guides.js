@@ -26,17 +26,20 @@ export const GUIDES = {
         title: 'Make it yours',
         body: 'Add your logo and brand colour so your emails and the whole app look like you, not like us.',
         cta: { label: 'Add branding', to: '/settings' },
+        skipIfDone: 'branding',
       },
       {
         icon: '👥',
         title: 'Bring your team',
         body: 'Invite the people who should have access and get your briefings. You choose what each person can see.',
         cta: { label: 'Invite team', to: '/settings' },
+        skipIfDone: 'team',
       },
       {
         icon: '🔔',
         title: 'Stay in the loop',
         body: "Turn on notifications and we'll nudge your phone when something needs you — even when Pulse is closed. Tap Allow when your browser asks.",
+        skipIfDone: 'notifications',
       },
       {
         icon: '🚀',

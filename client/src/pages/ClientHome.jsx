@@ -56,15 +56,19 @@ export default function ClientHome() {
     api.myBriefing(homeEntityId).then((b) => { if (alive) setBrief(b); }).catch(() => { if (alive) setBrief({ available: false }); });
     api.osInbox(homeEntityId).then((r) => { if (alive) setMessages(r.threads || []); }).catch(() => {});
     api.getDismissedThreads().then((r) => { if (alive) setDismissed(r.dismissed || []); }).catch(() => {});
-    // First run: a brand-new client (nothing done, not dismissed) gets the
-    // essentials welcome wizard once. Remembered per entity so it never nags again.
+    // First run: show the essentials welcome wizard once per entity (remembered
+    // in localStorage so it never nags again), unless they've dismissed setup or
+    // already finished. Auto-refinement: steps the client has already done are
+    // dropped, so the wizard only walks them through what's actually left.
     if (homeEntityId) {
       const seenKey = `howler_onboarding_welcomed:${homeEntityId}`;
       if (!localStorage.getItem(seenKey)) {
         api.getMyOnboarding(homeEntityId).then((o) => {
-          if (!alive || !o || o.dismissed || (o.done || 0) !== 0) return;
+          if (!alive || !o || o.dismissed || o.complete) return;
           localStorage.setItem(seenKey, '1');
-          setGuide(GUIDES.essentials);
+          const done = new Set((o.steps || []).filter((s) => s.done).map((s) => s.key));
+          const steps = GUIDES.essentials.steps.filter((s) => !s.skipIfDone || !done.has(s.skipIfDone));
+          setGuide({ ...GUIDES.essentials, steps });
         }).catch(() => {});
       }
     }
@@ -138,7 +142,7 @@ export default function ClientHome() {
             <span style={{ flex: 1 }} />
             {brief?.generatedAt && <span style={{ fontSize: 11, color: 'var(--muted)' }}>{new Date(brief.generatedAt).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}</span>}
             {refreshErr && <span style={{ fontSize: 11, color: 'var(--error)' }} title="Couldn't refresh — try again">⚠</span>}
-            <button onClick={() => setTuneOpen(true)} title="Tune your briefing — focus, event dates, phases" style={refreshBtn}>⚙ Tune</button>
+            <button onClick={() => { api.track(homeEntityId, { kind: 'feature', name: 'briefing_tune', event: 'use' }); setTuneOpen(true); }} title="Tune your briefing — focus, event dates, phases" style={refreshBtn}>⚙ Tune</button>
             <button onClick={refreshBrief} disabled={refreshing} title="Regenerate briefing" style={refreshBtn}>{refreshing ? '…' : '↻ Refresh'}</button>
           </div>
           {brief == null || refreshing ? (
@@ -282,7 +286,7 @@ export default function ClientHome() {
         <BriefingTuneModal entityId={homeEntityId} onClose={() => setTuneOpen(false)} onSaved={refreshBrief} />
       )}
 
-      {guide && <GuideModal guide={guide} onClose={() => setGuide(null)} />}
+      {guide && <GuideModal guide={guide} entityId={homeEntityId} onClose={() => setGuide(null)} />}
 
       {/* Suites */}
       <SectionHead>Your suites</SectionHead>

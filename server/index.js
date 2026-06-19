@@ -2238,6 +2238,9 @@ require('./scheduler').mount(app, { db, auth, mailer, messaging, push, generateC
 // Onboarding checklist — light-touch "Getting started" guide (auto-detect + manual).
 require('./onboarding').mount(app, { db, auth });
 
+// Onboarding & feature telemetry — usage signals to refine the wizard from real behaviour.
+require('./telemetry').mount(app, { db, auth, rateLimit });
+
 // Campaign email templates — reusable email content, applied when building a campaign.
 require('./campaignTemplates').mount(app, { db, auth });
 

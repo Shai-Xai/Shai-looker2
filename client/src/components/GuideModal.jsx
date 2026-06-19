@@ -1,15 +1,19 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useIsMobile } from '../lib/useIsMobile.js';
+import { api } from '../lib/api.js';
 
 // Reusable, mobile-first stepped walkthrough. One card at a time, progress dots,
 // Back / Next, a Skip-all escape, and an optional "do it now" CTA per step that
 // navigates into the app. Drives every guide: the first-run essentials wizard,
 // per-task walkthroughs and the feature explainers (content lives in guides.js).
 //
-//   <GuideModal guide={GUIDES.briefing} onClose={() => setOpen(false)} />
+// Pass `entityId` to record the funnel (open → step → cta/skip/complete) so the
+// flow can be refined from real behaviour — Admin → Onboarding.
 //
-export default function GuideModal({ guide, onClose, onComplete }) {
+//   <GuideModal guide={GUIDES.briefing} entityId={id} onClose={() => setOpen(false)} />
+//
+export default function GuideModal({ guide, entityId, onClose, onComplete }) {
   const isMobile = useIsMobile();
   const navigate = useNavigate();
   const [i, setI] = useState(0);
@@ -17,10 +21,24 @@ export default function GuideModal({ guide, onClose, onComplete }) {
   const step = steps[i];
   const last = i === steps.length - 1;
 
+  // Funnel telemetry. `done` guards the unmount handler so a clean finish/CTA
+  // isn't also logged as a drop-off (skip). All fire-and-forget.
+  const track = useCallback((event, stepIdx) => {
+    if (entityId && guide?.id) api.track(entityId, { kind: 'guide', name: guide.id, step: String(stepIdx), event });
+  }, [entityId, guide]);
+  const iRef = useRef(0);
+  const doneRef = useRef(false);
+  useEffect(() => { iRef.current = i; }, [i]);
+  useEffect(() => { // open once; on unmount, log a skip if it wasn't finished
+    track('open', 0);
+    return () => { if (!doneRef.current) track('skip', iRef.current); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { track('step', i); }, [i]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const close = useCallback(() => { onClose && onClose(); }, [onClose]);
-  const next = () => { if (last) { onComplete && onComplete(); close(); } else setI((n) => n + 1); };
+  const next = () => { if (last) { doneRef.current = true; track('complete', i); onComplete && onComplete(); close(); } else setI((n) => n + 1); };
   const back = () => setI((n) => Math.max(0, n - 1));
-  const doCta = () => { const to = step?.cta?.to; if (onComplete) onComplete(); close(); if (to) navigate(to); };
+  const doCta = () => { const to = step?.cta?.to; doneRef.current = true; track('cta', i); if (onComplete) onComplete(); close(); if (to) navigate(to); };
 
   // Esc closes; arrow keys page through — same affordances on phone and desktop.
   useEffect(() => {
