@@ -111,3 +111,18 @@ test('a goal remembers its chosen display (bar / ring / dial)', async () => {
   const upd = (await app.req('PUT', `/api/goals/${g.id}`, { as: owner, body: { display: 'ring' } })).body.goal;
   assert.equal(upd.display, 'ring', 'display change persists through update');
 });
+
+test('goals list in position order; updating position reorders them (drag-reorder)', async () => {
+  const sid = h.db.createSuite({ entityId, name: 'Order test' }).id;
+  const mk = (name) => app.req('POST', `/api/goals/suites/${sid}`, { as: owner, body: { name, source: 'manual', targetValue: 1 } });
+  const a = (await mk('A')).body.goal;
+  const b = (await mk('B')).body.goal;
+  const c = (await mk('C')).body.goal;
+  const namesNow = async () => (await app.req('GET', `/api/goals/suites/${sid}`, { as: owner })).body.goals.map((g) => g.name);
+  assert.deepEqual(await namesNow(), ['A', 'B', 'C'], 'defaults to creation order');
+  // Drag C to the front: persist new positions (what the widget does).
+  await app.req('PUT', `/api/goals/${c.id}`, { as: owner, body: { position: 0 } });
+  await app.req('PUT', `/api/goals/${a.id}`, { as: owner, body: { position: 1 } });
+  await app.req('PUT', `/api/goals/${b.id}`, { as: owner, body: { position: 2 } });
+  assert.deepEqual(await namesNow(), ['C', 'A', 'B'], 'order follows position, not North-Star-first');
+});

@@ -47,6 +47,15 @@ test('role permissions are enforced: finance can view settlements but not approv
   assert.equal(h.auth.hasPermission(user, ent.id, P.INTEGRATIONS_MANAGE), false, 'finance cannot manage integrations');
 });
 
+test('goals.manage: owner/manager/marketing/finance can set goals; a viewer cannot', () => {
+  const ent = h.makeEntity('Goals Perm Co', 'gp-org');
+  const P = h.roles.PERMISSIONS;
+  for (const role of ['owner', 'manager', 'marketing', 'finance']) {
+    assert.ok(h.auth.hasPermission(h.makeClient(`gm-${role}@test.local`, [ent.id], role), ent.id, P.GOALS_MANAGE), `${role} can manage goals`);
+  }
+  assert.equal(h.auth.hasPermission(h.makeClient('gm-viewer@test.local', [ent.id], 'viewer'), ent.id, P.GOALS_MANAGE), false, 'viewer cannot');
+});
+
 test('a viewer is read-only: dashboards yes, everything else no', () => {
   const ent = h.makeEntity('Viewer Co', 'v-org');
   const user = h.makeClient('viewer@test.local', [ent.id], 'viewer');
