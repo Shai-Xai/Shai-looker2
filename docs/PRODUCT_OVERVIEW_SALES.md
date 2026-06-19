@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-06-18 · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-06-19 · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -248,6 +248,34 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-19** — **Getting-started polish + Meta/TikTok step** 🧪: added a **“Connect
+  Meta & TikTok”** step to the Getting started checklist (auto-ticks once an ad
+  account is connected, with a guided walkthrough). Every walkthrough now has a
+  **“do it now” button on its last slide** too, and all the **“Go” buttons land on
+  the right place** — Settings opens the correct section (branding/team/notifications/
+  integrations) and the dashboards step opens an actual dashboard instead of bouncing
+  to home.
+- **2026-06-19** — **One-touch install & notifications in the wizard** 🧪: the welcome
+  wizard now has a dedicated **“Add Pulse to your phone”** step with a one-tap
+  **Install** button (native prompt on Android/desktop; Add-to-Home-Screen guidance
+  on iPhone), and the notifications step turns on push with a single tap. Usage
+  tracking widened too — opening a dashboard and asking the Owl for an insight now
+  feed the **Admin → Onboarding** feature-usage view.
+- **2026-06-19** — **Onboarding that learns** 🧪 (internal): the wizards now record
+  a usage **funnel** (open → step → skip/complete) and **feature usage**, surfaced
+  in **Admin → Onboarding** with plain recommendations ("most people drop at step
+  X — simplify it"). Two safe automatic touches: the welcome wizard **skips steps a
+  client has already done**. Bigger flow changes stay human-decided on purpose (no
+  silent auto-rewriting from a noisy signal).
+- **2026-06-19** — **Guided onboarding & in-app walkthroughs** 🧪: the "Getting
+  started" checklist is now a **guided-learning layer**. Brand-new clients get a
+  one-time **welcome wizard** (branding → team → notifications) on first login;
+  the checklist tasks are reworded and grouped into plain phases (*Make it yours ·
+  Stay in the loop · See & act on your data*), each with a **"Show me how"**
+  walkthrough. A **"Learn" launcher** on the home page explains the things people
+  miss at a glance — **how the home page works, tuning your briefing, pinning vs
+  following tiles, and how the Owl's AI insights work**. All copy lives in one
+  editable place; mobile-first throughout.
 - **2026-06-18** — **Owl auto-ingest for settlements & invoices** 🧪: CC the Owl
   on the settlement/invoice email you send a client and Pulse files it
   automatically — reads the PDF, cross-checks the totals, and **auto-publishes**
