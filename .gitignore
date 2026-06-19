@@ -1,3 +1,15 @@
 node_modules/
 .env
 *.log
+
+# Runtime data
+server/data/
+client/dist/
+
+# Dev screenshot helper (throwaway)
+shot.mjs
+dbg.mjs
+dnd.mjs
+*.shot.mjs
+shot*.mjs
+st.mjs

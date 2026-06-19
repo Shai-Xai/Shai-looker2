@@ -1,27 +1,425 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
+  /* Brand */
   --brand: #ff385c;
+  --brand-2: #ff6b35;          /* secondary — gradient partner, 2nd series */
   --brand-dark: #e0002b;
-  --bg: #f7f7f7;
+  --brand-rgb: 255, 56, 92;    /* primary as r,g,b for alpha tints */
+  /* Surfaces — Apple-style light canvas with floating white cards */
+  --bg: #f5f5f7;
   --card: #ffffff;
-  --border: #e0e0e0;
-  --text: #222222;
-  --muted: #717171;
-  --success: #008a00;
-  --error: #c0392b;
-  --warn: #b45309;
-  --radius: 12px;
-  --shadow: 0 2px 16px rgba(0,0,0,0.08);
+  --elevated: #ffffff;
+  --tile-bg: #ffffff;
+  --frost: rgba(255, 255, 255, 0.82); /* frosted headers / sidebar */
+  /* Hairlines & text */
+  --border: rgba(0, 0, 0, 0.06);
+  --hairline: rgba(0, 0, 0, 0.08);
+  --text: #1d1d1f;
+  --muted: #86868b;
+  --muted-2: #6e6e73;
+  --success: #1d8a3b;
+  --error: #d70015;
+  --warn: #b25000;
+  /* Shape & depth */
+  --radius: 18px;
+  --radius-md: 14px;
+  --radius-sm: 10px;
+  --shadow: 0 1px 2px rgba(0,0,0,0.04), 0 10px 30px -12px rgba(0,0,0,0.12);
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.05), 0 4px 12px -6px rgba(0,0,0,0.08);
+  --shadow-pop: 0 8px 40px rgba(0,0,0,0.16);
+  --skel: rgba(128,128,128,0.13);
+  --skel-hi: rgba(128,128,128,0.24);
+  --row-stripe: #fafafa;
+  --ai: #6d28d9; --ai-bg: rgba(246,241,255,0.92); --ai-border: #eadfff;
+  /* Liquid Glass — translucent chrome/overlays. Surfaces tint to what's behind
+     them (blur + saturate) with a bright top edge (specular highlight). Kept
+     fairly opaque so text stays crisp; the blur supplies the "glass" feel. */
+  --glass-bg: rgba(255, 255, 255, 0.82);
+  --glass-blur: 18px;
+  --glass-border: rgba(255, 255, 255, 0.6);
+  --glass-hi: rgba(255, 255, 255, 0.9);
+  --glass-shadow: 0 10px 34px -10px rgba(0, 0, 0, 0.22);
+  /* Motion — one shared language for the whole app */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);      /* decisive, settles softly */
+  --ease-spring: cubic-bezier(0.34, 1.30, 0.64, 1); /* slight overshoot */
+  --dur-fast: 150ms;
+  --dur-med: 280ms;
+  --dur-slow: 460ms;
 }
 
-body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+/* ─── Dark theme ─────────────────────────────────────────────────────────────
+   Activated via <html data-theme="dark">. Brand pink stays; surfaces/text flip
+   by redefining the same tokens, so anything using the variables adapts. */
+[data-theme="dark"] {
+  --bg: #0e0e11;
+  --card: #1a1a1f;
+  --elevated: #222228;
+  --tile-bg: #1a1a1f;
+  --frost: rgba(22, 22, 27, 0.82);
+  --border: rgba(255, 255, 255, 0.09);
+  --hairline: rgba(255, 255, 255, 0.12);
+  --text: #f3f3f6;
+  --muted: #9a9aa3;
+  --muted-2: #c0c0c9;
+  --success: #34d399;
+  --error: #ff6b6b;
+  --warn: #fbbf24;
+  --shadow: 0 1px 2px rgba(0,0,0,0.5), 0 12px 34px -14px rgba(0,0,0,0.7);
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.45), 0 6px 16px -8px rgba(0,0,0,0.6);
+  --shadow-pop: 0 10px 44px rgba(0,0,0,0.7);
+  --skel: rgba(255,255,255,0.07);
+  --skel-hi: rgba(255,255,255,0.14);
+  --row-stripe: #202027;
+  --ai: #c4b5fd; --ai-bg: rgba(124,58,237,0.20); --ai-border: rgba(124,58,237,0.45);
+  --glass-bg: rgba(30, 30, 36, 0.82);
+  --glass-border: rgba(255, 255, 255, 0.12);
+  --glass-hi: rgba(255, 255, 255, 0.16);
+  --glass-shadow: 0 12px 40px -10px rgba(0, 0, 0, 0.6);
+  color-scheme: dark;
+}
+html { transition: background .3s ease; }
+
+html, body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
   background: var(--bg);
   color: var(--text);
   min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  letter-spacing: -0.011em;
 }
 
 a { color: inherit; }
+button { font-family: inherit; transition: background .15s ease, box-shadow .15s ease, opacity .15s ease, filter .15s ease, transform .26s var(--ease-spring); }
+/* Liquid press — squish in, then spring back with a slight overshoot (bubble). */
+button:active:not(:disabled) { transform: scale(0.93); transition-duration: .09s; }
+button:disabled { opacity: 0.45; cursor: default !important; }
 
-button { font-family: inherit; }
+/* Liquid Glass button — opt-in sheen + glass highlight for primary CTAs. Layers
+   over the button's own colour; a specular shine sweeps across on hover and a
+   soft bloom blooms from the centre on press. */
+.liquid-btn { position: relative; overflow: hidden; isolation: isolate; box-shadow: inset 0 1px 0 rgba(255,255,255,0.35), 0 6px 18px -8px rgba(0,0,0,0.35); }
+.liquid-btn::before {
+  content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  background: linear-gradient(115deg, transparent 32%, rgba(255,255,255,0.45) 50%, transparent 68%);
+  transform: translateX(-140%); transition: transform .6s var(--ease-out);
+}
+.liquid-btn:hover::before { transform: translateX(140%); }
+.liquid-btn::after {
+  content: ''; position: absolute; left: 50%; top: 50%; width: 8px; height: 8px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(255,255,255,0.65), rgba(255,255,255,0)); pointer-events: none;
+  transform: translate(-50%, -50%) scale(0); opacity: 0;
+}
+.liquid-btn:active:not(:disabled)::after { animation: liquid-bloom .5s var(--ease-out); }
+@keyframes liquid-bloom {
+  0% { transform: translate(-50%, -50%) scale(0); opacity: 0.7; }
+  100% { transform: translate(-50%, -50%) scale(34); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .liquid-btn::before, .liquid-btn::after { display: none; }
+  button:active:not(:disabled) { transform: none; }
+}
+input, select, textarea { font-family: inherit; color: var(--text); }
+input::placeholder, textarea::placeholder { color: #b0b0b6; }
+
+/* Inputs — Apple-style soft fields */
+.fld {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  outline: none;
+  background: #fff;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.fld:focus { border-color: var(--brand); box-shadow: 0 0 0 3px rgba(var(--brand-rgb), 0.15); }
+
+/* Custom scrollbars — subtle, Apple-like */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.18); border-radius: 8px; border: 2px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.30); background-clip: content-box; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* AI insight button: hidden until the tile is hovered (or focused) */
+.howler-tile .insight-btn { opacity: 0; transition: opacity 0.15s ease; }
+.howler-tile:hover .insight-btn,
+.howler-tile:focus-within .insight-btn { opacity: 1; }
+@media (hover: none) { .howler-tile .insight-btn { opacity: 1; } }
+
+/* Tiles get a touch more lift + a faint brand ring on hover */
+.howler-tile { transition: box-shadow .2s ease, transform .2s ease, border-color .2s ease; }
+.howler-tile:hover { box-shadow: 0 1px 2px rgba(0,0,0,0.05), 0 14px 36px -14px rgba(0,0,0,0.18); border-color: rgba(var(--brand-rgb), 0.16); }
+
+/* Pop — for count badges / status chips that appear or change. */
+@keyframes pop { 0% { transform: scale(.4); opacity: 0; } 60% { transform: scale(1.14); } 100% { transform: scale(1); opacity: 1; } }
+.pop { animation: pop .34s var(--ease-spring) both; }
+
+/* Save → animated check that draws on. */
+@keyframes draw-check { to { stroke-dashoffset: 0; } }
+@keyframes fade-up { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.saved-chip { display: inline-flex; align-items: center; gap: 5px; animation: fade-up .25s var(--ease-out) both; }
+.check-anim path { stroke-dasharray: 22; stroke-dashoffset: 22; animation: draw-check .42s var(--ease-out) .05s forwards; }
+
+/* ─── Panels & sheets ───────────────────────────────────────────────────────── */
+@keyframes overlay-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes panel-in-right { from { transform: translateX(26px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes sheet-up { from { transform: translateY(100%); } to { transform: none; } }
+@keyframes msg-in { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: none; } }
+@keyframes modal-in { from { opacity: 0; transform: scale(0.96) translateY(8px); } to { opacity: 1; transform: none; } }
+
+.ai-overlay { animation: overlay-in .2s ease both; backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); }
+.ai-panel { animation: panel-in-right .36s var(--ease-spring) both; }
+.ai-sheet { animation: sheet-up .36s var(--ease-spring) both; }
+.modal-in { animation: modal-in .26s var(--ease-spring) both; }
+.msg-in { animation: msg-in .3s var(--ease-out) both; }
+
+/* Streaming AI text "materialises" — its trailing edge fades in as it grows. */
+.streaming {
+  -webkit-mask-image: linear-gradient(to bottom, #000 72%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 72%, transparent 100%);
+}
+
+/* Grab handle for mobile bottom sheets. */
+.sheet-grip { width: 38px; height: 4px; border-radius: 980px; background: rgba(128,128,128,0.3); margin: 0 auto 10px; flex-shrink: 0; }
+
+/* Dark mode: flip inline-white form fields (inline styles need !important). */
+[data-theme="dark"] input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+[data-theme="dark"] select,
+[data-theme="dark"] textarea {
+  background: var(--elevated) !important;
+  color: var(--text) !important;
+  border-color: var(--hairline) !important;
+}
+
+/* Key buttons get a soft light "shine" sweep on hover. Add class .btn-key. */
+.btn-key { position: relative; overflow: hidden; }
+.btn-key::after {
+  content: ''; position: absolute; top: 0; left: -120%; width: 55%; height: 100%;
+  background: linear-gradient(100deg, transparent, rgba(255,255,255,0.35), transparent);
+  transform: skewX(-18deg); pointer-events: none;
+}
+.btn-key:hover:not(:disabled)::after { animation: shine .7s var(--ease-out); }
+@keyframes shine { to { left: 135%; } }
+
+/* AI panels: an animated gradient border that rotates as they slide in. */
+@property --ai-angle { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+@keyframes ai-rotate { to { --ai-angle: 360deg; } }
+.ai-glow { position: relative; }
+.ai-glow::before {
+  content: ''; position: absolute; inset: 0; border-radius: inherit; padding: 1.6px;
+  background: conic-gradient(from var(--ai-angle), var(--brand), var(--brand-2), #7c3aed, #06b6d4, var(--brand));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  animation: ai-rotate 4.5s linear infinite;
+  pointer-events: none; z-index: 1;
+}
+
+/* AI mark — the Howler owl logo used as the "AI" affordance everywhere.
+   A soft rotating glow halo sits behind it and a few sparkles twinkle around
+   it so the mark feels alive without being noisy. */
+.ai-mark {
+  position: relative; display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0; line-height: 0; isolation: isolate;
+}
+.ai-mark .ai-mark-img {
+  width: 100%; height: 100%; object-fit: contain; display: block;
+  border-radius: 50%; position: relative; z-index: 1;
+  animation: ai-mark-breathe 4s var(--ease-out, ease-in-out) infinite;
+}
+/* Rotating conic halo behind the owl. */
+.ai-mark::before {
+  content: ''; position: absolute; inset: -16%; border-radius: 50%; z-index: 0;
+  background: conic-gradient(from var(--ai-angle), var(--brand), var(--brand-2), #7c3aed, #06b6d4, var(--brand));
+  filter: blur(5px); opacity: 0.55;
+  animation: ai-rotate 4.5s linear infinite;
+  pointer-events: none;
+}
+/* Two sparkles that twinkle on alternating beats (drawn with ::after + a child). */
+.ai-mark .ai-spark {
+  position: absolute; z-index: 2; pointer-events: none; color: #fff;
+  filter: drop-shadow(0 0 2px rgba(124,58,237,0.9));
+  animation: ai-twinkle 2.4s var(--ease-out, ease-in-out) infinite;
+}
+.ai-mark .ai-spark.s1 { top: -10%; right: -8%; font-size: 0.5em; }
+.ai-mark .ai-spark.s2 { bottom: -6%; left: -6%; font-size: 0.36em; animation-delay: 1.2s; }
+/* Quiet variant: just the owl, motionless — for dense mobile tile corners. */
+.ai-mark.quiet::before { display: none; }
+.ai-mark.quiet .ai-mark-img { animation: none; }
+@keyframes ai-mark-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
+@keyframes ai-twinkle {
+  0%, 100% { opacity: 0; transform: scale(0.3) rotate(0deg); }
+  40% { opacity: 1; transform: scale(1) rotate(25deg); }
+  70% { opacity: 0.4; transform: scale(0.7) rotate(0deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-overlay, .ai-panel, .ai-sheet, .modal-in, .msg-in { animation-duration: 1ms !important; }
+  .streaming { mask-image: none; -webkit-mask-image: none; }
+  .ai-glow::before { animation: none; }
+  .btn-key:hover::after { animation: none; }
+  .ai-mark::before, .ai-mark .ai-mark-img, .ai-mark .ai-spark { animation: none; }
+  .ai-mark .ai-spark { opacity: 0.85; }
+}
+
+/* Content fades in when switching sub-dashboard tabs (the tiles inside still
+   do their own staggered entrance). A directional variant slides the content
+   in from the side you swiped/clicked toward. */
+.tab-swap { animation: tab-fade .22s var(--ease-out, ease-out); }
+.tab-swap-next { animation: tab-in-right .26s var(--ease-out, ease-out); }
+.tab-swap-prev { animation: tab-in-left .26s var(--ease-out, ease-out); }
+@keyframes tab-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes tab-in-right { from { opacity: 0; transform: translateX(26px); } to { opacity: 1; transform: none; } }
+@keyframes tab-in-left { from { opacity: 0; transform: translateX(-26px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .tab-swap, .tab-swap-next, .tab-swap-prev { animation: none; } }
+
+/* Sub-dashboard tabs — underline style; the gradient underline slides between
+   tabs like the sidebar's nav indicator. Horizontally scrollable when long. */
+.subtabs {
+  position: relative; display: flex; gap: 2px; overflow-x: auto;
+  padding: 0 16px; flex-shrink: 0;
+  background: var(--frost);
+  backdrop-filter: saturate(180%) blur(20px); -webkit-backdrop-filter: saturate(180%) blur(20px);
+  border-bottom: 1px solid var(--hairline);
+  scrollbar-width: none;
+}
+.subtabs::-webkit-scrollbar { display: none; }
+.subtab {
+  flex-shrink: 0; border: none; background: transparent; cursor: pointer;
+  padding: 10px 14px 12px; font-size: 13.5px; font-weight: 600; font-family: inherit;
+  color: var(--muted-2); border-radius: 8px 8px 0 0;
+  transition: color .15s ease, background .15s ease;
+}
+.subtab:hover { background: rgba(128,128,128,0.08); color: var(--text); }
+.subtab.active { color: var(--brand); }
+.subtab-underline {
+  position: absolute; bottom: 0; left: 0; height: 2.5px; border-radius: 3px;
+  background: linear-gradient(90deg, var(--brand), var(--brand-2));
+  transition: transform .3s var(--ease-out), width .3s var(--ease-out), opacity .2s ease;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) { .subtab-underline { transition: none; } }
+
+/* ─── Liquid Glass ───────────────────────────────────────────────────────────
+   Reusable translucent surface for chrome + overlays (menus, modals, toasts,
+   sidebars). Tints to what's behind it, with a bright top edge highlight. */
+.glass {
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-hi);
+}
+/* App header / top chrome — frosted glass with a specular top edge. */
+.app-chrome {
+  background: var(--frost) !important;
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  box-shadow: inset 0 1px 0 var(--glass-hi);
+}
+
+/* Client sidebar — frosted, Apple-like */
+.howler-sidebar {
+  background: var(--frost);
+  backdrop-filter: saturate(180%) blur(var(--glass-blur));
+  -webkit-backdrop-filter: saturate(180%) blur(var(--glass-blur));
+  border-right: 1px solid var(--hairline);
+  box-shadow: inset 1px 0 0 var(--glass-hi);
+}
+.nav-row { transition: background .15s ease, color .15s ease; position: relative; z-index: 1; }
+.nav-row:hover { background: rgba(128,128,128,0.10); }
+.nav-row.active { color: var(--brand); }
+.nav-caret { transition: transform .22s var(--ease-out); }
+
+/* Sliding active indicator — one pink pill that glides between nav items. */
+.nav-indicator {
+  position: absolute; left: 6px; right: 6px; top: 0; height: 0;
+  background: rgba(var(--brand-rgb), 0.12); border-radius: 9px;
+  z-index: 0; pointer-events: none; opacity: 0;
+  transition: transform .32s var(--ease-spring), height .32s var(--ease-spring), opacity .2s ease;
+}
+
+/* Animated expand/collapse of tree sections (grid-rows 0fr↔1fr — no JS measuring). */
+.collapsey { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .26s var(--ease-out); }
+.collapsey.open { grid-template-rows: 1fr; }
+.collapsey-inner { overflow: hidden; min-height: 0; opacity: 0; transition: opacity .18s ease; }
+.collapsey.open > .collapsey-inner { opacity: 1; transition: opacity .28s ease .05s; }
+
+/* Desktop sidebar collapse — slide width to 0 instead of disappearing. */
+.sidebar-wrap { flex-shrink: 0; overflow: hidden; display: flex; transition: width .3s var(--ease-out), opacity .24s ease; }
+.sidebar-wrap > .howler-sidebar { height: 100%; }
+.sidebar-wrap.collapsed { width: 0 !important; opacity: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .nav-indicator, .collapsey, .collapsey-inner, .sidebar-wrap, .nav-caret { transition-duration: 1ms !important; }
+  .pop, .saved-chip { animation: none !important; }
+  .check-anim path { animation: none !important; stroke-dashoffset: 0 !important; }
+}
+
+/* Route cross-fade (View Transitions API) — quick and soft. */
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: .26s; animation-timing-function: var(--ease-out); }
+
+/* Soft hover lift for cards (folders, suites) */
+.lift { transition: box-shadow .22s ease, transform .22s ease, border-color .22s ease; }
+.lift:hover { transform: translateY(-2px); box-shadow: 0 10px 30px -12px rgba(0,0,0,0.18); border-color: rgba(0,0,0,0.10); }
+.lift:active { transform: translateY(0); }
+
+/* ─── Load choreography ─────────────────────────────────────────────────────
+   Tiles compose in: each tile's content fades + rises when its data lands,
+   staggered by grid position (delay set inline per tile). */
+@keyframes tile-rise {
+  from { opacity: 0; transform: translateY(10px) scale(0.985); }
+  to   { opacity: 1; transform: none; }
+}
+.tile-enter { animation: tile-rise var(--dur-slow) var(--ease-out) both; }
+
+/* Skeleton shimmer shown while a tile's first query runs. */
+@keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+.skel {
+  background: linear-gradient(100deg, var(--skel) 40%, var(--skel-hi) 50%, var(--skel) 60%);
+  background-size: 200% 100%;
+  animation: shimmer 1.6s linear infinite;
+  border-radius: 7px;
+}
+
+/* Comparison chips / secondary lines slide in after the KPI number settles. */
+@keyframes chip-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+.chip-in { animation: chip-in 340ms var(--ease-out) both; }
+
+/* While a tile refreshes (filter change), keep the stale data visible but dim. */
+.tile-refreshing { opacity: 0.45; filter: saturate(0.8); }
+.tile-live { transition: opacity var(--dur-med) ease, filter var(--dur-med) ease; }
+
+/* Honour users who prefer no motion. */
+@media (prefers-reduced-motion: reduce) {
+  .tile-enter, .chip-in { animation-duration: 1ms !important; }
+  .skel { animation: none; }
+}
+
+/* Mobile: inputs below 16px make iOS zoom in on focus — force 16px so the
+   viewport stays put. */
+@media (max-width: 767px) {
+  input, select, textarea { font-size: 16px !important; }
+}
+
+/* ─── Print / PDF ─────────────────────────────────────────────────────────────
+   The dashboard's "⤓ PDF" button calls window.print(); these rules strip the
+   app chrome and let the tile grid flow across pages, so Save-as-PDF yields a
+   clean report. Landscape suits the desktop grid's proportions. */
+@media print {
+  @page { size: A4 landscape; margin: 9mm; }
+  html, body, #root { height: auto !important; overflow: visible !important; background: #fff !important; }
+  #root > div { height: auto !important; display: block !important; }
+  header, .howler-sidebar, .sidebar-wrap, .subtabs, .no-print, .insight-btn,
+  .nav-indicator, .sheet-grip { display: none !important; }
+  main { overflow: visible !important; display: block !important; }
+  main > div { overflow: visible !important; height: auto !important; }
+  body { zoom: 0.72; }
+  .howler-tile { box-shadow: none !important; break-inside: avoid; }
+  .ai-glow::before { display: none !important; }
+}
