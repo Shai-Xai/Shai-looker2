@@ -228,5 +228,6 @@ module.exports = function createQueryEngine({ looker, auth }) {
     effectiveFilterValues,
     tileQueryBody,
     daysBeforeOverlayFor,
+    firstNumberFromDetail,
   };
 };

@@ -23,6 +23,7 @@ const rateLimit = require('./ratelimit');
 const {
   runLookerQuery, applyScope, stripAnyValue, ANY_VALUE, currentFirstEventSort,
   cleanFilterMap, expandLockMap, effectiveFilterValues, tileQueryBody, daysBeforeOverlayFor,
+  firstNumberFromDetail,
 } = require('./query')({ looker, auth });
 
 const app = express();
@@ -524,6 +525,25 @@ require('./dashboards').mount(app, {
   convertDashboard, fetchDashboard, parseDrillUrl,
   runLookerQuery, applyScope, stripAnyValue, currentFirstEventSort,
 });
+
+// ─── Goals (the Results pillar) → server/goals.js ──────────────────────────────
+// A tile-sourced goal reads the live number off a dashboard tile through the
+// SHARED, scope-enforced query path (so the goal value == what the dashboard
+// shows, and the per-tenant scope can't be bypassed). The suite's filter locks
+// (which event) are applied exactly as a dashboard view would apply them.
+async function resolveTileValue({ dashboardId, tileId, user, suiteId }) {
+  const def = db.getDashboard(dashboardId);
+  if (!def) return null;
+  const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))];
+  const tile = tiles.find((t) => t.id === tileId);
+  if (!tile) return null;
+  const lockMap = expandLockMap(db.lockedFiltersForSuite(suiteId));
+  const body = await tileQueryBody(tile, def, user, suiteId, lockMap);
+  if (!body) return null; // scope denied or non-queryable tile
+  const data = await runLookerQuery('/queries/run/json_detail', body);
+  return firstNumberFromDetail(data);
+}
+require('./goals').mount(app, { db, auth, resolveTileValue });
 
 // Format a Looker date value ("2026-05-29" / ISO) as "29 May 2026" for the
 // event dropdowns. Falls back to the raw string if it isn't a parseable date.

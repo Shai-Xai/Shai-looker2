@@ -15,6 +15,7 @@ const PERMISSIONS = {
   DASHBOARDS_VIEW: 'dashboards.view',        // see dashboards at all (scoped further by visibility)
   CAMPAIGNS_VIEW: 'campaigns.view',          // see the Actions area + campaign reports
   CAMPAIGNS_APPROVE: 'campaigns.approve',    // create/approve/send campaigns
+  GOALS_MANAGE: 'goals.manage',              // set/edit event goals + targets (Results)
   DIGESTS_MANAGE: 'digests.manage',          // create/edit scheduled digests
   SETTLEMENTS_VIEW: 'settlements.view',      // see settlements + documents
   SETTLEMENTS_MANAGE: 'settlements.manage',  // (reserved) edit settlement notes etc.
@@ -36,17 +37,17 @@ const ROLES = [
   {
     key: 'manager', label: 'Manager', lens: 'exec',
     description: 'All dashboards, digests and campaigns. No branding, integrations or team management.',
-    permissions: [P.DASHBOARDS_VIEW, P.CAMPAIGNS_VIEW, P.CAMPAIGNS_APPROVE, P.DIGESTS_MANAGE, P.SETTLEMENTS_VIEW],
+    permissions: [P.DASHBOARDS_VIEW, P.CAMPAIGNS_VIEW, P.CAMPAIGNS_APPROVE, P.GOALS_MANAGE, P.DIGESTS_MANAGE, P.SETTLEMENTS_VIEW],
   },
   {
     key: 'marketing', label: 'Marketing', lens: 'marketing',
     description: 'Marketing & ticketing dashboards and campaigns, with a marketing briefing focus.',
-    permissions: [P.DASHBOARDS_VIEW, P.CAMPAIGNS_VIEW, P.CAMPAIGNS_APPROVE, P.DIGESTS_MANAGE],
+    permissions: [P.DASHBOARDS_VIEW, P.CAMPAIGNS_VIEW, P.CAMPAIGNS_APPROVE, P.GOALS_MANAGE, P.DIGESTS_MANAGE],
   },
   {
     key: 'finance', label: 'Finance', lens: 'finance',
     description: 'Finance, revenue & settlement dashboards, with a finance briefing focus. No campaigns.',
-    permissions: [P.DASHBOARDS_VIEW, P.SETTLEMENTS_VIEW, P.SETTLEMENTS_MANAGE, P.DIGESTS_MANAGE],
+    permissions: [P.DASHBOARDS_VIEW, P.SETTLEMENTS_VIEW, P.SETTLEMENTS_MANAGE, P.GOALS_MANAGE, P.DIGESTS_MANAGE],
   },
   {
     key: 'viewer', label: 'Viewer', lens: 'exec',
