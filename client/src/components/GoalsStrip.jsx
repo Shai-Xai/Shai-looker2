@@ -175,7 +175,7 @@ function Ring({ pct, tone, size = 78 }) {
       <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(128,128,128,0.18)" strokeWidth={sw} />
       <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={tone} strokeWidth={sw} strokeLinecap="round"
         strokeDasharray={c} strokeDashoffset={c * (1 - shown / 100)} transform={`rotate(-90 ${size / 2} ${size / 2})`}
-        style={{ transition: 'stroke-dashoffset .8s cubic-bezier(.34,1,.4,1)' }} />
+        style={{ transition: 'stroke-dashoffset 1.2s cubic-bezier(.34,1,.4,1)' }} />
       <text x="50%" y="50%" dominantBaseline="central" textAnchor="middle" fontSize={size * 0.25} fontWeight="800" fill="var(--text)">{w}%</text>
     </svg>
   );
@@ -197,7 +197,7 @@ function Dial({ pct, tone, size = 86 }) {
       <path d={full} fill="none" stroke="rgba(128,128,128,0.18)" strokeWidth={sw} strokeLinecap="round" />
       <path d={full} fill="none" stroke={tone} strokeWidth={sw} strokeLinecap="round"
         strokeDasharray={arcLen} strokeDashoffset={arcLen * (1 - shown / 100)}
-        style={{ transition: 'stroke-dashoffset .8s cubic-bezier(.34,1,.4,1)' }} />
+        style={{ transition: 'stroke-dashoffset 1.2s cubic-bezier(.34,1,.4,1)' }} />
       <text x={cx} y={cy + 1} textAnchor="middle" fontSize={size * 0.2} fontWeight="800" fill="var(--text)">{w}%</text>
     </svg>
   );
