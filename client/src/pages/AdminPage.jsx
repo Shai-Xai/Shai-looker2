@@ -2722,6 +2722,7 @@ function Settlements({ entityId = null }) {
               </div>
             </div>
             <span style={{ flex: 1 }} />
+            <SettlementEventPicker s={s} eventNames={[...new Set(items.map((x) => x.eventName || x.title))]} onSaved={load} />
             <select
               style={{ ...input, minWidth: 90 }}
               value={s.status}
@@ -3053,6 +3054,20 @@ function DocEventPicker({ doc, eventNames, onSaved }) {
     api.adminUpdateDocument(doc.id, { eventName: t }).then(onSaved);
   };
   return <EventPicker value={val} onChange={setVal} onCommit={commit} eventNames={eventNames} style={{ ...input, minWidth: 150, maxWidth: 190 }} />;
+}
+
+// Per-settlement event assignment — mirrors DocEventPicker but saves onto the
+// settlement's extracted meta (so the card, the client-side grouping, and the
+// report header stay in sync). Type a new name or pick an existing event.
+function SettlementEventPicker({ s, eventNames, onSaved }) {
+  const [val, setVal] = useState(s.eventName || s.title || '');
+  useEffect(() => { setVal(s.eventName || s.title || ''); }, [s.eventName, s.title]);
+  const commit = (v) => {
+    const t = String(v == null ? val : v).trim();
+    if (!t || t === (s.eventName || s.title || '')) return;
+    api.adminUpdateSettlement(s.id, { eventName: t }).then(onSaved);
+  };
+  return <EventPicker value={val} onChange={setVal} onCommit={commit} eventNames={eventNames} style={{ ...input, minWidth: 150, maxWidth: 200 }} />;
 }
 
 // Best-overlap match of a free-text name (as printed on an invoice) onto one of

@@ -1110,7 +1110,15 @@ function updateSettlement(id, patch) {
   const status = patch.status !== undefined ? normSettlementStatus(patch.status) : cur.status;
   const kind = patch.kind !== undefined ? normSettlementKind(patch.kind) : (cur.kind || 'ticketing');
   const date = patch.settlementDate ?? cur.settlement_date;
-  const data = patch.data !== undefined ? JSON.stringify(patch.data) : cur.data;
+  // `eventName` edits the extracted meta so the name is consistent everywhere —
+  // the admin card, the client-side event grouping, and the report header all
+  // read meta.eventName.
+  let data = patch.data !== undefined ? JSON.stringify(patch.data) : cur.data;
+  if (patch.eventName !== undefined) {
+    const d = J(data, {});
+    d.meta = { ...(d.meta || {}), eventName: String(patch.eventName || '') };
+    data = JSON.stringify(d);
+  }
   const file = patch.file !== undefined ? patch.file : cur.file;
   const fileName = patch.fileName !== undefined ? patch.fileName : cur.file_name;
   const fileType = patch.fileType !== undefined ? patch.fileType : cur.file_type;
