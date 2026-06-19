@@ -29,6 +29,7 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, onClo
   const [preview, setPreview] = useState(null); // live value of the picked tile
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  const [confirmDel, setConfirmDel] = useState(false);
 
   // Load the client's dashboards/tiles only when they choose tile-tracking.
   useEffect(() => {
@@ -77,6 +78,12 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, onClo
       onSaved?.();
       onClose();
     } catch (e) { setErr(e.message || 'Could not save the goal.'); setBusy(false); }
+  }
+
+  async function del() {
+    setBusy(true); setErr('');
+    try { await api.deleteGoal(goal.id); onSaved?.(); onClose(); }
+    catch (e) { setErr(e.message || 'Could not delete the goal.'); setBusy(false); }
   }
 
   return (
@@ -147,10 +154,9 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, onClo
             <input value={target} onChange={(e) => setTarget(e.target.value)} placeholder="e.g. 25000" inputMode="decimal" style={inp} />
           </Field>
           <Field label="Unit" style={{ width: 130 }}>
-            <input list="goal-units" value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="e.g. sessions" style={inp} />
-            <datalist id="goal-units">
-              {['tickets', 'ZAR', '%', 'sessions', 'users', 'views', 'conversions', 'orders', 'count'].map((u) => <option key={u} value={u} />)}
-            </datalist>
+            <select value={unit} onChange={(e) => setUnit(e.target.value)} style={inp}>
+              {[...new Set(['tickets', 'ZAR', '%', 'sessions', 'users', 'views', 'conversions', 'orders', 'count', unit].filter(Boolean))].map((u) => <option key={u} value={u}>{u}</option>)}
+            </select>
           </Field>
         </div>
 
@@ -181,7 +187,12 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, onClo
 
         {err && <div style={{ color: 'var(--error, #dc2626)', fontSize: 12.5, marginTop: 10 }}>{err}</div>}
 
-        <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+        <div style={{ display: 'flex', gap: 10, marginTop: 16, alignItems: 'center' }}>
+          {editing && (confirmDel ? (
+            <button onClick={del} disabled={busy} style={btnDanger} title="Confirm delete">Delete goal</button>
+          ) : (
+            <button onClick={() => setConfirmDel(true)} style={btnDelGhost} title="Delete this goal" aria-label="Delete goal">🗑</button>
+          ))}
           <button onClick={onClose} style={btnGhost}>Cancel</button>
           <button onClick={save} disabled={busy} style={btnPrimary}>{busy ? 'Saving…' : (editing ? 'Save goal' : 'Set goal')}</button>
         </div>
@@ -226,4 +237,6 @@ const inp = { width: '100%', boxSizing: 'border-box', padding: '9px 11px', borde
 const xBtn = { border: 'none', background: 'rgba(128,128,128,0.12)', color: 'var(--muted-2)', borderRadius: 980, width: 28, height: 28, fontSize: 13, cursor: 'pointer' };
 const northRow = { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 6, padding: '10px 12px', border: '1px solid var(--hairline)', borderRadius: 10, cursor: 'pointer', fontSize: 13 };
 const btnGhost = { flex: '0 0 auto', padding: '10px 16px', borderRadius: 10, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', fontSize: 13.5, fontWeight: 700, cursor: 'pointer' };
+const btnDanger = { flex: '0 0 auto', padding: '10px 14px', borderRadius: 10, border: 'none', background: 'var(--error, #dc2626)', color: '#fff', fontSize: 13.5, fontWeight: 800, cursor: 'pointer' };
+const btnDelGhost = { flex: '0 0 auto', padding: '10px 12px', borderRadius: 10, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--error, #dc2626)', fontSize: 15, cursor: 'pointer' };
 const btnPrimary = { flex: 1, padding: '10px 16px', borderRadius: 10, border: 'none', background: 'var(--brand)', color: '#fff', fontSize: 13.5, fontWeight: 800, cursor: 'pointer' };

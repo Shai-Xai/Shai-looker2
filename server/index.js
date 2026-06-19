@@ -537,7 +537,12 @@ async function resolveTileValue({ dashboardId, tileId, user, suiteId }) {
   const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))];
   const tile = tiles.find((t) => t.id === tileId);
   if (!tile) return null;
-  const lockMap = expandLockMap(db.lockedFiltersForSuite(suiteId));
+  // Match the dashboard view exactly: apply its client-default saved filters (e.g.
+  // a date range — which a GA4 tile needs to return anything but 0), with the
+  // suite's organiser/event locks layered on top so scope still wins.
+  const su = db.getSuite(suiteId);
+  const entityView = su?.entityId ? (db.getFilterView('entity', su.entityId, dashboardId) || {}) : {};
+  const lockMap = { ...expandLockMap(entityView), ...expandLockMap(db.lockedFiltersForSuite(suiteId)) };
   const body = await tileQueryBody(tile, def, user, suiteId, lockMap);
   if (!body) return null; // scope denied or non-queryable tile
   const data = await runLookerQuery('/queries/run/json_detail', body);

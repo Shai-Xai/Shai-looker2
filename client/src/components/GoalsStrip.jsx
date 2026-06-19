@@ -45,6 +45,12 @@ export default function GoalsStrip({ entityId, suites }) {
       return { ...m, [suiteId]: { ...r, goals: goals.map((g, i) => ({ ...g, position: i })) } };
     });
   };
+
+  // Delete a goal (optimistic remove, then reload so a North-Star promotion shows).
+  const removeGoal = (suiteId, id) => {
+    setBySuite((m) => { const r = m[suiteId]; return r ? { ...m, [suiteId]: { ...r, goals: r.goals.filter((g) => g.id !== id) } } : m; });
+    api.deleteGoal(id).then(() => loadSuite(suiteId)).catch(() => loadSuite(suiteId));
+  };
   useEffect(() => { list.forEach((s) => loadSuite(s.id)); }, [list.map((s) => s.id).join(','), loadSuite]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const rows = list.map((s) => ({ suite: s, ...(bySuite[s.id] || { goals: [], canManage: false }) }))
@@ -89,6 +95,7 @@ export default function GoalsStrip({ entityId, suites }) {
                 {goals.map((g, i) => (
                   <GoalCard key={g.id} goal={g} index={i}
                     onClick={canManage ? () => setEditor({ suiteId: suite.id, goal: g }) : null}
+                    onDelete={canManage ? () => removeGoal(suite.id, g.id) : null}
                     draggable={canDrag}
                     onDragStartCard={() => { dragId.current = g.id; }}
                     onDropCard={() => reorder(suite.id, dragId.current, g.id)} />
@@ -127,11 +134,12 @@ function Strip({ children }) {
   );
 }
 
-function GoalCard({ goal, onClick, index = 0, draggable = false, onDragStartCard, onDropCard }) {
+function GoalCard({ goal, onClick, index = 0, draggable = false, onDragStartCard, onDropCard, onDelete }) {
   const p = goal.progress || {};
   const { tone, chip } = goalState(goal, p);
   const viz = goal.display || 'bar';
   const clickable = !!onClick;
+  const [confirming, setConfirming] = useState(false);
   return (
     <div className="lift msg-in"
       role={clickable ? 'button' : undefined} tabIndex={clickable ? 0 : undefined}
@@ -149,6 +157,14 @@ function GoalCard({ goal, onClick, index = 0, draggable = false, onDragStartCard
         {goal.isNorthStar && <span title="North Star" style={{ fontSize: 12, flexShrink: 0 }}>⭐</span>}
         <span style={{ fontSize: 12.5, fontWeight: 700, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{goal.name}</span>
         {chip}
+        {onDelete && (confirming ? (
+          <span style={{ display: 'flex', gap: 3, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
+            <button onClick={(e) => { e.stopPropagation(); onDelete(); }} title="Delete this goal" style={delYes}>Delete</button>
+            <button onClick={(e) => { e.stopPropagation(); setConfirming(false); }} title="Keep it" style={delNo}>✕</button>
+          </span>
+        ) : (
+          <button onClick={(e) => { e.stopPropagation(); setConfirming(true); }} title="Delete this goal" aria-label="Delete goal" style={cardX}>✕</button>
+        ))}
       </div>
       {viz === 'bar' ? (
         <div style={{ marginTop: 'auto', paddingTop: 12 }}>
@@ -259,6 +275,9 @@ function fmtVal(v, unit) {
 
 const eventName = { fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', padding: '0 2px' };
 const miniX = { border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 11, lineHeight: 1, padding: 2, flexShrink: 0 };
+const cardX = { border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 11, lineHeight: 1, padding: 2, flexShrink: 0, opacity: 0.55 };
+const delYes = { border: 'none', background: 'var(--error, #dc2626)', color: '#fff', borderRadius: 6, fontSize: 10, fontWeight: 700, padding: '2px 7px', cursor: 'pointer', flexShrink: 0 };
+const delNo = { border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--muted)', borderRadius: 6, fontSize: 10, padding: '2px 5px', cursor: 'pointer', flexShrink: 0 };
 const card = { flex: '0 0 172px', scrollSnapAlign: 'start', boxSizing: 'border-box', minHeight: 138, display: 'flex', flexDirection: 'column', background: 'var(--tile-bg, var(--card))', border: '1px solid var(--border)', borderRadius: 14, boxShadow: 'var(--shadow-sm)', padding: '11px 13px', color: 'var(--text)' };
 const addCard = { flex: '0 0 124px', scrollSnapAlign: 'start', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, minHeight: 138, border: '1px dashed var(--border)', borderRadius: 14, background: 'transparent', color: 'var(--brand)', cursor: 'pointer' };
 const dismissBtn = { border: 'none', background: 'rgba(128,128,128,0.12)', color: 'var(--muted-2)', borderRadius: 980, width: 26, height: 26, fontSize: 12, cursor: 'pointer', flexShrink: 0 };
