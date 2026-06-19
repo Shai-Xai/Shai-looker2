@@ -7,18 +7,24 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const owl = require('../server/owlIngest');
 
-test('settlement cross-check: passes when value-due reconciles (turnover − commissions − advances)', () => {
-  assert.equal(owl.crossCheckSettlement({ turnover: 1000000, commissionsTotal: 100000, valueDue: 850000, advances: { subtotal: 50000 } }), true);
-  // advances absent → value-due = turnover − commissions
-  assert.equal(owl.crossCheckSettlement({ turnover: 500000, commissionsTotal: 75000, valueDue: 425000 }), true);
-  // within the rounding tolerance
-  assert.equal(owl.crossCheckSettlement({ turnover: 500000, commissionsTotal: 75000, valueDue: 425000.4 }), true);
+test('settlement cross-check: passes when itemised sales sum to turnover (value due taken as stated)', () => {
+  // Real shape (Beats In The Bush): 7 sales rows totalling turnover, but value due
+  // is far HIGHER because R114k of withheld fees were released at event-end. The
+  // payout waterfall isn't reconciled — only the sales→turnover extraction is.
+  assert.equal(owl.crossCheckSettlement({ turnover: 267484.52, valueDue: 369517.52, sales: [{ subtotal: { total: 267484.52 } }] }), true);
+  // Multiple sales sections summing to turnover (value due below turnover is also fine).
+  assert.equal(owl.crossCheckSettlement({ turnover: 300000, valueDue: 250000, sales: [{ subtotal: { total: 200000 } }, { subtotal: { total: 100000 } }] }), true);
+  // Within the rounding tolerance.
+  assert.equal(owl.crossCheckSettlement({ turnover: 500000, valueDue: 425000, sales: [{ subtotal: { total: 500000.4 } }] }), true);
+  // No itemised sales to verify against → accept on the headline figures alone.
+  assert.equal(owl.crossCheckSettlement({ turnover: 100000, valueDue: 95000 }), true);
 });
 
-test('settlement cross-check: fails (→ draft) when it does not reconcile or figures are missing/zero', () => {
-  assert.equal(owl.crossCheckSettlement({ turnover: 1000000, commissionsTotal: 100000, valueDue: 700000, advances: { subtotal: 50000 } }), false); // off by 150k
-  assert.equal(owl.crossCheckSettlement({ turnover: 0, commissionsTotal: 0, valueDue: 0 }), false); // empty extraction
-  assert.equal(owl.crossCheckSettlement({ commissionsTotal: 100000, valueDue: 850000 }), false); // no turnover
+test('settlement cross-check: fails (→ draft) when sales do not sum to turnover, or headline figures are missing/zero', () => {
+  assert.equal(owl.crossCheckSettlement({ turnover: 300000, valueDue: 250000, sales: [{ subtotal: { total: 267484.52 } }] }), false); // mis-read line item
+  assert.equal(owl.crossCheckSettlement({ turnover: 0, valueDue: 0 }), false);            // empty extraction
+  assert.equal(owl.crossCheckSettlement({ valueDue: 369517.52 }), false);                 // no turnover
+  assert.equal(owl.crossCheckSettlement({ turnover: 267484.52, valueDue: 0 }), false);    // no value due
   assert.equal(owl.crossCheckSettlement(null), false);
 });
 

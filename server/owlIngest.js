@@ -24,19 +24,28 @@ const num = (x) => (typeof x === 'number' && Number.isFinite(x) ? x : NaN);
 // Tolerance for rounding: the larger of R1 or 0.5% of the expected magnitude.
 const within = (a, b) => Math.abs(a - b) <= Math.max(1, Math.abs(b) * 0.005);
 
-// A settlement reconciles when value-due ≈ turnover − commissions − advances.
-// Advances sign conventions vary (some reports print the amount, some the
-// deduction), so we accept either ±. If the core figures are missing or zero, or
-// it doesn't reconcile, we fail closed → the report is drafted, not published.
+// A settlement's extraction is trustworthy when its itemised sales reconcile to
+// the stated turnover — that's what catches a mis-read line item, the real risk.
+// We deliberately do NOT reconcile against "value due": Howler's payout waterfall
+// legitimately moves it above or below turnover (withheld-fee releases at
+// event-end, advances, prior-period balances), and the "net withheld released"
+// figure that drives it isn't a clean extraction field. Value due is read
+// verbatim from one prominent total, so we only sanity-check that it's present.
+// Missing/zero headline figures, or sales that don't sum to turnover, fail closed
+// → the report is drafted (hidden from the client) for a human to review.
 function crossCheckSettlement(d) {
   const turnover = num(d?.turnover);
-  const comm = num(d?.commissionsTotal);
-  const due = num(d?.valueDue);
-  if (![turnover, comm, due].every(Number.isFinite)) return false;
-  if (turnover === 0) return false;
-  const advRaw = num(d?.advances?.subtotal);
-  const adv = Number.isFinite(advRaw) ? advRaw : 0;
-  return within(due, turnover - comm - adv) || within(due, turnover - comm + adv);
+  const valueDue = num(d?.valueDue);
+  if (!Number.isFinite(turnover) || turnover === 0) return false;
+  if (!Number.isFinite(valueDue) || valueDue === 0) return false;
+  const sales = Array.isArray(d?.sales) ? d.sales : [];
+  const subtotals = sales.map((s) => num(s?.subtotal?.total)).filter(Number.isFinite);
+  // Itemised sales present → their subtotals must sum to turnover. No sections to
+  // verify against → accept on the headline figures alone (trusted sender).
+  if (sales.length && subtotals.length === sales.length) {
+    return within(subtotals.reduce((a, b) => a + b, 0), turnover);
+  }
+  return true;
 }
 
 // An invoice reconciles when total ≈ subtotal + VAT.
