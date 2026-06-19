@@ -33,22 +33,39 @@ export default function SettlementsPage() {
   const list = previewEntityId ? rawList.filter((s) => s.entityId === previewEntityId) : rawList;
   const docs = previewEntityId ? rawDocs.filter((d) => d.entityId === previewEntityId) : rawDocs;
 
-  // Group by event + product: an event accrues many weekly settlements per
-  // product (ticketing / cashless), then one final each. The hero card is the
-  // final (else the most recent report); the rest sit in a compact history
-  // list under it.
-  const groups = [];
-  for (const s of list) {
-    const key = `${s.eventName || s.title}|${s.kind || 'ticketing'}`;
-    let g = groups.find((x) => x.key === key);
-    if (!g) { g = { key, items: [] }; groups.push(g); }
-    g.items.push(s);
+  // Categorise everything BY EVENT. Each event holds its settlement cards (split
+  // by product — ticketing / cashless, each a hero "final" + weekly history) AND
+  // its invoices/documents. Settlements & documents link to an event by name.
+  const events = [];
+  const eventOf = (name) => {
+    const key = (name || '').trim() || 'Other';
+    let e = events.find((x) => x.key === key);
+    if (!e) { e = { key, settlements: [], docs: [] }; events.push(e); }
+    return e;
+  };
+  for (const s of list) eventOf(s.eventName || s.title).settlements.push(s);
+  for (const d of docs) eventOf(d.eventName).docs.push(d);
+
+  const dateOf = (x) => String(x.settlementDate || x.invoiceDate || x.createdAt || '');
+  for (const e of events) {
+    // Within an event, split settlements by product; hero = final (else newest).
+    const byKind = [];
+    for (const s of e.settlements) {
+      const k = s.kind || 'ticketing';
+      let g = byKind.find((x) => x.kind === k);
+      if (!g) { g = { kind: k, items: [] }; byKind.push(g); }
+      g.items.push(s);
+    }
+    for (const g of byKind) {
+      g.items.sort((a, b) => dateOf(b).localeCompare(dateOf(a)));
+      g.hero = g.items.find((x) => x.status === 'final') || g.items[0];
+      g.rest = g.items.filter((x) => x !== g.hero);
+    }
+    e.byKind = byKind;
+    e.meta = e.settlements[0] || null;                                   // venue/dates for the heading
+    e.latest = [...e.settlements, ...e.docs].map(dateOf).sort().pop() || '';
   }
-  for (const g of groups) {
-    g.items.sort((a, b) => String(b.settlementDate || b.createdAt).localeCompare(String(a.settlementDate || a.createdAt)));
-    g.hero = g.items.find((x) => x.status === 'final') || g.items[0];
-    g.rest = g.items.filter((x) => x !== g.hero);
-  }
+  events.sort((a, b) => b.latest.localeCompare(a.latest));               // most recent event first
 
   const open = (s) => vtNavigate(navigate, `/settlements/${s.id}`);
 
@@ -58,55 +75,58 @@ export default function SettlementsPage() {
         <HomeButton />
         <h1 style={{ fontSize: isMobile ? 20 : 26, fontWeight: 700, letterSpacing: '-0.02em' }}>Settlements</h1>
       </div>
-      <p style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 20 }}>Your event settlement reports — every payout, fee and advance, in one interactive view.</p>
-      {list.length === 0 ? (
-        <Centered>No settlement reports yet. They'll appear here once Howler publishes one for you.</Centered>
+      <p style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 20 }}>Your settlements and invoices, grouped by event — every payout, fee and advance in one interactive view.</p>
+      {events.length === 0 ? (
+        <Centered>No settlements or invoices yet. They'll appear here, grouped by event, once Howler publishes one for you.</Centered>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(360px, 1fr))', gap: 16, alignItems: 'start' }}>
-          {groups.map((g, i) => (
-            <div key={g.key} className="tile-enter" style={{ animationDelay: `${i * 60}ms`, display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {isAdmin && g.hero.needsReview && <DraftBanner s={g.hero} onOpen={() => open(g.hero)} onPublished={reload} />}
-              <SettlementCard s={g.hero} onOpen={() => open(g.hero)} isAdmin={isAdmin} />
-              {g.rest.length > 0 && <HistoryList items={g.rest} onOpen={open} isAdmin={isAdmin} />}
-            </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
+          {events.map((e, i) => (
+            <section key={e.key} className="tile-enter" style={{ animationDelay: `${i * 50}ms` }}>
+              <div style={{ marginBottom: 12 }}>
+                <h2 style={{ fontSize: isMobile ? 17 : 20, fontWeight: 700, letterSpacing: '-0.02em' }}>{e.key}</h2>
+                {e.meta && [e.meta.venue, e.meta.eventDates].filter(Boolean).length > 0 && (
+                  <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 2 }}>{[e.meta.venue, e.meta.eventDates].filter(Boolean).join(' · ')}</div>
+                )}
+              </div>
+              {e.byKind.length > 0 && (
+                <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(360px, 1fr))', gap: 16, alignItems: 'start' }}>
+                  {e.byKind.map((g) => (
+                    <div key={g.kind} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {isAdmin && g.hero.needsReview && <DraftBanner s={g.hero} onOpen={() => open(g.hero)} onPublished={reload} />}
+                      <SettlementCard s={g.hero} onOpen={() => open(g.hero)} isAdmin={isAdmin} />
+                      {g.rest.length > 0 && <HistoryList items={g.rest} onOpen={open} isAdmin={isAdmin} />}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {e.docs.length > 0 && <EventDocuments docs={e.docs} isMobile={isMobile} hasSettlements={e.byKind.length > 0} />}
+            </section>
           ))}
         </div>
       )}
-      {docs.length > 0 && <DocumentsSection docs={docs} isMobile={isMobile} />}
     </div>
   );
 }
 
-// Invoices & other paperwork uploaded for this client's events.
-function DocumentsSection({ docs, isMobile }) {
+// Invoices & documents for ONE event (the page already groups by event, so this
+// is just the list of that event's paperwork under its settlement cards).
+function EventDocuments({ docs, isMobile, hasSettlements }) {
   const navigate = useNavigate();
-  const groups = [];
-  for (const doc of docs) {
-    const key = doc.eventName || 'Other documents';
-    let g = groups.find((x) => x.key === key);
-    if (!g) { g = { key, items: [] }; groups.push(g); }
-    g.items.push(doc);
-  }
   return (
-    <div style={{ marginTop: 28 }}>
-      <h2 style={{ fontSize: isMobile ? 16 : 19, fontWeight: 700, letterSpacing: '-0.02em', marginBottom: 12 }}>Invoices & documents</h2>
-      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(360px, 1fr))', gap: 16, alignItems: 'start' }}>
-        {groups.map((g) => (
-          <div key={g.key} style={{ background: 'var(--tile-bg, var(--card))', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', boxShadow: 'var(--shadow-sm)', padding: '12px 14px' }}>
-            <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', marginBottom: 8 }}>{g.key}</div>
-            {g.items.map((doc) => (
-              <div key={doc.id} className="nav-row" style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '8px 8px', borderRadius: 8, color: 'var(--text)' }}>
-                <button onClick={() => vtNavigate(navigate, `/documents/${doc.id}`)} style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 9, border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left', padding: 0, color: 'var(--text)' }}>
-                  <span style={{ fontSize: 15, flexShrink: 0 }}>🧾</span>
-                  <span style={{ flex: 1, minWidth: 0 }}>
-                    <span style={{ display: 'block', fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{doc.title}</span>
-                    <span style={{ display: 'block', fontSize: 11, color: 'var(--muted)' }}>{[doc.invoiceDate || new Date(doc.createdAt).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' }), doc.total != null && fmtR(doc.total)].filter(Boolean).join(' · ')}</span>
-                  </span>
-                  <span style={{ color: 'var(--brand)', fontSize: 13, fontWeight: 600, flexShrink: 0 }}>View →</span>
-                </button>
-                <a href={`/api/documents/${doc.id}/file`} title="Download" style={{ flexShrink: 0, color: 'var(--muted)', textDecoration: 'none', fontSize: 14, padding: '0 4px' }}>⤓</a>
-              </div>
-            ))}
+    <div style={{ marginTop: hasSettlements ? 14 : 0 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', marginBottom: 8 }}>Invoices & documents</div>
+      <div style={{ background: 'var(--tile-bg, var(--card))', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', boxShadow: 'var(--shadow-sm)', padding: '6px 8px', maxWidth: isMobile ? 'none' : 560 }}>
+        {docs.map((doc) => (
+          <div key={doc.id} className="nav-row" style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '8px 8px', borderRadius: 8, color: 'var(--text)' }}>
+            <button onClick={() => vtNavigate(navigate, `/documents/${doc.id}`)} style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 9, border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left', padding: 0, color: 'var(--text)' }}>
+              <span style={{ fontSize: 15, flexShrink: 0 }}>🧾</span>
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ display: 'block', fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{doc.title}</span>
+                <span style={{ display: 'block', fontSize: 11, color: 'var(--muted)' }}>{[doc.invoiceDate || new Date(doc.createdAt).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' }), doc.total != null && fmtR(doc.total)].filter(Boolean).join(' · ')}</span>
+              </span>
+              <span style={{ color: 'var(--brand)', fontSize: 13, fontWeight: 600, flexShrink: 0 }}>View →</span>
+            </button>
+            <a href={`/api/documents/${doc.id}/file`} title="Download" style={{ flexShrink: 0, color: 'var(--muted)', textDecoration: 'none', fontSize: 14, padding: '0 4px' }}>⤓</a>
           </div>
         ))}
       </div>
