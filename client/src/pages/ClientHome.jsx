@@ -9,6 +9,7 @@ import BriefingTuneModal from '../components/BriefingTuneModal.jsx';
 import OnboardingCard from '../components/OnboardingCard.jsx';
 import GuideModal from '../components/GuideModal.jsx';
 import { GUIDES, FEATURE_GUIDES, getGuide } from '../lib/guides.js';
+import { isStandalone } from '../lib/pwa.js';
 import DigestHistory from '../components/DigestHistory.jsx';
 import { useProfile } from '../lib/profile.jsx';
 import OwlQuips from '../components/OwlQuips.jsx';
@@ -536,7 +537,8 @@ function LearnMenu({ onPick }) {
       </button>
       {open && (
         <div style={{ position: 'absolute', right: 0, top: '110%', zIndex: 60, width: 230, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, boxShadow: 'var(--shadow-lg, 0 10px 30px rgba(0,0,0,0.22))', padding: 6, display: 'flex', flexDirection: 'column', gap: 2 }}>
-          {FEATURE_GUIDES.map((g) => (
+          {/* Drop the install explainer once Pulse is already installed. */}
+          {FEATURE_GUIDES.filter((g) => !(g.id === 'install' && isStandalone())).map((g) => (
             <button key={g.id} type="button" onClick={() => { setOpen(false); onPick(g.id); }}
               style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', textAlign: 'left', padding: '9px 10px', minHeight: 40, border: 'none', background: 'transparent', color: 'var(--text)', fontSize: 13, fontWeight: 600, borderRadius: 8, cursor: 'pointer' }}
               onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(128,128,128,0.10)'; }}

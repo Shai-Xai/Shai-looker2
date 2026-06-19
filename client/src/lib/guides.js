@@ -157,6 +157,15 @@ export const GUIDES = {
       { icon: '🤝', title: 'Use both', body: 'Pin what you want to see; follow what you want explained. They work independently.' },
     ],
   },
+  install: {
+    id: 'install',
+    title: 'Install Pulse on your phone',
+    steps: [
+      { icon: '📲', title: 'Add it to your home screen', body: 'Install Pulse like a normal app — a home-screen icon, full screen, no browser bar. One tap below. (On iPhone, tap Share → Add to Home Screen.)', action: 'install' },
+      { icon: '🔔', title: 'Turn on notifications', body: "While you're here — switch on notifications so we can nudge you when something needs you, even when Pulse is closed.", action: 'notifications' },
+      { icon: '⚡', title: 'Why it’s better', body: 'The installed app opens instantly, runs full screen, and keeps you one tap from your data and your briefing.' },
+    ],
+  },
   insights: {
     id: 'insights',
     title: 'How Owl insights work',
@@ -176,6 +185,7 @@ export const FEATURE_GUIDES = [
   { id: 'briefing', icon: '🦉', label: 'Tune your briefing' },
   { id: 'pins', icon: '📌', label: 'Pinning & following tiles' },
   { id: 'insights', icon: '✨', label: 'How Owl insights work' },
+  { id: 'install', icon: '📲', label: 'Install Pulse on your phone' },
 ];
 
 export const getGuide = (id) => GUIDES[id] || null;
