@@ -422,4 +422,12 @@ export const api = {
   refineText: (body) => fetch('/api/my/refine-text', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
   saveBriefingTune: (tune, tiles, entityId) =>
     fetch(`/api/my/briefing-tune${entityId ? `?entityId=${encodeURIComponent(entityId)}` : ''}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tune, tiles }) }).then(json),
+
+  // Goals (the Results pillar) — one guarded route set serves admin + client.
+  // Goals are per event (suite); the list returns each goal with resolved progress.
+  suiteGoals: (suiteId) => fetch(`/api/goals/suites/${suiteId}`).then(json),
+  createGoal: (suiteId, b) => fetch(`/api/goals/suites/${suiteId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  updateGoal: (id, b) => fetch(`/api/goals/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  deleteGoal: (id) => fetch(`/api/goals/${id}`, { method: 'DELETE' }).then((r) => r.ok),
+  goalSnapshot: (id, value) => fetch(`/api/goals/${id}/snapshot`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value }) }).then(json),
 };

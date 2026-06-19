@@ -215,6 +215,27 @@ it auto-synced, and exclude people who already bought."
 
 ---
 
+## 9. Goals — track the results that matter  🧪
+The **Results** half of Pulse: set a target on the numbers that matter for an
+event and track them live. Each event has a **North Star** (the one headline
+goal) plus secondary goals, shown on the client's home with a **progress bar and
+a pace read** — *ahead / on track / behind* — not just "are we there yet."
+- **Set a goal in two taps** — pick a number you already see on a **dashboard
+  tile** (it then tracks **live**, always matching the dashboard), or **enter it
+  yourself** for things not on a dashboard yet (sponsorship secured, a cash target).
+- **Pace, not just percent** — with a deadline, each goal reads ahead/on-track/
+  behind; at event close it lands a **result band** (smashed / hit / just missed /
+  missed).
+- **Dual-surface** — clients set their own goals; Howler can set them on a client's
+  behalf. Edits are lightly logged.
+
+**Pitch:** "Tell Pulse what success looks like, and every screen shows how you're
+tracking against it — and what's closing the gap."
+*Coming next: the North Star leads the morning briefing in one line, and a goal
+can pull last event's actuals as its baseline.*
+
+---
+
 ## On the horizon (🔜 — not yet usable; for roadmap conversations only)
 Use these to set direction, **not** to promise dates.
 - **Conversational/agentic Owl** — chat that answers, analyses and *executes*
@@ -248,6 +269,13 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-19** — **Goals (Results pillar)** 🧪: set a **target** on the numbers
+  that matter for an event and track them live. Each event gets a **North Star**
+  plus secondary goals on the home, with a **progress bar + pace read**
+  (ahead/on-track/behind) and an end-of-event **result band**. Set a goal from a
+  **live dashboard tile** (tracks the real number) or **manually** (sponsorship,
+  cash targets). Dual-surface (client + Howler-on-behalf). *(P1; briefing
+  North-Star line + baseline onboarding next.)*
 - **2026-06-19** — **Getting-started polish + Meta/TikTok step** 🧪: added a **“Connect
   Meta & TikTok”** step to the Getting started checklist (auto-ticks once an ad
   account is connected, with a guided walkthrough). Every walkthrough now has a

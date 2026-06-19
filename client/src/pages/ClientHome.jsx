@@ -7,6 +7,7 @@ import { vtNavigate } from '../lib/viewTransition.js';
 import AiMark from '../components/AiMark.jsx';
 import BriefingTuneModal from '../components/BriefingTuneModal.jsx';
 import OnboardingCard from '../components/OnboardingCard.jsx';
+import GoalsStrip from '../components/GoalsStrip.jsx';
 import GuideModal from '../components/GuideModal.jsx';
 import { GUIDES, FEATURE_GUIDES, getGuide } from '../lib/guides.js';
 import { isStandalone } from '../lib/pwa.js';
@@ -178,6 +179,10 @@ export default function ClientHome() {
           )}
         </div>
       )}
+
+      {/* Goals — the Results pillar. North Star leads; tracks live off a tile or
+          a manual value. Hidden when there's nothing set and nothing to manage. */}
+      <GoalsStrip entityId={homeEntityId} suites={visibleSuites} />
 
       {/* Past digests — react/comment to tune future ones. Hidden until any exist. */}
       <DigestHistory entityId={homeEntityId} compact />

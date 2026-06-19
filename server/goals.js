@@ -140,7 +140,10 @@ function mount(app, { db, auth, resolveTileValue }) {
   // runs the tile's query through applyScope). Returns { value, asOf, source }.
   async function resolveMetric(goal, ctx = {}) {
     const ref = goal.metricRef || {};
-    const tileSourced = goal.source !== 'manual' && ref.dashboardId && ref.tileId;
+    // A goal is tile-sourced when it carries a tile ref — the tile IS the source.
+    // `source` is just a descriptive category; everything without a tile ref reads
+    // its latest manual snapshot (the universal fallback).
+    const tileSourced = !!(ref.dashboardId && ref.tileId);
     if (!tileSourced) {
       const snap = sql.prepare('SELECT actual_value, at FROM goal_snapshots WHERE goal_id=? ORDER BY at DESC LIMIT 1').get(goal.id);
       return { value: snap ? snap.actual_value : null, asOf: snap ? snap.at : null, source: 'manual' };
