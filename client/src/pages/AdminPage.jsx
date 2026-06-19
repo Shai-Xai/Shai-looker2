@@ -2913,7 +2913,7 @@ function EventDocuments({ entityId, eventNames }) {
                     {[doc.fileName, new Date(doc.createdAt).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' }), doc.total != null && `R${Number(doc.total).toLocaleString('en-US', { minimumFractionDigits: 2 })}`, doc.hasData ? 'interactive' : null].filter(Boolean).join(' · ')}
                   </div>
                 </div>
-                <EventPicker value={doc.eventName} onChange={(v) => api.adminUpdateDocument(doc.id, { eventName: v }).then(load)} eventNames={eventNames} style={{ ...input, minWidth: 150, maxWidth: 190 }} />
+                <DocEventPicker doc={doc} eventNames={eventNames} onSaved={load} />
                 <button style={miniBtnOutline} onClick={() => navigate(`/documents/${doc.id}`)}>Open</button>
                 <a href={`/api/documents/${doc.id}/file`} style={{ ...miniBtnOutline, textDecoration: 'none' }}>⤓</a>
                 <button style={{ ...miniBtnOutline, color: 'var(--error)' }} onClick={() => { if (confirm(`Delete "${doc.title}"?`)) api.adminDeleteDocument(doc.id).then(load); }}>Delete</button>
@@ -3013,14 +3013,25 @@ function SettlementChecks({ data }) {
 // Assign-to-event control: a select fed by the client's known events (from
 // their settlements), with an "Other / new event…" escape hatch to type a name
 // that doesn't exist yet. Values not in the list show as "(custom)".
-function EventPicker({ value, onChange, eventNames, style }) {
+// onChange fires per keystroke (update display); onCommit (optional) fires only
+// when the value is "settled" — input blur / Enter, or a dropdown pick — so a
+// consumer that SAVES can do so once, not on every character.
+function EventPicker({ value, onChange, onCommit, eventNames, style }) {
   const known = [...new Set((eventNames || []).filter(Boolean))];
   const custom = !!value && !known.includes(value);
   const [typing, setTyping] = useState(false);
   if (typing || known.length === 0) {
     return (
       <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
-        <input style={style} value={value} onChange={(e) => onChange(e.target.value)} placeholder="Event name" autoFocus={typing} />
+        <input
+          style={style}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onBlur={(e) => onCommit && onCommit(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); } }}
+          placeholder="Event name"
+          autoFocus={typing}
+        />
         {known.length > 0 && <button style={miniBtnOutline} title="Pick from known events" onClick={() => setTyping(false)}>▾</button>}
       </span>
     );
@@ -3031,7 +3042,7 @@ function EventPicker({ value, onChange, eventNames, style }) {
       value={custom ? '__custom' : value}
       onChange={(e) => {
         if (e.target.value === '__other') { setTyping(true); onChange(''); }
-        else if (e.target.value !== '__custom') onChange(e.target.value);
+        else if (e.target.value !== '__custom') { onChange(e.target.value); if (onCommit) onCommit(e.target.value); }
       }}
     >
       <option value="">— Assign to event —</option>
@@ -3040,6 +3051,20 @@ function EventPicker({ value, onChange, eventNames, style }) {
       <option value="__other">Other / new event…</option>
     </select>
   );
+}
+
+// Per-document event assignment. Types into LOCAL state and saves once on
+// blur/Enter (or immediately on a dropdown pick) — never per keystroke, which
+// would refetch + re-group the list mid-type and make the field feel "stuck".
+function DocEventPicker({ doc, eventNames, onSaved }) {
+  const [val, setVal] = useState(doc.eventName || '');
+  useEffect(() => { setVal(doc.eventName || ''); }, [doc.eventName]);
+  const commit = (v) => {
+    const t = String(v == null ? val : v).trim();
+    if (t === (doc.eventName || '')) return;
+    api.adminUpdateDocument(doc.id, { eventName: t }).then(onSaved);
+  };
+  return <EventPicker value={val} onChange={setVal} onCommit={commit} eventNames={eventNames} style={{ ...input, minWidth: 150, maxWidth: 190 }} />;
 }
 
 // Best-overlap match of a free-text name (as printed on an invoice) onto one of
