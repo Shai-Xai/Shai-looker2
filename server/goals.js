@@ -98,7 +98,9 @@ function mount(app, { db, auth, resolveTileValue }) {
     };
   }
   const goalById = (id) => rowToGoal(sql.prepare('SELECT * FROM goals WHERE id=?').get(id));
-  const listGoals = (suiteId) => sql.prepare("SELECT * FROM goals WHERE suite_id=? AND status='active' ORDER BY is_north_star DESC, position, created_at").all(suiteId).map(rowToGoal);
+  // Ordered by position (drag-to-reorder) then recency. The North Star is marked
+  // by is_north_star, not forced to the front — so a client can order goals freely.
+  const listGoals = (suiteId) => sql.prepare("SELECT * FROM goals WHERE suite_id=? AND status='active' ORDER BY position, created_at").all(suiteId).map(rowToGoal);
 
   // Sanitise incoming goal fields. P1 exposes only event goals; cascade/attribution
   // columns exist but aren't set here.

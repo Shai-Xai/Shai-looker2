@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import GoalEditor from './GoalEditor.jsx';
@@ -18,9 +18,28 @@ export default function GoalsStrip({ entityId, suites }) {
   useEffect(() => { setHidden(!!(entityId && localStorage.getItem(hideKey))); }, [hideKey, entityId]);
 
   const list = suites || [];
+  const dragId = useRef(null); // id of the card being dragged
   const loadSuite = useCallback((sid) => {
     api.suiteGoals(sid).then((r) => setBySuite((m) => ({ ...m, [sid]: r }))).catch(() => {});
   }, []);
+
+  // Drag-to-reorder within an event: move the dragged goal before the drop target,
+  // renumber positions, optimistically reorder, and persist each new position.
+  const reorder = (suiteId, fromId, toId) => {
+    if (!fromId || fromId === toId) return;
+    setBySuite((m) => {
+      const r = m[suiteId];
+      if (!r) return m;
+      const goals = [...r.goals];
+      const fi = goals.findIndex((g) => g.id === fromId);
+      const ti = goals.findIndex((g) => g.id === toId);
+      if (fi < 0 || ti < 0) return m;
+      const [moved] = goals.splice(fi, 1);
+      goals.splice(ti, 0, moved);
+      goals.forEach((g, i) => { if (g.position !== i) api.updateGoal(g.id, { position: i }).catch(() => {}); });
+      return { ...m, [suiteId]: { ...r, goals: goals.map((g, i) => ({ ...g, position: i })) } };
+    });
+  };
   useEffect(() => { list.forEach((s) => loadSuite(s.id)); }, [list.map((s) => s.id).join(','), loadSuite]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const rows = list.map((s) => ({ suite: s, ...(bySuite[s.id] || { goals: [], canManage: false }) }))
@@ -49,17 +68,20 @@ export default function GoalsStrip({ entityId, suites }) {
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         {rows.map(({ suite, goals = [], canManage }) => {
-          // North Star leads, then the rest.
-          const ordered = [...goals].sort((a, b) => (b.isNorthStar ? 1 : 0) - (a.isNorthStar ? 1 : 0));
+          const canDrag = canManage && goals.length > 1; // reorder only when there's a point
           return (
             <div key={suite.id}>
               {multi && <div style={eventName}>{suite.name}</div>}
               <Strip>
-                {ordered.map((g, i) => (
-                  <GoalCard key={g.id} goal={g} index={i} onClick={canManage ? () => setEditor({ suiteId: suite.id, goal: g }) : null} />
+                {goals.map((g, i) => (
+                  <GoalCard key={g.id} goal={g} index={i}
+                    onClick={canManage ? () => setEditor({ suiteId: suite.id, goal: g }) : null}
+                    draggable={canDrag}
+                    onDragStartCard={() => { dragId.current = g.id; }}
+                    onDropCard={() => reorder(suite.id, dragId.current, g.id)} />
                 ))}
                 {canManage && (
-                  <button className="lift msg-in" onClick={() => setEditor({ suiteId: suite.id, goal: null })} style={{ ...addCard, animationDelay: `${ordered.length * 60}ms` }}>
+                  <button className="lift msg-in" onClick={() => setEditor({ suiteId: suite.id, goal: null })} style={{ ...addCard, animationDelay: `${goals.length * 60}ms` }}>
                     <span style={{ fontSize: 22, lineHeight: 1 }}>＋</span>
                     <span style={{ fontSize: 12.5, fontWeight: 700 }}>{goals.length ? 'Add a goal' : 'Set a goal'}</span>
                   </button>
@@ -91,17 +113,21 @@ function Strip({ children }) {
   );
 }
 
-function GoalCard({ goal, onClick, index = 0 }) {
+function GoalCard({ goal, onClick, index = 0, draggable = false, onDragStartCard, onDropCard }) {
   const p = goal.progress || {};
-  const tone = paceTone(p);
+  const { tone, chip } = goalState(goal, p);
   const viz = goal.display || 'bar';
   const clickable = !!onClick;
-  const chip = p.band ? <Chip {...bandChip(p.band)} /> : (p.status && p.status !== 'final' ? <Chip {...statusChip(p.status)} /> : null);
   return (
     <div className="lift msg-in"
       role={clickable ? 'button' : undefined} tabIndex={clickable ? 0 : undefined}
       onClick={onClick || undefined}
       onKeyDown={clickable ? (e) => { if (e.key === 'Enter') onClick(); } : undefined}
+      draggable={draggable}
+      onDragStart={draggable ? onDragStartCard : undefined}
+      onDragOver={draggable ? (e) => e.preventDefault() : undefined}
+      onDrop={draggable ? (e) => { e.preventDefault(); onDropCard && onDropCard(); } : undefined}
+      title={draggable ? 'Drag to reorder' : undefined}
       style={{ ...card, animationDelay: `${index * 60}ms`, cursor: clickable ? 'pointer' : 'default' }}
     >
       {/* Title + pace chip share the top row, so the chip never costs its own line. */}
@@ -178,11 +204,22 @@ function Dial({ pct, tone, size = 86 }) {
 }
 
 const GREEN = '#2da44e', BLUE = '#0a66c2', AMBER = '#b45309', RED = '#dc2626';
-function paceTone(p) {
-  if (p.band) return ({ smashed: GREEN, hit: GREEN, near: AMBER, missed: RED })[p.band] || BLUE;
-  if (p.status === 'behind') return AMBER;
-  if (p.status === 'ahead') return GREEN;
-  return BLUE;
+const bandTone = (b) => ({ smashed: GREEN, hit: GREEN, near: AMBER, missed: RED }[b] || BLUE);
+// Colour + chip from the goal's state: GREEN once the target is reached, RED when
+// an "under a cap" goal goes over, AMBER when behind pace, BLUE while in progress,
+// and the result band once the deadline has passed.
+function goalState(goal, p) {
+  const dir = goal.direction || p.direction || 'at_least';
+  const v = p.value, t = goal.targetValue;
+  if (p.band) return { tone: bandTone(p.band), chip: <Chip {...bandChip(p.band)} /> };
+  const have = v != null && t != null;
+  const reached = have && (dir === 'at_most' ? v <= t : (p.pct != null ? p.pct >= 100 : v >= t));
+  const overCap = dir === 'at_most' && have && v > t;
+  if (reached) return { tone: GREEN, chip: <Chip t={dir === 'at_most' ? '✓ Under target' : '✓ Reached'} c={GREEN} bg="rgba(52,199,89,0.16)" /> };
+  if (overCap) return { tone: RED, chip: <Chip t="Over target" c={RED} bg="rgba(239,68,68,0.12)" /> };
+  if (p.status === 'behind') return { tone: AMBER, chip: <Chip t="Behind" c={AMBER} bg="rgba(245,158,11,0.16)" /> };
+  if (p.status) return { tone: BLUE, chip: <Chip {...statusChip(p.status)} /> };
+  return { tone: BLUE, chip: null };
 }
 const statusChip = (s) => ({
   ahead: { t: 'Ahead', c: GREEN, bg: 'rgba(52,199,89,0.15)' },

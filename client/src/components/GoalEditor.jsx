@@ -46,7 +46,11 @@ export default function GoalEditor({ entityId, suiteId, goal, onClose, onSaved }
   }, [track, dashboardId, tileId, suiteId]);
 
   const dashboards = cat?.dashboards || [];
-  const tilesFor = (dId) => dashboards.find((d) => d.dashboardId === dId)?.tiles || [];
+  // A goal tracks ONE headline number, so only single-value (KPI) tiles qualify —
+  // a chart/table tile has no single "the number" (and the resolver would read its
+  // first row, e.g. an early 0). Mirrors TileFrame's metric-tile test.
+  const isKpi = (t) => { const v = t.visType || ''; return v === 'single_value' || v === 'single_value_period_over_period' || v.includes('bar_gauge'); };
+  const tilesFor = (dId) => (dashboards.find((d) => d.dashboardId === dId)?.tiles || []).filter(isKpi);
 
   async function save() {
     if (!name.trim()) { setErr('Give the goal a name.'); return; }
@@ -95,17 +99,21 @@ export default function GoalEditor({ entityId, suiteId, goal, onClose, onSaved }
         </Field>
 
         {track === 'tile' ? (
-          <Field label="Which number?" hint="Pick the tile you already look at — the goal tracks that live number.">
+          <Field label="Which number?" hint="Pick a single-value (KPI) tile you already look at — the goal tracks that live number.">
             <select value={dashboardId} onChange={(e) => { setDashboardId(e.target.value); setTileId(''); }} style={inp}>
               <option value="">{cat ? 'Choose a dashboard…' : 'Loading…'}</option>
               {dashboards.map((d) => <option key={d.dashboardId} value={d.dashboardId}>{d.title}{d.setName ? ` · ${d.setName}` : ''}</option>)}
             </select>
-            {dashboardId && (
+            {dashboardId && (tilesFor(dashboardId).length ? (
               <select value={tileId} onChange={(e) => setTileId(e.target.value)} style={{ ...inp, marginTop: 8 }}>
                 <option value="">Choose a tile…</option>
                 {tilesFor(dashboardId).map((t) => <option key={t.tileId} value={t.tileId}>{t.title}</option>)}
               </select>
-            )}
+            ) : (
+              <div style={{ marginTop: 8, fontSize: 12, color: 'var(--muted)', lineHeight: 1.4 }}>
+                No single-value (KPI) tiles on this dashboard. Goals track one headline number — pick a dashboard with a KPI tile, or choose “✍️ I’ll enter it”.
+              </div>
+            ))}
             {tileId && (
               <div style={{ marginTop: 9, padding: '8px 11px', background: 'rgba(128,128,128,0.07)', borderRadius: 9, fontSize: 13, display: 'flex', alignItems: 'center', gap: 7 }}>
                 <span style={{ color: 'var(--muted)', fontWeight: 600 }}>This tile reads:</span>
@@ -129,10 +137,11 @@ export default function GoalEditor({ entityId, suiteId, goal, onClose, onSaved }
           <Field label="Target" style={{ flex: 1 }}>
             <input value={target} onChange={(e) => setTarget(e.target.value)} placeholder="e.g. 25000" inputMode="decimal" style={inp} />
           </Field>
-          <Field label="Unit" style={{ width: 120 }}>
-            <select value={unit} onChange={(e) => setUnit(e.target.value)} style={inp}>
-              {['tickets', 'ZAR', '%', 'count'].map((u) => <option key={u} value={u}>{u}</option>)}
-            </select>
+          <Field label="Unit" style={{ width: 130 }}>
+            <input list="goal-units" value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="e.g. sessions" style={inp} />
+            <datalist id="goal-units">
+              {['tickets', 'ZAR', '%', 'sessions', 'users', 'views', 'conversions', 'orders', 'count'].map((u) => <option key={u} value={u} />)}
+            </datalist>
           </Field>
         </div>
 
