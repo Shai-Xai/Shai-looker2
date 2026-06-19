@@ -6,9 +6,11 @@
 //   • feature explainers for the things customers don't get at a glance
 //     (the home page, tuning the briefing, pin vs follow, Owl insights).
 //
-// Each guide: { id, title, steps: [{ icon?, title, body, cta?: {label, to} }] }.
-// A `cta` (optional) is the "do it now" button on a step — `to` is an in-app
-// route. Keep copy short and plain — these are read on a phone.
+// Each guide: { id, title, steps: [{ icon?, title, body, cta?: {label,to}, action? }] }.
+// A `cta` is a "do it now" button that navigates (`to` is an in-app route); an
+// `action` ('notifications' | 'install') is a one-touch button that does the
+// thing in place. `skipIfDone: <onboarding step key>` drops the step from the
+// welcome wizard when that task is already done. Keep copy short — read on a phone.
 
 export const GUIDES = {
   // ── First-run welcome: the active essentials wizard ────────────────────────
@@ -38,8 +40,15 @@ export const GUIDES = {
       {
         icon: '🔔',
         title: 'Stay in the loop',
-        body: "Turn on notifications and we'll nudge your phone when something needs you — even when Pulse is closed. Tap Allow when your browser asks.",
+        body: "Turn on notifications and we'll nudge your phone when something needs you — a new message, an approval, an alert — even when Pulse is closed.",
+        action: 'notifications',
         skipIfDone: 'notifications',
+      },
+      {
+        icon: '📲',
+        title: 'Add Pulse to your phone',
+        body: 'Install Pulse like an app — a home-screen icon, full screen, no browser bar. One tap below. (On iPhone, use Share → Add to Home Screen.)',
+        action: 'install',
       },
       {
         icon: '🚀',
@@ -73,8 +82,9 @@ export const GUIDES = {
     id: 'notifications',
     title: 'Turn on notifications',
     steps: [
-      { icon: '🔔', title: 'Allow notifications', body: "When your browser asks, tap Allow. That's the only step — it takes a second." },
+      { icon: '🔔', title: 'Allow notifications', body: "One tap and we'll ask your browser for permission — that's the only step.", action: 'notifications' },
       { icon: '📱', title: 'Why it helps', body: "We'll nudge your phone when something needs you — a new message, an approval, an alert — even when Pulse is closed." },
+      { icon: '📲', title: 'Add it to your phone', body: 'Install Pulse to your home screen so it opens like a normal app and notifications land reliably. One tap below.', action: 'install' },
       { icon: '⚙️', title: 'Change your mind later', body: 'You can adjust or turn notifications off anytime in your browser or device settings.' },
     ],
   },

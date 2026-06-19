@@ -29,7 +29,7 @@ export function PinProvider({ dashboardId, entityId, isAdmin, enabled, children 
     const on = !cur.has(tileId);
     const set = kind === 'follow' ? setFollows : setPins;
     set((prev) => { const n = new Set(prev); if (on) n.add(tileId); else n.delete(tileId); return n; }); // optimistic
-    if (on) api.track(entityId, { kind: 'feature', name: kind, event: 'use' }); // feature-usage signal
+    if (on) api.trackUsage(entityId, { kind: 'feature', name: kind, event: 'use' }); // feature-usage signal
     api.togglePin({ dashboardId, tileId, kind, on, scope: isAdmin ? 'entity' : 'user', entityId })
       .then((r) => { setPins(forDash(r.pins, dashboardId)); setFollows(forDash(r.follows, dashboardId)); })
       .catch(() => {});

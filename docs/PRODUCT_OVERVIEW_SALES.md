@@ -248,6 +248,12 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-19** — **One-touch install & notifications in the wizard** 🧪: the welcome
+  wizard now has a dedicated **“Add Pulse to your phone”** step with a one-tap
+  **Install** button (native prompt on Android/desktop; Add-to-Home-Screen guidance
+  on iPhone), and the notifications step turns on push with a single tap. Usage
+  tracking widened too — opening a dashboard and asking the Owl for an insight now
+  feed the **Admin → Onboarding** feature-usage view.
 - **2026-06-19** — **Onboarding that learns** 🧪 (internal): the wizards now record
   a usage **funnel** (open → step → skip/complete) and **feature usage**, surfaced
   in **Admin → Onboarding** with plain recommendations ("most people drop at step

@@ -204,7 +204,8 @@ export default function AdminPage() {
 
 const FEATURE_LABELS = {
   pin: '📌 Pinned a tile', follow: '👁 Followed a tile', briefing_tune: '⚙ Tuned the briefing',
-  insight: '🦉 Asked for an insight',
+  insight: '🦉 Asked the Owl for an insight', dashboard: '📊 Opened a dashboard',
+  notifications_enabled: '🔔 Turned on notifications', install: '📲 Installed the app',
 };
 
 function OnboardingInsights() {

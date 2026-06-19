@@ -142,7 +142,7 @@ export default function ClientHome() {
             <span style={{ flex: 1 }} />
             {brief?.generatedAt && <span style={{ fontSize: 11, color: 'var(--muted)' }}>{new Date(brief.generatedAt).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}</span>}
             {refreshErr && <span style={{ fontSize: 11, color: 'var(--error)' }} title="Couldn't refresh — try again">⚠</span>}
-            <button onClick={() => { api.track(homeEntityId, { kind: 'feature', name: 'briefing_tune', event: 'use' }); setTuneOpen(true); }} title="Tune your briefing — focus, event dates, phases" style={refreshBtn}>⚙ Tune</button>
+            <button onClick={() => { api.trackUsage(homeEntityId, { kind: 'feature', name: 'briefing_tune', event: 'use' }); setTuneOpen(true); }} title="Tune your briefing — focus, event dates, phases" style={refreshBtn}>⚙ Tune</button>
             <button onClick={refreshBrief} disabled={refreshing} title="Regenerate briefing" style={refreshBtn}>{refreshing ? '…' : '↻ Refresh'}</button>
           </div>
           {brief == null || refreshing ? (

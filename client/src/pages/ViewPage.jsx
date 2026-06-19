@@ -170,6 +170,8 @@ export default function ViewPage() {
 
   // View tracking (fire-and-forget) — powers home-page personalisation.
   useEffect(() => { if (suiteId && id) api.track(suiteId, id); }, [suiteId, id]);
+  // Feature-usage signal: a client opened a dashboard (Admin → Onboarding insights).
+  useEffect(() => { if (scopeEntityId && id) api.trackUsage(scopeEntityId, { kind: 'feature', name: 'dashboard', event: 'use' }); }, [id, scopeEntityId]);
 
   // Sub-dashboard tabs: if this dashboard is a parent with children — or one of
   // the children — surface the whole family as a tab bar (parent first).

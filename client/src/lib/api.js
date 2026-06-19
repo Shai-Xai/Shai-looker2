@@ -124,7 +124,8 @@ export const api = {
     }).then(json),
   deleteDashboard: (id) => fetch(`/api/dashboards/${id}`, { method: 'DELETE' }),
   // Usage telemetry — fire-and-forget, batched (see _trackBuf below). Never throws.
-  track: (entityId, event) => queueTrack(entityId, event),
+  // NB: distinct from `track(suiteId, dashboardId)` below, which counts dashboard views.
+  trackUsage: (entityId, event) => queueTrack(entityId, event),
   // Admin: onboarding funnel + feature-usage aggregates.
   adminOnboardingStats: () => fetch('/api/admin/onboarding/stats').then(json),
 
