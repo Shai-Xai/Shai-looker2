@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import GoalEditor from './GoalEditor.jsx';
 
@@ -11,6 +12,7 @@ import GoalEditor from './GoalEditor.jsx';
 export default function GoalsStrip({ entityId, suites }) {
   const [bySuite, setBySuite] = useState({}); // suiteId -> { goals, canManage }
   const [editor, setEditor] = useState(null); // { suiteId, goal } | null
+  const [params, setParams] = useSearchParams();
   const [hidden, setHidden] = useState(true);  // start hidden until we read the flag
   const hideKey = `howler_goals_hidden:${entityId}`;
   useEffect(() => { setHidden(!!(entityId && localStorage.getItem(hideKey))); }, [hideKey, entityId]);
@@ -23,6 +25,17 @@ export default function GoalsStrip({ entityId, suites }) {
 
   const rows = list.map((s) => ({ suite: s, ...(bySuite[s.id] || { goals: [], canManage: false }) }))
     .filter((r) => (r.goals && r.goals.length) || r.canManage);
+
+  // Deep link from onboarding / the Learn wizard: /?goals=new opens the editor
+  // (un-hiding the section if it was dismissed). Waits for the suites to load.
+  useEffect(() => {
+    if (params.get('goals') !== 'new' || !Object.keys(bySuite).length) return;
+    const target = rows.find((r) => r.canManage);
+    if (hidden) { try { localStorage.removeItem(hideKey); } catch { /* ignore */ } setHidden(false); }
+    if (target) setEditor({ suiteId: target.suite.id, goal: null });
+    const next = new URLSearchParams(params); next.delete('goals'); setParams(next, { replace: true });
+  }, [params, rows.length, hidden]); // eslint-disable-line react-hooks/exhaustive-deps
+
   if (!rows.length || hidden) return null;
 
   const dismiss = () => { try { localStorage.setItem(hideKey, '1'); } catch { /* ignore */ } setHidden(true); };

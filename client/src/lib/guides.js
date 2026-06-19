@@ -51,6 +51,13 @@ export const GUIDES = {
         action: 'install',
       },
       {
+        icon: '⭐',
+        title: 'Set a goal',
+        body: 'Tell Pulse what success looks like — a ticket or revenue target for your event — and it shows how you’re tracking against it, everywhere you look.',
+        cta: { label: 'Set a goal', to: '/?goals=new' },
+        skipIfDone: 'goals',
+      },
+      {
         icon: '🚀',
         title: "You're set",
         body: "That's the essentials. The “Getting started” card on your home page tracks the rest, and the Owl will start briefing you on your data. Have a look around.",
@@ -134,6 +141,17 @@ export const GUIDES = {
     ],
   },
 
+  goals: {
+    id: 'goals',
+    title: 'Set your event goals',
+    steps: [
+      { icon: '🎯', title: 'Open “Your goals”', body: 'On your home page, find the “Your goals” strip and tap “Set a goal.”', cta: { label: 'Set a goal', to: '/?goals=new' } },
+      { icon: '📊', title: 'Track a live number', body: 'Pick a number you already watch on a dashboard — tickets sold, revenue — and the goal tracks it live, always matching the dashboard. Or enter a number yourself for things like sponsorship.' },
+      { icon: '🏁', title: 'Set the target', body: 'Type what you’re aiming for and a deadline (event day by default), and choose how it shows — a bar, circle or dial.' },
+      { owl: true, title: 'The North Star leads', body: 'Mark your headline goal as the North Star. Pulse then shows how you’re pacing — ahead, on track or behind — wherever you look.', cta: { label: 'Set a goal', to: '/?goals=new' } },
+    ],
+  },
+
   // ── Feature explainers (the "Learn" menu) ──────────────────────────────────
   home: {
     id: 'home',
@@ -194,6 +212,7 @@ export const FEATURE_GUIDES = [
   { id: 'briefing', owl: true, label: 'Tune your briefing' },
   { id: 'pins', icon: '📌', label: 'Pinning & following tiles' },
   { id: 'insights', owl: true, label: 'How Owl insights work' },
+  { id: 'goals', icon: '🎯', label: 'Setting goals' },
   { id: 'install', icon: '📲', label: 'Install Pulse on your phone' },
 ];
 
