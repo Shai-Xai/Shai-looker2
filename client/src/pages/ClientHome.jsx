@@ -7,6 +7,8 @@ import { vtNavigate } from '../lib/viewTransition.js';
 import AiMark from '../components/AiMark.jsx';
 import BriefingTuneModal from '../components/BriefingTuneModal.jsx';
 import OnboardingCard from '../components/OnboardingCard.jsx';
+import GuideModal from '../components/GuideModal.jsx';
+import { GUIDES, FEATURE_GUIDES, getGuide } from '../lib/guides.js';
 import DigestHistory from '../components/DigestHistory.jsx';
 import { useProfile } from '../lib/profile.jsx';
 import OwlQuips from '../components/OwlQuips.jsx';
@@ -36,6 +38,7 @@ export default function ClientHome() {
   const [tuneOpen, setTuneOpen] = useState(false);
   const [messages, setMessages] = useState([]);
   const [dismissed, setDismissed] = useState([]);
+  const [guide, setGuide] = useState(null); // open walkthrough/explainer, or null
 
   useEffect(() => { api.mySuites().then(setSuites).catch(() => {}); }, []);
   useEffect(() => {
@@ -53,6 +56,18 @@ export default function ClientHome() {
     api.myBriefing(homeEntityId).then((b) => { if (alive) setBrief(b); }).catch(() => { if (alive) setBrief({ available: false }); });
     api.osInbox(homeEntityId).then((r) => { if (alive) setMessages(r.threads || []); }).catch(() => {});
     api.getDismissedThreads().then((r) => { if (alive) setDismissed(r.dismissed || []); }).catch(() => {});
+    // First run: a brand-new client (nothing done, not dismissed) gets the
+    // essentials welcome wizard once. Remembered per entity so it never nags again.
+    if (homeEntityId) {
+      const seenKey = `howler_onboarding_welcomed:${homeEntityId}`;
+      if (!localStorage.getItem(seenKey)) {
+        api.getMyOnboarding(homeEntityId).then((o) => {
+          if (!alive || !o || o.dismissed || (o.done || 0) !== 0) return;
+          localStorage.setItem(seenKey, '1');
+          setGuide(GUIDES.essentials);
+        }).catch(() => {});
+      }
+    }
     return () => { alive = false; };
   }, [homeEntityId]);
   const dismissMessage = (id) => {
@@ -108,6 +123,7 @@ export default function ClientHome() {
             {todayLine()}{snap?.lastVisit ? ` · Here's what changed since your last visit ${relDay(snap.lastVisit)}.` : ''}
           </p>
         </div>
+        <LearnMenu onPick={(id) => setGuide(getGuide(id))} />
       </div>
 
       {/* Getting-started checklist — hides once complete or dismissed */}
@@ -265,6 +281,8 @@ export default function ClientHome() {
       {tuneOpen && (
         <BriefingTuneModal entityId={homeEntityId} onClose={() => setTuneOpen(false)} onSaved={refreshBrief} />
       )}
+
+      {guide && <GuideModal guide={guide} onClose={() => setGuide(null)} />}
 
       {/* Suites */}
       <SectionHead>Your suites</SectionHead>
@@ -492,6 +510,40 @@ function YourActions({ entityId, isMobile, onOpen }) {
         })}
       </div>
     </>
+  );
+}
+
+// Small "Learn" launcher in the greeting: a button that opens a popover of the
+// feature explainers (home, briefing, pins, insights). Closes on outside click.
+function LearnMenu({ onPick }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+  return (
+    <div ref={ref} style={{ position: 'relative', flexShrink: 0 }}>
+      <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open}
+        style={{ minHeight: 36, padding: '7px 13px', borderRadius: 980, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}>
+        ❔ Learn
+      </button>
+      {open && (
+        <div style={{ position: 'absolute', right: 0, top: '110%', zIndex: 60, width: 230, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, boxShadow: 'var(--shadow-lg, 0 10px 30px rgba(0,0,0,0.22))', padding: 6, display: 'flex', flexDirection: 'column', gap: 2 }}>
+          {FEATURE_GUIDES.map((g) => (
+            <button key={g.id} type="button" onClick={() => { setOpen(false); onPick(g.id); }}
+              style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', textAlign: 'left', padding: '9px 10px', minHeight: 40, border: 'none', background: 'transparent', color: 'var(--text)', fontSize: 13, fontWeight: 600, borderRadius: 8, cursor: 'pointer' }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(128,128,128,0.10)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}>
+              <span style={{ fontSize: 16, width: 20, textAlign: 'center', flexShrink: 0 }}>{g.icon}</span>
+              <span>{g.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

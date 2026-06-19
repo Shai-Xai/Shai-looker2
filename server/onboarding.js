@@ -22,15 +22,21 @@ function mount(app, { db, auth }) {
   const brandingDone = (e) => { try { const b = db.getEntityMailBranding(e) || {}; return !!(b.logo || b.brandColor || b.senderName || b.header) || !!db.getEntity(e)?.logo; } catch { return false; } };
 
   // Step catalogue. `auto` (when present) auto-completes the step from real state;
-  // steps without `auto` are manual (a CTA + tick). Order = the suggested journey.
+  // steps without `auto` are manual (a CTA + tick). Order = the suggested journey,
+  // grouped into three plain-language `phase`s for the card. `guide` keys into the
+  // front-end walkthrough content (client/src/lib/guides.js) — the "Show me how".
+  // Step keys are stable (don't rename) so stored progress + auto-checks keep working.
   const STEPS = [
-    { key: 'explore', icon: '📊', title: 'Explore your dashboards', desc: 'Open your suites and get a feel for your live data.', cta: '/' },
-    { key: 'branding', icon: '🎨', title: 'Add your branding', desc: 'Upload your logo and set your colour — emails and the app look like you.', cta: '/settings', auto: brandingDone },
-    { key: 'team', icon: '👥', title: 'Invite your team', desc: 'Add the people who should get access and digests.', cta: '/settings', auto: (e) => count('SELECT COUNT(*) n FROM user_entities WHERE entity_id=?', e) >= 2 },
-    { key: 'notifications', icon: '🔔', title: 'Turn on notifications', desc: 'Get a nudge on your phone when something needs you — even when Pulse is closed.', cta: '/' },
-    { key: 'digest', icon: '🗓', title: 'Schedule a digest', desc: 'An automated briefing emailed to your team on your schedule.', cta: '/digests', auto: (e) => count("SELECT COUNT(*) n FROM scheduled_jobs WHERE entity_id=? AND type='digest'", e) > 0 },
-    { key: 'segment', icon: '🎯', title: 'Build your first segment', desc: 'Turn a dashboard tile or a list into a reusable audience.', cta: '/engage/segments', auto: (e) => count('SELECT COUNT(*) n FROM segments WHERE entity_id=?', e) > 0 },
-    { key: 'campaign', icon: '📣', title: 'Send your first campaign', desc: 'Email or SMS an audience — abandoned-cart recovery is a great start.', cta: '/engage/campaigns', auto: (e) => count('SELECT COUNT(*) n FROM actions WHERE entity_id=?', e) > 0 },
+    // Phase 1 — Make it yours
+    { key: 'branding', phase: 'Make it yours', guide: 'branding', icon: '🎨', title: 'Add your logo & brand colour', desc: 'Upload your logo and pick your colour — your emails and the whole app then look like you.', cta: '/settings', auto: brandingDone },
+    { key: 'team', phase: 'Make it yours', guide: 'team', icon: '👥', title: 'Invite your team', desc: 'Add the people who should get access and briefings.', cta: '/settings', auto: (e) => count('SELECT COUNT(*) n FROM user_entities WHERE entity_id=?', e) >= 2 },
+    // Phase 2 — Stay in the loop
+    { key: 'notifications', phase: 'Stay in the loop', guide: 'notifications', icon: '🔔', title: 'Turn on notifications', desc: 'Get a nudge on your phone when something needs you — even when Pulse is closed.', cta: '/' },
+    { key: 'digest', phase: 'Stay in the loop', guide: 'digest', icon: '🗓', title: 'Set up your weekly briefing', desc: 'An automated briefing emailed to your team on the schedule you choose.', cta: '/digests', auto: (e) => count("SELECT COUNT(*) n FROM scheduled_jobs WHERE entity_id=? AND type='digest'", e) > 0 },
+    // Phase 3 — See & act on your data
+    { key: 'explore', phase: 'See & act on your data', guide: 'explore', icon: '📊', title: 'Take a tour of your dashboards', desc: 'Open your suites and get a feel for your live data.', cta: '/' },
+    { key: 'segment', phase: 'See & act on your data', guide: 'segment', icon: '🎯', title: 'Create your first audience', desc: 'Turn a dashboard tile or a list into a reusable audience you can message.', cta: '/engage/segments', auto: (e) => count('SELECT COUNT(*) n FROM segments WHERE entity_id=?', e) > 0 },
+    { key: 'campaign', phase: 'See & act on your data', guide: 'campaign', icon: '📣', title: 'Launch your first campaign', desc: 'Email or SMS an audience — winning back abandoned carts is a great first one.', cta: '/engage/campaigns', auto: (e) => count('SELECT COUNT(*) n FROM actions WHERE entity_id=?', e) > 0 },
   ];
 
   function progress(entityId) {
@@ -39,7 +45,7 @@ function mount(app, { db, auth }) {
     const steps = STEPS.map((s) => {
       const autoDone = s.auto ? !!s.auto(entityId) : false;
       const manualDone = manual[s.key] === 1;
-      return { key: s.key, icon: s.icon, title: s.title, desc: s.desc, cta: s.cta, auto: !!s.auto, done: autoDone || manualDone };
+      return { key: s.key, phase: s.phase, guide: s.guide, icon: s.icon, title: s.title, desc: s.desc, cta: s.cta, auto: !!s.auto, done: autoDone || manualDone };
     });
     const done = steps.filter((s) => s.done).length;
     return { steps, done, total: steps.length, complete: done === steps.length, dismissed: manual.__dismissed === 1 };
