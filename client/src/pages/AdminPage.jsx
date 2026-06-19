@@ -3020,17 +3020,22 @@ function EventPicker({ value, onChange, onCommit, eventNames, style }) {
   const known = [...new Set((eventNames || []).filter(Boolean))];
   const custom = !!value && !known.includes(value);
   const [typing, setTyping] = useState(false);
+  const inputRef = useRef(null);
+  // Focus the input via a ref when we switch into typing mode — autoFocus is
+  // unreliable across the select→input swap (the native select can keep focus),
+  // which made the "Other / new event" box impossible to type into.
+  useEffect(() => { if (typing && inputRef.current) inputRef.current.focus(); }, [typing]);
   if (typing || known.length === 0) {
     return (
       <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
         <input
+          ref={inputRef}
           style={style}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onBlur={(e) => onCommit && onCommit(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); } }}
           placeholder="Event name"
-          autoFocus={typing}
         />
         {known.length > 0 && <button style={miniBtnOutline} title="Pick from known events" onClick={() => setTyping(false)}>▾</button>}
       </span>
@@ -3061,7 +3066,8 @@ function DocEventPicker({ doc, eventNames, onSaved }) {
   useEffect(() => { setVal(doc.eventName || ''); }, [doc.eventName]);
   const commit = (v) => {
     const t = String(v == null ? val : v).trim();
-    if (t === (doc.eventName || '')) return;
+    if (!t) return;                          // ignore empty (the "Other" transition / accidental blur) — don't wipe or reload mid-edit
+    if (t === (doc.eventName || '')) return; // unchanged
     api.adminUpdateDocument(doc.id, { eventName: t }).then(onSaved);
   };
   return <EventPicker value={val} onChange={setVal} onCommit={commit} eventNames={eventNames} style={{ ...input, minWidth: 150, maxWidth: 190 }} />;
