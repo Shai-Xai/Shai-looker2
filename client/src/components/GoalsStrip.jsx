@@ -55,11 +55,11 @@ export default function GoalsStrip({ entityId, suites }) {
             <div key={suite.id}>
               {multi && <div style={eventName}>{suite.name}</div>}
               <Strip>
-                {ordered.map((g) => (
-                  <GoalCard key={g.id} goal={g} onClick={canManage ? () => setEditor({ suiteId: suite.id, goal: g }) : null} />
+                {ordered.map((g, i) => (
+                  <GoalCard key={g.id} goal={g} index={i} onClick={canManage ? () => setEditor({ suiteId: suite.id, goal: g }) : null} />
                 ))}
                 {canManage && (
-                  <button onClick={() => setEditor({ suiteId: suite.id, goal: null })} style={addCard}>
+                  <button className="lift msg-in" onClick={() => setEditor({ suiteId: suite.id, goal: null })} style={{ ...addCard, animationDelay: `${ordered.length * 60}ms` }}>
                     <span style={{ fontSize: 22, lineHeight: 1 }}>＋</span>
                     <span style={{ fontSize: 12.5, fontWeight: 700 }}>{goals.length ? 'Add a goal' : 'Set a goal'}</span>
                   </button>
@@ -91,36 +91,37 @@ function Strip({ children }) {
   );
 }
 
-function GoalCard({ goal, onClick }) {
+function GoalCard({ goal, onClick, index = 0 }) {
   const p = goal.progress || {};
   const tone = paceTone(p);
   const viz = goal.display || 'bar';
   const clickable = !!onClick;
   const chip = p.band ? <Chip {...bandChip(p.band)} /> : (p.status && p.status !== 'final' ? <Chip {...statusChip(p.status)} /> : null);
   return (
-    <div
+    <div className="lift msg-in"
       role={clickable ? 'button' : undefined} tabIndex={clickable ? 0 : undefined}
       onClick={onClick || undefined}
       onKeyDown={clickable ? (e) => { if (e.key === 'Enter') onClick(); } : undefined}
-      style={{ ...card, cursor: clickable ? 'pointer' : 'default' }}
+      style={{ ...card, animationDelay: `${index * 60}ms`, cursor: clickable ? 'pointer' : 'default' }}
     >
+      {/* Title + pace chip share the top row, so the chip never costs its own line. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-        {goal.isNorthStar && <span title="North Star" style={{ fontSize: 12 }}>⭐</span>}
+        {goal.isNorthStar && <span title="North Star" style={{ fontSize: 12, flexShrink: 0 }}>⭐</span>}
         <span style={{ fontSize: 12.5, fontWeight: 700, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{goal.name}</span>
+        {chip}
       </div>
       {viz === 'bar' ? (
-        <div style={{ marginTop: 8 }}>
-          <div style={{ fontSize: 17, fontWeight: 800 }}>{fmtVal(p.value, goal.unit)}</div>
+        <div style={{ marginTop: 'auto', paddingTop: 12 }}>
+          <div style={{ fontSize: 19, fontWeight: 800 }}>{fmtVal(p.value, goal.unit)}</div>
           <div style={{ fontSize: 11, color: 'var(--muted)' }}>of {fmtVal(goal.targetValue, goal.unit)}{p.pct != null ? ` · ${p.pct}%` : ''}</div>
           <Bar pct={p.pct} tone={tone} />
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginTop: 6, gap: 3 }}>
-          {viz === 'ring' ? <Ring pct={p.pct} tone={tone} size={62} /> : <Dial pct={p.pct} tone={tone} size={66} />}
-          <div style={{ fontSize: 11, color: 'var(--muted)', textAlign: 'center' }}>{fmtVal(p.value, goal.unit)} / {fmtVal(goal.targetValue, goal.unit)}</div>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, gap: 5, marginTop: 2 }}>
+          {viz === 'ring' ? <Ring pct={p.pct} tone={tone} size={78} /> : <Dial pct={p.pct} tone={tone} size={86} />}
+          <div style={{ fontSize: 11, color: 'var(--muted)', textAlign: 'center', lineHeight: 1.3 }}>{fmtVal(p.value, goal.unit)} / {fmtVal(goal.targetValue, goal.unit)}</div>
         </div>
       )}
-      <div style={{ marginTop: 8, minHeight: 18 }}>{chip}</div>
     </div>
   );
 }
@@ -138,32 +139,39 @@ function Chip({ t, c, bg }) {
 }
 
 // Circular progress ring with the % in the centre.
-function Ring({ pct, tone, size = 62 }) {
+function Ring({ pct, tone, size = 78 }) {
   const w = Math.max(0, Math.min(100, Math.round(pct || 0)));
-  const sw = 6, r = (size - sw) / 2, c = 2 * Math.PI * r;
+  const [shown, setShown] = useState(0); // animate the arc in on load
+  useEffect(() => { const t = setTimeout(() => setShown(w), 90); return () => clearTimeout(t); }, [w]);
+  const sw = 7, r = (size - sw) / 2, c = 2 * Math.PI * r;
   return (
     <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden="true">
       <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(128,128,128,0.18)" strokeWidth={sw} />
       <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={tone} strokeWidth={sw} strokeLinecap="round"
-        strokeDasharray={c} strokeDashoffset={c * (1 - w / 100)} transform={`rotate(-90 ${size / 2} ${size / 2})`}
-        style={{ transition: 'stroke-dashoffset .5s ease' }} />
-      <text x="50%" y="50%" dominantBaseline="central" textAnchor="middle" fontSize={size * 0.26} fontWeight="800" fill="var(--text)">{w}%</text>
+        strokeDasharray={c} strokeDashoffset={c * (1 - shown / 100)} transform={`rotate(-90 ${size / 2} ${size / 2})`}
+        style={{ transition: 'stroke-dashoffset .8s cubic-bezier(.34,1,.4,1)' }} />
+      <text x="50%" y="50%" dominantBaseline="central" textAnchor="middle" fontSize={size * 0.25} fontWeight="800" fill="var(--text)">{w}%</text>
     </svg>
   );
 }
 
 // Half-circle gauge (speedometer style); fills left→right with the % below.
-function Dial({ pct, tone, size = 66 }) {
+function Dial({ pct, tone, size = 86 }) {
   const w = Math.max(0, Math.min(100, Math.round(pct || 0)));
-  const sw = 7, r = (size - sw) / 2, cx = size / 2, cy = size / 2;
+  const [shown, setShown] = useState(0); // animate the gauge in on load
+  useEffect(() => { const t = setTimeout(() => setShown(w), 90); return () => clearTimeout(t); }, [w]);
+  const sw = 8, r = (size - sw) / 2, cx = size / 2, cy = size / 2;
   const at = (frac) => { const a = Math.PI - Math.PI * frac; return [cx + r * Math.cos(a), cy - r * Math.sin(a)]; };
-  const [sx, sy] = at(0), [ex, ey] = at(1), [px, py] = at(w / 100);
-  const arc = (x, y) => `M ${sx.toFixed(1)} ${sy.toFixed(1)} A ${r} ${r} 0 0 1 ${x.toFixed(1)} ${y.toFixed(1)}`;
+  const [sx, sy] = at(0), [ex, ey] = at(1);
+  const full = `M ${sx.toFixed(1)} ${sy.toFixed(1)} A ${r} ${r} 0 0 1 ${ex.toFixed(1)} ${ey.toFixed(1)}`;
+  const arcLen = Math.PI * r; // semicircle length — drives the dash draw-in
   const h = Math.ceil(cy + size * 0.24);
   return (
     <svg width={size} height={h} viewBox={`0 0 ${size} ${h}`} aria-hidden="true">
-      <path d={arc(ex, ey)} fill="none" stroke="rgba(128,128,128,0.18)" strokeWidth={sw} strokeLinecap="round" />
-      {w > 0 && <path d={arc(px, py)} fill="none" stroke={tone} strokeWidth={sw} strokeLinecap="round" style={{ transition: 'all .5s ease' }} />}
+      <path d={full} fill="none" stroke="rgba(128,128,128,0.18)" strokeWidth={sw} strokeLinecap="round" />
+      <path d={full} fill="none" stroke={tone} strokeWidth={sw} strokeLinecap="round"
+        strokeDasharray={arcLen} strokeDashoffset={arcLen * (1 - shown / 100)}
+        style={{ transition: 'stroke-dashoffset .8s cubic-bezier(.34,1,.4,1)' }} />
       <text x={cx} y={cy + 1} textAnchor="middle" fontSize={size * 0.2} fontWeight="800" fill="var(--text)">{w}%</text>
     </svg>
   );
@@ -199,6 +207,6 @@ function fmtVal(v, unit) {
 }
 
 const eventName = { fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', padding: '0 2px 6px' };
-const card = { flex: '0 0 170px', scrollSnapAlign: 'start', boxSizing: 'border-box', minHeight: 118, background: 'var(--tile-bg, var(--card))', border: '1px solid var(--border)', borderRadius: 14, boxShadow: 'var(--shadow-sm)', padding: '11px 13px', color: 'var(--text)' };
-const addCard = { flex: '0 0 130px', scrollSnapAlign: 'start', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, minHeight: 118, border: '1px dashed var(--border)', borderRadius: 14, background: 'transparent', color: 'var(--brand)', cursor: 'pointer' };
+const card = { flex: '0 0 172px', scrollSnapAlign: 'start', boxSizing: 'border-box', minHeight: 138, display: 'flex', flexDirection: 'column', background: 'var(--tile-bg, var(--card))', border: '1px solid var(--border)', borderRadius: 14, boxShadow: 'var(--shadow-sm)', padding: '11px 13px', color: 'var(--text)' };
+const addCard = { flex: '0 0 124px', scrollSnapAlign: 'start', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, minHeight: 138, border: '1px dashed var(--border)', borderRadius: 14, background: 'transparent', color: 'var(--brand)', cursor: 'pointer' };
 const dismissBtn = { border: 'none', background: 'rgba(128,128,128,0.12)', color: 'var(--muted-2)', borderRadius: 980, width: 26, height: 26, fontSize: 12, cursor: 'pointer', flexShrink: 0 };
