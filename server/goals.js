@@ -41,6 +41,7 @@ function mount(app, { db, auth, resolveTileValue }) {
       target_value REAL NOT NULL DEFAULT 0,
       unit TEXT NOT NULL DEFAULT '',
       direction TEXT NOT NULL DEFAULT 'at_least',
+      display TEXT NOT NULL DEFAULT 'bar',
       by_date TEXT NOT NULL DEFAULT '',
       is_north_star INTEGER NOT NULL DEFAULT 0,
       position INTEGER NOT NULL DEFAULT 0,
@@ -77,6 +78,8 @@ function mount(app, { db, auth, resolveTileValue }) {
     CREATE INDEX IF NOT EXISTS idx_goals_suite ON goals(suite_id);
     CREATE INDEX IF NOT EXISTS idx_goal_snapshots ON goal_snapshots(goal_id, at);
   `);
+  // Additive migration for tables created before `display` existed (idempotent).
+  try { sql.exec("ALTER TABLE goals ADD COLUMN display TEXT NOT NULL DEFAULT 'bar'"); } catch { /* column already present */ }
 
   const parseJson = (s, fb) => { try { return JSON.parse(s); } catch { return fb; } };
   function rowToGoal(r) {
@@ -84,7 +87,7 @@ function mount(app, { db, auth, resolveTileValue }) {
     return {
       id: r.id, suiteId: r.suite_id, entityId: r.entity_id, scope: r.scope, ownerRef: r.owner_ref,
       name: r.name, metricKey: r.metric_key, source: r.source, metricRef: parseJson(r.metric_ref, {}),
-      targetValue: r.target_value, unit: r.unit, direction: r.direction, byDate: r.by_date,
+      targetValue: r.target_value, unit: r.unit, direction: r.direction, display: r.display || 'bar', byDate: r.by_date,
       isNorthStar: !!r.is_north_star, position: r.position,
       baselineEventId: r.baseline_event_id, baselineValue: r.baseline_value, baselineSource: r.baseline_source,
       baselineComparable: !!r.baseline_comparable,
@@ -109,6 +112,7 @@ function mount(app, { db, auth, resolveTileValue }) {
       targetValue: Number(b.targetValue) || 0,
       unit: String(b.unit || '').slice(0, 16),
       direction: DIRECTIONS.includes(b.direction) ? b.direction : 'at_least',
+      display: ['bar', 'dial', 'ring'].includes(b.display) ? b.display : 'bar',
       byDate: String(b.byDate || '').slice(0, 32),
       position: Number.isFinite(Number(b.position)) ? Number(b.position) : 0,
       baselineEventId: String(b.baselineEventId || '').slice(0, 64),
@@ -219,11 +223,11 @@ function mount(app, { db, auth, resolveTileValue }) {
     const id = uuid(); const ts = now();
     const existing = sql.prepare("SELECT COUNT(*) n FROM goals WHERE suite_id=? AND scope='event' AND status='active'").get(req.params.suiteId).n;
     sql.prepare(`INSERT INTO goals (id, suite_id, entity_id, scope, owner_ref, name, metric_key, source, metric_ref,
-        target_value, unit, direction, by_date, is_north_star, position, baseline_event_id, baseline_value, baseline_source,
+        target_value, unit, direction, display, by_date, is_north_star, position, baseline_event_id, baseline_value, baseline_source,
         status, created_by, created_at, updated_by, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
       id, req.params.suiteId, su.entityId, 'event', req.params.suiteId, c.name, c.metricKey, c.source, JSON.stringify(c.metricRef),
-      c.targetValue, c.unit, c.direction, c.byDate, 0, c.position, c.baselineEventId, c.baselineValue, c.baselineSource,
+      c.targetValue, c.unit, c.direction, c.display, c.byDate, 0, c.position, c.baselineEventId, c.baselineValue, c.baselineSource,
       'active', req.user.email, ts, req.user.email, ts);
     // First active event goal becomes the North Star; or honour an explicit request.
     if (existing === 0 || req.body?.isNorthStar) setNorthStar(req.params.suiteId, id);
@@ -241,9 +245,9 @@ function mount(app, { db, auth, resolveTileValue }) {
       if (String(oldV) !== String(newV)) audit(g.id, field, oldV, newV, req.user.email);
     }
     sql.prepare(`UPDATE goals SET name=?, metric_key=?, source=?, metric_ref=?, target_value=?, unit=?, direction=?,
-        by_date=?, position=?, baseline_event_id=?, baseline_value=?, baseline_source=?, updated_by=?, updated_at=? WHERE id=?`).run(
+        display=?, by_date=?, position=?, baseline_event_id=?, baseline_value=?, baseline_source=?, updated_by=?, updated_at=? WHERE id=?`).run(
       c.name, c.metricKey, c.source, JSON.stringify(c.metricRef), c.targetValue, c.unit, c.direction,
-      c.byDate, c.position, c.baselineEventId, c.baselineValue, c.baselineSource, req.user.email, now(), g.id);
+      c.display, c.byDate, c.position, c.baselineEventId, c.baselineValue, c.baselineSource, req.user.email, now(), g.id);
     if (req.body?.isNorthStar && !g.isNorthStar) { setNorthStar(g.suiteId, g.id); audit(g.id, 'is_north_star', false, true, req.user.email); }
     res.json({ goal: goalById(g.id) });
   });
@@ -268,6 +272,20 @@ function mount(app, { db, auth, resolveTileValue }) {
     if (!Number.isFinite(v)) return res.status(400).json({ error: 'A numeric value is required' });
     sql.prepare('INSERT INTO goal_snapshots (id, goal_id, at, actual_value) VALUES (?,?,?,?)').run(uuid(), g.id, now(), v);
     res.status(201).json({ ok: true, value: v });
+  });
+
+  // Live preview of a tile's current number for the editor — so when you pick a
+  // tile to track, you see the actual figure before saving the target. Read-only
+  // (suite membership); scope is still enforced inside resolveTileValue.
+  app.post('/api/goals/suites/:suiteId/tile-value', auth.requireAuth, async (req, res) => {
+    if (!db.getSuite(req.params.suiteId)) return res.status(404).json({ error: 'Event not found' });
+    if (!canView(req.user, req.params.suiteId)) return res.status(403).json({ error: 'Not allowed' });
+    const { dashboardId, tileId } = req.body || {};
+    if (typeof resolveTileValue !== 'function' || !dashboardId || !tileId) return res.json({ value: null });
+    try {
+      const value = await resolveTileValue({ dashboardId, tileId, user: req.user, suiteId: req.params.suiteId });
+      res.json({ value: value == null ? null : Number(value) });
+    } catch (e) { res.json({ value: null, error: e.message }); }
   });
 
   console.log('[goals] Results pillar mounted');

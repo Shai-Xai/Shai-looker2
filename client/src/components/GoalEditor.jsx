@@ -23,7 +23,9 @@ export default function GoalEditor({ entityId, suiteId, goal, onClose, onSaved }
   const [byDate, setByDate] = useState(goal?.byDate ? goal.byDate.slice(0, 10) : '');
   const [northStar, setNorthStar] = useState(!!goal?.isNorthStar);
   const [current, setCurrent] = useState(''); // manual goals: enter today's actual
+  const [display, setDisplay] = useState(goal?.display || 'bar'); // bar | ring | dial
   const [cat, setCat] = useState(null);       // tile catalogue { dashboards: [...] }
+  const [preview, setPreview] = useState(null); // live value of the picked tile
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
@@ -32,6 +34,16 @@ export default function GoalEditor({ entityId, suiteId, goal, onClose, onSaved }
     if (track !== 'tile' || cat || !entityId) return;
     api.getMyDigestTiles(entityId).then(setCat).catch(() => setCat({ dashboards: [] }));
   }, [track, cat, entityId]);
+
+  // Live value of the chosen tile, so the target is set against the real number.
+  useEffect(() => {
+    if (track !== 'tile' || !dashboardId || !tileId || !suiteId) { setPreview(null); return undefined; }
+    let alive = true; setPreview({ loading: true });
+    api.goalTileValue(suiteId, dashboardId, tileId)
+      .then((r) => { if (alive) setPreview({ value: r.value }); })
+      .catch(() => { if (alive) setPreview({ value: null }); });
+    return () => { alive = false; };
+  }, [track, dashboardId, tileId, suiteId]);
 
   const dashboards = cat?.dashboards || [];
   const tilesFor = (dId) => dashboards.find((d) => d.dashboardId === dId)?.tiles || [];
@@ -46,7 +58,7 @@ export default function GoalEditor({ entityId, suiteId, goal, onClose, onSaved }
       source: 'manual', // resolution is driven by the tile ref below, not this label
       metricRef: track === 'tile' ? { dashboardId, tileId } : {},
       targetValue: Number(target),
-      unit, direction, byDate,
+      unit, direction, display, byDate,
       isNorthStar: northStar,
     };
     try {
@@ -94,6 +106,18 @@ export default function GoalEditor({ entityId, suiteId, goal, onClose, onSaved }
                 {tilesFor(dashboardId).map((t) => <option key={t.tileId} value={t.tileId}>{t.title}</option>)}
               </select>
             )}
+            {tileId && (
+              <div style={{ marginTop: 9, padding: '8px 11px', background: 'rgba(128,128,128,0.07)', borderRadius: 9, fontSize: 13, display: 'flex', alignItems: 'center', gap: 7 }}>
+                <span style={{ color: 'var(--muted)', fontWeight: 600 }}>This tile reads:</span>
+                {preview?.loading
+                  ? <span style={{ color: 'var(--muted)' }}>reading…</span>
+                  : preview && preview.value != null
+                    ? <b style={{ fontSize: 15 }}>{fmtNum(preview.value, unit)}</b>
+                    : <span style={{ color: 'var(--muted)' }}>— couldn't read it right now</span>}
+                <span style={{ flex: 1 }} />
+                <span style={{ fontSize: 11, color: 'var(--muted)' }}>updates live</span>
+              </div>
+            )}
           </Field>
         ) : (
           <Field label="Current value (optional)" hint="You can update this any time; the goal tracks what you enter.">
@@ -112,17 +136,24 @@ export default function GoalEditor({ entityId, suiteId, goal, onClose, onSaved }
           </Field>
         </div>
 
-        <div style={{ display: 'flex', gap: 10 }}>
-          <Field label="Direction" style={{ flex: 1 }}>
-            <select value={direction} onChange={(e) => setDirection(e.target.value)} style={inp}>
-              <option value="at_least">Reach at least</option>
-              <option value="at_most">Keep under</option>
-            </select>
-          </Field>
-          <Field label="By (deadline)" style={{ flex: 1 }} hint="Defaults to event day">
-            <input type="date" value={byDate} onChange={(e) => setByDate(e.target.value)} style={inp} />
-          </Field>
-        </div>
+        <Field label="Goal type" hint="Most goals (revenue, tickets, attendance) are “hit a target.”">
+          <select value={direction} onChange={(e) => setDirection(e.target.value)} style={inp}>
+            <option value="at_least">Hit a target — reach the number or beat it ↑</option>
+            <option value="at_most">Stay under a cap — keep the number below it ↓</option>
+          </select>
+        </Field>
+
+        <Field label="By (deadline)" hint="Defaults to event day">
+          <input type="date" value={byDate} onChange={(e) => setByDate(e.target.value)} style={inp} />
+        </Field>
+
+        <Field label="Show it as">
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Seg active={display === 'bar'} onClick={() => setDisplay('bar')}>▭ Bar</Seg>
+            <Seg active={display === 'ring'} onClick={() => setDisplay('ring')}>◯ Circle</Seg>
+            <Seg active={display === 'dial'} onClick={() => setDisplay('dial')}>◔ Dial</Seg>
+          </div>
+        </Field>
 
         <label style={northRow}>
           <input type="checkbox" checked={northStar} onChange={(e) => setNorthStar(e.target.checked)} />
@@ -159,6 +190,16 @@ function Seg({ active, onClick, children }) {
       color: active ? 'var(--brand)' : 'var(--text)',
     }}>{children}</button>
   );
+}
+
+function fmtNum(v, unit) {
+  if (v == null) return '—';
+  const n = Number(v);
+  if (!Number.isFinite(n)) return String(v);
+  const s = Math.abs(n) >= 1000 ? n.toLocaleString('en-ZA') : String(n);
+  if (unit === 'ZAR') return `R${s}`;
+  if (unit === '%') return `${s}%`;
+  return unit && unit !== 'count' ? `${s} ${unit}` : s;
 }
 
 const overlay = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, zIndex: 100 };

@@ -66,26 +66,40 @@ export default function GoalsStrip({ entityId, suites }) {
 function GoalRow({ goal, hero, onClick }) {
   const p = goal.progress || {};
   const tone = paceTone(p);
+  const viz = goal.display || 'bar';
   const clickable = !!onClick;
+  const chip = p.band ? <Chip {...bandChip(p.band)} /> : (p.status && p.status !== 'final' ? <Chip {...statusChip(p.status)} /> : null);
+  const title = (
+    <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+      {hero && <span title="North Star" style={{ fontSize: 14 }}>⭐</span>}
+      <span style={{ fontSize: hero ? 15 : 13.5, fontWeight: hero ? 800 : 600, flex: 1, minWidth: 0 }}>{goal.name}</span>
+      {chip}
+    </div>
+  );
+  const values = (
+    <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: hero ? 4 : 2, flexWrap: 'wrap' }}>
+      <span style={{ fontSize: hero ? 20 : 15, fontWeight: 800 }}>{fmtVal(p.value, goal.unit)}</span>
+      <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+        of {fmtVal(goal.targetValue, goal.unit)}{viz === 'bar' && p.pct != null ? ` · ${p.pct}%` : ''}
+      </span>
+    </div>
+  );
+  const rowProps = {
+    role: clickable ? 'button' : undefined, tabIndex: clickable ? 0 : undefined,
+    onClick: onClick || undefined,
+    onKeyDown: clickable ? (e) => { if (e.key === 'Enter') onClick(); } : undefined,
+    style: { padding: hero ? '12px 4px 14px' : '10px 4px', borderTop: hero ? 'none' : '1px solid var(--hairline)', cursor: clickable ? 'pointer' : 'default' },
+  };
+  if (viz === 'bar') {
+    return <div {...rowProps}>{title}{values}<Bar pct={p.pct} tone={tone} /></div>;
+  }
+  const size = hero ? 78 : 60;
   return (
-    <div
-      role={clickable ? 'button' : undefined} tabIndex={clickable ? 0 : undefined}
-      onClick={onClick || undefined}
-      onKeyDown={clickable ? (e) => { if (e.key === 'Enter') onClick(); } : undefined}
-      style={{ padding: hero ? '12px 4px 14px' : '10px 4px', borderTop: hero ? 'none' : '1px solid var(--hairline)', cursor: clickable ? 'pointer' : 'default' }}
-    >
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-        {hero && <span title="North Star" style={{ fontSize: 14 }}>⭐</span>}
-        <span style={{ fontSize: hero ? 15 : 13.5, fontWeight: hero ? 800 : 600, flex: 1, minWidth: 0 }}>{goal.name}</span>
-        {p.band ? <Chip {...bandChip(p.band)} /> : p.status && p.status !== 'final' ? <Chip {...statusChip(p.status)} /> : null}
+    <div {...rowProps}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>{title}{values}</div>
+        <div style={{ flexShrink: 0 }}>{viz === 'ring' ? <Ring pct={p.pct} tone={tone} size={size} /> : <Dial pct={p.pct} tone={tone} size={size} />}</div>
       </div>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: hero ? 4 : 2 }}>
-        <span style={{ fontSize: hero ? 20 : 15, fontWeight: 800 }}>{fmtVal(p.value, goal.unit)}</span>
-        <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>
-          of {fmtVal(goal.targetValue, goal.unit)}{p.pct != null ? ` · ${p.pct}%` : ''}
-        </span>
-      </div>
-      <Bar pct={p.pct} tone={tone} />
     </div>
   );
 }
@@ -100,6 +114,38 @@ function Bar({ pct, tone }) {
 }
 function Chip({ t, c, bg }) {
   return <span style={{ fontSize: 10.5, fontWeight: 700, borderRadius: 980, padding: '2px 9px', background: bg, color: c, flexShrink: 0 }}>{t}</span>;
+}
+
+// Circular progress ring with the % in the centre.
+function Ring({ pct, tone, size = 60 }) {
+  const w = Math.max(0, Math.min(100, Math.round(pct || 0)));
+  const sw = 6, r = (size - sw) / 2, c = 2 * Math.PI * r;
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden="true">
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(128,128,128,0.18)" strokeWidth={sw} />
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={tone} strokeWidth={sw} strokeLinecap="round"
+        strokeDasharray={c} strokeDashoffset={c * (1 - w / 100)} transform={`rotate(-90 ${size / 2} ${size / 2})`}
+        style={{ transition: 'stroke-dashoffset .5s ease' }} />
+      <text x="50%" y="50%" dominantBaseline="central" textAnchor="middle" fontSize={size * 0.27} fontWeight="800" fill="var(--text)">{w}%</text>
+    </svg>
+  );
+}
+
+// Half-circle gauge (speedometer style); fills left→right with the % below.
+function Dial({ pct, tone, size = 60 }) {
+  const w = Math.max(0, Math.min(100, Math.round(pct || 0)));
+  const sw = 7, r = (size - sw) / 2, cx = size / 2, cy = size / 2;
+  const at = (frac) => { const a = Math.PI - Math.PI * frac; return [cx + r * Math.cos(a), cy - r * Math.sin(a)]; };
+  const [sx, sy] = at(0), [ex, ey] = at(1), [px, py] = at(w / 100);
+  const arc = (x, y) => `M ${sx.toFixed(1)} ${sy.toFixed(1)} A ${r} ${r} 0 0 1 ${x.toFixed(1)} ${y.toFixed(1)}`;
+  const h = Math.ceil(cy + size * 0.24);
+  return (
+    <svg width={size} height={h} viewBox={`0 0 ${size} ${h}`} aria-hidden="true">
+      <path d={arc(ex, ey)} fill="none" stroke="rgba(128,128,128,0.18)" strokeWidth={sw} strokeLinecap="round" />
+      {w > 0 && <path d={arc(px, py)} fill="none" stroke={tone} strokeWidth={sw} strokeLinecap="round" style={{ transition: 'all .5s ease' }} />}
+      <text x={cx} y={cy + 1} textAnchor="middle" fontSize={size * 0.22} fontWeight="800" fill="var(--text)">{w}%</text>
+    </svg>
+  );
 }
 
 const GREEN = '#2da44e', BLUE = '#0a66c2', AMBER = '#b45309', RED = '#dc2626';

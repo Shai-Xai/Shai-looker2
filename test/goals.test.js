@@ -95,3 +95,19 @@ test('deleting the North Star promotes the next goal so one always leads', async
   assert.equal(after[0].id, b.id);
   assert.equal(after[0].isNorthStar, true, 'B was promoted to North Star');
 });
+
+test('the editor can preview a tile\'s live value before the goal is saved', async () => {
+  tileValue = 1234;
+  const r = await app.req('POST', `/api/goals/suites/${suiteId}/tile-value`, { as: owner, body: { dashboardId: 'd', tileId: 't' } });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.value, 1234);
+  // A non-member can't preview another tenant's tile value.
+  assert.equal((await app.req('POST', `/api/goals/suites/${suiteId}/tile-value`, { as: outsider, body: { dashboardId: 'd', tileId: 't' } })).status, 403);
+});
+
+test('a goal remembers its chosen display (bar / ring / dial)', async () => {
+  const g = (await create(owner, { name: 'Dial goal', source: 'manual', targetValue: 10, display: 'dial' })).body.goal;
+  assert.equal(g.display, 'dial');
+  const upd = (await app.req('PUT', `/api/goals/${g.id}`, { as: owner, body: { display: 'ring' } })).body.goal;
+  assert.equal(upd.display, 'ring', 'display change persists through update');
+});
