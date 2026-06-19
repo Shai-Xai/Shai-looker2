@@ -17,6 +17,13 @@ const insights = require('./insights');
 const mailer = require('./mailer');
 const messaging = require('./messaging');
 const rateLimit = require('./ratelimit');
+// Query & scope engine (shared library): the single place Looker queries run and
+// the per-client organiser scope is enforced. Lifted out of this file; behaviour
+// unchanged. See server/query.js.
+const {
+  runLookerQuery, applyScope, stripAnyValue, ANY_VALUE, currentFirstEventSort,
+  cleanFilterMap, expandLockMap, effectiveFilterValues, tileQueryBody, daysBeforeOverlayFor,
+} = require('./query')({ looker, auth });
 
 const app = express();
 // Behind a reverse proxy (Caddy/Nginx) in production so Secure cookies + the
@@ -475,13 +482,6 @@ app.get('/api/my/suites/:id', auth.requireAuth, (req, res) => {
 // Per-user "save my view" (client self-service) + the client default an admin
 // sets. Resolution on load is user view > entity default > the dashboard's own
 // default_value (applied client-side in ViewPage). Locks always still win.
-const cleanFilterMap = (f) => {
-  const out = {};
-  if (f && typeof f === 'object' && !Array.isArray(f)) {
-    for (const [k, v] of Object.entries(f).slice(0, 60)) if (typeof v === 'string') out[String(k).slice(0, 200)] = v.slice(0, 2000);
-  }
-  return out;
-};
 
 app.get('/api/my/dashboard-filters/:dashboardId', auth.requireAuth, (req, res) => {
   const { dashboardId } = req.params;
@@ -516,48 +516,6 @@ app.delete('/api/admin/entities/:entityId/dashboard-filters/:dashboardId', auth.
 });
 
 
-// Expand the map so each name-keyed lock also appears under its resolved field
-// — then a dashboard whose organiser filter is named differently still locks.
-// Name keys stay (and win client-side) so same-field filters (Current/Past
-// Event) keep locking independently.
-// The offset()-based "change" tiles are row-order sensitive: a single-value
-// tile shows the FIRST row, so the CURRENT event must lead the combined event
-// filters or the comparison reads backwards (the −83% vs +83% bug). Reorder
-// "Current & Past Events" / "Comparison Events" (+ cashless) so the Current
-// Event value(s) come first — deterministic regardless of how an admin entered
-// them, and harmless when a tile sorts its own rows (just reorders the IN-list).
-const COMBO_EVENT_FILTERS = {
-  'Current & Past Events': ['Current Event', 'Event Name'],
-  'Comparison Events': ['Current Event', 'Event Name'],
-  'Comparison Cashless Events': ['Current Cashless Event'],
-};
-function orderCurrentFirst(lockMap) {
-  const splitV = (v) => String(v == null ? '' : v).split(',').map((s) => s.trim()).filter(Boolean);
-  const out = { ...lockMap };
-  for (const [combo, currentNames] of Object.entries(COMBO_EVENT_FILTERS)) {
-    if (out[combo] == null || out[combo] === '') continue;
-    const vals = splitV(out[combo]);
-    if (vals.length < 2) continue;
-    let currentVals = [];
-    for (const n of currentNames) { currentVals = splitV(lockMap[n]); if (currentVals.length) break; }
-    if (!currentVals.length) continue;
-    const lead = vals.filter((v) => currentVals.includes(v));
-    const rest = vals.filter((v) => !currentVals.includes(v));
-    if (lead.length && rest.length) out[combo] = [...lead, ...rest].join(',');
-  }
-  return out;
-}
-
-function expandLockMap(lockMap) {
-  const ordered = orderCurrentFirst(lockMap || {});
-  const out = { ...ordered };
-  for (const [k, v] of Object.entries(ordered)) {
-    if (k.includes('.')) continue;
-    const field = auth.filterNameToField(k);
-    if (field && out[field] == null) out[field] = v;
-  }
-  return out;
-}
 
 // ─── Saved (editable) dashboards ───────────────────────────────────────────────
 
@@ -786,91 +744,6 @@ app.get('/api/looker/explores/:model/:explore', auth.requireAdmin, async (req, r
 // Data updates on a ~30-min Howler→Looker pipeline, so caching up to that cadence
 // costs no freshness — instant within a cycle, a new run picked up within ~5 min,
 // and the dashboard Refresh button force-bypasses for the latest run on demand.
-const QCACHE_TTL = (Number(process.env.QUERY_CACHE_TTL) || 300) * 1000;         // fresh window (s)
-const QCACHE_STALE = (Number(process.env.QUERY_CACHE_STALE) || 1800) * 1000;    // serve-stale window (s)
-const QCACHE_MAX = Number(process.env.QUERY_CACHE_MAX) || 500;
-const qCache = new Map();    // key -> { at, data }
-const qInflight = new Map(); // key -> Promise
-function stableKey(obj) {
-  if (Array.isArray(obj)) return '[' + obj.map(stableKey).join(',') + ']';
-  if (obj && typeof obj === 'object') return '{' + Object.keys(obj).sort().map((k) => JSON.stringify(k) + ':' + stableKey(obj[k])).join(',') + '}';
-  return JSON.stringify(obj);
-}
-function refreshQuery(key, path, body) {
-  if (qInflight.has(key)) return qInflight.get(key);
-  const p = looker.lookerRequest('POST', path, body)
-    .then((data) => {
-      qInflight.delete(key);
-      qCache.set(key, { at: Date.now(), data });
-      if (qCache.size > QCACHE_MAX) qCache.delete(qCache.keys().next().value);
-      return data;
-    })
-    .catch((e) => { qInflight.delete(key); throw e; });
-  qInflight.set(key, p);
-  return p;
-}
-// `ttl` optionally overrides the fresh window for this query (ms).
-// `force` skips the cache entirely and waits for live Looker data — used when
-// the user explicitly asks for a refresh (otherwise the serve-stale path would
-// hand back up-to-10-minute-old rows instantly and "refresh" changes nothing).
-async function runLookerQuery(path, body, ttl = QCACHE_TTL, force = false) {
-  const key = path + '|' + stableKey(body);
-  if (force) return refreshQuery(key, path, body);
-  const hit = qCache.get(key);
-  const age = hit ? Date.now() - hit.at : Infinity;
-  if (hit && age < ttl) return hit.data;                       // fresh
-  if (hit && age < ttl + QCACHE_STALE) {                        // stale → serve now, refresh behind
-    refreshQuery(key, path, body).catch(() => {});
-    return hit.data;
-  }
-  return refreshQuery(key, path, body);                         // miss → wait for it
-}
-
-// Force the user's ENTITY (organiser) lock onto every query — the hard security
-// boundary. Suite locks (event/cashless) are NOT forced here; they're per-tile
-// presets applied client-side via listenTo, so current/past/comparison don't
-// clobber each other. A suiteId only gates access + picks the right entity.
-// Admins are unscoped. Returns false to deny.
-// Force the organiser scope onto a query — using the organiser field that
-// belongs to the query's OWN explore (so GA4 etc. don't get core_organisers.name
-// injected, which Looker rejects). A suite context (client view or admin
-// preview) scopes to that suite's organiser; no suite + admin is unscoped.
-// "Is any value" sentinel (mirrors client/src/lib/filterConstants.js ANY_VALUE).
-// A filter set to this means "no constraint" — drop the field from the query
-// entirely. Sending "" instead would make Looker filter for blank values.
-const ANY_VALUE = ' __ANY_VALUE__';
-function stripAnyValue(filters) {
-  const out = {};
-  for (const [k, v] of Object.entries(filters || {})) if (v !== ANY_VALUE) out[k] = v;
-  return out;
-}
-
-async function applyScope(query, user, suiteId) {
-  const scope = await auth.scopeForQuery(query, user, suiteId);
-  if (scope === false) return false; // fail closed
-  query.filters = { ...(query.filters || {}), ...scope };
-  return true;
-}
-
-// Row-order-sensitive comparison tiles (offset() table calcs over current-vs-past
-// events) must return the CURRENT (most recent) event first, or the comparison
-// reads backwards (the −83%/−865 bug). Sorting by event NAME is unreliable
-// (naming conventions vary, e.g. "Event" vs "Event 2025"), so force a sort by the
-// event start date, newest first. Returns a modified query, or null if N/A.
-function currentFirstEventSort(query) {
-  try {
-    if (!query) return null;
-    const raw = query.dynamic_fields;
-    const dyn = typeof raw === 'string' ? JSON.parse(raw) : raw;
-    const hasOffset = Array.isArray(dyn) && dyn.some((d) => typeof d?.expression === 'string' && /\boffset\s*\(/i.test(d.expression));
-    if (!hasOffset) return null;
-    const fields = query.fields || [];
-    if (!fields.some((f) => /^core_events\./.test(String(f)))) return null;
-    const DATE = 'core_events.start_date';
-    const nextFields = fields.includes(DATE) ? fields : [...fields, DATE];
-    return { ...query, fields: nextFields, sorts: [`${DATE} desc`] };
-  } catch { return null; }
-}
 
 app.post('/api/run-query', auth.requireAuth, async (req, res) => {
   try {
@@ -1744,73 +1617,6 @@ function clientCatalogue(entityId) {
 // dashboard — applied between the built-in default_value and the suite lock, so
 // it overrides the narrow defaults (e.g. a management board's event filter) but
 // a hard lock still wins.
-function effectiveFilterValues(def, lockMap = {}, overlay = null) {
-  const norm = {};
-  for (const [k, v] of Object.entries(lockMap)) norm[k.trim().toLowerCase()] = v;
-  const fv = {};
-  for (const f of def.filters || []) {
-    const field = (f.field || f.dimension || '').trim().toLowerCase();
-    const nameKey = (f.name || '').trim().toLowerCase();
-    let v = f.default_value || '';
-    if (overlay && typeof overlay[f.name] === 'string') v = overlay[f.name];
-    const locked = norm[nameKey] != null ? norm[nameKey] : (field ? norm[field] : undefined);
-    if (locked != null && locked !== '') v = locked;
-    fv[f.name] = v;
-  }
-  return fv;
-}
-
-// `extraOverrides` (queryField → value) are dashboard filters captured into a
-// saved segment; they override the per-tile defaults. applyScope runs AFTER, so
-// the forced organiser/entity scope always wins — a segment can't widen scope.
-async function tileQueryBody(tile, def, user, suiteId, lockMap = {}, extraOverrides = {}) {
-  const q = tile.query;
-  if (tile.type === 'text' || !q?.model || !q?.view || !(q.fields || []).length) return null;
-  const fv = effectiveFilterValues(def, lockMap);
-  const overrides = {};
-  for (const [filterName, queryField] of Object.entries(tile.listenTo || {})) {
-    const v = fv[filterName];
-    if (v && String(v).trim()) overrides[queryField] = String(v).trim();
-  }
-  const body = { ...q, filters: stripAnyValue({ ...(q.filters || {}), ...overrides, ...extraOverrides }) };
-  if (!(await applyScope(body, user, suiteId))) return null;
-  return body;
-}
-
-// First numeric value in a json_detail result (measures → table calcs → dims) —
-// the days-before-event number a single-value source tile surfaces.
-function firstNumberFromDetail(res) {
-  const row = res?.data?.[0];
-  if (!row) return null;
-  const fields = [...(res.fields?.measures || []), ...(res.fields?.table_calculations || []), ...(res.fields?.dimensions || [])];
-  for (const f of fields) {
-    const v = row[f.name]?.value;
-    if (v != null && v !== '' && !Number.isNaN(Number(v))) return Math.round(Number(v));
-  }
-  return null;
-}
-
-// Server mirror of ViewPage.applyDaysToGo: for a dashboard whose days-to-go sync
-// is in APPLY mode, read the live days-before-event number from its source tile
-// and return a { filterName: expr } overlay (e.g. { "Days Before": ">=42" }) so
-// digest facts compare like-for-like to the same point in last year's cycle —
-// matching what the dashboard shows. Returns null when there's no sync to apply
-// (or the number can't be read), leaving the tile queries untouched.
-async function daysBeforeOverlayFor(def, user, suiteId, lockMap) {
-  const sync = def.daysBeforeSync;
-  if (!sync || sync.mode !== 'apply' || !sync.sourceTileId || !sync.filterName) return null;
-  const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))];
-  const src = tiles.find((t) => t.id === sync.sourceTileId);
-  if (!src?.query) return null;
-  const body = await tileQueryBody(src, def, user, suiteId, lockMap);
-  if (!body) return null;
-  try {
-    const data = await runLookerQuery('/queries/run/json_detail', body, undefined, false);
-    const n = firstNumberFromDetail(data);
-    if (n == null) return null;
-    return { [sync.filterName]: String(sync.expr || '>={n}').replace('{n}', String(n)) };
-  } catch { return null; }
-}
 
 // Cheap home data (no Looker): greeting context, browsing shortcuts, settlement
 // teaser, dashboard catalogue. Called on every home load.
