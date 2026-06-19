@@ -543,7 +543,7 @@ function LearnMenu({ onPick }) {
               style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', textAlign: 'left', padding: '9px 10px', minHeight: 40, border: 'none', background: 'transparent', color: 'var(--text)', fontSize: 13, fontWeight: 600, borderRadius: 8, cursor: 'pointer' }}
               onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(128,128,128,0.10)'; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}>
-              <span style={{ fontSize: 16, width: 20, textAlign: 'center', flexShrink: 0 }}>{g.icon}</span>
+              <span style={{ fontSize: 16, width: 20, textAlign: 'center', flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{g.owl ? <AiMark size={16} sparkle={false} quiet /> : g.icon}</span>
               <span>{g.label}</span>
             </button>
           ))}

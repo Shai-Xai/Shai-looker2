@@ -5,6 +5,7 @@ import { api } from '../lib/api.js';
 import { enablePush, pushSupported, pushPermission } from '../lib/push.js';
 import { isStandalone, isIOS, canInstallApp, promptInstall, onInstallChange } from '../lib/pwa.js';
 import { firstDashboardPath } from '../lib/onboardingNav.js';
+import AiMark from './AiMark.jsx';
 
 // Reusable, mobile-first stepped walkthrough. One card at a time, progress dots,
 // Back / Next, a Skip-all escape, and per step either a "do it now" CTA
@@ -94,9 +95,14 @@ export default function GuideModal({ guide, entityId, onClose, onComplete }) {
 
         {/* Body */}
         <div style={{ flex: 1, overflowY: 'auto', textAlign: 'center', padding: '4px 6px 8px' }}>
-          {step.icon && <div style={{ fontSize: 40, marginBottom: 12, lineHeight: 1 }}>{step.icon}</div>}
+          {/* `owl: true` renders the real platform owl mark instead of a 🦉 emoji. */}
+          {(step.owl || step.icon) && (
+            <div style={{ marginBottom: 12, lineHeight: 1, display: 'flex', justifyContent: 'center' }}>
+              {step.owl ? <AiMark size={44} /> : <span style={{ fontSize: 40 }}>{step.icon}</span>}
+            </div>
+          )}
           <div style={{ fontSize: 19, fontWeight: 800, letterSpacing: '-0.01em', marginBottom: 8 }}>{step.title}</div>
-          <p style={{ fontSize: 14.5, lineHeight: 1.6, color: 'var(--muted-2, var(--muted))', margin: 0 }}>{step.body}</p>
+          <p style={{ fontSize: 14.5, lineHeight: 1.6, color: 'var(--muted-2, var(--muted))', margin: 0 }}><OwlText text={step.body} /></p>
           {step.cta && (
             <button type="button" onClick={doCta} style={{ marginTop: 18, padding: '11px 20px', minHeight: 44, borderRadius: 980, border: 'none', background: 'var(--brand)', color: '#fff', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
               {step.cta.label} →
@@ -121,6 +127,16 @@ export default function GuideModal({ guide, entityId, onClose, onComplete }) {
 const navBtn = { minHeight: 40, padding: '9px 16px', borderRadius: 980, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', fontSize: 13.5, fontWeight: 700, cursor: 'pointer' };
 const actionBtn = { marginTop: 18, padding: '11px 20px', minHeight: 44, borderRadius: 980, border: 'none', background: 'var(--brand)', color: '#fff', fontSize: 14, fontWeight: 700, cursor: 'pointer' };
 const actionNote = { marginTop: 14, fontSize: 13, lineHeight: 1.5, color: 'var(--muted)' };
+
+// Render body text, swapping any inline 🦉 for the real platform owl mark so the
+// owl looks the same in the wizard as it does in the app.
+function OwlText({ text }) {
+  if (!text || !text.includes('🦉')) return text || null;
+  const parts = text.split('🦉');
+  return parts.map((p, n) => (
+    <span key={n}>{p}{n < parts.length - 1 && <AiMark size={15} sparkle={false} quiet style={{ verticalAlign: 'middle', margin: '0 2px' }} />}</span>
+  ));
+}
 
 // One-touch action embedded in a guide step. 'notifications' asks permission and
 // subscribes this device; 'install' fires the native PWA install prompt (with an

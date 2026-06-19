@@ -103,7 +103,7 @@ export const GUIDES = {
     steps: [
       { icon: '📊', title: 'Open a suite', body: 'Everything is organised as Suites → Sets → Dashboards in the sidebar. Tap below to jump straight into one.', cta: { label: 'Open a dashboard', to: 'first-dashboard' } },
       { icon: '👆', title: 'Get a feel', body: 'Explore the live tiles — charts, tables and headline numbers, all on your real data.' },
-      { icon: '🦉', title: 'Ask the Owl', body: 'Spot the 🦉 on a tile? Tap it for a plain-English read of what the numbers are saying.', cta: { label: 'Open a dashboard', to: 'first-dashboard' } },
+      { owl: true, title: 'Ask the Owl', body: 'Spot the 🦉 on a tile? Tap it for a plain-English read of what the numbers are saying.', cta: { label: 'Open a dashboard', to: 'first-dashboard' } },
     ],
   },
   segment: {
@@ -139,7 +139,7 @@ export const GUIDES = {
     id: 'home',
     title: 'How your home page works',
     steps: [
-      { icon: '🦉', title: 'Your briefing', body: "At the top, the Owl writes a short read on what changed since your last visit. Tap ⚙ Tune to steer it, ↻ Refresh to regenerate, or ♥ / 👎 to tell it how it's doing." },
+      { owl: true, title: 'Your briefing', body: "At the top, the Owl writes a short read on what changed since your last visit. Tap ⚙ Tune to steer it, ↻ Refresh to regenerate, or ♥ / 👎 to tell it how it's doing." },
       { icon: '📌', title: 'Pinned & shortcuts', body: 'Tiles you pin appear in the Pinned row. Below, “Your shortcuts” surfaces the dashboards you open most often.' },
       { icon: '✨', title: 'Worth a look', body: 'The Owl suggests dashboards worth checking — and if you run campaigns, it can turn a suggestion straight into one.' },
       { icon: '🗂', title: 'Your suites', body: 'Everything lives in the sidebar as Suites → Sets → Dashboards. Tap a suite to dive in.' },
@@ -179,7 +179,7 @@ export const GUIDES = {
     id: 'insights',
     title: 'How Owl insights work',
     steps: [
-      { icon: '🦉', title: 'The Owl on a tile', body: 'Tap the 🦉 on any tile for a short, plain-English read of what its numbers are saying.' },
+      { owl: true, title: 'The Owl on a tile', body: 'Tap the 🦉 on any tile for a short, plain-English read of what its numbers are saying.' },
       { icon: '💬', title: 'Ask follow-ups', body: "It's a conversation — ask “why?”, “compare to last week”, or add your own context, and it answers." },
       { icon: '📋', title: 'Whole-dashboard summary', body: 'Tap the 🦉 at the top of a dashboard for a summary that reads across all its tiles at once.' },
       { icon: '✍️', title: 'Refine your writing', body: 'Anywhere you see the 🦉 Refine button, it sharpens wording you’ve written — like your briefing focus.' },
@@ -191,9 +191,9 @@ export const GUIDES = {
 // The feature explainers shown in the home "Learn" launcher (order matters).
 export const FEATURE_GUIDES = [
   { id: 'home', icon: '🏠', label: 'How your home page works' },
-  { id: 'briefing', icon: '🦉', label: 'Tune your briefing' },
+  { id: 'briefing', owl: true, label: 'Tune your briefing' },
   { id: 'pins', icon: '📌', label: 'Pinning & following tiles' },
-  { id: 'insights', icon: '✨', label: 'How Owl insights work' },
+  { id: 'insights', owl: true, label: 'How Owl insights work' },
   { id: 'install', icon: '📲', label: 'Install Pulse on your phone' },
 ];
 
