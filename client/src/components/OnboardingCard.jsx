@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { getGuide } from '../lib/guides.js';
+import { firstDashboardPath } from '../lib/onboardingNav.js';
 import GuideModal from './GuideModal.jsx';
 
 // Light-touch "Getting started" card on the home page. Auto-detected steps tick
@@ -25,6 +26,12 @@ export default function OnboardingCard({ entityId }) {
   if (!entityId || !data || data.dismissed || data.complete || !(data.steps || []).length) return null;
 
   const mark = (key, done) => api.setMyOnboardingStep(entityId, key, done).then(setData).catch(() => {});
+  // "Go" → the step's route, except "explore" resolves to a real dashboard (its
+  // route is just '/', which would no-op since we're already on the home page).
+  const goTo = async (s) => {
+    if (s.key === 'explore') { const p = await firstDashboardPath(entityId); if (p) { navigate(p); return; } }
+    navigate(s.cta || '/');
+  };
   const dismiss = () => api.dismissMyOnboarding(entityId).then(setData).catch(() => {});
   const pct = data.total ? Math.round((data.done / data.total) * 100) : 0;
 
@@ -66,7 +73,7 @@ export default function OnboardingCard({ entityId }) {
                     {s.guide && getGuide(s.guide) && (
                       <button type="button" onClick={() => setGuide(getGuide(s.guide))} style={tickBtn} title="Show me how">?</button>
                     )}
-                    <button type="button" onClick={() => navigate(s.cta)} style={goBtn}>Go →</button>
+                    <button type="button" onClick={() => goTo(s)} style={goBtn}>Go →</button>
                     {!s.auto && <button type="button" onClick={() => mark(s.key, true)} style={tickBtn} title="Mark this step done">✓</button>}
                   </div>
                 )}

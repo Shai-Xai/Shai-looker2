@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useOutletContext } from 'react-router-dom';
+import { useOutletContext, useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import HomeButton from '../components/HomeButton.jsx';
 import IntegrationsForm from '../components/IntegrationsForm.jsx';
@@ -46,7 +46,13 @@ export default function ClientIntegrationsPage() {
   const ent = active || (activeItem ? { id: activeItem.entityId, name: activeItem.name } : null);
   // Only the sections this role can use (Notifications is personal, always on).
   const sections = SECTIONS.filter(([, , , perm]) => !perm || can(perm));
-  const [section, setSection] = useState(sections[0]?.[0] || 'notifications');
+  // Deep link: /settings?section=integrations|team|notifications|email… opens that
+  // section (used by the onboarding "Go" buttons). Falls back to the first allowed.
+  const [params] = useSearchParams();
+  const requested = params.get('section');
+  const [section, setSection] = useState(
+    requested && sections.some(([k]) => k === requested) ? requested : (sections[0]?.[0] || 'notifications'),
+  );
   useEffect(() => { api.getMyIntegrations().then(setItems).catch(() => setItems([])); }, []);
   // If the active section isn't permitted (e.g. after a profile switch), fall back.
   useEffect(() => { if (!sections.some(([k]) => k === section)) setSection(sections[0]?.[0] || 'notifications'); }, [sections, section]);

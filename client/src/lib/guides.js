@@ -27,14 +27,14 @@ export const GUIDES = {
         icon: '🎨',
         title: 'Make it yours',
         body: 'Add your logo and brand colour so your emails and the whole app look like you, not like us.',
-        cta: { label: 'Add branding', to: '/settings' },
+        cta: { label: 'Add branding', to: '/settings?section=email' },
         skipIfDone: 'branding',
       },
       {
         icon: '👥',
         title: 'Bring your team',
         body: 'Invite the people who should have access and get your briefings. You choose what each person can see.',
-        cta: { label: 'Invite team', to: '/settings' },
+        cta: { label: 'Invite team', to: '/settings?section=team' },
         skipIfDone: 'team',
       },
       {
@@ -64,18 +64,18 @@ export const GUIDES = {
     id: 'branding',
     title: 'Add your branding',
     steps: [
-      { icon: '🎨', title: 'Open Settings', body: 'Head to Settings, then the branding area.', cta: { label: 'Open Settings', to: '/settings' } },
+      { icon: '🎨', title: 'Open Settings', body: 'Head to Settings, then the branding area.', cta: { label: 'Open branding', to: '/settings?section=email' } },
       { icon: '🖼', title: 'Upload your logo', body: 'Drop in your logo and pick your brand colour. Leave a field blank to inherit the default.' },
-      { icon: '✨', title: 'See it everywhere', body: 'Your logo and colour then flow through the app and every email Pulse sends on your behalf.' },
+      { icon: '✨', title: 'See it everywhere', body: 'Your logo and colour then flow through the app and every email Pulse sends on your behalf.', cta: { label: 'Open branding', to: '/settings?section=email' } },
     ],
   },
   team: {
     id: 'team',
     title: 'Invite your team',
     steps: [
-      { icon: '👥', title: 'Open Settings', body: 'Go to Settings to manage your team.', cta: { label: 'Open Settings', to: '/settings' } },
+      { icon: '👥', title: 'Open Settings', body: 'Go to Settings to manage your team.', cta: { label: 'Open team', to: '/settings?section=team' } },
       { icon: '✉️', title: 'Invite by email', body: "Add a teammate's email and they'll get an invite to join your workspace." },
-      { icon: '🔐', title: 'Choose what they see', body: 'Roles control access — give each person only what they need. They can receive briefings too.' },
+      { icon: '🔐', title: 'Choose what they see', body: 'Roles control access — give each person only what they need. They can receive briefings too.', cta: { label: 'Invite team', to: '/settings?section=team' } },
     ],
   },
   notifications: {
@@ -94,16 +94,16 @@ export const GUIDES = {
     steps: [
       { icon: '🗓', title: 'Open Digests', body: 'Go to Digests to schedule an automated briefing.', cta: { label: 'Open Digests', to: '/digests' } },
       { icon: '⏰', title: 'Pick a schedule', body: 'Choose how often and when it sends — say every Monday at 8am.' },
-      { icon: '📧', title: 'It emails your team', body: "The Owl writes a briefing on your numbers and emails it to whoever you choose, on time, without you lifting a finger." },
+      { icon: '📧', title: 'It emails your team', body: "The Owl writes a briefing on your numbers and emails it to whoever you choose, on time, without you lifting a finger.", cta: { label: 'Open Digests', to: '/digests' } },
     ],
   },
   explore: {
     id: 'explore',
     title: 'Take a tour of your dashboards',
     steps: [
-      { icon: '📊', title: 'Open a suite', body: 'Everything is organised as Suites → Sets → Dashboards in the sidebar. Tap a suite to open its dashboards.', cta: { label: 'Browse suites', to: '/' } },
-      { icon: '👆', title: 'Get a feel', body: 'Open a dashboard and explore the live tiles — charts, tables and headline numbers, all on your real data.' },
-      { icon: '🦉', title: 'Ask the Owl', body: 'Spot the 🦉 on a tile? Tap it for a plain-English read of what the numbers are saying.' },
+      { icon: '📊', title: 'Open a suite', body: 'Everything is organised as Suites → Sets → Dashboards in the sidebar. Tap below to jump straight into one.', cta: { label: 'Open a dashboard', to: 'first-dashboard' } },
+      { icon: '👆', title: 'Get a feel', body: 'Explore the live tiles — charts, tables and headline numbers, all on your real data.' },
+      { icon: '🦉', title: 'Ask the Owl', body: 'Spot the 🦉 on a tile? Tap it for a plain-English read of what the numbers are saying.', cta: { label: 'Open a dashboard', to: 'first-dashboard' } },
     ],
   },
   segment: {
@@ -112,7 +112,7 @@ export const GUIDES = {
     steps: [
       { icon: '🎯', title: 'Open Segments', body: 'Go to Segments to build a reusable audience.', cta: { label: 'Open Segments', to: '/engage/segments' } },
       { icon: '📋', title: 'Pick your source', body: 'Build an audience from a dashboard tile (e.g. everyone who abandoned a cart) or paste a list.' },
-      { icon: '♻️', title: 'Reuse it', body: 'Save it once and target it again and again in campaigns — it stays up to date with your data.' },
+      { icon: '♻️', title: 'Reuse it', body: 'Save it once and target it again and again in campaigns — it stays up to date with your data.', cta: { label: 'Open Segments', to: '/engage/segments' } },
     ],
   },
   campaign: {
@@ -121,7 +121,16 @@ export const GUIDES = {
     steps: [
       { icon: '📣', title: 'Open Campaigns', body: 'Go to Campaigns to set one up.', cta: { label: 'Open Campaigns', to: '/engage/campaigns' } },
       { icon: '🎯', title: 'Choose an audience', body: 'Point it at a segment you built, then write your email or SMS.' },
-      { icon: '📈', title: 'Send & track', body: "It runs through an approval step, then sends. You'll see opens, clicks and conversions roll in." },
+      { icon: '📈', title: 'Send & track', body: "It runs through an approval step, then sends. You'll see opens, clicks and conversions roll in.", cta: { label: 'Open Campaigns', to: '/engage/campaigns' } },
+    ],
+  },
+  channels: {
+    id: 'channels',
+    title: 'Connect Meta & TikTok',
+    steps: [
+      { icon: '🔗', title: 'Open Integrations', body: 'In Settings → Integrations, add your Meta and/or TikTok access token and account ID. You only need the platforms you actually use.', cta: { label: 'Open Integrations', to: '/settings?section=integrations' } },
+      { icon: '🎯', title: 'Push your audiences', body: 'Once connected, any segment you build can sync to a Meta or TikTok Custom Audience — for ad targeting, or to exclude people who already converted.' },
+      { icon: '🔒', title: 'Privacy built in', body: 'Emails and phone numbers are hashed before they ever leave Pulse. Sync a segment from Engage → Segments whenever you’re ready.', cta: { label: 'Open Integrations', to: '/settings?section=integrations' } },
     ],
   },
 

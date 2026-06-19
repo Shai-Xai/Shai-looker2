@@ -248,6 +248,13 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-19** — **Getting-started polish + Meta/TikTok step** 🧪: added a **“Connect
+  Meta & TikTok”** step to the Getting started checklist (auto-ticks once an ad
+  account is connected, with a guided walkthrough). Every walkthrough now has a
+  **“do it now” button on its last slide** too, and all the **“Go” buttons land on
+  the right place** — Settings opens the correct section (branding/team/notifications/
+  integrations) and the dashboards step opens an actual dashboard instead of bouncing
+  to home.
 - **2026-06-19** — **One-touch install & notifications in the wizard** 🧪: the welcome
   wizard now has a dedicated **“Add Pulse to your phone”** step with a one-tap
   **Install** button (native prompt on Android/desktop; Add-to-Home-Screen guidance

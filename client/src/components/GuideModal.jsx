@@ -4,6 +4,7 @@ import { useIsMobile } from '../lib/useIsMobile.js';
 import { api } from '../lib/api.js';
 import { enablePush, pushSupported, pushPermission } from '../lib/push.js';
 import { isStandalone, isIOS, canInstallApp, promptInstall, onInstallChange } from '../lib/pwa.js';
+import { firstDashboardPath } from '../lib/onboardingNav.js';
 
 // Reusable, mobile-first stepped walkthrough. One card at a time, progress dots,
 // Back / Next, a Skip-all escape, and per step either a "do it now" CTA
@@ -44,7 +45,14 @@ export default function GuideModal({ guide, entityId, onClose, onComplete }) {
   const close = useCallback(() => { onClose && onClose(); }, [onClose]);
   const next = () => { if (last) { doneRef.current = true; track('complete', i); onComplete && onComplete(); close(); } else setI((n) => n + 1); };
   const back = () => setI((n) => Math.max(0, n - 1));
-  const doCta = () => { const to = step?.cta?.to; doneRef.current = true; track('cta', i); if (onComplete) onComplete(); close(); if (to) navigate(to); };
+  const doCta = async () => {
+    let to = step?.cta?.to;
+    doneRef.current = true; track('cta', i); if (onComplete) onComplete();
+    // 'first-dashboard' is a sentinel resolved at click time to a real dashboard.
+    if (to === 'first-dashboard') to = (await firstDashboardPath(entityId)) || '/';
+    close();
+    if (to) navigate(to);
+  };
 
   // Esc closes; arrow keys page through — same affordances on phone and desktop.
   useEffect(() => {

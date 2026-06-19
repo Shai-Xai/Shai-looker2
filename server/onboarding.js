@@ -20,6 +20,8 @@ function mount(app, { db, auth }) {
   // Safe count helpers — return 0 if a table isn't created yet (mount order).
   const count = (q, e) => { try { return sql.prepare(q).get(e)?.n || 0; } catch { return 0; } };
   const brandingDone = (e) => { try { const b = db.getEntityMailBranding(e) || {}; return !!(b.logo || b.brandColor || b.senderName || b.header) || !!db.getEntity(e)?.logo; } catch { return false; } };
+  // Auto-tick once either ad platform is connected (token + account set).
+  const adChannelsDone = (e) => { try { return require('./meta').isConfigured(e) || require('./tiktok').isConfigured(e); } catch { return false; } };
 
   // Step catalogue. `auto` (when present) auto-completes the step from real state;
   // steps without `auto` are manual (a CTA + tick). Order = the suggested journey,
@@ -28,15 +30,16 @@ function mount(app, { db, auth }) {
   // Step keys are stable (don't rename) so stored progress + auto-checks keep working.
   const STEPS = [
     // Phase 1 — Make it yours
-    { key: 'branding', phase: 'Make it yours', guide: 'branding', icon: '🎨', title: 'Add your logo & brand colour', desc: 'Upload your logo and pick your colour — your emails and the whole app then look like you.', cta: '/settings', auto: brandingDone },
-    { key: 'team', phase: 'Make it yours', guide: 'team', icon: '👥', title: 'Invite your team', desc: 'Add the people who should get access and briefings.', cta: '/settings', auto: (e) => count('SELECT COUNT(*) n FROM user_entities WHERE entity_id=?', e) >= 2 },
+    { key: 'branding', phase: 'Make it yours', guide: 'branding', icon: '🎨', title: 'Add your logo & brand colour', desc: 'Upload your logo and pick your colour — your emails and the whole app then look like you.', cta: '/settings?section=email', auto: brandingDone },
+    { key: 'team', phase: 'Make it yours', guide: 'team', icon: '👥', title: 'Invite your team', desc: 'Add the people who should get access and briefings.', cta: '/settings?section=team', auto: (e) => count('SELECT COUNT(*) n FROM user_entities WHERE entity_id=?', e) >= 2 },
     // Phase 2 — Stay in the loop
-    { key: 'notifications', phase: 'Stay in the loop', guide: 'notifications', icon: '🔔', title: 'Turn on notifications', desc: 'Get a nudge on your phone when something needs you — even when Pulse is closed.', cta: '/' },
+    { key: 'notifications', phase: 'Stay in the loop', guide: 'notifications', icon: '🔔', title: 'Turn on notifications', desc: 'Get a nudge on your phone when something needs you — even when Pulse is closed.', cta: '/settings?section=notifications' },
     { key: 'digest', phase: 'Stay in the loop', guide: 'digest', icon: '🗓', title: 'Set up your weekly briefing', desc: 'An automated briefing emailed to your team on the schedule you choose.', cta: '/digests', auto: (e) => count("SELECT COUNT(*) n FROM scheduled_jobs WHERE entity_id=? AND type='digest'", e) > 0 },
     // Phase 3 — See & act on your data
     { key: 'explore', phase: 'See & act on your data', guide: 'explore', icon: '📊', title: 'Take a tour of your dashboards', desc: 'Open your suites and get a feel for your live data.', cta: '/' },
     { key: 'segment', phase: 'See & act on your data', guide: 'segment', icon: '🎯', title: 'Create your first audience', desc: 'Turn a dashboard tile or a list into a reusable audience you can message.', cta: '/engage/segments', auto: (e) => count('SELECT COUNT(*) n FROM segments WHERE entity_id=?', e) > 0 },
     { key: 'campaign', phase: 'See & act on your data', guide: 'campaign', icon: '📣', title: 'Launch your first campaign', desc: 'Email or SMS an audience — winning back abandoned carts is a great first one.', cta: '/engage/campaigns', auto: (e) => count('SELECT COUNT(*) n FROM actions WHERE entity_id=?', e) > 0 },
+    { key: 'channels', phase: 'See & act on your data', guide: 'channels', icon: '🔗', title: 'Connect Meta & TikTok', desc: 'Link your ad accounts to push audiences to Meta & TikTok Custom Audiences for targeting.', cta: '/settings?section=integrations', auto: adChannelsDone },
   ];
 
   function progress(entityId) {
