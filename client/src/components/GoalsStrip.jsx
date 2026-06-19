@@ -16,6 +16,11 @@ export default function GoalsStrip({ entityId, suites }) {
   const [hidden, setHidden] = useState(true);  // start hidden until we read the flag
   const hideKey = `howler_goals_hidden:${entityId}`;
   useEffect(() => { setHidden(!!(entityId && localStorage.getItem(hideKey))); }, [hideKey, entityId]);
+  // Per-event dismiss (when a client has several events) — remembered locally.
+  const suitesHideKey = `howler_goals_suites_hidden:${entityId}`;
+  const [dismissedSuites, setDismissedSuites] = useState([]);
+  useEffect(() => { try { setDismissedSuites(JSON.parse(localStorage.getItem(suitesHideKey) || '[]')); } catch { setDismissedSuites([]); } }, [suitesHideKey]);
+  const dismissSuite = (sid) => setDismissedSuites((d) => { const next = [...new Set([...d, sid])]; try { localStorage.setItem(suitesHideKey, JSON.stringify(next)); } catch { /* ignore */ } return next; });
 
   const list = suites || [];
   const dragId = useRef(null); // id of the card being dragged
@@ -43,7 +48,10 @@ export default function GoalsStrip({ entityId, suites }) {
   useEffect(() => { list.forEach((s) => loadSuite(s.id)); }, [list.map((s) => s.id).join(','), loadSuite]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const rows = list.map((s) => ({ suite: s, ...(bySuite[s.id] || { goals: [], canManage: false }) }))
-    .filter((r) => (r.goals && r.goals.length) || r.canManage);
+    .filter((r) => ((r.goals && r.goals.length) || r.canManage) && !dismissedSuites.includes(r.suite.id));
+  // Manageable events — the options for the editor's "which event?" picker (kept
+  // even if an event is dismissed from the home, so you can still add to it).
+  const manageableSuites = list.map((s) => ({ suite: s, ...(bySuite[s.id] || {}) })).filter((r) => r.canManage).map((r) => ({ id: r.suite.id, name: r.suite.name }));
 
   // Deep link from onboarding / the Learn wizard: /?goals=new opens the editor
   // (un-hiding the section if it was dismissed). Waits for the suites to load.
@@ -71,7 +79,12 @@ export default function GoalsStrip({ entityId, suites }) {
           const canDrag = canManage && goals.length > 1; // reorder only when there's a point
           return (
             <div key={suite.id}>
-              {multi && <div style={eventName}>{suite.name}</div>}
+              {multi && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingBottom: 6 }}>
+                  <span style={eventName}>{suite.name}</span>
+                  <button onClick={() => dismissSuite(suite.id)} title={`Hide ${suite.name} goals`} aria-label="Hide this event's goals" style={miniX}>✕</button>
+                </div>
+              )}
               <Strip>
                 {goals.map((g, i) => (
                   <GoalCard key={g.id} goal={g} index={i}
@@ -95,9 +108,10 @@ export default function GoalsStrip({ entityId, suites }) {
         <GoalEditor
           entityId={entityId}
           suiteId={editor.suiteId}
+          suites={manageableSuites}
           goal={editor.goal}
           onClose={() => setEditor(null)}
-          onSaved={() => loadSuite(editor.suiteId)}
+          onSaved={() => list.forEach((s) => loadSuite(s.id))}
         />
       )}
     </>
@@ -243,7 +257,8 @@ function fmtVal(v, unit) {
   return unit && unit !== 'count' ? `${s} ${unit}` : s;
 }
 
-const eventName = { fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', padding: '0 2px 6px' };
+const eventName = { fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', padding: '0 2px' };
+const miniX = { border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 11, lineHeight: 1, padding: 2, flexShrink: 0 };
 const card = { flex: '0 0 172px', scrollSnapAlign: 'start', boxSizing: 'border-box', minHeight: 138, display: 'flex', flexDirection: 'column', background: 'var(--tile-bg, var(--card))', border: '1px solid var(--border)', borderRadius: 14, boxShadow: 'var(--shadow-sm)', padding: '11px 13px', color: 'var(--text)' };
 const addCard = { flex: '0 0 124px', scrollSnapAlign: 'start', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, minHeight: 138, border: '1px dashed var(--border)', borderRadius: 14, background: 'transparent', color: 'var(--brand)', cursor: 'pointer' };
 const dismissBtn = { border: 'none', background: 'rgba(128,128,128,0.12)', color: 'var(--muted-2)', borderRadius: 980, width: 26, height: 26, fontSize: 12, cursor: 'pointer', flexShrink: 0 };

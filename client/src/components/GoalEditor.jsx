@@ -9,10 +9,11 @@ import { useIsMobile } from '../lib/useIsMobile.js';
 // Dual-surface: identical for a client self-serving and an admin acting on their
 // behalf — the server guard decides who may write. `entityId` scopes the tile
 // catalogue; `suiteId` is the event the goal belongs to.
-export default function GoalEditor({ entityId, suiteId, goal, onClose, onSaved }) {
+export default function GoalEditor({ entityId, suiteId, suites = [], goal, onClose, onSaved }) {
   const isMobile = useIsMobile();
   const editing = !!goal;
   const hasTile = !!(goal?.metricRef?.tileId);
+  const [activeSuite, setActiveSuite] = useState(goal?.suiteId || suiteId);
   const [name, setName] = useState(goal?.name || '');
   const [track, setTrack] = useState(hasTile ? 'tile' : 'manual'); // 'tile' | 'manual'
   const [dashboardId, setDashboardId] = useState(goal?.metricRef?.dashboardId || '');
@@ -37,13 +38,13 @@ export default function GoalEditor({ entityId, suiteId, goal, onClose, onSaved }
 
   // Live value of the chosen tile, so the target is set against the real number.
   useEffect(() => {
-    if (track !== 'tile' || !dashboardId || !tileId || !suiteId) { setPreview(null); return undefined; }
+    if (track !== 'tile' || !dashboardId || !tileId || !activeSuite) { setPreview(null); return undefined; }
     let alive = true; setPreview({ loading: true });
-    api.goalTileValue(suiteId, dashboardId, tileId)
+    api.goalTileValue(activeSuite, dashboardId, tileId)
       .then((r) => { if (alive) setPreview({ value: r.value }); })
       .catch(() => { if (alive) setPreview({ value: null }); });
     return () => { alive = false; };
-  }, [track, dashboardId, tileId, suiteId]);
+  }, [track, dashboardId, tileId, activeSuite]);
 
   const dashboards = cat?.dashboards || [];
   // A goal tracks ONE headline number, so only single-value (KPI) tiles qualify —
@@ -68,7 +69,7 @@ export default function GoalEditor({ entityId, suiteId, goal, onClose, onSaved }
     try {
       let saved;
       if (editing) saved = (await api.updateGoal(goal.id, body)).goal;
-      else saved = (await api.createGoal(suiteId, body)).goal;
+      else saved = (await api.createGoal(activeSuite, body)).goal;
       // Manual goal with a starting value → record the first snapshot.
       if (track === 'manual' && current !== '' && !Number.isNaN(Number(current)) && saved?.id) {
         await api.goalSnapshot(saved.id, Number(current)).catch(() => {});
@@ -90,6 +91,14 @@ export default function GoalEditor({ entityId, suiteId, goal, onClose, onSaved }
         <Field label="What's the goal?">
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Sell-through, Bar revenue, Sponsorship secured" style={inp} autoFocus />
         </Field>
+
+        {suites.length > 1 && (
+          <Field label="For which event?" hint={editing ? 'A goal stays with its event.' : undefined}>
+            <select value={activeSuite} onChange={(e) => setActiveSuite(e.target.value)} disabled={editing} style={inp}>
+              {suites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </Field>
+        )}
 
         <Field label="How do you want to track it?">
           <div style={{ display: 'flex', gap: 8 }}>
