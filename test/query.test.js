@@ -60,6 +60,29 @@ test('runLookerQuery caches by path+body; force bypasses the cache', async () =>
   assert.equal(calls, 2, 'force skips the cache and re-fetches');
 });
 
+test('primaryTileValue shows the number the tile DISPLAYS, not the first raw field', () => {
+  const q = makeEngine();
+  // A "New Customers" tile: a hidden raw count + a visible % table-calc (rendered
+  // "64%", stored as the ratio 0.64). The dashboard shows 64%.
+  const data = {
+    fields: { measures: [{ name: 'orders.new_customers' }], table_calculations: [{ name: 'new_pct' }], dimensions: [] },
+    data: [{ 'orders.new_customers': { value: 20976, rendered: '20,976' }, new_pct: { value: 0.64, rendered: '64%' } }],
+    pivots: [],
+  };
+  // Looker hides the raw count → the goal must read 64 (the rendered %), not 20976.
+  assert.equal(q.primaryTileValue(data, { hidden_fields: ['orders.new_customers'] }), 64);
+  // With nothing hidden, the first visible measure leads.
+  assert.equal(q.primaryTileValue(data, {}), 20976);
+});
+
+test('primaryTileValue parses currency, thousands and magnitude suffixes from the rendered value', () => {
+  const q = makeEngine();
+  const mk = (rendered, value) => ({ fields: { measures: [{ name: 'm' }] }, data: [{ m: { value, rendered } }], pivots: [] });
+  assert.equal(q.primaryTileValue(mk('R20,976', 20976), {}), 20976);
+  assert.equal(q.primaryTileValue(mk('R1.2M', 1200000), {}), 1200000);
+  assert.equal(q.primaryTileValue(mk('', 4200), {}), 4200); // no rendered → fall back to the raw value
+});
+
 test('tileQueryBody scopes the body, and returns null when scope is denied', async () => {
   const q = makeEngine();
   const user = h.makeClient('tile@test.local', [h.makeEntity('Tile Co', 'Tile-org').id]);

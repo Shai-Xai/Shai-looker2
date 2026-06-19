@@ -23,7 +23,7 @@ const rateLimit = require('./ratelimit');
 const {
   runLookerQuery, applyScope, stripAnyValue, ANY_VALUE, currentFirstEventSort,
   cleanFilterMap, expandLockMap, effectiveFilterValues, tileQueryBody, daysBeforeOverlayFor,
-  firstNumberFromDetail,
+  primaryTileValue,
 } = require('./query')({ looker, auth });
 
 const app = express();
@@ -541,7 +541,9 @@ async function resolveTileValue({ dashboardId, tileId, user, suiteId }) {
   const body = await tileQueryBody(tile, def, user, suiteId, lockMap);
   if (!body) return null; // scope denied or non-queryable tile
   const data = await runLookerQuery('/queries/run/json_detail', body);
-  return firstNumberFromDetail(data);
+  // Use the number the tile actually SHOWS (honours hidden_fields, picks the
+  // visible primary measure, reads the rendered value) so the goal == the dashboard.
+  return primaryTileValue(data, tile.vis || {});
 }
 require('./goals').mount(app, { db, auth, resolveTileValue });
 

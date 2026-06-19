@@ -217,9 +217,44 @@ module.exports = function createQueryEngine({ looker, auth }) {
     } catch { return null; }
   }
 
+  // ── The number a single-value tile actually SHOWS ──
+  // Mirrors client SingleValueTile: honour Looker's hidden_fields (it hides a raw
+  // measure and shows the visible one — often a % table-calc), take the first
+  // visible measure/table-calc (else first visible field), resolve the latest
+  // pivot column, and use the RENDERED value so the magnitude matches the
+  // dashboard ("64%" → 64, not the hidden count 20976, and not the ratio 0.64).
+  function resolvePivotCellSrv(cell, pivots) {
+    if (!cell || cell.value !== undefined || cell.rendered !== undefined) return cell;
+    const keys = (pivots && pivots.length) ? pivots.map((p) => p.key) : Object.keys(cell);
+    for (let i = keys.length - 1; i >= 0; i--) { const c = cell[keys[i]]; if (c && (c.value != null || (c.rendered != null && c.rendered !== ''))) return c; }
+    return cell[keys[keys.length - 1]] || null;
+  }
+  function numFromCell(cell) {
+    if (!cell) return null;
+    const r = cell.rendered;
+    if (r != null && r !== '') {
+      const m = String(r).replace(/[\s,]/g, '').match(/(-?\d+(?:\.\d+)?)\s*(k|m|bn|b)?/i);
+      if (m) { let n = parseFloat(m[1]); const s = (m[2] || '').toLowerCase(); if (s === 'k') n *= 1e3; else if (s === 'm') n *= 1e6; else if (s === 'b' || s === 'bn') n *= 1e9; if (Number.isFinite(n)) return n; }
+    }
+    const v = Number(cell.value);
+    return Number.isFinite(v) ? v : null;
+  }
+  function primaryTileValue(data, visConfig = {}) {
+    const fields = data?.fields || {};
+    const rows = data?.data || [];
+    if (!rows.length) return null;
+    const hidden = new Set(visConfig.hidden_fields || []);
+    const measures = [...(fields.measures || []), ...(fields.table_calculations || [])].filter((f) => !hidden.has(f.name));
+    const dims = (fields.dimensions || []).filter((f) => !hidden.has(f.name));
+    const primary = measures[0] || [...measures, ...dims][0];
+    if (!primary) return null;
+    return numFromCell(resolvePivotCellSrv(rows[0][primary.name], data.pivots || []));
+  }
+
   return {
     runLookerQuery,
     applyScope,
+    primaryTileValue,
     stripAnyValue,
     ANY_VALUE,
     currentFirstEventSort,
