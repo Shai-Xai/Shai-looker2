@@ -85,6 +85,9 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries }) {
   // Personal goals (Slice D): per-user goals that contribute to the event. Default
   // team-visible; an owner can mark theirs private (owner + admins only).
   try { sql.exec("ALTER TABLE goals ADD COLUMN visibility TEXT NOT NULL DEFAULT 'team'"); } catch { /* column already present */ }
+  // Checkpoint curve link: the value-over-time tile used to suggest checkpoints
+  // (remembered so reopening the editor restores the link). { dashboardId, tileId, cadence }.
+  try { sql.exec("ALTER TABLE goals ADD COLUMN curve_ref TEXT NOT NULL DEFAULT '{}'"); } catch { /* column already present */ }
 
   const parseJson = (s, fb) => { try { return JSON.parse(s); } catch { return fb; } };
   function rowToGoal(r) {
@@ -94,6 +97,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries }) {
       name: r.name, metricKey: r.metric_key, source: r.source, metricRef: parseJson(r.metric_ref, {}),
       targetValue: r.target_value, unit: r.unit, direction: r.direction, display: r.display || 'bar', byDate: r.by_date,
       isNorthStar: !!r.is_north_star, position: r.position, milestones: parseJson(r.milestones, []),
+      curveRef: parseJson(r.curve_ref, null),
       baselineEventId: r.baseline_event_id, baselineValue: r.baseline_value, baselineSource: r.baseline_source,
       baselineComparable: !!r.baseline_comparable,
       conversionRef: r.conversion_ref ? parseJson(r.conversion_ref, null) : null,
@@ -118,6 +122,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries }) {
   // columns exist but aren't set here.
   function cleanInput(b = {}) {
     const mr = b.metricRef && typeof b.metricRef === 'object' ? b.metricRef : {};
+    const cr = b.curveRef && typeof b.curveRef === 'object' ? b.curveRef : {};
     return {
       name: String(b.name || '').slice(0, 120),
       metricKey: String(b.metricKey || '').slice(0, 80),
@@ -136,6 +141,11 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries }) {
       scope: b.scope === 'personal' ? 'personal' : 'event',
       visibility: b.visibility === 'private' ? 'private' : 'team',
       rollsUpTo: String(b.rollsUpTo || '').slice(0, 64),
+      // Checkpoint curve link (remembered for the editor): the value-over-time tile
+      // used to suggest checkpoints + the cadence.
+      curveRef: (cr.dashboardId && cr.tileId)
+        ? { dashboardId: String(cr.dashboardId).slice(0, 64), tileId: String(cr.tileId).slice(0, 64), cadence: cr.cadence === 'weekly' ? 'weekly' : 'monthly' }
+        : null,
       // Milestones: dated checkpoints on the way to the target. Sanitised, kept in
       // date order, capped (a goal isn't a project plan).
       milestones: Array.isArray(b.milestones) ? b.milestones
@@ -299,11 +309,11 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries }) {
     const existing = sql.prepare("SELECT COUNT(*) n FROM goals WHERE suite_id=? AND scope='event' AND status='active'").get(req.params.suiteId).n;
     sql.prepare(`INSERT INTO goals (id, suite_id, entity_id, scope, owner_ref, name, metric_key, source, metric_ref,
         target_value, unit, direction, display, by_date, is_north_star, position, baseline_event_id, baseline_value, baseline_source,
-        milestones, visibility, rolls_up_to, status, created_by, created_at, updated_by, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+        milestones, curve_ref, visibility, rolls_up_to, status, created_by, created_at, updated_by, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
       id, req.params.suiteId, su.entityId, c.scope, ownerRef, c.name, c.metricKey, c.source, JSON.stringify(c.metricRef),
       c.targetValue, c.unit, c.direction, c.display, c.byDate, 0, c.position, c.baselineEventId, c.baselineValue, c.baselineSource,
-      JSON.stringify(c.milestones), personal ? c.visibility : 'team', personal ? c.rollsUpTo : '', 'active', req.user.email, ts, req.user.email, ts);
+      JSON.stringify(c.milestones), JSON.stringify(c.curveRef), personal ? c.visibility : 'team', personal ? c.rollsUpTo : '', 'active', req.user.email, ts, req.user.email, ts);
     // Only EVENT goals get a North Star; the first becomes it, or honour a request.
     if (!personal && (existing === 0 || req.body?.isNorthStar)) setNorthStar(req.params.suiteId, id);
     audit(id, 'created', null, c.name, req.user.email);
@@ -321,10 +331,10 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries }) {
       if (String(oldV) !== String(newV)) audit(g.id, field, oldV, newV, req.user.email);
     }
     sql.prepare(`UPDATE goals SET name=?, metric_key=?, source=?, metric_ref=?, target_value=?, unit=?, direction=?,
-        display=?, by_date=?, position=?, baseline_event_id=?, baseline_value=?, baseline_source=?, milestones=?, visibility=?, rolls_up_to=?, updated_by=?, updated_at=? WHERE id=?`).run(
+        display=?, by_date=?, position=?, baseline_event_id=?, baseline_value=?, baseline_source=?, milestones=?, curve_ref=?, visibility=?, rolls_up_to=?, updated_by=?, updated_at=? WHERE id=?`).run(
       c.name, c.metricKey, c.source, JSON.stringify(c.metricRef), c.targetValue, c.unit, c.direction,
       c.display, c.byDate, c.position, c.baselineEventId, c.baselineValue, c.baselineSource, JSON.stringify(c.milestones),
-      personal ? c.visibility : 'team', personal ? c.rollsUpTo : '', req.user.email, now(), g.id);
+      JSON.stringify(c.curveRef), personal ? c.visibility : 'team', personal ? c.rollsUpTo : '', req.user.email, now(), g.id);
     if (req.body?.isNorthStar && !g.isNorthStar) { setNorthStar(g.suiteId, g.id); audit(g.id, 'is_north_star', false, true, req.user.email); }
     res.json({ goal: goalById(g.id) });
   });

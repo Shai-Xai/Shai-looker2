@@ -208,3 +208,14 @@ test('tile-series returns last time’s curve to a member and is denied to outsi
   assert.deepEqual(ok.body.series, [{ t: '2025-01-01', v: 1000 }, { t: '2025-02-01', v: 3000 }], 'returns the resolved series');
   assert.equal((await app.req('POST', `/api/goals/suites/${suiteId}/tile-series`, { as: outsider, body: { dashboardId: 'd', tileId: 't' } })).status, 403, 'outsider is blocked');
 });
+
+test('a goal remembers its linked checkpoint-curve tile across edits', async () => {
+  const g = (await create(owner, {
+    name: 'Curve link', source: 'manual', targetValue: 50000, unit: 'tickets',
+    curveRef: { dashboardId: 'dash9', tileId: 'trend7', cadence: 'weekly' },
+  })).body.goal;
+  assert.deepEqual(g.curveRef, { dashboardId: 'dash9', tileId: 'trend7', cadence: 'weekly' }, 'curve link is stored');
+  // Editing another field keeps the link.
+  const upd = (await app.req('PUT', `/api/goals/${g.id}`, { as: owner, body: { targetValue: 60000 } })).body.goal;
+  assert.deepEqual(upd.curveRef, { dashboardId: 'dash9', tileId: 'trend7', cadence: 'weekly' }, 'link survives an edit');
+});

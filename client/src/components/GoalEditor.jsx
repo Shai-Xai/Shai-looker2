@@ -39,10 +39,10 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
   // Checkpoint suggester — link a tile that holds the value over time (a sell-by-date
   // curve), read its shape under a comparable past event, and suggest checkpoints
   // scaled to this goal's target ("last year's sell-by shape → weekly checkpoints").
-  const [curveOpen, setCurveOpen] = useState(false);
-  const [curveDashboardId, setCurveDashboardId] = useState('');
-  const [curveTileId, setCurveTileId] = useState('');
-  const [curveCadence, setCurveCadence] = useState('monthly'); // 'weekly' | 'monthly'
+  const [curveOpen, setCurveOpen] = useState(!!(goal?.curveRef?.tileId)); // reopen showing the saved link
+  const [curveDashboardId, setCurveDashboardId] = useState(goal?.curveRef?.dashboardId || '');
+  const [curveTileId, setCurveTileId] = useState(goal?.curveRef?.tileId || '');
+  const [curveCadence, setCurveCadence] = useState(goal?.curveRef?.cadence || 'monthly'); // 'weekly' | 'monthly'
   const [curveSeries, setCurveSeries] = useState(null); // { loading } | [{ t, v }]
   // Personal-goal fields (Slice D): who can see it + which event goal it feeds.
   const [visibility, setVisibility] = useState(goal?.visibility || 'team');
@@ -206,6 +206,8 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
       milestones: milestones
         .map((m) => ({ byDate: m.byDate, targetValue: Number(m.targetValue) }))
         .filter((m) => m.byDate && Number.isFinite(m.targetValue)),
+      // Remember the linked checkpoint-curve tile so reopening restores it.
+      curveRef: (curveDashboardId && curveTileId) ? { dashboardId: curveDashboardId, tileId: curveTileId, cadence: curveCadence } : null,
     };
     try {
       let saved;
