@@ -105,6 +105,21 @@ test('the editor can preview a tile\'s live value before the goal is saved', asy
   assert.equal((await app.req('POST', `/api/goals/suites/${suiteId}/tile-value`, { as: outsider, body: { dashboardId: 'd', tileId: 't' } })).status, 403);
 });
 
+test('a goal stores its baseline (last time) for vs-last-time + target suggestions', async () => {
+  const prev = h.db.createSuite({ entityId, name: 'Bushfire 2025' }).id; // a comparable past event
+  const g = (await create(owner, {
+    name: 'Sell-through YoY', source: 'ticketing', targetValue: 20000, unit: 'tickets',
+    metricRef: { dashboardId: 'd', tileId: 't' },
+    baselineEventId: prev, baselineValue: 17500, baselineSource: 'looker',
+  })).body.goal;
+  assert.equal(g.baselineEventId, prev, 'remembers which event it was baselined against');
+  assert.equal(g.baselineValue, 17500, 'remembers last time’s number');
+  // The baseline persists (and can be revised) through an edit.
+  const upd = (await app.req('PUT', `/api/goals/${g.id}`, { as: owner, body: { baselineValue: 18000 } })).body.goal;
+  assert.equal(upd.baselineValue, 18000);
+  assert.equal(upd.baselineEventId, prev, 'editing one field keeps the baseline event');
+});
+
 test('a goal remembers its chosen display (bar / ring / dial)', async () => {
   const g = (await create(owner, { name: 'Dial goal', source: 'manual', targetValue: 10, display: 'dial' })).body.goal;
   assert.equal(g.display, 'dial');

@@ -25,6 +25,14 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, onClo
   const [northStar, setNorthStar] = useState(!!goal?.isNorthStar);
   const [current, setCurrent] = useState(''); // manual goals: enter today's actual
   const [display, setDisplay] = useState(goal?.display || 'bar'); // bar | ring | dial
+  // Baseline — "recreate last event": start the goal from a comparable past
+  // event's actual, so the target isn't a blank guess and the goal shows
+  // "vs last time". Tile goals read the SAME tile under that event's scope;
+  // manual goals enter the number by hand.
+  const [baselineSuiteId, setBaselineSuiteId] = useState(goal?.baselineEventId || '');
+  const [baselineValue, setBaselineValue] = useState(goal?.baselineValue != null ? String(goal.baselineValue) : '');
+  const [baselineLoading, setBaselineLoading] = useState(false);
+  const [pastSuites, setPastSuites] = useState([]); // other events to compare against
   const [cat, setCat] = useState(null);       // tile catalogue { dashboards: [...] }
   const [preview, setPreview] = useState(null); // live value of the picked tile
   const [busy, setBusy] = useState(false);
@@ -47,6 +55,26 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, onClo
     return () => { alive = false; };
   }, [track, dashboardId, tileId, activeSuite]);
 
+  // Candidate "previous events" to baseline against — the client's other events
+  // (same entity), so a goal can start from last time's actual.
+  useEffect(() => {
+    if (!entityId) { setPastSuites([]); return; }
+    api.mySuites().then((all) => setPastSuites((all || []).filter((s) => s.entityId === entityId && s.id !== activeSuite))).catch(() => setPastSuites([]));
+  }, [entityId, activeSuite]);
+
+  // Tile-sourced: read the SAME tile under the chosen past event's scope — that's
+  // "last time's" number, with zero extra query-building (the resolver enforces
+  // scope per event). Manual goals enter the baseline by hand below.
+  useEffect(() => {
+    if (track !== 'tile' || !baselineSuiteId || !dashboardId || !tileId) return undefined;
+    let alive = true; setBaselineLoading(true);
+    api.goalTileValue(baselineSuiteId, dashboardId, tileId)
+      .then((r) => { if (alive) setBaselineValue(r.value == null ? '' : String(r.value)); })
+      .catch(() => { if (alive) setBaselineValue(''); })
+      .finally(() => { if (alive) setBaselineLoading(false); });
+    return () => { alive = false; };
+  }, [track, baselineSuiteId, dashboardId, tileId]);
+
   const dashboards = cat?.dashboards || [];
   // A goal tracks ONE headline number, so only single-value (KPI) tiles qualify —
   // a chart/table tile has no single "the number" (and the resolver would read its
@@ -59,6 +87,8 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, onClo
     if (track === 'tile' && (!dashboardId || !tileId)) { setErr('Pick the dashboard tile to track.'); return; }
     if (!target || Number.isNaN(Number(target))) { setErr('Set a numeric target.'); return; }
     setBusy(true); setErr('');
+    const usingBaseline = !!baselineSuiteId;
+    const baseNum = baselineValue !== '' && !Number.isNaN(Number(baselineValue)) ? Number(baselineValue) : null;
     const body = {
       name: name.trim(),
       source: 'manual', // resolution is driven by the tile ref below, not this label
@@ -66,6 +96,9 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, onClo
       targetValue: Number(target),
       unit, direction, display, byDate,
       isNorthStar: northStar,
+      baselineEventId: usingBaseline ? baselineSuiteId : '',
+      baselineValue: usingBaseline ? baseNum : null,
+      baselineSource: usingBaseline ? (track === 'tile' ? 'looker' : 'manual') : '',
     };
     try {
       let saved;
@@ -146,6 +179,31 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, onClo
         ) : (
           <Field label="Current value (optional)" hint="You can update this any time; the goal tracks what you enter.">
             <input value={current} onChange={(e) => setCurrent(e.target.value)} placeholder="e.g. 120000" inputMode="decimal" style={inp} />
+          </Field>
+        )}
+
+        {pastSuites.length > 0 && (
+          <Field label="Compare to a previous event" hint="Start from last time — the goal shows “vs last time” and can suggest a target.">
+            <select value={baselineSuiteId} onChange={(e) => { setBaselineSuiteId(e.target.value); if (!e.target.value) setBaselineValue(''); }} style={inp}>
+              <option value="">No comparison</option>
+              {pastSuites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+            {track === 'manual' && baselineSuiteId && (
+              <input value={baselineValue} onChange={(e) => setBaselineValue(e.target.value)} placeholder="Last time’s value" inputMode="decimal" style={{ ...inp, marginTop: 8 }} />
+            )}
+            {baselineSuiteId && (baselineLoading ? (
+              <div style={{ marginTop: 8, fontSize: 12.5, color: 'var(--muted)' }}>reading last time…</div>
+            ) : baselineValue !== '' && Number.isFinite(Number(baselineValue)) ? (
+              <div style={{ marginTop: 9 }}>
+                <div style={{ fontSize: 13 }}><span style={{ color: 'var(--muted)', fontWeight: 600 }}>Last time:</span> <b>{fmtNum(Number(baselineValue), unit)}</b></div>
+                <div style={{ display: 'flex', gap: 6, marginTop: 7, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 11.5, color: 'var(--muted)', alignSelf: 'center' }}>Set target:</span>
+                  {[['Match', 1], ['+10%', 1.1], ['+15%', 1.15], ['+20%', 1.2]].map(([lbl, f]) => (
+                    <button key={lbl} type="button" onClick={() => setTarget(String(Math.round(Number(baselineValue) * f)))} style={suggestBtn}>{lbl}</button>
+                  ))}
+                </div>
+              </div>
+            ) : (track === 'tile' ? <div style={{ marginTop: 8, fontSize: 12, color: 'var(--muted)' }}>Couldn’t read that tile for the chosen event.</div> : null))}
           </Field>
         )}
 
@@ -236,6 +294,7 @@ const sheet = { width: '100%', maxHeight: '90vh', overflowY: 'auto', background:
 const inp = { width: '100%', boxSizing: 'border-box', padding: '9px 11px', border: '1.5px solid var(--hairline)', borderRadius: 9, fontSize: 14, outline: 'none', background: 'var(--card)', color: 'var(--text)', fontFamily: 'inherit' };
 const xBtn = { border: 'none', background: 'rgba(128,128,128,0.12)', color: 'var(--muted-2)', borderRadius: 980, width: 28, height: 28, fontSize: 13, cursor: 'pointer' };
 const northRow = { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 6, padding: '10px 12px', border: '1px solid var(--hairline)', borderRadius: 10, cursor: 'pointer', fontSize: 13 };
+const suggestBtn = { border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--brand)', borderRadius: 980, fontSize: 11.5, fontWeight: 700, padding: '3px 10px', cursor: 'pointer' };
 const btnGhost = { flex: '0 0 auto', padding: '10px 16px', borderRadius: 10, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', fontSize: 13.5, fontWeight: 700, cursor: 'pointer' };
 const btnDanger = { flex: '0 0 auto', padding: '10px 14px', borderRadius: 10, border: 'none', background: 'var(--error, #dc2626)', color: '#fff', fontSize: 13.5, fontWeight: 800, cursor: 'pointer' };
 const btnDelGhost = { flex: '0 0 auto', padding: '10px 12px', borderRadius: 10, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--error, #dc2626)', fontSize: 15, cursor: 'pointer' };
