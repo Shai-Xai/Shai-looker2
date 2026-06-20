@@ -334,7 +334,17 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
       }
     }
     const band = (!Number.isNaN(end) && nowMs >= end) ? resultBand(goal, value, pct) : (goal.resultBand || null);
-    return { value, pct, target: goal.targetValue, direction: goal.direction, expected, onPace, status, band, milestones, nextMilestone, lastAtNow, baselineFinal, daysLeft };
+    // Projected final landing — "if you finish like last time's shape from where you are
+    // now" (currentValue ÷ the fraction of last time's curve reached at this point). Only
+    // for curve goals heading UP to a target (an "under a cap" goal flips the meaning).
+    let forecast = null;
+    if (at && goal.direction !== 'at_most' && !Number.isNaN(end) && !Number.isNaN(start) && end > start) {
+      const cum = fc.toCumulative((Array.isArray(curve) ? curve : []).map((p) => p.v));
+      const r = Math.max(0, Math.min(1, (nowMs - start) / (end - start)));
+      const f = cum.length >= 2 ? fc.forecast({ cum, currentValue: value, target: goal.targetValue, r, daysLeft, recentRatePerDay: null, fNow: at.fraction }) : null;
+      if (f && Number.isFinite(f.projected)) forecast = { projected: f.projected, status: f.status, vsTargetPct: f.vsTargetPct };
+    }
+    return { value, pct, target: goal.targetValue, direction: goal.direction, expected, onPace, status, band, milestones, nextMilestone, lastAtNow, baselineFinal, daysLeft, forecast };
   }
 
   // ── Access guards (admin OR an entity member; writes need goals.manage) ──

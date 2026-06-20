@@ -316,6 +316,11 @@ test('a linked curve drives baseline + vs-last-time-at-this-point, with pace ove
   assert.ok(row.progress.lastAtNow > 1000 && row.progress.lastAtNow < 3000, 'last time read at a mid-window point of the curve');
   // expected-by-now rides the same curve fraction, scaled to the target (2× the curve total).
   assert.ok(Math.abs(row.progress.expected - 2 * row.progress.lastAtNow) <= 2, 'expected = target × the same curve fraction');
+  // Forecast: projected = current ÷ fraction of last time's shape reached at this point
+  // (current is the curve's this-year value; fraction = lastAtNow / curve total).
+  assert.ok(row.progress.forecast && row.progress.forecast.projected != null, 'a curve goal carries a forecast');
+  const expProj = Math.round(row.progress.value / (row.progress.lastAtNow / 3000));
+  assert.ok(Math.abs(row.progress.forecast.projected - expProj) <= 2, 'projected = current ÷ fraction of last time’s shape reached');
 });
 
 test('a curve goal reads its CURRENT value from the curve tile (this-year), not a drifting KPI tile', async () => {

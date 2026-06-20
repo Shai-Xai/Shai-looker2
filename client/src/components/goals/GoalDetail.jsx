@@ -72,6 +72,21 @@ export default function GoalDetail({ goal, suiteName, onEdit, onDelete, onClose,
           </div>
         )}
 
+        {/* Forecast — projected final landing if this finishes like last time's shape
+            from where it is now (currentValue ÷ fraction of the curve reached). */}
+        {p.forecast && p.forecast.projected != null && (() => {
+          const f = p.forecast; const gap = (goal.targetValue || 0) - f.projected;
+          const hit = f.status === 'will_hit';
+          const color = hit ? '#2da44e' : f.status === 'short' ? 'var(--error,#dc2626)' : 'var(--text)';
+          const tail = hit ? 'on track to hit target' : `≈ ${fmtVal(Math.abs(gap), goal.unit)} short${f.vsTargetPct != null ? ` (${f.vsTargetPct}%)` : ''}`;
+          return (
+            <div style={row}>
+              <span style={rowLabel}>Forecast</span>
+              <span style={{ color }}>projected ≈ {fmtVal(f.projected, goal.unit)} · {tail}</span>
+            </div>
+          );
+        })()}
+
         {/* "vs last time" — apples-to-apples at the equivalent point in the cycle when a
             curve is linked (lastAtNow), with last time's final total as a secondary line;
             otherwise the plain baseline comparison. */}

@@ -71,6 +71,7 @@ export function GoalCard({ goal, onClick, index = 0, colorIndex, draggable = fal
           <div style={{ fontSize: 11, color: 'var(--muted)' }}>of {fmtVal(goal.targetValue, goal.unit)}{p.pct != null ? ` · ${p.pct}%` : ''}</div>
           <Bar pct={p.pct} tone={tone} />
           <VsLast goal={goal} p={p} />
+          <Forecast goal={goal} p={p} />
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, gap: 5, marginTop: 2 }}>
@@ -119,6 +120,21 @@ export function VsLast({ goal, p, align = 'left' }) {
     <div style={{ fontSize: 10.5, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 4, marginTop: 4, justifyContent: align === 'center' ? 'center' : 'flex-start', whiteSpace: 'nowrap' }}>
       <span style={{ color, fontWeight: 700 }}>{arrow}{arrow ? ' ' : ''}{flat ? 'same' : `${pct > 0 ? '+' : ''}${pct}%`}</span>
       <span>vs last time</span>
+    </div>
+  );
+}
+
+// Projected final landing (curve goals heading up to a target) — "where you'll end
+// if you finish like last time's shape." Compact one-liner for the card; the detail
+// view spells out the gap. Green when on track to hit, amber/red when short.
+export function Forecast({ goal, p }) {
+  const f = p && p.forecast;
+  if (!f || f.projected == null) return null;
+  const hit = f.status === 'will_hit';
+  const color = hit ? GREEN : (f.status === 'short' ? RED : AMBER);
+  return (
+    <div style={{ fontSize: 10.5, color: 'var(--muted)', marginTop: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+      <span style={{ color, fontWeight: 700 }}>→ {fmtVal(f.projected, goal.unit)}</span> projected{f.vsTargetPct != null ? ` · ${f.vsTargetPct}%` : ''}
     </div>
   );
 }
