@@ -347,6 +347,74 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
     return { value, pct, target: goal.targetValue, direction: goal.direction, expected, onPace, status, band, milestones, nextMilestone, lastAtNow, baselineFinal, daysLeft, forecast };
   }
 
+  // ── Full live progress resolver (shared) ──────────────────────────────────
+  // Produces the SAME rich progress the Goals page card detail shows — current from
+  // the curve's this-year column, last-time-at-now, baseline total, pace, forecast,
+  // days-left. Reused by the suite GET route and the Owl goals summary so both read
+  // identical numbers. `caches` (optional) dedupes curve + event-date reads across a
+  // batch of goals in one suite.
+  const makeGoalCaches = () => ({ curve: new Map(), eventDate: new Map() });
+  function resolveCurve(g, user, cache) {
+    const cr = g.curveRef;
+    if (!cr || !cr.dashboardId || !cr.tileId) return Promise.resolve(null);
+    const key = `${cr.dashboardId}|${cr.tileId}|${g.suiteId}`;
+    if (cache && cache.has(key)) return cache.get(key);
+    const p = (async () => {
+      try {
+        // All-columns resolver: last time's shape (largest prior column) + this year's
+        // own running total, from the SAME tile/measure. `shape` stays raw for axis align.
+        if (typeof resolveTileSeriesAll === 'function') {
+          const data = await resolveTileSeriesAll({ dashboardId: cr.dashboardId, tileId: cr.tileId, user, suiteId: g.suiteId });
+          if (data && Array.isArray(data.columns) && data.columns.length) {
+            const shape = pickLastYearShape(data);
+            const byKeyDesc = [...data.columns].sort((a, b) => String(b.key).localeCompare(String(a.key), undefined, { numeric: true }));
+            const thisCol = data.columns.find((c) => c.key === byKeyDesc[0]?.key);
+            const thisCum = fc.toCumulative((thisCol?.series || []).map((x) => x.v));
+            const thisNow = thisCum.length ? thisCum[thisCum.length - 1] : null;
+            return { shape: shape.length >= 2 ? shape : null, thisNow };
+          }
+        }
+        if (typeof resolveTileSeries === 'function') {
+          const s = await resolveTileSeries({ dashboardId: cr.dashboardId, tileId: cr.tileId, user, suiteId: g.suiteId });
+          const pts = (s || []).filter((x) => x && Number.isFinite(Number(x.v)));
+          return { shape: pts.length >= 2 ? pts : null, thisNow: null };
+        }
+        return null;
+      } catch { return null; }
+    })();
+    if (cache) cache.set(key, p);
+    return p;
+  }
+  function resolveEventDateCached(suiteId, user, cache) {
+    if (typeof resolveEventDate !== 'function') return Promise.resolve(null);
+    if (cache && cache.has(suiteId)) return cache.get(suiteId);
+    const p = resolveEventDate({ suiteId, user }).catch(() => null);
+    if (cache) cache.set(suiteId, p);
+    return p;
+  }
+  function resolveLiveBaseline(g, user) {
+    const br = g.baselineRef;
+    if (!br || !br.dashboardId || !br.tileId || typeof resolveTileValue !== 'function') return Promise.resolve(null);
+    return resolveTileValue({ dashboardId: br.dashboardId, tileId: br.tileId, user, suiteId: g.suiteId }).catch(() => null);
+  }
+  async function attachProgress(g, user, caches = null) {
+    const c = caches || makeGoalCaches();
+    const [m, curve, eventDateIso, liveBaseline] = await Promise.all([
+      resolveMetric(g, { user }),
+      resolveCurve(g, user, c.curve),
+      resolveEventDateCached(g.suiteId, user, c.eventDate),
+      resolveLiveBaseline(g, user),
+    ]);
+    // Curve goals read CURRENT from the curve tile's this-year column (the same core
+    // measure that drives baseline + forecast); a live baseline tile overrides the
+    // stored snapshot (no-curve case).
+    const shape = curve?.shape || null;
+    const useCurveNow = curve && curve.thisNow != null;
+    const value = useCurveNow ? curve.thisNow : m.value;
+    const gp = (liveBaseline != null && Number.isFinite(Number(liveBaseline))) ? { ...g, baselineValue: Number(liveBaseline) } : g;
+    return { ...gp, progress: { ...computeProgress(gp, value, shape, { eventDateIso }), asOf: m.asOf, resolvedSource: useCurveNow ? 'curve-this-year' : m.source } };
+  }
+
   // ── Access guards (admin OR an entity member; writes need goals.manage) ──
   const canView = (user, suiteId) => user.role === 'admin' || auth.canAccessSuite(user, suiteId);
   function canManage(user, suiteId) {
@@ -367,73 +435,12 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
     const su = db.getSuite(req.params.suiteId);
     if (!su) return res.status(404).json({ error: 'Event not found' });
     if (!canView(req.user, req.params.suiteId)) return res.status(403).json({ error: 'Not allowed' });
-    // Resolve a goal's linked curve (last time's cumulative shape) once per
-    // (dashboard,tile,suite) per request, so baseline/pace/vs-last-time all agree.
-    const curveCache = new Map();
-    const curveFor = (g) => {
-      const cr = g.curveRef;
-      if (!cr || !cr.dashboardId || !cr.tileId) return Promise.resolve(null);
-      const key = `${cr.dashboardId}|${cr.tileId}|${g.suiteId}`;
-      if (!curveCache.has(key)) {
-        curveCache.set(key, (async () => {
-          try {
-            // Use the all-columns resolver (same path as the forecast probe) so we read
-            // BOTH last time's shape (the largest-total prior column) AND this year's own
-            // running total from the SAME tile/measure. `shape` stays the RAW series —
-            // computeProgress aligns it by the real axis (days-before-event), not by row.
-            if (typeof resolveTileSeriesAll === 'function') {
-              const data = await resolveTileSeriesAll({ dashboardId: cr.dashboardId, tileId: cr.tileId, user: req.user, suiteId: g.suiteId });
-              if (data && Array.isArray(data.columns) && data.columns.length) {
-                // last-year shape = the complete prior column; this-year = highest key.
-                const shape = pickLastYearShape(data);
-                const byKeyDesc = [...data.columns].sort((a, b) => String(b.key).localeCompare(String(a.key), undefined, { numeric: true }));
-                const thisCol = data.columns.find((c) => c.key === byKeyDesc[0]?.key);
-                const thisCum = fc.toCumulative((thisCol?.series || []).map((p) => p.v));
-                const thisNow = thisCum.length ? thisCum[thisCum.length - 1] : null;
-                return { shape: shape.length >= 2 ? shape : null, thisNow };
-              }
-            }
-            // Fallback: single-series resolver (shape only; current stays the KPI metric).
-            if (typeof resolveTileSeries === 'function') {
-              const s = await resolveTileSeries({ dashboardId: cr.dashboardId, tileId: cr.tileId, user: req.user, suiteId: g.suiteId });
-              const pts = (s || []).filter((p) => p && Number.isFinite(Number(p.v)));
-              return { shape: pts.length >= 2 ? pts : null, thisNow: null };
-            }
-            return null;
-          } catch { return null; }
-        })());
-      }
-      return curveCache.get(key);
-    };
-    // Resolve the event date from Looker ONCE for the whole suite (all goals here
-    // share it), so days-to-go is anchored to real data, not a typed deadline.
-    const eventDateP = (typeof resolveEventDate === 'function')
-      ? resolveEventDate({ suiteId: req.params.suiteId, user: req.user }).catch(() => null)
-      : Promise.resolve(null);
-    // A linked baseline tile is re-read live (like the metric + curve links), so "last
-    // time" stays current instead of a snapshot. Only when set — skips the extra read
-    // otherwise. (Ignored when a curve is linked: the curve provides last time's total.)
-    const baselineFor = (g) => {
-      const br = g.baselineRef;
-      if (!br || !br.dashboardId || !br.tileId || typeof resolveTileValue !== 'function') return Promise.resolve(null);
-      return resolveTileValue({ dashboardId: br.dashboardId, tileId: br.tileId, user: req.user, suiteId: g.suiteId }).catch(() => null);
-    };
-    const attach = async (g) => {
-      const [m, curve, eventDateIso, liveBaseline] = await Promise.all([resolveMetric(g, { user: req.user }), curveFor(g), eventDateP, baselineFor(g)]);
-      // A curve-linked goal reads its CURRENT value from the curve tile's OWN this-year
-      // column — the same core measure that drives the baseline + forecast — so the card,
-      // the curve, the forecast and the client's dashboard all show one number, instead
-      // of a separate KPI tile drifting (e.g. 43,310 vs the curve's 44,810).
-      const shape = curve?.shape || null;
-      const useCurveNow = curve && curve.thisNow != null;
-      const value = useCurveNow ? curve.thisNow : m.value;
-      // Live baseline from the linked tile overrides the stored snapshot (no curve case).
-      const gp = (liveBaseline != null && Number.isFinite(Number(liveBaseline))) ? { ...g, baselineValue: Number(liveBaseline) } : g;
-      return { ...gp, progress: { ...computeProgress(gp, value, shape, { eventDateIso }), asOf: m.asOf, resolvedSource: useCurveNow ? 'curve-this-year' : m.source } };
-    };
+    // Resolve every goal's FULL live progress (curve, baseline, pace, forecast) with a
+    // shared per-request cache so a curve/event-date is read once per suite.
+    const caches = makeGoalCaches();
     const [goals, personalGoals] = await Promise.all([
-      Promise.all(listGoals(req.params.suiteId).map(attach)),
-      Promise.all(listPersonalGoals(req.params.suiteId, req.user).map(attach)),
+      Promise.all(listGoals(req.params.suiteId).map((g) => attachProgress(g, req.user, caches))),
+      Promise.all(listPersonalGoals(req.params.suiteId, req.user).map((g) => attachProgress(g, req.user, caches))),
     ]);
     res.json({ goals, personalGoals, canManage: canManage(req.user, req.params.suiteId), me: req.user.email });
   });
@@ -675,7 +682,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
 
   console.log('[goals] Results pillar mounted');
   // Exposed so the briefing/digest can lead with the North Star (resolved values).
-  return { resolveMetric, computeProgress, listGoals, goalById };
+  return { resolveMetric, computeProgress, listGoals, goalById, attachProgress, makeGoalCaches };
 }
 
 module.exports = { mount };

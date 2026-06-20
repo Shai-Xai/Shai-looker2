@@ -223,7 +223,7 @@ async function streamDashboardInsight(ctx, onText) {
 // are computed; the AI never recomputes or invents them).
 const GOALS_SYSTEM = `You are a senior analyst for Howler, an events ticketing platform (organisers run events; customers buy tickets; amounts in South African Rand, ZAR).
 
-You are given the GOALS for a single event, each with its progress ALREADY COMPUTED: current value, target, % to target, pace status (ahead / on track / behind versus where it should be by now), the value expected by now, the comparison to last time (baseline), and the next checkpoint. These numbers are facts — phrase them; never recompute, and never invent figures or goals that aren't listed.
+You are given the GOALS for a single event, each with its progress ALREADY COMPUTED: current value, target, % to target, pace status (ahead / on track / behind versus where it should be by now), the value expected by now, the comparison to last time (both last time's value AT THIS SAME POINT in the cycle and last time's final total), the projected final landing (forecast — where it ends if it finishes like last time), days to go, and the next checkpoint. These numbers are facts — phrase them; never recompute, and never invent figures or goals that aren't listed.
 
 Write a short, honest, motivating summary for the organiser:
 - Lead with the North Star goal and whether it's on track.
@@ -242,7 +242,23 @@ function buildGoalsPrompt({ eventName, goals }) {
     parts.push(`  current ${fmt(p.value)} / target ${fmt(g.targetValue)}${p.pct != null ? ` (${p.pct}%)` : ''}`);
     if (g.direction === 'at_most') parts.push('  goal type: stay under the target');
     if (p.status) parts.push(`  pace: ${p.status}${p.expected != null ? `, expected ~${fmt(p.expected)} by now` : ''}`);
-    if (g.baselineValue != null) parts.push(`  last time: ${fmt(g.baselineValue)}`);
+    if (p.daysLeft != null) parts.push(`  days to go: ${p.daysLeft}`);
+    // vs last time — prefer the curve's "at this same point" (apples-to-apples), with
+    // last time's final total; fall back to the plain stored baseline.
+    if (p.lastAtNow != null) {
+      const d = p.value != null && p.lastAtNow ? Math.round(((p.value - p.lastAtNow) / Math.abs(p.lastAtNow)) * 100) : null;
+      parts.push(`  vs last time at this point: ${fmt(p.lastAtNow)}${d != null ? ` (${d > 0 ? '+' : ''}${d}%)` : ''}`);
+      if (p.baselineFinal != null) parts.push(`  last time total: ${fmt(p.baselineFinal)}`);
+    } else if (g.baselineValue != null) {
+      parts.push(`  last time: ${fmt(g.baselineValue)}`);
+    }
+    // Forecast — projected final landing if it finishes like last time's shape.
+    if (p.forecast && p.forecast.projected != null) {
+      const f = p.forecast;
+      const tail = f.status === 'will_hit' ? 'on track to hit target'
+        : `${f.vsTargetPct != null ? `${f.vsTargetPct}% of target` : ''}${g.targetValue ? `, ~${fmt(Math.abs(g.targetValue - f.projected))} short` : ''}`;
+      parts.push(`  forecast: projected ~${fmt(f.projected)}${tail ? ` (${tail})` : ''}`);
+    }
     if (p.nextMilestone) parts.push(`  next checkpoint: ${fmt(p.nextMilestone.targetValue)} by ${p.nextMilestone.byDate}`);
     if (g.byDate) parts.push(`  deadline: ${g.byDate}`);
     lines.push(parts.join('\n'));

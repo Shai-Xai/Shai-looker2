@@ -718,10 +718,13 @@ app.post('/api/goals/suites/:suiteId/brief', auth.requireAuth, rateLimit({ windo
   if (req.user.role !== 'admin' && !auth.canAccessSuite(req.user, suiteId)) return res.status(403).json({ error: 'Not allowed' });
   const apiKey = anthropicKeyForSuite(suiteId);
   if (!insights.isConfigured(apiKey)) return res.status(400).json({ error: 'AI insights are not configured. Set an Anthropic API key in Admin → Integrations (or .env).' });
+  // Resolve the SAME rich progress the Goals page card detail shows (curve current,
+  // vs-last-time, baseline total, pace, forecast) so the Owl can speak to all of it,
+  // not just the bare value/percent.
+  const caches = goalsApi.makeGoalCaches();
   const goals = [];
   for (const g of goalsApi.listGoals(suiteId)) {
-    const m = await goalsApi.resolveMetric(g, { user: req.user });
-    goals.push({ ...g, progress: goalsApi.computeProgress(g, m.value) });
+    goals.push(await goalsApi.attachProgress(g, req.user, caches));
   }
   if (!goals.length) return res.status(400).json({ error: 'No goals set for this event yet.' });
   try {
