@@ -543,6 +543,9 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
       strippedFilters: data.strippedFilters || [],
       deadline: { iso: Number.isFinite(endMs) ? new Date(endMs).toISOString().slice(0, 10) : null, source: req.query.end ? 'query' : ed.source, daysLeft },
       chosen: { lastKey: lastCol?.key, thisKey },
+      // What the goal's own metric is pointed at — so we can see WHY goalMetric may
+      // differ from the curve/dashboard (wrong tile, a field/pivot pick, or filters).
+      goalMetricRef: g ? { source: g.source, metricKey: g.metricKey || null, unit: g.unit || null, metricRef: g.metricRef || null, curveRef: g.curveRef || null } : null,
       align: at ? { basis: at.basis, daysLeft: at.daysLeft, lastYearAtNow: Math.round(at.valueAtNow), fractionReached: Number(at.fraction.toFixed(4)) } : null,
       inputs: { currentValue, currentValueSource, goalMetric: g ? (await resolveMetric(g, { user: req.user })).value : null, target, r: r == null ? null : Number(r.toFixed(4)), daysLeft: daysLeft == null ? null : Math.round(daysLeft), recentRatePerDay: recentRatePerDay == null ? null : Math.round(recentRatePerDay), recentBasis, lastYearTotal: cum.length ? cum[cum.length - 1] : null },
       forecast: result,
