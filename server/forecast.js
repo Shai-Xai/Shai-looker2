@@ -64,7 +64,7 @@ function interpByDaysBefore(sorted, target) {
 // (the real data point). For an ISO-date axis (no shared event anchor) we fall back
 // to the window fraction (position between start and deadline). Returns
 // { fraction, total, valueAtNow, basis, daysLeft } or null.
-function fractionAtNow(series, { deadlineMs, nowMs = Date.now(), startMs } = {}) {
+function fractionAtNow(series, { deadlineMs, nowMs = Date.now(), startMs, daysLeft = null } = {}) {
   const cum = cumulativeWithAxis(series);
   if (!cum) return null;
   const total = Math.max(...cum.map((p) => p.c));
@@ -74,11 +74,12 @@ function fractionAtNow(series, { deadlineMs, nowMs = Date.now(), startMs } = {})
   // stray totals row (empty x); ignore it rather than letting it veto the whole axis.
   const numPts = cum.filter((p) => p.t !== '' && p.t != null && !isISO(p.t) && Number.isFinite(Number(p.t)));
   const numericAxis = numPts.length >= 2 && numPts.length >= cum.length - 2;
-  if (numericAxis && Number.isFinite(deadlineMs)) {
-    const daysLeft = Math.round((deadlineMs - nowMs) / 86400000);
+  const dLeft = Number.isFinite(daysLeft) ? daysLeft
+    : (Number.isFinite(deadlineMs) ? Math.round((deadlineMs - nowMs) / 86400000) : null);
+  if (numericAxis && dLeft != null) {
     const sorted = numPts.map((p) => ({ d: Number(p.t), c: p.c })).sort((a, b) => b.d - a.d);
-    const valueAtNow = interpByDaysBefore(sorted, daysLeft);
-    if (valueAtNow != null) return { fraction: valueAtNow / total, total, valueAtNow, basis: 'days-before', daysLeft };
+    const valueAtNow = interpByDaysBefore(sorted, dLeft);
+    if (valueAtNow != null) return { fraction: valueAtNow / total, total, valueAtNow, basis: 'days-before', daysLeft: dLeft };
   }
   // Fallback: position within the [start → deadline] window, read by curve index.
   if (Number.isFinite(startMs) && Number.isFinite(deadlineMs) && deadlineMs > startMs) {

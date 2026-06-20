@@ -220,6 +220,19 @@ test('a goal remembers its linked checkpoint-curve tile across edits', async () 
   assert.deepEqual(upd.curveRef, { dashboardId: 'dash9', tileId: 'trend7', cadence: 'weekly' }, 'link survives an edit');
 });
 
+test('days-to-go is anchored to the event date (suite briefing), not the typed by_date', async () => {
+  const day = 86400000;
+  const sid = h.db.createSuite({ entityId, name: 'Anchor test' }).id;
+  // Event is 13 days out per the suite briefing; the goal's own by_date is 2 days early.
+  const eventDate = new Date(Date.now() + 13 * day).toISOString().slice(0, 10);
+  const byDate = new Date(Date.now() + 11 * day).toISOString().slice(0, 10);
+  h.db.updateSuite(sid, { briefing: { eventStart: eventDate } });
+  const g = (await app.req('POST', `/api/goals/suites/${sid}`, { as: owner, body: { name: 'Anchored', source: 'manual', targetValue: 1000, unit: 'tickets', byDate } })).body.goal;
+  await app.req('POST', `/api/goals/${g.id}/snapshot`, { as: owner, body: { value: 500 } });
+  const row = (await app.req('GET', `/api/goals/suites/${sid}`, { as: owner })).body.goals.find((x) => x.id === g.id);
+  assert.equal(row.progress.daysLeft, 13, 'days-to-go follows the event date, not the goal by_date');
+});
+
 test('a linked curve drives baseline + vs-last-time-at-this-point, with pace over the window', async () => {
   const day = 86400000;
   const start = new Date(Date.now() - 10 * day).toISOString().slice(0, 10);

@@ -227,6 +227,25 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
     }
     return points[points.length - 1][1];
   }
+  // The deadline for days-to-go and curve alignment is the EVENT date (the suite's
+  // briefing eventStart, the real event day), not a hand-typed goal.byDate which can
+  // drift. Falls back to eventEnd, then the goal's own byDate. Parsed at local
+  // midnight (date-only), like resolvePhase, so it counts whole days cleanly.
+  function eventDeadline(goal) {
+    const su = goal.suiteId ? db.getSuite(goal.suiteId) : null;
+    const b = (su && su.briefing) || {};
+    const pick = b.eventStart || b.eventEnd || goal.byDate || null;
+    const source = b.eventStart ? 'eventStart' : b.eventEnd ? 'eventEnd' : (goal.byDate ? 'byDate' : 'none');
+    const ms = pick ? new Date(`${String(pick).slice(0, 10)}T00:00:00`).getTime() : NaN;
+    return { ms, source };
+  }
+  // Whole calendar days from today → the event (date-to-date, ignoring time-of-day),
+  // so "11 days" doesn't become "10" just because it's the afternoon.
+  function calendarDaysLeft(deadlineMs, nowMs) {
+    if (!Number.isFinite(deadlineMs)) return null;
+    const floorDay = (ms) => { const d = new Date(ms); d.setHours(0, 0, 0, 0); return d.getTime(); };
+    return Math.round((floorDay(deadlineMs) - floorDay(nowMs)) / 86400000);
+  }
   // Progress = resolved value vs target, with honest PACE. Pace is measured over the
   // sell window [start_date (or created_at) → deadline]. When the goal links a
   // value-over-time curve (curveRef → `curve`, a cumulative array of last time's
@@ -243,11 +262,14 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
       .sort((a, b) => a.t - b.t)[0] || null;
     const nextMilestone = upcoming ? { byDate: upcoming.byDate, targetValue: upcoming.targetValue } : null;
     const start = Date.parse(goal.startDate || goal.createdAt);
-    const end = goal.byDate ? Date.parse(goal.byDate) : NaN;
+    const end = eventDeadline(goal).ms; // event day (falls back to goal.byDate)
+    const daysLeft = calendarDaysLeft(end, nowMs);
     // Align last time's curve to where we are now by its REAL axis (days-before-event),
     // not by row position — so "last time at this point" is the actual recorded value.
+    // Days-to-go is whole calendar days to the event day (the same anchor as last
+    // year's days_before axis), so the curve is read at the right point.
     const hasCurve = Array.isArray(curve) && curve.length >= 2;
-    const at = hasCurve ? fc.fractionAtNow(curve, { deadlineMs: end, nowMs, startMs: start }) : null;
+    const at = hasCurve ? fc.fractionAtNow(curve, { deadlineMs: end, nowMs, startMs: start, daysLeft }) : null;
     const baselineFinal = at ? Math.round(at.total) : (goal.baselineValue != null ? goal.baselineValue : null);
     if (value == null || !goal.targetValue) return { value, pct: null, status: null, band: goal.resultBand || null, milestones, nextMilestone, lastAtNow: null, baselineFinal };
     const pct = goal.direction === 'at_most'
@@ -280,7 +302,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
       }
     }
     const band = (!Number.isNaN(end) && nowMs >= end) ? resultBand(goal, value, pct) : (goal.resultBand || null);
-    return { value, pct, target: goal.targetValue, direction: goal.direction, expected, onPace, status, band, milestones, nextMilestone, lastAtNow, baselineFinal };
+    return { value, pct, target: goal.targetValue, direction: goal.direction, expected, onPace, status, band, milestones, nextMilestone, lastAtNow, baselineFinal, daysLeft };
   }
 
   // ── Access guards (admin OR an entity member; writes need goals.manage) ──
@@ -486,22 +508,25 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
 
     const now = Date.now();
     const startStr = req.query.start || g?.startDate || '';
-    const endStr = req.query.end || g?.byDate || '';
     const startMs = startStr ? Date.parse(startStr) : NaN;
-    const endMs = endStr ? Date.parse(endStr) : NaN;
+    // Deadline = the EVENT date (suite briefing), unless overridden by ?end=. Counted
+    // as whole calendar days so days-to-go matches the real event day.
+    const ed = g ? eventDeadline(g) : { ms: NaN, source: 'none' };
+    const endMs = req.query.end ? Date.parse(req.query.end) : ed.ms;
     const r = (!Number.isNaN(startMs) && !Number.isNaN(endMs) && endMs > startMs) ? Math.max(0, Math.min(1, (now - startMs) / (endMs - startMs))) : null;
-    const daysLeft = !Number.isNaN(endMs) ? Math.max(0, (endMs - now) / 86400000) : null;
+    const daysLeft = calendarDaysLeft(endMs, now);
     const target = Number(req.query.target) || (g ? g.targetValue : 0);
     // Align last year to NOW by its real axis (days-before-event) where possible, so the
     // forecast rides last year's ACTUAL cumulative at days-to-go — not an index guess.
     const at = (lastCol?.series && !Number.isNaN(endMs))
-      ? fc.fractionAtNow(lastCol.series, { deadlineMs: endMs, nowMs: now, startMs }) : null;
+      ? fc.fractionAtNow(lastCol.series, { deadlineMs: endMs, nowMs: now, startMs, daysLeft }) : null;
     const result = (cum.length >= 2 && (r != null || at != null) && currentValue != null)
       ? fc.forecast({ cum, currentValue, target, r, daysLeft, recentRatePerDay, fNow: at ? at.fraction : null }) : null;
 
     res.json({
       columns: cols,
       strippedFilters: data.strippedFilters || [],
+      deadline: { iso: Number.isFinite(endMs) ? new Date(endMs).toISOString().slice(0, 10) : null, source: req.query.end ? 'query' : ed.source, daysLeft },
       chosen: { lastKey: lastCol?.key, thisKey },
       align: at ? { basis: at.basis, daysLeft: at.daysLeft, lastYearAtNow: Math.round(at.valueAtNow), fractionReached: Number(at.fraction.toFixed(4)) } : null,
       inputs: { currentValue, target, r: r == null ? null : Number(r.toFixed(4)), daysLeft: daysLeft == null ? null : Math.round(daysLeft), recentRatePerDay: recentRatePerDay == null ? null : Math.round(recentRatePerDay), recentBasis, lastYearTotal: cum.length ? cum[cum.length - 1] : null },
