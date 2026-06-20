@@ -160,6 +160,18 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
     });
   }
 
+  // When the curve read fine but no checkpoints came out, say WHY (instead of silence).
+  function suggestReason() {
+    if (!Number(target) || !byDate) return 'Set a target and deadline above, then we’ll suggest checkpoints.';
+    const start = goal?.createdAt ? new Date(goal.createdAt) : new Date();
+    const end = new Date(byDate);
+    if (!(end.getTime() > start.getTime())) return 'Set a deadline in the future to space checkpoints out.';
+    const days = (end.getTime() - start.getTime()) / 86400000;
+    if (curveCadence === 'monthly' && days < 31) return 'Less than a month to the deadline — switch to Weekly for checkpoints.';
+    if (curveCadence === 'weekly' && days < 7) return 'Less than a week to the deadline — too short for checkpoints.';
+    return 'Couldn’t build checkpoints from that curve — try the other cadence.';
+  }
+
   // Baseline UI state: do we have a usable "last time" number, are we auto-reading
   // it off a past event's tile, and did that read succeed?
   const baseFinite = baselineValue !== '' && Number.isFinite(Number(baselineValue));
@@ -357,28 +369,33 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
                 <Seg active={curveCadence === 'weekly'} onClick={() => setCurveCadence('weekly')}>Weekly</Seg>
                 <Seg active={curveCadence === 'monthly'} onClick={() => setCurveCadence('monthly')}>Monthly</Seg>
               </div>
-              {curveSeries?.loading && <div style={{ marginTop: 8, fontSize: 12, color: 'var(--muted)' }}>reading last time…</div>}
-              {Array.isArray(curveSeries) && curveSeries.length === 0 && curveTileId && <div style={{ marginTop: 8, fontSize: 12, color: 'var(--muted)' }}>Couldn’t read a time series from that tile — pick a chart with a date dimension.</div>}
-              {(() => {
+              {curveSeries?.loading && <div style={hintRow}>reading last time…</div>}
+              {Array.isArray(curveSeries) && curveSeries.length === 0 && curveTileId && <div style={hintRow}>Couldn’t read a time series from that tile — pick a chart with a date dimension.</div>}
+              {Array.isArray(curveSeries) && curveSeries.length >= 2 && (() => {
                 const sugg = buildSuggestions();
-                if (!sugg.length) {
-                  if (Array.isArray(curveSeries) && curveSeries.length >= 2 && (!byDate || !Number(target))) {
-                    return <div style={{ marginTop: 8, fontSize: 12, color: 'var(--muted)' }}>Set a target and deadline above, then we’ll suggest checkpoints.</div>;
-                  }
-                  return null;
-                }
                 return (
                   <div style={{ marginTop: 10 }}>
-                    {sugg.map((s, i) => (
-                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '3px 0', fontSize: 12.5 }}>
-                        <span style={{ flex: 1, color: 'var(--muted)' }}>{fmtShort(s.byDate)}</span>
-                        <span style={{ color: 'var(--muted)', fontSize: 11 }}>last time {fmtNum(s.lastValue, unit)}</span>
-                        <span style={{ fontWeight: 700 }}>{fmtNum(s.targetValue, unit)}</span>
-                      </div>
-                    ))}
-                    <button type="button" onClick={() => setMilestones(sugg.map((s) => ({ byDate: s.byDate, targetValue: String(s.targetValue) })))} style={applyBtn}>
-                      Use these {sugg.length} checkpoints
-                    </button>
+                    {/* Preview — last time's shape, so you can see we picked it up. */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                      <CurveSparkline series={curveSeries} />
+                      <span style={{ fontSize: 11, color: 'var(--muted)' }}>last time’s shape · {curveSeries.length} points read</span>
+                    </div>
+                    {sugg.length ? (
+                      <>
+                        {sugg.map((s, i) => (
+                          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '3px 0', fontSize: 12.5 }}>
+                            <span style={{ flex: 1, color: 'var(--muted)' }}>{fmtShort(s.byDate)}</span>
+                            <span style={{ color: 'var(--muted)', fontSize: 11 }}>last time {fmtNum(s.lastValue, unit)}</span>
+                            <span style={{ fontWeight: 700 }}>{fmtNum(s.targetValue, unit)}</span>
+                          </div>
+                        ))}
+                        <button type="button" onClick={() => setMilestones(sugg.map((s) => ({ byDate: s.byDate, targetValue: String(s.targetValue) })))} style={applyBtn}>
+                          Use these {sugg.length} checkpoints
+                        </button>
+                      </>
+                    ) : (
+                      <div style={hintRow}>{suggestReason()}</div>
+                    )}
                   </div>
                 );
               })()}
@@ -467,6 +484,21 @@ function fmtNum(v, unit) {
 
 function fmtShort(s) { const d = new Date(s); return Number.isNaN(d.getTime()) ? s : d.toLocaleDateString('en-ZA', { day: 'numeric', month: 'short' }); }
 
+// Tiny cumulative-shape preview of last time's curve, so you can see it was read.
+function CurveSparkline({ series, w = 60, h = 22 }) {
+  const vals = (series || []).map((p) => Number(p.v)).filter((v) => Number.isFinite(v));
+  if (vals.length < 2) return null;
+  const nonDec = vals.every((v, i) => i === 0 || v >= vals[i - 1] - 1e-9);
+  let run = 0; const cum = vals.map((v) => { run = nonDec ? v : run + v; return run; });
+  const max = cum[cum.length - 1] || 1;
+  const pts = cum.map((c, i) => `${((i / (cum.length - 1)) * w).toFixed(1)},${(h - (c / max) * h).toFixed(1)}`).join(' ');
+  return (
+    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} style={{ flexShrink: 0 }} aria-hidden="true">
+      <polyline points={pts} fill="none" stroke="var(--brand)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 const overlay = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, zIndex: 100 };
 const sheet = { width: '100%', maxHeight: '90vh', overflowY: 'auto', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 16, padding: '18px 18px 20px', boxShadow: 'var(--shadow-lg, 0 12px 40px rgba(0,0,0,0.28))', color: 'var(--text)' };
 const inp = { width: '100%', boxSizing: 'border-box', padding: '9px 11px', border: '1.5px solid var(--hairline)', borderRadius: 9, fontSize: 14, outline: 'none', background: 'var(--card)', color: 'var(--text)', fontFamily: 'inherit' };
@@ -477,6 +509,7 @@ const msX = { border: '1px solid var(--hairline)', background: 'var(--card)', co
 const addMsBtn = { border: '1px dashed var(--hairline)', background: 'transparent', color: 'var(--brand)', borderRadius: 9, fontSize: 12.5, fontWeight: 700, padding: '7px 11px', cursor: 'pointer', width: '100%' };
 const curveToggle = { border: 'none', background: 'transparent', color: 'var(--brand)', fontSize: 12, fontWeight: 700, padding: '8px 2px 2px', cursor: 'pointer', fontFamily: 'inherit' };
 const curveBox = { marginTop: 4, padding: '11px 12px', background: 'rgba(128,128,128,0.06)', border: '1px solid var(--hairline)', borderRadius: 10 };
+const hintRow = { marginTop: 8, fontSize: 12, color: 'var(--muted)', lineHeight: 1.4 };
 const applyBtn = { marginTop: 9, width: '100%', border: 'none', background: 'var(--brand)', color: '#fff', borderRadius: 9, fontSize: 12.5, fontWeight: 700, padding: '8px 11px', cursor: 'pointer' };
 const btnGhost = { flex: '0 0 auto', padding: '10px 16px', borderRadius: 10, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', fontSize: 13.5, fontWeight: 700, cursor: 'pointer' };
 const btnDanger = { flex: '0 0 auto', padding: '10px 14px', borderRadius: 10, border: 'none', background: 'var(--error, #dc2626)', color: '#fff', fontSize: 13.5, fontWeight: 800, cursor: 'pointer' };
