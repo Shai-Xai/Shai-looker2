@@ -11,6 +11,7 @@ const { startApp } = require('./http');
 
 let tileValue = 4200; // what the stubbed tile resolver returns
 let tileSeries = [];  // what the stubbed time-series resolver returns
+let eventDate = null; // what the stubbed Looker event-date resolver returns
 let app, suiteId, entityId, goalsApi;
 let owner, viewer, outsider, admin;
 
@@ -28,11 +29,12 @@ before(async () => {
       auth: h.auth,
       resolveTileValue: async () => tileValue,
       resolveTileSeries: async () => tileSeries,
+      resolveEventDate: async () => eventDate,
     });
   });
 });
 after(async () => { if (app) await app.close(); });
-beforeEach(() => { tileValue = 4200; tileSeries = [{ t: '2025-01-01', v: 1000 }, { t: '2025-02-01', v: 3000 }]; });
+beforeEach(() => { tileValue = 4200; tileSeries = [{ t: '2025-01-01', v: 1000 }, { t: '2025-02-01', v: 3000 }]; eventDate = null; });
 
 const create = (as, body) => app.req('POST', `/api/goals/suites/${suiteId}`, { as, body });
 const list = (as) => app.req('GET', `/api/goals/suites/${suiteId}`, { as });
@@ -231,6 +233,19 @@ test('days-to-go is anchored to the event date (suite briefing), not the typed b
   await app.req('POST', `/api/goals/${g.id}/snapshot`, { as: owner, body: { value: 500 } });
   const row = (await app.req('GET', `/api/goals/suites/${sid}`, { as: owner })).body.goals.find((x) => x.id === g.id);
   assert.equal(row.progress.daysLeft, 13, 'days-to-go follows the event date, not the goal by_date');
+});
+
+test('Looker’s event start date wins over the briefing and the typed by_date', async () => {
+  const day = 86400000;
+  const sid = h.db.createSuite({ entityId, name: 'Looker anchor test' }).id;
+  // Briefing says 11 days; goal by_date says 9; Looker says 20 — Looker must win.
+  h.db.updateSuite(sid, { briefing: { eventStart: new Date(Date.now() + 11 * day).toISOString().slice(0, 10) } });
+  eventDate = new Date(Date.now() + 20 * day).toISOString().slice(0, 10);
+  const byDate = new Date(Date.now() + 9 * day).toISOString().slice(0, 10);
+  const g = (await app.req('POST', `/api/goals/suites/${sid}`, { as: owner, body: { name: 'Looker anchored', source: 'manual', targetValue: 1000, unit: 'tickets', byDate } })).body.goal;
+  await app.req('POST', `/api/goals/${g.id}/snapshot`, { as: owner, body: { value: 500 } });
+  const row = (await app.req('GET', `/api/goals/suites/${sid}`, { as: owner })).body.goals.find((x) => x.id === g.id);
+  assert.equal(row.progress.daysLeft, 20, 'days-to-go uses the live Looker event date');
 });
 
 test('a linked curve drives baseline + vs-last-time-at-this-point, with pace over the window', async () => {

@@ -666,7 +666,41 @@ async function resolveTileSeriesAll({ dashboardId, tileId, user, suiteId }) {
   }
   return { dateField: dateDim.name, measureField: measure.name, strippedFilters: stripResult.stripped, columns: columns.filter((c) => c.series.length) };
 }
-const goalsApi = require('./goals').mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTileSeriesAll });
+// The event's start date straight from Looker (core_events.start_date), scoped to
+// the suite so it returns THIS event — the authoritative anchor for "days to go" so
+// goals don't depend on a hand-typed deadline being entered. Runs a tiny inline
+// query on an explore the suite already uses (one that exposes core_events), newest
+// event first. Returns "YYYY-MM-DD" or null (callers fall back to the briefing date).
+async function resolveEventDate({ suiteId, user }) {
+  const DATE = 'core_events.start_date';
+  // Find an explore (model+view) the suite uses that references core_events.
+  const defs = db.dashboardsInSuite(suiteId).map((id) => db.getDashboard(id)).filter(Boolean);
+  const candidates = [];
+  for (const def of defs) {
+    const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))];
+    for (const t of tiles) {
+      const q = t.query;
+      if (!q?.model || !q?.view) continue;
+      const refsEvents = (q.fields || []).some((f) => /^core_events\./.test(String(f)));
+      candidates.push({ model: q.model, view: q.view, refsEvents });
+    }
+  }
+  // Prefer an explore we KNOW exposes core_events; else try the rest.
+  const seen = new Set();
+  const ordered = [...candidates.filter((c) => c.refsEvents), ...candidates.filter((c) => !c.refsEvents)]
+    .filter((c) => { const k = `${c.model}|${c.view}`; if (seen.has(k)) return false; seen.add(k); return true; });
+  for (const c of ordered) {
+    const q = { model: c.model, view: c.view, fields: [DATE], sorts: [`${DATE} desc`], limit: 1 };
+    if (!(await applyScope(q, user, suiteId))) continue; // fail closed → try next / fall back
+    try {
+      const rows = await runLookerQuery('/queries/run/json', q);
+      const v = rows && rows[0] && rows[0][DATE];
+      if (v != null && v !== '') { const m = String(v).match(/^\d{4}-\d{2}-\d{2}/); if (m) return m[0]; }
+    } catch { /* explore may not expose start_date — try the next */ }
+  }
+  return null;
+}
+const goalsApi = require('./goals').mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTileSeriesAll, resolveEventDate });
 
 // Owl summary of an event's goals — a short narrative over the RESOLVED goal values
 // (computed here by the goals resolver; the AI only phrases them). Streams plain text

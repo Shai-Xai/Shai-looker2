@@ -23,7 +23,7 @@ const fc = require('./forecast');
 const SOURCES = ['ticketing', 'cashless', 'access', 'audience', 'ga4', 'app', 'social_paid', 'sponsorship', 'manual'];
 const DIRECTIONS = ['at_least', 'at_most', 'exact'];
 
-function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTileSeriesAll }) {
+function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTileSeriesAll, resolveEventDate }) {
   const sql = db.db;
   const now = () => new Date().toISOString();
   const uuid = () => crypto.randomUUID();
@@ -227,15 +227,16 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
     }
     return points[points.length - 1][1];
   }
-  // The deadline for days-to-go and curve alignment is the EVENT date (the suite's
-  // briefing eventStart, the real event day), not a hand-typed goal.byDate which can
-  // drift. Falls back to eventEnd, then the goal's own byDate. Parsed at local
-  // midnight (date-only), like resolvePhase, so it counts whole days cleanly.
-  function eventDeadline(goal) {
+  // The deadline for days-to-go and curve alignment is the EVENT date. Priority:
+  // (1) the live date from Looker (core_events.start_date, scoped to the suite —
+  // always present, nothing to type), (2) the suite's briefing eventStart/eventEnd,
+  // (3) the goal's own by_date as a last resort. Parsed at local midnight (date-only),
+  // like resolvePhase, so it counts whole days cleanly.
+  function eventDeadline(goal, lookerDate) {
     const su = goal.suiteId ? db.getSuite(goal.suiteId) : null;
     const b = (su && su.briefing) || {};
-    const pick = b.eventStart || b.eventEnd || goal.byDate || null;
-    const source = b.eventStart ? 'eventStart' : b.eventEnd ? 'eventEnd' : (goal.byDate ? 'byDate' : 'none');
+    const pick = lookerDate || b.eventStart || b.eventEnd || goal.byDate || null;
+    const source = lookerDate ? 'looker' : b.eventStart ? 'eventStart' : b.eventEnd ? 'eventEnd' : (goal.byDate ? 'byDate' : 'none');
     const ms = pick ? new Date(`${String(pick).slice(0, 10)}T00:00:00`).getTime() : NaN;
     return { ms, source };
   }
@@ -253,7 +254,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
   // value at the equivalent point, `lastAtNow`, + its final total `baselineFinal`) —
   // so the back-loaded ticket curve isn't cried "behind" too early and "vs last time"
   // is apples-to-apples. With no curve it falls back to a milestone-linear pace line.
-  function computeProgress(goal, value, curve) {
+  function computeProgress(goal, value, curve, opts = {}) {
     const milestones = Array.isArray(goal.milestones) ? goal.milestones : [];
     const nowMs = Date.now();
     const upcoming = milestones
@@ -262,7 +263,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
       .sort((a, b) => a.t - b.t)[0] || null;
     const nextMilestone = upcoming ? { byDate: upcoming.byDate, targetValue: upcoming.targetValue } : null;
     const start = Date.parse(goal.startDate || goal.createdAt);
-    const end = eventDeadline(goal).ms; // event day (falls back to goal.byDate)
+    const end = eventDeadline(goal, opts.eventDateIso).ms; // event day (Looker → briefing → by_date)
     const daysLeft = calendarDaysLeft(end, nowMs);
     // Align last time's curve to where we are now by its REAL axis (days-before-event),
     // not by row position — so "last time at this point" is the actual recorded value.
@@ -345,9 +346,14 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
       }
       return curveCache.get(key);
     };
+    // Resolve the event date from Looker ONCE for the whole suite (all goals here
+    // share it), so days-to-go is anchored to real data, not a typed deadline.
+    const eventDateP = (typeof resolveEventDate === 'function')
+      ? resolveEventDate({ suiteId: req.params.suiteId, user: req.user }).catch(() => null)
+      : Promise.resolve(null);
     const attach = async (g) => {
-      const [m, curve] = await Promise.all([resolveMetric(g, { user: req.user }), curveFor(g)]);
-      return { ...g, progress: { ...computeProgress(g, m.value, curve), asOf: m.asOf, resolvedSource: m.source } };
+      const [m, curve, eventDateIso] = await Promise.all([resolveMetric(g, { user: req.user }), curveFor(g), eventDateP]);
+      return { ...g, progress: { ...computeProgress(g, m.value, curve, { eventDateIso }), asOf: m.asOf, resolvedSource: m.source } };
     };
     const [goals, personalGoals] = await Promise.all([
       Promise.all(listGoals(req.params.suiteId).map(attach)),
@@ -509,9 +515,11 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
     const now = Date.now();
     const startStr = req.query.start || g?.startDate || '';
     const startMs = startStr ? Date.parse(startStr) : NaN;
-    // Deadline = the EVENT date (suite briefing), unless overridden by ?end=. Counted
-    // as whole calendar days so days-to-go matches the real event day.
-    const ed = g ? eventDeadline(g) : { ms: NaN, source: 'none' };
+    // Deadline = the EVENT date from Looker (scoped), falling back to the suite
+    // briefing then by_date; overridable by ?end=. Whole calendar days to the event.
+    const lookerDate = (typeof resolveEventDate === 'function' && g)
+      ? await resolveEventDate({ suiteId, user: req.user }).catch(() => null) : null;
+    const ed = g ? eventDeadline(g, lookerDate) : { ms: NaN, source: 'none' };
     const endMs = req.query.end ? Date.parse(req.query.end) : ed.ms;
     const r = (!Number.isNaN(startMs) && !Number.isNaN(endMs) && endMs > startMs) ? Math.max(0, Math.min(1, (now - startMs) / (endMs - startMs))) : null;
     const daysLeft = calendarDaysLeft(endMs, now);
