@@ -338,16 +338,39 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
     const curveCache = new Map();
     const curveFor = (g) => {
       const cr = g.curveRef;
-      if (!cr || !cr.dashboardId || !cr.tileId || typeof resolveTileSeries !== 'function') return Promise.resolve(null);
+      if (!cr || !cr.dashboardId || !cr.tileId) return Promise.resolve(null);
       const key = `${cr.dashboardId}|${cr.tileId}|${g.suiteId}`;
       if (!curveCache.has(key)) {
         curveCache.set(key, (async () => {
           try {
-            // Keep the RAW series (x-axis + value). computeProgress aligns it by the
-            // real axis (days-before-event) rather than by row position.
-            const s = await resolveTileSeries({ dashboardId: cr.dashboardId, tileId: cr.tileId, user: req.user, suiteId: g.suiteId });
-            const pts = (s || []).filter((p) => p && Number.isFinite(Number(p.v)));
-            return pts.length >= 2 ? pts : null;
+            // Use the all-columns resolver (same path as the forecast probe) so we read
+            // BOTH last time's shape (the largest-total prior column) AND this year's own
+            // running total from the SAME tile/measure. `shape` stays the RAW series —
+            // computeProgress aligns it by the real axis (days-before-event), not by row.
+            if (typeof resolveTileSeriesAll === 'function') {
+              const data = await resolveTileSeriesAll({ dashboardId: cr.dashboardId, tileId: cr.tileId, user: req.user, suiteId: g.suiteId });
+              if (data && Array.isArray(data.columns) && data.columns.length) {
+                const totalOf = (c) => c.series.reduce((s, p) => s + (Number(p.v) || 0), 0);
+                // this-year = highest key (current period); last-year shape = largest-total
+                // of the rest (a COMPLETE prior period, not the partial current one).
+                const byKeyDesc = [...data.columns].sort((a, b) => String(b.key).localeCompare(String(a.key), undefined, { numeric: true }));
+                const thisKey = byKeyDesc[0]?.key;
+                const rest = data.columns.filter((c) => c.key !== thisKey);
+                const lastCol = (rest.length ? rest : data.columns).slice().sort((a, b) => totalOf(b) - totalOf(a))[0];
+                const thisCol = data.columns.find((c) => c.key === thisKey);
+                const shape = (lastCol?.series || []).filter((p) => p && Number.isFinite(Number(p.v)));
+                const thisCum = fc.toCumulative((thisCol?.series || []).map((p) => p.v));
+                const thisNow = thisCum.length ? thisCum[thisCum.length - 1] : null;
+                return { shape: shape.length >= 2 ? shape : null, thisNow };
+              }
+            }
+            // Fallback: single-series resolver (shape only; current stays the KPI metric).
+            if (typeof resolveTileSeries === 'function') {
+              const s = await resolveTileSeries({ dashboardId: cr.dashboardId, tileId: cr.tileId, user: req.user, suiteId: g.suiteId });
+              const pts = (s || []).filter((p) => p && Number.isFinite(Number(p.v)));
+              return { shape: pts.length >= 2 ? pts : null, thisNow: null };
+            }
+            return null;
           } catch { return null; }
         })());
       }
@@ -360,7 +383,14 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
       : Promise.resolve(null);
     const attach = async (g) => {
       const [m, curve, eventDateIso] = await Promise.all([resolveMetric(g, { user: req.user }), curveFor(g), eventDateP]);
-      return { ...g, progress: { ...computeProgress(g, m.value, curve, { eventDateIso }), asOf: m.asOf, resolvedSource: m.source } };
+      // A curve-linked goal reads its CURRENT value from the curve tile's OWN this-year
+      // column — the same core measure that drives the baseline + forecast — so the card,
+      // the curve, the forecast and the client's dashboard all show one number, instead
+      // of a separate KPI tile drifting (e.g. 43,310 vs the curve's 44,810).
+      const shape = curve?.shape || null;
+      const useCurveNow = curve && curve.thisNow != null;
+      const value = useCurveNow ? curve.thisNow : m.value;
+      return { ...g, progress: { ...computeProgress(g, value, shape, { eventDateIso }), asOf: m.asOf, resolvedSource: useCurveNow ? 'curve-this-year' : m.source } };
     };
     const [goals, personalGoals] = await Promise.all([
       Promise.all(listGoals(req.params.suiteId).map(attach)),

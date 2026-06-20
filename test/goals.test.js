@@ -11,6 +11,7 @@ const { startApp } = require('./http');
 
 let tileValue = 4200; // what the stubbed tile resolver returns
 let tileSeries = [];  // what the stubbed time-series resolver returns
+let tileColumns = null; // optional explicit columns for the all-columns resolver
 let eventDate = null; // what the stubbed Looker event-date resolver returns
 let app, suiteId, entityId, goalsApi;
 let owner, viewer, outsider, admin;
@@ -29,12 +30,13 @@ before(async () => {
       auth: h.auth,
       resolveTileValue: async () => tileValue,
       resolveTileSeries: async () => tileSeries,
+      resolveTileSeriesAll: async () => tileColumns || { columns: [{ key: 'one', series: tileSeries }] },
       resolveEventDate: async () => eventDate,
     });
   });
 });
 after(async () => { if (app) await app.close(); });
-beforeEach(() => { tileValue = 4200; tileSeries = [{ t: '2025-01-01', v: 1000 }, { t: '2025-02-01', v: 3000 }]; eventDate = null; });
+beforeEach(() => { tileValue = 4200; tileSeries = [{ t: '2025-01-01', v: 1000 }, { t: '2025-02-01', v: 3000 }]; tileColumns = null; eventDate = null; });
 
 const create = (as, body) => app.req('POST', `/api/goals/suites/${suiteId}`, { as, body });
 const list = (as) => app.req('GET', `/api/goals/suites/${suiteId}`, { as });
@@ -276,4 +278,26 @@ test('a linked curve drives baseline + vs-last-time-at-this-point, with pace ove
   assert.ok(row.progress.lastAtNow > 1000 && row.progress.lastAtNow < 3000, 'last time read at a mid-window point of the curve');
   // expected-by-now rides the same curve fraction, scaled to the target (2× the curve total).
   assert.ok(Math.abs(row.progress.expected - 2 * row.progress.lastAtNow) <= 2, 'expected = target × the same curve fraction');
+});
+
+test('a curve goal reads its CURRENT value from the curve tile (this-year), not a drifting KPI tile', async () => {
+  // The KPI tile says 43 310, but the curve tile's own this-year running total is 44 810.
+  // A curve-linked goal must show the curve number so the card == curve == dashboard.
+  tileValue = 43310; // resolveMetric (the separate KPI tile) — should be IGNORED
+  tileColumns = { columns: [
+    { key: '2025', series: [{ t: '10', v: 20000 }, { t: '5', v: 40000 }, { t: '0', v: 55997 }] }, // last year (shape)
+    { key: '2026', series: [{ t: '10', v: 18000 }, { t: '5', v: 36000 }, { t: '0', v: 44810 }] }, // this year (current)
+  ] };
+  const day = 86400000;
+  const g = (await create(owner, {
+    name: 'Curve current', source: 'tile', targetValue: 60500, unit: 'tickets',
+    startDate: new Date(Date.now() - 10 * day).toISOString().slice(0, 10),
+    byDate: new Date(Date.now() + 5 * day).toISOString().slice(0, 10),
+    metricRef: { dashboardId: 'd', tileId: 'kpi' },
+    curveRef: { dashboardId: 'd', tileId: 'trend' },
+  })).body.goal;
+  const row = (await list(owner)).body.goals.find((x) => x.id === g.id);
+  assert.equal(row.progress.value, 44810, 'current = the curve tile this-year total, not the 43 310 KPI tile');
+  assert.equal(row.progress.resolvedSource, 'curve-this-year', 'source reflects the curve anchor');
+  assert.equal(row.progress.baselineFinal, 55997, 'baseline still = last year’s curve total');
 });
