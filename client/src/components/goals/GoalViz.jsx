@@ -70,12 +70,14 @@ export function GoalCard({ goal, onClick, index = 0, colorIndex, draggable = fal
           <div style={{ fontSize: 19, fontWeight: 800 }}>{fmtVal(p.value, goal.unit)}</div>
           <div style={{ fontSize: 11, color: 'var(--muted)' }}>of {fmtVal(goal.targetValue, goal.unit)}{p.pct != null ? ` · ${p.pct}%` : ''}</div>
           <Bar pct={p.pct} tone={tone} />
+          <VsLast goal={goal} p={p} />
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, gap: 5, marginTop: 2 }}>
           {viz === 'ring' ? <Ring pct={p.pct} tone={tone} size={78} /> : <Dial pct={p.pct} tone={tone} size={86} />}
           <div style={{ fontSize: 11, color: 'var(--muted)', textAlign: 'center', lineHeight: 1.3 }}>{fmtVal(p.value, goal.unit)} / {fmtVal(goal.targetValue, goal.unit)}</div>
           {chip && <div style={{ marginTop: 1 }}>{chip}</div>}
+          <VsLast goal={goal} p={p} align="center" />
         </div>
       )}
     </div>
@@ -92,6 +94,33 @@ export function Bar({ pct, tone }) {
 }
 export function Chip({ t, c, bg }) {
   return <span style={{ fontSize: 10, fontWeight: 700, borderRadius: 980, padding: '2px 8px', background: bg, color: c, whiteSpace: 'nowrap' }}>{t}</span>;
+}
+
+// "vs last time" at the same point in the cycle — curve goals compare to last time's
+// value at now (lastAtNow); others to the stored baseline. Same basis as the detail
+// view, just compact. Colour is good/bad by direction (for an "under a cap" goal,
+// lower than last time is good), arrow follows the actual change.
+function vsLastBaseline(goal, p) {
+  if (p.lastAtNow != null) return Number(p.lastAtNow);
+  if (goal.baselineValue != null) return Number(goal.baselineValue);
+  return null;
+}
+export function VsLast({ goal, p, align = 'left' }) {
+  const base = vsLastBaseline(goal, p);
+  if (base == null || !base || p.value == null) return null;
+  const pct = Math.round(((Number(p.value) - base) / Math.abs(base)) * 100);
+  if (!Number.isFinite(pct)) return null;
+  const flat = pct === 0;
+  const dir = goal.direction || p.direction || 'at_least';
+  const good = dir === 'at_most' ? pct < 0 : pct > 0;
+  const color = flat ? 'var(--muted)' : (good ? GREEN : RED);
+  const arrow = flat ? '' : (pct > 0 ? '▲' : '▼');
+  return (
+    <div style={{ fontSize: 10.5, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 4, marginTop: 4, justifyContent: align === 'center' ? 'center' : 'flex-start', whiteSpace: 'nowrap' }}>
+      <span style={{ color, fontWeight: 700 }}>{arrow}{arrow ? ' ' : ''}{flat ? 'same' : `${pct > 0 ? '+' : ''}${pct}%`}</span>
+      <span>vs last time</span>
+    </div>
+  );
 }
 
 // Circular progress ring with the % in the centre.
