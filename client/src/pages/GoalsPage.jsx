@@ -8,6 +8,7 @@ import GoalRingsCard from '../components/goals/GoalRings.jsx';
 import GoalsBriefModal from '../components/goals/GoalsBriefModal.jsx';
 import GoalDetail from '../components/goals/GoalDetail.jsx';
 import GoalEditor from '../components/GoalEditor.jsx';
+import HomeButton from '../components/HomeButton.jsx';
 
 // The dedicated Goals page (the Results pillar, full surface). The home strip is a
 // teaser that links here; this is where goals live in full — grouped by event, with
@@ -37,6 +38,26 @@ export default function GoalsPage() {
   useEffect(() => { visibleSuites.forEach((s) => loadSuite(s.id)); }, [visibleSuites.map((s) => s.id).join(','), loadSuite]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const reloadAll = () => visibleSuites.forEach((s) => loadSuite(s.id));
+
+  // Drag-to-reorder event goals (desktop): move the dragged card before the drop
+  // target, renumber positions, optimistically reorder, and persist each — the same
+  // `position` the dashboard strip orders by, so the new order reflects there too.
+  const dragId = useRef(null);
+  const reorder = (suiteId, fromId, toId) => {
+    if (!fromId || fromId === toId) return;
+    setBySuite((m) => {
+      const r = m[suiteId];
+      if (!r) return m;
+      const goals = [...(r.goals || [])];
+      const fi = goals.findIndex((g) => g.id === fromId);
+      const ti = goals.findIndex((g) => g.id === toId);
+      if (fi < 0 || ti < 0) return m;
+      const [moved] = goals.splice(fi, 1);
+      goals.splice(ti, 0, moved);
+      goals.forEach((g, i) => { if (g.position !== i) api.updateGoal(g.id, { position: i }).catch(() => {}); });
+      return { ...m, [suiteId]: { ...r, goals: goals.map((g, i) => ({ ...g, position: i })) } };
+    });
+  };
 
   // Every accessible event is shown — even with no goals yet, a member can add a
   // personal goal there.
@@ -76,9 +97,12 @@ export default function GoalsPage() {
 
   return (
     <div style={{ maxWidth: 920, margin: '0 auto', padding: '4px 2px 40px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 9, margin: '6px 0 4px' }}>
-        <span style={{ fontSize: 22 }}>🎯</span>
-        <h1 style={{ fontSize: 22, fontWeight: 800, letterSpacing: '-0.02em' }}>Your goals</h1>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '6px 0 12px' }}>
+        <HomeButton />
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)', marginBottom: 2 }}>Results</div>
+          <h1 style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em' }}>Your goals</h1>
+        </div>
       </div>
       <p style={{ color: 'var(--muted)', fontSize: 13.5, margin: '0 0 18px', lineHeight: 1.5 }}>
         Targets on the numbers that matter — tracked live, the North Star leading. Tap a goal to see its detail, or set a new one.
@@ -119,7 +143,11 @@ export default function GoalsPage() {
             {loaded && (goals.length ? (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
                 {goals.map((g, i) => (
-                  <GoalCard key={g.id} goal={g} index={i} colorIndex={i} grid onClick={() => setDetail({ suiteId: suite.id, goalId: g.id })} />
+                  <GoalCard key={g.id} goal={g} index={i} colorIndex={i} grid
+                    draggable={canManage && goals.length > 1}
+                    onDragStartCard={() => { dragId.current = g.id; }}
+                    onDropCard={() => reorder(suite.id, dragId.current, g.id)}
+                    onClick={() => setDetail({ suiteId: suite.id, goalId: g.id })} />
                 ))}
               </div>
             ) : (

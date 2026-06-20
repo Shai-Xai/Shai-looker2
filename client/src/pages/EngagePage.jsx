@@ -6,6 +6,7 @@ import HomeButton from '../components/HomeButton.jsx';
 import CampaignManager from '../components/CampaignManager.jsx';
 import SegmentManager from '../components/SegmentManager.jsx';
 import TemplateManager from '../components/TemplateManager.jsx';
+import PieIcon from '../components/PieIcon.jsx';
 
 // Engage — the Action layer of the Experience OS as one first-class area.
 // Sub-areas live as tabs: Campaigns + Segments today; Automations, Templates and
@@ -13,7 +14,7 @@ import TemplateManager from '../components/TemplateManager.jsx';
 // before each ships. Deep links to /actions and /segments redirect in here.
 const TABS = [
   { key: 'campaigns', label: 'Campaigns', icon: '📣', ready: true },
-  { key: 'segments', label: 'Segments', icon: '🎯', ready: true },
+  { key: 'segments', label: 'Segments', icon: <PieIcon size={15} />, ready: true },
   { key: 'automations', label: 'Automations', icon: '⏱', ready: false },
   { key: 'templates', label: 'Templates', icon: '📝', ready: true },
   { key: 'connections', label: 'Connections', icon: '🔌', ready: false },

@@ -10,6 +10,7 @@ import { useSheetDrag } from '../lib/useSheetDrag.js';
 import { applyBrand, resetBrand } from '../lib/brand.js';
 import { useAccess, PERMS } from '../lib/access.js';
 import { FEATURES } from '../lib/features.js';
+import PieIcon from '../components/PieIcon.jsx';
 
 // Persistent client shell: a left sidebar tree of Suites → Sets → Dashboards,
 // with the selected dashboard rendered in the main area.
@@ -385,7 +386,7 @@ export default function ClientLayout() {
             style={{ ...rowBtn, fontWeight: onSegments ? 600 : 500 }}
             onClick={() => { if (!onSegments) vtNavigate(navigate, '/engage/segments'); if (isMobile) setNavOpen(false); }}
           >
-            <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>🎯</span>
+            <PieIcon size={15} />
             <span style={ellip}>Segments</span>
           </button>
           </>
@@ -542,7 +543,7 @@ export default function ClientLayout() {
                     style={{ ...mRowSuite, fontWeight: onSegments ? 700 : 500 }}
                     onClick={() => { if (!onSegments) vtNavigate(navigate, '/engage/segments'); setNavOpen(false); }}
                   >
-                    <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>🎯</span>
+                    <PieIcon size={17} />
                     <span style={ellip}>Segments</span>
                   </button>
                   </>
