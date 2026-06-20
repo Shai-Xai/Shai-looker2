@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { chartPalette } from '../../lib/brand.js';
 
 // Shared presentational pieces for the Results pillar — the compact goal card and
 // its progress visuals (bar / ring / dial), the state→colour/chip logic, and value
@@ -14,9 +15,11 @@ export function Strip({ children }) {
   );
 }
 
-export function GoalCard({ goal, onClick, index = 0, draggable = false, onDragStartCard, onDropCard, onDelete, grid = false }) {
+export function GoalCard({ goal, onClick, index = 0, colorIndex, draggable = false, onDragStartCard, onDropCard, onDelete, grid = false }) {
   const p = goal.progress || {};
-  const { tone, chip } = goalState(goal, p);
+  const { chip } = goalState(goal, p);
+  // Brand identity colour for healthy/in-progress goals; semantic still wins for state.
+  const tone = goalColor(goal, p, colorIndex != null ? paletteColor(colorIndex) : undefined);
   const viz = goal.display || 'bar';
   const clickable = !!onClick;
   const [confirming, setConfirming] = useState(false);
@@ -120,6 +123,31 @@ export function Dial({ pct, tone, size = 86 }) {
 
 export const GREEN = '#2da44e', BLUE = '#0a66c2', AMBER = '#b45309', RED = '#dc2626';
 export const bandTone = (b) => ({ smashed: GREEN, hit: GREEN, near: AMBER, missed: RED }[b] || BLUE);
+
+// Distinct per-goal identity colours, drawn from the white-label brand chart palette
+// (adapts per client). Used for healthy / in-progress goals so each ring + tile reads
+// as its own thing; the semantic state colours below still win for trouble (red/amber)
+// and done (green). Leads with cool hues and skips the red-ish brand primary, so a
+// healthy goal is never mistaken for the over-target red.
+function identityPalette() {
+  const c = chartPalette();
+  return [c[3], c[4], c[7], c[6], c[9], c[2], c[1]].filter(Boolean);
+}
+export function paletteColor(i) { const p = identityPalette(); return p.length ? p[((i % p.length) + p.length) % p.length] : BLUE; }
+// The colour for a goal's ring/tile: semantic when it matters (reached → green, over a
+// cap → red, behind → amber, finished → its result band), else the goal's brand
+// identity colour (falls back to blue when none is supplied).
+export function goalColor(goal, p = {}, brandColor) {
+  const dir = goal.direction || p.direction || 'at_least';
+  const v = p.value, t = goal.targetValue;
+  if (p.band) return bandTone(p.band);
+  const have = v != null && t != null;
+  const reached = have && (dir === 'at_most' ? v <= t : (p.pct != null ? p.pct >= 100 : v >= t));
+  if (reached) return GREEN;
+  if (dir === 'at_most' && have && v > t) return RED;
+  if (p.status === 'behind') return AMBER;
+  return brandColor || BLUE;
+}
 // Colour + chip from the goal's state: GREEN once the target is reached, RED when
 // an "under a cap" goal goes over, AMBER when behind pace, BLUE while in progress,
 // and the result band once the deadline has passed.

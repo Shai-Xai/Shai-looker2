@@ -91,7 +91,7 @@ export default function GoalsStrip({ entityId, suites }) {
               )}
               <Strip>
                 {goals.map((g, i) => (
-                  <GoalCard key={g.id} goal={g} index={i}
+                  <GoalCard key={g.id} goal={g} index={i} colorIndex={i}
                     onClick={() => openGoal(g.id)}
                     draggable={canDrag}
                     onDragStartCard={() => { dragId.current = g.id; }}

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { goalState, fmtVal } from './GoalViz.jsx';
+import { goalState, goalColor, paletteColor, fmtVal } from './GoalViz.jsx';
 
 // Apple-Fitness "Activity Rings" for goals — ALL of an event's targets at a glance,
 // as concentric rings (the headline summary). Like Move/Exercise/Stand, each goal is
@@ -17,7 +17,8 @@ const clamp = (n) => Math.max(0, Math.min(100, Math.round(n || 0)));
 export function ActivityRings({ rings, size = 180, stroke, gap = 4, onPick }) {
   const n = rings.length || 1;
   // Derive a stroke that fits all rings inside `size` with gaps between them.
-  const sw = stroke || Math.max(7, Math.min(20, Math.round((size / 2 - 6) / n) - gap));
+  // Kept slim (max ~9px) for a lighter, more refined look.
+  const sw = stroke || Math.max(5, Math.min(9, Math.round((size / 2 - 6) / n) - gap));
   const [draw, setDraw] = useState(false);
   useEffect(() => { const t = setTimeout(() => setDraw(true), 80); return () => clearTimeout(t); }, [rings.length]);
   const cx = size / 2;
@@ -49,11 +50,14 @@ export function ActivityRings({ rings, size = 180, stroke, gap = 4, onPick }) {
 export default function GoalRingsCard({ goals = [], title, onPick, size = 176, maxRings = 6 }) {
   const usable = goals.filter(Boolean);
   if (!usable.length) return null;
-  // North Star outermost, then by existing order; cap the rings so they stay legible.
+  // Stable identity colour per goal (by its index in the given order), so a goal's
+  // ring here matches its tile below. North Star outermost; cap rings for legibility.
+  const idxOf = new Map(usable.map((g, i) => [g.id, i]));
+  const colorFor = (g) => goalColor(g, g.progress || {}, paletteColor(idxOf.get(g.id)));
   const ordered = [...usable].sort((a, b) => (b.isNorthStar ? 1 : 0) - (a.isNorthStar ? 1 : 0));
   const shown = ordered.slice(0, maxRings);
   const extra = ordered.length - shown.length;
-  const rings = shown.map((g) => ({ pct: g.progress?.pct, color: goalState(g, g.progress || {}).tone }));
+  const rings = shown.map((g) => ({ pct: g.progress?.pct, color: colorFor(g) }));
 
   return (
     <div style={card}>
@@ -64,7 +68,8 @@ export default function GoalRingsCard({ goals = [], title, onPick, size = 176, m
         {title && <div style={{ fontSize: 12, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)' }}>{title}</div>}
         {shown.map((g) => {
           const p = g.progress || {};
-          const { tone, chip } = goalState(g, p);
+          const { chip } = goalState(g, p);
+          const tone = colorFor(g);
           return (
             <button key={g.id} onClick={() => onPick?.(g)} style={legendRow} className="lift">
               <span style={{ width: 9, height: 9, borderRadius: 980, background: tone, flexShrink: 0, boxShadow: `0 0 6px ${tone}88` }} />
