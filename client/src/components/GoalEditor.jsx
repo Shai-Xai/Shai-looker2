@@ -133,20 +133,21 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
     const start = goal?.createdAt ? new Date(goal.createdAt) : new Date();
     const end = new Date(byDate);
     if (!(end.getTime() > start.getTime())) return [];
-    const pts = series.map((p) => ({ t: Date.parse(p.t), v: Number(p.v) })).filter((p) => Number.isFinite(p.t) && Number.isFinite(p.v));
-    if (pts.length < 2) return [];
-    // If the series is already cumulative (non-decreasing) use it as-is; otherwise
-    // treat each point as a per-period increment and accumulate.
-    const nonDecreasing = pts.every((p, i) => i === 0 || p.v >= pts[i - 1].v - 1e-9);
-    let run = 0; const curve = pts.map((p) => { run = nonDecreasing ? p.v : run + p.v; return { t: p.t, c: run }; });
-    const final = curve[curve.length - 1].c;
+    // Use the curve's SHAPE by row order (the series is already chronological), so it
+    // works whether the x-axis is real dates, months, or a "days before" axis.
+    const vals = series.map((p) => Number(p.v)).filter((v) => Number.isFinite(v));
+    if (vals.length < 2) return [];
+    // Already cumulative (non-decreasing) → use as-is; else accumulate per-period.
+    const nonDecreasing = vals.every((v, i) => i === 0 || v >= vals[i - 1] - 1e-9);
+    let run = 0; const cum = vals.map((v) => { run = nonDecreasing ? v : run + v; return run; });
+    const final = cum[cum.length - 1];
     if (!(final > 0)) return [];
-    const lastStart = curve[0].t, lastEnd = curve[curve.length - 1].t;
-    const interp = (x) => {
-      if (x <= curve[0].t) return curve[0].c;
-      if (x >= lastEnd) return final;
-      for (let i = 1; i < curve.length; i++) { const a = curve[i - 1], b = curve[i]; if (x <= b.t) return a.c + (b.c - a.c) * ((x - a.t) / (b.t - a.t)); }
-      return final;
+    // Cumulative fraction at a relative position r in [0,1] along the curve.
+    const fracAt = (r) => {
+      const x = Math.max(0, Math.min(1, r)) * (cum.length - 1);
+      const i = Math.floor(x), f = x - i;
+      const c = i + 1 < cum.length ? cum[i] + (cum[i + 1] - cum[i]) * f : cum[i];
+      return c / final;
     };
     const dates = []; const d = new Date(start);
     const bump = () => (curveCadence === 'weekly' ? d.setDate(d.getDate() + 7) : d.setMonth(d.getMonth() + 1));
@@ -154,9 +155,8 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
     while (d.getTime() < end.getTime() && dates.length < 24) { dates.push(new Date(d)); bump(); }
     const span = end.getTime() - start.getTime();
     return dates.map((dt) => {
-      const rel = (dt.getTime() - start.getTime()) / span;
-      const lv = interp(lastStart + rel * (lastEnd - lastStart));
-      return { byDate: dt.toISOString().slice(0, 10), targetValue: Math.round(tgt * (lv / final)), lastValue: Math.round(lv) };
+      const frac = fracAt((dt.getTime() - start.getTime()) / span);
+      return { byDate: dt.toISOString().slice(0, 10), targetValue: Math.round(tgt * frac), lastValue: Math.round(final * frac) };
     });
   }
 

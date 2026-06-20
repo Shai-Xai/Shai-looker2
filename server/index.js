@@ -587,10 +587,23 @@ async function resolveTileSeries({ dashboardId, tileId, user, suiteId }) {
     if (r != null && r !== '') { const m = String(r).replace(/[\s,]/g, '').match(/-?\d+(?:\.\d+)?/); if (m && Number.isFinite(Number(m[0]))) return Number(m[0]); }
     const v = Number(cell.value); return Number.isFinite(v) ? v : null;
   };
-  return rows
-    .map((row) => ({ t: String(row[dateDim.name]?.value || ''), v: numOf(row[measure.name]) }))
-    .filter((p) => p.t && p.v != null)
-    .sort((a, b) => a.t.localeCompare(b.t));
+  // Pivoted trend (e.g. "26 vs 25 vs 24" pivots the measure by year): the measure cell
+  // is keyed by pivot value. Pick the pivot column with the largest total — typically a
+  // COMPLETE prior period rather than the partial current one — so we read a full curve.
+  const pivots = data.pivots || [];
+  let pickValue;
+  if (pivots.length) {
+    const totals = {};
+    for (const pv of pivots) { let s = 0; for (const row of rows) { const v = numOf(row[measure.name]?.[pv.key]); if (v != null) s += v; } totals[pv.key] = s; }
+    const bestKey = pivots.map((pv) => pv.key).sort((a, b) => (totals[b] || 0) - (totals[a] || 0))[0];
+    pickValue = (row) => numOf(row[measure.name]?.[bestKey]);
+  } else {
+    pickValue = (row) => numOf(row[measure.name]);
+  }
+  const series = rows.map((row) => ({ t: String(row[dateDim.name]?.value ?? ''), v: pickValue(row) })).filter((p) => p.v != null);
+  // Preserve the tile's own (chronological) row order; only re-sort when x is ISO dates.
+  if (series.length && looksDate(series[0].t)) series.sort((a, b) => a.t.localeCompare(b.t));
+  return series;
 }
 const goalsApi = require('./goals').mount(app, { db, auth, resolveTileValue, resolveTileSeries });
 
