@@ -115,7 +115,7 @@ export default function GoalsPage() {
       )}
       {editor && (
         <GoalEditor
-          entityId={activeEntityId}
+          entityId={suites.find((s) => s.id === editor.suiteId)?.entityId || activeEntityId}
           suiteId={editor.suiteId}
           suites={manageableSuites}
           goal={editor.goal}

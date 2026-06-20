@@ -55,11 +55,19 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, onClo
     return () => { alive = false; };
   }, [track, dashboardId, tileId, activeSuite]);
 
-  // Candidate "previous events" to baseline against — the client's other events
-  // (same entity), so a goal can start from last time's actual.
+  // Candidate "previous events" to baseline against. Derive the entity from the
+  // CURRENT suite (not the activeEntityId prop, which can be blank) so the picker
+  // is reliable; prefer the same client's other events, but if there are none under
+  // that entity, fall back to any other event the user can access (the resolver
+  // still enforces per-event scope) so the picker never silently disappears.
   useEffect(() => {
-    if (!entityId) { setPastSuites([]); return; }
-    api.mySuites().then((all) => setPastSuites((all || []).filter((s) => s.entityId === entityId && s.id !== activeSuite))).catch(() => setPastSuites([]));
+    api.mySuites().then((all) => {
+      const listAll = all || [];
+      const cur = listAll.find((s) => s.id === activeSuite);
+      const entId = cur?.entityId || entityId;
+      const sameEntity = entId ? listAll.filter((s) => s.entityId === entId && s.id !== activeSuite) : [];
+      setPastSuites(sameEntity.length ? sameEntity : listAll.filter((s) => s.id !== activeSuite));
+    }).catch(() => setPastSuites([]));
   }, [entityId, activeSuite]);
 
   // Tile-sourced: read the SAME tile under the chosen past event's scope — that's
@@ -82,12 +90,17 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, onClo
   const isKpi = (t) => { const v = t.visType || ''; return v === 'single_value' || v === 'single_value_period_over_period' || v.includes('bar_gauge'); };
   const tilesFor = (dId) => (dashboards.find((d) => d.dashboardId === dId)?.tiles || []).filter(isKpi);
 
+  // Baseline UI state: do we have a usable "last time" number, are we auto-reading
+  // it off a past event's tile, and did that read succeed?
+  const baseFinite = baselineValue !== '' && Number.isFinite(Number(baselineValue));
+  const autoMode = !!baselineSuiteId && track === 'tile'; // reading the same tile under a past event
+  const resolvedOk = autoMode && !baselineLoading && baseFinite;
+
   async function save() {
     if (!name.trim()) { setErr('Give the goal a name.'); return; }
     if (track === 'tile' && (!dashboardId || !tileId)) { setErr('Pick the dashboard tile to track.'); return; }
     if (!target || Number.isNaN(Number(target))) { setErr('Set a numeric target.'); return; }
     setBusy(true); setErr('');
-    const usingBaseline = !!baselineSuiteId;
     const baseNum = baselineValue !== '' && !Number.isNaN(Number(baselineValue)) ? Number(baselineValue) : null;
     const body = {
       name: name.trim(),
@@ -96,9 +109,11 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, onClo
       targetValue: Number(target),
       unit, direction, display, byDate,
       isNorthStar: northStar,
-      baselineEventId: usingBaseline ? baselineSuiteId : '',
-      baselineValue: usingBaseline ? baseNum : null,
-      baselineSource: usingBaseline ? (track === 'tile' ? 'looker' : 'manual') : '',
+      // Baseline persists whenever there's a number — whether read from a past
+      // event's tile or typed in by hand (last year isn't always in Pulse).
+      baselineEventId: baseNum != null ? baselineSuiteId : '',
+      baselineValue: baseNum,
+      baselineSource: baseNum != null ? (baselineSuiteId && track === 'tile' ? 'looker' : 'manual') : '',
     };
     try {
       let saved;
@@ -182,30 +197,30 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, onClo
           </Field>
         )}
 
-        {pastSuites.length > 0 && (
-          <Field label="Compare to a previous event" hint="Start from last time — the goal shows “vs last time” and can suggest a target.">
+        <Field label="Compare to last time (optional)" hint="Start from last time — the goal shows “vs last time” and can suggest a target.">
+          {pastSuites.length > 0 && (
             <select value={baselineSuiteId} onChange={(e) => { setBaselineSuiteId(e.target.value); if (!e.target.value) setBaselineValue(''); }} style={inp}>
-              <option value="">No comparison</option>
+              <option value="">Enter it manually…</option>
               {pastSuites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
-            {track === 'manual' && baselineSuiteId && (
-              <input value={baselineValue} onChange={(e) => setBaselineValue(e.target.value)} placeholder="Last time’s value" inputMode="decimal" style={{ ...inp, marginTop: 8 }} />
-            )}
-            {baselineSuiteId && (baselineLoading ? (
-              <div style={{ marginTop: 8, fontSize: 12.5, color: 'var(--muted)' }}>reading last time…</div>
-            ) : baselineValue !== '' && Number.isFinite(Number(baselineValue)) ? (
-              <div style={{ marginTop: 9 }}>
-                <div style={{ fontSize: 13 }}><span style={{ color: 'var(--muted)', fontWeight: 600 }}>Last time:</span> <b>{fmtNum(Number(baselineValue), unit)}</b></div>
-                <div style={{ display: 'flex', gap: 6, marginTop: 7, flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: 11.5, color: 'var(--muted)', alignSelf: 'center' }}>Set target:</span>
-                  {[['Match', 1], ['+10%', 1.1], ['+15%', 1.15], ['+20%', 1.2]].map(([lbl, f]) => (
-                    <button key={lbl} type="button" onClick={() => setTarget(String(Math.round(Number(baselineValue) * f)))} style={suggestBtn}>{lbl}</button>
-                  ))}
-                </div>
+          )}
+          {autoMode && baselineLoading && <div style={{ marginTop: 8, fontSize: 12.5, color: 'var(--muted)' }}>reading last time…</div>}
+          {autoMode && !baselineLoading && !baseFinite && <div style={{ marginTop: 8, fontSize: 12, color: 'var(--muted)' }}>Couldn’t read that tile for the chosen event — enter it below.</div>}
+          {!resolvedOk && !(autoMode && baselineLoading) && (
+            <input value={baselineValue} onChange={(e) => setBaselineValue(e.target.value)} placeholder="Last time’s value" inputMode="decimal" style={{ ...inp, marginTop: pastSuites.length > 0 ? 8 : 0 }} />
+          )}
+          {baseFinite && (
+            <div style={{ marginTop: 9 }}>
+              <div style={{ fontSize: 13 }}><span style={{ color: 'var(--muted)', fontWeight: 600 }}>Last time:</span> <b>{fmtNum(Number(baselineValue), unit)}</b></div>
+              <div style={{ display: 'flex', gap: 6, marginTop: 7, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 11.5, color: 'var(--muted)', alignSelf: 'center' }}>Set target:</span>
+                {[['Match', 1], ['+10%', 1.1], ['+15%', 1.15], ['+20%', 1.2]].map(([lbl, f]) => (
+                  <button key={lbl} type="button" onClick={() => setTarget(String(Math.round(Number(baselineValue) * f)))} style={suggestBtn}>{lbl}</button>
+                ))}
               </div>
-            ) : (track === 'tile' ? <div style={{ marginTop: 8, fontSize: 12, color: 'var(--muted)' }}>Couldn’t read that tile for the chosen event.</div> : null))}
-          </Field>
-        )}
+            </div>
+          )}
+        </Field>
 
         <div style={{ display: 'flex', gap: 10 }}>
           <Field label="Target" style={{ flex: 1 }}>
