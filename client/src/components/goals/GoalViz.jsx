@@ -129,9 +129,20 @@ export const bandTone = (b) => ({ smashed: GREEN, hit: GREEN, near: AMBER, misse
 // as its own thing; the semantic state colours below still win for trouble (red/amber)
 // and done (green). Leads with cool hues and skips the red-ish brand primary, so a
 // healthy goal is never mistaken for the over-target red.
+// A client's palette can include very light colours that vanish on the white card,
+// so darken anything too light to a readable contrast.
+function ensureContrast(hex) {
+  const m = /^#?([0-9a-fA-F]{6})$/.exec(hex || '');
+  if (!m) return hex;
+  let r = parseInt(m[1].slice(0, 2), 16), g = parseInt(m[1].slice(2, 4), 16), b = parseInt(m[1].slice(4, 6), 16);
+  const lum = 0.299 * r + 0.587 * g + 0.114 * b; // perceived brightness 0-255
+  const MAX = 150;
+  if (lum > MAX) { const f = MAX / lum; r *= f; g *= f; b *= f; }
+  return '#' + [r, g, b].map((x) => Math.round(Math.max(0, Math.min(255, x))).toString(16).padStart(2, '0')).join('');
+}
 function identityPalette() {
   const c = chartPalette();
-  return [c[3], c[4], c[7], c[6], c[9], c[2], c[1]].filter(Boolean);
+  return [c[3], c[4], c[7], c[6], c[9], c[2], c[1]].filter(Boolean).map(ensureContrast);
 }
 export function paletteColor(i) { const p = identityPalette(); return p.length ? p[((i % p.length) + p.length) % p.length] : BLUE; }
 // The colour for a goal's ring/tile: semantic when it matters (reached → green, over a
