@@ -56,6 +56,20 @@ test('fractionAtNow reads last year’s ACTUAL value at days-before = days-left 
   assert.ok(Math.abs(at.valueAtNow - 46000) <= 1, `last year at this point ≈ 46k, got ${Math.round(at.valueAtNow)}`);
 });
 
+test('fractionAtNow ignores the trend tile’s trailing totals row (empty x)', () => {
+  // Mirrors the live probe: a days-before axis with a stray { t:'', v:total } row at
+  // the end. That row must not veto the numeric axis and force an index guess.
+  const series = [
+    { t: '30', v: 40000 }, { t: '20', v: 44000 }, { t: '11', v: 46000 },
+    { t: '0', v: 55000 }, { t: '-2', v: 55997 }, { t: '', v: 55997 },
+  ];
+  const deadlineMs = Date.now() + 11 * 86400000;
+  const at = fc.fractionAtNow(series, { deadlineMs });
+  assert.equal(at.basis, 'days-before');
+  assert.equal(at.total, 55997);
+  assert.ok(Math.abs(at.valueAtNow - 46000) <= 1, `reads 46k at 11 days out, got ${Math.round(at.valueAtNow)}`);
+});
+
 test('fractionAtNow falls back to the window fraction for an ISO-date axis', () => {
   // No shared event anchor across years → position between start and deadline by index.
   const series = [{ t: '2025-01-01', v: 1000 }, { t: '2025-02-01', v: 3000 }];

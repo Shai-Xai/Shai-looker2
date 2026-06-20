@@ -67,13 +67,16 @@ function interpByDaysBefore(sorted, target) {
 function fractionAtNow(series, { deadlineMs, nowMs = Date.now(), startMs } = {}) {
   const cum = cumulativeWithAxis(series);
   if (!cum) return null;
-  const total = cum[cum.length - 1].c;
+  const total = Math.max(...cum.map((p) => p.c));
   if (!(total > 0)) return null;
   const isISO = (t) => /^\d{4}-\d{2}/.test(String(t));
-  const numericAxis = cum.every((p) => p.t !== '' && p.t != null && !isISO(p.t) && Number.isFinite(Number(p.t)));
+  // Points that carry a real numeric "days before event" label. Trend tiles append a
+  // stray totals row (empty x); ignore it rather than letting it veto the whole axis.
+  const numPts = cum.filter((p) => p.t !== '' && p.t != null && !isISO(p.t) && Number.isFinite(Number(p.t)));
+  const numericAxis = numPts.length >= 2 && numPts.length >= cum.length - 2;
   if (numericAxis && Number.isFinite(deadlineMs)) {
     const daysLeft = Math.round((deadlineMs - nowMs) / 86400000);
-    const sorted = cum.map((p) => ({ d: Number(p.t), c: p.c })).sort((a, b) => b.d - a.d);
+    const sorted = numPts.map((p) => ({ d: Number(p.t), c: p.c })).sort((a, b) => b.d - a.d);
     const valueAtNow = interpByDaysBefore(sorted, daysLeft);
     if (valueAtNow != null) return { fraction: valueAtNow / total, total, valueAtNow, basis: 'days-before', daysLeft };
   }
