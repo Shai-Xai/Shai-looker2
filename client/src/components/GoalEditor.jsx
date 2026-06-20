@@ -61,18 +61,21 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
     return () => { alive = false; };
   }, [track, dashboardId, tileId, activeSuite]);
 
-  // Candidate "previous events" to baseline against. Derive the entity from the
-  // CURRENT suite (not the activeEntityId prop, which can be blank) so the picker
-  // is reliable; prefer the same client's other events, but if there are none under
-  // that entity, fall back to any other event the user can access (the resolver
-  // still enforces per-event scope) so the picker never silently disappears.
+  // Candidate events to baseline against. Scoped STRICTLY to this profile's entity
+  // — never other clients' events. Derive the entity from the CURRENT suite (not
+  // the activeEntityId prop, which can be blank); if we can't resolve an entity,
+  // fail closed to just the current event. The current event is included on
+  // purpose: a recurring/annual event is its own "last time" (read the same tile
+  // under its earlier data). The resolver still enforces per-event scope.
   useEffect(() => {
     api.mySuites().then((all) => {
       const listAll = all || [];
       const cur = listAll.find((s) => s.id === activeSuite);
       const entId = cur?.entityId || entityId;
-      const sameEntity = entId ? listAll.filter((s) => s.entityId === entId && s.id !== activeSuite) : [];
-      setPastSuites(sameEntity.length ? sameEntity : listAll.filter((s) => s.id !== activeSuite));
+      const scoped = entId
+        ? listAll.filter((s) => s.entityId === entId)
+        : listAll.filter((s) => s.id === activeSuite);
+      setPastSuites(scoped);
     }).catch(() => setPastSuites([]));
   }, [entityId, activeSuite]);
 
@@ -217,7 +220,7 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
           {pastSuites.length > 0 && (
             <select value={baselineSuiteId} onChange={(e) => { setBaselineSuiteId(e.target.value); if (!e.target.value) setBaselineValue(''); }} style={inp}>
               <option value="">Enter it manually…</option>
-              {pastSuites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              {pastSuites.map((s) => <option key={s.id} value={s.id}>{s.name}{s.id === activeSuite ? ' (this event)' : ''}</option>)}
             </select>
           )}
           {autoMode && baselineLoading && <div style={{ marginTop: 8, fontSize: 12.5, color: 'var(--muted)' }}>reading last time…</div>}

@@ -4,6 +4,7 @@ import { api } from '../lib/api.js';
 import { useProfile } from '../lib/profile.jsx';
 import { vtNavigate } from '../lib/viewTransition.js';
 import { GoalCard } from '../components/goals/GoalViz.jsx';
+import GoalRingsCard from '../components/goals/GoalRings.jsx';
 import GoalDetail from '../components/goals/GoalDetail.jsx';
 import GoalEditor from '../components/GoalEditor.jsx';
 
@@ -96,6 +97,14 @@ export default function GoalsPage() {
                 <button onClick={() => setEditor({ suiteId: suite.id, goal: null, scope: 'event' })} style={addBtn}>＋ {goals.length ? 'Add a goal' : 'Set a goal'}</button>
               )}
             </div>
+            {/* Activity-Rings hero — all of this event's targets at a glance (Apple-style). */}
+            {[...goals, ...personalGoals].length >= 2 && (
+              <div style={{ marginBottom: 14 }}>
+                <GoalRingsCard
+                  goals={[...goals, ...personalGoals]}
+                  onPick={(g) => setDetail({ suiteId: suite.id, goalId: g.id })} />
+              </div>
+            )}
             {goals.length ? (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
                 {goals.map((g, i) => (
