@@ -36,9 +36,9 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
   const [baselineLoading, setBaselineLoading] = useState(false);
   // How "last time" is sourced: a past event (reuse the tracking tile under its scope),
   // a dashboard tile you pick (read live now), or a number you type. Stored as a value.
-  const [baselineMode, setBaselineMode] = useState(goal?.baselineEventId ? 'event' : 'manual'); // 'manual' | 'event' | 'tile'
-  const [baselineDashboardId, setBaselineDashboardId] = useState('');
-  const [baselineTileId, setBaselineTileId] = useState('');
+  const [baselineMode, setBaselineMode] = useState(goal?.baselineRef?.tileId ? 'tile' : (goal?.baselineEventId ? 'event' : 'manual')); // 'manual' | 'event' | 'tile'
+  const [baselineDashboardId, setBaselineDashboardId] = useState(goal?.baselineRef?.dashboardId || '');
+  const [baselineTileId, setBaselineTileId] = useState(goal?.baselineRef?.tileId || '');
   const [pastSuites, setPastSuites] = useState([]); // other events to compare against
   // Milestones — weekly/monthly checkpoints on the way to the target (Slice C).
   const [milestones, setMilestones] = useState(goal?.milestones || []);
@@ -198,10 +198,11 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
       visibility: isPersonal ? visibility : 'team',
       rollsUpTo: isPersonal ? rollsUpTo : '',
       // Baseline persists whenever there's a number — whether read from a past
-      // event's tile or typed in by hand (last year isn't always in Pulse).
-      baselineEventId: baseNum != null ? baselineSuiteId : '',
+      // event's tile, a picked tile (remembered + re-read live), or typed by hand.
+      baselineEventId: baseNum != null && baselineMode === 'event' ? baselineSuiteId : '',
       baselineValue: baseNum,
-      baselineSource: baseNum != null ? (baselineSuiteId && track === 'tile' ? 'looker' : 'manual') : '',
+      baselineSource: baseNum != null ? (baselineMode === 'tile' ? 'looker' : (baselineMode === 'event' && track === 'tile' ? 'looker' : 'manual')) : '',
+      baselineRef: baselineMode === 'tile' && baselineDashboardId && baselineTileId ? { dashboardId: baselineDashboardId, tileId: baselineTileId } : null,
       milestones: milestones
         .map((m) => ({ byDate: m.byDate, targetValue: Number(m.targetValue), ...(m.lastValue != null && m.lastValue !== '' ? { lastValue: Number(m.lastValue) } : {}) }))
         .filter((m) => m.byDate && Number.isFinite(m.targetValue)),

@@ -247,6 +247,21 @@ test('a goal remembers its linked checkpoint-curve tile across edits', async () 
   assert.deepEqual(upd.curveRef, { dashboardId: 'dash9', tileId: 'trend7', cadence: 'weekly' }, 'link survives an edit');
 });
 
+test('a goal remembers its baseline tile and re-reads "last time" live from it', async () => {
+  tileValue = 12345; // resolveTileValue stub → what the baseline tile reads live
+  const g = (await create(owner, {
+    name: 'Baseline link', source: 'manual', targetValue: 20000, unit: 'tickets',
+    baselineRef: { dashboardId: 'dashB', tileId: 'kpiLastYear' },
+  })).body.goal;
+  assert.deepEqual(g.baselineRef, { dashboardId: 'dashB', tileId: 'kpiLastYear' }, 'baseline tile link is stored');
+  await app.req('POST', `/api/goals/${g.id}/snapshot`, { as: owner, body: { value: 5000 } });
+  const row = (await list(owner)).body.goals.find((x) => x.id === g.id);
+  assert.equal(row.progress.baselineFinal, 12345, 'last time is re-read live from the linked tile, not a stale snapshot');
+  // Link survives an unrelated edit.
+  const upd = (await app.req('PUT', `/api/goals/${g.id}`, { as: owner, body: { targetValue: 25000 } })).body.goal;
+  assert.deepEqual(upd.baselineRef, { dashboardId: 'dashB', tileId: 'kpiLastYear' }, 'baseline link survives an edit');
+});
+
 test('a CURVE goal anchors days-to-go to the event date (briefing), not the typed by_date', async () => {
   const day = 86400000;
   const sid = h.db.createSuite({ entityId, name: 'Anchor test' }).id;
