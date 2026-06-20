@@ -16,7 +16,7 @@ export function Strip({ children }) {
   );
 }
 
-export function GoalCard({ goal, onClick, index = 0, colorIndex, draggable = false, onDragStartCard, onDropCard, onDelete, grid = false }) {
+export function GoalCard({ goal, onClick, index = 0, colorIndex, draggable = false, onDragStartCard, onDropCard, onMoveUp, onMoveDown, onDelete, grid = false }) {
   const p = goal.progress || {};
   const { chip } = goalState(goal, p);
   // Brand identity colour for healthy/in-progress goals; semantic still wins for state.
@@ -56,6 +56,14 @@ export function GoalCard({ goal, onClick, index = 0, colorIndex, draggable = fal
         {goal.isNorthStar && <span title="North Star" style={{ fontSize: 12, flexShrink: 0 }}>⭐</span>}
         <span style={{ fontSize: 12.5, fontWeight: 700, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{goal.name}</span>
         {viz === 'bar' && chip}
+        {/* Mobile reorder — drag is desktop-only, so phones get ▲▼ move controls
+            (same position the dashboard strip orders by). Hidden when not reorderable. */}
+        {isMobile && (onMoveUp || onMoveDown) && (
+          <span style={{ display: 'flex', gap: 2, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
+            <button onClick={(e) => { e.stopPropagation(); onMoveUp && onMoveUp(); }} disabled={!onMoveUp} title="Move up" aria-label="Move up" style={{ ...moveBtn, opacity: onMoveUp ? 0.7 : 0.25 }}>▲</button>
+            <button onClick={(e) => { e.stopPropagation(); onMoveDown && onMoveDown(); }} disabled={!onMoveDown} title="Move down" aria-label="Move down" style={{ ...moveBtn, opacity: onMoveDown ? 0.7 : 0.25 }}>▼</button>
+          </span>
+        )}
         {onDelete && (confirming ? (
           <span style={{ display: 'flex', gap: 3, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
             <button onClick={(e) => { e.stopPropagation(); onDelete(); }} title="Delete this goal" style={delYes}>Delete</button>
@@ -257,5 +265,6 @@ export function fmtVal(v, unit) {
 const card = { flex: '0 0 172px', scrollSnapAlign: 'start', boxSizing: 'border-box', minHeight: 138, display: 'flex', flexDirection: 'column', background: 'var(--tile-bg, var(--card))', border: '1px solid var(--border)', borderRadius: 14, boxShadow: 'var(--shadow-sm)', padding: '11px 13px', color: 'var(--text)' };
 const tapHint = { position: 'absolute', bottom: 6, left: '50%', transform: 'translateX(-50%)', background: 'var(--brand)', color: '#fff', fontSize: 10.5, fontWeight: 700, padding: '2px 9px', borderRadius: 980, whiteSpace: 'nowrap', pointerEvents: 'none', boxShadow: '0 2px 8px rgba(0,0,0,0.18)' };
 const cardX = { border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 11, lineHeight: 1, padding: 2, flexShrink: 0, opacity: 0.55 };
+const moveBtn = { border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', cursor: 'pointer', fontSize: 9, lineHeight: 1, borderRadius: 6, padding: '3px 5px', flexShrink: 0, minWidth: 22, minHeight: 22 };
 const delYes = { border: 'none', background: 'var(--error, #dc2626)', color: '#fff', borderRadius: 6, fontSize: 10, fontWeight: 700, padding: '2px 7px', cursor: 'pointer', flexShrink: 0 };
 const delNo = { border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--muted)', borderRadius: 6, fontSize: 10, padding: '2px 5px', cursor: 'pointer', flexShrink: 0 };

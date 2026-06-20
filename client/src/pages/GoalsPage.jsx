@@ -58,6 +58,19 @@ export default function GoalsPage() {
       return { ...m, [suiteId]: { ...r, goals: goals.map((g, i) => ({ ...g, position: i })) } };
     });
   };
+  // Mobile reorder (▲▼) — move one event goal up/down by one and persist positions.
+  const move = (suiteId, idx, dir) => {
+    setBySuite((m) => {
+      const r = m[suiteId];
+      if (!r) return m;
+      const goals = [...(r.goals || [])];
+      const j = idx + dir;
+      if (idx < 0 || j < 0 || idx >= goals.length || j >= goals.length) return m;
+      [goals[idx], goals[j]] = [goals[j], goals[idx]];
+      goals.forEach((g, i) => { if (g.position !== i) api.updateGoal(g.id, { position: i }).catch(() => {}); });
+      return { ...m, [suiteId]: { ...r, goals: goals.map((g, i) => ({ ...g, position: i })) } };
+    });
+  };
 
   // Every accessible event is shown — even with no goals yet, a member can add a
   // personal goal there.
@@ -147,6 +160,8 @@ export default function GoalsPage() {
                     draggable={canManage && goals.length > 1}
                     onDragStartCard={() => { dragId.current = g.id; }}
                     onDropCard={() => reorder(suite.id, dragId.current, g.id)}
+                    onMoveUp={canManage && goals.length > 1 && i > 0 ? () => move(suite.id, i, -1) : undefined}
+                    onMoveDown={canManage && goals.length > 1 && i < goals.length - 1 ? () => move(suite.id, i, 1) : undefined}
                     onClick={() => setDetail({ suiteId: suite.id, goalId: g.id })} />
                 ))}
               </div>
