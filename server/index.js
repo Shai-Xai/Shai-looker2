@@ -1684,6 +1684,28 @@ async function buildFacts(user, entityId, force = false, alignDaysBefore = false
     let taken = 0;
     for (const t of tiles) { if (taken >= PER_DASH || picks.length >= FACT_MAX_TILES) break; const before = picks.length; addTile(def, t, dashMeta[did]?.suiteId, true); if (picks.length > before) taken += 1; }
   }
+  const isAnalyticsName = (name) => /\bga4\b|analytics|google/i.test(name || '');
+  // 1d0) Guarantee the AUTHORITATIVE ticketing HEADLINE tiles by CONTENT, so the lead
+  //      sales figures are always present even when set/dashboard naming doesn't say
+  //      "ticketing/overview" (which is what let a Reps board take the lead). Match
+  //      tiles like "Total Tickets Sold", "Gross Revenue", "Orders" — excluding
+  //      analytics/GA4 sources (their "tickets" are funnel interest, not sales).
+  const TICKET_HEADLINE = /total\s*tickets|tickets?\s*sold|gross\s*(revenue|sales)|\bnet\s*sales\b|tickets?\s*revenue|sell[-\s]?through|attendance|checked?[-\s]?in/i;
+  let head = 0; const HEAD_BUDGET = 4;
+  for (const c of catalogue) {
+    if (head >= HEAD_BUDGET || picks.length >= FACT_MAX_TILES) break;
+    if (isAnalyticsName(c.setName) || isAnalyticsName(c.title)) continue;
+    const def = store.get(c.dashboardId);
+    if (!def || !dashMeta[c.dashboardId]) continue;
+    const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((t) => t.tiles || []))]
+      .filter((t) => t.type !== 'text' && t.query?.fields?.length && TICKET_HEADLINE.test(t.title || ''))
+      .sort((a, b) => tilePriority(a) - tilePriority(b));
+    for (const t of tiles) {
+      if (head >= HEAD_BUDGET || picks.length >= FACT_MAX_TILES) break;
+      const before = picks.length; addTile(def, t, c.suiteId, true);
+      if (picks.length > before) head += 1;
+    }
+  }
   // 1d) ALWAYS lead with TICKETING. Pull the ticketing set's OVERVIEW headline tiles
   //     first (tickets sold, revenue, orders) — across the WHOLE ticketing set, not
   //     just its first-listed dashboard — so a non-overview board (e.g. a Reps
@@ -1787,7 +1809,9 @@ async function buildFacts(user, entityId, force = false, alignDaysBefore = false
     const view = entityViews[p.def.id];
     const extra = {};
     if (view) for (const [fname, qfield] of Object.entries(p.tile.listenTo || {})) if (fname in view) extra[qfield] = view[fname];
-    const dbo = daysBeforeOverlays[p.def.id];
+    // Days-to-go overlay — but NOT for analytics/GA4 (they have no days-before-event
+    // axis; forcing one can return zero, which is what broke GA4 tiles in the briefing).
+    const dbo = isAnalyticsName(p.setName) ? null : daysBeforeOverlays[p.def.id];
     if (dbo) for (const [fname, qfield] of Object.entries(p.tile.listenTo || {})) if (fname in dbo) extra[qfield] = dbo[fname];
     // Expand the dashboard's client-default saved filters into the lock map (suite
     // locks still win), exactly like resolveTileValue — so a GA4 tile gets its saved
