@@ -605,7 +605,47 @@ async function resolveTileSeries({ dashboardId, tileId, user, suiteId }) {
   if (series.length && looksDate(series[0].t)) series.sort((a, b) => a.t.localeCompare(b.t));
   return series;
 }
-const goalsApi = require('./goals').mount(app, { db, auth, resolveTileValue, resolveTileSeries });
+
+// Diagnostic sibling: return EVERY pivot column of a trend tile (not just one),
+// so the forecast probe can read both last-year (the shape) and this-year (recent
+// momentum) at once. Same scoped query path; returns { dateField, measureField,
+// columns:[{ key, series:[{t,v}] }] } or null. Read-only, used by the probe route.
+async function resolveTileSeriesAll({ dashboardId, tileId, user, suiteId }) {
+  const def = db.getDashboard(dashboardId);
+  if (!def) return null;
+  const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))];
+  const tile = tiles.find((t) => t.id === tileId);
+  if (!tile) return null;
+  const su = db.getSuite(suiteId);
+  const entityView = su?.entityId ? (db.getFilterView('entity', su.entityId, dashboardId) || {}) : {};
+  const lockMap = { ...expandLockMap(entityView), ...expandLockMap(db.lockedFiltersForSuite(suiteId)) };
+  const body = await tileQueryBody(tile, def, user, suiteId, lockMap);
+  if (!body) return null;
+  body.limit = Math.max(Number(body.limit) || 0, 1000);
+  const data = await runLookerQuery('/queries/run/json_detail', body);
+  const fields = data?.fields || {};
+  const rows = data?.data || [];
+  if (!rows.length) return null;
+  const hidden = new Set((tile.vis || {}).hidden_fields || []);
+  const dims = (fields.dimensions || []).filter((f) => !hidden.has(f.name));
+  const measures = [...(fields.measures || []), ...(fields.table_calculations || [])].filter((f) => !hidden.has(f.name));
+  const isDateName = (n) => /date|day|week|month|year|created|time/i.test(n || '');
+  const looksDate2 = (v) => typeof v === 'string' && /^\d{4}-\d{2}/.test(v);
+  const dateDim = dims.find((f) => isDateName(f.name)) || dims.find((f) => looksDate2(rows[0][f.name]?.value)) || dims[0];
+  const measure = measures[0] || dims.find((f) => f !== dateDim);
+  if (!dateDim || !measure) return null;
+  const num = (cell) => { if (!cell) return null; const r = cell.rendered; if (r != null && r !== '') { const m = String(r).replace(/[\s,]/g, '').match(/-?\d+(?:\.\d+)?/); if (m && Number.isFinite(Number(m[0]))) return Number(m[0]); } const v = Number(cell.value); return Number.isFinite(v) ? v : null; };
+  const x = rows.map((row) => String(row[dateDim.name]?.value ?? ''));
+  const pivots = data.pivots || [];
+  const columns = [];
+  if (pivots.length) {
+    for (const pv of pivots) columns.push({ key: pv.key, series: rows.map((row, i) => ({ t: x[i], v: num(row[measure.name]?.[pv.key]) })).filter((p) => p.v != null) });
+  } else {
+    columns.push({ key: measure.label || measure.name, series: rows.map((row, i) => ({ t: x[i], v: num(row[measure.name]) })).filter((p) => p.v != null) });
+  }
+  return { dateField: dateDim.name, measureField: measure.name, columns: columns.filter((c) => c.series.length) };
+}
+const goalsApi = require('./goals').mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTileSeriesAll });
 
 // Owl summary of an event's goals — a short narrative over the RESOLVED goal values
 // (computed here by the goals resolver; the AI only phrases them). Streams plain text

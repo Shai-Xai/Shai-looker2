@@ -18,11 +18,12 @@
 // tile-sourced goal reads the very number the dashboard shows.
 
 const crypto = require('crypto');
+const fc = require('./forecast');
 
 const SOURCES = ['ticketing', 'cashless', 'access', 'audience', 'ga4', 'app', 'social_paid', 'sponsorship', 'manual'];
 const DIRECTIONS = ['at_least', 'at_most', 'exact'];
 
-function mount(app, { db, auth, resolveTileValue, resolveTileSeries }) {
+function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTileSeriesAll }) {
   const sql = db.db;
   const now = () => new Date().toISOString();
   const uuid = () => crypto.randomUUID();
@@ -435,6 +436,79 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries }) {
       const series = await resolveTileSeries({ dashboardId, tileId, user: req.user, suiteId: req.params.suiteId });
       res.json({ series });
     } catch (e) { res.json({ series: [], error: e.message }); }
+  });
+
+  // ── Forecast probe (read-only diagnostic) ──
+  // Validate the forecast model on a LIVE tile before we build any UI. Reads every
+  // pivot column of a trend tile, auto-picks last-year (largest complete column) +
+  // this-year (latest key), computes the forecast, and returns it all as JSON.
+  // Tunable via query params so we can correct the column pick on real data.
+  //   GET /api/goals/suites/:suiteId/forecast-probe
+  //     ?dashboardId=&tileId=&target=&start=YYYY-MM-DD&end=YYYY-MM-DD
+  //     [&recentDays=30&lastKey=&thisKey=&currentValue=]
+  app.get('/api/goals/suites/:suiteId/forecast-probe', auth.requireAuth, async (req, res) => {
+    if (typeof resolveTileSeriesAll !== 'function') return res.status(400).json({ error: 'series resolver unavailable' });
+    // Convenience: ?goalId=… defaults the tile, dates, target + current value off the goal.
+    const g = req.query.goalId ? goalById(req.query.goalId) : null;
+    const suiteId = g?.suiteId || req.params.suiteId;
+    if (!db.getSuite(suiteId)) return res.status(404).json({ error: 'Event not found' });
+    if (!canView(req.user, suiteId)) return res.status(403).json({ error: 'Not allowed' });
+    const dashboardId = req.query.dashboardId || g?.curveRef?.dashboardId || g?.metricRef?.dashboardId;
+    const tileId = req.query.tileId || g?.curveRef?.tileId || g?.metricRef?.tileId;
+    if (!dashboardId || !tileId) return res.status(400).json({ error: 'dashboardId and tileId are required (or pass goalId)' });
+    let data;
+    try { data = await resolveTileSeriesAll({ dashboardId, tileId, user: req.user, suiteId }); }
+    catch (e) { return res.json({ error: e.message }); }
+    if (!data || !data.columns.length) return res.json({ error: 'No series read from that tile', data });
+
+    const totalOf = (c) => c.series.reduce((s, p) => s + (Number(p.v) || 0), 0);
+    const cols = data.columns.map((c) => ({ key: c.key, n: c.series.length, total: Math.round(totalOf(c)), last: c.series[c.series.length - 1]?.v }));
+    // this-year = highest key (current period); last-year = largest-total of the rest.
+    const byKeyDesc = [...data.columns].sort((a, b) => String(b.key).localeCompare(String(a.key), undefined, { numeric: true }));
+    const thisKey = req.query.thisKey || byKeyDesc[0]?.key;
+    const rest = data.columns.filter((c) => c.key !== thisKey);
+    const lastCol = req.query.lastKey ? data.columns.find((c) => c.key === req.query.lastKey)
+      : rest.sort((a, b) => totalOf(b) - totalOf(a))[0];
+    const thisCol = data.columns.find((c) => c.key === thisKey);
+
+    const cum = fc.toCumulative((lastCol?.series || []).map((p) => p.v));
+    const thisCum = fc.toCumulative((thisCol?.series || []).map((p) => p.v));
+    // Current value: explicit override → the goal's live value → this-year cumulative.
+    let currentValue = req.query.currentValue ? Number(req.query.currentValue)
+      : (g ? (await resolveMetric(g, { user: req.user })).value : null);
+    if (currentValue == null) currentValue = thisCum.length ? thisCum[thisCum.length - 1] : null;
+
+    // Recent run-rate from this-year's tail over ~recentDays (by date if parseable).
+    const recentDays = Number(req.query.recentDays) || 30;
+    let recentRatePerDay = null, recentBasis = null;
+    if (thisCol && thisCol.series.length >= 2 && thisCum.length === thisCol.series.length) {
+      const s = thisCol.series; const lastT = Date.parse(s[s.length - 1].t);
+      let startIdx = 0;
+      if (!Number.isNaN(lastT)) {
+        for (let i = s.length - 1; i >= 0; i--) { const t = Date.parse(s[i].t); if (!Number.isNaN(t) && (lastT - t) >= recentDays * 86400000) { startIdx = i; break; } }
+        const st = Date.parse(s[startIdx].t); const spanDays = !Number.isNaN(st) ? (lastT - st) / 86400000 : null;
+        if (spanDays && spanDays > 0) { recentRatePerDay = (thisCum[thisCum.length - 1] - thisCum[startIdx]) / spanDays; recentBasis = `${Math.round(spanDays)}d, ${s.length - startIdx} pts`; }
+      }
+    }
+
+    const now = Date.now();
+    const startStr = req.query.start || g?.startDate || '';
+    const endStr = req.query.end || g?.byDate || '';
+    const startMs = startStr ? Date.parse(startStr) : NaN;
+    const endMs = endStr ? Date.parse(endStr) : NaN;
+    const r = (!Number.isNaN(startMs) && !Number.isNaN(endMs) && endMs > startMs) ? Math.max(0, Math.min(1, (now - startMs) / (endMs - startMs))) : null;
+    const daysLeft = !Number.isNaN(endMs) ? Math.max(0, (endMs - now) / 86400000) : null;
+    const target = Number(req.query.target) || (g ? g.targetValue : 0);
+    const result = (cum.length >= 2 && r != null && currentValue != null)
+      ? fc.forecast({ cum, currentValue, target, r, daysLeft, recentRatePerDay }) : null;
+
+    res.json({
+      columns: cols,
+      chosen: { lastKey: lastCol?.key, thisKey },
+      inputs: { currentValue, target, r: r == null ? null : Number(r.toFixed(4)), daysLeft: daysLeft == null ? null : Math.round(daysLeft), recentRatePerDay: recentRatePerDay == null ? null : Math.round(recentRatePerDay), recentBasis, lastYearTotal: cum.length ? cum[cum.length - 1] : null },
+      forecast: result,
+      sample: { lastYearTail: (lastCol?.series || []).slice(-6), thisYearTail: (thisCol?.series || []).slice(-6) },
+    });
   });
 
   console.log('[goals] Results pillar mounted');
