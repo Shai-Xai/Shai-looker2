@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { chartPalette } from '../../lib/brand.js';
+import { useIsMobile } from '../../lib/useIsMobile.js';
 
 // Shared presentational pieces for the Results pillar — the compact goal card and
 // its progress visuals (bar / ring / dial), the state→colour/chip logic, and value
@@ -23,21 +24,32 @@ export function GoalCard({ goal, onClick, index = 0, colorIndex, draggable = fal
   const viz = goal.display || 'bar';
   const clickable = !!onClick;
   const [confirming, setConfirming] = useState(false);
-  // Grid layout (the Goals page): flex-grow/shrink so at least two tiles sit per
-  // row on mobile (the fixed-width card is for the home's horizontal scroll strip).
+  // Mobile: require a SECOND tap to open (first tap arms it, with a hint), so a
+  // stray tap while scrolling doesn't fling you into a goal. Desktop opens on click.
+  const isMobile = useIsMobile();
+  const [armed, setArmed] = useState(false);
+  const armRef = useRef(null);
+  useEffect(() => () => clearTimeout(armRef.current), []);
+  const activate = () => {
+    if (!onClick) return;
+    if (!isMobile) { onClick(); return; }
+    if (armed) { clearTimeout(armRef.current); setArmed(false); onClick(); }
+    else { setArmed(true); clearTimeout(armRef.current); armRef.current = setTimeout(() => setArmed(false), 1800); }
+  };
   const cardStyle = grid ? { ...card, flex: '1 1 150px', minWidth: 0, maxWidth: 260 } : card;
   return (
     <div className="lift msg-in"
       role={clickable ? 'button' : undefined} tabIndex={clickable ? 0 : undefined}
-      onClick={onClick || undefined}
+      onClick={clickable ? activate : undefined}
       onKeyDown={clickable ? (e) => { if (e.key === 'Enter') onClick(); } : undefined}
       draggable={draggable}
       onDragStart={draggable ? onDragStartCard : undefined}
       onDragOver={draggable ? (e) => e.preventDefault() : undefined}
       onDrop={draggable ? (e) => { e.preventDefault(); onDropCard && onDropCard(); } : undefined}
       title={draggable ? 'Drag to reorder' : undefined}
-      style={{ ...cardStyle, animationDelay: `${index * 60}ms`, cursor: clickable ? 'pointer' : 'default' }}
+      style={{ ...cardStyle, position: 'relative', animationDelay: `${index * 60}ms`, cursor: clickable ? 'pointer' : 'default', boxShadow: armed ? '0 0 0 2px var(--brand)' : cardStyle.boxShadow }}
     >
+      {armed && <div style={tapHint}>Tap again to open</div>}
       {/* Title row. For ring/dial the pace chip moves to the centre (under the ring);
           for the bar layout it stays here, where there's no central column. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
@@ -198,6 +210,7 @@ export function fmtVal(v, unit) {
 }
 
 const card = { flex: '0 0 172px', scrollSnapAlign: 'start', boxSizing: 'border-box', minHeight: 138, display: 'flex', flexDirection: 'column', background: 'var(--tile-bg, var(--card))', border: '1px solid var(--border)', borderRadius: 14, boxShadow: 'var(--shadow-sm)', padding: '11px 13px', color: 'var(--text)' };
+const tapHint = { position: 'absolute', bottom: 6, left: '50%', transform: 'translateX(-50%)', background: 'var(--brand)', color: '#fff', fontSize: 10.5, fontWeight: 700, padding: '2px 9px', borderRadius: 980, whiteSpace: 'nowrap', pointerEvents: 'none', boxShadow: '0 2px 8px rgba(0,0,0,0.18)' };
 const cardX = { border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 11, lineHeight: 1, padding: 2, flexShrink: 0, opacity: 0.55 };
 const delYes = { border: 'none', background: 'var(--error, #dc2626)', color: '#fff', borderRadius: 6, fontSize: 10, fontWeight: 700, padding: '2px 7px', cursor: 'pointer', flexShrink: 0 };
 const delNo = { border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--muted)', borderRadius: 6, fontSize: 10, padding: '2px 5px', cursor: 'pointer', flexShrink: 0 };
