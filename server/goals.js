@@ -263,13 +263,20 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
       .sort((a, b) => a.t - b.t)[0] || null;
     const nextMilestone = upcoming ? { byDate: upcoming.byDate, targetValue: upcoming.targetValue } : null;
     const start = Date.parse(goal.startDate || goal.createdAt);
-    const end = eventDeadline(goal, opts.eventDateIso).ms; // event day (Looker → briefing → by_date)
+    const hasCurve = Array.isArray(curve) && curve.length >= 2;
+    // Deadline rule (scoped so we don't trample goals with their own schedule):
+    //  • a curve/forecast goal is aligned to the EVENT DAY — that's the axis its
+    //    sell-curve is measured against, so days-to-go must be days-before-event;
+    //  • every other goal keeps its OWN by_date (an early-bird target, a bar-revenue
+    //    deadline, a personal task) — the event day only fills in if none was set.
+    const ev = eventDeadline(goal, opts.eventDateIso);
+    const ownEnd = goal.byDate ? new Date(`${String(goal.byDate).slice(0, 10)}T00:00:00`).getTime() : NaN;
+    const end = hasCurve ? ev.ms : (Number.isFinite(ownEnd) ? ownEnd : ev.ms);
     const daysLeft = calendarDaysLeft(end, nowMs);
     // Align last time's curve to where we are now by its REAL axis (days-before-event),
     // not by row position — so "last time at this point" is the actual recorded value.
     // Days-to-go is whole calendar days to the event day (the same anchor as last
     // year's days_before axis), so the curve is read at the right point.
-    const hasCurve = Array.isArray(curve) && curve.length >= 2;
     const at = hasCurve ? fc.fractionAtNow(curve, { deadlineMs: end, nowMs, startMs: start, daysLeft }) : null;
     const baselineFinal = at ? Math.round(at.total) : (goal.baselineValue != null ? goal.baselineValue : null);
     if (value == null || !goal.targetValue) return { value, pct: null, status: null, band: goal.resultBand || null, milestones, nextMilestone, lastAtNow: null, baselineFinal };

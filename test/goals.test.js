@@ -222,17 +222,29 @@ test('a goal remembers its linked checkpoint-curve tile across edits', async () 
   assert.deepEqual(upd.curveRef, { dashboardId: 'dash9', tileId: 'trend7', cadence: 'weekly' }, 'link survives an edit');
 });
 
-test('days-to-go is anchored to the event date (suite briefing), not the typed by_date', async () => {
+test('a CURVE goal anchors days-to-go to the event date (briefing), not the typed by_date', async () => {
   const day = 86400000;
   const sid = h.db.createSuite({ entityId, name: 'Anchor test' }).id;
   // Event is 13 days out per the suite briefing; the goal's own by_date is 2 days early.
   const eventDate = new Date(Date.now() + 13 * day).toISOString().slice(0, 10);
   const byDate = new Date(Date.now() + 11 * day).toISOString().slice(0, 10);
   h.db.updateSuite(sid, { briefing: { eventStart: eventDate } });
-  const g = (await app.req('POST', `/api/goals/suites/${sid}`, { as: owner, body: { name: 'Anchored', source: 'manual', targetValue: 1000, unit: 'tickets', byDate } })).body.goal;
+  const g = (await app.req('POST', `/api/goals/suites/${sid}`, { as: owner, body: { name: 'Anchored', source: 'manual', targetValue: 1000, unit: 'tickets', byDate, curveRef: { dashboardId: 'd', tileId: 't' } } })).body.goal;
   await app.req('POST', `/api/goals/${g.id}/snapshot`, { as: owner, body: { value: 500 } });
   const row = (await app.req('GET', `/api/goals/suites/${sid}`, { as: owner })).body.goals.find((x) => x.id === g.id);
-  assert.equal(row.progress.daysLeft, 13, 'days-to-go follows the event date, not the goal by_date');
+  assert.equal(row.progress.daysLeft, 13, 'curve goal: days-to-go follows the event date, not the goal by_date');
+});
+
+test('a NON-curve goal keeps its own deadline (the event date does not trample it)', async () => {
+  const day = 86400000;
+  const sid = h.db.createSuite({ entityId, name: 'Own deadline test' }).id;
+  // Event is 13 days out, but this goal has its own 5-day deadline (e.g. early-bird).
+  h.db.updateSuite(sid, { briefing: { eventStart: new Date(Date.now() + 13 * day).toISOString().slice(0, 10) } });
+  const byDate = new Date(Date.now() + 5 * day).toISOString().slice(0, 10);
+  const g = (await app.req('POST', `/api/goals/suites/${sid}`, { as: owner, body: { name: 'Early bird', source: 'manual', targetValue: 1000, unit: 'tickets', byDate } })).body.goal;
+  await app.req('POST', `/api/goals/${g.id}/snapshot`, { as: owner, body: { value: 500 } });
+  const row = (await app.req('GET', `/api/goals/suites/${sid}`, { as: owner })).body.goals.find((x) => x.id === g.id);
+  assert.equal(row.progress.daysLeft, 5, 'non-curve goal keeps its own by_date, not the event date');
 });
 
 test('Looker’s event start date wins over the briefing and the typed by_date', async () => {
@@ -242,7 +254,7 @@ test('Looker’s event start date wins over the briefing and the typed by_date',
   h.db.updateSuite(sid, { briefing: { eventStart: new Date(Date.now() + 11 * day).toISOString().slice(0, 10) } });
   eventDate = new Date(Date.now() + 20 * day).toISOString().slice(0, 10);
   const byDate = new Date(Date.now() + 9 * day).toISOString().slice(0, 10);
-  const g = (await app.req('POST', `/api/goals/suites/${sid}`, { as: owner, body: { name: 'Looker anchored', source: 'manual', targetValue: 1000, unit: 'tickets', byDate } })).body.goal;
+  const g = (await app.req('POST', `/api/goals/suites/${sid}`, { as: owner, body: { name: 'Looker anchored', source: 'manual', targetValue: 1000, unit: 'tickets', byDate, curveRef: { dashboardId: 'd', tileId: 't' } } })).body.goal;
   await app.req('POST', `/api/goals/${g.id}/snapshot`, { as: owner, body: { value: 500 } });
   const row = (await app.req('GET', `/api/goals/suites/${sid}`, { as: owner })).body.goals.find((x) => x.id === g.id);
   assert.equal(row.progress.daysLeft, 20, 'days-to-go uses the live Looker event date');
