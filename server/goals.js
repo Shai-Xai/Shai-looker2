@@ -494,10 +494,17 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
 
     const cum = fc.toCumulative((lastCol?.series || []).map((p) => p.v));
     const thisCum = fc.toCumulative((thisCol?.series || []).map((p) => p.v));
-    // Current value: explicit override → the goal's live value → this-year cumulative.
-    let currentValue = req.query.currentValue ? Number(req.query.currentValue)
-      : (g ? (await resolveMetric(g, { user: req.user })).value : null);
-    if (currentValue == null) currentValue = thisCum.length ? thisCum[thisCum.length - 1] : null;
+    // Current value MUST be the SAME measure as the shape curve, or current ÷
+    // last-year-fraction mixes units. Prefer the curve tile's own this-year column
+    // (e.g. core_tickets so far), then an explicit override, then the goal's KPI
+    // metric only as a last resort. (The KPI tile can read a different ticket
+    // measure — that mismatch is what made 41,018 ≠ the curve's 44,810.)
+    const curveNow = thisCum.length ? thisCum[thisCum.length - 1] : null;
+    let currentValue, currentValueSource;
+    if (req.query.currentValue) { currentValue = Number(req.query.currentValue); currentValueSource = 'query'; }
+    else if (curveNow != null) { currentValue = curveNow; currentValueSource = 'curve-this-year'; }
+    else if (g) { currentValue = (await resolveMetric(g, { user: req.user })).value; currentValueSource = 'goal-metric'; }
+    else { currentValue = null; currentValueSource = null; }
 
     // Recent run-rate from this-year's tail over ~recentDays (by date if parseable).
     const recentDays = Number(req.query.recentDays) || 30;
@@ -537,7 +544,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
       deadline: { iso: Number.isFinite(endMs) ? new Date(endMs).toISOString().slice(0, 10) : null, source: req.query.end ? 'query' : ed.source, daysLeft },
       chosen: { lastKey: lastCol?.key, thisKey },
       align: at ? { basis: at.basis, daysLeft: at.daysLeft, lastYearAtNow: Math.round(at.valueAtNow), fractionReached: Number(at.fraction.toFixed(4)) } : null,
-      inputs: { currentValue, target, r: r == null ? null : Number(r.toFixed(4)), daysLeft: daysLeft == null ? null : Math.round(daysLeft), recentRatePerDay: recentRatePerDay == null ? null : Math.round(recentRatePerDay), recentBasis, lastYearTotal: cum.length ? cum[cum.length - 1] : null },
+      inputs: { currentValue, currentValueSource, goalMetric: g ? (await resolveMetric(g, { user: req.user })).value : null, target, r: r == null ? null : Number(r.toFixed(4)), daysLeft: daysLeft == null ? null : Math.round(daysLeft), recentRatePerDay: recentRatePerDay == null ? null : Math.round(recentRatePerDay), recentBasis, lastYearTotal: cum.length ? cum[cum.length - 1] : null },
       forecast: result,
       sample: { lastYearTail: (lastCol?.series || []).slice(-6), thisYearTail: (thisCol?.series || []).slice(-6) },
     });
