@@ -16,6 +16,7 @@ import DocumentViewPage from './pages/DocumentViewPage.jsx';
 import InboxPage from './os/InboxPage.jsx';
 import DigestsPage from './pages/DigestsPage.jsx';
 import EngagePage from './pages/EngagePage.jsx';
+import GoalsPage from './pages/GoalsPage.jsx';
 import InventiveAskPage from './pages/InventiveAskPage.jsx';
 import Logo from './components/Logo.jsx';
 import RootErrorBoundary from './components/RootErrorBoundary.jsx';
@@ -226,6 +227,7 @@ function Shell() {
               <Route element={<ClientLayout />}>
                 <Route path="/preview" element={<ClientHome />} />
                 <Route path="/suite/:suiteId/d/:id" element={<ViewPage />} />
+                <Route path="/goals" element={<GoalsPage />} />
                 <Route path="/settlements" element={<SettlementsPage />} />
                 <Route path="/settlements/:id" element={<SettlementViewPage />} />
                 <Route path="/documents/:id" element={<DocumentViewPage />} />
@@ -246,6 +248,7 @@ function Shell() {
                 <Route path="/" element={<ClientHome />} />
                 <Route path="/settings" element={<ClientIntegrationsPage />} />
                 <Route path="/suite/:suiteId/d/:id" element={<ViewPage />} />
+                <Route path="/goals" element={<GoalsPage />} />
                 <Route path="/settlements" element={<SettlementsPage />} />
                 <Route path="/settlements/:id" element={<SettlementViewPage />} />
                 <Route path="/documents/:id" element={<DocumentViewPage />} />
