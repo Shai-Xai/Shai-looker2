@@ -36,6 +36,14 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
   const [pastSuites, setPastSuites] = useState([]); // other events to compare against
   // Milestones — weekly/monthly checkpoints on the way to the target (Slice C).
   const [milestones, setMilestones] = useState(goal?.milestones || []);
+  // Checkpoint suggester — link a tile that holds the value over time (a sell-by-date
+  // curve), read its shape under a comparable past event, and suggest checkpoints
+  // scaled to this goal's target ("last year's sell-by shape → weekly checkpoints").
+  const [curveOpen, setCurveOpen] = useState(false);
+  const [curveDashboardId, setCurveDashboardId] = useState('');
+  const [curveTileId, setCurveTileId] = useState('');
+  const [curveCadence, setCurveCadence] = useState('monthly'); // 'weekly' | 'monthly'
+  const [curveSeries, setCurveSeries] = useState(null); // { loading } | [{ t, v }]
   // Personal-goal fields (Slice D): who can see it + which event goal it feeds.
   const [visibility, setVisibility] = useState(goal?.visibility || 'team');
   const [rollsUpTo, setRollsUpTo] = useState(goal?.rollsUpTo || '');
@@ -45,11 +53,23 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
   const [err, setErr] = useState('');
   const [confirmDel, setConfirmDel] = useState(false);
 
-  // Load the client's dashboards/tiles only when they choose tile-tracking.
+  // Load the client's dashboards/tiles for tile-tracking OR the curve suggester.
   useEffect(() => {
-    if (track !== 'tile' || cat || !entityId) return;
+    if ((track !== 'tile' && !curveOpen) || cat || !entityId) return;
     api.getMyDigestTiles(entityId).then(setCat).catch(() => setCat({ dashboards: [] }));
-  }, [track, cat, entityId]);
+  }, [track, curveOpen, cat, entityId]);
+
+  // Read "last time's curve" — the linked time-series tile under the comparable past
+  // event (or this event when none is chosen). Scope is enforced server-side.
+  const curveSuiteId = baselineSuiteId || activeSuite;
+  useEffect(() => {
+    if (!curveOpen || !curveDashboardId || !curveTileId || !curveSuiteId) { setCurveSeries(null); return undefined; }
+    let alive = true; setCurveSeries({ loading: true });
+    api.goalTileSeries(curveSuiteId, curveDashboardId, curveTileId)
+      .then((r) => { if (alive) setCurveSeries(Array.isArray(r.series) ? r.series : []); })
+      .catch(() => { if (alive) setCurveSeries([]); });
+    return () => { alive = false; };
+  }, [curveOpen, curveDashboardId, curveTileId, curveSuiteId]);
 
   // Live value of the chosen tile, so the target is set against the real number.
   useEffect(() => {
@@ -98,6 +118,47 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
   // first row, e.g. an early 0). Mirrors TileFrame's metric-tile test.
   const isKpi = (t) => { const v = t.visType || ''; return v === 'single_value' || v === 'single_value_period_over_period' || v.includes('bar_gauge'); };
   const tilesFor = (dId) => (dashboards.find((d) => d.dashboardId === dId)?.tiles || []).filter(isKpi);
+  // Curve candidates are the opposite: charts/tables that carry a value-over-time
+  // series (not single-value KPIs), so there's a shape to read.
+  const seriesTilesFor = (dId) => (dashboards.find((d) => d.dashboardId === dId)?.tiles || []).filter((t) => !isKpi(t));
+
+  // Turn last time's curve into suggested checkpoints for THIS goal: take the curve's
+  // SHAPE (cumulative fraction reached at each relative point in its run) and apply it
+  // to this goal's timeline + target. Each suggestion also carries last time's actual
+  // by the equivalent point, so the numbers are reviewable, not a black box.
+  function buildSuggestions() {
+    const series = Array.isArray(curveSeries) ? curveSeries : [];
+    const tgt = Number(target);
+    if (series.length < 2 || !byDate || !Number.isFinite(tgt) || tgt <= 0) return [];
+    const start = goal?.createdAt ? new Date(goal.createdAt) : new Date();
+    const end = new Date(byDate);
+    if (!(end.getTime() > start.getTime())) return [];
+    const pts = series.map((p) => ({ t: Date.parse(p.t), v: Number(p.v) })).filter((p) => Number.isFinite(p.t) && Number.isFinite(p.v));
+    if (pts.length < 2) return [];
+    // If the series is already cumulative (non-decreasing) use it as-is; otherwise
+    // treat each point as a per-period increment and accumulate.
+    const nonDecreasing = pts.every((p, i) => i === 0 || p.v >= pts[i - 1].v - 1e-9);
+    let run = 0; const curve = pts.map((p) => { run = nonDecreasing ? p.v : run + p.v; return { t: p.t, c: run }; });
+    const final = curve[curve.length - 1].c;
+    if (!(final > 0)) return [];
+    const lastStart = curve[0].t, lastEnd = curve[curve.length - 1].t;
+    const interp = (x) => {
+      if (x <= curve[0].t) return curve[0].c;
+      if (x >= lastEnd) return final;
+      for (let i = 1; i < curve.length; i++) { const a = curve[i - 1], b = curve[i]; if (x <= b.t) return a.c + (b.c - a.c) * ((x - a.t) / (b.t - a.t)); }
+      return final;
+    };
+    const dates = []; const d = new Date(start);
+    const bump = () => (curveCadence === 'weekly' ? d.setDate(d.getDate() + 7) : d.setMonth(d.getMonth() + 1));
+    bump();
+    while (d.getTime() < end.getTime() && dates.length < 24) { dates.push(new Date(d)); bump(); }
+    const span = end.getTime() - start.getTime();
+    return dates.map((dt) => {
+      const rel = (dt.getTime() - start.getTime()) / span;
+      const lv = interp(lastStart + rel * (lastEnd - lastStart));
+      return { byDate: dt.toISOString().slice(0, 10), targetValue: Math.round(tgt * (lv / final)), lastValue: Math.round(lv) };
+    });
+  }
 
   // Baseline UI state: do we have a usable "last time" number, are we auto-reading
   // it off a past event's tile, and did that read succeed?
@@ -272,6 +333,57 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
             </div>
           ))}
           <button type="button" onClick={addMilestone} style={addMsBtn}>＋ Add a checkpoint</button>
+
+          {/* Suggest checkpoints from last time's curve — link a value-over-time tile. */}
+          <button type="button" onClick={() => setCurveOpen((o) => !o)} style={curveToggle}>
+            📈 {curveOpen ? 'Hide suggestions' : 'Suggest from last time’s curve'}
+          </button>
+          {curveOpen && (
+            <div style={curveBox}>
+              <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 8, lineHeight: 1.45 }}>
+                Link a tile that shows the value over time (e.g. sales by date). We read its shape under {baselineSuiteId ? 'the event chosen above' : 'this event'} and suggest checkpoints scaled to your target.
+              </div>
+              <select value={curveDashboardId} onChange={(e) => { setCurveDashboardId(e.target.value); setCurveTileId(''); }} style={inp}>
+                <option value="">{cat ? 'Choose a dashboard…' : 'Loading…'}</option>
+                {dashboards.map((dd) => <option key={dd.dashboardId} value={dd.dashboardId}>{dd.title}{dd.setName ? ` · ${dd.setName}` : ''}</option>)}
+              </select>
+              {curveDashboardId && (
+                <select value={curveTileId} onChange={(e) => setCurveTileId(e.target.value)} style={{ ...inp, marginTop: 8 }}>
+                  <option value="">Choose a time-series tile…</option>
+                  {seriesTilesFor(curveDashboardId).map((t) => <option key={t.tileId} value={t.tileId}>{t.title}</option>)}
+                </select>
+              )}
+              <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                <Seg active={curveCadence === 'weekly'} onClick={() => setCurveCadence('weekly')}>Weekly</Seg>
+                <Seg active={curveCadence === 'monthly'} onClick={() => setCurveCadence('monthly')}>Monthly</Seg>
+              </div>
+              {curveSeries?.loading && <div style={{ marginTop: 8, fontSize: 12, color: 'var(--muted)' }}>reading last time…</div>}
+              {Array.isArray(curveSeries) && curveSeries.length === 0 && curveTileId && <div style={{ marginTop: 8, fontSize: 12, color: 'var(--muted)' }}>Couldn’t read a time series from that tile — pick a chart with a date dimension.</div>}
+              {(() => {
+                const sugg = buildSuggestions();
+                if (!sugg.length) {
+                  if (Array.isArray(curveSeries) && curveSeries.length >= 2 && (!byDate || !Number(target))) {
+                    return <div style={{ marginTop: 8, fontSize: 12, color: 'var(--muted)' }}>Set a target and deadline above, then we’ll suggest checkpoints.</div>;
+                  }
+                  return null;
+                }
+                return (
+                  <div style={{ marginTop: 10 }}>
+                    {sugg.map((s, i) => (
+                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '3px 0', fontSize: 12.5 }}>
+                        <span style={{ flex: 1, color: 'var(--muted)' }}>{fmtShort(s.byDate)}</span>
+                        <span style={{ color: 'var(--muted)', fontSize: 11 }}>last time {fmtNum(s.lastValue, unit)}</span>
+                        <span style={{ fontWeight: 700 }}>{fmtNum(s.targetValue, unit)}</span>
+                      </div>
+                    ))}
+                    <button type="button" onClick={() => setMilestones(sugg.map((s) => ({ byDate: s.byDate, targetValue: String(s.targetValue) })))} style={applyBtn}>
+                      Use these {sugg.length} checkpoints
+                    </button>
+                  </div>
+                );
+              })()}
+            </div>
+          )}
         </Field>
 
         <Field label="Show it as">
@@ -353,6 +465,8 @@ function fmtNum(v, unit) {
   return unit && unit !== 'count' ? `${s} ${unit}` : s;
 }
 
+function fmtShort(s) { const d = new Date(s); return Number.isNaN(d.getTime()) ? s : d.toLocaleDateString('en-ZA', { day: 'numeric', month: 'short' }); }
+
 const overlay = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, zIndex: 100 };
 const sheet = { width: '100%', maxHeight: '90vh', overflowY: 'auto', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 16, padding: '18px 18px 20px', boxShadow: 'var(--shadow-lg, 0 12px 40px rgba(0,0,0,0.28))', color: 'var(--text)' };
 const inp = { width: '100%', boxSizing: 'border-box', padding: '9px 11px', border: '1.5px solid var(--hairline)', borderRadius: 9, fontSize: 14, outline: 'none', background: 'var(--card)', color: 'var(--text)', fontFamily: 'inherit' };
@@ -361,6 +475,9 @@ const northRow = { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wra
 const suggestBtn = { border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--brand)', borderRadius: 980, fontSize: 11.5, fontWeight: 700, padding: '3px 10px', cursor: 'pointer' };
 const msX = { border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--muted)', borderRadius: 9, fontSize: 13, cursor: 'pointer', flexShrink: 0, width: 38 };
 const addMsBtn = { border: '1px dashed var(--hairline)', background: 'transparent', color: 'var(--brand)', borderRadius: 9, fontSize: 12.5, fontWeight: 700, padding: '7px 11px', cursor: 'pointer', width: '100%' };
+const curveToggle = { border: 'none', background: 'transparent', color: 'var(--brand)', fontSize: 12, fontWeight: 700, padding: '8px 2px 2px', cursor: 'pointer', fontFamily: 'inherit' };
+const curveBox = { marginTop: 4, padding: '11px 12px', background: 'rgba(128,128,128,0.06)', border: '1px solid var(--hairline)', borderRadius: 10 };
+const applyBtn = { marginTop: 9, width: '100%', border: 'none', background: 'var(--brand)', color: '#fff', borderRadius: 9, fontSize: 12.5, fontWeight: 700, padding: '8px 11px', cursor: 'pointer' };
 const btnGhost = { flex: '0 0 auto', padding: '10px 16px', borderRadius: 10, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', fontSize: 13.5, fontWeight: 700, cursor: 'pointer' };
 const btnDanger = { flex: '0 0 auto', padding: '10px 14px', borderRadius: 10, border: 'none', background: 'var(--error, #dc2626)', color: '#fff', fontSize: 13.5, fontWeight: 800, cursor: 'pointer' };
 const btnDelGhost = { flex: '0 0 auto', padding: '10px 12px', borderRadius: 10, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--error, #dc2626)', fontSize: 15, cursor: 'pointer' };

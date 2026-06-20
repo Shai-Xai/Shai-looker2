@@ -10,6 +10,7 @@ const h = require('./helpers');
 const { startApp } = require('./http');
 
 let tileValue = 4200; // what the stubbed tile resolver returns
+let tileSeries = [];  // what the stubbed time-series resolver returns
 let app, suiteId, entityId, goalsApi;
 let owner, viewer, outsider, admin;
 
@@ -26,11 +27,12 @@ before(async () => {
       db: h.db,
       auth: h.auth,
       resolveTileValue: async () => tileValue,
+      resolveTileSeries: async () => tileSeries,
     });
   });
 });
 after(async () => { if (app) await app.close(); });
-beforeEach(() => { tileValue = 4200; });
+beforeEach(() => { tileValue = 4200; tileSeries = [{ t: '2025-01-01', v: 1000 }, { t: '2025-02-01', v: 3000 }]; });
 
 const create = (as, body) => app.req('POST', `/api/goals/suites/${suiteId}`, { as, body });
 const list = (as) => app.req('GET', `/api/goals/suites/${suiteId}`, { as });
@@ -198,4 +200,11 @@ test('a personal goal rolls up to an event goal; only its owner (or admin) can e
   assert.equal((await app.req('PUT', `/api/goals/${personal.id}`, { as: viewer, body: { targetValue: 250 } })).status, 200, 'owner can edit');
   assert.equal((await app.req('PUT', `/api/goals/${personal.id}`, { as: owner, body: { targetValue: 999 } })).status, 403, 'another member (even with goals.manage) cannot');
   assert.equal((await app.req('PUT', `/api/goals/${personal.id}`, { as: admin, body: { targetValue: 300 } })).status, 200, 'admin can');
+});
+
+test('tile-series returns last time’s curve to a member and is denied to outsiders', async () => {
+  const ok = await app.req('POST', `/api/goals/suites/${suiteId}/tile-series`, { as: owner, body: { dashboardId: 'd', tileId: 't' } });
+  assert.equal(ok.status, 200);
+  assert.deepEqual(ok.body.series, [{ t: '2025-01-01', v: 1000 }, { t: '2025-02-01', v: 3000 }], 'returns the resolved series');
+  assert.equal((await app.req('POST', `/api/goals/suites/${suiteId}/tile-series`, { as: outsider, body: { dashboardId: 'd', tileId: 't' } })).status, 403, 'outsider is blocked');
 });

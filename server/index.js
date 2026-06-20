@@ -550,7 +550,49 @@ async function resolveTileValue({ dashboardId, tileId, user, suiteId }) {
   // visible primary measure, reads the rendered value) so the goal == the dashboard.
   return primaryTileValue(data, tile.vis || {});
 }
-require('./goals').mount(app, { db, auth, resolveTileValue });
+
+// Time-series version of resolveTileValue: run the SAME scoped query, but return
+// the whole [{ t, v }] series (a date dimension × the primary measure) instead of
+// one number. This is what powers "review last time's curve" when setting goal
+// checkpoints — the goal links a chart/table tile that carries the sell-by-now
+// shape, and we read its rows under the chosen event's scope. Scope is still
+// enforced inside tileQueryBody, exactly like the single-value path.
+async function resolveTileSeries({ dashboardId, tileId, user, suiteId }) {
+  const def = db.getDashboard(dashboardId);
+  if (!def) return [];
+  const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))];
+  const tile = tiles.find((t) => t.id === tileId);
+  if (!tile) return [];
+  const su = db.getSuite(suiteId);
+  const entityView = su?.entityId ? (db.getFilterView('entity', su.entityId, dashboardId) || {}) : {};
+  const lockMap = { ...expandLockMap(entityView), ...expandLockMap(db.lockedFiltersForSuite(suiteId)) };
+  const body = await tileQueryBody(tile, def, user, suiteId, lockMap);
+  if (!body) return [];
+  body.limit = Math.max(Number(body.limit) || 0, 1000); // enough rows for a full curve
+  const data = await runLookerQuery('/queries/run/json_detail', body);
+  const fields = data?.fields || {};
+  const rows = data?.data || [];
+  if (!rows.length) return [];
+  const hidden = new Set((tile.vis || {}).hidden_fields || []);
+  const dims = (fields.dimensions || []).filter((f) => !hidden.has(f.name));
+  const measures = [...(fields.measures || []), ...(fields.table_calculations || [])].filter((f) => !hidden.has(f.name));
+  const isDateName = (n) => /date|day|week|month|year|created|time/i.test(n || '');
+  const looksDate = (v) => typeof v === 'string' && /^\d{4}-\d{2}/.test(v);
+  const dateDim = dims.find((f) => isDateName(f.name)) || dims.find((f) => looksDate(rows[0][f.name]?.value)) || dims[0];
+  const measure = measures[0] || dims.find((f) => f !== dateDim);
+  if (!dateDim || !measure) return [];
+  const numOf = (cell) => {
+    if (!cell) return null;
+    const r = cell.rendered;
+    if (r != null && r !== '') { const m = String(r).replace(/[\s,]/g, '').match(/-?\d+(?:\.\d+)?/); if (m && Number.isFinite(Number(m[0]))) return Number(m[0]); }
+    const v = Number(cell.value); return Number.isFinite(v) ? v : null;
+  };
+  return rows
+    .map((row) => ({ t: String(row[dateDim.name]?.value || ''), v: numOf(row[measure.name]) }))
+    .filter((p) => p.t && p.v != null)
+    .sort((a, b) => a.t.localeCompare(b.t));
+}
+require('./goals').mount(app, { db, auth, resolveTileValue, resolveTileSeries });
 
 // Format a Looker date value ("2026-05-29" / ISO) as "29 May 2026" for the
 // event dropdowns. Falls back to the raw string if it isn't a parseable date.

@@ -22,7 +22,7 @@ const crypto = require('crypto');
 const SOURCES = ['ticketing', 'cashless', 'access', 'audience', 'ga4', 'app', 'social_paid', 'sponsorship', 'manual'];
 const DIRECTIONS = ['at_least', 'at_most', 'exact'];
 
-function mount(app, { db, auth, resolveTileValue }) {
+function mount(app, { db, auth, resolveTileValue, resolveTileSeries }) {
   const sql = db.db;
   const now = () => new Date().toISOString();
   const uuid = () => crypto.randomUUID();
@@ -363,6 +363,21 @@ function mount(app, { db, auth, resolveTileValue }) {
       const value = await resolveTileValue({ dashboardId, tileId, user: req.user, suiteId: req.params.suiteId });
       res.json({ value: value == null ? null : Number(value) });
     } catch (e) { res.json({ value: null, error: e.message }); }
+  });
+
+  // Time-series for a tile under an event's scope — "last time's curve". Powers the
+  // checkpoint suggester in the editor: link a chart/table tile that carries the
+  // sell-by-now shape, read its [{ t, v }] rows under a comparable past event, and
+  // suggest checkpoint targets from that shape (scaled to this goal's target).
+  app.post('/api/goals/suites/:suiteId/tile-series', auth.requireAuth, async (req, res) => {
+    if (!db.getSuite(req.params.suiteId)) return res.status(404).json({ error: 'Event not found' });
+    if (!canView(req.user, req.params.suiteId)) return res.status(403).json({ error: 'Not allowed' });
+    const { dashboardId, tileId } = req.body || {};
+    if (typeof resolveTileSeries !== 'function' || !dashboardId || !tileId) return res.json({ series: [] });
+    try {
+      const series = await resolveTileSeries({ dashboardId, tileId, user: req.user, suiteId: req.params.suiteId });
+      res.json({ series });
+    } catch (e) { res.json({ series: [], error: e.message }); }
   });
 
   console.log('[goals] Results pillar mounted');
