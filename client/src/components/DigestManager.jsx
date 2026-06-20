@@ -94,6 +94,7 @@ function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }
     includeFollowed: job?.includeFollowed || false,
     followedVisual: job?.followedVisual || false,
     followedTiles: job?.followedTiles || [], // chosen subset; [] = all followed tiles
+    includeGoals: job?.includeGoals || false,
   }));
   // The client's followed tiles available to pick from (loaded when the option
   // is switched on). [] selection = include them all.
@@ -113,7 +114,7 @@ function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }
     contentMode: f.contentMode, tiles: f.tiles, recipients: f.recipients.split(',').map((s) => s.trim()).filter(Boolean),
     channel: f.channel, smsRecipients: f.smsRecipients.split(/[\s,;]+/).map((s) => s.trim()).filter(Boolean),
     alignDaysBefore: f.alignDaysBefore, priorityDashboards: f.priorityDashboards,
-    includeFollowed: f.includeFollowed, followedVisual: f.followedVisual,
+    includeFollowed: f.includeFollowed, followedVisual: f.followedVisual, includeGoals: f.includeGoals,
   });
 
   // Two preview paths: the debounced auto-preview renders the SAMPLE layout
@@ -133,7 +134,7 @@ function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }
     clearTimeout(debounce.current);
     debounce.current = setTimeout(() => refreshPreview(false), 350);
     return () => clearTimeout(debounce.current);
-  }, [f.role, f.roleFocus, f.focusMode, f.customMessage, f.contentMode, JSON.stringify(f.tiles), f.includeFollowed, f.followedVisual, JSON.stringify(f.followedTiles)]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [f.role, f.roleFocus, f.focusMode, f.customMessage, f.contentMode, JSON.stringify(f.tiles), f.includeFollowed, f.followedVisual, JSON.stringify(f.followedTiles), f.includeGoals]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load the client's followed tiles once the option is switched on.
   useEffect(() => {
@@ -245,6 +246,12 @@ function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }
                   </div>
                 </div>
               )}
+              <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--hairline)' }}>
+                <Toggle on={f.includeGoals} onClick={() => set('includeGoals', !f.includeGoals)}>
+                  🎯 {f.includeGoals ? 'Including a goals summary' : 'Include a goals summary'}
+                </Toggle>
+                <div style={hintS}>Adds a goals paragraph to the digest — the event’s targets with live progress, pace, vs last time and the projected finish (leads with the North Star).</div>
+              </div>
             </div>
           </Field>
 

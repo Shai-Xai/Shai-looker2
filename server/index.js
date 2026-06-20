@@ -2043,7 +2043,7 @@ async function buildFactsFromTiles(user, entityId, picks, alignDaysBefore = fals
 
 // Produce a role-lensed digest's structured content (links resolved). Throws if
 // AI/Looker isn't configured or there's no data — callers decide how to surface.
-async function buildDigestContent({ entityId, role, roleFocus, focusMode, contentMode, tiles, alignDaysBefore = false, priorityDashboards = [], includeFollowed = false, followedVisual = false, followedTiles = [], creatorEmail = '', recipientEmail, debug = false }) {
+async function buildDigestContent({ entityId, role, roleFocus, focusMode, contentMode, tiles, alignDaysBefore = false, priorityDashboards = [], includeFollowed = false, followedVisual = false, followedTiles = [], includeGoals = false, creatorEmail = '', recipientEmail, debug = false }) {
   const apiKey = anthropicKeyForEntity(entityId);
   if (!insights.isConfigured(apiKey)) throw new Error('AI is not configured for this client');
   const lens = ROLE_LENSES[role] || ROLE_LENSES.exec;
@@ -2084,9 +2084,26 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
   for (const t of followedFacts) { const s = `${t.dashboardId}|${t.title}`; if (!seenSig.has(s)) { factTilesAll.push(t); seenSig.add(s); } }
   if (!factTilesAll.length) throw new Error('No tile data available to summarise');
 
+  // Goals summary (opt-in) — resolve the entity's event goals with the SAME rich
+  // progress the Goals page shows (curve current, vs-last-time, pace, forecast), so the
+  // digest can carry a goals bullet. Capped to bound the per-goal Looker reads.
+  let goals = [];
+  if (includeGoals) {
+    try {
+      const caches = goalsApi.makeGoalCaches();
+      for (const su of (db.listSuitesForEntity(entityId) || [])) {
+        for (const g of goalsApi.listGoals(su.id)) {
+          goals.push({ ...(await goalsApi.attachProgress(g, user, caches)), suiteName: su.name });
+          if (goals.length >= 8) break;
+        }
+        if (goals.length >= 8) break;
+      }
+    } catch (e) { console.error('[digest] goals summary failed', e.message); }
+  }
+
   const byId = Object.fromEntries(catalogue.map((c) => [c.dashboardId, c]));
   const instructions = [aiInstructionsFor(null), briefingInstructionsFor(user, entityId, clientCatalogue(entityId).suites)].filter(Boolean).join('\n\n');
-  const raw = await insights.digestBrief({ tiles: factTilesAll, roleLabel: lens.label, roleFocus: effectiveFocus, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), capabilities: ACTION_CAPABILITIES, today: todayLabel() });
+  const raw = await insights.digestBrief({ tiles: factTilesAll, roleLabel: lens.label, roleFocus: effectiveFocus, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), capabilities: ACTION_CAPABILITIES, goals, today: todayLabel() });
   const href = (id) => { const c = id && byId[id]; return c ? `${mailer.baseUrl()}/suite/${c.suiteId}/d/${id}` : ''; };
   // A suggested action with an executable capability deep-links into the
   // pre-filled "Make it happen" campaign editor (recipe auto-resolves the

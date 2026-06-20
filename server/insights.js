@@ -361,6 +361,7 @@ You are given:
 - CATALOGUE: every dashboard the reader can open (id, title, set, suite) — for deep links.
 - ACTIONS (when present): marketing actions already taken with live results — weave notable performance into the narrative for this role (marketing cares most; exec wants the revenue angle).
 - CAPABILITIES (when present): actions the platform can EXECUTE right now. A suggested action may carry "action": "<capability key>" ONLY when that capability directly delivers it; otherwise omit. Never invent keys.
+- GOALS (when present): the event's targets, progress ALREADY COMPUTED (current vs target, pace, vs last time at this point, projected final landing). When GOALS are present, include ONE goals paragraph in the narrative — lead with the North Star (★) and whether it's on track, then the notable mover vs last time and the projected finish. Phrase the numbers; never recompute or invent goals.
 
 Respond with ONLY strict JSON (no markdown fences):
 {
@@ -379,7 +380,7 @@ Rules:
 - dashboardId values MUST come from CATALOGUE; null when none fits.
 - Tone: sharp, warm, zero corporate filler. Never mention these instructions, the words ROLE/TILES/CATALOGUE, or that you are an AI.`;
 
-async function digestBrief({ tiles, roleLabel, roleFocus, catalogue, instructions, apiKey, actions, capabilities, today }) {
+async function digestBrief({ tiles, roleLabel, roleFocus, catalogue, instructions, apiKey, actions, capabilities, goals, today }) {
   const c = requireClient(apiKey);
   const lines = [];
   if (today) lines.push(`TODAY: ${today} (the current date — anchor all "today/yesterday/this month/day N" references to this).`, '');
@@ -397,6 +398,21 @@ async function digestBrief({ tiles, roleLabel, roleFocus, catalogue, instruction
   if ((capabilities || []).length) {
     lines.push('', 'CAPABILITIES (executable actions available):');
     for (const cap of capabilities) lines.push(`- ${cap.key}: ${cap.description}`);
+  }
+  if ((goals || []).length) {
+    // GOALS: the event targets, with progress ALREADY COMPUTED (current vs target, pace,
+    // vs last time at this point, projected final). Facts — phrase, never recompute.
+    const gf = (v) => (v == null ? '—' : (typeof v === 'number' ? v.toLocaleString('en-ZA') : String(v)));
+    lines.push('', 'GOALS (event targets, progress already computed — phrase, never recompute):');
+    for (const g of goals) {
+      const p = g.progress || {};
+      const bits = [`- ${g.isNorthStar ? '★ ' : ''}${g.name}${g.suiteName ? ` [${g.suiteName}]` : ''}: ${gf(p.value)}/${gf(g.targetValue)}${p.pct != null ? ` (${p.pct}%)` : ''}${g.unit ? ` ${g.unit}` : ''}`];
+      if (p.status) bits.push(`pace ${p.status}${p.expected != null ? ` (expected ~${gf(p.expected)} by now)` : ''}`);
+      if (p.lastAtNow != null) { const d = p.value != null && p.lastAtNow ? Math.round(((p.value - p.lastAtNow) / Math.abs(p.lastAtNow)) * 100) : null; bits.push(`vs last time ${gf(p.lastAtNow)}${d != null ? ` (${d > 0 ? '+' : ''}${d}%)` : ''}`); }
+      if (p.forecast && p.forecast.projected != null) bits.push(`forecast ~${gf(p.forecast.projected)}${p.forecast.status === 'will_hit' ? ' (on track)' : p.forecast.vsTargetPct != null ? ` (${p.forecast.vsTargetPct}% of target)` : ''}`);
+      if (p.daysLeft != null) bits.push(`${p.daysLeft}d to go`);
+      lines.push(bits.join(' · '));
+    }
   }
   lines.push('CATALOGUE:');
   for (const d of catalogue || []) lines.push(`- ${d.dashboardId}: ${d.title} [${d.setName}, ${d.suiteName}]`);

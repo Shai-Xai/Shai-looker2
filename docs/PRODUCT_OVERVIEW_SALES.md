@@ -279,6 +279,9 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-20** — **Goals in the digest** 🧪: a scheduled digest can now include a
+  **goals summary** paragraph (toggle in the digest editor) — the event's targets with
+  live progress, pace, vs-last-time and projected finish, leading with the North Star.
 - **2026-06-20** — **Goals — pace, forecast & comparisons** 🧪: goals now read pace
   off **last event's real sell-curve** (days-before-event), show **vs last time** and
   a **projected final landing** on the card, let you set the baseline from a **picked
