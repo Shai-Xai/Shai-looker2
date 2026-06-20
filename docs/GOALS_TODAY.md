@@ -65,7 +65,9 @@
 - **A — shipped** (page, detail, mobile fix, event link).
 - **B — shipped** (baseline-first; always-available picker + manual entry).
 - **C — shipped** (milestones + milestone-aware pace).
-- **D / E — pending.**
+- **D — shipped** (personal goals: per-user, team-visible-or-private, optional
+  roll-up to an event goal; owner-or-admin edit; contributor list on the parent).
+- **E — pending** (templates).
 
 ## Realistic phasing
 This is now a multi-day program, not one day. **Today: land Slice A** (the page,

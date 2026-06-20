@@ -8,7 +8,7 @@ import { Ring, Dial, Bar, goalState, fmtVal } from './GoalViz.jsx';
 // itself is no longer an edit trap (the mobile fix). Shows progress big, the pace
 // state, "vs last time" (baseline), the source, and an event link through to the
 // dashboard the goal is tracked from. Milestones (Slice C) render here later.
-export default function GoalDetail({ goal, suiteName, onEdit, onDelete, onClose, onOpenEvent, onChanged, canManage = true }) {
+export default function GoalDetail({ goal, suiteName, onEdit, onDelete, onClose, onOpenEvent, onChanged, canManage = true, me, contributors = [], linkedGoalName }) {
   const isMobile = useIsMobile();
   const [confirmDel, setConfirmDel] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -115,6 +115,32 @@ export default function GoalDetail({ goal, suiteName, onEdit, onDelete, onClose,
               title={tileSourced ? 'Open the source dashboard' : 'Open this event'}>
               {suiteName} →
             </button>
+          </div>
+        )}
+
+        {/* Personal-goal context: owner (if not you), visibility, and the event goal it feeds. */}
+        {goal.scope === 'personal' && (
+          <>
+            {goal.ownerRef && goal.ownerRef !== me && (
+              <div style={row}><span style={rowLabel}>Owner</span><span>{goal.ownerRef}</span></div>
+            )}
+            <div style={row}><span style={rowLabel}>Visibility</span><span>{goal.visibility === 'private' ? '🔒 Private — you + admins' : '👥 Visible to the team'}</span></div>
+            {linkedGoalName && (
+              <div style={row}><span style={rowLabel}>Contributes to</span><span>{linkedGoalName}</span></div>
+            )}
+          </>
+        )}
+
+        {/* Event goal: the personal goals rolling up into it. */}
+        {contributors.length > 0 && (
+          <div style={{ paddingTop: 8, borderTop: '1px solid var(--hairline)' }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', marginBottom: 4 }}>Contributing personal goals</div>
+            {contributors.map((c) => (
+              <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '4px 0', fontSize: 13 }}>
+                <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}{c.ownerRef ? ` · ${c.ownerRef}` : ''}</span>
+                <span style={{ fontWeight: 700, color: 'var(--muted)', flexShrink: 0 }}>{c.progress && c.progress.pct != null ? `${c.progress.pct}%` : '—'}</span>
+              </div>
+            ))}
           </div>
         )}
 

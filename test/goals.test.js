@@ -171,3 +171,31 @@ test('goals list in position order; updating position reorders them (drag-reorde
   await app.req('PUT', `/api/goals/${b.id}`, { as: owner, body: { position: 2 } });
   assert.deepEqual(await namesNow(), ['C', 'A', 'B'], 'order follows position, not North-Star-first');
 });
+
+test('a member without goals.manage can create their OWN personal goal (not an event goal)', async () => {
+  assert.equal((await create(viewer, { name: 'Nope event', source: 'manual', targetValue: 1, scope: 'event' })).status, 403, 'still cannot create an event goal');
+  const r = await create(viewer, { name: 'My personal push', source: 'manual', targetValue: 100, scope: 'personal' });
+  assert.equal(r.status, 201);
+  assert.equal(r.body.goal.scope, 'personal');
+  assert.equal(r.body.goal.ownerRef, 'g-viewer@test.local', 'owned by the creator');
+});
+
+test('personal-goal visibility: private is owner + admin only; team is shared', async () => {
+  const sid = h.db.createSuite({ entityId, name: 'Visibility test' }).id;
+  await app.req('POST', `/api/goals/suites/${sid}`, { as: owner, body: { name: 'Secret', source: 'manual', targetValue: 1, scope: 'personal', visibility: 'private' } });
+  await app.req('POST', `/api/goals/suites/${sid}`, { as: owner, body: { name: 'Shared', source: 'manual', targetValue: 1, scope: 'personal', visibility: 'team' } });
+  const seenBy = async (as) => (await app.req('GET', `/api/goals/suites/${sid}`, { as })).body.personalGoals.map((g) => g.name).sort();
+  assert.deepEqual(await seenBy(owner), ['Secret', 'Shared'], 'owner sees both');
+  assert.deepEqual(await seenBy(viewer), ['Shared'], 'another member sees only the team-visible one');
+  assert.deepEqual(await seenBy(admin), ['Secret', 'Shared'], 'admin sees both');
+});
+
+test('a personal goal rolls up to an event goal; only its owner (or admin) can edit it', async () => {
+  const sid = h.db.createSuite({ entityId, name: 'Rollup test' }).id;
+  const event = (await app.req('POST', `/api/goals/suites/${sid}`, { as: owner, body: { name: 'Event NS', source: 'manual', targetValue: 1000 } })).body.goal;
+  const personal = (await app.req('POST', `/api/goals/suites/${sid}`, { as: viewer, body: { name: 'My bit', source: 'manual', targetValue: 200, scope: 'personal', rollsUpTo: event.id } })).body.goal;
+  assert.equal(personal.rollsUpTo, event.id, 'remembers the parent event goal');
+  assert.equal((await app.req('PUT', `/api/goals/${personal.id}`, { as: viewer, body: { targetValue: 250 } })).status, 200, 'owner can edit');
+  assert.equal((await app.req('PUT', `/api/goals/${personal.id}`, { as: owner, body: { targetValue: 999 } })).status, 403, 'another member (even with goals.manage) cannot');
+  assert.equal((await app.req('PUT', `/api/goals/${personal.id}`, { as: admin, body: { targetValue: 300 } })).status, 200, 'admin can');
+});

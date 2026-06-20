@@ -9,9 +9,10 @@ import { useIsMobile } from '../lib/useIsMobile.js';
 // Dual-surface: identical for a client self-serving and an admin acting on their
 // behalf — the server guard decides who may write. `entityId` scopes the tile
 // catalogue; `suiteId` is the event the goal belongs to.
-export default function GoalEditor({ entityId, suiteId, suites = [], goal, onClose, onSaved }) {
+export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope = 'event', eventGoals = [], onClose, onSaved }) {
   const isMobile = useIsMobile();
   const editing = !!goal;
+  const isPersonal = (goal ? goal.scope : scope) === 'personal';
   const hasTile = !!(goal?.metricRef?.tileId);
   const [activeSuite, setActiveSuite] = useState(goal?.suiteId || suiteId);
   const [name, setName] = useState(goal?.name || '');
@@ -35,6 +36,9 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, onClo
   const [pastSuites, setPastSuites] = useState([]); // other events to compare against
   // Milestones — weekly/monthly checkpoints on the way to the target (Slice C).
   const [milestones, setMilestones] = useState(goal?.milestones || []);
+  // Personal-goal fields (Slice D): who can see it + which event goal it feeds.
+  const [visibility, setVisibility] = useState(goal?.visibility || 'team');
+  const [rollsUpTo, setRollsUpTo] = useState(goal?.rollsUpTo || '');
   const [cat, setCat] = useState(null);       // tile catalogue { dashboards: [...] }
   const [preview, setPreview] = useState(null); // live value of the picked tile
   const [busy, setBusy] = useState(false);
@@ -114,7 +118,10 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, onClo
       metricRef: track === 'tile' ? { dashboardId, tileId } : {},
       targetValue: Number(target),
       unit, direction, display, byDate,
-      isNorthStar: northStar,
+      scope: isPersonal ? 'personal' : 'event',
+      isNorthStar: isPersonal ? false : northStar,
+      visibility: isPersonal ? visibility : 'team',
+      rollsUpTo: isPersonal ? rollsUpTo : '',
       // Baseline persists whenever there's a number — whether read from a past
       // event's tile or typed in by hand (last year isn't always in Pulse).
       baselineEventId: baseNum != null ? baselineSuiteId : '',
@@ -147,8 +154,8 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, onClo
     <div style={overlay} onClick={onClose}>
       <div style={{ ...sheet, maxWidth: isMobile ? '100%' : 460 }} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-          <span style={{ fontSize: 20 }}>🎯</span>
-          <h2 style={{ fontSize: 17, fontWeight: 800, flex: 1 }}>{editing ? 'Edit goal' : 'Set a goal'}</h2>
+          <span style={{ fontSize: 20 }}>{isPersonal ? '🙋' : '🎯'}</span>
+          <h2 style={{ fontSize: 17, fontWeight: 800, flex: 1 }}>{editing ? (isPersonal ? 'Edit personal goal' : 'Edit goal') : (isPersonal ? 'Set a personal goal' : 'Set a goal')}</h2>
           <button onClick={onClose} style={xBtn} aria-label="Close">✕</button>
         </div>
 
@@ -272,11 +279,30 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, onClo
           </div>
         </Field>
 
-        <label style={northRow}>
-          <input type="checkbox" checked={northStar} onChange={(e) => setNorthStar(e.target.checked)} />
-          <span style={{ fontWeight: 700 }}>⭐ Make this the North Star</span>
-          <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>the one headline goal for this event</span>
-        </label>
+        {isPersonal ? (
+          <>
+            <Field label="Who can see this?" hint="Team-visible goals show on the event so everyone sees who’s driving what. Private goals are just you (and Howler admins).">
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Seg active={visibility === 'team'} onClick={() => setVisibility('team')}>👥 My team</Seg>
+                <Seg active={visibility === 'private'} onClick={() => setVisibility('private')}>🔒 Just me</Seg>
+              </div>
+            </Field>
+            {eventGoals.length > 0 && (
+              <Field label="Contributes to (optional)" hint="Link this to an event goal it helps reach — it’ll show as a contributor on that goal.">
+                <select value={rollsUpTo} onChange={(e) => setRollsUpTo(e.target.value)} style={inp}>
+                  <option value="">Not linked</option>
+                  {eventGoals.map((eg) => <option key={eg.id} value={eg.id}>{eg.name}</option>)}
+                </select>
+              </Field>
+            )}
+          </>
+        ) : (
+          <label style={northRow}>
+            <input type="checkbox" checked={northStar} onChange={(e) => setNorthStar(e.target.checked)} />
+            <span style={{ fontWeight: 700 }}>⭐ Make this the North Star</span>
+            <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>the one headline goal for this event</span>
+          </label>
+        )}
 
         {err && <div style={{ color: 'var(--error, #dc2626)', fontSize: 12.5, marginTop: 10 }}>{err}</div>}
 

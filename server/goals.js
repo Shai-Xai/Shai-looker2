@@ -82,6 +82,9 @@ function mount(app, { db, auth, resolveTileValue }) {
   try { sql.exec("ALTER TABLE goals ADD COLUMN display TEXT NOT NULL DEFAULT 'bar'"); } catch { /* column already present */ }
   // Milestones: weekly/monthly checkpoints on the way to the target (Slice C).
   try { sql.exec("ALTER TABLE goals ADD COLUMN milestones TEXT NOT NULL DEFAULT '[]'"); } catch { /* column already present */ }
+  // Personal goals (Slice D): per-user goals that contribute to the event. Default
+  // team-visible; an owner can mark theirs private (owner + admins only).
+  try { sql.exec("ALTER TABLE goals ADD COLUMN visibility TEXT NOT NULL DEFAULT 'team'"); } catch { /* column already present */ }
 
   const parseJson = (s, fb) => { try { return JSON.parse(s); } catch { return fb; } };
   function rowToGoal(r) {
@@ -94,7 +97,7 @@ function mount(app, { db, auth, resolveTileValue }) {
       baselineEventId: r.baseline_event_id, baselineValue: r.baseline_value, baselineSource: r.baseline_source,
       baselineComparable: !!r.baseline_comparable,
       conversionRef: r.conversion_ref ? parseJson(r.conversion_ref, null) : null,
-      rollsUpTo: r.rolls_up_to || null,
+      rollsUpTo: r.rolls_up_to || null, visibility: r.visibility || 'team',
       status: r.status, resultBand: r.result_band || null,
       createdBy: r.created_by, createdAt: r.created_at, updatedBy: r.updated_by, updatedAt: r.updated_at,
     };
@@ -102,7 +105,14 @@ function mount(app, { db, auth, resolveTileValue }) {
   const goalById = (id) => rowToGoal(sql.prepare('SELECT * FROM goals WHERE id=?').get(id));
   // Ordered by position (drag-to-reorder) then recency. The North Star is marked
   // by is_north_star, not forced to the front — so a client can order goals freely.
-  const listGoals = (suiteId) => sql.prepare("SELECT * FROM goals WHERE suite_id=? AND status='active' ORDER BY position, created_at").all(suiteId).map(rowToGoal);
+  const listGoals = (suiteId) => sql.prepare("SELECT * FROM goals WHERE suite_id=? AND scope='event' AND status='active' ORDER BY position, created_at").all(suiteId).map(rowToGoal);
+  // Personal goals visible to this user: their own always; others only when
+  // team-visible. Admins see all (for support / acting on a client's behalf).
+  const listPersonalGoals = (suiteId, user) => {
+    const all = sql.prepare("SELECT * FROM goals WHERE suite_id=? AND scope='personal' AND status='active' ORDER BY position, created_at").all(suiteId).map(rowToGoal);
+    if (user.role === 'admin') return all;
+    return all.filter((g) => g.visibility === 'team' || g.ownerRef === user.email);
+  };
 
   // Sanitise incoming goal fields. P1 exposes only event goals; cascade/attribution
   // columns exist but aren't set here.
@@ -122,6 +132,10 @@ function mount(app, { db, auth, resolveTileValue }) {
       baselineEventId: String(b.baselineEventId || '').slice(0, 64),
       baselineValue: b.baselineValue == null || b.baselineValue === '' ? null : Number(b.baselineValue),
       baselineSource: String(b.baselineSource || '').slice(0, 32),
+      // Personal-goal fields (ignored for event goals at the route level).
+      scope: b.scope === 'personal' ? 'personal' : 'event',
+      visibility: b.visibility === 'private' ? 'private' : 'team',
+      rollsUpTo: String(b.rollsUpTo || '').slice(0, 64),
       // Milestones: dated checkpoints on the way to the target. Sanitised, kept in
       // date order, capped (a goal isn't a project plan).
       milestones: Array.isArray(b.milestones) ? b.milestones
@@ -245,38 +259,53 @@ function mount(app, { db, auth, resolveTileValue }) {
     const su = db.getSuite(suiteId);
     return !!su && auth.canAccessSuite(user, suiteId) && auth.hasPermission(user, su.entityId, 'goals.manage');
   }
+  // Who may edit/delete a given goal: admins anything; the OWNER of a personal goal
+  // their own (no goals.manage needed — it's theirs); event goals need goals.manage.
+  function canEditGoal(user, goal) {
+    if (user.role === 'admin') return true;
+    if (goal.scope === 'personal') return goal.ownerRef === user.email && auth.canAccessSuite(user, goal.suiteId);
+    return canManage(user, goal.suiteId);
+  }
 
   // ── Routes (one guarded set serves admin + client self-service, keyed by suite) ──
   app.get('/api/goals/suites/:suiteId', auth.requireAuth, async (req, res) => {
     const su = db.getSuite(req.params.suiteId);
     if (!su) return res.status(404).json({ error: 'Event not found' });
     if (!canView(req.user, req.params.suiteId)) return res.status(403).json({ error: 'Not allowed' });
-    const goals = listGoals(req.params.suiteId);
-    const out = [];
-    for (const g of goals) {
+    const attach = async (g) => {
       const m = await resolveMetric(g, { user: req.user });
-      out.push({ ...g, progress: { ...computeProgress(g, m.value), asOf: m.asOf, resolvedSource: m.source } });
-    }
-    res.json({ goals: out, canManage: canManage(req.user, req.params.suiteId) });
+      return { ...g, progress: { ...computeProgress(g, m.value), asOf: m.asOf, resolvedSource: m.source } };
+    };
+    const goals = [];
+    for (const g of listGoals(req.params.suiteId)) goals.push(await attach(g));
+    const personalGoals = [];
+    for (const g of listPersonalGoals(req.params.suiteId, req.user)) personalGoals.push(await attach(g));
+    res.json({ goals, personalGoals, canManage: canManage(req.user, req.params.suiteId), me: req.user.email });
   });
 
   app.post('/api/goals/suites/:suiteId', auth.requireAuth, (req, res) => {
     const su = db.getSuite(req.params.suiteId);
     if (!su) return res.status(404).json({ error: 'Event not found' });
-    if (!canManage(req.user, req.params.suiteId)) return res.status(403).json({ error: 'Not allowed' });
     const c = cleanInput(req.body || {});
+    const personal = c.scope === 'personal';
+    // Event goals need goals.manage; a personal goal is the user's own, so any
+    // suite member may create one (admins can do either).
+    if (personal ? !canView(req.user, req.params.suiteId) : !canManage(req.user, req.params.suiteId)) {
+      return res.status(403).json({ error: 'Not allowed' });
+    }
     if (!c.name) return res.status(400).json({ error: 'A goal name is required' });
     const id = uuid(); const ts = now();
+    const ownerRef = personal ? req.user.email : req.params.suiteId;
     const existing = sql.prepare("SELECT COUNT(*) n FROM goals WHERE suite_id=? AND scope='event' AND status='active'").get(req.params.suiteId).n;
     sql.prepare(`INSERT INTO goals (id, suite_id, entity_id, scope, owner_ref, name, metric_key, source, metric_ref,
         target_value, unit, direction, display, by_date, is_north_star, position, baseline_event_id, baseline_value, baseline_source,
-        milestones, status, created_by, created_at, updated_by, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-      id, req.params.suiteId, su.entityId, 'event', req.params.suiteId, c.name, c.metricKey, c.source, JSON.stringify(c.metricRef),
+        milestones, visibility, rolls_up_to, status, created_by, created_at, updated_by, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      id, req.params.suiteId, su.entityId, c.scope, ownerRef, c.name, c.metricKey, c.source, JSON.stringify(c.metricRef),
       c.targetValue, c.unit, c.direction, c.display, c.byDate, 0, c.position, c.baselineEventId, c.baselineValue, c.baselineSource,
-      JSON.stringify(c.milestones), 'active', req.user.email, ts, req.user.email, ts);
-    // First active event goal becomes the North Star; or honour an explicit request.
-    if (existing === 0 || req.body?.isNorthStar) setNorthStar(req.params.suiteId, id);
+      JSON.stringify(c.milestones), personal ? c.visibility : 'team', personal ? c.rollsUpTo : '', 'active', req.user.email, ts, req.user.email, ts);
+    // Only EVENT goals get a North Star; the first becomes it, or honour a request.
+    if (!personal && (existing === 0 || req.body?.isNorthStar)) setNorthStar(req.params.suiteId, id);
     audit(id, 'created', null, c.name, req.user.email);
     res.status(201).json({ goal: goalById(id) });
   });
@@ -284,16 +313,18 @@ function mount(app, { db, auth, resolveTileValue }) {
   app.put('/api/goals/:id', auth.requireAuth, (req, res) => {
     const g = goalById(req.params.id);
     if (!g) return res.status(404).json({ error: 'Goal not found' });
-    if (!canManage(req.user, g.suiteId)) return res.status(403).json({ error: 'Not allowed' });
+    if (!canEditGoal(req.user, g)) return res.status(403).json({ error: 'Not allowed' });
     const c = cleanInput({ ...g, ...req.body });
+    const personal = g.scope === 'personal';
     // Audit the fields people care about.
     for (const [field, oldV, newV] of [['name', g.name, c.name], ['target_value', g.targetValue, c.targetValue], ['by_date', g.byDate, c.byDate], ['direction', g.direction, c.direction]]) {
       if (String(oldV) !== String(newV)) audit(g.id, field, oldV, newV, req.user.email);
     }
     sql.prepare(`UPDATE goals SET name=?, metric_key=?, source=?, metric_ref=?, target_value=?, unit=?, direction=?,
-        display=?, by_date=?, position=?, baseline_event_id=?, baseline_value=?, baseline_source=?, milestones=?, updated_by=?, updated_at=? WHERE id=?`).run(
+        display=?, by_date=?, position=?, baseline_event_id=?, baseline_value=?, baseline_source=?, milestones=?, visibility=?, rolls_up_to=?, updated_by=?, updated_at=? WHERE id=?`).run(
       c.name, c.metricKey, c.source, JSON.stringify(c.metricRef), c.targetValue, c.unit, c.direction,
-      c.display, c.byDate, c.position, c.baselineEventId, c.baselineValue, c.baselineSource, JSON.stringify(c.milestones), req.user.email, now(), g.id);
+      c.display, c.byDate, c.position, c.baselineEventId, c.baselineValue, c.baselineSource, JSON.stringify(c.milestones),
+      personal ? c.visibility : 'team', personal ? c.rollsUpTo : '', req.user.email, now(), g.id);
     if (req.body?.isNorthStar && !g.isNorthStar) { setNorthStar(g.suiteId, g.id); audit(g.id, 'is_north_star', false, true, req.user.email); }
     res.json({ goal: goalById(g.id) });
   });
@@ -301,7 +332,7 @@ function mount(app, { db, auth, resolveTileValue }) {
   app.delete('/api/goals/:id', auth.requireAuth, (req, res) => {
     const g = goalById(req.params.id);
     if (!g) return res.status(404).json({ error: 'Goal not found' });
-    if (!canManage(req.user, g.suiteId)) return res.status(403).json({ error: 'Not allowed' });
+    if (!canEditGoal(req.user, g)) return res.status(403).json({ error: 'Not allowed' });
     sql.prepare('DELETE FROM goals WHERE id=?').run(g.id);
     sql.prepare('DELETE FROM goal_snapshots WHERE goal_id=?').run(g.id);
     if (g.isNorthStar) ensureNorthStar(g.suiteId); // promote the next so one always leads
@@ -313,7 +344,7 @@ function mount(app, { db, auth, resolveTileValue }) {
   app.post('/api/goals/:id/snapshot', auth.requireAuth, (req, res) => {
     const g = goalById(req.params.id);
     if (!g) return res.status(404).json({ error: 'Goal not found' });
-    if (!canManage(req.user, g.suiteId)) return res.status(403).json({ error: 'Not allowed' });
+    if (!canEditGoal(req.user, g)) return res.status(403).json({ error: 'Not allowed' });
     const v = Number(req.body?.value);
     if (!Number.isFinite(v)) return res.status(400).json({ error: 'A numeric value is required' });
     sql.prepare('INSERT INTO goal_snapshots (id, goal_id, at, actual_value) VALUES (?,?,?,?)').run(uuid(), g.id, now(), v);
