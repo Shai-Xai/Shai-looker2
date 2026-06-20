@@ -26,8 +26,9 @@ export default function GoalsPage() {
   const [brief, setBrief] = useState(null);     // { suiteId, name } | null
   const [params, setParams] = useSearchParams();
   const handled = useRef(false);
+  const [suitesLoading, setSuitesLoading] = useState(true);
 
-  useEffect(() => { api.mySuites().then(setSuites).catch(() => {}); }, []);
+  useEffect(() => { api.mySuites().then(setSuites).catch(() => {}).finally(() => setSuitesLoading(false)); }, []);
   const visibleSuites = activeEntityId ? suites.filter((s) => s.entityId === activeEntityId) : suites;
 
   const loadSuite = useCallback((sid) => {
@@ -39,7 +40,7 @@ export default function GoalsPage() {
 
   // Every accessible event is shown — even with no goals yet, a member can add a
   // personal goal there.
-  const rows = visibleSuites.map((s) => ({ suite: s, goals: [], personalGoals: [], canManage: false, ...(bySuite[s.id] || {}) }));
+  const rows = visibleSuites.map((s) => ({ suite: s, goals: [], personalGoals: [], canManage: false, loaded: bySuite[s.id] !== undefined, ...(bySuite[s.id] || {}) }));
 
   const goalsIn = (r) => [...(r.goals || []), ...(r.personalGoals || [])];
 
@@ -83,34 +84,39 @@ export default function GoalsPage() {
         Targets on the numbers that matter — tracked live, the North Star leading. Tap a goal to see its detail, or set a new one.
       </p>
 
-      {!rows.length && (
+      {suitesLoading && <SectionSkeleton />}
+
+      {!suitesLoading && !rows.length && (
         <div style={{ padding: '28px 18px', textAlign: 'center', color: 'var(--muted)', border: '1px dashed var(--hairline)', borderRadius: 14 }}>
           No events yet. Once you have an event, set its first goal here.
         </div>
       )}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 26 }}>
-        {rows.map(({ suite, goals = [], personalGoals = [], canManage }) => (
+        {rows.map(({ suite, goals = [], personalGoals = [], canManage, loaded }) => (
           <section key={suite.id}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
               <h2 style={eventName}>{suite.name}</h2>
               <span style={{ flex: 1 }} />
-              {goals.length > 0 && (
+              {loaded && goals.length > 0 && (
                 <button onClick={() => setBrief({ suiteId: suite.id, name: suite.name })} style={owlBtn} title="Owl summary of these goals">🦉 Owl summary</button>
               )}
-              {canManage && (
+              {loaded && canManage && (
                 <button onClick={() => setEditor({ suiteId: suite.id, goal: null, scope: 'event' })} style={addBtn}>＋ {goals.length ? 'Add a goal' : 'Set a goal'}</button>
               )}
             </div>
+            {/* Still resolving this event's live goal values — show a skeleton, not a
+                premature "no goals" (the resolve hits Looker and can take a few seconds). */}
+            {!loaded && <SuiteSkeleton />}
             {/* Activity-Rings hero — all of this event's targets at a glance (Apple-style). */}
-            {[...goals, ...personalGoals].length >= 2 && (
+            {loaded && [...goals, ...personalGoals].length >= 2 && (
               <div style={{ marginBottom: 14 }}>
                 <GoalRingsCard
                   goals={[...goals, ...personalGoals]}
                   onPick={(g) => setDetail({ suiteId: suite.id, goalId: g.id })} />
               </div>
             )}
-            {goals.length ? (
+            {loaded && (goals.length ? (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
                 {goals.map((g, i) => (
                   <GoalCard key={g.id} goal={g} index={i} colorIndex={i} grid onClick={() => setDetail({ suiteId: suite.id, goalId: g.id })} />
@@ -118,22 +124,26 @@ export default function GoalsPage() {
               </div>
             ) : (
               <div style={{ fontSize: 13, color: 'var(--muted)' }}>No event goals yet.</div>
-            )}
+            ))}
 
             {/* Personal goals — yours + (team-visible) the team's. Anyone can add one. */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '16px 0 10px' }}>
-              <h3 style={subHead}>🙋 Personal goals</h3>
-              <span style={{ flex: 1 }} />
-              <button onClick={() => setEditor({ suiteId: suite.id, goal: null, scope: 'personal' })} style={addBtn}>＋ Add a personal goal</button>
-            </div>
-            {personalGoals.length ? (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
-                {personalGoals.map((g, i) => (
-                  <GoalCard key={g.id} goal={g} index={i} colorIndex={goals.length + i} grid onClick={() => setDetail({ suiteId: suite.id, goalId: g.id })} />
-                ))}
-              </div>
-            ) : (
-              <div style={{ fontSize: 13, color: 'var(--muted)' }}>No personal goals yet — set yours, and link it to an event goal if it helps reach one.</div>
+            {loaded && (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '16px 0 10px' }}>
+                  <h3 style={subHead}>🙋 Personal goals</h3>
+                  <span style={{ flex: 1 }} />
+                  <button onClick={() => setEditor({ suiteId: suite.id, goal: null, scope: 'personal' })} style={addBtn}>＋ Add a personal goal</button>
+                </div>
+                {personalGoals.length ? (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+                    {personalGoals.map((g, i) => (
+                      <GoalCard key={g.id} goal={g} index={i} colorIndex={goals.length + i} grid onClick={() => setDetail({ suiteId: suite.id, goalId: g.id })} />
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 13, color: 'var(--muted)' }}>No personal goals yet — set yours, and link it to an event goal if it helps reach one.</div>
+                )}
+              </>
             )}
           </section>
         ))}
@@ -169,6 +179,35 @@ export default function GoalsPage() {
           onSaved={reloadAll}
         />
       )}
+    </div>
+  );
+}
+
+// Shimmer placeholders shown while goals resolve (live values hit Looker, so a
+// section can take a few seconds). Uses the app's standard `.skel` shimmer.
+function Skel({ w = '100%', h = 14, r = 8, style }) {
+  return <div className="skel" style={{ width: w, height: h, borderRadius: r, ...style }} />;
+}
+function SuiteSkeleton() {
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 18, alignItems: 'center', flexWrap: 'wrap', background: 'var(--tile-bg, var(--card))', border: '1px solid var(--border)', borderRadius: 18, padding: '18px 20px', marginBottom: 14 }}>
+        <Skel w={150} h={150} r={980} />
+        <div style={{ flex: 1, minWidth: 160, display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {[0, 1, 2, 3].map((i) => <Skel key={i} w={`${80 - i * 8}%`} h={16} />)}
+        </div>
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+        {[0, 1].map((i) => <Skel key={i} w={160} h={138} r={14} />)}
+      </div>
+    </div>
+  );
+}
+function SectionSkeleton() {
+  return (
+    <div style={{ marginBottom: 26 }}>
+      <Skel w={120} h={12} style={{ marginBottom: 12 }} />
+      <SuiteSkeleton />
     </div>
   );
 }
