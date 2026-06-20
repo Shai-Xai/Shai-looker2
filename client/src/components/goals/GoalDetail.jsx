@@ -85,6 +85,24 @@ export default function GoalDetail({ goal, suiteName, onEdit, onDelete, onClose,
           <div style={row}><span style={rowLabel}>By</span><span>{fmtDate(goal.byDate)}</span></div>
         )}
 
+        {/* Checkpoints — pace is measured against the nearest upcoming one. */}
+        {Array.isArray(p.milestones) && p.milestones.length > 0 && (
+          <div style={{ paddingTop: 8, borderTop: '1px solid var(--hairline)' }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', marginBottom: 4 }}>Checkpoints</div>
+            {p.milestones.map((m, i) => {
+              const hit = p.value != null && (goal.direction === 'at_most' ? p.value <= m.targetValue : p.value >= m.targetValue);
+              const isNext = p.nextMilestone && p.nextMilestone.byDate === m.byDate && p.nextMilestone.targetValue === m.targetValue;
+              return (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '4px 0', fontSize: 13 }}>
+                  <span style={{ width: 18, flexShrink: 0 }}>{hit ? '✅' : isNext ? '➡️' : '○'}</span>
+                  <span style={{ flex: 1, color: isNext ? 'var(--text)' : 'var(--muted)', fontWeight: isNext ? 700 : 500 }}>{fmtDate(m.byDate)}</span>
+                  <span style={{ fontWeight: 700 }}>{fmtVal(m.targetValue, goal.unit)}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         {/* Source + event link */}
         <div style={row}>
           <span style={rowLabel}>Source</span>

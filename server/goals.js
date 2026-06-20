@@ -80,6 +80,8 @@ function mount(app, { db, auth, resolveTileValue }) {
   `);
   // Additive migration for tables created before `display` existed (idempotent).
   try { sql.exec("ALTER TABLE goals ADD COLUMN display TEXT NOT NULL DEFAULT 'bar'"); } catch { /* column already present */ }
+  // Milestones: weekly/monthly checkpoints on the way to the target (Slice C).
+  try { sql.exec("ALTER TABLE goals ADD COLUMN milestones TEXT NOT NULL DEFAULT '[]'"); } catch { /* column already present */ }
 
   const parseJson = (s, fb) => { try { return JSON.parse(s); } catch { return fb; } };
   function rowToGoal(r) {
@@ -88,7 +90,7 @@ function mount(app, { db, auth, resolveTileValue }) {
       id: r.id, suiteId: r.suite_id, entityId: r.entity_id, scope: r.scope, ownerRef: r.owner_ref,
       name: r.name, metricKey: r.metric_key, source: r.source, metricRef: parseJson(r.metric_ref, {}),
       targetValue: r.target_value, unit: r.unit, direction: r.direction, display: r.display || 'bar', byDate: r.by_date,
-      isNorthStar: !!r.is_north_star, position: r.position,
+      isNorthStar: !!r.is_north_star, position: r.position, milestones: parseJson(r.milestones, []),
       baselineEventId: r.baseline_event_id, baselineValue: r.baseline_value, baselineSource: r.baseline_source,
       baselineComparable: !!r.baseline_comparable,
       conversionRef: r.conversion_ref ? parseJson(r.conversion_ref, null) : null,
@@ -120,6 +122,13 @@ function mount(app, { db, auth, resolveTileValue }) {
       baselineEventId: String(b.baselineEventId || '').slice(0, 64),
       baselineValue: b.baselineValue == null || b.baselineValue === '' ? null : Number(b.baselineValue),
       baselineSource: String(b.baselineSource || '').slice(0, 32),
+      // Milestones: dated checkpoints on the way to the target. Sanitised, kept in
+      // date order, capped (a goal isn't a project plan).
+      milestones: Array.isArray(b.milestones) ? b.milestones
+        .map((m) => ({ byDate: String((m && m.byDate) || '').slice(0, 32), targetValue: Number(m && m.targetValue) }))
+        .filter((m) => m.byDate && Number.isFinite(m.targetValue))
+        .sort((a, z) => a.byDate.localeCompare(z.byDate))
+        .slice(0, 24) : [],
     };
   }
 
@@ -173,25 +182,50 @@ function mount(app, { db, auth, resolveTileValue }) {
     if (pct >= 95) return 'near';
     return 'missed';
   }
-  // Progress = resolved value vs target, respecting direction + (linear) pace.
-  // Pace needs a deadline; status is ahead/on_track/behind before it, 'final' after.
+  // Interpolate the expected value at time x along a piecewise-linear curve through
+  // sorted [ [t, value], … ] points. Clamps before the first / after the last point.
+  function interpAt(points, x) {
+    if (x <= points[0][0]) return points[0][1];
+    if (x >= points[points.length - 1][0]) return points[points.length - 1][1];
+    for (let i = 1; i < points.length; i++) {
+      const [t0, v0] = points[i - 1]; const [t1, v1] = points[i];
+      if (x <= t1) return v0 + (v1 - v0) * ((x - t0) / (t1 - t0));
+    }
+    return points[points.length - 1][1];
+  }
+  // Progress = resolved value vs target, with MILESTONE-AWARE pace. "Expected by now"
+  // follows the checkpoints — 0 when the goal was set, rising through each milestone
+  // to the final target on the deadline — so pace measures against the nearest
+  // checkpoint. That's the honest call for back-loaded curves (ticket sales), where a
+  // naive straight line to event day cries "behind" far too early. With no milestones
+  // it's the same straight line as before. Pace needs a deadline; status is
+  // ahead/on_track/behind before it, 'final' after.
   function computeProgress(goal, value) {
-    if (value == null || !goal.targetValue) return { value, pct: null, status: null, band: goal.resultBand || null };
+    const milestones = Array.isArray(goal.milestones) ? goal.milestones : [];
+    const nowMs = Date.now();
+    const upcoming = milestones
+      .map((m) => ({ byDate: m.byDate, targetValue: Number(m.targetValue), t: Date.parse(m.byDate) }))
+      .filter((m) => !Number.isNaN(m.t) && m.t >= nowMs)
+      .sort((a, b) => a.t - b.t)[0] || null;
+    const nextMilestone = upcoming ? { byDate: upcoming.byDate, targetValue: upcoming.targetValue } : null;
+    if (value == null || !goal.targetValue) return { value, pct: null, status: null, band: goal.resultBand || null, milestones, nextMilestone };
     const pct = goal.direction === 'at_most'
       ? (value <= 0 ? 100 : Math.round((goal.targetValue / value) * 100))
       : Math.round((value / goal.targetValue) * 100);
     let expected = null, onPace = null, status = null;
     const start = Date.parse(goal.createdAt);
     const end = goal.byDate ? Date.parse(goal.byDate) : NaN;
-    const nowMs = Date.now();
     if (!Number.isNaN(end) && !Number.isNaN(start) && end > start) {
-      const frac = Math.min(1, Math.max(0, (nowMs - start) / (end - start)));
-      expected = Math.round(goal.targetValue * frac);
+      const points = [[start, 0]];
+      for (const m of milestones) { const t = Date.parse(m.byDate); if (!Number.isNaN(t) && Number.isFinite(Number(m.targetValue))) points.push([t, Number(m.targetValue)]); }
+      points.push([end, goal.targetValue]);
+      points.sort((a, b) => a[0] - b[0]);
+      expected = Math.round(interpAt(points, nowMs));
       onPace = goal.direction === 'at_most' ? value <= (expected || goal.targetValue) : value >= expected * 0.95;
       status = nowMs >= end ? 'final' : (onPace ? (pct >= 100 ? 'ahead' : 'on_track') : 'behind');
     }
     const band = (!Number.isNaN(end) && nowMs >= end) ? resultBand(goal, value, pct) : (goal.resultBand || null);
-    return { value, pct, target: goal.targetValue, direction: goal.direction, expected, onPace, status, band };
+    return { value, pct, target: goal.targetValue, direction: goal.direction, expected, onPace, status, band, milestones, nextMilestone };
   }
 
   // ── Access guards (admin OR an entity member; writes need goals.manage) ──
@@ -226,11 +260,11 @@ function mount(app, { db, auth, resolveTileValue }) {
     const existing = sql.prepare("SELECT COUNT(*) n FROM goals WHERE suite_id=? AND scope='event' AND status='active'").get(req.params.suiteId).n;
     sql.prepare(`INSERT INTO goals (id, suite_id, entity_id, scope, owner_ref, name, metric_key, source, metric_ref,
         target_value, unit, direction, display, by_date, is_north_star, position, baseline_event_id, baseline_value, baseline_source,
-        status, created_by, created_at, updated_by, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+        milestones, status, created_by, created_at, updated_by, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
       id, req.params.suiteId, su.entityId, 'event', req.params.suiteId, c.name, c.metricKey, c.source, JSON.stringify(c.metricRef),
       c.targetValue, c.unit, c.direction, c.display, c.byDate, 0, c.position, c.baselineEventId, c.baselineValue, c.baselineSource,
-      'active', req.user.email, ts, req.user.email, ts);
+      JSON.stringify(c.milestones), 'active', req.user.email, ts, req.user.email, ts);
     // First active event goal becomes the North Star; or honour an explicit request.
     if (existing === 0 || req.body?.isNorthStar) setNorthStar(req.params.suiteId, id);
     audit(id, 'created', null, c.name, req.user.email);
@@ -247,9 +281,9 @@ function mount(app, { db, auth, resolveTileValue }) {
       if (String(oldV) !== String(newV)) audit(g.id, field, oldV, newV, req.user.email);
     }
     sql.prepare(`UPDATE goals SET name=?, metric_key=?, source=?, metric_ref=?, target_value=?, unit=?, direction=?,
-        display=?, by_date=?, position=?, baseline_event_id=?, baseline_value=?, baseline_source=?, updated_by=?, updated_at=? WHERE id=?`).run(
+        display=?, by_date=?, position=?, baseline_event_id=?, baseline_value=?, baseline_source=?, milestones=?, updated_by=?, updated_at=? WHERE id=?`).run(
       c.name, c.metricKey, c.source, JSON.stringify(c.metricRef), c.targetValue, c.unit, c.direction,
-      c.display, c.byDate, c.position, c.baselineEventId, c.baselineValue, c.baselineSource, req.user.email, now(), g.id);
+      c.display, c.byDate, c.position, c.baselineEventId, c.baselineValue, c.baselineSource, JSON.stringify(c.milestones), req.user.email, now(), g.id);
     if (req.body?.isNorthStar && !g.isNorthStar) { setNorthStar(g.suiteId, g.id); audit(g.id, 'is_north_star', false, true, req.user.email); }
     res.json({ goal: goalById(g.id) });
   });

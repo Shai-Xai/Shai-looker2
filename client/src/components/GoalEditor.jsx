@@ -33,6 +33,8 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, onClo
   const [baselineValue, setBaselineValue] = useState(goal?.baselineValue != null ? String(goal.baselineValue) : '');
   const [baselineLoading, setBaselineLoading] = useState(false);
   const [pastSuites, setPastSuites] = useState([]); // other events to compare against
+  // Milestones — weekly/monthly checkpoints on the way to the target (Slice C).
+  const [milestones, setMilestones] = useState(goal?.milestones || []);
   const [cat, setCat] = useState(null);       // tile catalogue { dashboards: [...] }
   const [preview, setPreview] = useState(null); // live value of the picked tile
   const [busy, setBusy] = useState(false);
@@ -96,6 +98,10 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, onClo
   const autoMode = !!baselineSuiteId && track === 'tile'; // reading the same tile under a past event
   const resolvedOk = autoMode && !baselineLoading && baseFinite;
 
+  const updateMilestone = (i, patch) => setMilestones((ms) => ms.map((m, j) => (j === i ? { ...m, ...patch } : m)));
+  const addMilestone = () => setMilestones((ms) => [...ms, { byDate: '', targetValue: '' }]);
+  const removeMilestone = (i) => setMilestones((ms) => ms.filter((_, j) => j !== i));
+
   async function save() {
     if (!name.trim()) { setErr('Give the goal a name.'); return; }
     if (track === 'tile' && (!dashboardId || !tileId)) { setErr('Pick the dashboard tile to track.'); return; }
@@ -114,6 +120,9 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, onClo
       baselineEventId: baseNum != null ? baselineSuiteId : '',
       baselineValue: baseNum,
       baselineSource: baseNum != null ? (baselineSuiteId && track === 'tile' ? 'looker' : 'manual') : '',
+      milestones: milestones
+        .map((m) => ({ byDate: m.byDate, targetValue: Number(m.targetValue) }))
+        .filter((m) => m.byDate && Number.isFinite(m.targetValue)),
     };
     try {
       let saved;
@@ -244,6 +253,17 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, onClo
           <input type="date" value={byDate} onChange={(e) => setByDate(e.target.value)} style={inp} />
         </Field>
 
+        <Field label="Checkpoints (optional)" hint="Weekly or monthly targets on the way — pace is measured against the nearest one, so a back-loaded goal isn’t flagged “behind” too early.">
+          {milestones.map((m, i) => (
+            <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+              <input type="date" value={m.byDate || ''} onChange={(e) => updateMilestone(i, { byDate: e.target.value })} style={{ ...inp, flex: 1 }} />
+              <input value={m.targetValue ?? ''} onChange={(e) => updateMilestone(i, { targetValue: e.target.value })} placeholder="target" inputMode="decimal" style={{ ...inp, width: 104 }} />
+              <button type="button" onClick={() => removeMilestone(i)} aria-label="Remove checkpoint" style={msX}>✕</button>
+            </div>
+          ))}
+          <button type="button" onClick={addMilestone} style={addMsBtn}>＋ Add a checkpoint</button>
+        </Field>
+
         <Field label="Show it as">
           <div style={{ display: 'flex', gap: 8 }}>
             <Seg active={display === 'bar'} onClick={() => setDisplay('bar')}>▭ Bar</Seg>
@@ -310,6 +330,8 @@ const inp = { width: '100%', boxSizing: 'border-box', padding: '9px 11px', borde
 const xBtn = { border: 'none', background: 'rgba(128,128,128,0.12)', color: 'var(--muted-2)', borderRadius: 980, width: 28, height: 28, fontSize: 13, cursor: 'pointer' };
 const northRow = { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 6, padding: '10px 12px', border: '1px solid var(--hairline)', borderRadius: 10, cursor: 'pointer', fontSize: 13 };
 const suggestBtn = { border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--brand)', borderRadius: 980, fontSize: 11.5, fontWeight: 700, padding: '3px 10px', cursor: 'pointer' };
+const msX = { border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--muted)', borderRadius: 9, fontSize: 13, cursor: 'pointer', flexShrink: 0, width: 38 };
+const addMsBtn = { border: '1px dashed var(--hairline)', background: 'transparent', color: 'var(--brand)', borderRadius: 9, fontSize: 12.5, fontWeight: 700, padding: '7px 11px', cursor: 'pointer', width: '100%' };
 const btnGhost = { flex: '0 0 auto', padding: '10px 16px', borderRadius: 10, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', fontSize: 13.5, fontWeight: 700, cursor: 'pointer' };
 const btnDanger = { flex: '0 0 auto', padding: '10px 14px', borderRadius: 10, border: 'none', background: 'var(--error, #dc2626)', color: '#fff', fontSize: 13.5, fontWeight: 800, cursor: 'pointer' };
 const btnDelGhost = { flex: '0 0 auto', padding: '10px 12px', borderRadius: 10, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--error, #dc2626)', fontSize: 15, cursor: 'pointer' };

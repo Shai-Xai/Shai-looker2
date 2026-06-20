@@ -10,7 +10,7 @@ const h = require('./helpers');
 const { startApp } = require('./http');
 
 let tileValue = 4200; // what the stubbed tile resolver returns
-let app, suiteId, entityId;
+let app, suiteId, entityId, goalsApi;
 let owner, viewer, outsider, admin;
 
 before(async () => {
@@ -22,7 +22,7 @@ before(async () => {
   outsider = h.makeClient('g-out@test.local', [h.makeEntity('Other', 'o-org').id], 'owner');
   admin = h.makeAdmin('g-admin@test.local');
   app = await startApp((expressApp) => {
-    require('../server/goals').mount(expressApp, {
+    goalsApi = require('../server/goals').mount(expressApp, {
       db: h.db,
       auth: h.auth,
       resolveTileValue: async () => tileValue,
@@ -118,6 +118,34 @@ test('a goal stores its baseline (last time) for vs-last-time + target suggestio
   const upd = (await app.req('PUT', `/api/goals/${g.id}`, { as: owner, body: { baselineValue: 18000 } })).body.goal;
   assert.equal(upd.baselineValue, 18000);
   assert.equal(upd.baselineEventId, prev, 'editing one field keeps the baseline event');
+});
+
+test('milestones persist in date order and survive an edit', async () => {
+  const g = (await create(owner, {
+    name: 'Sell-through curve', source: 'manual', targetValue: 25000, unit: 'tickets',
+    milestones: [{ byDate: '2026-06-20', targetValue: 9000 }, { byDate: '2026-06-10', targetValue: 4000 }],
+  })).body.goal;
+  assert.equal(g.milestones.length, 2);
+  assert.deepEqual(g.milestones.map((m) => m.byDate), ['2026-06-10', '2026-06-20'], 'kept in date order');
+  const upd = (await app.req('PUT', `/api/goals/${g.id}`, { as: owner, body: { milestones: [{ byDate: '2026-06-15', targetValue: 6000 }] } })).body.goal;
+  assert.equal(upd.milestones.length, 1);
+  assert.equal(upd.milestones[0].targetValue, 6000);
+});
+
+test('pace is measured against the nearest checkpoint (milestone-aware)', () => {
+  const day = 86400000, now = Date.now(), iso = (ms) => new Date(ms).toISOString();
+  const goal = {
+    createdAt: iso(now - 10 * day), byDate: iso(now + 10 * day),
+    targetValue: 1000, direction: 'at_least',
+    milestones: [{ byDate: iso(now), targetValue: 800 }], // a checkpoint due ~now at 800
+  };
+  // With the checkpoint, "expected by now" is ~800 (the checkpoint), not the linear ~500.
+  const p = goalsApi.computeProgress(goal, 400);
+  assert.ok(Math.abs(p.expected - 800) <= 5, `expected ≈ 800, got ${p.expected}`);
+  assert.equal(p.status, 'behind', '400 is well under the 800 checkpoint → behind');
+  // Without milestones the same goal sits on the straight line (~500 at the midpoint).
+  const linear = goalsApi.computeProgress({ ...goal, milestones: [] }, 400);
+  assert.ok(linear.expected < 600, `linear expected ~500, got ${linear.expected}`);
 });
 
 test('a goal remembers its chosen display (bar / ring / dial)', async () => {

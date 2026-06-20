@@ -61,6 +61,12 @@
   comparable event exists). System-seeded **and** "save this event's goals as a
   template." (= spec's recipe↔goal / Playbook, applied to goals.) Tests.
 
+## Progress
+- **A — shipped** (page, detail, mobile fix, event link).
+- **B — shipped** (baseline-first; always-available picker + manual entry).
+- **C — shipped** (milestones + milestone-aware pace).
+- **D / E — pending.**
+
 ## Realistic phasing
 This is now a multi-day program, not one day. **Today: land Slice A** (the page,
 detail view, mobile fix, event link — the surface everything else renders into),
