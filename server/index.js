@@ -545,6 +545,12 @@ async function resolveTileValue({ dashboardId, tileId, user, suiteId }) {
   const lockMap = { ...expandLockMap(entityView), ...expandLockMap(db.lockedFiltersForSuite(suiteId)) };
   const body = await tileQueryBody(tile, def, user, suiteId, lockMap);
   if (!body) return null; // scope denied or non-queryable tile
+  // Drop any "days before event" / days-to-go clip so a running-total KPI reads the
+  // FULL to-date figure the dashboard headline shows (e.g. Total Tickets Sold 44,806),
+  // not an as-of slice (43,310). Same treatment the curve resolver gives — keeps the
+  // goal, the curve and the dashboard on one number. No-op for tiles without such a
+  // filter (date ranges and other filters are untouched).
+  body.filters = stripDaysBeforeFilters(body.filters, def, tile).filters;
   const data = await runLookerQuery('/queries/run/json_detail', body);
   // Use the number the tile actually SHOWS (honours hidden_fields, picks the
   // visible primary measure, reads the rendered value) so the goal == the dashboard.
