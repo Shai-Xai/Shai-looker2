@@ -1681,29 +1681,30 @@ async function buildFacts(user, entityId, force = false, alignDaysBefore = false
     let taken = 0;
     for (const t of tiles) { if (taken >= PER_DASH || picks.length >= FACT_MAX_TILES) break; const before = picks.length; addTile(def, t, dashMeta[did]?.suiteId, true); if (picks.length > before) taken += 1; }
   }
-  // 1d) ALWAYS lead with TICKETING. Guarantee the ticketing set's lead (Overview)
-  //     headline tiles in every briefing — the authoritative sales source (tickets
-  //     sold, revenue, orders) — so GA4/analytics can never crowd them out. Capped
-  //     (TKT_BUDGET) so the other boards still get plenty of the budget. Detected
-  //     by set name; analytics/GA4 sets are excluded.
+  // 1d) ALWAYS lead with TICKETING. Pull the ticketing set's OVERVIEW headline tiles
+  //     first (tickets sold, revenue, orders) — across the WHOLE ticketing set, not
+  //     just its first-listed dashboard — so a non-overview board (e.g. a Reps
+  //     dashboard that happens to be listed first) can't take the lead and make the
+  //     briefing read "reps-only". Detected by set name; analytics/GA4 sets excluded.
+  //     Capped (TKT_BUDGET) so the other boards still get plenty of the budget.
   const isTicketingSet = (name) => /ticket/i.test(name || '') && !/\bga4\b|analytics|google/i.test(name || '');
+  const isOverviewDash = (title) => /overview|summary|headline/i.test(title || '');
+  const ticketingDashes = catalogue
+    .filter((c) => isTicketingSet(c.setName))
+    .sort((a, b) => (isOverviewDash(b.title) ? 1 : 0) - (isOverviewDash(a.title) ? 1 : 0)); // overview boards first
   let tkt = 0; const TKT_BUDGET = 8;
-  for (const lead of leads) {
+  for (const c of ticketingDashes) {
     if (tkt >= TKT_BUDGET || picks.length >= FACT_MAX_TILES) break;
-    if (!isTicketingSet(lead.setName)) continue;
-    for (const did of lead.dashboardIds) {
-      if (tkt >= TKT_BUDGET || picks.length >= FACT_MAX_TILES) break;
-      const def = store.get(did);
-      if (!def || !dashMeta[did]) continue;
-      const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((t) => t.tiles || []))]
-        .filter((t) => t.type !== 'text' && t.query?.fields?.length)
-        .sort((a, b) => tilePriority(a) - tilePriority(b));
-      let taken = 0;
-      for (const t of tiles) {
-        if (taken >= PER_DASH || tkt >= TKT_BUDGET || picks.length >= FACT_MAX_TILES) break;
-        const before = picks.length; addTile(def, t, lead.suiteId, true);
-        if (picks.length > before) { taken += 1; tkt += 1; }
-      }
+    const def = store.get(c.dashboardId);
+    if (!def || !dashMeta[c.dashboardId]) continue;
+    const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((t) => t.tiles || []))]
+      .filter((t) => t.type !== 'text' && t.query?.fields?.length)
+      .sort((a, b) => tilePriority(a) - tilePriority(b));
+    let taken = 0;
+    for (const t of tiles) {
+      if (taken >= PER_DASH || tkt >= TKT_BUDGET || picks.length >= FACT_MAX_TILES) break;
+      const before = picks.length; addTile(def, t, c.suiteId, true);
+      if (picks.length > before) { taken += 1; tkt += 1; }
     }
   }
   // 1e) Guarantee a little GA4/ANALYTICS — but ONLY if the client actually has an
@@ -1785,7 +1786,11 @@ async function buildFacts(user, entityId, force = false, alignDaysBefore = false
     if (view) for (const [fname, qfield] of Object.entries(p.tile.listenTo || {})) if (fname in view) extra[qfield] = view[fname];
     const dbo = daysBeforeOverlays[p.def.id];
     if (dbo) for (const [fname, qfield] of Object.entries(p.tile.listenTo || {})) if (fname in dbo) extra[qfield] = dbo[fname];
-    const body = await tileQueryBody(p.tile, p.def, user, p.suiteId, lockMaps[p.suiteId] || {}, extra);
+    // Expand the dashboard's client-default saved filters into the lock map (suite
+    // locks still win), exactly like resolveTileValue — so a GA4 tile gets its saved
+    // DATE RANGE (without which GA4 explores return 0) instead of dropping out.
+    const lockMap = { ...expandLockMap(view || {}), ...(lockMaps[p.suiteId] || {}) };
+    const body = await tileQueryBody(p.tile, p.def, user, p.suiteId, lockMap, extra);
     if (!body) { dropped.push(`${p.dashTitle} › ${p.tile.title || '?'} (scope blocked / unrunnable)`); return null; }
     try {
       const data = await runLookerQuery('/queries/run/json_detail', body, undefined, force);
@@ -1980,16 +1985,24 @@ async function buildFactsFromTiles(user, entityId, picks, alignDaysBefore = fals
     }
   }
   const lockMaps = {};
+  const entityViews = {};
   const daysBeforeOverlays = {};
   const out = [];
   const dropped = [];
   for (const { tile, def, m } of wanted.slice(0, 24)) {
     if (!(m.suiteId in lockMaps)) lockMaps[m.suiteId] = expandLockMap(db.lockedFiltersForSuite(m.suiteId));
+    if (!(def.id in entityViews)) entityViews[def.id] = db.getFilterView('entity', entityId, def.id) || null;
     if (alignDaysBefore && !(def.id in daysBeforeOverlays)) daysBeforeOverlays[def.id] = await daysBeforeOverlayFor(def, user, m.suiteId, lockMaps[m.suiteId] || {});
+    const view = entityViews[def.id];
     const dbo = daysBeforeOverlays[def.id];
     const extra = {};
+    if (view) for (const [fname, qfield] of Object.entries(tile.listenTo || {})) if (fname in view) extra[qfield] = view[fname];
     if (dbo) for (const [fname, qfield] of Object.entries(tile.listenTo || {})) if (fname in dbo) extra[qfield] = dbo[fname];
-    const body = await tileQueryBody(tile, def, user, m.suiteId, lockMaps[m.suiteId] || {}, extra);
+    // Expand the dashboard's client-default saved filters into the lock map (suite locks
+    // win), like resolveTileValue — so GA4 tiles get their saved DATE RANGE and don't
+    // come back empty (they were missing entirely from curated digests before).
+    const lockMap = { ...expandLockMap(view || {}), ...(lockMaps[m.suiteId] || {}) };
+    const body = await tileQueryBody(tile, def, user, m.suiteId, lockMap, extra);
     if (!body) { dropped.push(`${def.title} › ${tile.title || '?'} (scope blocked / unrunnable)`); continue; }
     try {
       const data = await runLookerQuery('/queries/run/json_detail', body, undefined, false);
