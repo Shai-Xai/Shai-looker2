@@ -41,6 +41,31 @@ test('forecast returns an ordered range spanning the two signals', () => {
   assert.ok(f.range[1] >= f.shape && f.range[1] >= f.momentum, 'range top covers both signals');
 });
 
+test('fractionAtNow reads last year’s ACTUAL value at days-before = days-left (not by index)', () => {
+  // x-axis is "days before the event" (the ticket trend tile). 11 days out last year
+  // was 46k, not the ~50k an index-position guess (≈7 days out) would give.
+  const series = [
+    { t: '30', v: 40000 }, { t: '20', v: 44000 }, { t: '11', v: 46000 },
+    { t: '5', v: 52000 }, { t: '0', v: 55000 }, { t: '-2', v: 55997 },
+  ];
+  const deadlineMs = Date.now() + 11 * 86400000; // event 11 days away → read at days-before 11
+  const at = fc.fractionAtNow(series, { deadlineMs });
+  assert.equal(at.basis, 'days-before');
+  assert.equal(at.daysLeft, 11);
+  assert.equal(at.total, 55997, 'total = last year’s final (post-event) cumulative');
+  assert.ok(Math.abs(at.valueAtNow - 46000) <= 1, `last year at this point ≈ 46k, got ${Math.round(at.valueAtNow)}`);
+});
+
+test('fractionAtNow falls back to the window fraction for an ISO-date axis', () => {
+  // No shared event anchor across years → position between start and deadline by index.
+  const series = [{ t: '2025-01-01', v: 1000 }, { t: '2025-02-01', v: 3000 }];
+  const startMs = Date.now() - 10 * 86400000, deadlineMs = Date.now() + 10 * 86400000;
+  const at = fc.fractionAtNow(series, { deadlineMs, startMs });
+  assert.equal(at.basis, 'window');
+  assert.equal(at.total, 3000);
+  assert.ok(at.valueAtNow > 1000 && at.valueAtNow < 3000, 'reads a mid-window point');
+});
+
 test('forecast is null when there is no usable curve', () => {
   assert.equal(fc.forecast({ cum: [], currentValue: 100, target: 200, r: 0.5 }), null);
 });

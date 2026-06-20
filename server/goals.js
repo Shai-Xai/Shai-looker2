@@ -227,15 +227,6 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
     }
     return points[points.length - 1][1];
   }
-  // Cumulative fraction reached at relative position r∈[0,1] along a cumulative curve.
-  function cumFracAt(cum, r) {
-    const total = cum[cum.length - 1];
-    if (!(total > 0)) return 0;
-    const x = Math.max(0, Math.min(1, r)) * (cum.length - 1);
-    const i = Math.floor(x), f = x - i;
-    const c = i + 1 < cum.length ? cum[i] + (cum[i + 1] - cum[i]) * f : cum[i];
-    return c / total;
-  }
   // Progress = resolved value vs target, with honest PACE. Pace is measured over the
   // sell window [start_date (or created_at) → deadline]. When the goal links a
   // value-over-time curve (curveRef → `curve`, a cumulative array of last time's
@@ -251,21 +242,23 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
       .filter((m) => !Number.isNaN(m.t) && m.t >= nowMs)
       .sort((a, b) => a.t - b.t)[0] || null;
     const nextMilestone = upcoming ? { byDate: upcoming.byDate, targetValue: upcoming.targetValue } : null;
+    const start = Date.parse(goal.startDate || goal.createdAt);
+    const end = goal.byDate ? Date.parse(goal.byDate) : NaN;
+    // Align last time's curve to where we are now by its REAL axis (days-before-event),
+    // not by row position — so "last time at this point" is the actual recorded value.
     const hasCurve = Array.isArray(curve) && curve.length >= 2;
-    const baselineFinal = hasCurve ? curve[curve.length - 1] : (goal.baselineValue != null ? goal.baselineValue : null);
+    const at = hasCurve ? fc.fractionAtNow(curve, { deadlineMs: end, nowMs, startMs: start }) : null;
+    const baselineFinal = at ? Math.round(at.total) : (goal.baselineValue != null ? goal.baselineValue : null);
     if (value == null || !goal.targetValue) return { value, pct: null, status: null, band: goal.resultBand || null, milestones, nextMilestone, lastAtNow: null, baselineFinal };
     const pct = goal.direction === 'at_most'
       ? (value <= 0 ? 100 : Math.round((goal.targetValue / value) * 100))
       : Math.round((value / goal.targetValue) * 100);
     let expected = null, onPace = null, status = null, lastAtNow = null;
-    const start = Date.parse(goal.startDate || goal.createdAt);
-    const end = goal.byDate ? Date.parse(goal.byDate) : NaN;
     if (!Number.isNaN(end) && !Number.isNaN(start) && end > start) {
-      if (hasCurve) {
-        // Curve-based pace: where last time's shape sits at this point in the window.
-        const frac = cumFracAt(curve, (nowMs - start) / (end - start));
-        expected = Math.round(goal.targetValue * frac);
-        lastAtNow = Math.round(baselineFinal * frac);
+      if (at) {
+        // Curve-based pace: where last time's shape sits at this point in the cycle.
+        expected = Math.round(goal.targetValue * at.fraction);
+        lastAtNow = Math.round(at.valueAtNow);
       } else {
         const points = [[start, 0]];
         for (const m of milestones) { const t = Date.parse(m.byDate); if (!Number.isNaN(t) && Number.isFinite(Number(m.targetValue))) points.push([t, Number(m.targetValue)]); }
@@ -320,11 +313,11 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
       if (!curveCache.has(key)) {
         curveCache.set(key, (async () => {
           try {
+            // Keep the RAW series (x-axis + value). computeProgress aligns it by the
+            // real axis (days-before-event) rather than by row position.
             const s = await resolveTileSeries({ dashboardId: cr.dashboardId, tileId: cr.tileId, user: req.user, suiteId: g.suiteId });
-            const vals = (s || []).map((p) => Number(p.v)).filter((v) => Number.isFinite(v));
-            if (vals.length < 2) return null;
-            const nonDec = vals.every((v, i) => i === 0 || v >= vals[i - 1] - 1e-9);
-            let run = 0; return vals.map((v) => { run = nonDec ? v : run + v; return run; });
+            const pts = (s || []).filter((p) => p && Number.isFinite(Number(p.v)));
+            return pts.length >= 2 ? pts : null;
           } catch { return null; }
         })());
       }
@@ -499,13 +492,18 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
     const r = (!Number.isNaN(startMs) && !Number.isNaN(endMs) && endMs > startMs) ? Math.max(0, Math.min(1, (now - startMs) / (endMs - startMs))) : null;
     const daysLeft = !Number.isNaN(endMs) ? Math.max(0, (endMs - now) / 86400000) : null;
     const target = Number(req.query.target) || (g ? g.targetValue : 0);
-    const result = (cum.length >= 2 && r != null && currentValue != null)
-      ? fc.forecast({ cum, currentValue, target, r, daysLeft, recentRatePerDay }) : null;
+    // Align last year to NOW by its real axis (days-before-event) where possible, so the
+    // forecast rides last year's ACTUAL cumulative at days-to-go — not an index guess.
+    const at = (lastCol?.series && !Number.isNaN(endMs))
+      ? fc.fractionAtNow(lastCol.series, { deadlineMs: endMs, nowMs: now, startMs }) : null;
+    const result = (cum.length >= 2 && (r != null || at != null) && currentValue != null)
+      ? fc.forecast({ cum, currentValue, target, r, daysLeft, recentRatePerDay, fNow: at ? at.fraction : null }) : null;
 
     res.json({
       columns: cols,
       strippedFilters: data.strippedFilters || [],
       chosen: { lastKey: lastCol?.key, thisKey },
+      align: at ? { basis: at.basis, daysLeft: at.daysLeft, lastYearAtNow: Math.round(at.valueAtNow), fractionReached: Number(at.fraction.toFixed(4)) } : null,
       inputs: { currentValue, target, r: r == null ? null : Number(r.toFixed(4)), daysLeft: daysLeft == null ? null : Math.round(daysLeft), recentRatePerDay: recentRatePerDay == null ? null : Math.round(recentRatePerDay), recentBasis, lastYearTotal: cum.length ? cum[cum.length - 1] : null },
       forecast: result,
       sample: { lastYearTail: (lastCol?.series || []).slice(-6), thisYearTail: (thisCol?.series || []).slice(-6) },
