@@ -219,3 +219,21 @@ test('a goal remembers its linked checkpoint-curve tile across edits', async () 
   const upd = (await app.req('PUT', `/api/goals/${g.id}`, { as: owner, body: { targetValue: 60000 } })).body.goal;
   assert.deepEqual(upd.curveRef, { dashboardId: 'dash9', tileId: 'trend7', cadence: 'weekly' }, 'link survives an edit');
 });
+
+test('a linked curve drives baseline + vs-last-time-at-this-point, with pace over the window', async () => {
+  const day = 86400000;
+  const start = new Date(Date.now() - 10 * day).toISOString().slice(0, 10);
+  const end = new Date(Date.now() + 10 * day).toISOString().slice(0, 10);
+  // Stubbed curve: cumulative [1000, 3000], total 3000. Midpoint of the window → ~2/3.
+  const g = (await create(owner, {
+    name: 'Curve pace', source: 'manual', targetValue: 6000, unit: 'tickets',
+    startDate: start, byDate: end, curveRef: { dashboardId: 'd', tileId: 't', cadence: 'weekly' },
+  })).body.goal;
+  assert.equal(g.startDate, start, 'remembers the track-from date');
+  await app.req('POST', `/api/goals/${g.id}/snapshot`, { as: owner, body: { value: 2500 } });
+  const row = (await list(owner)).body.goals.find((x) => x.id === g.id);
+  assert.equal(row.progress.baselineFinal, 3000, 'baseline = the curve total');
+  assert.ok(row.progress.lastAtNow > 1000 && row.progress.lastAtNow < 3000, 'last time read at a mid-window point of the curve');
+  // expected-by-now rides the same curve fraction, scaled to the target (2× the curve total).
+  assert.ok(Math.abs(row.progress.expected - 2 * row.progress.lastAtNow) <= 2, 'expected = target × the same curve fraction');
+});

@@ -88,6 +88,9 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries }) {
   // Checkpoint curve link: the value-over-time tile used to suggest checkpoints
   // (remembered so reopening the editor restores the link). { dashboardId, tileId, cadence }.
   try { sql.exec("ALTER TABLE goals ADD COLUMN curve_ref TEXT NOT NULL DEFAULT '{}'"); } catch { /* column already present */ }
+  // Track-from date: the start of the sell window, so pace is measured over the real
+  // cycle (not from when the goal happened to be created). Blank → falls back to created_at.
+  try { sql.exec("ALTER TABLE goals ADD COLUMN start_date TEXT NOT NULL DEFAULT ''"); } catch { /* column already present */ }
 
   const parseJson = (s, fb) => { try { return JSON.parse(s); } catch { return fb; } };
   function rowToGoal(r) {
@@ -97,7 +100,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries }) {
       name: r.name, metricKey: r.metric_key, source: r.source, metricRef: parseJson(r.metric_ref, {}),
       targetValue: r.target_value, unit: r.unit, direction: r.direction, display: r.display || 'bar', byDate: r.by_date,
       isNorthStar: !!r.is_north_star, position: r.position, milestones: parseJson(r.milestones, []),
-      curveRef: parseJson(r.curve_ref, null),
+      curveRef: parseJson(r.curve_ref, null), startDate: r.start_date || '',
       baselineEventId: r.baseline_event_id, baselineValue: r.baseline_value, baselineSource: r.baseline_source,
       baselineComparable: !!r.baseline_comparable,
       conversionRef: r.conversion_ref ? parseJson(r.conversion_ref, null) : null,
@@ -133,6 +136,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries }) {
       direction: DIRECTIONS.includes(b.direction) ? b.direction : 'at_least',
       display: ['bar', 'dial', 'ring'].includes(b.display) ? b.display : 'bar',
       byDate: String(b.byDate || '').slice(0, 32),
+      startDate: String(b.startDate || '').slice(0, 32),
       position: Number.isFinite(Number(b.position)) ? Number(b.position) : 0,
       baselineEventId: String(b.baselineEventId || '').slice(0, 64),
       baselineValue: b.baselineValue == null || b.baselineValue === '' ? null : Number(b.baselineValue),
@@ -149,7 +153,12 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries }) {
       // Milestones: dated checkpoints on the way to the target. Sanitised, kept in
       // date order, capped (a goal isn't a project plan).
       milestones: Array.isArray(b.milestones) ? b.milestones
-        .map((m) => ({ byDate: String((m && m.byDate) || '').slice(0, 32), targetValue: Number(m && m.targetValue) }))
+        .map((m) => {
+          const lv = m && m.lastValue;
+          const out = { byDate: String((m && m.byDate) || '').slice(0, 32), targetValue: Number(m && m.targetValue) };
+          if (lv != null && lv !== '' && Number.isFinite(Number(lv))) out.lastValue = Number(lv); // last time's value at this checkpoint
+          return out;
+        })
         .filter((m) => m.byDate && Number.isFinite(m.targetValue))
         .sort((a, z) => a.byDate.localeCompare(z.byDate))
         .slice(0, 24) : [],
@@ -217,14 +226,23 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries }) {
     }
     return points[points.length - 1][1];
   }
-  // Progress = resolved value vs target, with MILESTONE-AWARE pace. "Expected by now"
-  // follows the checkpoints — 0 when the goal was set, rising through each milestone
-  // to the final target on the deadline — so pace measures against the nearest
-  // checkpoint. That's the honest call for back-loaded curves (ticket sales), where a
-  // naive straight line to event day cries "behind" far too early. With no milestones
-  // it's the same straight line as before. Pace needs a deadline; status is
-  // ahead/on_track/behind before it, 'final' after.
-  function computeProgress(goal, value) {
+  // Cumulative fraction reached at relative position r∈[0,1] along a cumulative curve.
+  function cumFracAt(cum, r) {
+    const total = cum[cum.length - 1];
+    if (!(total > 0)) return 0;
+    const x = Math.max(0, Math.min(1, r)) * (cum.length - 1);
+    const i = Math.floor(x), f = x - i;
+    const c = i + 1 < cum.length ? cum[i] + (cum[i + 1] - cum[i]) * f : cum[i];
+    return c / total;
+  }
+  // Progress = resolved value vs target, with honest PACE. Pace is measured over the
+  // sell window [start_date (or created_at) → deadline]. When the goal links a
+  // value-over-time curve (curveRef → `curve`, a cumulative array of last time's
+  // shape), "expected by now" follows that real shape (and we surface last time's
+  // value at the equivalent point, `lastAtNow`, + its final total `baselineFinal`) —
+  // so the back-loaded ticket curve isn't cried "behind" too early and "vs last time"
+  // is apples-to-apples. With no curve it falls back to a milestone-linear pace line.
+  function computeProgress(goal, value, curve) {
     const milestones = Array.isArray(goal.milestones) ? goal.milestones : [];
     const nowMs = Date.now();
     const upcoming = milestones
@@ -232,19 +250,28 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries }) {
       .filter((m) => !Number.isNaN(m.t) && m.t >= nowMs)
       .sort((a, b) => a.t - b.t)[0] || null;
     const nextMilestone = upcoming ? { byDate: upcoming.byDate, targetValue: upcoming.targetValue } : null;
-    if (value == null || !goal.targetValue) return { value, pct: null, status: null, band: goal.resultBand || null, milestones, nextMilestone };
+    const hasCurve = Array.isArray(curve) && curve.length >= 2;
+    const baselineFinal = hasCurve ? curve[curve.length - 1] : (goal.baselineValue != null ? goal.baselineValue : null);
+    if (value == null || !goal.targetValue) return { value, pct: null, status: null, band: goal.resultBand || null, milestones, nextMilestone, lastAtNow: null, baselineFinal };
     const pct = goal.direction === 'at_most'
       ? (value <= 0 ? 100 : Math.round((goal.targetValue / value) * 100))
       : Math.round((value / goal.targetValue) * 100);
-    let expected = null, onPace = null, status = null;
-    const start = Date.parse(goal.createdAt);
+    let expected = null, onPace = null, status = null, lastAtNow = null;
+    const start = Date.parse(goal.startDate || goal.createdAt);
     const end = goal.byDate ? Date.parse(goal.byDate) : NaN;
     if (!Number.isNaN(end) && !Number.isNaN(start) && end > start) {
-      const points = [[start, 0]];
-      for (const m of milestones) { const t = Date.parse(m.byDate); if (!Number.isNaN(t) && Number.isFinite(Number(m.targetValue))) points.push([t, Number(m.targetValue)]); }
-      points.push([end, goal.targetValue]);
-      points.sort((a, b) => a[0] - b[0]);
-      expected = Math.round(interpAt(points, nowMs));
+      if (hasCurve) {
+        // Curve-based pace: where last time's shape sits at this point in the window.
+        const frac = cumFracAt(curve, (nowMs - start) / (end - start));
+        expected = Math.round(goal.targetValue * frac);
+        lastAtNow = Math.round(baselineFinal * frac);
+      } else {
+        const points = [[start, 0]];
+        for (const m of milestones) { const t = Date.parse(m.byDate); if (!Number.isNaN(t) && Number.isFinite(Number(m.targetValue))) points.push([t, Number(m.targetValue)]); }
+        points.push([end, goal.targetValue]);
+        points.sort((a, b) => a[0] - b[0]);
+        expected = Math.round(interpAt(points, nowMs));
+      }
       if (goal.direction === 'at_most') {
         const cap = expected || goal.targetValue;
         onPace = value <= cap;
@@ -259,7 +286,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries }) {
       }
     }
     const band = (!Number.isNaN(end) && nowMs >= end) ? resultBand(goal, value, pct) : (goal.resultBand || null);
-    return { value, pct, target: goal.targetValue, direction: goal.direction, expected, onPace, status, band, milestones, nextMilestone };
+    return { value, pct, target: goal.targetValue, direction: goal.direction, expected, onPace, status, band, milestones, nextMilestone, lastAtNow, baselineFinal };
   }
 
   // ── Access guards (admin OR an entity member; writes need goals.manage) ──
@@ -282,14 +309,34 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries }) {
     const su = db.getSuite(req.params.suiteId);
     if (!su) return res.status(404).json({ error: 'Event not found' });
     if (!canView(req.user, req.params.suiteId)) return res.status(403).json({ error: 'Not allowed' });
-    const attach = async (g) => {
-      const m = await resolveMetric(g, { user: req.user });
-      return { ...g, progress: { ...computeProgress(g, m.value), asOf: m.asOf, resolvedSource: m.source } };
+    // Resolve a goal's linked curve (last time's cumulative shape) once per
+    // (dashboard,tile,suite) per request, so baseline/pace/vs-last-time all agree.
+    const curveCache = new Map();
+    const curveFor = (g) => {
+      const cr = g.curveRef;
+      if (!cr || !cr.dashboardId || !cr.tileId || typeof resolveTileSeries !== 'function') return Promise.resolve(null);
+      const key = `${cr.dashboardId}|${cr.tileId}|${g.suiteId}`;
+      if (!curveCache.has(key)) {
+        curveCache.set(key, (async () => {
+          try {
+            const s = await resolveTileSeries({ dashboardId: cr.dashboardId, tileId: cr.tileId, user: req.user, suiteId: g.suiteId });
+            const vals = (s || []).map((p) => Number(p.v)).filter((v) => Number.isFinite(v));
+            if (vals.length < 2) return null;
+            const nonDec = vals.every((v, i) => i === 0 || v >= vals[i - 1] - 1e-9);
+            let run = 0; return vals.map((v) => { run = nonDec ? v : run + v; return run; });
+          } catch { return null; }
+        })());
+      }
+      return curveCache.get(key);
     };
-    const goals = [];
-    for (const g of listGoals(req.params.suiteId)) goals.push(await attach(g));
-    const personalGoals = [];
-    for (const g of listPersonalGoals(req.params.suiteId, req.user)) personalGoals.push(await attach(g));
+    const attach = async (g) => {
+      const [m, curve] = await Promise.all([resolveMetric(g, { user: req.user }), curveFor(g)]);
+      return { ...g, progress: { ...computeProgress(g, m.value, curve), asOf: m.asOf, resolvedSource: m.source } };
+    };
+    const [goals, personalGoals] = await Promise.all([
+      Promise.all(listGoals(req.params.suiteId).map(attach)),
+      Promise.all(listPersonalGoals(req.params.suiteId, req.user).map(attach)),
+    ]);
     res.json({ goals, personalGoals, canManage: canManage(req.user, req.params.suiteId), me: req.user.email });
   });
 
@@ -308,11 +355,11 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries }) {
     const ownerRef = personal ? req.user.email : req.params.suiteId;
     const existing = sql.prepare("SELECT COUNT(*) n FROM goals WHERE suite_id=? AND scope='event' AND status='active'").get(req.params.suiteId).n;
     sql.prepare(`INSERT INTO goals (id, suite_id, entity_id, scope, owner_ref, name, metric_key, source, metric_ref,
-        target_value, unit, direction, display, by_date, is_north_star, position, baseline_event_id, baseline_value, baseline_source,
+        target_value, unit, direction, display, by_date, start_date, is_north_star, position, baseline_event_id, baseline_value, baseline_source,
         milestones, curve_ref, visibility, rolls_up_to, status, created_by, created_at, updated_by, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
       id, req.params.suiteId, su.entityId, c.scope, ownerRef, c.name, c.metricKey, c.source, JSON.stringify(c.metricRef),
-      c.targetValue, c.unit, c.direction, c.display, c.byDate, 0, c.position, c.baselineEventId, c.baselineValue, c.baselineSource,
+      c.targetValue, c.unit, c.direction, c.display, c.byDate, c.startDate, 0, c.position, c.baselineEventId, c.baselineValue, c.baselineSource,
       JSON.stringify(c.milestones), JSON.stringify(c.curveRef), personal ? c.visibility : 'team', personal ? c.rollsUpTo : '', 'active', req.user.email, ts, req.user.email, ts);
     // Only EVENT goals get a North Star; the first becomes it, or honour a request.
     if (!personal && (existing === 0 || req.body?.isNorthStar)) setNorthStar(req.params.suiteId, id);
@@ -331,9 +378,9 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries }) {
       if (String(oldV) !== String(newV)) audit(g.id, field, oldV, newV, req.user.email);
     }
     sql.prepare(`UPDATE goals SET name=?, metric_key=?, source=?, metric_ref=?, target_value=?, unit=?, direction=?,
-        display=?, by_date=?, position=?, baseline_event_id=?, baseline_value=?, baseline_source=?, milestones=?, curve_ref=?, visibility=?, rolls_up_to=?, updated_by=?, updated_at=? WHERE id=?`).run(
+        display=?, by_date=?, start_date=?, position=?, baseline_event_id=?, baseline_value=?, baseline_source=?, milestones=?, curve_ref=?, visibility=?, rolls_up_to=?, updated_by=?, updated_at=? WHERE id=?`).run(
       c.name, c.metricKey, c.source, JSON.stringify(c.metricRef), c.targetValue, c.unit, c.direction,
-      c.display, c.byDate, c.position, c.baselineEventId, c.baselineValue, c.baselineSource, JSON.stringify(c.milestones),
+      c.display, c.byDate, c.startDate, c.position, c.baselineEventId, c.baselineValue, c.baselineSource, JSON.stringify(c.milestones),
       JSON.stringify(c.curveRef), personal ? c.visibility : 'team', personal ? c.rollsUpTo : '', req.user.email, now(), g.id);
     if (req.body?.isNorthStar && !g.isNorthStar) { setNorthStar(g.suiteId, g.id); audit(g.id, 'is_north_star', false, true, req.user.email); }
     res.json({ goal: goalById(g.id) });

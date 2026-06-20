@@ -23,6 +23,7 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
   const [unit, setUnit] = useState(goal?.unit || 'tickets');
   const [direction, setDirection] = useState(goal?.direction || 'at_least');
   const [byDate, setByDate] = useState(goal?.byDate ? goal.byDate.slice(0, 10) : '');
+  const [startDate, setStartDate] = useState(goal?.startDate ? goal.startDate.slice(0, 10) : ''); // sell-window start (pace anchor)
   const [northStar, setNorthStar] = useState(!!goal?.isNorthStar);
   const [current, setCurrent] = useState(''); // manual goals: enter today's actual
   const [display, setDisplay] = useState(goal?.display || 'bar'); // bar | ring | dial
@@ -130,7 +131,7 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
     const series = Array.isArray(curveSeries) ? curveSeries : [];
     const tgt = Number(target);
     if (series.length < 2 || !byDate || !Number.isFinite(tgt) || tgt <= 0) return [];
-    const start = goal?.createdAt ? new Date(goal.createdAt) : new Date();
+    const start = startDate ? new Date(startDate) : (goal?.createdAt ? new Date(goal.createdAt) : new Date());
     const end = new Date(byDate);
     if (!(end.getTime() > start.getTime())) return [];
     // Use the curve's SHAPE by row order (the series is already chronological), so it
@@ -163,7 +164,7 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
   // When the curve read fine but no checkpoints came out, say WHY (instead of silence).
   function suggestReason() {
     if (!Number(target) || !byDate) return 'Set a target and deadline above, then we’ll suggest checkpoints.';
-    const start = goal?.createdAt ? new Date(goal.createdAt) : new Date();
+    const start = startDate ? new Date(startDate) : (goal?.createdAt ? new Date(goal.createdAt) : new Date());
     const end = new Date(byDate);
     if (!(end.getTime() > start.getTime())) return 'Set a deadline in the future to space checkpoints out.';
     const days = (end.getTime() - start.getTime()) / 86400000;
@@ -193,7 +194,7 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
       source: 'manual', // resolution is driven by the tile ref below, not this label
       metricRef: track === 'tile' ? { dashboardId, tileId } : {},
       targetValue: Number(target),
-      unit, direction, display, byDate,
+      unit, direction, display, byDate, startDate,
       scope: isPersonal ? 'personal' : 'event',
       isNorthStar: isPersonal ? false : northStar,
       visibility: isPersonal ? visibility : 'team',
@@ -204,7 +205,7 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
       baselineValue: baseNum,
       baselineSource: baseNum != null ? (baselineSuiteId && track === 'tile' ? 'looker' : 'manual') : '',
       milestones: milestones
-        .map((m) => ({ byDate: m.byDate, targetValue: Number(m.targetValue) }))
+        .map((m) => ({ byDate: m.byDate, targetValue: Number(m.targetValue), ...(m.lastValue != null && m.lastValue !== '' ? { lastValue: Number(m.lastValue) } : {}) }))
         .filter((m) => m.byDate && Number.isFinite(m.targetValue)),
       // Remember the linked checkpoint-curve tile so reopening restores it.
       curveRef: (curveDashboardId && curveTileId) ? { dashboardId: curveDashboardId, tileId: curveTileId, cadence: curveCadence } : null,
@@ -334,9 +335,14 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
           </select>
         </Field>
 
-        <Field label="By (deadline)" hint="Defaults to event day">
-          <input type="date" value={byDate} onChange={(e) => setByDate(e.target.value)} style={inp} />
-        </Field>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <Field label="Track from" hint="When selling started — pace runs from here. Defaults to today." style={{ flex: 1 }}>
+            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} style={inp} />
+          </Field>
+          <Field label="By (deadline)" hint="Defaults to event day" style={{ flex: 1 }}>
+            <input type="date" value={byDate} onChange={(e) => setByDate(e.target.value)} style={inp} />
+          </Field>
+        </div>
 
         <Field label="Checkpoints (optional)" hint="Weekly or monthly targets on the way — pace is measured against the nearest one, so a back-loaded goal isn’t flagged “behind” too early.">
           {milestones.map((m, i) => (
@@ -391,7 +397,7 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
                             <span style={{ fontWeight: 700 }}>{fmtNum(s.targetValue, unit)}</span>
                           </div>
                         ))}
-                        <button type="button" onClick={() => setMilestones(sugg.map((s) => ({ byDate: s.byDate, targetValue: String(s.targetValue) })))} style={applyBtn}>
+                        <button type="button" onClick={() => setMilestones(sugg.map((s) => ({ byDate: s.byDate, targetValue: String(s.targetValue), lastValue: s.lastValue })))} style={applyBtn}>
                           Use these {sugg.length} checkpoints
                         </button>
                       </>

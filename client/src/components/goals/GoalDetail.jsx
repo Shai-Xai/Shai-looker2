@@ -72,13 +72,25 @@ export default function GoalDetail({ goal, suiteName, onEdit, onDelete, onClose,
           </div>
         )}
 
-        {/* Baseline — "vs last time" (Slice B fills this from a comparable event). */}
-        {hasBaseline && (
+        {/* "vs last time" — apples-to-apples at the equivalent point in the cycle when a
+            curve is linked (lastAtNow), with last time's final total as a secondary line;
+            otherwise the plain baseline comparison. */}
+        {p.lastAtNow != null ? (
+          <>
+            <div style={row}>
+              <span style={rowLabel}>vs last time</span>
+              <span>last time had {fmtVal(p.lastAtNow, goal.unit)} by now{p.value != null ? deltaText(p.value, p.lastAtNow) : ''}</span>
+            </div>
+            {p.baselineFinal != null && (
+              <div style={row}><span style={rowLabel}>Last time total</span><span>{fmtVal(p.baselineFinal, goal.unit)}</span></div>
+            )}
+          </>
+        ) : hasBaseline ? (
           <div style={row}>
             <span style={rowLabel}>vs last time</span>
             <span>{fmtVal(goal.baselineValue, goal.unit)}{p.value != null ? deltaText(p.value, goal.baselineValue) : ''}</span>
           </div>
-        )}
+        ) : null}
 
         {/* Deadline */}
         {goal.byDate && (
@@ -96,6 +108,7 @@ export default function GoalDetail({ goal, suiteName, onEdit, onDelete, onClose,
                 <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '4px 0', fontSize: 13 }}>
                   <span style={{ width: 18, flexShrink: 0 }}>{hit ? '✅' : isNext ? '➡️' : '○'}</span>
                   <span style={{ flex: 1, color: isNext ? 'var(--text)' : 'var(--muted)', fontWeight: isNext ? 700 : 500 }}>{fmtDate(m.byDate)}</span>
+                  {m.lastValue != null && <span style={{ color: 'var(--muted)', fontSize: 11.5 }}>last time {fmtVal(m.lastValue, goal.unit)}</span>}
                   <span style={{ fontWeight: 700 }}>{fmtVal(m.targetValue, goal.unit)}</span>
                 </div>
               );
