@@ -551,6 +551,24 @@ async function resolveTileValue({ dashboardId, tileId, user, suiteId }) {
   return primaryTileValue(data, tile.vis || {});
 }
 
+// Remove "Days Before Event" / days-to-go type filters from a built query body, so a
+// forecast curve reads last time's FULL sell-through to event day rather than the
+// to-date slice these comparison dashboards usually clip it to. Targets the field by
+// name (days_before / days_to_event / …) and by the dashboard's days-to-go sync
+// mapping. Returns { filters, stripped:[keys removed] }.
+function stripDaysBeforeFilters(filters, def, tile) {
+  if (!filters) return { filters, stripped: [] };
+  const out = { ...filters };
+  const stripped = [];
+  const isDays = (k) => /day[s_]*\s*(before|to|until|remaining)/i.test(String(k)) || /before[_\s]*event/i.test(String(k));
+  const syncName = def && def.daysBeforeSync ? def.daysBeforeSync.filterName : null;
+  const mappedField = syncName && tile && tile.listenTo ? tile.listenTo[syncName] : null;
+  for (const k of Object.keys(out)) {
+    if (isDays(k) || (mappedField && k === mappedField)) { delete out[k]; stripped.push(k); }
+  }
+  return { filters: out, stripped };
+}
+
 // Time-series version of resolveTileValue: run the SAME scoped query, but return
 // the whole [{ t, v }] series (a date dimension × the primary measure) instead of
 // one number. This is what powers "review last time's curve" when setting goal
@@ -568,6 +586,7 @@ async function resolveTileSeries({ dashboardId, tileId, user, suiteId }) {
   const lockMap = { ...expandLockMap(entityView), ...expandLockMap(db.lockedFiltersForSuite(suiteId)) };
   const body = await tileQueryBody(tile, def, user, suiteId, lockMap);
   if (!body) return [];
+  body.filters = stripDaysBeforeFilters(body.filters, def, tile).filters; // full curve to event day
   body.limit = Math.max(Number(body.limit) || 0, 1000); // enough rows for a full curve
   const data = await runLookerQuery('/queries/run/json_detail', body);
   const fields = data?.fields || {};
@@ -621,6 +640,8 @@ async function resolveTileSeriesAll({ dashboardId, tileId, user, suiteId }) {
   const lockMap = { ...expandLockMap(entityView), ...expandLockMap(db.lockedFiltersForSuite(suiteId)) };
   const body = await tileQueryBody(tile, def, user, suiteId, lockMap);
   if (!body) return null;
+  const stripResult = stripDaysBeforeFilters(body.filters, def, tile);
+  body.filters = stripResult.filters; // full curve to event day
   body.limit = Math.max(Number(body.limit) || 0, 1000);
   const data = await runLookerQuery('/queries/run/json_detail', body);
   const fields = data?.fields || {};
@@ -643,7 +664,7 @@ async function resolveTileSeriesAll({ dashboardId, tileId, user, suiteId }) {
   } else {
     columns.push({ key: measure.label || measure.name, series: rows.map((row, i) => ({ t: x[i], v: num(row[measure.name]) })).filter((p) => p.v != null) });
   }
-  return { dateField: dateDim.name, measureField: measure.name, columns: columns.filter((c) => c.series.length) };
+  return { dateField: dateDim.name, measureField: measure.name, strippedFilters: stripResult.stripped, columns: columns.filter((c) => c.series.length) };
 }
 const goalsApi = require('./goals').mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTileSeriesAll });
 

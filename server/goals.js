@@ -504,6 +504,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
 
     res.json({
       columns: cols,
+      strippedFilters: data.strippedFilters || [],
       chosen: { lastKey: lastCol?.key, thisKey },
       inputs: { currentValue, target, r: r == null ? null : Number(r.toFixed(4)), daysLeft: daysLeft == null ? null : Math.round(daysLeft), recentRatePerDay: recentRatePerDay == null ? null : Math.round(recentRatePerDay), recentBasis, lastYearTotal: cum.length ? cum[cum.length - 1] : null },
       forecast: result,
