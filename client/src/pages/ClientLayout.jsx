@@ -474,6 +474,16 @@ export default function ClientLayout() {
               {(
                 <>
                   <div style={{ borderTop: '1px solid var(--hairline)', margin: '10px 4px' }} />
+                  {(visibleSuites.length > 0 || isAdmin) && (
+                  <button
+                    className={`nav-row${onGoals ? ' active' : ''}`}
+                    style={{ ...mRowSuite, fontWeight: onGoals ? 700 : 500 }}
+                    onClick={() => { if (!onGoals) vtNavigate(navigate, '/goals'); setNavOpen(false); }}
+                  >
+                    <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>🎯</span>
+                    <span style={ellip}>Goals</span>
+                  </button>
+                  )}
                   {can(PERMS.SETTLEMENTS_VIEW) && (visibleSettlements.length > 0 || isAdmin) && (
                   <button
                     className={`nav-row${onSettlements ? ' active' : ''}`}
