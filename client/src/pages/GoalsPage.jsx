@@ -113,7 +113,7 @@ export default function GoalsPage() {
             {goals.length ? (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
                 {goals.map((g, i) => (
-                  <GoalCard key={g.id} goal={g} index={i} onClick={() => setDetail({ suiteId: suite.id, goalId: g.id })} />
+                  <GoalCard key={g.id} goal={g} index={i} grid onClick={() => setDetail({ suiteId: suite.id, goalId: g.id })} />
                 ))}
               </div>
             ) : (
@@ -129,7 +129,7 @@ export default function GoalsPage() {
             {personalGoals.length ? (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
                 {personalGoals.map((g, i) => (
-                  <GoalCard key={g.id} goal={g} index={i} onClick={() => setDetail({ suiteId: suite.id, goalId: g.id })} />
+                  <GoalCard key={g.id} goal={g} index={i} grid onClick={() => setDetail({ suiteId: suite.id, goalId: g.id })} />
                 ))}
               </div>
             ) : (

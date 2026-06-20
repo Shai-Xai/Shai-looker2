@@ -14,12 +14,15 @@ export function Strip({ children }) {
   );
 }
 
-export function GoalCard({ goal, onClick, index = 0, draggable = false, onDragStartCard, onDropCard, onDelete }) {
+export function GoalCard({ goal, onClick, index = 0, draggable = false, onDragStartCard, onDropCard, onDelete, grid = false }) {
   const p = goal.progress || {};
   const { tone, chip } = goalState(goal, p);
   const viz = goal.display || 'bar';
   const clickable = !!onClick;
   const [confirming, setConfirming] = useState(false);
+  // Grid layout (the Goals page): flex-grow/shrink so at least two tiles sit per
+  // row on mobile (the fixed-width card is for the home's horizontal scroll strip).
+  const cardStyle = grid ? { ...card, flex: '1 1 150px', minWidth: 0, maxWidth: 260 } : card;
   return (
     <div className="lift msg-in"
       role={clickable ? 'button' : undefined} tabIndex={clickable ? 0 : undefined}
@@ -30,13 +33,14 @@ export function GoalCard({ goal, onClick, index = 0, draggable = false, onDragSt
       onDragOver={draggable ? (e) => e.preventDefault() : undefined}
       onDrop={draggable ? (e) => { e.preventDefault(); onDropCard && onDropCard(); } : undefined}
       title={draggable ? 'Drag to reorder' : undefined}
-      style={{ ...card, animationDelay: `${index * 60}ms`, cursor: clickable ? 'pointer' : 'default' }}
+      style={{ ...cardStyle, animationDelay: `${index * 60}ms`, cursor: clickable ? 'pointer' : 'default' }}
     >
-      {/* Title + pace chip share the top row, so the chip never costs its own line. */}
+      {/* Title row. For ring/dial the pace chip moves to the centre (under the ring);
+          for the bar layout it stays here, where there's no central column. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
         {goal.isNorthStar && <span title="North Star" style={{ fontSize: 12, flexShrink: 0 }}>⭐</span>}
         <span style={{ fontSize: 12.5, fontWeight: 700, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{goal.name}</span>
-        {chip}
+        {viz === 'bar' && chip}
         {onDelete && (confirming ? (
           <span style={{ display: 'flex', gap: 3, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
             <button onClick={(e) => { e.stopPropagation(); onDelete(); }} title="Delete this goal" style={delYes}>Delete</button>
@@ -56,6 +60,7 @@ export function GoalCard({ goal, onClick, index = 0, draggable = false, onDragSt
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, gap: 5, marginTop: 2 }}>
           {viz === 'ring' ? <Ring pct={p.pct} tone={tone} size={78} /> : <Dial pct={p.pct} tone={tone} size={86} />}
           <div style={{ fontSize: 11, color: 'var(--muted)', textAlign: 'center', lineHeight: 1.3 }}>{fmtVal(p.value, goal.unit)} / {fmtVal(goal.targetValue, goal.unit)}</div>
+          {chip && <div style={{ marginTop: 1 }}>{chip}</div>}
         </div>
       )}
     </div>
