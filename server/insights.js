@@ -216,6 +216,55 @@ async function streamDashboardInsight(ctx, onText) {
   await stream.finalMessage();
 }
 
+// ─── Goals (Results pillar) summary ──────────────────────────────────────────────
+// A short Owl narrative over an event's goals. The values (current, %, pace,
+// vs-last-time, next checkpoint) are ALREADY COMPUTED by the goals resolver and
+// passed in — the model only phrases them (a Results non-negotiable: goal values
+// are computed; the AI never recomputes or invents them).
+const GOALS_SYSTEM = `You are a senior analyst for Howler, an events ticketing platform (organisers run events; customers buy tickets; amounts in South African Rand, ZAR).
+
+You are given the GOALS for a single event, each with its progress ALREADY COMPUTED: current value, target, % to target, pace status (ahead / on track / behind versus where it should be by now), the value expected by now, the comparison to last time (baseline), and the next checkpoint. These numbers are facts — phrase them; never recompute, and never invent figures or goals that aren't listed.
+
+Write a short, honest, motivating summary for the organiser:
+- Lead with the North Star goal and whether it's on track.
+- Call out what's ahead and what's behind pace, with the specific numbers.
+- Mention the biggest move versus last time when it's notable.
+- Point to the nearest checkpoint that needs attention, and end with one concrete nudge.
+
+Keep it to 3-5 short sentences or up to 5 brief bullets. No preamble, no headings, no restating the question. If there's too little to say, say so briefly.`;
+
+function buildGoalsPrompt({ eventName, goals }) {
+  const fmt = (v) => (v == null ? '—' : (typeof v === 'number' ? v.toLocaleString('en-ZA') : String(v)));
+  const lines = [`Event: ${eventName || '(untitled)'}`, `Goals: ${goals.length}`, ''];
+  for (const g of goals) {
+    const p = g.progress || {};
+    const parts = [`- ${g.isNorthStar ? '★ ' : ''}${g.name}${g.unit ? ` (${g.unit})` : ''}`];
+    parts.push(`  current ${fmt(p.value)} / target ${fmt(g.targetValue)}${p.pct != null ? ` (${p.pct}%)` : ''}`);
+    if (g.direction === 'at_most') parts.push('  goal type: stay under the target');
+    if (p.status) parts.push(`  pace: ${p.status}${p.expected != null ? `, expected ~${fmt(p.expected)} by now` : ''}`);
+    if (g.baselineValue != null) parts.push(`  last time: ${fmt(g.baselineValue)}`);
+    if (p.nextMilestone) parts.push(`  next checkpoint: ${fmt(p.nextMilestone.targetValue)} by ${p.nextMilestone.byDate}`);
+    if (g.byDate) parts.push(`  deadline: ${g.byDate}`);
+    lines.push(parts.join('\n'));
+  }
+  return lines.join('\n');
+}
+
+// Streaming Owl summary of an event's goals. ctx = { eventName, goals, instructions, apiKey }.
+async function streamGoalsBrief(ctx, onText) {
+  const c = requireClient(ctx.apiKey);
+  const stream = c.messages.stream({
+    model: MODEL,
+    max_tokens: 1200,
+    thinking: { type: 'adaptive' },
+    output_config: { effort: 'low' },
+    system: systemWith(GOALS_SYSTEM, ctx.instructions),
+    messages: [{ role: 'user', content: buildGoalsPrompt(ctx) }],
+  });
+  stream.on('text', (delta) => onText(delta));
+  await stream.finalMessage();
+}
+
 // ─── Tile-library labelling ────────────────────────────────────────────────────
 // Given a tile's metadata (its title, chart type, and the fields it queries),
 // ask Claude to name it and explain what it shows and what it's used for. Used
@@ -664,7 +713,8 @@ function promptRegistry() {
     { key: 'invoice', label: 'Invoice extraction', scope: 'PDF invoice → JSON', text: INVOICE_SYSTEM },
     { key: 'digest_prefs', label: 'Digest preferences', scope: 'Distilling digest/briefing feedback into a learned preferences note', text: DIGEST_PREFS_SYSTEM },
     { key: 'classify', label: 'Document classification', scope: 'Owl email ingest: settlement vs invoice vs other', text: CLASSIFY_SYSTEM },
+    { key: 'goals', label: 'Goals summary', scope: 'Owl summary of an event\'s goals on the Goals page', text: GOALS_SYSTEM },
   ];
 }
 
-module.exports = { generateInsight, streamInsight, streamDashboardInsight, describeTile, extractSettlement, extractInvoice, classifyDocument, briefHome, digestBrief, draftCampaign, refineText, distilPreferences, summariseReleaseNotes, promptRegistry, systemWith, isConfigured: (apiKey) => !!(apiKey || process.env.ANTHROPIC_API_KEY) };
+module.exports = { generateInsight, streamInsight, streamDashboardInsight, streamGoalsBrief, describeTile, extractSettlement, extractInvoice, classifyDocument, briefHome, digestBrief, draftCampaign, refineText, distilPreferences, summariseReleaseNotes, promptRegistry, systemWith, isConfigured: (apiKey) => !!(apiKey || process.env.ANTHROPIC_API_KEY) };

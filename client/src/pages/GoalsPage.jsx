@@ -5,6 +5,7 @@ import { useProfile } from '../lib/profile.jsx';
 import { vtNavigate } from '../lib/viewTransition.js';
 import { GoalCard } from '../components/goals/GoalViz.jsx';
 import GoalRingsCard from '../components/goals/GoalRings.jsx';
+import GoalsBriefModal from '../components/goals/GoalsBriefModal.jsx';
 import GoalDetail from '../components/goals/GoalDetail.jsx';
 import GoalEditor from '../components/GoalEditor.jsx';
 
@@ -22,6 +23,7 @@ export default function GoalsPage() {
   const [me, setMe] = useState('');
   const [editor, setEditor] = useState(null);  // { suiteId, goal, scope } | null
   const [detail, setDetail] = useState(null);   // { suiteId, goalId } | null
+  const [brief, setBrief] = useState(null);     // { suiteId, name } | null
   const [params, setParams] = useSearchParams();
   const handled = useRef(false);
 
@@ -93,6 +95,9 @@ export default function GoalsPage() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
               <h2 style={eventName}>{suite.name}</h2>
               <span style={{ flex: 1 }} />
+              {goals.length > 0 && (
+                <button onClick={() => setBrief({ suiteId: suite.id, name: suite.name })} style={owlBtn} title="Owl summary of these goals">🦉 Owl summary</button>
+              )}
               {canManage && (
                 <button onClick={() => setEditor({ suiteId: suite.id, goal: null, scope: 'event' })} style={addBtn}>＋ {goals.length ? 'Add a goal' : 'Set a goal'}</button>
               )}
@@ -149,6 +154,9 @@ export default function GoalsPage() {
           onOpenEvent={(dashboardId) => openEvent(detail.suiteId, dashboardId)}
         />
       )}
+      {brief && (
+        <GoalsBriefModal suiteId={brief.suiteId} eventName={brief.name} onClose={() => setBrief(null)} />
+      )}
       {editor && (
         <GoalEditor
           entityId={suites.find((s) => s.id === editor.suiteId)?.entityId || activeEntityId}
@@ -168,3 +176,4 @@ export default function GoalsPage() {
 const eventName = { fontSize: 12, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)' };
 const subHead = { fontSize: 12, fontWeight: 700, color: 'var(--muted)' };
 const addBtn = { border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--brand)', borderRadius: 9, fontSize: 12.5, fontWeight: 700, padding: '6px 11px', cursor: 'pointer', flexShrink: 0 };
+const owlBtn = { border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 9, fontSize: 12.5, fontWeight: 700, padding: '6px 11px', cursor: 'pointer', flexShrink: 0 };

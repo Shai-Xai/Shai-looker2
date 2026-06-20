@@ -592,7 +592,37 @@ async function resolveTileSeries({ dashboardId, tileId, user, suiteId }) {
     .filter((p) => p.t && p.v != null)
     .sort((a, b) => a.t.localeCompare(b.t));
 }
-require('./goals').mount(app, { db, auth, resolveTileValue, resolveTileSeries });
+const goalsApi = require('./goals').mount(app, { db, auth, resolveTileValue, resolveTileSeries });
+
+// Owl summary of an event's goals — a short narrative over the RESOLVED goal values
+// (computed here by the goals resolver; the AI only phrases them). Streams plain text
+// like the other Owl surfaces; per-event (the Goals page "Owl summary" button).
+app.post('/api/goals/suites/:suiteId/brief', auth.requireAuth, rateLimit({ windowMs: 60_000, max: 12, by: 'user', scope: 'goals-brief', message: 'Too many goal summaries — please wait a moment.' }), async (req, res) => {
+  const suiteId = req.params.suiteId;
+  const su = db.getSuite(suiteId);
+  if (!su) return res.status(404).json({ error: 'Event not found' });
+  if (req.user.role !== 'admin' && !auth.canAccessSuite(req.user, suiteId)) return res.status(403).json({ error: 'Not allowed' });
+  const apiKey = anthropicKeyForSuite(suiteId);
+  if (!insights.isConfigured(apiKey)) return res.status(400).json({ error: 'AI insights are not configured. Set an Anthropic API key in Admin → Integrations (or .env).' });
+  const goals = [];
+  for (const g of goalsApi.listGoals(suiteId)) {
+    const m = await goalsApi.resolveMetric(g, { user: req.user });
+    goals.push({ ...g, progress: goalsApi.computeProgress(g, m.value) });
+  }
+  if (!goals.length) return res.status(400).json({ error: 'No goals set for this event yet.' });
+  try {
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('X-Accel-Buffering', 'no'); // don't let a reverse proxy buffer the stream
+    res.flushHeaders?.();
+    await insights.streamGoalsBrief({ eventName: su.name, goals, instructions: aiInstructionsFor(suiteId), apiKey }, (t) => res.write(t));
+    res.end();
+  } catch (err) {
+    console.error('[POST /api/goals/:suiteId/brief]', err.message);
+    if (!res.headersSent) res.status(500).json({ error: err.message });
+    else { res.write(`\n\n[error: ${err.message}]`); res.end(); }
+  }
+});
 
 // Format a Looker date value ("2026-05-29" / ISO) as "29 May 2026" for the
 // event dropdowns. Falls back to the raw string if it isn't a parseable date.
