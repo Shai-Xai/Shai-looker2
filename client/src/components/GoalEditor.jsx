@@ -34,6 +34,11 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
   const [baselineSuiteId, setBaselineSuiteId] = useState(goal?.baselineEventId || '');
   const [baselineValue, setBaselineValue] = useState(goal?.baselineValue != null ? String(goal.baselineValue) : '');
   const [baselineLoading, setBaselineLoading] = useState(false);
+  // How "last time" is sourced: a past event (reuse the tracking tile under its scope),
+  // a dashboard tile you pick (read live now), or a number you type. Stored as a value.
+  const [baselineMode, setBaselineMode] = useState(goal?.baselineEventId ? 'event' : 'manual'); // 'manual' | 'event' | 'tile'
+  const [baselineDashboardId, setBaselineDashboardId] = useState('');
+  const [baselineTileId, setBaselineTileId] = useState('');
   const [pastSuites, setPastSuites] = useState([]); // other events to compare against
   // Milestones — weekly/monthly checkpoints on the way to the target (Slice C).
   const [milestones, setMilestones] = useState(goal?.milestones || []);
@@ -55,18 +60,19 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
   const [err, setErr] = useState('');
   const [confirmDel, setConfirmDel] = useState(false);
 
-  // Load the client's dashboards/tiles for tile-tracking OR the curve suggester.
+  // Load the client's dashboards/tiles for tile-tracking, the curve suggester, OR the
+  // "compare to last time" tile picker.
   useEffect(() => {
-    if ((track !== 'tile' && !curveOpen) || cat || !entityId) return;
+    if ((track !== 'tile' && !curveOpen && baselineMode !== 'tile') || cat || !entityId) return;
     api.getMyDigestTiles(entityId).then(setCat).catch(() => setCat({ dashboards: [] }));
-  }, [track, curveOpen, cat, entityId]);
+  }, [track, curveOpen, baselineMode, cat, entityId]);
 
   // Read "last time's curve" AND its checkpoint suggestions in one server call — the
   // server uses the SAME days-before alignment as the live pace engine, returning the
   // shape (for the sparkline) plus per-checkpoint fractions (target-independent, so the
   // target field below doesn't re-query). Scope is enforced server-side. Re-runs when
   // the tile, cadence or the start/deadline change (NOT on every target keystroke).
-  const curveSuiteId = baselineSuiteId || activeSuite;
+  const curveSuiteId = (baselineMode === 'event' && baselineSuiteId) ? baselineSuiteId : activeSuite;
   useEffect(() => {
     if (!curveOpen || !curveDashboardId || !curveTileId || !curveSuiteId) { setCurveSeries(null); setSuggInfo(null); return undefined; }
     let alive = true; setCurveSeries({ loading: true });
@@ -117,6 +123,19 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
     return () => { alive = false; };
   }, [track, baselineSuiteId, dashboardId, tileId]);
 
+  // Baseline from a PICKED tile — read it live (under this event's scope) and snapshot
+  // the number into baselineValue, so you can compare to any tile (e.g. a last-year KPI),
+  // not just the tracking tile under a past event.
+  useEffect(() => {
+    if (baselineMode !== 'tile' || !baselineDashboardId || !baselineTileId || !activeSuite) return undefined;
+    let alive = true; setBaselineLoading(true);
+    api.goalTileValue(activeSuite, baselineDashboardId, baselineTileId)
+      .then((r) => { if (alive) setBaselineValue(r.value == null ? '' : String(r.value)); })
+      .catch(() => { if (alive) setBaselineValue(''); })
+      .finally(() => { if (alive) setBaselineLoading(false); });
+    return () => { alive = false; };
+  }, [baselineMode, baselineDashboardId, baselineTileId, activeSuite]);
+
   const dashboards = cat?.dashboards || [];
   // A goal tracks ONE headline number, so only single-value (KPI) tiles qualify —
   // a chart/table tile has no single "the number" (and the resolver would read its
@@ -154,8 +173,9 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
   // Baseline UI state: do we have a usable "last time" number, are we auto-reading
   // it off a past event's tile, and did that read succeed?
   const baseFinite = baselineValue !== '' && Number.isFinite(Number(baselineValue));
-  const autoMode = !!baselineSuiteId && track === 'tile'; // reading the same tile under a past event
-  const resolvedOk = autoMode && !baselineLoading && baseFinite;
+  // "Auto" = the value is read for you (past event reusing the tracking tile, or a tile
+  // you picked) rather than typed.
+  const autoMode = (baselineMode === 'event' && !!baselineSuiteId && track === 'tile') || (baselineMode === 'tile' && !!baselineTileId);
 
   const updateMilestone = (i, patch) => setMilestones((ms) => ms.map((m, j) => (j === i ? { ...m, ...patch } : m)));
   const addMilestone = () => setMilestones((ms) => [...ms, { byDate: '', targetValue: '' }]);
@@ -271,16 +291,39 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
         )}
 
         <Field label="Compare to last time (optional)" hint="Start from last time — the goal shows “vs last time” and can suggest a target.">
-          {pastSuites.length > 0 && (
-            <select value={baselineSuiteId} onChange={(e) => { setBaselineSuiteId(e.target.value); if (!e.target.value) setBaselineValue(''); }} style={inp}>
-              <option value="">Enter it manually…</option>
-              {pastSuites.map((s) => <option key={s.id} value={s.id}>{s.name}{s.id === activeSuite ? ' (this event)' : ''}</option>)}
-            </select>
+          <select
+            value={baselineMode === 'event' ? baselineSuiteId : (baselineMode === 'tile' ? '__tile__' : '')}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v === '') { setBaselineMode('manual'); setBaselineSuiteId(''); setBaselineValue(''); }
+              else if (v === '__tile__') { setBaselineMode('tile'); setBaselineSuiteId(''); setBaselineValue(''); }
+              else { setBaselineMode('event'); setBaselineSuiteId(v); }
+            }}
+            style={inp}
+          >
+            <option value="">Enter it manually…</option>
+            <option value="__tile__">📊 From a dashboard tile…</option>
+            {pastSuites.map((s) => <option key={s.id} value={s.id}>{s.name}{s.id === activeSuite ? ' (this event)' : ''}</option>)}
+          </select>
+          {/* Pick any dashboard + tile for last time's number (e.g. a last-year KPI). */}
+          {baselineMode === 'tile' && (
+            <>
+              <select value={baselineDashboardId} onChange={(e) => { setBaselineDashboardId(e.target.value); setBaselineTileId(''); setBaselineValue(''); }} style={{ ...inp, marginTop: 8 }}>
+                <option value="">{cat ? 'Choose a dashboard…' : 'Loading…'}</option>
+                {dashboards.map((dd) => <option key={dd.dashboardId} value={dd.dashboardId}>{dd.title}{dd.setName ? ` · ${dd.setName}` : ''}</option>)}
+              </select>
+              {baselineDashboardId && (
+                <select value={baselineTileId} onChange={(e) => setBaselineTileId(e.target.value)} style={{ ...inp, marginTop: 8 }}>
+                  <option value="">Choose a tile…</option>
+                  {tilesFor(baselineDashboardId).map((t) => <option key={t.tileId} value={t.tileId}>{t.title}</option>)}
+                </select>
+              )}
+            </>
           )}
           {autoMode && baselineLoading && <div style={{ marginTop: 8, fontSize: 12.5, color: 'var(--muted)' }}>reading last time…</div>}
-          {autoMode && !baselineLoading && !baseFinite && <div style={{ marginTop: 8, fontSize: 12, color: 'var(--muted)' }}>Couldn’t read that tile for the chosen event — enter it below.</div>}
-          {!resolvedOk && !(autoMode && baselineLoading) && (
-            <input value={baselineValue} onChange={(e) => setBaselineValue(e.target.value)} placeholder="Last time’s value" inputMode="decimal" style={{ ...inp, marginTop: pastSuites.length > 0 ? 8 : 0 }} />
+          {autoMode && !baselineLoading && !baseFinite && <div style={{ marginTop: 8, fontSize: 12, color: 'var(--muted)' }}>Couldn’t read that tile — pick another or enter it below.</div>}
+          {(baselineMode === 'manual' || (autoMode && !baselineLoading && !baseFinite)) && (
+            <input value={baselineValue} onChange={(e) => setBaselineValue(e.target.value)} placeholder="Last time’s value" inputMode="decimal" style={{ ...inp, marginTop: 8 }} />
           )}
           {baseFinite && (
             <div style={{ marginTop: 9 }}>
