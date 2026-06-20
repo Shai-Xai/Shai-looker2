@@ -247,6 +247,19 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
     const floorDay = (ms) => { const d = new Date(ms); d.setHours(0, 0, 0, 0); return d.getTime(); };
     return Math.round((floorDay(deadlineMs) - floorDay(nowMs)) / 86400000);
   }
+  // Last time's shape from an all-columns tile read: the COMPLETE prior period (the
+  // largest-total column that isn't the current/highest-key one). Returns its raw
+  // [{ t, v }] series — the SAME column the live card uses as its baseline curve, so
+  // the checkpoint suggester and the card read one shape.
+  function pickLastYearShape(data) {
+    if (!data || !Array.isArray(data.columns) || !data.columns.length) return [];
+    const totalOf = (c) => c.series.reduce((s, p) => s + (Number(p.v) || 0), 0);
+    const byKeyDesc = [...data.columns].sort((a, b) => String(b.key).localeCompare(String(a.key), undefined, { numeric: true }));
+    const thisKey = byKeyDesc[0]?.key;
+    const rest = data.columns.filter((c) => c.key !== thisKey);
+    const lastCol = (rest.length ? rest : data.columns).slice().sort((a, b) => totalOf(b) - totalOf(a))[0];
+    return (lastCol?.series || []).filter((p) => p && Number.isFinite(Number(p.v)));
+  }
   // Progress = resolved value vs target, with honest PACE. Pace is measured over the
   // sell window [start_date (or created_at) → deadline]. When the goal links a
   // value-over-time curve (curveRef → `curve`, a cumulative array of last time's
@@ -350,15 +363,10 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
             if (typeof resolveTileSeriesAll === 'function') {
               const data = await resolveTileSeriesAll({ dashboardId: cr.dashboardId, tileId: cr.tileId, user: req.user, suiteId: g.suiteId });
               if (data && Array.isArray(data.columns) && data.columns.length) {
-                const totalOf = (c) => c.series.reduce((s, p) => s + (Number(p.v) || 0), 0);
-                // this-year = highest key (current period); last-year shape = largest-total
-                // of the rest (a COMPLETE prior period, not the partial current one).
+                // last-year shape = the complete prior column; this-year = highest key.
+                const shape = pickLastYearShape(data);
                 const byKeyDesc = [...data.columns].sort((a, b) => String(b.key).localeCompare(String(a.key), undefined, { numeric: true }));
-                const thisKey = byKeyDesc[0]?.key;
-                const rest = data.columns.filter((c) => c.key !== thisKey);
-                const lastCol = (rest.length ? rest : data.columns).slice().sort((a, b) => totalOf(b) - totalOf(a))[0];
-                const thisCol = data.columns.find((c) => c.key === thisKey);
-                const shape = (lastCol?.series || []).filter((p) => p && Number.isFinite(Number(p.v)));
+                const thisCol = data.columns.find((c) => c.key === byKeyDesc[0]?.key);
                 const thisCum = fc.toCumulative((thisCol?.series || []).map((p) => p.v));
                 const thisNow = thisCum.length ? thisCum[thisCum.length - 1] : null;
                 return { shape: shape.length >= 2 ? shape : null, thisNow };
@@ -494,6 +502,50 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
       const series = await resolveTileSeries({ dashboardId, tileId, user: req.user, suiteId: req.params.suiteId });
       res.json({ series });
     } catch (e) { res.json({ series: [], error: e.message }); }
+  });
+
+  // Server-computed checkpoint suggestions for the editor. Uses the SAME days-before
+  // alignment as the live pace engine (fc.fractionAtNow against the event-day anchor:
+  // Looker → briefing → by_date), so suggested checkpoints and the card's Ahead/Behind
+  // run on identical math. Returns last time's shape (for the sparkline) + per-checkpoint
+  // FRACTIONS of last time's total (target-independent — the client multiplies by the
+  // live target, so typing a target doesn't re-query) plus last time's value at each.
+  app.post('/api/goals/suites/:suiteId/checkpoint-suggestions', auth.requireAuth, async (req, res) => {
+    const suiteId = req.params.suiteId;
+    if (!db.getSuite(suiteId)) return res.status(404).json({ error: 'Event not found' });
+    if (!canView(req.user, suiteId)) return res.status(403).json({ error: 'Not allowed' });
+    const { dashboardId, tileId, cadence, startDate, byDate } = req.body || {};
+    if (typeof resolveTileSeriesAll !== 'function' || !dashboardId || !tileId) return res.json({ series: [], checkpoints: [] });
+    let series = [];
+    try {
+      const data = await resolveTileSeriesAll({ dashboardId, tileId, user: req.user, suiteId });
+      series = pickLastYearShape(data);
+    } catch (e) { return res.json({ series: [], checkpoints: [], error: e.message }); }
+    // Event-day anchor + window — identical inputs to the live pace engine.
+    let lookerDate = null;
+    try { lookerDate = (typeof resolveEventDate === 'function') ? await resolveEventDate({ suiteId, user: req.user }) : null; } catch { lookerDate = null; }
+    const endMs = eventDeadline({ suiteId, byDate }, lookerDate).ms;
+    const startMs = startDate ? new Date(`${String(startDate).slice(0, 10)}T00:00:00`).getTime() : Date.now();
+    const eventDate = Number.isFinite(endMs) ? new Date(endMs).toISOString().slice(0, 10) : null;
+    if (series.length < 2 || !Number.isFinite(endMs) || !Number.isFinite(startMs) || !(endMs > startMs)) {
+      return res.json({ series, pointsRead: series.length, eventDate, checkpoints: [] });
+    }
+    // Lay out checkpoint dates by cadence from the start to the event day…
+    const weekly = cadence !== 'monthly';
+    const dates = []; const d = new Date(startMs);
+    const bump = () => (weekly ? d.setDate(d.getDate() + 7) : d.setMonth(d.getMonth() + 1));
+    bump();
+    while (d.getTime() < endMs && dates.length < 24) { dates.push(new Date(d)); bump(); }
+    // …and read last time at each by the SAME days-before alignment the card uses.
+    const checkpoints = [];
+    for (const dt of dates) {
+      const daysLeft = calendarDaysLeft(endMs, dt.getTime());
+      const at = fc.fractionAtNow(series, { deadlineMs: endMs, nowMs: dt.getTime(), startMs, daysLeft });
+      if (at && Number.isFinite(at.fraction)) {
+        checkpoints.push({ byDate: dt.toISOString().slice(0, 10), fraction: Number(at.fraction.toFixed(6)), lastValue: Math.round(at.valueAtNow), basis: at.basis });
+      }
+    }
+    res.json({ series, pointsRead: series.length, eventDate, checkpoints });
   });
 
   // ── Forecast probe (read-only diagnostic) ──

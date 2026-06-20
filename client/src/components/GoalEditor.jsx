@@ -45,6 +45,7 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
   const [curveTileId, setCurveTileId] = useState(goal?.curveRef?.tileId || '');
   const [curveCadence, setCurveCadence] = useState(goal?.curveRef?.cadence || 'monthly'); // 'weekly' | 'monthly'
   const [curveSeries, setCurveSeries] = useState(null); // { loading } | [{ t, v }]
+  const [suggInfo, setSuggInfo] = useState(null); // server-computed { checkpoints:[{byDate,fraction,lastValue}] }
   // Personal-goal fields (Slice D): who can see it + which event goal it feeds.
   const [visibility, setVisibility] = useState(goal?.visibility || 'team');
   const [rollsUpTo, setRollsUpTo] = useState(goal?.rollsUpTo || '');
@@ -60,17 +61,20 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
     api.getMyDigestTiles(entityId).then(setCat).catch(() => setCat({ dashboards: [] }));
   }, [track, curveOpen, cat, entityId]);
 
-  // Read "last time's curve" — the linked time-series tile under the comparable past
-  // event (or this event when none is chosen). Scope is enforced server-side.
+  // Read "last time's curve" AND its checkpoint suggestions in one server call — the
+  // server uses the SAME days-before alignment as the live pace engine, returning the
+  // shape (for the sparkline) plus per-checkpoint fractions (target-independent, so the
+  // target field below doesn't re-query). Scope is enforced server-side. Re-runs when
+  // the tile, cadence or the start/deadline change (NOT on every target keystroke).
   const curveSuiteId = baselineSuiteId || activeSuite;
   useEffect(() => {
-    if (!curveOpen || !curveDashboardId || !curveTileId || !curveSuiteId) { setCurveSeries(null); return undefined; }
+    if (!curveOpen || !curveDashboardId || !curveTileId || !curveSuiteId) { setCurveSeries(null); setSuggInfo(null); return undefined; }
     let alive = true; setCurveSeries({ loading: true });
-    api.goalTileSeries(curveSuiteId, curveDashboardId, curveTileId)
-      .then((r) => { if (alive) setCurveSeries(Array.isArray(r.series) ? r.series : []); })
-      .catch(() => { if (alive) setCurveSeries([]); });
+    api.goalCheckpointSuggestions(curveSuiteId, { dashboardId: curveDashboardId, tileId: curveTileId, cadence: curveCadence, startDate, byDate })
+      .then((r) => { if (!alive) return; setCurveSeries(Array.isArray(r.series) ? r.series : []); setSuggInfo({ checkpoints: Array.isArray(r.checkpoints) ? r.checkpoints : [] }); })
+      .catch(() => { if (alive) { setCurveSeries([]); setSuggInfo({ checkpoints: [] }); } });
     return () => { alive = false; };
-  }, [curveOpen, curveDashboardId, curveTileId, curveSuiteId]);
+  }, [curveOpen, curveDashboardId, curveTileId, curveSuiteId, curveCadence, startDate, byDate]);
 
   // Live value of the chosen tile, so the target is set against the real number.
   useEffect(() => {
@@ -123,42 +127,16 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
   // series (not single-value KPIs), so there's a shape to read.
   const seriesTilesFor = (dId) => (dashboards.find((d) => d.dashboardId === dId)?.tiles || []).filter((t) => !isKpi(t));
 
-  // Turn last time's curve into suggested checkpoints for THIS goal: take the curve's
-  // SHAPE (cumulative fraction reached at each relative point in its run) and apply it
-  // to this goal's timeline + target. Each suggestion also carries last time's actual
-  // by the equivalent point, so the numbers are reviewable, not a black box.
+  // Suggested checkpoints for THIS goal: the SERVER computes each checkpoint's fraction
+  // of last time's total using the SAME days-before alignment as the live pace engine
+  // (so the suggestions and the card's Ahead/Behind use identical math). Here we just
+  // scale those fractions by the live target — keeping the target field instant (no
+  // re-query) while last time's actual value at each point stays reviewable.
   function buildSuggestions() {
-    const series = Array.isArray(curveSeries) ? curveSeries : [];
     const tgt = Number(target);
-    if (series.length < 2 || !byDate || !Number.isFinite(tgt) || tgt <= 0) return [];
-    const start = startDate ? new Date(startDate) : (goal?.createdAt ? new Date(goal.createdAt) : new Date());
-    const end = new Date(byDate);
-    if (!(end.getTime() > start.getTime())) return [];
-    // Use the curve's SHAPE by row order (the series is already chronological), so it
-    // works whether the x-axis is real dates, months, or a "days before" axis.
-    const vals = series.map((p) => Number(p.v)).filter((v) => Number.isFinite(v));
-    if (vals.length < 2) return [];
-    // Already cumulative (non-decreasing) → use as-is; else accumulate per-period.
-    const nonDecreasing = vals.every((v, i) => i === 0 || v >= vals[i - 1] - 1e-9);
-    let run = 0; const cum = vals.map((v) => { run = nonDecreasing ? v : run + v; return run; });
-    const final = cum[cum.length - 1];
-    if (!(final > 0)) return [];
-    // Cumulative fraction at a relative position r in [0,1] along the curve.
-    const fracAt = (r) => {
-      const x = Math.max(0, Math.min(1, r)) * (cum.length - 1);
-      const i = Math.floor(x), f = x - i;
-      const c = i + 1 < cum.length ? cum[i] + (cum[i + 1] - cum[i]) * f : cum[i];
-      return c / final;
-    };
-    const dates = []; const d = new Date(start);
-    const bump = () => (curveCadence === 'weekly' ? d.setDate(d.getDate() + 7) : d.setMonth(d.getMonth() + 1));
-    bump();
-    while (d.getTime() < end.getTime() && dates.length < 24) { dates.push(new Date(d)); bump(); }
-    const span = end.getTime() - start.getTime();
-    return dates.map((dt) => {
-      const frac = fracAt((dt.getTime() - start.getTime()) / span);
-      return { byDate: dt.toISOString().slice(0, 10), targetValue: Math.round(tgt * frac), lastValue: Math.round(final * frac) };
-    });
+    const cps = suggInfo?.checkpoints || [];
+    if (!cps.length || !Number.isFinite(tgt) || tgt <= 0) return [];
+    return cps.map((c) => ({ byDate: c.byDate, targetValue: Math.round(tgt * c.fraction), lastValue: c.lastValue }));
   }
 
   // When the curve read fine but no checkpoints came out, say WHY (instead of silence).

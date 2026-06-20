@@ -213,6 +213,29 @@ test('tile-series returns last time’s curve to a member and is denied to outsi
   assert.equal((await app.req('POST', `/api/goals/suites/${suiteId}/tile-series`, { as: outsider, body: { dashboardId: 'd', tileId: 't' } })).status, 403, 'outsider is blocked');
 });
 
+test('checkpoint-suggestions align to days-before-event (same math as the live pace), not row position', async () => {
+  const day = 86400000;
+  const iso = (ms) => new Date(ms).toISOString().slice(0, 10);
+  // Last time's curve on a days-before-event axis: cumulative 1000→10000 at 30,20,10,0 days out.
+  tileColumns = { columns: [{ key: 'one', series: [
+    { t: '30', v: 1000 }, { t: '20', v: 3000 }, { t: '10', v: 6000 }, { t: '0', v: 10000 },
+  ] }] };
+  const r = await app.req('POST', `/api/goals/suites/${suiteId}/checkpoint-suggestions`, { as: owner, body: {
+    dashboardId: 'd', tileId: 't', cadence: 'weekly',
+    startDate: iso(Date.now() - 30 * day), byDate: iso(Date.now() + 10 * day), // event in 10 days
+  } });
+  assert.equal(r.status, 200);
+  assert.ok(r.body.checkpoints.length >= 2, 'produces checkpoints');
+  // The checkpoint nearest the event lands 5 days out → days-before interp = 8000 (0.8),
+  // NOT the naive row-position read (which would give 8500). That proves the alignment.
+  const last = r.body.checkpoints[r.body.checkpoints.length - 1];
+  assert.equal(last.lastValue, 8000, 'last time read by days-before-event, not row position');
+  assert.ok(Math.abs(last.fraction - 0.8) < 1e-6, 'fraction is of last time’s total at that days-before point');
+  assert.equal(last.basis, 'days-before', 'used the days-before axis');
+  // Outsider is blocked.
+  assert.equal((await app.req('POST', `/api/goals/suites/${suiteId}/checkpoint-suggestions`, { as: outsider, body: { dashboardId: 'd', tileId: 't' } })).status, 403);
+});
+
 test('a goal remembers its linked checkpoint-curve tile across edits', async () => {
   const g = (await create(owner, {
     name: 'Curve link', source: 'manual', targetValue: 50000, unit: 'tickets',
