@@ -221,8 +221,18 @@ function mount(app, { db, auth, resolveTileValue }) {
       points.push([end, goal.targetValue]);
       points.sort((a, b) => a[0] - b[0]);
       expected = Math.round(interpAt(points, nowMs));
-      onPace = goal.direction === 'at_most' ? value <= (expected || goal.targetValue) : value >= expected * 0.95;
-      status = nowMs >= end ? 'final' : (onPace ? (pct >= 100 ? 'ahead' : 'on_track') : 'behind');
+      if (goal.direction === 'at_most') {
+        const cap = expected || goal.targetValue;
+        onPace = value <= cap;
+        status = nowMs >= end ? 'final' : (value <= cap * 0.9 ? 'ahead' : onPace ? 'on_track' : 'behind');
+      } else {
+        // Ahead / on-track / behind judged against the expected-by-now value (the pace
+        // line), NOT against the final target — so a goal well above where it should be
+        // by today reads "ahead" even before it has hit 100%.
+        const ratio = expected > 0 ? value / expected : (value > 0 ? 2 : 1);
+        onPace = ratio >= 0.95;
+        status = nowMs >= end ? 'final' : (ratio >= 1.1 ? 'ahead' : ratio >= 0.95 ? 'on_track' : 'behind');
+      }
     }
     const band = (!Number.isNaN(end) && nowMs >= end) ? resultBand(goal, value, pct) : (goal.resultBand || null);
     return { value, pct, target: goal.targetValue, direction: goal.direction, expected, onPace, status, band, milestones, nextMilestone };

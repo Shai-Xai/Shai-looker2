@@ -143,6 +143,8 @@ test('pace is measured against the nearest checkpoint (milestone-aware)', () => 
   const p = goalsApi.computeProgress(goal, 400);
   assert.ok(Math.abs(p.expected - 800) <= 5, `expected ≈ 800, got ${p.expected}`);
   assert.equal(p.status, 'behind', '400 is well under the 800 checkpoint → behind');
+  // Comfortably above the expected-by-now line reads "ahead" even before hitting target.
+  assert.equal(goalsApi.computeProgress(goal, 900).status, 'ahead', '900 vs ~800 expected (target 1000) → ahead of pace');
   // Without milestones the same goal sits on the straight line (~500 at the midpoint).
   const linear = goalsApi.computeProgress({ ...goal, milestones: [] }, 400);
   assert.ok(linear.expected < 600, `linear expected ~500, got ${linear.expected}`);
