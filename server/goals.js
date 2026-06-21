@@ -373,13 +373,20 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
     const start = Date.parse(goal.startDate || goal.createdAt);
     const hasCurve = Array.isArray(curve) && curve.length >= 2;
     // Deadline rule (scoped so we don't trample goals with their own schedule):
-    //  • a curve/forecast goal is aligned to the EVENT DAY — that's the axis its
-    //    sell-curve is measured against, so days-to-go must be days-before-event;
-    //  • every other goal keeps its OWN by_date (an early-bird target, a bar-revenue
-    //    deadline, a personal task) — the event day only fills in if none was set.
+    //  • a curve goal whose curve is a days-before-event COUNTDOWN (e.g. tickets) is
+    //    aligned to the EVENT DAY — that's the axis its sell-curve is measured against;
+    //  • every other goal — including a curve on a CALENDAR/forward axis (day-of-month,
+    //    monthly) — keeps its OWN by_date; the event day only fills in if none was set.
     const ev = eventDeadline(goal, opts.eventDateIso);
     const ownEnd = goal.byDate ? new Date(`${String(goal.byDate).slice(0, 10)}T00:00:00`).getTime() : NaN;
-    const end = hasCurve ? ev.ms : (Number.isFinite(ownEnd) ? ownEnd : ev.ms);
+    // A forward NUMERIC axis (day-of-month, week #: cumulative rises as the number
+    // rises) is a calendar/periodic curve, NOT an event sell-curve — keep the goal's
+    // own by_date. Countdown (days-before-event) and ISO-date curves stay event-anchored.
+    const isISO = (t) => /^\d{4}-\d{2}/.test(String(t));
+    const numCurve = (fc.cumulativeWithAxis(curve) || []).filter((p) => p.t !== '' && p.t != null && !isISO(p.t) && Number.isFinite(Number(p.t)));
+    const forwardPeriodic = numCurve.length >= 2 && !fc.isCountdownAxis(numCurve);
+    const eventAnchored = hasCurve && !forwardPeriodic;
+    const end = eventAnchored ? ev.ms : (Number.isFinite(ownEnd) ? ownEnd : ev.ms);
     const daysLeft = calendarDaysLeft(end, nowMs);
     // Align last time's curve to where we are now by its REAL axis (days-before-event),
     // not by row position — so "last time at this point" is the actual recorded value.
@@ -646,7 +653,11 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
     // Event-day anchor + window — identical inputs to the live pace engine.
     let lookerDate = null;
     try { lookerDate = (typeof resolveEventDate === 'function') ? await resolveEventDate({ suiteId, user: req.user }) : null; } catch { lookerDate = null; }
-    const endMs = eventDeadline({ suiteId, byDate }, lookerDate).ms;
+    // The editor's "By (deadline)" is explicit user intent — honour it; only fall
+    // back to the event/briefing date when the user left it blank.
+    const endMs = byDate
+      ? new Date(`${String(byDate).slice(0, 10)}T00:00:00`).getTime()
+      : eventDeadline({ suiteId }, lookerDate).ms;
     const startMs = startDate ? new Date(`${String(startDate).slice(0, 10)}T00:00:00`).getTime() : Date.now();
     const eventDate = Number.isFinite(endMs) ? new Date(endMs).toISOString().slice(0, 10) : null;
     if (series.length < 2 || !Number.isFinite(endMs) || !Number.isFinite(startMs) || !(endMs > startMs)) {
