@@ -28,7 +28,16 @@ const DIRECTIONS = ['at_least', 'at_most', 'exact'];
 // this year reaches only `now` (= elapsed / (elapsed + daysLeft)), leaving the rest
 // of the axis for the forecast curve. The forecast follows last time's REMAINING
 // shape scaled to the current value (so it lands on `projected`).
-// Returns { last:[{x,y}], cur:[{x,y}], forecast:[{x,y}], nowFrac } | null.
+// Trailing rows that don't increase the cumulative are empty/lagging data points
+// (Looker returns 0 for days not yet ingested), not real zero-sales days — drop
+// them so "actual" ends on the last day it genuinely moved.
+function dropFlatTail(arr, valOf) {
+  let end = arr.length - 1;
+  while (end > 0 && valOf(arr[end]) <= valOf(arr[end - 1]) + 1e-9) end--;
+  return arr.slice(0, end + 1);
+}
+
+// Returns { last:[{x,y}], cur:[{x,y}], forecast:[{x,y}], nowFrac, cycleDays } | null.
 function positionForecast({ cumLast, cumThis, daysLeft, projected }) {
   if ((!cumLast || cumLast.length < 2) && (!cumThis || cumThis.length < 2)) return null;
   const DAY = 86400000;
@@ -44,14 +53,18 @@ function positionForecast({ cumLast, cumThis, daysLeft, projected }) {
     const maxD = Math.max(...allT.map(Number), 1);
     const xOf = (t) => Math.max(0, Math.min(1, 1 - Number(t) / maxD));
     last = cumLast.map((p) => ({ x: xOf(p.t), y: Math.round(p.c) })).sort((a, b) => a.x - b.x);
-    cur = cumThis.map((p) => ({ x: xOf(p.t), y: Math.round(p.c) })).sort((a, b) => a.x - b.x);
+    const curRaw = cumThis.map((p) => ({ x: xOf(p.t), y: Math.round(p.c) })).sort((a, b) => a.x - b.x);
+    cur = dropFlatTail(curRaw, (p) => p.y); // end on the last real movement (largest x)
     nowFrac = cur.length ? cur[cur.length - 1].x : (dLeft != null ? xOf(dLeft) : 1);
     cycleDays = maxD;
   } else if (datedAxis && dLeft != null) {
-    const cd = cumThis.map((p) => ({ t: Date.parse(p.t), c: p.c })).sort((a, b) => a.t - b.t);
+    const cdRaw = cumThis.map((p) => ({ t: Date.parse(p.t), c: p.c })).sort((a, b) => a.t - b.t);
     const ld = cumLast.map((p) => ({ t: Date.parse(p.t), c: p.c })).sort((a, b) => a.t - b.t);
-    const ty0 = cd[0]?.t, tyNow = cd[cd.length - 1]?.t;
+    // Cycle length uses the ORIGINAL last date (≈ today) + days to event, so the
+    // axis still spans start→event even after we trim the lagging tail.
+    const ty0 = cdRaw[0]?.t, tyNow = cdRaw[cdRaw.length - 1]?.t;
     const total = (tyNow - ty0) / DAY + dLeft;
+    const cd = dropFlatTail(cdRaw, (p) => p.c); // end on the last day sales actually moved
     const ly0 = ld[0]?.t, lyEnd = ld[ld.length - 1]?.t; const lspan = (lyEnd - ly0) || 1;
     last = ld.map((p) => ({ x: (p.t - ly0) / lspan, y: Math.round(p.c) }));
     cur = total > 0 ? cd.map((p) => ({ x: (p.t - ty0) / (total * DAY), y: Math.round(p.c) })) : cd.map((p, i) => ({ x: i / Math.max(cd.length - 1, 1), y: Math.round(p.c) }));
@@ -60,10 +73,11 @@ function positionForecast({ cumLast, cumThis, daysLeft, projected }) {
   } else {
     // No usable axis: align by index, but end this year at its cycle fraction so the
     // forecast still has room when daysLeft is known.
-    const nC = cumThis.length;
+    const cumThisT = dropFlatTail(cumThis, (p) => p.c);
+    const nC = cumThisT.length;
     nowFrac = dLeft != null && (nC + dLeft) > 0 ? Math.min(1, (nC - 1) / (nC - 1 + dLeft)) : 1;
     last = cumLast.map((p, i) => ({ x: cumLast.length > 1 ? i / (cumLast.length - 1) : 0, y: Math.round(p.c) }));
-    cur = cumThis.map((p, i) => ({ x: nC > 1 ? (i / (nC - 1)) * nowFrac : 0, y: Math.round(p.c) }));
+    cur = cumThisT.map((p, i) => ({ x: nC > 1 ? (i / (nC - 1)) * nowFrac : 0, y: Math.round(p.c) }));
   }
 
   // Forecast curve from `now`, hugging last time's remaining shape.
