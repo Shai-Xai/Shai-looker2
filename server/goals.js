@@ -167,7 +167,16 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
       by TEXT,
       at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS goal_templates (
+      id TEXT PRIMARY KEY,
+      entity_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      payload TEXT NOT NULL DEFAULT '{}',
+      created_by TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL
+    );
     CREATE INDEX IF NOT EXISTS idx_goals_suite ON goals(suite_id);
+    CREATE INDEX IF NOT EXISTS idx_goal_templates ON goal_templates(entity_id);
     CREATE INDEX IF NOT EXISTS idx_goal_snapshots ON goal_snapshots(goal_id, at);
   `);
   // Additive migration for tables created before `display` existed (idempotent).
@@ -639,6 +648,49 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
     if (!Number.isFinite(v)) return res.status(400).json({ error: 'A numeric value is required' });
     sql.prepare('INSERT INTO goal_snapshots (id, goal_id, at, actual_value) VALUES (?,?,?,?)').run(uuid(), g.id, now(), v);
     res.status(201).json({ ok: true, value: v });
+  });
+
+  // ── Goal templates — save a goal's reusable config and start new goals from it ──
+  // Entity-scoped (a client's reusable patterns, e.g. "Monthly revenue"). The payload
+  // is the editor's create-body MINUS instance fields (dates, North Star, snapshots),
+  // so applying it just pre-fills the form; creation still goes through cleanInput.
+  const tmplCanEntity = (user, eid) => user.role === 'admin' || (user.entityIds || []).includes(eid);
+  const templatePayloadFromGoal = (g) => ({
+    name: g.name, source: g.source, metricKey: g.metricKey,
+    metricRef: g.metricRef || null, targetValue: g.targetValue, unit: g.unit,
+    direction: g.direction, display: g.display,
+    curveRef: g.curveRef || null, baselineRef: g.baselineRef || null, baselineSource: g.baselineSource || '',
+  });
+
+  app.get('/api/goals/templates/:entityId', auth.requireAuth, (req, res) => {
+    if (!tmplCanEntity(req.user, req.params.entityId)) return res.status(403).json({ error: 'Not allowed' });
+    const rows = sql.prepare('SELECT id, name, payload, created_at FROM goal_templates WHERE entity_id=? ORDER BY created_at DESC').all(req.params.entityId);
+    res.json({ templates: rows.map((r) => ({ id: r.id, name: r.name, payload: parseJson(r.payload, {}), createdAt: r.created_at })) });
+  });
+
+  app.post('/api/goals/templates', auth.requireAuth, (req, res) => {
+    let { entityId, name, payload } = req.body || {};
+    const fromGoalId = req.body?.fromGoalId;
+    if (fromGoalId) {
+      const g = goalById(fromGoalId);
+      if (!g) return res.status(404).json({ error: 'Goal not found' });
+      if (!canView(req.user, g.suiteId)) return res.status(403).json({ error: 'Not allowed' });
+      entityId = g.entityId; name = name || g.name; payload = templatePayloadFromGoal(g);
+    }
+    if (!entityId || !tmplCanEntity(req.user, entityId)) return res.status(403).json({ error: 'Not allowed' });
+    if (!name || !payload || typeof payload !== 'object') return res.status(400).json({ error: 'name and payload are required' });
+    const id = uuid(); const ts = now();
+    sql.prepare('INSERT INTO goal_templates (id, entity_id, name, payload, created_by, created_at) VALUES (?,?,?,?,?,?)')
+      .run(id, entityId, String(name).slice(0, 120), JSON.stringify(payload).slice(0, 8000), req.user.email, ts);
+    res.status(201).json({ template: { id, name: String(name).slice(0, 120), payload, createdAt: ts } });
+  });
+
+  app.delete('/api/goals/templates/:id', auth.requireAuth, (req, res) => {
+    const row = sql.prepare('SELECT entity_id FROM goal_templates WHERE id=?').get(req.params.id);
+    if (!row) return res.json({ ok: true });
+    if (!tmplCanEntity(req.user, row.entity_id)) return res.status(403).json({ error: 'Not allowed' });
+    sql.prepare('DELETE FROM goal_templates WHERE id=?').run(req.params.id);
+    res.json({ ok: true });
   });
 
   // Live preview of a tile's current number for the editor — so when you pick a

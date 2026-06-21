@@ -58,6 +58,8 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
   const [rollsUpTo, setRollsUpTo] = useState(goal?.rollsUpTo || '');
   const [cat, setCat] = useState(null);       // tile catalogue { dashboards: [...] }
   const [preview, setPreview] = useState(null); // live value of the picked tile
+  const [templates, setTemplates] = useState([]); // reusable goal templates for this entity
+  const [tmplBusy, setTmplBusy] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [confirmDel, setConfirmDel] = useState(false);
@@ -68,6 +70,43 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
     if ((track !== 'tile' && !curveOpen && baselineMode !== 'tile') || cat || !entityId) return;
     api.getMyDigestTiles(entityId).then(setCat).catch(() => setCat({ dashboards: [] }));
   }, [track, curveOpen, baselineMode, cat, entityId]);
+
+  // Reusable goal templates for this client.
+  useEffect(() => { if (entityId) api.goalTemplates(entityId).then((r) => setTemplates(r.templates || [])).catch(() => {}); }, [entityId]);
+
+  // The reusable subset of the current form (no dates / North Star / snapshot).
+  const templatePayload = () => ({
+    name, source: track === 'tile' ? 'ticketing' : 'manual',
+    metricRef: track === 'tile' && dashboardId && tileId ? { dashboardId, tileId } : null,
+    targetValue: Number(target) || 0, unit, direction, display,
+    curveRef: (curveDashboardId && curveTileId) ? { dashboardId: curveDashboardId, tileId: curveTileId, cadence: curveCadence, ...(compareKey ? { compareKey } : {}) } : null,
+    baselineRef: baselineMode === 'tile' && baselineDashboardId && baselineTileId ? { dashboardId: baselineDashboardId, tileId: baselineTileId } : null,
+  });
+  const applyTemplate = (p) => {
+    if (!p) return;
+    if (p.name) setName(p.name);
+    if (p.metricRef && p.metricRef.tileId) { setTrack('tile'); setDashboardId(p.metricRef.dashboardId || ''); setTileId(p.metricRef.tileId || ''); }
+    if (p.targetValue != null) setTarget(String(p.targetValue));
+    if (p.unit) setUnit(p.unit);
+    if (p.direction) setDirection(p.direction);
+    if (p.display) setDisplay(p.display);
+    if (p.curveRef && p.curveRef.tileId) { setCurveOpen(true); setCurveDashboardId(p.curveRef.dashboardId || ''); setCurveTileId(p.curveRef.tileId || ''); setCurveCadence(p.curveRef.cadence || 'monthly'); setCompareKey(p.curveRef.compareKey || ''); }
+    if (p.baselineRef && p.baselineRef.tileId) { setBaselineMode('tile'); setBaselineDashboardId(p.baselineRef.dashboardId || ''); setBaselineTileId(p.baselineRef.tileId || ''); }
+  };
+  const saveAsTemplate = async () => {
+    const nm = (name || '').trim() || window.prompt('Template name?') || '';
+    if (!nm.trim() || !entityId) return;
+    setTmplBusy(true);
+    try {
+      const r = await api.saveGoalTemplate({ entityId, name: nm.trim(), payload: { ...templatePayload(), name: nm.trim() } });
+      if (r?.template) { setTemplates((t) => [r.template, ...t]); window.alert(`Saved “${r.template.name}” as a reusable template.`); }
+    } catch (e) { window.alert(`Couldn't save template: ${e.message}`); }
+    finally { setTmplBusy(false); }
+  };
+  const removeTemplate = async (id) => {
+    if (!window.confirm('Delete this template?')) return;
+    try { await api.deleteGoalTemplate(id); setTemplates((t) => t.filter((x) => x.id !== id)); } catch { /* ignore */ }
+  };
 
   // Read "last time's curve" AND its checkpoint suggestions in one server call — the
   // server uses the SAME days-before alignment as the live pace engine, returning the
@@ -238,6 +277,20 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
           <h2 style={{ fontSize: 17, fontWeight: 800, flex: 1 }}>{editing ? (isPersonal ? 'Edit personal goal' : 'Edit goal') : (isPersonal ? 'Set a personal goal' : 'Set a goal')}</h2>
           <button onClick={onClose} style={xBtn} aria-label="Close">✕</button>
         </div>
+
+        {/* Start from a saved template (reuse a recurring goal's setup). */}
+        {!editing && templates.length > 0 && (
+          <Field label="Start from a template">
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {templates.map((t) => (
+                <span key={t.id} style={tmplChip}>
+                  <button type="button" onClick={() => applyTemplate(t.payload)} style={tmplChipBtn} title="Use this template">{t.name}</button>
+                  <button type="button" onClick={() => removeTemplate(t.id)} aria-label="Delete template" style={tmplChipX}>✕</button>
+                </span>
+              ))}
+            </div>
+          </Field>
+        )}
 
         <Field label="What's the goal?">
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Sell-through, Bar revenue, Sponsorship secured" style={inp} autoFocus />
@@ -486,6 +539,11 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
           ) : (
             <button onClick={() => setConfirmDel(true)} style={btnDelGhost} title="Delete this goal" aria-label="Delete goal">🗑</button>
           ))}
+          {!isPersonal && name.trim() && (
+            <button onClick={saveAsTemplate} disabled={tmplBusy} style={btnGhost} title="Save this setup as a reusable template">
+              {tmplBusy ? 'Saving…' : '📑 Save as template'}
+            </button>
+          )}
           <button onClick={onClose} style={btnGhost}>Cancel</button>
           <button onClick={save} disabled={busy} style={btnPrimary}>{busy ? 'Saving…' : (editing ? 'Save goal' : 'Set goal')}</button>
         </div>
@@ -493,6 +551,10 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
     </div>
   );
 }
+
+const tmplChip = { display: 'inline-flex', alignItems: 'center', gap: 2, border: '1px solid var(--hairline)', borderRadius: 980, background: 'var(--card)', overflow: 'hidden' };
+const tmplChipBtn = { border: 'none', background: 'transparent', color: 'var(--brand)', fontWeight: 700, fontSize: 12, cursor: 'pointer', padding: '6px 4px 6px 11px', fontFamily: 'inherit' };
+const tmplChipX = { border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 11, padding: '6px 9px 6px 4px', lineHeight: 1 };
 
 function Field({ label, hint, children, style }) {
   return (
