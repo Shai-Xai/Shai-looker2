@@ -78,6 +78,7 @@ function positionForecast({ cumLast, cumThis, daysLeft, projected }) {
     nowFrac = dLeft != null && (nC + dLeft) > 0 ? Math.min(1, (nC - 1) / (nC - 1 + dLeft)) : 1;
     last = cumLast.map((p, i) => ({ x: cumLast.length > 1 ? i / (cumLast.length - 1) : 0, y: Math.round(p.c) }));
     cur = cumThisT.map((p, i) => ({ x: nC > 1 ? (i / (nC - 1)) * nowFrac : 0, y: Math.round(p.c) }));
+    cycleDays = dLeft != null ? (nC - 1 + dLeft) : null; // rough: each point ≈ a day
   }
 
   // Forecast curve from `now`, hugging last time's remaining shape.

@@ -86,13 +86,14 @@ export default function ForecastChart({ data, unit, w = 440, h = 150 }) {
 
   const ys = [...lastPts, ...curPts, ...(fcPts || [])].map((p) => p.y);
   const yMax = Math.max(...ys, target || 0, projected || 0, 1) * 1.08;
-  const pad = { l: 6, r: 6, t: 10, b: 8 };
+  const pad = { l: 6, r: 6, t: 10, b: cycleDays != null ? 18 : 8 }; // room for days-before labels
   const X = (xp) => pad.l + xp * (w - pad.l - pad.r);
   const Y = (y) => h - pad.b - (y / yMax) * (h - pad.t - pad.b);
   const line = (pts) => pts.map((p, i) => `${i ? 'L' : 'M'}${X(p.x).toFixed(1)},${Y(p.y).toFixed(1)}`).join(' ');
   const MUTED = 'rgba(128,128,128,0.55)';
   const FC = '#f59e0b'; // forecast — distinct from the brand "actual" line
   const nowX = now ? now.x : null;
+  const tipUnit = (unit === 'ZAR' || unit === '%') ? unit : ''; // keep R/% prefix; drop long word units
 
   // Pointer/touch inspection: map the cursor to an x-fraction, then read each
   // series' value there (so a flat stretch reads as "no change those days").
@@ -101,8 +102,10 @@ export default function ForecastChart({ data, unit, w = 440, h = 150 }) {
     const rect = el.getBoundingClientRect();
     const vbX = ((clientX - rect.left) / rect.width) * w;
     const xp = Math.max(0, Math.min(1, (vbX - pad.l) / (w - pad.l - pad.r)));
-    setHover({ xp, px: clientX - rect.left });
+    setHover({ xp, px: clientX - rect.left, cw: rect.width });
   };
+  // Days-before-event ticks for the x-axis (when we know the cycle length).
+  const ticks = cycleDays != null ? [0, 0.5, 1].map((xp) => ({ xp, d: Math.max(0, Math.round((1 - xp) * cycleDays)) })) : [];
   let hv = null;
   if (hover) {
     const xp = hover.xp;
@@ -143,22 +146,32 @@ export default function ForecastChart({ data, unit, w = 440, h = 150 }) {
             {hv.actualY != null && <circle cx={X(hv.xp)} cy={Y(hv.actualY)} r="3.5" fill="var(--brand)" stroke="var(--card)" strokeWidth="1.5" />}
           </g>
         )}
+        {/* x-axis: days before the event (0 = event day) */}
+        {ticks.map((t, i) => (
+          <text key={i} x={X(t.xp)} y={h - 5} fontSize="8" fill={MUTED}
+            textAnchor={t.xp <= 0 ? 'start' : t.xp >= 1 ? 'end' : 'middle'}>
+            {t.xp >= 1 ? 'event' : `${t.d}d before`}
+          </text>
+        ))}
       </svg>
-      {hv && (
-        <div style={{
-          position: 'absolute', top: 2, left: Math.max(4, Math.min(hv.px - 60, w - 124)),
-          width: 'max-content', maxWidth: 150, pointerEvents: 'none', zIndex: 2,
-          background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 8,
-          boxShadow: '0 6px 18px rgba(0,0,0,0.18)', padding: '6px 9px', fontSize: 11, lineHeight: 1.5,
-        }}>
-          <div style={{ fontWeight: 700, color: 'var(--muted)', marginBottom: 2 }}>
-            {hv.daysToGo != null ? (hv.daysToGo === 0 ? 'event day' : `≈ ${hv.daysToGo}d to go`) : `${Math.round(hv.xp * 100)}% through`}
+      {hv && (() => {
+        const cw = hv.cw || 280; const tipW = Math.min(150, cw - 8);
+        const left = Math.max(4, Math.min(hv.px - tipW / 2, cw - tipW - 4));
+        return (
+          <div style={{
+            position: 'absolute', top: 2, left, width: 'max-content', maxWidth: tipW, pointerEvents: 'none', zIndex: 2,
+            background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 8,
+            boxShadow: '0 6px 18px rgba(0,0,0,0.18)', padding: '6px 9px', fontSize: 11, lineHeight: 1.5,
+          }}>
+            <div style={{ fontWeight: 700, color: 'var(--muted)', marginBottom: 2 }}>
+              {hv.daysToGo != null ? (hv.daysToGo === 0 ? 'event day' : `${hv.daysToGo}d before event`) : `${Math.round(hv.xp * 100)}% through`}
+            </div>
+            {hv.actualY != null && <TipRow color="var(--brand)" label="actual" val={fmtVal(Math.round(hv.actualY), tipUnit)} />}
+            {hv.fcY != null && <TipRow color={FC} label="forecast" val={fmtVal(Math.round(hv.fcY), tipUnit)} />}
+            {hv.lastY != null && <TipRow color={MUTED} label="last time" val={fmtVal(Math.round(hv.lastY), tipUnit)} />}
           </div>
-          {hv.actualY != null && <TipRow color="var(--brand)" label="actual" val={fmtVal(Math.round(hv.actualY), unit)} />}
-          {hv.fcY != null && <TipRow color={FC} label="forecast" val={fmtVal(Math.round(hv.fcY), unit)} />}
-          {hv.lastY != null && <TipRow color={MUTED} label="last time" val={fmtVal(Math.round(hv.lastY), unit)} />}
-        </div>
-      )}
+        );
+      })()}
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: 10.5, color: 'var(--muted)', marginTop: 4 }}>
         <Key color={MUTED}>last time{data?.lastKey ? ` (${data.lastKey})` : ''}</Key>
         <Key color="var(--brand)">actual</Key>
