@@ -47,7 +47,9 @@ function Header() {
   // The top-left identity doubles as the workspace switcher when there's
   // somewhere else to go: a client with >1 profile, or ANY admin that's linked
   // to client accounts (so they can flip between console and those clients).
-  const canSwitch = isAdmin ? entities.length > 0 : entities.length > 1;
+  // Admins always need the switcher while in a client experience (incl. previewing
+  // a client they aren't linked to) so they can get back to the console.
+  const canSwitch = isAdmin ? (entities.length > 0 || inClientView) : entities.length > 1;
   const enterClient = (id) => { setProfile(id); navigate('/'); };
   const goConsole = () => { enterConsole(); navigate('/admin'); };
   const location = useLocation();

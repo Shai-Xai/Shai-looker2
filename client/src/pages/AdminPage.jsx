@@ -4,6 +4,7 @@ import { api } from '../lib/api.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import { useAuth } from '../lib/auth.jsx';
 import { useTheme } from '../lib/theme.jsx';
+import { useProfile } from '../lib/profile.jsx';
 import IntegrationsForm from '../components/IntegrationsForm.jsx';
 import MailTemplateEditor from '../components/MailTemplateEditor.jsx';
 import MailLogView from '../components/MailLogView.jsx';
@@ -807,6 +808,7 @@ const adminMenuItem = { display: 'flex', alignItems: 'center', gap: 9, width: '1
 // Client settings: name, organiser locks, preview, delete.
 function ClientSettings({ entity, suites, fields, onChange, onBack }) {
   const navigate = useNavigate();
+  const { setProfile } = useProfile();
   const [name, setName] = useState(entity.name);
   const [logo, setLogo] = useState(entity.logo || '');
   const [aiContext, setAiContext] = useState(entity.aiContext || '');
@@ -817,13 +819,16 @@ function ClientSettings({ entity, suites, fields, onChange, onBack }) {
   const remove = async () => { if (confirm(`Delete client "${entity.name}"? This removes its sets too.`)) { await api.adminDeleteEntity(entity.id); onBack(); onChange(); } };
   const preview = async () => {
     if (!suites.length) { alert('This client has no suites yet.'); return; }
+    // Enter THIS client's experience so every scoped page (Goals, Engage, Home)
+    // sees only their data — not all clients. Then land on the first dashboard.
+    setProfile(entity.id, { name: entity.name, logo: entity.logo });
     try {
       for (const su of suites) {
         const d = await api.mySuite(su.id);
         const first = d.sets.flatMap((s) => s.dashboards)[0];
         if (first) { navigate(`/suite/${su.id}/d/${first.id}`); return; }
       }
-      alert('This client has no dashboards to preview yet.');
+      navigate('/'); // no dashboards yet — still drop into the client home, scoped to them
     } catch (e) { alert('Could not open preview: ' + e.message); }
   };
   return (
@@ -1397,6 +1402,7 @@ function RoleChips({ value = [], roles, onChange, inherit = false }) {
 // Rendered inside a client's Suites section (see ClientSuites).
 function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) {
   const navigate = useNavigate();
+  const { setProfile } = useProfile();
   const [openSets, setOpenSets] = useState({});
   const [name, setName] = useState(suite.name);
   const [icon, setIcon] = useState(suite.icon || '');
@@ -1439,6 +1445,9 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
   // first dashboard. Uses the client suite endpoint (admins can read any suite).
   const preview = async () => {
     try {
+      // Scope the whole client shell to this suite's client, then open the suite.
+      const ent = (entities || []).find((e) => e.id === suite.entityId);
+      if (suite.entityId) setProfile(suite.entityId, { name: ent?.name, logo: ent?.logo });
       const d = await api.mySuite(suite.id);
       const first = d.sets.flatMap((s) => s.dashboards)[0];
       if (first) navigate(`/suite/${suite.id}/d/${first.id}`);
