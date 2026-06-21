@@ -300,6 +300,20 @@ test('Looker’s event start date wins over the briefing and the typed by_date',
   assert.equal(row.progress.daysLeft, 20, 'days-to-go uses the live Looker event date');
 });
 
+test('a FORWARD/calendar curve (day-of-month) keeps the goal by_date, not the event date', async () => {
+  const day = 86400000;
+  const sid = h.db.createSuite({ entityId, name: 'Calendar curve test' }).id;
+  // Event (briefing) is 40 days out, but this is a monthly goal with a 9-day by_date.
+  h.db.updateSuite(sid, { briefing: { eventStart: new Date(Date.now() + 40 * day).toISOString().slice(0, 10) } });
+  const byDate = new Date(Date.now() + 9 * day).toISOString().slice(0, 10);
+  // Cumulative-by-day-of-month curve: value RISES as the axis number rises (forward).
+  tileColumns = { columns: [{ key: '2025', series: [{ t: '1', v: 100 }, { t: '10', v: 1000 }, { t: '20', v: 2200 }, { t: '31', v: 3000 }] }] };
+  const g = (await app.req('POST', `/api/goals/suites/${sid}`, { as: owner, body: { name: 'June revenue', source: 'manual', targetValue: 6000, unit: 'ZAR', byDate, curveRef: { dashboardId: 'd', tileId: 't' } } })).body.goal;
+  await app.req('POST', `/api/goals/${g.id}/snapshot`, { as: owner, body: { value: 1500 } });
+  const row = (await app.req('GET', `/api/goals/suites/${sid}`, { as: owner })).body.goals.find((x) => x.id === g.id);
+  assert.equal(row.progress.daysLeft, 9, 'a calendar/day-of-month curve keeps the goal by_date, not the 40-day event');
+});
+
 test('a linked curve drives baseline + vs-last-time-at-this-point, with pace over the window', async () => {
   const day = 86400000;
   const start = new Date(Date.now() - 10 * day).toISOString().slice(0, 10);

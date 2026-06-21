@@ -84,7 +84,16 @@ export default function ForecastChart({ data, unit, w = 440, h = 150 }) {
   const now = curPts.length ? curPts[curPts.length - 1] : null;
   const fcEndY = (fcPts && fcPts.length) ? fcPts[fcPts.length - 1].y : projected;
 
-  const ys = [...lastPts, ...curPts, ...(fcPts || [])].map((p) => p.y);
+  // Target PACE line: last year's shape scaled up to the target (the increase), so
+  // it hugs last year and lands exactly on the target at the event. Track actual +
+  // forecast against this to see "ahead / behind the line you need for target".
+  let tgtPace = null;
+  if (target != null && lastPts.length >= 2) {
+    const lastTotal = lastPts[lastPts.length - 1].y || Math.max(...lastPts.map((p) => p.y));
+    if (lastTotal > 0) tgtPace = lastPts.map((p) => ({ x: p.x, y: (target * p.y) / lastTotal }));
+  }
+
+  const ys = [...lastPts, ...curPts, ...(fcPts || []), ...(tgtPace || [])].map((p) => p.y);
   const yMax = Math.max(...ys, target || 0, projected || 0, 1) * 1.08;
   const pad = { l: 6, r: 6, t: 10, b: cycleDays != null ? 18 : 8 }; // room for days-before labels
   const X = (xp) => pad.l + xp * (w - pad.l - pad.r);
@@ -113,8 +122,9 @@ export default function ForecastChart({ data, unit, w = 440, h = 150 }) {
     const actualY = curPts.length >= 2 && (nowX == null || xp <= nowX + 1e-6) ? interpAt(curPts, xp) : null;
     const lastY = lastPts.length >= 2 ? interpAt(lastPts, xp) : null;
     const fcY = fcPts && fcPts.length >= 2 && nowX != null && xp >= nowX - 1e-6 ? interpAt(fcPts, xp) : null;
+    const tgtY = tgtPace ? interpAt(tgtPace, xp) : null;
     const daysToGo = cycleDays != null ? Math.max(0, Math.round((1 - xp) * cycleDays)) : null;
-    hv = { xp, px: hover.px, actualY, lastY, fcY, daysToGo };
+    hv = { xp, px: hover.px, cw: hover.cw, actualY, lastY, fcY, tgtY, daysToGo };
   }
 
   return (
@@ -126,10 +136,12 @@ export default function ForecastChart({ data, unit, w = 440, h = 150 }) {
         onTouchMove={(e) => { if (e.touches[0]) onMove(e.touches[0].clientX); }}
         onTouchEnd={() => setHover(null)}
       >
-        {target != null && (
-          <g>
-            <line x1={pad.l} x2={w - pad.r} y1={Y(target)} y2={Y(target)} stroke={TGT} strokeWidth="1.5" strokeDasharray="5 3" opacity="0.9" />
-          </g>
+        {/* Target pace — last year's shape scaled to the target (hugs last year,
+            lands on target). Falls back to a flat target line with no last-year shape. */}
+        {tgtPace ? (
+          <path d={line(tgtPace)} fill="none" stroke={TGT} strokeWidth="1.75" strokeDasharray="5 3" opacity="0.9" strokeLinejoin="round" strokeLinecap="round" />
+        ) : target != null && (
+          <line x1={pad.l} x2={w - pad.r} y1={Y(target)} y2={Y(target)} stroke={TGT} strokeWidth="1.5" strokeDasharray="5 3" opacity="0.9" />
         )}
         {/* "you are here" divider — actual to its left, forecast to its right */}
         {now && <line x1={X(now.x)} x2={X(now.x)} y1={pad.t} y2={h - pad.b} stroke={MUTED} strokeWidth="0.75" strokeDasharray="1 3" />}
@@ -142,6 +154,7 @@ export default function ForecastChart({ data, unit, w = 440, h = 150 }) {
         {hv && (
           <g pointerEvents="none">
             <line x1={X(hv.xp)} x2={X(hv.xp)} y1={pad.t} y2={h - pad.b} stroke="var(--text)" strokeOpacity="0.35" strokeWidth="1" />
+            {hv.tgtY != null && <circle cx={X(hv.xp)} cy={Y(hv.tgtY)} r="3" fill={TGT} />}
             {hv.lastY != null && <circle cx={X(hv.xp)} cy={Y(hv.lastY)} r="3" fill={MUTED} />}
             {hv.fcY != null && <circle cx={X(hv.xp)} cy={Y(hv.fcY)} r="3" fill={FC} />}
             {hv.actualY != null && <circle cx={X(hv.xp)} cy={Y(hv.actualY)} r="3.5" fill="var(--brand)" stroke="var(--card)" strokeWidth="1.5" />}
@@ -169,6 +182,7 @@ export default function ForecastChart({ data, unit, w = 440, h = 150 }) {
             </div>
             {hv.actualY != null && <TipRow color="var(--brand)" label="actual" val={fmtVal(Math.round(hv.actualY), tipUnit)} />}
             {hv.fcY != null && <TipRow color={FC} label="forecast" val={fmtVal(Math.round(hv.fcY), tipUnit)} />}
+            {hv.tgtY != null && <TipRow color={TGT} label="target pace" val={fmtVal(Math.round(hv.tgtY), tipUnit)} />}
             {hv.lastY != null && <TipRow color={MUTED} label="last time" val={fmtVal(Math.round(hv.lastY), tipUnit)} />}
           </div>
         );
@@ -177,7 +191,7 @@ export default function ForecastChart({ data, unit, w = 440, h = 150 }) {
         <Key color={MUTED}>last time{data?.lastKey ? ` (${data.lastKey})` : ''}</Key>
         <Key color="var(--brand)">actual</Key>
         <Key color={FC} dashed>forecast{projected != null ? ` ≈ ${fmtVal(projected, unit)}` : ''}</Key>
-        {target != null && <Key color={TGT} dashed>target {fmtVal(target, unit)}</Key>}
+        {target != null && <Key color={TGT} dashed>{tgtPace ? 'target pace' : 'target'} {fmtVal(target, unit)}</Key>}
       </div>
     </div>
   );
