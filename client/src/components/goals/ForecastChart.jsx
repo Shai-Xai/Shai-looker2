@@ -10,6 +10,8 @@ export default function ForecastChart({ data, unit, w = 440, h = 150 }) {
   if (last.length < 2 && cur.length < 2) return null;
   const isISO = (x) => /^\d{4}-\d{2}/.test(String(x));
   const numeric = last.concat(cur).every((p) => Number.isFinite(Number(p.x)) && !isISO(p.x));
+  const dated = !numeric && last.concat(cur).every((p) => isISO(p.x) && !Number.isNaN(Date.parse(p.x)));
+  const daysLeft = Number.isFinite(data?.daysLeft) ? Math.max(0, data.daysLeft) : null;
 
   let lastPts, curPts;
   if (numeric) {
@@ -17,10 +19,28 @@ export default function ForecastChart({ data, unit, w = 440, h = 150 }) {
     const xp = (x) => Math.max(0, Math.min(1, 1 - Number(x) / maxX)); // x=0 (event) → right
     lastPts = last.map((p) => ({ x: xp(p.x), y: p.y })).sort((a, b) => a.x - b.x);
     curPts = cur.map((p) => ({ x: xp(p.x), y: p.y })).sort((a, b) => a.x - b.x);
+  } else if (dated && daysLeft != null) {
+    // Date axis: place each point by its FRACTION of the run-up cycle so the two
+    // years align by point-in-cycle. Last time spans its full cycle (0→1); this
+    // year only reaches `now` = elapsed / (elapsed + daysLeft), leaving the rest of
+    // the axis (→ the event) for the forecast. Without this, aligning by row index
+    // pins today to the right edge and the forecast collapses to a dot.
+    const day = 86400000;
+    const cd = cur.map((p) => ({ t: Date.parse(p.x), y: p.y })).sort((a, b) => a.t - b.t);
+    const ld = last.map((p) => ({ t: Date.parse(p.x), y: p.y })).sort((a, b) => a.t - b.t);
+    const ty0 = cd[0]?.t, tyNow = cd[cd.length - 1]?.t;
+    const elapsed = (tyNow - ty0) / day;
+    const total = elapsed + daysLeft;
+    const ly0 = ld[0]?.t, lyEnd = ld[ld.length - 1]?.t;
+    const lspan = (lyEnd - ly0) || 1;
+    lastPts = ld.map((p) => ({ x: (p.t - ly0) / lspan, y: p.y }));
+    curPts = total > 0 ? cd.map((p) => ({ x: (p.t - ty0) / (total * day), y: p.y })) : cd.map((p, i) => ({ x: i / Math.max(cd.length - 1, 1), y: p.y }));
   } else {
-    const N = Math.max(last.length, cur.length, 2);
-    const idx = (arr) => arr.map((p, i) => ({ x: (i + (N - arr.length)) / (N - 1), y: p.y })); // align right (event)
-    lastPts = idx(last); curPts = idx(cur);
+    // Fallback (no usable axis): align LEFT and end this year at its cycle fraction
+    // so there's still room for the forecast when daysLeft is known.
+    const nowFrac = daysLeft != null && (cur.length + daysLeft) > 0 ? Math.min(1, (cur.length - 1) / (cur.length - 1 + daysLeft)) : 1;
+    lastPts = last.map((p, i) => ({ x: (last.length > 1 ? i / (last.length - 1) : 0), y: p.y }));
+    curPts = cur.map((p, i) => ({ x: (cur.length > 1 ? (i / (cur.length - 1)) * nowFrac : 0), y: p.y }));
   }
   const projected = Number.isFinite(data?.projected) ? data.projected : null;
   const target = Number.isFinite(data?.target) ? data.target : null;
