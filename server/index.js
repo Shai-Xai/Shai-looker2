@@ -1933,7 +1933,21 @@ async function generateBriefing(user, entityId, segment, { force = false } = {})
     const { suites } = clientCatalogue(entityId);
     const instructions = [aiInstructionsFor(null), briefingInstructionsFor(user, entityId, suites), timeDefaults()[segment]].filter(Boolean).join('\n\n');
     const msgs = recentMessages(entityId, user.id);
-    const raw = await insights.briefHome({ tiles, profile: profileForAi, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), messages: msgs, capabilities: ACTION_CAPABILITIES, today: todayLabel() });
+    // Resolve the event goals (North Star first) with the SAME rich progress the Goals
+    // page shows, so the briefing can anchor on the goal and how it's tracking. Capped.
+    let goals = [];
+    try {
+      const gcaches = goalsApi.makeGoalCaches();
+      for (const su of suites) {
+        for (const g of goalsApi.listGoals(su.id)) {
+          goals.push({ ...(await goalsApi.attachProgress(g, user, gcaches)), suiteName: su.name });
+          if (goals.length >= 6) break;
+        }
+        if (goals.length >= 6) break;
+      }
+      goals.sort((a, b) => (b.isNorthStar ? 1 : 0) - (a.isNorthStar ? 1 : 0)); // North Star first
+    } catch (e) { console.error('[briefing] goals failed', e.message); }
+    const raw = await insights.briefHome({ tiles, profile: profileForAi, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), messages: msgs, capabilities: ACTION_CAPABILITIES, goals, today: todayLabel() });
     const link = (id) => (id && byId[id] ? { dashboardId: id, suiteId: byId[id].suiteId, label: `${byId[id].setName} → ${byId[id].title}` } : null);
     const msgIds = new Set(msgs.map((m) => m.id));
     const out = {
