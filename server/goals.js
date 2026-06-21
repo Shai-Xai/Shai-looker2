@@ -729,8 +729,17 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
     const toXY = (series) => (fc.cumulativeWithAxis(series) || []).map((p) => ({ x: p.t, y: Math.round(p.c) }));
     const prog = (await attachProgress(g, req.user)).progress;
     const projected = prog.forecast ? prog.forecast.projected : null;
+    // Axis labels: a forward/calendar curve (day-of-month etc.) is date-based, so the
+    // chart should label real dates across [start → deadline]; an event sell-curve
+    // labels "days before event". (Mirrors the deadline-anchoring rule.)
+    const numCmp = (fc.cumulativeWithAxis(lastCol ? lastCol.series : []) || []).filter((p) => p.t !== '' && p.t != null && !/^\d{4}-\d{2}/.test(String(p.t)) && Number.isFinite(Number(p.t)));
+    const dateMode = numCmp.length >= 2 && !fc.isCountdownAxis(numCmp);
+    const endIso = dateMode
+      ? (g.byDate ? String(g.byDate).slice(0, 10) : (Number.isFinite(prog.daysLeft) ? new Date(Date.now() + prog.daysLeft * 86400000).toISOString().slice(0, 10) : null))
+      : null;
     res.json({
       available: true, unit: g.unit || '', target: g.targetValue, daysLeft: prog.daysLeft, projected,
+      axisMode: dateMode ? 'date' : 'event', startDate: dateMode ? (g.startDate || null) : null, endDate: endIso,
       lastKey: lastCol ? lastCol.key : null, thisKey: thisKey || null, years: priorYearKeys(data),
       lastYear: toXY(lastCol ? lastCol.series : []),
       thisYear: toXY(thisCol ? thisCol.series : []),

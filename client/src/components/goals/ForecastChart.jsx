@@ -114,8 +114,14 @@ export default function ForecastChart({ data, unit, w = 440, h = 150 }) {
     const xp = Math.max(0, Math.min(1, (vbX - pad.l) / (w - pad.l - pad.r)));
     setHover({ xp, px: clientX - rect.left, cw: rect.width });
   };
-  // Days-before-event ticks for the x-axis (when we know the cycle length).
-  const ticks = cycleDays != null ? [0, 0.5, 1].map((xp) => ({ xp, d: Math.max(0, Math.round((1 - xp) * cycleDays)) })) : [];
+  // X-axis labels: real DATES for a calendar/date goal, else "days before event".
+  const startMs = data?.startDate ? Date.parse(data.startDate) : NaN;
+  const endMs = data?.endDate ? Date.parse(data.endDate) : NaN;
+  const dateMode = data?.axisMode === 'date' && Number.isFinite(startMs) && Number.isFinite(endMs) && endMs > startMs;
+  const fmtDay = (ms) => new Date(ms).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short' });
+  const dateAt = (xp) => fmtDay(startMs + xp * (endMs - startMs));
+  const axisLabel = (xp) => (dateMode ? dateAt(xp) : (xp >= 1 ? 'event' : `${Math.max(0, Math.round((1 - xp) * cycleDays))}d before`));
+  const ticks = (dateMode || cycleDays != null) ? [0, 0.5, 1].map((xp) => ({ xp, label: axisLabel(xp) })) : [];
   let hv = null;
   if (hover) {
     const xp = hover.xp;
@@ -164,7 +170,7 @@ export default function ForecastChart({ data, unit, w = 440, h = 150 }) {
         {ticks.map((t, i) => (
           <text key={i} x={X(t.xp)} y={h - 5} fontSize="8" fill={MUTED}
             textAnchor={t.xp <= 0 ? 'start' : t.xp >= 1 ? 'end' : 'middle'}>
-            {t.xp >= 1 ? 'event' : `${t.d}d before`}
+            {t.label}
           </text>
         ))}
       </svg>
@@ -178,7 +184,7 @@ export default function ForecastChart({ data, unit, w = 440, h = 150 }) {
             boxShadow: '0 6px 18px rgba(0,0,0,0.18)', padding: '6px 9px', fontSize: 11, lineHeight: 1.5,
           }}>
             <div style={{ fontWeight: 700, color: 'var(--muted)', marginBottom: 2 }}>
-              {hv.daysToGo != null ? (hv.daysToGo === 0 ? 'event day' : `${hv.daysToGo}d before event`) : `${Math.round(hv.xp * 100)}% through`}
+              {dateMode ? dateAt(hv.xp) : (hv.daysToGo != null ? (hv.daysToGo === 0 ? 'event day' : `${hv.daysToGo}d before event`) : `${Math.round(hv.xp * 100)}% through`)}
             </div>
             {hv.actualY != null && <TipRow color="var(--brand)" label="actual" val={fmtVal(Math.round(hv.actualY), tipUnit)} />}
             {hv.fcY != null && <TipRow color={FC} label="forecast" val={fmtVal(Math.round(hv.fcY), tipUnit)} />}
