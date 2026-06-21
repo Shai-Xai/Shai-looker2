@@ -478,6 +478,71 @@ async function draftCampaign({ goal, clientName, clientContext, audienceCount, i
   return JSON.parse(match[0]);
 }
 
+// ─── Goal "gap plan" (marketing & insights manager) ──────────────────────────────
+// When a goal is behind/short, act as the client's marketing + insights manager:
+// mine the event's data for the SPECIFIC nuggets that can push it to target —
+// lagging or over-indexing ticket types, segments, demographics (age/city/country),
+// channels — and turn the best into a targeted campaign brief. Numbers are FACTS from
+// the tiles; never invent. Returns strict JSON the UI renders + uses to pre-fill a campaign.
+const GOAL_GAP_SYSTEM = `You are the marketing & insights manager for an events organiser on Howler (tickets; amounts in South African Rand, ZAR). A specific GOAL is behind pace or forecast to fall short. Your job: find the concrete nuggets in THIS event's data that can close the gap, and turn them into a targeted campaign — not a generic "abandoned cart" blast.
+
+You are given:
+- TODAY and the GOAL (name, current vs target, the gap, days to go, pace, vs last time at this point, projected finish).
+- TILES: live data for this event — ticket-type / price-tier splits, demographics (age, city, country, gender), sales channels (online, reps, cashless/top-ups), trends and last-year comparisons. These are the ONLY numbers you may use; never invent or extrapolate.
+- SEGMENTS (when present): saved, ready-to-use audiences (name + size).
+- CATALOGUE: dashboards you may deep-link a nugget to.
+
+Find the levers. Look for: a ticket type lagging vs last year or selling out; a city/region or age band over-indexing (lean in) or collapsing (win back); a high-converting segment to double down on; a channel that over/under-performs; price/tier headroom. Each nugget must cite a real number and say what to DO about it.
+
+Respond with ONLY strict JSON (no markdown fences):
+{
+  "summary": "1 sentence: where the gap is and the single biggest opportunity to close it",
+  "nuggets": [ { "headline": "the opportunity in <=10 words", "detail": "1-2 sentences with the real number(s) and the action", "dashboardId": "id from CATALOGUE or null" } ],
+  "audience": "who to target, described concretely (e.g. 'past buyers in Cape Town aged 18-24')",
+  "segmentName": "the EXACT name of a SEGMENTS entry that best fits, or empty string if none",
+  "angle": "the campaign angle / offer / hook in one line",
+  "campaignGoal": "a ready 1-2 sentence campaign goal to hand to the copywriter — who to target, what to say, what action to drive, anchored to closing this goal's gap"
+}
+Rules: 2-4 nuggets, the highest-leverage ones. Every figure verbatim from TILES. Prefer a named SEGMENT for the audience when one fits. Be specific and commercial; no fluff, no preamble.`;
+async function goalGapPlan({ goal, progress, tiles, segments, clientName, catalogue, instructions, today, apiKey }) {
+  const c = requireClient(apiKey);
+  const p = progress || {};
+  const gf = (v) => (v == null ? '—' : (typeof v === 'number' ? v.toLocaleString('en-ZA') : String(v)));
+  const gap = goal.targetValue != null && p.value != null ? goal.targetValue - p.value : null;
+  const lines = [];
+  if (today) lines.push(`TODAY: ${today}`, '');
+  lines.push(`CLIENT: ${clientName || 'an event organiser'}`);
+  const goalBits = [`GOAL: ${goal.isNorthStar ? '★ ' : ''}${goal.name}${goal.unit ? ` (${goal.unit})` : ''} — ${gf(p.value)} of ${gf(goal.targetValue)}${p.pct != null ? ` (${p.pct}%)` : ''}${gap != null ? `, ${gf(gap)} to go` : ''}`];
+  if (p.status) goalBits.push(`pace ${p.status}${p.expected != null ? ` (expected ~${gf(p.expected)} by now)` : ''}`);
+  if (p.lastAtNow != null) goalBits.push(`last time at this point ${gf(p.lastAtNow)}`);
+  if (p.forecast && p.forecast.projected != null) goalBits.push(`forecast ~${gf(p.forecast.projected)}${p.forecast.vsTargetPct != null ? ` (${p.forecast.vsTargetPct}% of target)` : ''}`);
+  if (p.daysLeft != null) goalBits.push(`${p.daysLeft} days to go`);
+  lines.push(goalBits.join(' · '), '');
+  lines.push('TILES (live data — the ONLY numbers you may use):', '');
+  for (const t of tiles || []) {
+    lines.push(`### ${t.title}${t.visType ? ` (${t.visType})` : ''} — ${t.setName} → ${t.dashTitle}`);
+    if (t.context && t.context.trim()) lines.push(`(context: ${t.context.trim()})`);
+    lines.push(compactTable(t.fields, t.rows, 40));
+    lines.push('');
+  }
+  if ((segments || []).length) {
+    lines.push('SEGMENTS (ready audiences — name · size):');
+    for (const s of segments) lines.push(`- ${s.name}${s.count != null && s.count >= 0 ? ` · ${s.count}` : ''}`);
+    lines.push('');
+  }
+  if ((catalogue || []).length) { lines.push('CATALOGUE:'); for (const d of catalogue) lines.push(`- ${d.dashboardId}: ${d.title} [${d.setName}, ${d.suiteName}]`); }
+  const resp = await c.messages.create({
+    model: MODEL,
+    max_tokens: 1500,
+    thinking: { type: 'adaptive' },
+    output_config: { effort: 'low' },
+    system: systemWith(GOAL_GAP_SYSTEM, instructions),
+    messages: [{ role: 'user', content: lines.join('\n') }],
+  });
+  const text = (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
+  return parseModelJsonResilient(c, text, 'goal-gap');
+}
+
 // Sharpen a short instruction/briefing note the user wrote to steer the Owl.
 // Returns improved PLAIN TEXT (not a report, not JSON) — same intent, clearer
 // and tighter as a prompt.
@@ -756,7 +821,8 @@ function promptRegistry() {
     { key: 'digest_prefs', label: 'Digest preferences', scope: 'Distilling digest/briefing feedback into a learned preferences note', text: DIGEST_PREFS_SYSTEM },
     { key: 'classify', label: 'Document classification', scope: 'Owl email ingest: settlement vs invoice vs other', text: CLASSIFY_SYSTEM },
     { key: 'goals', label: 'Goals summary', scope: 'Owl summary of an event\'s goals on the Goals page', text: GOALS_SYSTEM },
+    { key: 'goalGap', label: 'Goal gap plan', scope: 'Marketing/insights plan to close a behind-pace goal (→ targeted campaign)', text: GOAL_GAP_SYSTEM },
   ];
 }
 
-module.exports = { generateInsight, streamInsight, streamDashboardInsight, streamGoalsBrief, describeTile, extractSettlement, extractInvoice, classifyDocument, briefHome, digestBrief, draftCampaign, refineText, distilPreferences, summariseReleaseNotes, promptRegistry, systemWith, isConfigured: (apiKey) => !!(apiKey || process.env.ANTHROPIC_API_KEY) };
+module.exports = { generateInsight, streamInsight, streamDashboardInsight, streamGoalsBrief, describeTile, extractSettlement, extractInvoice, classifyDocument, briefHome, digestBrief, draftCampaign, goalGapPlan, refineText, distilPreferences, summariseReleaseNotes, promptRegistry, systemWith, isConfigured: (apiKey) => !!(apiKey || process.env.ANTHROPIC_API_KEY) };

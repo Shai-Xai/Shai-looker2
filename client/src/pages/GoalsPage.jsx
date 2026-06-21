@@ -7,6 +7,7 @@ import { GoalCard } from '../components/goals/GoalViz.jsx';
 import GoalRingsCard from '../components/goals/GoalRings.jsx';
 import GoalsBriefModal from '../components/goals/GoalsBriefModal.jsx';
 import GoalDetail from '../components/goals/GoalDetail.jsx';
+import GapPlanModal from '../components/goals/GapPlanModal.jsx';
 import GoalEditor from '../components/GoalEditor.jsx';
 import HomeButton from '../components/HomeButton.jsx';
 
@@ -25,6 +26,7 @@ export default function GoalsPage() {
   const [editor, setEditor] = useState(null);  // { suiteId, goal, scope } | null
   const [detail, setDetail] = useState(null);   // { suiteId, goalId } | null
   const [brief, setBrief] = useState(null);     // { suiteId, name } | null
+  const [gap, setGap] = useState(null);         // { suiteId, goalName, loading, plan, error } | null
   const [params, setParams] = useSearchParams();
   const handled = useRef(false);
   const [suitesLoading, setSuitesLoading] = useState(true);
@@ -96,6 +98,20 @@ export default function GoalsPage() {
   const openEvent = (suiteId, dashboardId) => {
     if (dashboardId) vtNavigate(navigate, `/suite/${suiteId}/d/${dashboardId}`);
     else vtNavigate(navigate, '/');
+  };
+
+  // "Close the gap": ask the Owl (as marketing/insights manager) for the data nuggets
+  // + a targeted campaign to push a behind goal to target, then hand it to the editor.
+  const openGapPlan = (suiteId, goal) => {
+    setGap({ suiteId, goalName: goal.name, loading: true });
+    api.goalGapPlan(goal.id)
+      .then((r) => setGap({ suiteId, goalName: goal.name, plan: r.plan }))
+      .catch((e) => setGap({ suiteId, goalName: goal.name, error: e.message || 'failed' }));
+  };
+  const launchGap = (plan) => {
+    setGap(null);
+    const text = plan?.campaignGoal || 'Re-engage the most likely buyers to lift sales before the deadline.';
+    vtNavigate(navigate, `/engage/campaigns?goal=${encodeURIComponent(text)}&type=email_campaign`);
   };
 
   const suiteData = (detail && bySuite[detail.suiteId]) || {};
@@ -205,6 +221,16 @@ export default function GoalsPage() {
           onDelete={() => { setDetail(null); loadSuite(detail.suiteId); }}
           onChanged={() => loadSuite(detail.suiteId)}
           onOpenEvent={(dashboardId) => openEvent(detail.suiteId, dashboardId)}
+          onCloseGap={() => { const sid = detail.suiteId; const g = detailGoal; setDetail(null); openGapPlan(sid, g); }}
+        />
+      )}
+      {gap && (
+        <GapPlanModal
+          goalName={gap.goalName}
+          state={gap}
+          onClose={() => setGap(null)}
+          onLaunch={launchGap}
+          onOpenDashboard={(did) => { const sid = gap.suiteId; setGap(null); openEvent(sid, did); }}
         />
       )}
       {brief && (

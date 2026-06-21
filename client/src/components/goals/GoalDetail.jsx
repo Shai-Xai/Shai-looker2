@@ -8,7 +8,7 @@ import { Ring, Dial, Bar, goalState, fmtVal } from './GoalViz.jsx';
 // itself is no longer an edit trap (the mobile fix). Shows progress big, the pace
 // state, "vs last time" (baseline), the source, and an event link through to the
 // dashboard the goal is tracked from. Milestones (Slice C) render here later.
-export default function GoalDetail({ goal, suiteName, onEdit, onDelete, onClose, onOpenEvent, onChanged, canManage = true, me, contributors = [], linkedGoalName }) {
+export default function GoalDetail({ goal, suiteName, onEdit, onDelete, onClose, onOpenEvent, onChanged, onCloseGap, canManage = true, me, contributors = [], linkedGoalName }) {
   const isMobile = useIsMobile();
   const [confirmDel, setConfirmDel] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -20,6 +20,12 @@ export default function GoalDetail({ goal, suiteName, onEdit, onDelete, onClose,
   const ref = goal.metricRef || {};
   const tileSourced = !!(ref.dashboardId && ref.tileId);
   const hasBaseline = goal.baselineValue != null && Number.isFinite(Number(goal.baselineValue));
+  // Insight → action: when a sales goal is behind pace (or forecast to fall short),
+  // offer a one-tap campaign to close the gap (pre-fills the campaign editor).
+  const gap = goal.targetValue != null && p.value != null ? goal.targetValue - p.value : null;
+  const behind = goal.direction !== 'at_most' && p.status && p.status !== 'final'
+    && (p.status === 'behind' || (p.forecast && (p.forecast.status === 'short' || p.forecast.status === 'borderline')));
+  const showGap = !!onCloseGap && behind && gap != null && gap > 0;
 
   async function saveManual() {
     const v = Number(manualVal);
@@ -61,6 +67,13 @@ export default function GoalDetail({ goal, suiteName, onEdit, onDelete, onClose,
           )}
           {chip && <div>{chip}</div>}
         </div>
+
+        {/* Close the gap — one-tap campaign when behind pace / forecast short. */}
+        {showGap && (
+          <button onClick={() => onCloseGap()} style={gapBtn}>
+            ⚡ Close the gap — find the opportunities
+          </button>
+        )}
 
         {/* Pace line — only when a deadline gives an "expected by now". */}
         {p.expected != null && p.status && p.status !== 'final' && (
@@ -218,6 +231,7 @@ const eventLink = { border: 'none', background: 'transparent', color: 'var(--bra
 const xBtn = { border: 'none', background: 'rgba(128,128,128,0.12)', color: 'var(--muted-2)', borderRadius: 980, width: 28, height: 28, fontSize: 13, cursor: 'pointer', flexShrink: 0 };
 const inp = { flex: 1, boxSizing: 'border-box', padding: '8px 11px', border: '1.5px solid var(--hairline)', borderRadius: 9, fontSize: 14, outline: 'none', background: 'var(--card)', color: 'var(--text)', fontFamily: 'inherit' };
 const btnPrimary = { padding: '10px 16px', borderRadius: 10, border: 'none', background: 'var(--brand)', color: '#fff', fontSize: 13.5, fontWeight: 800, cursor: 'pointer' };
+const gapBtn = { display: 'block', width: '100%', boxSizing: 'border-box', margin: '4px 0 2px', padding: '11px 14px', borderRadius: 10, border: 'none', background: 'var(--brand)', color: '#fff', fontSize: 13.5, fontWeight: 800, cursor: 'pointer' };
 const btnPrimarySm = { padding: '8px 14px', borderRadius: 9, border: 'none', background: 'var(--brand)', color: '#fff', fontSize: 13, fontWeight: 700, cursor: 'pointer', flexShrink: 0 };
 const btnDanger = { padding: '10px 14px', borderRadius: 10, border: 'none', background: 'var(--error, #dc2626)', color: '#fff', fontSize: 13.5, fontWeight: 800, cursor: 'pointer' };
 const btnDelGhost = { padding: '10px 12px', borderRadius: 10, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--error, #dc2626)', fontSize: 15, cursor: 'pointer' };

@@ -741,6 +741,33 @@ app.post('/api/goals/suites/:suiteId/brief', auth.requireAuth, rateLimit({ windo
   }
 });
 
+// "Close the gap" — act as the client's marketing & insights manager: mine the event's
+// data (ticket types, demographics, segments, channels) for the nuggets that can push a
+// behind/short goal to target, and return a plan that pre-fills a targeted campaign.
+app.post('/api/goals/:id/gap-plan', auth.requireAuth, rateLimit({ windowMs: 60_000, max: 8, by: 'user', scope: 'goal-gap', message: 'Too many gap plans — please wait a moment.' }), async (req, res) => {
+  const goal = goalsApi.goalById(req.params.id);
+  if (!goal) return res.status(404).json({ error: 'Goal not found' });
+  const suiteId = goal.suiteId;
+  if (req.user.role !== 'admin' && !auth.canAccessSuite(req.user, suiteId)) return res.status(403).json({ error: 'Not allowed' });
+  const su = db.getSuite(suiteId); const entityId = su?.entityId;
+  const apiKey = anthropicKeyForSuite(suiteId);
+  if (!insights.isConfigured(apiKey)) return res.status(400).json({ error: 'AI insights are not configured. Set an Anthropic API key in Admin → Integrations (or .env).' });
+  try {
+    const withProgress = await goalsApi.attachProgress(goal, req.user);
+    const { tiles, catalogue } = await buildFacts(req.user, entityId, false, true);
+    let segments = [];
+    try { segments = db.db.prepare('SELECT name, last_count FROM segments WHERE entity_id=? ORDER BY updated_at DESC LIMIT 50').all(entityId).map((s) => ({ name: s.name, count: s.last_count })); } catch { /* segments table may be empty */ }
+    const plan = await insights.goalGapPlan({
+      goal: withProgress, progress: withProgress.progress, tiles, segments, catalogue,
+      clientName: db.getEntity(entityId)?.name || '', instructions: aiInstructionsFor(suiteId), today: todayLabel(), apiKey,
+    });
+    res.json({ plan });
+  } catch (err) {
+    console.error('[POST /api/goals/:id/gap-plan]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Admin diagnostic: show EXACTLY what filters the briefing resolves for each tile on a
 // dashboard (and whether rows come back) — so we can see why a GA4 tile reads zero
 // (e.g. no date range applied). Mirrors buildFacts' resolution (entity view expanded
