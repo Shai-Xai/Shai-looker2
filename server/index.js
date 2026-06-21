@@ -708,6 +708,57 @@ async function resolveEventDate({ suiteId, user }) {
 }
 const goalsApi = require('./goals').mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTileSeriesAll, resolveEventDate });
 
+// ── Weekly goal nudge (push) ─────────────────────────────────────────────────
+// One calm "your goals this week" push per entity (not per-event): goals needing
+// attention (behind pace · forecast short · checkpoint missed) plus wins (reached).
+// Deduped per ISO week via a setting; respects each user's push pref (sendToEntity
+// filters by notifyPush). Global kill-switch: setting goal_nudges_enabled = '0'.
+function isoWeekKey(tz = 'Africa/Johannesburg') {
+  const p = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date()).reduce((a, x) => { a[x.type] = x.value; return a; }, {});
+  const dt = new Date(Date.UTC(+p.year, +p.month - 1, +p.day));
+  dt.setUTCDate(dt.getUTCDate() + 4 - (dt.getUTCDay() || 7)); // nearest Thursday
+  const yStart = new Date(Date.UTC(dt.getUTCFullYear(), 0, 1));
+  const wk = Math.ceil((((dt - yStart) / 86400000) + 1) / 7);
+  return `${dt.getUTCFullYear()}-W${String(wk).padStart(2, '0')}`;
+}
+async function goalNudgeSweep() {
+  try {
+    if (!push.isEnabled || !push.isEnabled()) return;
+    if (db.getSetting('goal_nudges_enabled', '1') !== '1') return;
+    const tz = 'Africa/Johannesburg';
+    const hour = Number(new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', hour12: false }).format(new Date()));
+    if (hour < 8) return; // morning+ only; ISO-week dedupe makes it ~Monday 08:00
+    const week = isoWeekKey(tz);
+    for (const ent of db.listEntities()) {
+      if (db.getSetting(`goal_nudge_week:${ent.id}`, '') === week) continue;
+      try {
+        const user = { id: `goal-nudge:${ent.id}`, role: 'client', entityIds: [ent.id], email: '' };
+        const wins = [], attention = []; let resolved = 0;
+        for (const su of db.listSuitesForEntity(ent.id)) {
+          const caches = goalsApi.makeGoalCaches();
+          for (const g of goalsApi.listGoals(su.id)) {
+            if (resolved >= 24) break;
+            const p = (await goalsApi.attachProgress(g, user, caches)).progress || {}; resolved += 1;
+            const dir = g.direction || 'at_least';
+            const reached = p.value != null && g.targetValue != null && (dir === 'at_most' ? p.value <= g.targetValue : (p.pct != null ? p.pct >= 100 : p.value >= g.targetValue));
+            if (reached) { wins.push(g.name); continue; }
+            const missed = Array.isArray(p.milestones) && p.milestones.some((m) => { const t = Date.parse(m.byDate); return !Number.isNaN(t) && t < Date.now() && p.value != null && (dir === 'at_most' ? p.value > m.targetValue : p.value < m.targetValue); });
+            if (p.status === 'behind' || (p.forecast && p.forecast.status === 'short') || missed) attention.push(g.name);
+          }
+        }
+        db.setSetting(`goal_nudge_week:${ent.id}`, week); // mark done even if nothing to say
+        if (!attention.length && !wins.length) continue;
+        const bits = [];
+        if (attention.length) bits.push(`${attention.length} goal${attention.length > 1 ? 's' : ''} need attention: ${attention.slice(0, 3).join(', ')}${attention.length > 3 ? '…' : ''}`);
+        if (wins.length) bits.push(`🎉 ${wins.length} reached: ${wins.slice(0, 2).join(', ')}${wins.length > 2 ? '…' : ''}`);
+        await push.sendToEntity(ent.id, { title: 'Your goals this week', body: bits.join(' · '), url: '/goals' });
+      } catch (e) { console.error('[goal-nudge]', ent.id, e.message); }
+    }
+  } catch (e) { console.error('[goal-nudge] sweep', e.message); }
+}
+setInterval(() => goalNudgeSweep(), 60 * 60 * 1000); // hourly; fires the first morning of each ISO week
+setTimeout(() => goalNudgeSweep(), 30000); // shortly after boot, in case it's the window
+
 // Owl summary of an event's goals — a short narrative over the RESOLVED goal values
 // (computed here by the goals resolver; the AI only phrases them). Streams plain text
 // like the other Owl surfaces; per-event (the Goals page "Owl summary" button).
