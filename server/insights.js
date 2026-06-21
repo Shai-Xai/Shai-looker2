@@ -332,7 +332,7 @@ const HOME_SYSTEM = `You are the Owl — Howler Pulse's analyst — writing a pr
 - MESSAGES (when present): recent messages from the Howler team to this organiser. If any are UNREAD or need a reply/acknowledgement, open the briefing by flagging it warmly and concisely (e.g. "Howler sent you a note about the settlement — worth a read"). Don't quote at length; point them to it.
 - CATALOGUE: every dashboard they can open (id, title, set, suite).
 - CAPABILITIES (when present): actions the platform can EXECUTE for the reader right now (key + what it does). A suggestion may carry "action": "<capability key>" ONLY when executing that capability would directly deliver the suggestion (e.g. an email_campaign for re-engaging abandoned carts). Most suggestions are just "look at this" — leave action out for those. Never invent capability keys.
-- GOALS (when present): the event's targets with progress ALREADY COMPUTED (current vs target & %, pace ahead/on-track/behind, vs last time at this same point, projected final landing, days to go). When GOALS are present, anchor the briefing on the NORTH STAR (★) goal — its attainment, whether it's on pace, the vs-last-time move and the projected finish — and weave the others in as supporting context. Phrase the numbers; never recompute or invent goals.
+- GOALS (when present): the event's targets with progress ALREADY COMPUTED (current vs target & %, pace ahead/on-track/behind, vs last time at this same point, projected final landing, checkpoints hit/missed, days to go). When GOALS are present, anchor the briefing on the NORTH STAR (★) goal — its attainment, whether it's on pace, the vs-last-time move and the projected finish — and weave the others in as supporting context. Celebrate any wins (goals REACHED/SMASHED or checkpoints hit) and flag a MISSED checkpoint worth attention. Phrase the numbers; never recompute or invent goals.
 
 Respond with ONLY strict JSON (no markdown fences):
 {
@@ -362,7 +362,7 @@ You are given:
 - CATALOGUE: every dashboard the reader can open (id, title, set, suite) — for deep links.
 - ACTIONS (when present): marketing actions already taken with live results — weave notable performance into the narrative for this role (marketing cares most; exec wants the revenue angle).
 - CAPABILITIES (when present): actions the platform can EXECUTE right now. A suggested action may carry "action": "<capability key>" ONLY when that capability directly delivers it; otherwise omit. Never invent keys.
-- GOALS (when present): the event's targets, progress ALREADY COMPUTED (current vs target, pace, vs last time at this point, projected final landing). When GOALS are present, include ONE goals paragraph in the narrative — lead with the North Star (★) and whether it's on track, then the notable mover vs last time and the projected finish. Phrase the numbers; never recompute or invent goals.
+- GOALS (when present): the event's targets, progress ALREADY COMPUTED (current vs target, pace, vs last time at this point, projected final landing, checkpoints hit/missed). When GOALS are present, include ONE goals paragraph in the narrative — lead with the North Star (★) and whether it's on track, then the notable mover vs last time and the projected finish. CELEBRATE wins (goals marked REACHED/SMASHED, or checkpoints hit) and flag any MISSED checkpoint worth attention with a concrete nudge. Phrase the numbers; never recompute or invent goals.
 
 Respond with ONLY strict JSON (no markdown fences):
 {
@@ -387,13 +387,27 @@ Rules:
 function goalsFactLines(goals) {
   if (!(goals || []).length) return [];
   const gf = (v) => (v == null ? '—' : (typeof v === 'number' ? v.toLocaleString('en-ZA') : String(v)));
-  const out = ['', 'GOALS (event targets, progress already computed — phrase, never recompute):'];
+  const out = ['', 'GOALS (event targets, progress already computed — phrase, never recompute; CALL OUT wins (goals reached / checkpoints hit) and flag any MISSED checkpoints):'];
+  const now = Date.now();
   for (const g of goals) {
     const p = g.progress || {};
-    const bits = [`- ${g.isNorthStar ? '★ ' : ''}${g.name}${g.suiteName ? ` [${g.suiteName}]` : ''}: ${gf(p.value)}/${gf(g.targetValue)}${p.pct != null ? ` (${p.pct}%)` : ''}${g.unit ? ` ${g.unit}` : ''}`];
-    if (p.status) bits.push(`pace ${p.status}${p.expected != null ? ` (expected ~${gf(p.expected)} by now)` : ''}`);
+    const dir = g.direction || p.direction || 'at_least';
+    const meets = (val, tgt) => val != null && tgt != null && (dir === 'at_most' ? val <= Number(tgt) : val >= Number(tgt));
+    const reached = p.pct != null ? (dir === 'at_most' ? meets(p.value, g.targetValue) : p.pct >= 100) : meets(p.value, g.targetValue);
+    const win = p.band === 'smashed' ? 'SMASHED ✓✓' : (reached || p.band === 'hit') ? 'REACHED ✓' : null;
+    const bits = [`- ${g.isNorthStar ? '★ ' : ''}${g.name}${g.suiteName ? ` [${g.suiteName}]` : ''}: ${gf(p.value)}/${gf(g.targetValue)}${p.pct != null ? ` (${p.pct}%)` : ''}${g.unit ? ` ${g.unit}` : ''}${win ? ` — ${win}` : ''}`];
+    if (!win && p.status) bits.push(`pace ${p.status}${p.expected != null ? ` (expected ~${gf(p.expected)} by now)` : ''}`);
     if (p.lastAtNow != null) { const d = p.value != null && p.lastAtNow ? Math.round(((p.value - p.lastAtNow) / Math.abs(p.lastAtNow)) * 100) : null; bits.push(`vs last time ${gf(p.lastAtNow)}${d != null ? ` (${d > 0 ? '+' : ''}${d}%)` : ''}`); }
-    if (p.forecast && p.forecast.projected != null) bits.push(`forecast ~${gf(p.forecast.projected)}${p.forecast.status === 'will_hit' ? ' (on track)' : p.forecast.vsTargetPct != null ? ` (${p.forecast.vsTargetPct}% of target)` : ''}`);
+    if (!win && p.forecast && p.forecast.projected != null) bits.push(`forecast ~${gf(p.forecast.projected)}${p.forecast.status === 'will_hit' ? ' (on track)' : p.forecast.vsTargetPct != null ? ` (${p.forecast.vsTargetPct}% of target)` : ''}`);
+    // Checkpoints (milestones): how many due ones we've hit, and the most recent miss.
+    const due = (Array.isArray(p.milestones) ? p.milestones : []).filter((m) => { const t = Date.parse(m.byDate); return !Number.isNaN(t) && t <= now; });
+    if (due.length) {
+      const hit = due.filter((m) => meets(p.value, m.targetValue)).length;
+      bits.push(`checkpoints ${hit}/${due.length} hit`);
+      const missed = [...due].reverse().find((m) => !meets(p.value, m.targetValue));
+      if (missed) bits.push(`MISSED checkpoint ${gf(Number(missed.targetValue))} by ${missed.byDate}`);
+    }
+    if (p.nextMilestone) bits.push(`next checkpoint ${gf(p.nextMilestone.targetValue)} by ${p.nextMilestone.byDate}`);
     if (p.daysLeft != null) bits.push(`${p.daysLeft}d to go`);
     out.push(bits.join(' · '));
   }

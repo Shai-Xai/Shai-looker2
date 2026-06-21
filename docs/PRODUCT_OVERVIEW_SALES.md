@@ -291,6 +291,8 @@ Use these to set direction, **not** to promise dates.
   hugs last event's remaining shape to its projected landing, with target + "you are
   here"). A calm **weekly "your goals this week" push** summarises what needs attention
   (behind · forecast short · checkpoint missed) plus wins; staff can fire a **test nudge**.
+  The **digest goals paragraph** now also celebrates **wins** (goals reached/smashed,
+  checkpoints hit) and flags **missed checkpoints** — not just pace and forecast.
 - **2026-06-20** — **Goals in the digest** 🧪: a scheduled digest can now include a
   **goals summary** paragraph (toggle in the digest editor) — the event's targets with
   live progress, pace, vs-last-time and projected finish, leading with the North Star.
