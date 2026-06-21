@@ -87,18 +87,31 @@ function fractionAtNow(series, { deadlineMs, nowMs = Date.now(), startMs, daysLe
   // Points that carry a real numeric "days before event" label. Trend tiles append a
   // stray totals row (empty x); ignore it rather than letting it veto the whole axis.
   const numPts = cum.filter((p) => p.t !== '' && p.t != null && !isISO(p.t) && Number.isFinite(Number(p.t)));
-  // Only a numeric COUNTDOWN axis is days-before-event; a forward axis (day-of-month,
-  // week #, calendar) uses the proportional window instead.
-  const numericAxis = numPts.length >= 2 && numPts.length >= cum.length - 2 && isCountdownAxis(numPts);
+  const hasNumeric = numPts.length >= 2 && numPts.length >= cum.length - 2;
+  const countdown = hasNumeric && isCountdownAxis(numPts);     // days-before-event
+  const forward = hasNumeric && !countdown;                    // day-of-month, week #, …
   const dLeft = Number.isFinite(daysLeft) ? daysLeft
     : (Number.isFinite(deadlineMs) ? Math.round((deadlineMs - nowMs) / 86400000) : null);
-  if (numericAxis && dLeft != null) {
+  if (countdown && dLeft != null) {
     const sorted = numPts.map((p) => ({ d: Number(p.t), c: p.c })).sort((a, b) => b.d - a.d);
     const valueAtNow = interpByDaysBefore(sorted, dLeft);
     if (valueAtNow != null) return { fraction: valueAtNow / total, total, valueAtNow, basis: 'days-before', daysLeft: dLeft };
   }
+  // Forward numeric axis (day-of-month): read last time at the SAME elapsed position
+  // from the start (i.e. the same calendar day), NOT by proportional index — which
+  // mis-reads when the curve span (e.g. 31 days) ≠ the window length (e.g. 30 days),
+  // making day 21 land on ~21.7 and over-reading last time.
+  if (forward && Number.isFinite(startMs)) {
+    const asc = numPts.map((p) => ({ d: Number(p.t), c: p.c })).sort((a, b) => a.d - b.d);
+    const targetAxis = asc[0].d + Math.floor((nowMs - startMs) / 86400000); // first axis value + WHOLE days elapsed (the current calendar day)
+    let v = null;
+    if (targetAxis <= asc[0].d) v = asc[0].c;
+    else if (targetAxis >= asc[asc.length - 1].d) v = asc[asc.length - 1].c;
+    else for (let i = 1; i < asc.length; i++) { if (asc[i].d >= targetAxis) { const a = asc[i - 1], b = asc[i]; const f = (targetAxis - a.d) / ((b.d - a.d) || 1); v = a.c + (b.c - a.c) * f; break; } }
+    if (v != null) return { fraction: v / total, total, valueAtNow: v, basis: 'forward-day', daysLeft: dLeft };
+  }
   // Fallback: position within the [start → deadline] window, read by curve index.
-  // Covers forward numeric axes (day-of-month), ISO dates and monthly buckets.
+  // Covers ISO-date and monthly-bucket curves with no numeric day axis.
   if (Number.isFinite(startMs) && Number.isFinite(deadlineMs) && deadlineMs > startMs) {
     const r = (nowMs - startMs) / (deadlineMs - startMs);
     const f = fractionAt(cum.map((p) => p.c), r);
