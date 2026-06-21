@@ -41,6 +41,24 @@ beforeEach(() => { tileValue = 4200; tileSeries = [{ t: '2025-01-01', v: 1000 },
 const create = (as, body) => app.req('POST', `/api/goals/suites/${suiteId}`, { as, body });
 const list = (as) => app.req('GET', `/api/goals/suites/${suiteId}`, { as });
 
+test('a goal can be saved as a reusable template, listed, applied and deleted', async () => {
+  const sid = h.db.createSuite({ entityId, name: 'Template test' }).id;
+  const g = (await app.req('POST', `/api/goals/suites/${sid}`, { as: owner, body: { name: 'Monthly revenue', source: 'manual', targetValue: 30000, unit: 'ZAR', direction: 'at_least' } })).body.goal;
+  // Save from the goal — server captures the reusable config.
+  const made = await app.req('POST', '/api/goals/templates', { as: owner, body: { fromGoalId: g.id } });
+  assert.equal(made.status, 201, 'template created');
+  assert.equal(made.body.template.name, 'Monthly revenue');
+  assert.equal(made.body.template.payload.targetValue, 30000, 'payload carries the reusable target');
+  assert.equal(made.body.template.payload.unit, 'ZAR');
+  // Listed for the entity, denied to an outsider.
+  const list1 = await app.req('GET', `/api/goals/templates/${entityId}`, { as: owner });
+  assert.ok(list1.body.templates.some((t) => t.id === made.body.template.id), 'template appears in the list');
+  assert.equal((await app.req('GET', `/api/goals/templates/${entityId}`, { as: outsider })).status, 403, 'outsider blocked');
+  // Delete it.
+  assert.equal((await app.req('DELETE', `/api/goals/templates/${made.body.template.id}`, { as: owner })).status, 200);
+  assert.equal((await app.req('GET', `/api/goals/templates/${entityId}`, { as: owner })).body.templates.filter((t) => t.id === made.body.template.id).length, 0, 'gone after delete');
+});
+
 test('the first event goal becomes the North Star automatically', async () => {
   const r = await create(owner, { name: 'Sell-through', source: 'manual', targetValue: 25000, unit: 'tickets' });
   assert.equal(r.status, 201);

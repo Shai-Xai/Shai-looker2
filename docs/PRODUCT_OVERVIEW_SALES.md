@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-06-21 · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-06-22 · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -242,6 +242,9 @@ a pace read** — *ahead / on track / behind* — not just "are we there yet."
   **Match / +10% / +15% / +20%** target helpers.
 - **Checkpoints from last time's shape** — suggest weekly/monthly checkpoints scaled to
   your target, on the same days-before-event math as the live pace.
+- **Reusable goal templates** — save a goal's whole setup (metric/curve tile, target, unit,
+  comparison year, cadence) as a template, then start new goals from it in one tap — ideal
+  for recurring monthly/quarterly targets. Set the fresh dates and go.
 - **Drag to reorder** — arrange goal tiles on the Goals page; the order carries to the
   home dashboard.
 - **Dual-surface** — clients set their own goals; Howler can set them on a client's
@@ -286,6 +289,13 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-22** — **Goals — reusable templates + smarter forecast** 🧪: save a goal's setup
+  as a **template** and start new goals from it (recurring monthly/quarterly targets in a
+  tap). Forecast now **blends recent run-rate (momentum)** with the last-time shape; the
+  comparison defaults to **last year** with a **"Compare against" year picker**; "vs last
+  time" reads the **same calendar day**; and the chart labels **real dates** for calendar
+  goals (vs "days before event") and trims lagging flat data so **actual** ends on the last
+  real sale.
 - **2026-06-21** — **Goals — forecast chart & weekly nudge** 🧪: curve-linked goals get a
   **sell-curve & forecast chart** (last time · actual · a followable forecast line that
   hugs last event's remaining shape to its projected landing, with target + "you are
