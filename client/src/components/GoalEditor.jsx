@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { api } from '../lib/api.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import { useAuth } from '../lib/auth.jsx';
@@ -10,7 +10,7 @@ import { useAuth } from '../lib/auth.jsx';
 // Dual-surface: identical for a client self-serving and an admin acting on their
 // behalf — the server guard decides who may write. `entityId` scopes the tile
 // catalogue; `suiteId` is the event the goal belongs to.
-export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope = 'event', eventGoals = [], onClose, onSaved }) {
+export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope = 'event', eventGoals = [], initialTemplate = null, onClose, onSaved }) {
   const isMobile = useIsMobile();
   const { isAdmin } = useAuth();
   const editing = !!goal;
@@ -120,6 +120,10 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
     if (p.baselineRef && (p.baselineRef.tileId || p.baselineRef.tileName)) { setBaselineMode('tile'); refs.baseline = p.baselineRef; }
     if (Object.keys(refs).length) setPendingRefs(refs); // resolved by name once the catalogue is loaded
   };
+  // Opened from the Templates tab → pre-fill from the chosen template once.
+  const tmplApplied = useRef(false);
+  useEffect(() => { if (initialTemplate && !tmplApplied.current) { tmplApplied.current = true; applyTemplate(initialTemplate); } }, [initialTemplate]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Resolve queued template refs against this client's catalogue (by id, else by name).
   useEffect(() => {
     if (!pendingRefs || !cat?.dashboards) return;
@@ -314,6 +318,15 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
           <h2 style={{ fontSize: 17, fontWeight: 800, flex: 1 }}>{editing ? (isPersonal ? 'Edit personal goal' : 'Edit goal') : (isPersonal ? 'Set a personal goal' : 'Set a goal')}</h2>
           <button onClick={onClose} style={xBtn} aria-label="Close">✕</button>
         </div>
+
+        {/* Which event the new goal belongs to (when there's more than one). */}
+        {!editing && !isPersonal && suites.length > 1 && (
+          <Field label="Which event?">
+            <select value={activeSuite} onChange={(e) => setActiveSuite(e.target.value)} style={inp}>
+              {suites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </Field>
+        )}
 
         {/* Start from a saved template (reuse a recurring goal's setup). */}
         {!editing && templates.length > 0 && (

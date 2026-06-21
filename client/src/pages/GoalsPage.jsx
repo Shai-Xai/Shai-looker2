@@ -3,7 +3,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { useProfile } from '../lib/profile.jsx';
 import { vtNavigate } from '../lib/viewTransition.js';
-import { GoalCard } from '../components/goals/GoalViz.jsx';
+import { GoalCard, fmtVal } from '../components/goals/GoalViz.jsx';
 import GoalRingsCard from '../components/goals/GoalRings.jsx';
 import GoalsBriefModal from '../components/goals/GoalsBriefModal.jsx';
 import GoalDetail from '../components/goals/GoalDetail.jsx';
@@ -30,6 +30,14 @@ export default function GoalsPage() {
   const [params, setParams] = useSearchParams();
   const handled = useRef(false);
   const [suitesLoading, setSuitesLoading] = useState(true);
+  const [tab, setTab] = useState('goals');        // 'goals' | 'templates'
+  const [templates, setTemplates] = useState(null); // reusable templates for this client (+ global)
+
+  const loadTemplates = useCallback(() => {
+    if (!activeEntityId) { setTemplates([]); return; }
+    api.goalTemplates(activeEntityId).then((r) => setTemplates(r.templates || [])).catch(() => setTemplates([]));
+  }, [activeEntityId]);
+  useEffect(() => { loadTemplates(); }, [loadTemplates]);
 
   useEffect(() => { api.mySuites().then(setSuites).catch(() => {}).finally(() => setSuitesLoading(false)); }, []);
   const visibleSuites = activeEntityId ? suites.filter((s) => s.entityId === activeEntityId) : suites;
@@ -40,6 +48,18 @@ export default function GoalsPage() {
   useEffect(() => { visibleSuites.forEach((s) => loadSuite(s.id)); }, [visibleSuites.map((s) => s.id).join(','), loadSuite]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const reloadAll = () => visibleSuites.forEach((s) => loadSuite(s.id));
+
+  // Templates tab: start a new goal from a template, or remove one.
+  const useTemplate = (t) => {
+    const sid = (rows.find((r) => r.canManage)?.suite.id) || visibleSuites[0]?.id;
+    if (!sid) { window.alert('Add an event first, then create a goal from a template.'); return; }
+    setTab('goals');
+    setEditor({ suiteId: sid, goal: null, scope: 'event', template: t.payload });
+  };
+  const deleteTpl = (t) => {
+    if (!window.confirm(`Delete template “${t.name}”?`)) return;
+    api.deleteGoalTemplate(t.id).then(() => setTemplates((x) => (x || []).filter((y) => y.id !== t.id))).catch((e) => window.alert(e.message));
+  };
 
   // Admin: preview the weekly goal nudge — sends the real summary push to MY own
   // devices (not the client team) so we can see exactly what would go out.
@@ -149,10 +169,21 @@ export default function GoalsPage() {
           <h1 style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em' }}>Your goals</h1>
         </div>
       </div>
-      <p style={{ color: 'var(--muted)', fontSize: 13.5, margin: '0 0 18px', lineHeight: 1.5 }}>
+      <p style={{ color: 'var(--muted)', fontSize: 13.5, margin: '0 0 14px', lineHeight: 1.5 }}>
         Targets on the numbers that matter — tracked live, the North Star leading. Tap a goal to see its detail, or set a new one.
       </p>
 
+      {/* Tabs: live goals vs the reusable templates available to this client. */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 18, borderBottom: '1px solid var(--hairline)' }}>
+        <TabBtn active={tab === 'goals'} onClick={() => setTab('goals')}>Goals</TabBtn>
+        <TabBtn active={tab === 'templates'} onClick={() => setTab('templates')}>Templates{templates && templates.length ? ` (${templates.length})` : ''}</TabBtn>
+      </div>
+
+      {tab === 'templates' && (
+        <TemplatesView templates={templates} canManage={rows.some((r) => r.canManage) || visibleSuites.length > 0} isAdmin={isAdmin} onUse={useTemplate} onDelete={deleteTpl} />
+      )}
+
+      {tab === 'goals' && (<>
       {suitesLoading && <SectionSkeleton />}
 
       {!suitesLoading && !rows.length && (
@@ -228,6 +259,7 @@ export default function GoalsPage() {
           </section>
         ))}
       </div>
+      </>)}
 
       {detail && detailGoal && (
         <GoalDetail
@@ -265,8 +297,9 @@ export default function GoalsPage() {
           goal={editor.goal}
           scope={editor.scope || 'event'}
           eventGoals={(bySuite[editor.suiteId]?.goals || []).map((g) => ({ id: g.id, name: g.name }))}
+          initialTemplate={editor.template || null}
           onClose={() => setEditor(null)}
-          onSaved={reloadAll}
+          onSaved={() => { reloadAll(); loadTemplates(); }}
         />
       )}
     </div>
@@ -298,6 +331,53 @@ function SectionSkeleton() {
     <div style={{ marginBottom: 26 }}>
       <Skel w={120} h={12} style={{ marginBottom: 12 }} />
       <SuiteSkeleton />
+    </div>
+  );
+}
+
+function TabBtn({ active, onClick, children }) {
+  return (
+    <button type="button" onClick={onClick} style={{
+      border: 'none', background: 'none', cursor: 'pointer', font: 'inherit', padding: '8px 4px', marginBottom: -1,
+      fontSize: 14, fontWeight: active ? 800 : 600, color: active ? 'var(--text)' : 'var(--muted)',
+      borderBottom: `2px solid ${active ? 'var(--brand)' : 'transparent'}`,
+    }}>{children}</button>
+  );
+}
+
+// All reusable templates available to this client — their own plus 🌐 global ones.
+function TemplatesView({ templates, canManage, isAdmin, onUse, onDelete }) {
+  if (templates === null) return <SectionSkeleton />;
+  if (!templates.length) {
+    return (
+      <div style={{ padding: '28px 18px', textAlign: 'center', color: 'var(--muted)', border: '1px dashed var(--hairline)', borderRadius: 14 }}>
+        No templates yet. Save a goal as a template (in the goal editor) to reuse it here.
+      </div>
+    );
+  }
+  const desc = (p = {}) => {
+    const bits = [];
+    if (p.targetValue != null) bits.push(`${fmtVal(p.targetValue, p.unit)} target`);
+    else if (p.unit) bits.push(p.unit);
+    if (p.curveRef?.tileName || p.curveRef?.cadence) bits.push(`${p.curveRef.cadence || 'curve'}${p.curveRef.tileName ? ` · ${p.curveRef.tileName}` : ''}`);
+    else if (p.metricRef?.tileName) bits.push(p.metricRef.tileName);
+    return bits.join(' · ');
+  };
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {templates.map((t) => (
+        <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 12, border: '1px solid var(--hairline)', borderRadius: 12, background: 'var(--card)', padding: '12px 14px' }}>
+          <span style={{ flex: 1, minWidth: 0 }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+              {t.global && <span title="Global template (available to every client)" style={{ fontSize: 10, fontWeight: 800, color: 'var(--brand)', border: '1px solid var(--hairline)', borderRadius: 980, padding: '1px 7px' }}>🌐 GLOBAL</span>}
+              <span style={{ fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.payload?.name || t.name}</span>
+            </span>
+            {desc(t.payload) && <span style={{ display: 'block', fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{desc(t.payload)}</span>}
+          </span>
+          {canManage && <button onClick={() => onUse(t)} style={addBtn}>＋ Use</button>}
+          {(!t.global || isAdmin) && <button onClick={() => onDelete(t)} aria-label="Delete template" style={{ border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 13, padding: 4 }}>🗑</button>}
+        </div>
+      ))}
     </div>
   );
 }
