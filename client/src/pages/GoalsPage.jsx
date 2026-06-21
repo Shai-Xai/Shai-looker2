@@ -19,7 +19,7 @@ import HomeButton from '../components/HomeButton.jsx';
 // detail, ?new=<suiteId> opens the editor for that event.
 export default function GoalsPage() {
   const navigate = useNavigate();
-  const { activeEntityId } = useProfile();
+  const { activeEntityId, isAdmin } = useProfile();
   const [suites, setSuites] = useState([]);
   const [bySuite, setBySuite] = useState({}); // suiteId -> { goals, personalGoals, canManage, me }
   const [me, setMe] = useState('');
@@ -40,6 +40,22 @@ export default function GoalsPage() {
   useEffect(() => { visibleSuites.forEach((s) => loadSuite(s.id)); }, [visibleSuites.map((s) => s.id).join(','), loadSuite]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const reloadAll = () => visibleSuites.forEach((s) => loadSuite(s.id));
+
+  // Admin: preview the weekly goal nudge — sends the real summary push to MY own
+  // devices (not the client team) so we can see exactly what would go out.
+  const [nudging, setNudging] = useState(null); // entityId being tested
+  const testNudge = (entityId) => {
+    setNudging(entityId);
+    api.goalNudgeTest(entityId)
+      .then((r) => {
+        if (r?.error) window.alert(`Couldn't send: ${r.error}`);
+        else if (r.sent > 0) window.alert(`Sent to ${r.sent} device${r.sent > 1 ? 's' : ''}:\n\n“${r.body}”`);
+        else if (r.wouldSend) window.alert(`Nothing sent — turn on push for this device first.\n\nThe weekly message would read:\n\n“${r.body}”`);
+        else window.alert(`No nudge this week — ${r.body}`);
+      })
+      .catch((e) => window.alert(`Couldn't send: ${e.message}`))
+      .finally(() => setNudging(null));
+  };
 
   // Drag-to-reorder event goals (desktop): move the dragged card before the drop
   // target, renumber positions, optimistically reorder, and persist each — the same
@@ -153,6 +169,11 @@ export default function GoalsPage() {
               <span style={{ flex: 1 }} />
               {loaded && goals.length > 0 && (
                 <button onClick={() => setBrief({ suiteId: suite.id, name: suite.name })} style={owlBtn} title="Owl summary of these goals">🦉 Owl summary</button>
+              )}
+              {loaded && isAdmin && goals.length > 0 && (
+                <button onClick={() => testNudge(suite.entityId)} disabled={nudging === suite.entityId} style={owlBtn} title="Preview the weekly goal nudge — sends to your own devices">
+                  {nudging === suite.entityId ? '…' : '🔔 Test nudge'}
+                </button>
               )}
               {loaded && canManage && (
                 <button onClick={() => setEditor({ suiteId: suite.id, goal: null, scope: 'event' })} style={addBtn}>＋ {goals.length ? 'Add a goal' : 'Set a goal'}</button>

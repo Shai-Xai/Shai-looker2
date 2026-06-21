@@ -721,6 +721,27 @@ function isoWeekKey(tz = 'Africa/Johannesburg') {
   const wk = Math.ceil((((dt - yStart) / 86400000) + 1) / 7);
   return `${dt.getUTCFullYear()}-W${String(wk).padStart(2, '0')}`;
 }
+// Resolve one entity's goals into a nudge summary { wins[], attention[], body }.
+async function buildGoalNudge(entityId) {
+  const user = { id: `goal-nudge:${entityId}`, role: 'client', entityIds: [entityId], email: '' };
+  const wins = [], attention = []; let resolved = 0;
+  for (const su of db.listSuitesForEntity(entityId)) {
+    const caches = goalsApi.makeGoalCaches();
+    for (const g of goalsApi.listGoals(su.id)) {
+      if (resolved >= 24) break;
+      const p = (await goalsApi.attachProgress(g, user, caches)).progress || {}; resolved += 1;
+      const dir = g.direction || 'at_least';
+      const reached = p.value != null && g.targetValue != null && (dir === 'at_most' ? p.value <= g.targetValue : (p.pct != null ? p.pct >= 100 : p.value >= g.targetValue));
+      if (reached) { wins.push(g.name); continue; }
+      const missed = Array.isArray(p.milestones) && p.milestones.some((m) => { const t = Date.parse(m.byDate); return !Number.isNaN(t) && t < Date.now() && p.value != null && (dir === 'at_most' ? p.value > m.targetValue : p.value < m.targetValue); });
+      if (p.status === 'behind' || (p.forecast && p.forecast.status === 'short') || missed) attention.push(g.name);
+    }
+  }
+  const bits = [];
+  if (attention.length) bits.push(`${attention.length} goal${attention.length > 1 ? 's' : ''} need attention: ${attention.slice(0, 3).join(', ')}${attention.length > 3 ? '…' : ''}`);
+  if (wins.length) bits.push(`🎉 ${wins.length} reached: ${wins.slice(0, 2).join(', ')}${wins.length > 2 ? '…' : ''}`);
+  return { wins, attention, body: bits.join(' · ') };
+}
 async function goalNudgeSweep() {
   try {
     if (!push.isEnabled || !push.isEnabled()) return;
@@ -732,30 +753,32 @@ async function goalNudgeSweep() {
     for (const ent of db.listEntities()) {
       if (db.getSetting(`goal_nudge_week:${ent.id}`, '') === week) continue;
       try {
-        const user = { id: `goal-nudge:${ent.id}`, role: 'client', entityIds: [ent.id], email: '' };
-        const wins = [], attention = []; let resolved = 0;
-        for (const su of db.listSuitesForEntity(ent.id)) {
-          const caches = goalsApi.makeGoalCaches();
-          for (const g of goalsApi.listGoals(su.id)) {
-            if (resolved >= 24) break;
-            const p = (await goalsApi.attachProgress(g, user, caches)).progress || {}; resolved += 1;
-            const dir = g.direction || 'at_least';
-            const reached = p.value != null && g.targetValue != null && (dir === 'at_most' ? p.value <= g.targetValue : (p.pct != null ? p.pct >= 100 : p.value >= g.targetValue));
-            if (reached) { wins.push(g.name); continue; }
-            const missed = Array.isArray(p.milestones) && p.milestones.some((m) => { const t = Date.parse(m.byDate); return !Number.isNaN(t) && t < Date.now() && p.value != null && (dir === 'at_most' ? p.value > m.targetValue : p.value < m.targetValue); });
-            if (p.status === 'behind' || (p.forecast && p.forecast.status === 'short') || missed) attention.push(g.name);
-          }
-        }
+        const { wins, attention, body } = await buildGoalNudge(ent.id);
         db.setSetting(`goal_nudge_week:${ent.id}`, week); // mark done even if nothing to say
         if (!attention.length && !wins.length) continue;
-        const bits = [];
-        if (attention.length) bits.push(`${attention.length} goal${attention.length > 1 ? 's' : ''} need attention: ${attention.slice(0, 3).join(', ')}${attention.length > 3 ? '…' : ''}`);
-        if (wins.length) bits.push(`🎉 ${wins.length} reached: ${wins.slice(0, 2).join(', ')}${wins.length > 2 ? '…' : ''}`);
-        await push.sendToEntity(ent.id, { title: 'Your goals this week', body: bits.join(' · '), url: '/goals' });
+        await push.sendToEntity(ent.id, { title: 'Your goals this week', body, url: '/goals' });
       } catch (e) { console.error('[goal-nudge]', ent.id, e.message); }
     }
   } catch (e) { console.error('[goal-nudge] sweep', e.message); }
 }
+
+// Admin: fire a goal nudge on demand for testing. Sends the real summary push to
+// the CALLER's own devices (not the whole client team), so staff can preview it
+// without spamming the client. Does NOT touch the weekly dedupe marker.
+//   POST /api/admin/goals/nudge-test  { entityId }
+app.post('/api/admin/goals/nudge-test', auth.requireAdmin, async (req, res) => {
+  const entityId = req.body?.entityId;
+  if (!entityId || !db.getEntity(entityId)) return res.status(400).json({ error: 'Valid entityId required' });
+  if (!push.isEnabled || !push.isEnabled()) return res.status(400).json({ error: 'Push is not enabled (set push_enabled=1)' });
+  try {
+    const { wins, attention, body } = await buildGoalNudge(entityId);
+    const text = body || 'No goals need attention right now — nothing would be sent this week.';
+    const sent = (attention.length || wins.length)
+      ? await push.sendToUser(req.user.id, { title: 'Your goals this week (test)', body: text, url: '/goals' })
+      : 0;
+    res.json({ sent, wouldSend: !!(attention.length || wins.length), body: text, wins: wins.length, attention: attention.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 setInterval(() => goalNudgeSweep(), 60 * 60 * 1000); // hourly; fires the first morning of each ISO week
 setTimeout(() => goalNudgeSweep(), 30000); // shortly after boot, in case it's the window
 

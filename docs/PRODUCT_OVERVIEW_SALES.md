@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-06-20 · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-06-21 · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -230,6 +230,13 @@ a pace read** — *ahead / on track / behind* — not just "are we there yet."
 - **vs last time + forecast on the card** — each goal shows **how it's tracking vs the
   same point last event** (e.g. +35%) and a **projected final landing** (on track to
   hit / how far short), both from the linked curve.
+- **Sell-curve & forecast chart** — open a curve-linked goal to see **last time, your
+  actual to date, and a forecast line you can follow** — the forecast hugs last event's
+  remaining shape (not a flat guess) to where it'll land, with the target and a "you are
+  here" marker.
+- **Weekly goal nudge** — one calm **"your goals this week"** push (not per-event spam),
+  summarising what **needs attention** (behind pace · forecast short · checkpoint missed)
+  plus **wins** (reached). Howler staff can fire a **test nudge** to preview it.
 - **Compare to last time, your way** — baseline from a past event, a **picked dashboard
   tile** (e.g. a last-year total, remembered + re-read live), or a typed number; one-tap
   **Match / +10% / +15% / +20%** target helpers.
@@ -279,6 +286,11 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-21** — **Goals — forecast chart & weekly nudge** 🧪: curve-linked goals get a
+  **sell-curve & forecast chart** (last time · actual · a followable forecast line that
+  hugs last event's remaining shape to its projected landing, with target + "you are
+  here"). A calm **weekly "your goals this week" push** summarises what needs attention
+  (behind · forecast short · checkpoint missed) plus wins; staff can fire a **test nudge**.
 - **2026-06-20** — **Goals in the digest** 🧪: a scheduled digest can now include a
   **goals summary** paragraph (toggle in the digest editor) — the event's targets with
   live progress, pace, vs-last-time and projected finish, leading with the North Star.

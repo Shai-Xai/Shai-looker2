@@ -435,4 +435,5 @@ export const api = {
   goalCheckpointSuggestions: (suiteId, body) => fetch(`/api/goals/suites/${suiteId}/checkpoint-suggestions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
   goalGapPlan: (goalId) => fetch(`/api/goals/${goalId}/gap-plan`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(json),
   goalForecastChart: (suiteId, goalId) => fetch(`/api/goals/suites/${suiteId}/forecast-chart?goalId=${encodeURIComponent(goalId)}`).then(json),
+  goalNudgeTest: (entityId) => fetch('/api/admin/goals/nudge-test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entityId }) }).then(json),
 };
