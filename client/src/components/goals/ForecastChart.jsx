@@ -5,71 +5,69 @@ import { fmtVal } from './GoalViz.jsx';
 // target (dotted) and a "you are here" dot. Axis is days-before-event when numeric (so
 // the two years align by point-in-cycle), else falls back to position.
 export default function ForecastChart({ data, unit, w = 440, h = 150 }) {
-  const last = (data?.lastYear || []).filter((p) => Number.isFinite(p.y));
-  const cur = (data?.thisYear || []).filter((p) => Number.isFinite(p.y));
-  if (last.length < 2 && cur.length < 2) return null;
-  const isISO = (x) => /^\d{4}-\d{2}/.test(String(x));
-  const numeric = last.concat(cur).every((p) => Number.isFinite(Number(p.x)) && !isISO(p.x));
-  const dated = !numeric && last.concat(cur).every((p) => isISO(p.x) && !Number.isNaN(Date.parse(p.x)));
-  const daysLeft = Number.isFinite(data?.daysLeft) ? Math.max(0, data.daysLeft) : null;
-
-  let lastPts, curPts;
-  if (numeric) {
-    const maxX = Math.max(...last.concat(cur).map((p) => Number(p.x)), 1);
-    const xp = (x) => Math.max(0, Math.min(1, 1 - Number(x) / maxX)); // x=0 (event) → right
-    lastPts = last.map((p) => ({ x: xp(p.x), y: p.y })).sort((a, b) => a.x - b.x);
-    curPts = cur.map((p) => ({ x: xp(p.x), y: p.y })).sort((a, b) => a.x - b.x);
-  } else if (dated && daysLeft != null) {
-    // Date axis: place each point by its FRACTION of the run-up cycle so the two
-    // years align by point-in-cycle. Last time spans its full cycle (0→1); this
-    // year only reaches `now` = elapsed / (elapsed + daysLeft), leaving the rest of
-    // the axis (→ the event) for the forecast. Without this, aligning by row index
-    // pins today to the right edge and the forecast collapses to a dot.
-    const day = 86400000;
-    const cd = cur.map((p) => ({ t: Date.parse(p.x), y: p.y })).sort((a, b) => a.t - b.t);
-    const ld = last.map((p) => ({ t: Date.parse(p.x), y: p.y })).sort((a, b) => a.t - b.t);
-    const ty0 = cd[0]?.t, tyNow = cd[cd.length - 1]?.t;
-    const elapsed = (tyNow - ty0) / day;
-    const total = elapsed + daysLeft;
-    const ly0 = ld[0]?.t, lyEnd = ld[ld.length - 1]?.t;
-    const lspan = (lyEnd - ly0) || 1;
-    lastPts = ld.map((p) => ({ x: (p.t - ly0) / lspan, y: p.y }));
-    curPts = total > 0 ? cd.map((p) => ({ x: (p.t - ty0) / (total * day), y: p.y })) : cd.map((p, i) => ({ x: i / Math.max(cd.length - 1, 1), y: p.y }));
-  } else {
-    // Fallback (no usable axis): align LEFT and end this year at its cycle fraction
-    // so there's still room for the forecast when daysLeft is known.
-    const nowFrac = daysLeft != null && (cur.length + daysLeft) > 0 ? Math.min(1, (cur.length - 1) / (cur.length - 1 + daysLeft)) : 1;
-    lastPts = last.map((p, i) => ({ x: (last.length > 1 ? i / (last.length - 1) : 0), y: p.y }));
-    curPts = cur.map((p, i) => ({ x: (cur.length > 1 ? (i / (cur.length - 1)) * nowFrac : 0), y: p.y }));
-  }
   const projected = Number.isFinite(data?.projected) ? data.projected : null;
   const target = Number.isFinite(data?.target) ? data.target : null;
-  const now = curPts.length ? curPts[curPts.length - 1] : null;
 
-  // Forecast trajectory you can follow point-by-point: from "now" it hugs last
-  // year's REMAINING cumulative shape, scaled so it lands on `projected`. (Falls
-  // back to a straight now→projected segment when there's no last-year shape.)
-  const interp = (pts, xq) => {
-    if (!pts.length) return null;
-    if (xq <= pts[0].x) return pts[0].y;
-    if (xq >= pts[pts.length - 1].x) return pts[pts.length - 1].y;
-    for (let i = 1; i < pts.length; i++) {
-      if (pts[i].x >= xq) { const a = pts[i - 1], b = pts[i]; const t = (xq - a.x) / ((b.x - a.x) || 1); return a.y + (b.y - a.y) * t; }
+  // Prefer the server-positioned coordinates (0..1 x, where 1 = event) — they're
+  // computed where daysLeft + the real axis are known, so the forecast curve always
+  // has room. Fall back to positioning from raw x labels for older payloads.
+  let lastPts, curPts, fcPts;
+  const pos = data?.positioned;
+  if (pos && (Array.isArray(pos.last) || Array.isArray(pos.cur))) {
+    lastPts = (pos.last || []).filter((p) => Number.isFinite(p.y));
+    curPts = (pos.cur || []).filter((p) => Number.isFinite(p.y));
+    fcPts = (pos.forecast || []).filter((p) => Number.isFinite(p.y));
+    if (!fcPts.length) fcPts = null;
+    if (lastPts.length < 2 && curPts.length < 2) return null;
+  } else {
+    const last = (data?.lastYear || []).filter((p) => Number.isFinite(p.y));
+    const cur = (data?.thisYear || []).filter((p) => Number.isFinite(p.y));
+    if (last.length < 2 && cur.length < 2) return null;
+    const isISO = (x) => /^\d{4}-\d{2}/.test(String(x));
+    const numeric = last.concat(cur).every((p) => Number.isFinite(Number(p.x)) && !isISO(p.x));
+    const dated = !numeric && last.concat(cur).every((p) => isISO(p.x) && !Number.isNaN(Date.parse(p.x)));
+    const daysLeft = Number.isFinite(data?.daysLeft) ? Math.max(0, data.daysLeft) : null;
+    if (numeric) {
+      const maxX = Math.max(...last.concat(cur).map((p) => Number(p.x)), 1);
+      const xp = (x) => Math.max(0, Math.min(1, 1 - Number(x) / maxX)); // x=0 (event) → right
+      lastPts = last.map((p) => ({ x: xp(p.x), y: p.y })).sort((a, b) => a.x - b.x);
+      curPts = cur.map((p) => ({ x: xp(p.x), y: p.y })).sort((a, b) => a.x - b.x);
+    } else if (dated && daysLeft != null) {
+      const day = 86400000;
+      const cd = cur.map((p) => ({ t: Date.parse(p.x), y: p.y })).sort((a, b) => a.t - b.t);
+      const ld = last.map((p) => ({ t: Date.parse(p.x), y: p.y })).sort((a, b) => a.t - b.t);
+      const ty0 = cd[0]?.t, tyNow = cd[cd.length - 1]?.t;
+      const total = (tyNow - ty0) / day + daysLeft;
+      const ly0 = ld[0]?.t, lyEnd = ld[ld.length - 1]?.t; const lspan = (lyEnd - ly0) || 1;
+      lastPts = ld.map((p) => ({ x: (p.t - ly0) / lspan, y: p.y }));
+      curPts = total > 0 ? cd.map((p) => ({ x: (p.t - ty0) / (total * day), y: p.y })) : cd.map((p, i) => ({ x: i / Math.max(cd.length - 1, 1), y: p.y }));
+    } else {
+      const nowFrac = daysLeft != null && (cur.length + daysLeft) > 0 ? Math.min(1, (cur.length - 1) / (cur.length - 1 + daysLeft)) : 1;
+      lastPts = last.map((p, i) => ({ x: (last.length > 1 ? i / (last.length - 1) : 0), y: p.y }));
+      curPts = cur.map((p, i) => ({ x: (cur.length > 1 ? (i / (cur.length - 1)) * nowFrac : 0), y: p.y }));
     }
-    return pts[pts.length - 1].y;
-  };
-  let fcPts = null;
-  if (now && lastPts.length >= 2) {
-    const Lnow = interp(lastPts, now.x);
-    if (Lnow && Lnow > 0) {
-      const ahead = lastPts.filter((p) => p.x > now.x).map((p) => ({ x: p.x, y: (now.y * p.y) / Lnow }));
-      fcPts = [{ x: now.x, y: now.y }, ...ahead];
-      const endY = (now.y * interp(lastPts, 1)) / Lnow;
-      if (fcPts[fcPts.length - 1].x < 0.999) fcPts.push({ x: 1, y: endY });
+    const nowL = curPts.length ? curPts[curPts.length - 1] : null;
+    const interp = (pts, xq) => {
+      if (!pts.length) return null;
+      if (xq <= pts[0].x) return pts[0].y;
+      if (xq >= pts[pts.length - 1].x) return pts[pts.length - 1].y;
+      for (let i = 1; i < pts.length; i++) { if (pts[i].x >= xq) { const a = pts[i - 1], b = pts[i]; const t = (xq - a.x) / ((b.x - a.x) || 1); return a.y + (b.y - a.y) * t; } }
+      return pts[pts.length - 1].y;
+    };
+    fcPts = null;
+    if (nowL && lastPts.length >= 2) {
+      const Lnow = interp(lastPts, nowL.x);
+      if (Lnow && Lnow > 0) {
+        const ahead = lastPts.filter((p) => p.x > nowL.x).map((p) => ({ x: p.x, y: (nowL.y * p.y) / Lnow }));
+        fcPts = [{ x: nowL.x, y: nowL.y }, ...ahead];
+        if (fcPts[fcPts.length - 1].x < 0.999) fcPts.push({ x: 1, y: (nowL.y * interp(lastPts, 1)) / Lnow });
+      }
     }
+    if (!fcPts && nowL && projected != null) fcPts = [{ x: nowL.x, y: nowL.y }, { x: 1, y: projected }];
   }
-  if (!fcPts && now && projected != null) fcPts = [{ x: now.x, y: now.y }, { x: 1, y: projected }];
-  const fcEndY = fcPts ? fcPts[fcPts.length - 1].y : projected;
+
+  const now = curPts.length ? curPts[curPts.length - 1] : null;
+  const fcEndY = (fcPts && fcPts.length) ? fcPts[fcPts.length - 1].y : projected;
 
   const ys = [...lastPts, ...curPts, ...(fcPts || [])].map((p) => p.y);
   const yMax = Math.max(...ys, target || 0, projected || 0, 1) * 1.08;

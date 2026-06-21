@@ -23,6 +23,69 @@ const fc = require('./forecast');
 const SOURCES = ['ticketing', 'cashless', 'access', 'audience', 'ga4', 'app', 'social_paid', 'sponsorship', 'manual'];
 const DIRECTIONS = ['at_least', 'at_most', 'exact'];
 
+// Place a goal's sell-curve onto a 0..1 x-axis (1 = event day) so the chart can
+// draw it without guessing the axis format. Last time spans its full cycle (0→1);
+// this year reaches only `now` (= elapsed / (elapsed + daysLeft)), leaving the rest
+// of the axis for the forecast curve. The forecast follows last time's REMAINING
+// shape scaled to the current value (so it lands on `projected`).
+// Returns { last:[{x,y}], cur:[{x,y}], forecast:[{x,y}], nowFrac } | null.
+function positionForecast({ cumLast, cumThis, daysLeft, projected }) {
+  if ((!cumLast || cumLast.length < 2) && (!cumThis || cumThis.length < 2)) return null;
+  const DAY = 86400000;
+  const isISO = (t) => /^\d{4}-\d{2}/.test(String(t));
+  const dLeft = Number.isFinite(daysLeft) ? Math.max(0, daysLeft) : null;
+  const allT = [...cumThis, ...cumLast].map((p) => p.t);
+  const numericAxis = allT.length > 0 && allT.every((t) => t !== '' && t != null && !isISO(t) && Number.isFinite(Number(t)));
+  const datedAxis = !numericAxis && allT.length > 0 && allT.every((t) => isISO(t) && !Number.isNaN(Date.parse(t)));
+
+  let last, cur, nowFrac;
+  if (numericAxis) {
+    // x-axis is "days before event": x = 1 − d/maxD, so d=0 (event) → right.
+    const maxD = Math.max(...allT.map(Number), 1);
+    const xOf = (t) => Math.max(0, Math.min(1, 1 - Number(t) / maxD));
+    last = cumLast.map((p) => ({ x: xOf(p.t), y: Math.round(p.c) })).sort((a, b) => a.x - b.x);
+    cur = cumThis.map((p) => ({ x: xOf(p.t), y: Math.round(p.c) })).sort((a, b) => a.x - b.x);
+    nowFrac = cur.length ? cur[cur.length - 1].x : (dLeft != null ? xOf(dLeft) : 1);
+  } else if (datedAxis && dLeft != null) {
+    const cd = cumThis.map((p) => ({ t: Date.parse(p.t), c: p.c })).sort((a, b) => a.t - b.t);
+    const ld = cumLast.map((p) => ({ t: Date.parse(p.t), c: p.c })).sort((a, b) => a.t - b.t);
+    const ty0 = cd[0]?.t, tyNow = cd[cd.length - 1]?.t;
+    const total = (tyNow - ty0) / DAY + dLeft;
+    const ly0 = ld[0]?.t, lyEnd = ld[ld.length - 1]?.t; const lspan = (lyEnd - ly0) || 1;
+    last = ld.map((p) => ({ x: (p.t - ly0) / lspan, y: Math.round(p.c) }));
+    cur = total > 0 ? cd.map((p) => ({ x: (p.t - ty0) / (total * DAY), y: Math.round(p.c) })) : cd.map((p, i) => ({ x: i / Math.max(cd.length - 1, 1), y: Math.round(p.c) }));
+    nowFrac = cur.length ? cur[cur.length - 1].x : 1;
+  } else {
+    // No usable axis: align by index, but end this year at its cycle fraction so the
+    // forecast still has room when daysLeft is known.
+    const nC = cumThis.length;
+    nowFrac = dLeft != null && (nC + dLeft) > 0 ? Math.min(1, (nC - 1) / (nC - 1 + dLeft)) : 1;
+    last = cumLast.map((p, i) => ({ x: cumLast.length > 1 ? i / (cumLast.length - 1) : 0, y: Math.round(p.c) }));
+    cur = cumThis.map((p, i) => ({ x: nC > 1 ? (i / (nC - 1)) * nowFrac : 0, y: Math.round(p.c) }));
+  }
+
+  // Forecast curve from `now`, hugging last time's remaining shape.
+  let forecast = null;
+  const now = cur.length ? cur[cur.length - 1] : null;
+  if (now && last.length >= 2) {
+    const interp = (pts, xq) => {
+      if (xq <= pts[0].x) return pts[0].y;
+      if (xq >= pts[pts.length - 1].x) return pts[pts.length - 1].y;
+      for (let i = 1; i < pts.length; i++) { if (pts[i].x >= xq) { const a = pts[i - 1], b = pts[i]; const f = (xq - a.x) / ((b.x - a.x) || 1); return a.y + (b.y - a.y) * f; } }
+      return pts[pts.length - 1].y;
+    };
+    const Lnow = interp(last, now.x);
+    if (Lnow > 0) {
+      const ahead = last.filter((p) => p.x > now.x).map((p) => ({ x: p.x, y: Math.round((now.y * p.y) / Lnow) }));
+      forecast = [{ x: now.x, y: now.y }, ...ahead];
+      if (forecast[forecast.length - 1].x < 0.999) forecast.push({ x: 1, y: Math.round((now.y * interp(last, 1)) / Lnow) });
+    }
+  }
+  if (!forecast && now && Number.isFinite(projected)) forecast = [{ x: now.x, y: now.y }, { x: 1, y: projected }];
+
+  return { last, cur, forecast, nowFrac };
+}
+
 function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTileSeriesAll, resolveEventDate }) {
   const sql = db.db;
   const now = () => new Date().toISOString();
@@ -606,12 +669,21 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
     const thisCol = data.columns.find((c) => c.key === thisKey);
     const toXY = (series) => (fc.cumulativeWithAxis(series) || []).map((p) => ({ x: p.t, y: Math.round(p.c) }));
     const prog = (await attachProgress(g, req.user)).progress;
+    const projected = prog.forecast ? prog.forecast.projected : null;
     res.json({
-      available: true, unit: g.unit || '', target: g.targetValue, daysLeft: prog.daysLeft,
-      projected: prog.forecast ? prog.forecast.projected : null,
+      available: true, unit: g.unit || '', target: g.targetValue, daysLeft: prog.daysLeft, projected,
       lastKey: lastCol ? lastCol.key : null, thisKey: thisKey || null,
       lastYear: toXY(lastCol ? lastCol.series : []),
       thisYear: toXY(thisCol ? thisCol.series : []),
+      // Pre-positioned coordinates (0..1 x, where 1 = event day) so the chart never
+      // has to guess the axis. `now` ends the actual line partway and leaves the rest
+      // of the axis for the forecast curve. Computed here where daysLeft + the real
+      // axis are known. The client falls back to lastYear/thisYear if this is absent.
+      positioned: positionForecast({
+        cumLast: fc.cumulativeWithAxis(lastCol ? lastCol.series : []) || [],
+        cumThis: fc.cumulativeWithAxis(thisCol ? thisCol.series : []) || [],
+        daysLeft: prog.daysLeft, projected,
+      }),
     });
   });
 

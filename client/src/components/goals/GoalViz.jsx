@@ -10,7 +10,7 @@ import { useIsMobile } from '../../lib/useIsMobile.js';
 // Horizontal snap strip — one row, scroll for more (like the pinned tiles).
 export function Strip({ children }) {
   return (
-    <div style={{ display: 'flex', gap: 10, overflowX: 'auto', scrollSnapType: 'x proximity', paddingBottom: 4, scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' }}>
+    <div style={{ display: 'flex', gap: 10, overflowX: 'auto', scrollSnapType: 'x proximity', padding: '4px 4px 8px', margin: '0 -4px', scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' }}>
       {children}
     </div>
   );
