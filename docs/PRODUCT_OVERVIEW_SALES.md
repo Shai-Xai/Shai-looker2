@@ -244,9 +244,10 @@ a pace read** — *ahead / on track / behind* — not just "are we there yet."
   your target, on the same days-before-event math as the live pace.
 - **Reusable goal templates** — save a goal's whole setup (metric/curve tile, target, unit,
   comparison year, cadence) as a template, then start new goals from it in one tap — ideal
-  for recurring monthly/quarterly targets. Set the fresh dates and go. **Howler can also
-  publish 🌐 global templates** — portable scaffolds (the metric definition + target/viz)
-  available to **every client**, who then link their own data.
+  for recurring monthly/quarterly targets. Set the fresh dates and go. Templates carry the
+  **dashboard name + tile** (the key components). **Howler can also publish 🌐 global
+  templates** to **every client** — they re-link to each client's matching dashboard/tile
+  **by name**, so standardised dashboards wire up automatically.
 - **Drag to reorder** — arrange goal tiles on the Goals page; the order carries to the
   home dashboard.
 - **Dual-surface** — clients set their own goals; Howler can set them on a client's
