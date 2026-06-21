@@ -47,7 +47,7 @@ export default function DigestHistory({ entityId, compact = false }) {
     <div style={{ marginTop: compact ? 18 : 30 }}>
       <button type="button" onClick={() => setCollapsed((c) => !c)} style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', background: 'none', border: 'none', padding: 0, cursor: 'pointer', font: 'inherit', textAlign: 'left' }}>
         <span style={{ width: 12, fontSize: 10, color: 'var(--muted)', transform: collapsed ? 'none' : 'rotate(90deg)', transition: 'transform .15s' }}>▶</span>
-        <span style={{ fontSize: compact ? 14 : 16, fontWeight: 700 }}>📨 Recent digests{list.length ? ` (${list.length})` : ''}</span>
+        <span style={{ fontSize: compact ? 14 : 16, fontWeight: 700 }}>📨 {compact ? 'Latest digest' : `Recent digests${list.length ? ` (${list.length})` : ''}`}</span>
       </button>
       {!compact && !collapsed && <p style={{ color: 'var(--muted)', fontSize: 13, margin: '4px 0 12px' }}>Look back at what was sent — tell the Owl what you liked or want changed, and future digests adapt.</p>}
       {!collapsed && (

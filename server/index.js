@@ -2339,7 +2339,8 @@ app.get('/api/admin/entities/:id/digest-tiles', auth.requireAdmin, (req, res) =>
   res.json(digestTileCatalogue(req.params.id));
 });
 app.get('/api/my/digest-tiles/:entityId', auth.requireAuth, (req, res) => {
-  if (!(req.user.entityIds || []).includes(req.params.entityId)) return res.status(403).json({ error: 'Not allowed' });
+  // Admins can act as any client (preview), so they pass the ownership check.
+  if (req.user.role !== 'admin' && !(req.user.entityIds || []).includes(req.params.entityId)) return res.status(403).json({ error: 'Not allowed' });
   res.json(digestTileCatalogue(req.params.entityId));
 });
 
@@ -2377,7 +2378,7 @@ app.get('/api/admin/entities/:id/followed-tiles', auth.requireAdmin, (req, res) 
   res.json(followedTilesFor(req.params.id, req.user.id));
 });
 app.get('/api/my/followed-tiles/:entityId', auth.requireAuth, (req, res) => {
-  if (!(req.user.entityIds || []).includes(req.params.entityId)) return res.status(403).json({ error: 'Not allowed' });
+  if (req.user.role !== 'admin' && !(req.user.entityIds || []).includes(req.params.entityId)) return res.status(403).json({ error: 'Not allowed' });
   res.json(followedTilesFor(req.params.entityId, req.user.id));
 });
 

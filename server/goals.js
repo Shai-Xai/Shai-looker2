@@ -38,7 +38,7 @@ function positionForecast({ cumLast, cumThis, daysLeft, projected }) {
   const numericAxis = allT.length > 0 && allT.every((t) => t !== '' && t != null && !isISO(t) && Number.isFinite(Number(t)));
   const datedAxis = !numericAxis && allT.length > 0 && allT.every((t) => isISO(t) && !Number.isNaN(Date.parse(t)));
 
-  let last, cur, nowFrac;
+  let last, cur, nowFrac, cycleDays = null;
   if (numericAxis) {
     // x-axis is "days before event": x = 1 − d/maxD, so d=0 (event) → right.
     const maxD = Math.max(...allT.map(Number), 1);
@@ -46,6 +46,7 @@ function positionForecast({ cumLast, cumThis, daysLeft, projected }) {
     last = cumLast.map((p) => ({ x: xOf(p.t), y: Math.round(p.c) })).sort((a, b) => a.x - b.x);
     cur = cumThis.map((p) => ({ x: xOf(p.t), y: Math.round(p.c) })).sort((a, b) => a.x - b.x);
     nowFrac = cur.length ? cur[cur.length - 1].x : (dLeft != null ? xOf(dLeft) : 1);
+    cycleDays = maxD;
   } else if (datedAxis && dLeft != null) {
     const cd = cumThis.map((p) => ({ t: Date.parse(p.t), c: p.c })).sort((a, b) => a.t - b.t);
     const ld = cumLast.map((p) => ({ t: Date.parse(p.t), c: p.c })).sort((a, b) => a.t - b.t);
@@ -55,6 +56,7 @@ function positionForecast({ cumLast, cumThis, daysLeft, projected }) {
     last = ld.map((p) => ({ x: (p.t - ly0) / lspan, y: Math.round(p.c) }));
     cur = total > 0 ? cd.map((p) => ({ x: (p.t - ty0) / (total * DAY), y: Math.round(p.c) })) : cd.map((p, i) => ({ x: i / Math.max(cd.length - 1, 1), y: Math.round(p.c) }));
     nowFrac = cur.length ? cur[cur.length - 1].x : 1;
+    cycleDays = total > 0 ? Math.round(total) : null;
   } else {
     // No usable axis: align by index, but end this year at its cycle fraction so the
     // forecast still has room when daysLeft is known.
@@ -83,7 +85,7 @@ function positionForecast({ cumLast, cumThis, daysLeft, projected }) {
   }
   if (!forecast && now && Number.isFinite(projected)) forecast = [{ x: now.x, y: now.y }, { x: 1, y: projected }];
 
-  return { last, cur, forecast, nowFrac };
+  return { last, cur, forecast, nowFrac, cycleDays };
 }
 
 function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTileSeriesAll, resolveEventDate }) {

@@ -1,12 +1,27 @@
+import { useRef, useState } from 'react';
 import { fmtVal } from './GoalViz.jsx';
+
+// Linear-interpolate a series of {x,y} (sorted by x) at x=xq.
+function interpAt(pts, xq) {
+  if (!pts || !pts.length) return null;
+  if (xq <= pts[0].x) return pts[0].y;
+  if (xq >= pts[pts.length - 1].x) return pts[pts.length - 1].y;
+  for (let i = 1; i < pts.length; i++) {
+    if (pts[i].x >= xq) { const a = pts[i - 1], b = pts[i]; const f = (xq - a.x) / ((b.x - a.x) || 1); return a.y + (b.y - a.y) * f; }
+  }
+  return pts[pts.length - 1].y;
+}
 
 // "Last year · this year · forecast" — last time's full cumulative curve (muted), this
 // year's actual to date (brand), the projected finish (dashed brand to the event), the
 // target (dotted) and a "you are here" dot. Axis is days-before-event when numeric (so
 // the two years align by point-in-cycle), else falls back to position.
 export default function ForecastChart({ data, unit, w = 440, h = 150 }) {
+  const svgRef = useRef(null);
+  const [hover, setHover] = useState(null); // { xp, px } while inspecting
   const projected = Number.isFinite(data?.projected) ? data.projected : null;
   const target = Number.isFinite(data?.target) ? data.target : null;
+  const cycleDays = Number.isFinite(data?.positioned?.cycleDays) ? data.positioned.cycleDays : null;
 
   // Prefer the server-positioned coordinates (0..1 x, where 1 = event) — they're
   // computed where daysLeft + the real axis are known, so the forecast curve always
@@ -77,10 +92,36 @@ export default function ForecastChart({ data, unit, w = 440, h = 150 }) {
   const line = (pts) => pts.map((p, i) => `${i ? 'L' : 'M'}${X(p.x).toFixed(1)},${Y(p.y).toFixed(1)}`).join(' ');
   const MUTED = 'rgba(128,128,128,0.55)';
   const FC = '#f59e0b'; // forecast — distinct from the brand "actual" line
+  const nowX = now ? now.x : null;
+
+  // Pointer/touch inspection: map the cursor to an x-fraction, then read each
+  // series' value there (so a flat stretch reads as "no change those days").
+  const onMove = (clientX) => {
+    const el = svgRef.current; if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const vbX = ((clientX - rect.left) / rect.width) * w;
+    const xp = Math.max(0, Math.min(1, (vbX - pad.l) / (w - pad.l - pad.r)));
+    setHover({ xp, px: clientX - rect.left });
+  };
+  let hv = null;
+  if (hover) {
+    const xp = hover.xp;
+    const actualY = curPts.length >= 2 && (nowX == null || xp <= nowX + 1e-6) ? interpAt(curPts, xp) : null;
+    const lastY = lastPts.length >= 2 ? interpAt(lastPts, xp) : null;
+    const fcY = fcPts && fcPts.length >= 2 && nowX != null && xp >= nowX - 1e-6 ? interpAt(fcPts, xp) : null;
+    const daysToGo = cycleDays != null ? Math.max(0, Math.round((1 - xp) * cycleDays)) : null;
+    hv = { xp, px: hover.px, actualY, lastY, fcY, daysToGo };
+  }
 
   return (
-    <div>
-      <svg width="100%" viewBox={`0 0 ${w} ${h}`} style={{ display: 'block' }} aria-hidden="true">
+    <div style={{ position: 'relative' }}>
+      <svg
+        ref={svgRef} width="100%" viewBox={`0 0 ${w} ${h}`} style={{ display: 'block', touchAction: 'none' }}
+        onMouseMove={(e) => onMove(e.clientX)} onMouseLeave={() => setHover(null)}
+        onTouchStart={(e) => { if (e.touches[0]) onMove(e.touches[0].clientX); }}
+        onTouchMove={(e) => { if (e.touches[0]) onMove(e.touches[0].clientX); }}
+        onTouchEnd={() => setHover(null)}
+      >
         {target != null && (
           <g>
             <line x1={pad.l} x2={w - pad.r} y1={Y(target)} y2={Y(target)} stroke={MUTED} strokeWidth="1" strokeDasharray="2 3" />
@@ -93,13 +134,47 @@ export default function ForecastChart({ data, unit, w = 440, h = 150 }) {
         {curPts.length >= 2 && <path d={line(curPts)} fill="none" stroke="var(--brand)" strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />}
         {fcEndY != null && <circle cx={X(1)} cy={Y(fcEndY)} r="3" fill={FC} opacity="0.9" />}
         {now && <circle cx={X(now.x)} cy={Y(now.y)} r="3.5" fill="var(--brand)" stroke="var(--card)" strokeWidth="1.5" />}
+        {/* hover guide + markers */}
+        {hv && (
+          <g pointerEvents="none">
+            <line x1={X(hv.xp)} x2={X(hv.xp)} y1={pad.t} y2={h - pad.b} stroke="var(--text)" strokeOpacity="0.35" strokeWidth="1" />
+            {hv.lastY != null && <circle cx={X(hv.xp)} cy={Y(hv.lastY)} r="3" fill={MUTED} />}
+            {hv.fcY != null && <circle cx={X(hv.xp)} cy={Y(hv.fcY)} r="3" fill={FC} />}
+            {hv.actualY != null && <circle cx={X(hv.xp)} cy={Y(hv.actualY)} r="3.5" fill="var(--brand)" stroke="var(--card)" strokeWidth="1.5" />}
+          </g>
+        )}
       </svg>
+      {hv && (
+        <div style={{
+          position: 'absolute', top: 2, left: Math.max(4, Math.min(hv.px - 60, w - 124)),
+          width: 'max-content', maxWidth: 150, pointerEvents: 'none', zIndex: 2,
+          background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 8,
+          boxShadow: '0 6px 18px rgba(0,0,0,0.18)', padding: '6px 9px', fontSize: 11, lineHeight: 1.5,
+        }}>
+          <div style={{ fontWeight: 700, color: 'var(--muted)', marginBottom: 2 }}>
+            {hv.daysToGo != null ? (hv.daysToGo === 0 ? 'event day' : `≈ ${hv.daysToGo}d to go`) : `${Math.round(hv.xp * 100)}% through`}
+          </div>
+          {hv.actualY != null && <TipRow color="var(--brand)" label="actual" val={fmtVal(Math.round(hv.actualY), unit)} />}
+          {hv.fcY != null && <TipRow color={FC} label="forecast" val={fmtVal(Math.round(hv.fcY), unit)} />}
+          {hv.lastY != null && <TipRow color={MUTED} label="last time" val={fmtVal(Math.round(hv.lastY), unit)} />}
+        </div>
+      )}
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: 10.5, color: 'var(--muted)', marginTop: 4 }}>
         <Key color={MUTED}>last time{data?.lastKey ? ` (${data.lastKey})` : ''}</Key>
         <Key color="var(--brand)">actual</Key>
         <Key color={FC} dashed>forecast{projected != null ? ` ≈ ${fmtVal(projected, unit)}` : ''}</Key>
         {target != null && <Key color={MUTED} dotted>target {fmtVal(target, unit)}</Key>}
       </div>
+    </div>
+  );
+}
+
+function TipRow({ color, label, val }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>
+      <span style={{ width: 8, height: 8, borderRadius: 2, background: color, flexShrink: 0 }} />
+      <span style={{ color: 'var(--muted)' }}>{label}</span>
+      <span style={{ marginLeft: 'auto', fontWeight: 700, color: 'var(--text)' }}>{val}</span>
     </div>
   );
 }
