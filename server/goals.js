@@ -97,9 +97,16 @@ function positionForecast({ cumLast, cumThis, daysLeft, projected }) {
     };
     const Lnow = interp(last, now.x);
     if (Lnow > 0) {
-      const ahead = last.filter((p) => p.x > now.x).map((p) => ({ x: p.x, y: Math.round((now.y * p.y) / Lnow) }));
-      forecast = [{ x: now.x, y: now.y }, ...ahead];
-      if (forecast[forecast.length - 1].x < 0.999) forecast.push({ x: 1, y: Math.round((now.y * interp(last, 1)) / Lnow) });
+      // Shape-only remaining curve from `now`…
+      const shapeAhead = last.filter((p) => p.x > now.x).map((p) => ({ x: p.x, y: (now.y * p.y) / Lnow }));
+      const shapeEnd = (now.y * interp(last, 1)) / Lnow;
+      // …then remap its growth so it lands on the (possibly momentum-blended) projected,
+      // keeping the curve's bend. So the dashed line, its end dot and the legend agree.
+      const targetEnd = Number.isFinite(projected) ? projected : shapeEnd;
+      const denom = (shapeEnd - now.y) || 1;
+      const remap = (y) => Math.round(now.y + (y - now.y) * ((targetEnd - now.y) / denom));
+      forecast = [{ x: now.x, y: now.y }, ...shapeAhead.map((p) => ({ x: p.x, y: remap(p.y) }))];
+      if (forecast[forecast.length - 1].x < 0.999) forecast.push({ x: 1, y: Math.round(targetEnd) });
     }
   }
   if (!forecast && now && Number.isFinite(projected)) forecast = [{ x: now.x, y: now.y }, { x: 1, y: projected }];
@@ -457,8 +464,11 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
     if (at && goal.direction !== 'at_most' && !Number.isNaN(end) && !Number.isNaN(start) && end > start) {
       const cum = fc.toCumulative((Array.isArray(curve) ? curve : []).map((p) => p.v));
       const r = Math.max(0, Math.min(1, (nowMs - start) / (end - start)));
-      const f = cum.length >= 2 ? fc.forecast({ cum, currentValue: value, target: goal.targetValue, r, daysLeft, recentRatePerDay: null, fNow: at.fraction }) : null;
-      if (f && Number.isFinite(f.projected)) forecast = { projected: f.projected, status: f.status, vsTargetPct: f.vsTargetPct };
+      // Blend last time's SHAPE with recent run-rate (momentum) so a hot/cold streak
+      // nudges the projection — but cap momentum at half so the seasonal shape (which
+      // captures a late surge a linear rate can't) stays the primary signal.
+      const f = cum.length >= 2 ? fc.forecast({ cum, currentValue: value, target: goal.targetValue, r, daysLeft, recentRatePerDay: opts.recentRatePerDay ?? null, weightMomentum: Math.min(0.5, r), fNow: at.fraction }) : null;
+      if (f && Number.isFinite(f.projected)) forecast = { projected: f.projected, status: f.status, vsTargetPct: f.vsTargetPct, shape: f.shape, momentum: f.momentum };
     }
     return { value, pct, target: goal.targetValue, direction: goal.direction, expected, onPace, status, band, milestones, nextMilestone, lastAtNow, baselineFinal, daysLeft, forecast };
   }
@@ -488,7 +498,8 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
             const thisCol = data.columns.find((c) => c.key === byKeyDesc[0]?.key);
             const thisCum = fc.toCumulative((thisCol?.series || []).map((x) => x.v));
             const thisNow = thisCum.length ? thisCum[thisCum.length - 1] : null;
-            return { shape: shape.length >= 2 ? shape : null, thisNow };
+            const recentRatePerDay = fc.recentRate(thisCol?.series || []); // momentum from this year's tail
+            return { shape: shape.length >= 2 ? shape : null, thisNow, recentRatePerDay };
           }
         }
         if (typeof resolveTileSeries === 'function') {
@@ -529,7 +540,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
     const useCurveNow = curve && curve.thisNow != null;
     const value = useCurveNow ? curve.thisNow : m.value;
     const gp = (liveBaseline != null && Number.isFinite(Number(liveBaseline))) ? { ...g, baselineValue: Number(liveBaseline) } : g;
-    return { ...gp, progress: { ...computeProgress(gp, value, shape, { eventDateIso }), asOf: m.asOf, resolvedSource: useCurveNow ? 'curve-this-year' : m.source } };
+    return { ...gp, progress: { ...computeProgress(gp, value, shape, { eventDateIso, recentRatePerDay: curve?.recentRatePerDay }), asOf: m.asOf, resolvedSource: useCurveNow ? 'curve-this-year' : m.source } };
   }
 
   // ── Access guards (admin OR an entity member; writes need goals.manage) ──

@@ -120,6 +120,27 @@ function fractionAtNow(series, { deadlineMs, nowMs = Date.now(), startMs, daysLe
   return null;
 }
 
+// Recent run-rate (per calendar day) over roughly the last `days` of THIS period's
+// own series — the momentum signal. Works for ISO-date and numeric (day-of-month /
+// days-before) axes alike: distance between two points is measured in axis-days.
+// Returns a per-day rate, or null when it can't be read.
+function recentRate(series, { days = 14 } = {}) {
+  const cum = cumulativeWithAxis(series);
+  if (!cum || cum.length < 2) return null;
+  const isISO = (t) => /^\d{4}-\d{2}/.test(String(t));
+  const dated = cum.every((p) => isISO(p.t) && !Number.isNaN(Date.parse(p.t)));
+  const numeric = !dated && cum.every((p) => p.t !== '' && p.t != null && Number.isFinite(Number(p.t)));
+  const axisDay = dated ? (p) => Date.parse(p.t) / 86400000 : numeric ? (p) => Number(p.t) : (p, i) => i;
+  // Time order = cumulative order (the curve is non-decreasing), robust to row order.
+  const pts = cum.map((p, i) => ({ d: axisDay(p, i), c: p.c })).sort((a, b) => a.c - b.c);
+  const last = pts[pts.length - 1];
+  let start = pts[0];
+  for (let i = pts.length - 1; i >= 0; i--) { if (Math.abs(last.d - pts[i].d) >= days) { start = pts[i]; break; } }
+  const span = Math.abs(last.d - start.d);
+  if (!(span > 0)) return null;
+  return (last.c - start.c) / span;
+}
+
 // Shape-scaled projection: where you'll land if you finish the curve like last time.
 // Prefer an explicit fNow (the real days-before fraction); else read it by index at r.
 function shapeForecast({ cum, currentValue, r, fNow = null }) {
@@ -164,4 +185,4 @@ function forecast({ cum, currentValue, target, r, daysLeft, recentRatePerDay, we
   };
 }
 
-module.exports = { toCumulative, fractionAt, cumulativeWithAxis, interpByDaysBefore, isCountdownAxis, fractionAtNow, shapeForecast, momentumForecast, statusVsTarget, forecast };
+module.exports = { toCumulative, fractionAt, cumulativeWithAxis, interpByDaysBefore, isCountdownAxis, fractionAtNow, recentRate, shapeForecast, momentumForecast, statusVsTarget, forecast };
