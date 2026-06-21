@@ -741,6 +741,39 @@ app.post('/api/goals/suites/:suiteId/brief', auth.requireAuth, rateLimit({ windo
   }
 });
 
+// Admin diagnostic: show EXACTLY what filters the briefing resolves for each tile on a
+// dashboard (and whether rows come back) — so we can see why a GA4 tile reads zero
+// (e.g. no date range applied). Mirrors buildFacts' resolution (entity view expanded
+// into the lock map + suite locks). Read-only. /api/admin/tile-filter-debug?suiteId=&dashboardId=
+app.get('/api/admin/tile-filter-debug', auth.requireAdmin, async (req, res) => {
+  try {
+    const { suiteId, dashboardId } = req.query;
+    const su = db.getSuite(suiteId);
+    const def = store.get(dashboardId);
+    if (!su || !def) return res.status(404).json({ error: 'suite or dashboard not found' });
+    const entityId = su.entityId;
+    const user = { id: `debug:${entityId}`, email: req.user.email, role: 'client', entityIds: [entityId] };
+    const view = db.getFilterView('entity', entityId, dashboardId) || null;
+    const lockMap = { ...expandLockMap(view || {}), ...expandLockMap(db.lockedFiltersForSuite(suiteId)) };
+    const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))]
+      .filter((t) => t.type !== 'text' && t.query?.fields?.length);
+    const out = [];
+    for (const t of tiles.slice(0, 14)) {
+      const body = await tileQueryBody(t, def, user, suiteId, lockMap, {});
+      let rows = null, err = null;
+      if (body) { try { const d = await runLookerQuery('/queries/run/json_detail', body, undefined, true); rows = d?.data?.length || 0; } catch (e) { err = e.message; } }
+      out.push({ title: t.title, model: t.query.model, view: t.query.view, listenTo: t.listenTo || {}, resolvedFilters: body ? body.filters : '(no body — scope blocked/unrunnable)', rows, err });
+    }
+    res.json({
+      dashboard: def.title, suiteId, entityId,
+      dashboardFilters: (def.filters || []).map((f) => ({ name: f.name, field: f.field || f.dimension, default: f.default_value })),
+      hasEntityView: !!view, entityView: view || null,
+      suiteLocks: db.lockedFiltersForSuite(suiteId),
+      tiles: out,
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Format a Looker date value ("2026-05-29" / ISO) as "29 May 2026" for the
 // event dropdowns. Falls back to the raw string if it isn't a parseable date.
 function fmtEventDate(v) {
