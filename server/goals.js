@@ -664,14 +664,6 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
     direction: g.direction, display: g.display,
     curveRef: g.curveRef || null, baselineRef: g.baselineRef || null, baselineSource: g.baselineSource || '',
   });
-  // A global template is a portable SCAFFOLD: the measurable definition + target/viz,
-  // minus the (client-specific) tile references — each client links their own data.
-  const toGlobalPayload = (p) => ({
-    name: p.name, source: 'manual', targetValue: p.targetValue, unit: p.unit,
-    direction: p.direction, display: p.display,
-    curveRef: p.curveRef ? { ...(p.curveRef.cadence ? { cadence: p.curveRef.cadence } : {}), ...(p.curveRef.compareKey ? { compareKey: p.curveRef.compareKey } : {}) } : null,
-    metricRef: null, baselineRef: null,
-  });
 
   app.get('/api/goals/templates/:entityId', auth.requireAuth, (req, res) => {
     if (!tmplCanEntity(req.user, req.params.entityId)) return res.status(403).json({ error: 'Not allowed' });
@@ -695,11 +687,12 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
     const scope = wantGlobal ? 'global' : 'entity';
     const eid = wantGlobal ? '' : entityId;
     if (!wantGlobal && (!eid || !tmplCanEntity(req.user, eid))) return res.status(403).json({ error: 'Not allowed' });
-    const finalPayload = wantGlobal ? toGlobalPayload(payload) : payload;
+    // Templates keep the dashboard NAME + tile title in each ref (set by the editor), so
+    // a global template re-resolves to each client's matching dashboard/tile by name.
     const id = uuid(); const ts = now();
     sql.prepare('INSERT INTO goal_templates (id, entity_id, scope, name, payload, created_by, created_at) VALUES (?,?,?,?,?,?,?)')
-      .run(id, eid, scope, String(name).slice(0, 120), JSON.stringify(finalPayload).slice(0, 8000), req.user.email, ts);
-    res.status(201).json({ template: { id, name: String(name).slice(0, 120), payload: finalPayload, scope, global: wantGlobal, createdAt: ts } });
+      .run(id, eid, scope, String(name).slice(0, 120), JSON.stringify(payload).slice(0, 8000), req.user.email, ts);
+    res.status(201).json({ template: { id, name: String(name).slice(0, 120), payload, scope, global: wantGlobal, createdAt: ts } });
   });
 
   app.delete('/api/goals/templates/:id', auth.requireAuth, (req, res) => {

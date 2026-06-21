@@ -76,29 +76,58 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
   // Reusable goal templates for this client.
   useEffect(() => { if (entityId) api.goalTemplates(entityId).then((r) => setTemplates(r.templates || [])).catch(() => {}); }, [entityId]);
 
-  // The reusable subset of the current form (no dates / North Star / snapshot).
+  // A tile ref carries the dashboard NAME + tile title (the key components) so a
+  // template — especially a global one — re-resolves to THIS client's matching
+  // dashboard/tile by name when the original IDs don't exist here.
+  const dashList = () => (cat?.dashboards || []);
+  const refWithNames = (dId, tId) => {
+    const d = dashList().find((x) => x.dashboardId === dId);
+    const t = d?.tiles?.find((x) => x.tileId === tId);
+    return { dashboardId: dId, tileId: tId, dashboardName: d?.title || '', tileName: t?.title || '' };
+  };
+  const resolveRef = (ref) => {
+    const ds = dashList();
+    let d = ds.find((x) => x.dashboardId === ref.dashboardId) || (ref.dashboardName && ds.find((x) => (x.title || '') === ref.dashboardName));
+    if (!d) return { dashboardId: '', tileId: '' };
+    const t = (d.tiles || []).find((x) => x.tileId === ref.tileId) || (ref.tileName && (d.tiles || []).find((x) => (x.title || '') === ref.tileName));
+    return { dashboardId: d.dashboardId, tileId: t ? t.tileId : '' };
+  };
+  const [pendingRefs, setPendingRefs] = useState(null); // template refs to resolve once the catalogue loads
+
+  // The reusable subset of the current form (no dates / North Star / snapshot). Each
+  // tile ref keeps the dashboard name + tile title alongside the IDs.
   const templatePayload = () => ({
     name, source: track === 'tile' ? 'ticketing' : 'manual',
-    metricRef: track === 'tile' && dashboardId && tileId ? { dashboardId, tileId } : null,
+    metricRef: track === 'tile' && dashboardId && tileId ? refWithNames(dashboardId, tileId) : null,
     targetValue: Number(target) || 0, unit, direction, display,
-    curveRef: (curveDashboardId && curveTileId) ? { dashboardId: curveDashboardId, tileId: curveTileId, cadence: curveCadence, ...(compareKey ? { compareKey } : {}) } : null,
-    baselineRef: baselineMode === 'tile' && baselineDashboardId && baselineTileId ? { dashboardId: baselineDashboardId, tileId: baselineTileId } : null,
+    curveRef: (curveDashboardId && curveTileId) ? { ...refWithNames(curveDashboardId, curveTileId), cadence: curveCadence, ...(compareKey ? { compareKey } : {}) } : null,
+    baselineRef: baselineMode === 'tile' && baselineDashboardId && baselineTileId ? refWithNames(baselineDashboardId, baselineTileId) : null,
   });
   const applyTemplate = (p) => {
     if (!p) return;
     if (p.name) setName(p.name);
-    if (p.metricRef && p.metricRef.tileId) { setTrack('tile'); setDashboardId(p.metricRef.dashboardId || ''); setTileId(p.metricRef.tileId || ''); }
     if (p.targetValue != null) setTarget(String(p.targetValue));
     if (p.unit) setUnit(p.unit);
     if (p.direction) setDirection(p.direction);
     if (p.display) setDisplay(p.display);
-    if (p.curveRef) { // global scaffolds carry cadence/compareKey without a tile
+    const refs = {};
+    if (p.metricRef && (p.metricRef.tileId || p.metricRef.tileName)) { setTrack('tile'); refs.metric = p.metricRef; }
+    if (p.curveRef) {
       if (p.curveRef.cadence) setCurveCadence(p.curveRef.cadence);
       if (p.curveRef.compareKey) setCompareKey(p.curveRef.compareKey);
-      if (p.curveRef.tileId) { setCurveOpen(true); setCurveDashboardId(p.curveRef.dashboardId || ''); setCurveTileId(p.curveRef.tileId || ''); }
+      if (p.curveRef.tileId || p.curveRef.tileName) { setCurveOpen(true); refs.curve = p.curveRef; }
     }
-    if (p.baselineRef && p.baselineRef.tileId) { setBaselineMode('tile'); setBaselineDashboardId(p.baselineRef.dashboardId || ''); setBaselineTileId(p.baselineRef.tileId || ''); }
+    if (p.baselineRef && (p.baselineRef.tileId || p.baselineRef.tileName)) { setBaselineMode('tile'); refs.baseline = p.baselineRef; }
+    if (Object.keys(refs).length) setPendingRefs(refs); // resolved by name once the catalogue is loaded
   };
+  // Resolve queued template refs against this client's catalogue (by id, else by name).
+  useEffect(() => {
+    if (!pendingRefs || !cat?.dashboards) return;
+    if (pendingRefs.metric) { const r = resolveRef(pendingRefs.metric); setDashboardId(r.dashboardId); setTileId(r.tileId); }
+    if (pendingRefs.curve) { const r = resolveRef(pendingRefs.curve); setCurveDashboardId(r.dashboardId); setCurveTileId(r.tileId); }
+    if (pendingRefs.baseline) { const r = resolveRef(pendingRefs.baseline); setBaselineDashboardId(r.dashboardId); setBaselineTileId(r.tileId); }
+    setPendingRefs(null);
+  }, [pendingRefs, cat]); // eslint-disable-line react-hooks/exhaustive-deps
   const saveAsTemplate = async () => {
     const nm = (name || '').trim() || window.prompt('Template name?') || '';
     if (!nm.trim() || !entityId) return;

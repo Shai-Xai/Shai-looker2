@@ -68,8 +68,8 @@ test('an admin can publish a GLOBAL template available to every client', async (
   const made = await app.req('POST', '/api/goals/templates', { as: admin, body: { fromGoalId: g.id, global: true } });
   assert.equal(made.status, 201);
   assert.equal(made.body.template.global, true);
-  assert.equal(made.body.template.payload.metricRef, null, 'global drops the tracking tile');
-  assert.equal(made.body.template.payload.curveRef.tileId, undefined, 'global curve keeps cadence, not the tile');
+  // Global templates KEEP the dashboard/tile reference (re-resolved per client by name).
+  assert.equal(made.body.template.payload.curveRef.tileId, 't', 'global keeps the curve tile reference');
   assert.equal(made.body.template.payload.curveRef.cadence, 'monthly');
   assert.equal(made.body.template.payload.targetValue, 5000, 'global keeps the measurable definition');
   // It shows in a client's template list.
