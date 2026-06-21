@@ -44,8 +44,12 @@ function positionForecast({ cumLast, cumThis, daysLeft, projected }) {
   const isISO = (t) => /^\d{4}-\d{2}/.test(String(t));
   const dLeft = Number.isFinite(daysLeft) ? Math.max(0, daysLeft) : null;
   const allT = [...cumThis, ...cumLast].map((p) => p.t);
-  const numericAxis = allT.length > 0 && allT.every((t) => t !== '' && t != null && !isISO(t) && Number.isFinite(Number(t)));
-  const datedAxis = !numericAxis && allT.length > 0 && allT.every((t) => isISO(t) && !Number.isNaN(Date.parse(t)));
+  // A numeric axis is only "days before event" when it's a COUNTDOWN (cumulative
+  // rises as the number falls). A forward axis (day-of-month, week #) must use the
+  // proportional/index path instead — otherwise it draws inverted and collapses.
+  const numAll = [...cumLast, ...cumThis].filter((p) => p.t !== '' && p.t != null && !isISO(p.t) && Number.isFinite(Number(p.t)));
+  const numericAxis = numAll.length >= 2 && fc.isCountdownAxis(numAll);
+  const datedAxis = allT.length > 0 && allT.every((t) => isISO(t) && !Number.isNaN(Date.parse(t)));
 
   let last, cur, nowFrac, cycleDays = null;
   if (numericAxis) {

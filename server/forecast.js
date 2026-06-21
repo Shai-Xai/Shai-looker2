@@ -63,6 +63,20 @@ function interpByDaysBefore(sorted, target) {
 // (the ticket trend tile), we read last year's cumulative at days-before = daysLeft
 // (the real data point). For an ISO-date axis (no shared event anchor) we fall back
 // to the window fraction (position between start and deadline). Returns
+// Is a numeric x-axis a genuine "days before event" COUNTDOWN (cumulative rises as
+// the number falls toward 0 = event) rather than a forward/elapsed axis like
+// day-of-month or week-number (cumulative rises AS the number rises)? Decide by the
+// sign of cov(axis, cumulative): negative → countdown (days-before); positive →
+// forward (must NOT be read as days-before, or it inverts and clamps to the total).
+function isCountdownAxis(pts) {
+  if (!pts || pts.length < 2) return false;
+  const ts = pts.map((p) => Number(p.t)); const cs = pts.map((p) => Number(p.c));
+  const mt = ts.reduce((a, b) => a + b, 0) / ts.length;
+  const mc = cs.reduce((a, b) => a + b, 0) / cs.length;
+  let cov = 0; for (let i = 0; i < ts.length; i++) cov += (ts[i] - mt) * (cs[i] - mc);
+  return cov < 0;
+}
+
 // { fraction, total, valueAtNow, basis, daysLeft } or null.
 function fractionAtNow(series, { deadlineMs, nowMs = Date.now(), startMs, daysLeft = null } = {}) {
   const cum = cumulativeWithAxis(series);
@@ -73,7 +87,9 @@ function fractionAtNow(series, { deadlineMs, nowMs = Date.now(), startMs, daysLe
   // Points that carry a real numeric "days before event" label. Trend tiles append a
   // stray totals row (empty x); ignore it rather than letting it veto the whole axis.
   const numPts = cum.filter((p) => p.t !== '' && p.t != null && !isISO(p.t) && Number.isFinite(Number(p.t)));
-  const numericAxis = numPts.length >= 2 && numPts.length >= cum.length - 2;
+  // Only a numeric COUNTDOWN axis is days-before-event; a forward axis (day-of-month,
+  // week #, calendar) uses the proportional window instead.
+  const numericAxis = numPts.length >= 2 && numPts.length >= cum.length - 2 && isCountdownAxis(numPts);
   const dLeft = Number.isFinite(daysLeft) ? daysLeft
     : (Number.isFinite(deadlineMs) ? Math.round((deadlineMs - nowMs) / 86400000) : null);
   if (numericAxis && dLeft != null) {
@@ -82,6 +98,7 @@ function fractionAtNow(series, { deadlineMs, nowMs = Date.now(), startMs, daysLe
     if (valueAtNow != null) return { fraction: valueAtNow / total, total, valueAtNow, basis: 'days-before', daysLeft: dLeft };
   }
   // Fallback: position within the [start → deadline] window, read by curve index.
+  // Covers forward numeric axes (day-of-month), ISO dates and monthly buckets.
   if (Number.isFinite(startMs) && Number.isFinite(deadlineMs) && deadlineMs > startMs) {
     const r = (nowMs - startMs) / (deadlineMs - startMs);
     const f = fractionAt(cum.map((p) => p.c), r);
@@ -134,4 +151,4 @@ function forecast({ cum, currentValue, target, r, daysLeft, recentRatePerDay, we
   };
 }
 
-module.exports = { toCumulative, fractionAt, cumulativeWithAxis, interpByDaysBefore, fractionAtNow, shapeForecast, momentumForecast, statusVsTarget, forecast };
+module.exports = { toCumulative, fractionAt, cumulativeWithAxis, interpByDaysBefore, isCountdownAxis, fractionAtNow, shapeForecast, momentumForecast, statusVsTarget, forecast };
