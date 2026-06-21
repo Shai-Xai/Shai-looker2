@@ -25,6 +25,12 @@ campaigns, tasks, messages with human confirm). Ties to `insights.js`, the Owl
 Narrate/Extract/Recall layers, and the action engine (`actions.js`).
 Effort: XL. The flagship of insight → action.
 
+> The **autonomous half** of 1.1 — self-running skills/agents (a ticketing
+> manager, a digital-marketing analyst) that watch a slice of the data on a
+> cadence and advise or propose actions — is specced in
+> **`docs/SKILLS_BRIEF.md`** (Skill runtime on `scheduler.js` + `insights.js` +
+> `actions.js`; the observe → advise → suggest → auto-act autonomy ladder).
+
 ### 1.2 Voice assistant
 *"Voice assistant."*
 Voice front-end to 1.1 — speak a question/command, hear/see the answer. Likely
