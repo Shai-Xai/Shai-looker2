@@ -586,6 +586,35 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
     res.json({ series, pointsRead: series.length, eventDate, checkpoints });
   });
 
+  // Forecast chart data for a goal — last time's full curve, this year's actual to date,
+  // and the projected finish — so the detail can draw "last year · this year · forecast"
+  // with a "you are here" marker. Cumulative, axis-preserved (days-before or date).
+  app.get('/api/goals/suites/:suiteId/forecast-chart', auth.requireAuth, async (req, res) => {
+    if (!db.getSuite(req.params.suiteId)) return res.status(404).json({ error: 'Event not found' });
+    if (!canView(req.user, req.params.suiteId)) return res.status(403).json({ error: 'Not allowed' });
+    const g = req.query.goalId ? goalById(req.query.goalId) : null;
+    if (!g || g.suiteId !== req.params.suiteId) return res.json({ available: false });
+    const cr = g.curveRef;
+    if (!cr || !cr.dashboardId || !cr.tileId || typeof resolveTileSeriesAll !== 'function') return res.json({ available: false });
+    let data; try { data = await resolveTileSeriesAll({ dashboardId: cr.dashboardId, tileId: cr.tileId, user: req.user, suiteId: g.suiteId }); } catch { return res.json({ available: false }); }
+    if (!data || !Array.isArray(data.columns) || !data.columns.length) return res.json({ available: false });
+    const totalOf = (c) => c.series.reduce((s, p) => s + (Number(p.v) || 0), 0);
+    const byKeyDesc = [...data.columns].sort((a, b) => String(b.key).localeCompare(String(a.key), undefined, { numeric: true }));
+    const thisKey = byKeyDesc[0]?.key;
+    const rest = data.columns.filter((c) => c.key !== thisKey);
+    const lastCol = (rest.length ? rest : data.columns).slice().sort((a, b) => totalOf(b) - totalOf(a))[0];
+    const thisCol = data.columns.find((c) => c.key === thisKey);
+    const toXY = (series) => (fc.cumulativeWithAxis(series) || []).map((p) => ({ x: p.t, y: Math.round(p.c) }));
+    const prog = (await attachProgress(g, req.user)).progress;
+    res.json({
+      available: true, unit: g.unit || '', target: g.targetValue, daysLeft: prog.daysLeft,
+      projected: prog.forecast ? prog.forecast.projected : null,
+      lastKey: lastCol ? lastCol.key : null, thisKey: thisKey || null,
+      lastYear: toXY(lastCol ? lastCol.series : []),
+      thisYear: toXY(thisCol ? thisCol.series : []),
+    });
+  });
+
   // ── Forecast probe (read-only diagnostic) ──
   // Validate the forecast model on a LIVE tile before we build any UI. Reads every
   // pivot column of a trend tile, auto-picks last-year (largest complete column) +

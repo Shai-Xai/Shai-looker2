@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { api } from '../../lib/api.js';
 import { useIsMobile } from '../../lib/useIsMobile.js';
 import { Ring, Dial, Bar, goalState, fmtVal } from './GoalViz.jsx';
+import ForecastChart from './ForecastChart.jsx';
 
 // The goal DETAIL view — the read surface for a goal. Tapping a goal card (on the
 // home strip or the Goals page) opens this; Edit/Delete live in here, so the card
@@ -13,6 +14,16 @@ export default function GoalDetail({ goal, suiteName, onEdit, onDelete, onClose,
   const [confirmDel, setConfirmDel] = useState(false);
   const [busy, setBusy] = useState(false);
   const [manualVal, setManualVal] = useState('');
+  // Sell-curve chart (last year · this year · forecast) — only for curve-linked goals.
+  const [chart, setChart] = useState(null);
+  useEffect(() => {
+    if (!goal?.curveRef?.tileId || !goal?.suiteId) { setChart(null); return undefined; }
+    let alive = true; setChart({ loading: true });
+    api.goalForecastChart(goal.suiteId, goal.id)
+      .then((r) => { if (alive) setChart(r && r.available ? r : null); })
+      .catch(() => { if (alive) setChart(null); });
+    return () => { alive = false; };
+  }, [goal?.id, goal?.suiteId, goal?.curveRef?.tileId]);
   if (!goal) return null;
   const p = goal.progress || {};
   const { tone, chip } = goalState(goal, p);
@@ -119,6 +130,14 @@ export default function GoalDetail({ goal, suiteName, onEdit, onDelete, onClose,
             <span>{fmtVal(goal.baselineValue, goal.unit)}{p.value != null ? deltaText(p.value, goal.baselineValue) : ''}</span>
           </div>
         ) : null}
+
+        {/* Sell curve & forecast — last year · this year · projected finish. */}
+        {chart && !chart.loading && ((chart.lastYear || []).length > 1 || (chart.thisYear || []).length > 1) && (
+          <div style={{ paddingTop: 10, borderTop: '1px solid var(--hairline)' }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', marginBottom: 6 }}>Sell curve &amp; forecast</div>
+            <ForecastChart data={chart} unit={goal.unit} />
+          </div>
+        )}
 
         {/* Deadline */}
         {goal.byDate && (

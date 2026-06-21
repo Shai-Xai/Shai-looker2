@@ -434,4 +434,5 @@ export const api = {
   goalTileSeries: (suiteId, dashboardId, tileId) => fetch(`/api/goals/suites/${suiteId}/tile-series`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dashboardId, tileId }) }).then(json),
   goalCheckpointSuggestions: (suiteId, body) => fetch(`/api/goals/suites/${suiteId}/checkpoint-suggestions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
   goalGapPlan: (goalId) => fetch(`/api/goals/${goalId}/gap-plan`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(json),
+  goalForecastChart: (suiteId, goalId) => fetch(`/api/goals/suites/${suiteId}/forecast-chart?goalId=${encodeURIComponent(goalId)}`).then(json),
 };
