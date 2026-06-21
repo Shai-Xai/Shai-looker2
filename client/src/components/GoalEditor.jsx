@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { api } from '../lib/api.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
+import { useAuth } from '../lib/auth.jsx';
 
 // Set or edit an event goal (the Results pillar). Two ways to track it, per the
 // spec: a LIVE number off a dashboard tile (the tile you look at becomes the goal
@@ -11,6 +12,7 @@ import { useIsMobile } from '../lib/useIsMobile.js';
 // catalogue; `suiteId` is the event the goal belongs to.
 export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope = 'event', eventGoals = [], onClose, onSaved }) {
   const isMobile = useIsMobile();
+  const { isAdmin } = useAuth();
   const editing = !!goal;
   const isPersonal = (goal ? goal.scope : scope) === 'personal';
   const hasTile = !!(goal?.metricRef?.tileId);
@@ -90,16 +92,22 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
     if (p.unit) setUnit(p.unit);
     if (p.direction) setDirection(p.direction);
     if (p.display) setDisplay(p.display);
-    if (p.curveRef && p.curveRef.tileId) { setCurveOpen(true); setCurveDashboardId(p.curveRef.dashboardId || ''); setCurveTileId(p.curveRef.tileId || ''); setCurveCadence(p.curveRef.cadence || 'monthly'); setCompareKey(p.curveRef.compareKey || ''); }
+    if (p.curveRef) { // global scaffolds carry cadence/compareKey without a tile
+      if (p.curveRef.cadence) setCurveCadence(p.curveRef.cadence);
+      if (p.curveRef.compareKey) setCompareKey(p.curveRef.compareKey);
+      if (p.curveRef.tileId) { setCurveOpen(true); setCurveDashboardId(p.curveRef.dashboardId || ''); setCurveTileId(p.curveRef.tileId || ''); }
+    }
     if (p.baselineRef && p.baselineRef.tileId) { setBaselineMode('tile'); setBaselineDashboardId(p.baselineRef.dashboardId || ''); setBaselineTileId(p.baselineRef.tileId || ''); }
   };
   const saveAsTemplate = async () => {
     const nm = (name || '').trim() || window.prompt('Template name?') || '';
     if (!nm.trim() || !entityId) return;
+    // Admins can publish a portable scaffold to every client.
+    const global = isAdmin && window.confirm('Make this available to ALL clients?\n\nOK = global template (a portable scaffold — each client links their own tiles)\nCancel = just this client');
     setTmplBusy(true);
     try {
-      const r = await api.saveGoalTemplate({ entityId, name: nm.trim(), payload: { ...templatePayload(), name: nm.trim() } });
-      if (r?.template) { setTemplates((t) => [r.template, ...t]); window.alert(`Saved “${r.template.name}” as a reusable template.`); }
+      const r = await api.saveGoalTemplate({ entityId, name: nm.trim(), payload: { ...templatePayload(), name: nm.trim() }, global });
+      if (r?.template) { setTemplates((t) => [r.template, ...t.filter((x) => x.id !== r.template.id)]); window.alert(`Saved “${r.template.name}”${r.template.global ? ' as a GLOBAL template (all clients)' : ''}.`); }
     } catch (e) { window.alert(`Couldn't save template: ${e.message}`); }
     finally { setTmplBusy(false); }
   };
@@ -284,8 +292,8 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
               {templates.map((t) => (
                 <span key={t.id} style={tmplChip}>
-                  <button type="button" onClick={() => applyTemplate(t.payload)} style={tmplChipBtn} title="Use this template">{t.name}</button>
-                  <button type="button" onClick={() => removeTemplate(t.id)} aria-label="Delete template" style={tmplChipX}>✕</button>
+                  <button type="button" onClick={() => applyTemplate(t.payload)} style={tmplChipBtn} title={t.global ? 'Global template (links your own tiles)' : 'Use this template'}>{t.global ? '🌐 ' : ''}{t.name}</button>
+                  {(!t.global || isAdmin) && <button type="button" onClick={() => removeTemplate(t.id)} aria-label="Delete template" style={tmplChipX}>✕</button>}
                 </span>
               ))}
             </div>

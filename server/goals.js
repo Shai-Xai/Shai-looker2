@@ -170,6 +170,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
     CREATE TABLE IF NOT EXISTS goal_templates (
       id TEXT PRIMARY KEY,
       entity_id TEXT NOT NULL,
+      scope TEXT NOT NULL DEFAULT 'entity',
       name TEXT NOT NULL,
       payload TEXT NOT NULL DEFAULT '{}',
       created_by TEXT NOT NULL DEFAULT '',
@@ -181,6 +182,8 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
   `);
   // Additive migration for tables created before `display` existed (idempotent).
   try { sql.exec("ALTER TABLE goals ADD COLUMN display TEXT NOT NULL DEFAULT 'bar'"); } catch { /* column already present */ }
+  // Goal templates created before global scope existed.
+  try { sql.exec("ALTER TABLE goal_templates ADD COLUMN scope TEXT NOT NULL DEFAULT 'entity'"); } catch { /* column already present */ }
   // Milestones: weekly/monthly checkpoints on the way to the target (Slice C).
   try { sql.exec("ALTER TABLE goals ADD COLUMN milestones TEXT NOT NULL DEFAULT '[]'"); } catch { /* column already present */ }
   // Personal goals (Slice D): per-user goals that contribute to the event. Default
@@ -661,34 +664,50 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
     direction: g.direction, display: g.display,
     curveRef: g.curveRef || null, baselineRef: g.baselineRef || null, baselineSource: g.baselineSource || '',
   });
+  // A global template is a portable SCAFFOLD: the measurable definition + target/viz,
+  // minus the (client-specific) tile references — each client links their own data.
+  const toGlobalPayload = (p) => ({
+    name: p.name, source: 'manual', targetValue: p.targetValue, unit: p.unit,
+    direction: p.direction, display: p.display,
+    curveRef: p.curveRef ? { ...(p.curveRef.cadence ? { cadence: p.curveRef.cadence } : {}), ...(p.curveRef.compareKey ? { compareKey: p.curveRef.compareKey } : {}) } : null,
+    metricRef: null, baselineRef: null,
+  });
 
   app.get('/api/goals/templates/:entityId', auth.requireAuth, (req, res) => {
     if (!tmplCanEntity(req.user, req.params.entityId)) return res.status(403).json({ error: 'Not allowed' });
-    const rows = sql.prepare('SELECT id, name, payload, created_at FROM goal_templates WHERE entity_id=? ORDER BY created_at DESC').all(req.params.entityId);
-    res.json({ templates: rows.map((r) => ({ id: r.id, name: r.name, payload: parseJson(r.payload, {}), createdAt: r.created_at })) });
+    // This client's own templates PLUS every global (platform) template.
+    const rows = sql.prepare("SELECT id, name, payload, scope, created_at FROM goal_templates WHERE (scope='entity' AND entity_id=?) OR scope='global' ORDER BY scope DESC, created_at DESC").all(req.params.entityId);
+    res.json({ templates: rows.map((r) => ({ id: r.id, name: r.name, payload: parseJson(r.payload, {}), scope: r.scope, global: r.scope === 'global', createdAt: r.created_at })) });
   });
 
   app.post('/api/goals/templates', auth.requireAuth, (req, res) => {
     let { entityId, name, payload } = req.body || {};
     const fromGoalId = req.body?.fromGoalId;
+    const wantGlobal = !!req.body?.global;
+    if (wantGlobal && req.user.role !== 'admin') return res.status(403).json({ error: 'Only admins can create global templates' });
     if (fromGoalId) {
       const g = goalById(fromGoalId);
       if (!g) return res.status(404).json({ error: 'Goal not found' });
       if (!canView(req.user, g.suiteId)) return res.status(403).json({ error: 'Not allowed' });
       entityId = g.entityId; name = name || g.name; payload = templatePayloadFromGoal(g);
     }
-    if (!entityId || !tmplCanEntity(req.user, entityId)) return res.status(403).json({ error: 'Not allowed' });
     if (!name || !payload || typeof payload !== 'object') return res.status(400).json({ error: 'name and payload are required' });
+    const scope = wantGlobal ? 'global' : 'entity';
+    const eid = wantGlobal ? '' : entityId;
+    if (!wantGlobal && (!eid || !tmplCanEntity(req.user, eid))) return res.status(403).json({ error: 'Not allowed' });
+    const finalPayload = wantGlobal ? toGlobalPayload(payload) : payload;
     const id = uuid(); const ts = now();
-    sql.prepare('INSERT INTO goal_templates (id, entity_id, name, payload, created_by, created_at) VALUES (?,?,?,?,?,?)')
-      .run(id, entityId, String(name).slice(0, 120), JSON.stringify(payload).slice(0, 8000), req.user.email, ts);
-    res.status(201).json({ template: { id, name: String(name).slice(0, 120), payload, createdAt: ts } });
+    sql.prepare('INSERT INTO goal_templates (id, entity_id, scope, name, payload, created_by, created_at) VALUES (?,?,?,?,?,?,?)')
+      .run(id, eid, scope, String(name).slice(0, 120), JSON.stringify(finalPayload).slice(0, 8000), req.user.email, ts);
+    res.status(201).json({ template: { id, name: String(name).slice(0, 120), payload: finalPayload, scope, global: wantGlobal, createdAt: ts } });
   });
 
   app.delete('/api/goals/templates/:id', auth.requireAuth, (req, res) => {
-    const row = sql.prepare('SELECT entity_id FROM goal_templates WHERE id=?').get(req.params.id);
+    const row = sql.prepare('SELECT entity_id, scope FROM goal_templates WHERE id=?').get(req.params.id);
     if (!row) return res.json({ ok: true });
-    if (!tmplCanEntity(req.user, row.entity_id)) return res.status(403).json({ error: 'Not allowed' });
+    // Global templates: admins only. Entity templates: the client (or an admin).
+    const allowed = row.scope === 'global' ? req.user.role === 'admin' : tmplCanEntity(req.user, row.entity_id);
+    if (!allowed) return res.status(403).json({ error: 'Not allowed' });
     sql.prepare('DELETE FROM goal_templates WHERE id=?').run(req.params.id);
     res.json({ ok: true });
   });

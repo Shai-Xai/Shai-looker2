@@ -59,6 +59,27 @@ test('a goal can be saved as a reusable template, listed, applied and deleted', 
   assert.equal((await app.req('GET', `/api/goals/templates/${entityId}`, { as: owner })).body.templates.filter((t) => t.id === made.body.template.id).length, 0, 'gone after delete');
 });
 
+test('an admin can publish a GLOBAL template available to every client', async () => {
+  const sid = h.db.createSuite({ entityId, name: 'Global tmpl test' }).id;
+  const g = (await app.req('POST', `/api/goals/suites/${sid}`, { as: owner, body: { name: 'Std monthly', source: 'manual', targetValue: 5000, unit: 'ZAR', curveRef: { dashboardId: 'd', tileId: 't', cadence: 'monthly', compareKey: '2025' } } })).body.goal;
+  // A client cannot publish a global template.
+  assert.equal((await app.req('POST', '/api/goals/templates', { as: owner, body: { fromGoalId: g.id, global: true } })).status, 403, 'non-admin blocked from global');
+  // An admin can — and it strips the client-specific tile refs to a portable scaffold.
+  const made = await app.req('POST', '/api/goals/templates', { as: admin, body: { fromGoalId: g.id, global: true } });
+  assert.equal(made.status, 201);
+  assert.equal(made.body.template.global, true);
+  assert.equal(made.body.template.payload.metricRef, null, 'global drops the tracking tile');
+  assert.equal(made.body.template.payload.curveRef.tileId, undefined, 'global curve keeps cadence, not the tile');
+  assert.equal(made.body.template.payload.curveRef.cadence, 'monthly');
+  assert.equal(made.body.template.payload.targetValue, 5000, 'global keeps the measurable definition');
+  // It shows in a client's template list.
+  const listed = await app.req('GET', `/api/goals/templates/${entityId}`, { as: owner });
+  assert.ok(listed.body.templates.some((t) => t.id === made.body.template.id && t.global), 'global shows for the client');
+  // A client cannot delete a global; an admin can.
+  assert.equal((await app.req('DELETE', `/api/goals/templates/${made.body.template.id}`, { as: owner })).status, 403, 'client cannot delete a global');
+  assert.equal((await app.req('DELETE', `/api/goals/templates/${made.body.template.id}`, { as: admin })).status, 200, 'admin deletes the global');
+});
+
 test('the first event goal becomes the North Star automatically', async () => {
   const r = await create(owner, { name: 'Sell-through', source: 'manual', targetValue: 25000, unit: 'tickets' });
   assert.equal(r.status, 201);
