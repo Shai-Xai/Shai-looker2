@@ -244,7 +244,9 @@ a pace read** — *ahead / on track / behind* — not just "are we there yet."
   your target, on the same days-before-event math as the live pace.
 - **Reusable goal templates** — save a goal's whole setup (metric/curve tile, target, unit,
   comparison year, cadence) as a template, then start new goals from it in one tap — ideal
-  for recurring monthly/quarterly targets. Set the fresh dates and go.
+  for recurring monthly/quarterly targets. Set the fresh dates and go. **Howler can also
+  publish 🌐 global templates** — portable scaffolds (the metric definition + target/viz)
+  available to **every client**, who then link their own data.
 - **Drag to reorder** — arrange goal tiles on the Goals page; the order carries to the
   home dashboard.
 - **Dual-surface** — clients set their own goals; Howler can set them on a client's
@@ -291,7 +293,7 @@ Use these to set direction, **not** to promise dates.
 
 - **2026-06-22** — **Goals — reusable templates + smarter forecast** 🧪: save a goal's setup
   as a **template** and start new goals from it (recurring monthly/quarterly targets in a
-  tap). Forecast now **blends recent run-rate (momentum)** with the last-time shape; the
+  tap); Howler can publish **🌐 global templates** to every client. Forecast now **blends recent run-rate (momentum)** with the last-time shape; the
   comparison defaults to **last year** with a **"Compare against" year picker**; "vs last
   time" reads the **same calendar day**; and the chart labels **real dates** for calendar
   goals (vs "days before event") and trims lagging flat data so **actual** ends on the last
