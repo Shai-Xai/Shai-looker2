@@ -92,6 +92,7 @@ export default function ForecastChart({ data, unit, w = 440, h = 150 }) {
   const line = (pts) => pts.map((p, i) => `${i ? 'L' : 'M'}${X(p.x).toFixed(1)},${Y(p.y).toFixed(1)}`).join(' ');
   const MUTED = 'rgba(128,128,128,0.55)';
   const FC = '#f59e0b'; // forecast — distinct from the brand "actual" line
+  const TGT = '#16a34a'; // target reference line — its own colour, distinct from "last time"
   const nowX = now ? now.x : null;
   const tipUnit = (unit === 'ZAR' || unit === '%') ? unit : ''; // keep R/% prefix; drop long word units
 
@@ -127,7 +128,7 @@ export default function ForecastChart({ data, unit, w = 440, h = 150 }) {
       >
         {target != null && (
           <g>
-            <line x1={pad.l} x2={w - pad.r} y1={Y(target)} y2={Y(target)} stroke={MUTED} strokeWidth="1" strokeDasharray="2 3" />
+            <line x1={pad.l} x2={w - pad.r} y1={Y(target)} y2={Y(target)} stroke={TGT} strokeWidth="1.5" strokeDasharray="5 3" opacity="0.9" />
           </g>
         )}
         {/* "you are here" divider — actual to its left, forecast to its right */}
@@ -176,7 +177,7 @@ export default function ForecastChart({ data, unit, w = 440, h = 150 }) {
         <Key color={MUTED}>last time{data?.lastKey ? ` (${data.lastKey})` : ''}</Key>
         <Key color="var(--brand)">actual</Key>
         <Key color={FC} dashed>forecast{projected != null ? ` ≈ ${fmtVal(projected, unit)}` : ''}</Key>
-        {target != null && <Key color={MUTED} dotted>target {fmtVal(target, unit)}</Key>}
+        {target != null && <Key color={TGT} dashed>target {fmtVal(target, unit)}</Key>}
       </div>
     </div>
   );
