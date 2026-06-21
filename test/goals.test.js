@@ -347,11 +347,15 @@ test('a linked curve drives baseline + vs-last-time-at-this-point, with pace ove
   assert.ok(row.progress.lastAtNow > 1000 && row.progress.lastAtNow < 3000, 'last time read at a mid-window point of the curve');
   // expected-by-now rides the same curve fraction, scaled to the target (2× the curve total).
   assert.ok(Math.abs(row.progress.expected - 2 * row.progress.lastAtNow) <= 2, 'expected = target × the same curve fraction');
-  // Forecast: projected = current ÷ fraction of last time's shape reached at this point
-  // (current is the curve's this-year value; fraction = lastAtNow / curve total).
+  // Forecast: the SHAPE signal = current ÷ fraction of last time's shape reached at
+  // this point (current is the curve's this-year value; fraction = lastAtNow / total).
   assert.ok(row.progress.forecast && row.progress.forecast.projected != null, 'a curve goal carries a forecast');
-  const expProj = Math.round(row.progress.value / (row.progress.lastAtNow / 3000));
-  assert.ok(Math.abs(row.progress.forecast.projected - expProj) <= 2, 'projected = current ÷ fraction of last time’s shape reached');
+  const expShape = Math.round(row.progress.value / (row.progress.lastAtNow / 3000));
+  assert.ok(Math.abs(row.progress.forecast.shape - expShape) <= 2, 'shape projection = current ÷ fraction of last time’s shape reached');
+  // projected blends shape with recent momentum, so it sits between the two signals.
+  const lo = Math.min(row.progress.forecast.shape, row.progress.forecast.momentum);
+  const hi = Math.max(row.progress.forecast.shape, row.progress.forecast.momentum);
+  assert.ok(row.progress.forecast.projected >= lo - 2 && row.progress.forecast.projected <= hi + 2, 'projected sits between the shape and momentum signals');
 });
 
 test('a curve goal reads its CURRENT value from the curve tile (this-year), not a drifting KPI tile', async () => {
