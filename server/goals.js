@@ -239,7 +239,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
       // Checkpoint curve link (remembered for the editor): the value-over-time tile
       // used to suggest checkpoints + the cadence.
       curveRef: (cr.dashboardId && cr.tileId)
-        ? { dashboardId: String(cr.dashboardId).slice(0, 64), tileId: String(cr.tileId).slice(0, 64), cadence: cr.cadence === 'weekly' ? 'weekly' : 'monthly' }
+        ? { dashboardId: String(cr.dashboardId).slice(0, 64), tileId: String(cr.tileId).slice(0, 64), cadence: cr.cadence === 'weekly' ? 'weekly' : 'monthly', ...(cr.compareKey ? { compareKey: String(cr.compareKey).slice(0, 32) } : {}) }
         : null,
       // Baseline tile link (remembered for the editor + re-read live on the card): the
       // tile a picked "last time" number comes from.
@@ -346,14 +346,39 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
   // largest-total column that isn't the current/highest-key one). Returns its raw
   // [{ t, v }] series — the SAME column the live card uses as its baseline curve, so
   // the checkpoint suggester and the card read one shape.
-  function pickLastYearShape(data) {
-    if (!data || !Array.isArray(data.columns) || !data.columns.length) return [];
-    const totalOf = (c) => c.series.reduce((s, p) => s + (Number(p.v) || 0), 0);
+  // The column to compare against = the most recent PRIOR period that has real data
+  // (the immediately preceding year), NOT the biggest-total year. YoY must compare to
+  // LAST year: with 2023/24/25/26 columns and 2026 current, "last time" is 2025 —
+  // even if 2024 had a bigger total (picking by total gave the wrong year + a wrong
+  // "vs last time" %).
+  function pickLastYearColumn(data) {
+    if (!data || !Array.isArray(data.columns) || !data.columns.length) return null;
+    const totalOf = (c) => (c.series || []).reduce((s, p) => s + (Number(p.v) || 0), 0);
+    const okPts = (c) => (c.series || []).filter((p) => p && Number.isFinite(Number(p.v))).length >= 2;
     const byKeyDesc = [...data.columns].sort((a, b) => String(b.key).localeCompare(String(a.key), undefined, { numeric: true }));
     const thisKey = byKeyDesc[0]?.key;
-    const rest = data.columns.filter((c) => c.key !== thisKey);
-    const lastCol = (rest.length ? rest : data.columns).slice().sort((a, b) => totalOf(b) - totalOf(a))[0];
-    return (lastCol?.series || []).filter((p) => p && Number.isFinite(Number(p.v)));
+    const prior = byKeyDesc.filter((c) => c.key !== thisKey);
+    return prior.find((c) => totalOf(c) > 0 && okPts(c)) || prior[0] || byKeyDesc[0] || null;
+  }
+  function pickLastYearShape(data) {
+    const col = pickLastYearColumn(data);
+    return (col?.series || []).filter((p) => p && Number.isFinite(Number(p.v)));
+  }
+  // Honour a user-chosen comparison year (curveRef.compareKey) when present; else the
+  // most recent prior year. Lets a client compare against a specific past year.
+  function pickCompareColumn(data, compareKey) {
+    if (compareKey) {
+      const c = (data?.columns || []).find((x) => String(x.key) === String(compareKey));
+      if (c) return c;
+    }
+    return pickLastYearColumn(data);
+  }
+  // The prior-year column keys (newest first) — the choices for "compare against".
+  function priorYearKeys(data) {
+    if (!data || !Array.isArray(data.columns) || !data.columns.length) return [];
+    const byKeyDesc = [...data.columns].sort((a, b) => String(b.key).localeCompare(String(a.key), undefined, { numeric: true }));
+    const thisKey = byKeyDesc[0]?.key;
+    return byKeyDesc.filter((c) => c.key !== thisKey).map((c) => c.key);
   }
   // Progress = resolved value vs target, with honest PACE. Pace is measured over the
   // sell window [start_date (or created_at) → deadline]. When the goal links a
@@ -448,16 +473,17 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
   function resolveCurve(g, user, cache) {
     const cr = g.curveRef;
     if (!cr || !cr.dashboardId || !cr.tileId) return Promise.resolve(null);
-    const key = `${cr.dashboardId}|${cr.tileId}|${g.suiteId}`;
+    const key = `${cr.dashboardId}|${cr.tileId}|${g.suiteId}|${cr.compareKey || ''}`;
     if (cache && cache.has(key)) return cache.get(key);
     const p = (async () => {
       try {
-        // All-columns resolver: last time's shape (largest prior column) + this year's
-        // own running total, from the SAME tile/measure. `shape` stays raw for axis align.
+        // All-columns resolver: last time's shape (chosen / most-recent prior column) +
+        // this year's own running total, from the SAME tile. `shape` stays raw for align.
         if (typeof resolveTileSeriesAll === 'function') {
           const data = await resolveTileSeriesAll({ dashboardId: cr.dashboardId, tileId: cr.tileId, user, suiteId: g.suiteId });
           if (data && Array.isArray(data.columns) && data.columns.length) {
-            const shape = pickLastYearShape(data);
+            const cmp = pickCompareColumn(data, cr.compareKey);
+            const shape = (cmp?.series || []).filter((p2) => p2 && Number.isFinite(Number(p2.v)));
             const byKeyDesc = [...data.columns].sort((a, b) => String(b.key).localeCompare(String(a.key), undefined, { numeric: true }));
             const thisCol = data.columns.find((c) => c.key === byKeyDesc[0]?.key);
             const thisCum = fc.toCumulative((thisCol?.series || []).map((x) => x.v));
@@ -643,12 +669,15 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
     const suiteId = req.params.suiteId;
     if (!db.getSuite(suiteId)) return res.status(404).json({ error: 'Event not found' });
     if (!canView(req.user, suiteId)) return res.status(403).json({ error: 'Not allowed' });
-    const { dashboardId, tileId, cadence, startDate, byDate } = req.body || {};
+    const { dashboardId, tileId, cadence, startDate, byDate, compareKey } = req.body || {};
     if (typeof resolveTileSeriesAll !== 'function' || !dashboardId || !tileId) return res.json({ series: [], checkpoints: [] });
-    let series = [];
+    let series = [], years = [], usedCompareKey = null;
     try {
       const data = await resolveTileSeriesAll({ dashboardId, tileId, user: req.user, suiteId });
-      series = pickLastYearShape(data);
+      const cmp = pickCompareColumn(data, compareKey);
+      series = (cmp?.series || []).filter((p) => p && Number.isFinite(Number(p.v)));
+      years = priorYearKeys(data); // choices for "compare against" (newest first)
+      usedCompareKey = cmp?.key || null;
     } catch (e) { return res.json({ series: [], checkpoints: [], error: e.message }); }
     // Event-day anchor + window — identical inputs to the live pace engine.
     let lookerDate = null;
@@ -661,7 +690,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
     const startMs = startDate ? new Date(`${String(startDate).slice(0, 10)}T00:00:00`).getTime() : Date.now();
     const eventDate = Number.isFinite(endMs) ? new Date(endMs).toISOString().slice(0, 10) : null;
     if (series.length < 2 || !Number.isFinite(endMs) || !Number.isFinite(startMs) || !(endMs > startMs)) {
-      return res.json({ series, pointsRead: series.length, eventDate, checkpoints: [] });
+      return res.json({ series, pointsRead: series.length, eventDate, checkpoints: [], years, compareKey: usedCompareKey });
     }
     // Lay out checkpoint dates by cadence from the start to the event day…
     const weekly = cadence !== 'monthly';
@@ -678,7 +707,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
         checkpoints.push({ byDate: dt.toISOString().slice(0, 10), fraction: Number(at.fraction.toFixed(6)), lastValue: Math.round(at.valueAtNow), basis: at.basis });
       }
     }
-    res.json({ series, pointsRead: series.length, eventDate, checkpoints });
+    res.json({ series, pointsRead: series.length, eventDate, checkpoints, years, compareKey: usedCompareKey });
   });
 
   // Forecast chart data for a goal — last time's full curve, this year's actual to date,
@@ -693,18 +722,16 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
     if (!cr || !cr.dashboardId || !cr.tileId || typeof resolveTileSeriesAll !== 'function') return res.json({ available: false });
     let data; try { data = await resolveTileSeriesAll({ dashboardId: cr.dashboardId, tileId: cr.tileId, user: req.user, suiteId: g.suiteId }); } catch { return res.json({ available: false }); }
     if (!data || !Array.isArray(data.columns) || !data.columns.length) return res.json({ available: false });
-    const totalOf = (c) => c.series.reduce((s, p) => s + (Number(p.v) || 0), 0);
     const byKeyDesc = [...data.columns].sort((a, b) => String(b.key).localeCompare(String(a.key), undefined, { numeric: true }));
     const thisKey = byKeyDesc[0]?.key;
-    const rest = data.columns.filter((c) => c.key !== thisKey);
-    const lastCol = (rest.length ? rest : data.columns).slice().sort((a, b) => totalOf(b) - totalOf(a))[0];
+    const lastCol = pickCompareColumn(data, cr.compareKey); // chosen year, else most recent prior
     const thisCol = data.columns.find((c) => c.key === thisKey);
     const toXY = (series) => (fc.cumulativeWithAxis(series) || []).map((p) => ({ x: p.t, y: Math.round(p.c) }));
     const prog = (await attachProgress(g, req.user)).progress;
     const projected = prog.forecast ? prog.forecast.projected : null;
     res.json({
       available: true, unit: g.unit || '', target: g.targetValue, daysLeft: prog.daysLeft, projected,
-      lastKey: lastCol ? lastCol.key : null, thisKey: thisKey || null,
+      lastKey: lastCol ? lastCol.key : null, thisKey: thisKey || null, years: priorYearKeys(data),
       lastYear: toXY(lastCol ? lastCol.series : []),
       thisYear: toXY(thisCol ? thisCol.series : []),
       // Pre-positioned coordinates (0..1 x, where 1 = event day) so the chart never
@@ -744,12 +771,11 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
 
     const totalOf = (c) => c.series.reduce((s, p) => s + (Number(p.v) || 0), 0);
     const cols = data.columns.map((c) => ({ key: c.key, n: c.series.length, total: Math.round(totalOf(c)), last: c.series[c.series.length - 1]?.v }));
-    // this-year = highest key (current period); last-year = largest-total of the rest.
+    // this-year = highest key (current period); last-year = the most recent PRIOR year.
     const byKeyDesc = [...data.columns].sort((a, b) => String(b.key).localeCompare(String(a.key), undefined, { numeric: true }));
     const thisKey = req.query.thisKey || byKeyDesc[0]?.key;
-    const rest = data.columns.filter((c) => c.key !== thisKey);
     const lastCol = req.query.lastKey ? data.columns.find((c) => c.key === req.query.lastKey)
-      : rest.sort((a, b) => totalOf(b) - totalOf(a))[0];
+      : pickLastYearColumn(data);
     const thisCol = data.columns.find((c) => c.key === thisKey);
 
     const cum = fc.toCumulative((lastCol?.series || []).map((p) => p.v));
