@@ -13,6 +13,14 @@ import { goalState, goalColor, paletteColor, fmtVal } from './GoalViz.jsx';
 
 const clamp = (n) => Math.max(0, Math.min(100, Math.round(n || 0)));
 
+// The slice that represents a mix/split goal in the rings summary: the focus slice if
+// one is marked, else the largest share.
+function compLeadPart(g) {
+  const parts = (g.progress?.parts || []).filter((x) => Number.isFinite(x.share));
+  if (!parts.length) return null;
+  return parts.find((x) => x.focus) || parts.reduce((a, b) => (b.share > a.share ? b : a), parts[0]);
+}
+
 // The concentric SVG. `rings` = [{ pct, color }] from outer → inner.
 export function ActivityRings({ rings, size = 180, stroke, gap = 4, onPick }) {
   const n = rings.length || 1;
@@ -48,7 +56,7 @@ export function ActivityRings({ rings, size = 180, stroke, gap = 4, onPick }) {
 // The full hero card: rings on the left, a tappable legend on the right (name,
 // value / target, % and pace chip) — the Apple "Summary" Activity-Rings card.
 export default function GoalRingsCard({ goals = [], title, onPick, size = 176, maxRings = 6 }) {
-  const usable = goals.filter((g) => g && g.direction !== 'composition'); // compositions have their own viz, not a ring
+  const usable = goals.filter(Boolean);
   if (!usable.length) return null;
   // Stable identity colour per goal (by its index in the given order), so a goal's
   // ring here matches its tile below. North Star outermost; cap rings for legibility.
@@ -57,7 +65,10 @@ export default function GoalRingsCard({ goals = [], title, onPick, size = 176, m
   const ordered = [...usable].sort((a, b) => (b.isNorthStar ? 1 : 0) - (a.isNorthStar ? 1 : 0));
   const shown = ordered.slice(0, maxRings);
   const extra = ordered.length - shown.length;
-  const rings = shown.map((g) => ({ pct: g.progress?.pct, color: colorFor(g) }));
+  // A mix/split goal has no single pct — represent it by its focus (or leading) slice's
+  // share, so it still reads as one ring in the summary alongside the other goals.
+  const ringPctFor = (g) => { if (g.direction === 'composition') { const lp = compLeadPart(g); return lp ? lp.share : 0; } return g.progress?.pct; };
+  const rings = shown.map((g) => ({ pct: ringPctFor(g), color: colorFor(g) }));
 
   return (
     <div style={card}>
@@ -77,9 +88,18 @@ export default function GoalRingsCard({ goals = [], title, onPick, size = 176, m
                 <span style={{ fontSize: 11.5, color: 'var(--muted)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {g.isNorthStar && <span title="North Star">⭐</span>}{g.name}
                 </span>
-                <span style={{ fontSize: 16, fontWeight: 800, color: tone, lineHeight: 1.1 }}>
-                  {fmtVal(p.value, g.unit)}<span style={{ color: 'var(--muted)', fontWeight: 700, fontSize: 12 }}> / {fmtVal(g.targetValue, g.unit)}</span>
-                </span>
+                {g.direction === 'composition' ? (() => {
+                  const lp = compLeadPart(g);
+                  return (
+                    <span style={{ fontSize: 16, fontWeight: 800, color: tone, lineHeight: 1.1 }}>
+                      {lp ? <>{lp.label} {lp.share}%<span style={{ color: 'var(--muted)', fontWeight: 700, fontSize: 12 }}> / {lp.target}%</span></> : '—'}
+                    </span>
+                  );
+                })() : (
+                  <span style={{ fontSize: 16, fontWeight: 800, color: tone, lineHeight: 1.1 }}>
+                    {fmtVal(p.value, g.unit)}<span style={{ color: 'var(--muted)', fontWeight: 700, fontSize: 12 }}> / {fmtVal(g.targetValue, g.unit)}</span>
+                  </span>
+                )}
               </span>
               {chip && <span style={{ flexShrink: 0 }}>{chip}</span>}
             </button>
