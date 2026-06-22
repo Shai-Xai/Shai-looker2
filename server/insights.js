@@ -427,14 +427,16 @@ You are given:
 Respond with ONLY strict JSON (no markdown fences):
 {
   "subject": "email subject line — specific and quantitative, <70 chars",
-  "headline": "1-2 sentences: the single most important story for THIS role right now (may use **bold**)",
-  "narrative": [ "2-4 short analytical paragraphs for this role; specific, quantitative, plain-English; may use **bold**" ],
+  "headline": "1 tight sentence: the single most important story for THIS role right now (may use **bold**)",
+  "narrative": [ "2-4 TIGHT points for this role. Start EACH point with a SHORT bold heading (2-4 words) + a colon, then the point — e.g. '**Daily sales:** 312 sold yesterday, +18% on last week'. Keep each point to ONE sentence (two only if essential) — lean, ~20% shorter than a normal paragraph; specific, quantitative, plain-English" ],
   "kpis": [ { "label": "short metric name", "value": "the figure verbatim from TILES (e.g. R1.2m, 8,430, 62%)", "delta": "movement vs a comparison if present, e.g. +12% vs last week, or empty", "dashboardId": "id from CATALOGUE or null" } ],
   "actions": [ { "text": "a concrete, role-appropriate suggested action (imperative, one line)", "dashboardId": "id from CATALOGUE or null", "action": "a CAPABILITIES key ONLY if directly executable, else omit" } ]
 }
 
 Rules:
+- Every narrative point MUST open with a 2-4 word **bold heading** + colon, then a single tight sentence (two only if essential). Be ruthless with length — trim filler so each point reads ~20% shorter than you'd normally write. No point should run more than two sentences.
 - Anchor every time reference — "today", "yesterday", "so far this month", "day N", month-to-date — to TODAY's calendar date, NEVER to the latest date in the data. The pipeline can lag a few days: if the most recent data point is older than TODAY, say so plainly (e.g. "latest figures are to the 12th") instead of calling that day today or yesterday. Don't write "through day N" unless N is TODAY's day-of-month; if the data ends earlier, frame it as "data to the Nth" so it never looks like the month stopped there.
+- A comparison shown against a prior event is aligned to the SAME point in that event's cycle (same days-to-go) when the tile is event-aligned — phrase it as "vs the same point last time", not as a full-event total.
 - 3-6 KPIs, the ones that matter MOST to this role. Values must be real, verbatim from TILES.
 - Each tile shows its source as "— <set> → <dashboard>". Metrics from a web-analytics source (e.g. GA4, Google Analytics — sessions, page views, "conversions", site events) measure TRAFFIC and on-site behaviour, NOT finalised ticket sales. Never report a GA4/analytics "tickets" or "conversions" figure as actual tickets sold. Tickets sold, revenue and attendance/check-ins are authoritative ONLY from the ticketing/event dashboards. If two tiles look similar (e.g. an analytics "Total Tickets" vs a ticketing "Total Tickets Sold"), lead with the ticketing-source figure and treat the analytics one as funnel/interest.
 - 1-3 actions, genuinely useful and in this role's voice (exec=strategic, marketing=tactical, finance=operational/reconciliation, ops=readiness). Omit actions rather than padding.
@@ -531,14 +533,17 @@ You are given:
 Respond with ONLY strict JSON (no markdown fences):
 {
   "subject": "email subject — specific and quantitative across the portfolio, <70 chars",
-  "headline": "1-2 sentences: the single most important cross-event story for THIS role (may use **bold**)",
-  "narrative": [ "1-3 short cross-event paragraphs: the portfolio position, the standout/biggest mover, what needs attention — name events explicitly (may use **bold**). Include ONE goals paragraph if GOALS given." ],
+  "headline": "1 tight sentence: the single most important cross-event story for THIS role, led by daily-sales pace (may use **bold**)",
+  "narrative": [ "1-3 TIGHT cross-event points. Start EACH with a SHORT bold heading (2-4 words) + colon. The FIRST point MUST be '**Daily sales:** …' — the recent daily-sales pace across the events vs the comparison. Then the standout/biggest mover and anything needing attention; name events explicitly. One sentence each (two only if essential), ~20% leaner than usual. Include ONE '**Goals:** …' point if GOALS given." ],
   "kpis": [ { "label": "short metric (prefix the event if useful)", "value": "figure verbatim from TILES", "delta": "movement vs a comparison or empty", "dashboardId": "id from any CATALOGUE or null" } ],
   "actions": [ { "text": "a concrete, role-appropriate cross-event next step (imperative, one line)", "dashboardId": "id from CATALOGUE or null", "action": "a CAPABILITIES key ONLY if directly executable, else omit" } ]
 }
 
 Rules:
 - This is the OVERVIEW only — synthesise ACROSS events; do NOT write a separate paragraph per event (each event has its own section below this).
+- LEAD with DAILY SALES: the first narrative point and the first KPI should be the recent daily-sales pace across the events (this report's focus), before anything else.
+- Every narrative point opens with a 2-4 word **bold heading** + colon, then one tight sentence (two only if essential); trim filler so points run ~20% shorter than usual.
+- A comparison against a prior event is aligned to the same point in its cycle (same days-to-go) when the tile is event-aligned — phrase it as "vs the same point last time", not as a full-event total.
 - Identify each event ONLY by its EVENT heading. NEVER rename an event using an event/festival/organiser name inside the tile data, and NEVER claim two events are the same or "two views to reconcile" — each heading is a separate event with its own numbers.
 - Each tile shows the EVENT its value is for ("· event: …"). Within one event you'll often get the CURRENT event AND a same-event LAST-TIME comparison (same title, earlier-dated event): treat the earlier-dated one as the year-ago comparison, never as a conflicting number.
 - 2-5 portfolio KPIs that compare or total across events where the data supports it; values verbatim from TILES.

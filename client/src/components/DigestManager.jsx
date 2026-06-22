@@ -90,7 +90,7 @@ function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }
     runAt: job?.runAt || '', recipients: (job?.recipients || []).join(', '), status: job?.status || 'active',
     contentMode: job?.contentMode || 'ai', tiles: job?.tiles || [],
     channel: job?.channel || 'email', smsRecipients: (job?.smsRecipients || []).join(', '),
-    alignDaysBefore: job?.alignDaysBefore || false,
+    alignDaysBefore: job ? !!job.alignDaysBefore : true, // new digests align comparisons like the home briefing; existing keep their saved choice
     priorityDashboards: job?.priorityDashboards || [],
     includeFollowed: job?.includeFollowed || false,
     followedVisual: job?.followedVisual || false,
@@ -299,7 +299,7 @@ function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }
             <Toggle on={f.alignDaysBefore} onClick={() => set('alignDaysBefore', !f.alignDaysBefore)}>
               ⏳ {f.alignDaysBefore ? 'Aligning to days-to-go' : 'Off — use each tile’s own dates'}
             </Toggle>
-            <div style={hintS}>When on, dashboards with a days-to-go countdown compare like-for-like to the same point in last year’s cycle (e.g. “42 days out”) — matching what you see on the dashboard. Tiles without a countdown are unaffected.</div>
+            <div style={hintS}>On by default. Dashboards with a days-to-go countdown compare like-for-like to the same point in last year’s cycle (e.g. “42 days out”) — matching what you see on the dashboard, not last year’s full-event total. Turn off only to compare against each tile’s own raw dates. Tiles without a countdown are unaffected.</div>
           </Field>
 
           <Field label="Schedule">
