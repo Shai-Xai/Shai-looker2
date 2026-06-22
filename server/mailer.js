@@ -160,14 +160,18 @@ function setPlatformTemplate(patch) {
   if (db) db.setSetting('mail_template', JSON.stringify(next));
   return getPlatformTemplate();
 }
-// Resolve the branding to use for a given client (or platform default if none).
-function resolveBranding(entityId) {
+// Resolve the branding to use for a client (or platform default if none), with
+// an optional EVENT (suite) override layered on top. Tiers, each blank field
+// inheriting the one below: defaults ← platform ← client identity ← client
+// branding ← event branding.
+function resolveBranding(entityId, suiteId) {
   const platform = overlay(DEFAULTS, platformTemplate());
   const client = entityId && db ? db.getEntityMailBranding(entityId) : {};
   // Default a client's logo/sender to its own identity when not explicitly set.
   const ent = entityId && db ? db.getEntity(entityId) : null;
   const clientDefaults = ent ? { senderName: ent.name, wordmark: ent.name, logo: ent.logo || '' } : {};
-  return overlay(overlay(platform, clientDefaults), client);
+  const suite = suiteId && db && db.getSuiteMailBranding ? db.getSuiteMailBranding(suiteId) : {};
+  return overlay(overlay(overlay(platform, clientDefaults), client), suite);
 }
 
 // ── Branded notification template ────────────────────────────────────────────
@@ -400,8 +404,8 @@ function campaignEmail({ branding, entityId, assetScope, subject, bodyText, ctaT
 // Branding to render for a live preview: unsaved `edits` layered over the right
 // base (a client's resolved branding, or the platform template for the platform
 // editor). Used by the preview endpoint so editors see exactly what will send.
-function previewBranding({ edits, entityId } = {}) {
-  const base = entityId ? resolveBranding(entityId) : overlay(DEFAULTS, platformTemplate());
+function previewBranding({ edits, entityId, suiteId } = {}) {
+  const base = entityId ? resolveBranding(entityId, suiteId) : overlay(DEFAULTS, platformTemplate());
   return overlay(base, edits || {});
 }
 

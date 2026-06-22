@@ -170,6 +170,7 @@ addColumn('set_dashboards', 'parent_dashboard_id', 'TEXT');
 // Per-event briefing config: { launchDate, eventStart, eventEnd, manualPhase,
 // instructions, phaseOverrides: {phaseKey: text} } — drives the home briefing.
 addColumn('suites', 'briefing', "TEXT NOT NULL DEFAULT '{}'");
+addColumn('suites', 'mail_branding', "TEXT NOT NULL DEFAULT '{}'"); // per-event branding override (logo/colour/sender/wording); blank inherits the client
 addColumn('suites', 'event_url', "TEXT NOT NULL DEFAULT ''"); // the event's ticket/checkout link — default CTA for campaigns
 // settlements.notes/.kind added after the table shipped, so migrate existing DBs.
 if (tableExists('settlements')) {
@@ -637,6 +638,19 @@ function setEntityMailBranding(id, patch) {
   const next = { ...cur, ...(patch || {}) };
   db.prepare('UPDATE entities SET mail_branding=? WHERE id=?').run(JSON.stringify(next), id);
   return getEntityMailBranding(id);
+}
+// Per-EVENT (suite) branding override — same shape as the client branding, but
+// one tier higher: blank fields inherit the client. Lets one client run several
+// events each with their own logo/colours/sender in mailers + the in-app theme.
+function getSuiteMailBranding(id) {
+  const r = db.prepare('SELECT mail_branding FROM suites WHERE id=?').get(id);
+  return r ? J(r.mail_branding, {}) : {};
+}
+function setSuiteMailBranding(id, patch) {
+  const cur = getSuiteMailBranding(id);
+  const next = { ...cur, ...(patch || {}) };
+  db.prepare('UPDATE suites SET mail_branding=? WHERE id=?').run(JSON.stringify(next), id);
+  return getSuiteMailBranding(id);
 }
 
 // ── CC-the-Owl inbound address tokens ──
@@ -1242,6 +1256,7 @@ module.exports = {
   getFilterView, setFilterView, deleteFilterView,
   listEntities, getEntity, createEntity, updateEntity, deleteEntity, getEntityIntegrations, setEntityIntegrations,
   getEntityMailBranding, setEntityMailBranding,
+  getSuiteMailBranding, setSuiteMailBranding,
   ensureInboxToken, regenerateInboxToken, findEntityByInboxToken,
   listUsers, getUser, getUserByEmail, createUser, updateUser, deleteUser, verifyCredentials, publicUser, setUserEntities, setNotificationPrefs,
   membershipsForUser, roleForMembership, setMembershipRole, removeMembership,

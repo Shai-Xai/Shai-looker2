@@ -242,10 +242,11 @@ a pace read** — *ahead / on track / behind* — not just "are we there yet."
   flagged** (⚠ Above range) rather than falsely "reached" — for ratio metrics where too
   far over is also wrong; or a **mix / split** goal.
 - **Mix / split goals (compositions)** — track shares of a 100% whole that move together:
-  **New vs Returning**, **age bands**, local/international, ticket tiers, channels. Pick a
-  breakdown tile, set each slice's target share, and the goal shows the actual split as a
-  stacked bar — **✓ Balanced** when every slice sits in its band, **⚠ Mix drifting** when
-  one slips (e.g. Returning creeping up while New starves). Mark a **focus slice** to grow.
+  **New vs Returning**, **age bands**, local/international, ticket tiers, channels. Source the
+  slices from **one breakdown tile** *or* **a separate tile per slice**, set each slice's
+  target share, and the goal shows the actual split as a stacked bar — **✓ Balanced** when
+  every slice sits in its band, **⚠ Mix drifting** when one slips (e.g. Returning creeping up
+  while New starves). Mark a **focus slice** to grow.
 - **Compare to last time, your way** — baseline from a past event, a **picked dashboard
   tile** (e.g. a last-year total, remembered + re-read live), or a typed number; one-tap
   **Match / +10% / +15% / +20%** target helpers.
@@ -346,6 +347,16 @@ Use these to set direction, **not** to promise dates.
   data sources the client already uses, and every read runs through the same per-client
   + per-event scope boundary as a tile, so it can't reach another client's or event's
   data. Removes the "an admin must build a tile first" step for slice-level alerts.
+- **2026-06-22** — **Per-event branding** ✅ (dual-surface): a client running several events can now
+  give **each event its own logo, colours and sender name**. It layers on top of the client's
+  branding — anything left blank inherits the client (which inherits Howler) — so you override only
+  what differs. An event's branding is used for **its campaigns**, **its single-event digests**, and
+  the **in-app theme while viewing that event**; multi-event/portfolio digests stay on the client's
+  branding. **Self-service:** clients manage it themselves in **Settings → Branding**, which is now
+  split into **Account & portfolio** (their overall look) and **Events** (pick an event, brand it);
+  Howler can also set it in the event (suite) detail → **Event branding**. Emails still send from
+  Howler's verified domain, so "different mailer per event" means a different look + sender display
+  name, not a different sending address.
 - **2026-06-22** — **Alerts** 🧪 (new): clients (and Howler on their behalf) can set an
   **alert on any metric** — point it at a dashboard KPI tile and Pulse watches that live
   number, firing the moment it crosses. Three types out of the box (**🎉 sold out**,

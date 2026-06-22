@@ -21,7 +21,7 @@ const FIELDS = [
   ['footer', 'Footer text', 'textarea', 'Small print under the card — supports multiple lines (e.g. contact details)'],
 ];
 
-export default function MailTemplateEditor({ entityId, scope = 'platform', canTest = false }) {
+export default function MailTemplateEditor({ entityId, scope = 'platform', suiteId = '', canTest = false }) {
   const [data, setData] = useState(null);     // { template|branding, resolved?, defaults }
   const [edits, setEdits] = useState({});     // local overrides being edited
   const [previewHtml, setPreviewHtml] = useState('');
@@ -31,25 +31,29 @@ export default function MailTemplateEditor({ entityId, scope = 'platform', canTe
   const debounce = useRef(null);
 
   const loadFn = scope === 'platform' ? () => api.getMailTemplate()
+    : scope === 'admin-suite' ? () => api.getSuiteMailTemplate(suiteId)
+    : scope === 'my-suite' ? () => api.getMySuiteMailTemplate(suiteId)
     : scope === 'admin-client' ? () => api.getEntityMailTemplate(entityId)
     : () => api.getMyMailTemplate(entityId);
   const saveFn = scope === 'platform' ? (p) => api.saveMailTemplate(p)
+    : scope === 'admin-suite' ? (p) => api.saveSuiteMailTemplate(suiteId, p)
+    : scope === 'my-suite' ? (p) => api.saveMySuiteMailTemplate(suiteId, p)
     : scope === 'admin-client' ? (p) => api.saveEntityMailTemplate(entityId, p)
     : (p) => api.saveMyMailTemplate(entityId, p);
 
   useEffect(() => {
     loadFn().then((d) => { setData(d); setEdits({ ...(d.template || d.branding || {}) }); });
-  }, [entityId, scope]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [entityId, scope, suiteId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Debounced live preview as the user types.
   useEffect(() => {
     if (!data) return;
     clearTimeout(debounce.current);
     debounce.current = setTimeout(() => {
-      api.previewMail(edits, entityId).then((r) => setPreviewHtml(r.html)).catch(() => {});
+      api.previewMail(edits, entityId, suiteId).then((r) => setPreviewHtml(r.html)).catch(() => {});
     }, 350);
     return () => clearTimeout(debounce.current);
-  }, [edits, entityId, data]);
+  }, [edits, entityId, suiteId, data]);
 
   if (!data) return <p style={{ color: 'var(--muted)', fontSize: 13 }}>Loading…</p>;
   const placeholderFor = (k) => (scope === 'platform' ? data.defaults?.[k] : data.resolved?.[k]) || '';
@@ -59,9 +63,10 @@ export default function MailTemplateEditor({ entityId, scope = 'platform', canTe
     setBusy(true);
     try {
       const d = await saveFn(edits); setData(d); setSaved(true); setTimeout(() => setSaved(false), 1600);
-      // Tell the app shell to re-pull this client's theme so the logo/colours
-      // update live (no reload). Platform scope has no entityId — skip.
-      if (entityId) window.dispatchEvent(new CustomEvent('pulse-branding-saved', { detail: { entityId } }));
+      // Tell the app shell to re-pull the theme so the logo/colours update live
+      // (no reload). Platform scope has no entityId — skip. A suite edit carries
+      // the suiteId so the shell re-themes when viewing that event.
+      if (entityId || suiteId) window.dispatchEvent(new CustomEvent('pulse-branding-saved', { detail: { entityId, suiteId } }));
     }
     catch (e) { alert('Save failed: ' + e.message); }
     finally { setBusy(false); }

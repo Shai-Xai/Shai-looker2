@@ -197,17 +197,19 @@ export default function ClientLayout() {
     let alive = true;
     const load = () => {
       if (!themeEntityId) { resetBrand(); return; }
-      api.getEntityTheme(themeEntityId)
+      // While viewing an event, theme to that EVENT's branding (its logo/colours,
+      // inheriting the client's where unset); the home/portfolio uses the client.
+      api.getEntityTheme(themeEntityId, suiteId || '')
         .then((t) => { if (alive) applyBrand(t); })
         .catch(() => { if (alive) resetBrand(); });
     };
     load();
-    // Re-pull the moment the client saves their branding (logo/colours), so the
-    // shell updates live without a reload.
-    const onSaved = (e) => { if (!e.detail || e.detail.entityId === themeEntityId) load(); };
+    // Re-pull the moment branding is saved (client or this event), so the shell
+    // updates live without a reload.
+    const onSaved = (e) => { if (!e.detail || e.detail.entityId === themeEntityId || (e.detail.suiteId && e.detail.suiteId === suiteId)) load(); };
     window.addEventListener('pulse-branding-saved', onSaved);
     return () => { alive = false; resetBrand(); window.removeEventListener('pulse-branding-saved', onSaved); };
-  }, [themeEntityId]);
+  }, [themeEntityId, suiteId]);
 
   // Mobile sheet skips the suite level for single-suite clients — make sure
   // that suite's detail is loaded the moment the sheet opens.

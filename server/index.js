@@ -1437,9 +1437,13 @@ const cleanBrandingPatch = (body) => {
 // (or the platform template's). Logos are public-facing brand assets — no auth.
 app.get('/mail-assets/logo/:scope', (req, res) => {
   const scope = req.params.scope;
+  // scope is 'platform', an entity id, or a SUITE id (event-branded emails carry
+  // the suite as their asset scope so this serves the event's resolved logo).
+  const suite = scope !== 'platform' && !db.getEntity(scope) ? db.getSuite(scope) : null;
   const logo = scope === 'platform'
     ? mailer.getPlatformTemplate().logo
-    : (db.getEntity(scope) ? mailer.resolveBranding(scope).logo : '');
+    : (db.getEntity(scope) ? mailer.resolveBranding(scope).logo
+      : (suite ? mailer.resolveBranding(suite.entityId, scope).logo : ''));
   if (!logo) return res.status(404).end();
   if (!logo.startsWith('data:')) return res.redirect(302, logo); // external URL
   const m = logo.match(/^data:([^;,]+)?(;base64)?,(.*)$/s);
@@ -1480,6 +1484,24 @@ app.put('/api/admin/entities/:id/mail-template', auth.requireAdmin, (req, res) =
   res.json(clientMailView(req.params.id));
 });
 
+// Per-EVENT (suite) branding override (admin). Same shape; blank fields inherit
+// the client. `resolved` shows the fully-layered result (defaults ← platform ←
+// client ← event) so the editor's placeholders show what's inherited.
+function suiteMailView(suite) {
+  return { branding: db.getSuiteMailBranding(suite.id), resolved: mailer.resolveBranding(suite.entityId, suite.id), defaults: mailer.DEFAULTS };
+}
+app.get('/api/admin/suites/:id/mail-template', auth.requireAdmin, (req, res) => {
+  const suite = db.getSuite(req.params.id);
+  if (!suite) return res.status(404).json({ error: 'Not found' });
+  res.json(suiteMailView(suite));
+});
+app.put('/api/admin/suites/:id/mail-template', auth.requireAdmin, (req, res) => {
+  const suite = db.getSuite(req.params.id);
+  if (!suite) return res.status(404).json({ error: 'Not found' });
+  db.setSuiteMailBranding(req.params.id, cleanBrandingPatch(req.body || {}));
+  res.json(suiteMailView(suite));
+});
+
 // ── CC-the-Owl: a client's inbound address (admin + client self-service) ───────
 const inboundDomain = () => db.getSetting('inbound_domain', '');
 function inboxView(entityId) {
@@ -1513,6 +1535,20 @@ app.put('/api/my/mail-template/:entityId', auth.requireAuth, auth.requirePermiss
   res.json(clientMailView(req.params.entityId));
 });
 
+// Client self-service for a single EVENT (suite) they own — same per-event
+// branding override as the admin surface, gated by suite access + branding.manage.
+app.get('/api/my/suites/:id/mail-template', auth.requireAuth, (req, res) => {
+  const suite = db.getSuite(req.params.id);
+  if (!suite || !auth.canAccessSuite(req.user, suite.id)) return res.status(403).json({ error: 'Not allowed' });
+  res.json(suiteMailView(suite));
+});
+app.put('/api/my/suites/:id/mail-template', auth.requireAuth, auth.requirePermission('branding.manage'), (req, res) => {
+  const suite = db.getSuite(req.params.id);
+  if (!suite || !auth.canAccessSuite(req.user, suite.id)) return res.status(403).json({ error: 'Not allowed' });
+  db.setSuiteMailBranding(suite.id, cleanBrandingPatch(req.body || {}));
+  res.json(suiteMailView(suite));
+});
+
 // ── White-label theme ──────────────────────────────────────────────────────────
 // The client's brand pair (primary + secondary) + logo, resolved through the
 // same layering as email branding (defaults ← platform ← client) — ONE brand
@@ -1521,18 +1557,29 @@ app.get('/api/theme/:entityId', auth.requireAuth, (req, res) => {
   const id = req.params.entityId;
   if (req.user.role !== 'admin' && !(req.user.entityIds || []).includes(id)) return res.status(403).json({ error: 'Not allowed' });
   if (!db.getEntity(id)) return res.status(404).json({ error: 'Not found' });
-  const b = mailer.resolveBranding(id);
-  res.json({ primary: b.brandColor, secondary: b.secondaryColor, chart3: b.chart3, chart4: b.chart4, chart5: b.chart5, logo: b.logo || '' });
+  // Optional ?suite= layers that event's branding on top (in-app theme follows
+  // the event you're viewing); only honoured when the suite belongs to this client.
+  const suiteId = String(req.query.suite || '');
+  const suite = suiteId ? db.getSuite(suiteId) : null;
+  const b = mailer.resolveBranding(id, suite && suite.entityId === id ? suiteId : '');
+  // The app-shell logo (top-left identity) is ALWAYS the client's logo — the
+  // per-event theme only swaps the colours in-app, never the main profile logo.
+  const logo = mailer.resolveBranding(id).logo || '';
+  res.json({ primary: b.brandColor, secondary: b.secondaryColor, chart3: b.chart3, chart4: b.chart4, chart5: b.chart5, logo });
 });
 
 // Live preview: render the email HTML with unsaved edits layered on the right
 // base. Clients may only preview their own entity.
 app.post('/api/mail/preview', auth.requireAuth, (req, res) => {
-  const { edits, entityId } = req.body || {};
+  const { edits, entityId, suiteId } = req.body || {};
   if (entityId && req.user.role !== 'admin' && !(req.user.entityIds || []).includes(entityId)) {
     return res.status(403).json({ error: 'Not allowed' });
   }
-  const branding = mailer.previewBranding({ edits: cleanBrandingPatch(edits || {}), entityId });
+  // Event-branding editors preview on top of the event's resolved base — admins,
+  // or a client previewing an event they own.
+  const suite = suiteId ? db.getSuite(suiteId) : null;
+  const canSuite = suite && (req.user.role === 'admin' || auth.canAccessSuite(req.user, suite.id));
+  const branding = mailer.previewBranding({ edits: cleanBrandingPatch(edits || {}), entityId, suiteId: canSuite ? suiteId : '' });
   const { html } = mailer.notificationEmail({
     title: 'Sound check signoff needed',
     body: 'Hi — please review the stage plot and confirm the gate times before Friday. Tap below to acknowledge in Pulse.',
@@ -2619,6 +2666,9 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
   const selSet = new Set(selSuiteIds);
   const multiClient = allSuites.length > 1;
   const multi = multiClient && selSuiteIds.length > 1;
+  // Brand the email with the EVENT's branding when the digest covers exactly one
+  // event; a multi-event (portfolio) digest keeps the client-level branding.
+  const brandingSuiteId = selSuiteIds.length === 1 ? selSuiteIds[0] : '';
 
   // Curated picks scoped to the selected events (each pick resolves under its
   // dashboard's event); AI mode scopes the fact sweep via suiteIds.
@@ -2689,7 +2739,7 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
   // Render a set of followed-tile facts as email visuals — chart tiles become a
   // PNG mail asset, single-value/table tiles become a metric chip. Best-effort.
   const renderFollowed = (facts) => {
-    const branding = mailer.resolveBranding(entityId);
+    const branding = mailer.resolveBranding(entityId, brandingSuiteId);
     const base = mailer.baseUrl();
     let tileimg = null;
     try { tileimg = require('./tileimg'); } catch (e) { console.error('[digest] tileimg load failed', e.message); }
@@ -2784,6 +2834,8 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
   } else {
     out = await buildFlat();
   }
+  // The event whose branding the email should use ('' = client-level / portfolio).
+  out.brandingSuiteId = brandingSuiteId;
 
   // Diagnostic: the exact tiles the analyst read + the value each returned under
   // the digest's scope — so a mismatch with the dashboard (wrong tile / missing

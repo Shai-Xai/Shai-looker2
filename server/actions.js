@@ -779,7 +779,11 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     const heroImage = heroRaw
       ? (heroRaw.startsWith('data:') && realSend ? `${mailer.baseUrl()}${heroPath}` : heroRaw)
       : '';
-    const { html, text } = mailer.campaignEmail({ entityId: action.entityId, assetScope: action.entityId, subject, bodyText: tok(useBody), ctaText: useCta || 'View event', ctaUrl, unsubUrl, heroImage, promo });
+    // Brand the campaign with its EVENT's branding (logo/colour/sender) when the
+    // campaign is tied to one; the asset scope carries the suite so the email's
+    // logo URL resolves the event's logo.
+    const evSuite = action.config?.eventSuiteId || '';
+    const { html, text } = mailer.campaignEmail({ entityId: action.entityId, assetScope: evSuite || action.entityId, branding: mailer.resolveBranding(action.entityId, evSuite), subject, bodyText: tok(useBody), ctaText: useCta || 'View event', ctaUrl, unsubUrl, heroImage, promo });
     return { html: withPixel(html, rtok), text, subject };
   }
 
@@ -815,7 +819,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
   async function runCampaign(actionId) {
     const a = getAction(actionId);
     if (!a || a.status !== 'running') return;
-    const branding = mailer.resolveBranding(a.entityId);
+    const branding = mailer.resolveBranding(a.entityId, a.config?.eventSuiteId || '');
     const wantsEmail = a.config.channel !== 'sms';
     const wantsSms = a.config.channel !== 'email';
     const results = { sent: 0, failed: 0, clicks: a.results.clicks || 0, total: a.audience.length, startedAt: now(), emailSent: a.results.emailSent || 0, smsSent: a.results.smsSent || 0 };
@@ -1125,7 +1129,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     }
     if (wantsEmail) {
       const { html, text, subject } = renderFor(fake, { email: req.user.email, name: '', ticket: 'General Admission' });
-      const branding = mailer.resolveBranding(req.params.entityId);
+      const branding = mailer.resolveBranding(req.params.entityId, fake.config?.eventSuiteId || '');
       const r = await mailer.send({ to: req.user.email, subject: `[TEST] ${subject || 'Campaign'}`, html, text, fromName: branding.senderName, kind: 'test', entity: req.params.entityId });
       if (!r.ok) return res.status(400).json({ error: r.error || r.reason || 'email not configured' });
       done.push(req.user.email);
@@ -1669,7 +1673,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
       const a = getAction(action_id);
       if (!a || a.status !== 'auto' || a.config.campaignMode !== 'sequence') continue;
       const steps = a.config.steps || [];
-      const branding = mailer.resolveBranding(a.entityId);
+      const branding = mailer.resolveBranding(a.entityId, a.config?.eventSuiteId || '');
       let reachable = new Map(); // email -> { emailOk, smsOk } (re-evaluated live, so consent changes apply mid-journey)
       try { const { list } = await audienceFor(a.entityId, a.config, sysUser); for (const r of list) reachable.set(r.email, r); }
       catch (e) { console.error('[actions] sequence audience re-check failed', a.id, e.message); continue; }

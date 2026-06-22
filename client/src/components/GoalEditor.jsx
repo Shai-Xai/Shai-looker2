@@ -23,9 +23,10 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
   const [tileId, setTileId] = useState(goal?.metricRef?.tileId || '');
   const [target, setTarget] = useState(goal ? String(goal.targetValue ?? '') : '');
   const [targetMax, setTargetMax] = useState(goal?.targetMax != null ? String(goal.targetMax) : ''); // upper bound for 'range' goals
-  const [parts, setParts] = useState(goal?.parts || []); // composition slices [{label, target, focus}]
+  const [parts, setParts] = useState(goal?.parts || []); // composition slices [{label, target, focus, ref?}]
   const [partTol, setPartTol] = useState(goal?.parts?.[0]?.tol != null ? String(goal.parts[0].tol) : '5'); // ±pp band
   const [partsLoading, setPartsLoading] = useState(false);
+  const [compMode, setCompMode] = useState(goal?.parts?.some((p) => p && p.ref && p.ref.tileId) ? 'tiles' : 'breakdown'); // breakdown tile | a tile per slice
   const [unit, setUnit] = useState(goal?.unit || 'tickets');
   const [direction, setDirection] = useState(goal?.direction || 'at_least');
   const isComp = direction === 'composition';
@@ -90,7 +91,7 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
       setParts(rows.map((x) => ({ label: String(x.t), target: Math.round((Number(x.v) / total) * 100) })));
     } catch { /* ignore */ } finally { setPartsLoading(false); }
   };
-  useEffect(() => { if (isComp && dashboardId && tileId && parts.length === 0) loadSegments(); }, [isComp, dashboardId, tileId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (isComp && compMode === 'breakdown' && dashboardId && tileId && parts.length === 0) loadSegments(); }, [isComp, compMode, dashboardId, tileId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Reusable goal templates for this client.
   useEffect(() => { if (entityId) api.goalTemplates(entityId).then((r) => setTemplates(r.templates || [])).catch(() => {}); }, [entityId]);
@@ -286,8 +287,10 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
   async function save() {
     if (!name.trim()) { setErr('Give the goal a name.'); return; }
     if (isComp) {
-      if (!dashboardId || !tileId) { setErr('Pick the breakdown tile.'); return; }
-      if (parts.filter((p) => String(p.label).trim()).length < 2) { setErr('Add at least two slices to the split.'); return; }
+      if (compMode === 'breakdown' && (!dashboardId || !tileId)) { setErr('Pick the breakdown tile.'); return; }
+      const named = parts.filter((p) => String(p.label).trim());
+      if (named.length < 2) { setErr('Add at least two slices to the split.'); return; }
+      if (compMode === 'tiles' && named.some((p) => !(p.ref && p.ref.tileId))) { setErr('Pick a tile for every slice.'); return; }
     } else {
       if (track === 'tile' && (!dashboardId || !tileId)) { setErr('Pick the dashboard tile to track.'); return; }
       if (!target || Number.isNaN(Number(target))) { setErr('Set a numeric target.'); return; }
@@ -298,8 +301,12 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
     const body = {
       name: name.trim(),
       source: 'manual', // resolution is driven by the tile ref below, not this label
-      metricRef: (isComp || track === 'tile') ? { dashboardId, tileId } : {},
-      parts: isComp ? parts.filter((p) => String(p.label).trim()).map((p) => ({ label: String(p.label).trim(), target: Number(p.target) || 0, tol, ...(p.focus ? { focus: true } : {}) })) : [],
+      metricRef: (isComp && compMode === 'breakdown') || (!isComp && track === 'tile') ? { dashboardId, tileId } : {},
+      parts: isComp ? parts.filter((p) => String(p.label).trim()).map((p) => ({
+        label: String(p.label).trim(), target: Number(p.target) || 0, tol,
+        ...(p.focus ? { focus: true } : {}),
+        ...(compMode === 'tiles' && p.ref && p.ref.tileId ? { ref: refWithNames(p.ref.dashboardId, p.ref.tileId) } : {}),
+      })) : [],
       targetValue: isComp ? 0 : Number(target),
       targetMax: direction === 'range' && targetMax !== '' ? Number(targetMax) : null,
       unit, direction, display, byDate, startDate,
@@ -490,39 +497,85 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
           </select>
         </Field>
 
-        {/* Composition: pick a breakdown tile, then set each slice's target share. */}
+        {/* Composition: shares from ONE breakdown tile, or a tile PER slice. */}
         {isComp && (
           <div style={{ border: '1px solid var(--hairline)', borderRadius: 12, padding: 12, marginBottom: 12 }}>
-            <Field label="Breakdown tile" hint="A chart/table split by category (e.g. customers by type, audience by age).">
-              <select value={dashboardId} onChange={(e) => { setDashboardId(e.target.value); setTileId(''); setParts([]); }} style={inp}>
-                <option value="">{cat ? 'Choose a dashboard…' : 'Loading…'}</option>
-                {dashboards.map((d) => <option key={d.dashboardId} value={d.dashboardId}>{d.title}{d.setName ? ` · ${d.setName}` : ''}</option>)}
-              </select>
-              {dashboardId && (
-                <select value={tileId} onChange={(e) => { setTileId(e.target.value); setParts([]); }} style={{ ...inp, marginTop: 8 }}>
-                  <option value="">Choose a tile…</option>
-                  {seriesTilesFor(dashboardId).map((t) => <option key={t.tileId} value={t.tileId}>{t.title}</option>)}
-                </select>
-              )}
+            <Field label="Where do the slices come from?">
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Seg active={compMode === 'breakdown'} onClick={() => setCompMode('breakdown')}>📊 One breakdown tile</Seg>
+                <Seg active={compMode === 'tiles'} onClick={() => setCompMode('tiles')}>🔢 A tile per slice</Seg>
+              </div>
             </Field>
-            {tileId && (
+
+            {compMode === 'breakdown' ? (
               <>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '4px 0 8px' }}>
-                  <span style={{ fontSize: 12, fontWeight: 700, flex: 1 }}>Target split{parts.length ? ` — sums to ${parts.reduce((s, p) => s + (Number(p.target) || 0), 0)}%` : ''}</span>
-                  <button type="button" onClick={loadSegments} style={{ ...addMsBtn }}>{partsLoading ? '…' : '↻ Reload segments'}</button>
-                </div>
-                {parts.map((p, i) => (
-                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                    <button type="button" onClick={() => setParts((ps) => ps.map((x, j) => ({ ...x, focus: j === i ? !x.focus : x.focus })))} title="Focus slice (Owl targets this to grow it)" style={{ border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 13, opacity: p.focus ? 1 : 0.35 }}>🎯</button>
-                    <span style={{ flex: 1, minWidth: 0, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.label}</span>
-                    <input value={p.target} onChange={(e) => setParts((ps) => ps.map((x, j) => j === i ? { ...x, target: e.target.value } : x))} inputMode="decimal" style={{ ...inp, width: 64, textAlign: 'right' }} />
-                    <span style={{ fontSize: 12, color: 'var(--muted)' }}>%</span>
-                  </div>
-                ))}
-                <Field label="Tolerance (± percentage points)" hint="How far a slice can drift before it's flagged." style={{ marginTop: 6 }}>
-                  <input value={partTol} onChange={(e) => setPartTol(e.target.value)} inputMode="decimal" style={{ ...inp, width: 90 }} />
+                <Field label="Breakdown tile" hint="A chart/table split by category (e.g. customers by type, audience by age).">
+                  <select value={dashboardId} onChange={(e) => { setDashboardId(e.target.value); setTileId(''); setParts([]); }} style={inp}>
+                    <option value="">{cat ? 'Choose a dashboard…' : 'Loading…'}</option>
+                    {dashboards.map((d) => <option key={d.dashboardId} value={d.dashboardId}>{d.title}{d.setName ? ` · ${d.setName}` : ''}</option>)}
+                  </select>
+                  {dashboardId && (
+                    <select value={tileId} onChange={(e) => { setTileId(e.target.value); setParts([]); }} style={{ ...inp, marginTop: 8 }}>
+                      <option value="">Choose a tile…</option>
+                      {seriesTilesFor(dashboardId).map((t) => <option key={t.tileId} value={t.tileId}>{t.title}</option>)}
+                    </select>
+                  )}
                 </Field>
+                {tileId && (
+                  <>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '4px 0 8px' }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, flex: 1 }}>Target split{parts.length ? ` — sums to ${parts.reduce((s, p) => s + (Number(p.target) || 0), 0)}%` : ''}</span>
+                      <button type="button" onClick={loadSegments} style={{ ...addMsBtn }}>{partsLoading ? '…' : '↻ Reload segments'}</button>
+                    </div>
+                    {parts.map((p, i) => (
+                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                        <button type="button" onClick={() => setParts((ps) => ps.map((x, j) => ({ ...x, focus: j === i ? !x.focus : x.focus })))} title="Focus slice (Owl targets this to grow it)" style={{ border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 13, opacity: p.focus ? 1 : 0.35 }}>🎯</button>
+                        <span style={{ flex: 1, minWidth: 0, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.label}</span>
+                        <input value={p.target} onChange={(e) => setParts((ps) => ps.map((x, j) => j === i ? { ...x, target: e.target.value } : x))} inputMode="decimal" style={{ ...inp, width: 64, textAlign: 'right' }} />
+                        <span style={{ fontSize: 12, color: 'var(--muted)' }}>%</span>
+                      </div>
+                    ))}
+                  </>
+                )}
               </>
+            ) : (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 0 8px' }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, flex: 1 }}>Slices{parts.length ? ` — targets sum to ${parts.reduce((s, p) => s + (Number(p.target) || 0), 0)}%` : ''}</span>
+                  <button type="button" onClick={() => setParts((ps) => [...ps, { label: '', target: 0, ref: { dashboardId: '', tileId: '' } }])} style={{ ...addMsBtn }}>＋ Add slice</button>
+                </div>
+                {parts.map((p, i) => {
+                  const setPart = (patch) => setParts((ps) => ps.map((x, j) => j === i ? { ...x, ...patch } : x));
+                  const ref = p.ref || {};
+                  return (
+                    <div key={i} style={{ border: '1px solid var(--hairline)', borderRadius: 9, padding: 8, marginBottom: 8 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                        <button type="button" onClick={() => setPart({ focus: !p.focus })} title="Focus slice (the one to grow)" style={{ border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 13, opacity: p.focus ? 1 : 0.35 }}>🎯</button>
+                        <input value={p.label} onChange={(e) => setPart({ label: e.target.value })} placeholder="Slice name (e.g. New)" style={{ ...inp, flex: 1 }} />
+                        <input value={p.target} onChange={(e) => setPart({ target: e.target.value })} inputMode="decimal" style={{ ...inp, width: 58, textAlign: 'right' }} />
+                        <span style={{ fontSize: 12, color: 'var(--muted)' }}>%</span>
+                        <button type="button" onClick={() => setParts((ps) => ps.filter((_, j) => j !== i))} aria-label="Remove slice" style={{ border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer' }}>✕</button>
+                      </div>
+                      <select value={ref.dashboardId || ''} onChange={(e) => setPart({ ref: { dashboardId: e.target.value, tileId: '' } })} style={inp}>
+                        <option value="">{cat ? 'Choose a dashboard…' : 'Loading…'}</option>
+                        {dashboards.map((d) => <option key={d.dashboardId} value={d.dashboardId}>{d.title}{d.setName ? ` · ${d.setName}` : ''}</option>)}
+                      </select>
+                      {ref.dashboardId && (
+                        <select value={ref.tileId || ''} onChange={(e) => setPart({ ref: { ...ref, tileId: e.target.value } })} style={{ ...inp, marginTop: 6 }}>
+                          <option value="">Choose a tile…</option>
+                          {tilesFor(ref.dashboardId).map((t) => <option key={t.tileId} value={t.tileId}>{t.title}</option>)}
+                        </select>
+                      )}
+                    </div>
+                  );
+                })}
+              </>
+            )}
+
+            {parts.length > 0 && (
+              <Field label="Tolerance (± percentage points)" hint="How far a slice can drift before it's flagged." style={{ marginTop: 6 }}>
+                <input value={partTol} onChange={(e) => setPartTol(e.target.value)} inputMode="decimal" style={{ ...inp, width: 90 }} />
+              </Field>
             )}
           </div>
         )}
