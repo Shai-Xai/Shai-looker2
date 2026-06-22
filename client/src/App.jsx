@@ -17,6 +17,7 @@ import InboxPage from './os/InboxPage.jsx';
 import DigestsPage from './pages/DigestsPage.jsx';
 import EngagePage from './pages/EngagePage.jsx';
 import GoalsPage from './pages/GoalsPage.jsx';
+import AlertsPage from './pages/AlertsPage.jsx';
 import InventiveAskPage from './pages/InventiveAskPage.jsx';
 import Logo from './components/Logo.jsx';
 import { useBrandLogo } from './lib/brand.js';
@@ -232,6 +233,7 @@ function Shell() {
                 <Route path="/preview" element={<ClientHome />} />
                 <Route path="/suite/:suiteId/d/:id" element={<ViewPage />} />
                 <Route path="/goals" element={<GoalsPage />} />
+                <Route path="/alerts" element={<AlertsPage />} />
                 <Route path="/settlements" element={<SettlementsPage />} />
                 <Route path="/settlements/:id" element={<SettlementViewPage />} />
                 <Route path="/documents/:id" element={<DocumentViewPage />} />
@@ -253,6 +255,7 @@ function Shell() {
                 <Route path="/settings" element={<ClientIntegrationsPage />} />
                 <Route path="/suite/:suiteId/d/:id" element={<ViewPage />} />
                 <Route path="/goals" element={<GoalsPage />} />
+                <Route path="/alerts" element={<AlertsPage />} />
                 <Route path="/settlements" element={<SettlementsPage />} />
                 <Route path="/settlements/:id" element={<SettlementViewPage />} />
                 <Route path="/documents/:id" element={<DocumentViewPage />} />

@@ -41,6 +41,7 @@ export default function ClientLayout() {
   useEffect(() => { api.mySuites().then(setSuites).catch(() => {}).finally(() => setLoading(false)); }, []);
   useEffect(() => { api.mySettlements().then(setSettlements).catch(() => {}); }, []);
   const onGoals = location.pathname.startsWith('/goals');
+  const onAlerts = location.pathname.startsWith('/alerts');
   const onSettlements = location.pathname.startsWith('/settlements');
   const onInbox = location.pathname.startsWith('/inbox');
   const onDigests = location.pathname.startsWith('/digests');
@@ -331,6 +332,17 @@ export default function ClientLayout() {
             <span style={ellip}>Goals</span>
           </button>
           )}
+          {(visibleSuites.length > 0 || isAdmin) && (
+          <button
+            ref={onAlerts ? activeRef : null}
+            className={`nav-row${onAlerts ? ' active' : ''}`}
+            style={{ ...rowBtn, fontWeight: onAlerts ? 600 : 500 }}
+            onClick={() => { if (!onAlerts) vtNavigate(navigate, '/alerts'); if (isMobile) setNavOpen(false); }}
+          >
+            <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>🔔</span>
+            <span style={ellip}>Alerts</span>
+          </button>
+          )}
           {can(PERMS.SETTLEMENTS_VIEW) && (visibleSettlements.length > 0 || isAdmin) && (
           <button
             ref={onSettlements ? activeRef : null}
@@ -491,6 +503,16 @@ export default function ClientLayout() {
                   >
                     <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>🎯</span>
                     <span style={ellip}>Goals</span>
+                  </button>
+                  )}
+                  {(visibleSuites.length > 0 || isAdmin) && (
+                  <button
+                    className={`nav-row${onAlerts ? ' active' : ''}`}
+                    style={{ ...mRowSuite, fontWeight: onAlerts ? 700 : 500 }}
+                    onClick={() => { if (!onAlerts) vtNavigate(navigate, '/alerts'); setNavOpen(false); }}
+                  >
+                    <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>🔔</span>
+                    <span style={ellip}>Alerts</span>
                   </button>
                   )}
                   {can(PERMS.SETTLEMENTS_VIEW) && (visibleSettlements.length > 0 || isAdmin) && (

@@ -781,6 +781,12 @@ async function resolveEventDate({ suiteId, user }) {
 }
 const goalsApi = require('./goals').mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTileSeriesAll, resolveEventDate });
 
+// ── Alerts: metric watchers → server/alerts.js ───────────────────────────────
+// A self-contained module that watches a dashboard tile's live number (the SAME
+// scope-enforced resolveTileValue goals use) and fires through the inbox/push/
+// email/SMS when it crosses a threshold. Background tick evaluates the rules.
+require('./alerts').mount(app, { db, auth, resolveTileValue, os, mailer, push, messaging });
+
 // ── Weekly goal nudge (push) ─────────────────────────────────────────────────
 // One calm "your goals this week" push per entity (not per-event): goals needing
 // attention (behind pace · forecast short · checkpoint missed) plus wins (reached).

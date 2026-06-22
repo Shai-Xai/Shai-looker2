@@ -455,4 +455,15 @@ export const api = {
   goalTemplates: (entityId) => fetch(`/api/goals/templates/${entityId}`).then(json),
   saveGoalTemplate: (body) => fetch('/api/goals/templates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
   deleteGoalTemplate: (id) => fetch(`/api/goals/templates/${id}`, { method: 'DELETE' }).then(json),
+
+  // Alerts — metric watchers, per event (suite). One guarded set serves admin +
+  // client self-service (the server decides who may write).
+  suiteAlerts: (suiteId) => fetch(`/api/alerts/suites/${suiteId}`).then(json),
+  createAlert: (suiteId, b) => fetch(`/api/alerts/suites/${suiteId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  updateAlert: (id, b) => fetch(`/api/alerts/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  deleteAlert: (id) => fetch(`/api/alerts/${id}`, { method: 'DELETE' }).then((r) => r.ok),
+  setAlertStatus: (id, status) => fetch(`/api/alerts/${id}/status`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) }).then(json),
+  alertEvents: (id) => fetch(`/api/alerts/${id}/events`).then(json),
+  testAlert: (id) => fetch(`/api/alerts/${id}/test`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(json),
+  alertTileValue: (suiteId, dashboardId, tileId) => fetch(`/api/alerts/suites/${suiteId}/tile-value`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dashboardId, tileId }) }).then(json),
 };

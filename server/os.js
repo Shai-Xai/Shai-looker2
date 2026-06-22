@@ -404,7 +404,11 @@ function mount(app, { db, auth, mailer, push, onInbound }) {
     sql.prepare('INSERT INTO os_messages (id, thread_id, author_type, author_email, author_name, channel, body, created_at) VALUES (?,?,?,?,?,?,?,?)')
       .run(uuid(), id, authorType, createdBy, '', 'pulse', String(body || '').slice(0, 8000), ts);
     const t = thread(id);
-    notifyEntity(entityId, t, String(body || '').slice(0, 8000), channels);
+    // `channels` undefined → default fan-out (email+push). An explicit array is taken
+    // literally (even empty = inbox only) so callers like Alerts can land a thread
+    // WITHOUT email/push when the user picked neither.
+    if (channels === undefined) notifyEntity(entityId, t, String(body || '').slice(0, 8000));
+    else { const ch = (Array.isArray(channels) ? channels : []).filter((c) => VALID_CHANNELS.includes(c)); if (ch.length) notifyEntity(entityId, t, String(body || '').slice(0, 8000), ch); }
     return t;
   }
 
