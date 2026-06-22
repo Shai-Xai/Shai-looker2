@@ -493,7 +493,7 @@ function getReleaseNote(id) { return rowToReleaseNote(db.prepare('SELECT * FROM 
 function createReleaseNote({ date = '', title = '', body = '', howTo = '', bodyDev = '', deepLink = '', modules = '', published = true, source = 'manual', lastSha = '' } = {}) {
   const id = uuid(); const ts = now();
   db.prepare('INSERT INTO release_notes (id,date,title,body,how_to,body_dev,deep_link,modules,published,source,last_sha,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)')
-    .run(id, date || ts.slice(0, 10), title || '', body || '', howTo || '', bodyDev || '', deepLink || '', modules || '', published ? 1 : 0, source === 'auto' ? 'auto' : 'manual', lastSha || '', ts, ts);
+    .run(id, date || ts.slice(0, 10), title || '', body || '', howTo || '', bodyDev || '', deepLink || '', modules || '', published ? 1 : 0, (['auto', 'seed'].includes(source) ? source : 'manual'), lastSha || '', ts, ts);
   return getReleaseNote(id);
 }
 function updateReleaseNote(id, patch = {}) {
