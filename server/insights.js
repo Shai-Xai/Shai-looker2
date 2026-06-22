@@ -454,6 +454,13 @@ function goalsFactLines(goals) {
   for (const g of goals) {
     const p = g.progress || {};
     const dir = g.direction || p.direction || 'at_least';
+    if (dir === 'composition') {
+      const parts = Array.isArray(p.parts) ? p.parts : [];
+      const partStr = parts.map((pt) => `${pt.label} ${pt.share}%${pt.status === 'over' ? '↑' : pt.status === 'under' ? '↓' : ''} (target ${pt.target}%)`).join(', ');
+      const head = p.balanced === false ? '⚠ MIX DRIFTING' : p.balanced === true ? 'BALANCED ✓' : 'mix';
+      out.push(`- ${g.isNorthStar ? '★ ' : ''}${g.name}${g.suiteName ? ` [${g.suiteName}]` : ''}: ${head}${partStr ? ` — ${partStr}` : ''}`);
+      continue;
+    }
     const meets = (val, tgt) => val != null && tgt != null && (dir === 'at_most' ? val <= Number(tgt) : val >= Number(tgt));
     const reached = dir === 'range' ? !!p.inRange : (p.pct != null ? (dir === 'at_most' ? meets(p.value, g.targetValue) : p.pct >= 100) : meets(p.value, g.targetValue));
     const aboveRange = dir === 'range' && p.over;

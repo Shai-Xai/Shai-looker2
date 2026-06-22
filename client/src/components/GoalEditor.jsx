@@ -23,8 +23,12 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
   const [tileId, setTileId] = useState(goal?.metricRef?.tileId || '');
   const [target, setTarget] = useState(goal ? String(goal.targetValue ?? '') : '');
   const [targetMax, setTargetMax] = useState(goal?.targetMax != null ? String(goal.targetMax) : ''); // upper bound for 'range' goals
+  const [parts, setParts] = useState(goal?.parts || []); // composition slices [{label, target, focus}]
+  const [partTol, setPartTol] = useState(goal?.parts?.[0]?.tol != null ? String(goal.parts[0].tol) : '5'); // ±pp band
+  const [partsLoading, setPartsLoading] = useState(false);
   const [unit, setUnit] = useState(goal?.unit || 'tickets');
   const [direction, setDirection] = useState(goal?.direction || 'at_least');
+  const isComp = direction === 'composition';
   const [byDate, setByDate] = useState(goal?.byDate ? goal.byDate.slice(0, 10) : '');
   const [startDate, setStartDate] = useState(goal?.startDate ? goal.startDate.slice(0, 10) : ''); // sell-window start (pace anchor)
   const [northStar, setNorthStar] = useState(!!goal?.isNorthStar);
@@ -70,9 +74,23 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
   // Load the client's dashboards/tiles for tile-tracking, the curve suggester, OR the
   // "compare to last time" tile picker.
   useEffect(() => {
-    if ((track !== 'tile' && !curveOpen && baselineMode !== 'tile') || cat || !entityId) return;
+    if ((track !== 'tile' && !curveOpen && baselineMode !== 'tile' && !isComp) || cat || !entityId) return;
     api.getMyDigestTiles(entityId).then(setCat).catch(() => setCat({ dashboards: [] }));
-  }, [track, curveOpen, baselineMode, cat, entityId]);
+  }, [track, curveOpen, baselineMode, isComp, cat, entityId]);
+
+  // Composition: read the chosen breakdown tile's segments and seed each part's target
+  // with its current share (so you just adjust). Only auto-fills when parts are empty.
+  const loadSegments = async () => {
+    if (!dashboardId || !tileId || !activeSuite) return;
+    setPartsLoading(true);
+    try {
+      const r = await api.goalTileSeries(activeSuite, dashboardId, tileId);
+      const rows = (r.series || []).filter((x) => x && Number.isFinite(Number(x.v)));
+      const total = rows.reduce((s, x) => s + Number(x.v), 0) || 1;
+      setParts(rows.map((x) => ({ label: String(x.t), target: Math.round((Number(x.v) / total) * 100) })));
+    } catch { /* ignore */ } finally { setPartsLoading(false); }
+  };
+  useEffect(() => { if (isComp && dashboardId && tileId && parts.length === 0) loadSegments(); }, [isComp, dashboardId, tileId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Reusable goal templates for this client.
   useEffect(() => { if (entityId) api.goalTemplates(entityId).then((r) => setTemplates(r.templates || [])).catch(() => {}); }, [entityId]);
@@ -267,15 +285,22 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
 
   async function save() {
     if (!name.trim()) { setErr('Give the goal a name.'); return; }
-    if (track === 'tile' && (!dashboardId || !tileId)) { setErr('Pick the dashboard tile to track.'); return; }
-    if (!target || Number.isNaN(Number(target))) { setErr('Set a numeric target.'); return; }
+    if (isComp) {
+      if (!dashboardId || !tileId) { setErr('Pick the breakdown tile.'); return; }
+      if (parts.filter((p) => String(p.label).trim()).length < 2) { setErr('Add at least two slices to the split.'); return; }
+    } else {
+      if (track === 'tile' && (!dashboardId || !tileId)) { setErr('Pick the dashboard tile to track.'); return; }
+      if (!target || Number.isNaN(Number(target))) { setErr('Set a numeric target.'); return; }
+    }
     setBusy(true); setErr('');
     const baseNum = baselineValue !== '' && !Number.isNaN(Number(baselineValue)) ? Number(baselineValue) : null;
+    const tol = partTol !== '' && !Number.isNaN(Number(partTol)) ? Number(partTol) : 5;
     const body = {
       name: name.trim(),
       source: 'manual', // resolution is driven by the tile ref below, not this label
-      metricRef: track === 'tile' ? { dashboardId, tileId } : {},
-      targetValue: Number(target),
+      metricRef: (isComp || track === 'tile') ? { dashboardId, tileId } : {},
+      parts: isComp ? parts.filter((p) => String(p.label).trim()).map((p) => ({ label: String(p.label).trim(), target: Number(p.target) || 0, tol, ...(p.focus ? { focus: true } : {}) })) : [],
+      targetValue: isComp ? 0 : Number(target),
       targetMax: direction === 'range' && targetMax !== '' ? Number(targetMax) : null,
       unit, direction, display, byDate, startDate,
       scope: isPersonal ? 'personal' : 'event',
@@ -322,15 +347,6 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
           <button onClick={onClose} style={xBtn} aria-label="Close">✕</button>
         </div>
 
-        {/* Which event the new goal belongs to (when there's more than one). */}
-        {!editing && !isPersonal && suites.length > 1 && (
-          <Field label="Which event?">
-            <select value={activeSuite} onChange={(e) => setActiveSuite(e.target.value)} style={inp}>
-              {suites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
-          </Field>
-        )}
-
         {/* Start from a saved template (reuse a recurring goal's setup). */}
         {!editing && templates.length > 0 && (
           <Field label="Start from a template">
@@ -357,6 +373,7 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
           </Field>
         )}
 
+        {!isComp && (<>
         <Field label="How do you want to track it?">
           <div style={{ display: 'flex', gap: 8 }}>
             <Seg active={track === 'tile'} onClick={() => setTrack('tile')}>📊 From my dashboard</Seg>
@@ -462,15 +479,55 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
             </select>
           </Field>
         </div>
+        </>)}
 
-        <Field label="Goal type" hint="“Healthy range” flags going too far over — good for ratios like returning %.">
+        <Field label="Goal type" hint="“Healthy range” flags going too far over; “Mix / split” tracks shares of a whole.">
           <select value={direction} onChange={(e) => setDirection(e.target.value)} style={inp}>
             <option value="at_least">Hit a target — reach the number or beat it ↑</option>
             <option value="at_most">Stay under a cap — keep the number below it ↓</option>
             <option value="range">Healthy range — stay within a band (flag over) ↕</option>
+            <option value="composition">Mix / split — shares of a 100% whole (New/Returning, age…) ◑</option>
           </select>
         </Field>
 
+        {/* Composition: pick a breakdown tile, then set each slice's target share. */}
+        {isComp && (
+          <div style={{ border: '1px solid var(--hairline)', borderRadius: 12, padding: 12, marginBottom: 12 }}>
+            <Field label="Breakdown tile" hint="A chart/table split by category (e.g. customers by type, audience by age).">
+              <select value={dashboardId} onChange={(e) => { setDashboardId(e.target.value); setTileId(''); setParts([]); }} style={inp}>
+                <option value="">{cat ? 'Choose a dashboard…' : 'Loading…'}</option>
+                {dashboards.map((d) => <option key={d.dashboardId} value={d.dashboardId}>{d.title}{d.setName ? ` · ${d.setName}` : ''}</option>)}
+              </select>
+              {dashboardId && (
+                <select value={tileId} onChange={(e) => { setTileId(e.target.value); setParts([]); }} style={{ ...inp, marginTop: 8 }}>
+                  <option value="">Choose a tile…</option>
+                  {seriesTilesFor(dashboardId).map((t) => <option key={t.tileId} value={t.tileId}>{t.title}</option>)}
+                </select>
+              )}
+            </Field>
+            {tileId && (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '4px 0 8px' }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, flex: 1 }}>Target split{parts.length ? ` — sums to ${parts.reduce((s, p) => s + (Number(p.target) || 0), 0)}%` : ''}</span>
+                  <button type="button" onClick={loadSegments} style={{ ...addMsBtn }}>{partsLoading ? '…' : '↻ Reload segments'}</button>
+                </div>
+                {parts.map((p, i) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                    <button type="button" onClick={() => setParts((ps) => ps.map((x, j) => ({ ...x, focus: j === i ? !x.focus : x.focus })))} title="Focus slice (Owl targets this to grow it)" style={{ border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 13, opacity: p.focus ? 1 : 0.35 }}>🎯</button>
+                    <span style={{ flex: 1, minWidth: 0, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.label}</span>
+                    <input value={p.target} onChange={(e) => setParts((ps) => ps.map((x, j) => j === i ? { ...x, target: e.target.value } : x))} inputMode="decimal" style={{ ...inp, width: 64, textAlign: 'right' }} />
+                    <span style={{ fontSize: 12, color: 'var(--muted)' }}>%</span>
+                  </div>
+                ))}
+                <Field label="Tolerance (± percentage points)" hint="How far a slice can drift before it's flagged." style={{ marginTop: 6 }}>
+                  <input value={partTol} onChange={(e) => setPartTol(e.target.value)} inputMode="decimal" style={{ ...inp, width: 90 }} />
+                </Field>
+              </>
+            )}
+          </div>
+        )}
+
+        {!isComp && (<>
         <div style={{ display: 'flex', gap: 10 }}>
           <Field label="Track from" hint="When selling started — pace runs from here. Defaults to today." style={{ flex: 1 }}>
             <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} style={inp} />
@@ -564,6 +621,7 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
             <Seg active={display === 'dial'} onClick={() => setDisplay('dial')}>◔ Dial</Seg>
           </div>
         </Field>
+        </>)}
 
         {isPersonal ? (
           <>
