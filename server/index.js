@@ -1973,8 +1973,11 @@ async function buildFacts(user, entityId, force = false, alignDaysBefore = false
   for (const p of picks) if (!(p.def.id in entityViews)) entityViews[p.def.id] = db.getFilterView('entity', entityId, p.def.id) || null;
   // Days-to-go alignment (opt-in): per dashboard with a days-before sync in apply
   // mode, resolve { filterName: expr } once and layer it onto each tile's query.
+  // Keyed by SUITE+dashboard — a shared dashboard's alignment differs per event
+  // (each event's days-to-go), so it must not be computed once and reused.
+  const dboKey = (p) => `${p.suiteId}|${p.def.id}`;
   const daysBeforeOverlays = {};
-  if (alignDaysBefore) for (const p of picks) if (!(p.def.id in daysBeforeOverlays)) daysBeforeOverlays[p.def.id] = await daysBeforeOverlayFor(p.def, user, p.suiteId, lockMaps[p.suiteId] || {});
+  if (alignDaysBefore) for (const p of picks) if (!(dboKey(p) in daysBeforeOverlays)) daysBeforeOverlays[dboKey(p)] = await daysBeforeOverlayFor(p.def, user, p.suiteId, lockMaps[p.suiteId] || {});
 
   const dropped = []; // tiles excluded from the facts, with the reason (logged below)
   const tiles = (await Promise.all(picks.slice(0, maxTiles).map(async (p) => {
@@ -1983,7 +1986,7 @@ async function buildFacts(user, entityId, force = false, alignDaysBefore = false
     if (view) for (const [fname, qfield] of Object.entries(p.tile.listenTo || {})) if (fname in view) extra[qfield] = view[fname];
     // Days-to-go overlay — but NOT for analytics/GA4 (they have no days-before-event
     // axis; forcing one can return zero, which is what broke GA4 tiles in the briefing).
-    const dbo = isAnalyticsName(p.setName) ? null : daysBeforeOverlays[p.def.id];
+    const dbo = isAnalyticsName(p.setName) ? null : daysBeforeOverlays[dboKey(p)];
     if (dbo) for (const [fname, qfield] of Object.entries(p.tile.listenTo || {})) if (fname in dbo) extra[qfield] = dbo[fname];
     // Expand the dashboard's client-default saved filters into the lock map (suite
     // locks still win), exactly like resolveTileValue — so a GA4 tile gets its saved
@@ -2122,16 +2125,22 @@ async function generateEvents(user, entityId, segment, { force = false, debug = 
   if (briefInflight.has(key)) return briefInflight.get(key);
   const p = (async () => {
     const { groups, byId } = await factGroups(user, entityId, selected, force);
-    if (!groups.length) return { events: [] };
-    const raw = await insights.briefHomeEvents({ groups, today: todayLabel(), instructions: briefInstructions(user, entityId, segment), apiKey });
+    const nameById = Object.fromEntries(suites.map((s) => [s.id, s.name]));
+    const raw = groups.length ? await insights.briefHomeEvents({ groups, today: todayLabel(), instructions: briefInstructions(user, entityId, segment), apiKey }) : { events: [] };
     const link = (id) => (id && byId[id] ? { dashboardId: id, suiteId: byId[id].suiteId, label: `${byId[id].setName} → ${byId[id].title}` } : null);
-    const nameById = Object.fromEntries(groups.map((g) => [g.suiteId, g.suiteName]));
-    const order = Object.fromEntries(selected.map((id, i) => [id, i]));
-    const events = (raw.events || []).filter((e) => nameById[e.suiteId]).map((e) => ({
-      suiteId: e.suiteId, suiteName: nameById[e.suiteId],
-      headline: String(e.headline || '').slice(0, 400),
-      bullets: (e.bullets || []).slice(0, 3).map((b) => ({ text: String(b.text || '').slice(0, 400), link: link(b.dashboardId) })).filter((b) => b.text),
-    })).sort((a, b) => (order[a.suiteId] ?? 99) - (order[b.suiteId] ?? 99));
+    const aiById = Object.fromEntries((raw.events || []).filter((e) => nameById[e.suiteId]).map((e) => [e.suiteId, e]));
+    const haveFacts = new Set(groups.map((g) => g.suiteId));
+    // One section per SELECTED event, in order. Events that returned no data still
+    // get a section (so all the chosen events are visible) with a clear note.
+    const events = selected.map((id) => {
+      const e = aiById[id];
+      if (e) return {
+        suiteId: id, suiteName: nameById[id] || '',
+        headline: String(e.headline || '').slice(0, 400),
+        bullets: (e.bullets || []).slice(0, 3).map((b) => ({ text: String(b.text || '').slice(0, 400), link: link(b.dashboardId) })).filter((b) => b.text),
+      };
+      return { suiteId: id, suiteName: nameById[id] || '', headline: haveFacts.has(id) ? 'No headline available for this event right now.' : 'No sales/activity recorded for this event yet.', bullets: [], empty: true };
+    });
     const out = { events, generatedAt: new Date().toISOString() };
     cachePut(briefCache, key, out);
     return out;
