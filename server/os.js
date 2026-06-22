@@ -16,7 +16,7 @@ const fs = require('fs');
 const path = require('path');
 const express = require('express');
 
-function mount(app, { db, auth, mailer, push }) {
+function mount(app, { db, auth, mailer, push, onInbound }) {
   const sql = db.db;            // raw better-sqlite3 handle
   const now = () => new Date().toISOString();
   const uuid = () => crypto.randomUUID();
@@ -115,14 +115,16 @@ function mount(app, { db, auth, mailer, push }) {
       .map((r) => ({ ...messageRow(r), attachments: byMsg[r.id] || [] }));
   }
 
-  // Persist base64 attachments for a message. Hard limits: 5 files, 10MB each.
+  // Persist base64 attachments for a message. Defaults suit in-app uploads
+  // (5 files, 10MB each); callers can raise the caps — inbound email carries
+  // settlement/invoice PDFs that can run larger.
   const MAX_FILES = 5, MAX_BYTES = 10 * 1024 * 1024;
-  function saveAttachments(threadId, messageId, list) {
+  function saveAttachments(threadId, messageId, list, { maxFiles = MAX_FILES, maxBytes = MAX_BYTES } = {}) {
     let n = 0;
-    for (const f of (list || []).slice(0, MAX_FILES)) {
+    for (const f of (list || []).slice(0, maxFiles)) {
       try {
         const buf = Buffer.from(String(f.data || ''), 'base64');
-        if (!buf.length || buf.length > MAX_BYTES) continue;
+        if (!buf.length || buf.length > maxBytes) continue;
         const id = uuid();
         fs.writeFileSync(path.join(ATT_DIR, id), buf);
         sql.prepare('INSERT INTO os_attachments (id, message_id, thread_id, name, mime, size, created_at) VALUES (?,?,?,?,?,?,?)')
@@ -548,7 +550,7 @@ function mount(app, { db, auth, mailer, push }) {
   }
 
   // Idempotent ingest. Returns { ok, threadId } | { skipped } | { error }.
-  function ingestInbound({ from, to, cc, subject, text, html, raw, email, messageId }) {
+  function ingestInbound({ from, to, cc, subject, text, html, raw, email, messageId, attachments }) {
     const fromEmail = stripAngle(from);
     const recipients = [...asList(to), ...asList(cc)];
     const ent = routeEntity(recipients);
@@ -576,10 +578,23 @@ function mount(app, { db, auth, mailer, push }) {
         .run(threadId, ent.id, '', 'message', '', subj, 'normal', 'open', fromEmail, ts, ts);
     }
     const authorType = authorTypeFor(ent.id, fromEmail);
+    const mid = uuid();
     sql.prepare('INSERT INTO os_messages (id, thread_id, author_type, author_email, author_name, channel, body, created_at, ext_id) VALUES (?,?,?,?,?,?,?,?,?)')
-      .run(uuid(), threadId, authorType, fromEmail, '', 'email', body, ts, String(messageId || ''));
+      .run(mid, threadId, authorType, fromEmail, '', 'email', body, ts, String(messageId || ''));
+    // Inbound attachments (PDFs etc.). Forwarder posts [{ name, mime, data(base64) }].
+    // Bigger caps than in-app uploads — settlement/invoice PDFs run larger. These
+    // are the files the Owl's settlement auto-ingest (next slice) reads.
+    const nAtt = saveAttachments(threadId, mid, Array.isArray(attachments) ? attachments : [], { maxFiles: 10, maxBytes: 25 * 1024 * 1024 });
     touch(threadId);
-    return { ok: true, threadId, entityId: ent.id, created: !t };
+    // Hand stored attachments to the Owl auto-ingest (settlements/invoices), if
+    // wired. Fire-and-forget: extraction is slow (AI) and must never block or
+    // break the webhook response. Errors are swallowed + logged downstream.
+    if (nAtt && typeof onInbound === 'function') {
+      const meta = sql.prepare('SELECT id, name, mime, size FROM os_attachments WHERE message_id=?').all(mid);
+      Promise.resolve().then(() => onInbound({ entityId: ent.id, threadId, messageId: mid, from: fromEmail, subject: subj, attachments: meta }))
+        .catch((e) => console.error('[os] onInbound handler error:', e.message));
+    }
+    return { ok: true, threadId, messageId: mid, entityId: ent.id, created: !t, attachments: nAtt };
   }
 
   // One-time cleanup of messages/threads ingested before MIME decoding existed —
@@ -610,11 +625,11 @@ function mount(app, { db, auth, mailer, push }) {
   // `x-owl-secret` or `?secret=`) that whatever forwards mail must include.
   // Transport-agnostic: Cloudflare Email Worker, SendGrid Parse, Resend inbound,
   // etc. all just POST this JSON shape.
-  app.post('/api/inbound/email', requireOn, (req, res) => {
+  app.post('/api/inbound/email', bigJson, requireOn, (req, res) => {
     const given = req.get('x-owl-secret') || req.query.secret || (req.body || {}).secret || '';
     if (given !== inboundSecret()) return res.status(401).json({ error: 'bad secret' });
     const r = ingestInbound(req.body || {});
-    if (r.ok) return res.status(201).json({ ok: true, threadId: r.threadId });
+    if (r.ok) return res.status(201).json({ ok: true, threadId: r.threadId, attachments: r.attachments || 0 });
     if (r.skipped) return res.json({ ok: true, skipped: r.reason });
     console.warn('[os] inbound unrouted:', r.error, r.recipients || '');
     return res.status(202).json({ ok: false, error: r.error }); // 202: accepted but ignored
@@ -634,8 +649,17 @@ function mount(app, { db, auth, mailer, push }) {
     res.json({ domain: db.getSetting('inbound_domain', ''), secret: inboundSecret(), webhookPath: '/api/inbound/email' });
   });
 
+  // Read a stored attachment's bytes (for the Owl auto-ingest to extract PDFs).
+  // Scoped by the caller (the inbound hook only hands ids it just stored).
+  function getAttachmentBuffer(id) {
+    const a = sql.prepare('SELECT id, name, mime FROM os_attachments WHERE id=?').get(id);
+    if (!a) return null;
+    try { return { buf: fs.readFileSync(path.join(ATT_DIR, a.id)), name: a.name, mime: a.mime }; }
+    catch (e) { console.error('[os] attachment read failed:', e.message); return null; }
+  }
+
   console.log('[os] Experience OS spine mounted', enabled() ? '(enabled)' : '(disabled — set os_enabled=1)');
-  return { announce, subjectThread };
+  return { announce, subjectThread, getAttachmentBuffer };
 }
 
 module.exports = { mount };

@@ -17,6 +17,14 @@ const insights = require('./insights');
 const mailer = require('./mailer');
 const messaging = require('./messaging');
 const rateLimit = require('./ratelimit');
+// Query & scope engine (shared library): the single place Looker queries run and
+// the per-client organiser scope is enforced. Lifted out of this file; behaviour
+// unchanged. See server/query.js.
+const {
+  runLookerQuery, applyScope, stripAnyValue, ANY_VALUE, currentFirstEventSort,
+  cleanFilterMap, expandLockMap, effectiveFilterValues, tileQueryBody, daysBeforeOverlayFor,
+  primaryTileValue,
+} = require('./query')({ looker, auth });
 
 const app = express();
 // Behind a reverse proxy (Caddy/Nginx) in production so Secure cookies + the
@@ -28,7 +36,9 @@ if (process.env.NODE_ENV === 'production' || process.env.TRUST_PROXY === '1') ap
 const jsonParser = express.json({ limit: '5mb' });
 const parsesOwnBody = (p) => p === '/api/admin/import' || p.startsWith('/api/admin/settlements') || p.startsWith('/api/admin/documents')
   // OS messenger attachment payloads (base64) need a bigger limit — os.js parses these itself.
-  || /^\/api\/os\/threads\/[^/]+\/messages$/.test(p) || p === '/api/os/admin/announce';
+  || /^\/api\/os\/threads\/[^/]+\/messages$/.test(p) || p === '/api/os/admin/announce'
+  // Inbound email may carry attachment PDFs (base64) — os.js parses it with a bigger limit.
+  || p === '/api/inbound/email';
 app.use((req, res, next) => (parsesOwnBody(req.path) ? next() : jsonParser(req, res, next)));
 // API responses are personal and live (suites, branding, icons…). Without an
 // explicit header some browsers (Safari especially) heuristically cache GETs,
@@ -71,9 +81,17 @@ tiktok.init({ db });
 // comms spine can push alongside email.
 const push = require('./push');
 push.mount(app, { db, auth });
+// Owl auto-ingest — settlements/invoices that arrive by CC-the-Owl email
+// (disposable module; no tables/routes of its own). Triggered by the os inbound
+// hook below. Safe by default: does nothing unless the sender is on the allowlist
+// and the kill-switch is on.
+const owlIngest = require('./owlIngest').mount({ db, insights, anthropicKeyForEntity });
 // Experience OS comms spine — self-contained module (own tables + routes under
 // /api/os). Remove this line + server/os.js to fully uninstall the feature.
-const os = require('./os').mount(app, { db, auth, mailer, push });
+let osApi;
+const os = require('./os').mount(app, { db, auth, mailer, push,
+  onInbound: (p) => owlIngest.handle({ ...p, getAttachmentBuffer: osApi.getAttachmentBuffer }) });
+osApi = os;
 
 // ─── Health ───────────────────────────────────────────────────────────────────
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
@@ -469,13 +487,6 @@ app.get('/api/my/suites/:id', auth.requireAuth, (req, res) => {
 // Per-user "save my view" (client self-service) + the client default an admin
 // sets. Resolution on load is user view > entity default > the dashboard's own
 // default_value (applied client-side in ViewPage). Locks always still win.
-const cleanFilterMap = (f) => {
-  const out = {};
-  if (f && typeof f === 'object' && !Array.isArray(f)) {
-    for (const [k, v] of Object.entries(f).slice(0, 60)) if (typeof v === 'string') out[String(k).slice(0, 200)] = v.slice(0, 2000);
-  }
-  return out;
-};
 
 app.get('/api/my/dashboard-filters/:dashboardId', auth.requireAuth, (req, res) => {
   const { dashboardId } = req.params;
@@ -509,409 +520,363 @@ app.delete('/api/admin/entities/:entityId/dashboard-filters/:dashboardId', auth.
   res.json({ ok: true });
 });
 
+// ─── Dashboards → server/dashboards.js ─────────────────────────────────────────
+// Extracted: dashboard CRUD, Looker import, folders, run-query and drill. The
+// query routes share the one query-engine instance (functions injected), so the
+// cache + scope boundary stay singular across the app.
+require('./dashboards').mount(app, {
+  store, db, auth, looker,
+  convertDashboard, fetchDashboard, parseDrillUrl,
+  runLookerQuery, applyScope, stripAnyValue, currentFirstEventSort,
+});
 
-// Expand the map so each name-keyed lock also appears under its resolved field
-// — then a dashboard whose organiser filter is named differently still locks.
-// Name keys stay (and win client-side) so same-field filters (Current/Past
-// Event) keep locking independently.
-// The offset()-based "change" tiles are row-order sensitive: a single-value
-// tile shows the FIRST row, so the CURRENT event must lead the combined event
-// filters or the comparison reads backwards (the −83% vs +83% bug). Reorder
-// "Current & Past Events" / "Comparison Events" (+ cashless) so the Current
-// Event value(s) come first — deterministic regardless of how an admin entered
-// them, and harmless when a tile sorts its own rows (just reorders the IN-list).
-const COMBO_EVENT_FILTERS = {
-  'Current & Past Events': ['Current Event', 'Event Name'],
-  'Comparison Events': ['Current Event', 'Event Name'],
-  'Comparison Cashless Events': ['Current Cashless Event'],
-};
-function orderCurrentFirst(lockMap) {
-  const splitV = (v) => String(v == null ? '' : v).split(',').map((s) => s.trim()).filter(Boolean);
-  const out = { ...lockMap };
-  for (const [combo, currentNames] of Object.entries(COMBO_EVENT_FILTERS)) {
-    if (out[combo] == null || out[combo] === '') continue;
-    const vals = splitV(out[combo]);
-    if (vals.length < 2) continue;
-    let currentVals = [];
-    for (const n of currentNames) { currentVals = splitV(lockMap[n]); if (currentVals.length) break; }
-    if (!currentVals.length) continue;
-    const lead = vals.filter((v) => currentVals.includes(v));
-    const rest = vals.filter((v) => !currentVals.includes(v));
-    if (lead.length && rest.length) out[combo] = [...lead, ...rest].join(',');
-  }
-  return out;
+// ─── Goals (the Results pillar) → server/goals.js ──────────────────────────────
+// A tile-sourced goal reads the live number off a dashboard tile through the
+// SHARED, scope-enforced query path (so the goal value == what the dashboard
+// shows, and the per-tenant scope can't be bypassed). The suite's filter locks
+// (which event) are applied exactly as a dashboard view would apply them.
+async function resolveTileValue({ dashboardId, tileId, user, suiteId }) {
+  const def = db.getDashboard(dashboardId);
+  if (!def) return null;
+  const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))];
+  const tile = tiles.find((t) => t.id === tileId);
+  if (!tile) return null;
+  // Match the dashboard view exactly: apply its client-default saved filters (e.g.
+  // a date range — which a GA4 tile needs to return anything but 0), with the
+  // suite's organiser/event locks layered on top so scope still wins.
+  const su = db.getSuite(suiteId);
+  const entityView = su?.entityId ? (db.getFilterView('entity', su.entityId, dashboardId) || {}) : {};
+  const lockMap = { ...expandLockMap(entityView), ...expandLockMap(db.lockedFiltersForSuite(suiteId)) };
+  const body = await tileQueryBody(tile, def, user, suiteId, lockMap);
+  if (!body) return null; // scope denied or non-queryable tile
+  // Drop any "days before event" / days-to-go clip so a running-total KPI reads the
+  // FULL to-date figure the dashboard headline shows (e.g. Total Tickets Sold 44,806),
+  // not an as-of slice (43,310). Same treatment the curve resolver gives — keeps the
+  // goal, the curve and the dashboard on one number. No-op for tiles without such a
+  // filter (date ranges and other filters are untouched).
+  body.filters = stripDaysBeforeFilters(body.filters, def, tile).filters;
+  const data = await runLookerQuery('/queries/run/json_detail', body);
+  // Use the number the tile actually SHOWS (honours hidden_fields, picks the
+  // visible primary measure, reads the rendered value) so the goal == the dashboard.
+  return primaryTileValue(data, tile.vis || {});
 }
 
-function expandLockMap(lockMap) {
-  const ordered = orderCurrentFirst(lockMap || {});
-  const out = { ...ordered };
-  for (const [k, v] of Object.entries(ordered)) {
-    if (k.includes('.')) continue;
-    const field = auth.filterNameToField(k);
-    if (field && out[field] == null) out[field] = v;
+// Remove "Days Before Event" / days-to-go type filters from a built query body, so a
+// forecast curve reads last time's FULL sell-through to event day rather than the
+// to-date slice these comparison dashboards usually clip it to. Targets the field by
+// name (days_before / days_to_event / …) and by the dashboard's days-to-go sync
+// mapping. Returns { filters, stripped:[keys removed] }.
+function stripDaysBeforeFilters(filters, def, tile) {
+  if (!filters) return { filters, stripped: [] };
+  const out = { ...filters };
+  const stripped = [];
+  const isDays = (k) => /day[s_]*\s*(before|to|until|remaining)/i.test(String(k)) || /before[_\s]*event/i.test(String(k));
+  const syncName = def && def.daysBeforeSync ? def.daysBeforeSync.filterName : null;
+  const mappedField = syncName && tile && tile.listenTo ? tile.listenTo[syncName] : null;
+  for (const k of Object.keys(out)) {
+    if (isDays(k) || (mappedField && k === mappedField)) { delete out[k]; stripped.push(k); }
   }
-  return out;
+  return { filters: out, stripped };
 }
 
-// ─── Saved (editable) dashboards ───────────────────────────────────────────────
-
-// List — scoped by access (admin sees all; client sees shared + their own).
-app.get('/api/dashboards', auth.requireAuth, (req, res) => {
-  res.json(store.list().filter((d) => auth.canAccessDashboard(req.user, d)));
-});
-
-// Folder-level "📌 Imported filters" — a PERSISTENT setting on the folder path that
-// cascades to every dashboard in it (+ subfolders), including ones added later.
-// Applied at view time (see GET /api/dashboards/:id); never written onto dashboards.
-// MUST be declared before `/api/dashboards/:id` or it'd match id="folder-settings".
-app.get('/api/dashboards/folder-settings', auth.requireAdmin, (_req, res) => res.json(db.folderSettingsMap()));
-app.post('/api/dashboards/folder/keep-imported', auth.requireAdmin, (req, res) => {
-  const folder = String((req.body || {}).folder || '');
-  const on = !!(req.body || {}).on;
-  db.setFolderKeepImported(folder, on);
-  res.json({ ok: true, folder, on });
-});
-
-app.get('/api/dashboards/:id', auth.requireAuth, (req, res) => {
-  const d = store.get(req.params.id);
-  if (!d) return res.status(404).json({ error: 'Dashboard not found' });
-  if (!auth.canAccessDashboard(req.user, d)) return res.status(403).json({ error: 'Not allowed' });
-  // View-time cascade: a persistent folder setting can pin imported filters for the
-  // whole folder. Surfaced as a separate hint so the editor still shows the
-  // dashboard's OWN flag; it's never persisted onto the dashboard.
-  res.json({ ...d, folderKeepImported: db.folderKeepImportedFor(d.folder) });
-});
-
-// Create / edit / delete / import — admin only (Howler builds; clients view).
-app.post('/api/dashboards', auth.requireAdmin, (req, res) => res.status(201).json(store.create(req.body || {})));
-app.put('/api/dashboards/:id', auth.requireAdmin, (req, res) => {
-  const d = store.update(req.params.id, req.body || {});
-  if (!d) return res.status(404).json({ error: 'Dashboard not found' });
-  res.json(d);
-});
-app.delete('/api/dashboards/:id', auth.requireAdmin, (req, res) => {
-  res.status(store.remove(req.params.id) ? 204 : 404).end();
-});
-
-app.post('/api/dashboards/import', auth.requireAdmin, async (req, res) => {
-  const { lookerDashboardId, title, folder } = req.body || {};
-  if (!lookerDashboardId) return res.status(400).json({ error: 'lookerDashboardId is required' });
-  try {
-    const source = await fetchDashboard(lookerDashboardId);
-    await looker.resolveElementQueries(source.elements);
-    const def = convertDashboard(source);
-    if (title) def.title = title;
-    if (req.body?.keepImportedFilters) def.keepImportedFilters = true; // Looker defaults stay authoritative
-    // Folder: explicit choice, else the dashboard's Looker folder.
-    def.folder = (folder || source.dashboard?.folder?.name || '').trim();
-    const created = store.create(def);
-    try { db.harvestDashboardTiles(created, { sourceDashboardId: created.id }); } catch (e) { console.error('[harvest]', e.message); }
-    res.status(201).json(created);
-  } catch (err) {
-    console.error('[POST /api/dashboards/import]', err.message);
-    res.status(500).json({ error: err.message });
+// Time-series version of resolveTileValue: run the SAME scoped query, but return
+// the whole [{ t, v }] series (a date dimension × the primary measure) instead of
+// one number. This is what powers "review last time's curve" when setting goal
+// checkpoints — the goal links a chart/table tile that carries the sell-by-now
+// shape, and we read its rows under the chosen event's scope. Scope is still
+// enforced inside tileQueryBody, exactly like the single-value path.
+async function resolveTileSeries({ dashboardId, tileId, user, suiteId }) {
+  const def = db.getDashboard(dashboardId);
+  if (!def) return [];
+  const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))];
+  const tile = tiles.find((t) => t.id === tileId);
+  if (!tile) return [];
+  const su = db.getSuite(suiteId);
+  const entityView = su?.entityId ? (db.getFilterView('entity', su.entityId, dashboardId) || {}) : {};
+  const lockMap = { ...expandLockMap(entityView), ...expandLockMap(db.lockedFiltersForSuite(suiteId)) };
+  const body = await tileQueryBody(tile, def, user, suiteId, lockMap);
+  if (!body) return [];
+  body.filters = stripDaysBeforeFilters(body.filters, def, tile).filters; // full curve to event day
+  body.limit = Math.max(Number(body.limit) || 0, 1000); // enough rows for a full curve
+  const data = await runLookerQuery('/queries/run/json_detail', body);
+  const fields = data?.fields || {};
+  const rows = data?.data || [];
+  if (!rows.length) return [];
+  const hidden = new Set((tile.vis || {}).hidden_fields || []);
+  const dims = (fields.dimensions || []).filter((f) => !hidden.has(f.name));
+  const measures = [...(fields.measures || []), ...(fields.table_calculations || [])].filter((f) => !hidden.has(f.name));
+  const isDateName = (n) => /date|day|week|month|year|created|time/i.test(n || '');
+  const looksDate = (v) => typeof v === 'string' && /^\d{4}-\d{2}/.test(v);
+  const dateDim = dims.find((f) => isDateName(f.name)) || dims.find((f) => looksDate(rows[0][f.name]?.value)) || dims[0];
+  const measure = measures[0] || dims.find((f) => f !== dateDim);
+  if (!dateDim || !measure) return [];
+  const numOf = (cell) => {
+    if (!cell) return null;
+    const r = cell.rendered;
+    if (r != null && r !== '') { const m = String(r).replace(/[\s,]/g, '').match(/-?\d+(?:\.\d+)?/); if (m && Number.isFinite(Number(m[0]))) return Number(m[0]); }
+    const v = Number(cell.value); return Number.isFinite(v) ? v : null;
+  };
+  // Pivoted trend (e.g. "26 vs 25 vs 24" pivots the measure by year): the measure cell
+  // is keyed by pivot value. Pick the pivot column with the largest total — typically a
+  // COMPLETE prior period rather than the partial current one — so we read a full curve.
+  const pivots = data.pivots || [];
+  let pickValue;
+  if (pivots.length) {
+    const totals = {};
+    for (const pv of pivots) { let s = 0; for (const row of rows) { const v = numOf(row[measure.name]?.[pv.key]); if (v != null) s += v; } totals[pv.key] = s; }
+    const bestKey = pivots.map((pv) => pv.key).sort((a, b) => (totals[b] || 0) - (totals[a] || 0))[0];
+    pickValue = (row) => numOf(row[measure.name]?.[bestKey]);
+  } else {
+    pickValue = (row) => numOf(row[measure.name]);
   }
-});
+  const series = rows.map((row) => ({ t: String(row[dateDim.name]?.value ?? ''), v: pickValue(row) })).filter((p) => p.v != null);
+  // Preserve the tile's own (chronological) row order; only re-sort when x is ISO dates.
+  if (series.length && looksDate(series[0].t)) series.sort((a, b) => a.t.localeCompare(b.t));
+  return series;
+}
 
-// Preview a Looker folder as a tree of folders → dashboards (admin picks/
-// confirms before importing). Honours ?subfolders=0 to show top-level only.
-app.get('/api/looker/folder/:id', auth.requireAdmin, async (req, res) => {
-  try {
-    const includeSub = req.query.subfolders !== '0';
-    const root = await looker.lookerRequest('GET', `/folders/${encodeURIComponent(req.params.id)}?fields=id,name,dashboards(id,title)`);
-    let tree;
-    if (includeSub) {
-      try { tree = await collectFolderTree(req.params.id); }
-      catch { tree = (root.dashboards || []).map((d) => ({ id: String(d.id), title: d.title, folder: root.name, folderId: String(root.id), depth: 0 })); }
-    } else {
-      tree = (root.dashboards || []).map((d) => ({ id: String(d.id), title: d.title, folder: root.name, folderId: String(root.id), depth: 0 }));
+// Diagnostic sibling: return EVERY pivot column of a trend tile (not just one),
+// so the forecast probe can read both last-year (the shape) and this-year (recent
+// momentum) at once. Same scoped query path; returns { dateField, measureField,
+// columns:[{ key, series:[{t,v}] }] } or null. Read-only, used by the probe route.
+async function resolveTileSeriesAll({ dashboardId, tileId, user, suiteId }) {
+  const def = db.getDashboard(dashboardId);
+  if (!def) return null;
+  const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))];
+  const tile = tiles.find((t) => t.id === tileId);
+  if (!tile) return null;
+  const su = db.getSuite(suiteId);
+  const entityView = su?.entityId ? (db.getFilterView('entity', su.entityId, dashboardId) || {}) : {};
+  const lockMap = { ...expandLockMap(entityView), ...expandLockMap(db.lockedFiltersForSuite(suiteId)) };
+  const body = await tileQueryBody(tile, def, user, suiteId, lockMap);
+  if (!body) return null;
+  const stripResult = stripDaysBeforeFilters(body.filters, def, tile);
+  body.filters = stripResult.filters; // full curve to event day
+  body.limit = Math.max(Number(body.limit) || 0, 1000);
+  const data = await runLookerQuery('/queries/run/json_detail', body);
+  const fields = data?.fields || {};
+  const rows = data?.data || [];
+  if (!rows.length) return null;
+  const hidden = new Set((tile.vis || {}).hidden_fields || []);
+  const dims = (fields.dimensions || []).filter((f) => !hidden.has(f.name));
+  const measures = [...(fields.measures || []), ...(fields.table_calculations || [])].filter((f) => !hidden.has(f.name));
+  const isDateName = (n) => /date|day|week|month|year|created|time/i.test(n || '');
+  const looksDate2 = (v) => typeof v === 'string' && /^\d{4}-\d{2}/.test(v);
+  const dateDim = dims.find((f) => isDateName(f.name)) || dims.find((f) => looksDate2(rows[0][f.name]?.value)) || dims[0];
+  const measure = measures[0] || dims.find((f) => f !== dateDim);
+  if (!dateDim || !measure) return null;
+  const num = (cell) => { if (!cell) return null; const r = cell.rendered; if (r != null && r !== '') { const m = String(r).replace(/[\s,]/g, '').match(/-?\d+(?:\.\d+)?/); if (m && Number.isFinite(Number(m[0]))) return Number(m[0]); } const v = Number(cell.value); return Number.isFinite(v) ? v : null; };
+  const x = rows.map((row) => String(row[dateDim.name]?.value ?? ''));
+  const pivots = data.pivots || [];
+  const columns = [];
+  if (pivots.length) {
+    for (const pv of pivots) columns.push({ key: pv.key, series: rows.map((row, i) => ({ t: x[i], v: num(row[measure.name]?.[pv.key]) })).filter((p) => p.v != null) });
+  } else {
+    columns.push({ key: measure.label || measure.name, series: rows.map((row, i) => ({ t: x[i], v: num(row[measure.name]) })).filter((p) => p.v != null) });
+  }
+  return { dateField: dateDim.name, measureField: measure.name, strippedFilters: stripResult.stripped, columns: columns.filter((c) => c.series.length) };
+}
+// The event's start date straight from Looker (core_events.start_date), scoped to
+// the suite so it returns THIS event — the authoritative anchor for "days to go" so
+// goals don't depend on a hand-typed deadline being entered. Runs a tiny inline
+// query on an explore the suite already uses (one that exposes core_events), newest
+// event first. Returns "YYYY-MM-DD" or null (callers fall back to the briefing date).
+async function resolveEventDate({ suiteId, user }) {
+  const DATE = 'core_events.start_date';
+  // Find an explore (model+view) the suite uses that references core_events.
+  const defs = db.dashboardsInSuite(suiteId).map((id) => db.getDashboard(id)).filter(Boolean);
+  const candidates = [];
+  for (const def of defs) {
+    const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))];
+    for (const t of tiles) {
+      const q = t.query;
+      if (!q?.model || !q?.view) continue;
+      const refsEvents = (q.fields || []).some((f) => /^core_events\./.test(String(f)));
+      candidates.push({ model: q.model, view: q.view, refsEvents });
     }
-    // Group into folders, preserving depth-first order. `path` is the nested
-    // folder path (e.g. "Festivals/MTN Bushfire/Cashless") used when importing.
-    const order = [];
-    const byId = new Map();
-    for (const d of tree) {
-      if (!byId.has(d.folderId)) { byId.set(d.folderId, { id: d.folderId, name: d.folder, depth: d.depth, path: (d.path || [d.folder]).join('/'), dashboards: [] }); order.push(d.folderId); }
-      byId.get(d.folderId).dashboards.push({ id: d.id, title: d.title });
-    }
-    res.json({ id: String(root.id), name: root.name, folders: order.map((fid) => byId.get(fid)), total: tree.length });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// Recursively collect every dashboard in a folder and its subfolders.
-// Returns [{ id, title, folder, folderId, depth, path }] where path is the array
-// of folder names from the import root down to where the dashboard lives.
-async function collectFolderTree(folderId, maxDepth = 6) {
-  const result = [];
+  }
+  // Prefer an explore we KNOW exposes core_events; else try the rest.
   const seen = new Set();
-  async function walk(id, depth, pathArr) {
-    if (seen.has(String(id))) return; // guard against odd cycles
-    seen.add(String(id));
-    const f = await looker.lookerRequest('GET', `/folders/${encodeURIComponent(id)}?fields=id,name,dashboards(id,title)`);
-    const name = f.name || 'Imported folder';
-    const path = [...pathArr, name];
-    for (const d of f.dashboards || []) result.push({ id: String(d.id), title: d.title, folder: name, folderId: String(f.id), depth, path });
-    if (depth < maxDepth) {
-      let children = [];
-      try { children = await looker.lookerRequest('GET', `/folders/${encodeURIComponent(id)}/children?fields=id,name`); } catch { children = []; }
-      for (const c of children || []) await walk(c.id, depth + 1, path);
-    }
-  }
-  await walk(folderId, 0, []);
-  return result;
-}
-
-// Import every dashboard in a Looker folder, filing them under a folder (the
-// Looker folder name by default). With includeSubfolders, the whole tree is
-// imported and each dashboard is filed under its own Looker (sub)folder name.
-// Sequential — can take a while for big folders.
-app.post('/api/dashboards/import-folder', auth.requireAdmin, async (req, res) => {
-  const { folderId, folder: folderName, includeSubfolders = true, keepImportedFilters = false } = req.body || {};
-  if (!folderId) return res.status(400).json({ error: 'folderId is required' });
-  try {
-    const root = await looker.lookerRequest('GET', `/folders/${encodeURIComponent(folderId)}?fields=id,name,dashboards(id,title)`);
-    const rootName = (folderName || root.name || 'Imported folder').trim();
-    const list = includeSubfolders
-      ? await collectFolderTree(folderId)
-      : (root.dashboards || []).map((d) => ({ id: String(d.id), title: d.title, path: [root.name], depth: 0 }));
-    let imported = 0;
-    const failed = [];
-    for (const d of list) {
-      try {
-        const source = await fetchDashboard(String(d.id));
-        await looker.resolveElementQueries(source.elements);
-        const def = convertDashboard(source);
-        if (keepImportedFilters) def.keepImportedFilters = true; // Looker defaults stay authoritative
-        // Nested folder path; the root segment honours the optional name override.
-        const path = (d.path || [root.name]).slice();
-        path[0] = rootName;
-        def.folder = path.join('/');
-        const created = store.create(def);
-        try { db.harvestDashboardTiles(created, { sourceDashboardId: created.id }); } catch (e) { console.error('[harvest]', e.message); }
-        imported++;
-      } catch (e) {
-        failed.push({ id: d.id, title: d.title, error: e.message });
-      }
-    }
-    const folders = [...new Set(list.map((d) => { const p = (d.path || [root.name]).slice(); p[0] = rootName; return p.join('/'); }))];
-    res.json({ folder: rootName, imported, total: list.length, failed, folders: folders.length });
-  } catch (err) {
-    console.error('[POST /api/dashboards/import-folder]', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Backfill folders: for already-imported dashboards with no folder, look up
-// their source Looker dashboard's folder name and file them under it.
-app.post('/api/admin/backfill-folders', auth.requireAdmin, async (_req, res) => {
-  let updated = 0;
-  const errors = [];
-  for (const d of db.listDashboards()) {
-    if (d.folder) continue;
-    const lid = db.getDashboard(d.id)?.source?.lookerDashboardId;
-    if (!lid) continue;
+  const ordered = [...candidates.filter((c) => c.refsEvents), ...candidates.filter((c) => !c.refsEvents)]
+    .filter((c) => { const k = `${c.model}|${c.view}`; if (seen.has(k)) return false; seen.add(k); return true; });
+  for (const c of ordered) {
+    const q = { model: c.model, view: c.view, fields: [DATE], sorts: [`${DATE} desc`], limit: 1 };
+    if (!(await applyScope(q, user, suiteId))) continue; // fail closed → try next / fall back
     try {
-      const ld = await looker.lookerRequest('GET', `/dashboards/${encodeURIComponent(lid)}?fields=folder`);
-      const name = ld.folder?.name;
-      if (name) { db.updateDashboard(d.id, { folder: name }); updated++; }
-    } catch (e) { errors.push({ id: d.id, error: e.message }); }
+      const rows = await runLookerQuery('/queries/run/json', q);
+      const v = rows && rows[0] && rows[0][DATE];
+      if (v != null && v !== '') { const m = String(v).match(/^\d{4}-\d{2}-\d{2}/); if (m) return m[0]; }
+    } catch { /* explore may not expose start_date — try the next */ }
   }
-  res.json({ updated, errors });
-});
+  return null;
+}
+const goalsApi = require('./goals').mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTileSeriesAll, resolveEventDate });
 
-// Distinct dashboard folders (for pickers/grouping).
-app.get('/api/admin/folders', auth.requireAdmin, (_req, res) => {
-  const set = new Set();
-  for (const d of db.listDashboards()) if (d.folder) set.add(d.folder);
-  res.json([...set].sort((a, b) => a.localeCompare(b)));
-});
-
-// Rename a folder (and everything nested beneath it). `from`/`to` are folder
-// paths; the matched prefix is rewritten on every dashboard under it.
-app.post('/api/admin/folders/rename', auth.requireAdmin, (req, res) => {
-  const from = String((req.body || {}).from || '').replace(/\/+$/, '');
-  const toLeaf = String((req.body || {}).to || '').trim();
-  if (!from || !toLeaf) return res.status(400).json({ error: 'from and to are required' });
-  const parent = from.includes('/') ? from.slice(0, from.lastIndexOf('/') + 1) : '';
-  const newPrefix = parent + toLeaf;
-  let updated = 0;
-  for (const d of db.listDashboards()) {
-    const f = d.folder || '';
-    if (f === from || f.startsWith(from + '/')) {
-      db.updateDashboard(d.id, { folder: newPrefix + f.slice(from.length) });
-      updated++;
+// ── Weekly goal nudge (push) ─────────────────────────────────────────────────
+// One calm "your goals this week" push per entity (not per-event): goals needing
+// attention (behind pace · forecast short · checkpoint missed) plus wins (reached).
+// Deduped per ISO week via a setting; respects each user's push pref (sendToEntity
+// filters by notifyPush). Global kill-switch: setting goal_nudges_enabled = '0'.
+function isoWeekKey(tz = 'Africa/Johannesburg') {
+  const p = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date()).reduce((a, x) => { a[x.type] = x.value; return a; }, {});
+  const dt = new Date(Date.UTC(+p.year, +p.month - 1, +p.day));
+  dt.setUTCDate(dt.getUTCDate() + 4 - (dt.getUTCDay() || 7)); // nearest Thursday
+  const yStart = new Date(Date.UTC(dt.getUTCFullYear(), 0, 1));
+  const wk = Math.ceil((((dt - yStart) / 86400000) + 1) / 7);
+  return `${dt.getUTCFullYear()}-W${String(wk).padStart(2, '0')}`;
+}
+// Resolve one entity's goals into a nudge summary { wins[], attention[], body }.
+async function buildGoalNudge(entityId) {
+  const user = { id: `goal-nudge:${entityId}`, role: 'client', entityIds: [entityId], email: '' };
+  const wins = [], attention = []; let resolved = 0;
+  for (const su of db.listSuitesForEntity(entityId)) {
+    const caches = goalsApi.makeGoalCaches();
+    for (const g of goalsApi.listGoals(su.id)) {
+      if (resolved >= 24) break;
+      const p = (await goalsApi.attachProgress(g, user, caches)).progress || {}; resolved += 1;
+      const dir = g.direction || 'at_least';
+      const reached = p.value != null && g.targetValue != null && (dir === 'at_most' ? p.value <= g.targetValue : (p.pct != null ? p.pct >= 100 : p.value >= g.targetValue));
+      if (reached) { wins.push(g.name); continue; }
+      const missed = Array.isArray(p.milestones) && p.milestones.some((m) => { const t = Date.parse(m.byDate); return !Number.isNaN(t) && t < Date.now() && p.value != null && (dir === 'at_most' ? p.value > m.targetValue : p.value < m.targetValue); });
+      if (p.status === 'behind' || (p.forecast && p.forecast.status === 'short') || missed) attention.push(g.name);
     }
   }
-  res.json({ updated });
-});
-
-// Delete a folder (and subfolders): removes every dashboard filed under it.
-app.post('/api/admin/folders/delete', auth.requireAdmin, (req, res) => {
-  const path = String((req.body || {}).path || '').replace(/\/+$/, '');
-  if (!path) return res.status(400).json({ error: 'path is required' });
-  let deleted = 0;
-  for (const d of db.listDashboards()) {
-    const f = d.folder || '';
-    if (f === path || f.startsWith(path + '/')) { store.remove(d.id); deleted++; }
-  }
-  res.json({ deleted });
-});
-
-// ─── LookML metadata (admin builds tiles) ──────────────────────────────────────
-app.get('/api/looker/models', auth.requireAdmin, async (_req, res) => {
-  try { res.json(await looker.listModels()); }
-  catch (err) { res.status(500).json({ error: err.message }); }
-});
-app.get('/api/looker/explores/:model/:explore', auth.requireAdmin, async (req, res) => {
-  try { res.json(await looker.getExploreFields(req.params.model, req.params.explore)); }
-  catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// ─── Query execution (the calculation engine) — scoped per tenant ──────────────
-
-// Slow explores (e.g. cashless) get hammered with identical queries when many
-// tiles or repeat views run. Cache results briefly AND de-duplicate in-flight
-// runs so the same Looker query is never launched twice at once.
-// Query cache with stale-while-revalidate. Fresh hits (< TTL) return instantly.
-// Stale hits (< TTL+STALE) return the cached data immediately AND kick off a
-// background refresh, so users never wait on a slow Looker query for repeat
-// views while data still stays reasonably current. Concurrent identical runs
-// are de-duplicated into one Looker call.
-// Data updates on a ~30-min Howler→Looker pipeline, so caching up to that cadence
-// costs no freshness — instant within a cycle, a new run picked up within ~5 min,
-// and the dashboard Refresh button force-bypasses for the latest run on demand.
-const QCACHE_TTL = (Number(process.env.QUERY_CACHE_TTL) || 300) * 1000;         // fresh window (s)
-const QCACHE_STALE = (Number(process.env.QUERY_CACHE_STALE) || 1800) * 1000;    // serve-stale window (s)
-const QCACHE_MAX = Number(process.env.QUERY_CACHE_MAX) || 500;
-const qCache = new Map();    // key -> { at, data }
-const qInflight = new Map(); // key -> Promise
-function stableKey(obj) {
-  if (Array.isArray(obj)) return '[' + obj.map(stableKey).join(',') + ']';
-  if (obj && typeof obj === 'object') return '{' + Object.keys(obj).sort().map((k) => JSON.stringify(k) + ':' + stableKey(obj[k])).join(',') + '}';
-  return JSON.stringify(obj);
+  const bits = [];
+  if (attention.length) bits.push(`${attention.length} goal${attention.length > 1 ? 's' : ''} need attention: ${attention.slice(0, 3).join(', ')}${attention.length > 3 ? '…' : ''}`);
+  if (wins.length) bits.push(`🎉 ${wins.length} reached: ${wins.slice(0, 2).join(', ')}${wins.length > 2 ? '…' : ''}`);
+  return { wins, attention, body: bits.join(' · ') };
 }
-function refreshQuery(key, path, body) {
-  if (qInflight.has(key)) return qInflight.get(key);
-  const p = looker.lookerRequest('POST', path, body)
-    .then((data) => {
-      qInflight.delete(key);
-      qCache.set(key, { at: Date.now(), data });
-      if (qCache.size > QCACHE_MAX) qCache.delete(qCache.keys().next().value);
-      return data;
-    })
-    .catch((e) => { qInflight.delete(key); throw e; });
-  qInflight.set(key, p);
-  return p;
-}
-// `ttl` optionally overrides the fresh window for this query (ms).
-// `force` skips the cache entirely and waits for live Looker data — used when
-// the user explicitly asks for a refresh (otherwise the serve-stale path would
-// hand back up-to-10-minute-old rows instantly and "refresh" changes nothing).
-async function runLookerQuery(path, body, ttl = QCACHE_TTL, force = false) {
-  const key = path + '|' + stableKey(body);
-  if (force) return refreshQuery(key, path, body);
-  const hit = qCache.get(key);
-  const age = hit ? Date.now() - hit.at : Infinity;
-  if (hit && age < ttl) return hit.data;                       // fresh
-  if (hit && age < ttl + QCACHE_STALE) {                        // stale → serve now, refresh behind
-    refreshQuery(key, path, body).catch(() => {});
-    return hit.data;
-  }
-  return refreshQuery(key, path, body);                         // miss → wait for it
-}
-
-// Force the user's ENTITY (organiser) lock onto every query — the hard security
-// boundary. Suite locks (event/cashless) are NOT forced here; they're per-tile
-// presets applied client-side via listenTo, so current/past/comparison don't
-// clobber each other. A suiteId only gates access + picks the right entity.
-// Admins are unscoped. Returns false to deny.
-// Force the organiser scope onto a query — using the organiser field that
-// belongs to the query's OWN explore (so GA4 etc. don't get core_organisers.name
-// injected, which Looker rejects). A suite context (client view or admin
-// preview) scopes to that suite's organiser; no suite + admin is unscoped.
-// "Is any value" sentinel (mirrors client/src/lib/filterConstants.js ANY_VALUE).
-// A filter set to this means "no constraint" — drop the field from the query
-// entirely. Sending "" instead would make Looker filter for blank values.
-const ANY_VALUE = ' __ANY_VALUE__';
-function stripAnyValue(filters) {
-  const out = {};
-  for (const [k, v] of Object.entries(filters || {})) if (v !== ANY_VALUE) out[k] = v;
-  return out;
-}
-
-async function applyScope(query, user, suiteId) {
-  const scope = await auth.scopeForQuery(query, user, suiteId);
-  if (scope === false) return false; // fail closed
-  query.filters = { ...(query.filters || {}), ...scope };
-  return true;
-}
-
-// Row-order-sensitive comparison tiles (offset() table calcs over current-vs-past
-// events) must return the CURRENT (most recent) event first, or the comparison
-// reads backwards (the −83%/−865 bug). Sorting by event NAME is unreliable
-// (naming conventions vary, e.g. "Event" vs "Event 2025"), so force a sort by the
-// event start date, newest first. Returns a modified query, or null if N/A.
-function currentFirstEventSort(query) {
+async function goalNudgeSweep() {
   try {
-    if (!query) return null;
-    const raw = query.dynamic_fields;
-    const dyn = typeof raw === 'string' ? JSON.parse(raw) : raw;
-    const hasOffset = Array.isArray(dyn) && dyn.some((d) => typeof d?.expression === 'string' && /\boffset\s*\(/i.test(d.expression));
-    if (!hasOffset) return null;
-    const fields = query.fields || [];
-    if (!fields.some((f) => /^core_events\./.test(String(f)))) return null;
-    const DATE = 'core_events.start_date';
-    const nextFields = fields.includes(DATE) ? fields : [...fields, DATE];
-    return { ...query, fields: nextFields, sorts: [`${DATE} desc`] };
-  } catch { return null; }
+    if (!push.isEnabled || !push.isEnabled()) return;
+    if (db.getSetting('goal_nudges_enabled', '1') !== '1') return;
+    const tz = 'Africa/Johannesburg';
+    const hour = Number(new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', hour12: false }).format(new Date()));
+    if (hour < 8) return; // morning+ only; ISO-week dedupe makes it ~Monday 08:00
+    const week = isoWeekKey(tz);
+    for (const ent of db.listEntities()) {
+      if (db.getSetting(`goal_nudge_week:${ent.id}`, '') === week) continue;
+      try {
+        const { wins, attention, body } = await buildGoalNudge(ent.id);
+        db.setSetting(`goal_nudge_week:${ent.id}`, week); // mark done even if nothing to say
+        if (!attention.length && !wins.length) continue;
+        await push.sendToEntity(ent.id, { title: 'Your goals this week', body, url: '/goals' });
+      } catch (e) { console.error('[goal-nudge]', ent.id, e.message); }
+    }
+  } catch (e) { console.error('[goal-nudge] sweep', e.message); }
 }
 
-app.post('/api/run-query', auth.requireAuth, async (req, res) => {
+// Admin: fire a goal nudge on demand for testing. Sends the real summary push to
+// the CALLER's own devices (not the whole client team), so staff can preview it
+// without spamming the client. Does NOT touch the weekly dedupe marker.
+//   POST /api/admin/goals/nudge-test  { entityId }
+app.post('/api/admin/goals/nudge-test', auth.requireAdmin, async (req, res) => {
+  const entityId = req.body?.entityId;
+  if (!entityId || !db.getEntity(entityId)) return res.status(400).json({ error: 'Valid entityId required' });
+  if (!push.isEnabled || !push.isEnabled()) return res.status(400).json({ error: 'Push is not enabled (set push_enabled=1)' });
   try {
-    const { query, filterOverrides = {}, suiteId, refresh = false } = req.body;
-    if (!query) return res.status(400).json({ error: 'query is required' });
-    const queryBody = { ...query, filters: stripAnyValue({ ...(query.filters || {}), ...filterOverrides }) };
-    if (!(await applyScope(queryBody, req.user, suiteId))) {
-      // Admins get the specific reason (which explore couldn't be scoped, or no
-      // organiser configured) so a blocked dashboard is diagnosable; clients get
-      // the generic message (don't leak scoping internals).
-      let error = 'No data access is configured for your account yet.';
-      if (req.user.role === 'admin') {
-        const r = await auth.resolveScope(queryBody, req.user, suiteId);
-        if (r.block) error = `Scope blocked: ${r.reason}`;
-      }
-      return res.status(403).json({ error });
-    }
-    // Force current-event-first ordering for offset comparison tiles; fall back
-    // to the original query if the explore doesn't expose the event date field.
-    const altered = currentFirstEventSort(queryBody);
-    let data;
-    if (altered) {
-      try { data = await runLookerQuery('/queries/run/json_detail', altered, undefined, !!refresh); }
-      catch (e) { console.warn('[run-query] event-date sort fallback:', e.message); data = await runLookerQuery('/queries/run/json_detail', queryBody, undefined, !!refresh); }
-    } else {
-      data = await runLookerQuery('/queries/run/json_detail', queryBody, undefined, !!refresh);
-    }
-    res.json(data);
+    const { wins, attention, body } = await buildGoalNudge(entityId);
+    const text = body || 'No goals need attention right now — nothing would be sent this week.';
+    const sent = (attention.length || wins.length)
+      ? await push.sendToUser(req.user.id, { title: 'Your goals this week (test)', body: text, url: '/goals' })
+      : 0;
+    res.json({ sent, wouldSend: !!(attention.length || wins.length), body: text, wins: wins.length, attention: attention.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+setInterval(() => goalNudgeSweep(), 60 * 60 * 1000); // hourly; fires the first morning of each ISO week
+setTimeout(() => goalNudgeSweep(), 30000); // shortly after boot, in case it's the window
+
+// Owl summary of an event's goals — a short narrative over the RESOLVED goal values
+// (computed here by the goals resolver; the AI only phrases them). Streams plain text
+// like the other Owl surfaces; per-event (the Goals page "Owl summary" button).
+app.post('/api/goals/suites/:suiteId/brief', auth.requireAuth, rateLimit({ windowMs: 60_000, max: 12, by: 'user', scope: 'goals-brief', message: 'Too many goal summaries — please wait a moment.' }), async (req, res) => {
+  const suiteId = req.params.suiteId;
+  const su = db.getSuite(suiteId);
+  if (!su) return res.status(404).json({ error: 'Event not found' });
+  if (req.user.role !== 'admin' && !auth.canAccessSuite(req.user, suiteId)) return res.status(403).json({ error: 'Not allowed' });
+  const apiKey = anthropicKeyForSuite(suiteId);
+  if (!insights.isConfigured(apiKey)) return res.status(400).json({ error: 'AI insights are not configured. Set an Anthropic API key in Admin → Integrations (or .env).' });
+  // Resolve the SAME rich progress the Goals page card detail shows (curve current,
+  // vs-last-time, baseline total, pace, forecast) so the Owl can speak to all of it,
+  // not just the bare value/percent.
+  const caches = goalsApi.makeGoalCaches();
+  const goals = [];
+  for (const g of goalsApi.listGoals(suiteId)) {
+    goals.push(await goalsApi.attachProgress(g, req.user, caches));
+  }
+  if (!goals.length) return res.status(400).json({ error: 'No goals set for this event yet.' });
+  try {
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('X-Accel-Buffering', 'no'); // don't let a reverse proxy buffer the stream
+    res.flushHeaders?.();
+    await insights.streamGoalsBrief({ eventName: su.name, goals, instructions: aiInstructionsFor(suiteId), apiKey }, (t) => res.write(t));
+    res.end();
   } catch (err) {
-    console.error('[POST /api/run-query]', err.message);
+    console.error('[POST /api/goals/:suiteId/brief]', err.message);
+    if (!res.headersSent) res.status(500).json({ error: err.message });
+    else { res.write(`\n\n[error: ${err.message}]`); res.end(); }
+  }
+});
+
+// "Close the gap" — act as the client's marketing & insights manager: mine the event's
+// data (ticket types, demographics, segments, channels) for the nuggets that can push a
+// behind/short goal to target, and return a plan that pre-fills a targeted campaign.
+app.post('/api/goals/:id/gap-plan', auth.requireAuth, rateLimit({ windowMs: 60_000, max: 8, by: 'user', scope: 'goal-gap', message: 'Too many gap plans — please wait a moment.' }), async (req, res) => {
+  const goal = goalsApi.goalById(req.params.id);
+  if (!goal) return res.status(404).json({ error: 'Goal not found' });
+  const suiteId = goal.suiteId;
+  if (req.user.role !== 'admin' && !auth.canAccessSuite(req.user, suiteId)) return res.status(403).json({ error: 'Not allowed' });
+  const su = db.getSuite(suiteId); const entityId = su?.entityId;
+  const apiKey = anthropicKeyForSuite(suiteId);
+  if (!insights.isConfigured(apiKey)) return res.status(400).json({ error: 'AI insights are not configured. Set an Anthropic API key in Admin → Integrations (or .env).' });
+  try {
+    const withProgress = await goalsApi.attachProgress(goal, req.user);
+    const { tiles, catalogue } = await buildFacts(req.user, entityId, false, true);
+    let segments = [];
+    try { segments = db.db.prepare('SELECT name, last_count FROM segments WHERE entity_id=? ORDER BY updated_at DESC LIMIT 50').all(entityId).map((s) => ({ name: s.name, count: s.last_count })); } catch { /* segments table may be empty */ }
+    const plan = await insights.goalGapPlan({
+      goal: withProgress, progress: withProgress.progress, tiles, segments, catalogue,
+      clientName: db.getEntity(entityId)?.name || '', instructions: aiInstructionsFor(suiteId), today: todayLabel(), apiKey,
+    });
+    res.json({ plan });
+  } catch (err) {
+    console.error('[POST /api/goals/:id/gap-plan]', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-app.post('/api/drill', auth.requireAuth, async (req, res) => {
+// Admin diagnostic: show EXACTLY what filters the briefing resolves for each tile on a
+// dashboard (and whether rows come back) — so we can see why a GA4 tile reads zero
+// (e.g. no date range applied). Mirrors buildFacts' resolution (entity view expanded
+// into the lock map + suite locks). Read-only. /api/admin/tile-filter-debug?suiteId=&dashboardId=
+app.get('/api/admin/tile-filter-debug', auth.requireAdmin, async (req, res) => {
   try {
-    const query = parseDrillUrl(req.body?.url);
-    if (!query) return res.status(400).json({ error: 'Could not parse drill link' });
-    if (!(await applyScope(query, req.user, req.body?.suiteId))) {
-      return res.status(403).json({ error: 'No data access is configured for your account yet.' });
+    const { suiteId, dashboardId } = req.query;
+    const su = db.getSuite(suiteId);
+    const def = store.get(dashboardId);
+    if (!su || !def) return res.status(404).json({ error: 'suite or dashboard not found' });
+    const entityId = su.entityId;
+    const user = { id: `debug:${entityId}`, email: req.user.email, role: 'client', entityIds: [entityId] };
+    const view = db.getFilterView('entity', entityId, dashboardId) || null;
+    const lockMap = { ...expandLockMap(view || {}), ...expandLockMap(db.lockedFiltersForSuite(suiteId)) };
+    const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))]
+      .filter((t) => t.type !== 'text' && t.query?.fields?.length);
+    const out = [];
+    for (const t of tiles.slice(0, 14)) {
+      const body = await tileQueryBody(t, def, user, suiteId, lockMap, {});
+      let rows = null, err = null;
+      if (body) { try { const d = await runLookerQuery('/queries/run/json_detail', body, undefined, true); rows = d?.data?.length || 0; } catch (e) { err = e.message; } }
+      out.push({ title: t.title, model: t.query.model, view: t.query.view, listenTo: t.listenTo || {}, resolvedFilters: body ? body.filters : '(no body — scope blocked/unrunnable)', rows, err });
     }
-    const data = await runLookerQuery('/queries/run/json_detail', query);
-    res.json({ query, data });
-  } catch (err) {
-    console.error('[POST /api/drill]', err.message);
-    res.status(500).json({ error: err.message });
-  }
+    res.json({
+      dashboard: def.title, suiteId, entityId,
+      dashboardFilters: (def.filters || []).map((f) => ({ name: f.name, field: f.field || f.dimension, default: f.default_value })),
+      hasEntityView: !!view, entityView: view || null,
+      suiteLocks: db.lockedFiltersForSuite(suiteId),
+      tiles: out,
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // Format a Looker date value ("2026-05-29" / ISO) as "29 May 2026" for the
@@ -1562,197 +1527,11 @@ app.post('/api/dashboard-insight', auth.requireAuth, rateLimit({ windowMs: 60_00
   }
 });
 
-// ─── Settlements ───────────────────────────────────────────────────────────────
-// Event settlement reports. Admin uploads the PDF; Claude extracts it into
-// structured JSON; the client gets an interactive report scoped to their
-// entity. PDF bodies can be large, so admin routes parse their own body.
-const settlementJson = express.json({ limit: '40mb' });
-
-// Can this user open this settlement? Admin: any. Client: must belong to one of
-// their entities.
-function canAccessSettlement(user, s) {
-  if (!s) return false;
-  if (user.role === 'admin') return true;
-  return !!s.entityId && (user.entityIds || []).includes(s.entityId);
-}
-
-// Client list: settlements for the user's entities (admin sees all).
-app.get('/api/my/settlements', auth.requireAuth, (req, res) => {
-  const list = req.user.role === 'admin' ? db.listSettlements() : db.listSettlements({ entityIds: req.user.entityIds || [] });
-  res.json(list);
-});
-
-app.get('/api/settlements/:id', auth.requireAuth, (req, res) => {
-  const s = db.getSettlement(req.params.id);
-  if (!s) return res.status(404).json({ error: 'Settlement not found' });
-  if (!canAccessSettlement(req.user, s)) return res.status(403).json({ error: 'Not allowed' });
-  res.json(s);
-});
-
-// Save notes (user annotations) on a settlement. Writable by anyone who can
-// view it — admin or the assigned client — since notes are collaborative.
-// The client sends the full notes array; we stamp author + timestamp.
-app.put('/api/settlements/:id/notes', auth.requireAuth, (req, res) => {
-  const s = db.getSettlement(req.params.id);
-  if (!s) return res.status(404).json({ error: 'Settlement not found' });
-  if (!canAccessSettlement(req.user, s)) return res.status(403).json({ error: 'Not allowed' });
-  const incoming = Array.isArray(req.body?.notes) ? req.body.notes : [];
-  const clean = incoming.slice(0, 500).map((n) => ({
-    id: String(n.id || '').slice(0, 64) || Math.random().toString(36).slice(2),
-    section: String(n.section || 'general').slice(0, 64),
-    sectionLabel: String(n.sectionLabel || '').slice(0, 120),
-    text: String(n.text || '').slice(0, 4000),
-    author: String(n.author || req.user.email || '').slice(0, 160),
-    at: n.at || new Date().toISOString(),
-  })).filter((n) => n.text.trim());
-  const updated = db.setSettlementNotes(req.params.id, clean);
-  res.json({ notes: updated.notes });
-});
-
-// Download the original PDF.
-app.get('/api/settlements/:id/file', auth.requireAuth, (req, res) => {
-  const s = db.getSettlement(req.params.id);
-  if (!s) return res.status(404).json({ error: 'Settlement not found' });
-  if (!canAccessSettlement(req.user, s)) return res.status(403).json({ error: 'Not allowed' });
-  const f = db.getSettlementFile(req.params.id);
-  if (!f) return res.status(404).json({ error: 'No file attached' });
-  res.setHeader('Content-Type', f.fileType || 'application/pdf');
-  res.setHeader('Content-Disposition', `attachment; filename="${(f.fileName || 'settlement.pdf').replace(/"/g, '')}"`);
-  res.send(Buffer.from(f.file, 'base64'));
-});
-
-// Admin: list all (with entity names for the management table).
-app.get('/api/admin/settlements', auth.requireAdmin, (_req, res) => {
-  res.json(db.listSettlements().map((s) => ({ ...s, entityName: s.entityId ? (db.getEntity(s.entityId)?.name || '') : '' })));
-});
-
-// ─── Event documents (invoices etc.) ───────────────────────────────────────────
-// Plain file storage per client/event — uploaded by admins, downloadable by the
-// assigned client. No extraction.
-app.get('/api/my/documents', auth.requireAuth, (req, res) => {
-  const list = req.user.role === 'admin' ? db.listDocuments() : db.listDocuments({ entityIds: req.user.entityIds || [] });
-  res.json(list);
-});
-app.get('/api/documents/:id', auth.requireAuth, (req, res) => {
-  const doc = db.getDocument(req.params.id);
-  if (!doc) return res.status(404).json({ error: 'Document not found' });
-  const allowed = req.user.role === 'admin' || (doc.entityId && (req.user.entityIds || []).includes(doc.entityId));
-  if (!allowed) return res.status(403).json({ error: 'Not allowed' });
-  res.json({ ...doc, entityName: doc.entityId ? (db.getEntity(doc.entityId)?.name || '') : '' });
-});
-app.get('/api/documents/:id/file', auth.requireAuth, (req, res) => {
-  const doc = db.getDocument(req.params.id);
-  if (!doc) return res.status(404).json({ error: 'Document not found' });
-  const allowed = req.user.role === 'admin' || (doc.entityId && (req.user.entityIds || []).includes(doc.entityId));
-  if (!allowed) return res.status(403).json({ error: 'Not allowed' });
-  const f = db.getDocumentFile(req.params.id);
-  if (!f) return res.status(404).json({ error: 'No file attached' });
-  res.setHeader('Content-Type', f.fileType || 'application/octet-stream');
-  // inline=1 lets the browser render it in the viewer; otherwise force download.
-  const disp = req.query.inline ? 'inline' : 'attachment';
-  res.setHeader('Content-Disposition', `${disp}; filename="${(f.fileName || 'document').replace(/"/g, '')}"`);
-  res.send(Buffer.from(f.file, 'base64'));
-});
-app.get('/api/admin/documents', auth.requireAdmin, (req, res) => {
-  res.json(db.listDocuments(req.query.entityId ? { entityId: req.query.entityId } : {}));
-});
-app.post('/api/admin/documents', auth.requireAdmin, settlementJson, (req, res) => {
-  const { entityId, eventName, title, category, data, fileBase64, fileName, fileType } = req.body || {};
-  if (!fileBase64) return res.status(400).json({ error: 'fileBase64 is required' });
-  res.status(201).json(db.createDocument({ entityId, eventName, title, category, data: data || {}, file: fileBase64, fileName: fileName || '', fileType: fileType || '' }));
-});
-// AI-extract an invoice PDF into structured JSON (same ndjson progress stream
-// as the settlement extraction). Nothing saved — the admin reviews & publishes.
-app.post('/api/admin/documents/extract', auth.requireAdmin, settlementJson, async (req, res) => {
-  const { fileBase64 } = req.body || {};
-  if (!fileBase64) return res.status(400).json({ error: 'fileBase64 is required' });
-  const apiKey = adminAnthropicKey();
-  if (!insights.isConfigured(apiKey)) return res.status(400).json({ error: 'AI extraction needs an Anthropic API key (Admin → Integrations).' });
-  res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
-  res.setHeader('Cache-Control', 'no-cache, no-transform');
-  res.setHeader('X-Accel-Buffering', 'no');
-  res.flushHeaders?.();
-  const send = (obj) => res.write(JSON.stringify(obj) + '\n');
-  send({ type: 'progress', stage: 'reading', chars: 0, rows: 0 });
-  try {
-    const data = await insights.extractInvoice({
-      pdfBase64: fileBase64, apiKey,
-      onProgress: (p) => send({ type: 'progress', stage: 'extracting', ...p }),
-    });
-    send({ type: 'done', data });
-  } catch (err) {
-    console.error('[POST /api/admin/documents/extract]', err.message);
-    send({ type: 'error', error: err.message });
-  }
-  res.end();
-});
-app.put('/api/admin/documents/:id', auth.requireAdmin, settlementJson, (req, res) => {
-  const doc = db.updateDocument(req.params.id, req.body || {});
-  if (!doc) return res.status(404).json({ error: 'Document not found' });
-  res.json(doc);
-});
-app.delete('/api/admin/documents/:id', auth.requireAdmin, (req, res) => {
-  res.status(db.deleteDocument(req.params.id) ? 204 : 404).end();
-});
-
-// Admin: AI-extract an uploaded settlement PDF into the structured JSON draft.
-// Streams progress as newline-delimited JSON ({type:'progress'|'done'|'error'})
-// so the admin sees live feedback — and so bytes keep flowing through any
-// proxy during the long extraction. Nothing is saved; the admin reviews, then
-// publishes via POST /api/admin/settlements.
-app.post('/api/admin/settlements/extract', auth.requireAdmin, settlementJson, async (req, res) => {
-  const { fileBase64, fileType } = req.body || {};
-  if (!fileBase64) return res.status(400).json({ error: 'fileBase64 is required' });
-  if (fileType && fileType !== 'application/pdf') return res.status(400).json({ error: 'Only PDF files are supported for now' });
-  const apiKey = adminAnthropicKey();
-  if (!insights.isConfigured(apiKey)) return res.status(400).json({ error: 'AI extraction needs an Anthropic API key (Admin → Integrations).' });
-  res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
-  res.setHeader('Cache-Control', 'no-cache, no-transform');
-  res.setHeader('X-Accel-Buffering', 'no');
-  res.flushHeaders?.();
-  const send = (obj) => res.write(JSON.stringify(obj) + '\n');
-  send({ type: 'progress', stage: 'reading', chars: 0, rows: 0 });
-  try {
-    const data = await insights.extractSettlement({
-      pdfBase64: fileBase64, apiKey,
-      onProgress: (p) => send({ type: 'progress', stage: 'extracting', ...p }),
-    });
-    send({ type: 'done', data });
-  } catch (err) {
-    console.error('[POST /api/admin/settlements/extract]', err.message);
-    send({ type: 'error', error: err.message });
-  }
-  res.end();
-});
-
-// Admin: publish a settlement (extracted data + original file + assignment).
-app.post('/api/admin/settlements', auth.requireAdmin, settlementJson, (req, res) => {
-  const { entityId, title, status, settlementDate, data, fileBase64, fileName, fileType } = req.body || {};
-  if (!data || typeof data !== 'object') return res.status(400).json({ error: 'data is required' });
-  const s = db.createSettlement({ entityId, title, status, settlementDate, data, file: fileBase64 || '', fileName: fileName || '', fileType: fileType || '' });
-  res.status(201).json(s);
-});
-
-// Admin: load the bundled example report (MTN Bushfire) to demo the feature.
-app.post('/api/admin/settlements/example', auth.requireAdmin, (_req, res) => {
-  try {
-    const data = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'settlement-example.json'), 'utf8'));
-    const s = db.createSettlement({ entityId: null, title: data.meta.eventName, status: 'final', settlementDate: data.meta.settlementDate, data });
-    res.status(201).json(s);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.put('/api/admin/settlements/:id', auth.requireAdmin, settlementJson, (req, res) => {
-  const s = db.updateSettlement(req.params.id, req.body || {});
-  if (!s) return res.status(404).json({ error: 'Settlement not found' });
-  res.json(s);
-});
-
-app.delete('/api/admin/settlements/:id', auth.requireAdmin, (req, res) => {
-  res.status(db.deleteSettlement(req.params.id) ? 204 : 404).end();
-});
+// ─── Settlements & documents → server/settlements.js ───────────────────────────
+// Extracted, self-contained module (own routes; behaviour unchanged). The global
+// json parser still skips /api/admin/settlements* and /api/admin/documents* via
+// `parsesOwnBody` above, so the module's own 40mb parser handles those uploads.
+require('./settlements').mount(app, { db, auth, insights, anthropicKey: adminAnthropicKey });
 
 // ─── Personalised home: tracking, snapshot, briefing ───────────────────────────
 
@@ -1924,73 +1703,6 @@ function clientCatalogue(entityId) {
 // dashboard — applied between the built-in default_value and the suite lock, so
 // it overrides the narrow defaults (e.g. a management board's event filter) but
 // a hard lock still wins.
-function effectiveFilterValues(def, lockMap = {}, overlay = null) {
-  const norm = {};
-  for (const [k, v] of Object.entries(lockMap)) norm[k.trim().toLowerCase()] = v;
-  const fv = {};
-  for (const f of def.filters || []) {
-    const field = (f.field || f.dimension || '').trim().toLowerCase();
-    const nameKey = (f.name || '').trim().toLowerCase();
-    let v = f.default_value || '';
-    if (overlay && typeof overlay[f.name] === 'string') v = overlay[f.name];
-    const locked = norm[nameKey] != null ? norm[nameKey] : (field ? norm[field] : undefined);
-    if (locked != null && locked !== '') v = locked;
-    fv[f.name] = v;
-  }
-  return fv;
-}
-
-// `extraOverrides` (queryField → value) are dashboard filters captured into a
-// saved segment; they override the per-tile defaults. applyScope runs AFTER, so
-// the forced organiser/entity scope always wins — a segment can't widen scope.
-async function tileQueryBody(tile, def, user, suiteId, lockMap = {}, extraOverrides = {}) {
-  const q = tile.query;
-  if (tile.type === 'text' || !q?.model || !q?.view || !(q.fields || []).length) return null;
-  const fv = effectiveFilterValues(def, lockMap);
-  const overrides = {};
-  for (const [filterName, queryField] of Object.entries(tile.listenTo || {})) {
-    const v = fv[filterName];
-    if (v && String(v).trim()) overrides[queryField] = String(v).trim();
-  }
-  const body = { ...q, filters: stripAnyValue({ ...(q.filters || {}), ...overrides, ...extraOverrides }) };
-  if (!(await applyScope(body, user, suiteId))) return null;
-  return body;
-}
-
-// First numeric value in a json_detail result (measures → table calcs → dims) —
-// the days-before-event number a single-value source tile surfaces.
-function firstNumberFromDetail(res) {
-  const row = res?.data?.[0];
-  if (!row) return null;
-  const fields = [...(res.fields?.measures || []), ...(res.fields?.table_calculations || []), ...(res.fields?.dimensions || [])];
-  for (const f of fields) {
-    const v = row[f.name]?.value;
-    if (v != null && v !== '' && !Number.isNaN(Number(v))) return Math.round(Number(v));
-  }
-  return null;
-}
-
-// Server mirror of ViewPage.applyDaysToGo: for a dashboard whose days-to-go sync
-// is in APPLY mode, read the live days-before-event number from its source tile
-// and return a { filterName: expr } overlay (e.g. { "Days Before": ">=42" }) so
-// digest facts compare like-for-like to the same point in last year's cycle —
-// matching what the dashboard shows. Returns null when there's no sync to apply
-// (or the number can't be read), leaving the tile queries untouched.
-async function daysBeforeOverlayFor(def, user, suiteId, lockMap) {
-  const sync = def.daysBeforeSync;
-  if (!sync || sync.mode !== 'apply' || !sync.sourceTileId || !sync.filterName) return null;
-  const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))];
-  const src = tiles.find((t) => t.id === sync.sourceTileId);
-  if (!src?.query) return null;
-  const body = await tileQueryBody(src, def, user, suiteId, lockMap);
-  if (!body) return null;
-  try {
-    const data = await runLookerQuery('/queries/run/json_detail', body, undefined, false);
-    const n = firstNumberFromDetail(data);
-    if (n == null) return null;
-    return { [sync.filterName]: String(sync.expr || '>={n}').replace('{n}', String(n)) };
-  } catch { return null; }
-}
 
 // Cheap home data (no Looker): greeting context, browsing shortcuts, settlement
 // teaser, dashboard catalogue. Called on every home load.
@@ -2110,29 +1822,52 @@ async function buildFacts(user, entityId, force = false, alignDaysBefore = false
     let taken = 0;
     for (const t of tiles) { if (taken >= PER_DASH || picks.length >= FACT_MAX_TILES) break; const before = picks.length; addTile(def, t, dashMeta[did]?.suiteId, true); if (picks.length > before) taken += 1; }
   }
-  // 1d) ALWAYS lead with TICKETING. Guarantee the ticketing set's lead (Overview)
-  //     headline tiles in every briefing — the authoritative sales source (tickets
-  //     sold, revenue, orders) — so GA4/analytics can never crowd them out. Capped
-  //     (TKT_BUDGET) so the other boards still get plenty of the budget. Detected
-  //     by set name; analytics/GA4 sets are excluded.
+  const isAnalyticsName = (name) => /\bga4\b|analytics|google/i.test(name || '');
+  // 1d0) Guarantee the AUTHORITATIVE ticketing HEADLINE tiles by CONTENT, so the lead
+  //      sales figures are always present even when set/dashboard naming doesn't say
+  //      "ticketing/overview" (which is what let a Reps board take the lead). Match
+  //      tiles like "Total Tickets Sold", "Gross Revenue", "Orders" — excluding
+  //      analytics/GA4 sources (their "tickets" are funnel interest, not sales).
+  const TICKET_HEADLINE = /total\s*tickets|tickets?\s*sold|gross\s*(revenue|sales)|\bnet\s*sales\b|tickets?\s*revenue|sell[-\s]?through|attendance|checked?[-\s]?in/i;
+  let head = 0; const HEAD_BUDGET = 4;
+  for (const c of catalogue) {
+    if (head >= HEAD_BUDGET || picks.length >= FACT_MAX_TILES) break;
+    if (isAnalyticsName(c.setName) || isAnalyticsName(c.title)) continue;
+    const def = store.get(c.dashboardId);
+    if (!def || !dashMeta[c.dashboardId]) continue;
+    const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((t) => t.tiles || []))]
+      .filter((t) => t.type !== 'text' && t.query?.fields?.length && TICKET_HEADLINE.test(t.title || ''))
+      .sort((a, b) => tilePriority(a) - tilePriority(b));
+    for (const t of tiles) {
+      if (head >= HEAD_BUDGET || picks.length >= FACT_MAX_TILES) break;
+      const before = picks.length; addTile(def, t, c.suiteId, true);
+      if (picks.length > before) head += 1;
+    }
+  }
+  // 1d) ALWAYS lead with TICKETING. Pull the ticketing set's OVERVIEW headline tiles
+  //     first (tickets sold, revenue, orders) — across the WHOLE ticketing set, not
+  //     just its first-listed dashboard — so a non-overview board (e.g. a Reps
+  //     dashboard that happens to be listed first) can't take the lead and make the
+  //     briefing read "reps-only". Detected by set name; analytics/GA4 sets excluded.
+  //     Capped (TKT_BUDGET) so the other boards still get plenty of the budget.
   const isTicketingSet = (name) => /ticket/i.test(name || '') && !/\bga4\b|analytics|google/i.test(name || '');
+  const isOverviewDash = (title) => /overview|summary|headline/i.test(title || '');
+  const ticketingDashes = catalogue
+    .filter((c) => isTicketingSet(c.setName))
+    .sort((a, b) => (isOverviewDash(b.title) ? 1 : 0) - (isOverviewDash(a.title) ? 1 : 0)); // overview boards first
   let tkt = 0; const TKT_BUDGET = 8;
-  for (const lead of leads) {
+  for (const c of ticketingDashes) {
     if (tkt >= TKT_BUDGET || picks.length >= FACT_MAX_TILES) break;
-    if (!isTicketingSet(lead.setName)) continue;
-    for (const did of lead.dashboardIds) {
-      if (tkt >= TKT_BUDGET || picks.length >= FACT_MAX_TILES) break;
-      const def = store.get(did);
-      if (!def || !dashMeta[did]) continue;
-      const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((t) => t.tiles || []))]
-        .filter((t) => t.type !== 'text' && t.query?.fields?.length)
-        .sort((a, b) => tilePriority(a) - tilePriority(b));
-      let taken = 0;
-      for (const t of tiles) {
-        if (taken >= PER_DASH || tkt >= TKT_BUDGET || picks.length >= FACT_MAX_TILES) break;
-        const before = picks.length; addTile(def, t, lead.suiteId, true);
-        if (picks.length > before) { taken += 1; tkt += 1; }
-      }
+    const def = store.get(c.dashboardId);
+    if (!def || !dashMeta[c.dashboardId]) continue;
+    const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((t) => t.tiles || []))]
+      .filter((t) => t.type !== 'text' && t.query?.fields?.length)
+      .sort((a, b) => tilePriority(a) - tilePriority(b));
+    let taken = 0;
+    for (const t of tiles) {
+      if (taken >= PER_DASH || tkt >= TKT_BUDGET || picks.length >= FACT_MAX_TILES) break;
+      const before = picks.length; addTile(def, t, c.suiteId, true);
+      if (picks.length > before) { taken += 1; tkt += 1; }
     }
   }
   // 1e) Guarantee a little GA4/ANALYTICS — but ONLY if the client actually has an
@@ -2212,9 +1947,15 @@ async function buildFacts(user, entityId, force = false, alignDaysBefore = false
     const view = entityViews[p.def.id];
     const extra = {};
     if (view) for (const [fname, qfield] of Object.entries(p.tile.listenTo || {})) if (fname in view) extra[qfield] = view[fname];
-    const dbo = daysBeforeOverlays[p.def.id];
+    // Days-to-go overlay — but NOT for analytics/GA4 (they have no days-before-event
+    // axis; forcing one can return zero, which is what broke GA4 tiles in the briefing).
+    const dbo = isAnalyticsName(p.setName) ? null : daysBeforeOverlays[p.def.id];
     if (dbo) for (const [fname, qfield] of Object.entries(p.tile.listenTo || {})) if (fname in dbo) extra[qfield] = dbo[fname];
-    const body = await tileQueryBody(p.tile, p.def, user, p.suiteId, lockMaps[p.suiteId] || {}, extra);
+    // Expand the dashboard's client-default saved filters into the lock map (suite
+    // locks still win), exactly like resolveTileValue — so a GA4 tile gets its saved
+    // DATE RANGE (without which GA4 explores return 0) instead of dropping out.
+    const lockMap = { ...expandLockMap(view || {}), ...(lockMaps[p.suiteId] || {}) };
+    const body = await tileQueryBody(p.tile, p.def, user, p.suiteId, lockMap, extra);
     if (!body) { dropped.push(`${p.dashTitle} › ${p.tile.title || '?'} (scope blocked / unrunnable)`); return null; }
     try {
       const data = await runLookerQuery('/queries/run/json_detail', body, undefined, force);
@@ -2297,7 +2038,21 @@ async function generateBriefing(user, entityId, segment, { force = false } = {})
     const { suites } = clientCatalogue(entityId);
     const instructions = [aiInstructionsFor(null), briefingInstructionsFor(user, entityId, suites), timeDefaults()[segment]].filter(Boolean).join('\n\n');
     const msgs = recentMessages(entityId, user.id);
-    const raw = await insights.briefHome({ tiles, profile: profileForAi, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), messages: msgs, capabilities: ACTION_CAPABILITIES, today: todayLabel() });
+    // Resolve the event goals (North Star first) with the SAME rich progress the Goals
+    // page shows, so the briefing can anchor on the goal and how it's tracking. Capped.
+    let goals = [];
+    try {
+      const gcaches = goalsApi.makeGoalCaches();
+      for (const su of suites) {
+        for (const g of goalsApi.listGoals(su.id)) {
+          goals.push({ ...(await goalsApi.attachProgress(g, user, gcaches)), suiteName: su.name });
+          if (goals.length >= 6) break;
+        }
+        if (goals.length >= 6) break;
+      }
+      goals.sort((a, b) => (b.isNorthStar ? 1 : 0) - (a.isNorthStar ? 1 : 0)); // North Star first
+    } catch (e) { console.error('[briefing] goals failed', e.message); }
+    const raw = await insights.briefHome({ tiles, profile: profileForAi, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), messages: msgs, capabilities: ACTION_CAPABILITIES, goals, today: todayLabel() });
     const link = (id) => (id && byId[id] ? { dashboardId: id, suiteId: byId[id].suiteId, label: `${byId[id].setName} → ${byId[id].title}` } : null);
     const msgIds = new Set(msgs.map((m) => m.id));
     const out = {
@@ -2367,54 +2122,11 @@ app.post('/api/my/prewarm', auth.requireAuth, (req, res) => {
   res.json({ ok: true }); // never wait — warming happens in the background
 });
 
-// ─── Inventive: embedded conversational AI analyst (per-client workspaces) ─────
-// We proxy Inventive's /embed/getAuthorizedUrl server-side so the API key never
-// reaches the browser (their requirement). Each Pulse client (entity) maps to one
-// Inventive workspace via accountScope.externalRefId = entityId. Config via env
-// (or admin settings): INVENTIVE_API_KEY, INVENTIVE_EMBED_AUTH_TOKEN, optional
-// INVENTIVE_API_ENDPOINT. Read/write "actions" bridge is NOT here (Inventive
-// doesn't expose it yet) — this is the embed only.
-const inventiveEndpoint = () => (db.getSetting('inventive_api_endpoint') || process.env.INVENTIVE_API_ENDPOINT || 'https://app-api.madeinventive.com').replace(/\/+$/, '');
-const inventiveKey = () => (db.getSetting('inventive_api_key') || process.env.INVENTIVE_API_KEY || '').trim();
-const inventiveEmbedToken = () => (db.getSetting('inventive_embed_auth_token') || process.env.INVENTIVE_EMBED_AUTH_TOKEN || '').trim();
-const inventiveName = (email) => {
-  const local = String(email || '').split('@')[0].replace(/[._-]+/g, ' ').trim();
-  const parts = local.split(/\s+/).map((s) => s.charAt(0).toUpperCase() + s.slice(1));
-  return { firstname: parts[0] || 'User', lastname: parts.slice(1).join(' ') };
-};
-app.get('/api/inventive/status', auth.requireAuth, (req, res) => {
-  res.json({ configured: !!(inventiveKey() && inventiveEmbedToken()) });
-});
-app.post('/api/inventive/embed-url', auth.requireAuth, async (req, res) => {
-  const key = inventiveKey(); const token = inventiveEmbedToken();
-  if (!key || !token) return res.status(400).json({ error: 'Inventive is not configured yet.' });
-  const entityId = homeEntityFor(req);
-  if (!entityId) return res.status(400).json({ error: 'No client context for the AI workspace.' });
-  const entity = db.getEntity(entityId);
-  if (!entity) return res.status(404).json({ error: 'Client not found.' });
-  const { firstname, lastname } = inventiveName(req.user.email);
-  const userInfo = {
-    firstname, lastname, email: req.user.email,
-    // One Inventive workspace per Pulse client (entity).
-    accountScope: { externalRefId: entity.id, name: entity.name, description: `${entity.name} · Pulse` },
-  };
-  try {
-    const r = await fetch(`${inventiveEndpoint()}/embed/getAuthorizedUrl`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'INVENTIVE-API-KEY': key },
-      body: JSON.stringify({ embedAuthToken: token, userInfo, options: req.body?.options || {} }),
-    });
-    if (!r.ok) {
-      const detail = await r.text().catch(() => '');
-      console.error('[inventive] getAuthorizedUrl', r.status, detail.slice(0, 300));
-      return res.status(502).json({ error: 'Inventive rejected the request (check the user is provisioned and the host URL matches the embed token).' });
-    }
-    res.json(await r.json()); // { url, tokens, scopeToken, hostUrl }
-  } catch (e) {
-    console.error('[inventive] embed-url', e.message);
-    res.status(502).json({ error: 'Could not reach Inventive.' });
-  }
-});
+// ─── Inventive ("Ask" analyst) → server/inventive.js ───────────────────────────
+// Extracted, self-contained module (own routes; behaviour unchanged). homeEntityFor
+// stays here (shared helper) and is injected. The admin config UI for the Inventive
+// keys lives with the integrations routes above.
+require('./inventive').mount(app, { db, auth, homeEntityFor });
 
 // ─── Scheduled digests: role-lensed content builder ────────────────────────────
 // Default role "lenses" — what the analyst leads with for each audience. Editable
@@ -2452,16 +2164,24 @@ async function buildFactsFromTiles(user, entityId, picks, alignDaysBefore = fals
     }
   }
   const lockMaps = {};
+  const entityViews = {};
   const daysBeforeOverlays = {};
   const out = [];
   const dropped = [];
   for (const { tile, def, m } of wanted.slice(0, 24)) {
     if (!(m.suiteId in lockMaps)) lockMaps[m.suiteId] = expandLockMap(db.lockedFiltersForSuite(m.suiteId));
+    if (!(def.id in entityViews)) entityViews[def.id] = db.getFilterView('entity', entityId, def.id) || null;
     if (alignDaysBefore && !(def.id in daysBeforeOverlays)) daysBeforeOverlays[def.id] = await daysBeforeOverlayFor(def, user, m.suiteId, lockMaps[m.suiteId] || {});
+    const view = entityViews[def.id];
     const dbo = daysBeforeOverlays[def.id];
     const extra = {};
+    if (view) for (const [fname, qfield] of Object.entries(tile.listenTo || {})) if (fname in view) extra[qfield] = view[fname];
     if (dbo) for (const [fname, qfield] of Object.entries(tile.listenTo || {})) if (fname in dbo) extra[qfield] = dbo[fname];
-    const body = await tileQueryBody(tile, def, user, m.suiteId, lockMaps[m.suiteId] || {}, extra);
+    // Expand the dashboard's client-default saved filters into the lock map (suite locks
+    // win), like resolveTileValue — so GA4 tiles get their saved DATE RANGE and don't
+    // come back empty (they were missing entirely from curated digests before).
+    const lockMap = { ...expandLockMap(view || {}), ...(lockMaps[m.suiteId] || {}) };
+    const body = await tileQueryBody(tile, def, user, m.suiteId, lockMap, extra);
     if (!body) { dropped.push(`${def.title} › ${tile.title || '?'} (scope blocked / unrunnable)`); continue; }
     try {
       const data = await runLookerQuery('/queries/run/json_detail', body, undefined, false);
@@ -2475,7 +2195,7 @@ async function buildFactsFromTiles(user, entityId, picks, alignDaysBefore = fals
 
 // Produce a role-lensed digest's structured content (links resolved). Throws if
 // AI/Looker isn't configured or there's no data — callers decide how to surface.
-async function buildDigestContent({ entityId, role, roleFocus, focusMode, contentMode, tiles, alignDaysBefore = false, priorityDashboards = [], includeFollowed = false, followedVisual = false, followedTiles = [], creatorEmail = '', recipientEmail, debug = false }) {
+async function buildDigestContent({ entityId, role, roleFocus, focusMode, contentMode, tiles, alignDaysBefore = false, priorityDashboards = [], includeFollowed = false, followedVisual = false, followedTiles = [], includeGoals = false, creatorEmail = '', recipientEmail, debug = false }) {
   const apiKey = anthropicKeyForEntity(entityId);
   if (!insights.isConfigured(apiKey)) throw new Error('AI is not configured for this client');
   const lens = ROLE_LENSES[role] || ROLE_LENSES.exec;
@@ -2516,9 +2236,26 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
   for (const t of followedFacts) { const s = `${t.dashboardId}|${t.title}`; if (!seenSig.has(s)) { factTilesAll.push(t); seenSig.add(s); } }
   if (!factTilesAll.length) throw new Error('No tile data available to summarise');
 
+  // Goals summary (opt-in) — resolve the entity's event goals with the SAME rich
+  // progress the Goals page shows (curve current, vs-last-time, pace, forecast), so the
+  // digest can carry a goals bullet. Capped to bound the per-goal Looker reads.
+  let goals = [];
+  if (includeGoals) {
+    try {
+      const caches = goalsApi.makeGoalCaches();
+      for (const su of (db.listSuitesForEntity(entityId) || [])) {
+        for (const g of goalsApi.listGoals(su.id)) {
+          goals.push({ ...(await goalsApi.attachProgress(g, user, caches)), suiteName: su.name });
+          if (goals.length >= 8) break;
+        }
+        if (goals.length >= 8) break;
+      }
+    } catch (e) { console.error('[digest] goals summary failed', e.message); }
+  }
+
   const byId = Object.fromEntries(catalogue.map((c) => [c.dashboardId, c]));
   const instructions = [aiInstructionsFor(null), briefingInstructionsFor(user, entityId, clientCatalogue(entityId).suites)].filter(Boolean).join('\n\n');
-  const raw = await insights.digestBrief({ tiles: factTilesAll, roleLabel: lens.label, roleFocus: effectiveFocus, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), capabilities: ACTION_CAPABILITIES, today: todayLabel() });
+  const raw = await insights.digestBrief({ tiles: factTilesAll, roleLabel: lens.label, roleFocus: effectiveFocus, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), capabilities: ACTION_CAPABILITIES, goals, today: todayLabel() });
   const href = (id) => { const c = id && byId[id]; return c ? `${mailer.baseUrl()}/suite/${c.suiteId}/d/${id}` : ''; };
   // A suggested action with an executable capability deep-links into the
   // pre-filled "Make it happen" campaign editor (recipe auto-resolves the
@@ -2606,7 +2343,8 @@ app.get('/api/admin/entities/:id/digest-tiles', auth.requireAdmin, (req, res) =>
   res.json(digestTileCatalogue(req.params.id));
 });
 app.get('/api/my/digest-tiles/:entityId', auth.requireAuth, (req, res) => {
-  if (!(req.user.entityIds || []).includes(req.params.entityId)) return res.status(403).json({ error: 'Not allowed' });
+  // Admins can act as any client (preview), so they pass the ownership check.
+  if (req.user.role !== 'admin' && !(req.user.entityIds || []).includes(req.params.entityId)) return res.status(403).json({ error: 'Not allowed' });
   res.json(digestTileCatalogue(req.params.entityId));
 });
 
@@ -2644,7 +2382,7 @@ app.get('/api/admin/entities/:id/followed-tiles', auth.requireAdmin, (req, res) 
   res.json(followedTilesFor(req.params.id, req.user.id));
 });
 app.get('/api/my/followed-tiles/:entityId', auth.requireAuth, (req, res) => {
-  if (!(req.user.entityIds || []).includes(req.params.entityId)) return res.status(403).json({ error: 'Not allowed' });
+  if (req.user.role !== 'admin' && !(req.user.entityIds || []).includes(req.params.entityId)) return res.status(403).json({ error: 'Not allowed' });
   res.json(followedTilesFor(req.params.entityId, req.user.id));
 });
 
@@ -2922,6 +2660,9 @@ require('./scheduler').mount(app, { db, auth, mailer, messaging, push, generateC
 
 // Onboarding checklist — light-touch "Getting started" guide (auto-detect + manual).
 require('./onboarding').mount(app, { db, auth });
+
+// Onboarding & feature telemetry — usage signals to refine the wizard from real behaviour.
+require('./telemetry').mount(app, { db, auth, rateLimit });
 
 // Campaign email templates — reusable email content, applied when building a campaign.
 require('./campaignTemplates').mount(app, { db, auth });

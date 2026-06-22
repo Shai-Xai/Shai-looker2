@@ -1,9 +1,10 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useId } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import { useAuth } from '../lib/auth.jsx';
 import { useTheme } from '../lib/theme.jsx';
+import { useProfile } from '../lib/profile.jsx';
 import IntegrationsForm from '../components/IntegrationsForm.jsx';
 import MailTemplateEditor from '../components/MailTemplateEditor.jsx';
 import MailLogView from '../components/MailLogView.jsx';
@@ -13,6 +14,7 @@ import CampaignManager from '../components/CampaignManager.jsx';
 import SegmentManager from '../components/SegmentManager.jsx';
 import RateCard from '../components/RateCard.jsx';
 import { BriefingConfigForm } from '../components/BriefingTuneModal.jsx';
+import { GUIDES } from '../lib/guides.js';
 
 // Icon control: an emoji, or an uploaded image (downscaled to a small data-URL).
 // Offers a palette of common dashboard-category icons for quick picking.
@@ -114,6 +116,7 @@ const ADMIN_NAV = [
   ['sets', 'Sets', '🗂️'],
   ['library', 'Tile library', '🧩'],
   ['ai', 'AI', '🤖'],
+  ['onboarding', 'Onboarding', '🚀'],
   ['settlements', 'Settlements', '💰'],
   ['billing', 'Billing', '💳'],
   ['integrations', 'Integrations', '🔌'],
@@ -135,6 +138,7 @@ export default function AdminPage() {
       {tab === 'sets' && <Sets />}
       {tab === 'library' && <Library />}
       {tab === 'ai' && <AISettings />}
+      {tab === 'onboarding' && <OnboardingInsights />}
       {tab === 'settlements' && <Settlements />}
       {tab === 'billing' && <Billing />}
       {tab === 'integrations' && <AdminIntegrations />}
@@ -189,6 +193,127 @@ export default function AdminPage() {
         <div style={{ minWidth: 0 }}>{content}</div>
       </div>
     </main>
+  );
+}
+
+// ─── Onboarding insights ───────────────────────────────────────────────────────
+// Learn from how clients actually use the onboarding wizards: the funnel (where
+// people open, advance, skip or complete each guide) and which features they use.
+// Measure → recommend → a human decides what to change in guides.js. We don't
+// auto-rewrite the flow: a noisy signal silently steering copy is exactly the
+// failure mode we want to avoid.
+
+const FEATURE_LABELS = {
+  pin: '📌 Pinned a tile', follow: '👁 Followed a tile', briefing_tune: '⚙ Tuned the briefing',
+  insight: '🦉 Asked the Owl for an insight', dashboard: '📊 Opened a dashboard',
+  notifications_enabled: '🔔 Turned on notifications', install: '📲 Installed the app',
+};
+
+function OnboardingInsights() {
+  const [stats, setStats] = useState(null);
+  const [err, setErr] = useState(false);
+  useEffect(() => { api.adminOnboardingStats().then(setStats).catch(() => setErr(true)); }, []);
+
+  if (err) return <p style={{ color: 'var(--muted)', fontSize: 13 }}>Couldn’t load usage stats.</p>;
+  if (!stats) return <p style={{ color: 'var(--muted)', fontSize: 13 }}>Loading…</p>;
+
+  // Build an ordered funnel per guide using the real step order from guides.js.
+  const guideIds = Object.keys(stats.guides || {}).filter((id) => GUIDES[id]).sort((a, b) => (stats.guides[b].opens || 0) - (stats.guides[a].opens || 0));
+  const recs = [];
+  for (const id of guideIds) {
+    const g = stats.guides[id];
+    const steps = GUIDES[id].steps;
+    const baseline = g.opens || (g.steps['0']?.viewed || 0);
+    if (baseline < 5) continue; // too little signal to advise on
+    let worst = null;
+    for (let n = 1; n < steps.length; n++) {
+      const prev = g.steps[String(n - 1)]?.viewed || 0;
+      const here = g.steps[String(n)]?.viewed || 0;
+      const drop = prev - here;
+      if (prev > 0 && (!worst || drop > worst.drop)) worst = { n, drop, prev, here };
+    }
+    if (worst && worst.drop > 0 && worst.drop / (worst.prev || 1) >= 0.4) {
+      recs.push(`In “${GUIDES[id].title}”, ${worst.drop} of ${worst.prev} people drop at “${steps[worst.n].title}”. Consider simplifying that step or moving it later.`);
+    }
+    const rate = g.opens ? Math.round((g.completes / g.opens) * 100) : 0;
+    if (g.opens >= 5 && rate < 50) recs.push(`Only ${rate}% finish “${GUIDES[id].title}” (${g.completes}/${g.opens}). It may be too long — trim it.`);
+  }
+  const features = stats.features || [];
+  const topFeature = features[0];
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18, maxWidth: 720 }}>
+      <div>
+        <h2 style={{ fontSize: 17, fontWeight: 800 }}>Onboarding insights</h2>
+        <p style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 3 }}>
+          How clients use the welcome wizard and guides. Use this to refine the steps in <code>client/src/lib/guides.js</code>. {stats.total === 0 && 'No usage recorded yet — check back once clients have started using the wizards.'}
+        </p>
+      </div>
+
+      {recs.length > 0 && (
+        <div style={{ background: 'rgba(124,58,237,0.07)', border: '1px solid rgba(124,58,237,0.25)', borderRadius: 12, padding: 14 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 800, color: '#7c3aed', marginBottom: 8 }}>💡 Recommendations</div>
+          <ul style={{ margin: 0, paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {recs.map((r, i) => <li key={i} style={{ fontSize: 13, lineHeight: 1.5 }}>{r}</li>)}
+          </ul>
+        </div>
+      )}
+
+      {guideIds.map((id) => {
+        const g = stats.guides[id];
+        const steps = GUIDES[id].steps;
+        const baseline = Math.max(g.opens || 0, g.steps['0']?.viewed || 0, 1);
+        const rate = g.opens ? Math.round((g.completes / g.opens) * 100) : 0;
+        return (
+          <div key={id} style={{ border: '1px solid var(--border)', borderRadius: 14, padding: 16, background: 'var(--card)' }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
+              <span style={{ fontSize: 14.5, fontWeight: 800 }}>{GUIDES[id].title}</span>
+              <span style={{ fontSize: 12, color: 'var(--muted)' }}>{g.opens} opened · {g.completes} finished · {rate}% completion</span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {steps.map((s, n) => {
+                const st = g.steps[String(n)] || { viewed: 0, cta: 0, skip: 0 };
+                const pct = Math.round((st.viewed / baseline) * 100);
+                return (
+                  <div key={n} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span style={{ flex: '0 0 38%', minWidth: 0, fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{n + 1}. {s.title}</span>
+                    <div style={{ flex: 1, height: 16, borderRadius: 6, background: 'rgba(128,128,128,0.13)', overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${pct}%`, background: 'var(--brand)', borderRadius: 6, transition: 'width .25s' }} />
+                    </div>
+                    <span style={{ flex: '0 0 auto', fontSize: 11.5, color: 'var(--muted)', minWidth: 92, textAlign: 'right' }}>
+                      {st.viewed} seen{st.cta ? ` · ${st.cta} acted` : ''}{st.skip ? ` · ${st.skip} left` : ''}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+
+      <div style={{ border: '1px solid var(--border)', borderRadius: 14, padding: 16, background: 'var(--card)' }}>
+        <div style={{ fontSize: 14.5, fontWeight: 800, marginBottom: 4 }}>Feature usage</div>
+        <p style={{ fontSize: 12, color: 'var(--muted)', marginTop: 0, marginBottom: 12 }}>What clients actually do — the most-used features are the ones worth teaching in the wizard.</p>
+        {features.length === 0 ? (
+          <p style={{ fontSize: 12.5, color: 'var(--muted)' }}>No feature usage recorded yet.</p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {features.map((f) => {
+              const pct = Math.round((f.people / (topFeature.people || 1)) * 100);
+              return (
+                <div key={f.name} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ flex: '0 0 38%', minWidth: 0, fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{FEATURE_LABELS[f.name] || f.name}</span>
+                  <div style={{ flex: 1, height: 16, borderRadius: 6, background: 'rgba(128,128,128,0.13)', overflow: 'hidden' }}>
+                    <div style={{ height: '100%', width: `${pct}%`, background: '#2da44e', borderRadius: 6 }} />
+                  </div>
+                  <span style={{ flex: '0 0 auto', fontSize: 11.5, color: 'var(--muted)', minWidth: 92, textAlign: 'right' }}>{f.people} {f.people === 1 ? 'client' : 'clients'} · {f.hits}×</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -683,6 +808,7 @@ const adminMenuItem = { display: 'flex', alignItems: 'center', gap: 9, width: '1
 // Client settings: name, organiser locks, preview, delete.
 function ClientSettings({ entity, suites, fields, onChange, onBack }) {
   const navigate = useNavigate();
+  const { setProfile } = useProfile();
   const [name, setName] = useState(entity.name);
   const [logo, setLogo] = useState(entity.logo || '');
   const [aiContext, setAiContext] = useState(entity.aiContext || '');
@@ -693,13 +819,16 @@ function ClientSettings({ entity, suites, fields, onChange, onBack }) {
   const remove = async () => { if (confirm(`Delete client "${entity.name}"? This removes its sets too.`)) { await api.adminDeleteEntity(entity.id); onBack(); onChange(); } };
   const preview = async () => {
     if (!suites.length) { alert('This client has no suites yet.'); return; }
+    // Enter THIS client's experience so every scoped page (Goals, Engage, Home)
+    // sees only their data — not all clients. Then land on the first dashboard.
+    setProfile(entity.id, { name: entity.name, logo: entity.logo });
     try {
       for (const su of suites) {
         const d = await api.mySuite(su.id);
         const first = d.sets.flatMap((s) => s.dashboards)[0];
         if (first) { navigate(`/suite/${su.id}/d/${first.id}`); return; }
       }
-      alert('This client has no dashboards to preview yet.');
+      navigate('/'); // no dashboards yet — still drop into the client home, scoped to them
     } catch (e) { alert('Could not open preview: ' + e.message); }
   };
   return (
@@ -1273,6 +1402,7 @@ function RoleChips({ value = [], roles, onChange, inherit = false }) {
 // Rendered inside a client's Suites section (see ClientSuites).
 function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) {
   const navigate = useNavigate();
+  const { setProfile } = useProfile();
   const [openSets, setOpenSets] = useState({});
   const [name, setName] = useState(suite.name);
   const [icon, setIcon] = useState(suite.icon || '');
@@ -1315,6 +1445,9 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
   // first dashboard. Uses the client suite endpoint (admins can read any suite).
   const preview = async () => {
     try {
+      // Scope the whole client shell to this suite's client, then open the suite.
+      const ent = (entities || []).find((e) => e.id === suite.entityId);
+      if (suite.entityId) setProfile(suite.entityId, { name: ent?.name, logo: ent?.logo });
       const d = await api.mySuite(suite.id);
       const first = d.sets.flatMap((s) => s.dashboards)[0];
       if (first) navigate(`/suite/${suite.id}/d/${first.id}`);
@@ -2160,6 +2293,10 @@ function AdminIntegrations() {
         <p style={hint}>Lets emails be captured into client inboxes by CC’ing a per-client address. Set the inbound domain, then point your mail forwarder at the webhook below.</p>
         <InboundConfig />
       </Section>
+      <Section title="📥 Owl auto-ingest — settlements & invoices">
+        <p style={hint}>When a PDF settlement or invoice is CC’d to a client’s Owl address from a trusted sender, the Owl extracts it, cross-checks the totals, and auto-publishes it — or holds a draft for review if the numbers don’t reconcile.</p>
+        <OwlIngestConfig />
+      </Section>
     </div>
   );
 }
@@ -2387,6 +2524,38 @@ function InboundConfig() {
 }
 const lblS = { fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', marginBottom: 5 };
 const inS = { flex: 1, boxSizing: 'border-box', padding: '9px 12px', border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 13, outline: 'none', background: 'var(--card)', color: 'var(--text)' };
+
+// Owl auto-ingest config: the kill-switch + the trusted-sender allowlist that may
+// trigger settlement/invoice auto-publish from email. Backed by /api/admin/owl-ingest.
+function OwlIngestConfig() {
+  const [cfg, setCfg] = useState(null);
+  const [senders, setSenders] = useState('');
+  const [saved, setSaved] = useState(false);
+  useEffect(() => { api.getOwlIngest().then((c) => { setCfg(c); setSenders(c.senders || ''); }); }, []);
+  if (!cfg) return <Muted>Loading…</Muted>;
+  const save = async (patch) => {
+    const c = await api.saveOwlIngest(patch);
+    setCfg(c); setSenders(c.senders || ''); setSaved(true); setTimeout(() => setSaved(false), 1600);
+  };
+  return (
+    <div style={{ ...cardStyle, display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
+        <input type="checkbox" checked={cfg.enabled} onChange={(e) => save({ enabled: e.target.checked })} />
+        <span style={{ fontSize: 13, fontWeight: 600 }}>Auto-ingest enabled</span>
+        <span style={{ fontSize: 12, color: 'var(--muted)' }}>{cfg.enabled ? 'on' : 'off — emailed PDFs are captured to the inbox only'}</span>
+      </label>
+      <div>
+        <div style={lblS}>Trusted senders</div>
+        <textarea style={{ ...inS, minHeight: 60, resize: 'vertical', fontFamily: 'inherit' }} value={senders} onChange={(e) => setSenders(e.target.value)} placeholder="howler.co.za, settlements@howler.co.za" />
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 6 }}>
+          <button style={miniBtn} onClick={() => save({ senders })}>Save</button>
+          {saved && <span style={{ color: 'var(--success,#10b981)', fontSize: 13, fontWeight: 600 }}>✓</span>}
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>Emails or bare domains, comma/space-separated. Only PDFs from these senders are auto-ingested; everything else is just captured to the inbox. A settlement only auto-<b>publishes</b> when its totals reconcile — otherwise it’s held as a draft for review.</div>
+      </div>
+    </div>
+  );
+}
 
 // Per-client integrations (admin), shown inside a client's detail nav.
 function ClientIntegrations({ entity }) {
@@ -2686,6 +2855,7 @@ function Settlements({ entityId = null }) {
               </div>
             </div>
             <span style={{ flex: 1 }} />
+            <SettlementEventPicker s={s} eventNames={[...new Set(items.map((x) => x.eventName || x.title))]} onSaved={load} />
             <select
               style={{ ...input, minWidth: 90 }}
               value={s.status}
@@ -2877,7 +3047,7 @@ function EventDocuments({ entityId, eventNames }) {
                     {[doc.fileName, new Date(doc.createdAt).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' }), doc.total != null && `R${Number(doc.total).toLocaleString('en-US', { minimumFractionDigits: 2 })}`, doc.hasData ? 'interactive' : null].filter(Boolean).join(' · ')}
                   </div>
                 </div>
-                <EventPicker value={doc.eventName} onChange={(v) => api.adminUpdateDocument(doc.id, { eventName: v }).then(load)} eventNames={eventNames} style={{ ...input, minWidth: 150, maxWidth: 190 }} />
+                <DocEventPicker doc={doc} eventNames={eventNames} onSaved={load} />
                 <button style={miniBtnOutline} onClick={() => navigate(`/documents/${doc.id}`)}>Open</button>
                 <a href={`/api/documents/${doc.id}/file`} style={{ ...miniBtnOutline, textDecoration: 'none' }}>⤓</a>
                 <button style={{ ...miniBtnOutline, color: 'var(--error)' }} onClick={() => { if (confirm(`Delete "${doc.title}"?`)) api.adminDeleteDocument(doc.id).then(load); }}>Delete</button>
@@ -2977,33 +3147,60 @@ function SettlementChecks({ data }) {
 // Assign-to-event control: a select fed by the client's known events (from
 // their settlements), with an "Other / new event…" escape hatch to type a name
 // that doesn't exist yet. Values not in the list show as "(custom)".
-function EventPicker({ value, onChange, eventNames, style }) {
+// Free-text event name with autocomplete suggestions from known events. A plain
+// input (no select↔input mode-switching, which kept breaking focus/typing) — so
+// it ALWAYS accepts typing. Picking a suggestion or typing a new name both just
+// set the value; onCommit (optional) fires on blur/Enter so a consumer saves once.
+function EventPicker({ value, onChange, onCommit, eventNames, style }) {
   const known = [...new Set((eventNames || []).filter(Boolean))];
-  const custom = !!value && !known.includes(value);
-  const [typing, setTyping] = useState(false);
-  if (typing || known.length === 0) {
-    return (
-      <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
-        <input style={style} value={value} onChange={(e) => onChange(e.target.value)} placeholder="Event name" autoFocus={typing} />
-        {known.length > 0 && <button style={miniBtnOutline} title="Pick from known events" onClick={() => setTyping(false)}>▾</button>}
-      </span>
-    );
-  }
+  const listId = useId();
   return (
-    <select
-      style={style}
-      value={custom ? '__custom' : value}
-      onChange={(e) => {
-        if (e.target.value === '__other') { setTyping(true); onChange(''); }
-        else if (e.target.value !== '__custom') onChange(e.target.value);
-      }}
-    >
-      <option value="">— Assign to event —</option>
-      {known.map((n) => <option key={n} value={n}>{n}</option>)}
-      {custom && <option value="__custom">{value} (custom)</option>}
-      <option value="__other">Other / new event…</option>
-    </select>
+    <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+      <input
+        style={style}
+        value={value}
+        list={known.length ? listId : undefined}
+        placeholder="Event name"
+        onChange={(e) => onChange(e.target.value)}
+        onBlur={(e) => onCommit && onCommit(e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); } }}
+      />
+      {known.length > 0 && (
+        <datalist id={listId}>
+          {known.map((n) => <option key={n} value={n} />)}
+        </datalist>
+      )}
+    </span>
   );
+}
+
+// Per-document event assignment. Types into LOCAL state and saves once on
+// blur/Enter (or immediately on a dropdown pick) — never per keystroke, which
+// would refetch + re-group the list mid-type and make the field feel "stuck".
+function DocEventPicker({ doc, eventNames, onSaved }) {
+  const [val, setVal] = useState(doc.eventName || '');
+  useEffect(() => { setVal(doc.eventName || ''); }, [doc.eventName]);
+  const commit = (v) => {
+    const t = String(v == null ? val : v).trim();
+    if (!t) return;                          // ignore empty (the "Other" transition / accidental blur) — don't wipe or reload mid-edit
+    if (t === (doc.eventName || '')) return; // unchanged
+    api.adminUpdateDocument(doc.id, { eventName: t }).then(onSaved);
+  };
+  return <EventPicker value={val} onChange={setVal} onCommit={commit} eventNames={eventNames} style={{ ...input, minWidth: 150, maxWidth: 190 }} />;
+}
+
+// Per-settlement event assignment — mirrors DocEventPicker but saves onto the
+// settlement's extracted meta (so the card, the client-side grouping, and the
+// report header stay in sync). Type a new name or pick an existing event.
+function SettlementEventPicker({ s, eventNames, onSaved }) {
+  const [val, setVal] = useState(s.eventName || s.title || '');
+  useEffect(() => { setVal(s.eventName || s.title || ''); }, [s.eventName, s.title]);
+  const commit = (v) => {
+    const t = String(v == null ? val : v).trim();
+    if (!t || t === (s.eventName || s.title || '')) return;
+    api.adminUpdateSettlement(s.id, { eventName: t }).then(onSaved);
+  };
+  return <EventPicker value={val} onChange={setVal} onCommit={commit} eventNames={eventNames} style={{ ...input, minWidth: 150, maxWidth: 200 }} />;
 }
 
 // Best-overlap match of a free-text name (as printed on an invoice) onto one of

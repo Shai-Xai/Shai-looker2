@@ -47,7 +47,7 @@ export default function DigestHistory({ entityId, compact = false }) {
     <div style={{ marginTop: compact ? 18 : 30 }}>
       <button type="button" onClick={() => setCollapsed((c) => !c)} style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', background: 'none', border: 'none', padding: 0, cursor: 'pointer', font: 'inherit', textAlign: 'left' }}>
         <span style={{ width: 12, fontSize: 10, color: 'var(--muted)', transform: collapsed ? 'none' : 'rotate(90deg)', transition: 'transform .15s' }}>▶</span>
-        <span style={{ fontSize: compact ? 14 : 16, fontWeight: 700 }}>📨 Recent digests{list.length ? ` (${list.length})` : ''}</span>
+        <span style={{ fontSize: compact ? 14 : 16, fontWeight: 700 }}>📨 {compact ? 'Latest digest' : `Recent digests${list.length ? ` (${list.length})` : ''}`}</span>
       </button>
       {!compact && !collapsed && <p style={{ color: 'var(--muted)', fontSize: 13, margin: '4px 0 12px' }}>Look back at what was sent — tell the Owl what you liked or want changed, and future digests adapt.</p>}
       {!collapsed && (
@@ -55,7 +55,7 @@ export default function DigestHistory({ entityId, compact = false }) {
           <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: 10 }}>No digests sent yet — they’ll appear here once your schedule runs (or you send a test).</p>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: compact ? 10 : 0 }}>
-            {(compact ? list.slice(0, 5) : list).map((d) => (
+            {(compact ? list.slice(0, 1) : list).map((d) => (
               <div key={d.id} style={{ border: '1px solid var(--hairline)', borderRadius: 12, background: 'var(--card)', overflow: 'hidden' }}>
                 <button type="button" onClick={() => open(d)} style={{ display: 'flex', width: '100%', alignItems: 'center', gap: 10, padding: '11px 14px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', font: 'inherit', color: 'var(--text)' }}>
                   <span style={{ flex: 1, minWidth: 0 }}>

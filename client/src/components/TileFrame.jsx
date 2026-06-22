@@ -12,6 +12,7 @@ import { useTileData, isRunnableQuery } from '../lib/useTileData.js';
 import { ANY_VALUE } from '../lib/filterConstants.js';
 import { useAuth } from '../lib/auth.jsx';
 import { useScope } from '../lib/ScopeContext.jsx';
+import { api } from '../lib/api.js';
 import { useAccess, PERMS } from '../lib/access.js';
 import CreateSegmentModal from './CreateSegmentModal.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
@@ -26,6 +27,8 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
   const isMobile = useIsMobile();
   const [showInsight, setShowInsight] = useState(false);
   const [showSegment, setShowSegment] = useState(false);
+  // Open the Owl on this tile, recording it as a feature-usage signal (Admin → Onboarding).
+  const openInsight = () => { if (entityId) api.trackUsage(entityId, { kind: 'feature', name: 'insight', event: 'use' }); setShowInsight(true); };
 
   // The filters in effect for this tile (its own query filters + the dashboard
   // filters it listens to) — passed to the AI for context.
@@ -69,7 +72,9 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
 
   return (
     <div
-      className="howler-tile"
+      // Hover-lift in view mode (matches the home cards). Not while editing — it
+      // would fight the drag-to-rearrange transform.
+      className={`howler-tile${editable ? '' : ' lift'}`}
       style={{
         background: 'var(--tile-bg, #fff)',
         border: '1px solid var(--border)',
@@ -105,7 +110,7 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
           {!editable && canInsight && (
             <>
               <PinButton tileId={tile.id} isMobile={isMobile} />
-              <InsightButton onClick={() => setShowInsight(true)} isMobile={isMobile} />
+              <InsightButton onClick={openInsight} isMobile={isMobile} />
             </>
           )}
           {editable && (
@@ -132,7 +137,7 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
         {!editable && canInsight && !showHeader && (
           <>
             <PinButton tileId={tile.id} isMobile={isMobile} corner />
-            <InsightButton onClick={() => setShowInsight(true)} isMobile={isMobile} corner />
+            <InsightButton onClick={openInsight} isMobile={isMobile} corner />
           </>
         )}
         {!editable && canSegment && !showHeader && <SegmentButton onClick={() => setShowSegment(true)} isMobile={isMobile} corner />}

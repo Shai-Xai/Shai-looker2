@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-06-17 · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-06-22 · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -105,8 +105,14 @@ receipts live in one place with a clear read/ack trail."
 ## 4. Settlements & documents  ✅
 - Upload a **settlement PDF** → Pulse extracts it into a clean, interactive
   statement the client can read; plus an event **documents** area.
+- **Owl auto-ingest** 🧪 — **CC the Owl** on the settlement/invoice email you
+  already send the client, and Pulse files it for you: it reads the PDF, checks
+  the totals add up, and **publishes the settlement to the client automatically**
+  (from trusted Howler senders). If the numbers don't reconcile it's held as a
+  draft for a quick human review — never published unchecked. No manual upload.
 
-**Pitch:** "Settlements clients can actually read, not a PDF buried in email."
+**Pitch:** "Settlements clients can actually read, not a PDF buried in email —
+and now they file themselves: just CC the Owl."
 
 ## 5. Engage — the campaign engine
 The "action" half of Pulse. Turn any audience into branded email/SMS outreach,
@@ -209,6 +215,50 @@ it auto-synced, and exclude people who already bought."
 
 ---
 
+## 9. Goals — track the results that matter  🧪
+The **Results** half of Pulse: set a target on the numbers that matter for an
+event and track them live. Each event has a **North Star** (the one headline
+goal) plus secondary goals, shown on the client's home with a **progress bar and
+a pace read** — *ahead / on track / behind* — not just "are we there yet."
+- **Set a goal in two taps** — pick a number you already see on a **dashboard
+  tile** (it then tracks **live**, always matching the dashboard), or **enter it
+  yourself** for things not on a dashboard yet (sponsorship secured, a cash target).
+- **Pace, not just percent** — with a deadline, each goal reads ahead/on-track/
+  behind; at event close it lands a **result band** (smashed / hit / just missed /
+  missed). Pace is read off **last event's real sell-curve** (days-before-event), so a
+  back-loaded goal isn't cried "behind" too early.
+- **vs last time + forecast on the card** — each goal shows **how it's tracking vs the
+  same point last event** (e.g. +35%) and a **projected final landing** (on track to
+  hit / how far short), both from the linked curve.
+- **Sell-curve & forecast chart** — open a curve-linked goal to see **last time, your
+  actual to date, and a forecast line you can follow** — the forecast hugs last event's
+  remaining shape (not a flat guess) to where it'll land, with the target and a "you are
+  here" marker.
+- **Weekly goal nudge** — one calm **"your goals this week"** push (not per-event spam),
+  summarising what **needs attention** (behind pace · forecast short · checkpoint missed)
+  plus **wins** (reached). Howler staff can fire a **test nudge** to preview it.
+- **Compare to last time, your way** — baseline from a past event, a **picked dashboard
+  tile** (e.g. a last-year total, remembered + re-read live), or a typed number; one-tap
+  **Match / +10% / +15% / +20%** target helpers.
+- **Checkpoints from last time's shape** — suggest weekly/monthly checkpoints scaled to
+  your target, on the same days-before-event math as the live pace.
+- **Reusable goal templates** — save a goal's whole setup (metric/curve tile, target, unit,
+  comparison year, cadence) as a template, then start new goals from it in one tap — ideal
+  for recurring monthly/quarterly targets. Set the fresh dates and go. Templates carry the
+  **dashboard name + tile** (the key components). **Howler can also publish 🌐 global
+  templates** to **every client** — they re-link to each client's matching dashboard/tile
+  **by name**, so standardised dashboards wire up automatically.
+- **Drag to reorder** — arrange goal tiles on the Goals page; the order carries to the
+  home dashboard.
+- **Dual-surface** — clients set their own goals; Howler can set them on a client's
+  behalf. Edits are lightly logged.
+
+**Pitch:** "Tell Pulse what success looks like, and every screen shows how you're
+tracking against it, how it compares to last time, and where you'll land."
+*Coming next: the North Star leads the morning briefing in one line.*
+
+---
+
 ## On the horizon (🔜 — not yet usable; for roadmap conversations only)
 Use these to set direction, **not** to promise dates.
 - **Conversational/agentic Owl** — chat that answers, analyses and *executes*
@@ -242,6 +292,71 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-22** — **Goals — reusable templates + smarter forecast** 🧪: save a goal's setup
+  as a **template** and start new goals from it (recurring monthly/quarterly targets in a
+  tap); Howler can publish **🌐 global templates** to every client. Forecast now **blends recent run-rate (momentum)** with the last-time shape; the
+  comparison defaults to **last year** with a **"Compare against" year picker**; "vs last
+  time" reads the **same calendar day**; and the chart labels **real dates** for calendar
+  goals (vs "days before event") and trims lagging flat data so **actual** ends on the last
+  real sale.
+- **2026-06-21** — **Goals — forecast chart & weekly nudge** 🧪: curve-linked goals get a
+  **sell-curve & forecast chart** (last time · actual · a followable forecast line that
+  hugs last event's remaining shape to its projected landing, with target + "you are
+  here"). A calm **weekly "your goals this week" push** summarises what needs attention
+  (behind · forecast short · checkpoint missed) plus wins; staff can fire a **test nudge**.
+  The **digest goals paragraph** now also celebrates **wins** (goals reached/smashed,
+  checkpoints hit) and flags **missed checkpoints** — not just pace and forecast.
+- **2026-06-20** — **Goals in the digest** 🧪: a scheduled digest can now include a
+  **goals summary** paragraph (toggle in the digest editor) — the event's targets with
+  live progress, pace, vs-last-time and projected finish, leading with the North Star.
+- **2026-06-20** — **Goals — pace, forecast & comparisons** 🧪: goals now read pace
+  off **last event's real sell-curve** (days-before-event), show **vs last time** and
+  a **projected final landing** on the card, let you set the baseline from a **picked
+  dashboard tile** (remembered + live), suggest **checkpoints** on the same math, and
+  support **drag-to-reorder** (carries to the home dashboard). Also: the briefing now
+  **leads with ticketing** (not a reps board) and **GA4 tiles read their saved date
+  range** so they stop coming back empty.
+- **2026-06-19** — **Goals (Results pillar)** 🧪: set a **target** on the numbers
+  that matter for an event and track them live. Each event gets a **North Star**
+  plus secondary goals on the home, with a **progress bar + pace read**
+  (ahead/on-track/behind) and an end-of-event **result band**. Set a goal from a
+  **live dashboard tile** (tracks the real number) or **manually** (sponsorship,
+  cash targets). Dual-surface (client + Howler-on-behalf). *(P1; briefing
+  North-Star line + baseline onboarding next.)*
+- **2026-06-19** — **Getting-started polish + Meta/TikTok step** 🧪: added a **“Connect
+  Meta & TikTok”** step to the Getting started checklist (auto-ticks once an ad
+  account is connected, with a guided walkthrough). Every walkthrough now has a
+  **“do it now” button on its last slide** too, and all the **“Go” buttons land on
+  the right place** — Settings opens the correct section (branding/team/notifications/
+  integrations) and the dashboards step opens an actual dashboard instead of bouncing
+  to home.
+- **2026-06-19** — **One-touch install & notifications in the wizard** 🧪: the welcome
+  wizard now has a dedicated **“Add Pulse to your phone”** step with a one-tap
+  **Install** button (native prompt on Android/desktop; Add-to-Home-Screen guidance
+  on iPhone), and the notifications step turns on push with a single tap. Usage
+  tracking widened too — opening a dashboard and asking the Owl for an insight now
+  feed the **Admin → Onboarding** feature-usage view.
+- **2026-06-19** — **Onboarding that learns** 🧪 (internal): the wizards now record
+  a usage **funnel** (open → step → skip/complete) and **feature usage**, surfaced
+  in **Admin → Onboarding** with plain recommendations ("most people drop at step
+  X — simplify it"). Two safe automatic touches: the welcome wizard **skips steps a
+  client has already done**. Bigger flow changes stay human-decided on purpose (no
+  silent auto-rewriting from a noisy signal).
+- **2026-06-19** — **Guided onboarding & in-app walkthroughs** 🧪: the "Getting
+  started" checklist is now a **guided-learning layer**. Brand-new clients get a
+  one-time **welcome wizard** (branding → team → notifications) on first login;
+  the checklist tasks are reworded and grouped into plain phases (*Make it yours ·
+  Stay in the loop · See & act on your data*), each with a **"Show me how"**
+  walkthrough. A **"Learn" launcher** on the home page explains the things people
+  miss at a glance — **how the home page works, tuning your briefing, pinning vs
+  following tiles, and how the Owl's AI insights work**. All copy lives in one
+  editable place; mobile-first throughout.
+- **2026-06-18** — **Owl auto-ingest for settlements & invoices** 🧪: CC the Owl
+  on the settlement/invoice email you send a client and Pulse files it
+  automatically — reads the PDF, cross-checks the totals, and **auto-publishes**
+  to the client (trusted Howler senders only); anything that doesn't reconcile is
+  held as a draft for review. Configurable under Admin → Integrations (kill-switch
+  + trusted-sender allowlist). No manual upload step.
 - **2026-06-18** — **Campaign costs & billing** 🟡: per-channel rate card — a
   platform **master** rate (Admin → Billing) with optional **per-client** fees
   (Admin → client → Fees; blank inherits master). Campaigns show an **estimated

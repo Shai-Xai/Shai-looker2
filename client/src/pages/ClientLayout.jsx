@@ -40,6 +40,7 @@ export default function ClientLayout() {
 
   useEffect(() => { api.mySuites().then(setSuites).catch(() => {}).finally(() => setLoading(false)); }, []);
   useEffect(() => { api.mySettlements().then(setSettlements).catch(() => {}); }, []);
+  const onGoals = location.pathname.startsWith('/goals');
   const onSettlements = location.pathname.startsWith('/settlements');
   const onInbox = location.pathname.startsWith('/inbox');
   const onDigests = location.pathname.startsWith('/digests');
@@ -310,6 +311,17 @@ export default function ClientLayout() {
         <>
           <div style={{ borderTop: '1px solid var(--hairline)', margin: '12px 6px 10px' }} />
           <div style={{ padding: '0 8px 8px 14px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)' }}>Workspace</div>
+          {(visibleSuites.length > 0 || isAdmin) && (
+          <button
+            ref={onGoals ? activeRef : null}
+            className={`nav-row${onGoals ? ' active' : ''}`}
+            style={{ ...rowBtn, fontWeight: onGoals ? 600 : 500 }}
+            onClick={() => { if (!onGoals) vtNavigate(navigate, '/goals'); if (isMobile) setNavOpen(false); }}
+          >
+            <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>🎯</span>
+            <span style={ellip}>Goals</span>
+          </button>
+          )}
           {can(PERMS.SETTLEMENTS_VIEW) && (visibleSettlements.length > 0 || isAdmin) && (
           <button
             ref={onSettlements ? activeRef : null}
@@ -373,7 +385,7 @@ export default function ClientLayout() {
             style={{ ...rowBtn, fontWeight: onSegments ? 600 : 500 }}
             onClick={() => { if (!onSegments) vtNavigate(navigate, '/engage/segments'); if (isMobile) setNavOpen(false); }}
           >
-            <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>🎯</span>
+            <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>🥧</span>
             <span style={ellip}>Segments</span>
           </button>
           </>
@@ -462,6 +474,16 @@ export default function ClientLayout() {
               {(
                 <>
                   <div style={{ borderTop: '1px solid var(--hairline)', margin: '10px 4px' }} />
+                  {(visibleSuites.length > 0 || isAdmin) && (
+                  <button
+                    className={`nav-row${onGoals ? ' active' : ''}`}
+                    style={{ ...mRowSuite, fontWeight: onGoals ? 700 : 500 }}
+                    onClick={() => { if (!onGoals) vtNavigate(navigate, '/goals'); setNavOpen(false); }}
+                  >
+                    <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>🎯</span>
+                    <span style={ellip}>Goals</span>
+                  </button>
+                  )}
                   {can(PERMS.SETTLEMENTS_VIEW) && (visibleSettlements.length > 0 || isAdmin) && (
                   <button
                     className={`nav-row${onSettlements ? ' active' : ''}`}
@@ -520,7 +542,7 @@ export default function ClientLayout() {
                     style={{ ...mRowSuite, fontWeight: onSegments ? 700 : 500 }}
                     onClick={() => { if (!onSegments) vtNavigate(navigate, '/engage/segments'); setNavOpen(false); }}
                   >
-                    <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>🎯</span>
+                    <span style={{ fontSize: 16, lineHeight: 1, flexShrink: 0 }}>🥧</span>
                     <span style={ellip}>Segments</span>
                   </button>
                   </>

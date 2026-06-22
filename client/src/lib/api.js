@@ -6,6 +6,30 @@ async function json(res) {
   return data;
 }
 
+// Usage telemetry: buffer events and flush in small batches (after a short idle,
+// when the buffer fills, or when the tab is hidden). Fire-and-forget — a failed
+// flush is dropped silently so it can never affect the UI.
+let _trackBuf = [];
+let _trackEntity = null;
+let _trackTimer = null;
+function flushTrack() {
+  clearTimeout(_trackTimer); _trackTimer = null;
+  if (!_trackBuf.length || !_trackEntity) return;
+  const body = JSON.stringify({ entityId: _trackEntity, events: _trackBuf });
+  _trackBuf = [];
+  fetch('/api/my/track', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body }).catch(() => {});
+}
+function queueTrack(entityId, event) {
+  if (!entityId || !event || !event.kind || !event.event || !event.name) return;
+  if (_trackEntity && _trackEntity !== entityId) flushTrack(); // don't mix entities in a batch
+  _trackEntity = entityId;
+  _trackBuf.push(event);
+  if (_trackBuf.length >= 25) return flushTrack();
+  clearTimeout(_trackTimer);
+  _trackTimer = setTimeout(flushTrack, 1500);
+}
+if (typeof window !== 'undefined') window.addEventListener('pagehide', flushTrack);
+
 // POST to an AI-extraction endpoint that streams ndjson progress events
 // ({type:'progress'|'done'|'error'}); calls onProgress per event and resolves
 // with the extracted data.
@@ -99,6 +123,12 @@ export const api = {
       body: JSON.stringify(def),
     }).then(json),
   deleteDashboard: (id) => fetch(`/api/dashboards/${id}`, { method: 'DELETE' }),
+  // Usage telemetry — fire-and-forget, batched (see _trackBuf below). Never throws.
+  // NB: distinct from `track(suiteId, dashboardId)` below, which counts dashboard views.
+  trackUsage: (entityId, event) => queueTrack(entityId, event),
+  // Admin: onboarding funnel + feature-usage aggregates.
+  adminOnboardingStats: () => fetch('/api/admin/onboarding/stats').then(json),
+
   // Onboarding checklist
   getMyOnboarding: (entityId) => fetch(`/api/my/onboarding/${entityId}`).then(json),
   setMyOnboardingStep: (entityId, key, done) => fetch(`/api/my/onboarding/${entityId}/${key}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ done }) }).then(json),
@@ -225,6 +255,9 @@ export const api = {
   // CC-the-Owl: inbound email addresses + config
   getInboundConfig: () => fetch('/api/os/admin/inbound').then(json),
   saveInboundConfig: (p) => fetch('/api/os/admin/inbound', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),
+  // Owl auto-ingest (settlements/invoices from CC-the-Owl email): kill-switch + sender allowlist
+  getOwlIngest: () => fetch('/api/admin/owl-ingest').then(json),
+  saveOwlIngest: (p) => fetch('/api/admin/owl-ingest', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),
   getEntityInbox: (id) => fetch(`/api/admin/entities/${id}/inbox`).then(json),
   regenEntityInbox: (id) => fetch(`/api/admin/entities/${id}/inbox/regenerate`, { method: 'POST' }).then(json),
   getMyInbox: (entityId) => fetch(`/api/my/inbox/${entityId}`).then(json),
@@ -389,4 +422,21 @@ export const api = {
   refineText: (body) => fetch('/api/my/refine-text', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
   saveBriefingTune: (tune, tiles, entityId) =>
     fetch(`/api/my/briefing-tune${entityId ? `?entityId=${encodeURIComponent(entityId)}` : ''}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tune, tiles }) }).then(json),
+
+  // Goals (the Results pillar) — one guarded route set serves admin + client.
+  // Goals are per event (suite); the list returns each goal with resolved progress.
+  suiteGoals: (suiteId) => fetch(`/api/goals/suites/${suiteId}`).then(json),
+  createGoal: (suiteId, b) => fetch(`/api/goals/suites/${suiteId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  updateGoal: (id, b) => fetch(`/api/goals/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  deleteGoal: (id) => fetch(`/api/goals/${id}`, { method: 'DELETE' }).then((r) => r.ok),
+  goalSnapshot: (id, value) => fetch(`/api/goals/${id}/snapshot`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value }) }).then(json),
+  goalTileValue: (suiteId, dashboardId, tileId) => fetch(`/api/goals/suites/${suiteId}/tile-value`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dashboardId, tileId }) }).then(json),
+  goalTileSeries: (suiteId, dashboardId, tileId) => fetch(`/api/goals/suites/${suiteId}/tile-series`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dashboardId, tileId }) }).then(json),
+  goalCheckpointSuggestions: (suiteId, body) => fetch(`/api/goals/suites/${suiteId}/checkpoint-suggestions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
+  goalGapPlan: (goalId) => fetch(`/api/goals/${goalId}/gap-plan`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(json),
+  goalForecastChart: (suiteId, goalId) => fetch(`/api/goals/suites/${suiteId}/forecast-chart?goalId=${encodeURIComponent(goalId)}`).then(json),
+  goalNudgeTest: (entityId) => fetch('/api/admin/goals/nudge-test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entityId }) }).then(json),
+  goalTemplates: (entityId) => fetch(`/api/goals/templates/${entityId}`).then(json),
+  saveGoalTemplate: (body) => fetch('/api/goals/templates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
+  deleteGoalTemplate: (id) => fetch(`/api/goals/templates/${id}`, { method: 'DELETE' }).then(json),
 };

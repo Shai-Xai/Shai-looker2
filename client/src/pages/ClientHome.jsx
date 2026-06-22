@@ -7,6 +7,10 @@ import { vtNavigate } from '../lib/viewTransition.js';
 import AiMark from '../components/AiMark.jsx';
 import BriefingTuneModal from '../components/BriefingTuneModal.jsx';
 import OnboardingCard from '../components/OnboardingCard.jsx';
+import GoalsStrip from '../components/GoalsStrip.jsx';
+import GuideModal from '../components/GuideModal.jsx';
+import { GUIDES, FEATURE_GUIDES, getGuide } from '../lib/guides.js';
+import { isStandalone } from '../lib/pwa.js';
 import DigestHistory from '../components/DigestHistory.jsx';
 import { useProfile } from '../lib/profile.jsx';
 import OwlQuips from '../components/OwlQuips.jsx';
@@ -36,6 +40,7 @@ export default function ClientHome() {
   const [tuneOpen, setTuneOpen] = useState(false);
   const [messages, setMessages] = useState([]);
   const [dismissed, setDismissed] = useState([]);
+  const [guide, setGuide] = useState(null); // open walkthrough/explainer, or null
 
   useEffect(() => { api.mySuites().then(setSuites).catch(() => {}); }, []);
   useEffect(() => {
@@ -53,6 +58,22 @@ export default function ClientHome() {
     api.myBriefing(homeEntityId).then((b) => { if (alive) setBrief(b); }).catch(() => { if (alive) setBrief({ available: false }); });
     api.osInbox(homeEntityId).then((r) => { if (alive) setMessages(r.threads || []); }).catch(() => {});
     api.getDismissedThreads().then((r) => { if (alive) setDismissed(r.dismissed || []); }).catch(() => {});
+    // First run: show the essentials welcome wizard once per entity (remembered
+    // in localStorage so it never nags again), unless they've dismissed setup or
+    // already finished. Auto-refinement: steps the client has already done are
+    // dropped, so the wizard only walks them through what's actually left.
+    if (homeEntityId) {
+      const seenKey = `howler_onboarding_welcomed:${homeEntityId}`;
+      if (!localStorage.getItem(seenKey)) {
+        api.getMyOnboarding(homeEntityId).then((o) => {
+          if (!alive || !o || o.dismissed || o.complete) return;
+          localStorage.setItem(seenKey, '1');
+          const done = new Set((o.steps || []).filter((s) => s.done).map((s) => s.key));
+          const steps = GUIDES.essentials.steps.filter((s) => !s.skipIfDone || !done.has(s.skipIfDone));
+          setGuide({ ...GUIDES.essentials, steps });
+        }).catch(() => {});
+      }
+    }
     return () => { alive = false; };
   }, [homeEntityId]);
   const dismissMessage = (id) => {
@@ -108,6 +129,7 @@ export default function ClientHome() {
             {todayLine()}{snap?.lastVisit ? ` · Here's what changed since your last visit ${relDay(snap.lastVisit)}.` : ''}
           </p>
         </div>
+        <LearnMenu onPick={(id) => setGuide(getGuide(id))} />
       </div>
 
       {/* Getting-started checklist — hides once complete or dismissed */}
@@ -122,7 +144,7 @@ export default function ClientHome() {
             <span style={{ flex: 1 }} />
             {brief?.generatedAt && <span style={{ fontSize: 11, color: 'var(--muted)' }}>{new Date(brief.generatedAt).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}</span>}
             {refreshErr && <span style={{ fontSize: 11, color: 'var(--error)' }} title="Couldn't refresh — try again">⚠</span>}
-            <button onClick={() => setTuneOpen(true)} title="Tune your briefing — focus, event dates, phases" style={refreshBtn}>⚙ Tune</button>
+            <button onClick={() => { api.trackUsage(homeEntityId, { kind: 'feature', name: 'briefing_tune', event: 'use' }); setTuneOpen(true); }} title="Tune your briefing — focus, event dates, phases" style={refreshBtn}>⚙ Tune</button>
             <button onClick={refreshBrief} disabled={refreshing} title="Regenerate briefing" style={refreshBtn}>{refreshing ? '…' : '↻ Refresh'}</button>
           </div>
           {brief == null || refreshing ? (
@@ -157,6 +179,10 @@ export default function ClientHome() {
           )}
         </div>
       )}
+
+      {/* Goals — the Results pillar. North Star leads; tracks live off a tile or
+          a manual value. Hidden when there's nothing set and nothing to manage. */}
+      <GoalsStrip entityId={homeEntityId} suites={visibleSuites} />
 
       {/* Past digests — react/comment to tune future ones. Hidden until any exist. */}
       <DigestHistory entityId={homeEntityId} compact />
@@ -265,6 +291,8 @@ export default function ClientHome() {
       {tuneOpen && (
         <BriefingTuneModal entityId={homeEntityId} onClose={() => setTuneOpen(false)} onSaved={refreshBrief} />
       )}
+
+      {guide && <GuideModal guide={guide} entityId={homeEntityId} onClose={() => setGuide(null)} />}
 
       {/* Suites */}
       <SectionHead>Your suites</SectionHead>
@@ -492,6 +520,41 @@ function YourActions({ entityId, isMobile, onOpen }) {
         })}
       </div>
     </>
+  );
+}
+
+// Small "Learn" launcher in the greeting: a button that opens a popover of the
+// feature explainers (home, briefing, pins, insights). Closes on outside click.
+function LearnMenu({ onPick }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+  return (
+    <div ref={ref} style={{ position: 'relative', flexShrink: 0 }}>
+      <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open}
+        style={{ minHeight: 36, padding: '7px 13px', borderRadius: 980, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}>
+        ❔ Learn
+      </button>
+      {open && (
+        <div style={{ position: 'absolute', right: 0, top: '110%', zIndex: 60, width: 230, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, boxShadow: 'var(--shadow-lg, 0 10px 30px rgba(0,0,0,0.22))', padding: 6, display: 'flex', flexDirection: 'column', gap: 2 }}>
+          {/* Drop the install explainer once Pulse is already installed. */}
+          {FEATURE_GUIDES.filter((g) => !(g.id === 'install' && isStandalone())).map((g) => (
+            <button key={g.id} type="button" onClick={() => { setOpen(false); onPick(g.id); }}
+              style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', textAlign: 'left', padding: '9px 10px', minHeight: 40, border: 'none', background: 'transparent', color: 'var(--text)', fontSize: 13, fontWeight: 600, borderRadius: 8, cursor: 'pointer' }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(128,128,128,0.10)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}>
+              <span style={{ fontSize: 16, width: 20, textAlign: 'center', flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{g.owl ? <AiMark size={16} sparkle={false} quiet /> : g.icon}</span>
+              <span>{g.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

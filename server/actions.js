@@ -948,14 +948,22 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     const candidates = db.listUsers()
       .filter((u) => u.role !== 'admin' && (u.entityIds || []).includes(req.params.entityId) && auth.hasPermission(u, req.params.entityId, 'campaigns.approve'))
       .map((u) => ({ userId: u.id, email: u.email }));
-    // Unique openers per campaign (one grouped query) → open rate on the list.
+    // Roll up opens/clicks for JUST the campaigns we're listing — scoped to this
+    // entity's own action ids (already in hand from `rows`), never a full-table
+    // scan across every tenant's action_opens/action_clicks (those tables grow
+    // without bound, so an unscoped GROUP BY here is a per-load cost cliff).
+    const ids = rows.map((r) => r.id);
+    const ph = ids.map(() => '?').join(',');
     const openMap = {};
-    try { for (const o of sql.prepare("SELECT action_id, COUNT(DISTINCT email) n FROM action_opens WHERE email!='' GROUP BY action_id").all()) openMap[o.action_id] = o.n; } catch { /* table may be new */ }
-    // Per-channel clicks per campaign (one grouped query) → reconcile the cached
-    // counters from the source-of-truth table so the list + master rollup can't
-    // drift from it (the counter is just a cache; see reconcileClicks).
     const clickMap = {};
-    try { for (const c of sql.prepare('SELECT action_id, channel, COUNT(*) n FROM action_clicks GROUP BY action_id, channel').all()) (clickMap[c.action_id] = clickMap[c.action_id] || []).push({ channel: c.channel, n: c.n }); } catch { /* table may be new */ }
+    if (ids.length) {
+      // Unique openers per campaign → open rate on the list.
+      try { for (const o of sql.prepare(`SELECT action_id, COUNT(DISTINCT email) n FROM action_opens WHERE email!='' AND action_id IN (${ph}) GROUP BY action_id`).all(...ids)) openMap[o.action_id] = o.n; } catch { /* table may be new */ }
+      // Per-channel clicks per campaign → reconcile the cached counters from the
+      // source-of-truth table so the list + master rollup can't drift from it
+      // (the counter is just a cache; see reconcileClicks).
+      try { for (const c of sql.prepare(`SELECT action_id, channel, COUNT(*) n FROM action_clicks WHERE action_id IN (${ph}) GROUP BY action_id, channel`).all(...ids)) (clickMap[c.action_id] = clickMap[c.action_id] || []).push({ channel: c.channel, n: c.n }); } catch { /* table may be new */ }
+    }
     const actions = rows.map((r) => {
       const a = reconcileClicks(rowToAction(r), clickMap[r.id] || []);
       const pub = publicAction(a);

@@ -216,6 +216,71 @@ async function streamDashboardInsight(ctx, onText) {
   await stream.finalMessage();
 }
 
+// ─── Goals (Results pillar) summary ──────────────────────────────────────────────
+// A short Owl narrative over an event's goals. The values (current, %, pace,
+// vs-last-time, next checkpoint) are ALREADY COMPUTED by the goals resolver and
+// passed in — the model only phrases them (a Results non-negotiable: goal values
+// are computed; the AI never recomputes or invents them).
+const GOALS_SYSTEM = `You are a senior analyst for Howler, an events ticketing platform (organisers run events; customers buy tickets; amounts in South African Rand, ZAR).
+
+You are given the GOALS for a single event, each with its progress ALREADY COMPUTED: current value, target, % to target, pace status (ahead / on track / behind versus where it should be by now), the value expected by now, the comparison to last time (both last time's value AT THIS SAME POINT in the cycle and last time's final total), the projected final landing (forecast — where it ends if it finishes like last time), days to go, and the next checkpoint. These numbers are facts — phrase them; never recompute, and never invent figures or goals that aren't listed.
+
+Write a short, honest, motivating summary for the organiser:
+- Lead with the North Star goal and whether it's on track.
+- Call out what's ahead and what's behind pace, with the specific numbers.
+- Mention the biggest move versus last time when it's notable.
+- Point to the nearest checkpoint that needs attention, and end with one concrete nudge.
+
+Keep it to 3-5 short sentences or up to 5 brief bullets. No preamble, no headings, no restating the question. If there's too little to say, say so briefly.`;
+
+function buildGoalsPrompt({ eventName, goals }) {
+  const fmt = (v) => (v == null ? '—' : (typeof v === 'number' ? v.toLocaleString('en-ZA') : String(v)));
+  const lines = [`Event: ${eventName || '(untitled)'}`, `Goals: ${goals.length}`, ''];
+  for (const g of goals) {
+    const p = g.progress || {};
+    const parts = [`- ${g.isNorthStar ? '★ ' : ''}${g.name}${g.unit ? ` (${g.unit})` : ''}`];
+    parts.push(`  current ${fmt(p.value)} / target ${fmt(g.targetValue)}${p.pct != null ? ` (${p.pct}%)` : ''}`);
+    if (g.direction === 'at_most') parts.push('  goal type: stay under the target');
+    if (p.status) parts.push(`  pace: ${p.status}${p.expected != null ? `, expected ~${fmt(p.expected)} by now` : ''}`);
+    if (p.daysLeft != null) parts.push(`  days to go: ${p.daysLeft}`);
+    // vs last time — prefer the curve's "at this same point" (apples-to-apples), with
+    // last time's final total; fall back to the plain stored baseline.
+    if (p.lastAtNow != null) {
+      const d = p.value != null && p.lastAtNow ? Math.round(((p.value - p.lastAtNow) / Math.abs(p.lastAtNow)) * 100) : null;
+      parts.push(`  vs last time at this point: ${fmt(p.lastAtNow)}${d != null ? ` (${d > 0 ? '+' : ''}${d}%)` : ''}`);
+      if (p.baselineFinal != null) parts.push(`  last time total: ${fmt(p.baselineFinal)}`);
+    } else if (g.baselineValue != null) {
+      parts.push(`  last time: ${fmt(g.baselineValue)}`);
+    }
+    // Forecast — projected final landing if it finishes like last time's shape.
+    if (p.forecast && p.forecast.projected != null) {
+      const f = p.forecast;
+      const tail = f.status === 'will_hit' ? 'on track to hit target'
+        : `${f.vsTargetPct != null ? `${f.vsTargetPct}% of target` : ''}${g.targetValue ? `, ~${fmt(Math.abs(g.targetValue - f.projected))} short` : ''}`;
+      parts.push(`  forecast: projected ~${fmt(f.projected)}${tail ? ` (${tail})` : ''}`);
+    }
+    if (p.nextMilestone) parts.push(`  next checkpoint: ${fmt(p.nextMilestone.targetValue)} by ${p.nextMilestone.byDate}`);
+    if (g.byDate) parts.push(`  deadline: ${g.byDate}`);
+    lines.push(parts.join('\n'));
+  }
+  return lines.join('\n');
+}
+
+// Streaming Owl summary of an event's goals. ctx = { eventName, goals, instructions, apiKey }.
+async function streamGoalsBrief(ctx, onText) {
+  const c = requireClient(ctx.apiKey);
+  const stream = c.messages.stream({
+    model: MODEL,
+    max_tokens: 1200,
+    thinking: { type: 'adaptive' },
+    output_config: { effort: 'low' },
+    system: systemWith(GOALS_SYSTEM, ctx.instructions),
+    messages: [{ role: 'user', content: buildGoalsPrompt(ctx) }],
+  });
+  stream.on('text', (delta) => onText(delta));
+  await stream.finalMessage();
+}
+
 // ─── Tile-library labelling ────────────────────────────────────────────────────
 // Given a tile's metadata (its title, chart type, and the fields it queries),
 // ask Claude to name it and explain what it shows and what it's used for. Used
@@ -267,6 +332,7 @@ const HOME_SYSTEM = `You are the Owl — Howler Pulse's analyst — writing a pr
 - MESSAGES (when present): recent messages from the Howler team to this organiser. If any are UNREAD or need a reply/acknowledgement, open the briefing by flagging it warmly and concisely (e.g. "Howler sent you a note about the settlement — worth a read"). Don't quote at length; point them to it.
 - CATALOGUE: every dashboard they can open (id, title, set, suite).
 - CAPABILITIES (when present): actions the platform can EXECUTE for the reader right now (key + what it does). A suggestion may carry "action": "<capability key>" ONLY when executing that capability would directly deliver the suggestion (e.g. an email_campaign for re-engaging abandoned carts). Most suggestions are just "look at this" — leave action out for those. Never invent capability keys.
+- GOALS (when present): the event's targets with progress ALREADY COMPUTED (current vs target & %, pace ahead/on-track/behind, vs last time at this same point, projected final landing, checkpoints hit/missed, days to go). When GOALS are present, anchor the briefing on the NORTH STAR (★) goal — its attainment, whether it's on pace, the vs-last-time move and the projected finish — and weave the others in as supporting context. Celebrate any wins (goals REACHED/SMASHED or checkpoints hit) and flag a MISSED checkpoint worth attention. Phrase the numbers; never recompute or invent goals.
 
 Respond with ONLY strict JSON (no markdown fences):
 {
@@ -276,7 +342,7 @@ Respond with ONLY strict JSON (no markdown fences):
 }
 
 Rules:
-- ALWAYS LEAD with the headline TICKETING numbers as the most important story — tickets sold, gross revenue and orders for the current event are the authoritative sales figures and must anchor the briefing, regardless of which dashboards the reader visits most. Then layer in supporting context (audience, traffic, channels, comparisons).
+- ALWAYS LEAD with the headline TICKETING numbers as the most important story — tickets sold, gross revenue and orders for the current event are the authoritative sales figures and must anchor the briefing, regardless of which dashboards the reader visits most. Then layer in supporting context (audience, traffic, channels, comparisons). Do NOT lead with a single sales CHANNEL (e.g. reps/agents/promoters), a sub-segment, or an overnight DELTA — those are supporting context, never the headline. The lead is the event's cumulative total tickets sold and gross revenue, even if they barely moved overnight. Cashless/top-ups are also supporting context, not the ticketing lead.
 - Each tile shows its source as "— <set> → <dashboard>". Metrics from a web-analytics source (e.g. GA4, Google Analytics — sessions, page views, "conversions", site events) measure TRAFFIC and on-site behaviour, NOT finalised ticket sales: never report a GA4/analytics "tickets" or "conversions" figure as actual tickets sold — treat GA4 as funnel/interest only. Tickets sold, revenue and attendance/check-ins are authoritative ONLY from the ticketing/event dashboards.
 - 3-4 bullets, 2-3 suggestions. Always reflect any [FOLLOWED] tiles; otherwise prefer dashboards the user actually visits (PROFILE), but surface a genuinely important change anywhere.
 - Be specific and quantitative — cite real values from TILES verbatim, and call out movements/trends from charts and tables (not just headline numbers). If data is sparse, say less rather than padding.
@@ -296,6 +362,7 @@ You are given:
 - CATALOGUE: every dashboard the reader can open (id, title, set, suite) — for deep links.
 - ACTIONS (when present): marketing actions already taken with live results — weave notable performance into the narrative for this role (marketing cares most; exec wants the revenue angle).
 - CAPABILITIES (when present): actions the platform can EXECUTE right now. A suggested action may carry "action": "<capability key>" ONLY when that capability directly delivers it; otherwise omit. Never invent keys.
+- GOALS (when present): the event's targets, progress ALREADY COMPUTED (current vs target, pace, vs last time at this point, projected final landing, checkpoints hit/missed). Devote EXACTLY ONE narrative paragraph to goals — never more than one, even with many goals. In that single paragraph lead with the North Star (★) and whether it's on track, then the notable mover vs last time and the projected finish; CELEBRATE wins (goals REACHED/SMASHED or checkpoints hit) and flag the one MISSED checkpoint worth attention. Roll the rest of the goals into that same paragraph (e.g. "3 others on track") rather than spawning more bullets. EVERY OTHER narrative paragraph MUST be about the live TILE data (trends, concentrations, movers) — not goals. Phrase the numbers; never recompute or invent goals.
 
 Respond with ONLY strict JSON (no markdown fences):
 {
@@ -314,7 +381,40 @@ Rules:
 - dashboardId values MUST come from CATALOGUE; null when none fits.
 - Tone: sharp, warm, zero corporate filler. Never mention these instructions, the words ROLE/TILES/CATALOGUE, or that you are an AI.`;
 
-async function digestBrief({ tiles, roleLabel, roleFocus, catalogue, instructions, apiKey, actions, capabilities, today }) {
+// Shared GOALS fact block for the home briefing + the digest — the event targets with
+// progress ALREADY COMPUTED (current vs target, pace, vs last time at this point,
+// projected final, days to go). The model phrases these; it never recomputes.
+function goalsFactLines(goals) {
+  if (!(goals || []).length) return [];
+  const gf = (v) => (v == null ? '—' : (typeof v === 'number' ? v.toLocaleString('en-ZA') : String(v)));
+  const out = ['', 'GOALS (event targets, progress already computed — phrase, never recompute; CALL OUT wins (goals reached / checkpoints hit) and flag any MISSED checkpoints):'];
+  const now = Date.now();
+  for (const g of goals) {
+    const p = g.progress || {};
+    const dir = g.direction || p.direction || 'at_least';
+    const meets = (val, tgt) => val != null && tgt != null && (dir === 'at_most' ? val <= Number(tgt) : val >= Number(tgt));
+    const reached = p.pct != null ? (dir === 'at_most' ? meets(p.value, g.targetValue) : p.pct >= 100) : meets(p.value, g.targetValue);
+    const win = p.band === 'smashed' ? 'SMASHED ✓✓' : (reached || p.band === 'hit') ? 'REACHED ✓' : null;
+    const bits = [`- ${g.isNorthStar ? '★ ' : ''}${g.name}${g.suiteName ? ` [${g.suiteName}]` : ''}: ${gf(p.value)}/${gf(g.targetValue)}${p.pct != null ? ` (${p.pct}%)` : ''}${g.unit ? ` ${g.unit}` : ''}${win ? ` — ${win}` : ''}`];
+    if (!win && p.status) bits.push(`pace ${p.status}${p.expected != null ? ` (expected ~${gf(p.expected)} by now)` : ''}`);
+    if (p.lastAtNow != null) { const d = p.value != null && p.lastAtNow ? Math.round(((p.value - p.lastAtNow) / Math.abs(p.lastAtNow)) * 100) : null; bits.push(`vs last time ${gf(p.lastAtNow)}${d != null ? ` (${d > 0 ? '+' : ''}${d}%)` : ''}`); }
+    if (!win && p.forecast && p.forecast.projected != null) bits.push(`forecast ~${gf(p.forecast.projected)}${p.forecast.status === 'will_hit' ? ' (on track)' : p.forecast.vsTargetPct != null ? ` (${p.forecast.vsTargetPct}% of target)` : ''}`);
+    // Checkpoints (milestones): how many due ones we've hit, and the most recent miss.
+    const due = (Array.isArray(p.milestones) ? p.milestones : []).filter((m) => { const t = Date.parse(m.byDate); return !Number.isNaN(t) && t <= now; });
+    if (due.length) {
+      const hit = due.filter((m) => meets(p.value, m.targetValue)).length;
+      bits.push(`checkpoints ${hit}/${due.length} hit`);
+      const missed = [...due].reverse().find((m) => !meets(p.value, m.targetValue));
+      if (missed) bits.push(`MISSED checkpoint ${gf(Number(missed.targetValue))} by ${missed.byDate}`);
+    }
+    if (p.nextMilestone) bits.push(`next checkpoint ${gf(p.nextMilestone.targetValue)} by ${p.nextMilestone.byDate}`);
+    if (p.daysLeft != null) bits.push(`${p.daysLeft}d to go`);
+    out.push(bits.join(' · '));
+  }
+  return out;
+}
+
+async function digestBrief({ tiles, roleLabel, roleFocus, catalogue, instructions, apiKey, actions, capabilities, goals, today }) {
   const c = requireClient(apiKey);
   const lines = [];
   if (today) lines.push(`TODAY: ${today} (the current date — anchor all "today/yesterday/this month/day N" references to this).`, '');
@@ -332,6 +432,10 @@ async function digestBrief({ tiles, roleLabel, roleFocus, catalogue, instruction
   if ((capabilities || []).length) {
     lines.push('', 'CAPABILITIES (executable actions available):');
     for (const cap of capabilities) lines.push(`- ${cap.key}: ${cap.description}`);
+  }
+  if ((goals || []).length) {
+    // GOALS: the event targets, with progress ALREADY COMPUTED. Facts — phrase, never recompute.
+    lines.push(...goalsFactLines(goals));
   }
   lines.push('CATALOGUE:');
   for (const d of catalogue || []) lines.push(`- ${d.dashboardId}: ${d.title} [${d.setName}, ${d.suiteName}]`);
@@ -388,6 +492,71 @@ async function draftCampaign({ goal, clientName, clientContext, audienceCount, i
   return JSON.parse(match[0]);
 }
 
+// ─── Goal "gap plan" (marketing & insights manager) ──────────────────────────────
+// When a goal is behind/short, act as the client's marketing + insights manager:
+// mine the event's data for the SPECIFIC nuggets that can push it to target —
+// lagging or over-indexing ticket types, segments, demographics (age/city/country),
+// channels — and turn the best into a targeted campaign brief. Numbers are FACTS from
+// the tiles; never invent. Returns strict JSON the UI renders + uses to pre-fill a campaign.
+const GOAL_GAP_SYSTEM = `You are the marketing & insights manager for an events organiser on Howler (tickets; amounts in South African Rand, ZAR). A specific GOAL is behind pace or forecast to fall short. Your job: find the concrete nuggets in THIS event's data that can close the gap, and turn them into a targeted campaign — not a generic "abandoned cart" blast.
+
+You are given:
+- TODAY and the GOAL (name, current vs target, the gap, days to go, pace, vs last time at this point, projected finish).
+- TILES: live data for this event — ticket-type / price-tier splits, demographics (age, city, country, gender), sales channels (online, reps, cashless/top-ups), trends and last-year comparisons. These are the ONLY numbers you may use; never invent or extrapolate.
+- SEGMENTS (when present): saved, ready-to-use audiences (name + size).
+- CATALOGUE: dashboards you may deep-link a nugget to.
+
+Find the levers. Look for: a ticket type lagging vs last year or selling out; a city/region or age band over-indexing (lean in) or collapsing (win back); a high-converting segment to double down on; a channel that over/under-performs; price/tier headroom. Each nugget must cite a real number and say what to DO about it.
+
+Respond with ONLY strict JSON (no markdown fences):
+{
+  "summary": "1 sentence: where the gap is and the single biggest opportunity to close it",
+  "nuggets": [ { "headline": "the opportunity in <=10 words", "detail": "1-2 sentences with the real number(s) and the action", "dashboardId": "id from CATALOGUE or null" } ],
+  "audience": "who to target, described concretely (e.g. 'past buyers in Cape Town aged 18-24')",
+  "segmentName": "the EXACT name of a SEGMENTS entry that best fits, or empty string if none",
+  "angle": "the campaign angle / offer / hook in one line",
+  "campaignGoal": "a ready 1-2 sentence campaign goal to hand to the copywriter — who to target, what to say, what action to drive, anchored to closing this goal's gap"
+}
+Rules: 2-4 nuggets, the highest-leverage ones. Every figure verbatim from TILES. Prefer a named SEGMENT for the audience when one fits. Be specific and commercial; no fluff, no preamble.`;
+async function goalGapPlan({ goal, progress, tiles, segments, clientName, catalogue, instructions, today, apiKey }) {
+  const c = requireClient(apiKey);
+  const p = progress || {};
+  const gf = (v) => (v == null ? '—' : (typeof v === 'number' ? v.toLocaleString('en-ZA') : String(v)));
+  const gap = goal.targetValue != null && p.value != null ? goal.targetValue - p.value : null;
+  const lines = [];
+  if (today) lines.push(`TODAY: ${today}`, '');
+  lines.push(`CLIENT: ${clientName || 'an event organiser'}`);
+  const goalBits = [`GOAL: ${goal.isNorthStar ? '★ ' : ''}${goal.name}${goal.unit ? ` (${goal.unit})` : ''} — ${gf(p.value)} of ${gf(goal.targetValue)}${p.pct != null ? ` (${p.pct}%)` : ''}${gap != null ? `, ${gf(gap)} to go` : ''}`];
+  if (p.status) goalBits.push(`pace ${p.status}${p.expected != null ? ` (expected ~${gf(p.expected)} by now)` : ''}`);
+  if (p.lastAtNow != null) goalBits.push(`last time at this point ${gf(p.lastAtNow)}`);
+  if (p.forecast && p.forecast.projected != null) goalBits.push(`forecast ~${gf(p.forecast.projected)}${p.forecast.vsTargetPct != null ? ` (${p.forecast.vsTargetPct}% of target)` : ''}`);
+  if (p.daysLeft != null) goalBits.push(`${p.daysLeft} days to go`);
+  lines.push(goalBits.join(' · '), '');
+  lines.push('TILES (live data — the ONLY numbers you may use):', '');
+  for (const t of tiles || []) {
+    lines.push(`### ${t.title}${t.visType ? ` (${t.visType})` : ''} — ${t.setName} → ${t.dashTitle}`);
+    if (t.context && t.context.trim()) lines.push(`(context: ${t.context.trim()})`);
+    lines.push(compactTable(t.fields, t.rows, 40));
+    lines.push('');
+  }
+  if ((segments || []).length) {
+    lines.push('SEGMENTS (ready audiences — name · size):');
+    for (const s of segments) lines.push(`- ${s.name}${s.count != null && s.count >= 0 ? ` · ${s.count}` : ''}`);
+    lines.push('');
+  }
+  if ((catalogue || []).length) { lines.push('CATALOGUE:'); for (const d of catalogue) lines.push(`- ${d.dashboardId}: ${d.title} [${d.setName}, ${d.suiteName}]`); }
+  const resp = await c.messages.create({
+    model: MODEL,
+    max_tokens: 1500,
+    thinking: { type: 'adaptive' },
+    output_config: { effort: 'low' },
+    system: systemWith(GOAL_GAP_SYSTEM, instructions),
+    messages: [{ role: 'user', content: lines.join('\n') }],
+  });
+  const text = (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
+  return parseModelJsonResilient(c, text, 'goal-gap');
+}
+
 // Sharpen a short instruction/briefing note the user wrote to steer the Owl.
 // Returns improved PLAIN TEXT (not a report, not JSON) — same intent, clearer
 // and tighter as a prompt.
@@ -437,7 +606,7 @@ async function summariseReleaseNotes({ days, apiKey, instructions }) {
   return Array.isArray(parsed?.days) ? parsed.days : [];
 }
 
-async function briefHome({ tiles, profile, catalogue, instructions, apiKey, actions, messages, capabilities, today }) {
+async function briefHome({ tiles, profile, catalogue, instructions, apiKey, actions, messages, capabilities, goals, today }) {
   const c = requireClient(apiKey);
   const lines = [];
   if (today) lines.push(`TODAY: ${today} (the current date — anchor all "today/yesterday/this month/day N" references to this).`, '');
@@ -462,6 +631,7 @@ async function briefHome({ tiles, profile, catalogue, instructions, apiKey, acti
     lines.push('', 'MESSAGES (from the Howler team):');
     for (const m of fromHowler) lines.push(`- [id:${m.id}] ${m.unread ? '[UNREAD] ' : ''}${m.priority === 'must_ack' && !m.acked ? '[NEEDS ACK] ' : ''}"${m.title}": ${m.preview}`);
   }
+  if ((goals || []).length) lines.push(...goalsFactLines(goals));
   lines.push('');
   lines.push('CATALOGUE:');
   for (const d of catalogue || []) lines.push(`- ${d.dashboardId}: ${d.title} [${d.setName}, ${d.suiteName}]`);
@@ -622,6 +792,34 @@ async function distilPreferences({ items, previous, apiKey }) {
   return (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim().slice(0, 4000);
 }
 
+// ─── Document classification (Owl email auto-ingest) ────────────────────────────
+// A cheap one-word triage so the Owl knows which extractor to run on a PDF that
+// arrived by email. Only called when the subject/filename heuristic is ambiguous.
+const CLASSIFY_SYSTEM = `You classify a single Howler PDF. Reply with EXACTLY one lowercase word and nothing else:
+- "settlement" — an event settlement / reconciliation report (turnover, Howler commissions, advances, value due to the client).
+- "invoice" — a tax invoice (line items, VAT, a total amount due).
+- "other" — anything else.
+One word only. If unsure, answer "other".`;
+
+async function classifyDocument({ pdfBase64, apiKey }) {
+  const c = requireClient(apiKey);
+  const resp = await c.messages.create({
+    model: MODEL, max_tokens: 8, output_config: { effort: 'low' },
+    system: CLASSIFY_SYSTEM,
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: pdfBase64 } },
+        { type: 'text', text: 'Classify this document. One word: settlement, invoice, or other.' },
+      ],
+    }],
+  });
+  const t = (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').toLowerCase();
+  if (t.includes('settlement')) return 'settlement';
+  if (t.includes('invoice')) return 'invoice';
+  return 'other';
+}
+
 function promptRegistry() {
   return [
     { key: 'tile', label: 'Tile insight', scope: 'Per-tile "Explain this" insight', text: SYSTEM },
@@ -635,7 +833,10 @@ function promptRegistry() {
     { key: 'settlement', label: 'Settlement extraction', scope: 'PDF settlement → JSON', text: SETTLEMENT_SYSTEM },
     { key: 'invoice', label: 'Invoice extraction', scope: 'PDF invoice → JSON', text: INVOICE_SYSTEM },
     { key: 'digest_prefs', label: 'Digest preferences', scope: 'Distilling digest/briefing feedback into a learned preferences note', text: DIGEST_PREFS_SYSTEM },
+    { key: 'classify', label: 'Document classification', scope: 'Owl email ingest: settlement vs invoice vs other', text: CLASSIFY_SYSTEM },
+    { key: 'goals', label: 'Goals summary', scope: 'Owl summary of an event\'s goals on the Goals page', text: GOALS_SYSTEM },
+    { key: 'goalGap', label: 'Goal gap plan', scope: 'Marketing/insights plan to close a behind-pace goal (→ targeted campaign)', text: GOAL_GAP_SYSTEM },
   ];
 }
 
-module.exports = { generateInsight, streamInsight, streamDashboardInsight, describeTile, extractSettlement, extractInvoice, briefHome, digestBrief, draftCampaign, refineText, distilPreferences, summariseReleaseNotes, promptRegistry, systemWith, isConfigured: (apiKey) => !!(apiKey || process.env.ANTHROPIC_API_KEY) };
+module.exports = { generateInsight, streamInsight, streamDashboardInsight, streamGoalsBrief, describeTile, extractSettlement, extractInvoice, classifyDocument, briefHome, digestBrief, draftCampaign, goalGapPlan, refineText, distilPreferences, summariseReleaseNotes, promptRegistry, systemWith, isConfigured: (apiKey) => !!(apiKey || process.env.ANTHROPIC_API_KEY) };

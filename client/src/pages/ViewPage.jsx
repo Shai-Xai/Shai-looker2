@@ -10,6 +10,7 @@ import EditableGrid from '../components/EditableGrid.jsx';
 import { api } from '../lib/api.js';
 import { ANY_VALUE } from '../lib/filterConstants.js';
 import { useAuth } from '../lib/auth.jsx';
+import { useProfile } from '../lib/profile.jsx';
 import { useTheme } from '../lib/theme.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import { ScopeProvider } from '../lib/ScopeContext.jsx';
@@ -22,6 +23,7 @@ export default function ViewPage() {
   const { id, suiteId } = useParams();
   const navigate = useNavigate();
   const { isAdmin, insightsEnabled, user } = useAuth();
+  const { mode } = useProfile();
   const { previewEntityId, actionsSlot } = useOutletContext() || {};
   const { theme: appTheme } = useTheme();
   const [def, setDef] = useState(null);
@@ -168,6 +170,8 @@ export default function ViewPage() {
 
   // View tracking (fire-and-forget) — powers home-page personalisation.
   useEffect(() => { if (suiteId && id) api.track(suiteId, id); }, [suiteId, id]);
+  // Feature-usage signal: a client opened a dashboard (Admin → Onboarding insights).
+  useEffect(() => { if (scopeEntityId && id) api.trackUsage(scopeEntityId, { kind: 'feature', name: 'dashboard', event: 'use' }); }, [id, scopeEntityId]);
 
   // Sub-dashboard tabs: if this dashboard is a parent with children — or one of
   // the children — surface the whole family as a tab bar (parent first).
@@ -227,7 +231,11 @@ export default function ViewPage() {
     background: dark ? 'var(--bg)' : (theme.background || 'var(--bg)'),
     ...(dark ? null : { '--tile-bg': theme.tileBackground || '#fff' }),
   };
-  const backTo = '/';
+  // Home target: an admin previewing a client (console mode, inside the client
+  // shell via /suite/...) goes to the preview home, not the admin console — '/'
+  // redirects admins to /admin. Real clients and direct /d/:id admin views use '/'.
+  const previewMode = isAdmin && mode === 'console';
+  const backTo = suiteId && previewMode ? '/preview' : '/';
   const hasFilters = (def.filters?.length || 0) > 0;
   const activeCount = hasFilters ? activeFilterCount(def.filters, filterValues) : 0;
   const hasTiles = !!(def.tiles?.length || def.carousels?.length);

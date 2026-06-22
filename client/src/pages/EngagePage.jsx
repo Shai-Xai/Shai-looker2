@@ -13,7 +13,7 @@ import TemplateManager from '../components/TemplateManager.jsx';
 // before each ships. Deep links to /actions and /segments redirect in here.
 const TABS = [
   { key: 'campaigns', label: 'Campaigns', icon: '📣', ready: true },
-  { key: 'segments', label: 'Segments', icon: '🎯', ready: true },
+  { key: 'segments', label: 'Segments', icon: '🥧', ready: true },
   { key: 'automations', label: 'Automations', icon: '⏱', ready: false },
   { key: 'templates', label: 'Templates', icon: '📝', ready: true },
   { key: 'connections', label: 'Connections', icon: '🔌', ready: false },

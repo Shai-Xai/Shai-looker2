@@ -539,6 +539,17 @@ CREATE TABLE IF NOT EXISTS event_documents (
 CREATE INDEX IF NOT EXISTS idx_event_documents_entity ON event_documents(entity_id);
 `);
 
+// Owl auto-ingest provenance + review gate (settlements/invoices that arrive by
+// CC-the-Owl email). `source`='email' marks Owl-ingested; `needs_review`=1 hides
+// it from the client until a human publishes (set when the totals cross-check
+// failed); `source_ref` is the os_attachment id it came from (dedup vs re-delivery).
+addColumn('settlements', 'source', "TEXT NOT NULL DEFAULT 'manual'");
+addColumn('settlements', 'needs_review', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('settlements', 'source_ref', "TEXT NOT NULL DEFAULT ''");
+addColumn('event_documents', 'source', "TEXT NOT NULL DEFAULT 'manual'");
+addColumn('event_documents', 'needs_review', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('event_documents', 'source_ref', "TEXT NOT NULL DEFAULT ''");
+
 // Tile library ─────────────────────────────────────────────────────────────────
 // Every visualization tile imported from Looker is harvested here so it can be
 // labelled (what it is / what it's used for) and reused when building new
@@ -1063,6 +1074,7 @@ function rowToSettlementSummary(r) {
     valueDue: d.valueDue ?? null,
     advances: (d.advances?.rows || []).map((a) => ({ date: a.date, value: a.value })),
     hasFile: !!r.file, fileName: r.file_name || '',
+    source: r.source || 'manual', needsReview: !!r.needs_review,
     createdAt: r.created_at, updatedAt: r.updated_at,
   };
 }
@@ -1070,11 +1082,15 @@ function rowToSettlement(r) {
   if (!r) return null;
   return { ...rowToSettlementSummary(r), data: J(r.data, {}), notes: J(r.notes, []) };
 }
-function listSettlements({ entityIds } = {}) {
-  let rows = db.prepare('SELECT id, entity_id, title, status, kind, settlement_date, data, file_name, created_at, updated_at, (file != \'\') AS file FROM settlements ORDER BY settlement_date DESC, created_at DESC').all();
+function listSettlements({ entityIds, includeDrafts = false } = {}) {
+  let rows = db.prepare('SELECT id, entity_id, title, status, kind, settlement_date, data, file_name, source, needs_review, created_at, updated_at, (file != \'\') AS file FROM settlements ORDER BY settlement_date DESC, created_at DESC').all();
+  if (!includeDrafts) rows = rows.filter((r) => !r.needs_review); // drafts (failed cross-check) stay hidden until a human publishes
   if (entityIds) rows = rows.filter((r) => r.entity_id && entityIds.includes(r.entity_id));
   return rows.map(rowToSettlementSummary);
 }
+// Has a settlement/document already been created from this inbound attachment?
+// Used by the Owl auto-ingest to stay idempotent across webhook re-delivery.
+function settlementExistsForSource(ref) { return !!ref && !!db.prepare('SELECT 1 FROM settlements WHERE source_ref=? LIMIT 1').get(String(ref)); }
 function getSettlement(id) { return rowToSettlement(db.prepare('SELECT * FROM settlements WHERE id=?').get(id)); }
 function getSettlementFile(id) {
   const r = db.prepare('SELECT file, file_name, file_type FROM settlements WHERE id=?').get(id);
@@ -1084,12 +1100,12 @@ function getSettlementFile(id) {
 // report (interim kept for ad-hoc statements).
 const normSettlementStatus = (s) => (['weekly', 'interim', 'final'].includes(s) ? s : 'final');
 const normSettlementKind = (k) => (['ticketing', 'cashless'].includes(k) ? k : 'ticketing');
-function createSettlement({ entityId = null, title, status = 'final', kind = 'ticketing', settlementDate = '', data = {}, file = '', fileName = '', fileType = '' }) {
+function createSettlement({ entityId = null, title, status = 'final', kind = 'ticketing', settlementDate = '', data = {}, file = '', fileName = '', fileType = '', source = 'manual', needsReview = 0, sourceRef = '' }) {
   const ts = now();
   const id = uuid();
-  db.prepare('INSERT INTO settlements (id,entity_id,title,status,kind,settlement_date,data,file,file_name,file_type,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
+  db.prepare('INSERT INTO settlements (id,entity_id,title,status,kind,settlement_date,data,file,file_name,file_type,source,needs_review,source_ref,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
     .run(id, entityId || null, title || data.meta?.eventName || 'Settlement report', normSettlementStatus(status), normSettlementKind(kind),
-      settlementDate || data.meta?.settlementDate || '', JSON.stringify(data), file, fileName, fileType, ts, ts);
+      settlementDate || data.meta?.settlementDate || '', JSON.stringify(data), file, fileName, fileType, source === 'email' ? 'email' : 'manual', needsReview ? 1 : 0, String(sourceRef || ''), ts, ts);
   return getSettlement(id);
 }
 function updateSettlement(id, patch) {
@@ -1100,12 +1116,23 @@ function updateSettlement(id, patch) {
   const status = patch.status !== undefined ? normSettlementStatus(patch.status) : cur.status;
   const kind = patch.kind !== undefined ? normSettlementKind(patch.kind) : (cur.kind || 'ticketing');
   const date = patch.settlementDate ?? cur.settlement_date;
-  const data = patch.data !== undefined ? JSON.stringify(patch.data) : cur.data;
+  // `eventName` edits the extracted meta so the name is consistent everywhere —
+  // the admin card, the client-side event grouping, and the report header all
+  // read meta.eventName.
+  let data = patch.data !== undefined ? JSON.stringify(patch.data) : cur.data;
+  if (patch.eventName !== undefined) {
+    const d = J(data, {});
+    d.meta = { ...(d.meta || {}), eventName: String(patch.eventName || '') };
+    data = JSON.stringify(d);
+  }
   const file = patch.file !== undefined ? patch.file : cur.file;
   const fileName = patch.fileName !== undefined ? patch.fileName : cur.file_name;
   const fileType = patch.fileType !== undefined ? patch.fileType : cur.file_type;
-  db.prepare('UPDATE settlements SET entity_id=?, title=?, status=?, kind=?, settlement_date=?, data=?, file=?, file_name=?, file_type=?, updated_at=? WHERE id=?')
-    .run(entityId, title, status, kind, date, data, file, fileName, fileType, now(), id);
+  // Publishing an Owl-drafted settlement = clearing needs_review (provenance
+  // `source`/`source_ref` stay put).
+  const needsReview = patch.needsReview !== undefined ? (patch.needsReview ? 1 : 0) : cur.needs_review;
+  db.prepare('UPDATE settlements SET entity_id=?, title=?, status=?, kind=?, settlement_date=?, data=?, file=?, file_name=?, file_type=?, needs_review=?, updated_at=? WHERE id=?')
+    .run(entityId, title, status, kind, date, data, file, fileName, fileType, needsReview, now(), id);
   return getSettlement(id);
 }
 function deleteSettlement(id) { return db.prepare('DELETE FROM settlements WHERE id=?').run(id).changes > 0; }
@@ -1128,27 +1155,30 @@ function rowToDocumentSummary(r) {
     category: r.category, fileName: r.file_name, fileType: r.file_type, createdAt: r.created_at,
     invoiceNumber: d.meta?.invoiceNumber || '', invoiceDate: d.meta?.date || '',
     total: d.total ?? null, hasData: !!(d.items?.length || d.total != null),
+    source: r.source || 'manual', needsReview: !!r.needs_review,
   };
 }
 function rowToDocument(r) {
   if (!r) return null;
   return { ...rowToDocumentSummary(r), data: J(r.data, {}) };
 }
-function listDocuments({ entityIds, entityId } = {}) {
-  let rows = db.prepare('SELECT id, entity_id, event_name, title, category, data, file_name, file_type, created_at FROM event_documents ORDER BY created_at DESC').all();
+function listDocuments({ entityIds, entityId, includeDrafts = false } = {}) {
+  let rows = db.prepare('SELECT id, entity_id, event_name, title, category, data, file_name, file_type, source, needs_review, created_at FROM event_documents ORDER BY created_at DESC').all();
+  if (!includeDrafts) rows = rows.filter((r) => !r.needs_review); // Owl-drafted docs stay hidden until a human publishes
   if (entityId) rows = rows.filter((r) => r.entity_id === entityId);
   else if (entityIds) rows = rows.filter((r) => r.entity_id && entityIds.includes(r.entity_id));
   return rows.map(rowToDocumentSummary);
 }
-function getDocument(id) { return rowToDocument(db.prepare('SELECT id, entity_id, event_name, title, category, data, file_name, file_type, created_at FROM event_documents WHERE id=?').get(id)); }
+function documentExistsForSource(ref) { return !!ref && !!db.prepare('SELECT 1 FROM event_documents WHERE source_ref=? LIMIT 1').get(String(ref)); }
+function getDocument(id) { return rowToDocument(db.prepare('SELECT id, entity_id, event_name, title, category, data, file_name, file_type, source, needs_review, created_at FROM event_documents WHERE id=?').get(id)); }
 function getDocumentFile(id) {
   const r = db.prepare('SELECT file, file_name, file_type FROM event_documents WHERE id=?').get(id);
   return r && r.file ? { file: r.file, fileName: r.file_name, fileType: r.file_type } : null;
 }
-function createDocument({ entityId = null, eventName = '', title, category = 'invoice', data = {}, file = '', fileName = '', fileType = '' }) {
+function createDocument({ entityId = null, eventName = '', title, category = 'invoice', data = {}, file = '', fileName = '', fileType = '', source = 'manual', needsReview = 0, sourceRef = '' }) {
   const id = uuid();
-  db.prepare('INSERT INTO event_documents (id,entity_id,event_name,title,category,data,file,file_name,file_type,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
-    .run(id, entityId || null, eventName || '', title || fileName || 'Document', category || 'invoice', JSON.stringify(data || {}), file, fileName, fileType, now());
+  db.prepare('INSERT INTO event_documents (id,entity_id,event_name,title,category,data,file,file_name,file_type,source,needs_review,source_ref,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)')
+    .run(id, entityId || null, eventName || '', title || fileName || 'Document', category || 'invoice', JSON.stringify(data || {}), file, fileName, fileType, source === 'email' ? 'email' : 'manual', needsReview ? 1 : 0, String(sourceRef || ''), now());
   return getDocument(id);
 }
 function updateDocument(id, patch) {
@@ -1158,7 +1188,8 @@ function updateDocument(id, patch) {
   const eventName = patch.eventName !== undefined ? (patch.eventName || '') : cur.event_name;
   const title = patch.title ?? cur.title;
   const category = patch.category ?? cur.category;
-  db.prepare('UPDATE event_documents SET entity_id=?, event_name=?, title=?, category=? WHERE id=?').run(entityId, eventName, title, category, id);
+  const needsReview = patch.needsReview !== undefined ? (patch.needsReview ? 1 : 0) : (db.prepare('SELECT needs_review FROM event_documents WHERE id=?').get(id)?.needs_review || 0);
+  db.prepare('UPDATE event_documents SET entity_id=?, event_name=?, title=?, category=?, needs_review=? WHERE id=?').run(entityId, eventName, title, category, needsReview, id);
   return getDocument(id);
 }
 function deleteDocument(id) { return db.prepare('DELETE FROM event_documents WHERE id=?').run(id).changes > 0; }
@@ -1216,9 +1247,9 @@ module.exports = {
   // release notes (daily product changelog)
   listReleaseNotes, getReleaseNote, createReleaseNote, updateReleaseNote, deleteReleaseNote,
   // settlements
-  listSettlements, getSettlement, getSettlementFile, createSettlement, updateSettlement, deleteSettlement, setSettlementNotes,
+  listSettlements, getSettlement, getSettlementFile, createSettlement, updateSettlement, deleteSettlement, setSettlementNotes, settlementExistsForSource,
   // event documents (invoices etc.)
-  listDocuments, getDocument, getDocumentFile, createDocument, updateDocument, deleteDocument,
+  listDocuments, getDocument, getDocumentFile, createDocument, updateDocument, deleteDocument, documentExistsForSource,
   // view tracking
   recordView, viewProfile,
   // tile marks (pins + follows)
