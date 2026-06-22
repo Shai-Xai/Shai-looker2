@@ -811,10 +811,11 @@ function ClientSettings({ entity, suites, fields, onChange, onBack }) {
   const [name, setName] = useState(entity.name);
   const [logo, setLogo] = useState(entity.logo || '');
   const [aiContext, setAiContext] = useState(entity.aiContext || '');
+  const [inventiveName, setInventiveName] = useState(entity.inventiveName || '');
   const [locks, setLocks] = useState(entity.lockedFilters || {});
   const [allOrganisers, setAllOrganisers] = useState(!!entity.allOrganisers);
   const [saved, setSaved] = useState(false);
-  const save = async () => { await api.adminUpdateEntity(entity.id, { name, logo, aiContext, lockedFilters: locks, allOrganisers }); flash(setSaved); onChange(); };
+  const save = async () => { await api.adminUpdateEntity(entity.id, { name, logo, aiContext, inventiveName, lockedFilters: locks, allOrganisers }); flash(setSaved); onChange(); };
   const remove = async () => { if (confirm(`Delete client "${entity.name}"? This removes its sets too.`)) { await api.adminDeleteEntity(entity.id); onBack(); onChange(); } };
   const preview = async () => {
     if (!suites.length) { alert('This client has no suites yet.'); return; }
@@ -840,6 +841,11 @@ function ClientSettings({ entity, suites, fields, onChange, onBack }) {
       <div style={{ marginBottom: 12 }}>
         <L>Client logo</L>
         <div style={{ marginTop: 6 }}><LogoPicker value={logo} onChange={setLogo} /></div>
+      </div>
+      <div style={{ marginBottom: 12 }}>
+        <L>Inventive account name</L>
+        <div style={{ fontSize: 12, color: 'var(--muted)', margin: '4px 0 6px' }}>Workspace name sent to the Inventive AI analyst. Leave blank to use the client name above.</div>
+        <input style={input} value={inventiveName} onChange={(e) => setInventiveName(e.target.value)} placeholder={name || 'Use client name'} />
       </div>
       {/* Internal/management clients see every organiser's data — no scope. A
           deliberate, admin-only opt-out of the organiser boundary. */}

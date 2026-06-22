@@ -32,10 +32,14 @@ function mount(app, { db, auth, homeEntityFor }) {
     const entity = db.getEntity(entityId);
     if (!entity) return res.status(404).json({ error: 'Client not found.' });
     const { firstname, lastname } = inventiveName(req.user.email);
+    // The Inventive workspace display name can be overridden per client (Admin →
+    // client settings); blank inherits the Pulse client name. The externalRefId
+    // (entity UUID) is the stable mapping key and never changes on a rename.
+    const accountName = (entity.inventiveName || '').trim() || entity.name;
     const userInfo = {
       firstname, lastname, email: req.user.email,
       // One Inventive workspace per Pulse client (entity).
-      accountScope: { externalRefId: entity.id, name: entity.name, description: `${entity.name} · Pulse` },
+      accountScope: { externalRefId: entity.id, name: accountName, description: `${accountName} · Pulse` },
     };
     try {
       const r = await fetch(`${inventiveEndpoint()}/embed/getAuthorizedUrl`, {
