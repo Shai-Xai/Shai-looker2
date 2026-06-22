@@ -32,10 +32,12 @@ export default function MailTemplateEditor({ entityId, scope = 'platform', suite
 
   const loadFn = scope === 'platform' ? () => api.getMailTemplate()
     : scope === 'admin-suite' ? () => api.getSuiteMailTemplate(suiteId)
+    : scope === 'my-suite' ? () => api.getMySuiteMailTemplate(suiteId)
     : scope === 'admin-client' ? () => api.getEntityMailTemplate(entityId)
     : () => api.getMyMailTemplate(entityId);
   const saveFn = scope === 'platform' ? (p) => api.saveMailTemplate(p)
     : scope === 'admin-suite' ? (p) => api.saveSuiteMailTemplate(suiteId, p)
+    : scope === 'my-suite' ? (p) => api.saveMySuiteMailTemplate(suiteId, p)
     : scope === 'admin-client' ? (p) => api.saveEntityMailTemplate(entityId, p)
     : (p) => api.saveMyMailTemplate(entityId, p);
 

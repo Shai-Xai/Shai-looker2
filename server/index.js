@@ -1437,6 +1437,20 @@ app.put('/api/my/mail-template/:entityId', auth.requireAuth, auth.requirePermiss
   res.json(clientMailView(req.params.entityId));
 });
 
+// Client self-service for a single EVENT (suite) they own — same per-event
+// branding override as the admin surface, gated by suite access + branding.manage.
+app.get('/api/my/suites/:id/mail-template', auth.requireAuth, (req, res) => {
+  const suite = db.getSuite(req.params.id);
+  if (!suite || !auth.canAccessSuite(req.user, suite.id)) return res.status(403).json({ error: 'Not allowed' });
+  res.json(suiteMailView(suite));
+});
+app.put('/api/my/suites/:id/mail-template', auth.requireAuth, auth.requirePermission('branding.manage'), (req, res) => {
+  const suite = db.getSuite(req.params.id);
+  if (!suite || !auth.canAccessSuite(req.user, suite.id)) return res.status(403).json({ error: 'Not allowed' });
+  db.setSuiteMailBranding(suite.id, cleanBrandingPatch(req.body || {}));
+  res.json(suiteMailView(suite));
+});
+
 // ── White-label theme ──────────────────────────────────────────────────────────
 // The client's brand pair (primary + secondary) + logo, resolved through the
 // same layering as email branding (defaults ← platform ← client) — ONE brand
@@ -1460,9 +1474,11 @@ app.post('/api/mail/preview', auth.requireAuth, (req, res) => {
   if (entityId && req.user.role !== 'admin' && !(req.user.entityIds || []).includes(entityId)) {
     return res.status(403).json({ error: 'Not allowed' });
   }
-  // Event-branding editors (admin) preview on top of the event's resolved base.
-  const suite = suiteId && req.user.role === 'admin' ? db.getSuite(suiteId) : null;
-  const branding = mailer.previewBranding({ edits: cleanBrandingPatch(edits || {}), entityId, suiteId: suite ? suiteId : '' });
+  // Event-branding editors preview on top of the event's resolved base — admins,
+  // or a client previewing an event they own.
+  const suite = suiteId ? db.getSuite(suiteId) : null;
+  const canSuite = suite && (req.user.role === 'admin' || auth.canAccessSuite(req.user, suite.id));
+  const branding = mailer.previewBranding({ edits: cleanBrandingPatch(edits || {}), entityId, suiteId: canSuite ? suiteId : '' });
   const { html } = mailer.notificationEmail({
     title: 'Sound check signoff needed',
     body: 'Hi — please review the stage plot and confirm the gate times before Friday. Tap below to acknowledge in Pulse.',

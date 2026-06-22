@@ -255,6 +255,9 @@ export const api = {
   // Per-event (suite) branding override — admin only.
   getSuiteMailTemplate: (suiteId) => fetch(`/api/admin/suites/${suiteId}/mail-template`).then(json),
   saveSuiteMailTemplate: (suiteId, p) => fetch(`/api/admin/suites/${suiteId}/mail-template`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),
+  // Per-event branding — client self-service (a suite the client owns).
+  getMySuiteMailTemplate: (suiteId) => fetch(`/api/my/suites/${suiteId}/mail-template`).then(json),
+  saveMySuiteMailTemplate: (suiteId, p) => fetch(`/api/my/suites/${suiteId}/mail-template`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),
 
   // CC-the-Owl: inbound email addresses + config
   getInboundConfig: () => fetch('/api/os/admin/inbound').then(json),

@@ -114,8 +114,13 @@ export default function ClientIntegrationsPage() {
 
           {section === 'email' && (
             <div>
-              <p style={hint}>Your colours and logo — they style your whole Pulse platform (buttons, accents, charts) and your notification emails. Blank fields keep Howler's defaults.</p>
+              <h3 style={subhead}>Account &amp; portfolio</h3>
+              <p style={hint}>Your colours and logo — they style your whole Pulse platform (buttons, accents, charts) and your notification emails. Used everywhere by default, and on portfolio (multi-event) digests. Blank fields keep Howler's defaults.</p>
               <MailTemplateEditor scope="my" entityId={activeItem.entityId} />
+
+              <h3 style={{ ...subhead, marginTop: 34 }}>Events</h3>
+              <p style={hint}>Give a specific event its own logo, colours and sender name — used for that event's campaigns and digests, and the in-app look while you're viewing it. Blank fields inherit your account branding above.</p>
+              <EventBranding entityId={activeItem.entityId} />
             </div>
           )}
 
@@ -152,3 +157,33 @@ const tabBtn = (active) => ({
   color: active ? 'var(--brand)' : 'var(--text)',
 });
 const hint = { color: 'var(--muted)', fontSize: 13, marginBottom: 14, lineHeight: 1.5 };
+const subhead = { fontSize: 15, fontWeight: 700, marginBottom: 6 };
+
+// Per-event branding self-service: pick one of this client's events, then edit
+// its branding override (inherits the account branding above where left blank).
+function EventBranding({ entityId }) {
+  const [suites, setSuites] = useState(null);
+  const [picked, setPicked] = useState('');
+  useEffect(() => {
+    api.mySuites().then((all) => setSuites((all || []).filter((s) => s.entityId === entityId))).catch(() => setSuites([]));
+  }, [entityId]);
+
+  if (!suites) return <p style={{ color: 'var(--muted)', fontSize: 13 }}>Loading your events…</p>;
+  if (!suites.length) return <p style={{ color: 'var(--muted)', fontSize: 13 }}>No events yet — once Howler sets up an event for you, you can brand it here.</p>;
+
+  return (
+    <div>
+      <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Event</label>
+      <select value={picked} onChange={(e) => setPicked(e.target.value)} style={selectBox}>
+        <option value="">Choose an event…</option>
+        {suites.map((s) => <option key={s.id} value={s.id}>{s.icon ? `${s.icon} ` : ''}{s.name}</option>)}
+      </select>
+      {picked && <div style={{ marginTop: 16 }}><MailTemplateEditor key={picked} scope="my-suite" entityId={entityId} suiteId={picked} /></div>}
+    </div>
+  );
+}
+
+const selectBox = {
+  padding: '9px 12px', borderRadius: 10, fontSize: 14, border: '1.5px solid var(--hairline)',
+  background: 'var(--surface)', color: 'var(--text)', minWidth: 260, maxWidth: '100%',
+};
