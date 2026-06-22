@@ -1816,7 +1816,7 @@ async function buildFacts(user, entityId, force = false, alignDaysBefore = false
   const suiteSet = Array.isArray(opts.suiteIds) && opts.suiteIds.length ? new Set(opts.suiteIds) : null;
   // Scale the tile budget when covering multiple events so each gets a fair share
   // (≈10 tiles/event, capped) rather than all events squeezing into the single cap.
-  const maxTiles = suiteSet ? Math.min(72, Math.max(FACT_MAX_TILES, suiteSet.size * 12)) : FACT_MAX_TILES;
+  const maxTiles = suiteSet ? Math.min(72, Math.max(FACT_MAX_TILES, suiteSet.size * 14)) : FACT_MAX_TILES;
   const enabledCats = briefingCats(user.id, entityId); // which always-include categories are on
   const picks = []; // { tile, def, suiteId, setName, dashTitle, pinned }
   const seen = new Set();
@@ -1918,11 +1918,13 @@ async function buildFacts(user, entityId, force = false, alignDaysBefore = false
     // ticket-types, abandoned carts, audience) — matched by tile title.
     const MUST = BRIEF_CATS.filter((cat) => cat.re && enabledCats.has(cat.key)).map((cat) => cat.re);
     for (const sid of suiteSet) {
+      let count = 0; // tiles taken for THIS event — caps it at perEvent so later
+      // events aren't starved (the global maxTiles guard alone isn't enough).
       const dashes = catalogue.filter((c) => c.suiteId === sid).map((c) => store.get(c.dashboardId)).filter(Boolean);
       for (const re of MUST) {
         for (const def of dashes) {
           const m = [...(def.tiles || []), ...((def.carousels || []).flatMap((t) => t.tiles || []))].find((t) => t.type !== 'text' && t.query?.fields?.length && re.test(t.title || ''));
-          if (m) { addTile(def, m, sid, true); break; }
+          if (m) { const before = picks.length; addTile(def, m, sid, true); if (picks.length > before) count += 1; break; }
         }
       }
       const pools = catalogue.filter((c) => c.suiteId === sid)
@@ -1931,7 +1933,7 @@ async function buildFacts(user, entityId, force = false, alignDaysBefore = false
         .sort((a, b) => rank(a.c) - rank(b.c))
         .map(({ def }) => ({ def, tiles: [...(def.tiles || []), ...((def.carousels || []).flatMap((t) => t.tiles || []))].filter((t) => t.type !== 'text' && t.query?.fields?.length).sort((a, b) => tilePriority(a) - tilePriority(b)), idx: 0, taken: 0 }))
         .filter((p) => p.tiles.length);
-      let count = 0; let progressed = true;
+      let progressed = true;
       while (count < perEvent && progressed && picks.length < maxTiles) {
         progressed = false;
         for (const pool of pools) {
