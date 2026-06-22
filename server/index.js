@@ -1464,7 +1464,10 @@ app.get('/api/theme/:entityId', auth.requireAuth, (req, res) => {
   const suiteId = String(req.query.suite || '');
   const suite = suiteId ? db.getSuite(suiteId) : null;
   const b = mailer.resolveBranding(id, suite && suite.entityId === id ? suiteId : '');
-  res.json({ primary: b.brandColor, secondary: b.secondaryColor, chart3: b.chart3, chart4: b.chart4, chart5: b.chart5, logo: b.logo || '' });
+  // The app-shell logo (top-left identity) is ALWAYS the client's logo — the
+  // per-event theme only swaps the colours in-app, never the main profile logo.
+  const logo = mailer.resolveBranding(id).logo || '';
+  res.json({ primary: b.brandColor, secondary: b.secondaryColor, chart3: b.chart3, chart4: b.chart4, chart5: b.chart5, logo });
 });
 
 // Live preview: render the email HTML with unsaved edits layered on the right
