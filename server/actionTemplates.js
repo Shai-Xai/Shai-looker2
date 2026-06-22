@@ -50,9 +50,11 @@ function list() {
 }
 
 // Resolve a template's audience source for one client, given a tile catalogue
-// [{ dashboardId, title, tiles:[{tileId, title, fields:[fieldName] }] }].
-// Returns the matched dashboard/tile + suggested field mappings, and `ready`
-// (whether a usable source was found). The client can still adjust everything.
+// [{ dashboardId, suiteId, title, tiles:[{tileId, title, fields:[fieldName] }] }].
+// Dashboards are tried in order, so pass the event the suggestion pointed at
+// first to scope a multi-event client to the right one. Returns the matched
+// dashboard/tile/event + suggested field mappings, and `ready` (whether a usable
+// source was found). The client can still adjust everything.
 function resolveAudience(t, dashboards) {
   const pickField = (fields, hints) => {
     for (const h of hints) { const f = (fields || []).find((name) => h.test(name)); if (f) return f; }
@@ -68,6 +70,9 @@ function resolveAudience(t, dashboards) {
       return {
         ready: true,
         dashboardId: d.dashboardId,
+        // The event (suite) the matched tile belongs to — so a multi-event
+        // campaign scopes its audience to the right event automatically.
+        suiteId: d.suiteId || '',
         tileId: tile.tileId,
         emailField,
         nameField: pickField(fields, t.fieldHints?.nameField || []),

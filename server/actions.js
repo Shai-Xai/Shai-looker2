@@ -592,7 +592,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
       if (!cfg.audience.dashboardId || !cfg.audience.tileId) return { list: [], fields: [], filterFields: [], excluded: 0, noConsent: 0, filteredOut: 0 };
       // `lookerFilters` are the dashboard filters captured when a segment was made
       // from a tile — applied at query time so the segment resolves that cohort.
-      const res = await resolveAudience({ entityId, dashboardId: cfg.audience.dashboardId, tileId: cfg.audience.tileId, user, filterOverrides: cfg.audience.lookerFilters || {} });
+      const res = await resolveAudience({ entityId, dashboardId: cfg.audience.dashboardId, tileId: cfg.audience.tileId, user, filterOverrides: cfg.audience.lookerFilters || {}, suiteId: cfg.eventSuiteId || '' });
       fields = res.fields;
       const emailField = cfg.audience.emailField || res.fields.find((f) => /email/i.test(f.name) || /email/i.test(f.label))?.name || '';
       const nameField = cfg.audience.nameField || '';
@@ -611,7 +611,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
       let attrMap = null; let attrFields = [];
       if (cfg.audience.attrDashboardId && cfg.audience.attrTileId) {
         try {
-          const ar = await resolveAudience({ entityId, dashboardId: cfg.audience.attrDashboardId, tileId: cfg.audience.attrTileId, user });
+          const ar = await resolveAudience({ entityId, dashboardId: cfg.audience.attrDashboardId, tileId: cfg.audience.attrTileId, user, suiteId: cfg.eventSuiteId || '' });
           attrFields = ar.fields || [];
           const aEmail = cfg.audience.attrEmailField || attrFields.find((f) => /email/i.test(f.name) || /email/i.test(f.label))?.name || '';
           if (aEmail) { attrMap = new Map(); for (const r of ar.rows) { const e = cellVal(r[aEmail]).toLowerCase(); if (e) attrMap.set(e, r); } }
@@ -1066,10 +1066,10 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
   // Distinct values for a tile column — powers the targeting filter multi-select.
   app.post('/api/actions/:entityId/field-values', auth.requireAuth, auth.requirePermission('campaigns.view'), async (req, res) => {
     if (!guard(req, res, req.params.entityId)) return;
-    const { dashboardId, tileId, field } = req.body || {};
+    const { dashboardId, tileId, field, eventSuiteId } = req.body || {};
     if (!dashboardId || !tileId || !field) return res.json({ values: [] });
     try {
-      const r = await resolveAudience({ entityId: req.params.entityId, dashboardId, tileId, user: req.user });
+      const r = await resolveAudience({ entityId: req.params.entityId, dashboardId, tileId, user: req.user, suiteId: eventSuiteId || '' });
       const seen = new Map(); // lower → original
       for (const row of r.rows || []) {
         const v = cellVal(row[field]);

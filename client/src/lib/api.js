@@ -294,7 +294,13 @@ export const api = {
   getEntityTheme: (entityId) => fetch(`/api/theme/${entityId}`).then(json),
 
   // Action Engine — campaigns (one set of endpoints; server enforces entity access)
-  getActionTemplates: (entityId) => fetch(`/api/action-templates/${entityId}`).then(json),
+  getActionTemplates: (entityId, prefer = {}) => {
+    const q = new URLSearchParams();
+    if (prefer.dashboard) q.set('dashboard', prefer.dashboard);
+    if (prefer.suite) q.set('suite', prefer.suite);
+    const qs = q.toString();
+    return fetch(`/api/action-templates/${entityId}${qs ? `?${qs}` : ''}`).then(json);
+  },
   actionJourney: (entityId, id) => fetch(`/api/actions/${entityId}/${id}/journey`).then(json),
   getMasters: (entityId) => fetch(`/api/actions/${entityId}/masters`).then(json),
   saveMaster: (entityId, b) => fetch(`/api/actions/${entityId}/masters`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),

@@ -10,7 +10,7 @@ const money = (cur, n) => `${cur === 'ZAR' || !cur ? 'R' : `${cur} `}${Number(n 
 // APPROVE (explicit, shows the count) → running → done with results.
 // One component for both surfaces (admin + client self-service) — the server
 // enforces entity access on every call.
-export default function CampaignManager({ entityId, scope = 'admin', initialGoal = '', initialType = '', initialActionId = '' }) {
+export default function CampaignManager({ entityId, scope = 'admin', initialGoal = '', initialType = '', initialActionId = '', initialDashboardId = '', initialSuiteId = '' }) {
   const isAdmin = scope === 'admin';
   const [data, setData] = useState(null);
   const [editing, setEditing] = useState(null); // action object | 'new'
@@ -32,16 +32,34 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
   }, [openMasters, mastersKey]);
   const [channelFilter, setChannelFilter] = useState('all'); // all | email | sms | both
   const [stateFilter, setStateFilter] = useState('all'); // all | draft | pending | scheduled | sent | automated
-  useEffect(() => { api.getActionTemplates(entityId).then((r) => setTemplates(r.templates || [])).catch(() => setTemplates([])); }, [entityId]);
+  const [templatesLoaded, setTemplatesLoaded] = useState(false);
+  useEffect(() => { api.getActionTemplates(entityId).then((r) => setTemplates(r.templates || [])).catch(() => setTemplates([])).finally(() => setTemplatesLoaded(true)); }, [entityId]);
   const loadMasters = () => api.getMasters(entityId).then((r) => setMasters(r.masters || [])).catch(() => setMasters([]));
   useEffect(() => { loadMasters(); }, [entityId]); // eslint-disable-line react-hooks/exhaustive-deps
   // "Make it happen": arriving with a goal (from a briefing/digest suggestion)
-  // opens a fresh campaign — pre-filled from the matching template if ?type names one.
+  // opens a fresh campaign — pre-filled from the matching template if ?type names
+  // one. We wait until the templates have loaded (so the recipe's resolved audience
+  // is present — opening earlier would mount the editor with an empty source), and
+  // when the suggestion named a dashboard/event we re-resolve the recipe scoped to
+  // THAT tile/event so a multi-event client pre-fills the right audience.
+  const [prefilled, setPrefilled] = useState(false);
   useEffect(() => {
-    if (!initialGoal && !initialType) return;
-    const t = templates.find((x) => x.key === initialType || x.capability === initialType);
-    setTpl(t || null); setEditing('new');
-  }, [initialGoal, initialType, templates]);
+    if (prefilled || (!initialGoal && !initialType) || !templatesLoaded) return;
+    let cancelled = false;
+    (async () => {
+      let pool = templates;
+      if (initialType && initialDashboardId) {
+        try {
+          const r = await api.getActionTemplates(entityId, { dashboard: initialDashboardId, suite: initialSuiteId });
+          if (r.templates) pool = r.templates;
+        } catch { /* fall back to the unscoped templates */ }
+      }
+      if (cancelled) return;
+      const t = pool.find((x) => x.key === initialType || x.capability === initialType);
+      setTpl(t || null); setEditing('new'); setPrefilled(true);
+    })();
+    return () => { cancelled = true; };
+  }, [initialGoal, initialType, initialDashboardId, initialSuiteId, templatesLoaded, templates, entityId, prefilled]);
 
   const load = () => api.listActions(entityId).then(setData).catch(() => setData({ actions: [] }));
   useEffect(() => { load(); }, [entityId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -323,7 +341,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
     filters: cfg.audience?.filters || [], // [{field, op:'in'|'between', values:[], min, max}]
     attrDashboardId: cfg.audience?.attrDashboardId || '', // optional 2nd source for targeting fields
     attrTileId: cfg.audience?.attrTileId || '',
-    eventSuiteId: cfg.eventSuiteId || '',
+    eventSuiteId: cfg.eventSuiteId || ta.eventSuiteId || '',
     contentMode: cfg.contentMode || 'template',
     heroImage: cfg.heroImage || '',
     customHtml: cfg.customHtml || '',
@@ -482,7 +500,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
     setAudBusy(true);
     api.actionAudiencePreview(entityId, payload()).then(setAud).catch((e) => setAud({ error: e.message })).finally(() => setAudBusy(false));
   };
-  useEffect(() => { refreshAudience(); }, [f.audienceMode, f.segmentId, f.dashboardId, f.tileId, f.emailField, f.consentField, f.emailConsentField, f.smsConsentField, f.ignoreConsent, f.phoneField, f.channel, f.attrDashboardId, f.attrTileId, JSON.stringify(f.filters)]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { refreshAudience(); }, [f.audienceMode, f.segmentId, f.dashboardId, f.tileId, f.emailField, f.consentField, f.emailConsentField, f.smsConsentField, f.ignoreConsent, f.phoneField, f.channel, f.attrDashboardId, f.attrTileId, f.eventSuiteId, JSON.stringify(f.filters)]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Debounced email preview. For a sequence, preview the step you're editing.
   useEffect(() => {
@@ -822,7 +840,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
                   </>
                 )}
                 {aud?.fields?.length > 0 && (
-                  <AudienceFilters entityId={entityId}
+                  <AudienceFilters entityId={entityId} eventSuiteId={f.eventSuiteId}
                     fields={(aud.filterFields && aud.filterFields.length) ? aud.filterFields : aud.fields.map((fl) => ({ ...fl, dashboardId: f.dashboardId, tileId: f.tileId }))}
                     filters={f.filters} addFilter={addFilter} setFilter={setFilter} removeFilter={removeFilter}
                     attr={{ dashboardId: f.attrDashboardId, tileId: f.attrTileId }}
@@ -1678,13 +1696,13 @@ function Accordion({ title, defaultOpen = false, open: controlledOpen, onToggle,
 // Optional targeting filters on the audience tile's columns (city, age, ticket
 // category, new/returning…). 'is one of' picks real values from the data;
 // 'between' is a numeric range (e.g. age). All filters narrow the segment (AND).
-export function AudienceFilters({ entityId, fields, filters, addFilter, setFilter, removeFilter, attr, tiles, onAttr, hideAttrSource }) {
+export function AudienceFilters({ entityId, fields, filters, addFilter, setFilter, removeFilter, attr, tiles, onAttr, hideAttrSource, eventSuiteId = '' }) {
   const attrDash = tiles?.dashboards?.find((d) => d.dashboardId === attr?.dashboardId);
   return (
     <div style={{ marginTop: 8, borderTop: '1px dashed var(--hairline)', paddingTop: 10 }}>
       <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', marginBottom: 6 }}>🎯 Target a segment (optional)</div>
       {filters.map((fl, i) => (
-        <FilterRow key={i} entityId={entityId} fields={fields} filter={fl}
+        <FilterRow key={i} entityId={entityId} fields={fields} filter={fl} eventSuiteId={eventSuiteId}
           onChange={(p) => setFilter(i, p)} onRemove={() => removeFilter(i)} />
       ))}
       <button type="button" style={{ ...mini, marginTop: filters.length ? 6 : 0 }} onClick={addFilter}>＋ Add filter</button>
@@ -1710,7 +1728,7 @@ export function AudienceFilters({ entityId, fields, filters, addFilter, setFilte
     </div>
   );
 }
-function FilterRow({ entityId, fields, filter, onChange, onRemove }) {
+function FilterRow({ entityId, fields, filter, onChange, onRemove, eventSuiteId = '' }) {
   const [values, setValues] = useState(null); // distinct values for the chosen field
   const [open, setOpen] = useState(false);
   const fieldDef = fields.find((fl) => fl.name === filter.field);
@@ -1720,9 +1738,9 @@ function FilterRow({ entityId, fields, filter, onChange, onRemove }) {
     if (fieldDef?.values) { setValues(fieldDef.values); return; }
     if (!fieldDef?.dashboardId || !fieldDef?.tileId) { setValues(null); return; }
     let alive = true;
-    api.actionFieldValues(entityId, { dashboardId: fieldDef.dashboardId, tileId: fieldDef.tileId, field: filter.field }).then((r) => { if (alive) setValues(r.values || []); }).catch(() => { if (alive) setValues([]); });
+    api.actionFieldValues(entityId, { dashboardId: fieldDef.dashboardId, tileId: fieldDef.tileId, field: filter.field, eventSuiteId }).then((r) => { if (alive) setValues(r.values || []); }).catch(() => { if (alive) setValues([]); });
     return () => { alive = false; };
-  }, [filter.field, filter.op, fieldDef?.dashboardId, fieldDef?.tileId, fieldDef?.values, entityId]);
+  }, [filter.field, filter.op, fieldDef?.dashboardId, fieldDef?.tileId, fieldDef?.values, entityId, eventSuiteId]);
   const toggleVal = (v) => onChange({ values: filter.values.includes(v) ? filter.values.filter((x) => x !== v) : [...filter.values, v] });
   return (
     <div style={{ border: '1px solid var(--hairline)', borderRadius: 8, padding: 8, marginBottom: 6 }}>

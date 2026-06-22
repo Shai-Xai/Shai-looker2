@@ -37,6 +37,10 @@ export default function EngagePage() {
   const initialGoal = params.get('goal') || '';
   const initialType = params.get('type') || '';
   const initialActionId = params.get('action') || '';
+  // The dashboard + event a "Worth a look" suggestion pointed at — so the campaign
+  // editor scopes its pre-filled audience to that exact tile/event.
+  const initialDashboardId = params.get('dashboard') || '';
+  const initialSuiteId = params.get('suite') || '';
 
   return (
     <main style={{ flex: 1, padding: '26px 22px', maxWidth: 1080, margin: '0 auto', width: '100%', boxSizing: 'border-box', overflowY: 'auto' }}>
@@ -92,7 +96,7 @@ export default function EngagePage() {
       ) : (
         <>
           <p style={{ color: 'var(--muted)', marginBottom: 18, fontSize: 14 }}>Turn your data into action — e.g. email customers who abandoned checkout. Preview the audience and copy, then explicitly approve the send.</p>
-          <CampaignManager entityId={entityId} scope={isAdmin ? 'admin' : 'my'} initialGoal={initialGoal} initialType={initialType} initialActionId={initialActionId} />
+          <CampaignManager entityId={entityId} scope={isAdmin ? 'admin' : 'my'} initialGoal={initialGoal} initialType={initialType} initialActionId={initialActionId} initialDashboardId={initialDashboardId} initialSuiteId={initialSuiteId} />
         </>
       )}
     </main>

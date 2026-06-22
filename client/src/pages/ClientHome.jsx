@@ -337,7 +337,15 @@ export default function ClientHome() {
                     <span
                       role="button" tabIndex={0}
                       title="Turn this suggestion into a campaign"
-                      onClick={(e) => { e.stopPropagation(); vtNavigate(navigate, `/actions?goal=${encodeURIComponent(`${s.title}${s.reason ? ` — ${s.reason}` : ''}`)}&type=${s.action}`); }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        // Carry the dashboard + event the suggestion pointed at, so the
+                        // campaign editor pre-fills the audience from THAT tile/event.
+                        const q = new URLSearchParams({ goal: `${s.title}${s.reason ? ` — ${s.reason}` : ''}`, type: s.action });
+                        if (s.link?.dashboardId) q.set('dashboard', s.link.dashboardId);
+                        if (s.link?.suiteId) q.set('suite', s.link.suiteId);
+                        vtNavigate(navigate, `/actions?${q.toString()}`);
+                      }}
                       style={{ fontSize: 11.5, fontWeight: 700, color: '#7c3aed', background: 'rgba(124,58,237,0.10)', borderRadius: 980, padding: '3px 10px' }}
                     >⚡ Make it happen</span>
                   )}

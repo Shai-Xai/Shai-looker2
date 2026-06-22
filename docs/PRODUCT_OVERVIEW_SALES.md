@@ -292,6 +292,12 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-22** — **"Make it happen" pre-fills the right audience** ✅: when a client turns
+  a **Worth a look** suggestion (e.g. recover abandoned carts) into a campaign, the editor now
+  opens **pre-loaded with the audience source from that exact tile and event** — the right
+  dashboard, the email/name/ticket/consent columns, and (for multi-event clients) **scoped to
+  the event the suggestion was about**, so the preview, targeting and send all resolve the
+  right cohort. Less setup, fewer wrong-event sends.
 - **2026-06-22** — **Multi-event home briefing** ✅: for clients running several events
   at once, the home briefing now leads with a **portfolio summary across all events**
   (totals, biggest mover, what needs attention), then a **collapsible section per event**.

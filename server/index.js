@@ -2722,21 +2722,32 @@ function tileCatalogueWithFields(entityId) {
     const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((x) => x.tiles || []))]
       .filter((t) => t.type !== 'text' && t.query?.fields?.length)
       .map((t) => ({ tileId: t.id, title: t.title || '', fields: (t.query.fields || []).map(String) }));
-    if (tiles.length) dashboards.push({ dashboardId: c.dashboardId, title: c.title, tiles });
+    // One entry per (suite, dashboard) — a dashboard shared across events appears
+    // once per event, carrying its suiteId so the audience can scope to that event.
+    if (tiles.length) dashboards.push({ dashboardId: c.dashboardId, suiteId: c.suiteId, title: c.title, tiles });
   }
   return dashboards;
 }
 // The templates a client can run, each with its audience pre-resolved + presets.
-function resolveActionTemplates(entityId) {
-  const dashboards = tileCatalogueWithFields(entityId);
+// `prefer` ({ dashboardId, suiteId }) — when a suggestion pointed at a specific
+// dashboard/event (e.g. "Worth a look" → abandoned carts), try that one FIRST so
+// the audience resolves to exactly that event for a multi-event client.
+function resolveActionTemplates(entityId, prefer = {}) {
+  let dashboards = tileCatalogueWithFields(entityId);
+  const { dashboardId, suiteId } = prefer;
+  if (dashboardId) {
+    const isPref = (d) => d.dashboardId === dashboardId && (!suiteId || d.suiteId === suiteId);
+    dashboards = [...dashboards.filter(isPref), ...dashboards.filter((d) => !isPref(d))];
+  }
   return actionTemplates.list().map((meta) => {
     const t = actionTemplates.get(meta.key);
     const resolved = actionTemplates.resolveAudience(t, dashboards);
-    return { ...meta, preset: t.preset, ready: resolved.ready, audience: resolved.ready ? { mode: 'tile', ...resolved } : { mode: 'tile' } };
+    const eventSuiteId = resolved.ready ? (resolved.suiteId || '') : '';
+    return { ...meta, preset: t.preset, ready: resolved.ready, audience: resolved.ready ? { mode: 'tile', ...resolved, eventSuiteId } : { mode: 'tile' } };
   });
 }
 app.get('/api/action-templates/:entityId', auth.requireAuth, auth.requirePermission('campaigns.view'), (req, res) => {
-  res.json({ templates: resolveActionTemplates(req.params.entityId) });
+  res.json({ templates: resolveActionTemplates(req.params.entityId, { dashboardId: String(req.query.dashboard || ''), suiteId: String(req.query.suite || '') }) });
 });
 
 // Compact summary of a client's recent marketing actions (non-draft campaigns
@@ -2924,9 +2935,13 @@ const actionsApi = require('./actions').mount(app, {
   db, auth, mailer, push, messaging, os, billing,
   // Run a tile's query (scoped + suite-locked) and return its rows + fields —
   // the campaign audience source.
-  resolveAudience: async ({ entityId, dashboardId, tileId, user, filterOverrides = {} }) => {
+  resolveAudience: async ({ entityId, dashboardId, tileId, user, filterOverrides = {}, suiteId = '' }) => {
     const { catalogue } = clientCatalogue(entityId);
-    const meta = catalogue.find((c) => c.dashboardId === dashboardId);
+    // A dashboard shared across events appears once per event — scope to the
+    // campaign's chosen event (suiteId) so its locks resolve the right cohort;
+    // fall back to the first event if none was specified.
+    const meta = (suiteId && catalogue.find((c) => c.dashboardId === dashboardId && c.suiteId === suiteId))
+      || catalogue.find((c) => c.dashboardId === dashboardId);
     const def = store.get(dashboardId);
     if (!meta || !def) throw new Error('That dashboard is not available for this client');
     const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))];
