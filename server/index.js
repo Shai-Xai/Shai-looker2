@@ -2625,29 +2625,35 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
 
   let out;
   if (multi) {
-    // Multi-event: one structured AI pass over the events, rendered as a portfolio
-    // overview + a clearly-separated section per event (in the selected order). If
-    // that pass fails (e.g. the model returns unparseable JSON for a big payload),
-    // fall back to the flat digest so the send still goes out.
+    // Multi-event: a short cross-event OVERVIEW, then a clearly-separated section
+    // per event. Each event's section is written by the SAME proven single-event
+    // digest call, scoped to that event's tiles — so every model response stays
+    // small and reliable (no one giant JSON to truncate). Overview + per-event all
+    // run in parallel. If the whole thing fails, fall back to a flat digest.
     try {
       const nameById = Object.fromEntries(allSuites.map((s) => [s.id, s.name]));
       const bySuite = new Map();
       for (const t of factTilesAll) { if (!bySuite.has(t.suiteId)) bySuite.set(t.suiteId, []); bySuite.get(t.suiteId).push(t); }
       const groups = selSuiteIds.map((id) => ({ suiteId: id, suiteName: nameById[id] || '', tiles: bySuite.get(id) || [] })).filter((g) => g.tiles.length);
-      const raw = await insights.digestBriefMulti({ groups, roleLabel: lens.label, roleFocus: effectiveFocus, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), capabilities: ACTION_CAPABILITIES, goals, today: todayLabel() });
-      const ov = raw.overall || {};
-      const aiBySuite = Object.fromEntries((raw.events || []).filter((e) => nameById[e.suiteId]).map((e) => [e.suiteId, e]));
+      const today = todayLabel();
+      const acts = actionsSummaryFor(entityId);
       // Followed-tile visuals, grouped into the event each tile belongs to.
       const visualsBySuite = {};
       if (followedVisual && followedFacts.length) {
         for (const ft of followedFacts) { (visualsBySuite[ft.suiteId] = visualsBySuite[ft.suiteId] || []).push(ft); }
         for (const id of Object.keys(visualsBySuite)) visualsBySuite[id] = renderFollowed(visualsBySuite[id]);
       }
-      const events = groups.map((g) => {
-        const e = aiBySuite[g.suiteId] || {};
+      const [ovRaw, evRaws] = await Promise.all([
+        insights.digestBriefMulti({ groups, roleLabel: lens.label, roleFocus: effectiveFocus, catalogue, instructions, apiKey, actions: acts, capabilities: ACTION_CAPABILITIES, goals, today }),
+        Promise.all(groups.map((g) => insights.digestBrief({ tiles: g.tiles, roleLabel: lens.label, roleFocus: effectiveFocus, catalogue, instructions, apiKey, actions: acts, capabilities: ACTION_CAPABILITIES, goals: [], today })
+          .then((r) => ({ g, r }))
+          .catch((e) => { console.error(`[digest] event section failed (${g.suiteName}):`, e.message); return { g, r: null }; }))),
+      ]);
+      const events = evRaws.map(({ g, r }) => {
+        const e = r || {};
         const sect = {
           suiteId: g.suiteId, suiteName: g.suiteName,
-          headline: String(e.headline || '').slice(0, 400),
+          headline: r ? String(e.headline || '').slice(0, 400) : 'Summary unavailable for this event right now.',
           narrative: (e.narrative || []).slice(0, 3).map((s) => String(s).slice(0, 800)).filter(Boolean),
           kpis: (e.kpis || []).slice(0, 6).map(mapKpi).filter((k) => k.label && k.value),
           actions: (e.actions || []).slice(0, 3).map(mapAction).filter((a) => a.text),
@@ -2657,11 +2663,11 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
         return sect;
       });
       out = {
-        subject: String(raw.subject || '').slice(0, 120),
-        headline: String(ov.headline || '').slice(0, 600),
-        narrative: (ov.narrative || []).slice(0, 4).map((s) => String(s).slice(0, 800)).filter(Boolean),
-        kpis: (ov.kpis || []).slice(0, 6).map(mapKpi).filter((k) => k.label && k.value),
-        actions: (ov.actions || []).slice(0, 3).map(mapAction).filter((a) => a.text),
+        subject: String(ovRaw.subject || '').slice(0, 120),
+        headline: String(ovRaw.headline || '').slice(0, 600),
+        narrative: (ovRaw.narrative || []).slice(0, 4).map((s) => String(s).slice(0, 800)).filter(Boolean),
+        kpis: (ovRaw.kpis || []).slice(0, 6).map(mapKpi).filter((k) => k.label && k.value),
+        actions: (ovRaw.actions || []).slice(0, 3).map(mapAction).filter((a) => a.text),
         events,
         eventCount: events.length,
       };

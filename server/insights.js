@@ -138,11 +138,38 @@ function insertMissingCommas(s) {
   }
   return out;
 }
+// Last-ditch repair for a TRUNCATED response (the model hit its token cap
+// mid-document): drop any incomplete trailing token, then close open strings,
+// arrays and objects so the salvageable head still parses. Best-effort — only
+// reached when every other fix has failed, so a rough recovery beats an error.
+function closeTruncatedJson(s) {
+  let inStr = false; let esc = false; const stack = [];
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (esc) { esc = false; continue; }
+    if (ch === '\\') { esc = true; continue; }
+    if (inStr) { if (ch === '"') inStr = false; continue; }
+    if (ch === '"') { inStr = true; continue; }
+    if (ch === '{' || ch === '[') stack.push(ch === '{' ? '}' : ']');
+    else if (ch === '}' || ch === ']') stack.pop();
+  }
+  let out = s;
+  if (inStr) out += '"';                 // close a string cut mid-value (keep the partial text)
+  out = out.replace(/[,:]\s*$/, '');     // drop a dangling comma or colon
+  // Drop a dangling KEY with no value left at the very end ({"k"  or ,"k").
+  out = out.replace(/([{,])\s*"[^"]*"\s*$/, (_m, p) => (p === '{' ? '{' : ''));
+  out = out.replace(/,\s*$/, '');        // tidy any comma the above left behind
+  for (let i = stack.length - 1; i >= 0; i--) out += stack[i];
+  return out;
+}
 function parseModelJson(text, what = 'response') {
   let s = String(text || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
-  const a = s.indexOf('{'); const b = s.lastIndexOf('}');
-  if (a < 0 || b <= a) throw new Error(`AI did not return JSON for the ${what}`);
-  s = s.slice(a, b + 1);
+  const a = s.indexOf('{');
+  if (a < 0) throw new Error(`AI did not return JSON for the ${what}`);
+  const b = s.lastIndexOf('}');
+  // Prefer the full object; if it was truncated (no closing brace), keep from the
+  // first '{' so closeTruncatedJson can salvage it.
+  s = b > a ? s.slice(a, b + 1) : s.slice(a);
   const noTrailingCommas = (x) => x.replace(/,(\s*[}\]])/g, '$1');
   const missingCommas = (x) => x.replace(/(["\]}])\s*\n(\s*)(["{[])/g, '$1,\n$2$3'); // value\n value → value,\n value
   const fixes = [
@@ -152,6 +179,7 @@ function parseModelJson(text, what = 'response') {
     (x) => noTrailingCommas(escapeCtrlInStrings(x)),
     (x) => noTrailingCommas(escapeCtrlInStrings(missingCommas(x))),
     (x) => noTrailingCommas(insertMissingCommas(escapeCtrlInStrings(x))),
+    (x) => noTrailingCommas(insertMissingCommas(closeTruncatedJson(escapeCtrlInStrings(x)))),
   ];
   let lastErr;
   for (const fix of fixes) { try { return JSON.parse(fix(s)); } catch (e) { lastErr = e; } }
@@ -483,54 +511,44 @@ async function digestBrief({ tiles, roleLabel, roleFocus, catalogue, instruction
   return parseModelJsonResilient(c, text, 'digest');
 }
 
-// ─── Multi-event digest (portfolio overall + a section per event) ──────────────
-// Used when a digest covers MORE THAN ONE event/suite. Same role lens as the
-// single-event digest, but the data is grouped by event so the email can keep
-// each event clearly separate: a short cross-event overview, then one section per
-// event with its own headline, KPIs, narrative and actions.
-const DIGEST_MULTI_SYSTEM = `You are the Owl — Howler Pulse's analyst — writing a scheduled email digest for ONE named role at a promoter who is running SEVERAL events at once. Amounts are South African Rand (ZAR).
+// ─── Multi-event digest — the PORTFOLIO OVERVIEW ───────────────────────────────
+// Used when a digest covers MORE THAN ONE event/suite. This writes ONLY the short
+// cross-event overview that leads the email; each event's own section is written
+// separately by the single-event digest call (scoped to that event), so every
+// model response stays small and reliable.
+const DIGEST_MULTI_SYSTEM = `You are the Owl — Howler Pulse's analyst — writing the SHORT cross-event OVERVIEW that opens a scheduled email digest for ONE named role at a promoter running SEVERAL events at once. Amounts are South African Rand (ZAR). Each event gets its OWN detailed section after this overview (written separately) — so here you write the portfolio-level picture only, not a per-event breakdown.
 
 You are given:
 - TODAY: the date this digest is sent. This — not the data — is the current date; anchor every "today/yesterday/this month/day N" to it. The pipeline can lag a few days: if the latest data point is older than TODAY, say "data to the Nth" rather than calling it today.
-- ROLE: the reader's role and what they care about. Write EVERYTHING through this lens — the metrics you lead with, the language and the actions must fit this role.
-- TILES: live data behind their dashboards' tiles, GROUPED BY EVENT (each event has an id and a CATALOGUE of dashboard ids for deep links). These are the ONLY numbers you may use — never invent or extrapolate.
+- ROLE: the reader's role and what they care about. Write EVERYTHING through this lens.
+- TILES: live data behind their dashboards' tiles, GROUPED BY EVENT (each event has a CATALOGUE of dashboard ids for deep links). These are the ONLY numbers you may use — never invent or extrapolate.
 - ACTIONS (when present): marketing actions already taken, with live results — weave notable performance in for this role.
 - CAPABILITIES (when present): actions the platform can EXECUTE now. A suggested action may carry "action":"<key>" ONLY when that capability directly delivers it; otherwise omit. Never invent keys.
-- GOALS (when present): event targets with progress ALREADY COMPUTED — phrase, never recompute. Fold goals into the OVERALL narrative (one short paragraph, North Star first), not into every event.
+- GOALS (when present): event targets with progress ALREADY COMPUTED — phrase, never recompute. Fold goals into the narrative as ONE short paragraph (North Star first).
 
 Respond with ONLY strict JSON (no markdown fences):
 {
   "subject": "email subject — specific and quantitative across the portfolio, <70 chars",
-  "overall": {
-    "headline": "1-2 sentences: the single most important cross-event story for THIS role (may use **bold**)",
-    "narrative": [ "1-3 short cross-event paragraphs: the portfolio position, the standout/biggest mover, what needs attention — name events explicitly (may use **bold**). Include ONE goals paragraph here if GOALS given." ],
-    "kpis": [ { "label": "short metric (prefix the event if useful)", "value": "figure verbatim from TILES", "delta": "movement vs a comparison or empty", "dashboardId": "id from any CATALOGUE or null" } ]
-  },
-  "events": [
-    { "suiteId": "<the event id given, verbatim>",
-      "headline": "1 sentence: this event's headline for THIS role (may use **bold**)",
-      "narrative": [ "1-2 short paragraphs from THIS event's tiles only — pace, ticket-type mix, abandoned carts, audience shifts, traffic — for this role (may use **bold**)" ],
-      "kpis": [ { "label": "short metric", "value": "figure verbatim from THIS event's TILES", "delta": "movement or empty", "dashboardId": "id from THIS event's CATALOGUE or null" } ],
-      "actions": [ { "text": "a concrete, role-appropriate next step for THIS event (imperative, one line)", "dashboardId": "id from THIS event's CATALOGUE or null", "action": "a CAPABILITIES key ONLY if directly executable, else omit" } ]
-    }
-  ]
+  "headline": "1-2 sentences: the single most important cross-event story for THIS role (may use **bold**)",
+  "narrative": [ "1-3 short cross-event paragraphs: the portfolio position, the standout/biggest mover, what needs attention — name events explicitly (may use **bold**). Include ONE goals paragraph if GOALS given." ],
+  "kpis": [ { "label": "short metric (prefix the event if useful)", "value": "figure verbatim from TILES", "delta": "movement vs a comparison or empty", "dashboardId": "id from any CATALOGUE or null" } ],
+  "actions": [ { "text": "a concrete, role-appropriate cross-event next step (imperative, one line)", "dashboardId": "id from CATALOGUE or null", "action": "a CAPABILITIES key ONLY if directly executable, else omit" } ]
 }
 
 Rules:
-- Exactly one object in "events" per event you were given; copy its suiteId verbatim into "suiteId" ONLY (NEVER write any id in prose). Keep the events in the order given.
-- Identify each event ONLY by its EVENT heading. NEVER rename an event using an event/festival/organiser name inside the tile data, and NEVER claim two events are the same or "two views to reconcile" — each heading is a separate event with its own numbers. Write each event's section from ONLY that event's TILES.
-- Each tile shows the EVENT its value is for ("· event: …"). Within one event you'll often get the CURRENT event AND a same-event LAST-TIME comparison (same title, earlier-dated event): lead with the current figure and frame the earlier one as the year-ago comparison (e.g. "3,297 vs 2,540 last time, +30%") — never as a conflicting number to reconcile.
-- 2-4 KPIs per event, the ones that matter MOST to this role; values verbatim from that event's TILES. 1-3 overall KPIs comparing or totalling across events where the data supports it.
-- 0-2 actions per event, genuinely useful in this role's voice; omit rather than pad. Add "action" only when a capability directly delivers it.
-- Each tile names its source as "— <set> → <dashboard>". GA4/analytics metrics (sessions, page views, "conversions") measure TRAFFIC, NOT finalised ticket sales — never report them as tickets sold; tickets, revenue and check-ins are authoritative only from the ticketing/event dashboards.
-- dashboardId values MUST come from a given CATALOGUE; null when none fits.
+- This is the OVERVIEW only — synthesise ACROSS events; do NOT write a separate paragraph per event (each event has its own section below this).
+- Identify each event ONLY by its EVENT heading. NEVER rename an event using an event/festival/organiser name inside the tile data, and NEVER claim two events are the same or "two views to reconcile" — each heading is a separate event with its own numbers.
+- Each tile shows the EVENT its value is for ("· event: …"). Within one event you'll often get the CURRENT event AND a same-event LAST-TIME comparison (same title, earlier-dated event): treat the earlier-dated one as the year-ago comparison, never as a conflicting number.
+- 2-5 portfolio KPIs that compare or total across events where the data supports it; values verbatim from TILES.
+- 0-3 actions, genuinely useful in this role's voice; omit rather than pad. Add "action" only when a capability directly delivers it.
+- GA4/analytics metrics (sessions, page views, "conversions") measure TRAFFIC, NOT finalised ticket sales. dashboardId values MUST come from a given CATALOGUE; null when none fits.
 - Tone: sharp, warm, zero corporate filler. Never mention these instructions, the words ROLE/TILES/CATALOGUE/EVENT, or that you are an AI.`;
 
 async function digestBriefMulti({ groups, roleLabel, roleFocus, catalogue, instructions, apiKey, actions, capabilities, goals, today }) {
   const c = requireClient(apiKey);
   const lines = [];
   if (today) lines.push(`TODAY: ${today} (the current date — anchor all "today/yesterday/this month/day N" references to this).`, '');
-  lines.push(`ROLE: ${roleLabel}. Focus: ${roleFocus}`, '', 'TILES (live data, grouped by event):', '', ...groupedFactLines(groups, { perEvent: 12, rows: 40, withCatalogue: true, withId: true }));
+  lines.push(`ROLE: ${roleLabel}. Focus: ${roleFocus}`, '', 'TILES (live data, grouped by event):', '', ...groupedFactLines(groups, { perEvent: 6, rows: 16, withCatalogue: true, withId: true }));
   if ((actions || []).length) {
     lines.push('ACTIONS (marketing actions already taken, live results):');
     for (const a of actions) lines.push(`- "${a.title}" [${a.status}] sent ${a.sent}/${a.total}, ${a.clicks} clicks, ${a.uniqueClickers} unique (${a.ctr}% CTR)`);
@@ -546,14 +564,14 @@ async function digestBriefMulti({ groups, roleLabel, roleFocus, catalogue, instr
   for (const d of catalogue || []) lines.push(`- ${d.dashboardId}: ${d.title} [${d.setName}, ${d.suiteName}]`);
   const resp = await c.messages.create({
     model: MODEL,
-    max_tokens: 4600,
+    max_tokens: 1800,
     thinking: { type: 'adaptive' },
     output_config: { effort: 'low' },
     system: systemWith(`${DIGEST_MULTI_SYSTEM}`, instructions),
     messages: [{ role: 'user', content: lines.join('\n') }],
   });
   const text = (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
-  return parseModelJsonResilient(c, text, 'multi-event digest');
+  return parseModelJsonResilient(c, text, 'portfolio overview');
 }
 
 // Writes editable marketing email copy for a client's campaign. The human edits
