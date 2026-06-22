@@ -899,10 +899,25 @@ function AdminLogins({ admins, entities = [], onChange }) {
   const [error, setError] = useState(null);
   const [editing, setEditing] = useState(null); // { id, email, password, entityIds }
   const nameOf = (id) => entities.find((e) => e.id === id)?.name || id;
+  // Convert an EXISTING login (e.g. a client/team member) into an admin — keeps
+  // its current client access plus any ticked here. No new password needed.
+  const promote = async () => {
+    setError(null);
+    try { await api.adminPromoteUser({ email: (form.email || '').trim(), entityIds: form.entityIds }); setForm({ email: '', password: '', entityIds: [] }); onChange(); }
+    catch (e) { setError(e.message); }
+  };
   const add = async () => {
     setError(null);
     try { await api.adminCreateUser({ email: form.email, password: form.password, role: 'admin', entityIds: form.entityIds }); setForm({ email: '', password: '', entityIds: [] }); onChange(); }
-    catch (e) { setError(e.message); }
+    catch (e) {
+      // Email already in a login → offer to promote that account to admin
+      // instead of a dead-end "already exists" error.
+      if (/already exists/i.test(e.message || '')
+        && confirm(`A login with ${form.email} already exists. Convert it to an admin?\n\nIt keeps its current client access, plus any clients you've ticked here.`)) {
+        return promote();
+      }
+      setError(e.message);
+    }
   };
   const del = async (u) => { if (confirm(`Delete admin ${u.email}?`)) { await api.adminDeleteUser(u.id); onChange(); } };
   const save = async () => {
@@ -955,6 +970,7 @@ function AdminLogins({ admins, entities = [], onChange }) {
         <Field label="Email"><input style={input} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>
         <Field label="Password"><input style={input} type="text" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></Field>
         <button style={miniBtn} onClick={add} disabled={!form.email || !form.password}>+ Add admin</button>
+        <button style={miniBtnOutline} onClick={promote} disabled={!form.email} title="Make an existing login (e.g. a client team member) an admin — no new password needed">↑ Promote existing</button>
       </div>
       {entities.length > 0 && (
         <div style={{ marginTop: 8 }}>

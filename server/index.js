@@ -227,6 +227,22 @@ app.delete('/api/admin/users/:id', auth.requireAdmin, (req, res) => {
   if (req.params.id === req.user.id) return res.status(400).json({ error: "You can't delete your own account" });
   auth.deleteUser(req.params.id); res.status(204).end();
 });
+// Promote an EXISTING login (e.g. a client/team member) to an admin, instead of
+// erroring on a duplicate email when "adding" them. Keeps their current client
+// access and adds any newly-ticked memberships.
+app.post('/api/admin/users/promote', auth.requireAdmin, (req, res) => {
+  try {
+    const b = req.body || {};
+    const email = String(b.email || '').trim().toLowerCase();
+    if (!email) return res.status(400).json({ error: 'Email required' });
+    const existing = db.getUserByEmail(email);
+    if (!existing) return res.status(404).json({ error: 'No login with that email exists yet — use “Add admin” to create one.' });
+    const want = Array.isArray(b.entityIds) ? b.entityIds.map(String) : [];
+    const merged = [...new Set([...(existing.entityIds || []), ...want])];
+    const u = auth.updateUser(existing.id, { role: 'admin', entityIds: merged });
+    res.json(u);
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
 
 // Role catalog (for the role pickers).
 const roles = require('./roles');
