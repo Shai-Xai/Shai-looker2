@@ -1788,6 +1788,22 @@ function tilePriority(t) {
   if (SUMMARY_TILE.test(title)) s -= 10;  // pick first
   return s;
 }
+// What every event's briefing always tries to cover, on top of the ticketing
+// headline. Toggleable per reader (Tune → "What the briefing covers"); default all
+// on. Each has a tile-title matcher (ga4 is matched by set/dashboard name instead).
+const BRIEF_CATS = [
+  { key: 'daily_sales', label: 'Daily sales pace', re: /daily\s*sales|sales\s*(by\s*)?day|sales\s*per\s*day|day(?:'s)?\s*sales/i },
+  { key: 'ticket_types', label: 'Ticket-type mix', re: /ticket\s*type|type\s*of\s*ticket|tickets?\s*by\s*type|by\s*ticket\s*type/i },
+  { key: 'abandoned', label: 'Abandoned carts', re: /abandon/i },
+  { key: 'audience', label: 'Audience: age, gender, country/city', re: /\bage\b|gender|demographic|nationalit|\bcountr|province|\bcit(y|ies)\b|catchment|\bregion\b/i },
+  { key: 'ga4', label: 'Website traffic (GA4)', re: null },
+];
+function briefingCats(userId, entityId) {
+  const all = BRIEF_CATS.map((c) => c.key);
+  let on = null;
+  try { on = JSON.parse(db.getUserPref(userId, `briefing_cats:${entityId}`) || 'null'); } catch { on = null; }
+  return Array.isArray(on) ? new Set(on.filter((k) => all.includes(k))) : new Set(all); // default: all on
+}
 async function buildFacts(user, entityId, force = false, alignDaysBefore = false, priorityDashboards = [], opts = {}) {
   const { catalogue, leads, suites: catSuites } = clientCatalogue(entityId);
   const follows = db.listMarks({ userId: user.id, entityId, kind: 'follow' });
@@ -1801,6 +1817,7 @@ async function buildFacts(user, entityId, force = false, alignDaysBefore = false
   // Scale the tile budget when covering multiple events so each gets a fair share
   // (≈10 tiles/event, capped) rather than all events squeezing into the single cap.
   const maxTiles = suiteSet ? Math.min(72, Math.max(FACT_MAX_TILES, suiteSet.size * 12)) : FACT_MAX_TILES;
+  const enabledCats = briefingCats(user.id, entityId); // which always-include categories are on
   const picks = []; // { tile, def, suiteId, setName, dashTitle, pinned }
   const seen = new Set();
   const addTile = (def, tile, suiteId, pinned) => {
@@ -1892,21 +1909,14 @@ async function buildFacts(user, entityId, force = false, alignDaysBefore = false
     const rank = (c) => {
       const n = `${c.setName} ${c.title}`.toLowerCase();
       if (isTicketingSet(c.setName)) return isOverviewDash(c.title) ? 0 : 1;
-      if (/\bga4\b|analytics|google/.test(n)) return 2;            // traffic / funnel
-      if (/audience|fan|customer|demograph|marketing/.test(n)) return 3;
+      if (/\bga4\b|analytics|google/.test(n)) return enabledCats.has('ga4') ? 2 : 9;          // traffic / funnel
+      if (/audience|fan|customer|demograph|marketing/.test(n)) return enabledCats.has('audience') ? 3 : 7;
       if (/cashless|vendor|\bbar\b|token|product/.test(n)) return 8; // empty pre-event → last
       return 5;
     };
-    // Always include, per event: daily-sales (pace), ticket-types (mix), abandoned
-    // carts (recoverable demand), and an audience-dynamics view (age/gender/geo) —
-    // matched by tile title — so each event covers pace + mix + funnel + audience,
-    // not just headline totals.
-    const MUST = [
-      /daily\s*sales|sales\s*(by\s*)?day|sales\s*per\s*day|day(?:'s)?\s*sales/i,
-      /ticket\s*type|type\s*of\s*ticket|tickets?\s*by\s*type|by\s*ticket\s*type/i,
-      /abandon/i,
-      /\bage\b|gender|demographic|nationalit|\bcountr|province|\bcit(y|ies)\b|catchment|\bregion\b/i,
-    ];
+    // Always include, per event, the reader's enabled categories (daily-sales,
+    // ticket-types, abandoned carts, audience) — matched by tile title.
+    const MUST = BRIEF_CATS.filter((cat) => cat.re && enabledCats.has(cat.key)).map((cat) => cat.re);
     for (const sid of suiteSet) {
       const dashes = catalogue.filter((c) => c.suiteId === sid).map((c) => store.get(c.dashboardId)).filter(Boolean);
       for (const re of MUST) {
@@ -1957,7 +1967,7 @@ async function buildFacts(user, entityId, force = false, alignDaysBefore = false
   //     analytics set (else this is a no-op). A small budget so the traffic/
   //     funnel headline tiles always make the cut without crowding out ticketing.
   const isAnalyticsSet = (name) => /\bga4\b|analytics|google/i.test(name || '');
-  let ga = 0; const GA_BUDGET = 3;
+  let ga = 0; const GA_BUDGET = enabledCats.has('ga4') ? 3 : 0; // off when the reader hides GA4
   for (const lead of leads) {
     if (ga >= GA_BUDGET || picks.length >= maxTiles) break;
     if (!isAnalyticsSet(lead.setName)) continue;
@@ -2987,7 +2997,9 @@ app.get('/api/my/briefing-config', auth.requireAuth, (req, res) => {
   }));
   let tiles = [];
   try { tiles = JSON.parse(db.getUserPref(req.user.id, `briefing_tiles:${entityId}`) || '[]'); } catch { tiles = []; }
-  res.json({ suites, phases: PHASES, phaseDefaults: phaseDefaults(), tune: db.getUserPref(req.user.id, `briefing_tune:${entityId}`), tiles });
+  const on = briefingCats(req.user.id, entityId);
+  const categories = BRIEF_CATS.map((c) => ({ key: c.key, label: c.label, enabled: on.has(c.key) }));
+  res.json({ suites, phases: PHASES, phaseDefaults: phaseDefaults(), tune: db.getUserPref(req.user.id, `briefing_tune:${entityId}`), tiles, categories });
 });
 app.put('/api/my/briefing-config/suite/:id', auth.requireAuth, (req, res) => {
   if (!auth.canAccessSuite(req.user, req.params.id)) return res.status(403).json({ error: 'Not allowed' });
@@ -3035,6 +3047,11 @@ app.put('/api/my/briefing-tune', auth.requireAuth, (req, res) => {
       .filter((t) => t && t.dashboardId && t.tileId)
       .map((t) => ({ dashboardId: String(t.dashboardId), tileId: String(t.tileId) }));
     db.setUserPref(req.user.id, `briefing_tiles:${entityId}`, JSON.stringify(tiles));
+  }
+  // Always-include categories the reader has enabled (Tune → "What the briefing covers").
+  if (Array.isArray(body.categories)) {
+    const allowed = new Set(BRIEF_CATS.map((c) => c.key));
+    db.setUserPref(req.user.id, `briefing_cats:${entityId}`, JSON.stringify([...new Set(body.categories.map(String).filter((k) => allowed.has(k)))]));
   }
   bustHome(req.user.id, entityId);
   let tiles = [];

@@ -425,8 +425,8 @@ export const api = {
   adminListBriefingFeedback: () => fetch('/api/admin/briefing-feedback').then(json),
   adminResolveBriefingFeedback: (id, status) => fetch(`/api/admin/briefing-feedback/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) }).then(json),
   refineText: (body) => fetch('/api/my/refine-text', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
-  saveBriefingTune: (tune, tiles, entityId) =>
-    fetch(`/api/my/briefing-tune${entityId ? `?entityId=${encodeURIComponent(entityId)}` : ''}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tune, tiles }) }).then(json),
+  saveBriefingTune: (tune, tiles, entityId, categories) =>
+    fetch(`/api/my/briefing-tune${entityId ? `?entityId=${encodeURIComponent(entityId)}` : ''}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tune, tiles, ...(categories ? { categories } : {}) }) }).then(json),
 
   // Goals (the Results pillar) — one guarded route set serves admin + client.
   // Goals are per event (suite); the list returns each goal with resolved progress.

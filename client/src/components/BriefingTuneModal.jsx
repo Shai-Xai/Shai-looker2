@@ -18,6 +18,7 @@ export function BriefingConfigForm({ entityId, onSaved, showTune = true }) {
   const [cfg, setCfg] = useState(null);
   const [tune, setTune] = useState('');
   const [tiles, setTiles] = useState([]); // reader-chosen focus tiles ({dashboardId, tileId})
+  const [cats, setCats] = useState([]); // always-include categories [{key,label,enabled}]
   const [suiteEdits, setSuiteEdits] = useState({}); // suiteId -> briefing cfg
   const [openSuite, setOpenSuite] = useState(null);
   const [openPhase, setOpenPhase] = useState(null);
@@ -51,6 +52,7 @@ export function BriefingConfigForm({ entityId, onSaved, showTune = true }) {
       setCfg(r);
       setTune(r.tune || '');
       setTiles(r.tiles || []);
+      setCats(r.categories || []);
       setSuiteEdits(Object.fromEntries(r.suites.map((s) => [s.id, {
         launchDate: s.briefing.launchDate || '', eventStart: s.briefing.eventStart || '', eventEnd: s.briefing.eventEnd || '',
         manualPhase: s.briefing.manualPhase || 'auto', instructions: s.briefing.instructions || '',
@@ -63,7 +65,7 @@ export function BriefingConfigForm({ entityId, onSaved, showTune = true }) {
   async function saveAll() {
     setBusy(true); setError(null);
     try {
-      if (showTune) await api.saveBriefingTune(tune, tiles, entityId);
+      if (showTune) await api.saveBriefingTune(tune, tiles, entityId, cats.filter((c) => c.enabled).map((c) => c.key));
       for (const su of cfg.suites) await api.saveSuiteBriefing(su.id, suiteEdits[su.id], entityId);
       setSavedAt(Date.now());
       onSaved?.();
@@ -114,6 +116,28 @@ export function BriefingConfigForm({ entityId, onSaved, showTune = true }) {
                   Optional — for boards that aren't event-driven (e.g. management) point the briefing at the exact tiles that matter. Leave empty to let the Owl sweep the whole catalogue.
                 </div>
                 <TilePicker catalogue={cat} load={loadTiles} selected={tiles} onChange={setTiles} />
+                {cats.length > 0 && (
+                  <>
+                    <Label>What every event's briefing covers</Label>
+                    <div style={{ fontSize: 11, color: 'var(--muted)', margin: '0 0 6px', lineHeight: 1.45 }}>
+                      On top of the ticketing headline, each event tries to surface these. Untick any you don't want.
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                      {cats.map((c) => (
+                        <button
+                          key={c.key} type="button"
+                          onClick={() => setCats((cur) => cur.map((x) => (x.key === c.key ? { ...x, enabled: !x.enabled } : x)))}
+                          style={{
+                            border: `1.5px solid ${c.enabled ? 'var(--brand)' : 'var(--hairline)'}`,
+                            background: c.enabled ? 'rgba(var(--brand-rgb), 0.08)' : 'transparent',
+                            color: c.enabled ? 'var(--brand)' : 'var(--muted-2)',
+                            borderRadius: 980, padding: '5px 12px', fontSize: 12.5, fontWeight: 600, cursor: 'pointer',
+                          }}
+                        >{c.enabled ? '✓ ' : ''}{c.label}</button>
+                      ))}
+                    </div>
+                  </>
+                )}
               </>
             )}
 
