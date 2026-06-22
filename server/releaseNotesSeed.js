@@ -13,6 +13,34 @@
 
 const SEED = [
   {
+    key: 'shipped-2026-06-22',
+    date: '2026-06-22',
+    title: 'Goals, alerts, per-event branding & multi-event briefings',
+    summary: [
+      '- Goals gained two new types: a "composition" goal (mix/split — shares of a 100% whole) and a "healthy range" goal that flags when a number drifts too far either way.',
+      '- Metric alerts (Wave 1): watch any tile or a custom metric and get alerted the moment it crosses the threshold you set.',
+      '- Per-event branding: give each event its own logo, colours and email sender, layered over your client look — and manage it yourself.',
+      '- Multi-event briefings & digests: a portfolio overview plus a clear section per event, with an event picker, so running several events at once is easier to read.',
+      '- Release notes: this feed, so you can always see what shipped.',
+    ].join('\n'),
+    howTo: [
+      '- Goals: Goals → New goal → pick "Composition" or "Healthy range".',
+      "- Alerts: create an alert on a tile or custom metric, set the threshold, and you'll be notified when it crosses.",
+      '- Per-event branding: Settings → Branding → choose an event to give it its own logo, colours and sender.',
+      '- Multi-event briefing: on Home, use the event picker to switch between the portfolio overview and each event.',
+    ].join('\n'),
+    deepLink: '',
+    dev: [
+      '- Goals: composition (mix/split) + healthy-range (band) goal types; each slice sourced from its own tile.',
+      '- Metric alerts Wave 1: tile-watch + custom-metric (measure + dimension filter) sources; fire-on-cross.',
+      '- Per-event (suite) branding: own logo/colours/sender layered over client; client self-service; app-shell logo precedence fixes.',
+      '- Multi-event briefings/digests: per-event scoped facts, portfolio + per-event sections, event picker; robustness vs malformed JSON; Diagnose tooling for dropped tiles/filters.',
+      '- Release Notes 2.0 (three lenses) + authored seed loaded on boot.',
+      '- Admin: promote an existing login to admin; duplicate-email handled cleanly. Inventive: per-client account-name override.',
+    ].join('\n'),
+    published: true,
+  },
+  {
     key: 'release-notes-2.0',
     date: '2026-06-22',
     title: 'Daily release notes — three lenses',
