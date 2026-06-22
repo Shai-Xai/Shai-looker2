@@ -1882,27 +1882,38 @@ async function buildFacts(user, entityId, force = false, alignDaysBefore = false
   //     Capped (TKT_BUDGET) so the other boards still get plenty of the budget.
   const isTicketingSet = (name) => /ticket/i.test(name || '') && !/\bga4\b|analytics|google/i.test(name || '');
   const isOverviewDash = (title) => /overview|summary|headline/i.test(title || '');
-  // 1c2) MULTI-EVENT FAIRNESS: when scoped to several events, seed EACH event's own
-  //      ticketing headline tiles FIRST — otherwise the global ticketing budget
-  //      below is eaten by the first event and the others get only leftover
-  //      (often data-less cashless) dashboards, so they show "no activity".
+  // 1c2) MULTI-EVENT BALANCE: when scoped to several events, fill EACH event with a
+  //      spread across ITS dashboards — round-robin so a section isn't all
+  //      ticketing: lead with ticketing/overview, then GA4, audience, then the
+  //      rest (cashless/vendor last — they're empty pre-event). This both keeps the
+  //      events fair (each gets its own budget) and gives them breadth.
   if (suiteSet) {
-    const perSuiteSeed = Math.max(3, Math.floor(maxTiles / (suiteSet.size * 2)));
+    const perEvent = Math.max(6, Math.floor(maxTiles / suiteSet.size));
+    const rank = (c) => {
+      const n = `${c.setName} ${c.title}`.toLowerCase();
+      if (isTicketingSet(c.setName)) return isOverviewDash(c.title) ? 0 : 1;
+      if (/\bga4\b|analytics|google/.test(n)) return 2;            // traffic / funnel
+      if (/audience|fan|customer|demograph|marketing/.test(n)) return 3;
+      if (/cashless|vendor|\bbar\b|token|product/.test(n)) return 8; // empty pre-event → last
+      return 5;
+    };
     for (const sid of suiteSet) {
-      const dashes = catalogue.filter((c) => c.suiteId === sid && isTicketingSet(c.setName))
-        .sort((a, b) => (isOverviewDash(b.title) ? 1 : 0) - (isOverviewDash(a.title) ? 1 : 0));
-      let taken = 0;
-      for (const c of dashes) {
-        if (taken >= perSuiteSeed || picks.length >= maxTiles) break;
-        const def = store.get(c.dashboardId);
-        if (!def) continue;
-        const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((t) => t.tiles || []))]
-          .filter((t) => t.type !== 'text' && t.query?.fields?.length)
-          .sort((a, b) => tilePriority(a) - tilePriority(b));
-        for (const t of tiles) {
-          if (taken >= perSuiteSeed || picks.length >= maxTiles) break;
-          const before = picks.length; addTile(def, t, sid, true);
-          if (picks.length > before) taken += 1;
+      const pools = catalogue.filter((c) => c.suiteId === sid)
+        .map((c) => ({ c, def: store.get(c.dashboardId) }))
+        .filter((x) => x.def)
+        .sort((a, b) => rank(a.c) - rank(b.c))
+        .map(({ def }) => ({ def, tiles: [...(def.tiles || []), ...((def.carousels || []).flatMap((t) => t.tiles || []))].filter((t) => t.type !== 'text' && t.query?.fields?.length).sort((a, b) => tilePriority(a) - tilePriority(b)), idx: 0, taken: 0 }))
+        .filter((p) => p.tiles.length);
+      let count = 0; let progressed = true;
+      while (count < perEvent && progressed && picks.length < maxTiles) {
+        progressed = false;
+        for (const pool of pools) {
+          if (count >= perEvent || picks.length >= maxTiles) break;
+          if (pool.idx < pool.tiles.length && pool.taken < PER_DASH) {
+            const t = pool.tiles[pool.idx++]; const before = picks.length;
+            addTile(pool.def, t, sid, true);
+            if (picks.length > before) { pool.taken += 1; count += 1; progressed = true; }
+          }
         }
       }
     }

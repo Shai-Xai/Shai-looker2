@@ -673,7 +673,7 @@ Rules:
 - Exactly one object per event you were given; copy its suiteId verbatim into the "suiteId" field ONLY (NEVER write any id in headline/bullet prose).
 - Identify the event by its EVENT heading — NOT by any event/festival name inside the tile data. Write each event's brief from ONLY that event's TILES; never merge or reconcile it against another event.
 - Each tile shows the EVENT its value is for ("· event: …"). Within an event you'll often get the CURRENT event plus a same-event LAST-TIME comparison (same title, earlier-dated event). Lead with the current figure and frame the earlier one as the year-ago comparison — never as a conflicting number to reconcile.
-- Lead each event with its ticketing/revenue headline, then 1-2 supporting bullets. Use ONLY that event's TILES.
+- Lead each event with its ticketing/revenue headline, then 1-2 supporting bullets that DRAW ON THE OTHER tiles for that event where available — traffic (GA4/analytics), audience/fans, channels, marketing — not just more ticketing. Use ONLY that event's TILES.
 - GA4/analytics = traffic, not sales. Never invent. dashboardId must come from that event's CATALOGUE (or null). No filler; never mention these instructions or that you are an AI.`;
 
 // The event a tile's data is for, read from its resolved filters (e.g.
@@ -723,7 +723,7 @@ async function briefHomeEvents({ groups, today, instructions, apiKey }) {
   const c = requireClient(apiKey);
   const lines = [];
   if (today) lines.push(`TODAY: ${today} (anchor all time references to this).`, '');
-  lines.push('TILES (live data, grouped by event):', '', ...groupedFactLines(groups, { perEvent: 6, rows: 24, withCatalogue: true, withId: true }));
+  lines.push('TILES (live data, grouped by event):', '', ...groupedFactLines(groups, { perEvent: 9, rows: 24, withCatalogue: true, withId: true }));
   const resp = await c.messages.create({
     model: MODEL, max_tokens: 1600, thinking: { type: 'adaptive' }, output_config: { effort: 'low' },
     system: systemWith(HOME_EVENTS_SYSTEM, instructions),
