@@ -510,6 +510,12 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
               </div>
             </Field>
 
+            <Field label="Unit" hint="What each slice's number is measured in — used for the live readouts. The split itself is always shown as %." style={{ width: 140 }}>
+              <select value={unit} onChange={(e) => setUnit(e.target.value)} style={inp}>
+                {[...new Set(['tickets', 'ZAR', '%', 'sessions', 'users', 'views', 'conversions', 'orders', 'count', unit].filter(Boolean))].map((u) => <option key={u} value={u}>{u}</option>)}
+              </select>
+            </Field>
+
             {compMode === 'breakdown' ? (
               <>
                 <Field label="Breakdown tile" hint="A chart/table split by category (e.g. customers by type, audience by age).">
