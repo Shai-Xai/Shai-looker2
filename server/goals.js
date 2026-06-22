@@ -258,6 +258,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
         ...(p.tol != null && p.tol !== '' ? { tol: Number(p.tol) } : {}),
         ...(p.focus ? { focus: true } : {}),
         ...(p.ref && p.ref.tileId ? { ref: { dashboardId: String(p.ref.dashboardId || '').slice(0, 64), tileId: String(p.ref.tileId || '').slice(0, 64), dashboardName: String(p.ref.dashboardName || '').slice(0, 120), tileName: String(p.ref.tileName || '').slice(0, 120) } } : {}),
+        ...(p.lastRef && p.lastRef.tileId ? { lastRef: { dashboardId: String(p.lastRef.dashboardId || '').slice(0, 64), tileId: String(p.lastRef.tileId || '').slice(0, 64), dashboardName: String(p.lastRef.dashboardName || '').slice(0, 120), tileName: String(p.lastRef.tileName || '').slice(0, 120) } } : {}),
       })).filter((p) => p.label).slice(0, 12) : [],
       unit: String(b.unit || '').slice(0, 16),
       direction: DIRECTIONS.includes(b.direction) ? b.direction : 'at_least',
@@ -342,27 +343,31 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
   // on another, and slices drifting outside their band are flagged.
   async function resolveComposition(goal, user) {
     const partsCfg = Array.isArray(goal.parts) ? goal.parts : [];
-    const build = (withVal, total) => {
+    const build = (withVal, total, lastTotal) => {
       const parts = withVal.map((pt) => {
         const share = Math.round((pt.value / total) * 1000) / 10; // one decimal place
         const tol = Number.isFinite(Number(pt.tol)) ? Number(pt.tol) : 5; // ±pp default band
         const diff = share - Number(pt.target);
         const status = diff > tol ? 'over' : diff < -tol ? 'under' : 'in';
-        return { label: pt.label, target: Number(pt.target), tol, value: Math.round(pt.value), share, status, focus: !!pt.focus };
+        let lastShare = null, deltaPp = null;
+        if (Number.isFinite(pt.lastValue) && lastTotal > 0) {
+          lastShare = Math.round((pt.lastValue / lastTotal) * 1000) / 10;
+          deltaPp = Math.round((share - lastShare) * 10) / 10; // movement in percentage points
+        }
+        return { label: pt.label, target: Number(pt.target), tol, value: Math.round(pt.value), share, status, focus: !!pt.focus, lastShare, deltaPp };
       });
       const drift = parts.filter((p) => p.status !== 'in');
       return { composition: true, total: Math.round(total), parts, balanced: parts.length ? drift.length === 0 : null, driftCount: drift.length, asOf: now() };
     };
-    // Tile-per-slice mode: at least two parts each carry their own tile ref.
+    // Tile-per-slice mode: at least two parts each carry their own tile ref. A part may
+    // also carry a last-year tile (lastRef) to show its share's movement vs last time.
     if (partsCfg.filter((p) => p.ref && p.ref.tileId).length >= 2 && typeof resolveTileValue === 'function') {
-      const withVal = await Promise.all(partsCfg.map(async (pt) => {
-        if (!pt.ref || !pt.ref.tileId) return { ...pt, value: 0 };
-        try { const v = await resolveTileValue({ dashboardId: pt.ref.dashboardId, tileId: pt.ref.tileId, user, suiteId: goal.suiteId }); return { ...pt, value: Number(v) || 0 }; }
-        catch { return { ...pt, value: 0 }; }
-      }));
-      const total = withVal.reduce((s, p) => s + p.value, 0);
+      const read = async (r) => { if (!r || !r.tileId) return null; try { const v = await resolveTileValue({ dashboardId: r.dashboardId, tileId: r.tileId, user, suiteId: goal.suiteId }); return Number(v); } catch { return null; } };
+      const withVal = await Promise.all(partsCfg.map(async (pt) => ({ ...pt, value: (await read(pt.ref)) || 0, lastValue: await read(pt.lastRef) })));
+      const total = withVal.reduce((s, p) => s + (p.value || 0), 0);
       if (!(total > 0)) return { composition: true, parts: [], balanced: null, total: 0, asOf: now() };
-      return build(withVal, total);
+      const lastTotal = withVal.reduce((s, p) => s + (Number.isFinite(p.lastValue) ? p.lastValue : 0), 0);
+      return build(withVal, total, lastTotal);
     }
     // Breakdown-tile mode: one tile returns category → value.
     const ref = goal.metricRef || {};
@@ -510,8 +515,13 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
     const lo = goal.targetValue, hi = goal.targetMax;
     const over = isRange ? value > hi : false;          // drifted above the band
     const inRange = isRange ? (value >= lo && value <= hi) : false;
+    // Range %: below the band reads toward 100 (value/lo); in-band is 100; ABOVE the
+    // band keeps counting past 100 against the ceiling (value/hi) so the dial shows how
+    // far over you've drifted (e.g. 68 over a 62–65 band → ~105%) instead of a flat 100.
     const pct = isRange
-      ? (value < lo ? Math.max(0, Math.min(100, Math.round((value / lo) * 100))) : 100)
+      ? (value < lo ? Math.max(0, Math.min(100, Math.round((value / lo) * 100)))
+        : over && hi > 0 ? Math.round((value / hi) * 100)
+        : 100)
       : goal.direction === 'at_most'
         ? (value <= 0 ? 100 : Math.round((goal.targetValue / value) * 100))
         : Math.round((value / goal.targetValue) * 100);

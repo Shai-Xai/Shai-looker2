@@ -95,6 +95,10 @@ test('a range goal: in-band reads on-target, above the band is flagged (not "rea
   // Above the band → flagged over (NOT reached).
   assert.equal(P(idOver).over, true); assert.equal(P(idOver).inRange, false);
   assert.equal(P(idOver).targetMax, 38, 'carries the band upper bound');
+  // Over the band keeps counting past 100% (value/hi) so the dial reads how far over,
+  // not a flat 100. 44 over a 30–38 band → 44/38 ≈ 116%.
+  assert.equal(P(idOver).pct, Math.round((44 / 38) * 100));
+  assert.ok(P(idOver).pct > 100, 'over-band pct exceeds 100');
 });
 
 test('a composition goal reads the breakdown as shares and flags a slice out of band', async () => {
@@ -130,6 +134,24 @@ test('a composition goal can source each slice from its own tile', async () => {
   assert.equal(get('New').share, 40); assert.equal(get('New').status, 'under', 'New 40% is below its 50% (±5) target');
   assert.equal(get('Returning').share, 60); assert.equal(get('Returning').status, 'over');
   assert.equal(p.balanced, false);
+});
+
+test('a per-tile composition slice can compare to a last-year tile (movement in pp)', async () => {
+  const sid = h.db.createSuite({ entityId, name: 'Composition last-year test' }).id;
+  // This year: New 40 / Returning 60. Last year: New 30 / Returning 70.
+  tileValueByTile = { tNew: 40, tRet: 60, tNewLY: 30, tRetLY: 70 };
+  const g = (await app.req('POST', `/api/goals/suites/${sid}`, { as: owner, body: {
+    name: 'New vs returning (with last year)', source: 'manual', direction: 'composition',
+    parts: [
+      { label: 'New', target: 50, ref: { dashboardId: 'd', tileId: 'tNew' }, lastRef: { dashboardId: 'd', tileId: 'tNewLY' } },
+      { label: 'Returning', target: 50, ref: { dashboardId: 'd', tileId: 'tRet' }, lastRef: { dashboardId: 'd', tileId: 'tRetLY' } },
+    ],
+  } })).body.goal;
+  const row = (await app.req('GET', `/api/goals/suites/${sid}`, { as: owner })).body.goals.find((x) => x.id === g.id);
+  const get = (l) => row.progress.parts.find((x) => x.label === l);
+  // New grew from 30% → 40% of the whole (+10pp); Returning fell 70% → 60% (−10pp).
+  assert.equal(get('New').lastShare, 30); assert.equal(get('New').deltaPp, 10);
+  assert.equal(get('Returning').lastShare, 70); assert.equal(get('Returning').deltaPp, -10);
 });
 
 test('the first event goal becomes the North Star automatically', async () => {

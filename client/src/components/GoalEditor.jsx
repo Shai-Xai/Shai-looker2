@@ -306,6 +306,7 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
         label: String(p.label).trim(), target: Number(p.target) || 0, tol,
         ...(p.focus ? { focus: true } : {}),
         ...(compMode === 'tiles' && p.ref && p.ref.tileId ? { ref: refWithNames(p.ref.dashboardId, p.ref.tileId) } : {}),
+        ...(compMode === 'tiles' && p.lastRef && p.lastRef.tileId ? { lastRef: refWithNames(p.lastRef.dashboardId, p.lastRef.tileId) } : {}),
       })) : [],
       targetValue: isComp ? 0 : Number(target),
       targetMax: direction === 'range' && targetMax !== '' ? Number(targetMax) : null,
@@ -549,6 +550,7 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
                 {parts.map((p, i) => {
                   const setPart = (patch) => setParts((ps) => ps.map((x, j) => j === i ? { ...x, ...patch } : x));
                   const ref = p.ref || {};
+                  const lastRef = p.lastRef || {};
                   return (
                     <div key={i} style={{ border: '1px solid var(--hairline)', borderRadius: 9, padding: 8, marginBottom: 8 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
@@ -568,6 +570,24 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
                           {tilesFor(ref.dashboardId).map((t) => <option key={t.tileId} value={t.tileId}>{t.title}</option>)}
                         </select>
                       )}
+                      <TilePeek suiteId={activeSuite} dashboardId={ref.dashboardId} tileId={ref.tileId} unit={unit} label="this slice reads" />
+                      {/* Optional last-year tile for this slice — shows movement (▲/▼ pp vs last year). */}
+                      {ref.tileId && (
+                        <details style={{ marginTop: 8 }}>
+                          <summary style={{ fontSize: 11.5, color: 'var(--brand)', cursor: 'pointer', fontWeight: 700 }}>Compare to last year (optional)</summary>
+                          <select value={lastRef.dashboardId || ''} onChange={(e) => setPart({ lastRef: { dashboardId: e.target.value, tileId: '' } })} style={{ ...inp, marginTop: 6 }}>
+                            <option value="">{cat ? 'Choose a dashboard…' : 'Loading…'}</option>
+                            {dashboards.map((d) => <option key={d.dashboardId} value={d.dashboardId}>{d.title}{d.setName ? ` · ${d.setName}` : ''}</option>)}
+                          </select>
+                          {lastRef.dashboardId && (
+                            <select value={lastRef.tileId || ''} onChange={(e) => setPart({ lastRef: { ...lastRef, tileId: e.target.value } })} style={{ ...inp, marginTop: 6 }}>
+                              <option value="">Choose last-year tile…</option>
+                              {tilesFor(lastRef.dashboardId).map((t) => <option key={t.tileId} value={t.tileId}>{t.title}</option>)}
+                            </select>
+                          )}
+                          <TilePeek suiteId={activeSuite} dashboardId={lastRef.dashboardId} tileId={lastRef.tileId} unit={unit} label="last year reads" />
+                        </details>
+                      )}
                     </div>
                   );
                 })}
@@ -579,6 +599,14 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
                 <input value={partTol} onChange={(e) => setPartTol(e.target.value)} inputMode="decimal" style={{ ...inp, width: 90 }} />
               </Field>
             )}
+
+            <Field label="Show it as" style={{ marginBottom: 0, marginTop: 6 }}>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Seg active={display === 'bar'} onClick={() => setDisplay('bar')}>▭ Stacked bar</Seg>
+                <Seg active={display === 'ring'} onClick={() => setDisplay('ring')}>◯ Donut</Seg>
+                <Seg active={display === 'dial'} onClick={() => setDisplay('dial')}>◔ Dial</Seg>
+              </div>
+            </Field>
           </div>
         )}
 
@@ -756,6 +784,27 @@ function fmtNum(v, unit) {
   if (unit === 'ZAR') return `R${s}`;
   if (unit === '%') return `${s}%`;
   return unit && unit !== 'count' ? `${s} ${unit}` : s;
+}
+
+// Live readout of a chosen tile's value (mix/split slices) so you can see the actual
+// number you're splitting on as you pick. `label` distinguishes this-year vs last-year.
+function TilePeek({ suiteId, dashboardId, tileId, unit, label = 'reads' }) {
+  const [st, setSt] = useState(null);
+  useEffect(() => {
+    if (!suiteId || !dashboardId || !tileId) { setSt(null); return undefined; }
+    let alive = true; setSt({ loading: true });
+    api.goalTileValue(suiteId, dashboardId, tileId)
+      .then((r) => { if (alive) setSt({ value: r.value }); })
+      .catch(() => { if (alive) setSt({ value: null }); });
+    return () => { alive = false; };
+  }, [suiteId, dashboardId, tileId]);
+  if (!tileId || !st) return null;
+  return (
+    <div style={{ marginTop: 6, fontSize: 12, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
+      <span>{label}:</span>
+      {st.loading ? <span>reading…</span> : st.value != null ? <b style={{ color: 'var(--text)' }}>{fmtNum(st.value, unit)}</b> : <span>— couldn't read it</span>}
+    </div>
+  );
 }
 
 function fmtShort(s) { const d = new Date(s); return Number.isNaN(d.getTime()) ? s : d.toLocaleDateString('en-ZA', { day: 'numeric', month: 'short' }); }

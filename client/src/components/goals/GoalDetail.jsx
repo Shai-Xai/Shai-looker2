@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { api } from '../../lib/api.js';
 import { useIsMobile } from '../../lib/useIsMobile.js';
-import { Ring, Dial, Bar, CompositionBar, CompositionLegend, goalState, fmtVal, fmtTarget } from './GoalViz.jsx';
+import { Ring, Dial, Bar, CompositionBar, CompositionDonut, CompositionArc, CompositionLegend, goalState, fmtVal, fmtTarget, rangeLabel } from './GoalViz.jsx';
 import ForecastChart from './ForecastChart.jsx';
 
 // The goal DETAIL view — the read surface for a goal. Tapping a goal card (on the
@@ -64,7 +64,13 @@ export default function GoalDetail({ goal, suiteName, onEdit, onDelete, onClose,
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: '14px 0 6px' }}>
           {goal.direction === 'composition' ? (
             <div style={{ width: '100%' }}>
-              <CompositionBar parts={p.parts} />
+              {viz === 'ring' ? (
+                <div style={{ display: 'flex', justifyContent: 'center' }}><CompositionDonut parts={p.parts} size={150} /></div>
+              ) : viz === 'dial' ? (
+                <div style={{ display: 'flex', justifyContent: 'center' }}><CompositionArc parts={p.parts} size={190} /></div>
+              ) : (
+                <CompositionBar parts={p.parts} />
+              )}
               <CompositionLegend parts={p.parts} />
             </div>
           ) : viz === 'bar' ? (
@@ -77,7 +83,7 @@ export default function GoalDetail({ goal, suiteName, onEdit, onDelete, onClose,
             </div>
           ) : (
             <>
-              {viz === 'ring' ? <Ring pct={p.pct} tone={tone} size={132} /> : <Dial pct={p.pct} tone={tone} size={150} />}
+              {viz === 'ring' ? <Ring pct={p.pct} tone={tone} size={132} label={rangeLabel(goal, p)} /> : <Dial pct={p.pct} tone={tone} size={150} label={rangeLabel(goal, p)} />}
               <div style={{ fontSize: 14, color: 'var(--muted)' }}>{fmtVal(p.value, goal.unit)} / {fmtTarget(goal)}</div>
             </>
           )}

@@ -75,7 +75,13 @@ export function GoalCard({ goal, onClick, index = 0, colorIndex, draggable = fal
       </div>
       {goal.direction === 'composition' ? (
         <div style={{ marginTop: 'auto', paddingTop: 12 }}>
-          <CompositionBar parts={p.parts} />
+          {viz === 'ring' ? (
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 4 }}><CompositionDonut parts={p.parts} size={96} /></div>
+          ) : viz === 'dial' ? (
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 2 }}><CompositionArc parts={p.parts} size={132} /></div>
+          ) : (
+            <CompositionBar parts={p.parts} />
+          )}
           <CompositionLegend parts={p.parts} compact />
         </div>
       ) : viz === 'bar' ? (
@@ -88,7 +94,7 @@ export function GoalCard({ goal, onClick, index = 0, colorIndex, draggable = fal
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, gap: 5, marginTop: 2 }}>
-          {viz === 'ring' ? <Ring pct={p.pct} tone={tone} size={78} /> : <Dial pct={p.pct} tone={tone} size={86} />}
+          {viz === 'ring' ? <Ring pct={p.pct} tone={tone} size={78} label={rangeLabel(goal, p)} /> : <Dial pct={p.pct} tone={tone} size={86} label={rangeLabel(goal, p)} />}
           <div style={{ fontSize: 11, color: 'var(--muted)', textAlign: 'center', lineHeight: 1.3 }}>{fmtVal(p.value, goal.unit)} / {fmtTarget(goal)}</div>
           {chip && <div style={{ marginTop: 1 }}>{chip}</div>}
           <VsLast goal={goal} p={p} align="center" />
@@ -98,20 +104,70 @@ export function GoalCard({ goal, onClick, index = 0, colorIndex, draggable = fal
   );
 }
 
-// Composition: a stacked bar of the actual shares; slices that drift out of their
-// band turn amber. Parts are interlinked (they sum to ~100% of the breakdown total).
+// Composition: a stacked bar of the actual shares, with TARGET markers (thin lines at
+// the cumulative target boundaries) so you can see actual vs the target split. Slices
+// outside their band turn amber. Parts are interlinked (they sum to ~100% of total).
 export function CompositionBar({ parts = [] }) {
   const shown = parts.filter((p) => Number.isFinite(p.share));
-  if (!shown.length) return <div style={{ height: 14, borderRadius: 7, background: 'rgba(128,128,128,0.16)' }} />;
+  if (!shown.length) return <div style={{ height: 16, borderRadius: 8, background: 'rgba(128,128,128,0.16)' }} />;
+  // Cumulative target boundaries (skip the last = 100%).
+  let acc = 0; const marks = shown.slice(0, -1).map((p) => (acc += Number(p.target) || 0));
   return (
-    <div style={{ display: 'flex', height: 14, borderRadius: 7, overflow: 'hidden', background: 'rgba(128,128,128,0.16)' }}>
-      {shown.map((p, i) => (
-        <div key={p.label} title={`${p.label} ${p.share}% (target ${p.target}%)`}
-          style={{ width: `${Math.max(0, p.share)}%`, background: p.status !== 'in' ? AMBER : partColors[i % partColors.length], borderRight: '1.5px solid var(--card)' }} />
+    <div style={{ position: 'relative', height: 16, borderRadius: 8, overflow: 'hidden', background: 'rgba(128,128,128,0.16)' }}>
+      <div style={{ display: 'flex', height: '100%' }}>
+        {shown.map((p, i) => (
+          <div key={p.label} title={`${p.label} ${p.share}% (target ${p.target}%)`}
+            style={{ width: `${Math.max(0, p.share)}%`, background: p.status !== 'in' ? AMBER : partColors[i % partColors.length], borderRight: '1.5px solid var(--card)' }} />
+        ))}
+      </div>
+      {marks.map((m, i) => (
+        <span key={i} title={`target boundary ${Math.round(m)}%`} style={{ position: 'absolute', top: -2, bottom: -2, left: `${m}%`, width: 0, borderLeft: '2px dashed var(--text)', opacity: 0.55 }} />
       ))}
     </div>
   );
 }
+
+// Donut of the actual shares (display 'ring' for compositions), with target-boundary
+// ticks around the rim.
+export function CompositionDonut({ parts = [], size = 96 }) {
+  const shown = parts.filter((p) => Number.isFinite(p.share));
+  const total = shown.reduce((s, p) => s + Math.max(0, p.share), 0) || 100;
+  const r = (size - 14) / 2, cx = size / 2, cy = size / 2, C = 2 * Math.PI * r;
+  let off = 0;
+  const seg = (frac) => { const len = frac * C; const el = { dasharray: `${len} ${C - len}`, dashoffset: -off }; off += len; return el; };
+  const tickAt = (frac) => { const a = -Math.PI / 2 + 2 * Math.PI * frac; return [cx + (r + 7) * Math.cos(a), cy + (r + 7) * Math.sin(a), cx + (r - 7) * Math.cos(a), cy + (r - 7) * Math.sin(a)]; };
+  let tacc = 0; const marks = shown.slice(0, -1).map((p) => (tacc += (Number(p.target) || 0) / 100));
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden="true">
+      <g transform={`rotate(-90 ${cx} ${cy})`}>
+        {shown.map((p, i) => { const e = seg(Math.max(0, p.share) / total); return (
+          <circle key={p.label} cx={cx} cy={cy} r={r} fill="none" stroke={p.status !== 'in' ? AMBER : partColors[i % partColors.length]} strokeWidth="12" strokeDasharray={e.dasharray} strokeDashoffset={e.dashoffset} />
+        ); })}
+      </g>
+      {marks.map((m, i) => { const [x1, y1, x2, y2] = tickAt(m); return <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} stroke="var(--text)" strokeOpacity="0.55" strokeWidth="2" strokeDasharray="2 2" />; })}
+    </svg>
+  );
+}
+
+// Semicircle stacked arc (display 'dial' for compositions), with target-boundary ticks.
+export function CompositionArc({ parts = [], size = 132 }) {
+  const shown = parts.filter((p) => Number.isFinite(p.share));
+  const total = shown.reduce((s, p) => s + Math.max(0, p.share), 0) || 100;
+  const sw = 12, r = (size - sw) / 2, cx = size / 2, cy = size / 2;
+  const pt = (frac) => { const a = Math.PI - Math.PI * frac; return [cx + r * Math.cos(a), cy - r * Math.sin(a)]; };
+  const arc = (f0, f1) => { const [x0, y0] = pt(f0), [x1, y1] = pt(f1); return `M ${x0.toFixed(1)} ${y0.toFixed(1)} A ${r} ${r} 0 0 1 ${x1.toFixed(1)} ${y1.toFixed(1)}`; };
+  const h = Math.ceil(cy + sw);
+  let acc = 0; const segs = shown.map((p, i) => { const f0 = acc / total; acc += Math.max(0, p.share); const f1 = acc / total; return { f0, f1, color: p.status !== 'in' ? AMBER : partColors[i % partColors.length], key: p.label }; });
+  let tacc = 0; const marks = shown.slice(0, -1).map((p) => (tacc += (Number(p.target) || 0) / 100));
+  return (
+    <svg width={size} height={h} viewBox={`0 0 ${size} ${h}`} aria-hidden="true">
+      <path d={arc(0, 1)} fill="none" stroke="rgba(128,128,128,0.18)" strokeWidth={sw} />
+      {segs.map((s) => <path key={s.key} d={arc(s.f0, s.f1)} fill="none" stroke={s.color} strokeWidth={sw} />)}
+      {marks.map((m, i) => { const [x, y] = pt(m); const [xo, yo] = [cx + (r + sw / 2 + 2) * Math.cos(Math.PI - Math.PI * m), cy - (r + sw / 2 + 2) * Math.sin(Math.PI - Math.PI * m)]; return <line key={i} x1={x} y1={y} x2={xo} y2={yo} stroke="var(--text)" strokeOpacity="0.6" strokeWidth="2" />; })}
+    </svg>
+  );
+}
+
 export function CompositionLegend({ parts = [], compact = false }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: compact ? 3 : 6, marginTop: 8 }}>
@@ -123,10 +179,20 @@ export function CompositionLegend({ parts = [], compact = false }) {
           <span style={{ color: 'var(--muted)' }}>/ {p.target}%</span>
           {p.status === 'over' && <span style={{ color: AMBER, fontWeight: 700 }} title="above band">↑</span>}
           {p.status === 'under' && <span style={{ color: AMBER, fontWeight: 700 }} title="below band">↓</span>}
+          {Number.isFinite(p.deltaPp) && p.deltaPp !== 0 && (
+            <span style={{ color: 'var(--muted)', fontSize: 10.5 }} title={`vs last year (${p.lastShare}%)`}>{p.deltaPp > 0 ? '▲' : '▼'}{Math.abs(p.deltaPp)}pp</span>
+          )}
         </div>
       ))}
     </div>
   );
+}
+
+// Centre label for a ring/dial: range goals show the real % (uncapped) so going over
+// the band reads as e.g. "105%" instead of a flat "100%". Others fall back to the arc %.
+export function rangeLabel(goal, p = {}) {
+  if (goal.direction === 'range' && p.pct != null) return `${Math.round(p.pct)}%`;
+  return undefined;
 }
 
 export function Bar({ pct, tone }) {
@@ -183,8 +249,10 @@ export function Forecast({ goal, p }) {
   );
 }
 
-// Circular progress ring with the % in the centre.
-export function Ring({ pct, tone, size = 78 }) {
+// Circular progress ring with the % in the centre. The arc always clamps to 100%, but
+// `label` can override the centre text (e.g. a range goal over the band shows the real
+// 105% rather than a flat 100%).
+export function Ring({ pct, tone, size = 78, label }) {
   const w = Math.max(0, Math.min(100, Math.round(pct || 0)));
   const [shown, setShown] = useState(0); // animate the arc in on load
   useEffect(() => { const t = setTimeout(() => setShown(w), 90); return () => clearTimeout(t); }, [w]);
@@ -195,13 +263,14 @@ export function Ring({ pct, tone, size = 78 }) {
       <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={tone} strokeWidth={sw} strokeLinecap="round"
         strokeDasharray={c} strokeDashoffset={c * (1 - shown / 100)} transform={`rotate(-90 ${size / 2} ${size / 2})`}
         style={{ transition: 'stroke-dashoffset 1.2s cubic-bezier(.34,1,.4,1)' }} />
-      <text x="50%" y="50%" dominantBaseline="central" textAnchor="middle" fontSize={size * 0.25} fontWeight="800" fill="var(--text)">{w}%</text>
+      <text x="50%" y="50%" dominantBaseline="central" textAnchor="middle" fontSize={size * 0.25} fontWeight="800" fill="var(--text)">{label != null ? label : `${w}%`}</text>
     </svg>
   );
 }
 
-// Half-circle gauge (speedometer style); fills left→right with the % below.
-export function Dial({ pct, tone, size = 86 }) {
+// Half-circle gauge (speedometer style); fills left→right with the % below. `label`
+// can override the centre text (range over-band shows the real >100% reading).
+export function Dial({ pct, tone, size = 86, label }) {
   const w = Math.max(0, Math.min(100, Math.round(pct || 0)));
   const [shown, setShown] = useState(0); // animate the gauge in on load
   useEffect(() => { const t = setTimeout(() => setShown(w), 90); return () => clearTimeout(t); }, [w]);
@@ -217,7 +286,7 @@ export function Dial({ pct, tone, size = 86 }) {
       <path d={full} fill="none" stroke={tone} strokeWidth={sw} strokeLinecap="round"
         strokeDasharray={arcLen} strokeDashoffset={arcLen * (1 - shown / 100)}
         style={{ transition: 'stroke-dashoffset 1.2s cubic-bezier(.34,1,.4,1)' }} />
-      <text x={cx} y={cy + 1} textAnchor="middle" fontSize={size * 0.2} fontWeight="800" fill="var(--text)">{w}%</text>
+      <text x={cx} y={cy + 1} textAnchor="middle" fontSize={size * 0.2} fontWeight="800" fill="var(--text)">{label != null ? label : `${w}%`}</text>
     </svg>
   );
 }
