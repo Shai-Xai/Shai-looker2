@@ -76,7 +76,7 @@ export function GoalCard({ goal, onClick, index = 0, colorIndex, draggable = fal
       {viz === 'bar' ? (
         <div style={{ marginTop: 'auto', paddingTop: 12 }}>
           <div style={{ fontSize: 19, fontWeight: 800 }}>{fmtVal(p.value, goal.unit)}</div>
-          <div style={{ fontSize: 11, color: 'var(--muted)' }}>of {fmtVal(goal.targetValue, goal.unit)}{p.pct != null ? ` · ${p.pct}%` : ''}</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)' }}>{goal.direction === 'range' ? 'aim ' : 'of '}{fmtTarget(goal)}{p.pct != null ? ` · ${p.pct}%` : ''}</div>
           <Bar pct={p.pct} tone={tone} />
           <VsLast goal={goal} p={p} />
           <Forecast goal={goal} p={p} />
@@ -84,7 +84,7 @@ export function GoalCard({ goal, onClick, index = 0, colorIndex, draggable = fal
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, gap: 5, marginTop: 2 }}>
           {viz === 'ring' ? <Ring pct={p.pct} tone={tone} size={78} /> : <Dial pct={p.pct} tone={tone} size={86} />}
-          <div style={{ fontSize: 11, color: 'var(--muted)', textAlign: 'center', lineHeight: 1.3 }}>{fmtVal(p.value, goal.unit)} / {fmtVal(goal.targetValue, goal.unit)}</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', textAlign: 'center', lineHeight: 1.3 }}>{fmtVal(p.value, goal.unit)} / {fmtTarget(goal)}</div>
           {chip && <div style={{ marginTop: 1 }}>{chip}</div>}
           <VsLast goal={goal} p={p} align="center" />
         </div>
@@ -187,7 +187,15 @@ export function Dial({ pct, tone, size = 86 }) {
 }
 
 export const GREEN = '#2da44e', BLUE = '#0a66c2', AMBER = '#b45309', RED = '#dc2626';
-export const bandTone = (b) => ({ smashed: GREEN, hit: GREEN, near: AMBER, missed: RED }[b] || BLUE);
+export const bandTone = (b) => ({ smashed: GREEN, hit: GREEN, near: AMBER, missed: RED, over: AMBER }[b] || BLUE);
+// Target label: a band (lo–hi) for range goals, else the single target.
+export function fmtTarget(goal) {
+  if (goal.direction === 'range' && goal.targetMax != null) {
+    if (goal.unit === '%') return `${goal.targetValue}–${goal.targetMax}%`;
+    return `${fmtVal(goal.targetValue, goal.unit)}–${fmtVal(goal.targetMax, goal.unit)}`;
+  }
+  return fmtVal(goal.targetValue, goal.unit);
+}
 
 // Distinct per-goal identity colours, drawn from the white-label brand chart palette
 // (adapts per client). Used for healthy / in-progress goals so each ring + tile reads
@@ -217,6 +225,12 @@ export function goalColor(goal, p = {}, brandColor) {
   const dir = goal.direction || p.direction || 'at_least';
   const v = p.value, t = goal.targetValue;
   if (p.band) return bandTone(p.band);
+  if (dir === 'range') {
+    if (p.over) return AMBER;          // above the healthy band → flagged
+    if (p.inRange) return GREEN;       // inside the band → good
+    if (p.status === 'behind') return AMBER;
+    return brandColor || BLUE;
+  }
   const have = v != null && t != null;
   const reached = have && (dir === 'at_most' ? v <= t : (p.pct != null ? p.pct >= 100 : v >= t));
   if (reached) return GREEN;
@@ -231,6 +245,13 @@ export function goalState(goal, p) {
   const dir = goal.direction || p.direction || 'at_least';
   const v = p.value, t = goal.targetValue;
   if (p.band) return { tone: bandTone(p.band), chip: <Chip {...bandChip(p.band)} /> };
+  if (dir === 'range') {
+    if (p.over) return { tone: AMBER, chip: <Chip t="⚠ Above range" c={AMBER} bg="rgba(245,158,11,0.16)" /> };
+    if (p.inRange) return { tone: GREEN, chip: <Chip t="✓ On target" c={GREEN} bg="rgba(52,199,89,0.16)" /> };
+    if (p.status === 'behind') return { tone: AMBER, chip: <Chip t="Behind" c={AMBER} bg="rgba(245,158,11,0.16)" /> };
+    if (p.status) return { tone: BLUE, chip: <Chip {...statusChip(p.status)} /> };
+    return { tone: BLUE, chip: null };
+  }
   const have = v != null && t != null;
   const reached = have && (dir === 'at_most' ? v <= t : (p.pct != null ? p.pct >= 100 : v >= t));
   const overCap = dir === 'at_most' && have && v > t;
@@ -250,6 +271,7 @@ export const bandChip = (b) => ({
   hit: { t: '✓ Hit', c: GREEN, bg: 'rgba(52,199,89,0.16)' },
   near: { t: 'Just missed', c: AMBER, bg: 'rgba(245,158,11,0.16)' },
   missed: { t: 'Missed', c: RED, bg: 'rgba(239,68,68,0.12)' },
+  over: { t: '⚠ Above range', c: AMBER, bg: 'rgba(245,158,11,0.16)' },
 }[b] || { t: b, c: BLUE, bg: 'rgba(10,132,255,0.13)' });
 
 export function fmtVal(v, unit) {

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { api } from '../../lib/api.js';
 import { useIsMobile } from '../../lib/useIsMobile.js';
-import { Ring, Dial, Bar, goalState, fmtVal } from './GoalViz.jsx';
+import { Ring, Dial, Bar, goalState, fmtVal, fmtTarget } from './GoalViz.jsx';
 import ForecastChart from './ForecastChart.jsx';
 
 // The goal DETAIL view — the read surface for a goal. Tapping a goal card (on the
@@ -66,14 +66,14 @@ export default function GoalDetail({ goal, suiteName, onEdit, onDelete, onClose,
             <div style={{ width: '100%' }}>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
                 <span style={{ fontSize: 30, fontWeight: 800 }}>{fmtVal(p.value, goal.unit)}</span>
-                <span style={{ fontSize: 14, color: 'var(--muted)' }}>of {fmtVal(goal.targetValue, goal.unit)}{p.pct != null ? ` · ${p.pct}%` : ''}</span>
+                <span style={{ fontSize: 14, color: 'var(--muted)' }}>{goal.direction === 'range' ? 'aim ' : 'of '}{fmtTarget(goal)}{p.pct != null ? ` · ${p.pct}%` : ''}</span>
               </div>
               <Bar pct={p.pct} tone={tone} />
             </div>
           ) : (
             <>
               {viz === 'ring' ? <Ring pct={p.pct} tone={tone} size={132} /> : <Dial pct={p.pct} tone={tone} size={150} />}
-              <div style={{ fontSize: 14, color: 'var(--muted)' }}>{fmtVal(p.value, goal.unit)} / {fmtVal(goal.targetValue, goal.unit)}</div>
+              <div style={{ fontSize: 14, color: 'var(--muted)' }}>{fmtVal(p.value, goal.unit)} / {fmtTarget(goal)}</div>
             </>
           )}
           {chip && <div>{chip}</div>}

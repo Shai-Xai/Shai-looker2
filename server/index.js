@@ -804,7 +804,8 @@ async function buildGoalNudge(entityId) {
       if (resolved >= 24) break;
       const p = (await goalsApi.attachProgress(g, user, caches)).progress || {}; resolved += 1;
       const dir = g.direction || 'at_least';
-      const reached = p.value != null && g.targetValue != null && (dir === 'at_most' ? p.value <= g.targetValue : (p.pct != null ? p.pct >= 100 : p.value >= g.targetValue));
+      if (dir === 'range' && p.over) { attention.push(g.name); continue; } // drifted above the healthy band
+      const reached = dir === 'range' ? !!p.inRange : (p.value != null && g.targetValue != null && (dir === 'at_most' ? p.value <= g.targetValue : (p.pct != null ? p.pct >= 100 : p.value >= g.targetValue)));
       if (reached) { wins.push(g.name); continue; }
       const missed = Array.isArray(p.milestones) && p.milestones.some((m) => { const t = Date.parse(m.byDate); return !Number.isNaN(t) && t < Date.now() && p.value != null && (dir === 'at_most' ? p.value > m.targetValue : p.value < m.targetValue); });
       if (p.status === 'behind' || (p.forecast && p.forecast.status === 'short') || missed) attention.push(g.name);
