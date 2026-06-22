@@ -2106,10 +2106,17 @@ async function generateOverall(user, entityId, segment, { force = false } = {}) 
   return p;
 }
 // The per-event sections (loaded after the overall — the slower pass).
-async function generateEvents(user, entityId, segment, { force = false } = {}) {
+// `debug` returns the raw resolved facts per event (no AI) — what FILTERS each
+// tile actually ran with (so a wrong event lock is visible) + its headline value.
+async function generateEvents(user, entityId, segment, { force = false, debug = false } = {}) {
   const apiKey = anthropicKeyForUser(user);
   const { suites, selected } = briefingSuites(user, entityId);
-  if (suites.length <= 1 || !insights.isConfigured(apiKey) || !selected.length) return { events: [] };
+  if (suites.length <= 1 || !selected.length) return debug ? { diag: [] } : { events: [] };
+  if (debug) {
+    const { groups } = await factGroups(user, entityId, selected, true);
+    return { diag: groups.map((g) => ({ suiteId: g.suiteId, suiteName: g.suiteName, tiles: g.tiles.slice(0, 12).map((t) => ({ dashTitle: t.dashTitle, setName: t.setName, title: t.title, value: factValueLabel(t), filters: t.filters || {} })) })) };
+  }
+  if (!insights.isConfigured(apiKey)) return { events: [] };
   const key = `${user.id}:${entityId}:events:${selected.join(',')}`;
   if (!force) { const hit = cacheGet(briefCache, key, 6 * 3600e3); if (hit) return hit; }
   if (briefInflight.has(key)) return briefInflight.get(key);
@@ -2209,7 +2216,8 @@ app.get('/api/my/briefing/events', auth.requireAuth, async (req, res) => {
   const entityId = homeEntityFor(req);
   if (!entityId) return res.json({ events: [] });
   try {
-    const out = await generateEvents(req.user, entityId, timeSegment(Number(req.query.hour)), { force: !!req.query.refresh });
+    const debug = req.query.debug === '1' && req.user.role === 'admin'; // resolved-filters view (admin only)
+    const out = await generateEvents(req.user, entityId, timeSegment(Number(req.query.hour)), { force: !!req.query.refresh || debug, debug });
     res.json(out);
   } catch (err) {
     console.error('[GET /api/my/briefing/events]', err.message);

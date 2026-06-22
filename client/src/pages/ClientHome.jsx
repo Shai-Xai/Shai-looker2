@@ -38,6 +38,7 @@ export default function ClientHome() {
   const [events, setEvents] = useState(null); // multi-event: per-event sections (null=loading)
   const [openEvents, setOpenEvents] = useState({}); // which event sections are expanded
   const [savingSuites, setSavingSuites] = useState(false);
+  const [diag, setDiag] = useState(null); // admin: resolved filters per event ('loading' | [])
   const [refreshing, setRefreshing] = useState(false);
   const [refreshErr, setRefreshErr] = useState(false);
   const [tuneOpen, setTuneOpen] = useState(false);
@@ -208,7 +209,26 @@ export default function ClientHome() {
                         {s.selected ? '✓ ' : ''}{s.name}{!s.active ? ' · past' : ''}
                       </button>
                     ))}
+                    {isAdmin && <button onClick={() => { setDiag('loading'); api.myBriefingEvents(homeEntityId, true, true).then((r) => setDiag(r.diag || [])).catch(() => setDiag([])); }} style={{ ...eventChip(false), marginLeft: 'auto' }} title="Admin: show the filters each event's tiles resolved to">🔍 Diagnose</button>}
                   </div>
+                  {/* Admin diagnostic: what FILTERS each event's tiles actually ran with
+                      (so a wrong/absent event lock — tiles pulling another event — is visible). */}
+                  {isAdmin && diag && (
+                    <div style={{ marginBottom: 12, border: '1px solid var(--hairline)', borderRadius: 8, padding: '8px 10px', fontSize: 11.5, background: 'var(--elevated, rgba(128,128,128,0.06))' }}>
+                      {diag === 'loading' ? <span style={{ color: 'var(--muted)' }}>Resolving live filters…</span>
+                        : diag.length === 0 ? <span style={{ color: 'var(--muted)' }}>No facts resolved for the selected events.</span>
+                        : diag.map((g) => (
+                          <div key={g.suiteId} style={{ marginBottom: 8 }}>
+                            <div style={{ fontWeight: 800 }}>{g.suiteName}</div>
+                            {g.tiles.map((t, i) => (
+                              <div key={i} style={{ color: 'var(--muted-2)', marginTop: 2, lineHeight: 1.45 }}>
+                                <b>{t.title}</b> = {t.value} <span style={{ color: 'var(--muted)' }}>· {Object.entries(t.filters || {}).map(([k, v]) => `${k}=${v}`).join(', ') || 'no filters'}</span>
+                              </div>
+                            ))}
+                          </div>
+                        ))}
+                    </div>
+                  )}
                   {/* Per-event sections — collapsed; busiest (first) expanded. */}
                   {events == null ? (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>

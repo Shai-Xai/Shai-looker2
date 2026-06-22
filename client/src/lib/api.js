@@ -374,8 +374,8 @@ export const api = {
     fetch(`/api/my/snapshot?${new URLSearchParams({ ...(entityId ? { entityId } : {}), ...(refresh ? { refresh: 1 } : {}) })}`).then(json),
   myBriefing: (entityId, refresh) =>
     fetch(`/api/my/briefing?${new URLSearchParams({ hour: new Date().getHours(), ...(entityId ? { entityId } : {}), ...(refresh ? { refresh: 1 } : {}) })}`).then(json),
-  myBriefingEvents: (entityId, refresh) =>
-    fetch(`/api/my/briefing/events?${new URLSearchParams({ hour: new Date().getHours(), ...(entityId ? { entityId } : {}), ...(refresh ? { refresh: 1 } : {}) })}`).then(json),
+  myBriefingEvents: (entityId, refresh, debug) =>
+    fetch(`/api/my/briefing/events?${new URLSearchParams({ hour: new Date().getHours(), ...(entityId ? { entityId } : {}), ...(refresh ? { refresh: 1 } : {}), ...(debug ? { debug: 1 } : {}) })}`).then(json),
   setBriefingSuites: (entityId, suites) =>
     fetch('/api/my/briefing/suites', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entityId, suites }) }).then(json),
   prewarm: (entityId, hour) => fetch('/api/my/prewarm', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entityId, hour }) }).then(json).catch(() => {}),
