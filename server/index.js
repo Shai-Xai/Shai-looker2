@@ -2603,48 +2603,11 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
     return { charts, kpis };
   };
 
-  let out;
-  if (multi) {
-    // Multi-event: one structured AI pass over the events, rendered as a portfolio
-    // overview + a clearly-separated section per event (in the selected order).
-    const nameById = Object.fromEntries(allSuites.map((s) => [s.id, s.name]));
-    const bySuite = new Map();
-    for (const t of factTilesAll) { if (!bySuite.has(t.suiteId)) bySuite.set(t.suiteId, []); bySuite.get(t.suiteId).push(t); }
-    const groups = selSuiteIds.map((id) => ({ suiteId: id, suiteName: nameById[id] || '', tiles: bySuite.get(id) || [] })).filter((g) => g.tiles.length);
-    const raw = await insights.digestBriefMulti({ groups, roleLabel: lens.label, roleFocus: effectiveFocus, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), capabilities: ACTION_CAPABILITIES, goals, today: todayLabel() });
-    const ov = raw.overall || {};
-    const aiBySuite = Object.fromEntries((raw.events || []).filter((e) => nameById[e.suiteId]).map((e) => [e.suiteId, e]));
-    // Followed-tile visuals, grouped into the event each tile belongs to.
-    const visualsBySuite = {};
-    if (followedVisual && followedFacts.length) {
-      for (const ft of followedFacts) { (visualsBySuite[ft.suiteId] = visualsBySuite[ft.suiteId] || []).push(ft); }
-      for (const id of Object.keys(visualsBySuite)) visualsBySuite[id] = renderFollowed(visualsBySuite[id]);
-    }
-    const events = groups.map((g) => {
-      const e = aiBySuite[g.suiteId] || {};
-      const sect = {
-        suiteId: g.suiteId, suiteName: g.suiteName,
-        headline: String(e.headline || '').slice(0, 400),
-        narrative: (e.narrative || []).slice(0, 3).map((s) => String(s).slice(0, 800)).filter(Boolean),
-        kpis: (e.kpis || []).slice(0, 6).map(mapKpi).filter((k) => k.label && k.value),
-        actions: (e.actions || []).slice(0, 3).map(mapAction).filter((a) => a.text),
-      };
-      const vis = visualsBySuite[g.suiteId];
-      if (vis) { if (vis.charts.length) sect.charts = vis.charts.slice(0, 6); if (vis.kpis.length) sect.kpis = [...vis.kpis, ...sect.kpis].slice(0, 9); }
-      return sect;
-    });
-    out = {
-      subject: String(raw.subject || '').slice(0, 120),
-      headline: String(ov.headline || '').slice(0, 600),
-      narrative: (ov.narrative || []).slice(0, 4).map((s) => String(s).slice(0, 800)).filter(Boolean),
-      kpis: (ov.kpis || []).slice(0, 6).map(mapKpi).filter((k) => k.label && k.value),
-      actions: (ov.actions || []).slice(0, 3).map(mapAction).filter((a) => a.text),
-      events,
-      eventCount: events.length,
-    };
-  } else {
+  // The single-pass (flat) digest over all the facts — used for single-event
+  // clients, and as the safety net if the multi-event pass can't be produced.
+  const buildFlat = async () => {
     const raw = await insights.digestBrief({ tiles: factTilesAll, roleLabel: lens.label, roleFocus: effectiveFocus, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), capabilities: ACTION_CAPABILITIES, goals, today: todayLabel() });
-    out = {
+    const o = {
       subject: String(raw.subject || '').slice(0, 120),
       headline: String(raw.headline || '').slice(0, 600),
       narrative: (raw.narrative || []).slice(0, 5).map((s) => String(s).slice(0, 800)).filter(Boolean),
@@ -2654,9 +2617,60 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
     // Followed-tile visuals lead the single-event KPI strip / add chart blocks.
     if (followedVisual && followedFacts.length) {
       const { charts, kpis } = renderFollowed(followedFacts);
-      if (charts.length) out.charts = charts.slice(0, 6);
-      if (kpis.length) out.kpis = [...kpis, ...out.kpis].slice(0, 9);
+      if (charts.length) o.charts = charts.slice(0, 6);
+      if (kpis.length) o.kpis = [...kpis, ...o.kpis].slice(0, 9);
     }
+    return o;
+  };
+
+  let out;
+  if (multi) {
+    // Multi-event: one structured AI pass over the events, rendered as a portfolio
+    // overview + a clearly-separated section per event (in the selected order). If
+    // that pass fails (e.g. the model returns unparseable JSON for a big payload),
+    // fall back to the flat digest so the send still goes out.
+    try {
+      const nameById = Object.fromEntries(allSuites.map((s) => [s.id, s.name]));
+      const bySuite = new Map();
+      for (const t of factTilesAll) { if (!bySuite.has(t.suiteId)) bySuite.set(t.suiteId, []); bySuite.get(t.suiteId).push(t); }
+      const groups = selSuiteIds.map((id) => ({ suiteId: id, suiteName: nameById[id] || '', tiles: bySuite.get(id) || [] })).filter((g) => g.tiles.length);
+      const raw = await insights.digestBriefMulti({ groups, roleLabel: lens.label, roleFocus: effectiveFocus, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), capabilities: ACTION_CAPABILITIES, goals, today: todayLabel() });
+      const ov = raw.overall || {};
+      const aiBySuite = Object.fromEntries((raw.events || []).filter((e) => nameById[e.suiteId]).map((e) => [e.suiteId, e]));
+      // Followed-tile visuals, grouped into the event each tile belongs to.
+      const visualsBySuite = {};
+      if (followedVisual && followedFacts.length) {
+        for (const ft of followedFacts) { (visualsBySuite[ft.suiteId] = visualsBySuite[ft.suiteId] || []).push(ft); }
+        for (const id of Object.keys(visualsBySuite)) visualsBySuite[id] = renderFollowed(visualsBySuite[id]);
+      }
+      const events = groups.map((g) => {
+        const e = aiBySuite[g.suiteId] || {};
+        const sect = {
+          suiteId: g.suiteId, suiteName: g.suiteName,
+          headline: String(e.headline || '').slice(0, 400),
+          narrative: (e.narrative || []).slice(0, 3).map((s) => String(s).slice(0, 800)).filter(Boolean),
+          kpis: (e.kpis || []).slice(0, 6).map(mapKpi).filter((k) => k.label && k.value),
+          actions: (e.actions || []).slice(0, 3).map(mapAction).filter((a) => a.text),
+        };
+        const vis = visualsBySuite[g.suiteId];
+        if (vis) { if (vis.charts.length) sect.charts = vis.charts.slice(0, 6); if (vis.kpis.length) sect.kpis = [...vis.kpis, ...sect.kpis].slice(0, 9); }
+        return sect;
+      });
+      out = {
+        subject: String(raw.subject || '').slice(0, 120),
+        headline: String(ov.headline || '').slice(0, 600),
+        narrative: (ov.narrative || []).slice(0, 4).map((s) => String(s).slice(0, 800)).filter(Boolean),
+        kpis: (ov.kpis || []).slice(0, 6).map(mapKpi).filter((k) => k.label && k.value),
+        actions: (ov.actions || []).slice(0, 3).map(mapAction).filter((a) => a.text),
+        events,
+        eventCount: events.length,
+      };
+    } catch (e) {
+      console.error('[digest] multi-event generation failed, falling back to a single combined digest:', e.message);
+      out = await buildFlat();
+    }
+  } else {
+    out = await buildFlat();
   }
 
   // Diagnostic: the exact tiles the analyst read + the value each returned under

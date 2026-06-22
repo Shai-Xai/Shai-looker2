@@ -114,6 +114,30 @@ function escapeCtrlInStrings(s) {
   }
   return out;
 }
+// String-state-aware missing-comma repair: insert a comma between a value that
+// ENDS ("/}/]) and the next value that STARTS ("/{/[) when only whitespace
+// separates them (a comma already present, or a `:`/other token, is left alone).
+// Tracks string state + escapes so it never touches content inside strings — the
+// common "Expected ',' or ']' after array element" model slip, anywhere (not just
+// at line breaks like the cheaper regex below).
+function insertMissingCommas(s) {
+  let out = ''; let inStr = false; let esc = false;
+  const startsValue = (ch) => ch === '"' || ch === '{' || ch === '[';
+  const nextNonWs = (from) => { let j = from; while (j < s.length && /\s/.test(s[j])) j++; return s[j]; };
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    out += ch;
+    if (esc) { esc = false; continue; }
+    if (ch === '\\') { esc = true; continue; }
+    if (ch === '"') {
+      if (inStr) { inStr = false; if (startsValue(nextNonWs(i + 1))) out += ','; }
+      else inStr = true;
+      continue;
+    }
+    if (!inStr && (ch === '}' || ch === ']')) { if (startsValue(nextNonWs(i + 1))) out += ','; }
+  }
+  return out;
+}
 function parseModelJson(text, what = 'response') {
   let s = String(text || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
   const a = s.indexOf('{'); const b = s.lastIndexOf('}');
@@ -121,7 +145,14 @@ function parseModelJson(text, what = 'response') {
   s = s.slice(a, b + 1);
   const noTrailingCommas = (x) => x.replace(/,(\s*[}\]])/g, '$1');
   const missingCommas = (x) => x.replace(/(["\]}])\s*\n(\s*)(["{[])/g, '$1,\n$2$3'); // value\n value → value,\n value
-  const fixes = [(x) => x, noTrailingCommas, escapeCtrlInStrings, (x) => noTrailingCommas(escapeCtrlInStrings(x)), (x) => noTrailingCommas(escapeCtrlInStrings(missingCommas(x)))];
+  const fixes = [
+    (x) => x,
+    noTrailingCommas,
+    escapeCtrlInStrings,
+    (x) => noTrailingCommas(escapeCtrlInStrings(x)),
+    (x) => noTrailingCommas(escapeCtrlInStrings(missingCommas(x))),
+    (x) => noTrailingCommas(insertMissingCommas(escapeCtrlInStrings(x))),
+  ];
   let lastErr;
   for (const fix of fixes) { try { return JSON.parse(fix(s)); } catch (e) { lastErr = e; } }
   throw lastErr;
@@ -129,7 +160,7 @@ function parseModelJson(text, what = 'response') {
 // Last-resort: ask the model to repair its own malformed JSON (only on parse failure).
 async function repairJsonViaModel(c, broken) {
   const resp = await c.messages.create({
-    model: MODEL, max_tokens: 2400, output_config: { effort: 'low' },
+    model: MODEL, max_tokens: 8192, output_config: { effort: 'low' },
     system: 'You fix malformed JSON. Return ONLY the corrected, valid JSON — no prose, no markdown fences. Preserve all content and keys; fix only syntax (missing commas, unescaped quotes/newlines, trailing commas).',
     messages: [{ role: 'user', content: String(broken || '').slice(0, 24000) }],
   });
@@ -515,7 +546,7 @@ async function digestBriefMulti({ groups, roleLabel, roleFocus, catalogue, instr
   for (const d of catalogue || []) lines.push(`- ${d.dashboardId}: ${d.title} [${d.setName}, ${d.suiteName}]`);
   const resp = await c.messages.create({
     model: MODEL,
-    max_tokens: 2800,
+    max_tokens: 4600,
     thinking: { type: 'adaptive' },
     output_config: { effort: 'low' },
     system: systemWith(`${DIGEST_MULTI_SYSTEM}`, instructions),
