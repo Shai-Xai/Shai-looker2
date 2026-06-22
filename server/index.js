@@ -1788,17 +1788,22 @@ function tilePriority(t) {
   if (SUMMARY_TILE.test(title)) s -= 10;  // pick first
   return s;
 }
-async function buildFacts(user, entityId, force = false, alignDaysBefore = false, priorityDashboards = []) {
+async function buildFacts(user, entityId, force = false, alignDaysBefore = false, priorityDashboards = [], opts = {}) {
   const { catalogue, leads } = clientCatalogue(entityId);
   const follows = db.listMarks({ userId: user.id, entityId, kind: 'follow' });
   const dashMeta = Object.fromEntries(catalogue.map((c) => [c.dashboardId, c]));
+  // Optional: restrict the whole fact-gather to a set of suites (multi-event
+  // briefing scopes to the selected events). Null = every suite (default).
+  const suiteSet = Array.isArray(opts.suiteIds) && opts.suiteIds.length ? new Set(opts.suiteIds) : null;
   const picks = []; // { tile, def, suiteId, setName, dashTitle, pinned }
   const seen = new Set();
   const addTile = (def, tile, suiteId, pinned) => {
     const sig = `${def.id}|${tile.id}`;
     if (seen.has(sig)) return;
     const meta = dashMeta[def.id];
-    picks.push({ tile, def, suiteId: suiteId || meta?.suiteId, setName: meta?.setName || '', dashTitle: def.title, pinned: !!pinned });
+    const sid = suiteId || meta?.suiteId;
+    if (suiteSet && !suiteSet.has(sid)) return; // not in the selected events
+    picks.push({ tile, def, suiteId: sid, setName: meta?.setName || '', dashTitle: def.title, pinned: !!pinned });
     seen.add(sig);
   };
   // 1) Followed tiles — wherever they live — always make the cut.
@@ -1979,7 +1984,7 @@ async function buildFacts(user, entityId, force = false, alignDaysBefore = false
       return {
         title: p.tile.title || '(untitled)', visType: p.tile.vis?.type, context: p.tile.aiContext || '',
         fields: data.fields, rows: data.data, filters: body.filters || {},
-        dashboardId: p.def.id, suiteId: p.suiteId, setName: p.setName, dashTitle: p.dashTitle, pinned: p.pinned,
+        dashboardId: p.def.id, suiteId: p.suiteId, suiteName: dashMeta[p.def.id]?.suiteName || '', setName: p.setName, dashTitle: p.dashTitle, pinned: p.pinned,
       };
     } catch (e) { dropped.push(`${p.dashTitle} › ${p.tile.title || '?'} (error: ${e.message})`); return null; }
   }))).filter(Boolean);
@@ -2001,7 +2006,9 @@ const cachePut = (map, key, val) => { map.set(key, { at: Date.now(), val }); if 
 const bustHome = (userId, entityId) => {
   const k = `${userId}:${entityId}`;
   snapCache.delete(k);
-  for (const t of TIMES) briefCache.delete(`${k}:${t.key}`);
+  // Clear every briefing cache entry for this user+client — single segment keys
+  // AND the multi-event overall/events keys (which carry the suite selection).
+  for (const key of [...briefCache.keys()]) if (key.startsWith(`${k}:`)) briefCache.delete(key);
 };
 
 app.get('/api/my/snapshot', auth.requireAuth, (req, res) => {
@@ -2033,9 +2040,91 @@ function todayLabel(tz = 'Africa/Johannesburg') {
   try { return new Date().toLocaleDateString('en-ZA', { timeZone: tz, weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }); }
   catch { return new Date().toISOString().slice(0, 10); }
 }
+// ── Multi-event briefing (portfolio overall + per-event sections) ─────────────
+// The selected events for a client's briefing: default = ACTIVE events (phase not
+// post_event); a user pref `briefing_suites:{entityId}` overrides. Returns the
+// full suite list (with active+selected flags) and the resolved selection.
+function briefingSuites(user, entityId) {
+  const raw = clientCatalogue(entityId).suites;
+  const list = raw.map((su) => ({ id: su.id, name: su.name, active: resolvePhase(su.briefing || {}).key !== 'post_event' }));
+  const ids = new Set(list.map((s) => s.id));
+  let selected = null;
+  try { selected = JSON.parse(db.getUserPref(user.id, `briefing_suites:${entityId}`) || 'null'); } catch { selected = null; }
+  if (Array.isArray(selected)) selected = selected.map(String).filter((id) => ids.has(id));
+  if (!Array.isArray(selected) || !selected.length) {
+    const active = list.filter((s) => s.active).map((s) => s.id);
+    selected = active.length ? active : list.map((s) => s.id);
+  }
+  const sel = new Set(selected);
+  return { suites: list.map((s) => ({ ...s, selected: sel.has(s.id) })), selected, raw };
+}
+const briefInstructions = (user, entityId, segment) => [aiInstructionsFor(null), briefingInstructionsFor(user, entityId, clientCatalogue(entityId).suites), segment ? timeDefaults()[segment] : ''].filter(Boolean).join('\n\n');
+// Build briefing facts scoped to the selected events, grouped by event (in the
+// selected order). Reuses buildFacts (and its Looker query cache).
+async function factGroups(user, entityId, selectedIds, force) {
+  const { tiles, catalogue } = await buildFacts(user, entityId, force, true, [], { suiteIds: selectedIds });
+  const byId = Object.fromEntries(catalogue.map((c) => [c.dashboardId, c]));
+  const map = new Map();
+  for (const t of tiles) {
+    if (!map.has(t.suiteId)) map.set(t.suiteId, { suiteId: t.suiteId, suiteName: t.suiteName || byId[t.dashboardId]?.suiteName || '', tiles: [] });
+    map.get(t.suiteId).tiles.push(t);
+  }
+  return { groups: selectedIds.map((id) => map.get(id)).filter(Boolean), byId };
+}
+// The portfolio OVERALL summary (fast, returned first). Includes the suite list
+// so the home page can render the event picker + collapsed sections immediately.
+async function generateOverall(user, entityId, segment, { force = false } = {}) {
+  const apiKey = anthropicKeyForUser(user);
+  const { suites, selected } = briefingSuites(user, entityId);
+  const base = { available: true, multi: true, generatedAt: new Date().toISOString(), suites };
+  if (!insights.isConfigured(apiKey) || !selected.length) return { ...base, headline: '', bullets: [] };
+  const key = `${user.id}:${entityId}:${segment}:overall:${selected.join(',')}`;
+  if (!force) { const hit = cacheGet(briefCache, key, 6 * 3600e3); if (hit) return hit; }
+  if (briefInflight.has(key)) return briefInflight.get(key);
+  const p = (async () => {
+    const { groups } = await factGroups(user, entityId, selected, force);
+    if (!groups.length) return { ...base, headline: '', bullets: [] };
+    const raw = await insights.briefHomeOverall({ groups, today: todayLabel(), instructions: briefInstructions(user, entityId, segment), apiKey });
+    const out = { ...base, headline: String(raw.headline || '').slice(0, 600), bullets: (raw.bullets || []).slice(0, 4).map((b) => ({ text: String(b.text || '').slice(0, 400) })).filter((b) => b.text) };
+    cachePut(briefCache, key, out);
+    return out;
+  })().finally(() => briefInflight.delete(key));
+  briefInflight.set(key, p);
+  return p;
+}
+// The per-event sections (loaded after the overall — the slower pass).
+async function generateEvents(user, entityId, segment, { force = false } = {}) {
+  const apiKey = anthropicKeyForUser(user);
+  const { suites, selected } = briefingSuites(user, entityId);
+  if (suites.length <= 1 || !insights.isConfigured(apiKey) || !selected.length) return { events: [] };
+  const key = `${user.id}:${entityId}:events:${selected.join(',')}`;
+  if (!force) { const hit = cacheGet(briefCache, key, 6 * 3600e3); if (hit) return hit; }
+  if (briefInflight.has(key)) return briefInflight.get(key);
+  const p = (async () => {
+    const { groups, byId } = await factGroups(user, entityId, selected, force);
+    if (!groups.length) return { events: [] };
+    const raw = await insights.briefHomeEvents({ groups, today: todayLabel(), instructions: briefInstructions(user, entityId, segment), apiKey });
+    const link = (id) => (id && byId[id] ? { dashboardId: id, suiteId: byId[id].suiteId, label: `${byId[id].setName} → ${byId[id].title}` } : null);
+    const nameById = Object.fromEntries(groups.map((g) => [g.suiteId, g.suiteName]));
+    const order = Object.fromEntries(selected.map((id, i) => [id, i]));
+    const events = (raw.events || []).filter((e) => nameById[e.suiteId]).map((e) => ({
+      suiteId: e.suiteId, suiteName: nameById[e.suiteId],
+      headline: String(e.headline || '').slice(0, 400),
+      bullets: (e.bullets || []).slice(0, 3).map((b) => ({ text: String(b.text || '').slice(0, 400), link: link(b.dashboardId) })).filter((b) => b.text),
+    })).sort((a, b) => (order[a.suiteId] ?? 99) - (order[b.suiteId] ?? 99));
+    const out = { events, generatedAt: new Date().toISOString() };
+    cachePut(briefCache, key, out);
+    return out;
+  })().finally(() => briefInflight.delete(key));
+  briefInflight.set(key, p);
+  return p;
+}
+
 async function generateBriefing(user, entityId, segment, { force = false } = {}) {
   const apiKey = anthropicKeyForUser(user);
   if (!insights.isConfigured(apiKey)) return { available: false };
+  // Multi-event client → portfolio overall (per-event sections load separately).
+  if (clientCatalogue(entityId).suites.length > 1) return generateOverall(user, entityId, segment, { force });
   const key = `${user.id}:${entityId}:${segment}`;
   if (!force) { const hit = cacheGet(briefCache, key, 6 * 3600e3); if (hit) return hit; }
   if (briefInflight.has(key)) return briefInflight.get(key); // coalesce concurrent (prewarm + real)
@@ -2099,6 +2188,31 @@ app.get('/api/my/briefing', auth.requireAuth, async (req, res) => {
     console.error('[GET /api/my/briefing]', err.message);
     res.status(500).json({ error: err.message });
   }
+});
+
+// Per-event sections of a multi-event briefing — loaded AFTER the overall so the
+// summary shows immediately while these (the slower pass) fill in.
+app.get('/api/my/briefing/events', auth.requireAuth, async (req, res) => {
+  const entityId = homeEntityFor(req);
+  if (!entityId) return res.json({ events: [] });
+  try {
+    const out = await generateEvents(req.user, entityId, timeSegment(Number(req.query.hour)), { force: !!req.query.refresh });
+    res.json(out);
+  } catch (err) {
+    console.error('[GET /api/my/briefing/events]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Which events the briefing covers (per-user). Empty/absent → default (active events).
+app.put('/api/my/briefing/suites', auth.requireAuth, (req, res) => {
+  const entityId = req.body?.entityId || homeEntityFor(req);
+  if (!entityId) return res.status(400).json({ error: 'No client context' });
+  const ids = new Set(clientCatalogue(entityId).suites.map((s) => s.id));
+  const want = Array.isArray(req.body?.suites) ? [...new Set(req.body.suites.map(String).filter((id) => ids.has(id)))] : [];
+  db.setUserPref(req.user.id, `briefing_suites:${entityId}`, JSON.stringify(want));
+  bustHome(req.user.id, entityId);
+  res.json(briefingSuites(req.user, entityId));
 });
 
 // Pre-warm on home load: generate the briefing (coalesced) and run the top

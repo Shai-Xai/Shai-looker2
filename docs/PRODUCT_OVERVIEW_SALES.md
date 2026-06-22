@@ -292,6 +292,12 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-22** — **Multi-event home briefing** ✅: for clients running several events
+  at once, the home briefing now leads with a **portfolio summary across all events**
+  (totals, biggest mover, what needs attention), then a **collapsible section per event**.
+  Readers **choose which events** to include (defaults to active/on-sale events; past
+  events off). The overall summary lands first, then the per-event sections fill in, so
+  it stays fast. Single-event clients are unchanged.
 - **2026-06-22** — **Goals — reusable templates + smarter forecast** 🧪: save a goal's setup
   as a **template** and start new goals from it (recurring monthly/quarterly targets in a
   tap); Howler can publish **🌐 global templates** to every client. Forecast now **blends recent run-rate (momentum)** with the last-time shape; the

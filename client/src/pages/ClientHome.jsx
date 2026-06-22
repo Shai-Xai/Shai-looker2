@@ -35,6 +35,9 @@ export default function ClientHome() {
   const [suites, setSuites] = useState([]);
   const [snap, setSnap] = useState(null);
   const [brief, setBrief] = useState(null); // null=loading, {available:false}=hidden
+  const [events, setEvents] = useState(null); // multi-event: per-event sections (null=loading)
+  const [openEvents, setOpenEvents] = useState({}); // which event sections are expanded
+  const [savingSuites, setSavingSuites] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshErr, setRefreshErr] = useState(false);
   const [tuneOpen, setTuneOpen] = useState(false);
@@ -49,13 +52,19 @@ export default function ClientHome() {
     // otherwise shows the WRONG client's briefing/snapshot when an older, slower
     // fetch resolves last. Only the current entity's responses are applied.
     let alive = true;
-    setSnap(null); setBrief(null); setMessages([]);
+    setSnap(null); setBrief(null); setEvents(null); setMessages([]);
     // Pre-warm in the background: top dashboards' tiles into the query cache +
     // the briefing (coalesced with our own fetch below), so the first click and
     // briefing of the session are warm. Same hour as the briefing so it hits.
     api.prewarm(homeEntityId, new Date().getHours());
     api.mySnapshot(homeEntityId).then((s) => { if (alive) setSnap(s); }).catch(() => { if (alive) setSnap({ kpis: [], shortcuts: [], settlement: null, lastVisit: null }); });
-    api.myBriefing(homeEntityId).then((b) => { if (alive) setBrief(b); }).catch(() => { if (alive) setBrief({ available: false }); });
+    api.myBriefing(homeEntityId).then((b) => {
+      if (!alive) return;
+      setBrief(b);
+      // Multi-event: the overall summary is here now; load the per-event sections
+      // (the slower pass) separately so they fill in without blocking the summary.
+      if (b?.multi) { setEvents(null); setOpenEvents({}); api.myBriefingEvents(homeEntityId).then((r) => { if (alive) setEvents(r.events || []); }).catch(() => { if (alive) setEvents([]); }); }
+    }).catch(() => { if (alive) setBrief({ available: false }); });
     api.osInbox(homeEntityId).then((r) => { if (alive) setMessages(r.threads || []); }).catch(() => {});
     api.getDismissedThreads().then((r) => { if (alive) setDismissed(r.dismissed || []); }).catch(() => {});
     // First run: show the essentials welcome wizard once per entity (remembered
@@ -99,9 +108,23 @@ export default function ClientHome() {
     setRefreshErr(false);
     api.mySnapshot(homeEntityId, true).then(setSnap).catch(() => {});
     api.myBriefing(homeEntityId, true)
-      .then((b) => setBrief(b))
+      .then((b) => { setBrief(b); if (b?.multi) { setEvents(null); api.myBriefingEvents(homeEntityId, true).then((r) => setEvents(r.events || [])).catch(() => setEvents([])); } })
       .catch(() => setRefreshErr(true))
       .finally(() => setRefreshing(false));
+  };
+
+  // Multi-event: choose which events the briefing covers (persisted per user).
+  // Re-pulls the overall + per-event sections for the new selection.
+  const toggleEventSuite = (id) => {
+    const cur = (brief?.suites || []).filter((s) => s.selected).map((s) => s.id);
+    const next = cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id];
+    if (!next.length) return; // keep at least one event
+    setSavingSuites(true);
+    api.setBriefingSuites(homeEntityId, next)
+      .then(() => { setBrief(null); setEvents(null); return api.myBriefing(homeEntityId, true); })
+      .then((b) => { setBrief(b); if (b?.multi) { api.myBriefingEvents(homeEntityId, true).then((r) => setEvents(r.events || [])).catch(() => setEvents([])); } })
+      .catch(() => {})
+      .finally(() => setSavingSuites(false));
   };
 
   const go = (suiteId, dashboardId) => vtNavigate(navigate, `/suite/${suiteId}/d/${dashboardId}`);
@@ -175,6 +198,52 @@ export default function ClientHome() {
                 </div>
               )}
               <FeedbackRow brief={brief} entityId={homeEntityId} />
+              {brief.multi && (
+                <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--hairline)' }}>
+                  {/* Which events the briefing covers — toggle to include/exclude. */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+                    <span style={{ fontSize: 10.5, color: 'var(--muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginRight: 2 }}>Events</span>
+                    {(brief.suites || []).map((s) => (
+                      <button key={s.id} onClick={() => toggleEventSuite(s.id)} disabled={savingSuites} style={eventChip(s.selected)} title={s.active ? 'Included' : 'Past event'}>
+                        {s.selected ? '✓ ' : ''}{s.name}{!s.active ? ' · past' : ''}
+                      </button>
+                    ))}
+                  </div>
+                  {/* Per-event sections — collapsed; busiest (first) expanded. */}
+                  {events == null ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <div className="skel" style={{ width: '62%', height: 13 }} />
+                      <div className="skel" style={{ width: '74%', height: 13 }} />
+                    </div>
+                  ) : events.map((ev, i) => {
+                    const open = openEvents[ev.suiteId] ?? (i === 0);
+                    return (
+                      <div key={ev.suiteId} style={{ borderTop: i ? '1px solid var(--hairline)' : 'none', padding: '8px 0' }}>
+                        <button onClick={() => setOpenEvents((o) => ({ ...o, [ev.suiteId]: !open }))} style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', background: 'none', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left', color: 'var(--text)' }}>
+                          <span style={{ width: 12, fontSize: 10, color: 'var(--muted)', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s', flexShrink: 0 }}>▶</span>
+                          <span style={{ fontSize: 12.5, fontWeight: 800, flexShrink: 0 }}>{ev.suiteName}</span>
+                          {!open && <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: 'var(--muted-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ev.headline.replace(/\*\*/g, '')}</span>}
+                        </button>
+                        {open && (
+                          <div style={{ paddingLeft: 20, marginTop: 4 }}>
+                            <p style={{ fontSize: 13.5, lineHeight: 1.55 }}>{bold(ev.headline)}</p>
+                            {(ev.bullets || []).length > 0 && (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6 }}>
+                                {ev.bullets.map((b, j) => (
+                                  <div key={j} style={{ display: 'flex', gap: 8, fontSize: 13, lineHeight: 1.5 }}>
+                                    <span style={{ color: 'var(--brand)', flexShrink: 0 }}>●</span>
+                                    <span>{bold(b.text)}{' '}{b.link && <button onClick={() => go(b.link.suiteId, b.link.dashboardId)} style={inlineLink}>{b.link.label} →</button>}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </>
           )}
         </div>
@@ -589,3 +658,4 @@ const cardBtn = { textAlign: 'left', background: 'var(--tile-bg, var(--card))', 
 const settleCard = { display: 'flex', alignItems: 'center', gap: 12, width: '100%', marginTop: 16, background: 'linear-gradient(90deg, rgba(52,199,89,0.10), transparent 60%) var(--tile-bg, var(--card))', border: '1px solid rgba(52,199,89,0.35)', borderRadius: 14, padding: '13px 16px', cursor: 'pointer', color: 'var(--text)' };
 const refreshBtn = { border: 'none', background: 'var(--ai-bg, rgba(124,58,237,0.08))', color: 'var(--ai, #7c3aed)', borderRadius: 980, padding: '4px 11px', fontSize: 11, fontWeight: 700, cursor: 'pointer', flexShrink: 0 };
 const inlineLink = { border: 'none', background: 'transparent', color: 'var(--ai, #7c3aed)', fontWeight: 700, fontSize: 12.5, cursor: 'pointer', padding: 0, fontFamily: 'inherit' };
+const eventChip = (on) => ({ border: `1.5px solid ${on ? 'var(--brand)' : 'var(--hairline)'}`, background: on ? 'rgba(var(--brand-rgb), 0.08)' : 'transparent', color: on ? 'var(--brand)' : 'var(--muted-2)', borderRadius: 980, padding: '3px 11px', fontSize: 12, fontWeight: 600, cursor: 'pointer' });

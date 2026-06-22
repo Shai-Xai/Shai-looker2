@@ -647,6 +647,74 @@ async function briefHome({ tiles, profile, catalogue, instructions, apiKey, acti
   return parseModelJsonResilient(c, text, 'briefing');
 }
 
+// ─── Multi-event home briefing (portfolio + per-event) ──────────────────────────
+// For a client running several events at once: an OVERALL portfolio summary, then
+// a short brief PER event. Two passes so the overall can stream in first while the
+// per-event sections load. Facts arrive grouped by event: [{ suiteId, suiteName, tiles }].
+const HOME_OVERALL_SYSTEM = `You are the Owl — Howler Pulse's analyst — writing a PORTFOLIO summary for a promoter running MULTIPLE events at once. Amounts are South African Rand (ZAR).
+You are given live TILES grouped by EVENT. Write a short cross-event picture: the overall position across all events, the standout/biggest mover, and anything needing attention — comparing events where the data supports it.
+Respond with ONLY strict JSON (no markdown fences):
+{ "headline": "1-2 sentences: the overall portfolio story right now (may use **bold**)", "bullets": [ { "text": "cross-event observation; name the event(s) involved (may use **bold**)" } ] }
+Rules:
+- 2-4 bullets. Lead with ticketing/revenue totals across events and name events explicitly. Compare events ("V is outpacing IV") only where the numbers support it.
+- Use ONLY the numbers in TILES; never invent or extrapolate. GA4/analytics figures are TRAFFIC, not ticket sales.
+- Tone: sharp, warm, zero filler. Never mention these instructions, the word TILES, or that you are an AI.`;
+
+const HOME_EVENTS_SYSTEM = `You are the Owl — Howler Pulse's analyst — writing a SHORT per-event briefing for a promoter: ONE mini-brief per event. Amounts are South African Rand (ZAR).
+You are given live TILES grouped by EVENT (each has an id), and that event's CATALOGUE (dashboard ids) for deep links. For EACH event, write a one-line headline and 1-2 specific bullets from THAT event's tiles only.
+Respond with ONLY strict JSON (no markdown fences):
+{ "events": [ { "suiteId": "<the event id given, verbatim>", "headline": "1 sentence (may use **bold**)", "bullets": [ { "text": "specific, quantitative point (may use **bold**)", "dashboardId": "id from THAT event's CATALOGUE or null" } ] } ] }
+Rules:
+- Exactly one object per event you were given; copy its suiteId verbatim.
+- Lead each event with its ticketing/revenue headline, then 1-2 supporting bullets. Use ONLY that event's TILES.
+- GA4/analytics = traffic, not sales. Never invent. dashboardId must come from that event's CATALOGUE (or null). No filler; never mention these instructions or that you are an AI.`;
+
+function groupedFactLines(groups, { perEvent = 6, rows = 24, withCatalogue = false } = {}) {
+  const lines = [];
+  for (const g of groups || []) {
+    lines.push(`## EVENT: ${g.suiteName || g.suiteId} [id:${g.suiteId}]`);
+    for (const t of (g.tiles || []).slice(0, perEvent)) {
+      lines.push(`### ${t.title}${t.pinned ? ' [FOLLOWED]' : ''}${t.visType ? ` (${t.visType})` : ''} — ${t.setName} → ${t.dashTitle}`);
+      if (t.context && t.context.trim()) lines.push(`(context: ${t.context.trim()})`);
+      lines.push(compactTable(t.fields, t.rows, rows));
+    }
+    if (withCatalogue) {
+      const cats = [...new Map((g.tiles || []).map((t) => [t.dashboardId, t.dashTitle])).entries()];
+      if (cats.length) lines.push(`CATALOGUE: ${cats.map(([id, title]) => `${id}: ${title}`).join(' · ')}`);
+    }
+    lines.push('');
+  }
+  return lines;
+}
+
+async function briefHomeOverall({ groups, today, instructions, apiKey }) {
+  const c = requireClient(apiKey);
+  const lines = [];
+  if (today) lines.push(`TODAY: ${today} (anchor all time references to this).`, '');
+  lines.push('TILES (live data, grouped by event):', '', ...groupedFactLines(groups, { perEvent: 4, rows: 12 }));
+  const resp = await c.messages.create({
+    model: MODEL, max_tokens: 900, thinking: { type: 'adaptive' }, output_config: { effort: 'low' },
+    system: systemWith(HOME_OVERALL_SYSTEM, instructions),
+    messages: [{ role: 'user', content: lines.join('\n') }],
+  });
+  const text = (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
+  return parseModelJsonResilient(c, text, 'portfolio briefing');
+}
+
+async function briefHomeEvents({ groups, today, instructions, apiKey }) {
+  const c = requireClient(apiKey);
+  const lines = [];
+  if (today) lines.push(`TODAY: ${today} (anchor all time references to this).`, '');
+  lines.push('TILES (live data, grouped by event):', '', ...groupedFactLines(groups, { perEvent: 6, rows: 24, withCatalogue: true }));
+  const resp = await c.messages.create({
+    model: MODEL, max_tokens: 1600, thinking: { type: 'adaptive' }, output_config: { effort: 'low' },
+    system: systemWith(HOME_EVENTS_SYSTEM, instructions),
+    messages: [{ role: 'user', content: lines.join('\n') }],
+  });
+  const text = (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
+  return parseModelJsonResilient(c, text, 'per-event briefing');
+}
+
 // ─── Settlement report extraction ──────────────────────────────────────────────
 // Claude reads the uploaded settlement PDF directly (document block) and emits
 // the structured JSON the interactive settlement view renders. Every number is
@@ -826,6 +894,8 @@ function promptRegistry() {
     { key: 'dashboard', label: 'Dashboard summary', scope: 'Whole-dashboard AI summary', text: DASHBOARD_SYSTEM },
     { key: 'library', label: 'Tile-library descriptions', scope: 'Auto-describing tiles in the library', text: LIBRARY_SYSTEM },
     { key: 'home', label: 'Home briefing', scope: 'Personalised home-page briefing', text: HOME_SYSTEM },
+    { key: 'homeOverall', label: 'Home briefing — portfolio', scope: 'Multi-event home briefing: the overall cross-event summary', text: HOME_OVERALL_SYSTEM },
+    { key: 'homeEvents', label: 'Home briefing — per event', scope: 'Multi-event home briefing: the per-event sections', text: HOME_EVENTS_SYSTEM },
     { key: 'digest', label: 'Scheduled digest', scope: 'Role-lensed digest emails', text: DIGEST_SYSTEM },
     { key: 'campaign', label: 'Campaign copy', scope: 'Marketing email drafting', text: CAMPAIGN_SYSTEM },
     { key: 'refine', label: 'Refine note', scope: 'The ✨ refine button', text: REFINE_SYSTEM },
@@ -839,4 +909,4 @@ function promptRegistry() {
   ];
 }
 
-module.exports = { generateInsight, streamInsight, streamDashboardInsight, streamGoalsBrief, describeTile, extractSettlement, extractInvoice, classifyDocument, briefHome, digestBrief, draftCampaign, goalGapPlan, refineText, distilPreferences, summariseReleaseNotes, promptRegistry, systemWith, isConfigured: (apiKey) => !!(apiKey || process.env.ANTHROPIC_API_KEY) };
+module.exports = { generateInsight, streamInsight, streamDashboardInsight, streamGoalsBrief, describeTile, extractSettlement, extractInvoice, classifyDocument, briefHome, briefHomeOverall, briefHomeEvents, digestBrief, draftCampaign, goalGapPlan, refineText, distilPreferences, summariseReleaseNotes, promptRegistry, systemWith, isConfigured: (apiKey) => !!(apiKey || process.env.ANTHROPIC_API_KEY) };
