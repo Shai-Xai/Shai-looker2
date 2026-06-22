@@ -210,6 +210,19 @@ Grounding the how-to: feed the daily model (a) any `how-to:` / `link:` trailers 
 the day's commits, and (b) a short curated `feature → screen/path` map kept beside
 the prompt — cheap, and keeps it from inventing UI.
 
+### 8a. Production note — authored seed (commits aren't readable in prod)
+Runtime "summarise from git" needs the repo's history at runtime, which the
+deployed server **does not have** (Render does a shallow clone), so the daily git
+tick and the "Generate from commits" button only work in **dev**. In production,
+notes are instead **authored at source**: a version-controlled seed
+(`server/releaseNotesSeed.js`) holds note objects (all three lenses), and
+`applySeed(db)` upserts them **once on boot**. Each entry has a stable `key`
+recorded in the `release_seed_applied` setting, so re-deploys never duplicate a
+note nor resurrect one an admin has edited/deleted. To ship a note, append an
+entry in the same PR as the change it describes — higher quality than summarising
+terse commits, and no runtime git or GitHub token. (A GitHub-API commit source is
+the alternative if a fully hands-off daily robot is ever wanted — deferred.)
+
 ## 9. Surfaces
 - **Admin → Product → Release notes** (extend `ProductReleaseNotes`,
   `AdminPage.jsx:489`): each daily entry shows **Summary · How-to · Dev** fields, all

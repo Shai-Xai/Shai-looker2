@@ -66,6 +66,9 @@ app.use(express.static(staticDir, {
 // admin exists.
 migrate.run();
 auth.seedAdmin();
+// Apply any version-controlled release-notes seed (authored at source; prod has no
+// git history to summarise). Idempotent — each entry is applied exactly once.
+require('./releaseNotesSeed').applySeed(db);
 // Outbound email (Resend) — disposable module; senders no-op when unconfigured.
 mailer.init({ db });
 // SMS (Clickatell One API) — second channel; no-ops when unconfigured.

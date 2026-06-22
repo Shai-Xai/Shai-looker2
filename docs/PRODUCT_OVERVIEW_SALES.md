@@ -243,10 +243,15 @@ a pace read** — *ahead / on track / behind* — not just "are we there yet."
   far over is also wrong; or a **mix / split** goal.
 - **Mix / split goals (compositions)** — track shares of a 100% whole that move together:
   **New vs Returning**, **age bands**, local/international, ticket tiers, channels. Source the
-  slices from **one breakdown tile** *or* **a separate tile per slice**, set each slice's
-  target share, and the goal shows the actual split as a stacked bar — **✓ Balanced** when
-  every slice sits in its band, **⚠ Mix drifting** when one slips (e.g. Returning creeping up
-  while New starves). Mark a **focus slice** to grow.
+  slices from **one breakdown tile** *or* **a separate tile per slice** (with the live tile
+  number shown as you pick), set each slice's target share, and the goal shows the actual
+  split as a **stacked bar, donut or dial** (with target-boundary markers) — **✓ Balanced**
+  when every slice sits in its band, **⚠ Mix drifting** when one slips (e.g. Returning
+  creeping up while New starves). Add an optional **last-year tile per slice** to show the
+  **movement** (▲/▼ pp vs last year), and mark a **focus slice** to grow.
+- **Range goals read the real %** — when a healthy-range goal drifts above its band, the
+  dial/ring shows how far over (e.g. **105%**) instead of a flat 100%, so over-shooting is
+  obvious at a glance.
 - **Compare to last time, your way** — baseline from a past event, a **picked dashboard
   tile** (e.g. a last-year total, remembered + re-read live), or a typed number; one-tap
   **Match / +10% / +15% / +20%** target helpers.
@@ -346,6 +351,12 @@ Use these to set direction, **not** to promise dates.
   Alerts page lists and reuses them. The "Start from" gallery gains **🎟 Ticket type** and
   **🏷 Ticket category** starters that jump straight into a pre-filtered metric — pick the value +
   measure + number. The metric builder now reads **data → filter → measure** (filter first).
+- **2026-06-22** — **Mix / split goals — richer visuals & last-year movement** ✅: per-slice
+  tiles now show their **live number** as you build the goal; add an optional **last-year
+  tile per slice** to surface the **movement** (▲/▼ pp vs last year) in the legend; and a
+  mix/split goal can render as a **stacked bar, donut or dial** (with target-boundary
+  markers), matching the other goal types. **Range goals** also now read the **real
+  percentage** when over the band (e.g. *105%*) instead of capping the dial at 100%.
 - **2026-06-22** — **Alerts: custom metric source** 🧪: alerts can now watch a metric
   that has **no dashboard tile** — pick a measure and filter it by a dimension like
   **Ticket Type** or **Category** (e.g. "tickets sold where Ticket Type = VIP"), with
