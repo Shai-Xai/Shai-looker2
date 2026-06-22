@@ -10,6 +10,7 @@ const h = require('./helpers');
 const { startApp } = require('./http');
 
 let tileValue = 4200; // what the stubbed tile resolver returns
+let tileValueByTile = null; // optional per-tileId overrides for the value resolver
 let tileSeries = [];  // what the stubbed time-series resolver returns
 let tileColumns = null; // optional explicit columns for the all-columns resolver
 let eventDate = null; // what the stubbed Looker event-date resolver returns
@@ -28,7 +29,7 @@ before(async () => {
     goalsApi = require('../server/goals').mount(expressApp, {
       db: h.db,
       auth: h.auth,
-      resolveTileValue: async () => tileValue,
+      resolveTileValue: async ({ tileId } = {}) => (tileValueByTile && tileValueByTile[tileId] != null ? tileValueByTile[tileId] : tileValue),
       resolveTileSeries: async () => tileSeries,
       resolveTileSeriesAll: async () => tileColumns || { columns: [{ key: 'one', series: tileSeries }] },
       resolveEventDate: async () => eventDate,
@@ -36,7 +37,7 @@ before(async () => {
   });
 });
 after(async () => { if (app) await app.close(); });
-beforeEach(() => { tileValue = 4200; tileSeries = [{ t: '2025-01-01', v: 1000 }, { t: '2025-02-01', v: 3000 }]; tileColumns = null; eventDate = null; });
+beforeEach(() => { tileValue = 4200; tileValueByTile = null; tileSeries = [{ t: '2025-01-01', v: 1000 }, { t: '2025-02-01', v: 3000 }]; tileColumns = null; eventDate = null; });
 
 const create = (as, body) => app.req('POST', `/api/goals/suites/${suiteId}`, { as, body });
 const list = (as) => app.req('GET', `/api/goals/suites/${suiteId}`, { as });
@@ -111,6 +112,24 @@ test('a composition goal reads the breakdown as shares and flags a slice out of 
   assert.equal(get('New').share, 30); assert.equal(get('New').status, 'in', 'New 30% is on target');
   assert.equal(get('Returning').share, 70); assert.equal(get('Returning').status, 'over', 'Returning 70% is above its 60% (±5) band');
   assert.equal(p.balanced, false, 'mix is drifting');
+});
+
+test('a composition goal can source each slice from its own tile', async () => {
+  const sid = h.db.createSuite({ entityId, name: 'Composition tiles test' }).id;
+  tileValueByTile = { tNew: 40, tRet: 60 }; // two separate KPI tiles → 40% / 60%
+  const g = (await app.req('POST', `/api/goals/suites/${sid}`, { as: owner, body: {
+    name: 'New vs returning (2 tiles)', source: 'manual', direction: 'composition',
+    parts: [
+      { label: 'New', target: 50, ref: { dashboardId: 'd', tileId: 'tNew' } },
+      { label: 'Returning', target: 50, ref: { dashboardId: 'd', tileId: 'tRet' } },
+    ],
+  } })).body.goal;
+  const row = (await app.req('GET', `/api/goals/suites/${sid}`, { as: owner })).body.goals.find((x) => x.id === g.id);
+  const p = row.progress;
+  const get = (l) => p.parts.find((x) => x.label === l);
+  assert.equal(get('New').share, 40); assert.equal(get('New').status, 'under', 'New 40% is below its 50% (±5) target');
+  assert.equal(get('Returning').share, 60); assert.equal(get('Returning').status, 'over');
+  assert.equal(p.balanced, false);
 });
 
 test('the first event goal becomes the North Star automatically', async () => {
