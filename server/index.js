@@ -1858,7 +1858,7 @@ async function buildFacts(user, entityId, force = false, alignDaysBefore = false
   //      "ticketing/overview" (which is what let a Reps board take the lead). Match
   //      tiles like "Total Tickets Sold", "Gross Revenue", "Orders" — excluding
   //      analytics/GA4 sources (their "tickets" are funnel interest, not sales).
-  const TICKET_HEADLINE = /total\s*tickets|tickets?\s*sold|gross\s*(revenue|sales)|\bnet\s*sales\b|tickets?\s*revenue|sell[-\s]?through|attendance|checked?[-\s]?in/i;
+  const TICKET_HEADLINE = /total\s*tickets|tickets?\s*sold|gross\s*(revenue|sales)|\bnet\s*sales\b|tickets?\s*revenue|sell[-\s]?through|attendance|checked?[-\s]?in|daily\s*sales|sales\s*(by\s*)?day|ticket\s*type|tickets?\s*by\s*type/i;
   let head = 0; const HEAD_BUDGET = 4;
   for (const c of catalogue) {
     if (head >= HEAD_BUDGET || picks.length >= maxTiles) break;
@@ -1897,7 +1897,17 @@ async function buildFacts(user, entityId, force = false, alignDaysBefore = false
       if (/cashless|vendor|\bbar\b|token|product/.test(n)) return 8; // empty pre-event → last
       return 5;
     };
+    // Always include a daily-sales and a ticket-types view per event (by tile
+    // title), so every event covers pace + mix — not just headline totals.
+    const MUST = [/daily\s*sales|sales\s*(by\s*)?day|sales\s*per\s*day|day(?:'s)?\s*sales/i, /ticket\s*type|type\s*of\s*ticket|tickets?\s*by\s*type|by\s*ticket\s*type/i];
     for (const sid of suiteSet) {
+      const dashes = catalogue.filter((c) => c.suiteId === sid).map((c) => store.get(c.dashboardId)).filter(Boolean);
+      for (const re of MUST) {
+        for (const def of dashes) {
+          const m = [...(def.tiles || []), ...((def.carousels || []).flatMap((t) => t.tiles || []))].find((t) => t.type !== 'text' && t.query?.fields?.length && re.test(t.title || ''));
+          if (m) { addTile(def, m, sid, true); break; }
+        }
+      }
       const pools = catalogue.filter((c) => c.suiteId === sid)
         .map((c) => ({ c, def: store.get(c.dashboardId) }))
         .filter((x) => x.def)
