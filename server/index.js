@@ -1789,9 +1789,12 @@ function tilePriority(t) {
   return s;
 }
 async function buildFacts(user, entityId, force = false, alignDaysBefore = false, priorityDashboards = [], opts = {}) {
-  const { catalogue, leads } = clientCatalogue(entityId);
+  const { catalogue, leads, suites: catSuites } = clientCatalogue(entityId);
   const follows = db.listMarks({ userId: user.id, entityId, kind: 'follow' });
   const dashMeta = Object.fromEntries(catalogue.map((c) => [c.dashboardId, c]));
+  // Suite name by suiteId — authoritative even for SHARED dashboards (where the
+  // dashboardId→meta map is last-suite-wins, so it would mislabel the event).
+  const suiteNameById = Object.fromEntries((catSuites || []).map((s) => [s.id, s.name]));
   // Optional: restrict the whole fact-gather to a set of suites (multi-event
   // briefing scopes to the selected events). Null = every suite (default).
   const suiteSet = Array.isArray(opts.suiteIds) && opts.suiteIds.length ? new Set(opts.suiteIds) : null;
@@ -1994,7 +1997,7 @@ async function buildFacts(user, entityId, force = false, alignDaysBefore = false
       return {
         title: p.tile.title || '(untitled)', visType: p.tile.vis?.type, context: p.tile.aiContext || '',
         fields: data.fields, rows: data.data, filters: body.filters || {},
-        dashboardId: p.def.id, suiteId: p.suiteId, suiteName: dashMeta[p.def.id]?.suiteName || '', setName: p.setName, dashTitle: p.dashTitle, pinned: p.pinned,
+        dashboardId: p.def.id, suiteId: p.suiteId, suiteName: suiteNameById[p.suiteId] || dashMeta[p.def.id]?.suiteName || '', setName: p.setName, dashTitle: p.dashTitle, pinned: p.pinned,
       };
     } catch (e) { dropped.push(`${p.dashTitle} › ${p.tile.title || '?'} (error: ${e.message})`); return null; }
   }))).filter(Boolean);
@@ -2076,7 +2079,7 @@ async function factGroups(user, entityId, selectedIds, force) {
   const byId = Object.fromEntries(catalogue.map((c) => [c.dashboardId, c]));
   const map = new Map();
   for (const t of tiles) {
-    if (!map.has(t.suiteId)) map.set(t.suiteId, { suiteId: t.suiteId, suiteName: t.suiteName || byId[t.dashboardId]?.suiteName || '', tiles: [] });
+    if (!map.has(t.suiteId)) map.set(t.suiteId, { suiteId: t.suiteId, suiteName: t.suiteName || '', tiles: [] });
     map.get(t.suiteId).tiles.push(t);
   }
   return { groups: selectedIds.map((id) => map.get(id)).filter(Boolean), byId };

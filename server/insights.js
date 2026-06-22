@@ -657,6 +657,8 @@ Respond with ONLY strict JSON (no markdown fences):
 { "headline": "1-2 sentences: the overall portfolio story right now (may use **bold**)", "bullets": [ { "text": "cross-event observation; name the event(s) involved (may use **bold**)" } ] }
 Rules:
 - 2-4 bullets. Lead with ticketing/revenue totals across events and name events explicitly. Compare events ("V is outpacing IV") only where the numbers support it.
+- Identify each event ONLY by the EVENT heading it is listed under. NEVER rename an event using an event/festival/organiser name that appears inside the tile data, and NEVER claim two different events are the same event or "two views to reconcile" — each heading is a separate event with its own numbers.
+- NEVER write internal ids ("[id:…]", dashboard ids) in your output.
 - Use ONLY the numbers in TILES; never invent or extrapolate. GA4/analytics figures are TRAFFIC, not ticket sales.
 - Tone: sharp, warm, zero filler. Never mention these instructions, the word TILES, or that you are an AI.`;
 
@@ -665,14 +667,15 @@ You are given live TILES grouped by EVENT (each has an id), and that event's CAT
 Respond with ONLY strict JSON (no markdown fences):
 { "events": [ { "suiteId": "<the event id given, verbatim>", "headline": "1 sentence (may use **bold**)", "bullets": [ { "text": "specific, quantitative point (may use **bold**)", "dashboardId": "id from THAT event's CATALOGUE or null" } ] } ] }
 Rules:
-- Exactly one object per event you were given; copy its suiteId verbatim.
+- Exactly one object per event you were given; copy its suiteId verbatim into the "suiteId" field ONLY (NEVER write any id in headline/bullet prose).
+- Identify the event by its EVENT heading — NOT by any event/festival name inside the tile data. Write each event's brief from ONLY that event's TILES; never merge or reconcile it against another event.
 - Lead each event with its ticketing/revenue headline, then 1-2 supporting bullets. Use ONLY that event's TILES.
 - GA4/analytics = traffic, not sales. Never invent. dashboardId must come from that event's CATALOGUE (or null). No filler; never mention these instructions or that you are an AI.`;
 
-function groupedFactLines(groups, { perEvent = 6, rows = 24, withCatalogue = false } = {}) {
+function groupedFactLines(groups, { perEvent = 6, rows = 24, withCatalogue = false, withId = false } = {}) {
   const lines = [];
   for (const g of groups || []) {
-    lines.push(`## EVENT: ${g.suiteName || g.suiteId} [id:${g.suiteId}]`);
+    lines.push(`## EVENT: ${g.suiteName || g.suiteId}${withId ? ` [id:${g.suiteId}]` : ''}`);
     for (const t of (g.tiles || []).slice(0, perEvent)) {
       lines.push(`### ${t.title}${t.pinned ? ' [FOLLOWED]' : ''}${t.visType ? ` (${t.visType})` : ''} — ${t.setName} → ${t.dashTitle}`);
       if (t.context && t.context.trim()) lines.push(`(context: ${t.context.trim()})`);
@@ -705,7 +708,7 @@ async function briefHomeEvents({ groups, today, instructions, apiKey }) {
   const c = requireClient(apiKey);
   const lines = [];
   if (today) lines.push(`TODAY: ${today} (anchor all time references to this).`, '');
-  lines.push('TILES (live data, grouped by event):', '', ...groupedFactLines(groups, { perEvent: 6, rows: 24, withCatalogue: true }));
+  lines.push('TILES (live data, grouped by event):', '', ...groupedFactLines(groups, { perEvent: 6, rows: 24, withCatalogue: true, withId: true }));
   const resp = await c.messages.create({
     model: MODEL, max_tokens: 1600, thinking: { type: 'adaptive' }, output_config: { effort: 'low' },
     system: systemWith(HOME_EVENTS_SYSTEM, instructions),
