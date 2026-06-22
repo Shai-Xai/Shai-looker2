@@ -198,6 +198,62 @@ mechanism (`rolls_up_to`) already powers personal goals; P3 generalises it.
 
 ---
 
+## 2.5 Proposed addition — Goal **compositions** (mix / distribution goals)
+
+> Raised by Shai. Not in the original canonical phasing; folding it in here because it's
+> a natural extension of the **range/band** type just shipped, and several real goals are
+> this shape. Could land before or alongside P2.
+
+**Thesis:** many goals are **shares of one whole that must sum to ~100% and move
+together** — they're not independent. Examples:
+- **New vs Returning** customers (30% / 70%),
+- **Age bands** (18–24 / 25–34 / 35–44 / …),
+- **Local vs International**, **ticket tiers**, **acquisition channels**.
+
+Modelling these as separate goals is wrong: a move in one silently breaks the others,
+and nothing enforces the interlink.
+
+### Model
+One goal, **`scope`/type `composition`**, owning the whole split:
+- **parts**: `[{ key, label, targetShare, band? }]` — each a % of total; targets ≈ sum to 100.
+- Reads a **breakdown** (a category→value tile) and **normalises to actual shares**, so
+  parts are interlinked *by construction* (shared denominator = the sum). Up on one ⇒ down
+  on another, truthfully — no sync rule to maintain.
+- **Per-part status reuses the range/band engine** (just shipped): in band → ok; out →
+  flagged. Overall = **✓ Balanced** vs **⚠ Mix drifting** (names the offending slice).
+
+### Growth ("grow the 18–24 band")
+- Each part shows **movement vs last time** (share ↑/↓) + vs its target.
+- Optional **focus slice** (the one you're growing): Owl's "close the gap" then targets it
+  (e.g. acquisition skewed to 18–24, or a New-customer push when New is below band).
+
+### Two shapes (both reduce to "shares")
+- **(a) Composition goal** — the whole distribution (the audience mix).
+- **(b) Single share goal** — one slice tracked alone ("18–24 ≥ 25% of total") = a
+  **derived-share %** metric (part ÷ total) on the existing `at_least`/`range` types. Needs
+  only a "share of total" metric source; no new viz.
+
+### Data + UI + reuse
+- **Source:** one category-breakdown tile (`resolveTileSeriesAll` already returns
+  columns/rows) mapped to parts; total = sum of parts (or an explicit total tile).
+- **Display:** a stacked bar (target vs actual) or split ring; per-slice colour; drift +
+  focus highlighted; per-slice vs-last-time arrows.
+- **Reuses:** the band/range engine (per part), the breakdown resolver, the close-the-gap
+  campaign flow, vs-last-time.
+- **New work:** a distribution metric (read breakdown → shares), multi-part goal config in
+  the editor, and the composition viz. Focused build; leans on shipped pieces.
+
+### ⟶ DECIDE (compositions)
+- **C1 — Source:** single breakdown tile (recommended) vs N per-part tiles.
+- **C2 — Bands per part:** explicit min/max vs target ± tolerance (recommend target ± tol).
+- **C3 — Focus slice + action targeting** in v1? (recommend yes — it's the payoff.)
+- **C4 — North Star interplay:** allow a single slice as North Star while the composition
+  shows the balance? (recommend yes.)
+- **C5 — Sequencing:** ship compositions **before P2** (it extends the range type and is
+  client-facing value), or after? 
+
+---
+
 ## 3. Cross-cutting decisions to confirm
 
 - **⟶ DECIDE 3 (sequencing):** Recommended order is **P2a → P2b → P2c → P3a → P3b → P3c**
