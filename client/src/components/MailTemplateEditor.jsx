@@ -14,7 +14,7 @@ const FIELDS = [
   ['chart3', 'Chart colour 3', 'color', 'Third chart series'],
   ['chart4', 'Chart colour 4', 'color', 'Fourth chart series'],
   ['chart5', 'Chart colour 5', 'color', 'Fifth chart series — further series are generated from your palette'],
-  ['logo', 'Logo image', 'logo', 'Upload an image or paste a URL — blank uses the wordmark'],
+  ['logo', 'Logo image', 'logo', 'Shown across your Pulse app (sidebar + identity) and at the top of your emails. Upload an image or paste a URL — blank uses the wordmark'],
   ['wordmark', 'Wordmark', 'text', 'Text shown if there is no logo'],
   ['header', 'Header text', 'textarea', 'Tagline shown under the logo, at the top of every email'],
   ['intro', 'Intro line', 'textarea', 'Optional line above the message, inside the card'],
@@ -57,7 +57,12 @@ export default function MailTemplateEditor({ entityId, scope = 'platform', canTe
 
   async function save() {
     setBusy(true);
-    try { const d = await saveFn(edits); setData(d); setSaved(true); setTimeout(() => setSaved(false), 1600); }
+    try {
+      const d = await saveFn(edits); setData(d); setSaved(true); setTimeout(() => setSaved(false), 1600);
+      // Tell the app shell to re-pull this client's theme so the logo/colours
+      // update live (no reload). Platform scope has no entityId — skip.
+      if (entityId) window.dispatchEvent(new CustomEvent('pulse-branding-saved', { detail: { entityId } }));
+    }
     catch (e) { alert('Save failed: ' + e.message); }
     finally { setBusy(false); }
   }

@@ -55,7 +55,7 @@ export function GoalCard({ goal, onClick, index = 0, colorIndex, draggable = fal
       <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
         {goal.isNorthStar && <span title="North Star" style={{ fontSize: 12, flexShrink: 0 }}>⭐</span>}
         <span style={{ fontSize: 12.5, fontWeight: 700, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{goal.name}</span>
-        {viz === 'bar' && chip}
+        {(viz === 'bar' || goal.direction === 'composition') && chip}
         {/* Mobile reorder — drag is desktop-only, so phones get ▲▼ move controls
             (same position the dashboard strip orders by). Hidden when not reorderable. */}
         {isMobile && (onMoveUp || onMoveDown) && (
@@ -73,7 +73,12 @@ export function GoalCard({ goal, onClick, index = 0, colorIndex, draggable = fal
           <button onClick={(e) => { e.stopPropagation(); setConfirming(true); }} title="Delete this goal" aria-label="Delete goal" style={cardX}>✕</button>
         ))}
       </div>
-      {viz === 'bar' ? (
+      {goal.direction === 'composition' ? (
+        <div style={{ marginTop: 'auto', paddingTop: 12 }}>
+          <CompositionBar parts={p.parts} />
+          <CompositionLegend parts={p.parts} compact />
+        </div>
+      ) : viz === 'bar' ? (
         <div style={{ marginTop: 'auto', paddingTop: 12 }}>
           <div style={{ fontSize: 19, fontWeight: 800 }}>{fmtVal(p.value, goal.unit)}</div>
           <div style={{ fontSize: 11, color: 'var(--muted)' }}>{goal.direction === 'range' ? 'aim ' : 'of '}{fmtTarget(goal)}{p.pct != null ? ` · ${p.pct}%` : ''}</div>
@@ -89,6 +94,37 @@ export function GoalCard({ goal, onClick, index = 0, colorIndex, draggable = fal
           <VsLast goal={goal} p={p} align="center" />
         </div>
       )}
+    </div>
+  );
+}
+
+// Composition: a stacked bar of the actual shares; slices that drift out of their
+// band turn amber. Parts are interlinked (they sum to ~100% of the breakdown total).
+export function CompositionBar({ parts = [] }) {
+  const shown = parts.filter((p) => Number.isFinite(p.share));
+  if (!shown.length) return <div style={{ height: 14, borderRadius: 7, background: 'rgba(128,128,128,0.16)' }} />;
+  return (
+    <div style={{ display: 'flex', height: 14, borderRadius: 7, overflow: 'hidden', background: 'rgba(128,128,128,0.16)' }}>
+      {shown.map((p, i) => (
+        <div key={p.label} title={`${p.label} ${p.share}% (target ${p.target}%)`}
+          style={{ width: `${Math.max(0, p.share)}%`, background: p.status !== 'in' ? AMBER : partColors[i % partColors.length], borderRight: '1.5px solid var(--card)' }} />
+      ))}
+    </div>
+  );
+}
+export function CompositionLegend({ parts = [], compact = false }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: compact ? 3 : 6, marginTop: 8 }}>
+      {parts.map((p, i) => (
+        <div key={p.label} style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 11.5 }}>
+          <span style={{ width: 9, height: 9, borderRadius: 2, flexShrink: 0, background: p.status !== 'in' ? AMBER : partColors[i % partColors.length] }} />
+          <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.focus ? '🎯 ' : ''}{p.label}</span>
+          <span style={{ fontWeight: 700 }}>{p.share}%</span>
+          <span style={{ color: 'var(--muted)' }}>/ {p.target}%</span>
+          {p.status === 'over' && <span style={{ color: AMBER, fontWeight: 700 }} title="above band">↑</span>}
+          {p.status === 'under' && <span style={{ color: AMBER, fontWeight: 700 }} title="below band">↓</span>}
+        </div>
+      ))}
     </div>
   );
 }
@@ -221,9 +257,12 @@ export function paletteColor(i) { const p = identityPalette(); return p.length ?
 // The colour for a goal's ring/tile: semantic when it matters (reached → green, over a
 // cap → red, behind → amber, finished → its result band), else the goal's brand
 // identity colour (falls back to blue when none is supplied).
+// Part colours for composition slices (distinct, theme-agnostic).
+export const partColors = ['#0a84ff', '#34c759', '#ff9f0a', '#bf5af2', '#ff375f', '#5ac8fa', '#ffd60a', '#64d2ff'];
 export function goalColor(goal, p = {}, brandColor) {
   const dir = goal.direction || p.direction || 'at_least';
   const v = p.value, t = goal.targetValue;
+  if (dir === 'composition') return p.balanced === false ? AMBER : p.balanced === true ? GREEN : (brandColor || BLUE);
   if (p.band) return bandTone(p.band);
   if (dir === 'range') {
     if (p.over) return AMBER;          // above the healthy band → flagged
@@ -244,6 +283,11 @@ export function goalColor(goal, p = {}, brandColor) {
 export function goalState(goal, p) {
   const dir = goal.direction || p.direction || 'at_least';
   const v = p.value, t = goal.targetValue;
+  if (dir === 'composition') {
+    if (p.balanced === false) return { tone: AMBER, chip: <Chip t="⚠ Mix drifting" c={AMBER} bg="rgba(245,158,11,0.16)" /> };
+    if (p.balanced === true) return { tone: GREEN, chip: <Chip t="✓ Balanced" c={GREEN} bg="rgba(52,199,89,0.16)" /> };
+    return { tone: BLUE, chip: null };
+  }
   if (p.band) return { tone: bandTone(p.band), chip: <Chip {...bandChip(p.band)} /> };
   if (dir === 'range') {
     if (p.over) return { tone: AMBER, chip: <Chip t="⚠ Above range" c={AMBER} bg="rgba(245,158,11,0.16)" /> };

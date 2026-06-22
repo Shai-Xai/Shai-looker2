@@ -21,7 +21,7 @@ const crypto = require('crypto');
 const fc = require('./forecast');
 
 const SOURCES = ['ticketing', 'cashless', 'access', 'audience', 'ga4', 'app', 'social_paid', 'sponsorship', 'manual'];
-const DIRECTIONS = ['at_least', 'at_most', 'exact', 'range'];
+const DIRECTIONS = ['at_least', 'at_most', 'exact', 'range', 'composition'];
 
 // Place a goal's sell-curve onto a 0..1 x-axis (1 = event day) so the chart can
 // draw it without guessing the axis format. Last time spans its full cycle (0→1);
@@ -186,6 +186,8 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
   try { sql.exec("ALTER TABLE goal_templates ADD COLUMN scope TEXT NOT NULL DEFAULT 'entity'"); } catch { /* column already present */ }
   // Range goals: an upper bound for "keep it within a healthy band" (e.g. returning % 30–38).
   try { sql.exec('ALTER TABLE goals ADD COLUMN target_max REAL'); } catch { /* column already present */ }
+  // Composition goals: parts of a 100% split (New/Returning, age bands…), each a target share.
+  try { sql.exec("ALTER TABLE goals ADD COLUMN parts TEXT NOT NULL DEFAULT '[]'"); } catch { /* column already present */ }
   // Milestones: weekly/monthly checkpoints on the way to the target (Slice C).
   try { sql.exec("ALTER TABLE goals ADD COLUMN milestones TEXT NOT NULL DEFAULT '[]'"); } catch { /* column already present */ }
   // Personal goals (Slice D): per-user goals that contribute to the event. Default
@@ -210,6 +212,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
       name: r.name, metricKey: r.metric_key, source: r.source, metricRef: parseJson(r.metric_ref, {}),
       targetValue: r.target_value, targetMax: r.target_max == null ? null : r.target_max, unit: r.unit, direction: r.direction, display: r.display || 'bar', byDate: r.by_date,
       isNorthStar: !!r.is_north_star, position: r.position, milestones: parseJson(r.milestones, []),
+      parts: parseJson(r.parts, []),
       curveRef: parseJson(r.curve_ref, null), startDate: r.start_date || '',
       baselineEventId: r.baseline_event_id, baselineValue: r.baseline_value, baselineSource: r.baseline_source,
       baselineRef: parseJson(r.baseline_ref, null),
@@ -246,6 +249,13 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
       targetValue: Number(b.targetValue) || 0,
       // Range goals carry an upper bound; targetValue is the lower bound of the band.
       targetMax: (b.targetMax == null || b.targetMax === '') ? null : Number(b.targetMax),
+      // Composition goals: the parts of a 100% split, each with a target share %.
+      parts: Array.isArray(b.parts) ? b.parts.map((p) => ({
+        label: String(p.label || '').slice(0, 60),
+        target: Number(p.target) || 0,
+        ...(p.tol != null && p.tol !== '' ? { tol: Number(p.tol) } : {}),
+        ...(p.focus ? { focus: true } : {}),
+      })).filter((p) => p.label).slice(0, 12) : [],
       unit: String(b.unit || '').slice(0, 16),
       direction: DIRECTIONS.includes(b.direction) ? b.direction : 'at_least',
       display: ['bar', 'dial', 'ring'].includes(b.display) ? b.display : 'bar',
@@ -320,6 +330,31 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
       const value = await resolveTileValue({ dashboardId: ref.dashboardId, tileId: ref.tileId, field: ref.field, user: ctx.user, suiteId: goal.suiteId });
       return { value: value == null ? null : Number(value), asOf: now(), source: goal.source };
     } catch (e) { console.error('[goals] tile resolve failed', goal.id, e.message); return { value: null, asOf: null, source: goal.source }; }
+  }
+
+  // Composition goal: read the breakdown tile (category → value), normalise each part to
+  // its SHARE of the total, and flag parts that drift outside their target band. Parts
+  // are interlinked by construction (shared denominator), so up on one is down on another.
+  async function resolveComposition(goal, user) {
+    const ref = goal.metricRef || {};
+    if (!ref.dashboardId || !ref.tileId || typeof resolveTileSeries !== 'function') return null;
+    let series;
+    try { series = await resolveTileSeries({ dashboardId: ref.dashboardId, tileId: ref.tileId, user, suiteId: goal.suiteId }); }
+    catch { return null; }
+    const rows = (series || []).filter((p) => p && Number.isFinite(Number(p.v)));
+    const total = rows.reduce((s, p) => s + Number(p.v), 0);
+    if (!(total > 0)) return { composition: true, parts: [], balanced: null, total: 0, asOf: now() };
+    const valOf = (label) => rows.filter((p) => String(p.t).toLowerCase() === String(label).toLowerCase()).reduce((s, p) => s + Number(p.v), 0);
+    const parts = (goal.parts || []).map((pt) => {
+      const value = valOf(pt.label);
+      const share = Math.round((value / total) * 1000) / 10; // one decimal place
+      const tol = Number.isFinite(Number(pt.tol)) ? Number(pt.tol) : 5; // ±pp default band
+      const diff = share - Number(pt.target);
+      const status = diff > tol ? 'over' : diff < -tol ? 'under' : 'in';
+      return { label: pt.label, target: Number(pt.target), tol, value: Math.round(value), share, status, focus: !!pt.focus };
+    });
+    const drift = parts.filter((p) => p.status !== 'in');
+    return { composition: true, total: Math.round(total), parts, balanced: parts.length ? drift.length === 0 : null, driftCount: drift.length, asOf: now() };
   }
 
   function resultBand(goal, value, pct) {
@@ -563,6 +598,11 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
     return resolveTileValue({ dashboardId: br.dashboardId, tileId: br.tileId, user, suiteId: g.suiteId }).catch(() => null);
   }
   async function attachProgress(g, user, caches = null) {
+    // Composition goals don't have a single metric/curve — they read a breakdown.
+    if (g.direction === 'composition') {
+      const comp = await resolveComposition(g, user);
+      return { ...g, progress: comp || { composition: true, parts: [], balanced: null, asOf: now() } };
+    }
     const c = caches || makeGoalCaches();
     const [m, curve, eventDateIso, liveBaseline] = await Promise.all([
       resolveMetric(g, { user }),
@@ -625,11 +665,11 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
     const ownerRef = personal ? req.user.email : req.params.suiteId;
     const existing = sql.prepare("SELECT COUNT(*) n FROM goals WHERE suite_id=? AND scope='event' AND status='active'").get(req.params.suiteId).n;
     sql.prepare(`INSERT INTO goals (id, suite_id, entity_id, scope, owner_ref, name, metric_key, source, metric_ref,
-        target_value, target_max, unit, direction, display, by_date, start_date, is_north_star, position, baseline_event_id, baseline_value, baseline_source, baseline_ref,
+        target_value, target_max, parts, unit, direction, display, by_date, start_date, is_north_star, position, baseline_event_id, baseline_value, baseline_source, baseline_ref,
         milestones, curve_ref, visibility, rolls_up_to, status, created_by, created_at, updated_by, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
       id, req.params.suiteId, su.entityId, c.scope, ownerRef, c.name, c.metricKey, c.source, JSON.stringify(c.metricRef),
-      c.targetValue, c.targetMax, c.unit, c.direction, c.display, c.byDate, c.startDate, 0, c.position, c.baselineEventId, c.baselineValue, c.baselineSource, JSON.stringify(c.baselineRef),
+      c.targetValue, c.targetMax, JSON.stringify(c.parts), c.unit, c.direction, c.display, c.byDate, c.startDate, 0, c.position, c.baselineEventId, c.baselineValue, c.baselineSource, JSON.stringify(c.baselineRef),
       JSON.stringify(c.milestones), JSON.stringify(c.curveRef), personal ? c.visibility : 'team', personal ? c.rollsUpTo : '', 'active', req.user.email, ts, req.user.email, ts);
     // Only EVENT goals get a North Star; the first becomes it, or honour a request.
     if (!personal && (existing === 0 || req.body?.isNorthStar)) setNorthStar(req.params.suiteId, id);
@@ -647,9 +687,9 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
     for (const [field, oldV, newV] of [['name', g.name, c.name], ['target_value', g.targetValue, c.targetValue], ['by_date', g.byDate, c.byDate], ['direction', g.direction, c.direction]]) {
       if (String(oldV) !== String(newV)) audit(g.id, field, oldV, newV, req.user.email);
     }
-    sql.prepare(`UPDATE goals SET name=?, metric_key=?, source=?, metric_ref=?, target_value=?, target_max=?, unit=?, direction=?,
+    sql.prepare(`UPDATE goals SET name=?, metric_key=?, source=?, metric_ref=?, target_value=?, target_max=?, parts=?, unit=?, direction=?,
         display=?, by_date=?, start_date=?, position=?, baseline_event_id=?, baseline_value=?, baseline_source=?, baseline_ref=?, milestones=?, curve_ref=?, visibility=?, rolls_up_to=?, updated_by=?, updated_at=? WHERE id=?`).run(
-      c.name, c.metricKey, c.source, JSON.stringify(c.metricRef), c.targetValue, c.targetMax, c.unit, c.direction,
+      c.name, c.metricKey, c.source, JSON.stringify(c.metricRef), c.targetValue, c.targetMax, JSON.stringify(c.parts), c.unit, c.direction,
       c.display, c.byDate, c.startDate, c.position, c.baselineEventId, c.baselineValue, c.baselineSource, JSON.stringify(c.baselineRef), JSON.stringify(c.milestones),
       JSON.stringify(c.curveRef), personal ? c.visibility : 'team', personal ? c.rollsUpTo : '', req.user.email, now(), g.id);
     if (req.body?.isNorthStar && !g.isNorthStar) { setNorthStar(g.suiteId, g.id); audit(g.id, 'is_north_star', false, true, req.user.email); }

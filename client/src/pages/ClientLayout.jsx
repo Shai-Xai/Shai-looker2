@@ -7,7 +7,7 @@ import { useProfile } from '../lib/profile.jsx';
 import { useTheme } from '../lib/theme.jsx';
 import { vtNavigate } from '../lib/viewTransition.js';
 import { useSheetDrag } from '../lib/useSheetDrag.js';
-import { applyBrand, resetBrand } from '../lib/brand.js';
+import { applyBrand, resetBrand, useBrandLogo } from '../lib/brand.js';
 import { useAccess, PERMS } from '../lib/access.js';
 import { FEATURES } from '../lib/features.js';
 
@@ -195,11 +195,18 @@ export default function ClientLayout() {
   const themeEntityId = activeEntityId;
   useEffect(() => {
     let alive = true;
-    if (!themeEntityId) { resetBrand(); return; }
-    api.getEntityTheme(themeEntityId)
-      .then((t) => { if (alive) applyBrand(t); })
-      .catch(() => { if (alive) resetBrand(); });
-    return () => { alive = false; resetBrand(); };
+    const load = () => {
+      if (!themeEntityId) { resetBrand(); return; }
+      api.getEntityTheme(themeEntityId)
+        .then((t) => { if (alive) applyBrand(t); })
+        .catch(() => { if (alive) resetBrand(); });
+    };
+    load();
+    // Re-pull the moment the client saves their branding (logo/colours), so the
+    // shell updates live without a reload.
+    const onSaved = (e) => { if (!e.detail || e.detail.entityId === themeEntityId) load(); };
+    window.addEventListener('pulse-branding-saved', onSaved);
+    return () => { alive = false; resetBrand(); window.removeEventListener('pulse-branding-saved', onSaved); };
   }, [themeEntityId]);
 
   // Mobile sheet skips the suite level for single-suite clients — make sure
@@ -665,6 +672,7 @@ function readJson(key) {
 function ProfileFooter({ user, isAdmin, activeEntityId, brand, onNavigate }) {
   const { theme, toggle } = useTheme();
   const { logout } = useAuth();
+  const brandLogoUrl = useBrandLogo(); // the active client's resolved branding logo
   const [open, setOpen] = useState(false);
   const entity = user?.entities?.[0];
   const name = isAdmin ? 'Howler · Admin' : (brand?.entityName || entity?.name || (user?.email || '').split('@')[0]);
@@ -673,7 +681,9 @@ function ProfileFooter({ user, isAdmin, activeEntityId, brand, onNavigate }) {
   // logo. Without this gate the logo falls back to user.entities[0].logo (the
   // admin's FIRST linked client, e.g. Kappa), which bleeds the wrong brand in
   // next to "Howler · Admin".
-  const logo = isAdmin ? '' : (brand?.entityLogo || entity?.logo || '');
+  // Prefer the client's resolved BRANDING logo (what they set under Branding,
+  // falling back to their entity logo) so a branding change shows here live.
+  const logo = isAdmin ? '' : (brandLogoUrl || brand?.entityLogo || entity?.logo || '');
   const initial = (name || '?').trim().charAt(0).toUpperCase();
   return (
     <div style={{ position: 'relative', borderTop: '1px solid var(--hairline)', padding: 8, flexShrink: 0 }}>

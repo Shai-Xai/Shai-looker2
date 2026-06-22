@@ -810,6 +810,7 @@ async function buildGoalNudge(entityId) {
       if (resolved >= 24) break;
       const p = (await goalsApi.attachProgress(g, user, caches)).progress || {}; resolved += 1;
       const dir = g.direction || 'at_least';
+      if (dir === 'composition') { if (p.balanced === false) attention.push(g.name); else if (p.balanced === true) wins.push(g.name); continue; }
       if (dir === 'range' && p.over) { attention.push(g.name); continue; } // drifted above the healthy band
       const reached = dir === 'range' ? !!p.inRange : (p.value != null && g.targetValue != null && (dir === 'at_most' ? p.value <= g.targetValue : (p.pct != null ? p.pct >= 100 : p.value >= g.targetValue)));
       if (reached) { wins.push(g.name); continue; }

@@ -96,6 +96,23 @@ test('a range goal: in-band reads on-target, above the band is flagged (not "rea
   assert.equal(P(idOver).targetMax, 38, 'carries the band upper bound');
 });
 
+test('a composition goal reads the breakdown as shares and flags a slice out of band', async () => {
+  const sid = h.db.createSuite({ entityId, name: 'Composition test' }).id;
+  tileSeries = [{ t: 'New', v: 30 }, { t: 'Returning', v: 70 }]; // 30% / 70% of total
+  const g = (await app.req('POST', `/api/goals/suites/${sid}`, { as: owner, body: {
+    name: 'Audience mix', source: 'manual', direction: 'composition',
+    metricRef: { dashboardId: 'd', tileId: 't' },
+    parts: [{ label: 'New', target: 30 }, { label: 'Returning', target: 60 }],
+  } })).body.goal;
+  const row = (await app.req('GET', `/api/goals/suites/${sid}`, { as: owner })).body.goals.find((x) => x.id === g.id);
+  const p = row.progress;
+  assert.equal(p.composition, true);
+  const get = (l) => p.parts.find((x) => x.label === l);
+  assert.equal(get('New').share, 30); assert.equal(get('New').status, 'in', 'New 30% is on target');
+  assert.equal(get('Returning').share, 70); assert.equal(get('Returning').status, 'over', 'Returning 70% is above its 60% (±5) band');
+  assert.equal(p.balanced, false, 'mix is drifting');
+});
+
 test('the first event goal becomes the North Star automatically', async () => {
   const r = await create(owner, { name: 'Sell-through', source: 'manual', targetValue: 25000, unit: 'tickets' });
   assert.equal(r.status, 201);
