@@ -393,9 +393,11 @@ function goalsFactLines(goals) {
     const p = g.progress || {};
     const dir = g.direction || p.direction || 'at_least';
     const meets = (val, tgt) => val != null && tgt != null && (dir === 'at_most' ? val <= Number(tgt) : val >= Number(tgt));
-    const reached = p.pct != null ? (dir === 'at_most' ? meets(p.value, g.targetValue) : p.pct >= 100) : meets(p.value, g.targetValue);
-    const win = p.band === 'smashed' ? 'SMASHED ✓✓' : (reached || p.band === 'hit') ? 'REACHED ✓' : null;
-    const bits = [`- ${g.isNorthStar ? '★ ' : ''}${g.name}${g.suiteName ? ` [${g.suiteName}]` : ''}: ${gf(p.value)}/${gf(g.targetValue)}${p.pct != null ? ` (${p.pct}%)` : ''}${g.unit ? ` ${g.unit}` : ''}${win ? ` — ${win}` : ''}`];
+    const reached = dir === 'range' ? !!p.inRange : (p.pct != null ? (dir === 'at_most' ? meets(p.value, g.targetValue) : p.pct >= 100) : meets(p.value, g.targetValue));
+    const aboveRange = dir === 'range' && p.over;
+    const win = aboveRange ? null : (p.band === 'smashed' ? 'SMASHED ✓✓' : (reached || p.band === 'hit') ? (dir === 'range' ? 'IN RANGE ✓' : 'REACHED ✓') : null);
+    const tgtLabel = dir === 'range' && g.targetMax != null ? `${gf(g.targetValue)}–${gf(g.targetMax)}` : gf(g.targetValue);
+    const bits = [`- ${g.isNorthStar ? '★ ' : ''}${g.name}${g.suiteName ? ` [${g.suiteName}]` : ''}: ${gf(p.value)}/${tgtLabel}${p.pct != null ? ` (${p.pct}%)` : ''}${g.unit ? ` ${g.unit}` : ''}${win ? ` — ${win}` : ''}${aboveRange ? ' — ⚠ ABOVE RANGE' : ''}`];
     if (!win && p.status) bits.push(`pace ${p.status}${p.expected != null ? ` (expected ~${gf(p.expected)} by now)` : ''}`);
     if (p.lastAtNow != null) { const d = p.value != null && p.lastAtNow ? Math.round(((p.value - p.lastAtNow) / Math.abs(p.lastAtNow)) * 100) : null; bits.push(`vs last time ${gf(p.lastAtNow)}${d != null ? ` (${d > 0 ? '+' : ''}${d}%)` : ''}`); }
     if (!win && p.forecast && p.forecast.projected != null) bits.push(`forecast ~${gf(p.forecast.projected)}${p.forecast.status === 'will_hit' ? ' (on track)' : p.forecast.vsTargetPct != null ? ` (${p.forecast.vsTargetPct}% of target)` : ''}`);
