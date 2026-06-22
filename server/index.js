@@ -2161,10 +2161,20 @@ async function generateOverall(user, entityId, segment, { force = false } = {}) 
   if (!force) { const hit = cacheGet(briefCache, key, 6 * 3600e3); if (hit) return hit; }
   if (briefInflight.has(key)) return briefInflight.get(key);
   const p = (async () => {
-    const { groups } = await factGroups(user, entityId, selected, force);
+    const { groups, byId } = await factGroups(user, entityId, selected, force);
     if (!groups.length) return { ...base, headline: '', bullets: [] };
-    const raw = await insights.briefHomeOverall({ groups, today: todayLabel(), instructions: briefInstructions(user, entityId, segment), apiKey });
-    const out = { ...base, headline: String(raw.headline || '').slice(0, 600), bullets: (raw.bullets || []).slice(0, 4).map((b) => ({ text: String(b.text || '').slice(0, 400) })).filter((b) => b.text) };
+    const { catalogue } = clientCatalogue(entityId);
+    const raw = await insights.briefHomeOverall({ groups, catalogue, capabilities: ACTION_CAPABILITIES, actions: actionsSummaryFor(entityId), today: todayLabel(), instructions: briefInstructions(user, entityId, segment), apiKey });
+    const link = (id) => (id && byId[id] ? { dashboardId: id, suiteId: byId[id].suiteId, label: `${byId[id].setName} → ${byId[id].title}` } : null);
+    const out = {
+      ...base,
+      headline: String(raw.headline || '').slice(0, 600),
+      bullets: (raw.bullets || []).slice(0, 4).map((b) => ({ text: String(b.text || '').slice(0, 400) })).filter((b) => b.text),
+      // Cross-event "Worth a look" suggestions (so the portfolio home keeps them).
+      suggestions: (raw.suggestions || []).slice(0, 3)
+        .map((s) => ({ title: String(s.title || '').slice(0, 80), reason: String(s.reason || '').slice(0, 200), link: link(s.dashboardId), action: CAPABILITY_KEYS.has(s.action) ? s.action : null }))
+        .filter((s) => s.title && (s.link || s.action)),
+    };
     cachePut(briefCache, key, out);
     return out;
   })().finally(() => briefInflight.delete(key));

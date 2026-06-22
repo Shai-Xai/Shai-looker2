@@ -655,9 +655,11 @@ async function briefHome({ tiles, profile, catalogue, instructions, apiKey, acti
 // per-event sections load. Facts arrive grouped by event: [{ suiteId, suiteName, tiles }].
 const HOME_OVERALL_SYSTEM = `You are the Owl — Howler Pulse's analyst — writing a PORTFOLIO summary for a promoter running MULTIPLE events at once. Amounts are South African Rand (ZAR).
 You are given live TILES grouped by EVENT. Write a short cross-event picture: the overall position across all events, the standout/biggest mover, and anything needing attention — comparing events where the data supports it.
+You may also be given CATALOGUE (dashboards you can link to), CAPABILITIES (actions the platform can EXECUTE now) and ACTIONS (campaigns already run, with results). Use these to suggest a few cross-event "worth a look" next steps.
 Respond with ONLY strict JSON (no markdown fences):
-{ "headline": "1-2 sentences: the overall portfolio story right now (may use **bold**)", "bullets": [ { "text": "cross-event observation; name the event(s) involved (may use **bold**)" } ] }
+{ "headline": "1-2 sentences: the overall portfolio story right now (may use **bold**)", "bullets": [ { "text": "cross-event observation; name the event(s) involved (may use **bold**)" } ], "suggestions": [ { "title": "short hook (max 8 words, name the event)", "reason": "one line on why it's worth acting on now", "dashboardId": "id from CATALOGUE", "action": "a CAPABILITIES key ONLY if directly executable (e.g. an email/SMS recovery for an event with abandoned carts or soft pace), else omit" } ] }
 Rules:
+- 2-3 suggestions, each tied to a specific event and a real opportunity (e.g. a soft daily pace, abandoned carts to recover, an audience skew to lean into). dashboardId MUST come from CATALOGUE. Add "action" only when a capability would directly deliver it; never invent capability keys.
 - 2-4 bullets. Lead with ticketing/revenue totals across events and name events explicitly. Compare events ("V is outpacing IV") only where the numbers support it.
 - Identify each event ONLY by the EVENT heading it is listed under. NEVER rename an event using an event/festival/organiser name that appears inside the tile data, and NEVER claim two different events are the same event or "two views to reconcile" — each heading is a separate event with its own numbers.
 - Each tile shows the EVENT its value is for ("· event: …"). Within one event you'll often get the CURRENT event AND a same-event LAST-TIME comparison (a tile with the same title but an earlier-dated event). Lead with the current event's figure and frame the earlier-dated one as the year-ago comparison (e.g. "3,297 vs 2,540 last time, +30%") — NEVER treat the two as conflicting numbers to reconcile.
@@ -705,13 +707,25 @@ function groupedFactLines(groups, { perEvent = 6, rows = 24, withCatalogue = fal
   return lines;
 }
 
-async function briefHomeOverall({ groups, today, instructions, apiKey }) {
+async function briefHomeOverall({ groups, catalogue, capabilities, actions, today, instructions, apiKey }) {
   const c = requireClient(apiKey);
   const lines = [];
   if (today) lines.push(`TODAY: ${today} (anchor all time references to this).`, '');
   lines.push('TILES (live data, grouped by event):', '', ...groupedFactLines(groups, { perEvent: 4, rows: 12 }));
+  if ((actions || []).length) {
+    lines.push('ACTIONS (marketing actions already taken, live results):');
+    for (const a of actions) lines.push(`- "${a.title}" [${a.status}] sent ${a.sent}/${a.total}, ${a.clicks} clicks (${a.ctr}% CTR)`);
+    lines.push('');
+  }
+  if ((capabilities || []).length) {
+    lines.push('CAPABILITIES (executable actions available):');
+    for (const cap of capabilities) lines.push(`- ${cap.key}: ${cap.description}`);
+    lines.push('');
+  }
+  lines.push('CATALOGUE (dashboardId: title [set, event]):');
+  for (const d of catalogue || []) lines.push(`- ${d.dashboardId}: ${d.title} [${d.setName}, ${d.suiteName}]`);
   const resp = await c.messages.create({
-    model: MODEL, max_tokens: 900, thinking: { type: 'adaptive' }, output_config: { effort: 'low' },
+    model: MODEL, max_tokens: 1100, thinking: { type: 'adaptive' }, output_config: { effort: 'low' },
     system: systemWith(HOME_OVERALL_SYSTEM, instructions),
     messages: [{ role: 'user', content: lines.join('\n') }],
   });
