@@ -21,7 +21,7 @@ const crypto = require('crypto');
 const fc = require('./forecast');
 
 const SOURCES = ['ticketing', 'cashless', 'access', 'audience', 'ga4', 'app', 'social_paid', 'sponsorship', 'manual'];
-const DIRECTIONS = ['at_least', 'at_most', 'exact'];
+const DIRECTIONS = ['at_least', 'at_most', 'exact', 'range'];
 
 // Place a goal's sell-curve onto a 0..1 x-axis (1 = event day) so the chart can
 // draw it without guessing the axis format. Last time spans its full cycle (0→1);
@@ -184,6 +184,8 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
   try { sql.exec("ALTER TABLE goals ADD COLUMN display TEXT NOT NULL DEFAULT 'bar'"); } catch { /* column already present */ }
   // Goal templates created before global scope existed.
   try { sql.exec("ALTER TABLE goal_templates ADD COLUMN scope TEXT NOT NULL DEFAULT 'entity'"); } catch { /* column already present */ }
+  // Range goals: an upper bound for "keep it within a healthy band" (e.g. returning % 30–38).
+  try { sql.exec('ALTER TABLE goals ADD COLUMN target_max REAL'); } catch { /* column already present */ }
   // Milestones: weekly/monthly checkpoints on the way to the target (Slice C).
   try { sql.exec("ALTER TABLE goals ADD COLUMN milestones TEXT NOT NULL DEFAULT '[]'"); } catch { /* column already present */ }
   // Personal goals (Slice D): per-user goals that contribute to the event. Default
@@ -206,7 +208,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
     return {
       id: r.id, suiteId: r.suite_id, entityId: r.entity_id, scope: r.scope, ownerRef: r.owner_ref,
       name: r.name, metricKey: r.metric_key, source: r.source, metricRef: parseJson(r.metric_ref, {}),
-      targetValue: r.target_value, unit: r.unit, direction: r.direction, display: r.display || 'bar', byDate: r.by_date,
+      targetValue: r.target_value, targetMax: r.target_max == null ? null : r.target_max, unit: r.unit, direction: r.direction, display: r.display || 'bar', byDate: r.by_date,
       isNorthStar: !!r.is_north_star, position: r.position, milestones: parseJson(r.milestones, []),
       curveRef: parseJson(r.curve_ref, null), startDate: r.start_date || '',
       baselineEventId: r.baseline_event_id, baselineValue: r.baseline_value, baselineSource: r.baseline_source,
@@ -242,6 +244,8 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
       source: SOURCES.includes(b.source) ? b.source : 'manual',
       metricRef: { dashboardId: String(mr.dashboardId || '').slice(0, 64), tileId: String(mr.tileId || '').slice(0, 64), field: String(mr.field || '').slice(0, 200) },
       targetValue: Number(b.targetValue) || 0,
+      // Range goals carry an upper bound; targetValue is the lower bound of the band.
+      targetMax: (b.targetMax == null || b.targetMax === '') ? null : Number(b.targetMax),
       unit: String(b.unit || '').slice(0, 16),
       direction: DIRECTIONS.includes(b.direction) ? b.direction : 'at_least',
       display: ['bar', 'dial', 'ring'].includes(b.display) ? b.display : 'bar',
@@ -319,6 +323,13 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
   }
 
   function resultBand(goal, value, pct) {
+    if (goal.direction === 'range' && Number.isFinite(goal.targetMax)) {
+      const lo = goal.targetValue, hi = goal.targetMax;
+      if (value > hi) return 'over';            // above the healthy band → flagged
+      if (value >= lo) return 'hit';            // inside the band
+      if (value >= lo * 0.95) return 'near';
+      return 'missed';
+    }
     if (goal.direction === 'at_most') {
       if (value <= goal.targetValue * 0.9) return 'smashed';
       if (value <= goal.targetValue) return 'hit';
@@ -439,9 +450,16 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
     const at = hasCurve ? fc.fractionAtNow(curve, { deadlineMs: end, nowMs, startMs: start, daysLeft }) : null;
     const baselineFinal = at ? Math.round(at.total) : (goal.baselineValue != null ? goal.baselineValue : null);
     if (value == null || !goal.targetValue) return { value, pct: null, status: null, band: goal.resultBand || null, milestones, nextMilestone, lastAtNow: null, baselineFinal };
-    const pct = goal.direction === 'at_most'
-      ? (value <= 0 ? 100 : Math.round((goal.targetValue / value) * 100))
-      : Math.round((value / goal.targetValue) * 100);
+    // Range goal = a healthy BAND [lo, hi]: in-band is good, above hi is flagged.
+    const isRange = goal.direction === 'range' && Number.isFinite(goal.targetMax);
+    const lo = goal.targetValue, hi = goal.targetMax;
+    const over = isRange ? value > hi : false;          // drifted above the band
+    const inRange = isRange ? (value >= lo && value <= hi) : false;
+    const pct = isRange
+      ? (value < lo ? Math.max(0, Math.min(100, Math.round((value / lo) * 100))) : 100)
+      : goal.direction === 'at_most'
+        ? (value <= 0 ? 100 : Math.round((goal.targetValue / value) * 100))
+        : Math.round((value / goal.targetValue) * 100);
     let expected = null, onPace = null, status = null, lastAtNow = null;
     if (!Number.isNaN(end) && !Number.isNaN(start) && end > start) {
       if (at) {
@@ -455,7 +473,14 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
         points.sort((a, b) => a[0] - b[0]);
         expected = Math.round(interpAt(points, nowMs));
       }
-      if (goal.direction === 'at_most') {
+      if (isRange) {
+        // Pace toward entering the band (lo); flag if already above it.
+        onPace = value >= lo && value <= hi;
+        if (nowMs >= end) status = 'final';
+        else if (over) status = 'over';
+        else if (value >= lo) status = 'on_track';     // inside the band
+        else { const ratio = expected > 0 ? value / expected : (value > 0 ? 2 : 1); status = ratio >= 1.1 ? 'ahead' : ratio >= 0.95 ? 'on_track' : 'behind'; }
+      } else if (goal.direction === 'at_most') {
         const cap = expected || goal.targetValue;
         onPace = value <= cap;
         status = nowMs >= end ? 'final' : (value <= cap * 0.9 ? 'ahead' : onPace ? 'on_track' : 'behind');
@@ -473,7 +498,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
     // now" (currentValue ÷ the fraction of last time's curve reached at this point). Only
     // for curve goals heading UP to a target (an "under a cap" goal flips the meaning).
     let forecast = null;
-    if (at && goal.direction !== 'at_most' && !Number.isNaN(end) && !Number.isNaN(start) && end > start) {
+    if (at && goal.direction !== 'at_most' && !isRange && !Number.isNaN(end) && !Number.isNaN(start) && end > start) {
       const cum = fc.toCumulative((Array.isArray(curve) ? curve : []).map((p) => p.v));
       const r = Math.max(0, Math.min(1, (nowMs - start) / (end - start)));
       // Blend last time's SHAPE with recent run-rate (momentum) so a hot/cold streak
@@ -482,7 +507,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
       const f = cum.length >= 2 ? fc.forecast({ cum, currentValue: value, target: goal.targetValue, r, daysLeft, recentRatePerDay: opts.recentRatePerDay ?? null, weightMomentum: Math.min(0.5, r), fNow: at.fraction }) : null;
       if (f && Number.isFinite(f.projected)) forecast = { projected: f.projected, status: f.status, vsTargetPct: f.vsTargetPct, shape: f.shape, momentum: f.momentum };
     }
-    return { value, pct, target: goal.targetValue, direction: goal.direction, expected, onPace, status, band, milestones, nextMilestone, lastAtNow, baselineFinal, daysLeft, forecast };
+    return { value, pct, target: goal.targetValue, targetMax: goal.targetMax ?? null, over, inRange, direction: goal.direction, expected, onPace, status, band, milestones, nextMilestone, lastAtNow, baselineFinal, daysLeft, forecast };
   }
 
   // ── Full live progress resolver (shared) ──────────────────────────────────
@@ -600,11 +625,11 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
     const ownerRef = personal ? req.user.email : req.params.suiteId;
     const existing = sql.prepare("SELECT COUNT(*) n FROM goals WHERE suite_id=? AND scope='event' AND status='active'").get(req.params.suiteId).n;
     sql.prepare(`INSERT INTO goals (id, suite_id, entity_id, scope, owner_ref, name, metric_key, source, metric_ref,
-        target_value, unit, direction, display, by_date, start_date, is_north_star, position, baseline_event_id, baseline_value, baseline_source, baseline_ref,
+        target_value, target_max, unit, direction, display, by_date, start_date, is_north_star, position, baseline_event_id, baseline_value, baseline_source, baseline_ref,
         milestones, curve_ref, visibility, rolls_up_to, status, created_by, created_at, updated_by, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
       id, req.params.suiteId, su.entityId, c.scope, ownerRef, c.name, c.metricKey, c.source, JSON.stringify(c.metricRef),
-      c.targetValue, c.unit, c.direction, c.display, c.byDate, c.startDate, 0, c.position, c.baselineEventId, c.baselineValue, c.baselineSource, JSON.stringify(c.baselineRef),
+      c.targetValue, c.targetMax, c.unit, c.direction, c.display, c.byDate, c.startDate, 0, c.position, c.baselineEventId, c.baselineValue, c.baselineSource, JSON.stringify(c.baselineRef),
       JSON.stringify(c.milestones), JSON.stringify(c.curveRef), personal ? c.visibility : 'team', personal ? c.rollsUpTo : '', 'active', req.user.email, ts, req.user.email, ts);
     // Only EVENT goals get a North Star; the first becomes it, or honour a request.
     if (!personal && (existing === 0 || req.body?.isNorthStar)) setNorthStar(req.params.suiteId, id);
@@ -622,9 +647,9 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
     for (const [field, oldV, newV] of [['name', g.name, c.name], ['target_value', g.targetValue, c.targetValue], ['by_date', g.byDate, c.byDate], ['direction', g.direction, c.direction]]) {
       if (String(oldV) !== String(newV)) audit(g.id, field, oldV, newV, req.user.email);
     }
-    sql.prepare(`UPDATE goals SET name=?, metric_key=?, source=?, metric_ref=?, target_value=?, unit=?, direction=?,
+    sql.prepare(`UPDATE goals SET name=?, metric_key=?, source=?, metric_ref=?, target_value=?, target_max=?, unit=?, direction=?,
         display=?, by_date=?, start_date=?, position=?, baseline_event_id=?, baseline_value=?, baseline_source=?, baseline_ref=?, milestones=?, curve_ref=?, visibility=?, rolls_up_to=?, updated_by=?, updated_at=? WHERE id=?`).run(
-      c.name, c.metricKey, c.source, JSON.stringify(c.metricRef), c.targetValue, c.unit, c.direction,
+      c.name, c.metricKey, c.source, JSON.stringify(c.metricRef), c.targetValue, c.targetMax, c.unit, c.direction,
       c.display, c.byDate, c.startDate, c.position, c.baselineEventId, c.baselineValue, c.baselineSource, JSON.stringify(c.baselineRef), JSON.stringify(c.milestones),
       JSON.stringify(c.curveRef), personal ? c.visibility : 'team', personal ? c.rollsUpTo : '', req.user.email, now(), g.id);
     if (req.body?.isNorthStar && !g.isNorthStar) { setNorthStar(g.suiteId, g.id); audit(g.id, 'is_north_star', false, true, req.user.email); }

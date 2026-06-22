@@ -80,6 +80,22 @@ test('an admin can publish a GLOBAL template available to every client', async (
   assert.equal((await app.req('DELETE', `/api/goals/templates/${made.body.template.id}`, { as: admin })).status, 200, 'admin deletes the global');
 });
 
+test('a range goal: in-band reads on-target, above the band is flagged (not "reached")', async () => {
+  const sid = h.db.createSuite({ entityId, name: 'Range test' }).id;
+  const mk = (val) => app.req('POST', `/api/goals/suites/${sid}`, { as: owner, body: { name: `R${val}`, source: 'manual', targetValue: 30, targetMax: 38, unit: '%', direction: 'range' } })
+    .then(async (r) => { await app.req('POST', `/api/goals/${r.body.goal.id}/snapshot`, { as: owner, body: { value: val } }); return r.body.goal.id; });
+  const idLow = await mk(25), idIn = await mk(34), idOver = await mk(44);
+  const goals = (await app.req('GET', `/api/goals/suites/${sid}`, { as: owner })).body.goals;
+  const P = (id) => goals.find((x) => x.id === id).progress;
+  // Below the band → under, not reached.
+  assert.equal(P(idLow).inRange, false); assert.equal(P(idLow).over, false);
+  // Inside the band → on target.
+  assert.equal(P(idIn).inRange, true); assert.equal(P(idIn).over, false); assert.equal(P(idIn).pct, 100);
+  // Above the band → flagged over (NOT reached).
+  assert.equal(P(idOver).over, true); assert.equal(P(idOver).inRange, false);
+  assert.equal(P(idOver).targetMax, 38, 'carries the band upper bound');
+});
+
 test('the first event goal becomes the North Star automatically', async () => {
   const r = await create(owner, { name: 'Sell-through', source: 'manual', targetValue: 25000, unit: 'tickets' });
   assert.equal(r.status, 201);

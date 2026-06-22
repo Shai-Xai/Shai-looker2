@@ -22,6 +22,7 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
   const [dashboardId, setDashboardId] = useState(goal?.metricRef?.dashboardId || '');
   const [tileId, setTileId] = useState(goal?.metricRef?.tileId || '');
   const [target, setTarget] = useState(goal ? String(goal.targetValue ?? '') : '');
+  const [targetMax, setTargetMax] = useState(goal?.targetMax != null ? String(goal.targetMax) : ''); // upper bound for 'range' goals
   const [unit, setUnit] = useState(goal?.unit || 'tickets');
   const [direction, setDirection] = useState(goal?.direction || 'at_least');
   const [byDate, setByDate] = useState(goal?.byDate ? goal.byDate.slice(0, 10) : '');
@@ -99,7 +100,7 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
   const templatePayload = () => ({
     name, source: track === 'tile' ? 'ticketing' : 'manual',
     metricRef: track === 'tile' && dashboardId && tileId ? refWithNames(dashboardId, tileId) : null,
-    targetValue: Number(target) || 0, unit, direction, display,
+    targetValue: Number(target) || 0, targetMax: direction === 'range' && targetMax !== '' ? Number(targetMax) : null, unit, direction, display,
     curveRef: (curveDashboardId && curveTileId) ? { ...refWithNames(curveDashboardId, curveTileId), cadence: curveCadence, ...(compareKey ? { compareKey } : {}) } : null,
     baselineRef: baselineMode === 'tile' && baselineDashboardId && baselineTileId ? refWithNames(baselineDashboardId, baselineTileId) : null,
   });
@@ -107,8 +108,9 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
     if (!p) return;
     if (p.name) setName(p.name);
     if (p.targetValue != null) setTarget(String(p.targetValue));
-    if (p.unit) setUnit(p.unit);
+    if (p.targetMax != null) setTargetMax(String(p.targetMax));
     if (p.direction) setDirection(p.direction);
+    if (p.unit) setUnit(p.unit);
     if (p.display) setDisplay(p.display);
     const refs = {};
     if (p.metricRef && (p.metricRef.tileId || p.metricRef.tileName)) { setTrack('tile'); refs.metric = p.metricRef; }
@@ -274,6 +276,7 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
       source: 'manual', // resolution is driven by the tile ref below, not this label
       metricRef: track === 'tile' ? { dashboardId, tileId } : {},
       targetValue: Number(target),
+      targetMax: direction === 'range' && targetMax !== '' ? Number(targetMax) : null,
       unit, direction, display, byDate, startDate,
       scope: isPersonal ? 'personal' : 'event',
       isNorthStar: isPersonal ? false : northStar,
@@ -445,20 +448,26 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
         </Field>
 
         <div style={{ display: 'flex', gap: 10 }}>
-          <Field label="Target" style={{ flex: 1 }}>
-            <input value={target} onChange={(e) => setTarget(e.target.value)} placeholder="e.g. 25000" inputMode="decimal" style={inp} />
+          <Field label={direction === 'range' ? 'Range — low' : 'Target'} style={{ flex: 1 }}>
+            <input value={target} onChange={(e) => setTarget(e.target.value)} placeholder={direction === 'range' ? 'e.g. 30' : 'e.g. 25000'} inputMode="decimal" style={inp} />
           </Field>
-          <Field label="Unit" style={{ width: 130 }}>
+          {direction === 'range' && (
+            <Field label="Range — high" style={{ flex: 1 }}>
+              <input value={targetMax} onChange={(e) => setTargetMax(e.target.value)} placeholder="e.g. 38" inputMode="decimal" style={inp} />
+            </Field>
+          )}
+          <Field label="Unit" style={{ width: 110 }}>
             <select value={unit} onChange={(e) => setUnit(e.target.value)} style={inp}>
               {[...new Set(['tickets', 'ZAR', '%', 'sessions', 'users', 'views', 'conversions', 'orders', 'count', unit].filter(Boolean))].map((u) => <option key={u} value={u}>{u}</option>)}
             </select>
           </Field>
         </div>
 
-        <Field label="Goal type" hint="Most goals (revenue, tickets, attendance) are “hit a target.”">
+        <Field label="Goal type" hint="“Healthy range” flags going too far over — good for ratios like returning %.">
           <select value={direction} onChange={(e) => setDirection(e.target.value)} style={inp}>
             <option value="at_least">Hit a target — reach the number or beat it ↑</option>
             <option value="at_most">Stay under a cap — keep the number below it ↓</option>
+            <option value="range">Healthy range — stay within a band (flag over) ↕</option>
           </select>
         </Field>
 
