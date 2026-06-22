@@ -818,58 +818,44 @@ async function exploreLabelMap() {
 }
 const prettifyName = (s) => String(s || '').replace(/_/g, ' ').replace(/\b\w/g, (ch) => ch.toUpperCase());
 
-// Per-explore: how the client's own tiles wire each dashboard FILTER NAME (e.g.
-// "Current Event") to a query field on that explore. This is the authoritative
-// mapping the dashboards already use — each explore has its OWN event field, so we
-// can't assume core_events.name. Built from the tiles' listenTo maps. `${model}::${view}`
-// -> { filterNameLower: queryField }.
-function exploreFilterFieldIndex(entityId) {
+// A representative tile on a given explore from the client's dashboards. We borrow
+// its filter WIRING (listenTo) + its dashboard's filter defs so a raw metric query
+// scopes to the event/organiser EXACTLY as the dashboards do — no guessing which
+// field is "the event" on this explore. Every catalogue explore has ≥1 such tile
+// (the catalogue is built from them), so this is normally present.
+function representativeTileForExplore(entityId, model, view) {
   const { catalogue } = clientCatalogue(entityId);
-  const idx = new Map();
+  let fallback = null;
   for (const c of catalogue) {
     const def = store.get(c.dashboardId);
     if (!def) continue;
-    // This dashboard's filter NAME -> its field, so a lock keyed by EITHER resolves.
-    const filterField = {};
-    for (const f of def.filters || []) { if (f.name) filterField[f.name.toLowerCase()] = (f.field || f.dimension || ''); }
     const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((x) => x.tiles || []))];
     for (const t of tiles) {
-      const q = t.query; if (!q?.model || !q?.view) continue;
-      const key = `${q.model}::${q.view}`;
-      let m = idx.get(key); if (!m) { m = {}; idx.set(key, m); }
-      for (const [fname, qfield] of Object.entries(t.listenTo || {})) {
-        if (!fname || !qfield) continue;
-        const nk = fname.toLowerCase();
-        if (m[nk] == null) m[nk] = qfield;                                    // by filter name ("Current Event")
-        const ff = filterField[nk];
-        if (ff && m[ff.toLowerCase()] == null) m[ff.toLowerCase()] = qfield;  // by the filter's own field
-      }
+      const q = t.query; if (q?.model !== model || q?.view !== view) continue;
+      if (t.listenTo && Object.keys(t.listenTo).length) return { def, tile: t }; // prefer a wired one
+      if (!fallback) fallback = { def, tile: t };
     }
   }
-  return idx;
+  return fallback;
 }
 
-// Scope a raw metric query to THIS event (suite), the same way the dashboards do.
-// The suite's locks are keyed by dashboard FILTER NAME (e.g. "Current Event") and/or
-// field; for each, we resolve the field on THIS explore — name-keyed via the tiles'
-// listenTo wiring, field-keyed if that field actually exists here — and apply the
-// locked value. applyScope still forces the organiser lock on top (the hard boundary);
-// this narrows the metric to one event instead of the organiser's whole history.
-async function applyEventLocksToMetric(body, model, view, suiteId) {
-  try {
-    const su = db.getSuite(suiteId); if (!su) return;
-    const lockMap = expandLockMap(db.lockedFiltersForSuite(suiteId)); // name- + field-keyed
-    const dims = new Set((await getExploreFieldsCached(model, view)).dimensions.map((d) => d.name));
-    const wiring = exploreFilterFieldIndex(su.entityId).get(`${model}::${view}`) || {};
-    for (const [k, v] of Object.entries(lockMap)) {
-      if (v == null || v === '') continue;
-      // Resolve this lock (keyed by filter name OR field) to THIS explore's query field:
-      // first via the tiles' wiring, else a field that's already a dimension here.
-      let field = wiring[k.toLowerCase()] || null;
-      if (!field && k.includes('.') && dims.has(k)) field = k;
-      if (field && body.filters[field] == null) body.filters[field] = v;
-    }
-  } catch (e) { console.warn('[alerts] event-lock apply skipped:', e.message); }
+// Build a scoped query body for a raw measure/dimension on an explore, reusing the
+// EXACT dashboard path: a synthetic tile that borrows a real tile's listenTo wiring,
+// run through tileQueryBody (which applies the event/organiser locks via that wiring
+// + effectiveFilterValues, then forces the organiser scope). `extraOverrides` are the
+// user's metric filters (queryField -> value). Returns a body or null (fail closed).
+async function scopedMetricBody({ model, view, fields, sorts, limit, extraOverrides, user, suiteId }) {
+  const su = db.getSuite(suiteId); if (!su) return null;
+  const rep = representativeTileForExplore(su.entityId, model, view);
+  const lockMap = expandLockMap(db.lockedFiltersForSuite(suiteId));
+  if (rep) {
+    const synthetic = { ...rep.tile, id: 'metric', type: 'vis', vis: {}, query: { model, view, fields, ...(sorts ? { sorts } : {}), ...(limit ? { limit } : {}) } };
+    return tileQueryBody(synthetic, rep.def, user, suiteId, lockMap, extraOverrides || {});
+  }
+  // No tile on this explore (shouldn't happen for catalogue explores): organiser scope only.
+  const body = { model, view, fields, filters: { ...(extraOverrides || {}) }, ...(sorts ? { sorts } : {}), ...(limit ? { limit } : {}) };
+  if (!(await applyScope(body, user, suiteId))) return null;
+  return body;
 }
 
 // The catalogue of explores a client can build a metric from — derived from the
@@ -898,13 +884,12 @@ async function metricCatalog(entityId) {
   return { explores };
 }
 
-// Read a built metric's live number: one measure, the chosen dimension filters, the
-// event lock, the organiser lock (applyScope) — fail-closed if scope can't resolve.
+// Read a built metric's live number — one measure, the user's dimension filters,
+// scoped to THIS event + client exactly like the dashboards. Fail-closed.
 async function resolveCustomMetric({ model, view, measure, filters, user, suiteId }) {
   if (!model || !view || !measure) return null;
-  const body = { model, view, fields: [measure], filters: { ...(filters || {}) }, limit: 1 };
-  await applyEventLocksToMetric(body, model, view, suiteId);
-  if (!(await applyScope(body, user, suiteId))) return null; // hard boundary, fail closed
+  const body = await scopedMetricBody({ model, view, fields: [measure], limit: 1, extraOverrides: filters || {}, user, suiteId });
+  if (!body) return null;
   const data = await runLookerQuery('/queries/run/json_detail', body);
   return primaryTileValue(data, {});
 }
@@ -912,9 +897,8 @@ async function resolveCustomMetric({ model, view, measure, filters, user, suiteI
 // Distinct values of a dimension under this event's scope — the choices for a filter
 // (e.g. the Ticket Type values that exist for this event).
 async function metricFilterValues({ model, view, field, user, suiteId }) {
-  const body = { model, view, fields: [field], filters: {}, sorts: [field], limit: 500 };
-  await applyEventLocksToMetric(body, model, view, suiteId);
-  if (!(await applyScope(body, user, suiteId))) return [];
+  const body = await scopedMetricBody({ model, view, fields: [field], sorts: [field], limit: 500, extraOverrides: {}, user, suiteId });
+  if (!body) return [];
   const data = await runLookerQuery('/queries/run/json_detail', body);
   const out = [];
   for (const r of (data?.data || [])) {

@@ -374,9 +374,9 @@ export default function AlertEditor({ entityId, suiteId, suiteName, alert, smsAv
                       {dimsFor().map((d) => <option key={d.name} value={d.name}>{d.label}</option>)}
                     </select>
                     {f.field && (
-                      Array.isArray(filterVals[f.field])
+                      Array.isArray(filterVals[f.field]) && filterVals[f.field].length
                         ? <select value={f.value} onChange={(e) => setFilter(i, { value: e.target.value })} style={{ ...inp, flex: 1 }}>
-                            <option value="">{filterVals[f.field].length ? 'Choose a value…' : 'type below'}</option>
+                            <option value="">Choose a value…</option>
                             {filterVals[f.field].map((v) => <option key={v} value={v}>{v}</option>)}
                           </select>
                         : <input value={f.value} onChange={(e) => setFilter(i, { value: e.target.value })} placeholder={filterVals[f.field] === 'loading' ? 'loading values…' : 'value (e.g. VIP)'} style={{ ...inp, flex: 1 }} />
