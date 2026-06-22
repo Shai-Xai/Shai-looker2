@@ -589,6 +589,7 @@ function ProductReleaseNotes() {
                   <span style={{ fontSize: 14, fontWeight: 700 }}>{n.title || '(untitled)'}</span>
                   {!n.published && <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', border: '1px solid var(--hairline)', borderRadius: 980, padding: '1px 7px' }}>DRAFT</span>}
                   {n.source === 'auto' && <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--brand)', border: '1px solid var(--brand)', borderRadius: 980, padding: '1px 7px' }}>AUTO</span>}
+                  {n.source === 'seed' && <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', border: '1px solid var(--hairline)', borderRadius: 980, padding: '1px 7px' }}>SEEDED</span>}
                   <span style={{ flex: 1 }} />
                   <button style={miniBtnOutline} onClick={() => togglePub(n)}>{n.published ? 'Unpublish' : 'Publish'}</button>
                   <button style={miniBtnOutline} onClick={() => setEditing({ id: n.id, date: n.date, title: n.title, body: n.body, howTo: n.howTo || '', deepLink: n.deepLink || '', bodyDev: n.bodyDev || '', published: n.published })}>Edit</button>
