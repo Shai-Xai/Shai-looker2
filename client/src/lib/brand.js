@@ -1,8 +1,10 @@
 // ─── White-label brand engine ──────────────────────────────────────────────────
-// One source of truth for the brand pair (primary + secondary). Howler's look
-// is the default; a client's pair swaps in via the SAME mechanics — CSS
-// variables for the UI, and a generated 10-colour chart palette that replicates
-// how Howler's own palette relates to its brand pair.
+// One source of truth for the brand pair (primary + secondary) AND the brand
+// logo. Howler's look is the default; a client's pair + logo swap in via the SAME
+// mechanics — CSS variables for the UI, a generated 10-colour chart palette, and
+// the resolved logo shown across the app shell (sidebar + identity).
+
+import { useState, useEffect } from 'react';
 
 const HOWLER_PRIMARY = '#FF385C';
 const HOWLER_SECONDARY = '#FF6B35';
@@ -11,7 +13,7 @@ const HOWLER_PALETTE = ['#FF385C', '#FF6B35', '#FFB020', '#06B6D4', '#7C3AED', '
 // The fixed tail (series 6-10) for the Howler default.
 const HOWLER_TAIL = ['#10B981', '#EC4899', '#3B82F6', '#F97316', '#14B8A6'];
 
-let current = { primary: HOWLER_PRIMARY, secondary: HOWLER_SECONDARY, chart3: '', chart4: '', chart5: '' };
+let current = { primary: HOWLER_PRIMARY, secondary: HOWLER_SECONDARY, chart3: '', chart4: '', chart5: '', logo: '' };
 
 // ── colour maths ──
 function hexToRgb(hex) {
@@ -90,8 +92,8 @@ export function chartPalette() {
 export const brandPrimary = () => current.primary;
 
 // ── CSS variable application ──
-export function applyBrand({ primary, secondary, chart3, chart4, chart5 } = {}) {
-  current = { primary: primary || HOWLER_PRIMARY, secondary: secondary || HOWLER_SECONDARY, chart3: chart3 || '', chart4: chart4 || '', chart5: chart5 || '' };
+export function applyBrand({ primary, secondary, chart3, chart4, chart5, logo } = {}) {
+  current = { primary: primary || HOWLER_PRIMARY, secondary: secondary || HOWLER_SECONDARY, chart3: chart3 || '', chart4: chart4 || '', chart5: chart5 || '', logo: logo || '' };
   const root = document.documentElement;
   root.style.setProperty('--brand', current.primary);
   root.style.setProperty('--brand-2', current.secondary);
@@ -100,8 +102,21 @@ export function applyBrand({ primary, secondary, chart3, chart4, chart5 } = {}) 
   window.dispatchEvent(new Event('brand-changed'));
 }
 export function resetBrand() {
-  current = { primary: HOWLER_PRIMARY, secondary: HOWLER_SECONDARY, chart3: '', chart4: '', chart5: '' };
+  current = { primary: HOWLER_PRIMARY, secondary: HOWLER_SECONDARY, chart3: '', chart4: '', chart5: '', logo: '' };
   const root = document.documentElement;
   for (const v of ['--brand', '--brand-2', '--brand-dark', '--brand-rgb']) root.style.removeProperty(v);
   window.dispatchEvent(new Event('brand-changed'));
+}
+// The active client's resolved brand logo (their branding logo, falling back to
+// their entity logo) — shown across the app shell. '' = Howler default (no logo).
+export const brandLogo = () => current.logo;
+// Subscribe a component to the current brand logo; re-renders when it changes.
+export function useBrandLogo() {
+  const [v, setV] = useState(current.logo);
+  useEffect(() => {
+    const on = () => setV(current.logo);
+    window.addEventListener('brand-changed', on);
+    return () => window.removeEventListener('brand-changed', on);
+  }, []);
+  return v;
 }
