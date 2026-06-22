@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { api } from '../lib/api.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
+import { useAuth } from '../lib/auth.jsx';
 
 // Set or edit a metric alert (insight → action). Like the goal editor, you point
 // it at a single-value (KPI) tile you already look at — the alert watches that live
@@ -17,10 +18,15 @@ const TEMPLATES = [
   { key: 'revenue', emoji: '💰', label: 'Revenue milestone', hint: 'When revenue crosses a number', ruleType: 'threshold', operator: 'gte', unit: 'ZAR', name: 'Revenue milestone' },
   { key: 'lowstock', emoji: '⚠️', label: 'Low stock', hint: 'When tickets left drop below', ruleType: 'depletion', unit: 'tickets', name: 'Low stock' },
   { key: 'target', emoji: '🎯', label: 'Sales target', hint: 'When tickets sold reach', ruleType: 'threshold', operator: 'gte', unit: 'tickets', name: 'Sales target' },
+  // These two jump straight into a built metric, pre-filtered by Ticket Type /
+  // Category — you just pick the value + measure + threshold.
+  { key: 'tickettype', emoji: '🎟', label: 'Ticket type', hint: 'Filter to a ticket type', metric: true, filterHint: 'type', ruleType: 'threshold', operator: 'gte', unit: 'tickets', name: 'Ticket type alert' },
+  { key: 'category', emoji: '🏷', label: 'Ticket category', hint: 'Filter to a category', metric: true, filterHint: 'category', ruleType: 'threshold', operator: 'gte', unit: 'tickets', name: 'Category alert' },
 ];
 
-export default function AlertEditor({ entityId, suiteId, suiteName, alert, smsAvailable = false, onClose, onSaved }) {
+export default function AlertEditor({ entityId, suiteId, suiteName, alert, smsAvailable = false, initialTemplate = null, onClose, onSaved }) {
   const isMobile = useIsMobile();
+  const { isAdmin } = useAuth();
   const editing = !!alert;
 
   const [name, setName] = useState(alert?.name || '');
@@ -48,6 +54,11 @@ export default function AlertEditor({ entityId, suiteId, suiteName, alert, smsAv
   const [measure, setMeasure] = useState(alert?.measure || '');
   const [mFilters, setMFilters] = useState(() => Object.entries(alert?.metricFilters || {}).map(([field, value]) => ({ field, value })));
   const [filterVals, setFilterVals] = useState({}); // dimensionField -> [values] | 'loading'
+  const [filterHint, setFilterHint] = useState(''); // 'type' | 'category' — from a starter card, resolved to a real dimension
+
+  const [templates, setTemplates] = useState([]); // reusable alert templates (this client + global)
+  const [tmplBusy, setTmplBusy] = useState(false);
+  const [pendingRefs, setPendingRefs] = useState(null); // tile ref from a template, resolved once the catalogue loads
 
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -102,6 +113,43 @@ export default function AlertEditor({ entityId, suiteId, suiteName, alert, smsAv
     return () => { alive = false; };
   }, [source, dashboardId, tileId, suiteId, exKey, measure, JSON.stringify(mFilters)]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Reusable templates for this client (their own + global).
+  useEffect(() => { if (entityId) api.alertTemplates(entityId).then((r) => setTemplates(r.templates || [])).catch(() => {}); }, [entityId]);
+
+  // A starter card asked for a Ticket Type / Category filter: pick the explore that
+  // has that dimension (if we can), then pre-add the matching filter row.
+  const hintRe = (h) => (h === 'category' ? /categor/i : /ticket\s*type|\btype\b/i);
+  useEffect(() => {
+    if (source !== 'metric' || !filterHint || exKey || !exCat) return;
+    const re = hintRe(filterHint);
+    const match = (exCat.explores || []).find((e) => (e.dimensions || []).some((d) => re.test(d.label) || re.test(d.name)));
+    if (match) setExKey(`${match.model}::${match.view}`);
+  }, [source, filterHint, exKey, exCat]);
+  useEffect(() => {
+    if (source !== 'metric' || !filterHint || !curExplore) return;
+    const re = hintRe(filterHint);
+    const dim = dimsFor().find((d) => re.test(d.label) || re.test(d.name));
+    if (dim) { setMFilters((fs) => (fs.some((f) => f.field === dim.name) ? fs : [...fs, { field: dim.name, value: '' }])); loadFilterVals(dim.name); }
+    setFilterHint('');
+  }, [source, filterHint, curExplore]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Resolve a template's tile ref against this client's catalogue (by id, else by name).
+  useEffect(() => {
+    if (!pendingRefs || !cat?.dashboards) return;
+    const ds = cat.dashboards;
+    const d = ds.find((x) => x.dashboardId === pendingRefs.dashboardId) || (pendingRefs.dashboardName && ds.find((x) => (x.title || '') === pendingRefs.dashboardName));
+    if (d) {
+      setDashboardId(d.dashboardId);
+      const t = (d.tiles || []).find((x) => x.tileId === pendingRefs.tileId) || (pendingRefs.tileName && (d.tiles || []).find((x) => (x.title || '') === pendingRefs.tileName));
+      setTileId(t ? t.tileId : '');
+    }
+    setPendingRefs(null);
+  }, [pendingRefs, cat]);
+
+  // Opened from a template (the page's Templates tab) — apply it once.
+  const tmplApplied = useRef(false);
+  useEffect(() => { if (initialTemplate && !tmplApplied.current) { tmplApplied.current = true; applySavedTemplate(initialTemplate); } }, [initialTemplate]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const dashboards = cat?.dashboards || [];
   // An alert watches ONE headline number, so only single-value (KPI) tiles qualify
   // (mirrors the goal editor's test).
@@ -110,12 +158,69 @@ export default function AlertEditor({ entityId, suiteId, suiteName, alert, smsAv
   const tileName = () => { const d = dashboards.find((x) => x.dashboardId === dashboardId); return d?.tiles?.find((x) => x.tileId === tileId)?.title || ''; };
   const dashName = () => dashboards.find((x) => x.dashboardId === dashboardId)?.title || '';
 
+  // Built-in starter cards. A `metric` starter jumps to the metric builder and
+  // (via filterHint) pre-adds a Ticket Type / Category filter once an explore loads.
   const applyTemplate = (t) => {
     setRuleType(t.ruleType);
     if (t.operator) setOperator(t.operator);
     if (t.unit) setUnit(t.unit);
     if (!name) setName(t.name);
     if (t.ruleType === 'sold_out') setThreshold('0');
+    if (t.metric) { setSource('metric'); setMFilters([]); if (t.filterHint) setFilterHint(t.filterHint); }
+    else setSource('tile');
+  };
+
+  // Apply a SAVED template payload (the full reusable setup).
+  const applySavedTemplate = (p) => {
+    if (!p) return;
+    if (p.name) setName(p.name);
+    if (p.ruleType) setRuleType(p.ruleType);
+    if (p.operator) setOperator(p.operator);
+    if (p.unit) setUnit(p.unit);
+    if (p.threshold != null) setThreshold(String(p.threshold));
+    if (Array.isArray(p.channels)) setChannels(p.channels);
+    if (p.priority) setPriority(p.priority);
+    if (p.frequency) setFrequency(p.frequency);
+    if (p.cooldownMin != null) setCooldownMin(String(p.cooldownMin));
+    if (p.quietStart != null) setQuietStart(p.quietStart);
+    if (p.quietEnd != null) setQuietEnd(p.quietEnd);
+    if (p.source === 'metric' && p.metricRef) {
+      setSource('metric');
+      setExKey(`${p.metricRef.model}::${p.metricRef.view}`);
+      setMeasure(p.metricRef.measure || '');
+      setMFilters(Object.entries(p.metricRef.metricFilters || {}).map(([field, value]) => ({ field, value })));
+    } else if (p.source === 'tile' && p.tileRef) {
+      setSource('tile');
+      setPendingRefs(p.tileRef); // resolved by id/name once the tile catalogue loads
+    }
+  };
+
+  // The reusable subset of the current form (no live state / SMS numbers).
+  const templatePayload = () => ({
+    name, ruleType, source,
+    tileRef: source === 'tile' && dashboardId && tileId ? { dashboardId, tileId, dashboardName: dashName(), tileName: tileName() } : null,
+    metricRef: source === 'metric' && curExplore && measure ? { model: curExplore.model, view: curExplore.view, measure, measureLabel: measureObj()?.label || '', metricFilters: metricFiltersObj(), metricLabel: metricLabelStr() } : null,
+    operator: ruleType === 'depletion' || ruleType === 'sold_out' ? 'lte' : operator,
+    threshold: ruleType === 'sold_out' ? 0 : (threshold === '' ? 0 : Number(threshold)),
+    unit, channels, priority, frequency, cooldownMin: Number(cooldownMin) || 60, quietStart, quietEnd,
+  });
+
+  const saveAsTemplate = async () => {
+    const nm = (name || '').trim() || (window.prompt('Template name?') || '');
+    if (!nm.trim() || !entityId) return;
+    if (source === 'metric' ? !(curExplore && measure) : !(dashboardId && tileId)) { setErr('Pick what to watch before saving a template.'); return; }
+    // Admins can publish a portable scaffold to every client.
+    const global = isAdmin && window.confirm('Make this available to ALL clients?\n\nOK = global template (every client)\nCancel = just this client');
+    setTmplBusy(true);
+    try {
+      const r = await api.saveAlertTemplate({ entityId, name: nm.trim(), payload: { ...templatePayload(), name: nm.trim() }, global });
+      if (r?.template) { setTemplates((t) => [r.template, ...t.filter((x) => x.id !== r.template.id)]); window.alert(`Saved “${r.template.name}”${r.template.global ? ' as a GLOBAL template (all clients)' : ''}.`); }
+    } catch (e) { window.alert(`Couldn't save template: ${e.message}`); }
+    finally { setTmplBusy(false); }
+  };
+  const removeTemplate = async (id) => {
+    if (!window.confirm('Delete this template?')) return;
+    try { await api.deleteAlertTemplate(id); setTemplates((t) => t.filter((x) => x.id !== id)); } catch { /* ignore */ }
   };
 
   const toggleChannel = (c) => setChannels((cs) => (cs.includes(c) ? cs.filter((x) => x !== c) : [...cs, c]));
@@ -204,6 +309,20 @@ export default function AlertEditor({ entityId, suiteId, suiteName, alert, smsAv
           </Field>
         )}
 
+        {/* …or a saved template (this client's own + 🌐 global ones). */}
+        {!editing && templates.length > 0 && (
+          <Field label="…or a saved template">
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {templates.map((t) => (
+                <span key={t.id} style={tmplChip}>
+                  <button type="button" onClick={() => applySavedTemplate(t.payload)} style={tmplChipBtn} title={t.global ? 'Global template (links your own data)' : 'Use this template'}>{t.global ? '🌐 ' : ''}{t.payload?.name || t.name}</button>
+                  {(!t.global || isAdmin) && <button type="button" onClick={() => removeTemplate(t.id)} aria-label="Delete template" style={tmplChipX}>✕</button>}
+                </span>
+              ))}
+            </div>
+          </Field>
+        )}
+
         <Field label="Name">
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. VIP nearly gone, R1m revenue" style={inp} autoFocus />
         </Field>
@@ -233,7 +352,8 @@ export default function AlertEditor({ entityId, suiteId, suiteName, alert, smsAv
             ))}
           </Field>
         ) : (
-          <Field label="Build the metric" hint="Pick a measure and (optionally) filter it — e.g. tickets sold where Ticket Type = VIP. No tile needed.">
+          <Field label="Build the metric" hint="Choose the data, filter it to the slice you care about (e.g. Ticket Type = VIP), then pick the measure. No tile needed.">
+            {/* 1 — the data source */}
             <select value={exKey} onChange={(e) => { setExKey(e.target.value); setMeasure(''); setMFilters([]); }} style={inp}>
               <option value="">{exCat ? 'Choose a data source…' : 'Loading…'}</option>
               {explores.map((e) => <option key={`${e.model}::${e.view}`} value={`${e.model}::${e.view}`}>{e.label}</option>)}
@@ -243,14 +363,10 @@ export default function AlertEditor({ entityId, suiteId, suiteName, alert, smsAv
                 No data sources available yet (these come from your existing dashboards). Use “A dashboard tile” instead.
               </div>
             )}
+            {/* 2 — the filter(s) FIRST (Ticket Type / Category …) */}
             {curExplore && (
-              <select value={measure} onChange={(e) => { setMeasure(e.target.value); const m = measuresFor().find((x) => x.name === e.target.value); if (m && /revenue|amount|sales|gross|net|value|spend/i.test(`${m.label} ${m.name}`)) setUnit('ZAR'); }} style={{ ...inp, marginTop: 8 }}>
-                <option value="">Choose a measure…</option>
-                {measuresFor().map((m) => <option key={m.name} value={m.name}>{m.label}</option>)}
-              </select>
-            )}
-            {curExplore && measure && (
               <div style={{ marginTop: 10 }}>
+                <div style={subLabel}>Filter (optional)</div>
                 {mFilters.map((f, i) => (
                   <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
                     <select value={f.field} onChange={(e) => { setFilter(i, { field: e.target.value, value: '' }); loadFilterVals(e.target.value); }} style={{ ...inp, flex: 1 }}>
@@ -269,6 +385,16 @@ export default function AlertEditor({ entityId, suiteId, suiteName, alert, smsAv
                   </div>
                 ))}
                 <button type="button" onClick={addFilter} style={addFilterBtn}>＋ Add a filter (e.g. Ticket Type, Category)</button>
+              </div>
+            )}
+            {/* 3 — the measure */}
+            {curExplore && (
+              <div style={{ marginTop: 10 }}>
+                <div style={subLabel}>Measure</div>
+                <select value={measure} onChange={(e) => { setMeasure(e.target.value); const m = measuresFor().find((x) => x.name === e.target.value); if (m && /revenue|amount|sales|gross|net|value|spend/i.test(`${m.label} ${m.name}`)) setUnit('ZAR'); }} style={inp}>
+                  <option value="">Choose a measure…</option>
+                  {measuresFor().map((m) => <option key={m.name} value={m.name}>{m.label}</option>)}
+                </select>
               </div>
             )}
           </Field>
@@ -380,6 +506,7 @@ export default function AlertEditor({ entityId, suiteId, suiteName, alert, smsAv
             <button onClick={() => setConfirmDel(true)} style={btnDelGhost} aria-label="Delete alert" title="Delete this alert">🗑</button>
           ))}
           {editing && <button onClick={test} disabled={testing} style={btnGhost} title="Send a test notification now">{testing ? 'Sending…' : '🔔 Test'}</button>}
+          {name.trim() && <button onClick={saveAsTemplate} disabled={tmplBusy} style={btnGhost} title="Save this setup as a reusable template">{tmplBusy ? 'Saving…' : '📑 Template'}</button>}
           <button onClick={onClose} style={btnGhost}>Cancel</button>
           <button onClick={save} disabled={busy} style={btnPrimary}>{busy ? 'Saving…' : (editing ? 'Save alert' : 'Create alert')}</button>
         </div>
@@ -449,6 +576,10 @@ const xBtn = { border: 'none', background: 'rgba(128,128,128,0.12)', color: 'var
 const readsBox = { marginTop: 9, padding: '8px 11px', background: 'rgba(128,128,128,0.07)', borderRadius: 9, fontSize: 13, display: 'flex', alignItems: 'center', gap: 7 };
 const msX = { border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--muted)', borderRadius: 9, fontSize: 13, cursor: 'pointer', flexShrink: 0, width: 38 };
 const addFilterBtn = { border: '1px dashed var(--hairline)', background: 'transparent', color: 'var(--brand)', borderRadius: 9, fontSize: 12, fontWeight: 700, padding: '7px 11px', cursor: 'pointer', width: '100%' };
+const subLabel = { fontSize: 11, fontWeight: 700, color: 'var(--muted)', marginBottom: 5 };
+const tmplChip = { display: 'inline-flex', alignItems: 'center', gap: 2, border: '1px solid var(--hairline)', borderRadius: 980, background: 'var(--card)', overflow: 'hidden' };
+const tmplChipBtn = { border: 'none', background: 'transparent', color: 'var(--brand)', fontWeight: 700, fontSize: 12, cursor: 'pointer', padding: '6px 4px 6px 11px', fontFamily: 'inherit' };
+const tmplChipX = { border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 11, padding: '6px 9px 6px 4px', lineHeight: 1 };
 const miniBtn = { border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--brand)', borderRadius: 980, fontSize: 11, fontWeight: 700, padding: '3px 9px', cursor: 'pointer' };
 const sentenceBox = { marginTop: 6, padding: '11px 13px', background: 'rgba(var(--brand-rgb,10,132,255),0.07)', border: '1px solid var(--hairline)', borderRadius: 10, fontSize: 13, lineHeight: 1.5, fontWeight: 600 };
 const btnGhost = { flex: '0 0 auto', padding: '10px 14px', borderRadius: 10, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', fontSize: 13.5, fontWeight: 700, cursor: 'pointer' };

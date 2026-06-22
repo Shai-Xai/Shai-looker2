@@ -90,6 +90,20 @@ function mount(app, { db, auth, resolveTileValue, resolveCustomMetric, metricCat
       status     TEXT NOT NULL DEFAULT 'fired' -- fired | suppressed (cooldown) | error
     );
     CREATE INDEX IF NOT EXISTS idx_alert_events ON alert_events(alert_id, at);
+
+    -- Reusable alert setups. scope 'entity' = one client's; 'global' = a platform
+    -- template Howler publishes to every client (re-links tiles by name; metric
+    -- refs port directly on the shared LookML model). Mirrors goal_templates.
+    CREATE TABLE IF NOT EXISTS alert_templates (
+      id         TEXT PRIMARY KEY,
+      entity_id  TEXT NOT NULL DEFAULT '',
+      scope      TEXT NOT NULL DEFAULT 'entity',  -- entity | global
+      name       TEXT NOT NULL,
+      payload    TEXT NOT NULL DEFAULT '{}',
+      created_by TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_alert_templates ON alert_templates(entity_id);
   `);
 
   // Additive migrations for DBs created before the "metric" (tile-less) source.
@@ -513,6 +527,65 @@ function mount(app, { db, auth, resolveTileValue, resolveCustomMetric, metricCat
     if (typeof metricFilterValues !== 'function') return res.json({ values: [] });
     try { res.json({ values: await metricFilterValues({ model, view, field, user: req.user, suiteId: req.params.suiteId }) }); }
     catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ── Reusable templates (a client's own + Howler's global ones) ───────────────
+  // The reusable subset of an alert: the rule + how-you're-told, plus the metric/
+  // tile reference. Instance-only bits (live state, SMS numbers) are dropped. Tile
+  // refs keep the dashboard + tile NAMES so a global template re-resolves to each
+  // client's matching tile by name; metric refs (LookML field names) port directly.
+  const tmplCanEntity = (user, eid) => isAdmin(user) || (user.entityIds || []).includes(eid);
+  function templatePayloadFromAlert(a) {
+    return {
+      name: a.name, ruleType: a.ruleType, source: a.source,
+      tileRef: a.source === 'tile' && a.dashboardId && a.tileId
+        ? { dashboardId: a.dashboardId, tileId: a.tileId, dashboardName: a.dashboardName, tileName: a.tileName } : null,
+      metricRef: a.source === 'metric' && a.measure
+        ? { model: a.model, view: a.view, measure: a.measure, measureLabel: a.measureLabel, metricFilters: a.metricFilters, metricLabel: a.metricLabel } : null,
+      operator: a.operator, threshold: a.threshold, unit: a.unit,
+      channels: a.channels, priority: a.priority, frequency: a.frequency, cooldownMin: a.cooldownMin,
+      quietStart: a.quietStart, quietEnd: a.quietEnd,
+    };
+  }
+
+  app.get('/api/alerts/templates/:entityId', auth.requireAuth, (req, res) => {
+    if (!enabled()) return off(res);
+    if (!tmplCanEntity(req.user, req.params.entityId)) return res.status(403).json({ error: 'Not allowed' });
+    // This client's own templates PLUS every global (platform) template.
+    const rows = sql.prepare("SELECT id, name, payload, scope, created_at FROM alert_templates WHERE (scope='entity' AND entity_id=?) OR scope='global' ORDER BY scope DESC, created_at DESC").all(req.params.entityId);
+    res.json({ templates: rows.map((r) => ({ id: r.id, name: r.name, payload: parseJson(r.payload, {}), scope: r.scope, global: r.scope === 'global', createdAt: r.created_at })) });
+  });
+
+  app.post('/api/alerts/templates', auth.requireAuth, (req, res) => {
+    if (!enabled()) return off(res);
+    let { entityId, name, payload } = req.body || {};
+    const fromAlertId = req.body?.fromAlertId;
+    const wantGlobal = !!req.body?.global;
+    if (wantGlobal && !isAdmin(req.user)) return res.status(403).json({ error: 'Only admins can create global templates' });
+    if (fromAlertId) {
+      const a = alertById(fromAlertId);
+      if (!a) return res.status(404).json({ error: 'Alert not found' });
+      if (!canView(req.user, a.suiteId)) return res.status(403).json({ error: 'Not allowed' });
+      entityId = a.entityId; name = name || a.name; payload = templatePayloadFromAlert(a);
+    }
+    if (!name || !payload || typeof payload !== 'object') return res.status(400).json({ error: 'name and payload are required' });
+    const scope = wantGlobal ? 'global' : 'entity';
+    const eid = wantGlobal ? '' : entityId;
+    if (!wantGlobal && (!eid || !tmplCanEntity(req.user, eid))) return res.status(403).json({ error: 'Not allowed' });
+    const id = uuid(); const ts = now();
+    sql.prepare('INSERT INTO alert_templates (id, entity_id, scope, name, payload, created_by, created_at) VALUES (?,?,?,?,?,?,?)')
+      .run(id, eid, scope, String(name).slice(0, 120), JSON.stringify(payload).slice(0, 8000), req.user.email, ts);
+    res.status(201).json({ template: { id, name: String(name).slice(0, 120), payload, scope, global: wantGlobal, createdAt: ts } });
+  });
+
+  app.delete('/api/alerts/templates/:id', auth.requireAuth, (req, res) => {
+    if (!enabled()) return off(res);
+    const row = sql.prepare('SELECT entity_id, scope FROM alert_templates WHERE id=?').get(req.params.id);
+    if (!row) return res.json({ ok: true });
+    const allowed = row.scope === 'global' ? isAdmin(req.user) : tmplCanEntity(req.user, row.entity_id);
+    if (!allowed) return res.status(403).json({ error: 'Not allowed' });
+    sql.prepare('DELETE FROM alert_templates WHERE id=?').run(req.params.id);
+    res.json({ ok: true });
   });
 
   // Status (client uses it to decide whether to show the feature).

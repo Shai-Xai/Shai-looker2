@@ -473,4 +473,8 @@ export const api = {
   alertMetricCatalog: (suiteId) => fetch(`/api/alerts/suites/${suiteId}/metric-catalog`).then(json),
   alertMetricValue: (suiteId, body) => fetch(`/api/alerts/suites/${suiteId}/metric-value`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
   alertMetricFilterValues: (suiteId, body) => fetch(`/api/alerts/suites/${suiteId}/metric-filter-values`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
+  // Reusable alert templates (a client's own + Howler's global ones).
+  alertTemplates: (entityId) => fetch(`/api/alerts/templates/${entityId}`).then(json),
+  saveAlertTemplate: (body) => fetch('/api/alerts/templates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
+  deleteAlertTemplate: (id) => fetch(`/api/alerts/templates/${id}`, { method: 'DELETE' }).then(json),
 };

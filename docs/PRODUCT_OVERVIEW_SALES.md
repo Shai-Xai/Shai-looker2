@@ -340,6 +340,12 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-22** — **Alerts: templates + Ticket Type/Category starters** 🧪: alerts can now be
+  **saved as reusable templates** — a client's own, or (admins) **🌐 global** templates pushed to
+  every client (they re-link to each client's matching data by name). A **Templates** tab on the
+  Alerts page lists and reuses them. The "Start from" gallery gains **🎟 Ticket type** and
+  **🏷 Ticket category** starters that jump straight into a pre-filtered metric — pick the value +
+  measure + number. The metric builder now reads **data → filter → measure** (filter first).
 - **2026-06-22** — **Alerts: custom metric source** 🧪: alerts can now watch a metric
   that has **no dashboard tile** — pick a measure and filter it by a dimension like
   **Ticket Type** or **Category** (e.g. "tickets sold where Ticket Type = VIP"), with
