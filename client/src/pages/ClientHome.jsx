@@ -209,24 +209,33 @@ export default function ClientHome() {
                         {s.selected ? '✓ ' : ''}{s.name}{!s.active ? ' · past' : ''}
                       </button>
                     ))}
-                    {isAdmin && <button onClick={() => { setDiag('loading'); api.myBriefingEvents(homeEntityId, true, true).then((r) => setDiag(r.diag || [])).catch(() => setDiag([])); }} style={{ ...eventChip(false), marginLeft: 'auto' }} title="Admin: show the filters each event's tiles resolved to">🔍 Diagnose</button>}
+                    {isAdmin && <button onClick={() => { setDiag('loading'); api.myBriefingEvents(homeEntityId, true, true).then((r) => setDiag(r || {})).catch(() => setDiag({ diag: [] })); }} style={{ ...eventChip(false), marginLeft: 'auto' }} title="Admin: show the filters each event's tiles resolved to">🔍 Diagnose</button>}
                   </div>
-                  {/* Admin diagnostic: what FILTERS each event's tiles actually ran with
-                      (so a wrong/absent event lock — tiles pulling another event — is visible). */}
+                  {/* Admin diagnostic: per selected event, the FILTERS each tile ran with
+                      (so a wrong/absent event lock is visible) + tiles dropped and why
+                      (e.g. 'no rows' = no sales for that event). */}
                   {isAdmin && diag && (
                     <div style={{ marginBottom: 12, border: '1px solid var(--hairline)', borderRadius: 8, padding: '8px 10px', fontSize: 11.5, background: 'var(--elevated, rgba(128,128,128,0.06))' }}>
-                      {diag === 'loading' ? <span style={{ color: 'var(--muted)' }}>Resolving live filters…</span>
-                        : diag.length === 0 ? <span style={{ color: 'var(--muted)' }}>No facts resolved for the selected events.</span>
-                        : diag.map((g) => (
-                          <div key={g.suiteId} style={{ marginBottom: 8 }}>
-                            <div style={{ fontWeight: 800 }}>{g.suiteName}</div>
-                            {g.tiles.map((t, i) => (
-                              <div key={i} style={{ color: 'var(--muted-2)', marginTop: 2, lineHeight: 1.45 }}>
-                                <b>{t.title}</b> = {t.value} <span style={{ color: 'var(--muted)' }}>· {Object.entries(t.filters || {}).map(([k, v]) => `${k}=${v}`).join(', ') || 'no filters'}</span>
-                              </div>
-                            ))}
-                          </div>
-                        ))}
+                      {diag === 'loading' ? <span style={{ color: 'var(--muted)' }}>Resolving live filters…</span> : (
+                        <>
+                          {(diag.diag || []).map((g) => (
+                            <div key={g.suiteId} style={{ marginBottom: 8 }}>
+                              <div style={{ fontWeight: 800 }}>{g.suiteName}{!g.tiles.length ? ' — no tiles returned data' : ''}</div>
+                              {g.tiles.map((t, i) => (
+                                <div key={i} style={{ color: 'var(--muted-2)', marginTop: 2, lineHeight: 1.45 }}>
+                                  <b>{t.title}</b> = {t.value} <span style={{ color: 'var(--muted)' }}>· {Object.entries(t.filters || {}).map(([k, v]) => `${k}=${v}`).join(', ') || 'no filters'}</span>
+                                </div>
+                              ))}
+                            </div>
+                          ))}
+                          {(diag.dropped || []).length > 0 && (
+                            <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--hairline)' }}>
+                              <div style={{ fontWeight: 800, color: '#b45309' }}>Dropped tiles ({diag.dropped.length})</div>
+                              {diag.dropped.map((d, i) => <div key={i} style={{ color: 'var(--muted)', marginTop: 2 }}>{d}</div>)}
+                            </div>
+                          )}
+                        </>
+                      )}
                     </div>
                   )}
                   {/* Per-event sections — collapsed; busiest (first) expanded. */}

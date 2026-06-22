@@ -2078,14 +2078,14 @@ const briefInstructions = (user, entityId, segment) => [aiInstructionsFor(null),
 // Build briefing facts scoped to the selected events, grouped by event (in the
 // selected order). Reuses buildFacts (and its Looker query cache).
 async function factGroups(user, entityId, selectedIds, force) {
-  const { tiles, catalogue } = await buildFacts(user, entityId, force, true, [], { suiteIds: selectedIds });
+  const { tiles, catalogue, dropped = [] } = await buildFacts(user, entityId, force, true, [], { suiteIds: selectedIds });
   const byId = Object.fromEntries(catalogue.map((c) => [c.dashboardId, c]));
   const map = new Map();
   for (const t of tiles) {
     if (!map.has(t.suiteId)) map.set(t.suiteId, { suiteId: t.suiteId, suiteName: t.suiteName || '', tiles: [] });
     map.get(t.suiteId).tiles.push(t);
   }
-  return { groups: selectedIds.map((id) => map.get(id)).filter(Boolean), byId };
+  return { groups: selectedIds.map((id) => map.get(id)).filter(Boolean), byId, dropped };
 }
 // The portfolio OVERALL summary (fast, returned first). Includes the suite list
 // so the home page can render the event picker + collapsed sections immediately.
@@ -2116,8 +2116,18 @@ async function generateEvents(user, entityId, segment, { force = false, debug = 
   const { suites, selected } = briefingSuites(user, entityId);
   if (suites.length <= 1 || !selected.length) return debug ? { diag: [] } : { events: [] };
   if (debug) {
-    const { groups } = await factGroups(user, entityId, selected, true);
-    return { diag: groups.map((g) => ({ suiteId: g.suiteId, suiteName: g.suiteName, tiles: g.tiles.slice(0, 12).map((t) => ({ dashTitle: t.dashTitle, setName: t.setName, title: t.title, value: factValueLabel(t), filters: t.filters || {} })) })) };
+    const { groups, dropped } = await factGroups(user, entityId, selected, true);
+    const nameById = Object.fromEntries(suites.map((s) => [s.id, s.name]));
+    const gById = Object.fromEntries(groups.map((g) => [g.suiteId, g]));
+    // One entry per SELECTED event (even those with no facts), so an empty event's
+    // cause is visible alongside the dropped-tile reasons below.
+    return {
+      diag: selected.map((id) => {
+        const g = gById[id];
+        return { suiteId: id, suiteName: nameById[id] || '', tiles: (g ? g.tiles : []).slice(0, 12).map((t) => ({ dashTitle: t.dashTitle, setName: t.setName, title: t.title, value: factValueLabel(t), filters: t.filters || {} })) };
+      }),
+      dropped: (dropped || []).slice(0, 50),
+    };
   }
   if (!insights.isConfigured(apiKey)) return { events: [] };
   const key = `${user.id}:${entityId}:events:${selected.join(',')}`;
