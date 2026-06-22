@@ -630,13 +630,12 @@ function Entities({ fields }) {
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState(null);
   const [q, setQ] = useState(''); // client search
-  const load = () => {
-    setLoading(true);
-    return Promise.all([api.adminListEntities(), api.adminListSuites(), api.adminListSets(), api.adminListUsers(), api.listDashboards()])
-      .then(([e, su, s, u, d]) => { setItems(e); setSuites(su); setSets(s); setUsers(u); setDashTitle(Object.fromEntries(d.map((x) => [x.id, x.title]))); })
-      .finally(() => setLoading(false));
-  };
-  useEffect(() => { load(); }, []);
+  // Refreshes (onChange after a save / new suite) must NOT toggle `loading` —
+  // doing so unmounts ClientDetail and resets its tab to Settings. Only the first
+  // load shows the blocking spinner; later loads update in place.
+  const load = () => Promise.all([api.adminListEntities(), api.adminListSuites(), api.adminListSets(), api.adminListUsers(), api.listDashboards()])
+    .then(([e, su, s, u, d]) => { setItems(e); setSuites(su); setSets(s); setUsers(u); setDashTitle(Object.fromEntries(d.map((x) => [x.id, x.title]))); });
+  useEffect(() => { load().finally(() => setLoading(false)); }, []);
   if (loading) return <Muted>Loading…</Muted>;
 
   const suitesOf = (eid) => suites.filter((s) => s.entityId === eid);
@@ -1774,7 +1773,7 @@ function LockedFilterEditor({ value, onChange, fields, categories, restrictTo = 
       </div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
         <button style={miniBtn} onClick={addRow}>+ Add locked filter</button>
-        <button style={miniBtn} onClick={() => seedDefaults(categories && categories.length ? categories : LOCK_CATEGORIES, { force: true })}>+ Add default filters</button>
+        {!restrictTo && <button style={miniBtn} onClick={() => seedDefaults(categories && categories.length ? categories : LOCK_CATEGORIES, { force: true })}>+ Add default filters</button>}
       </div>
     </div>
   );
