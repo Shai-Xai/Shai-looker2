@@ -1800,7 +1800,7 @@ async function buildFacts(user, entityId, force = false, alignDaysBefore = false
   const suiteSet = Array.isArray(opts.suiteIds) && opts.suiteIds.length ? new Set(opts.suiteIds) : null;
   // Scale the tile budget when covering multiple events so each gets a fair share
   // (≈10 tiles/event, capped) rather than all events squeezing into the single cap.
-  const maxTiles = suiteSet ? Math.min(60, Math.max(FACT_MAX_TILES, suiteSet.size * 10)) : FACT_MAX_TILES;
+  const maxTiles = suiteSet ? Math.min(72, Math.max(FACT_MAX_TILES, suiteSet.size * 12)) : FACT_MAX_TILES;
   const picks = []; // { tile, def, suiteId, setName, dashTitle, pinned }
   const seen = new Set();
   const addTile = (def, tile, suiteId, pinned) => {
@@ -1897,9 +1897,16 @@ async function buildFacts(user, entityId, force = false, alignDaysBefore = false
       if (/cashless|vendor|\bbar\b|token|product/.test(n)) return 8; // empty pre-event → last
       return 5;
     };
-    // Always include a daily-sales and a ticket-types view per event (by tile
-    // title), so every event covers pace + mix — not just headline totals.
-    const MUST = [/daily\s*sales|sales\s*(by\s*)?day|sales\s*per\s*day|day(?:'s)?\s*sales/i, /ticket\s*type|type\s*of\s*ticket|tickets?\s*by\s*type|by\s*ticket\s*type/i];
+    // Always include, per event: daily-sales (pace), ticket-types (mix), abandoned
+    // carts (recoverable demand), and an audience-dynamics view (age/gender/geo) —
+    // matched by tile title — so each event covers pace + mix + funnel + audience,
+    // not just headline totals.
+    const MUST = [
+      /daily\s*sales|sales\s*(by\s*)?day|sales\s*per\s*day|day(?:'s)?\s*sales/i,
+      /ticket\s*type|type\s*of\s*ticket|tickets?\s*by\s*type|by\s*ticket\s*type/i,
+      /abandon/i,
+      /\bage\b|gender|demographic|nationalit|\bcountr|province|\bcit(y|ies)\b|catchment|\bregion\b/i,
+    ];
     for (const sid of suiteSet) {
       const dashes = catalogue.filter((c) => c.suiteId === sid).map((c) => store.get(c.dashboardId)).filter(Boolean);
       for (const re of MUST) {
