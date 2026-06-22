@@ -197,9 +197,13 @@ app.post('/api/admin/users', auth.requireAdmin, (req, res) => {
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.put('/api/admin/users/:id', auth.requireAdmin, (req, res) => {
-  const u = auth.updateUser(req.params.id, req.body || {});
-  if (!u) return res.status(404).json({ error: 'User not found' });
-  res.json(u);
+  try {
+    const u = auth.updateUser(req.params.id, req.body || {});
+    if (!u) return res.status(404).json({ error: 'User not found' });
+    res.json(u);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
 });
 app.delete('/api/admin/users/:id', auth.requireAdmin, (req, res) => {
   if (req.params.id === req.user.id) return res.status(400).json({ error: "You can't delete your own account" });

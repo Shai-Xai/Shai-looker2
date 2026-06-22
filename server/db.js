@@ -713,6 +713,12 @@ function updateUser(id, patch) {
   const cur = db.prepare('SELECT * FROM users WHERE id=?').get(id);
   if (!cur) return null;
   const email = patch.email ? patch.email.trim().toLowerCase() : cur.email;
+  // Email is unique — surface a clear message instead of a raw constraint 500
+  // when the target email already belongs to another login.
+  if (email !== cur.email) {
+    const clash = db.prepare('SELECT id FROM users WHERE email=? AND id!=?').get(email, id);
+    if (clash) throw new Error('That email is already used by another login.');
+  }
   const hash = patch.password ? bcrypt.hashSync(patch.password, 10) : cur.password_hash;
   const role = patch.role ? (patch.role === 'admin' ? 'admin' : 'client') : cur.role;
   db.prepare('UPDATE users SET email=?, password_hash=?, role=? WHERE id=?').run(email, hash, role, id);
