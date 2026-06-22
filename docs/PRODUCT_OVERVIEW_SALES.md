@@ -237,10 +237,15 @@ a pace read** — *ahead / on track / behind* — not just "are we there yet."
 - **Weekly goal nudge** — one calm **"your goals this week"** push (not per-event spam),
   summarising what **needs attention** (behind pace · forecast short · checkpoint missed)
   plus **wins** (reached). Howler staff can fire a **test nudge** to preview it.
-- **Goal types** — *hit a target* (≥), *stay under a cap* (≤), or a **healthy range** (a
+- **Goal types** — *hit a target* (≥), *stay under a cap* (≤), a **healthy range** (a
   band like *returning 30–38%*): in-band reads **On target**, drifting **above the band is
   flagged** (⚠ Above range) rather than falsely "reached" — for ratio metrics where too
-  far over is also wrong.
+  far over is also wrong; or a **mix / split** goal.
+- **Mix / split goals (compositions)** — track shares of a 100% whole that move together:
+  **New vs Returning**, **age bands**, local/international, ticket tiers, channels. Pick a
+  breakdown tile, set each slice's target share, and the goal shows the actual split as a
+  stacked bar — **✓ Balanced** when every slice sits in its band, **⚠ Mix drifting** when
+  one slips (e.g. Returning creeping up while New starves). Mark a **focus slice** to grow.
 - **Compare to last time, your way** — baseline from a past event, a **picked dashboard
   tile** (e.g. a last-year total, remembered + re-read live), or a typed number; one-tap
   **Match / +10% / +15% / +20%** target helpers.
