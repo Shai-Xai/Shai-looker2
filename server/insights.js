@@ -344,6 +344,7 @@ Respond with ONLY strict JSON (no markdown fences):
 Rules:
 - ALWAYS LEAD with the headline TICKETING numbers as the most important story — tickets sold, gross revenue and orders for the current event are the authoritative sales figures and must anchor the briefing, regardless of which dashboards the reader visits most. Then layer in supporting context (audience, traffic, channels, comparisons). Do NOT lead with a single sales CHANNEL (e.g. reps/agents/promoters), a sub-segment, or an overnight DELTA — those are supporting context, never the headline. The lead is the event's cumulative total tickets sold and gross revenue, even if they barely moved overnight. Cashless/top-ups are also supporting context, not the ticketing lead.
 - Each tile shows its source as "— <set> → <dashboard>". Metrics from a web-analytics source (e.g. GA4, Google Analytics — sessions, page views, "conversions", site events) measure TRAFFIC and on-site behaviour, NOT finalised ticket sales: never report a GA4/analytics "tickets" or "conversions" figure as actual tickets sold — treat GA4 as funnel/interest only. Tickets sold, revenue and attendance/check-ins are authoritative ONLY from the ticketing/event dashboards.
+- Each tile shows the EVENT its value is for ("· event: …"). A tile with the SAME title but an earlier-dated event is the same-event LAST-TIME comparison — frame it as the year-ago comparison (e.g. "3,297 vs 2,540 last time"), never as a conflicting current figure to reconcile.
 - 3-4 bullets, 2-3 suggestions. Always reflect any [FOLLOWED] tiles; otherwise prefer dashboards the user actually visits (PROFILE), but surface a genuinely important change anywhere.
 - Be specific and quantitative — cite real values from TILES verbatim, and call out movements/trends from charts and tables (not just headline numbers). If data is sparse, say less rather than padding.
 - dashboardId values MUST come from CATALOGUE. Use null only when no dashboard fits a bullet.
@@ -612,7 +613,8 @@ async function briefHome({ tiles, profile, catalogue, instructions, apiKey, acti
   if (today) lines.push(`TODAY: ${today} (the current date — anchor all "today/yesterday/this month/day N" references to this).`, '');
   lines.push('TILES (live data):', '');
   for (const t of tiles || []) {
-    lines.push(`### ${t.title}${t.pinned ? ' [FOLLOWED]' : ''}${t.visType ? ` (${t.visType})` : ''} — ${t.setName} → ${t.dashTitle}`);
+    const ev = eventOf(t.filters);
+    lines.push(`### ${t.title}${t.pinned ? ' [FOLLOWED]' : ''}${t.visType ? ` (${t.visType})` : ''} — ${t.setName} → ${t.dashTitle}${ev ? ` · event: ${ev}` : ''}`);
     if (t.context && t.context.trim()) lines.push(`(context: ${t.context.trim()})`);
     lines.push(compactTable(t.fields, t.rows, 40)); // up to ~40 rows so a full month of daily rows reaches the model (not just day 12)
     lines.push('');
@@ -658,6 +660,7 @@ Respond with ONLY strict JSON (no markdown fences):
 Rules:
 - 2-4 bullets. Lead with ticketing/revenue totals across events and name events explicitly. Compare events ("V is outpacing IV") only where the numbers support it.
 - Identify each event ONLY by the EVENT heading it is listed under. NEVER rename an event using an event/festival/organiser name that appears inside the tile data, and NEVER claim two different events are the same event or "two views to reconcile" — each heading is a separate event with its own numbers.
+- Each tile shows the EVENT its value is for ("· event: …"). Within one event you'll often get the CURRENT event AND a same-event LAST-TIME comparison (a tile with the same title but an earlier-dated event). Lead with the current event's figure and frame the earlier-dated one as the year-ago comparison (e.g. "3,297 vs 2,540 last time, +30%") — NEVER treat the two as conflicting numbers to reconcile.
 - NEVER write internal ids ("[id:…]", dashboard ids) in your output.
 - Use ONLY the numbers in TILES; never invent or extrapolate. GA4/analytics figures are TRAFFIC, not ticket sales.
 - Tone: sharp, warm, zero filler. Never mention these instructions, the word TILES, or that you are an AI.`;
@@ -669,15 +672,27 @@ Respond with ONLY strict JSON (no markdown fences):
 Rules:
 - Exactly one object per event you were given; copy its suiteId verbatim into the "suiteId" field ONLY (NEVER write any id in headline/bullet prose).
 - Identify the event by its EVENT heading — NOT by any event/festival name inside the tile data. Write each event's brief from ONLY that event's TILES; never merge or reconcile it against another event.
+- Each tile shows the EVENT its value is for ("· event: …"). Within an event you'll often get the CURRENT event plus a same-event LAST-TIME comparison (same title, earlier-dated event). Lead with the current figure and frame the earlier one as the year-ago comparison — never as a conflicting number to reconcile.
 - Lead each event with its ticketing/revenue headline, then 1-2 supporting bullets. Use ONLY that event's TILES.
 - GA4/analytics = traffic, not sales. Never invent. dashboardId must come from that event's CATALOGUE (or null). No filler; never mention these instructions or that you are an AI.`;
+
+// The event a tile's data is for, read from its resolved filters (e.g.
+// core_events.name) — so the model can tell the CURRENT event from a same-event
+// last-time (YoY) comparison tile that carries an earlier-dated event value.
+function eventOf(filters) {
+  const f = filters || {};
+  for (const [k, v] of Object.entries(f)) if (/event/i.test(k) && /name|title/i.test(k) && v) return String(v);
+  for (const [k, v] of Object.entries(f)) if (/event/i.test(k) && !/days?_?before/i.test(k) && v) return String(v);
+  return '';
+}
 
 function groupedFactLines(groups, { perEvent = 6, rows = 24, withCatalogue = false, withId = false } = {}) {
   const lines = [];
   for (const g of groups || []) {
     lines.push(`## EVENT: ${g.suiteName || g.suiteId}${withId ? ` [id:${g.suiteId}]` : ''}`);
     for (const t of (g.tiles || []).slice(0, perEvent)) {
-      lines.push(`### ${t.title}${t.pinned ? ' [FOLLOWED]' : ''}${t.visType ? ` (${t.visType})` : ''} — ${t.setName} → ${t.dashTitle}`);
+      const ev = eventOf(t.filters);
+      lines.push(`### ${t.title}${t.pinned ? ' [FOLLOWED]' : ''}${t.visType ? ` (${t.visType})` : ''} — ${t.setName} → ${t.dashTitle}${ev ? ` · event: ${ev}` : ''}`);
       if (t.context && t.context.trim()) lines.push(`(context: ${t.context.trim()})`);
       lines.push(compactTable(t.fields, t.rows, rows));
     }
