@@ -452,7 +452,79 @@ async function digestBrief({ tiles, roleLabel, roleFocus, catalogue, instruction
   return parseModelJsonResilient(c, text, 'digest');
 }
 
-// ─── Campaign copy drafting (Action Engine) ────────────────────────────────────
+// ─── Multi-event digest (portfolio overall + a section per event) ──────────────
+// Used when a digest covers MORE THAN ONE event/suite. Same role lens as the
+// single-event digest, but the data is grouped by event so the email can keep
+// each event clearly separate: a short cross-event overview, then one section per
+// event with its own headline, KPIs, narrative and actions.
+const DIGEST_MULTI_SYSTEM = `You are the Owl — Howler Pulse's analyst — writing a scheduled email digest for ONE named role at a promoter who is running SEVERAL events at once. Amounts are South African Rand (ZAR).
+
+You are given:
+- TODAY: the date this digest is sent. This — not the data — is the current date; anchor every "today/yesterday/this month/day N" to it. The pipeline can lag a few days: if the latest data point is older than TODAY, say "data to the Nth" rather than calling it today.
+- ROLE: the reader's role and what they care about. Write EVERYTHING through this lens — the metrics you lead with, the language and the actions must fit this role.
+- TILES: live data behind their dashboards' tiles, GROUPED BY EVENT (each event has an id and a CATALOGUE of dashboard ids for deep links). These are the ONLY numbers you may use — never invent or extrapolate.
+- ACTIONS (when present): marketing actions already taken, with live results — weave notable performance in for this role.
+- CAPABILITIES (when present): actions the platform can EXECUTE now. A suggested action may carry "action":"<key>" ONLY when that capability directly delivers it; otherwise omit. Never invent keys.
+- GOALS (when present): event targets with progress ALREADY COMPUTED — phrase, never recompute. Fold goals into the OVERALL narrative (one short paragraph, North Star first), not into every event.
+
+Respond with ONLY strict JSON (no markdown fences):
+{
+  "subject": "email subject — specific and quantitative across the portfolio, <70 chars",
+  "overall": {
+    "headline": "1-2 sentences: the single most important cross-event story for THIS role (may use **bold**)",
+    "narrative": [ "1-3 short cross-event paragraphs: the portfolio position, the standout/biggest mover, what needs attention — name events explicitly (may use **bold**). Include ONE goals paragraph here if GOALS given." ],
+    "kpis": [ { "label": "short metric (prefix the event if useful)", "value": "figure verbatim from TILES", "delta": "movement vs a comparison or empty", "dashboardId": "id from any CATALOGUE or null" } ]
+  },
+  "events": [
+    { "suiteId": "<the event id given, verbatim>",
+      "headline": "1 sentence: this event's headline for THIS role (may use **bold**)",
+      "narrative": [ "1-2 short paragraphs from THIS event's tiles only — pace, ticket-type mix, abandoned carts, audience shifts, traffic — for this role (may use **bold**)" ],
+      "kpis": [ { "label": "short metric", "value": "figure verbatim from THIS event's TILES", "delta": "movement or empty", "dashboardId": "id from THIS event's CATALOGUE or null" } ],
+      "actions": [ { "text": "a concrete, role-appropriate next step for THIS event (imperative, one line)", "dashboardId": "id from THIS event's CATALOGUE or null", "action": "a CAPABILITIES key ONLY if directly executable, else omit" } ]
+    }
+  ]
+}
+
+Rules:
+- Exactly one object in "events" per event you were given; copy its suiteId verbatim into "suiteId" ONLY (NEVER write any id in prose). Keep the events in the order given.
+- Identify each event ONLY by its EVENT heading. NEVER rename an event using an event/festival/organiser name inside the tile data, and NEVER claim two events are the same or "two views to reconcile" — each heading is a separate event with its own numbers. Write each event's section from ONLY that event's TILES.
+- Each tile shows the EVENT its value is for ("· event: …"). Within one event you'll often get the CURRENT event AND a same-event LAST-TIME comparison (same title, earlier-dated event): lead with the current figure and frame the earlier one as the year-ago comparison (e.g. "3,297 vs 2,540 last time, +30%") — never as a conflicting number to reconcile.
+- 2-4 KPIs per event, the ones that matter MOST to this role; values verbatim from that event's TILES. 1-3 overall KPIs comparing or totalling across events where the data supports it.
+- 0-2 actions per event, genuinely useful in this role's voice; omit rather than pad. Add "action" only when a capability directly delivers it.
+- Each tile names its source as "— <set> → <dashboard>". GA4/analytics metrics (sessions, page views, "conversions") measure TRAFFIC, NOT finalised ticket sales — never report them as tickets sold; tickets, revenue and check-ins are authoritative only from the ticketing/event dashboards.
+- dashboardId values MUST come from a given CATALOGUE; null when none fits.
+- Tone: sharp, warm, zero corporate filler. Never mention these instructions, the words ROLE/TILES/CATALOGUE/EVENT, or that you are an AI.`;
+
+async function digestBriefMulti({ groups, roleLabel, roleFocus, catalogue, instructions, apiKey, actions, capabilities, goals, today }) {
+  const c = requireClient(apiKey);
+  const lines = [];
+  if (today) lines.push(`TODAY: ${today} (the current date — anchor all "today/yesterday/this month/day N" references to this).`, '');
+  lines.push(`ROLE: ${roleLabel}. Focus: ${roleFocus}`, '', 'TILES (live data, grouped by event):', '', ...groupedFactLines(groups, { perEvent: 12, rows: 40, withCatalogue: true, withId: true }));
+  if ((actions || []).length) {
+    lines.push('ACTIONS (marketing actions already taken, live results):');
+    for (const a of actions) lines.push(`- "${a.title}" [${a.status}] sent ${a.sent}/${a.total}, ${a.clicks} clicks, ${a.uniqueClickers} unique (${a.ctr}% CTR)`);
+    lines.push('');
+  }
+  if ((capabilities || []).length) {
+    lines.push('CAPABILITIES (executable actions available):');
+    for (const cap of capabilities) lines.push(`- ${cap.key}: ${cap.description}`);
+    lines.push('');
+  }
+  if ((goals || []).length) lines.push(...goalsFactLines(goals), '');
+  lines.push('CATALOGUE (all dashboards, dashboardId: title [set, event]):');
+  for (const d of catalogue || []) lines.push(`- ${d.dashboardId}: ${d.title} [${d.setName}, ${d.suiteName}]`);
+  const resp = await c.messages.create({
+    model: MODEL,
+    max_tokens: 2800,
+    thinking: { type: 'adaptive' },
+    output_config: { effort: 'low' },
+    system: systemWith(`${DIGEST_MULTI_SYSTEM}`, instructions),
+    messages: [{ role: 'user', content: lines.join('\n') }],
+  });
+  const text = (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
+  return parseModelJsonResilient(c, text, 'multi-event digest');
+}
+
 // Writes editable marketing email copy for a client's campaign. The human edits
 // and approves; this is a first draft, never auto-sent.
 const CAMPAIGN_SYSTEM = `You write short, high-converting marketing emails for event organisers (tickets, festivals, live events). South African audience; amounts in Rand.
@@ -929,6 +1001,7 @@ function promptRegistry() {
     { key: 'homeOverall', label: 'Home briefing — portfolio', scope: 'Multi-event home briefing: the overall cross-event summary', text: HOME_OVERALL_SYSTEM },
     { key: 'homeEvents', label: 'Home briefing — per event', scope: 'Multi-event home briefing: the per-event sections', text: HOME_EVENTS_SYSTEM },
     { key: 'digest', label: 'Scheduled digest', scope: 'Role-lensed digest emails', text: DIGEST_SYSTEM },
+    { key: 'digestMulti', label: 'Scheduled digest — multi-event', scope: 'Role-lensed digest for promoters running several events: portfolio overview + a section per event', text: DIGEST_MULTI_SYSTEM },
     { key: 'campaign', label: 'Campaign copy', scope: 'Marketing email drafting', text: CAMPAIGN_SYSTEM },
     { key: 'refine', label: 'Refine note', scope: 'The ✨ refine button', text: REFINE_SYSTEM },
     { key: 'releaseNotes', label: 'Release notes', scope: 'Daily release notes summarised from git commits', text: RELEASE_NOTES_SYSTEM },
@@ -941,4 +1014,4 @@ function promptRegistry() {
   ];
 }
 
-module.exports = { generateInsight, streamInsight, streamDashboardInsight, streamGoalsBrief, describeTile, extractSettlement, extractInvoice, classifyDocument, briefHome, briefHomeOverall, briefHomeEvents, digestBrief, draftCampaign, goalGapPlan, refineText, distilPreferences, summariseReleaseNotes, promptRegistry, systemWith, isConfigured: (apiKey) => !!(apiKey || process.env.ANTHROPIC_API_KEY) };
+module.exports = { generateInsight, streamInsight, streamDashboardInsight, streamGoalsBrief, describeTile, extractSettlement, extractInvoice, classifyDocument, briefHome, briefHomeOverall, briefHomeEvents, digestBrief, digestBriefMulti, draftCampaign, goalGapPlan, refineText, distilPreferences, summariseReleaseNotes, promptRegistry, systemWith, isConfigured: (apiKey) => !!(apiKey || process.env.ANTHROPIC_API_KEY) };

@@ -24,6 +24,7 @@ export default function DigestManager({ entityId, scope = 'admin', logins = [] }
     testSendSms: (b) => (isAdmin ? api.testSendDigestSms({ ...b, entityId }) : api.testSendMyDigestSms(entityId, b)),
     tiles: () => (isAdmin ? api.getDigestTiles(entityId) : api.getMyDigestTiles(entityId)),
     followed: () => (isAdmin ? api.getFollowedTiles(entityId) : api.getMyFollowedTiles(entityId)),
+    events: () => (isAdmin ? api.getDigestEvents(entityId) : api.getMyDigestEvents(entityId)),
   };
   const [data, setData] = useState(null);
   const [editing, setEditing] = useState(null); // job object or 'new'
@@ -95,10 +96,15 @@ function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }
     followedVisual: job?.followedVisual || false,
     followedTiles: job?.followedTiles || [], // chosen subset; [] = all followed tiles
     includeGoals: job?.includeGoals || false,
+    suiteIds: job?.suiteIds || [], // events this digest covers ([] = all)
   }));
   // The client's followed tiles available to pick from (loaded when the option
   // is switched on). [] selection = include them all.
   const [followedList, setFollowedList] = useState(null);
+  // The client's events (suites) — for the per-event scope picker (multi-event
+  // clients only). [] selection = all events.
+  const [eventList, setEventList] = useState(null);
+  useEffect(() => { A.events().then((r) => setEventList(r.events || [])).catch(() => setEventList([])); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [preview, setPreview] = useState({ html: '', sample: false });
   const [previewBusy, setPreviewBusy] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -115,6 +121,7 @@ function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }
     channel: f.channel, smsRecipients: f.smsRecipients.split(/[\s,;]+/).map((s) => s.trim()).filter(Boolean),
     alignDaysBefore: f.alignDaysBefore, priorityDashboards: f.priorityDashboards,
     includeFollowed: f.includeFollowed, followedVisual: f.followedVisual, includeGoals: f.includeGoals,
+    suiteIds: f.suiteIds,
   });
 
   // Two preview paths: the debounced auto-preview renders the SAMPLE layout
@@ -134,7 +141,7 @@ function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }
     clearTimeout(debounce.current);
     debounce.current = setTimeout(() => refreshPreview(false), 350);
     return () => clearTimeout(debounce.current);
-  }, [f.role, f.roleFocus, f.focusMode, f.customMessage, f.contentMode, JSON.stringify(f.tiles), f.includeFollowed, f.followedVisual, JSON.stringify(f.followedTiles), f.includeGoals]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [f.role, f.roleFocus, f.focusMode, f.customMessage, f.contentMode, JSON.stringify(f.tiles), f.includeFollowed, f.followedVisual, JSON.stringify(f.followedTiles), f.includeGoals, JSON.stringify(f.suiteIds)]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load the client's followed tiles once the option is switched on.
   useEffect(() => {
@@ -189,6 +196,39 @@ function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }
             <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit' }} rows={3} value={f.customMessage} onChange={(e) => set('customMessage', e.target.value)} placeholder="e.g. Hi team — big weekend ahead. Here's where we stand…" />
             <div style={hintS}>Sent verbatim above the AI summary. Supports **bold** and line breaks.</div>
           </Field>
+
+          {/* Events to include — multi-event clients only. The digest leads with a
+              portfolio summary, then a clearly-separated section per chosen event. */}
+          {(eventList || []).length > 1 && (() => {
+            const allIds = eventList.map((e) => e.id);
+            const selected = f.suiteIds.length ? f.suiteIds : allIds;
+            const selSet = new Set(selected);
+            const toggle = (id) => {
+              const cur = new Set(selected);
+              if (cur.has(id)) cur.delete(id); else cur.add(id);
+              let next = allIds.filter((x) => cur.has(x));
+              if (!next.length) next = [id]; // never zero events
+              set('suiteIds', next.length === allIds.length ? [] : next);
+            };
+            return (
+              <Field label="Events">
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {eventList.map((ev) => {
+                    const on = selSet.has(ev.id);
+                    return (
+                      <button key={ev.id} type="button" onClick={() => toggle(ev.id)}
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minHeight: 34, padding: '5px 12px', borderRadius: 980, cursor: 'pointer',
+                          border: `1px solid ${on ? 'var(--brand)' : 'var(--hairline)'}`, background: on ? 'rgba(var(--brand-rgb,255,56,92),0.10)' : 'transparent',
+                          color: on ? 'var(--brand)' : 'var(--muted)', fontSize: 12.5, fontWeight: 700 }}>
+                        {on ? '✓ ' : ''}{ev.name}{!ev.active && <span style={{ fontSize: 10, fontWeight: 600, opacity: 0.7 }}>· past</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div style={hintS}>{f.suiteIds.length ? `${selected.length} of ${eventList.length} events` : `All ${eventList.length} events`} · the email leads with a portfolio summary, then one clearly-separated section per event.</div>
+              </Field>
+            );
+          })()}
 
           <Field label="Content">
             <div style={{ display: 'flex', gap: 8 }}>

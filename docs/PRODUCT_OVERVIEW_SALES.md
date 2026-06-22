@@ -292,6 +292,13 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-22** — **Multi-event digests** ✅: scheduled digest emails now understand clients
+  running several events at once. The email leads with a **portfolio summary** (the cross-event
+  story + top KPIs), then a **clearly-separated section per event** — each with its own headline,
+  KPIs, narrative and suggested actions, so numbers from different events never blur together.
+  The digest editor gains an **Events picker** (admin + client self-service): choose exactly which
+  events a digest covers (defaults to all). Works for both AI-led and curated digests; single-event
+  clients are unchanged.
 - **2026-06-22** — **"Make it happen" pre-fills the right audience** ✅: when a client turns
   a **Worth a look** suggestion (e.g. recover abandoned carts) into a campaign, the editor now
   opens **pre-loaded with the audience source from that exact tile and event** — the right

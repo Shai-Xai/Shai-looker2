@@ -236,43 +236,61 @@ function digestEmail({ branding, entityId, assetScope, content, roleLabel, custo
     : `<div style="font-size:15px;font-weight:800;letter-spacing:-0.02em;color:#111;">${esc(b.wordmark)}</div>`;
   const headerLine = b.header ? `<div style="font-size:12.5px;color:#6e6e73;margin-top:5px;white-space:pre-wrap;">${esc(b.header)}</div>` : '';
 
-  // KPI cards laid out 3 per row (email-safe table).
-  let kpiHtml = '';
-  const kpis = content.kpis || [];
-  for (let i = 0; i < kpis.length; i += 3) {
-    const row = kpis.slice(i, i + 3).map((k) => `
-      <td style="padding:6px;" width="33%" valign="top">
-        <div style="background:#fafafa;border:1px solid #ececf0;border-radius:12px;padding:13px 14px;">
-          <div style="font-size:11px;color:#86868b;text-transform:uppercase;letter-spacing:0.04em;font-weight:700;">${esc(k.label)}</div>
-          <div style="font-size:21px;font-weight:800;color:#111;margin-top:4px;letter-spacing:-0.02em;">${esc(k.value)}</div>
-          ${k.delta ? `<div style="font-size:11.5px;font-weight:700;margin-top:2px;color:${/^-|↓|▼|down|behind/i.test(k.delta) ? '#d11' : '#1a8a4a'};">${esc(k.delta)}</div>` : ''}
-        </div>
-      </td>`).join('');
-    kpiHtml += `<tr>${row}</tr>`;
-  }
-  const kpiTable = kpis.length ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:6px 0 4px;border-collapse:collapse;">${kpiHtml}</table>` : '';
+  // Build the inner pieces (KPI cards, chart images, narrative, suggested
+  // actions) for one "part" — the whole digest in single-event mode, or each
+  // section (overall + per event) in a multi-event digest.
+  const partsHtml = (part) => {
+    const kpis = part.kpis || [];
+    let kpiHtml = '';
+    for (let i = 0; i < kpis.length; i += 3) {
+      const row = kpis.slice(i, i + 3).map((k) => `
+        <td style="padding:6px;" width="33%" valign="top">
+          <div style="background:#fafafa;border:1px solid #ececf0;border-radius:12px;padding:13px 14px;">
+            <div style="font-size:11px;color:#86868b;text-transform:uppercase;letter-spacing:0.04em;font-weight:700;">${esc(k.label)}</div>
+            <div style="font-size:21px;font-weight:800;color:#111;margin-top:4px;letter-spacing:-0.02em;">${esc(k.value)}</div>
+            ${k.delta ? `<div style="font-size:11.5px;font-weight:700;margin-top:2px;color:${/^-|↓|▼|down|behind/i.test(k.delta) ? '#d11' : '#1a8a4a'};">${esc(k.delta)}</div>` : ''}
+          </div>
+        </td>`).join('');
+      kpiHtml += `<tr>${row}</tr>`;
+    }
+    const kpiTable = kpis.length ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:6px 0 4px;border-collapse:collapse;">${kpiHtml}</table>` : '';
+    // Chart images (e.g. followed tiles rendered server-side to PNG). Full-width,
+    // titled, linking to the dashboard. Each image already includes its own title.
+    const charts = (part.charts || []).filter((c) => c.imageUrl);
+    const chartsBlock = charts.length ? charts.map((c) => {
+      const img = `<img src="${esc(c.imageUrl)}" alt="${esc(c.title || '')}" width="100%" style="width:100%;max-width:520px;border:1px solid #ececf0;border-radius:12px;display:block;margin:0 auto;" />`;
+      return `<div style="margin:14px 0;">${c.href ? `<a href="${esc(c.href)}" style="text-decoration:none;">${img}</a>` : img}</div>`;
+    }).join('') : '';
+    const narrative = (part.narrative || []).map((p) => `<p style="font-size:14px;line-height:1.6;color:#3a3a3c;margin:0 0 12px;">${mdBold(p)}</p>`).join('');
+    const actionsLis = (part.actions || []).filter((a) => a.text).map((a) => {
+      const txt = `<span style="color:#111;font-weight:600;">${esc(a.text)}</span>`;
+      // "Make it happen" only when the action maps to an executable capability.
+      const makeIt = a.action ? `<a href="${baseUrl()}/actions?goal=${encodeURIComponent(a.text)}&type=${encodeURIComponent(a.action)}" style="color:#7c3aed;text-decoration:none;font-size:12px;font-weight:700;margin-left:8px;">⚡ Make it happen</a>` : '';
+      return `<li style="margin:0 0 8px;line-height:1.5;">${a.href ? `<a href="${esc(a.href)}" style="color:${esc(b.brandColor)};text-decoration:none;">${esc(a.text)} →</a>` : txt}${makeIt}</li>`;
+    }).join('');
+    const actionsBlock = actionsLis ? `
+      <div style="margin-top:18px;padding-top:16px;border-top:1px solid #ececf0;">
+        <div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:0.05em;color:#86868b;margin-bottom:8px;">Suggested actions</div>
+        <ul style="margin:0;padding-left:18px;font-size:13.5px;color:#3a3a3c;">${actionsLis}</ul>
+      </div>` : '';
+    return { kpiTable, chartsBlock, narrative, actionsBlock };
+  };
 
-  // Chart images (e.g. followed tiles rendered server-side to PNG). Full-width,
-  // titled, linking to the dashboard. Each image already includes its own title,
-  // so we only add the link affordance below it.
-  const charts = (content.charts || []).filter((c) => c.imageUrl);
-  const chartsBlock = charts.length ? charts.map((c) => {
-    const img = `<img src="${esc(c.imageUrl)}" alt="${esc(c.title || '')}" width="100%" style="width:100%;max-width:520px;border:1px solid #ececf0;border-radius:12px;display:block;margin:0 auto;" />`;
-    return `<div style="margin:14px 0;">${c.href ? `<a href="${esc(c.href)}" style="text-decoration:none;">${img}</a>` : img}</div>`;
-  }).join('') : '';
-
-  const narrative = (content.narrative || []).map((p) => `<p style="font-size:14px;line-height:1.6;color:#3a3a3c;margin:0 0 12px;">${mdBold(p)}</p>`).join('');
-  const actions = (content.actions || []).filter((a) => a.text).map((a) => {
-    const txt = `<span style="color:#111;font-weight:600;">${esc(a.text)}</span>`;
-    // "Make it happen" only when the action maps to an executable capability.
-    const makeIt = a.action ? `<a href="${baseUrl()}/actions?goal=${encodeURIComponent(a.text)}&type=${encodeURIComponent(a.action)}" style="color:#7c3aed;text-decoration:none;font-size:12px;font-weight:700;margin-left:8px;">⚡ Make it happen</a>` : '';
-    return `<li style="margin:0 0 8px;line-height:1.5;">${a.href ? `<a href="${esc(a.href)}" style="color:${esc(b.brandColor)};text-decoration:none;">${esc(a.text)} →</a>` : txt}${makeIt}</li>`;
+  const { kpiTable, chartsBlock, narrative, actionsBlock } = partsHtml(content);
+  // Multi-event digests carry per-event sections — render each one clearly
+  // separated and labelled with the event name, under the portfolio overview.
+  const events = content.events || [];
+  const eventsBlock = events.map((ev) => {
+    const p = partsHtml(ev);
+    return `
+      <div style="margin-top:24px;padding-top:18px;border-top:2px solid #ececf0;">
+        <div style="font-size:11.5px;font-weight:800;text-transform:uppercase;letter-spacing:0.06em;color:${esc(b.brandColor)};margin-bottom:8px;">${esc(ev.suiteName || 'Event')}</div>
+        ${ev.headline ? `<div style="font-size:16px;font-weight:800;color:#111;margin-bottom:10px;line-height:1.35;letter-spacing:-0.01em;">${mdBold(ev.headline)}</div>` : ''}
+        ${p.kpiTable}${p.chartsBlock}
+        <div style="margin-top:10px;">${p.narrative}</div>
+        ${p.actionsBlock}
+      </div>`;
   }).join('');
-  const actionsBlock = actions ? `
-    <div style="margin-top:18px;padding-top:16px;border-top:1px solid #ececf0;">
-      <div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:0.05em;color:#86868b;margin-bottom:8px;">Suggested actions</div>
-      <ul style="margin:0;padding-left:18px;font-size:13.5px;color:#3a3a3c;">${actions}</ul>
-    </div>` : '';
 
   // Optional personal note (from the AM / client), rendered as a callout above
   // the AI content. Verbatim, with **bold** + line breaks honoured.
@@ -294,12 +312,14 @@ function digestEmail({ branding, entityId, assetScope, content, roleLabel, custo
     </div>
     <div style="background:#ffffff;border:1px solid #e8e8ec;border-radius:14px;padding:24px;">
       ${note}
+      ${events.length ? `<div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.06em;color:#86868b;margin-bottom:6px;">Portfolio · ${events.length} event${events.length === 1 ? '' : 's'}</div>` : ''}
       ${content.headline ? `<div style="font-size:18px;font-weight:800;color:#111;margin-bottom:14px;line-height:1.35;letter-spacing:-0.01em;">${mdBold(content.headline)}</div>` : ''}
       ${kpiTable}
       ${chartsBlock}
       <div style="margin-top:14px;">${narrative}</div>
       ${actionsBlock}
-      <a href="${url}" style="display:inline-block;margin-top:20px;background:${esc(b.brandColor)};color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;border-radius:980px;padding:11px 22px;">Open Pulse →</a>
+      ${eventsBlock}
+      <a href="${url}" style="display:inline-block;margin-top:22px;background:${esc(b.brandColor)};color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;border-radius:980px;padding:11px 22px;">Open Pulse →</a>
       ${feedbackUrl ? `<div style="margin-top:20px;padding-top:16px;border-top:1px solid #ececf0;text-align:center;font-size:13px;color:#6e6e73;">
         Was this digest useful?
         <a href="${esc(feedbackUrl)}&amp;v=up" style="text-decoration:none;font-size:17px;margin:0 5px;">👍</a>
@@ -315,11 +335,20 @@ function digestEmail({ branding, entityId, assetScope, content, roleLabel, custo
 
   const textParts = [];
   if ((customMessage || '').trim()) textParts.push(customMessage.trim(), '');
+  if (events.length) textParts.push(`Portfolio · ${events.length} events`);
   textParts.push(content.headline || '');
-  for (const k of kpis) textParts.push(`• ${k.label}: ${k.value}${k.delta ? ` (${k.delta})` : ''}`);
-  for (const c of charts) textParts.push(`• ${c.title || 'Chart'}${c.href ? `: ${c.href}` : ''}`);
+  for (const k of (content.kpis || [])) textParts.push(`• ${k.label}: ${k.value}${k.delta ? ` (${k.delta})` : ''}`);
+  for (const c of (content.charts || [])) if (c.imageUrl) textParts.push(`• ${c.title || 'Chart'}${c.href ? `: ${c.href}` : ''}`);
   textParts.push('', ...(content.narrative || []));
   if (content.actions?.length) { textParts.push('', 'Suggested actions:'); for (const a of content.actions) textParts.push(`- ${a.text}`); }
+  // Per-event sections (multi-event digest).
+  for (const ev of events) {
+    textParts.push('', `── ${ev.suiteName || 'Event'} ──`);
+    if (ev.headline) textParts.push(ev.headline);
+    for (const k of (ev.kpis || [])) textParts.push(`• ${k.label}: ${k.value}${k.delta ? ` (${k.delta})` : ''}`);
+    if ((ev.narrative || []).length) textParts.push('', ...ev.narrative);
+    if (ev.actions?.length) { textParts.push('Suggested actions:'); for (const a of ev.actions) textParts.push(`- ${a.text}`); }
+  }
   textParts.push('', `Open Pulse: ${url}`, '', b.footer);
   const text = textParts.join('\n').replace(/\*\*/g, '');
   return { html, text, subject: content.subject };

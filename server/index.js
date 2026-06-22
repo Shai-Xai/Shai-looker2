@@ -2440,7 +2440,7 @@ async function buildFactsFromTiles(user, entityId, picks, alignDaysBefore = fals
 
 // Produce a role-lensed digest's structured content (links resolved). Throws if
 // AI/Looker isn't configured or there's no data — callers decide how to surface.
-async function buildDigestContent({ entityId, role, roleFocus, focusMode, contentMode, tiles, alignDaysBefore = false, priorityDashboards = [], includeFollowed = false, followedVisual = false, followedTiles = [], includeGoals = false, creatorEmail = '', recipientEmail, debug = false }) {
+async function buildDigestContent({ entityId, role, roleFocus, focusMode, contentMode, tiles, alignDaysBefore = false, priorityDashboards = [], includeFollowed = false, followedVisual = false, followedTiles = [], includeGoals = false, suiteIds = [], creatorEmail = '', recipientEmail, debug = false }) {
   const apiKey = anthropicKeyForEntity(entityId);
   if (!insights.isConfigured(apiKey)) throw new Error('AI is not configured for this client');
   const lens = ROLE_LENSES[role] || ROLE_LENSES.exec;
@@ -2450,9 +2450,27 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
     : (focusMode === 'blend' ? `${lens.focus}\n\nExtra emphasis for this digest: ${customFocus}` : customFocus);
   let user = recipientEmail ? db.getUserByEmail(recipientEmail) : null;
   if (!user || !(user.entityIds || []).includes(entityId)) user = { id: `digest:${entityId}`, email: recipientEmail || '', role: 'client', entityIds: [entityId] };
+  // Which events this digest covers. A multi-event client can scope the digest to
+  // a subset of its events (suiteIds); empty = all events. Below one event we keep
+  // the single-event layout exactly as before.
+  const allSuites = clientCatalogue(entityId).suites;
+  const validSuite = new Set(allSuites.map((s) => s.id));
+  let selSuiteIds = Array.isArray(suiteIds) ? [...new Set(suiteIds.map(String).filter((id) => validSuite.has(id)))] : [];
+  if (!selSuiteIds.length) selSuiteIds = allSuites.map((s) => s.id);
+  const selSet = new Set(selSuiteIds);
+  const multiClient = allSuites.length > 1;
+  const multi = multiClient && selSuiteIds.length > 1;
+
+  // Curated picks scoped to the selected events (each pick resolves under its
+  // dashboard's event); AI mode scopes the fact sweep via suiteIds.
+  let curatedPicks = tiles || [];
+  if (contentMode === 'curated' && multiClient && selSuiteIds.length < allSuites.length) {
+    const cMeta = Object.fromEntries(clientCatalogue(entityId).catalogue.map((c) => [c.dashboardId, c]));
+    curatedPicks = curatedPicks.filter((p) => { const m = cMeta[String(p.dashboardId)]; return m && selSet.has(m.suiteId); });
+  }
   const { tiles: factTiles, catalogue, dropped = [] } = (contentMode === 'curated' && (tiles || []).length)
-    ? await buildFactsFromTiles(user, entityId, tiles, alignDaysBefore)
-    : await buildFacts(user, entityId, false, alignDaysBefore, priorityDashboards);
+    ? await buildFactsFromTiles(user, entityId, curatedPicks, alignDaysBefore)
+    : await buildFacts(user, entityId, false, alignDaysBefore, priorityDashboards, multiClient ? { suiteIds: selSuiteIds } : {});
 
   // Saved tiles: the 📌 pinned + ⭐ followed tiles marked as mattering. Pulled in
   // on top of whatever the mode produced, so they ride along in BOTH AI-led and
@@ -2500,7 +2518,6 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
 
   const byId = Object.fromEntries(catalogue.map((c) => [c.dashboardId, c]));
   const instructions = [aiInstructionsFor(null), briefingInstructionsFor(user, entityId, clientCatalogue(entityId).suites)].filter(Boolean).join('\n\n');
-  const raw = await insights.digestBrief({ tiles: factTilesAll, roleLabel: lens.label, roleFocus: effectiveFocus, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), capabilities: ACTION_CAPABILITIES, goals, today: todayLabel() });
   const href = (id) => { const c = id && byId[id]; return c ? `${mailer.baseUrl()}/suite/${c.suiteId}/d/${id}` : ''; };
   // A suggested action with an executable capability deep-links into the
   // pre-filled "Make it happen" campaign editor (recipe auto-resolves the
@@ -2508,25 +2525,17 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
   const actionHref = (a) => (CAPABILITY_KEYS.has(a.action)
     ? `${mailer.baseUrl()}/engage/campaigns?type=${encodeURIComponent(a.action)}&goal=${encodeURIComponent(String(a.text || '').slice(0, 200))}`
     : href(a.dashboardId));
-  const out = {
-    subject: String(raw.subject || '').slice(0, 120),
-    headline: String(raw.headline || '').slice(0, 600),
-    narrative: (raw.narrative || []).slice(0, 5).map((s) => String(s).slice(0, 800)).filter(Boolean),
-    kpis: (raw.kpis || []).slice(0, 6).map((k) => ({ label: String(k.label || '').slice(0, 40), value: String(k.value || '').slice(0, 30), delta: String(k.delta || '').slice(0, 40), href: href(k.dashboardId) })).filter((k) => k.label && k.value),
-    actions: (raw.actions || []).slice(0, 3).map((a) => ({ text: String(a.text || '').slice(0, 200), href: actionHref(a), action: CAPABILITY_KEYS.has(a.action) ? a.action : null })).filter((a) => a.text),
-  };
-
-  // Render followed tiles as visuals: chart-type tiles become a PNG embedded in
-  // the email (stored as a mail asset, served by token); single-value/table tiles
-  // become a metric chip that leads the KPI strip. Best-effort — a tile that
-  // can't render just falls back to the metric (or is skipped).
-  if (followedVisual && followedFacts.length) {
+  const mapKpi = (k) => ({ label: String(k.label || '').slice(0, 40), value: String(k.value || '').slice(0, 30), delta: String(k.delta || '').slice(0, 40), href: href(k.dashboardId) });
+  const mapAction = (a) => ({ text: String(a.text || '').slice(0, 200), href: actionHref(a), action: CAPABILITY_KEYS.has(a.action) ? a.action : null });
+  // Render a set of followed-tile facts as email visuals — chart tiles become a
+  // PNG mail asset, single-value/table tiles become a metric chip. Best-effort.
+  const renderFollowed = (facts) => {
     const branding = mailer.resolveBranding(entityId);
     const base = mailer.baseUrl();
     let tileimg = null;
     try { tileimg = require('./tileimg'); } catch (e) { console.error('[digest] tileimg load failed', e.message); }
-    const charts = []; const followKpis = [];
-    for (const ft of followedFacts) {
+    const charts = []; const kpis = [];
+    for (const ft of facts) {
       const tileShim = { title: ft.title, vis: { type: ft.visType } };
       const png = tileimg ? tileimg.renderTilePng(tileShim, ft, branding) : null;
       if (png) {
@@ -2535,11 +2544,66 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
         charts.push({ title: ft.title, imageUrl: `${base}/mail-assets/img/${token}`, href: href(ft.dashboardId) });
       } else {
         const v = factValueLabel(ft);
-        if (v && v !== '—') followKpis.push({ label: String(ft.title || '').slice(0, 40), value: String(v).slice(0, 30), delta: '', href: href(ft.dashboardId) });
+        if (v && v !== '—') kpis.push({ label: String(ft.title || '').slice(0, 40), value: String(v).slice(0, 30), delta: '', href: href(ft.dashboardId) });
       }
     }
-    if (charts.length) out.charts = charts.slice(0, 6);
-    if (followKpis.length) out.kpis = [...followKpis, ...out.kpis].slice(0, 9); // followed metrics lead the strip
+    return { charts, kpis };
+  };
+
+  let out;
+  if (multi) {
+    // Multi-event: one structured AI pass over the events, rendered as a portfolio
+    // overview + a clearly-separated section per event (in the selected order).
+    const nameById = Object.fromEntries(allSuites.map((s) => [s.id, s.name]));
+    const bySuite = new Map();
+    for (const t of factTilesAll) { if (!bySuite.has(t.suiteId)) bySuite.set(t.suiteId, []); bySuite.get(t.suiteId).push(t); }
+    const groups = selSuiteIds.map((id) => ({ suiteId: id, suiteName: nameById[id] || '', tiles: bySuite.get(id) || [] })).filter((g) => g.tiles.length);
+    const raw = await insights.digestBriefMulti({ groups, roleLabel: lens.label, roleFocus: effectiveFocus, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), capabilities: ACTION_CAPABILITIES, goals, today: todayLabel() });
+    const ov = raw.overall || {};
+    const aiBySuite = Object.fromEntries((raw.events || []).filter((e) => nameById[e.suiteId]).map((e) => [e.suiteId, e]));
+    // Followed-tile visuals, grouped into the event each tile belongs to.
+    const visualsBySuite = {};
+    if (followedVisual && followedFacts.length) {
+      for (const ft of followedFacts) { (visualsBySuite[ft.suiteId] = visualsBySuite[ft.suiteId] || []).push(ft); }
+      for (const id of Object.keys(visualsBySuite)) visualsBySuite[id] = renderFollowed(visualsBySuite[id]);
+    }
+    const events = groups.map((g) => {
+      const e = aiBySuite[g.suiteId] || {};
+      const sect = {
+        suiteId: g.suiteId, suiteName: g.suiteName,
+        headline: String(e.headline || '').slice(0, 400),
+        narrative: (e.narrative || []).slice(0, 3).map((s) => String(s).slice(0, 800)).filter(Boolean),
+        kpis: (e.kpis || []).slice(0, 6).map(mapKpi).filter((k) => k.label && k.value),
+        actions: (e.actions || []).slice(0, 3).map(mapAction).filter((a) => a.text),
+      };
+      const vis = visualsBySuite[g.suiteId];
+      if (vis) { if (vis.charts.length) sect.charts = vis.charts.slice(0, 6); if (vis.kpis.length) sect.kpis = [...vis.kpis, ...sect.kpis].slice(0, 9); }
+      return sect;
+    });
+    out = {
+      subject: String(raw.subject || '').slice(0, 120),
+      headline: String(ov.headline || '').slice(0, 600),
+      narrative: (ov.narrative || []).slice(0, 4).map((s) => String(s).slice(0, 800)).filter(Boolean),
+      kpis: (ov.kpis || []).slice(0, 6).map(mapKpi).filter((k) => k.label && k.value),
+      actions: (ov.actions || []).slice(0, 3).map(mapAction).filter((a) => a.text),
+      events,
+      eventCount: events.length,
+    };
+  } else {
+    const raw = await insights.digestBrief({ tiles: factTilesAll, roleLabel: lens.label, roleFocus: effectiveFocus, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), capabilities: ACTION_CAPABILITIES, goals, today: todayLabel() });
+    out = {
+      subject: String(raw.subject || '').slice(0, 120),
+      headline: String(raw.headline || '').slice(0, 600),
+      narrative: (raw.narrative || []).slice(0, 5).map((s) => String(s).slice(0, 800)).filter(Boolean),
+      kpis: (raw.kpis || []).slice(0, 6).map(mapKpi).filter((k) => k.label && k.value),
+      actions: (raw.actions || []).slice(0, 3).map(mapAction).filter((a) => a.text),
+    };
+    // Followed-tile visuals lead the single-event KPI strip / add chart blocks.
+    if (followedVisual && followedFacts.length) {
+      const { charts, kpis } = renderFollowed(followedFacts);
+      if (charts.length) out.charts = charts.slice(0, 6);
+      if (kpis.length) out.kpis = [...kpis, ...out.kpis].slice(0, 9);
+    }
   }
 
   // Diagnostic: the exact tiles the analyst read + the value each returned under
@@ -2591,6 +2655,21 @@ app.get('/api/my/digest-tiles/:entityId', auth.requireAuth, (req, res) => {
   // Admins can act as any client (preview), so they pass the ownership check.
   if (req.user.role !== 'admin' && !(req.user.entityIds || []).includes(req.params.entityId)) return res.status(403).json({ error: 'Not allowed' });
   res.json(digestTileCatalogue(req.params.entityId));
+});
+
+// The client's events (suites) a digest can be scoped to — id, name, and whether
+// the event is still active (on sale). Drives the digest editor's event picker;
+// only shown there for multi-event clients.
+function digestEventList(entityId) {
+  return { events: clientCatalogue(entityId).suites.map((su) => ({ id: su.id, name: su.name, active: resolvePhase(su.briefing || {}).key !== 'post_event' })) };
+}
+app.get('/api/admin/entities/:id/digest-events', auth.requireAdmin, (req, res) => {
+  if (!db.getEntity(req.params.id)) return res.status(404).json({ error: 'Not found' });
+  res.json(digestEventList(req.params.id));
+});
+app.get('/api/my/digest-events/:entityId', auth.requireAuth, (req, res) => {
+  if (req.user.role !== 'admin' && !(req.user.entityIds || []).includes(req.params.entityId)) return res.status(403).json({ error: 'Not allowed' });
+  res.json(digestEventList(req.params.entityId));
 });
 
 // The SAVED tiles for a viewer — the ones marked as mattering, whether 📌 pinned
