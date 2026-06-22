@@ -195,6 +195,35 @@ export function rangeLabel(goal, p = {}) {
   return undefined;
 }
 
+// Plain-English read of a mix/split goal — the same kind of narrative the other goal
+// types get (pace / forecast / vs last time), built from the resolved parts: which
+// slice leads, whether the mix is balanced or drifting (and how), movement vs last
+// year, and a nudge on the focus slice. Returns '' when there's nothing to say.
+export function compositionCommentary(goal, p = {}) {
+  const parts = (p.parts || []).filter((x) => Number.isFinite(x.share));
+  if (!parts.length) return '';
+  const bits = [];
+  const lead = parts.reduce((a, b) => (b.share > a.share ? b : a), parts[0]);
+  const drift = parts.filter((x) => x.status !== 'in');
+  if (p.balanced === true) {
+    bits.push(`${lead.label} leads at ${lead.share}% and the mix is balanced — every slice sits within its target band.`);
+  } else if (drift.length) {
+    const names = drift.map((x) => `${x.label} is ${x.status === 'over' ? 'above' : 'below'} target (${x.share}% vs ${x.target}%)`);
+    bits.push(`The mix is drifting: ${names.join('; ')}.`);
+  } else {
+    bits.push(`${lead.label} leads at ${lead.share}%.`);
+  }
+  const moved = parts.filter((x) => Number.isFinite(x.deltaPp) && x.deltaPp !== 0);
+  if (moved.length) {
+    bits.push(`Versus last year, ${moved.map((x) => `${x.label} is ${x.deltaPp > 0 ? 'up' : 'down'} ${Math.abs(x.deltaPp)}pp`).join(' and ')}.`);
+  }
+  const focus = parts.find((x) => x.focus);
+  if (focus && focus.status !== 'over') {
+    bits.push(`Focus on growing ${focus.label} (now ${focus.share}%, target ${focus.target}%).`);
+  }
+  return bits.join(' ');
+}
+
 export function Bar({ pct, tone }) {
   const w = Math.max(0, Math.min(100, Math.round(pct || 0)));
   return (
