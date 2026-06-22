@@ -48,7 +48,7 @@ export function ActivityRings({ rings, size = 180, stroke, gap = 4, onPick }) {
 // The full hero card: rings on the left, a tappable legend on the right (name,
 // value / target, % and pace chip) — the Apple "Summary" Activity-Rings card.
 export default function GoalRingsCard({ goals = [], title, onPick, size = 176, maxRings = 6 }) {
-  const usable = goals.filter(Boolean);
+  const usable = goals.filter((g) => g && g.direction !== 'composition'); // compositions have their own viz, not a ring
   if (!usable.length) return null;
   // Stable identity colour per goal (by its index in the given order), so a goal's
   // ring here matches its tile below. North Star outermost; cap rings for legibility.

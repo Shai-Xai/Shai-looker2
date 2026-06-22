@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { api } from '../../lib/api.js';
 import { useIsMobile } from '../../lib/useIsMobile.js';
-import { Ring, Dial, Bar, goalState, fmtVal, fmtTarget } from './GoalViz.jsx';
+import { Ring, Dial, Bar, CompositionBar, CompositionLegend, goalState, fmtVal, fmtTarget } from './GoalViz.jsx';
 import ForecastChart from './ForecastChart.jsx';
 
 // The goal DETAIL view — the read surface for a goal. Tapping a goal card (on the
@@ -62,7 +62,12 @@ export default function GoalDetail({ goal, suiteName, onEdit, onDelete, onClose,
 
         {/* Progress — the big number, with the chosen viz. */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: '14px 0 6px' }}>
-          {viz === 'bar' ? (
+          {goal.direction === 'composition' ? (
+            <div style={{ width: '100%' }}>
+              <CompositionBar parts={p.parts} />
+              <CompositionLegend parts={p.parts} />
+            </div>
+          ) : viz === 'bar' ? (
             <div style={{ width: '100%' }}>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
                 <span style={{ fontSize: 30, fontWeight: 800 }}>{fmtVal(p.value, goal.unit)}</span>
