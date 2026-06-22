@@ -489,13 +489,19 @@ function FeatureSection({ section, feats }) {
 // Daily release notes — authored here, persisted server-side, newest day first.
 function ProductReleaseNotes() {
   const today = () => new Date().toISOString().slice(0, 10);
+  const blank = () => ({ date: today(), title: '', body: '', howTo: '', deepLink: '', bodyDev: '', published: true });
   const [items, setItems] = useState(null);
-  const [draft, setDraft] = useState({ date: today(), title: '', body: '', published: true });
-  const [editing, setEditing] = useState(null); // { id, date, title, body, published }
+  const [draft, setDraft] = useState(blank);
+  const [editing, setEditing] = useState(null); // { id, date, title, body, howTo, deepLink, bodyDev, published }
   const [err, setErr] = useState('');
   const [gen, setGen] = useState({ busy: false, msg: '' });
   const load = () => api.adminListReleaseNotes().then(setItems).catch(() => setItems([]));
   useEffect(() => { load(); }, []);
+  // Three lenses on one note: `body` is the end-user summary, `howTo` the end-user
+  // steps (both reach clients), `bodyDev` the internal-only technical view.
+  const ta = { width: '100%', boxSizing: 'border-box', padding: '10px 12px', border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 13, outline: 'none', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5, marginTop: 4 };
+  const lensLabel = { fontSize: 10.5, fontWeight: 700, letterSpacing: 0.3, textTransform: 'uppercase', color: 'var(--muted)' };
+  const lensBody = { fontSize: 13, color: 'var(--text)', marginTop: 3, whiteSpace: 'pre-wrap', lineHeight: 1.55 };
   const generate = async () => {
     setGen({ busy: true, msg: '' });
     try {
@@ -506,13 +512,38 @@ function ProductReleaseNotes() {
   };
   const add = async () => {
     setErr('');
-    try { await api.adminCreateReleaseNote(draft); setDraft({ date: today(), title: '', body: '', published: true }); load(); }
+    try { await api.adminCreateReleaseNote(draft); setDraft(blank()); load(); }
     catch (e) { setErr(e.message); }
   };
   const save = async () => { await api.adminUpdateReleaseNote(editing.id, editing); setEditing(null); load(); };
   const del = async (n) => { if (confirm(`Delete release note "${n.title || n.date}"?`)) { await api.adminDeleteReleaseNote(n.id); load(); } };
   const togglePub = async (n) => { await api.adminUpdateReleaseNote(n.id, { published: !n.published }); load(); };
   const fmtDate = (d) => { const dt = new Date(d); return isNaN(dt) ? d : dt.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }); };
+
+  // The lens editor (composer + inline edit share it). `v`/`set` read+write one note object.
+  const lensFields = (v, set) => (
+    <>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        <Field label="Date"><input type="date" style={{ ...input, minWidth: 150 }} value={v.date} onChange={(e) => set({ ...v, date: e.target.value })} /></Field>
+        <Field label="Title"><input style={{ ...input, minWidth: 240 }} placeholder="e.g. Engage hardening" value={v.title} onChange={(e) => set({ ...v, title: e.target.value })} /></Field>
+      </div>
+      <div style={{ marginTop: 8 }}>
+        <L>What shipped — the end-user summary clients see (Markdown)</L>
+        <textarea rows={3} value={v.body} onChange={(e) => set({ ...v, body: e.target.value })} placeholder={'- New: …\n- Fixed: …'} style={ta} />
+      </div>
+      <div style={{ marginTop: 8 }}>
+        <L>How to use it — end-user steps (shown to clients in What's New + the weekly email)</L>
+        <textarea rows={3} value={v.howTo} onChange={(e) => set({ ...v, howTo: e.target.value })} placeholder={'1. Go to Settings → …\n2. …'} style={ta} />
+      </div>
+      <div style={{ marginTop: 8 }}>
+        <Field label="Deep link — in-app path to the feature"><input style={{ ...input, minWidth: 240 }} placeholder="/settings/branding" value={v.deepLink} onChange={(e) => set({ ...v, deepLink: e.target.value })} /></Field>
+      </div>
+      <div style={{ marginTop: 8 }}>
+        <L>Dev notes — technical, internal only (never shown to clients)</L>
+        <textarea rows={3} value={v.bodyDev} onChange={(e) => set({ ...v, bodyDev: e.target.value })} placeholder={'- Refactored … (sha)\n- Migration: …'} style={ta} />
+      </div>
+    </>
+  );
 
   return (
     <div style={cardStyle}>
@@ -523,22 +554,13 @@ function ProductReleaseNotes() {
           {gen.busy ? 'Generating…' : '✨ Generate from commits'}
         </button>
       </div>
-      <p style={hint}>Post what shipped each day, or auto-generate drafts from commits. Drafts stay hidden until you publish them.</p>
+      <p style={hint}>Each day has three lenses: the end-user <b>summary</b> + <b>how-to</b> reach clients (What's New + the weekly email); the <b>dev notes</b> stay internal. Drafts stay hidden until you publish.</p>
       {gen.msg && <div style={{ fontSize: 12.5, color: 'var(--muted)', margin: '-6px 0 12px' }}>{gen.msg}</div>}
 
       {/* Composer */}
       <div style={{ border: '1px solid var(--hairline)', borderRadius: 10, padding: 12, marginBottom: 16 }}>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-          <Field label="Date"><input type="date" style={{ ...input, minWidth: 150 }} value={draft.date} onChange={(e) => setDraft({ ...draft, date: e.target.value })} /></Field>
-          <Field label="Title"><input style={{ ...input, minWidth: 240 }} placeholder="e.g. Engage hardening" value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} /></Field>
-        </div>
-        <div style={{ marginTop: 8 }}>
-          <L>What shipped (Markdown supported)</L>
-          <textarea rows={4} value={draft.body} onChange={(e) => setDraft({ ...draft, body: e.target.value })}
-            placeholder={'- New: …\n- Fixed: …'}
-            style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 13, outline: 'none', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5, marginTop: 4 }} />
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 8, flexWrap: 'wrap' }}>
+        {lensFields(draft, setDraft)}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 10, flexWrap: 'wrap' }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12.5, color: 'var(--muted)', cursor: 'pointer' }}>
             <input type="checkbox" checked={draft.published} onChange={(e) => setDraft({ ...draft, published: e.target.checked })} /> Publish now
           </label>
@@ -554,13 +576,8 @@ function ProductReleaseNotes() {
           <div key={n.id} style={{ borderTop: '1px solid var(--hairline)', padding: '12px 0' }}>
             {editing?.id === n.id ? (
               <div>
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-                  <Field label="Date"><input type="date" style={{ ...input, minWidth: 150 }} value={editing.date} onChange={(e) => setEditing({ ...editing, date: e.target.value })} /></Field>
-                  <Field label="Title"><input style={{ ...input, minWidth: 240 }} value={editing.title} onChange={(e) => setEditing({ ...editing, title: e.target.value })} /></Field>
-                </div>
-                <textarea rows={4} value={editing.body} onChange={(e) => setEditing({ ...editing, body: e.target.value })}
-                  style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 13, outline: 'none', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5, marginTop: 8 }} />
-                <div style={{ marginTop: 8 }}>
+                {lensFields(editing, setEditing)}
+                <div style={{ marginTop: 10 }}>
                   <button style={miniBtn} onClick={save}>Save</button>{' '}
                   <button style={miniBtnOutline} onClick={() => setEditing(null)}>Cancel</button>
                 </div>
@@ -574,10 +591,13 @@ function ProductReleaseNotes() {
                   {n.source === 'auto' && <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--brand)', border: '1px solid var(--brand)', borderRadius: 980, padding: '1px 7px' }}>AUTO</span>}
                   <span style={{ flex: 1 }} />
                   <button style={miniBtnOutline} onClick={() => togglePub(n)}>{n.published ? 'Unpublish' : 'Publish'}</button>
-                  <button style={miniBtnOutline} onClick={() => setEditing({ id: n.id, date: n.date, title: n.title, body: n.body, published: n.published })}>Edit</button>
+                  <button style={miniBtnOutline} onClick={() => setEditing({ id: n.id, date: n.date, title: n.title, body: n.body, howTo: n.howTo || '', deepLink: n.deepLink || '', bodyDev: n.bodyDev || '', published: n.published })}>Edit</button>
                   <button style={delBtn} onClick={() => del(n)}>Delete</button>
                 </div>
-                {n.body && <div style={{ fontSize: 13, color: 'var(--text)', marginTop: 6, whiteSpace: 'pre-wrap', lineHeight: 1.55 }}>{n.body}</div>}
+                {n.body && <div style={lensBody}>{n.body}</div>}
+                {n.howTo && (<div style={{ marginTop: 9 }}><div style={lensLabel}>How to use it · client-facing</div><div style={lensBody}>{n.howTo}</div></div>)}
+                {n.deepLink && <div style={{ marginTop: 6 }}><span style={codeChip}>{n.deepLink}</span></div>}
+                {n.bodyDev && (<div style={{ marginTop: 9 }}><div style={lensLabel}>Dev notes · internal only</div><div style={{ ...lensBody, color: 'var(--muted)' }}>{n.bodyDev}</div></div>)}
               </div>
             )}
           </div>

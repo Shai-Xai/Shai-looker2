@@ -648,31 +648,45 @@ async function refineText({ text, purpose, instructions, apiKey }) {
   return (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
 }
 
-// Summarise raw git commits into clean, customer-readable daily release notes.
-const RELEASE_NOTES_SYSTEM = `You turn a software team's raw git commit messages into clean, customer-readable DAILY release notes for Howler Pulse (an events analytics + comms platform used by event organisers). You are given commits grouped by calendar day.
+// Summarise raw git commits into clean DAILY release notes, in three lenses:
+// a non-technical end-user `summary`, an end-user `howTo`, and a technical `dev`
+// view (internal only). `summary` + `howTo` reach clients (What's New + weekly
+// email); `dev` never leaves the internal surface. See docs/specs/RELEASE_NOTES_SPEC.md.
+const RELEASE_NOTES_SYSTEM = `You turn a software team's raw git commit messages into clean DAILY release notes for Howler Pulse (an events analytics + comms platform used by event organisers). You are given commits grouped by calendar day, and may be given a FEATURE MAP (feature → in-app screen/path) to ground links.
 
 Respond with ONLY strict JSON (no markdown fences) of the form:
-{ "days": [ { "date": "YYYY-MM-DD", "title": "short headline for the day, <8 words", "body": "markdown bullet list of what shipped" } ] }
+{ "days": [ {
+  "date": "YYYY-MM-DD",
+  "title": "short headline for the day, <8 words",
+  "summary": "markdown bullet list of what shipped, benefit-led, for a non-technical reader",
+  "howTo": "markdown: 1-3 short end-user steps to use the day's main change, or empty string if nothing is user-actionable",
+  "deepLink": "in-app path to the headline feature (e.g. /settings/branding), or empty string if unknown",
+  "dev": "markdown bullets for the dev team: what changed technically, notable commits, any breaking/migration notes"
+} ] }
 
 Rules:
 - One object per day that has meaningful, user-noticeable changes. Use the exact date string given.
-- Group related commits; merge duplicates. Each bullet starts with a verb (Added / Improved / Fixed / Faster …).
-- Write for a non-technical reader: describe the BENEFIT, not the code. Translate jargon (e.g. "fix 422 on dashboard_elements" → "Fixed an error when recreating some dashboards").
-- DROP pure noise: merge commits, version bumps, formatting/lint, CI, refactors with no visible effect, WIP. If a day has only noise, omit that day entirely.
-- Never invent features or claims not supported by the commits. Be concise and honest. No emojis.
-- Keep each day to at most ~6 bullets; combine the rest.`;
-async function summariseReleaseNotes({ days, apiKey, instructions }) {
+- Group related commits; merge duplicates. Each summary bullet starts with a verb (Added / Improved / Fixed / Faster …).
+- summary + howTo are written for a NON-TECHNICAL end user: describe the BENEFIT and the steps, not the code. Translate jargon (e.g. "fix 422 on dashboard_elements" → "Fixed an error when recreating some dashboards").
+- howTo names the actual screen and gives concrete steps. If a commit carries a "how-to:" line, use it (lightly cleaned up). Set howTo to "" when the change isn't something a user does (e.g. a backend-only fix).
+- deepLink: only set it when you are confident of the path from the FEATURE MAP or a commit "link:" line; otherwise "".
+- dev keeps the technical detail (jargon, commit refs, migration/flag notes) and is honest — never invent.
+- DROP pure noise from summary/howTo: merge commits, version bumps, formatting/lint, CI, refactors with no visible effect, WIP. If a day has only noise, omit that day entirely (dev may still note a significant refactor on a day that survives for other reasons).
+- Never invent features or claims not supported by the commits. No emojis. Keep each lens tight (~6 bullets max).`;
+async function summariseReleaseNotes({ days, apiKey, instructions, featureMap }) {
   const c = requireClient(apiKey);
   const payload = (days || [])
     .map((d) => `## ${d.date}\n${(d.commits || []).map((m) => `- ${m}`).join('\n')}`)
     .join('\n\n');
+  const map = (featureMap || '').trim();
+  const user = (map ? `FEATURE MAP (feature → in-app path, for grounding howTo/deepLink):\n${map}\n\n` : '') + `COMMITS BY DAY:\n\n${payload}`;
   const resp = await c.messages.create({
     model: MODEL,
-    max_tokens: 2000,
+    max_tokens: 2400,
     thinking: { type: 'adaptive' },
     output_config: { effort: 'low' },
     system: systemWith(RELEASE_NOTES_SYSTEM, instructions),
-    messages: [{ role: 'user', content: `COMMITS BY DAY:\n\n${payload}` }],
+    messages: [{ role: 'user', content: user }],
   });
   const text = (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
   const parsed = await parseModelJsonResilient(c, text, 'release notes');
