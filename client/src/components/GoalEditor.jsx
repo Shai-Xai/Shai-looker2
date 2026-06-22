@@ -470,7 +470,18 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
             </div>
           )}
         </Field>
+        </>)}
 
+        <Field label="Goal type" hint="“Healthy range” flags going too far over; “Mix / split” tracks shares of a whole.">
+          <select value={direction} onChange={(e) => setDirection(e.target.value)} style={inp}>
+            <option value="at_least">Hit a target — reach the number or beat it ↑</option>
+            <option value="at_most">Stay under a cap — keep the number below it ↓</option>
+            <option value="range">Healthy range — stay within a band (flag over) ↕</option>
+            <option value="composition">Mix / split — shares of a 100% whole (New/Returning, age…) ◑</option>
+          </select>
+        </Field>
+
+        {!isComp && (
         <div style={{ display: 'flex', gap: 10 }}>
           <Field label={direction === 'range' ? 'Range — low' : 'Target'} style={{ flex: 1 }}>
             <input value={target} onChange={(e) => setTarget(e.target.value)} placeholder={direction === 'range' ? 'e.g. 30' : 'e.g. 25000'} inputMode="decimal" style={inp} />
@@ -486,16 +497,7 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
             </select>
           </Field>
         </div>
-        </>)}
-
-        <Field label="Goal type" hint="“Healthy range” flags going too far over; “Mix / split” tracks shares of a whole.">
-          <select value={direction} onChange={(e) => setDirection(e.target.value)} style={inp}>
-            <option value="at_least">Hit a target — reach the number or beat it ↑</option>
-            <option value="at_most">Stay under a cap — keep the number below it ↓</option>
-            <option value="range">Healthy range — stay within a band (flag over) ↕</option>
-            <option value="composition">Mix / split — shares of a 100% whole (New/Returning, age…) ◑</option>
-          </select>
-        </Field>
+        )}
 
         {/* Composition: shares from ONE breakdown tile, or a tile PER slice. */}
         {isComp && (
