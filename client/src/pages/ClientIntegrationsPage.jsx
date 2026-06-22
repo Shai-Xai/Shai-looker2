@@ -114,11 +114,18 @@ export default function ClientIntegrationsPage() {
 
           {section === 'email' && (
             <div>
-              <h3 style={subhead}>Account &amp; portfolio</h3>
-              <p style={hint}>Your colours and logo — they style your whole Pulse platform (buttons, accents, charts) and your notification emails. Used everywhere by default, and on portfolio (multi-event) digests. Blank fields keep Howler's defaults.</p>
-              <MailTemplateEditor scope="my" entityId={activeItem.entityId} />
+              <details style={{ marginBottom: 8 }}>
+                <summary style={summaryRow}>
+                  <span style={subhead}>Account &amp; portfolio</span>
+                  <span style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 500 }}>your overall look · used on portfolio digests</span>
+                </summary>
+                <div style={{ marginTop: 12 }}>
+                  <p style={hint}>Your colours and logo — they style your whole Pulse platform (buttons, accents, charts) and your notification emails. Used everywhere by default, and on portfolio (multi-event) digests. Blank fields keep Howler's defaults.</p>
+                  <MailTemplateEditor scope="my" entityId={activeItem.entityId} />
+                </div>
+              </details>
 
-              <h3 style={{ ...subhead, marginTop: 34 }}>Events</h3>
+              <h3 style={{ ...subhead, marginTop: 26 }}>Events</h3>
               <p style={hint}>Give a specific event its own logo, colours and sender name — used for that event's campaigns and digests, and the in-app look while you're viewing it. Blank fields inherit your account branding above.</p>
               <EventBranding entityId={activeItem.entityId} />
             </div>
@@ -158,6 +165,7 @@ const tabBtn = (active) => ({
 });
 const hint = { color: 'var(--muted)', fontSize: 13, marginBottom: 14, lineHeight: 1.5 };
 const subhead = { fontSize: 15, fontWeight: 700, marginBottom: 6 };
+const summaryRow = { cursor: 'pointer', display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap', listStyle: 'revert' };
 
 // Per-event branding self-service: pick one of this client's events, then edit
 // its branding override (inherits the account branding above where left blank).
@@ -176,7 +184,10 @@ function EventBranding({ entityId }) {
       <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Event</label>
       <select value={picked} onChange={(e) => setPicked(e.target.value)} style={selectBox}>
         <option value="">Choose an event…</option>
-        {suites.map((s) => <option key={s.id} value={s.id}>{s.icon ? `${s.icon} ` : ''}{s.name}</option>)}
+        {suites.map((s) => {
+          const icon = s.icon && !s.icon.startsWith('data:') ? `${s.icon} ` : '';
+          return <option key={s.id} value={s.id}>{icon}{s.name}</option>;
+        })}
       </select>
       {picked && <div style={{ marginTop: 16 }}><MailTemplateEditor key={picked} scope="my-suite" entityId={entityId} suiteId={picked} /></div>}
     </div>
