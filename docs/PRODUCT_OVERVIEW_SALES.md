@@ -263,6 +263,39 @@ tracking against it, how it compares to last time, and where you'll land."
 
 ---
 
+## 10. Alerts — get told the moment a number matters  🧪
+The **Action** trigger of Pulse: instead of checking dashboards, a client sets an
+**alert on a metric** and Pulse watches it for them, pinging the team the second it
+crosses — a sell-out, a revenue milestone, stock running low. Built on the same
+governed, per-client data as the dashboards, so an alert can only ever watch *that
+client's* numbers.
+- **Point it at a number you already see** — pick a single-value (KPI) tile (tickets
+  sold, revenue, tickets remaining, a category total) and the alert watches that
+  **live** number, always matching the dashboard.
+- **Three ready-made types** — **🎉 Sold out** (hits zero), **⚠️ Low stock** (drops
+  below a number you set), and **📈 Crosses a number** (rises to / drops to a value),
+  with a **template gallery** so setup is a tap and one number.
+- **Choose how you're told** — it always lands in the **Pulse inbox**; add **📱 push**,
+  **✉️ email** and **💬 SMS** on top. Important alerts can be flagged to **always reach
+  you**.
+- **No spam, by design** — fires on the **cross** (not every check), with a **cooldown**
+  so a busy on-sale can't buzz a phone repeatedly, **quiet hours** that hold non-urgent
+  alerts overnight, and a **once / every-time** choice. Each alert keeps a **history** of
+  when it fired and at what value.
+- **Plain-English** — every rule reads back as a sentence ("When VIP remaining drops
+  below 100, notify me via inbox, push and SMS — once"), and a **Test** button shows
+  exactly what will land.
+- **Dual-surface** — clients set their own alerts; Howler can set them on a client's
+  behalf during onboarding so the first week already feels proactive.
+
+**Pitch:** "Stop watching dashboards — tell Pulse the number that matters and it taps
+you on the shoulder the moment it happens, on whatever screen you're on."
+*Checked every few minutes (data refreshes on the ~30-min pipeline). Coming next:
+sales-surge/stall detection, AI-written alert messages, and one-tap actions from the
+alert itself.*
+
+---
+
 ## On the horizon (🔜 — not yet usable; for roadmap conversations only)
 Use these to set direction, **not** to promise dates.
 - **Conversational/agentic Owl** — chat that answers, analyses and *executes*
@@ -296,6 +329,15 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-22** — **Alerts** 🧪 (new): clients (and Howler on their behalf) can set an
+  **alert on any metric** — point it at a dashboard KPI tile and Pulse watches that live
+  number, firing the moment it crosses. Three types out of the box (**🎉 sold out**,
+  **⚠️ low stock**, **📈 crosses a number**) from a **template gallery**, delivered to the
+  **inbox + push + email + SMS**. Edge-triggered with **cooldown**, **quiet hours** and a
+  **once/every-time** choice so it never spams; each alert keeps a **fire history** and a
+  **Test** button. Mobile-first, dual-surface, and scoped per client (an alert can only
+  watch that client's data). Wave 1 of the alerts engine — surge/stall detection and
+  AI-written messages come next.
 - **2026-06-22** — **Multi-event digests** ✅: scheduled digest emails now understand clients
   running several events at once. The email leads with a **portfolio summary** (the cross-event
   story + top KPIs), then a **clearly-separated section per event** — each with its own headline,
