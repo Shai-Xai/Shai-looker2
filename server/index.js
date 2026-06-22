@@ -1882,6 +1882,31 @@ async function buildFacts(user, entityId, force = false, alignDaysBefore = false
   //     Capped (TKT_BUDGET) so the other boards still get plenty of the budget.
   const isTicketingSet = (name) => /ticket/i.test(name || '') && !/\bga4\b|analytics|google/i.test(name || '');
   const isOverviewDash = (title) => /overview|summary|headline/i.test(title || '');
+  // 1c2) MULTI-EVENT FAIRNESS: when scoped to several events, seed EACH event's own
+  //      ticketing headline tiles FIRST — otherwise the global ticketing budget
+  //      below is eaten by the first event and the others get only leftover
+  //      (often data-less cashless) dashboards, so they show "no activity".
+  if (suiteSet) {
+    const perSuiteSeed = Math.max(3, Math.floor(maxTiles / (suiteSet.size * 2)));
+    for (const sid of suiteSet) {
+      const dashes = catalogue.filter((c) => c.suiteId === sid && isTicketingSet(c.setName))
+        .sort((a, b) => (isOverviewDash(b.title) ? 1 : 0) - (isOverviewDash(a.title) ? 1 : 0));
+      let taken = 0;
+      for (const c of dashes) {
+        if (taken >= perSuiteSeed || picks.length >= maxTiles) break;
+        const def = store.get(c.dashboardId);
+        if (!def) continue;
+        const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((t) => t.tiles || []))]
+          .filter((t) => t.type !== 'text' && t.query?.fields?.length)
+          .sort((a, b) => tilePriority(a) - tilePriority(b));
+        for (const t of tiles) {
+          if (taken >= perSuiteSeed || picks.length >= maxTiles) break;
+          const before = picks.length; addTile(def, t, sid, true);
+          if (picks.length > before) taken += 1;
+        }
+      }
+    }
+  }
   const ticketingDashes = catalogue
     .filter((c) => isTicketingSet(c.setName))
     .sort((a, b) => (isOverviewDash(b.title) ? 1 : 0) - (isOverviewDash(a.title) ? 1 : 0)); // overview boards first
