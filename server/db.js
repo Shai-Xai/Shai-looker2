@@ -475,18 +475,24 @@ db.exec(`CREATE TABLE IF NOT EXISTS release_notes (
 );`);
 addColumn('release_notes', 'source', "TEXT NOT NULL DEFAULT 'manual'"); // 'manual' | 'auto' (AI-summarised from commits)
 addColumn('release_notes', 'last_sha', "TEXT NOT NULL DEFAULT ''");     // newest commit sha summarised for that day
+// Release Notes 2.0 lenses: `body` is the end-user summary; how_to + deep_link ride to clients
+// (What's New + weekly email); body_dev is internal-only and never sent to a client surface.
+addColumn('release_notes', 'how_to', "TEXT NOT NULL DEFAULT ''");    // end-user steps — serves clients AND the team
+addColumn('release_notes', 'body_dev', "TEXT NOT NULL DEFAULT ''");  // technical lens — internal only
+addColumn('release_notes', 'deep_link', "TEXT NOT NULL DEFAULT ''"); // in-app path to the headline feature
+addColumn('release_notes', 'modules', "TEXT NOT NULL DEFAULT ''");   // future per-client relevance tags (unused in v1)
 function rowToReleaseNote(r) {
-  return r && { id: r.id, date: r.date, title: r.title, body: r.body, published: !!r.published, source: r.source || 'manual', lastSha: r.last_sha || '', createdAt: r.created_at, updatedAt: r.updated_at };
+  return r && { id: r.id, date: r.date, title: r.title, body: r.body, howTo: r.how_to || '', bodyDev: r.body_dev || '', deepLink: r.deep_link || '', modules: r.modules || '', published: !!r.published, source: r.source || 'manual', lastSha: r.last_sha || '', createdAt: r.created_at, updatedAt: r.updated_at };
 }
 // Newest day first; ties broken by most-recently created.
 function listReleaseNotes() {
   return db.prepare('SELECT * FROM release_notes ORDER BY date DESC, created_at DESC').all().map(rowToReleaseNote);
 }
 function getReleaseNote(id) { return rowToReleaseNote(db.prepare('SELECT * FROM release_notes WHERE id=?').get(id)); }
-function createReleaseNote({ date = '', title = '', body = '', published = true, source = 'manual', lastSha = '' } = {}) {
+function createReleaseNote({ date = '', title = '', body = '', howTo = '', bodyDev = '', deepLink = '', modules = '', published = true, source = 'manual', lastSha = '' } = {}) {
   const id = uuid(); const ts = now();
-  db.prepare('INSERT INTO release_notes (id,date,title,body,published,source,last_sha,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)')
-    .run(id, date || ts.slice(0, 10), title || '', body || '', published ? 1 : 0, source === 'auto' ? 'auto' : 'manual', lastSha || '', ts, ts);
+  db.prepare('INSERT INTO release_notes (id,date,title,body,how_to,body_dev,deep_link,modules,published,source,last_sha,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)')
+    .run(id, date || ts.slice(0, 10), title || '', body || '', howTo || '', bodyDev || '', deepLink || '', modules || '', published ? 1 : 0, source === 'auto' ? 'auto' : 'manual', lastSha || '', ts, ts);
   return getReleaseNote(id);
 }
 function updateReleaseNote(id, patch = {}) {
@@ -495,8 +501,12 @@ function updateReleaseNote(id, patch = {}) {
   const date = patch.date !== undefined ? (patch.date || '') : cur.date;
   const title = patch.title !== undefined ? (patch.title || '') : cur.title;
   const body = patch.body !== undefined ? (patch.body || '') : cur.body;
+  const howTo = patch.howTo !== undefined ? (patch.howTo || '') : cur.how_to;
+  const bodyDev = patch.bodyDev !== undefined ? (patch.bodyDev || '') : cur.body_dev;
+  const deepLink = patch.deepLink !== undefined ? (patch.deepLink || '') : cur.deep_link;
+  const modules = patch.modules !== undefined ? (patch.modules || '') : cur.modules;
   const published = patch.published !== undefined ? (patch.published ? 1 : 0) : cur.published;
-  db.prepare('UPDATE release_notes SET date=?, title=?, body=?, published=?, updated_at=? WHERE id=?').run(date, title, body, published, now(), id);
+  db.prepare('UPDATE release_notes SET date=?, title=?, body=?, how_to=?, body_dev=?, deep_link=?, modules=?, published=?, updated_at=? WHERE id=?').run(date, title, body, howTo, bodyDev, deepLink, modules, published, now(), id);
   return getReleaseNote(id);
 }
 function deleteReleaseNote(id) { return db.prepare('DELETE FROM release_notes WHERE id=?').run(id).changes > 0; }
