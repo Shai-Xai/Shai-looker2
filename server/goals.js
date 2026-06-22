@@ -250,11 +250,14 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
       // Range goals carry an upper bound; targetValue is the lower bound of the band.
       targetMax: (b.targetMax == null || b.targetMax === '') ? null : Number(b.targetMax),
       // Composition goals: the parts of a 100% split, each with a target share %.
+      // A part may carry its own tile ref (tile-per-slice mode); else the goal's
+      // breakdown tile (metricRef) supplies all slices by label.
       parts: Array.isArray(b.parts) ? b.parts.map((p) => ({
         label: String(p.label || '').slice(0, 60),
         target: Number(p.target) || 0,
         ...(p.tol != null && p.tol !== '' ? { tol: Number(p.tol) } : {}),
         ...(p.focus ? { focus: true } : {}),
+        ...(p.ref && p.ref.tileId ? { ref: { dashboardId: String(p.ref.dashboardId || '').slice(0, 64), tileId: String(p.ref.tileId || '').slice(0, 64), dashboardName: String(p.ref.dashboardName || '').slice(0, 120), tileName: String(p.ref.tileName || '').slice(0, 120) } } : {}),
       })).filter((p) => p.label).slice(0, 12) : [],
       unit: String(b.unit || '').slice(0, 16),
       direction: DIRECTIONS.includes(b.direction) ? b.direction : 'at_least',
@@ -332,10 +335,36 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
     } catch (e) { console.error('[goals] tile resolve failed', goal.id, e.message); return { value: null, asOf: null, source: goal.source }; }
   }
 
-  // Composition goal: read the breakdown tile (category → value), normalise each part to
-  // its SHARE of the total, and flag parts that drift outside their target band. Parts
-  // are interlinked by construction (shared denominator), so up on one is down on another.
+  // Composition goal: each part is a SHARE of the total. Two sources:
+  //  • breakdown tile (one tile, category → value), matched to parts by label; or
+  //  • a tile PER slice (each part carries its own ref) — summed to the total.
+  // Parts are interlinked by construction (shared denominator), so up on one is down
+  // on another, and slices drifting outside their band are flagged.
   async function resolveComposition(goal, user) {
+    const partsCfg = Array.isArray(goal.parts) ? goal.parts : [];
+    const build = (withVal, total) => {
+      const parts = withVal.map((pt) => {
+        const share = Math.round((pt.value / total) * 1000) / 10; // one decimal place
+        const tol = Number.isFinite(Number(pt.tol)) ? Number(pt.tol) : 5; // ±pp default band
+        const diff = share - Number(pt.target);
+        const status = diff > tol ? 'over' : diff < -tol ? 'under' : 'in';
+        return { label: pt.label, target: Number(pt.target), tol, value: Math.round(pt.value), share, status, focus: !!pt.focus };
+      });
+      const drift = parts.filter((p) => p.status !== 'in');
+      return { composition: true, total: Math.round(total), parts, balanced: parts.length ? drift.length === 0 : null, driftCount: drift.length, asOf: now() };
+    };
+    // Tile-per-slice mode: at least two parts each carry their own tile ref.
+    if (partsCfg.filter((p) => p.ref && p.ref.tileId).length >= 2 && typeof resolveTileValue === 'function') {
+      const withVal = await Promise.all(partsCfg.map(async (pt) => {
+        if (!pt.ref || !pt.ref.tileId) return { ...pt, value: 0 };
+        try { const v = await resolveTileValue({ dashboardId: pt.ref.dashboardId, tileId: pt.ref.tileId, user, suiteId: goal.suiteId }); return { ...pt, value: Number(v) || 0 }; }
+        catch { return { ...pt, value: 0 }; }
+      }));
+      const total = withVal.reduce((s, p) => s + p.value, 0);
+      if (!(total > 0)) return { composition: true, parts: [], balanced: null, total: 0, asOf: now() };
+      return build(withVal, total);
+    }
+    // Breakdown-tile mode: one tile returns category → value.
     const ref = goal.metricRef || {};
     if (!ref.dashboardId || !ref.tileId || typeof resolveTileSeries !== 'function') return null;
     let series;
@@ -345,16 +374,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
     const total = rows.reduce((s, p) => s + Number(p.v), 0);
     if (!(total > 0)) return { composition: true, parts: [], balanced: null, total: 0, asOf: now() };
     const valOf = (label) => rows.filter((p) => String(p.t).toLowerCase() === String(label).toLowerCase()).reduce((s, p) => s + Number(p.v), 0);
-    const parts = (goal.parts || []).map((pt) => {
-      const value = valOf(pt.label);
-      const share = Math.round((value / total) * 1000) / 10; // one decimal place
-      const tol = Number.isFinite(Number(pt.tol)) ? Number(pt.tol) : 5; // ±pp default band
-      const diff = share - Number(pt.target);
-      const status = diff > tol ? 'over' : diff < -tol ? 'under' : 'in';
-      return { label: pt.label, target: Number(pt.target), tol, value: Math.round(value), share, status, focus: !!pt.focus };
-    });
-    const drift = parts.filter((p) => p.status !== 'in');
-    return { composition: true, total: Math.round(total), parts, balanced: parts.length ? drift.length === 0 : null, driftCount: drift.length, asOf: now() };
+    return build(partsCfg.map((pt) => ({ ...pt, value: valOf(pt.label) })), total);
   }
 
   function resultBand(goal, value, pct) {
