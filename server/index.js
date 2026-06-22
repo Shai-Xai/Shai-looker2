@@ -818,18 +818,58 @@ async function exploreLabelMap() {
 }
 const prettifyName = (s) => String(s || '').replace(/_/g, ' ').replace(/\b\w/g, (ch) => ch.toUpperCase());
 
-// Apply the suite's EVENT lock (e.g. core_events.name = <event>) to a raw query —
-// but only for fields that actually exist on this explore, so we never inject an
-// invalid filter. applyScope still forces the organiser lock on top (the real
-// boundary); this just narrows a metric to THIS event, not the org's whole history.
+// Per-explore: how the client's own tiles wire each dashboard FILTER NAME (e.g.
+// "Current Event") to a query field on that explore. This is the authoritative
+// mapping the dashboards already use — each explore has its OWN event field, so we
+// can't assume core_events.name. Built from the tiles' listenTo maps. `${model}::${view}`
+// -> { filterNameLower: queryField }.
+function exploreFilterFieldIndex(entityId) {
+  const { catalogue } = clientCatalogue(entityId);
+  const idx = new Map();
+  for (const c of catalogue) {
+    const def = store.get(c.dashboardId);
+    if (!def) continue;
+    // This dashboard's filter NAME -> its field, so a lock keyed by EITHER resolves.
+    const filterField = {};
+    for (const f of def.filters || []) { if (f.name) filterField[f.name.toLowerCase()] = (f.field || f.dimension || ''); }
+    const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((x) => x.tiles || []))];
+    for (const t of tiles) {
+      const q = t.query; if (!q?.model || !q?.view) continue;
+      const key = `${q.model}::${q.view}`;
+      let m = idx.get(key); if (!m) { m = {}; idx.set(key, m); }
+      for (const [fname, qfield] of Object.entries(t.listenTo || {})) {
+        if (!fname || !qfield) continue;
+        const nk = fname.toLowerCase();
+        if (m[nk] == null) m[nk] = qfield;                                    // by filter name ("Current Event")
+        const ff = filterField[nk];
+        if (ff && m[ff.toLowerCase()] == null) m[ff.toLowerCase()] = qfield;  // by the filter's own field
+      }
+    }
+  }
+  return idx;
+}
+
+// Scope a raw metric query to THIS event (suite), the same way the dashboards do.
+// The suite's locks are keyed by dashboard FILTER NAME (e.g. "Current Event") and/or
+// field; for each, we resolve the field on THIS explore — name-keyed via the tiles'
+// listenTo wiring, field-keyed if that field actually exists here — and apply the
+// locked value. applyScope still forces the organiser lock on top (the hard boundary);
+// this narrows the metric to one event instead of the organiser's whole history.
 async function applyEventLocksToMetric(body, model, view, suiteId) {
   try {
+    const su = db.getSuite(suiteId); if (!su) return;
+    const lockMap = expandLockMap(db.lockedFiltersForSuite(suiteId)); // name- + field-keyed
     const dims = new Set((await getExploreFieldsCached(model, view)).dimensions.map((d) => d.name));
-    const lockMap = expandLockMap(db.lockedFiltersForSuite(suiteId));
+    const wiring = exploreFilterFieldIndex(su.entityId).get(`${model}::${view}`) || {};
     for (const [k, v] of Object.entries(lockMap)) {
-      if (k.includes('.') && dims.has(k) && body.filters[k] == null) body.filters[k] = v;
+      if (v == null || v === '') continue;
+      // Resolve this lock (keyed by filter name OR field) to THIS explore's query field:
+      // first via the tiles' wiring, else a field that's already a dimension here.
+      let field = wiring[k.toLowerCase()] || null;
+      if (!field && k.includes('.') && dims.has(k)) field = k;
+      if (field && body.filters[field] == null) body.filters[field] = v;
     }
-  } catch { /* metadata best-effort; applyScope below is the hard boundary */ }
+  } catch (e) { console.warn('[alerts] event-lock apply skipped:', e.message); }
 }
 
 // The catalogue of explores a client can build a metric from — derived from the
