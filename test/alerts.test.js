@@ -18,9 +18,13 @@ function mountAlerts() {
   let scopedUser = null;      // captures the user resolveTileValue was called with
   const announced = [];       // captured inbox/email-push deliveries
   const sms = [];             // captured SMS deliveries
+  let metricArgs = null;       // captures the args a metric read was called with
   const mod = require('../server/alerts').mount(fakeApp(), {
     db, auth,
     resolveTileValue: async ({ user }) => { scopedUser = user; return tileValue; },
+    resolveCustomMetric: async ({ user, ...rest }) => { scopedUser = user; metricArgs = rest; return tileValue; },
+    metricCatalog: async () => ({ explores: [] }),
+    metricFilterValues: async () => [],
     os: { announce: (a) => { announced.push(a); return { id: 'thread' }; } },
     mailer: { baseUrl: () => 'https://pulse.test' },
     push: { isEnabled: () => true },
@@ -30,6 +34,7 @@ function mountAlerts() {
     mod, sql,
     setValue: (v) => { tileValue = v; },
     getScopedUser: () => scopedUser,
+    getMetricArgs: () => metricArgs,
     announced, sms,
   };
 }
@@ -46,11 +51,14 @@ function makeAlert(over = {}) {
     status: 'active', state: 'armed', lastValue: null, lastCheckedAt: '', lastFiredAt: '', fireCount: 0,
     createdBy: 'owner@test', ...over,
   };
-  db.db.prepare(`INSERT INTO alerts (id, entity_id, suite_id, name, rule_type, dashboard_id, tile_id, operator, threshold, unit,
+  a.source = over.source || 'tile';
+  a.model = over.model || ''; a.view = over.view || ''; a.measure = over.measure || '';
+  a.measureLabel = over.measureLabel || ''; a.metricFilters = over.metricFilters || {}; a.metricLabel = over.metricLabel || '';
+  db.db.prepare(`INSERT INTO alerts (id, entity_id, suite_id, name, rule_type, source, dashboard_id, tile_id, model, view, measure, measure_label, metric_filters, metric_label, operator, threshold, unit,
       channels, sms_recipients, priority, frequency, cooldown_min, quiet_start, quiet_end, timezone, status, state, fire_count,
       created_at, updated_at, created_by)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-    a.id, a.entityId, a.suiteId, a.name, a.ruleType, a.dashboardId, a.tileId, a.operator, a.threshold, a.unit,
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+    a.id, a.entityId, a.suiteId, a.name, a.ruleType, a.source, a.dashboardId, a.tileId, a.model, a.view, a.measure, a.measureLabel, JSON.stringify(a.metricFilters), a.metricLabel, a.operator, a.threshold, a.unit,
     JSON.stringify(a.channels), JSON.stringify(a.smsRecipients), a.priority, a.frequency, a.cooldownMin,
     a.quietStart, a.quietEnd, a.timezone, a.status, a.state, a.fireCount, new Date().toISOString(), new Date().toISOString(), a.createdBy);
   return a;
@@ -158,6 +166,23 @@ test('evaluation runs as a CLIENT user scoped to the entity (never admin/unscope
   const u = h.getScopedUser();
   assert.equal(u.role, 'client');                 // not admin → scope is enforced
   assert.deepEqual(u.entityIds, [ent.id]);        // locked to this alert's entity only
+});
+
+test('a custom-metric alert reads via resolveCustomMetric (no tile) and fires on the cross', async () => {
+  const h = mountAlerts();
+  const a = makeAlert({
+    source: 'metric', model: 'ticketing', view: 'core', measure: 'core.tickets_sold',
+    metricFilters: { 'core.ticket_type': 'VIP' }, measureLabel: 'Tickets sold', metricLabel: 'Tickets sold · Ticket Type = VIP',
+    threshold: 1000, operator: 'gte',
+  });
+  // Below → no fire; the metric read got the measure + filter we configured.
+  h.setValue(800); await h.mod.evaluate({ ...a });
+  assert.equal(firedCount(h.sql, a.id), 0);
+  assert.deepEqual(h.getMetricArgs(), { model: 'ticketing', view: 'core', measure: 'core.tickets_sold', filters: { 'core.ticket_type': 'VIP' }, suiteId: 'suite1' });
+  // Crosses → fires once, and the message carries the metric label (not a tile name).
+  h.setValue(1200); await h.mod.evaluate({ ...a, state: 'armed' });
+  assert.equal(firedCount(h.sql, a.id), 1);
+  assert.match(h.announced[0].body, /Tickets sold · Ticket Type = VIP/);
 });
 
 test('SMS fans out to configured numbers when the sms channel is on', async () => {

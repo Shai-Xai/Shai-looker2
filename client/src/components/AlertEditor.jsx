@@ -39,24 +39,68 @@ export default function AlertEditor({ entityId, suiteId, suiteName, alert, smsAv
   const [quietEnd, setQuietEnd] = useState(alert?.quietEnd || '');
 
   const [cat, setCat] = useState(null);          // tile catalogue { dashboards: [...] }
-  const [preview, setPreview] = useState(null);   // live value of the picked tile
+  const [preview, setPreview] = useState(null);   // live value of the picked target
+
+  // Custom-metric source (alert on a raw measure + dimension filter, no tile).
+  const [source, setSource] = useState(alert?.source || 'tile');   // 'tile' | 'metric'
+  const [exCat, setExCat] = useState(null);        // { explores: [...] }
+  const [exKey, setExKey] = useState(alert?.source === 'metric' && alert?.model ? `${alert.model}::${alert.view}` : '');
+  const [measure, setMeasure] = useState(alert?.measure || '');
+  const [mFilters, setMFilters] = useState(() => Object.entries(alert?.metricFilters || {}).map(([field, value]) => ({ field, value })));
+  const [filterVals, setFilterVals] = useState({}); // dimensionField -> [values] | 'loading'
+
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState(false);
   const [err, setErr] = useState('');
   const [confirmDel, setConfirmDel] = useState(false);
 
-  // Load the client's dashboards/tiles for the picker (once).
-  useEffect(() => { if (!cat && entityId) api.getMyDigestTiles(entityId).then(setCat).catch(() => setCat({ dashboards: [] })); }, [cat, entityId]);
+  // Load the client's dashboards/tiles for the tile picker (once, when used).
+  useEffect(() => { if (source === 'tile' && !cat && entityId) api.getMyDigestTiles(entityId).then(setCat).catch(() => setCat({ dashboards: [] })); }, [source, cat, entityId]);
+  // Load the metric catalogue (explores the client already uses) when building a metric.
+  useEffect(() => { if (source === 'metric' && !exCat && suiteId) api.alertMetricCatalog(suiteId).then(setExCat).catch(() => setExCat({ explores: [] })); }, [source, exCat, suiteId]);
 
-  // Live value of the chosen tile, so the threshold is set against the real number.
+  // The chosen explore + its measures/dimensions.
+  const explores = exCat?.explores || [];
+  const curExplore = explores.find((e) => `${e.model}::${e.view}` === exKey) || null;
+  const measuresFor = () => curExplore?.measures || [];
+  const dimsFor = () => curExplore?.dimensions || [];
+  const measureObj = () => measuresFor().find((m) => m.name === measure) || null;
+  const dimLabel = (name) => dimsFor().find((d) => d.name === name)?.label || name;
+  const metricFiltersObj = () => { const o = {}; for (const f of mFilters) if (f.field && f.value) o[f.field] = f.value; return o; };
+  const metricLabelStr = () => {
+    const ml = measureObj()?.label || '';
+    const fs = mFilters.filter((f) => f.field && f.value).map((f) => `${dimLabel(f.field)} = ${f.value}`);
+    return fs.length ? `${ml} · ${fs.join(', ')}` : ml;
+  };
+  // Lazily fetch the distinct values for a filter dimension (scoped to this event).
+  const loadFilterVals = (field) => {
+    if (!field || filterVals[field] || !curExplore) return;
+    setFilterVals((m) => ({ ...m, [field]: 'loading' }));
+    api.alertMetricFilterValues(suiteId, { model: curExplore.model, view: curExplore.view, field })
+      .then((r) => setFilterVals((m) => ({ ...m, [field]: r.values || [] })))
+      .catch(() => setFilterVals((m) => ({ ...m, [field]: [] })));
+  };
+  const setFilter = (i, patch) => setMFilters((fs) => fs.map((f, j) => (j === i ? { ...f, ...patch } : f)));
+  const addFilter = () => setMFilters((fs) => [...fs, { field: '', value: '' }]);
+  const removeFilter = (i) => setMFilters((fs) => fs.filter((_, j) => j !== i));
+
+  // Live value of the chosen target (tile OR built metric), so the threshold is set
+  // against the real number.
   useEffect(() => {
-    if (!dashboardId || !tileId || !suiteId) { setPreview(null); return undefined; }
-    let alive = true; setPreview({ loading: true });
-    api.alertTileValue(suiteId, dashboardId, tileId)
-      .then((r) => { if (alive) setPreview({ value: r.value }); })
-      .catch(() => { if (alive) setPreview({ value: null }); });
+    let alive = true;
+    const done = (v) => { if (alive) setPreview(v); };
+    if (source === 'tile') {
+      if (!dashboardId || !tileId || !suiteId) { setPreview(null); return undefined; }
+      setPreview({ loading: true });
+      api.alertTileValue(suiteId, dashboardId, tileId).then((r) => done({ value: r.value })).catch(() => done({ value: null }));
+    } else {
+      if (!curExplore || !measure || !suiteId) { setPreview(null); return undefined; }
+      setPreview({ loading: true });
+      api.alertMetricValue(suiteId, { model: curExplore.model, view: curExplore.view, measure, filters: metricFiltersObj() })
+        .then((r) => done({ value: r.value })).catch(() => done({ value: null }));
+    }
     return () => { alive = false; };
-  }, [dashboardId, tileId, suiteId]);
+  }, [source, dashboardId, tileId, suiteId, exKey, measure, JSON.stringify(mFilters)]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const dashboards = cat?.dashboards || [];
   // An alert watches ONE headline number, so only single-value (KPI) tiles qualify
@@ -78,7 +122,7 @@ export default function AlertEditor({ entityId, suiteId, suiteName, alert, smsAv
 
   // The plain-English read-back of the rule (always visible, so it's never a mystery).
   const sentence = () => {
-    const metric = tileName() || 'the number';
+    const metric = (source === 'metric' ? metricLabelStr() : tileName()) || 'the number';
     const tval = threshold === '' ? '…' : fmtNum(Number(threshold), unit);
     let when;
     if (ruleType === 'sold_out') when = `${metric} sells out`;
@@ -92,13 +136,13 @@ export default function AlertEditor({ entityId, suiteId, suiteName, alert, smsAv
 
   async function save() {
     if (!name.trim()) { setErr('Give the alert a name.'); return; }
-    if (!dashboardId || !tileId) { setErr('Pick the dashboard tile to watch.'); return; }
+    if (source === 'metric') { if (!curExplore || !measure) { setErr('Pick the metric to watch.'); return; } }
+    else if (!dashboardId || !tileId) { setErr('Pick the dashboard tile to watch.'); return; }
     if (ruleType !== 'sold_out' && (threshold === '' || Number.isNaN(Number(threshold)))) { setErr('Set a number to alert on.'); return; }
     if (!channels.length) { setErr('Pick at least one way to be notified (or just the inbox stays on).'); }
     setBusy(true); setErr('');
     const body = {
-      name: name.trim(), ruleType,
-      dashboardId, tileId, dashboardName: dashName(), tileName: tileName(),
+      name: name.trim(), ruleType, source,
       operator: ruleType === 'depletion' || ruleType === 'sold_out' ? 'lte' : operator,
       threshold: ruleType === 'sold_out' ? 0 : Number(threshold),
       unit, channels,
@@ -107,6 +151,12 @@ export default function AlertEditor({ entityId, suiteId, suiteName, alert, smsAv
       cooldownMin: Number(cooldownMin) || 60,
       quietStart, quietEnd,
     };
+    if (source === 'metric') {
+      body.model = curExplore.model; body.view = curExplore.view; body.measure = measure;
+      body.measureLabel = measureObj()?.label || ''; body.metricFilters = metricFiltersObj(); body.metricLabel = metricLabelStr();
+    } else {
+      body.dashboardId = dashboardId; body.tileId = tileId; body.dashboardName = dashName(); body.tileName = tileName();
+    }
     try {
       if (editing) await api.updateAlert(alert.id, body);
       else await api.createAlert(suiteId, body);
@@ -158,34 +208,85 @@ export default function AlertEditor({ entityId, suiteId, suiteName, alert, smsAv
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. VIP nearly gone, R1m revenue" style={inp} autoFocus />
         </Field>
 
-        <Field label="Watch which number?" hint="Pick a single-value (KPI) tile you already look at — the alert watches that live number.">
-          <select value={dashboardId} onChange={(e) => { setDashboardId(e.target.value); setTileId(''); }} style={inp}>
-            <option value="">{cat ? 'Choose a dashboard…' : 'Loading…'}</option>
-            {dashboards.map((d) => <option key={d.dashboardId} value={d.dashboardId}>{d.title}{d.setName ? ` · ${d.setName}` : ''}</option>)}
-          </select>
-          {dashboardId && (tilesFor(dashboardId).length ? (
-            <select value={tileId} onChange={(e) => setTileId(e.target.value)} style={{ ...inp, marginTop: 8 }}>
-              <option value="">Choose a tile…</option>
-              {tilesFor(dashboardId).map((t) => <option key={t.tileId} value={t.tileId}>{t.title}</option>)}
-            </select>
-          ) : (
-            <div style={{ marginTop: 8, fontSize: 12, color: 'var(--muted)', lineHeight: 1.4 }}>
-              No single-value (KPI) tiles on this dashboard. Alerts watch one headline number — pick a dashboard with a KPI tile.
-            </div>
-          ))}
-          {tileId && (
-            <div style={readsBox}>
-              <span style={{ color: 'var(--muted)', fontWeight: 600 }}>This tile reads:</span>
-              {preview?.loading ? <span style={{ color: 'var(--muted)' }}>reading…</span>
-                : preview && preview.value != null ? <b style={{ fontSize: 15 }}>{fmtNum(preview.value, unit)}</b>
-                  : <span style={{ color: 'var(--muted)' }}>— couldn't read it right now</span>}
-              <span style={{ flex: 1 }} />
-              {preview && preview.value != null && threshold === '' && ruleType !== 'sold_out' && (
-                <button type="button" onClick={() => setThreshold(String(Math.round(Number(preview.value))))} style={miniBtn}>Use as start</button>
-              )}
-            </div>
-          )}
+        <Field label="What should we watch?">
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Seg active={source === 'tile'} onClick={() => setSource('tile')}>📊 A dashboard tile</Seg>
+            <Seg active={source === 'metric'} onClick={() => setSource('metric')}>🧩 Build a metric</Seg>
+          </div>
         </Field>
+
+        {source === 'tile' ? (
+          <Field label="Which tile?" hint="Pick a single-value (KPI) tile you already look at — the alert watches that live number.">
+            <select value={dashboardId} onChange={(e) => { setDashboardId(e.target.value); setTileId(''); }} style={inp}>
+              <option value="">{cat ? 'Choose a dashboard…' : 'Loading…'}</option>
+              {dashboards.map((d) => <option key={d.dashboardId} value={d.dashboardId}>{d.title}{d.setName ? ` · ${d.setName}` : ''}</option>)}
+            </select>
+            {dashboardId && (tilesFor(dashboardId).length ? (
+              <select value={tileId} onChange={(e) => setTileId(e.target.value)} style={{ ...inp, marginTop: 8 }}>
+                <option value="">Choose a tile…</option>
+                {tilesFor(dashboardId).map((t) => <option key={t.tileId} value={t.tileId}>{t.title}</option>)}
+              </select>
+            ) : (
+              <div style={{ marginTop: 8, fontSize: 12, color: 'var(--muted)', lineHeight: 1.4 }}>
+                No single-value (KPI) tiles on this dashboard. Alerts watch one headline number — pick a dashboard with a KPI tile, or “Build a metric”.
+              </div>
+            ))}
+          </Field>
+        ) : (
+          <Field label="Build the metric" hint="Pick a measure and (optionally) filter it — e.g. tickets sold where Ticket Type = VIP. No tile needed.">
+            <select value={exKey} onChange={(e) => { setExKey(e.target.value); setMeasure(''); setMFilters([]); }} style={inp}>
+              <option value="">{exCat ? 'Choose a data source…' : 'Loading…'}</option>
+              {explores.map((e) => <option key={`${e.model}::${e.view}`} value={`${e.model}::${e.view}`}>{e.label}</option>)}
+            </select>
+            {exCat && !explores.length && (
+              <div style={{ marginTop: 8, fontSize: 12, color: 'var(--muted)', lineHeight: 1.4 }}>
+                No data sources available yet (these come from your existing dashboards). Use “A dashboard tile” instead.
+              </div>
+            )}
+            {curExplore && (
+              <select value={measure} onChange={(e) => { setMeasure(e.target.value); const m = measuresFor().find((x) => x.name === e.target.value); if (m && /revenue|amount|sales|gross|net|value|spend/i.test(`${m.label} ${m.name}`)) setUnit('ZAR'); }} style={{ ...inp, marginTop: 8 }}>
+                <option value="">Choose a measure…</option>
+                {measuresFor().map((m) => <option key={m.name} value={m.name}>{m.label}</option>)}
+              </select>
+            )}
+            {curExplore && measure && (
+              <div style={{ marginTop: 10 }}>
+                {mFilters.map((f, i) => (
+                  <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+                    <select value={f.field} onChange={(e) => { setFilter(i, { field: e.target.value, value: '' }); loadFilterVals(e.target.value); }} style={{ ...inp, flex: 1 }}>
+                      <option value="">Filter by…</option>
+                      {dimsFor().map((d) => <option key={d.name} value={d.name}>{d.label}</option>)}
+                    </select>
+                    {f.field && (
+                      Array.isArray(filterVals[f.field])
+                        ? <select value={f.value} onChange={(e) => setFilter(i, { value: e.target.value })} style={{ ...inp, flex: 1 }}>
+                            <option value="">{filterVals[f.field].length ? 'Choose a value…' : 'type below'}</option>
+                            {filterVals[f.field].map((v) => <option key={v} value={v}>{v}</option>)}
+                          </select>
+                        : <input value={f.value} onChange={(e) => setFilter(i, { value: e.target.value })} placeholder={filterVals[f.field] === 'loading' ? 'loading values…' : 'value (e.g. VIP)'} style={{ ...inp, flex: 1 }} />
+                    )}
+                    <button type="button" onClick={() => removeFilter(i)} aria-label="Remove filter" style={msX}>✕</button>
+                  </div>
+                ))}
+                <button type="button" onClick={addFilter} style={addFilterBtn}>＋ Add a filter (e.g. Ticket Type, Category)</button>
+              </div>
+            )}
+          </Field>
+        )}
+
+        {/* Shared live-value box — what the chosen target reads right now. */}
+        {((source === 'tile' && tileId) || (source === 'metric' && measure)) && (
+          <div style={readsBox}>
+            <span style={{ color: 'var(--muted)', fontWeight: 600 }}>This reads:</span>
+            {preview?.loading ? <span style={{ color: 'var(--muted)' }}>reading…</span>
+              : preview && preview.value != null ? <b style={{ fontSize: 15 }}>{fmtNum(preview.value, unit)}</b>
+                : <span style={{ color: 'var(--muted)' }}>— couldn't read it right now</span>}
+            <span style={{ flex: 1 }} />
+            {preview && preview.value != null && threshold === '' && ruleType !== 'sold_out' && (
+              <button type="button" onClick={() => setThreshold(String(Math.round(Number(preview.value))))} style={miniBtn}>Use as start</button>
+            )}
+          </div>
+        )}
 
         <Field label="Alert me when…">
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -346,6 +447,8 @@ const sheet = { width: '100%', maxHeight: '90vh', overflowY: 'auto', background:
 const inp = { width: '100%', boxSizing: 'border-box', padding: '9px 11px', border: '1.5px solid var(--hairline)', borderRadius: 9, fontSize: 14, outline: 'none', background: 'var(--card)', color: 'var(--text)', fontFamily: 'inherit' };
 const xBtn = { border: 'none', background: 'rgba(128,128,128,0.12)', color: 'var(--muted-2)', borderRadius: 980, width: 28, height: 28, fontSize: 13, cursor: 'pointer' };
 const readsBox = { marginTop: 9, padding: '8px 11px', background: 'rgba(128,128,128,0.07)', borderRadius: 9, fontSize: 13, display: 'flex', alignItems: 'center', gap: 7 };
+const msX = { border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--muted)', borderRadius: 9, fontSize: 13, cursor: 'pointer', flexShrink: 0, width: 38 };
+const addFilterBtn = { border: '1px dashed var(--hairline)', background: 'transparent', color: 'var(--brand)', borderRadius: 9, fontSize: 12, fontWeight: 700, padding: '7px 11px', cursor: 'pointer', width: '100%' };
 const miniBtn = { border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--brand)', borderRadius: 980, fontSize: 11, fontWeight: 700, padding: '3px 9px', cursor: 'pointer' };
 const sentenceBox = { marginTop: 6, padding: '11px 13px', background: 'rgba(var(--brand-rgb,10,132,255),0.07)', border: '1px solid var(--hairline)', borderRadius: 10, fontSize: 13, lineHeight: 1.5, fontWeight: 600 };
 const btnGhost = { flex: '0 0 auto', padding: '10px 14px', borderRadius: 10, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', fontSize: 13.5, fontWeight: 700, cursor: 'pointer' };

@@ -137,7 +137,7 @@ function AlertRow({ alert, canManage, onEdit, onToggle }) {
 }
 
 function ruleText(a) {
-  const metric = a.tileName || 'the number';
+  const metric = (a.source === 'metric' ? a.metricLabel : a.tileName) || 'the number';
   const t = fmtNum(a.threshold, a.unit);
   if (a.ruleType === 'sold_out') return `When ${metric} sells out`;
   if (a.ruleType === 'depletion') return `When ${metric} drops below ${t}`;

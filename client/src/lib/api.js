@@ -463,4 +463,8 @@ export const api = {
   alertEvents: (id) => fetch(`/api/alerts/${id}/events`).then(json),
   testAlert: (id) => fetch(`/api/alerts/${id}/test`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(json),
   alertTileValue: (suiteId, dashboardId, tileId) => fetch(`/api/alerts/suites/${suiteId}/tile-value`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dashboardId, tileId }) }).then(json),
+  // Custom-metric source: alert on a raw measure + dimension filter (no tile needed).
+  alertMetricCatalog: (suiteId) => fetch(`/api/alerts/suites/${suiteId}/metric-catalog`).then(json),
+  alertMetricValue: (suiteId, body) => fetch(`/api/alerts/suites/${suiteId}/metric-value`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
+  alertMetricFilterValues: (suiteId, body) => fetch(`/api/alerts/suites/${suiteId}/metric-filter-values`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
 };

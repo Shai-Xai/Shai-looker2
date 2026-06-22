@@ -782,10 +782,108 @@ async function resolveEventDate({ suiteId, user }) {
 const goalsApi = require('./goals').mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTileSeriesAll, resolveEventDate });
 
 // ── Alerts: metric watchers → server/alerts.js ───────────────────────────────
-// A self-contained module that watches a dashboard tile's live number (the SAME
-// scope-enforced resolveTileValue goals use) and fires through the inbox/push/
-// email/SMS when it crosses a threshold. Background tick evaluates the rules.
-require('./alerts').mount(app, { db, auth, resolveTileValue, os, mailer, push, messaging });
+// A self-contained module that watches a number (a dashboard tile via the SAME
+// scope-enforced resolveTileValue goals use, OR a raw measure + dimension filter
+// built in the editor) and fires through the inbox/push/email/SMS when it crosses
+// a threshold. Background tick evaluates the rules.
+//
+// The "custom metric" source lets a client alert on a slice that has no tile (e.g.
+// "tickets sold where Ticket Type = VIP"). To keep the per-tenant boundary intact,
+// the catalogue is built ONLY from explores the client's dashboards already use —
+// the exact set where applyScope can resolve the organiser lock — and every read
+// still runs through applyScope (fail-closed) with the suite's event lock applied.
+
+// Looker metadata, cached (explore field lists + model/explore labels).
+const _exFieldCache = new Map(); // `${model}::${view}` -> { at, data:{ dimensions, measures } }
+const METRIC_META_TTL = 10 * 60000;
+async function getExploreFieldsCached(model, view) {
+  const key = `${model}::${view}`;
+  const hit = _exFieldCache.get(key);
+  if (hit && Date.now() - hit.at < METRIC_META_TTL) return hit.data;
+  const data = await looker.getExploreFields(model, view);
+  _exFieldCache.set(key, { at: Date.now(), data });
+  return data;
+}
+let _exLabels = null, _exLabelsAt = 0;
+async function exploreLabelMap() {
+  if (!_exLabels || Date.now() - _exLabelsAt > METRIC_META_TTL) {
+    try { const models = await looker.listModels(); _exLabels = new Map(); _exLabelsAt = Date.now();
+      for (const m of models || []) for (const e of m.explores || []) _exLabels.set(`${m.name}::${e.name}`, e.label || e.name);
+    } catch { _exLabels = _exLabels || new Map(); }
+  }
+  return _exLabels;
+}
+const prettifyName = (s) => String(s || '').replace(/_/g, ' ').replace(/\b\w/g, (ch) => ch.toUpperCase());
+
+// Apply the suite's EVENT lock (e.g. core_events.name = <event>) to a raw query —
+// but only for fields that actually exist on this explore, so we never inject an
+// invalid filter. applyScope still forces the organiser lock on top (the real
+// boundary); this just narrows a metric to THIS event, not the org's whole history.
+async function applyEventLocksToMetric(body, model, view, suiteId) {
+  try {
+    const dims = new Set((await getExploreFieldsCached(model, view)).dimensions.map((d) => d.name));
+    const lockMap = expandLockMap(db.lockedFiltersForSuite(suiteId));
+    for (const [k, v] of Object.entries(lockMap)) {
+      if (k.includes('.') && dims.has(k) && body.filters[k] == null) body.filters[k] = v;
+    }
+  } catch { /* metadata best-effort; applyScope below is the hard boundary */ }
+}
+
+// The catalogue of explores a client can build a metric from — derived from the
+// dashboards they already have, so scope is guaranteed to resolve. Each carries its
+// measures + filterable dimensions (with friendly labels) for the editor's pickers.
+async function metricCatalog(entityId) {
+  const { catalogue } = clientCatalogue(entityId);
+  const seen = new Map(); // `${model}::${view}` -> { model, view }
+  for (const c of catalogue) {
+    const def = store.get(c.dashboardId);
+    if (!def) continue;
+    const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((x) => x.tiles || []))];
+    for (const t of tiles) { const q = t.query; if (q?.model && q?.view) seen.set(`${q.model}::${q.view}`, { model: q.model, view: q.view }); }
+  }
+  const labels = await exploreLabelMap();
+  const explores = [];
+  for (const { model, view } of seen.values()) {
+    try {
+      const f = await getExploreFieldsCached(model, view);
+      if (!f.measures.length) continue; // nothing to alert on
+      const shape = (arr) => arr.map((x) => ({ name: x.name, label: x.label, type: x.type, group: x.group_label || '' }));
+      explores.push({ model, view, label: labels.get(`${model}::${view}`) || prettifyName(view), measures: shape(f.measures), dimensions: shape(f.dimensions) });
+    } catch { /* skip explores Looker won't describe */ }
+  }
+  explores.sort((a, b) => String(a.label).localeCompare(String(b.label)));
+  return { explores };
+}
+
+// Read a built metric's live number: one measure, the chosen dimension filters, the
+// event lock, the organiser lock (applyScope) — fail-closed if scope can't resolve.
+async function resolveCustomMetric({ model, view, measure, filters, user, suiteId }) {
+  if (!model || !view || !measure) return null;
+  const body = { model, view, fields: [measure], filters: { ...(filters || {}) }, limit: 1 };
+  await applyEventLocksToMetric(body, model, view, suiteId);
+  if (!(await applyScope(body, user, suiteId))) return null; // hard boundary, fail closed
+  const data = await runLookerQuery('/queries/run/json_detail', body);
+  return primaryTileValue(data, {});
+}
+
+// Distinct values of a dimension under this event's scope — the choices for a filter
+// (e.g. the Ticket Type values that exist for this event).
+async function metricFilterValues({ model, view, field, user, suiteId }) {
+  const body = { model, view, fields: [field], filters: {}, sorts: [field], limit: 500 };
+  await applyEventLocksToMetric(body, model, view, suiteId);
+  if (!(await applyScope(body, user, suiteId))) return [];
+  const data = await runLookerQuery('/queries/run/json_detail', body);
+  const out = [];
+  for (const r of (data?.data || [])) {
+    const cell = r[field];
+    const v = cell ? (cell.rendered != null && cell.rendered !== '' ? cell.rendered : cell.value) : null;
+    if (v != null && v !== '' && !out.includes(String(v))) out.push(String(v));
+    if (out.length >= 200) break;
+  }
+  return out;
+}
+
+require('./alerts').mount(app, { db, auth, resolveTileValue, resolveCustomMetric, metricCatalog, metricFilterValues, os, mailer, push, messaging });
 
 // ── Weekly goal nudge (push) ─────────────────────────────────────────────────
 // One calm "your goals this week" push per entity (not per-event): goals needing

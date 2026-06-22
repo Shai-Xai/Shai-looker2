@@ -277,6 +277,11 @@ client's* numbers.
 - **Point it at a number you already see** — pick a single-value (KPI) tile (tickets
   sold, revenue, tickets remaining, a category total) and the alert watches that
   **live** number, always matching the dashboard.
+- **Or build a metric, no tile needed** 🆕 — pick a **measure** (tickets sold, revenue)
+  and **filter it** by a dimension like **Ticket Type** or **Category** (e.g. "tickets
+  sold where Ticket Type = VIP"), choosing the value from a real list. Great for slices
+  that aren't on a dashboard. It only offers data sources the client already uses, and
+  every read stays scoped to that client + event.
 - **Three ready-made types** — **🎉 Sold out** (hits zero), **⚠️ Low stock** (drops
   below a number you set), and **📈 Crosses a number** (rises to / drops to a value),
   with a **template gallery** so setup is a tap and one number.
@@ -334,6 +339,13 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-22** — **Alerts: custom metric source** 🧪: alerts can now watch a metric
+  that has **no dashboard tile** — pick a measure and filter it by a dimension like
+  **Ticket Type** or **Category** (e.g. "tickets sold where Ticket Type = VIP"), with
+  the filter value chosen from a real, scoped list of values. The picker only offers
+  data sources the client already uses, and every read runs through the same per-client
+  + per-event scope boundary as a tile, so it can't reach another client's or event's
+  data. Removes the "an admin must build a tile first" step for slice-level alerts.
 - **2026-06-22** — **Alerts** 🧪 (new): clients (and Howler on their behalf) can set an
   **alert on any metric** — point it at a dashboard KPI tile and Pulse watches that live
   number, firing the moment it crosses. Three types out of the box (**🎉 sold out**,
