@@ -1795,14 +1795,20 @@ async function buildFacts(user, entityId, force = false, alignDaysBefore = false
   // Optional: restrict the whole fact-gather to a set of suites (multi-event
   // briefing scopes to the selected events). Null = every suite (default).
   const suiteSet = Array.isArray(opts.suiteIds) && opts.suiteIds.length ? new Set(opts.suiteIds) : null;
+  // Scale the tile budget when covering multiple events so each gets a fair share
+  // (≈10 tiles/event, capped) rather than all events squeezing into the single cap.
+  const maxTiles = suiteSet ? Math.min(60, Math.max(FACT_MAX_TILES, suiteSet.size * 10)) : FACT_MAX_TILES;
   const picks = []; // { tile, def, suiteId, setName, dashTitle, pinned }
   const seen = new Set();
   const addTile = (def, tile, suiteId, pinned) => {
-    const sig = `${def.id}|${tile.id}`;
-    if (seen.has(sig)) return;
     const meta = dashMeta[def.id];
     const sid = suiteId || meta?.suiteId;
     if (suiteSet && !suiteSet.has(sid)) return; // not in the selected events
+    // Dedupe per dashboard+tile — but when scoped to multiple events (suiteSet),
+    // a SHARED dashboard must contribute once PER event (each resolved with that
+    // event's own locks), so include the suite in the signature there.
+    const sig = suiteSet ? `${sid}|${def.id}|${tile.id}` : `${def.id}|${tile.id}`;
+    if (seen.has(sig)) return;
     picks.push({ tile, def, suiteId: sid, setName: meta?.setName || '', dashTitle: def.title, pinned: !!pinned });
     seen.add(sig);
   };
@@ -1819,7 +1825,7 @@ async function buildFacts(user, entityId, force = false, alignDaysBefore = false
   let focus = [];
   try { focus = JSON.parse(db.getUserPref(user.id, `briefing_tiles:${entityId}`) || '[]'); } catch { focus = []; }
   for (const fsel of Array.isArray(focus) ? focus : []) {
-    if (picks.length >= FACT_MAX_TILES) break;
+    if (picks.length >= maxTiles) break;
     const def = store.get(fsel.dashboardId);
     if (!def || !dashMeta[def.id]) continue; // must be in this client's catalogue
     const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))];
@@ -1834,14 +1840,14 @@ async function buildFacts(user, entityId, force = false, alignDaysBefore = false
   //     matter (e.g. ticketing, audience) are never crowded out by busier ones
   //     (e.g. GA4). Capped per dashboard like the rotation fill.
   for (const did of Array.isArray(priorityDashboards) ? priorityDashboards : []) {
-    if (picks.length >= FACT_MAX_TILES) break;
+    if (picks.length >= maxTiles) break;
     const def = store.get(did);
     if (!def || !dashMeta[did]) continue; // must be in this client's catalogue
     const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))]
       .filter((t) => t.type !== 'text' && t.query?.fields?.length)
       .sort((a, b) => tilePriority(a) - tilePriority(b));
     let taken = 0;
-    for (const t of tiles) { if (taken >= PER_DASH || picks.length >= FACT_MAX_TILES) break; const before = picks.length; addTile(def, t, dashMeta[did]?.suiteId, true); if (picks.length > before) taken += 1; }
+    for (const t of tiles) { if (taken >= PER_DASH || picks.length >= maxTiles) break; const before = picks.length; addTile(def, t, dashMeta[did]?.suiteId, true); if (picks.length > before) taken += 1; }
   }
   const isAnalyticsName = (name) => /\bga4\b|analytics|google/i.test(name || '');
   // 1d0) Guarantee the AUTHORITATIVE ticketing HEADLINE tiles by CONTENT, so the lead
@@ -1852,7 +1858,7 @@ async function buildFacts(user, entityId, force = false, alignDaysBefore = false
   const TICKET_HEADLINE = /total\s*tickets|tickets?\s*sold|gross\s*(revenue|sales)|\bnet\s*sales\b|tickets?\s*revenue|sell[-\s]?through|attendance|checked?[-\s]?in/i;
   let head = 0; const HEAD_BUDGET = 4;
   for (const c of catalogue) {
-    if (head >= HEAD_BUDGET || picks.length >= FACT_MAX_TILES) break;
+    if (head >= HEAD_BUDGET || picks.length >= maxTiles) break;
     if (isAnalyticsName(c.setName) || isAnalyticsName(c.title)) continue;
     const def = store.get(c.dashboardId);
     if (!def || !dashMeta[c.dashboardId]) continue;
@@ -1860,7 +1866,7 @@ async function buildFacts(user, entityId, force = false, alignDaysBefore = false
       .filter((t) => t.type !== 'text' && t.query?.fields?.length && TICKET_HEADLINE.test(t.title || ''))
       .sort((a, b) => tilePriority(a) - tilePriority(b));
     for (const t of tiles) {
-      if (head >= HEAD_BUDGET || picks.length >= FACT_MAX_TILES) break;
+      if (head >= HEAD_BUDGET || picks.length >= maxTiles) break;
       const before = picks.length; addTile(def, t, c.suiteId, true);
       if (picks.length > before) head += 1;
     }
@@ -1878,7 +1884,7 @@ async function buildFacts(user, entityId, force = false, alignDaysBefore = false
     .sort((a, b) => (isOverviewDash(b.title) ? 1 : 0) - (isOverviewDash(a.title) ? 1 : 0)); // overview boards first
   let tkt = 0; const TKT_BUDGET = 8;
   for (const c of ticketingDashes) {
-    if (tkt >= TKT_BUDGET || picks.length >= FACT_MAX_TILES) break;
+    if (tkt >= TKT_BUDGET || picks.length >= maxTiles) break;
     const def = store.get(c.dashboardId);
     if (!def || !dashMeta[c.dashboardId]) continue;
     const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((t) => t.tiles || []))]
@@ -1886,7 +1892,7 @@ async function buildFacts(user, entityId, force = false, alignDaysBefore = false
       .sort((a, b) => tilePriority(a) - tilePriority(b));
     let taken = 0;
     for (const t of tiles) {
-      if (taken >= PER_DASH || tkt >= TKT_BUDGET || picks.length >= FACT_MAX_TILES) break;
+      if (taken >= PER_DASH || tkt >= TKT_BUDGET || picks.length >= maxTiles) break;
       const before = picks.length; addTile(def, t, c.suiteId, true);
       if (picks.length > before) { taken += 1; tkt += 1; }
     }
@@ -1897,10 +1903,10 @@ async function buildFacts(user, entityId, force = false, alignDaysBefore = false
   const isAnalyticsSet = (name) => /\bga4\b|analytics|google/i.test(name || '');
   let ga = 0; const GA_BUDGET = 3;
   for (const lead of leads) {
-    if (ga >= GA_BUDGET || picks.length >= FACT_MAX_TILES) break;
+    if (ga >= GA_BUDGET || picks.length >= maxTiles) break;
     if (!isAnalyticsSet(lead.setName)) continue;
     for (const did of lead.dashboardIds) {
-      if (ga >= GA_BUDGET || picks.length >= FACT_MAX_TILES) break;
+      if (ga >= GA_BUDGET || picks.length >= maxTiles) break;
       const def = store.get(did);
       if (!def || !dashMeta[did]) continue;
       const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((t) => t.tiles || []))]
@@ -1908,7 +1914,7 @@ async function buildFacts(user, entityId, force = false, alignDaysBefore = false
         .sort((a, b) => tilePriority(a) - tilePriority(b));
       let taken = 0;
       for (const t of tiles) {
-        if (taken >= PER_DASH || ga >= GA_BUDGET || picks.length >= FACT_MAX_TILES) break;
+        if (taken >= PER_DASH || ga >= GA_BUDGET || picks.length >= maxTiles) break;
         const before = picks.length; addTile(def, t, lead.suiteId, true);
         if (picks.length > before) { taken += 1; ga += 1; }
       }
@@ -1923,8 +1929,12 @@ async function buildFacts(user, entityId, force = false, alignDaysBefore = false
   const pools = [];
   const pooled = new Set();
   for (const c of catalogue) {
-    if (pooled.has(c.dashboardId)) continue;
-    pooled.add(c.dashboardId);
+    if (suiteSet && !suiteSet.has(c.suiteId)) continue; // only the selected events
+    // One pool per dashboard — but per (suite, dashboard) when scoped to multiple
+    // events, so a shared dashboard fills each event with its own scoped tiles.
+    const pkey = suiteSet ? `${c.suiteId}|${c.dashboardId}` : c.dashboardId;
+    if (pooled.has(pkey)) continue;
+    pooled.add(pkey);
     const def = store.get(c.dashboardId);
     if (!def) continue;
     const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((t) => t.tiles || []))]
@@ -1935,10 +1945,10 @@ async function buildFacts(user, entityId, force = false, alignDaysBefore = false
   const offset = pools.length ? Math.floor(Date.now() / 864e5) % pools.length : 0;
   const rotated = [...pools.slice(offset), ...pools.slice(0, offset)];
   let progressed = true;
-  while (picks.length < FACT_MAX_TILES && progressed) {
+  while (picks.length < maxTiles && progressed) {
     progressed = false;
     for (const pool of rotated) {
-      if (picks.length >= FACT_MAX_TILES) break;
+      if (picks.length >= maxTiles) break;
       while (pool.idx < pool.tiles.length && pool.taken < PER_DASH) {
         const tile = pool.tiles[pool.idx++];
         const before = picks.length;
@@ -1964,7 +1974,7 @@ async function buildFacts(user, entityId, force = false, alignDaysBefore = false
   if (alignDaysBefore) for (const p of picks) if (!(p.def.id in daysBeforeOverlays)) daysBeforeOverlays[p.def.id] = await daysBeforeOverlayFor(p.def, user, p.suiteId, lockMaps[p.suiteId] || {});
 
   const dropped = []; // tiles excluded from the facts, with the reason (logged below)
-  const tiles = (await Promise.all(picks.slice(0, FACT_MAX_TILES).map(async (p) => {
+  const tiles = (await Promise.all(picks.slice(0, maxTiles).map(async (p) => {
     const view = entityViews[p.def.id];
     const extra = {};
     if (view) for (const [fname, qfield] of Object.entries(p.tile.listenTo || {})) if (fname in view) extra[qfield] = view[fname];
