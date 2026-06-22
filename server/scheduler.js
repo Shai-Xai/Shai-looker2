@@ -171,8 +171,10 @@ function mount(app, { db, auth, mailer, messaging, push, generateContent, roleLe
   // feedbackUrl embeds 👍/👎/comment links back into Pulse.
   function emailFor(job, content, { feedbackUrl: fbUrl = '' } = {}) {
     const lens = lensFor(job);
-    const branding = mailer.resolveBranding(job.entityId);
-    const email = mailer.digestEmail({ branding, entityId: job.entityId, assetScope: job.entityId, content, roleLabel: lens.label, customMessage: job.customMessage, feedbackUrl: fbUrl });
+    // Single-event digests brand with that event; portfolio digests stay client-level.
+    const bSuite = content?.brandingSuiteId || '';
+    const branding = mailer.resolveBranding(job.entityId, bSuite);
+    const email = mailer.digestEmail({ branding, entityId: job.entityId, assetScope: bSuite || job.entityId, content, roleLabel: lens.label, customMessage: job.customMessage, feedbackUrl: fbUrl });
     return { ...email, content, senderName: branding.senderName };
   }
   // Preview/back-compat: generate + render in one go (no feedback link).
@@ -367,8 +369,9 @@ function mount(app, { db, auth, mailer, messaging, push, generateContent, roleLe
     const lens = lensFor(job);
     const sample = (reason) => {
       const content = sampleContent(lens.label);
-      const branding = mailer.resolveBranding(entityId);
-      const { html, subject } = mailer.digestEmail({ branding, entityId, assetScope: entityId, content, roleLabel: lens.label, customMessage: job.customMessage });
+      const bSuite = content?.brandingSuiteId || '';
+      const branding = mailer.resolveBranding(entityId, bSuite);
+      const { html, subject } = mailer.digestEmail({ branding, entityId, assetScope: bSuite || entityId, content, roleLabel: lens.label, customMessage: job.customMessage });
       res.json({ html, subject, sample: true, reason: reason || '' });
     };
     if (!body.live) return sample('');

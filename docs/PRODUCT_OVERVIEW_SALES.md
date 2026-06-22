@@ -301,6 +301,14 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-22** — **Per-event branding** ✅ (admin-set): a client running several events can now
+  give **each event its own logo, colours and sender name**. It layers on top of the client's
+  branding — anything left blank inherits the client (which inherits Howler) — so you override only
+  what differs. An event's branding is used for **its campaigns**, **its single-event digests**, and
+  the **in-app theme while viewing that event**; multi-event/portfolio digests stay on the client's
+  branding. Managed by Howler in the event (suite) detail → **Event branding**. Emails still send
+  from Howler's verified domain, so "different mailer per event" means a different look + sender
+  display name, not a different sending address.
 - **2026-06-22** — **Multi-event digests** ✅: scheduled digest emails now understand clients
   running several events at once. The email leads with a **portfolio summary** (the cross-event
   story + top KPIs), then a **clearly-separated section per event** — each with its own headline,

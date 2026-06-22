@@ -1597,6 +1597,10 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
         <input style={{ ...input, width: '100%' }} value={eventUrl} onChange={(e) => setEventUrl(e.target.value)} placeholder="https://tickets.example.com/your-event" />
       </div>
       <SaveRow onSave={save} saved={saved} id={suite.id} />
+      <Section title="Event branding (logo / colours / sender)">
+        <p style={hint}>Override this <b>event's</b> look — its logo, colours and sender name — used for this event's campaigns and single-event digests, and the in-app theme while viewing it. Anything left blank inherits <b>{entities.find((e) => e.id === entityId)?.name || 'the client'}</b>'s branding. Saved on its own (separate from the suite settings above).</p>
+        <MailTemplateEditor scope="admin-suite" entityId={entityId} suiteId={suite.id} />
+      </Section>
     </div>
   );
 }

@@ -251,7 +251,10 @@ export const api = {
   saveEntityMailTemplate: (id, p) => fetch(`/api/admin/entities/${id}/mail-template`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),
   getMyMailTemplate: (entityId) => fetch(`/api/my/mail-template/${entityId}`).then(json),
   saveMyMailTemplate: (entityId, p) => fetch(`/api/my/mail-template/${entityId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),
-  previewMail: (edits, entityId) => fetch('/api/mail/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ edits, entityId }) }).then(json),
+  previewMail: (edits, entityId, suiteId) => fetch('/api/mail/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ edits, entityId, suiteId }) }).then(json),
+  // Per-event (suite) branding override — admin only.
+  getSuiteMailTemplate: (suiteId) => fetch(`/api/admin/suites/${suiteId}/mail-template`).then(json),
+  saveSuiteMailTemplate: (suiteId, p) => fetch(`/api/admin/suites/${suiteId}/mail-template`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),
 
   // CC-the-Owl: inbound email addresses + config
   getInboundConfig: () => fetch('/api/os/admin/inbound').then(json),
@@ -292,7 +295,7 @@ export const api = {
   saveBillingEntityRates: (entityId, b) => fetch(`/api/billing/admin/entities/${entityId}/rates`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   getMyBilling: (entityId) => fetch(`/api/billing/my/${entityId}`).then(json),
   getBillingRollup: () => fetch('/api/billing/rollup').then(json),
-  getEntityTheme: (entityId) => fetch(`/api/theme/${entityId}`).then(json),
+  getEntityTheme: (entityId, suiteId) => fetch(`/api/theme/${entityId}${suiteId ? `?suite=${encodeURIComponent(suiteId)}` : ''}`).then(json),
 
   // Action Engine — campaigns (one set of endpoints; server enforces entity access)
   getActionTemplates: (entityId, prefer = {}) => {
