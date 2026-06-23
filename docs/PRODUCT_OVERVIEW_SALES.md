@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-06-22 · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-06-23 · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -201,6 +201,9 @@ it auto-synced, and exclude people who already bought."
 ## 7. Admin console (Howler internal)  ✅
 - Manage **clients**, their **dashboards/sets/suites**, the **tile library**, **AI
   instructions**, **integrations**, **settlements**, **logins/roles**, backups.
+- **Per-client suite control** — pick which **sets** (grouped by folder) and which
+  **individual dashboards** a client gets, and **lock filters per dashboard** for that
+  client (e.g. pin one dashboard to a specific event) on top of the suite-wide locks.
 - **Preview as a client** to see exactly what they see.
 - **AI audit** — every system prompt the AI is given is viewable ("Everything the
   AI is told").
@@ -345,6 +348,14 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-23** — **Suite setup & navigation polish** ✅: when bundling a client's
+  suite, sets now group by **folder → set → dashboards**, and you can tick **individual
+  dashboards** in a set (include a subset for one client instead of all-or-nothing). New
+  **per-dashboard locked filters** let an admin pin a filter (e.g. a specific event) on a
+  single dashboard for one client while the rest of the suite keeps the suite-wide locks.
+  Across the app, **back buttons** now appear on the dashboard view, the editor, folders and
+  the mobile menu bar; the in-dashboard **carousels** resize to fit a smaller desktop window,
+  and swiping a carousel on a phone no longer jumps to the next dashboard.
 - **2026-06-22** — **Alerts: templates + Ticket Type/Category starters** 🧪: alerts can now be
   **saved as reusable templates** — a client's own, or (admins) **🌐 global** templates pushed to
   every client (they re-link to each client's matching data by name). A **Templates** tab on the
