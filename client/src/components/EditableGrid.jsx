@@ -50,7 +50,7 @@ function StackedGrid({ tiles = [], carousels = [], filterValues }) {
           const stiles = (c.tiles || []).slice().sort((a, b) => (a.layout?.y ?? 0) - (b.layout?.y ?? 0) || (a.layout?.x ?? 0) - (b.layout?.x ?? 0));
           return (
             <div key={c.id} style={{ gridColumn: '1 / -1', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 12, boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
-              {c.title && <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 10 }}>{c.title}</h3>}
+              {c.title && <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 10, textAlign: c.titleAlign || 'left' }}>{c.title}</h3>}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, gridAutoFlow: 'dense' }}>
                 {stiles.map((t) => (
                   <div key={t.id} style={{ height: mobileTileHeight(t), gridColumn: isMetricTile(t) ? 'auto' : '1 / -1' }}>

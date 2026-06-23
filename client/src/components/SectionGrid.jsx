@@ -1,6 +1,7 @@
 import { useState, useRef, useLayoutEffect } from 'react';
 import GridLayout from 'react-grid-layout';
 import TileFrame from './TileFrame.jsx';
+import AlignPicker from './AlignPicker.jsx';
 
 const COLS = 24;
 const ROW_HEIGHT = 30;
@@ -10,7 +11,8 @@ const ROW_HEIGHT = 30;
 // sibling of Carousel, sharing the same container handlers. The inner grid
 // stops mousedown propagation so dragging a tile here doesn't also drag the
 // whole section in the outer dashboard grid.
-export default function SectionGrid({ carousel, filterValues, editable, onEditTile, onRemoveTile, onDuplicateTile, onAddTile, onChangeTitle, onRemove, onDropTile, onMoveTileOut, onTileLayout }) {
+export default function SectionGrid({ carousel, filterValues, editable, onEditTile, onRemoveTile, onDuplicateTile, onAddTile, onChangeTitle, onChangeAlign, onRemove, onDropTile, onMoveTileOut, onTileLayout }) {
+  const align = carousel.titleAlign || 'left';
   const [dragOver, setDragOver] = useState(false);
   // Measure our own width so the nested grid lays out across the real columns
   // (WidthProvider mis-measures inside another grid item, collapsing tiles to
@@ -48,17 +50,19 @@ export default function SectionGrid({ carousel, filterValues, editable, onEditTi
       >
         {editable && <span style={{ color: '#bbb', fontSize: 13 }} title="Drag to move section">⠿⠿</span>}
         {editable ? (
-          <input
-            value={carousel.title || ''}
-            onChange={(e) => onChangeTitle(e.target.value)}
-            onMouseDown={(e) => e.stopPropagation()}
-            placeholder="Section title"
-            style={{ fontSize: 15, fontWeight: 700, border: '1.5px solid transparent', background: 'var(--elevated)', borderRadius: 6, padding: '4px 8px', outline: 'none' }}
-          />
+          <>
+            <input
+              value={carousel.title || ''}
+              onChange={(e) => onChangeTitle(e.target.value)}
+              onMouseDown={(e) => e.stopPropagation()}
+              placeholder="Section title"
+              style={{ flex: 1, minWidth: 0, fontSize: 15, fontWeight: 700, border: '1.5px solid transparent', background: 'var(--elevated)', borderRadius: 6, padding: '4px 8px', outline: 'none', textAlign: align }}
+            />
+            {onChangeAlign && <AlignPicker value={align} onChange={onChangeAlign} />}
+          </>
         ) : (
-          carousel.title && <h3 style={{ fontSize: 15, fontWeight: 700 }}>{carousel.title}</h3>
+          carousel.title ? <h3 style={{ fontSize: 15, fontWeight: 700, flex: 1, minWidth: 0, margin: 0, textAlign: align }}>{carousel.title}</h3> : <div style={{ flex: 1 }} />
         )}
-        <div style={{ flex: 1 }} />
         {editable && (
           <span style={{ display: 'flex', gap: 6 }} onMouseDown={(e) => e.stopPropagation()}>
             <button style={miniBtn} onClick={() => onAddTile('vis')}>+ Visualization</button>

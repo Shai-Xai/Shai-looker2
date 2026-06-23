@@ -1,12 +1,13 @@
 import { useRef, useState } from 'react';
 import TileFrame from './TileFrame.jsx';
+import AlignPicker from './AlignPicker.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
 
 // A horizontal, scrollable row of tiles, rendered as a full-width grid item so
 // it can be dragged anywhere on the dashboard and resized with the grid's own
 // handles. Cards fill the band height; card width is set with the right-edge
 // drag handle. In edit mode it's also a drop target for existing tiles.
-export default function Carousel({ carousel, filterValues, editable, onEditTile, onRemoveTile, onDuplicateTile, onAddTile, onChangeTitle, onRemove, onDropTile, onMoveTileOut, onChangeTileW }) {
+export default function Carousel({ carousel, filterValues, editable, onEditTile, onRemoveTile, onDuplicateTile, onAddTile, onChangeTitle, onChangeAlign, onRemove, onDropTile, onMoveTileOut, onChangeTileW }) {
   const trackRef = useRef(null);
   const isMobile = useIsMobile();
   const [dragOver, setDragOver] = useState(false);
@@ -16,6 +17,7 @@ export default function Carousel({ carousel, filterValues, editable, onEditTile,
   const cardW = carousel.cardW || 300;
   const tiles = carousel.tiles || [];
   const cardH = carousel.cardH || 220; // fixed card height in grid (section) mode
+  const align = carousel.titleAlign || 'left'; // heading alignment: left | center | right
   // On phones a card shouldn't exceed the viewport — show one card plus a peek
   // of the next so it's obviously swipeable. On desktop the configured width is
   // the target, but it's capped to the row's own width (100%) so cards shrink to
@@ -68,17 +70,19 @@ export default function Carousel({ carousel, filterValues, editable, onEditTile,
       >
         {editable && <span style={{ color: '#bbb', fontSize: 13 }} title="Drag to move row">⠿⠿</span>}
         {editable ? (
-          <input
-            value={carousel.title || ''}
-            onChange={(e) => onChangeTitle(e.target.value)}
-            onMouseDown={(e) => e.stopPropagation()}
-            placeholder={isGrid ? 'Section title' : 'Row title'}
-            style={{ fontSize: 15, fontWeight: 700, border: '1.5px solid transparent', background: 'var(--elevated)', borderRadius: 6, padding: '4px 8px', outline: 'none' }}
-          />
+          <>
+            <input
+              value={carousel.title || ''}
+              onChange={(e) => onChangeTitle(e.target.value)}
+              onMouseDown={(e) => e.stopPropagation()}
+              placeholder={isGrid ? 'Section title' : 'Row title'}
+              style={{ flex: 1, minWidth: 0, fontSize: 15, fontWeight: 700, border: '1.5px solid transparent', background: 'var(--elevated)', borderRadius: 6, padding: '4px 8px', outline: 'none', textAlign: align }}
+            />
+            {onChangeAlign && <AlignPicker value={align} onChange={onChangeAlign} />}
+          </>
         ) : (
-          carousel.title && <h3 style={{ fontSize: 15, fontWeight: 700 }}>{carousel.title}</h3>
+          carousel.title ? <h3 style={{ fontSize: 15, fontWeight: 700, flex: 1, minWidth: 0, margin: 0, textAlign: align }}>{carousel.title}</h3> : <div style={{ flex: 1 }} />
         )}
-        <div style={{ flex: 1 }} />
         {editable && (
           <span style={{ display: 'flex', gap: 6 }} onMouseDown={(e) => e.stopPropagation()}>
             <button style={miniBtn} onClick={() => onAddTile('vis')}>+ Visualization</button>

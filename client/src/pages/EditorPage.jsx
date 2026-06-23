@@ -139,6 +139,9 @@ export default function EditorPage() {
   function changeCarouselTitle(cid, title) {
     mutate((d) => ({ ...d, carousels: (d.carousels || []).map((c) => (c.id === cid ? { ...c, title } : c)) }));
   }
+  function setCarouselAlign(cid, titleAlign) {
+    mutate((d) => ({ ...d, carousels: (d.carousels || []).map((c) => (c.id === cid ? { ...c, titleAlign } : c)) }));
+  }
   // Per-tile width inside a carousel (each card sized on its own).
   function setTileWidth(tileId, w) {
     mutate((d) => ({
@@ -258,6 +261,7 @@ export default function EditorPage() {
     onDuplicateTile: (tid) => duplicateTileInCarousel(c.id, tid),
     onAddTile: (type) => addTileToCarousel(c.id, type),
     onChangeTitle: (t) => changeCarouselTitle(c.id, t),
+    onChangeAlign: (a) => setCarouselAlign(c.id, a),
     onRemove: () => removeCarousel(c.id),
     onDropTile: (tileId, beforeId) => moveTileToCarousel(tileId, c.id, beforeId),
     onMoveTileOut: (tid) => moveTileOutOfCarousel(c.id, tid),
