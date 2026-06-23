@@ -21,14 +21,15 @@ export default function Carousel({ carousel, filterValues, editable, onEditTile,
   // the target, but it's capped to the row's own width (100%) so cards shrink to
   // fit when the window/container narrows instead of sticking at a fixed size.
   const cardBasis = (w) => (isMobile ? `min(${w}px, 82vw)` : `min(${w}px, 100%)`);
-  // Card sizing per mode. On a desktop scroller the cards FLEX to fill the row
-  // (grow/shrink with the window) so they resize to fit the screen, only
-  // scrolling once they hit a sensible min width. Grid sections and mobile keep
-  // their fixed/peek sizing.
+  // Card sizing per mode. On a scroller the cards FLEX to fill the row (grow/
+  // shrink with the window) so they resize to fit the screen — on mobile too,
+  // with a smaller min so several KPI cards still fit a phone instead of jumping
+  // to one big card. They only scroll once they hit that min. Grid sections keep
+  // their fixed wrapping size.
   const cardSizeStyle = (w) => {
     if (isGrid) return { flex: `0 0 ${cardBasis(w)}`, width: cardBasis(w), height: cardH };
-    if (isMobile) return { flex: `0 0 min(${w}px, 82vw)`, width: `min(${w}px, 82vw)`, height: '100%', scrollSnapAlign: 'start' };
-    return { flex: `1 1 ${w}px`, minWidth: Math.min(w, 150), height: '100%' };
+    const min = isMobile ? 120 : 150;
+    return { flex: `1 1 ${w}px`, minWidth: Math.min(w, min), height: '100%', scrollSnapAlign: isMobile ? 'start' : undefined };
   };
   // A brand insertion bar on the card we'd drop before (or the row's end).
   const dropAccent = (tid, isLast) => {
