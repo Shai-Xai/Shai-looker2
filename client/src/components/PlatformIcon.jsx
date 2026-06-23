@@ -1,4 +1,4 @@
-import { SiTiktok, SiMeta, SiYoutube, SiX } from 'react-icons/si';
+import { SiTiktok, SiMeta, SiGoogleads, SiYoutube, SiX } from 'react-icons/si';
 
 // Real platform brand marks, in one place so every surface (hub, segments,
 // integrations) shows the actual logo instead of a stand-in glyph. `live` marks
@@ -6,6 +6,7 @@ import { SiTiktok, SiMeta, SiYoutube, SiX } from 'react-icons/si';
 export const PLATFORMS = {
   tiktok: { Icon: SiTiktok, label: 'TikTok', color: 'currentColor', live: true },
   meta: { Icon: SiMeta, label: 'Meta', color: '#0866FF', live: true },
+  google: { Icon: SiGoogleads, label: 'Google', color: '#4285F4', live: false },
   x: { Icon: SiX, label: 'X', color: 'currentColor', live: false },
   youtube: { Icon: SiYoutube, label: 'YouTube', color: '#FF0000', live: false },
 };

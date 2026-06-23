@@ -7,7 +7,7 @@ import PlatformIcon, { PLATFORMS } from './PlatformIcon.jsx';
 // (synced from a segment) and any OTHER audiences that exist on the platform —
 // reconciled by audience id — plus connection health and live match size.
 // Mobile-first single column. Scoped to the client's own entity via /api/my.
-const CHANNEL_ORDER = ['tiktok', 'meta', 'x', 'youtube'];
+const CHANNEL_ORDER = ['tiktok', 'meta', 'google', 'x', 'youtube'];
 
 const when = (iso) => {
   if (!iso) return 'never';
