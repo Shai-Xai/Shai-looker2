@@ -75,6 +75,64 @@ export function buildCaseWhen({ field, rows, elseMode, elseLabel }) {
   return `case(\n${[...lines, elseLine].join(',\n')}\n)`;
 }
 
+// Numeric range bucketing:
+//   case( when(${field} >= a and ${field} < b, "Label"), …, "Everything else" )
+// Parsed into { field, rows:[{from,to,label}], elseLabel }. Only the standard
+// >= (lower, inclusive) / < (upper, exclusive) forms are accepted so a
+// round-trip can't shift a boundary; anything else returns null → raw editor.
+export function parseNumericCase(expr) {
+  const e = (expr || '').trim();
+  const m = e.match(/^case\s*\(([\s\S]*)\)\s*$/i);
+  if (!m) return null;
+  const parts = splitTop(m[1]);
+  if (!parts.length) return null;
+  const cmp = /^\$\{([^}]+)\}\s*(<|>=)\s*(-?\d+(?:\.\d+)?)$/;
+  let field = null;
+  const rows = [];
+  let elseLabel = '';
+  let elseFromCatchAll = false;
+  for (const p of parts) {
+    const wm = p.match(/^when\s*\(([\s\S]*)\)$/i);
+    if (wm) {
+      const inner = splitTop(wm[1]);
+      if (inner.length < 2) return null;
+      const cond = inner[0].trim();
+      const result = inner.slice(1).join(',').trim();
+      const lm = result.match(/^"([\s\S]*)"$/);
+      if (!lm) return null;
+      const label = lm[1];
+      if (/^yes$/i.test(cond)) { elseLabel = label; elseFromCatchAll = true; continue; }
+      let from = '', to = '';
+      for (const cstr of cond.split(/\s+and\s+/i).map((s) => s.trim())) {
+        const cm = cstr.match(cmp);
+        if (!cm) return null;
+        const f = cm[1].trim();
+        if (field && field !== f) return null;
+        field = f;
+        if (cm[2] === '<') { if (to !== '') return null; to = cm[3]; } else { if (from !== '') return null; from = cm[3]; }
+      }
+      if (from === '' && to === '') return null;
+      rows.push({ from, to, label });
+    } else {
+      if (elseFromCatchAll) continue;
+      const lm = p.match(/^"([\s\S]*)"$/);
+      if (lm) { elseLabel = lm[1]; } else return null;
+    }
+  }
+  if (!rows.length || !field) return null;
+  return { field, rows, elseLabel };
+}
+
+export function buildNumericCase({ field, rows, elseLabel }) {
+  const lines = (rows || []).map((r) => {
+    const c = [];
+    if (r.from !== '' && r.from != null) c.push(`\${${field}} >= ${r.from}`);
+    if (r.to !== '' && r.to != null) c.push(`\${${field}} < ${r.to}`);
+    return `  when(${c.length ? c.join(' and ') : 'yes'}, "${r.label}")`;
+  });
+  return `case(\n${[...lines, `  "${elseLabel || ''}"`].join(',\n')}\n)`;
+}
+
 // A raw matcher value ↔ a friendly { op, text }. matches_filter takes Looker
 // filter syntax: `%x%` = contains, `NULL` = blank, plain = exact.
 function valToOp(value) {
@@ -90,6 +148,10 @@ function opToVal(op, text) {
 }
 
 export default function CaseBuilder({ expression, fields = [], onChange }) {
+  // Numeric range bucketing gets its own from→to UI.
+  const numeric = parseCaseWhen(expression) ? null : parseNumericCase(expression);
+  if (numeric) return <NumericRules parsed={numeric} fields={fields} onChange={onChange} />;
+
   const parsed = parseCaseWhen(expression) || { field: fields[0] || '', rows: [{ value: '', label: '' }], elseMode: 'label', elseLabel: 'Other' };
   const push = (next) => onChange(buildCaseWhen(next));
   const setField = (f) => push({ ...parsed, field: f });
@@ -146,6 +208,46 @@ export default function CaseBuilder({ expression, fields = [], onChange }) {
           <input style={{ ...input, flex: 1, padding: '6px 8px' }} value={parsed.elseLabel} placeholder="e.g. Other" onChange={(e) => push({ ...parsed, elseLabel: e.target.value })} />
         )}
       </div>
+    </div>
+  );
+}
+
+function NumericRules({ parsed, fields, onChange }) {
+  const push = (next) => onChange(buildNumericCase(next));
+  const setRow = (i, patch) => push({ ...parsed, rows: parsed.rows.map((r, j) => (j === i ? { ...r, ...patch } : r)) });
+  const addRow = () => push({ ...parsed, rows: [...parsed.rows, { from: '', to: '', label: '' }] });
+  const removeRow = (i) => push({ ...parsed, rows: parsed.rows.filter((_, j) => j !== i) });
+  const fieldOpts = [...new Set([parsed.field, ...fields].filter(Boolean))];
+  return (
+    <div style={wrap}>
+      <Lbl>Number field</Lbl>
+      <select style={input} value={parsed.field} onChange={(e) => push({ ...parsed, field: e.target.value })}>
+        {fieldOpts.map((f) => <option key={f} value={f}>{f}</option>)}
+      </select>
+
+      <Lbl>Tiers — first match wins</Lbl>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {parsed.rows.map((r, i) => (
+          <div key={i} style={ruleCard}>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <span style={miniLbl}>From</span>
+              <input type="number" style={{ ...input, flex: 1, padding: '6px 8px' }} value={r.from} placeholder="any" onChange={(e) => setRow(i, { from: e.target.value })} />
+              <span style={{ ...miniLbl, width: 'auto' }}>up to</span>
+              <input type="number" style={{ ...input, flex: 1, padding: '6px 8px' }} value={r.to} placeholder="any" onChange={(e) => setRow(i, { to: e.target.value })} />
+            </div>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 6 }}>
+              <span style={miniLbl}>→</span>
+              <input style={{ ...input, flex: 1, padding: '6px 8px' }} value={r.label} placeholder="label to show" onChange={(e) => setRow(i, { label: e.target.value })} />
+              <button style={delBtn} title="Remove tier" onClick={() => removeRow(i)}>✕</button>
+            </div>
+          </div>
+        ))}
+      </div>
+      <button style={addBtn} onClick={addRow}>+ Add tier</button>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 5, lineHeight: 1.4 }}>“Up to” is exclusive — <b>From 18 up to 26</b> means 18–25. Leave a box blank for no limit.</div>
+
+      <Lbl>Everything else</Lbl>
+      <input style={input} value={parsed.elseLabel} placeholder="e.g. Other" onChange={(e) => push({ ...parsed, elseLabel: e.target.value })} />
     </div>
   );
 }

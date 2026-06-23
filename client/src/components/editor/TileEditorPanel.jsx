@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import ExploreBrowser from './ExploreBrowser.jsx';
-import CaseBuilder, { parseCaseWhen } from './CaseBuilder.jsx';
+import CaseBuilder, { parseCaseWhen, parseNumericCase } from './CaseBuilder.jsx';
 
 const VIS_TYPES = [
   { value: 'single_value', label: 'Metric / KPI card' },
@@ -186,7 +186,7 @@ function TableCalcEditor({ query, onChange }) {
         const name = c.label || c.table_calculation || c.measure || c.dimension || `Calculation ${idx + 1}`;
         // A bucketing case/when can be edited with the no-code builder; anything
         // else (or when the user flips to "Expression") shows the raw formula.
-        const buildable = !!parseCaseWhen(c.expression);
+        const buildable = !!(parseCaseWhen(c.expression) || parseNumericCase(c.expression));
         const showRaw = rawMode[idx] || !buildable;
         return (
           <div key={idx} style={{ marginTop: 10 }}>
