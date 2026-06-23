@@ -925,7 +925,7 @@ function AddUserForm({ entities, roles, onCancel, onCreated }) {
 
   return (
     <div>
-      <button style={miniBtnOutline} onClick={onCancel}>← All users</button>
+      <AdminBack onBack={onCancel}>All users</AdminBack>
       <h2 style={{ fontSize: 20, fontWeight: 700, margin: '12px 0 4px' }}>Add a user</h2>
       <p style={{ ...hint, marginBottom: 16 }}>Create a Howler admin (full access to every client + the console) or a client login (scoped to the clients you pick).</p>
       <div style={{ ...cardStyle, maxWidth: 560 }}>
@@ -976,8 +976,8 @@ function UserDetail({ userId, entities = [], roles = [], initialEditing = false,
   const [editing, setEditing] = useState(!!initialEditing);
   const load = () => api.adminGetUser(userId).then(setData).catch((e) => setErr(e.message || 'Failed to load'));
   useEffect(() => { setData(null); setErr(''); setEditing(!!initialEditing); load(); }, [userId]); // eslint-disable-line react-hooks/exhaustive-deps
-  if (err) return <div><button style={miniBtnOutline} onClick={onBack}>← All users</button><p style={{ color: 'var(--error)', marginTop: 12 }}>{err}</p></div>;
-  if (!data) return <div><button style={miniBtnOutline} onClick={onBack}>← All users</button><p style={{ marginTop: 12 }}><Muted>Loading…</Muted></p></div>;
+  if (err) return <div><AdminBack onBack={onBack}>All users</AdminBack><p style={{ color: 'var(--error)', marginTop: 12 }}>{err}</p></div>;
+  if (!data) return <div><AdminBack onBack={onBack}>All users</AdminBack><p style={{ marginTop: 12 }}><Muted>Loading…</Muted></p></div>;
 
   const { user, memberships, profile, dashboards, activity, usageByClient = [], emails = [] } = data;
   const isAdmin = user.role === 'admin';
@@ -999,7 +999,10 @@ function UserDetail({ userId, entities = [], roles = [], initialEditing = false,
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-        <button style={miniBtnOutline} onClick={onBack}>← All users</button>
+        <button style={adminBackBtn} onClick={onBack}>
+          <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
+          All users
+        </button>
         <span style={{ flex: 1 }} />
         <button style={miniBtn} onClick={() => setEditing(true)}>✏️ Edit</button>
         <button style={delBtn} onClick={del}>Delete</button>
@@ -1159,7 +1162,7 @@ function UserEditCard({ user, memberships, entities, roles, onCancel, onSaved })
   };
   return (
     <div>
-      <button style={miniBtnOutline} onClick={onCancel}>← Back</button>
+      <AdminBack onBack={onCancel}>Back</AdminBack>
       <h2 style={{ fontSize: 20, fontWeight: 700, margin: '12px 0 14px', wordBreak: 'break-word' }}>Edit {user.fullName || user.email}</h2>
       <div style={{ ...cardStyle, maxWidth: 560 }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
@@ -1204,7 +1207,7 @@ function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites,
   const nav = [['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['sets', 'Custom sets'], ['briefing', 'Briefing'], ['messages', 'Messages'], ['digests', 'Digests'], ['campaigns', 'Campaigns'], ['segments', 'Segments'], ['fees', 'Fees'], ['settlements', 'Settlements'], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations'], ['email', 'Branding']];
   return (
     <div>
-      <button style={miniBtnOutline} onClick={onBack}>← All clients</button>
+      <AdminBack onBack={onBack}>All clients</AdminBack>
       <h2 style={{ fontSize: 20, fontWeight: 700, margin: '12px 0 16px' }}>{entity.name}</h2>
       <div style={{ display: 'flex', gap: 18, alignItems: 'flex-start', flexWrap: 'wrap' }}>
         <nav style={detailNav}>
@@ -2325,6 +2328,20 @@ function ValuePicker({ meta, value, onChange, extraFilters = null }) {
 
 // ─── Small shared bits ────────────────────────────────────────────────────────
 function flash(setSaved) { setSaved(true); setTimeout(() => setSaved(false), 1500); }
+// Shared back affordance for the admin console's drill-downs (client / user
+// detail, add-user). Sticky so it stays reachable down a long detail page, and a
+// round chevron + label to match the back buttons everywhere else in the app.
+function AdminBack({ onBack, children }) {
+  return (
+    <div style={{ position: 'sticky', top: 0, zIndex: 6, background: 'var(--bg)', padding: '6px 0 8px', margin: '-6px 0 4px' }}>
+      <button style={adminBackBtn} onClick={onBack}>
+        <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
+        {children}
+      </button>
+    </div>
+  );
+}
+const adminBackBtn = { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 14px 7px 10px', background: 'var(--card)', border: '1.5px solid var(--hairline)', borderRadius: 980, fontWeight: 600, fontSize: 13, cursor: 'pointer', color: 'var(--text)' };
 function Row({ children }) { return <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 10 }}>{children}</div>; }
 function SaveRow({ onSave, saved, id }) {
   return (
