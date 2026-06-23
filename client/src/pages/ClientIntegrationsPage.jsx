@@ -114,16 +114,7 @@ export default function ClientIntegrationsPage() {
 
           {section === 'email' && (
             <div>
-              <details style={{ marginBottom: 8 }}>
-                <summary style={summaryRow}>
-                  <span style={subhead}>Account &amp; portfolio</span>
-                  <span style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 500 }}>your overall look · used on portfolio digests</span>
-                </summary>
-                <div style={{ marginTop: 12 }}>
-                  <p style={hint}>Your colours and logo — they style your whole Pulse platform (buttons, accents, charts) and your notification emails. Used everywhere by default, and on portfolio (multi-event) digests. Blank fields keep Howler's defaults.</p>
-                  <MailTemplateEditor scope="my" entityId={activeItem.entityId} />
-                </div>
-              </details>
+              <AccountBranding entityId={activeItem.entityId} />
 
               <h3 style={{ ...subhead, marginTop: 26 }}>Events</h3>
               <p style={hint}>Give a specific event its own logo, colours and sender name — used for that event's campaigns and digests, and the in-app look while you're viewing it. Blank fields inherit your account branding above.</p>
@@ -165,7 +156,32 @@ const tabBtn = (active) => ({
 });
 const hint = { color: 'var(--muted)', fontSize: 13, marginBottom: 14, lineHeight: 1.5 };
 const subhead = { fontSize: 15, fontWeight: 700, marginBottom: 6 };
-const summaryRow = { cursor: 'pointer', display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap', listStyle: 'revert' };
+
+// Account-level branding, as a clearly-expandable accordion (the old <details>
+// hid its disclosure triangle behind a flex summary, so it read as a dead
+// heading). Open by default so the controls — and the fact it expands — are
+// obvious; collapsible via the chevron to keep the page tidy.
+function AccountBranding({ entityId }) {
+  const [open, setOpen] = useState(true);
+  return (
+    <div style={acctCard}>
+      <button type="button" onClick={() => setOpen((o) => !o)} style={acctHeader} aria-expanded={open}>
+        <span style={{ ...acctChevron, transform: open ? 'rotate(90deg)' : 'none' }}>▸</span>
+        <span style={{ fontSize: 15, fontWeight: 700 }}>Account &amp; portfolio</span>
+        <span style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 500 }}>your overall look · used on portfolio digests</span>
+      </button>
+      {open && (
+        <div style={{ padding: '0 14px 14px' }}>
+          <p style={hint}>Your colours and logo — they style your whole Pulse platform (buttons, accents, charts) and your notification emails. Used everywhere by default, and on portfolio (multi-event) digests. Blank fields keep Howler's defaults.</p>
+          <MailTemplateEditor scope="my" entityId={entityId} />
+        </div>
+      )}
+    </div>
+  );
+}
+const acctCard = { border: '1px solid var(--hairline)', borderRadius: 12, marginBottom: 8, overflow: 'hidden', background: 'var(--card)' };
+const acctHeader = { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', width: '100%', textAlign: 'left', cursor: 'pointer', background: 'transparent', border: 'none', padding: '13px 14px', color: 'var(--text)' };
+const acctChevron = { color: 'var(--muted)', fontSize: 12, transition: 'transform 0.15s', flexShrink: 0 };
 
 // Per-event branding self-service: pick one of this client's events, then edit
 // its branding override (inherits the account branding above where left blank).
