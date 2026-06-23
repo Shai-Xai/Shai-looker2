@@ -164,7 +164,7 @@ const hint = { color: 'var(--muted)', fontSize: 13, marginBottom: 14, lineHeight
 // heading). Open by default so the controls — and the fact it expands — are
 // obvious; collapsible via the chevron to keep the page tidy. Used for both the
 // account branding and the per-event branding so they match.
-function BrandingSection({ title, subtitle, defaultOpen = true, children }) {
+function BrandingSection({ title, subtitle, defaultOpen = false, children }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
     <div style={acctCard}>
