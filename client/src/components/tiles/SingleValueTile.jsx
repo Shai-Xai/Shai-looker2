@@ -99,10 +99,10 @@ export default function SingleValueTile({ data, visConfig = {}, label }) {
   return (
     <div style={{ ...wrap, ...(cf?.background ? { background: cf.background } : null) }}>
       <AutoFitText
-        max={isMobile ? 40 : 30}
-        min={isMobile ? 13 : 11}
-        widthFactor={0.22}
-        style={{ flex: 1, minHeight: isMobile ? 30 : 22 }}
+        max={isMobile ? 48 : 34}
+        min={isMobile ? 14 : 11}
+        widthFactor={0.28}
+        style={{ flex: 1, minHeight: isMobile ? 34 : 24 }}
         onClick={drillable ? () => openDrill(primaryCell.links, primaryField.label_short || primaryField.label) : undefined}
         spanStyle={{
           fontWeight: cf?.bold ? 800 : 700, color: valueColor, letterSpacing: '-0.5px',
@@ -112,13 +112,13 @@ export default function SingleValueTile({ data, visConfig = {}, label }) {
         <CountUpValue text={primaryValue} />
       </AutoFitText>
       {comparison && (
-        <div className="chip-in" style={{ fontSize: 12.5, marginTop: 3, fontWeight: 600, color: comparison.color, flexShrink: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%', animationDelay: '420ms' }}>
+        <div className="chip-in" style={{ fontSize: isMobile ? 11 : 12.5, marginTop: 2, fontWeight: 600, color: comparison.color, flexShrink: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%', animationDelay: '420ms' }}>
           {comparison.text}
           <span style={{ color: 'var(--muted)', fontWeight: 400, marginLeft: 6 }}>{comparison.label}</span>
         </div>
       )}
       {labelText && (
-        <div className="chip-in" style={{ fontSize: 13, color: labelColor, marginTop: 3, fontWeight: 500, lineHeight: 1.2, textAlign: 'center', overflow: 'hidden', flexShrink: 0, animationDelay: '240ms' }}>
+        <div className="chip-in" style={{ fontSize: isMobile ? 10.5 : 13, color: labelColor, marginTop: 2, fontWeight: 500, lineHeight: 1.15, textAlign: 'center', overflow: 'hidden', flexShrink: 0, animationDelay: '240ms' }}>
           {labelText}
         </div>
       )}
