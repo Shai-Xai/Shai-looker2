@@ -195,6 +195,23 @@ export default function EditorPage() {
     });
   }
 
+  // Move a tile OUT of a carousel/section back onto the main dashboard grid,
+  // keeping the tile (the inverse of moveTileToCarousel). Lands it full-ish width
+  // at the bottom of the grid.
+  function moveTileOutOfCarousel(cid, tileId) {
+    mutate((d) => {
+      let moved = null;
+      const carousels = (d.carousels || []).map((c) => {
+        if (c.id !== cid) return c;
+        return { ...c, tiles: c.tiles.filter((t) => { if (t.id === tileId) { moved = { ...t }; return false; } return true; }) };
+      });
+      if (!moved) return d;
+      const nextY = d.tiles.reduce((max, t) => Math.max(max, (t.layout?.y ?? 0) + (t.layout?.h ?? 6)), 0);
+      moved.layout = { x: 0, y: nextY, w: Math.min(moved.layout?.w || 8, 12), h: moved.layout?.h || 6 };
+      return { ...d, tiles: [...d.tiles, moved], carousels };
+    });
+  }
+
   function duplicateTileInCarousel(cid, tileId) {
     mutate((d) => ({
       ...d,
@@ -233,6 +250,7 @@ export default function EditorPage() {
     onChangeTitle: (t) => changeCarouselTitle(c.id, t),
     onRemove: () => removeCarousel(c.id),
     onDropTile: (tileId) => moveTileToCarousel(tileId, c.id),
+    onMoveTileOut: (tid) => moveTileOutOfCarousel(c.id, tid),
     onChangeTileW: (tileId, w) => setTileWidth(tileId, w),
     onTileLayout: (map) => setSectionTileLayouts(c.id, map),
   });

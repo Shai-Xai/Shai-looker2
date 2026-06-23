@@ -10,7 +10,7 @@ const ROW_HEIGHT = 30;
 // sibling of Carousel, sharing the same container handlers. The inner grid
 // stops mousedown propagation so dragging a tile here doesn't also drag the
 // whole section in the outer dashboard grid.
-export default function SectionGrid({ carousel, filterValues, editable, onEditTile, onRemoveTile, onDuplicateTile, onAddTile, onChangeTitle, onRemove, onDropTile, onTileLayout }) {
+export default function SectionGrid({ carousel, filterValues, editable, onEditTile, onRemoveTile, onDuplicateTile, onAddTile, onChangeTitle, onRemove, onDropTile, onMoveTileOut, onTileLayout }) {
   const [dragOver, setDragOver] = useState(false);
   // Measure our own width so the nested grid lays out across the real columns
   // (WidthProvider mis-measures inside another grid item, collapsing tiles to
@@ -106,14 +106,25 @@ export default function SectionGrid({ carousel, filterValues, editable, onEditTi
                   onDuplicate={() => onDuplicateTile?.(t.id)}
                   onRemove={() => onRemoveTile?.(t.id)}
                 />
-                {editable && onRemoveTile && (
-                  <button
-                    onMouseDown={(e) => e.stopPropagation()}
-                    onClick={(e) => { e.stopPropagation(); onRemoveTile(t.id); }}
-                    title="Remove from this section"
-                    aria-label="Remove from this section"
-                    style={cardRemoveBtn}
-                  >✕</button>
+                {editable && (onMoveTileOut || onRemoveTile) && (
+                  <span style={cardCtrls} onMouseDown={(e) => e.stopPropagation()}>
+                    {onMoveTileOut && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onMoveTileOut(t.id); }}
+                        title="Move out to the dashboard grid"
+                        aria-label="Move out to the dashboard grid"
+                        style={cardCtrlBtn}
+                      >⤴</button>
+                    )}
+                    {onRemoveTile && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onRemoveTile(t.id); }}
+                        title="Remove from this section"
+                        aria-label="Remove from this section"
+                        style={{ ...cardCtrlBtn, color: 'var(--error)' }}
+                      >✕</button>
+                    )}
+                  </span>
                 )}
               </div>
             ))}
@@ -125,4 +136,5 @@ export default function SectionGrid({ carousel, filterValues, editable, onEditTi
 }
 
 const miniBtn = { padding: '6px 10px', background: 'var(--card)', border: '1.5px solid var(--hairline)', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer' };
-const cardRemoveBtn = { position: 'absolute', top: 4, right: 4, zIndex: 8, width: 22, height: 22, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--error)', fontSize: 12, fontWeight: 700, lineHeight: 1, cursor: 'pointer', boxShadow: '0 1px 3px rgba(0,0,0,0.18)' };
+const cardCtrls = { position: 'absolute', top: 4, right: 4, zIndex: 8, display: 'flex', gap: 4 };
+const cardCtrlBtn = { width: 22, height: 22, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', fontSize: 12, fontWeight: 700, lineHeight: 1, cursor: 'pointer', boxShadow: '0 1px 3px rgba(0,0,0,0.18)' };

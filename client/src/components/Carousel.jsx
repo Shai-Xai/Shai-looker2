@@ -6,7 +6,7 @@ import { useIsMobile } from '../lib/useIsMobile.js';
 // it can be dragged anywhere on the dashboard and resized with the grid's own
 // handles. Cards fill the band height; card width is set with the right-edge
 // drag handle. In edit mode it's also a drop target for existing tiles.
-export default function Carousel({ carousel, filterValues, editable, onEditTile, onRemoveTile, onDuplicateTile, onAddTile, onChangeTitle, onRemove, onDropTile, onChangeTileW }) {
+export default function Carousel({ carousel, filterValues, editable, onEditTile, onRemoveTile, onDuplicateTile, onAddTile, onChangeTitle, onRemove, onDropTile, onMoveTileOut, onChangeTileW }) {
   const trackRef = useRef(null);
   const isMobile = useIsMobile();
   const [dragOver, setDragOver] = useState(false);
@@ -107,17 +107,29 @@ export default function Carousel({ carousel, filterValues, editable, onEditTile,
                     onRemove={() => onRemoveTile?.(t.id)}
                     onDuplicate={() => onDuplicateTile?.(t.id)}
                   />
-                  {/* Always-visible remove on the card itself — in a scrolling row
-                      the tile's own header ✕ is easy to miss (and metric tiles hide
-                      it), so this guarantees a one-tap "remove from this carousel". */}
-                  {editable && onRemoveTile && (
-                    <button
-                      onMouseDown={(e) => e.stopPropagation()}
-                      onClick={(e) => { e.stopPropagation(); onRemoveTile(t.id); }}
-                      title="Remove from this carousel"
-                      aria-label="Remove from this carousel"
-                      style={cardRemoveBtn}
-                    >✕</button>
+                  {/* Card controls — in a scrolling row the tile's own header
+                      buttons are easy to miss (and metric tiles hide them), so we
+                      surface a "move out to the dashboard grid" and a "remove"
+                      affordance right on the card. */}
+                  {editable && (onMoveTileOut || onRemoveTile) && (
+                    <span style={cardCtrls} onMouseDown={(e) => e.stopPropagation()}>
+                      {onMoveTileOut && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); onMoveTileOut(t.id); }}
+                          title="Move out to the dashboard grid"
+                          aria-label="Move out to the dashboard grid"
+                          style={cardCtrlBtn}
+                        >⤴</button>
+                      )}
+                      {onRemoveTile && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); onRemoveTile(t.id); }}
+                          title="Remove from this carousel"
+                          aria-label="Remove from this carousel"
+                          style={{ ...cardCtrlBtn, color: 'var(--error)' }}
+                        >✕</button>
+                      )}
+                    </span>
                   )}
                   {editable && onChangeTileW && (
                     <div onMouseDown={startTileResize(t.id, w)} title="Drag to resize this tile" style={tileResizeHandle} />
@@ -136,4 +148,5 @@ const GAP = 12;
 const miniBtn = { padding: '6px 10px', background: 'var(--card)', border: '1.5px solid var(--hairline)', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer' };
 const arrowBtn = { width: 30, height: 30, borderRadius: '50%', border: '1.5px solid var(--hairline)', background: 'var(--card)', cursor: 'pointer', fontSize: 18, lineHeight: 1, color: '#555', flexShrink: 0 };
 const tileResizeHandle = { position: 'absolute', top: '32%', right: -3, height: '36%', width: 8, cursor: 'ew-resize', borderRight: '4px solid #cbd5e1', borderRadius: 2, zIndex: 6 };
-const cardRemoveBtn = { position: 'absolute', top: 4, right: 4, zIndex: 8, width: 22, height: 22, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--error)', fontSize: 12, fontWeight: 700, lineHeight: 1, cursor: 'pointer', boxShadow: '0 1px 3px rgba(0,0,0,0.18)' };
+const cardCtrls = { position: 'absolute', top: 4, right: 4, zIndex: 8, display: 'flex', gap: 4 };
+const cardCtrlBtn = { width: 22, height: 22, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', fontSize: 12, fontWeight: 700, lineHeight: 1, cursor: 'pointer', boxShadow: '0 1px 3px rgba(0,0,0,0.18)' };
