@@ -254,6 +254,7 @@ export const api = {
   myAudiences: (entityId) => fetch(`/api/my/audiences/${entityId}`).then(json),
   myVerifyConnector: (entityId, channel) => fetch(`/api/my/audiences/${entityId}/verify`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ channel }) }).then(json),
   myAudienceStatus: (entityId, channel, audienceId) => fetch(`/api/my/audiences/${entityId}/audience-status`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ channel, audienceId }) }).then(json),
+  myPlatformAudiences: (entityId, channel) => fetch(`/api/my/audiences/${entityId}/platform/${channel}`).then(json),
   myAudienceSyncLog: (entityId, limit = 50) => fetch(`/api/my/audiences/${entityId}/log?limit=${limit}`).then(json),
   saveAdminIntegrations: (p) => fetch('/api/admin/integrations', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),
   sendMailTest: (entityId) => fetch('/api/admin/mail/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entityId }) }).then(json),

@@ -1859,6 +1859,16 @@ app.post('/api/my/audiences/:entityId/audience-status', auth.requireAuth, async 
   if (!channel) return res.status(400).json({ error: 'Unknown channel' });
   res.json(await channel.audienceStatus(id, String(req.body?.audienceId || '')));
 });
+// Live list of EVERY audience on the platform (Pulse-made or external). The hub
+// reconciles these against Pulse's own records to flag what it manages.
+app.get('/api/my/audiences/:entityId/platform/:channel', auth.requireAuth, async (req, res) => {
+  const id = req.params.entityId;
+  if (!ownsEntity(req, id)) return res.status(403).json({ error: 'Not allowed' });
+  const channel = audienceChannel(req.params.channel);
+  if (!channel) return res.status(400).json({ error: 'Unknown channel' });
+  if (typeof channel.listAudiences !== 'function') return res.json({ ok: false, error: 'Listing isn’t supported for this channel yet.' });
+  res.json(await channel.listAudiences(id));
+});
 app.get('/api/my/audiences/:entityId/log', auth.requireAuth, (req, res) => {
   const id = req.params.entityId;
   if (!ownsEntity(req, id)) return res.status(403).json({ error: 'Not allowed' });

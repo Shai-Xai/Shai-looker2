@@ -292,6 +292,36 @@ async function verify(entityId) {
   } catch (e) { return { ok: false, status: 'error', detail: e.message, checkedAt }; }
 }
 
+// Live list of ALL custom audiences on the advertiser — Pulse-made or created
+// directly in TikTok Ads. Paginates; best-effort; never throws.
+// Returns { ok, audiences:[{audienceId,name,size,valid,type,calculateType,createdAt}] }.
+async function listAudiences(entityId) {
+  if (!isConfigured(entityId)) return { ok: false, error: 'not connected' };
+  const { accessToken: token, advertiserId } = connection(entityId);
+  try {
+    const audiences = []; let page = 1; let totalPage = 1;
+    do {
+      const url = `${BASE}/dmp/custom_audience/list/?advertiser_id=${encodeURIComponent(advertiserId)}&page=${page}&page_size=100`;
+      const res = await fetch(url, { headers: { 'Access-Token': token } });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || (data && data.code)) return { ok: false, error: (data && data.message) || `TikTok HTTP ${res.status}` };
+      const d = data.data || {};
+      for (const a of d.list || []) audiences.push({
+        audienceId: String(a.audience_id || ''),
+        name: a.name || '',
+        size: a.cover_num ?? null,
+        valid: a.is_valid !== false,
+        type: a.audience_type || '',
+        calculateType: a.calculate_type || '',
+        createdAt: a.create_time || '',
+      });
+      totalPage = (d.page_info && d.page_info.total_page) || 1;
+      page += 1;
+    } while (page <= totalPage && page <= 20); // hard cap so a huge account can't spin forever
+    return { ok: true, audiences };
+  } catch (e) { return { ok: false, error: e.message }; }
+}
+
 // Best-effort deep link to this advertiser's audiences in TikTok Ads.
 function audiencesUrl(entityId) {
   const adv = connection(entityId).advertiserId; if (!adv) return '';
@@ -308,4 +338,4 @@ function summary(entityId) {
   return { channel: 'tiktok', configured: isConfigured(entityId), advertiserId: connection(entityId).advertiserId, audiencesUrl: audiencesUrl(entityId), audienceCount: audiences.length, ok: audiences.length - errors, errors, lastAt, lastError: lastError ? { at: lastError.at, error: lastError.error, segmentId: lastError.segmentId } : null, audiences };
 }
 
-module.exports = { init, isConfigured, status, connection, syncAudience, lastSyncFor, clearMembers, verify, audienceStatus, audiencesUrl, summary, hashEmail, hashPhone };
+module.exports = { init, isConfigured, status, connection, syncAudience, lastSyncFor, clearMembers, verify, audienceStatus, listAudiences, audiencesUrl, summary, hashEmail, hashPhone };

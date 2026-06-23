@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { api } from '../lib/api.js';
+import PlatformIcon from './PlatformIcon.jsx';
 import { AudienceFilters } from './CampaignManager.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
 
@@ -149,10 +150,10 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
                 <div style={{ display: 'flex', gap: 8, flexShrink: 0, flexWrap: 'wrap' }}>
                   <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding }} onClick={() => viewPeople(s)}>👥 List</button>
                   <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding }} onClick={() => refresh(s)} disabled={busyId === s.id}>{busyId === s.id ? '…' : '↻ Refresh'}</button>
-                  {metaConnected && <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding }} onClick={() => syncMeta(s)} disabled={busyId === s.id} title="Mirror this audience to a Meta Custom Audience (hashed match)">◇ Sync to Meta</button>}
-                  {metaConnected && <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding, ...(s.metaAuto ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }} onClick={() => api.setSegmentAuto(entityId, s.id, 'meta', !s.metaAuto).then(load)} title="Keep the Meta audience mirrored automatically (~daily)">{s.metaAuto ? '◇ Auto: on' : '◇ Auto: off'}</button>}
-                  {tiktokConnected && <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding }} onClick={() => syncTikTok(s)} disabled={busyId === s.id} title="Mirror this audience to a TikTok Custom Audience (hashed match)">♪ Sync to TikTok</button>}
-                  {tiktokConnected && <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding, ...(s.tiktokAuto ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }} onClick={() => api.setSegmentAuto(entityId, s.id, 'tiktok', !s.tiktokAuto).then(load)} title="Keep the TikTok audience mirrored automatically (~daily)">{s.tiktokAuto ? '♪ Auto: on' : '♪ Auto: off'}</button>}
+                  {metaConnected && <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding }} onClick={() => syncMeta(s)} disabled={busyId === s.id} title="Mirror this audience to a Meta Custom Audience (hashed match)"><PlatformIcon channel="meta" size={13} /> Sync to Meta</button>}
+                  {metaConnected && <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding, ...(s.metaAuto ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }} onClick={() => api.setSegmentAuto(entityId, s.id, 'meta', !s.metaAuto).then(load)} title="Keep the Meta audience mirrored automatically (~daily)"><PlatformIcon channel="meta" size={13} /> {s.metaAuto ? 'Auto: on' : 'Auto: off'}</button>}
+                  {tiktokConnected && <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding }} onClick={() => syncTikTok(s)} disabled={busyId === s.id} title="Mirror this audience to a TikTok Custom Audience (hashed match)"><PlatformIcon channel="tiktok" size={13} /> Sync to TikTok</button>}
+                  {tiktokConnected && <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding, ...(s.tiktokAuto ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }} onClick={() => api.setSegmentAuto(entityId, s.id, 'tiktok', !s.tiktokAuto).then(load)} title="Keep the TikTok audience mirrored automatically (~daily)"><PlatformIcon channel="tiktok" size={13} /> {s.tiktokAuto ? 'Auto: on' : 'Auto: off'}</button>}
                   <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding }} onClick={() => setEditing(s)}>Edit</button>
                   <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding, color: 'var(--error,#ef4444)' }} onClick={() => del(s)}>Delete</button>
                 </div>
@@ -160,8 +161,8 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
                   ? <div style={{ fontSize: 11.5, color: syncMsg[s.id].startsWith('✗') ? 'var(--error,#ef4444)' : 'var(--muted)', flexBasis: '100%', marginTop: isMobile ? 0 : 4 }}>{syncMsg[s.id]}</div>
                   : (connectors.meta?.connected || connectors.tiktok?.connected || s.metaSync || s.tiktokSync) && (
                     <div style={{ flexBasis: '100%', marginTop: isMobile ? 0 : 4, display: 'flex', flexDirection: 'column', gap: 2 }}>
-                      {(connectors.meta?.connected || s.metaSync) && connLine('◇', 'Meta', s.metaSync, connectors.meta?.audiencesUrl)}
-                      {(connectors.tiktok?.connected || s.tiktokSync) && connLine('♪', 'TikTok', s.tiktokSync, connectors.tiktok?.audiencesUrl)}
+                      {(connectors.meta?.connected || s.metaSync) && connLine(<PlatformIcon channel="meta" size={12} />, 'Meta', s.metaSync, connectors.meta?.audiencesUrl)}
+                      {(connectors.tiktok?.connected || s.tiktokSync) && connLine(<PlatformIcon channel="tiktok" size={12} />, 'TikTok', s.tiktokSync, connectors.tiktok?.audiencesUrl)}
                     </div>
                   )}
               </div>
