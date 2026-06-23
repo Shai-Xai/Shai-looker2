@@ -950,7 +950,7 @@ function UserDetail({ userId, entities = [], roles = [], onBack }) {
   if (err) return <div><button style={miniBtnOutline} onClick={onBack}>← All users</button><p style={{ color: 'var(--error)', marginTop: 12 }}>{err}</p></div>;
   if (!data) return <div><button style={miniBtnOutline} onClick={onBack}>← All users</button><p style={{ marginTop: 12 }}><Muted>Loading…</Muted></p></div>;
 
-  const { user, memberships, profile, dashboards, activity } = data;
+  const { user, memberships, profile, dashboards, activity, usageByClient = [] } = data;
   const isAdmin = user.role === 'admin';
   const nav = [
     ['overview', 'Overview'],
@@ -1018,7 +1018,31 @@ function UserDetail({ userId, entities = [], roles = [], onBack }) {
           {section === 'usage' && (
             <div>
               <div style={cardStyle}>
-                <h3 style={subhead}>Most-used dashboards <span style={{ fontWeight: 400, color: 'var(--muted)' }}>(last 90 days)</span></h3>
+                <h3 style={subhead}>Usage by client <span style={{ fontWeight: 400, color: 'var(--muted)' }}>(last 90 days)</span></h3>
+                {usageByClient.length === 0 ? <Muted>No client-attributed dashboard activity yet.</Muted> : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                    {usageByClient.map((c) => (
+                      <div key={c.entityId} style={{ borderLeft: '3px solid var(--brand)', paddingLeft: 12 }}>
+                        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+                          <span style={{ fontWeight: 600, fontSize: 14 }}>{c.entityName}</span>
+                          <span style={{ color: 'var(--muted)', fontSize: 12 }}>{c.views} view{c.views === 1 ? '' : 's'} · active {relTime(c.lastAt)}</span>
+                        </div>
+                        <ul style={{ listStyle: 'none', margin: '5px 0 0', padding: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                          {c.topDashboards.map((d) => (
+                            <li key={d.dashboardId} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5 }}>
+                              <span>📊</span>
+                              <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.title}</span>
+                              <span style={{ color: 'var(--muted)' }}>{d.count}× · {relTime(d.lastAt)}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div style={cardStyle}>
+                <h3 style={subhead}>Most-used dashboards <span style={{ fontWeight: 400, color: 'var(--muted)' }}>(last 90 days)</span> <span style={{ fontWeight: 400, color: 'var(--muted)' }}>· across all clients</span></h3>
                 {(dashboards.used || []).length === 0 ? <Muted>No dashboard activity yet.</Muted> : (
                   <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
                     {dashboards.used.map((d) => (

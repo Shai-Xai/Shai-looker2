@@ -226,6 +226,39 @@ function recentViewsForUser(userId, limit = 60) {
     WHERE uv.user_id=? ORDER BY uv.at DESC LIMIT ?
   `).all(userId, Math.min(200, limit));
 }
+// Per-client usage breakdown for one user: group their dashboard opens (last
+// `days`) by the client whose suite they were opened under. A dashboard open
+// carries the suite it happened in, and a suite belongs to a client — so the
+// same shared dashboard counts toward whichever client's context it was used in.
+// Views with no suite context can't be attributed to a client and are skipped.
+function usageByClientForUser(userId, days = 90) {
+  const since = new Date(Date.now() - days * 864e5).toISOString();
+  const rows = db.prepare(`
+    SELECT suite_id AS suiteId, dashboard_id AS dashboardId, COUNT(*) AS count, MAX(at) AS lastAt
+    FROM user_views WHERE user_id=? AND at>=? GROUP BY suite_id, dashboard_id
+  `).all(userId, since);
+  const byEntity = new Map();
+  for (const r of rows) {
+    const suite = r.suiteId ? getSuite(r.suiteId) : null;
+    const eid = suite ? suite.entityId : '';
+    if (!eid) continue; // unattributable without a client context
+    let b = byEntity.get(eid);
+    if (!b) { b = { entityId: eid, entityName: getEntity(eid)?.name || eid, views: 0, lastAt: '', dashboards: new Map() }; byEntity.set(eid, b); }
+    b.views += r.count;
+    if (r.lastAt > b.lastAt) b.lastAt = r.lastAt;
+    const d = b.dashboards.get(r.dashboardId) || { dashboardId: r.dashboardId, count: 0, lastAt: '' };
+    d.count += r.count; if (r.lastAt > d.lastAt) d.lastAt = r.lastAt;
+    b.dashboards.set(r.dashboardId, d);
+  }
+  return [...byEntity.values()]
+    .sort((a, c) => c.views - a.views)
+    .map((b) => ({
+      entityId: b.entityId, entityName: b.entityName, views: b.views, lastAt: b.lastAt,
+      topDashboards: [...b.dashboards.values()]
+        .sort((a, c) => c.count - a.count || (a.lastAt < c.lastAt ? 1 : -1)).slice(0, 5)
+        .map((d) => ({ dashboardId: d.dashboardId, title: getDashboard(d.dashboardId)?.title || d.dashboardId, count: d.count, lastAt: d.lastAt })),
+    }));
+}
 // Batch: each user's latest dashboard view (for the "last active" column).
 function lastViewForUsers() {
   const out = {};
@@ -1362,7 +1395,7 @@ module.exports = {
   // event documents (invoices etc.)
   listDocuments, getDocument, getDocumentFile, createDocument, updateDocument, deleteDocument, documentExistsForSource,
   // view tracking
-  recordView, viewProfile, recentViewsForUser, lastViewForUsers, recentUsageForUser,
+  recordView, viewProfile, recentViewsForUser, lastViewForUsers, recentUsageForUser, usageByClientForUser,
   // user action audit log
   recordAction, listActionsForUser, lastActionsForUsers,
   // tile marks (pins + follows)
