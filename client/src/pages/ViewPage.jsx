@@ -59,7 +59,10 @@ export default function ViewPage() {
       for (const f of data.filters || []) vals[f.name] = f.default_value || '';
       return { vals, lockedMap: {} };
     }
-    const lockMap = suite?.lockedFilters || {};
+    // Suite-wide locks, then this dashboard's own per-suite lock overrides on top
+    // (most specific wins) — lets an admin lock one dashboard's filters for a
+    // single client without touching the rest of the suite.
+    const lockMap = { ...(suite?.lockedFilters || {}), ...((suite?.dashboardLocks && suite.dashboardLocks[id]) || {}) };
     const norm = {};
     for (const [k, v] of Object.entries(lockMap)) norm[k.trim().toLowerCase()] = v;
     const vals = {};

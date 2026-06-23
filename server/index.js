@@ -624,6 +624,9 @@ app.get('/api/my/suites/:id', auth.requireAuth, (req, res) => {
   const isAdmin = req.user.role === 'admin';
   const role = auth.roleForEntity(req.user, su.entityId);
   const visible = (setId, dashId) => isAdmin || db.dashboardVisibleToRole(su.entityId, setId, dashId, role);
+  // Dashboards an admin removed from THIS suite (a subset of a shared set). Hidden
+  // for everyone — including admin preview — so it matches what the client sees.
+  const excluded = new Set(su.excludedDashboards || []);
   const sets = su.setIds.map((sid) => {
     const set = db.getSet(sid);
     if (!set) return null;
@@ -631,7 +634,7 @@ app.get('/api/my/suites/:id', auth.requireAuth, (req, res) => {
     // in `children`. An orphaned parent reference renders top-level.
     const nodes = (set.dashboards || []).map(({ id, parentId }) => {
       const d = store.get(id);
-      return d && visible(set.id, id) && { id: d.id, title: d.title, description: d.description || '', tileCount: (d.tiles || []).length, parentId };
+      return d && !excluded.has(id) && visible(set.id, id) && { id: d.id, title: d.title, description: d.description || '', tileCount: (d.tiles || []).length, parentId };
     }).filter(Boolean);
     const valid = new Set(nodes.map((n) => n.id));
     const dashboards = nodes.filter((n) => !n.parentId || !valid.has(n.parentId)).map(({ parentId, ...top }) => ({
@@ -641,11 +644,17 @@ app.get('/api/my/suites/:id', auth.requireAuth, (req, res) => {
     return { id: set.id, name: set.name, icon: set.icon || '', dashboards };
   }).filter((s) => s && (isAdmin || s.dashboards.length)); // drop sets fully hidden for this role
   const ent = db.getEntity(su.entityId);
+  // Per-dashboard lock overrides, expanded the same way as the suite-wide locks
+  // so ViewPage can layer them on top for the matching dashboard.
+  const dashboardLocks = {};
+  for (const [did, locks] of Object.entries(su.dashboardLocks || {})) {
+    if (locks && Object.keys(locks).length) dashboardLocks[did] = expandLockMap(locks);
+  }
   res.json({
     id: su.id, name: su.name, icon: su.icon || '',
     entityId: su.entityId, // the suite's client — authoritative scope for tile actions (e.g. create segment)
     entityName: ent?.name || '', entityLogo: ent?.logo || '',
-    lockedFilters: expandLockMap(auth.lockedFiltersForSuite(su.id)), sets,
+    lockedFilters: expandLockMap(auth.lockedFiltersForSuite(su.id)), dashboardLocks, sets,
   });
 });
 
@@ -712,7 +721,7 @@ async function resolveTileValue({ dashboardId, tileId, user, suiteId }) {
   // suite's organiser/event locks layered on top so scope still wins.
   const su = db.getSuite(suiteId);
   const entityView = su?.entityId ? (db.getFilterView('entity', su.entityId, dashboardId) || {}) : {};
-  const lockMap = { ...expandLockMap(entityView), ...expandLockMap(db.lockedFiltersForSuite(suiteId)) };
+  const lockMap = { ...expandLockMap(entityView), ...expandLockMap(db.lockedFiltersForSuite(suiteId, dashboardId)) };
   const body = await tileQueryBody(tile, def, user, suiteId, lockMap);
   if (!body) return null; // scope denied or non-queryable tile
   // Drop any "days before event" / days-to-go clip so a running-total KPI reads the
@@ -772,7 +781,7 @@ async function resolveTileSeries({ dashboardId, tileId, user, suiteId }) {
   if (!tile) return [];
   const su = db.getSuite(suiteId);
   const entityView = su?.entityId ? (db.getFilterView('entity', su.entityId, dashboardId) || {}) : {};
-  const lockMap = { ...expandLockMap(entityView), ...expandLockMap(db.lockedFiltersForSuite(suiteId)) };
+  const lockMap = { ...expandLockMap(entityView), ...expandLockMap(db.lockedFiltersForSuite(suiteId, dashboardId)) };
   const body = await tileQueryBody(tile, def, user, suiteId, lockMap);
   if (!body) return [];
   body.filters = stripDaysBeforeFilters(body.filters, def, tile).filters; // full curve to event day
@@ -826,7 +835,7 @@ async function resolveTileSeriesAll({ dashboardId, tileId, user, suiteId }) {
   if (!tile) return null;
   const su = db.getSuite(suiteId);
   const entityView = su?.entityId ? (db.getFilterView('entity', su.entityId, dashboardId) || {}) : {};
-  const lockMap = { ...expandLockMap(entityView), ...expandLockMap(db.lockedFiltersForSuite(suiteId)) };
+  const lockMap = { ...expandLockMap(entityView), ...expandLockMap(db.lockedFiltersForSuite(suiteId, dashboardId)) };
   const body = await tileQueryBody(tile, def, user, suiteId, lockMap);
   if (!body) return null;
   const stripResult = stripDaysBeforeFilters(body.filters, def, tile);
@@ -1168,7 +1177,7 @@ app.get('/api/admin/tile-filter-debug', auth.requireAdmin, async (req, res) => {
     const entityId = su.entityId;
     const user = { id: `debug:${entityId}`, email: req.user.email, role: 'client', entityIds: [entityId] };
     const view = db.getFilterView('entity', entityId, dashboardId) || null;
-    const lockMap = { ...expandLockMap(view || {}), ...expandLockMap(db.lockedFiltersForSuite(suiteId)) };
+    const lockMap = { ...expandLockMap(view || {}), ...expandLockMap(db.lockedFiltersForSuite(suiteId, dashboardId)) };
     const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))]
       .filter((t) => t.type !== 'text' && t.query?.fields?.length);
     const out = [];
@@ -1182,7 +1191,7 @@ app.get('/api/admin/tile-filter-debug', auth.requireAdmin, async (req, res) => {
       dashboard: def.title, suiteId, entityId,
       dashboardFilters: (def.filters || []).map((f) => ({ name: f.name, field: f.field || f.dimension, default: f.default_value })),
       hasEntityView: !!view, entityView: view || null,
-      suiteLocks: db.lockedFiltersForSuite(suiteId),
+      suiteLocks: db.lockedFiltersForSuite(suiteId, dashboardId),
       tiles: out,
     });
   } catch (e) { res.status(500).json({ error: e.message }); }

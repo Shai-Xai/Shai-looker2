@@ -1833,8 +1833,18 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
   const [entityId, setEntityId] = useState(suite.entityId);
   const [setIds, setSetIds] = useState(suite.setIds || []);
   const [locks, setLocks] = useState(suite.lockedFilters || {});
+  // Dashboards an admin left OUT of a selected set for this client, and
+  // per-dashboard locked-filter overrides ({ dashboardId: { field: 'v1,v2' } }).
+  const [excluded, setExcluded] = useState(suite.excludedDashboards || []);
+  const [dashLocks, setDashLocks] = useState(suite.dashboardLocks || {});
   const [eventUrl, setEventUrl] = useState(suite.eventUrl || '');
   const [saved, setSaved] = useState(false);
+  const toggleDash = (did) => setExcluded((cur) => (cur.includes(did) ? cur.filter((x) => x !== did) : [...cur, did]));
+  const setDashLock = (did, map) => setDashLocks((cur) => {
+    const next = { ...cur };
+    if (map && Object.keys(map).length) next[did] = map; else delete next[did];
+    return next;
+  });
   // Role-based visibility for this client (keyed to the suite's entity).
   const [cr, setCr] = useState({ sets: {}, dashboards: {} });
   const [roleCat, setRoleCat] = useState([]);
@@ -1863,7 +1873,18 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
     setSetIds((cur) => { const n = cur.slice(); const [m] = n.splice(from, 1); n.splice(i, 0, m); return n; });
     dragFrom.current = i; setDragOver(i);
   };
-  const save = async () => { await api.adminUpdateSuite(suite.id, { name, icon, entityId, setIds, lockedFilters: locks, eventUrl }); flash(setSaved); onChange(); };
+  const save = async () => { await api.adminUpdateSuite(suite.id, { name, icon, entityId, setIds, lockedFilters: locks, excludedDashboards: excluded, dashboardLocks: dashLocks, eventUrl }); flash(setSaved); onChange(); };
+  // Sets grouped by their library folder (item: show folder → set → dashboards),
+  // named folders first then the ungrouped bucket.
+  const setsByFolder = (() => { const m = {}; for (const s of sets) { const f = s.folder || ''; (m[f] = m[f] || []).push(s); } return m; })();
+  const setFolderOrder = Object.keys(setsByFolder).sort((a, b) => (a === '' ? 1 : b === '' ? -1 : a.localeCompare(b)));
+  // The dashboards actually reaching the client through this suite (selected sets
+  // minus per-dashboard exclusions), de-duped — drives the per-dashboard lock list.
+  const includedDashboards = (() => {
+    const seen = new Set(); const out = [];
+    for (const sid of setIds) { const s = setById[sid]; if (!s) continue; for (const did of (s.dashboardIds || [])) { if (excluded.includes(did) || seen.has(did)) continue; seen.add(did); out.push({ id: did, title: dashTitle[did] || did }); } }
+    return out;
+  })();
   const remove = async () => { if (confirm(`Delete suite "${suite.name}"?`)) { await api.adminDeleteSuite(suite.id); onChange(); } };
   // Open this suite exactly as the client sees it (preview), jumping to its
   // first dashboard. Uses the client suite endpoint (admins can read any suite).
@@ -1890,31 +1911,43 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
         <Field label="Icon"><IconPicker value={icon} onChange={setIcon} /></Field>
       </div>
       <Section title={`Sets in this suite (${setIds.length})`}>
+        <p style={{ ...hint, marginTop: 0 }}>Tick a set to include it. Expand a set to choose which of its dashboards this client gets — untick any you want to leave out.</p>
         <div style={checkList}>
-          {sets.map((s) => {
-            const open = !!openSets[s.id];
-            return (
-              <div key={s.id}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <button onClick={() => setOpenSets((p) => ({ ...p, [s.id]: !p[s.id] }))} title="Show dashboards" style={{ width: 14, border: 'none', background: 'transparent', cursor: 'pointer', color: '#b0b0b6', fontSize: 10, padding: 0, transform: open ? 'rotate(90deg)' : 'none' }}>▶</button>
-                  <label style={{ ...checkItem, flex: 1 }}>
-                    <input type="checkbox" checked={setIds.includes(s.id)} onChange={() => toggleSet(s.id)} />
-                    <span>{s.name} <span style={{ color: 'var(--muted)' }}>({s.dashboardIds.length})</span></span>
-                  </label>
-                </div>
-                {open && (
-                  <div style={{ paddingLeft: 26, margin: '2px 0 6px' }}>
-                    {s.dashboardIds.length === 0 ? (
-                      <div style={{ fontSize: 12, color: 'var(--muted)' }}>No dashboards in this set.</div>
-                    ) : s.dashboardIds.map((id) => (
-                      <div key={id} style={{ fontSize: 12.5, color: 'var(--muted-2, #555)', padding: '2px 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>• {dashTitle[id] || id}</div>
-                    ))}
+          {sets.length === 0 ? <Muted>Create a Set first.</Muted> : setFolderOrder.map((folder) => (
+            <div key={folder || '__ungrouped__'} style={{ marginBottom: 4 }}>
+              <div style={{ fontSize: 11, fontWeight: 800, textTransform: folder ? 'none' : 'uppercase', letterSpacing: folder ? 0 : '0.06em', color: 'var(--muted)', padding: '4px 0 2px' }}>{folder ? `📁 ${folder}` : 'Ungrouped'}</div>
+              {setsByFolder[folder].map((s) => {
+                const open = !!openSets[s.id];
+                const setOn = setIds.includes(s.id);
+                return (
+                  <div key={s.id} style={{ paddingLeft: folder ? 8 : 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <button onClick={() => setOpenSets((p) => ({ ...p, [s.id]: !p[s.id] }))} title="Show dashboards" style={{ width: 14, border: 'none', background: 'transparent', cursor: 'pointer', color: '#b0b0b6', fontSize: 10, padding: 0, transform: open ? 'rotate(90deg)' : 'none' }}>▶</button>
+                      <label style={{ ...checkItem, flex: 1 }}>
+                        <input type="checkbox" checked={setOn} onChange={() => toggleSet(s.id)} />
+                        <span>{s.name} <span style={{ color: 'var(--muted)' }}>({s.dashboardIds.length})</span></span>
+                      </label>
+                    </div>
+                    {open && (
+                      <div style={{ paddingLeft: 26, margin: '2px 0 6px' }}>
+                        {s.dashboardIds.length === 0 ? (
+                          <div style={{ fontSize: 12, color: 'var(--muted)' }}>No dashboards in this set.</div>
+                        ) : s.dashboardIds.map((did) => {
+                          const included = setOn && !excluded.includes(did);
+                          return (
+                            <label key={did} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, padding: '2px 0', opacity: setOn ? 1 : 0.45, cursor: setOn ? 'pointer' : 'default' }}>
+                              <input type="checkbox" disabled={!setOn} checked={included} onChange={() => toggleDash(did)} />
+                              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{dashTitle[did] || did}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-            );
-          })}
-          {sets.length === 0 && <Muted>Create a Set first.</Muted>}
+                );
+              })}
+            </div>
+          ))}
         </div>
       </Section>
       {setIds.length > 1 && (
@@ -1974,6 +2007,31 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
       <Section title="Locked filters (the event, cashless events…)">
         <LockedFilterEditor value={locks} onChange={setLocks} fields={fields} categories={lockCategories} clientOrganiser={organiserValsFromLocks(entities.find((e) => e.id === entityId)?.lockedFilters)} />
       </Section>
+      {includedDashboards.length > 0 && (
+        <Section title="Per-dashboard locked filters (override the suite locks for one dashboard)">
+          <p style={{ ...hint, marginTop: 0 }}>Lock a filter on just ONE dashboard for <b>{entities.find((e) => e.id === entityId)?.name || 'this client'}</b> — e.g. pin a specific event on a single dashboard while the rest of the suite uses the suite-wide locks above. Leave a dashboard untouched to follow those.</p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {includedDashboards.map((d) => {
+              const open = !!openSets[`lock-${d.id}`];
+              const count = Object.values(dashLocks[d.id] || {}).filter((v) => String(v || '') !== '').length;
+              return (
+                <div key={d.id} style={{ border: '1px solid var(--hairline)', borderRadius: 8, padding: '8px 10px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <button onClick={() => setOpenSets((p) => ({ ...p, [`lock-${d.id}`]: !p[`lock-${d.id}`] }))} style={{ width: 14, border: 'none', background: 'transparent', cursor: 'pointer', color: '#b0b0b6', fontSize: 10, padding: 0, transform: open ? 'rotate(90deg)' : 'none' }}>▶</button>
+                    <span style={{ fontWeight: 600, fontSize: 13, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.title}</span>
+                    {count > 0 && <span style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--brand)', background: 'rgba(var(--brand-rgb,255,56,92),0.10)', borderRadius: 980, padding: '2px 8px', flexShrink: 0 }}>{count} locked</span>}
+                  </div>
+                  {open && (
+                    <div style={{ marginTop: 8 }}>
+                      <LockedFilterEditor value={dashLocks[d.id] || {}} onChange={(m) => setDashLock(d.id, m)} fields={fields} categories={[]} clientOrganiser={organiserValsFromLocks(entities.find((e) => e.id === entityId)?.lockedFilters)} />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </Section>
+      )}
       <div style={{ marginTop: 12 }}>
         <L>Ticket / checkout link</L>
         <div style={{ fontSize: 12, color: 'var(--muted)', margin: '2px 0 6px' }}>The event's buy / checkout URL. Campaigns linked to this event auto-fill it as the call-to-action link.</div>
