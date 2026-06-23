@@ -150,7 +150,7 @@ export default function ClientLayout() {
   // home, digests, actions — and persists across visits. An admin in the console
   // who opens a suite is "previewing"; an admin who switched INTO a client
   // account (mode 'client') is acting as that client (no preview banner).
-  const { activeEntityId: profileEntityId, mode: profileMode } = useProfile();
+  const { activeEntityId: profileEntityId, mode: profileMode, enterConsole, active } = useProfile();
   const { can } = useAccess(); // role-gated nav for the active profile (admins: all)
   const previewMode = isAdmin && profileMode === 'console';
   const activeEntityId = isAdmin
@@ -636,12 +636,16 @@ export default function ClientLayout() {
             </div>
           );
         })}
-        {previewMode && (
+        {/* Admin previewing/acting-as a client — show on EVERY device (the
+            "Preview" buttons put you in client mode, which previewMode alone
+            misses) with a one-tap exit back to the console. Compact on mobile so
+            the Exit button always fits. */}
+        {isAdmin && !!activeEntityId && (
           <div style={previewBar}>
-            <span style={{ fontWeight: 700 }}>👁 Client preview{activeEntityId && (() => { const n = suites.find((s) => s.entityId === activeEntityId)?.entityName; return n ? ` — ${n}` : ''; })()}</span>
-            <span style={{ opacity: 0.85 }}>You're viewing this exactly as the client would, scoped to their data.</span>
+            <span style={{ fontWeight: 700 }}>👁 Client preview{(() => { const n = suites.find((s) => s.entityId === activeEntityId)?.entityName || active?.name; return n ? ` — ${n}` : ''; })()}</span>
+            {!isMobile && <span style={{ opacity: 0.85 }}>You're viewing this exactly as the client would, scoped to their data.</span>}
             <div style={{ flex: 1 }} />
-            <button style={exitPreviewBtn} onClick={() => navigate('/admin')}>Exit preview</button>
+            <button style={exitPreviewBtn} onClick={() => { enterConsole(); navigate('/admin'); }}>Exit preview</button>
           </div>
         )}
         {(isMobile || collapsed) && (
