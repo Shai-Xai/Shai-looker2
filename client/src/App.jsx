@@ -226,6 +226,9 @@ function Shell() {
               <Route path="/dashboards" element={<HomePage />} />
               <Route path="/d/:id" element={<ViewPage />} />
               <Route path="/d/:id/edit" element={<EditorPage />} />
+              {/* Editing a dashboard opened inside a suite keeps the suite in the
+                  URL so the editor's Back/View return to the suite view. */}
+              <Route path="/suite/:suiteId/d/:id/edit" element={<EditorPage />} />
               <Route path="/clone" element={<ClonePage />} />
               <Route path="/admin" element={<AdminPage />} />
               {/* Preview the client experience without logging in as them. */}
@@ -254,6 +257,11 @@ function Shell() {
                 <Route path="/" element={<ClientHome />} />
                 <Route path="/settings" element={<ClientIntegrationsPage />} />
                 <Route path="/suite/:suiteId/d/:id" element={<ViewPage />} />
+                {/* Editor is admin-only (guarded inside EditorPage) but mounted
+                    here too so an admin acting as a client can edit without the
+                    route falling through to "home". */}
+                <Route path="/d/:id/edit" element={<EditorPage />} />
+                <Route path="/suite/:suiteId/d/:id/edit" element={<EditorPage />} />
                 <Route path="/goals" element={<GoalsPage />} />
                 <Route path="/alerts" element={<AlertsPage />} />
                 <Route path="/settlements" element={<SettlementsPage />} />

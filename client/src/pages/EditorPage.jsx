@@ -1,15 +1,21 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate, Navigate } from 'react-router-dom';
 import EditableGrid from '../components/EditableGrid.jsx';
 import FilterBar from '../components/FilterBar.jsx';
 import TileEditorPanel from '../components/editor/TileEditorPanel.jsx';
 import FilterManager from '../components/editor/FilterManager.jsx';
 import TileLibraryPicker from '../components/editor/TileLibraryPicker.jsx';
+import BackButton from '../components/BackButton.jsx';
 import { api } from '../lib/api.js';
+import { useAuth } from '../lib/auth.jsx';
 
 export default function EditorPage() {
-  const { id } = useParams();
+  const { id, suiteId } = useParams();
   const navigate = useNavigate();
+  const { isAdmin } = useAuth();
+  // Where "View" / Save-and-return goes — back to the suite view when we got
+  // here from inside a suite, otherwise the standalone dashboard view.
+  const viewPath = suiteId ? `/suite/${suiteId}/d/${id}` : `/d/${id}`;
   const [def, setDef] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -201,6 +207,9 @@ export default function EditorPage() {
     }));
   }
 
+  // The editor is a Howler-staff tool. Mounted on client routes only so an admin
+  // acting as a client can reach it; a real client who deep-links here is sent home.
+  if (!isAdmin) return <Navigate to={viewPath} replace />;
   if (loading) return <Centered>Loading…</Centered>;
   if (error) return <Centered error>Error: {error}</Centered>;
   if (!def) return null;
@@ -232,7 +241,7 @@ export default function EditorPage() {
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
       {/* Toolbar */}
       <div style={toolbar}>
-        <Link to="/dashboards" style={{ color: 'var(--muted)', fontSize: 13, textDecoration: 'none' }}>← Back</Link>
+        <BackButton fallback={viewPath} title="Back" />
         <input
           style={titleInput}
           value={def.title}
@@ -256,7 +265,7 @@ export default function EditorPage() {
         <span style={{ fontSize: 12, color: dirty ? 'var(--warn)' : 'var(--muted)' }}>
           {dirty ? '● Unsaved changes' : '✓ Saved'}
         </span>
-        <button style={viewBtn} onClick={() => navigate(`/d/${id}`)}>View</button>
+        <button style={viewBtn} onClick={() => navigate(viewPath)}>View</button>
         <button className="btn-key" style={saveBtn} onClick={save} disabled={saving || !dirty}>{saving ? 'Saving…' : 'Save'}</button>
       </div>
 

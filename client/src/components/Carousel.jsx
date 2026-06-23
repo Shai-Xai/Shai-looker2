@@ -15,8 +15,10 @@ export default function Carousel({ carousel, filterValues, editable, onEditTile,
   const tiles = carousel.tiles || [];
   const cardH = carousel.cardH || 220; // fixed card height in grid (section) mode
   // On phones a card shouldn't exceed the viewport — show one card plus a peek
-  // of the next so it's obviously swipeable.
-  const cardBasis = (w) => (isMobile ? `min(${w}px, 82vw)` : `${w}px`);
+  // of the next so it's obviously swipeable. On desktop the configured width is
+  // the target, but it's capped to the row's own width (100%) so cards shrink to
+  // fit when the window/container narrows instead of sticking at a fixed size.
+  const cardBasis = (w) => (isMobile ? `min(${w}px, 82vw)` : `min(${w}px, 100%)`);
 
   const scroll = (dir) => trackRef.current?.scrollBy({ left: dir * (cardW + GAP) * 2, behavior: 'smooth' });
 
@@ -70,6 +72,12 @@ export default function Carousel({ carousel, filterValues, editable, onEditTile,
       <div style={{ position: 'relative', flex: 1, minHeight: 0 }}>
         <div
           ref={trackRef}
+          // Keep horizontal tile-scrolling self-contained: stop touch gestures
+          // from bubbling up to the dashboard's swipe-to-next-tab handler, so
+          // scrolling a carousel on mobile never flips to the next dashboard.
+          onTouchStart={!isGrid ? (e) => e.stopPropagation() : undefined}
+          onTouchMove={!isGrid ? (e) => e.stopPropagation() : undefined}
+          onTouchEnd={!isGrid ? (e) => e.stopPropagation() : undefined}
           onDragOver={editable && onDropTile ? (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (!dragOver) setDragOver(true); } : undefined}
           onDragLeave={editable && onDropTile ? () => setDragOver(false) : undefined}
           onDrop={editable && onDropTile ? (e) => { e.preventDefault(); setDragOver(false); const id = e.dataTransfer.getData('text/plain'); if (id) onDropTile(id); } : undefined}

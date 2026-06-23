@@ -7,6 +7,7 @@ import FilterBar, { activeFilterCount } from '../components/FilterBar.jsx';
 import DashboardInsightModal from '../components/DashboardInsightModal.jsx';
 import AiMark from '../components/AiMark.jsx';
 import EditableGrid from '../components/EditableGrid.jsx';
+import BackButton from '../components/BackButton.jsx';
 import { api } from '../lib/api.js';
 import { ANY_VALUE } from '../lib/filterConstants.js';
 import { useAuth } from '../lib/auth.jsx';
@@ -257,6 +258,7 @@ export default function ViewPage() {
             context, so skip this header to avoid stacking two titles. */}
         {!(isMobile && suiteId) && (
           <div style={{ background: 'var(--frost)', backdropFilter: 'saturate(180%) blur(20px)', WebkitBackdropFilter: 'saturate(180%) blur(20px)', borderBottom: '1px solid var(--hairline)', padding: isMobile ? '12px 14px' : '16px 22px', display: 'flex', alignItems: 'center', gap: isMobile ? 10 : 16 }}>
+            <BackButton fallback={backTo} style={homeBtn} />
             <Link to={backTo} title="Home" aria-label="Home" className="btn-key" style={homeBtn}><HomeIcon /></Link>
             <div style={{ flex: 1, minWidth: 0 }}>
               {(setInfo || daysToGo != null) && (
@@ -282,7 +284,7 @@ export default function ViewPage() {
               </button>
             )}
             {!isMobile && <ActionsMenu suiteId={suiteId} dashboardId={id} filterValues={filterValues} />}
-            {isAdmin && !isMobile && <button style={editBtn} onClick={() => navigate(`/d/${id}/edit`)}>Edit</button>}
+            {isAdmin && !isMobile && <button style={editBtn} onClick={() => navigate(suiteId ? `/suite/${suiteId}/d/${id}/edit` : `/d/${id}/edit`)}>Edit</button>}
           </div>
         )}
 
