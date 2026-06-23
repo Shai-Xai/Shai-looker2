@@ -215,6 +215,8 @@ export const api = {
   // Admin: per-dashboard locked-filter overrides for a suite dashboard (writes to
   // suite.dashboardLocks). `locks` is { filterName: value } — empty clears it.
   setSuiteDashboardLocks: (suiteId, dashboardId, locks) => fetch(`/api/admin/suites/${suiteId}/dashboard-locks/${dashboardId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ locks }) }).then(json),
+  // Per-tile lock overrides for one tile in a suite ({ filterName: value }).
+  setSuiteTileLocks: (suiteId, tileId, locks) => fetch(`/api/admin/suites/${suiteId}/tile-locks/${tileId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ locks }) }).then(json),
 
   // Tile library
   libraryList: (params = {}) => {

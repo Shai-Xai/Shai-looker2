@@ -654,7 +654,7 @@ app.get('/api/my/suites/:id', auth.requireAuth, (req, res) => {
     id: su.id, name: su.name, icon: su.icon || '',
     entityId: su.entityId, // the suite's client — authoritative scope for tile actions (e.g. create segment)
     entityName: ent?.name || '', entityLogo: ent?.logo || '',
-    lockedFilters: expandLockMap(auth.lockedFiltersForSuite(su.id)), dashboardLocks, sets,
+    lockedFilters: expandLockMap(auth.lockedFiltersForSuite(su.id)), dashboardLocks, tileLocks: su.tileLocks || {}, sets,
   });
 });
 
@@ -700,6 +700,14 @@ app.delete('/api/admin/entities/:entityId/dashboard-filters/:dashboardId', auth.
 // by the dashboard's filter name; the client view + goal resolvers expand it.
 app.put('/api/admin/suites/:suiteId/dashboard-locks/:dashboardId', auth.requireAdmin, (req, res) => {
   const map = db.setSuiteDashboardLocks(req.params.suiteId, req.params.dashboardId, cleanFilterMap(req.body?.locks));
+  if (map == null) return res.status(404).json({ error: 'Suite not found' });
+  res.json({ ok: true });
+});
+// Admin: lock filter(s) on a SINGLE tile for this client (suite.tileLocks). The
+// override is keyed by the dashboard filter name the tile listens to. Empty map
+// clears the tile's entry.
+app.put('/api/admin/suites/:suiteId/tile-locks/:tileId', auth.requireAdmin, (req, res) => {
+  const map = db.setSuiteTileLocks(req.params.suiteId, req.params.tileId, cleanFilterMap(req.body?.locks));
   if (map == null) return res.status(404).json({ error: 'Suite not found' });
   res.json({ ok: true });
 });

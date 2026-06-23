@@ -321,9 +321,23 @@ export default function ViewPage() {
     onUnlock: onUnlockFilter, onRelock: onRelockFilter, onLockHere: onLockHereFilter, onInherit: onInheritFilter,
     hasOverride, savingName: lockSavingName, status: lockStatus,
   } : null;
+  // Persist a single tile's per-client lock overrides (suite.tileLocks[tileId]),
+  // updating the loaded suite so the tile re-queries immediately.
+  const saveTileLock = async (tileId, map) => {
+    try {
+      await api.setSuiteTileLocks(suiteId, tileId, map);
+      setSetInfo((prev) => {
+        const next = { ...(prev || {}), tileLocks: { ...((prev || {}).tileLocks || {}) } };
+        if (map && Object.keys(map).length) next.tileLocks[tileId] = map; else delete next.tileLocks[tileId];
+        return next;
+      });
+      return true;
+    } catch { return false; }
+  };
 
   return (
-    <ScopeProvider suiteId={suiteId || null} dashboardContext={def.aiContext || ''} entityId={scopeEntityId} dashboardId={id} refreshKey={refreshKey} softKey={softKey}>
+    <ScopeProvider suiteId={suiteId || null} dashboardContext={def.aiContext || ''} entityId={scopeEntityId} dashboardId={id} refreshKey={refreshKey} softKey={softKey}
+      tileLocks={setInfo?.tileLocks || {}} lockFilters={def.filters || []} canLockTiles={isAdmin && !!suiteId && !keepImported} onSaveTileLock={saveTileLock}>
     <PinProvider dashboardId={id} entityId={previewEntityId || null} isAdmin={isAdmin} enabled={pinsEnabled}>
       <div style={shellStyle}>
         {/* On mobile inside a suite the sticky "☰ Menu" bar already shows the

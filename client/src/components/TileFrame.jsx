@@ -15,6 +15,7 @@ import { useScope } from '../lib/ScopeContext.jsx';
 import { api } from '../lib/api.js';
 import { useAccess, PERMS } from '../lib/access.js';
 import CreateSegmentModal from './CreateSegmentModal.jsx';
+import TileLockModal from './TileLockModal.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
 
 // Renders a single tile (vis or text). In edit mode it shows hover controls
@@ -22,7 +23,12 @@ import { useIsMobile } from '../lib/useIsMobile.js';
 export default function TileFrame({ tile, filterValues, editable, onEdit, onDuplicate, onRemove, onMoveOut, onToggleHide, inCarousel }) {
   const { data, loading, error } = useTileData(tile, filterValues);
   const { insightsEnabled } = useAuth();
-  const { entityId, dashboardId } = useScope();
+  const { entityId, dashboardId, suiteId, canLockTiles, tileLocks = {}, lockFilters = [], onSaveTileLock } = useScope();
+  const [showTileLock, setShowTileLock] = useState(false);
+  // Admin per-tile lock affordance: only when in a suite, the tile is queryable
+  // and it actually listens to a dashboard filter (otherwise there's nothing to lock).
+  const tileLockCount = Object.keys(tileLocks?.[tile.id] || {}).length;
+  const canLockThisTile = !!(canLockTiles && !editable && tile.type !== 'text' && Object.keys(tile.listenTo || {}).length > 0 && onSaveTileLock);
   const { can } = useAccess();
   const isMobile = useIsMobile();
   const [showInsight, setShowInsight] = useState(false);
@@ -124,6 +130,7 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
               <InsightButton onClick={openInsight} isMobile={isMobile} />
             </>
           )}
+          {canLockThisTile && (!isMobile || tapped) && <LockTileButton onClick={() => setShowTileLock(true)} count={tileLockCount} isMobile={isMobile} />}
           {editable && (
             <span style={{ display: 'flex', gap: 4, alignItems: 'center' }} onMouseDown={(e) => e.stopPropagation()}>
               {inCarousel && <ReorderGrip tileId={tile.id} />}
@@ -157,6 +164,7 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
           </>
         )}
         {!editable && (!isMobile || tapped) && canSegment && !showHeader && <SegmentButton onClick={() => setShowSegment(true)} isMobile={isMobile} corner />}
+        {canLockThisTile && (!isMobile || tapped) && !showHeader && <LockTileButton onClick={() => setShowTileLock(true)} count={tileLockCount} isMobile={isMobile} corner />}
         {/* Editable metric tile (no header): the move handle + edit controls float
             in the top-RIGHT corner, so the value below stays fully visible. The
             move handle reorders within a carousel (⠿) or moves on the grid (✥). */}
@@ -209,6 +217,16 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
           onClose={() => setShowSegment(false)}
         />
       )}
+      {showTileLock && (
+        <TileLockModal
+          tile={tile}
+          filters={lockFilters}
+          suiteId={suiteId}
+          current={tileLocks?.[tile.id] || {}}
+          onSave={onSaveTileLock}
+          onClose={() => setShowTileLock(false)}
+        />
+      )}
     </div>
   );
 }
@@ -232,6 +250,16 @@ function Eye() {
 }
 function EyeOff() {
   return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" /><line x1="1" y1="1" x2="23" y2="23" /></svg>;
+}
+
+// Admin: lock this tile's filter(s) for the client. Brand-tinted when it has
+// active locks. Corner variant floats bottom-left (clear of the owl/segment).
+function LockTileButton({ onClick, count, isMobile, corner }) {
+  const base = { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', border: `1px solid ${count ? 'var(--brand)' : 'var(--hairline)'}`, background: 'var(--card)', color: count ? 'var(--brand)' : 'var(--muted)', borderRadius: 7, fontSize: isMobile ? 13 : 11, lineHeight: 1, minWidth: isMobile ? 28 : 24, height: isMobile ? 28 : 24, padding: '0 5px', fontWeight: 700 };
+  const cornerStyle = corner ? { position: 'absolute', bottom: 6, left: 6, zIndex: 6 } : null;
+  return (
+    <button className="no-print" title="Lock this tile's filters for this client" onClick={(e) => { e.stopPropagation(); onClick(); }} style={{ ...base, ...cornerStyle }}>🔒{count ? ` ${count}` : ''}</button>
+  );
 }
 
 // "Create segment" affordance — same visual language as the insight/pin buttons.

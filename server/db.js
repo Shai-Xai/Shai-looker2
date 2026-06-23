@@ -187,6 +187,10 @@ addColumn('suites', 'event_url', "TEXT NOT NULL DEFAULT ''"); // the event's tic
 //     applied to one dashboard within this suite, on top of the suite-wide locks.
 addColumn('suites', 'excluded_dashboards', "TEXT NOT NULL DEFAULT '[]'");
 addColumn('suites', 'dashboard_locks', "TEXT NOT NULL DEFAULT '{}'");
+// Per-tile lock overrides for THIS suite (one client): { tileId: { filterName:
+// value } } — forces a single tile's filter to a value for this client, on top
+// of the dashboard/suite locks. Applied to that tile's query only.
+addColumn('suites', 'tile_locks', "TEXT NOT NULL DEFAULT '{}'");
 // settlements.notes/.kind added after the table shipped, so migrate existing DBs.
 if (tableExists('settlements')) {
   addColumn('settlements', 'notes', "TEXT NOT NULL DEFAULT '[]'");
@@ -1051,7 +1055,7 @@ function suiteSetIds(suiteId) {
   return db.prepare('SELECT set_id FROM suite_sets WHERE suite_id=? ORDER BY position').all(suiteId).map((r) => r.set_id);
 }
 function rowToSuite(r) {
-  return r && { id: r.id, entityId: r.entity_id, name: r.name, icon: r.icon || '', eventUrl: r.event_url || '', lockedFilters: J(r.locked_filters, {}), dashboardLocks: J(r.dashboard_locks, {}), excludedDashboards: J(r.excluded_dashboards, []), briefing: J(r.briefing, {}), setIds: suiteSetIds(r.id), position: r.position, createdAt: r.created_at };
+  return r && { id: r.id, entityId: r.entity_id, name: r.name, icon: r.icon || '', eventUrl: r.event_url || '', lockedFilters: J(r.locked_filters, {}), dashboardLocks: J(r.dashboard_locks, {}), tileLocks: J(r.tile_locks, {}), excludedDashboards: J(r.excluded_dashboards, []), briefing: J(r.briefing, {}), setIds: suiteSetIds(r.id), position: r.position, createdAt: r.created_at };
 }
 function listSuites() { return db.prepare('SELECT * FROM suites ORDER BY position, name').all().map(rowToSuite); }
 function listSuitesForEntity(entityId) {
@@ -1082,11 +1086,22 @@ function updateSuite(id, patch) {
   const eventUrl = patch.eventUrl !== undefined ? String(patch.eventUrl || '') : (cur.event_url || '');
   const excluded = patch.excludedDashboards !== undefined ? JSON.stringify(patch.excludedDashboards || []) : (cur.excluded_dashboards || '[]');
   const dashLocks = patch.dashboardLocks !== undefined ? JSON.stringify(patch.dashboardLocks || {}) : (cur.dashboard_locks || '{}');
-  db.prepare('UPDATE suites SET name=?, icon=?, entity_id=?, locked_filters=?, briefing=?, position=?, event_url=?, excluded_dashboards=?, dashboard_locks=? WHERE id=?').run(name, icon, ent, lf, brief, pos, eventUrl, excluded, dashLocks, id);
+  const tileLocks = patch.tileLocks !== undefined ? JSON.stringify(patch.tileLocks || {}) : (cur.tile_locks || '{}');
+  db.prepare('UPDATE suites SET name=?, icon=?, entity_id=?, locked_filters=?, briefing=?, position=?, event_url=?, excluded_dashboards=?, dashboard_locks=?, tile_locks=? WHERE id=?').run(name, icon, ent, lf, brief, pos, eventUrl, excluded, dashLocks, tileLocks, id);
   if (patch.setIds !== undefined) setSuiteSets(id, patch.setIds);
   return getSuite(id);
 }
 function deleteSuite(id) { db.prepare('DELETE FROM suites WHERE id=?').run(id); }
+// Set (or clear) the per-tile lock overrides for ONE tile within a suite. Empty
+// map removes the tile's entry.
+function setSuiteTileLocks(suiteId, tileId, locks) {
+  const row = db.prepare('SELECT tile_locks FROM suites WHERE id=?').get(suiteId);
+  if (!row) return null;
+  const map = J(row.tile_locks, {});
+  if (locks && Object.keys(locks).length) map[tileId] = locks; else delete map[tileId];
+  db.prepare('UPDATE suites SET tile_locks=? WHERE id=?').run(JSON.stringify(map), suiteId);
+  return map;
+}
 // Set (or clear) the per-dashboard lock overrides for ONE dashboard within a
 // suite, without disturbing the others. Empty map removes the dashboard's entry.
 function setSuiteDashboardLocks(suiteId, dashboardId, locks) {
@@ -1405,7 +1420,7 @@ module.exports = {
   listSets, listSetsForEntity, getSet, createSet, cloneSetForEntity, updateSet, deleteSet, setSetDashboards, dashboardsInSet,
   rolesForScope, setContentRoles, contentRolesForEntity, dashboardVisibleToRole,
   // suites (event context)
-  listSuites, listSuitesForEntity, getSuite, createSuite, updateSuite, deleteSuite, setSuiteSets, setSuiteDashboardLocks, suiteSetIds, dashboardsInSuite, lockedFiltersForSuite,
+  listSuites, listSuitesForEntity, getSuite, createSuite, updateSuite, deleteSuite, setSuiteSets, setSuiteDashboardLocks, setSuiteTileLocks, suiteSetIds, dashboardsInSuite, lockedFiltersForSuite,
   // tile library
   listLibraryTiles, listLibraryCategories, getLibraryTile, harvestTile, harvestDashboardTiles, updateLibraryTile, deleteLibraryTile, bumpLibraryUsage,
   // settings (key/value)

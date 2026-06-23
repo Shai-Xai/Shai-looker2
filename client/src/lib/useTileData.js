@@ -14,7 +14,7 @@ export function isRunnableQuery(q) {
 // values change. Returns { data, loading, error }. Looker does the calculation;
 // we only receive json_detail rows.
 export function useTileData(tile, filterValues) {
-  const { suiteId, refreshKey = 0, softKey = 0 } = useScope();
+  const { suiteId, refreshKey = 0, softKey = 0, tileLocks = {} } = useScope();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(tile.type !== 'text' && isRunnableQuery(tile.query));
   const [error, setError] = useState(null);
@@ -26,10 +26,14 @@ export function useTileData(tile, filterValues) {
   const prev = useRef({ queryKey: '', overrideKey: '', suiteId, refreshKey, softKey });
 
   // Build filter overrides for this tile from the dashboard-level filter values,
-  // using the tile's listenTo wiring ({ filterName -> queryField }).
+  // using the tile's listenTo wiring ({ filterName -> queryField }). A per-tile
+  // lock (suite.tileLocks for this client) forces this ONE tile's value for a
+  // filter, overriding the dashboard's value.
+  const myLocks = tileLocks?.[tile.id] || {};
   const overrides = {};
   for (const [filterName, queryField] of Object.entries(tile.listenTo || {})) {
-    const val = filterValues?.[filterName];
+    const locked = myLocks[filterName];
+    const val = (locked != null && String(locked).trim() !== '') ? locked : filterValues?.[filterName];
     // "Any value": send the ANY_VALUE sentinel so the server DROPS this field
     // from the query entirely (true "is any value"). An empty string wouldn't
     // work — Looker reads "" as "is blank", not "no constraint".

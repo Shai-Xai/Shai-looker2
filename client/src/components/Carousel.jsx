@@ -102,15 +102,14 @@ export default function Carousel({ carousel, filterValues, editable, onEditTile,
           </>
         ) : (
           <>
-            {carousel.title && (
-              <h3 style={align === 'center'
-                // Centered headings overlay the whole row (absolute) so they sit
-                // dead-centre regardless of the scroll arrows on the right —
-                // flex:1 + text-align would centre only the space LEFT of them.
-                ? { position: 'absolute', left: 0, right: 0, textAlign: 'center', padding: (!isGrid && canScroll) ? '0 56px' : 0, boxSizing: 'border-box', margin: 0, fontSize: 15, fontWeight: 700, pointerEvents: 'none', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }
-                : { flex: 1, minWidth: 0, textAlign: align, margin: 0, fontSize: 15, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{carousel.title}</h3>
-            )}
-            {(align === 'center' || !carousel.title) && <div style={{ flex: 1 }} />}
+            {/* Centre the heading in the FULL row by balancing the right-hand
+                scroll arrows with an equal spacer on the left — kept in-flow (no
+                absolute positioning) so the header always reserves its height and
+                never sits behind the tiles. */}
+            {align === 'center' && !isGrid && canScroll && <span aria-hidden="true" style={{ width: 52, flexShrink: 0 }} />}
+            {carousel.title
+              ? <h3 style={{ flex: 1, minWidth: 0, margin: 0, fontSize: 15, fontWeight: 700, textAlign: align, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{carousel.title}</h3>
+              : <div style={{ flex: 1 }} />}
           </>
         )}
         {editable && (
