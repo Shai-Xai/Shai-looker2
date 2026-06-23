@@ -47,6 +47,10 @@ app.use((req, res, next) => (parsesOwnBody(req.path) ? next() : jsonParser(req, 
 app.use('/api', (_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
 app.use(cookieParser());
 app.use(auth.attachUser);
+// User action audit — logs every meaningful state-changing request (+ a few
+// deliberate views) for Admin → Users. Mounted here so it sees req.user and wraps
+// every route registered below. Disposable: remove this line + server/audit.js.
+require('./audit').mount(app, { db });
 
 // Serve built React app (client/dist) if present, else raw client/
 const clientDist = path.join(__dirname, '../client/dist');
@@ -121,10 +125,13 @@ app.post('/api/auth/login', rateLimit({ windowMs: 15 * 60_000, max: 10, by: 'ip'
   const user = auth.verifyCredentials(email, password);
   if (!user) return res.status(401).json({ error: 'Invalid email or password' });
   auth.issueCookie(res, user);
+  db.touchLastLogin(user.id); // most recent login → Admin → Users
+  db.recordAction({ userId: user.id, action: 'auth.login', label: 'Logged in', method: 'POST', path: '/api/auth/login' });
   res.json({ user: meUser(user) });
 });
 
 app.post('/api/auth/logout', (req, res) => {
+  if (req.user) db.recordAction({ userId: req.user.id, action: 'auth.logout', label: 'Logged out', method: 'POST', path: '/api/auth/logout' });
   auth.clearCookie(res);
   res.json({ ok: true });
 });
@@ -212,7 +219,24 @@ app.post('/api/admin/import', auth.requireAdmin, express.json({ limit: '256mb' }
 });
 
 // ─── Admin: users ──────────────────────────────────────────────────────────────
-app.get('/api/admin/users', auth.requireAdmin, (_req, res) => res.json(auth.loadUsers().map(auth.publicUser)));
+// List every user with a directory-style summary: role, client memberships, when
+// they last logged in, and when they were last active (most recent of login /
+// action / dashboard view). Enriched in two batch queries — no per-user N+1.
+app.get('/api/admin/users', auth.requireAdmin, (_req, res) => {
+  const lastActions = db.lastActionsForUsers();
+  const lastViews = db.lastViewForUsers();
+  res.json(auth.loadUsers().map((u) => {
+    const la = lastActions[u.id] || null;
+    const lastActiveAt = [u.lastLogin, la?.at, lastViews[u.id]].filter(Boolean).sort().pop() || null;
+    return {
+      id: u.id, email: u.email, role: u.role,
+      entityIds: u.entityIds, memberships: u.memberships,
+      notifyEmail: u.notifyEmail, notifyPush: u.notifyPush,
+      createdAt: u.createdAt, lastLogin: u.lastLogin || null, lastActiveAt,
+      lastAction: la ? { action: la.action, label: la.label, at: la.at } : null,
+    };
+  }));
+});
 app.post('/api/admin/users', auth.requireAdmin, (req, res) => {
   try { res.status(201).json(auth.createUser(req.body || {})); }
   catch (e) { res.status(400).json({ error: e.message }); }
@@ -250,6 +274,85 @@ app.post('/api/admin/users/promote', auth.requireAdmin, (req, res) => {
 // Role catalog (for the role pickers).
 const roles = require('./roles');
 app.get('/api/admin/roles', auth.requireAdmin, (_req, res) => res.json({ roles: roles.catalog() }));
+
+// Friendly labels for the merged activity feed's non-audit sources.
+function usageLabel(r) {
+  const name = r.name || 'a feature';
+  if (r.kind === 'guide') {
+    if (r.event === 'complete') return `Completed the “${name}” guide`;
+    if (r.event === 'skip') return `Skipped the “${name}” guide`;
+    if (r.event === 'open') return `Opened the “${name}” guide`;
+    return `Used the “${name}” guide`;
+  }
+  return `Used ${name}`;
+}
+// One user's recent activity, merging three sources into a single time-ordered
+// feed: audited actions (what they did), dashboard opens (what they use), and
+// onboarding/feature telemetry (what they engaged with).
+function buildUserActivity(userId, limit = 120) {
+  const entityName = (id) => (id ? (db.getEntity(id)?.name || '') : '');
+  const actions = db.listActionsForUser(userId, 150).map((a) => ({
+    at: a.at, kind: 'action', action: a.action, label: a.label,
+    entityId: a.entityId, entityName: entityName(a.entityId),
+    targetType: a.targetType, targetId: a.targetId, detail: a.detail,
+  }));
+  const views = db.recentViewsForUser(userId, 80).map((v) => ({
+    at: v.at, kind: 'view', action: 'dashboard.open',
+    label: `Opened ${v.title || 'a dashboard'}`, dashboardId: v.dashboardId, suiteId: v.suiteId,
+  }));
+  const usage = db.recentUsageForUser(userId, 80).map((u) => ({
+    at: u.at, kind: 'usage', action: `${u.kind}.${u.event}`,
+    label: usageLabel(u), entityId: u.entityId, entityName: entityName(u.entityId),
+  }));
+  return [...actions, ...views, ...usage]
+    .filter((e) => e.at)
+    .sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0))
+    .slice(0, limit);
+}
+
+// Full per-user detail for the Admin → Users drill-in: identity, client
+// memberships (with role + lens), usage profile, dashboards (used + accessible)
+// and the merged activity timeline. Never leaks the password hash.
+app.get('/api/admin/users/:id', auth.requireAdmin, (req, res) => {
+  const u = db.getUser(req.params.id);
+  if (!u) return res.status(404).json({ error: 'User not found' });
+  const memberships = (u.memberships || []).map((m) => {
+    const e = db.getEntity(m.entityId);
+    const role = roles.getRole(m.role);
+    return { entityId: m.entityId, entityName: e?.name || m.entityId, entityLogo: e?.logo || '', role: m.role, roleLabel: role.label, lens: role.lens, permissions: role.permissions };
+  });
+  const profile = db.viewProfile(u.id);
+  const titleFor = (id) => db.getDashboard(id)?.title || id;
+  const used = (profile.top || []).map((t) => ({ dashboardId: t.dashboardId, suiteId: t.suiteId, count: t.count, lastAt: t.lastAt, title: titleFor(t.dashboardId) }));
+  // Dashboards this user can reach today: every dashboard bundled into a set in
+  // one of their entities' suites (deduped). Admins see everything → flagged.
+  const accSeen = new Set();
+  const accessible = [];
+  if (u.role !== 'admin') {
+    for (const eid of u.entityIds || []) {
+      for (const su of db.listSuitesForEntity(eid)) {
+        for (const sid of db.suiteSetIds(su.id)) {
+          for (const did of db.dashboardsInSet(sid)) {
+            if (accSeen.has(did)) continue;
+            accSeen.add(did);
+            accessible.push({ dashboardId: did, title: titleFor(did), suiteId: su.id, suiteName: su.name });
+          }
+        }
+      }
+    }
+  }
+  res.json({
+    user: {
+      id: u.id, email: u.email, role: u.role, createdAt: u.createdAt,
+      lastLogin: u.lastLogin || null, notifyEmail: u.notifyEmail, notifyPush: u.notifyPush,
+      entityIds: u.entityIds,
+    },
+    memberships,
+    profile: { top: used, lastVisit: profile.lastVisit },
+    dashboards: { used, accessible, accessibleAll: u.role === 'admin' },
+    activity: buildUserActivity(u.id),
+  });
+});
 // Set a login's role WITHIN a specific client (its membership).
 app.put('/api/admin/entities/:id/logins/:userId/role', auth.requireAdmin, (req, res) => {
   const { id, userId } = req.params;

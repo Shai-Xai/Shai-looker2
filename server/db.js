@@ -142,6 +142,8 @@ addColumn('entities', 'all_organisers', "INTEGER NOT NULL DEFAULT 0"); // intern
 // Per-user notification channel preferences (1 = receive on that channel).
 addColumn('users', 'notify_email', 'INTEGER NOT NULL DEFAULT 1');
 addColumn('users', 'notify_push', 'INTEGER NOT NULL DEFAULT 1');
+// Most recent successful login (ISO; null = never logged in). Powers Admin → Users.
+addColumn('users', 'last_login', 'TEXT');
 // Persistent per-folder settings for the dashboard library. Folders are "/"-path
 // strings on each dashboard (not records), so a setting keyed by path cascades to
 // every dashboard in that folder + subfolders — and to ones added later.
@@ -210,6 +212,72 @@ function viewProfile(userId) {
   const cutoff = new Date(Date.now() - 30 * 60e3).toISOString();
   const last = db.prepare('SELECT MAX(at) AS at FROM user_views WHERE user_id=? AND at<?').get(userId, cutoff);
   return { top, lastVisit: last?.at || null };
+}
+// The user's most recent dashboard opens, with titles (for the activity feed).
+function recentViewsForUser(userId, limit = 60) {
+  return db.prepare(`
+    SELECT uv.dashboard_id AS dashboardId, uv.suite_id AS suiteId, uv.at AS at, d.title AS title
+    FROM user_views uv LEFT JOIN dashboards d ON d.id = uv.dashboard_id
+    WHERE uv.user_id=? ORDER BY uv.at DESC LIMIT ?
+  `).all(userId, Math.min(200, limit));
+}
+// Batch: each user's latest dashboard view (for the "last active" column).
+function lastViewForUsers() {
+  const out = {};
+  for (const r of db.prepare('SELECT user_id, MAX(at) AS at FROM user_views GROUP BY user_id').all()) out[r.user_id] = r.at;
+  return out;
+}
+// The user's recent onboarding/feature telemetry (guide + feature engagement),
+// folded into the activity feed. The table is owned by telemetry.js; tolerate
+// its absence (module not mounted) without throwing.
+function recentUsageForUser(userId, limit = 60) {
+  try {
+    return db.prepare('SELECT entity_id AS entityId, kind, name, event, ts AS at FROM usage_events WHERE user_id=? ORDER BY ts DESC LIMIT ?')
+      .all(userId, Math.min(200, limit));
+  } catch { return []; }
+}
+
+// ─── User action audit log (every meaningful action) ─────────────────────────
+// One row per state-changing request (and a few deliberate "views"), recorded by
+// the audit middleware (server/audit.js) and a couple of explicit call sites
+// (login/logout). Powers the Admin → Users activity timeline. Bounded per user.
+db.exec(`
+CREATE TABLE IF NOT EXISTS user_actions (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id     TEXT NOT NULL,
+  entity_id   TEXT NOT NULL DEFAULT '',
+  action      TEXT NOT NULL,            -- machine key, e.g. 'campaign.send'
+  label       TEXT NOT NULL DEFAULT '', -- human summary, e.g. 'Sent a campaign'
+  target_type TEXT NOT NULL DEFAULT '',
+  target_id   TEXT NOT NULL DEFAULT '',
+  detail      TEXT NOT NULL DEFAULT '{}',
+  method      TEXT NOT NULL DEFAULT '',
+  path        TEXT NOT NULL DEFAULT '',
+  at          TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_user_actions_user ON user_actions(user_id, at);
+`);
+function recordAction({ userId, entityId = '', action, label = '', targetType = '', targetId = '', detail = {}, method = '', path = '' } = {}) {
+  if (!userId || !action) return;
+  try {
+    db.prepare('INSERT INTO user_actions (user_id,entity_id,action,label,target_type,target_id,detail,method,path,at) VALUES (?,?,?,?,?,?,?,?,?,?)')
+      .run(userId, entityId || '', String(action).slice(0, 64), String(label || '').slice(0, 160),
+           String(targetType || '').slice(0, 32), String(targetId || '').slice(0, 80),
+           JSON.stringify(detail || {}).slice(0, 1000), String(method || '').slice(0, 8), String(path || '').slice(0, 200), now());
+    // Keep the per-user log bounded (latest 500) so it never grows unbounded.
+    db.prepare('DELETE FROM user_actions WHERE user_id=? AND id NOT IN (SELECT id FROM user_actions WHERE user_id=? ORDER BY id DESC LIMIT 500)').run(userId, userId);
+  } catch { /* audit must never break a request */ }
+}
+const rowToAction = (r) => ({ id: r.id, userId: r.user_id, entityId: r.entity_id, action: r.action, label: r.label, targetType: r.target_type, targetId: r.target_id, detail: J(r.detail, {}), method: r.method, path: r.path, at: r.at });
+function listActionsForUser(userId, limit = 100) {
+  return db.prepare('SELECT * FROM user_actions WHERE user_id=? ORDER BY id DESC LIMIT ?').all(userId, Math.min(500, limit)).map(rowToAction);
+}
+// Batch: each user's most recent action (for the users list). One grouped query.
+function lastActionsForUsers() {
+  const out = {};
+  const rows = db.prepare('SELECT user_id, action, label, entity_id, at FROM user_actions WHERE id IN (SELECT MAX(id) FROM user_actions GROUP BY user_id)').all();
+  for (const r of rows) out[r.user_id] = { action: r.action, label: r.label, entityId: r.entity_id, at: r.at };
+  return out;
 }
 
 // ─── Share links ──────────────────────────────────────────────────────────────
@@ -697,7 +765,7 @@ function roleForMembership(userId, entityId) {
 function rowToUser(r) {
   if (!r) return null;
   const memberships = membershipsForUser(r.id);
-  return { id: r.id, email: r.email, role: r.role, passwordHash: r.password_hash, entityIds: memberships.map((m) => m.entityId), memberships, notifyEmail: r.notify_email !== 0, notifyPush: r.notify_push !== 0, createdAt: r.created_at };
+  return { id: r.id, email: r.email, role: r.role, passwordHash: r.password_hash, entityIds: memberships.map((m) => m.entityId), memberships, notifyEmail: r.notify_email !== 0, notifyPush: r.notify_push !== 0, lastLogin: r.last_login || null, createdAt: r.created_at };
 }
 function publicUser(u) {
   if (!u) return null;
@@ -765,6 +833,11 @@ function updateUser(id, patch) {
   return publicUser(getUser(id));
 }
 function deleteUser(id) { db.prepare('DELETE FROM users WHERE id=?').run(id); }
+// Stamp the most recent successful login. Best-effort — never block auth on it.
+function touchLastLogin(userId) {
+  if (!userId) return;
+  try { db.prepare('UPDATE users SET last_login=? WHERE id=?').run(now(), userId); } catch { /* ignore */ }
+}
 function verifyCredentials(email, password) {
   const u = getUserByEmail(email);
   if (!u) return null;
@@ -1223,7 +1296,7 @@ function updateDocument(id, patch) {
 function deleteDocument(id) { return db.prepare('DELETE FROM event_documents WHERE id=?').run(id).changes > 0; }
 
 // ─── Full backup / restore (export to JSON, import to replace) ────────────────
-const EXPORT_TABLES = ['entities', 'users', 'user_entities', 'sets', 'set_dashboards', 'suites', 'suite_sets', 'dashboards', 'settings', 'tile_library', 'settlements', 'event_documents', 'user_views', 'user_prefs', 'tile_marks', 'briefing_feedback', 'share_links', 'os_threads', 'os_messages', 'os_receipts', 'scheduled_jobs', 'actions', 'action_suppressions', 'action_clicks'];
+const EXPORT_TABLES = ['entities', 'users', 'user_entities', 'sets', 'set_dashboards', 'suites', 'suite_sets', 'dashboards', 'settings', 'tile_library', 'settlements', 'event_documents', 'user_views', 'user_actions', 'user_prefs', 'tile_marks', 'briefing_feedback', 'share_links', 'os_threads', 'os_messages', 'os_receipts', 'scheduled_jobs', 'actions', 'action_suppressions', 'action_clicks'];
 function exportAll() {
   const out = { _version: 1, exportedAt: now() };
   for (const t of EXPORT_TABLES) out[t] = tableExists(t) ? db.prepare(`SELECT * FROM ${t}`).all() : [];
@@ -1239,8 +1312,8 @@ function insertRow(name, row) {
 // Replace ALL data with the contents of an export. Deletes children first
 // (FK-safe), then inserts parents first.
 const importAll = db.transaction((data) => {
-  const delOrder = ['user_views', 'user_prefs', 'tile_marks', 'briefing_feedback', 'share_links', 'os_threads', 'os_messages', 'os_receipts', 'scheduled_jobs', 'actions', 'action_suppressions', 'action_clicks', 'user_entities', 'suite_sets', 'set_dashboards', 'suites', 'sets', 'dashboards', 'users', 'settlements', 'event_documents', 'entities', 'settings', 'tile_library'];
-  const insOrder = ['entities', 'dashboards', 'users', 'sets', 'suites', 'set_dashboards', 'suite_sets', 'user_entities', 'settings', 'tile_library', 'settlements', 'event_documents', 'user_views', 'user_prefs', 'tile_marks', 'briefing_feedback', 'share_links', 'os_threads', 'os_messages', 'os_receipts', 'scheduled_jobs', 'actions', 'action_suppressions', 'action_clicks'];
+  const delOrder = ['user_views', 'user_actions', 'user_prefs', 'tile_marks', 'briefing_feedback', 'share_links', 'os_threads', 'os_messages', 'os_receipts', 'scheduled_jobs', 'actions', 'action_suppressions', 'action_clicks', 'user_entities', 'suite_sets', 'set_dashboards', 'suites', 'sets', 'dashboards', 'users', 'settlements', 'event_documents', 'entities', 'settings', 'tile_library'];
+  const insOrder = ['entities', 'dashboards', 'users', 'sets', 'suites', 'set_dashboards', 'suite_sets', 'user_entities', 'settings', 'tile_library', 'settlements', 'event_documents', 'user_views', 'user_actions', 'user_prefs', 'tile_marks', 'briefing_feedback', 'share_links', 'os_threads', 'os_messages', 'os_receipts', 'scheduled_jobs', 'actions', 'action_suppressions', 'action_clicks'];
   for (const t of delOrder) { if (tableExists(t)) db.prepare(`DELETE FROM ${t}`).run(); }
   let counts = {};
   for (const t of insOrder) {
@@ -1260,7 +1333,7 @@ module.exports = {
   getEntityMailBranding, setEntityMailBranding,
   getSuiteMailBranding, setSuiteMailBranding,
   ensureInboxToken, regenerateInboxToken, findEntityByInboxToken,
-  listUsers, getUser, getUserByEmail, createUser, updateUser, deleteUser, verifyCredentials, publicUser, setUserEntities, setNotificationPrefs,
+  listUsers, getUser, getUserByEmail, createUser, updateUser, deleteUser, verifyCredentials, publicUser, setUserEntities, setNotificationPrefs, touchLastLogin,
   membershipsForUser, roleForMembership, setMembershipRole, removeMembership,
   listDashboards, getDashboard, createDashboard, updateDashboard, removeDashboard, dashboardPoolFor, sharedDashboards,
   setFolderKeepImported, folderSettingsMap, folderKeepImportedFor,
@@ -1280,7 +1353,9 @@ module.exports = {
   // event documents (invoices etc.)
   listDocuments, getDocument, getDocumentFile, createDocument, updateDocument, deleteDocument, documentExistsForSource,
   // view tracking
-  recordView, viewProfile,
+  recordView, viewProfile, recentViewsForUser, lastViewForUsers, recentUsageForUser,
+  // user action audit log
+  recordAction, listActionsForUser, lastActionsForUsers,
   // tile marks (pins + follows)
   setMark, listMarks,
   // mail assets (email-embedded images)

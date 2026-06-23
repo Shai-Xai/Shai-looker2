@@ -112,6 +112,7 @@ function IconPicker({ value, onChange }) {
 //   Logins (Users)      – credentials, assigned to one or more entities
 const ADMIN_NAV = [
   ['entities', 'Clients', '👥'],
+  ['users', 'Users', '🧑'],
   ['logins', 'Admin logins', '🔑'],
   ['sets', 'Sets', '🗂️'],
   ['library', 'Tile library', '🧩'],
@@ -134,6 +135,7 @@ export default function AdminPage() {
   const content = (
     <>
       {tab === 'entities' && <Entities fields={fields} />}
+      {tab === 'users' && <UsersTab />}
       {tab === 'logins' && <AdminLoginsTab />}
       {tab === 'sets' && <Sets />}
       {tab === 'library' && <Library />}
@@ -719,6 +721,267 @@ function AdminLoginsTab() {
   useEffect(() => { load(); }, []);
   if (!users) return <Muted>Loading…</Muted>;
   return <AdminLogins admins={users.filter((u) => u.role === 'admin')} entities={entities} onChange={load} />;
+}
+
+// ─── Users: every login in one place, with a drill-in detail view ─────────────
+// A directory of ALL users (Howler admins + client logins). Click a user to see
+// their profile, client roles, last login and a full activity timeline (what
+// they did and what they viewed). Read-only — editing still lives under a
+// client's Logins tab / Admin logins.
+function relTime(iso) {
+  if (!iso) return 'Never';
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return '—';
+  const s = (Date.now() - t) / 1000;
+  if (s < 45) return 'just now';
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  if (s < 604800) return `${Math.floor(s / 86400)}d ago`;
+  return new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+}
+function fmtWhen(iso) {
+  if (!iso) return 'Never';
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+}
+// One emoji per action family — keeps the timeline scannable at a glance.
+function actionGlyph(action = '') {
+  const a = String(action);
+  if (a.startsWith('auth')) return '🔑';
+  if (a.startsWith('campaign')) return '📣';
+  if (a.startsWith('segment')) return '👥';
+  if (a.startsWith('goal')) return '🎯';
+  if (a.startsWith('alert')) return '🔔';
+  if (a.startsWith('digest')) return '📧';
+  if (a.startsWith('settings') || a.startsWith('home')) return '⚙️';
+  if (a.startsWith('briefing')) return '📝';
+  if (a.startsWith('team') || a.startsWith('admin.user')) return '🧑';
+  if (a.startsWith('admin')) return '🛠️';
+  if (a.startsWith('dashboard')) return '📊';
+  if (a.startsWith('guide') || a.startsWith('feature')) return '🚀';
+  return '•';
+}
+
+function UsersTab() {
+  const isMobile = useIsMobile();
+  const [users, setUsers] = useState(null);
+  const [entities, setEntities] = useState([]);
+  const [roles, setRoles] = useState([]);
+  const [q, setQ] = useState('');
+  const [sort, setSort] = useState('active'); // active | email | login
+  const [roleFilter, setRoleFilter] = useState('all'); // all | admin | client
+  const [selectedId, setSelectedId] = useState(null);
+  const load = () => Promise.all([api.adminListUsers(), api.adminListEntities(), api.getRoles().catch(() => ({ roles: [] }))])
+    .then(([u, e, r]) => { setUsers(u); setEntities(e); setRoles(r.roles || []); });
+  useEffect(() => { load(); }, []);
+  if (!users) return <Muted>Loading…</Muted>;
+  if (selectedId) return <UserDetail userId={selectedId} onBack={() => { setSelectedId(null); load(); }} />;
+
+  const entName = Object.fromEntries(entities.map((e) => [e.id, e.name]));
+  const clientsOf = (u) => (u.memberships || []).map((m) => entName[m.entityId] || m.entityId);
+  const ql = q.trim().toLowerCase();
+  const byRole = roleFilter === 'all' ? users : users.filter((u) => (roleFilter === 'admin' ? u.role === 'admin' : u.role !== 'admin'));
+  const matched = ql ? byRole.filter((u) => u.email.toLowerCase().includes(ql) || clientsOf(u).some((n) => n.toLowerCase().includes(ql))) : byRole;
+  const sorted = [...matched].sort((a, b) => {
+    if (sort === 'email') return a.email.localeCompare(b.email, undefined, { sensitivity: 'base' });
+    const key = sort === 'login' ? 'lastLogin' : 'lastActiveAt';
+    return String(b[key] || '').localeCompare(String(a[key] || '')); // newest first; nulls sink
+  });
+  const adminCount = users.filter((u) => u.role === 'admin').length;
+
+  const clientsCell = (u) => {
+    if (u.role === 'admin' && !(u.memberships || []).length) return <span style={{ color: 'var(--muted)' }}>All (admin)</span>;
+    const names = clientsOf(u);
+    if (!names.length) return <span style={{ color: 'var(--muted)' }}>—</span>;
+    return <span title={names.join(', ')}>{names.length === 1 ? names[0] : `${names.length} clients`}</span>;
+  };
+  const adminBadge = (u) => u.role === 'admin' && <span style={howlerBadge}>HOWLER</span>;
+  const lastActiveCell = (u) => (
+    <>
+      <span>{relTime(u.lastActiveAt)}</span>
+      {u.lastAction && <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{u.lastAction.label}</div>}
+    </>
+  );
+
+  return (
+    <div>
+      <p style={hint}>Every login on Pulse — {users.length} user{users.length === 1 ? '' : 's'} ({adminCount} Howler admin{adminCount === 1 ? '' : 's'}). Click a user to see their profile, roles and activity.</p>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
+        <div style={{ ...searchWrap, marginBottom: 0 }}>
+          <span style={{ color: 'var(--muted)', fontSize: 13, flexShrink: 0 }}>⌕</span>
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by email or client…" style={searchInput} />
+          {ql && <button onClick={() => setQ('')} style={searchClear} aria-label="Clear search">✕</button>}
+        </div>
+        <select style={{ ...input, minWidth: 150 }} value={sort} onChange={(e) => setSort(e.target.value)} title="Sort">
+          <option value="active">Recently active</option>
+          <option value="login">Recent login</option>
+          <option value="email">Email (A–Z)</option>
+        </select>
+        <div style={{ display: 'flex', gap: 4 }}>
+          {[['all', `All (${users.length})`], ['admin', `Howler (${adminCount})`], ['client', `Clients (${users.length - adminCount})`]].map(([key, label]) => (
+            <button key={key} onClick={() => setRoleFilter(key)} style={roleFilter === key ? { ...miniBtn, background: 'var(--brand)', color: '#fff', borderColor: 'var(--brand)' } : miniBtnOutline}>{label}</button>
+          ))}
+        </div>
+      </div>
+
+      {isMobile ? (
+        <div style={clientList}>
+          {sorted.map((u) => (
+            <button key={u.id} className="lift" style={clientRow} onClick={() => setSelectedId(u.id)}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, textAlign: 'left' }}>
+                <span style={{ fontWeight: 600, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis' }}>{u.email} {adminBadge(u)}</span>
+                <span style={{ fontSize: 12, color: 'var(--muted)' }}>{u.role === 'admin' ? 'Howler admin' : 'Client'} · {clientsOf(u).length || (u.role === 'admin' ? '∞' : 0)} client{clientsOf(u).length === 1 ? '' : 's'}</span>
+                <span style={{ fontSize: 12, color: 'var(--muted)' }}>Active {relTime(u.lastActiveAt)}{u.lastAction ? ` · ${u.lastAction.label}` : ''}</span>
+              </div>
+              <span style={{ color: '#bbb', marginLeft: 'auto' }}>›</span>
+            </button>
+          ))}
+          {sorted.length === 0 && <Muted>{ql ? `No users match “${q.trim()}”.` : 'No users in this view.'}</Muted>}
+        </div>
+      ) : (
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <thead>
+            <tr>
+              {['User', 'Type', 'Clients', 'Last login', 'Last active'].map((h) => <th key={h} style={thS}>{h}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map((u) => (
+              <tr key={u.id} className="lift" style={{ cursor: 'pointer' }} onClick={() => setSelectedId(u.id)}>
+                <td style={td}>{u.email} {adminBadge(u)}</td>
+                <td style={td}>{u.role === 'admin' ? 'Howler admin' : 'Client'}</td>
+                <td style={td}>{clientsCell(u)}</td>
+                <td style={td} title={fmtWhen(u.lastLogin)}>{relTime(u.lastLogin)}</td>
+                <td style={td} title={fmtWhen(u.lastActiveAt)}>{lastActiveCell(u)}</td>
+              </tr>
+            ))}
+            {sorted.length === 0 && <tr><td style={td} colSpan={5}><Muted>{ql ? `No users match “${q.trim()}”.` : 'No users in this view.'}</Muted></td></tr>}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+// One user's detail: identity, client roles, usage profile and activity timeline.
+function UserDetail({ userId, onBack }) {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState('');
+  const [section, setSection] = useState('overview');
+  useEffect(() => { setData(null); setErr(''); api.adminGetUser(userId).then(setData).catch((e) => setErr(e.message || 'Failed to load')); }, [userId]);
+  if (err) return <div><button style={miniBtnOutline} onClick={onBack}>← All users</button><p style={{ color: 'var(--error)', marginTop: 12 }}>{err}</p></div>;
+  if (!data) return <div><button style={miniBtnOutline} onClick={onBack}>← All users</button><p style={{ marginTop: 12 }}><Muted>Loading…</Muted></p></div>;
+
+  const { user, memberships, profile, dashboards, activity } = data;
+  const isAdmin = user.role === 'admin';
+  const nav = [
+    ['overview', 'Overview'],
+    ['roles', `Clients & roles (${memberships.length})`],
+    ['usage', 'Usage'],
+    ['activity', `Activity (${activity.length})`],
+  ];
+  const mostRecent = activity[0] || null;
+
+  return (
+    <div>
+      <button style={miniBtnOutline} onClick={onBack}>← All users</button>
+      <h2 style={{ fontSize: 20, fontWeight: 700, margin: '12px 0 4px', wordBreak: 'break-all' }}>{user.email} {isAdmin && <span style={howlerBadge}>HOWLER</span>}</h2>
+      <p style={{ ...hint, marginBottom: 16 }}>{isAdmin ? 'Howler admin — full access to every client.' : `Client login · ${memberships.length} client${memberships.length === 1 ? '' : 's'}`}</p>
+      <div style={{ display: 'flex', gap: 18, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+        <nav style={detailNav}>
+          {nav.map(([key, label]) => (
+            <button key={key} onClick={() => setSection(key)} style={{ ...detailNavItem, ...(section === key ? detailNavActive : null) }}>{label}</button>
+          ))}
+        </nav>
+        <div style={{ flex: 1, minWidth: 280 }}>
+          {section === 'overview' && (
+            <div style={cardStyle}>
+              <KV label="Email" value={user.email} />
+              <KV label="Account type" value={isAdmin ? 'Howler admin' : 'Client login'} />
+              <KV label="Member of" value={isAdmin ? 'All clients (admin)' : (memberships.length ? memberships.map((m) => m.entityName).join(', ') : 'No clients linked')} />
+              <KV label="Last login" value={fmtWhen(user.lastLogin)} sub={user.lastLogin ? relTime(user.lastLogin) : ''} />
+              <KV label="Most recent action" value={mostRecent ? mostRecent.label : 'No activity yet'} sub={mostRecent ? `${relTime(mostRecent.at)}${mostRecent.entityName ? ` · ${mostRecent.entityName}` : ''}` : ''} />
+              <KV label="Account created" value={fmtWhen(user.createdAt)} />
+              <KV label="Notifications" value={`Email ${user.notifyEmail ? 'on' : 'off'} · Push ${user.notifyPush ? 'on' : 'off'}`} />
+            </div>
+          )}
+
+          {section === 'roles' && (
+            <div>
+              {isAdmin && <div style={{ ...cardStyle, marginBottom: 12 }}><b>Howler admin.</b> <span style={{ color: 'var(--muted)' }}>Has full access to every client regardless of the memberships below.</span></div>}
+              {memberships.length === 0 ? (
+                <Muted>{isAdmin ? 'No explicit client links (admins see everything anyway).' : 'Not linked to any client.'}</Muted>
+              ) : memberships.map((m) => (
+                <div key={m.entityId} style={{ ...cardStyle, display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+                  <span style={{ fontSize: 22, width: 30, textAlign: 'center' }}>{m.entityLogo && m.entityLogo.length <= 4 ? m.entityLogo : '🏢'}</span>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 600 }}>{m.entityName}</div>
+                    <div style={{ fontSize: 12, color: 'var(--muted)' }}>{m.roleLabel} · {(m.permissions || []).length} permission{(m.permissions || []).length === 1 ? '' : 's'} · {m.lens} lens</div>
+                  </div>
+                  <span style={{ ...rolePill, marginLeft: 'auto' }}>{m.roleLabel}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {section === 'usage' && (
+            <div>
+              <div style={cardStyle}>
+                <h3 style={subhead}>Most-used dashboards <span style={{ fontWeight: 400, color: 'var(--muted)' }}>(last 90 days)</span></h3>
+                {(dashboards.used || []).length === 0 ? <Muted>No dashboard activity yet.</Muted> : (
+                  <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {dashboards.used.map((d) => (
+                      <li key={d.dashboardId} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+                        <span>📊</span><span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.title}</span>
+                        <span style={{ color: 'var(--muted)', fontSize: 12 }}>{d.count}× · {relTime(d.lastAt)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <div style={cardStyle}>
+                <h3 style={subhead}>Dashboards they can access</h3>
+                {dashboards.accessibleAll ? <Muted>All dashboards (Howler admin).</Muted>
+                  : (dashboards.accessible || []).length === 0 ? <Muted>No dashboards reachable (no client membership or sets).</Muted>
+                  : <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>{dashboards.accessible.map((d) => <span key={d.dashboardId} style={chipNeutral} title={d.suiteName}>{d.title}</span>)}</div>}
+              </div>
+            </div>
+          )}
+
+          {section === 'activity' && (
+            <div>
+              {activity.length === 0 ? <Muted>No activity recorded yet.</Muted> : (
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  {activity.map((e, i) => (
+                    <div key={i} style={{ display: 'flex', gap: 11, padding: '9px 0', borderBottom: i < activity.length - 1 ? '1px solid var(--hairline)' : 'none' }}>
+                      <span style={{ fontSize: 16, width: 22, textAlign: 'center', flexShrink: 0 }}>{actionGlyph(e.action)}</span>
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ fontSize: 13.5 }}>{e.label}</div>
+                        <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 1 }}>
+                          {fmtWhen(e.at)}{e.entityName ? ` · ${e.entityName}` : ''}{e.kind === 'view' ? ' · viewed' : ''}
+                        </div>
+                      </div>
+                      <span style={{ fontSize: 11.5, color: 'var(--muted)', flexShrink: 0, whiteSpace: 'nowrap' }}>{relTime(e.at)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// A label/value row for the user overview card.
+function KV({ label, value, sub }) {
+  return (
+    <div style={{ display: 'flex', gap: 12, padding: '7px 0', borderBottom: '1px solid var(--hairline)' }}>
+      <span style={{ width: 150, flexShrink: 0, color: 'var(--muted)', fontSize: 12.5 }}>{label}</span>
+      <span style={{ fontSize: 13.5, minWidth: 0, wordBreak: 'break-word' }}>{value}{sub ? <span style={{ color: 'var(--muted)', fontSize: 12 }}> · {sub}</span> : null}</span>
+    </div>
+  );
 }
 
 // One client's settings hub: a left nav (Settings / Suites / Logins) + panel.
@@ -3350,6 +3613,12 @@ const delBtn = { padding: '6px 12px', background: 'var(--card)', color: 'var(--e
 const previewBtn = { padding: '6px 12px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 600, fontSize: 12, cursor: 'pointer' };
 const th = { textAlign: 'left', padding: '8px 10px', borderBottom: '2px solid #e0e0e0', fontSize: 12, color: 'var(--muted)' };
 const td = { padding: '8px 10px', borderBottom: '1px solid var(--hairline)' };
+// Admin → Users
+const thS = { textAlign: 'left', padding: '6px 10px', borderBottom: '1.5px solid var(--hairline)', fontSize: 11.5, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.4 };
+const howlerBadge = { fontSize: 10, fontWeight: 700, color: 'var(--brand)', border: '1px solid var(--brand)', borderRadius: 980, padding: '1px 7px', verticalAlign: 'middle' };
+const rolePill = { fontSize: 11, fontWeight: 700, color: 'var(--brand)', background: '#fff0f3', borderRadius: 980, padding: '3px 10px', flexShrink: 0 };
+const subhead = { fontSize: 14, fontWeight: 700, margin: '0 0 10px' };
+const chipNeutral = { display: 'inline-flex', alignItems: 'center', background: 'var(--elevated)', border: '1px solid var(--hairline)', borderRadius: 980, padding: '3px 10px', fontSize: 12, color: 'var(--text)' };
 const checkList = { display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 200, overflowY: 'auto', border: '1px solid var(--hairline)', borderRadius: 8, padding: 10, margin: '6px 0' };
 const checkItem = { display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' };
 const crumbLink = { border: 'none', background: 'transparent', color: 'var(--brand)', fontWeight: 600, fontSize: 13, cursor: 'pointer', padding: 0 };
