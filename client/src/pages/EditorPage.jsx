@@ -174,7 +174,11 @@ export default function EditorPage() {
     if (selectedTileId === tileId) setSelectedTileId(null);
   }
   // Move an existing tile (from the grid or another carousel) into a carousel.
-  function moveTileToCarousel(tileId, targetId) {
+  // Move/insert a tile into a carousel. `beforeId` (a tile id, or '__end__'/null)
+  // sets the drop position, so this powers both dragging a tile IN and dragging
+  // to REORDER within the same carousel (drop position preserved, no index drift
+  // since we resolve by id after removing the dragged tile).
+  function moveTileToCarousel(tileId, targetId, beforeId = null) {
     mutate((d) => {
       let moved = null;
       const tiles = d.tiles.filter((t) => { if (t.id === tileId) { moved = { ...t }; return false; } return true; });
@@ -183,14 +187,20 @@ export default function EditorPage() {
         tiles: c.tiles.filter((t) => { if (t.id === tileId) { moved = { ...t }; return false; } return true; }),
       }));
       if (!moved) return d;
-      // Drop at the bottom of the target container; cap the width to half so it
-      // can sit beside another tile. Grid sections use this layout; scrolling
-      // carousels ignore it (they size by card width).
+      // Cap the width to half so it can sit beside another tile. Grid sections use
+      // this layout; scrolling carousels ignore it (they size by card width).
       moved.layout = { x: 0, y: 9999, w: Math.min(moved.layout?.w || 8, 12), h: moved.layout?.h || 6 };
       return {
         ...d,
         tiles,
-        carousels: carousels.map((c) => (c.id === targetId ? { ...c, tiles: [...c.tiles, moved] } : c)),
+        carousels: carousels.map((c) => {
+          if (c.id !== targetId) return c;
+          const arr = c.tiles.slice();
+          let idx = arr.length;
+          if (beforeId && beforeId !== '__end__') { const j = arr.findIndex((t) => t.id === beforeId); if (j >= 0) idx = j; }
+          arr.splice(idx, 0, moved);
+          return { ...c, tiles: arr };
+        }),
       };
     });
   }
@@ -249,7 +259,7 @@ export default function EditorPage() {
     onAddTile: (type) => addTileToCarousel(c.id, type),
     onChangeTitle: (t) => changeCarouselTitle(c.id, t),
     onRemove: () => removeCarousel(c.id),
-    onDropTile: (tileId) => moveTileToCarousel(tileId, c.id),
+    onDropTile: (tileId, beforeId) => moveTileToCarousel(tileId, c.id, beforeId),
     onMoveTileOut: (tid) => moveTileOutOfCarousel(c.id, tid),
     onChangeTileW: (tileId, w) => setTileWidth(tileId, w),
     onTileLayout: (map) => setSectionTileLayouts(c.id, map),

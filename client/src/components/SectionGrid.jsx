@@ -105,27 +105,8 @@ export default function SectionGrid({ carousel, filterValues, editable, onEditTi
                   onEdit={() => onEditTile?.(t.id)}
                   onDuplicate={() => onDuplicateTile?.(t.id)}
                   onRemove={() => onRemoveTile?.(t.id)}
+                  onMoveOut={onMoveTileOut ? () => onMoveTileOut(t.id) : undefined}
                 />
-                {editable && (onMoveTileOut || onRemoveTile) && (
-                  <span style={cardCtrls} onMouseDown={(e) => e.stopPropagation()}>
-                    {onMoveTileOut && (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); onMoveTileOut(t.id); }}
-                        title="Move out to the dashboard grid"
-                        aria-label="Move out to the dashboard grid"
-                        style={cardCtrlBtn}
-                      >⤴</button>
-                    )}
-                    {onRemoveTile && (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); onRemoveTile(t.id); }}
-                        title="Remove from this section"
-                        aria-label="Remove from this section"
-                        style={{ ...cardCtrlBtn, color: 'var(--error)' }}
-                      >✕</button>
-                    )}
-                  </span>
-                )}
               </div>
             ))}
           </GridLayout>
@@ -136,5 +117,3 @@ export default function SectionGrid({ carousel, filterValues, editable, onEditTi
 }
 
 const miniBtn = { padding: '6px 10px', background: 'var(--card)', border: '1.5px solid var(--hairline)', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer' };
-const cardCtrls = { position: 'absolute', top: 4, right: 4, zIndex: 8, display: 'flex', gap: 4 };
-const cardCtrlBtn = { width: 22, height: 22, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', fontSize: 12, fontWeight: 700, lineHeight: 1, cursor: 'pointer', boxShadow: '0 1px 3px rgba(0,0,0,0.18)' };

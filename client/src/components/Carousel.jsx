@@ -10,6 +10,8 @@ export default function Carousel({ carousel, filterValues, editable, onEditTile,
   const trackRef = useRef(null);
   const isMobile = useIsMobile();
   const [dragOver, setDragOver] = useState(false);
+  // Drag-to-reorder within the row: track which tile we'd drop BEFORE (or the end).
+  const [dropBefore, setDropBefore] = useState(null);
   const isGrid = carousel.mode === 'grid'; // a "section": tiles flow in a wrapping grid, not a scroller
   const cardW = carousel.cardW || 300;
   const tiles = carousel.tiles || [];
@@ -19,6 +21,28 @@ export default function Carousel({ carousel, filterValues, editable, onEditTile,
   // the target, but it's capped to the row's own width (100%) so cards shrink to
   // fit when the window/container narrows instead of sticking at a fixed size.
   const cardBasis = (w) => (isMobile ? `min(${w}px, 82vw)` : `min(${w}px, 100%)`);
+  // Card sizing per mode. On a desktop scroller the cards FLEX to fill the row
+  // (grow/shrink with the window) so they resize to fit the screen, only
+  // scrolling once they hit a sensible min width. Grid sections and mobile keep
+  // their fixed/peek sizing.
+  const cardSizeStyle = (w) => {
+    if (isGrid) return { flex: `0 0 ${cardBasis(w)}`, width: cardBasis(w), height: cardH };
+    if (isMobile) return { flex: `0 0 min(${w}px, 82vw)`, width: `min(${w}px, 82vw)`, height: '100%', scrollSnapAlign: 'start' };
+    return { flex: `1 1 ${w}px`, minWidth: Math.min(w, 150), height: '100%' };
+  };
+  // A brand insertion bar on the card we'd drop before (or the row's end).
+  const dropAccent = (tid, isLast) => {
+    if (dropBefore === tid) return 'inset 3px 0 0 var(--brand)';
+    if (isLast && dropBefore === '__end__') return 'inset -3px 0 0 var(--brand)';
+    return undefined;
+  };
+  const onCardDragOver = (i) => (e) => {
+    if (!(editable && onDropTile) || isGrid) return;
+    e.preventDefault();
+    const r = e.currentTarget.getBoundingClientRect();
+    const before = (e.clientX - r.left) < r.width / 2;
+    setDropBefore(before ? tiles[i].id : (tiles[i + 1]?.id || '__end__'));
+  };
 
   const scroll = (dir) => trackRef.current?.scrollBy({ left: dir * (cardW + GAP) * 2, behavior: 'smooth' });
 
@@ -72,15 +96,18 @@ export default function Carousel({ carousel, filterValues, editable, onEditTile,
       <div style={{ position: 'relative', flex: 1, minHeight: 0 }}>
         <div
           ref={trackRef}
+          className={isGrid ? undefined : 'howler-carousel-track'}
           // Keep horizontal tile-scrolling self-contained: stop touch gestures
           // from bubbling up to the dashboard's swipe-to-next-tab handler, so
           // scrolling a carousel on mobile never flips to the next dashboard.
           onTouchStart={!isGrid ? (e) => e.stopPropagation() : undefined}
           onTouchMove={!isGrid ? (e) => e.stopPropagation() : undefined}
           onTouchEnd={!isGrid ? (e) => e.stopPropagation() : undefined}
-          onDragOver={editable && onDropTile ? (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (!dragOver) setDragOver(true); } : undefined}
+          // The full-track highlight is only for dropping into an EMPTY row; a
+          // non-empty row shows a precise insertion bar via the cards instead.
+          onDragOver={editable && onDropTile ? (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (tiles.length === 0 && !dragOver) setDragOver(true); } : undefined}
           onDragLeave={editable && onDropTile ? () => setDragOver(false) : undefined}
-          onDrop={editable && onDropTile ? (e) => { e.preventDefault(); setDragOver(false); const id = e.dataTransfer.getData('text/plain'); if (id) onDropTile(id); } : undefined}
+          onDrop={editable && onDropTile ? (e) => { e.preventDefault(); setDragOver(false); const id = e.dataTransfer.getData('text/plain'); const before = dropBefore; setDropBefore(null); if (id) onDropTile(id, before); } : undefined}
           style={{
             display: 'flex', gap: GAP, height: '100%', borderRadius: 8,
             ...(isGrid
@@ -95,10 +122,15 @@ export default function Carousel({ carousel, filterValues, editable, onEditTile,
               {editable ? (isGrid ? 'Empty section — add tiles above, or drag a tile here' : 'Empty row — add tiles above, or drag a tile here →') : 'No tiles'}
             </div>
           ) : (
-            tiles.map((t) => {
+            tiles.map((t, i) => {
               const w = t.cw || cardW;
               return (
-                <div key={t.id} style={{ flex: `0 0 ${cardBasis(w)}`, width: cardBasis(w), height: isGrid ? cardH : '100%', position: 'relative', scrollSnapAlign: isGrid ? undefined : 'start' }}>
+                <div
+                  key={t.id}
+                  onDragOver={onCardDragOver(i)}
+                  onDragEnd={() => { setDropBefore(null); setDragOver(false); }}
+                  style={{ ...cardSizeStyle(w), position: 'relative', borderRadius: 8, boxShadow: dropAccent(t.id, i === tiles.length - 1) }}
+                >
                   <TileFrame
                     tile={t}
                     filterValues={filterValues}
@@ -106,32 +138,10 @@ export default function Carousel({ carousel, filterValues, editable, onEditTile,
                     onEdit={() => onEditTile?.(t.id)}
                     onRemove={() => onRemoveTile?.(t.id)}
                     onDuplicate={() => onDuplicateTile?.(t.id)}
+                    onMoveOut={onMoveTileOut ? () => onMoveTileOut(t.id) : undefined}
                   />
-                  {/* Card controls — in a scrolling row the tile's own header
-                      buttons are easy to miss (and metric tiles hide them), so we
-                      surface a "move out to the dashboard grid" and a "remove"
-                      affordance right on the card. */}
-                  {editable && (onMoveTileOut || onRemoveTile) && (
-                    <span style={cardCtrls} onMouseDown={(e) => e.stopPropagation()}>
-                      {onMoveTileOut && (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); onMoveTileOut(t.id); }}
-                          title="Move out to the dashboard grid"
-                          aria-label="Move out to the dashboard grid"
-                          style={cardCtrlBtn}
-                        >⤴</button>
-                      )}
-                      {onRemoveTile && (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); onRemoveTile(t.id); }}
-                          title="Remove from this carousel"
-                          aria-label="Remove from this carousel"
-                          style={{ ...cardCtrlBtn, color: 'var(--error)' }}
-                        >✕</button>
-                      )}
-                    </span>
-                  )}
-                  {editable && onChangeTileW && (
+                  {/* Per-card width handle (desktop scroller only — grid/mobile size themselves). */}
+                  {editable && onChangeTileW && !isGrid && !isMobile && (
                     <div onMouseDown={startTileResize(t.id, w)} title="Drag to resize this tile" style={tileResizeHandle} />
                   )}
                 </div>
@@ -148,5 +158,3 @@ const GAP = 12;
 const miniBtn = { padding: '6px 10px', background: 'var(--card)', border: '1.5px solid var(--hairline)', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer' };
 const arrowBtn = { width: 30, height: 30, borderRadius: '50%', border: '1.5px solid var(--hairline)', background: 'var(--card)', cursor: 'pointer', fontSize: 18, lineHeight: 1, color: '#555', flexShrink: 0 };
 const tileResizeHandle = { position: 'absolute', top: '32%', right: -3, height: '36%', width: 8, cursor: 'ew-resize', borderRight: '4px solid #cbd5e1', borderRadius: 2, zIndex: 6 };
-const cardCtrls = { position: 'absolute', top: 4, right: 4, zIndex: 8, display: 'flex', gap: 4 };
-const cardCtrlBtn = { width: 22, height: 22, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', fontSize: 12, fontWeight: 700, lineHeight: 1, cursor: 'pointer', boxShadow: '0 1px 3px rgba(0,0,0,0.18)' };

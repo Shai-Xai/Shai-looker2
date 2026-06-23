@@ -286,6 +286,10 @@ input::placeholder, textarea::placeholder { color: #b0b0b6; }
   scrollbar-width: none;
 }
 .subtabs::-webkit-scrollbar { display: none; }
+/* Carousel tile track — hide the horizontal scrollbar (the ‹ › arrows + swipe
+   handle scrolling); keeps the band clean. */
+.howler-carousel-track { scrollbar-width: none; -ms-overflow-style: none; }
+.howler-carousel-track::-webkit-scrollbar { display: none; }
 .subtab {
   flex-shrink: 0; border: none; background: transparent; cursor: pointer;
   padding: 10px 14px 12px; font-size: 13.5px; font-weight: 600; font-family: inherit;

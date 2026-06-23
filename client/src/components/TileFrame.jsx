@@ -19,7 +19,7 @@ import { useIsMobile } from '../lib/useIsMobile.js';
 
 // Renders a single tile (vis or text). In edit mode it shows hover controls
 // (edit / duplicate / delete) and a drag handle on the title bar.
-export default function TileFrame({ tile, filterValues, editable, onEdit, onDuplicate, onRemove }) {
+export default function TileFrame({ tile, filterValues, editable, onEdit, onDuplicate, onRemove, onMoveOut }) {
   const { data, loading, error } = useTileData(tile, filterValues);
   const { insightsEnabled } = useAuth();
   const { entityId, dashboardId } = useScope();
@@ -117,6 +117,7 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
             <span style={{ display: 'flex', gap: 4 }} onMouseDown={(e) => e.stopPropagation()}>
               <IconBtn title="Edit" onClick={onEdit}>✎</IconBtn>
               <IconBtn title="Duplicate" onClick={onDuplicate}>⧉</IconBtn>
+              {onMoveOut && <IconBtn title="Move out to the dashboard grid" onClick={onMoveOut}>⤴</IconBtn>}
               <IconBtn title="Delete" onClick={onRemove} danger>✕</IconBtn>
             </span>
           )}
@@ -148,6 +149,7 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
             <span className="tile-drag-handle" title="Drag to move" style={{ cursor: 'move', color: '#999', fontSize: 13, padding: '2px 5px', lineHeight: 1.2 }}>✥</span>
             <IconBtn title="Edit" onClick={onEdit}>✎</IconBtn>
             <IconBtn title="Duplicate" onClick={onDuplicate}>⧉</IconBtn>
+            {onMoveOut && <IconBtn title="Move out to the dashboard grid" onClick={onMoveOut}>⤴</IconBtn>}
             <IconBtn title="Delete" onClick={onRemove} danger>✕</IconBtn>
           </span>
         )}
