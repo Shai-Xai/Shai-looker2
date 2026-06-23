@@ -217,7 +217,7 @@ function Toggle({ active, onClick, children }) {
   );
 }
 
-const panel = { width: 320, flexShrink: 0, background: 'var(--card)', borderLeft: '1px solid var(--border)', display: 'flex', flexDirection: 'column', height: '100%' };
+const panel = { width: 320, flexShrink: 0, background: 'var(--card)', borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', height: '100%' };
 const header = { display: 'flex', alignItems: 'center', padding: '14px 16px', borderBottom: '1px solid var(--border)' };
 const body = { flex: 1, overflowY: 'auto', padding: '4px 16px 24px' };
 const closeBtn = { border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 15, color: '#888' };

@@ -306,8 +306,17 @@ export default function EditorPage() {
         <FilterBar filters={def.filters} values={filterValues} onChange={(name, value) => setFilterValues((p) => ({ ...p, [name]: value }))} />
       )}
 
-      {/* Canvas + side panel */}
+      {/* Side panel (left) + canvas */}
       <div style={{ flex: 1, display: 'flex', minHeight: 0, background: canvasBg }}>
+        {selectedTile && (
+          <TileEditorPanel
+            key={selectedTile.id}
+            tile={selectedTile}
+            dashboardFilters={def.filters}
+            onChange={updateTile}
+            onClose={() => setSelectedTileId(null)}
+          />
+        )}
         <div style={canvasInner}>
           {def.tiles.length > 0 || def.carousels.length > 0 ? (
             <EditableGrid
@@ -325,16 +334,6 @@ export default function EditorPage() {
             <Centered>Empty dashboard — add a visualization, text tile, or carousel to begin.</Centered>
           )}
         </div>
-
-        {selectedTile && (
-          <TileEditorPanel
-            key={selectedTile.id}
-            tile={selectedTile}
-            dashboardFilters={def.filters}
-            onChange={updateTile}
-            onClose={() => setSelectedTileId(null)}
-          />
-        )}
       </div>
 
       {showFilters && (

@@ -136,7 +136,7 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
             draggable
             onDragStart={(e) => { e.dataTransfer.setData('text/plain', tile.id); e.dataTransfer.effectAllowed = 'move'; }}
             title="Drag into a carousel"
-            style={{ position: 'absolute', top: 6, right: 6, zIndex: 6, cursor: 'grab', fontSize: 12, color: '#999', background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 5, padding: '1px 5px', lineHeight: 1.3 }}
+            style={{ position: 'absolute', top: 6, left: 6, zIndex: 6, cursor: 'grab', fontSize: 12, color: '#999', background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 5, padding: '1px 5px', lineHeight: 1.3 }}
           >⠿</span>
         )}
         {/* No header (metric tiles): the insight button floats in the corner,
@@ -149,10 +149,10 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
         )}
         {!editable && canSegment && !showHeader && <SegmentButton onClick={() => setShowSegment(true)} isMobile={isMobile} corner />}
         {/* Editable metric tile (no header): the move handle + edit controls float
-            in the top-LEFT corner, so the value below stays fully visible. The
+            in the top-RIGHT corner, so the value below stays fully visible. The
             move handle reorders within a carousel (⠿) or moves on the grid (✥). */}
         {editable && !showHeader && (
-          <span style={{ position: 'absolute', top: 6, left: 6, zIndex: 7, display: 'flex', gap: 4, alignItems: 'center', background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 8, padding: 2 }} onMouseDown={(e) => e.stopPropagation()}>
+          <span style={{ position: 'absolute', top: 6, right: 6, zIndex: 7, display: 'flex', gap: 4, alignItems: 'center', background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 8, padding: 2 }} onMouseDown={(e) => e.stopPropagation()}>
             {inCarousel
               ? <ReorderGrip tileId={tile.id} />
               : <span className="tile-drag-handle" title="Drag to move" style={{ cursor: 'move', color: '#999', fontSize: 13, padding: '2px 5px', lineHeight: 1.2 }}>✥</span>}
