@@ -2382,6 +2382,7 @@ async function buildFacts(user, entityId, force = false, alignDaysBefore = false
   // (each event's days-to-go), so it must not be computed once and reused.
   const dboKey = (p) => `${p.suiteId}|${p.def.id}`;
   const daysBeforeOverlays = {};
+  const tOverlay = Date.now();
   if (alignDaysBefore) {
     // Resolve each unique suite+dashboard overlay in parallel — every one is a
     // Looker round-trip, so a sequential loop here serialised N calls before the
@@ -2390,8 +2391,11 @@ async function buildFacts(user, entityId, force = false, alignDaysBefore = false
     for (const p of picks) { const k = dboKey(p); if (!seenDbo.has(k)) { seenDbo.add(k); uniq.push(p); } }
     await Promise.all(uniq.map(async (p) => { daysBeforeOverlays[dboKey(p)] = await daysBeforeOverlayFor(p.def, user, p.suiteId, lockMaps[p.suiteId] || {}); }));
   }
+  const overlayMs = Date.now() - tOverlay;
 
   const dropped = []; // tiles excluded from the facts, with the reason (logged below)
+  const slow = []; // per-tile query durations, for the diagnostics log
+  const tSweep = Date.now();
   const tiles = (await Promise.all(picks.slice(0, maxTiles).map(async (p) => {
     const view = entityViews[p.def.id];
     const extra = {};
@@ -2406,24 +2410,32 @@ async function buildFacts(user, entityId, force = false, alignDaysBefore = false
     const lockMap = { ...expandLockMap(view || {}), ...(lockMaps[p.suiteId] || {}) };
     const body = await tileQueryBody(p.tile, p.def, user, p.suiteId, lockMap, extra);
     if (!body) { dropped.push(`${p.dashTitle} › ${p.tile.title || '?'} (scope blocked / unrunnable)`); return null; }
+    const tQ = Date.now();
     try {
       const data = await runLookerQuery('/queries/run/json_detail', body, undefined, force);
+      slow.push({ t: `${p.dashTitle} › ${p.tile.title || '?'}`, ms: Date.now() - tQ });
       if (!data?.data?.length) { dropped.push(`${p.dashTitle} › ${p.tile.title || '?'} (no rows for the default filters)`); return null; }
       return {
         title: p.tile.title || '(untitled)', visType: p.tile.vis?.type, context: p.tile.aiContext || '',
         fields: data.fields, rows: data.data, filters: body.filters || {},
         dashboardId: p.def.id, suiteId: p.suiteId, suiteName: suiteNameById[p.suiteId] || dashMeta[p.def.id]?.suiteName || '', setName: p.setName, dashTitle: p.dashTitle, pinned: p.pinned,
       };
-    } catch (e) { dropped.push(`${p.dashTitle} › ${p.tile.title || '?'} (error: ${e.message})`); return null; }
+    } catch (e) { slow.push({ t: `${p.dashTitle} › ${p.tile.title || '?'}`, ms: Date.now() - tQ }); dropped.push(`${p.dashTitle} › ${p.tile.title || '?'} (error: ${e.message})`); return null; }
   }))).filter(Boolean);
+  const sweepMs = Date.now() - tSweep;
 
   // Why a dashboard might be missing from a briefing/digest: tiles drop when the
   // explore can't be scoped, or the query returns no rows. Log it so it's not a
   // mystery (visible in the server logs when a digest is built/tested).
   if (dropped.length) console.warn(`[facts] entity=${entityId} kept ${tiles.length} tiles, dropped ${dropped.length}: ${dropped.slice(0, 25).join(' · ')}`);
   if (tiles.length) console.log(`[facts] entity=${entityId} dashboards in facts: ${[...new Set(tiles.map((t) => t.dashTitle))].join(' · ')}`);
+  // ── DIAGNOSTICS ── where the fact sweep's wall-clock went. force=true (a hard
+  // refresh) bypasses the Looker query cache, so every tile re-runs live.
+  const top = slow.sort((a, b) => b.ms - a.ms).slice(0, 5);
+  console.log(`[briefing-timing] facts entity=${entityId} force=${!!force} picks=${picks.length} ran=${slow.length} overlays=${overlayMs}ms sweep=${sweepMs}ms slowest=[${top.map((s) => `${s.ms}ms ${s.t}`).join(' | ')}]`);
+  const timing = { overlayMs, sweepMs, picks: picks.length, ran: slow.length, slowest: top };
 
-  return { tiles, catalogue, dropped };
+  return { tiles, catalogue, dropped, timing };
 }
 
 // In-memory caches: light snapshot (10 min) and briefing (6 h) per user+entity.
@@ -2490,14 +2502,14 @@ const briefInstructions = (user, entityId, segment) => [aiInstructionsFor(null),
 // Build briefing facts scoped to the selected events, grouped by event (in the
 // selected order). Reuses buildFacts (and its Looker query cache).
 async function factGroups(user, entityId, selectedIds, force) {
-  const { tiles, catalogue, dropped = [] } = await buildFacts(user, entityId, force, true, [], { suiteIds: selectedIds });
+  const { tiles, catalogue, dropped = [], timing: factTiming } = await buildFacts(user, entityId, force, true, [], { suiteIds: selectedIds });
   const byId = Object.fromEntries(catalogue.map((c) => [c.dashboardId, c]));
   const map = new Map();
   for (const t of tiles) {
     if (!map.has(t.suiteId)) map.set(t.suiteId, { suiteId: t.suiteId, suiteName: t.suiteName || '', tiles: [] });
     map.get(t.suiteId).tiles.push(t);
   }
-  return { groups: selectedIds.map((id) => map.get(id)).filter(Boolean), byId, dropped };
+  return { groups: selectedIds.map((id) => map.get(id)).filter(Boolean), byId, dropped, factTiming };
 }
 // The portfolio OVERALL summary (fast, returned first). Includes the suite list
 // so the home page can render the event picker + collapsed sections immediately.
@@ -2510,10 +2522,16 @@ async function generateOverall(user, entityId, segment, { force = false } = {}) 
   if (!force) { const hit = cacheGet(briefCache, key, 6 * 3600e3); if (hit) return hit; }
   if (briefInflight.has(key)) return briefInflight.get(key);
   const p = (async () => {
-    const { groups, byId } = await factGroups(user, entityId, selected, force);
+    const tStart = Date.now();
+    const { groups, byId, factTiming } = await factGroups(user, entityId, selected, force);
+    const factsMs = Date.now() - tStart;
     if (!groups.length) return { ...base, headline: '', bullets: [] };
     const { catalogue } = clientCatalogue(entityId);
+    const tLlm = Date.now();
     const raw = await insights.briefHomeOverall({ groups, catalogue, capabilities: ACTION_CAPABILITIES, actions: actionsSummaryFor(entityId), today: todayLabel(), instructions: briefInstructions(user, entityId, segment), apiKey });
+    const llmMs = Date.now() - tLlm;
+    const totalMs = Date.now() - tStart;
+    console.log(`[briefing-timing] overall entity=${entityId} force=${!!force} events=${selected.length} total=${totalMs}ms facts=${factsMs}ms llm=${llmMs}ms`);
     const link = (id) => (id && byId[id] ? { dashboardId: id, suiteId: byId[id].suiteId, label: `${byId[id].setName} → ${byId[id].title}` } : null);
     const out = {
       ...base,
@@ -2523,6 +2541,7 @@ async function generateOverall(user, entityId, segment, { force = false } = {}) 
       suggestions: (raw.suggestions || []).slice(0, 3)
         .map((s) => ({ title: String(s.title || '').slice(0, 80), reason: String(s.reason || '').slice(0, 200), link: link(s.dashboardId), action: CAPABILITY_KEYS.has(s.action) ? s.action : null }))
         .filter((s) => s.title && (s.link || s.action)),
+      _timing: { totalMs, factsMs, llmMs, facts: factTiming },
     };
     cachePut(briefCache, key, out);
     return out;
@@ -2556,9 +2575,13 @@ async function generateEvents(user, entityId, segment, { force = false, debug = 
   if (!force) { const hit = cacheGet(briefCache, key, 6 * 3600e3); if (hit) return hit; }
   if (briefInflight.has(key)) return briefInflight.get(key);
   const p = (async () => {
+    const tStart = Date.now();
     const { groups, byId } = await factGroups(user, entityId, selected, force);
+    const factsMs = Date.now() - tStart;
     const nameById = Object.fromEntries(suites.map((s) => [s.id, s.name]));
+    const tLlm = Date.now();
     const raw = groups.length ? await insights.briefHomeEvents({ groups, today: todayLabel(), instructions: briefInstructions(user, entityId, segment), apiKey }) : { events: [] };
+    console.log(`[briefing-timing] events entity=${entityId} force=${!!force} events=${selected.length} total=${Date.now() - tStart}ms facts=${factsMs}ms llm=${Date.now() - tLlm}ms`);
     const link = (id) => (id && byId[id] ? { dashboardId: id, suiteId: byId[id].suiteId, label: `${byId[id].setName} → ${byId[id].title}` } : null);
     const aiById = Object.fromEntries((raw.events || []).filter((e) => nameById[e.suiteId]).map((e) => [e.suiteId, e]));
     const haveFacts = new Set(groups.map((g) => g.suiteId));
@@ -2573,7 +2596,7 @@ async function generateEvents(user, entityId, segment, { force = false, debug = 
       };
       return { suiteId: id, suiteName: nameById[id] || '', headline: haveFacts.has(id) ? 'No headline available for this event right now.' : 'No sales/activity recorded for this event yet.', bullets: [], empty: true };
     });
-    const out = { events, generatedAt: new Date().toISOString() };
+    const out = { events, generatedAt: new Date().toISOString(), _timing: { totalMs: Date.now() - tStart, factsMs } };
     cachePut(briefCache, key, out);
     return out;
   })().finally(() => briefInflight.delete(key));
@@ -2610,7 +2633,9 @@ async function generateBriefing(user, entityId, segment, { force = false } = {})
     // Read facts days-before-aligned (like-for-like to the same point in the
     // past event's cycle) wherever a dashboard has that sync configured — so the
     // briefing's comparisons match what the aligned dashboard shows.
-    const { tiles, catalogue } = await buildFacts(user, entityId, force, true);
+    const tStart = Date.now();
+    const { tiles, catalogue, timing: factTiming } = await buildFacts(user, entityId, force, true);
+    const factsMs = Date.now() - tStart;
     if (!tiles.length) return { available: false };
     const byId = Object.fromEntries(catalogue.map((c) => [c.dashboardId, c]));
     const prof = db.viewProfile(user.id);
@@ -2620,8 +2645,15 @@ async function generateBriefing(user, entityId, segment, { force = false } = {})
     };
     const instructions = [aiInstructionsFor(null), briefingInstructionsFor(user, entityId, suites), timeDefaults()[segment]].filter(Boolean).join('\n\n');
     const msgs = recentMessages(entityId, user.id);
+    const tGoals = Date.now();
     const goals = await goalsP;
+    const goalsWaitMs = Date.now() - tGoals;
+    const tLlm = Date.now();
     const raw = await insights.briefHome({ tiles, profile: profileForAi, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), messages: msgs, capabilities: ACTION_CAPABILITIES, goals, today: todayLabel() });
+    const llmMs = Date.now() - tLlm;
+    const totalMs = Date.now() - tStart;
+    const _timing = { totalMs, factsMs, goalsWaitMs, llmMs, facts: factTiming };
+    console.log(`[briefing-timing] single entity=${entityId} force=${!!force} total=${totalMs}ms facts=${factsMs}ms goalsWait=${goalsWaitMs}ms llm=${llmMs}ms`);
     const link = (id) => (id && byId[id] ? { dashboardId: id, suiteId: byId[id].suiteId, label: `${byId[id].setName} → ${byId[id].title}` } : null);
     const msgIds = new Set(msgs.map((m) => m.id));
     const out = {
@@ -2634,6 +2666,7 @@ async function generateBriefing(user, entityId, segment, { force = false } = {})
       suggestions: (raw.suggestions || []).slice(0, 3)
         .map((s) => ({ title: String(s.title || '').slice(0, 80), reason: String(s.reason || '').slice(0, 200), link: link(s.dashboardId), action: CAPABILITY_KEYS.has(s.action) ? s.action : null }))
         .filter((s) => s.title && s.link),
+      _timing,
     };
     cachePut(briefCache, key, out);
     return out;
