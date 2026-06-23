@@ -370,7 +370,7 @@ export default function ViewPage() {
               </button>
             )}
             {!isMobile && <ActionsMenu suiteId={suiteId} dashboardId={id} filterValues={filterValues} />}
-            {isAdmin && !isMobile && <button style={editBtn} onClick={() => navigate(suiteId ? `/suite/${suiteId}/d/${id}/edit` : `/d/${id}/edit`)}>Edit</button>}
+            {isAdmin && !isMobile && <button style={editBtn} onClick={() => navigate(suiteId ? `/suite/${suiteId}/d/${id}/edit` : `/d/${id}/edit`, { state: { filterValues } })}>Edit</button>}
           </div>
         )}
 

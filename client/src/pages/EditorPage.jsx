@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useParams, useNavigate, Navigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation, Navigate } from 'react-router-dom';
 import EditableGrid from '../components/EditableGrid.jsx';
 import FilterBar from '../components/FilterBar.jsx';
 import TileEditorPanel from '../components/editor/TileEditorPanel.jsx';
@@ -13,6 +13,11 @@ import { ScopeProvider } from '../lib/ScopeContext.jsx';
 export default function EditorPage() {
   const { id, suiteId } = useParams();
   const navigate = useNavigate();
+  // When opened from a client/suite view via the Edit button, the live filter
+  // values applied on that dashboard (suite + per-dashboard locks already
+  // merged in) ride along in router state — so the editor's preview and the
+  // Results grid reflect the actual filters the client sees, not just defaults.
+  const passedFilters = useLocation().state?.filterValues || null;
   const { isAdmin } = useAuth();
   // Where "View" / Save-and-return goes — back to the suite view when we got
   // here from inside a suite, otherwise the standalone dashboard view.
@@ -53,6 +58,13 @@ export default function EditorPage() {
         setDef(data);
         const defaults = {};
         for (const f of data.filters || []) defaults[f.name] = f.default_value || '';
+        // Seed with the dashboard's own defaults, then overlay the live values
+        // passed in from the client view (only for filters this dashboard has).
+        if (passedFilters) {
+          for (const f of data.filters || []) {
+            if (passedFilters[f.name] !== undefined) defaults[f.name] = passedFilters[f.name];
+          }
+        }
         setFilterValues(defaults);
       })
       .catch((e) => setError(e.message))
