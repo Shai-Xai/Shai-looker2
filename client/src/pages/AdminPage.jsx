@@ -1095,11 +1095,10 @@ function ClientSettings({ entity, suites, fields, onChange, onBack }) {
   const [name, setName] = useState(entity.name);
   const [logo, setLogo] = useState(entity.logo || '');
   const [aiContext, setAiContext] = useState(entity.aiContext || '');
-  const [inventiveName, setInventiveName] = useState(entity.inventiveName || '');
   const [locks, setLocks] = useState(entity.lockedFilters || {});
   const [allOrganisers, setAllOrganisers] = useState(!!entity.allOrganisers);
   const [saved, setSaved] = useState(false);
-  const save = async () => { await api.adminUpdateEntity(entity.id, { name, logo, aiContext, inventiveName, lockedFilters: locks, allOrganisers }); flash(setSaved); onChange(); };
+  const save = async () => { await api.adminUpdateEntity(entity.id, { name, logo, aiContext, lockedFilters: locks, allOrganisers }); flash(setSaved); onChange(); };
   const remove = async () => { if (confirm(`Delete client "${entity.name}"? This removes its sets too.`)) { await api.adminDeleteEntity(entity.id); onBack(); onChange(); } };
   const preview = async () => {
     if (!suites.length) { alert('This client has no suites yet.'); return; }
@@ -1125,11 +1124,6 @@ function ClientSettings({ entity, suites, fields, onChange, onBack }) {
       <div style={{ marginBottom: 12 }}>
         <L>Client logo</L>
         <div style={{ marginTop: 6 }}><LogoPicker value={logo} onChange={setLogo} /></div>
-      </div>
-      <div style={{ marginBottom: 12 }}>
-        <L>Inventive account name</L>
-        <div style={{ fontSize: 12, color: 'var(--muted)', margin: '4px 0 6px' }}>Workspace name sent to the Inventive AI analyst. Leave blank to use the client name above.</div>
-        <input style={input} value={inventiveName} onChange={(e) => setInventiveName(e.target.value)} placeholder={name || 'Use client name'} />
       </div>
       {/* Internal/management clients see every organiser's data — no scope. A
           deliberate, admin-only opt-out of the organiser boundary. */}
@@ -2869,31 +2863,27 @@ function OwlIngestConfig() {
 // Per-client integrations (admin), shown inside a client's detail nav.
 function ClientIntegrations({ entity }) {
   const [value, setValue] = useState(null);
-  const [refId, setRefId] = useState(entity.inventiveRefId || '');
-  const [refSaved, setRefSaved] = useState(false);
-  useEffect(() => { setRefId(entity.inventiveRefId || ''); }, [entity.id, entity.inventiveRefId]);
   useEffect(() => { api.getEntityIntegrations(entity.id).then(setValue); }, [entity.id]);
   if (!value) return <Muted>Loading…</Muted>;
-  // Blank inherits the client's own Howler UUID (the default we already send).
-  const effectiveRef = (refId || '').trim() || entity.id;
-  const saveRef = async () => { await api.adminUpdateEntity(entity.id, { inventiveRefId: refId }); flash(setRefSaved); };
+  // The Inventive workspace name/ref live on the entity (not the integrations
+  // blob), so split them out of the form payload and save them separately.
+  const onSave = async (p) => {
+    const { inventiveWorkspace, ...integ } = p;
+    if (inventiveWorkspace) await api.adminUpdateEntity(entity.id, { inventiveName: inventiveWorkspace.name, inventiveRefId: inventiveWorkspace.refId });
+    setValue(await api.saveEntityIntegrations(entity.id, integ));
+  };
   return (
     <div>
       <p style={hint}>Optional per-client accounts. Anything left blank falls back to the platform default (Admin → Integrations).</p>
-      {/* Ref ID — the externalRefId we pass to Inventive. Defaults to the client's
-          own Howler UUID; editable to match a workspace provisioned under a
-          different ref (manual, no-integration setup). */}
-      <div style={{ margin: '0 0 16px' }}>
-        <L>Ref ID — Inventive workspace externalRefId</L>
-        <div style={{ ...hint, margin: '4px 0 6px' }}>Passed to Inventive as the workspace <code>externalRefId</code>. Leave blank to use this client's own Howler UUID (the default): <code style={{ userSelect: 'all' }}>{entity.id}</code>.</div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <input style={{ ...input, minWidth: 320, fontFamily: 'monospace', fontSize: 12 }} value={refId} onChange={(e) => setRefId(e.target.value)} placeholder={entity.id} />
-          <button type="button" style={miniBtnOutline} onClick={() => { navigator.clipboard?.writeText(effectiveRef).catch(() => {}); }} title="Copy the externalRefId we send Inventive">Copy</button>
-          <button type="button" style={miniBtn} onClick={saveRef}>Save</button>
-          {refSaved && <span style={{ color: 'var(--brand)', fontSize: 12, fontWeight: 600 }}>✓ Saved</span>}
-        </div>
-      </div>
-      <IntegrationsForm value={value} lookerActive={false} showMeta showTikTok onSave={async (p) => setValue(await api.saveEntityIntegrations(entity.id, p))} />
+      <IntegrationsForm
+        key={entity.id}
+        value={value}
+        lookerActive={false}
+        showMeta
+        showTikTok
+        inventiveWorkspace={{ name: entity.inventiveName || '', refId: entity.inventiveRefId || '', defaultRefId: entity.id }}
+        onSave={onSave}
+      />
     </div>
   );
 }
