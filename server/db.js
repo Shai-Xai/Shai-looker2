@@ -135,6 +135,7 @@ addColumn('entities', 'logo', "TEXT NOT NULL DEFAULT ''"); // client brand image
 addColumn('entities', 'ai_context', "TEXT NOT NULL DEFAULT ''"); // client-specific AI background
 addColumn('entities', 'integrations', "TEXT NOT NULL DEFAULT '{}'"); // per-client API credentials (Looker / Anthropic)
 addColumn('entities', 'inventive_name', "TEXT NOT NULL DEFAULT ''"); // optional Inventive workspace name override ('' = use the client name)
+addColumn('entities', 'inventive_ref_id', "TEXT NOT NULL DEFAULT ''"); // optional Inventive externalRefId override ('' = use the client's own UUID)
 addColumn('entities', 'mail_branding', "TEXT NOT NULL DEFAULT '{}'"); // per-client email branding (logo/colour/sender/wording)
 addColumn('entities', 'inbox_token', "TEXT NOT NULL DEFAULT ''"); // unique token for the client's CC-the-Owl inbound address
 addColumn('entities', 'all_organisers', "INTEGER NOT NULL DEFAULT 0"); // internal/management client: sees ALL organisers' data (deliberately unscoped)
@@ -589,7 +590,7 @@ CREATE INDEX IF NOT EXISTS idx_tile_library_category ON tile_library(category);
 
 // ─── Entities ─────────────────────────────────────────────────────────────────
 function rowToEntity(r) {
-  return r && { id: r.id, name: r.name, logo: r.logo || '', aiContext: r.ai_context || '', inventiveName: r.inventive_name || '', lockedFilters: J(r.locked_filters, {}), scopeFields: J(r.scope_fields, {}), allOrganisers: !!r.all_organisers, createdAt: r.created_at };
+  return r && { id: r.id, name: r.name, logo: r.logo || '', aiContext: r.ai_context || '', inventiveName: r.inventive_name || '', inventiveRefId: r.inventive_ref_id || '', lockedFilters: J(r.locked_filters, {}), scopeFields: J(r.scope_fields, {}), allOrganisers: !!r.all_organisers, createdAt: r.created_at };
 }
 function listEntities() { return db.prepare('SELECT * FROM entities ORDER BY name').all().map(rowToEntity); }
 function getEntity(id) { return rowToEntity(db.prepare('SELECT * FROM entities WHERE id=?').get(id)); }
@@ -606,10 +607,11 @@ function updateEntity(id, patch) {
   const logo = patch.logo !== undefined ? (patch.logo || '') : (cur.logo || '');
   const aiContext = patch.aiContext !== undefined ? (patch.aiContext || '') : (cur.ai_context || '');
   const invName = patch.inventiveName !== undefined ? (patch.inventiveName || '') : (cur.inventive_name || '');
+  const invRef = patch.inventiveRefId !== undefined ? (patch.inventiveRefId || '') : (cur.inventive_ref_id || '');
   const lf = patch.lockedFilters !== undefined ? JSON.stringify(patch.lockedFilters) : cur.locked_filters;
   const sf = patch.scopeFields !== undefined ? JSON.stringify(patch.scopeFields) : cur.scope_fields;
   const allOrg = patch.allOrganisers !== undefined ? (patch.allOrganisers ? 1 : 0) : cur.all_organisers;
-  db.prepare('UPDATE entities SET name=?, logo=?, ai_context=?, inventive_name=?, locked_filters=?, scope_fields=?, all_organisers=? WHERE id=?').run(name, logo, aiContext, invName, lf, sf, allOrg, id);
+  db.prepare('UPDATE entities SET name=?, logo=?, ai_context=?, inventive_name=?, inventive_ref_id=?, locked_filters=?, scope_fields=?, all_organisers=? WHERE id=?').run(name, logo, aiContext, invName, invRef, lf, sf, allOrg, id);
   return getEntity(id);
 }
 function deleteEntity(id) { db.prepare('DELETE FROM entities WHERE id=?').run(id); }

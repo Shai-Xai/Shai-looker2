@@ -833,10 +833,11 @@ function ClientSettings({ entity, suites, fields, onChange, onBack }) {
   const [logo, setLogo] = useState(entity.logo || '');
   const [aiContext, setAiContext] = useState(entity.aiContext || '');
   const [inventiveName, setInventiveName] = useState(entity.inventiveName || '');
+  const [inventiveRefId, setInventiveRefId] = useState(entity.inventiveRefId || '');
   const [locks, setLocks] = useState(entity.lockedFilters || {});
   const [allOrganisers, setAllOrganisers] = useState(!!entity.allOrganisers);
   const [saved, setSaved] = useState(false);
-  const save = async () => { await api.adminUpdateEntity(entity.id, { name, logo, aiContext, inventiveName, lockedFilters: locks, allOrganisers }); flash(setSaved); onChange(); };
+  const save = async () => { await api.adminUpdateEntity(entity.id, { name, logo, aiContext, inventiveName, inventiveRefId, lockedFilters: locks, allOrganisers }); flash(setSaved); onChange(); };
   const remove = async () => { if (confirm(`Delete client "${entity.name}"? This removes its sets too.`)) { await api.adminDeleteEntity(entity.id); onBack(); onChange(); } };
   const preview = async () => {
     if (!suites.length) { alert('This client has no suites yet.'); return; }
@@ -867,6 +868,13 @@ function ClientSettings({ entity, suites, fields, onChange, onBack }) {
         <L>Inventive account name</L>
         <div style={{ fontSize: 12, color: 'var(--muted)', margin: '4px 0 6px' }}>Workspace name sent to the Inventive AI analyst. Leave blank to use the client name above.</div>
         <input style={input} value={inventiveName} onChange={(e) => setInventiveName(e.target.value)} placeholder={name || 'Use client name'} />
+      </div>
+      <div style={{ marginBottom: 12 }}>
+        <L>Inventive external reference (UUID)</L>
+        <div style={{ fontSize: 12, color: 'var(--muted)', margin: '4px 0 6px' }}>
+          The <code>externalRefId</code> sent to Inventive. Leave blank to use this client's own ID (the default): <code style={{ userSelect: 'all' }}>{entity.id}</code>. Only set this to match an Inventive workspace provisioned under a different reference.
+        </div>
+        <input style={input} value={inventiveRefId} onChange={(e) => setInventiveRefId(e.target.value)} placeholder={entity.id} />
       </div>
       {/* Internal/management clients see every organiser's data — no scope. A
           deliberate, admin-only opt-out of the organiser boundary. */}
