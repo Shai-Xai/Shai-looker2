@@ -176,8 +176,11 @@ async function uploadFile({ advertiserId, token, calculateType, values }) {
   return (data.data && (data.data.file_path || data.data.path)) || '';
 }
 
-async function createAudience({ advertiserId, token, name, filePaths }) {
-  const d = await api('dmp/custom_audience/create/', { token, body: JSON.stringify({ advertiser_id: advertiserId, custom_audience_name: name, file_paths: filePaths }) });
+// `create` requires a single calculate_type, so an audience is seeded from ONE
+// id kind; the other kind is added afterwards via update/APPEND (which doesn't
+// take a calculate_type). calculateType: 'EMAIL_SHA256' | 'PHONE_SHA256'.
+async function createAudience({ advertiserId, token, name, calculateType, filePaths }) {
+  const d = await api('dmp/custom_audience/create/', { token, body: JSON.stringify({ advertiser_id: advertiserId, custom_audience_name: name, calculate_type: calculateType, file_paths: filePaths }) });
   return d.custom_audience_id || d.audience_id || '';
 }
 // action: 'APPEND' | 'DELETE'.
@@ -211,12 +214,21 @@ async function syncAudience({ entityId, segmentId, name, members = [], by = '' }
   try {
     let audienceId = mapRow(entityId, segmentId)?.audience_id || '';
     const createFresh = async () => {
-      const paths = [];
-      if (newEmails.size) paths.push(await uploadFile({ advertiserId, token, calculateType: 'EMAIL_SHA256', values: [...newEmails] }));
-      if (newPhones.size) paths.push(await uploadFile({ advertiserId, token, calculateType: 'PHONE_SHA256', values: [...newPhones] }));
-      const clean = paths.filter(Boolean);
-      if (!clean.length) throw new Error('TikTok accepted no files for this segment.');
-      return createAudience({ advertiserId, token, name: audienceName, filePaths: clean });
+      // Seed the audience from whichever id kind we have first, then APPEND the
+      // other — `create` takes a single calculate_type, but APPEND mixes types.
+      let id = '';
+      const seed = async (kind, values) => {
+        if (!values.length) return;
+        const calculateType = kind === 'phone' ? 'PHONE_SHA256' : 'EMAIL_SHA256';
+        const path = await uploadFile({ advertiserId, token, calculateType, values });
+        if (!path) return;
+        if (!id) id = await createAudience({ advertiserId, token, name: audienceName, calculateType, filePaths: [path] });
+        else await updateAudience({ advertiserId, token, audienceId: id, action: 'APPEND', filePaths: [path] });
+      };
+      await seed('email', [...newEmails]);
+      await seed('phone', [...newPhones]);
+      if (!id) throw new Error('TikTok accepted no files for this segment.');
+      return id;
     };
     let added = count; let removed = 0;
     if (audienceId) {
