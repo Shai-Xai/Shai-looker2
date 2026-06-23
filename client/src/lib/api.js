@@ -212,6 +212,9 @@ export const api = {
   resetMyDashboardFilters: (dashboardId) => fetch(`/api/my/dashboard-filters/${dashboardId}`, { method: 'DELETE' }).then(json),
   setClientDashboardFilters: (entityId, dashboardId, filters) => fetch(`/api/admin/entities/${entityId}/dashboard-filters/${dashboardId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filters }) }).then(json),
   resetClientDashboardFilters: (entityId, dashboardId) => fetch(`/api/admin/entities/${entityId}/dashboard-filters/${dashboardId}`, { method: 'DELETE' }).then(json),
+  // Admin: per-dashboard locked-filter overrides for a suite dashboard (writes to
+  // suite.dashboardLocks). `locks` is { filterName: value } — empty clears it.
+  setSuiteDashboardLocks: (suiteId, dashboardId, locks) => fetch(`/api/admin/suites/${suiteId}/dashboard-locks/${dashboardId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ locks }) }).then(json),
 
   // Tile library
   libraryList: (params = {}) => {

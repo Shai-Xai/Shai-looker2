@@ -694,6 +694,15 @@ app.delete('/api/admin/entities/:entityId/dashboard-filters/:dashboardId', auth.
   db.deleteFilterView('entity', req.params.entityId, req.params.dashboardId);
   res.json({ ok: true });
 });
+// Admin: set the per-dashboard LOCKED-filter overrides for one dashboard within a
+// suite (the same suite.dashboardLocks the suite editor writes). An empty map
+// clears the override so the dashboard falls back to the suite-wide locks. Keyed
+// by the dashboard's filter name; the client view + goal resolvers expand it.
+app.put('/api/admin/suites/:suiteId/dashboard-locks/:dashboardId', auth.requireAdmin, (req, res) => {
+  const map = db.setSuiteDashboardLocks(req.params.suiteId, req.params.dashboardId, cleanFilterMap(req.body?.locks));
+  if (map == null) return res.status(404).json({ error: 'Suite not found' });
+  res.json({ ok: true });
+});
 
 // ─── Dashboards → server/dashboards.js ─────────────────────────────────────────
 // Extracted: dashboard CRUD, Looker import, folders, run-query and drill. The

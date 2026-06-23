@@ -348,6 +348,10 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-23** — **Edit a dashboard's locks in-context** ✅: an admin viewing a client's
+  dashboard can now click a locked filter (or **🔒 Edit locks for this dashboard**), change
+  the values, tick **Lock here**, and save — it writes the per-dashboard lock override for
+  that client straight from the dashboard view (same store as the suite editor).
 - **2026-06-23** — **Suite setup & navigation polish** ✅: when bundling a client's
   suite, sets now group by **folder → set → dashboards**, and you can tick **individual
   dashboards** in a set (include a subset for one client instead of all-or-nothing). New

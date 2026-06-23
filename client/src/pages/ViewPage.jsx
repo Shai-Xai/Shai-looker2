@@ -38,6 +38,16 @@ export default function ViewPage() {
   const scopeEntityId = setInfo?.entityId || previewEntityId || (isAdmin ? null : ((user?.entities || [])[0]?.id || (user?.entityIds || [])[0] || null));
   const [locked, setLocked] = useState({});
   const [filtersOpen, setFiltersOpen] = useState(false);
+  // Admin "edit locks" mode: change which filters are locked on THIS dashboard
+  // for this client, written back to suite.dashboardLocks (same store the suite
+  // editor uses). lockDraft = the set of filter names locked on this dashboard.
+  const [lockEditing, setLockEditing] = useState(false);
+  const [lockDraft, setLockDraft] = useState(() => new Set());
+  const [lockStatus, setLockStatus] = useState('');
+  const [lockSaving, setLockSaving] = useState(false);
+  const lockEditingRef = useRef(false);
+  const lockSnapshotRef = useRef(null);
+  useEffect(() => { lockEditingRef.current = lockEditing; }, [lockEditing]);
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [entityDefault, setEntityDefault] = useState(null); // the client default (if any), for reset
   const [hasUserView, setHasUserView] = useState(false);    // does this user have a saved view?
@@ -139,6 +149,10 @@ export default function ViewPage() {
 
   const handleFilterChange = useCallback((name, value) => {
     setFilterValues((prev) => ({ ...prev, [name]: value }));
+    // In admin lock-edit mode, changing a filter's value implies "lock it here".
+    if (lockEditingRef.current && value && value !== ANY_VALUE) {
+      setLockDraft((prev) => (prev.has(name) ? prev : new Set(prev).add(name)));
+    }
   }, []);
 
   // Keep an open dashboard current: soft-refresh when the tab regains focus and
@@ -253,6 +267,66 @@ export default function ViewPage() {
   // client pin entity-wide defaults (needs the previewed entity).
   const pinsEnabled = !!suiteId && insightsEnabled && (!isAdmin || !!previewEntityId);
 
+  // ── Admin per-dashboard lock editing ──────────────────────────────────────
+  // Resolve a filter's value in a lock map by its name or underlying field
+  // (mirrors buildFilters' matching), so we can read the current per-dashboard
+  // override and the suite-wide value for each dashboard filter.
+  const lockLookup = (map, f) => {
+    const norm = {};
+    for (const [k, v] of Object.entries(map || {})) norm[k.trim().toLowerCase()] = v;
+    const nameKey = (f.name || '').trim().toLowerCase();
+    const field = (f.field || f.dimension || '').trim().toLowerCase();
+    return norm[nameKey] != null ? norm[nameKey] : (field ? norm[field] : undefined);
+  };
+  const perDashLockValue = (f) => lockLookup(setInfo?.dashboardLocks?.[id], f);
+  const inheritedValueFor = (f) => { const v = lockLookup(setInfo?.lockedFilters, f); return (v != null && v !== '') ? v : (f.default_value || ''); };
+  const enterLockEdit = () => {
+    lockSnapshotRef.current = { values: { ...filterValues }, locked: { ...locked } };
+    const init = new Set();
+    for (const f of def.filters || []) if (perDashLockValue(f) != null) init.add(f.name);
+    setLockDraft(init);
+    setLockStatus('');
+    setLockEditing(true);
+    setFiltersOpen(true);
+  };
+  const toggleLockHere = (name, on) => {
+    setLockDraft((prev) => { const n = new Set(prev); if (on) n.add(name); else n.delete(name); return n; });
+    if (!on) { const f = (def.filters || []).find((x) => x.name === name); if (f) setFilterValues((v) => ({ ...v, [name]: inheritedValueFor(f) })); }
+  };
+  const cancelLockEdit = () => {
+    const snap = lockSnapshotRef.current;
+    if (snap) { setFilterValues(snap.values); setLocked(snap.locked); }
+    setLockEditing(false);
+    setLockStatus('');
+  };
+  const saveLocks = async () => {
+    setLockSaving(true);
+    const map = {};
+    for (const f of def.filters || []) {
+      if (!lockDraft.has(f.name)) continue;
+      const v = filterValues[f.name];
+      if (v != null && String(v).trim() !== '' && v !== ANY_VALUE) map[f.name] = String(v);
+    }
+    try {
+      await api.setSuiteDashboardLocks(suiteId, id, map);
+      const nextSuite = { ...setInfo, dashboardLocks: { ...(setInfo?.dashboardLocks || {}), [id]: map } };
+      setSetInfo(nextSuite);
+      // Re-derive locked state, keeping current non-locked values as the overlay.
+      const { vals, lockedMap } = buildFilters(def, nextSuite, filterValues);
+      setFilterValues(vals); setLocked(lockedMap);
+      setLockEditing(false);
+      setLockStatus('Locks saved ✓');
+      setTimeout(() => setLockStatus(''), 2000);
+    } catch {
+      setLockStatus('Could not save');
+    } finally { setLockSaving(false); }
+  };
+  const lockEdit = (isAdmin && suiteId && !keepImported) ? {
+    canEdit: true, active: lockEditing, saving: lockSaving, status: lockStatus,
+    onEnter: enterLockEdit, onSave: saveLocks, onCancel: cancelLockEdit,
+    isLockedHere: (name) => lockDraft.has(name), onToggle: toggleLockHere,
+  } : null;
+
   return (
     <ScopeProvider suiteId={suiteId || null} dashboardContext={def.aiContext || ''} entityId={scopeEntityId} dashboardId={id} refreshKey={refreshKey} softKey={softKey}>
     <PinProvider dashboardId={id} entityId={previewEntityId || null} isAdmin={isAdmin} enabled={pinsEnabled}>
@@ -319,7 +393,7 @@ export default function ViewPage() {
         {hasFilters && (
           <FilterBar
             filters={def.filters} values={filterValues} onChange={handleFilterChange} locked={locked}
-            open={filtersOpen} onClose={() => setFiltersOpen(false)} viewActions={viewActions}
+            open={filtersOpen || lockEditing} onClose={() => setFiltersOpen(false)} viewActions={viewActions} lockEdit={lockEdit}
           />
         )}
 

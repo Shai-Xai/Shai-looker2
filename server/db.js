@@ -1087,6 +1087,16 @@ function updateSuite(id, patch) {
   return getSuite(id);
 }
 function deleteSuite(id) { db.prepare('DELETE FROM suites WHERE id=?').run(id); }
+// Set (or clear) the per-dashboard lock overrides for ONE dashboard within a
+// suite, without disturbing the others. Empty map removes the dashboard's entry.
+function setSuiteDashboardLocks(suiteId, dashboardId, locks) {
+  const row = db.prepare('SELECT dashboard_locks FROM suites WHERE id=?').get(suiteId);
+  if (!row) return null;
+  const map = J(row.dashboard_locks, {});
+  if (locks && Object.keys(locks).length) map[dashboardId] = locks; else delete map[dashboardId];
+  db.prepare('UPDATE suites SET dashboard_locks=? WHERE id=?').run(JSON.stringify(map), suiteId);
+  return map;
+}
 
 // All dashboards reachable through a suite (union across its sets).
 function dashboardsInSuite(suiteId) {
@@ -1395,7 +1405,7 @@ module.exports = {
   listSets, listSetsForEntity, getSet, createSet, cloneSetForEntity, updateSet, deleteSet, setSetDashboards, dashboardsInSet,
   rolesForScope, setContentRoles, contentRolesForEntity, dashboardVisibleToRole,
   // suites (event context)
-  listSuites, listSuitesForEntity, getSuite, createSuite, updateSuite, deleteSuite, setSuiteSets, suiteSetIds, dashboardsInSuite, lockedFiltersForSuite,
+  listSuites, listSuitesForEntity, getSuite, createSuite, updateSuite, deleteSuite, setSuiteSets, setSuiteDashboardLocks, suiteSetIds, dashboardsInSuite, lockedFiltersForSuite,
   // tile library
   listLibraryTiles, listLibraryCategories, getLibraryTile, harvestTile, harvestDashboardTiles, updateLibraryTile, deleteLibraryTile, bumpLibraryUsage,
   // settings (key/value)
