@@ -776,12 +776,19 @@ function UsersTab() {
   const [sort, setSort] = useState('active'); // active | email | login
   const [roleFilter, setRoleFilter] = useState('all'); // all | admin | client
   const [selectedId, setSelectedId] = useState(null);
+  const [openInEdit, setOpenInEdit] = useState(false);
   const [adding, setAdding] = useState(false);
   const load = () => Promise.all([api.adminListUsers(), api.adminListEntities(), api.getRoles().catch(() => ({ roles: [] }))])
     .then(([u, e, r]) => { setUsers(u); setEntities(e); setRoles(r.roles || []); });
   useEffect(() => { load(); }, []);
+  // Open a user's detail; `edit` jumps straight into the edit form.
+  const openUser = (u, edit = false) => { setOpenInEdit(edit); setSelectedId(u.id); };
+  const removeUser = async (u) => {
+    if (!confirm(`Delete ${u.fullName || u.email}? This removes the login for every client and can't be undone.`)) return;
+    try { await api.adminDeleteUser(u.id); load(); } catch (e) { alert(e.message); }
+  };
   if (!users) return <Muted>Loading…</Muted>;
-  if (selectedId) return <UserDetail userId={selectedId} entities={entities} roles={roles} onBack={() => { setSelectedId(null); load(); }} />;
+  if (selectedId) return <UserDetail userId={selectedId} entities={entities} roles={roles} initialEditing={openInEdit} onBack={() => { setSelectedId(null); setOpenInEdit(false); load(); }} />;
   if (adding) return <AddUserForm entities={entities} roles={roles} onCancel={() => setAdding(false)} onCreated={(id) => { setAdding(false); load().then(() => { if (id) setSelectedId(id); }); }} />;
 
   const entName = Object.fromEntries(entities.map((e) => [e.id, e.name]));
@@ -837,14 +844,15 @@ function UsersTab() {
       {isMobile ? (
         <div style={clientList}>
           {sorted.map((u) => (
-            <button key={u.id} className="lift" style={clientRow} onClick={() => setSelectedId(u.id)}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, textAlign: 'left' }}>
+            <div key={u.id} className="lift" style={{ ...clientRow, gap: 8 }}>
+              <div onClick={() => openUser(u)} style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, textAlign: 'left', flex: 1, cursor: 'pointer' }}>
                 <span style={{ fontWeight: 600, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis' }}>{u.fullName || u.email} {adminBadge(u)}</span>
                 <span style={{ fontSize: 12, color: 'var(--muted)' }}>{u.fullName ? `${u.email} · ` : ''}{u.role === 'admin' ? 'Howler admin' : 'Client'} · {clientsOf(u).length || (u.role === 'admin' ? '∞' : 0)} client{clientsOf(u).length === 1 ? '' : 's'}</span>
                 <span style={{ fontSize: 12, color: 'var(--muted)' }}>{u.mobile ? `${u.mobile} · ` : ''}active {relTime(u.lastActiveAt)}</span>
               </div>
-              <span style={{ color: '#bbb', marginLeft: 'auto' }}>›</span>
-            </button>
+              <button style={miniBtnOutline} onClick={() => openUser(u, true)}>Edit</button>
+              <button style={delBtn} onClick={() => removeUser(u)}>Del</button>
+            </div>
           ))}
           {sorted.length === 0 && <Muted>{ql ? `No users match “${q.trim()}”.` : 'No users in this view.'}</Muted>}
         </div>
@@ -852,12 +860,12 @@ function UsersTab() {
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
             <tr>
-              {['User', 'Type', 'Clients', 'Mobile', 'Last active'].map((h) => <th key={h} style={thS}>{h}</th>)}
+              {['User', 'Type', 'Clients', 'Mobile', 'Last active', ''].map((h, i) => <th key={i} style={thS}>{h}</th>)}
             </tr>
           </thead>
           <tbody>
             {sorted.map((u) => (
-              <tr key={u.id} className="lift" style={{ cursor: 'pointer' }} onClick={() => setSelectedId(u.id)}>
+              <tr key={u.id} className="lift" style={{ cursor: 'pointer' }} onClick={() => openUser(u)}>
                 <td style={td}>
                   <div style={{ fontWeight: 600 }}>{u.fullName || u.email} {adminBadge(u)}</div>
                   {u.fullName && <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>{u.email}</div>}
@@ -866,9 +874,13 @@ function UsersTab() {
                 <td style={td}>{clientsCell(u)}</td>
                 <td style={td}>{u.mobile || <span style={{ color: 'var(--muted)' }}>—</span>}</td>
                 <td style={td} title={`Last login ${fmtWhen(u.lastLogin)}`}>{lastActiveCell(u)}</td>
+                <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
+                  <button style={miniBtnOutline} onClick={() => openUser(u, true)}>Edit</button>
+                  <button style={{ ...delBtn, marginLeft: 6 }} onClick={() => removeUser(u)}>Delete</button>
+                </td>
               </tr>
             ))}
-            {sorted.length === 0 && <tr><td style={td} colSpan={5}><Muted>{ql ? `No users match “${q.trim()}”.` : 'No users in this view.'}</Muted></td></tr>}
+            {sorted.length === 0 && <tr><td style={td} colSpan={6}><Muted>{ql ? `No users match “${q.trim()}”.` : 'No users in this view.'}</Muted></td></tr>}
           </tbody>
         </table>
       )}
@@ -957,13 +969,13 @@ function AddUserForm({ entities, roles, onCancel, onCreated }) {
 }
 
 // One user's detail: identity, client roles, usage profile and activity timeline.
-function UserDetail({ userId, entities = [], roles = [], onBack }) {
+function UserDetail({ userId, entities = [], roles = [], initialEditing = false, onBack }) {
   const [data, setData] = useState(null);
   const [err, setErr] = useState('');
   const [section, setSection] = useState('overview');
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(!!initialEditing);
   const load = () => api.adminGetUser(userId).then(setData).catch((e) => setErr(e.message || 'Failed to load'));
-  useEffect(() => { setData(null); setErr(''); setEditing(false); load(); }, [userId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setData(null); setErr(''); setEditing(!!initialEditing); load(); }, [userId]); // eslint-disable-line react-hooks/exhaustive-deps
   if (err) return <div><button style={miniBtnOutline} onClick={onBack}>← All users</button><p style={{ color: 'var(--error)', marginTop: 12 }}>{err}</p></div>;
   if (!data) return <div><button style={miniBtnOutline} onClick={onBack}>← All users</button><p style={{ marginTop: 12 }}><Muted>Loading…</Muted></p></div>;
 
