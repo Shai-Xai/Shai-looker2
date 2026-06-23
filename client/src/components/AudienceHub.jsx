@@ -20,6 +20,8 @@ export default function AudienceHub({ entityId }) {
   const [err, setErr] = useState('');
   const [verify, setVerify] = useState({}); // channel -> result | 'checking'
   const [sizes, setSizes] = useState({});   // `${channel}:${audienceId}` -> result | 'checking'
+  const [syncing, setSyncing] = useState({}); // segmentId -> bool
+  const [syncMsg, setSyncMsg] = useState({}); // segmentId -> message
   const [busy, setBusy] = useState(false);
 
   const load = () => {
@@ -41,6 +43,23 @@ export default function AudienceHub({ entityId }) {
     setSizes((s) => ({ ...s, [k]: 'checking' }));
     try { const r = await api.myAudienceStatus(entityId, channel, audienceId); setSizes((s) => ({ ...s, [k]: r })); }
     catch (e) { setSizes((s) => ({ ...s, [k]: { ok: false, error: e.message } })); }
+  };
+  // Re-push a segment's current members to the platform (reuses the segment sync
+  // route the Segments tab uses; needs campaigns.approve — surfaces an error if not).
+  const doSync = async (channel, segmentId) => {
+    setSyncing((s) => ({ ...s, [segmentId]: true }));
+    setSyncMsg((m) => ({ ...m, [segmentId]: '' }));
+    try {
+      const fn = channel === 'tiktok' ? api.syncSegmentTikTok : api.syncSegmentMeta;
+      const r = await fn(entityId, segmentId);
+      const label = channel === 'tiktok' ? 'TikTok' : 'Meta';
+      setSyncMsg((m) => ({ ...m, [segmentId]: `✓ ${r.received ?? r.pushed ?? 0} synced${r.added != null ? ` (+${r.added} −${r.removed ?? 0})` : ''} to ${label}` }));
+      load();
+    } catch (e) {
+      setSyncMsg((m) => ({ ...m, [segmentId]: `✗ ${e.message}` }));
+    } finally {
+      setSyncing((s) => ({ ...s, [segmentId]: false }));
+    }
   };
 
   if (err) return <p style={muted}>Couldn’t load your audiences: {err}</p>;
@@ -116,20 +135,20 @@ export default function AudienceHub({ entityId }) {
                           ? <span style={{ color: 'var(--error,#ef4444)' }}>{a.error}</span>
                           : <>{a.received} contact{a.received === 1 ? '' : 's'} synced{a.audienceId ? ` · audience ${a.audienceId}` : ''}</>}
                       </div>
-                      {!failed && a.audienceId && (
-                        <div style={{ paddingLeft: 20, marginTop: 6, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                          <button onClick={() => doSize(c.key, a.audienceId)} disabled={sr === 'checking'} style={chip}>{sr === 'checking' ? 'Checking…' : 'Check live size'}</button>
-                          {sr && sr !== 'checking' && (
-                            <span style={{ fontSize: 12, color: sr.ok ? 'var(--muted)' : 'var(--error,#ef4444)' }}>
-                              {sr.ok
-                                ? (sr.size == null || sr.size < 0
-                                  ? `↳ still processing on ${c.label}${sr.operation ? ` · ${sr.operation}` : ''}`
-                                  : `↳ ~${sr.size} matched on ${c.label}${sr.operation ? ` · ${sr.operation}` : ''}`)
-                                : `↳ ${sr.error}`}
-                            </span>
-                          )}
-                        </div>
-                      )}
+                      <div style={{ paddingLeft: 20, marginTop: 6, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                        <button onClick={() => doSync(c.key, a.segmentId)} disabled={!!syncing[a.segmentId]} style={chip} title="Re-push this segment's current members to the platform">{syncing[a.segmentId] ? 'Syncing…' : '↻ Sync now'}</button>
+                        {!failed && a.audienceId && <button onClick={() => doSize(c.key, a.audienceId)} disabled={sr === 'checking'} style={chip}>{sr === 'checking' ? 'Checking…' : 'Check live size'}</button>}
+                        {sr && sr !== 'checking' && (
+                          <span style={{ fontSize: 12, color: sr.ok ? 'var(--muted)' : 'var(--error,#ef4444)' }}>
+                            {sr.ok
+                              ? (sr.size == null || sr.size < 0
+                                ? `↳ still processing on ${c.label}${sr.operation ? ` · ${sr.operation}` : ''}`
+                                : `↳ ~${sr.size} matched on ${c.label}${sr.operation ? ` · ${sr.operation}` : ''}`)
+                              : `↳ ${sr.error}`}
+                          </span>
+                        )}
+                      </div>
+                      {syncMsg[a.segmentId] && <div style={{ paddingLeft: 20, marginTop: 4, fontSize: 12, color: syncMsg[a.segmentId].startsWith('✗') ? 'var(--error,#ef4444)' : 'var(--success,#10b981)' }}>{syncMsg[a.segmentId]}</div>}
                     </div>
                   );
                 })}
