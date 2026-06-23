@@ -15,13 +15,21 @@ export default function AlertsPage() {
   const { activeEntityId } = useProfile();
   const [suites, setSuites] = useState([]);
   const [bySuite, setBySuite] = useState({}); // suiteId -> { alerts, canManage, smsAvailable }
-  const [editor, setEditor] = useState(null);  // { suiteId, alert } | null
+  const [editor, setEditor] = useState(null);  // { suiteId, alert, template } | null
   const [suitesLoading, setSuitesLoading] = useState(true);
   const [params, setParams] = useSearchParams();
   const handled = useRef(false);
+  const [tab, setTab] = useState('alerts');         // 'alerts' | 'templates'
+  const [templates, setTemplates] = useState(null);  // reusable templates (this client + global)
 
   useEffect(() => { api.mySuites().then(setSuites).catch(() => {}).finally(() => setSuitesLoading(false)); }, []);
   const visibleSuites = activeEntityId ? suites.filter((s) => s.entityId === activeEntityId) : suites;
+
+  const loadTemplates = useCallback(() => {
+    if (!activeEntityId) { setTemplates([]); return; }
+    api.alertTemplates(activeEntityId).then((r) => setTemplates(r.templates || [])).catch(() => setTemplates([]));
+  }, [activeEntityId]);
+  useEffect(() => { loadTemplates(); }, [loadTemplates]);
 
   const loadSuite = useCallback((sid) => {
     api.suiteAlerts(sid).then((r) => setBySuite((m) => ({ ...m, [sid]: r }))).catch(() => {});
@@ -46,6 +54,18 @@ export default function AlertsPage() {
       .then(() => loadSuite(alert.suiteId)).catch((e) => window.alert(e.message));
   };
 
+  // Start a new alert from a saved template — attach it to a manageable event.
+  const useTemplate = (t) => {
+    const sid = (rows.find((r) => r.canManage)?.suite.id) || visibleSuites[0]?.id;
+    if (!sid) { window.alert('Add an event first, then create an alert from a template.'); return; }
+    setTab('alerts');
+    setEditor({ suiteId: sid, alert: null, template: t.payload });
+  };
+  const deleteTpl = (t) => {
+    if (!window.confirm(`Delete template “${t.payload?.name || t.name}”?`)) return;
+    api.deleteAlertTemplate(t.id).then(() => setTemplates((x) => (x || []).filter((y) => y.id !== t.id))).catch((e) => window.alert(e.message));
+  };
+
   return (
     <div style={{ maxWidth: 920, margin: '0 auto', padding: '4px 2px 40px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '6px 0 12px' }}>
@@ -60,6 +80,17 @@ export default function AlertsPage() {
         Pulse watches the metric for you (checked every few minutes) and tells you on your phone, by email or SMS.
       </p>
 
+      {/* Tabs: live alerts vs the reusable templates available to this client. */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 18, borderBottom: '1px solid var(--hairline)' }}>
+        <TabBtn active={tab === 'alerts'} onClick={() => setTab('alerts')}>Alerts</TabBtn>
+        <TabBtn active={tab === 'templates'} onClick={() => setTab('templates')}>Templates{templates && templates.length ? ` (${templates.length})` : ''}</TabBtn>
+      </div>
+
+      {tab === 'templates' && (
+        <TemplatesView templates={templates} canUse={rows.some((r) => r.canManage) || visibleSuites.length > 0} onUse={useTemplate} onDelete={deleteTpl} />
+      )}
+
+      {tab === 'alerts' && (<>
       {suitesLoading && <Skel w="100%" h={90} r={14} />}
 
       {!suitesLoading && !rows.length && (
@@ -89,6 +120,7 @@ export default function AlertsPage() {
           </section>
         ))}
       </div>
+      </>)}
 
       {editor && (
         <AlertEditor
@@ -96,9 +128,10 @@ export default function AlertsPage() {
           suiteId={editor.suiteId}
           suiteName={suites.find((s) => s.id === editor.suiteId)?.name}
           alert={editor.alert}
+          initialTemplate={editor.template || null}
           smsAvailable={!!bySuite[editor.suiteId]?.smsAvailable}
           onClose={() => setEditor(null)}
-          onSaved={reloadAll}
+          onSaved={() => { reloadAll(); loadTemplates(); }}
         />
       )}
     </div>
@@ -137,7 +170,7 @@ function AlertRow({ alert, canManage, onEdit, onToggle }) {
 }
 
 function ruleText(a) {
-  const metric = a.tileName || 'the number';
+  const metric = (a.source === 'metric' ? a.metricLabel : a.tileName) || 'the number';
   const t = fmtNum(a.threshold, a.unit);
   if (a.ruleType === 'sold_out') return `When ${metric} sells out`;
   if (a.ruleType === 'depletion') return `When ${metric} drops below ${t}`;
@@ -164,6 +197,54 @@ function rel(iso) {
 }
 
 function Skel({ w = '100%', h = 14, r = 8, style }) { return <div className="skel" style={{ width: w, height: h, borderRadius: r, ...style }} />; }
+
+function TabBtn({ active, onClick, children }) {
+  return (
+    <button type="button" onClick={onClick} style={{
+      border: 'none', background: 'none', cursor: 'pointer', font: 'inherit', padding: '8px 4px', marginBottom: -1,
+      fontSize: 14, fontWeight: active ? 800 : 600, color: active ? 'var(--text)' : 'var(--muted)',
+      borderBottom: `2px solid ${active ? 'var(--brand)' : 'transparent'}`,
+    }}>{children}</button>
+  );
+}
+
+// Reusable alert templates — this client's own plus 🌐 global ones. Tap to start a
+// new alert from one; delete removes it (global ones admin-only, enforced server-side).
+function TemplatesView({ templates, canUse, onUse, onDelete }) {
+  if (templates === null) return <Skel w="100%" h={60} r={12} />;
+  if (!templates.length) {
+    return (
+      <div style={empty}>
+        No templates yet. Build an alert, then tap <b>📑 Template</b> in its editor to save the setup here and reuse it.
+      </div>
+    );
+  }
+  const desc = (p = {}) => {
+    const bits = [];
+    if (p.source === 'metric' && p.metricRef?.metricLabel) bits.push(p.metricRef.metricLabel);
+    else if (p.source === 'tile' && p.tileRef?.tileName) bits.push(p.tileRef.tileName);
+    if (p.threshold != null && p.ruleType !== 'sold_out') bits.push(`${p.ruleType === 'depletion' ? 'below ' : ''}${p.threshold}${p.unit && p.unit !== 'count' ? ` ${p.unit}` : ''}`);
+    if (p.ruleType === 'sold_out') bits.push('sold out');
+    return bits.join(' · ');
+  };
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {templates.map((t) => (
+        <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 12, border: '1px solid var(--hairline)', borderRadius: 12, background: 'var(--card)', padding: '12px 14px' }}>
+          <span style={{ flex: 1, minWidth: 0 }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+              {t.global && <span title="Global template (available to every client)" style={{ fontSize: 10, fontWeight: 800, color: 'var(--brand)', border: '1px solid var(--hairline)', borderRadius: 980, padding: '1px 7px' }}>🌐 GLOBAL</span>}
+              <span style={{ fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.payload?.name || t.name}</span>
+            </span>
+            {desc(t.payload) && <span style={{ display: 'block', fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{desc(t.payload)}</span>}
+          </span>
+          {canUse && <button onClick={() => onUse(t)} style={addBtn}>＋ Use</button>}
+          <button onClick={() => onDelete(t)} aria-label="Delete template" style={{ border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 13, padding: 4 }}>🗑</button>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 const eventName = { fontSize: 12, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)' };
 const addBtn = { border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--brand)', borderRadius: 9, fontSize: 12.5, fontWeight: 700, padding: '6px 11px', cursor: 'pointer', flexShrink: 0 };

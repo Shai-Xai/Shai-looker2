@@ -29,7 +29,7 @@ const CHANNELS = ['push', 'email', 'sms'];        // inbox is always-on (the can
 const FREQUENCIES = ['once', 'repeat'];
 const PRIORITIES = ['normal', 'important'];
 
-function mount(app, { db, auth, resolveTileValue, os, mailer, push, messaging }) {
+function mount(app, { db, auth, resolveTileValue, resolveCustomMetric, metricCatalog, metricFilterValues, os, mailer, push, messaging }) {
   const sql = db.db;
   const now = () => new Date().toISOString();
   const uuid = () => crypto.randomUUID();
@@ -42,10 +42,17 @@ function mount(app, { db, auth, resolveTileValue, os, mailer, push, messaging })
       suite_id      TEXT NOT NULL,
       name          TEXT NOT NULL DEFAULT '',
       rule_type     TEXT NOT NULL DEFAULT 'threshold',  -- threshold | depletion | sold_out
+      source        TEXT NOT NULL DEFAULT 'tile',        -- tile | metric (raw measure + filter, no tile needed)
       dashboard_id  TEXT NOT NULL DEFAULT '',
       tile_id       TEXT NOT NULL DEFAULT '',
       dashboard_name TEXT NOT NULL DEFAULT '',           -- remembered for display + portability
       tile_name     TEXT NOT NULL DEFAULT '',
+      model         TEXT NOT NULL DEFAULT '',            -- (metric source) Looker model
+      view          TEXT NOT NULL DEFAULT '',            -- (metric source) explore
+      measure       TEXT NOT NULL DEFAULT '',            -- (metric source) measure field
+      measure_label TEXT NOT NULL DEFAULT '',            -- (metric source) human measure label
+      metric_filters TEXT NOT NULL DEFAULT '{}',          -- (metric source) {field: value} dimension filters
+      metric_label  TEXT NOT NULL DEFAULT '',            -- (metric source) "Tickets sold · Ticket Type = VIP"
       operator      TEXT NOT NULL DEFAULT 'gte',         -- gte | lte | gt | lt
       threshold     REAL NOT NULL DEFAULT 0,
       unit          TEXT NOT NULL DEFAULT '',
@@ -83,7 +90,34 @@ function mount(app, { db, auth, resolveTileValue, os, mailer, push, messaging })
       status     TEXT NOT NULL DEFAULT 'fired' -- fired | suppressed (cooldown) | error
     );
     CREATE INDEX IF NOT EXISTS idx_alert_events ON alert_events(alert_id, at);
+
+    -- Reusable alert setups. scope 'entity' = one client's; 'global' = a platform
+    -- template Howler publishes to every client (re-links tiles by name; metric
+    -- refs port directly on the shared LookML model). Mirrors goal_templates.
+    CREATE TABLE IF NOT EXISTS alert_templates (
+      id         TEXT PRIMARY KEY,
+      entity_id  TEXT NOT NULL DEFAULT '',
+      scope      TEXT NOT NULL DEFAULT 'entity',  -- entity | global
+      name       TEXT NOT NULL,
+      payload    TEXT NOT NULL DEFAULT '{}',
+      created_by TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_alert_templates ON alert_templates(entity_id);
   `);
+
+  // Additive migrations for DBs created before the "metric" (tile-less) source.
+  try {
+    const cols = sql.prepare('PRAGMA table_info(alerts)').all().map((c) => c.name);
+    const add = (name, ddl) => { if (!cols.includes(name)) sql.exec(`ALTER TABLE alerts ADD COLUMN ${ddl}`); };
+    add('source', "source TEXT NOT NULL DEFAULT 'tile'");
+    add('model', "model TEXT NOT NULL DEFAULT ''");
+    add('view', "view TEXT NOT NULL DEFAULT ''");
+    add('measure', "measure TEXT NOT NULL DEFAULT ''");
+    add('measure_label', "measure_label TEXT NOT NULL DEFAULT ''");
+    add('metric_filters', "metric_filters TEXT NOT NULL DEFAULT '{}'");
+    add('metric_label', "metric_label TEXT NOT NULL DEFAULT ''");
+  } catch (e) { console.error('[alerts] column migration skipped:', e.message); }
 
   const parseJson = (s, fb) => { try { const v = JSON.parse(s); return v == null ? fb : v; } catch { return fb; } };
   const isAdmin = (u) => u && u.role === 'admin';
@@ -92,7 +126,10 @@ function mount(app, { db, auth, resolveTileValue, os, mailer, push, messaging })
     if (!r) return null;
     return {
       id: r.id, entityId: r.entity_id, suiteId: r.suite_id, name: r.name, ruleType: r.rule_type,
+      source: r.source || 'tile',
       dashboardId: r.dashboard_id, tileId: r.tile_id, dashboardName: r.dashboard_name, tileName: r.tile_name,
+      model: r.model || '', view: r.view || '', measure: r.measure || '', measureLabel: r.measure_label || '',
+      metricFilters: parseJson(r.metric_filters, {}), metricLabel: r.metric_label || '',
       operator: r.operator, threshold: r.threshold, unit: r.unit,
       channels: parseJson(r.channels, ['push']), smsRecipients: parseJson(r.sms_recipients, []),
       priority: r.priority, frequency: r.frequency, cooldownMin: r.cooldown_min,
@@ -117,14 +154,29 @@ function mount(app, { db, auth, resolveTileValue, os, mailer, push, messaging })
     if (ruleType === 'sold_out') { operator = 'lte'; if (!Number.isFinite(threshold)) threshold = 0; }
     if (!Number.isFinite(threshold)) threshold = 0;
     const channels = Array.isArray(b.channels) ? [...new Set(b.channels.filter((c) => CHANNELS.includes(c)))] : [];
+    const source = b.source === 'metric' ? 'metric' : 'tile';
+    // Metric-source filters: { dimensionField: value }. Both keyed + value are strings;
+    // applied to the raw measure query (scope is still forced on server-side).
+    const mf = {};
+    if (b.metricFilters && typeof b.metricFilters === 'object' && !Array.isArray(b.metricFilters)) {
+      for (const [k, v] of Object.entries(b.metricFilters).slice(0, 10)) {
+        if (k && v != null && String(v).trim()) mf[String(k).slice(0, 200)] = String(v).slice(0, 500);
+      }
+    }
     return {
       entityId, suiteId,
       name: String(b.name || '').slice(0, 120),
-      ruleType,
+      ruleType, source,
       dashboardId: String(b.dashboardId || '').slice(0, 64),
       tileId: String(b.tileId || '').slice(0, 64),
       dashboardName: String(b.dashboardName || '').slice(0, 200),
       tileName: String(b.tileName || '').slice(0, 200),
+      model: String(b.model || '').slice(0, 120),
+      view: String(b.view || '').slice(0, 120),
+      measure: String(b.measure || '').slice(0, 200),
+      measureLabel: String(b.measureLabel || '').slice(0, 200),
+      metricFilters: mf,
+      metricLabel: String(b.metricLabel || '').slice(0, 240),
       operator, threshold,
       unit: String(b.unit || '').slice(0, 16),
       channels: channels.length ? channels : ['push'],
@@ -145,20 +197,24 @@ function mount(app, { db, auth, resolveTileValue, os, mailer, push, messaging })
   function upsert(id, c, who) {
     const ts = now();
     if (id) {
-      sql.prepare(`UPDATE alerts SET name=?, rule_type=?, dashboard_id=?, tile_id=?, dashboard_name=?, tile_name=?,
+      sql.prepare(`UPDATE alerts SET name=?, rule_type=?, source=?, dashboard_id=?, tile_id=?, dashboard_name=?, tile_name=?,
+        model=?, view=?, measure=?, measure_label=?, metric_filters=?, metric_label=?,
         operator=?, threshold=?, unit=?, channels=?, sms_recipients=?, priority=?, frequency=?, cooldown_min=?,
         quiet_start=?, quiet_end=?, timezone=?, status=?, state='armed', updated_by=?, updated_at=? WHERE id=?`)
-        .run(c.name, c.ruleType, c.dashboardId, c.tileId, c.dashboardName, c.tileName, c.operator, c.threshold, c.unit,
-          JSON.stringify(c.channels), JSON.stringify(c.smsRecipients), c.priority, c.frequency, c.cooldownMin,
+        .run(c.name, c.ruleType, c.source, c.dashboardId, c.tileId, c.dashboardName, c.tileName,
+          c.model, c.view, c.measure, c.measureLabel, JSON.stringify(c.metricFilters), c.metricLabel,
+          c.operator, c.threshold, c.unit, JSON.stringify(c.channels), JSON.stringify(c.smsRecipients), c.priority, c.frequency, c.cooldownMin,
           c.quietStart, c.quietEnd, c.timezone, c.status, who || '', ts, id);
       return alertById(id);
     }
     const nid = uuid();
-    sql.prepare(`INSERT INTO alerts (id, entity_id, suite_id, name, rule_type, dashboard_id, tile_id, dashboard_name, tile_name,
+    sql.prepare(`INSERT INTO alerts (id, entity_id, suite_id, name, rule_type, source, dashboard_id, tile_id, dashboard_name, tile_name,
+      model, view, measure, measure_label, metric_filters, metric_label,
       operator, threshold, unit, channels, sms_recipients, priority, frequency, cooldown_min, quiet_start, quiet_end, timezone,
       status, state, created_by, created_at, updated_by, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'armed',?,?,?,?)`)
-      .run(nid, c.entityId, c.suiteId, c.name, c.ruleType, c.dashboardId, c.tileId, c.dashboardName, c.tileName,
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'armed',?,?,?,?)`)
+      .run(nid, c.entityId, c.suiteId, c.name, c.ruleType, c.source, c.dashboardId, c.tileId, c.dashboardName, c.tileName,
+        c.model, c.view, c.measure, c.measureLabel, JSON.stringify(c.metricFilters), c.metricLabel,
         c.operator, c.threshold, c.unit, JSON.stringify(c.channels), JSON.stringify(c.smsRecipients), c.priority, c.frequency,
         c.cooldownMin, c.quietStart, c.quietEnd, c.timezone, c.status, who || '', ts, who || '', ts);
     return alertById(nid);
@@ -186,7 +242,7 @@ function mount(app, { db, auth, resolveTileValue, os, mailer, push, messaging })
   // A plain-English line for the notification body. Kept template-driven for Wave 1
   // (the AI-written version is a later wave). The metric label is the tile's title.
   function buildMessage(a, value) {
-    const metric = a.tileName || a.name || 'A metric';
+    const metric = (a.source === 'metric' ? (a.metricLabel || a.measureLabel) : a.tileName) || a.name || 'A metric';
     const val = fmtNum(value, a.unit);
     if (a.ruleType === 'sold_out') return `🎉 Sold out — ${metric} reached ${val}.`;
     if (a.ruleType === 'depletion') return `⚠️ Low stock — only ${val} left on ${metric} (alert set below ${fmtNum(a.threshold, a.unit)}).`;
@@ -224,11 +280,17 @@ function mount(app, { db, auth, resolveTileValue, os, mailer, push, messaging })
     return { id: `alert:${a.entityId}`, email: a.createdBy || 'alerts@howler', role: 'client', entityIds: [a.entityId] };
   }
   async function readValue(a) {
-    if (typeof resolveTileValue !== 'function' || !a.dashboardId || !a.tileId || !a.suiteId) return null;
+    if (!a.suiteId) return null;
     try {
+      if (a.source === 'metric') {
+        if (typeof resolveCustomMetric !== 'function' || !a.model || !a.view || !a.measure) return null;
+        const v = await resolveCustomMetric({ model: a.model, view: a.view, measure: a.measure, filters: a.metricFilters || {}, user: evalUser(a), suiteId: a.suiteId });
+        return v == null ? null : Number(v);
+      }
+      if (typeof resolveTileValue !== 'function' || !a.dashboardId || !a.tileId) return null;
       const v = await resolveTileValue({ dashboardId: a.dashboardId, tileId: a.tileId, user: evalUser(a), suiteId: a.suiteId });
       return v == null ? null : Number(v);
-    } catch (e) { console.error('[alerts] tile read failed', a.id, e.message); return null; }
+    } catch (e) { console.error('[alerts] value read failed', a.id, e.message); return null; }
   }
 
   // ── deliver: inbox (always) + email/push (via the OS spine) + SMS (direct) ──
@@ -319,7 +381,8 @@ function mount(app, { db, auth, resolveTileValue, os, mailer, push, messaging })
     if (!enabled() || ticking) return;
     ticking = true;
     try {
-      const due = sql.prepare("SELECT * FROM alerts WHERE status='active' AND dashboard_id<>'' AND tile_id<>''").all().map(rowToAlert);
+      const due = sql.prepare(`SELECT * FROM alerts WHERE status='active'
+        AND ((source='tile' AND dashboard_id<>'' AND tile_id<>'') OR (source='metric' AND measure<>''))`).all().map(rowToAlert);
       for (const a of due) { try { await evaluate(a); } catch (e) { console.error('[alerts] evaluate failed', a.id, e.message); } }
     } finally { ticking = false; }
   }
@@ -354,7 +417,8 @@ function mount(app, { db, auth, resolveTileValue, os, mailer, push, messaging })
     if (!canManage(req.user, req.params.suiteId)) return res.status(403).json({ error: 'Not allowed' });
     const c = clean(req.body || {}, su.entityId, su.id);
     if (!c.name) return res.status(400).json({ error: 'Give the alert a name.' });
-    if (!c.dashboardId || !c.tileId) return res.status(400).json({ error: 'Pick the dashboard tile to watch.' });
+    if (c.source === 'metric') { if (!c.model || !c.view || !c.measure) return res.status(400).json({ error: 'Pick the metric to watch.' }); }
+    else if (!c.dashboardId || !c.tileId) return res.status(400).json({ error: 'Pick the dashboard tile to watch.' });
     res.status(201).json({ alert: upsert(null, c, req.user.email) });
   });
 
@@ -365,7 +429,8 @@ function mount(app, { db, auth, resolveTileValue, os, mailer, push, messaging })
     if (!canManage(req.user, a.suiteId)) return res.status(403).json({ error: 'Not allowed' });
     const c = clean({ ...a, ...req.body }, a.entityId, a.suiteId);
     if (!c.name) return res.status(400).json({ error: 'Give the alert a name.' });
-    if (!c.dashboardId || !c.tileId) return res.status(400).json({ error: 'Pick the dashboard tile to watch.' });
+    if (c.source === 'metric') { if (!c.model || !c.view || !c.measure) return res.status(400).json({ error: 'Pick the metric to watch.' }); }
+    else if (!c.dashboardId || !c.tileId) return res.status(400).json({ error: 'Pick the dashboard tile to watch.' });
     res.json({ alert: upsert(a.id, c, req.user.email) });
   });
 
@@ -422,6 +487,105 @@ function mount(app, { db, auth, resolveTileValue, os, mailer, push, messaging })
       const value = await resolveTileValue({ dashboardId, tileId, user: req.user, suiteId: req.params.suiteId });
       res.json({ value: value == null ? null : Number(value) });
     } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ── Custom-metric source (alert on a raw measure + dimension filter, no tile) ──
+  // The catalogue is constrained to the explores the client's dashboards already
+  // use, which is exactly the set where the per-tenant scope boundary resolves —
+  // so a metric alert can never reach an unscoped explore.
+  app.get('/api/alerts/suites/:suiteId/metric-catalog', auth.requireAuth, async (req, res) => {
+    if (!enabled()) return off(res);
+    const su = db.getSuite(req.params.suiteId);
+    if (!su) return res.status(404).json({ error: 'Event not found' });
+    if (!canView(req.user, req.params.suiteId)) return res.status(403).json({ error: 'Not allowed' });
+    if (typeof metricCatalog !== 'function') return res.json({ explores: [] });
+    try { res.json(await metricCatalog(su.entityId)); }
+    catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Live value of a built metric (for the editor preview), scope enforced server-side.
+  app.post('/api/alerts/suites/:suiteId/metric-value', auth.requireAuth, async (req, res) => {
+    if (!enabled()) return off(res);
+    if (!db.getSuite(req.params.suiteId)) return res.status(404).json({ error: 'Event not found' });
+    if (!canView(req.user, req.params.suiteId)) return res.status(403).json({ error: 'Not allowed' });
+    const { model, view, measure, filters } = req.body || {};
+    if (!model || !view || !measure) return res.status(400).json({ error: 'model, view and measure required' });
+    try {
+      const value = await resolveCustomMetric({ model, view, measure, filters: filters || {}, user: req.user, suiteId: req.params.suiteId });
+      res.json({ value: value == null ? null : Number(value) });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Distinct values of a dimension (e.g. the Ticket Type values for this event),
+  // scoped — drives the filter-value dropdown so users pick "VIP", not type it.
+  app.post('/api/alerts/suites/:suiteId/metric-filter-values', auth.requireAuth, async (req, res) => {
+    if (!enabled()) return off(res);
+    if (!db.getSuite(req.params.suiteId)) return res.status(404).json({ error: 'Event not found' });
+    if (!canView(req.user, req.params.suiteId)) return res.status(403).json({ error: 'Not allowed' });
+    const { model, view, field } = req.body || {};
+    if (!model || !view || !field) return res.status(400).json({ error: 'model, view and field required' });
+    if (typeof metricFilterValues !== 'function') return res.json({ values: [] });
+    try { res.json({ values: await metricFilterValues({ model, view, field, user: req.user, suiteId: req.params.suiteId }) }); }
+    catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ── Reusable templates (a client's own + Howler's global ones) ───────────────
+  // The reusable subset of an alert: the rule + how-you're-told, plus the metric/
+  // tile reference. Instance-only bits (live state, SMS numbers) are dropped. Tile
+  // refs keep the dashboard + tile NAMES so a global template re-resolves to each
+  // client's matching tile by name; metric refs (LookML field names) port directly.
+  const tmplCanEntity = (user, eid) => isAdmin(user) || (user.entityIds || []).includes(eid);
+  function templatePayloadFromAlert(a) {
+    return {
+      name: a.name, ruleType: a.ruleType, source: a.source,
+      tileRef: a.source === 'tile' && a.dashboardId && a.tileId
+        ? { dashboardId: a.dashboardId, tileId: a.tileId, dashboardName: a.dashboardName, tileName: a.tileName } : null,
+      metricRef: a.source === 'metric' && a.measure
+        ? { model: a.model, view: a.view, measure: a.measure, measureLabel: a.measureLabel, metricFilters: a.metricFilters, metricLabel: a.metricLabel } : null,
+      operator: a.operator, threshold: a.threshold, unit: a.unit,
+      channels: a.channels, priority: a.priority, frequency: a.frequency, cooldownMin: a.cooldownMin,
+      quietStart: a.quietStart, quietEnd: a.quietEnd,
+    };
+  }
+
+  app.get('/api/alerts/templates/:entityId', auth.requireAuth, (req, res) => {
+    if (!enabled()) return off(res);
+    if (!tmplCanEntity(req.user, req.params.entityId)) return res.status(403).json({ error: 'Not allowed' });
+    // This client's own templates PLUS every global (platform) template.
+    const rows = sql.prepare("SELECT id, name, payload, scope, created_at FROM alert_templates WHERE (scope='entity' AND entity_id=?) OR scope='global' ORDER BY scope DESC, created_at DESC").all(req.params.entityId);
+    res.json({ templates: rows.map((r) => ({ id: r.id, name: r.name, payload: parseJson(r.payload, {}), scope: r.scope, global: r.scope === 'global', createdAt: r.created_at })) });
+  });
+
+  app.post('/api/alerts/templates', auth.requireAuth, (req, res) => {
+    if (!enabled()) return off(res);
+    let { entityId, name, payload } = req.body || {};
+    const fromAlertId = req.body?.fromAlertId;
+    const wantGlobal = !!req.body?.global;
+    if (wantGlobal && !isAdmin(req.user)) return res.status(403).json({ error: 'Only admins can create global templates' });
+    if (fromAlertId) {
+      const a = alertById(fromAlertId);
+      if (!a) return res.status(404).json({ error: 'Alert not found' });
+      if (!canView(req.user, a.suiteId)) return res.status(403).json({ error: 'Not allowed' });
+      entityId = a.entityId; name = name || a.name; payload = templatePayloadFromAlert(a);
+    }
+    if (!name || !payload || typeof payload !== 'object') return res.status(400).json({ error: 'name and payload are required' });
+    const scope = wantGlobal ? 'global' : 'entity';
+    const eid = wantGlobal ? '' : entityId;
+    if (!wantGlobal && (!eid || !tmplCanEntity(req.user, eid))) return res.status(403).json({ error: 'Not allowed' });
+    const id = uuid(); const ts = now();
+    sql.prepare('INSERT INTO alert_templates (id, entity_id, scope, name, payload, created_by, created_at) VALUES (?,?,?,?,?,?,?)')
+      .run(id, eid, scope, String(name).slice(0, 120), JSON.stringify(payload).slice(0, 8000), req.user.email, ts);
+    res.status(201).json({ template: { id, name: String(name).slice(0, 120), payload, scope, global: wantGlobal, createdAt: ts } });
+  });
+
+  app.delete('/api/alerts/templates/:id', auth.requireAuth, (req, res) => {
+    if (!enabled()) return off(res);
+    const row = sql.prepare('SELECT entity_id, scope FROM alert_templates WHERE id=?').get(req.params.id);
+    if (!row) return res.json({ ok: true });
+    const allowed = row.scope === 'global' ? isAdmin(req.user) : tmplCanEntity(req.user, row.entity_id);
+    if (!allowed) return res.status(403).json({ error: 'Not allowed' });
+    sql.prepare('DELETE FROM alert_templates WHERE id=?').run(req.params.id);
+    res.json({ ok: true });
   });
 
   // Status (client uses it to decide whether to show the feature).

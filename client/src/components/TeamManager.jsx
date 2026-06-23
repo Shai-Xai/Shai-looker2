@@ -7,7 +7,7 @@ import { api } from '../lib/api.js';
 // here. Server enforces team.manage + the last-owner guard.
 export default function TeamManager({ entityId, entityName }) {
   const [data, setData] = useState(null);
-  const [form, setForm] = useState({ email: '', password: '', role: 'viewer' });
+  const [form, setForm] = useState({ firstName: '', lastName: '', email: '', mobile: '', password: '', role: 'viewer' });
   const [error, setError] = useState('');
   const load = () => api.myTeam(entityId).then(setData).catch(() => setData({ members: [], roles: [] }));
   useEffect(() => { load(); }, [entityId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -16,7 +16,7 @@ export default function TeamManager({ entityId, entityName }) {
 
   const add = async () => {
     setError('');
-    try { await api.myTeamAdd(entityId, form); setForm({ email: '', password: '', role: 'viewer' }); load(); }
+    try { await api.myTeamAdd(entityId, form); setForm({ firstName: '', lastName: '', email: '', mobile: '', password: '', role: 'viewer' }); load(); }
     catch (e) { setError(e.message); }
   };
   const setRole = async (m, role) => { setError(''); try { await api.myTeamSetRole(entityId, m.id, role); load(); } catch (e) { setError(e.message); } };
@@ -37,9 +37,10 @@ export default function TeamManager({ entityId, entityName }) {
             {data.members.map((m) => (
               <tr key={m.id} style={{ borderBottom: '1px solid var(--hairline)' }}>
                 <td style={{ padding: '8px 6px' }}>
-                  {m.email}
+                  <span style={m.fullName ? { fontWeight: 600 } : null}>{m.fullName || m.email}</span>
                   {m.isYou && <span style={{ color: 'var(--muted)', fontSize: 11 }}> · you</span>}
                   {m.alsoOtherClients && <span style={{ color: 'var(--muted)', fontSize: 11 }}> · also other clients</span>}
+                  {(m.fullName || m.mobile) && <div style={{ color: 'var(--muted)', fontSize: 11 }}>{m.fullName ? m.email : ''}{m.fullName && m.mobile ? ' · ' : ''}{m.mobile || ''}</div>}
                 </td>
                 <td style={{ padding: '8px 6px', width: 140 }}>
                   <select style={sel} value={m.role} onChange={(e) => setRole(m, e.target.value)}>
@@ -55,7 +56,10 @@ export default function TeamManager({ entityId, entityName }) {
         </table>
       )}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginTop: 12 }}>
+        <Field label="First name"><input style={inp} value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} /></Field>
+        <Field label="Surname"><input style={inp} value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} /></Field>
         <Field label="Email"><input style={inp} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="teammate@company.com" /></Field>
+        <Field label="Mobile"><input style={inp} value={form.mobile} onChange={(e) => setForm({ ...form, mobile: e.target.value })} placeholder="+27…" /></Field>
         <Field label="Temp password"><input style={inp} type="text" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="they can change it" /></Field>
         <Field label="Role"><select style={sel} value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>{roles.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}</select></Field>
         <button style={addBtn} onClick={add} disabled={!form.email || !form.password}>+ Add teammate</button>

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { api } from '../../lib/api.js';
 import { useIsMobile } from '../../lib/useIsMobile.js';
-import { Ring, Dial, Bar, CompositionBar, CompositionLegend, goalState, fmtVal, fmtTarget } from './GoalViz.jsx';
+import { Ring, Dial, Bar, CompositionBar, CompositionDonut, CompositionArc, CompositionLegend, compositionCommentary, goalState, fmtVal, fmtTarget, rangeLabel } from './GoalViz.jsx';
 import ForecastChart from './ForecastChart.jsx';
 
 // The goal DETAIL view — the read surface for a goal. Tapping a goal card (on the
@@ -64,8 +64,17 @@ export default function GoalDetail({ goal, suiteName, onEdit, onDelete, onClose,
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: '14px 0 6px' }}>
           {goal.direction === 'composition' ? (
             <div style={{ width: '100%' }}>
-              <CompositionBar parts={p.parts} />
+              {viz === 'ring' ? (
+                <div style={{ display: 'flex', justifyContent: 'center' }}><CompositionDonut parts={p.parts} size={150} /></div>
+              ) : viz === 'dial' ? (
+                <div style={{ display: 'flex', justifyContent: 'center' }}><CompositionArc parts={p.parts} size={190} /></div>
+              ) : (
+                <CompositionBar parts={p.parts} />
+              )}
               <CompositionLegend parts={p.parts} />
+              {compositionCommentary(goal, p) && (
+                <div style={noteBox}>🦉 {compositionCommentary(goal, p)}</div>
+              )}
             </div>
           ) : viz === 'bar' ? (
             <div style={{ width: '100%' }}>
@@ -77,7 +86,7 @@ export default function GoalDetail({ goal, suiteName, onEdit, onDelete, onClose,
             </div>
           ) : (
             <>
-              {viz === 'ring' ? <Ring pct={p.pct} tone={tone} size={132} /> : <Dial pct={p.pct} tone={tone} size={150} />}
+              {viz === 'ring' ? <Ring pct={p.pct} tone={tone} size={132} label={rangeLabel(goal, p)} /> : <Dial pct={p.pct} tone={tone} size={150} label={rangeLabel(goal, p)} />}
               <div style={{ fontSize: 14, color: 'var(--muted)' }}>{fmtVal(p.value, goal.unit)} / {fmtTarget(goal)}</div>
             </>
           )}
@@ -249,6 +258,7 @@ function fmtDate(s) {
 
 const overlay = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, zIndex: 100 };
 const sheet = { width: '100%', maxHeight: '90vh', overflowY: 'auto', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 16, padding: '18px 18px 20px', boxShadow: 'var(--shadow-lg, 0 12px 40px rgba(0,0,0,0.28))', color: 'var(--text)' };
+const noteBox = { marginTop: 12, padding: '10px 12px', background: 'rgba(128,128,128,0.07)', borderRadius: 10, fontSize: 13, lineHeight: 1.5, color: 'var(--text)' };
 const row = { display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderTop: '1px solid var(--hairline)', fontSize: 13.5 };
 const rowLabel = { fontSize: 12, fontWeight: 700, color: 'var(--muted)', width: 92, flexShrink: 0 };
 const eventLink = { border: 'none', background: 'transparent', color: 'var(--brand)', fontWeight: 700, fontSize: 13.5, cursor: 'pointer', padding: 0, fontFamily: 'inherit' };

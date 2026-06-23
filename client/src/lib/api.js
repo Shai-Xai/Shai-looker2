@@ -103,6 +103,7 @@ export const api = {
 
   // Users (admin)
   adminListUsers: () => fetch('/api/admin/users').then(json),
+  adminGetUser: (id) => fetch(`/api/admin/users/${id}`).then(json),
   adminCreateUser: (u) => fetch('/api/admin/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(u) }).then(json),
   adminUpdateUser: (id, u) => fetch(`/api/admin/users/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(u) }).then(json),
   adminDeleteUser: (id) => fetch(`/api/admin/users/${id}`, { method: 'DELETE' }),
@@ -469,4 +470,12 @@ export const api = {
   alertEvents: (id) => fetch(`/api/alerts/${id}/events`).then(json),
   testAlert: (id) => fetch(`/api/alerts/${id}/test`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(json),
   alertTileValue: (suiteId, dashboardId, tileId) => fetch(`/api/alerts/suites/${suiteId}/tile-value`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dashboardId, tileId }) }).then(json),
+  // Custom-metric source: alert on a raw measure + dimension filter (no tile needed).
+  alertMetricCatalog: (suiteId) => fetch(`/api/alerts/suites/${suiteId}/metric-catalog`).then(json),
+  alertMetricValue: (suiteId, body) => fetch(`/api/alerts/suites/${suiteId}/metric-value`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
+  alertMetricFilterValues: (suiteId, body) => fetch(`/api/alerts/suites/${suiteId}/metric-filter-values`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
+  // Reusable alert templates (a client's own + Howler's global ones).
+  alertTemplates: (entityId) => fetch(`/api/alerts/templates/${entityId}`).then(json),
+  saveAlertTemplate: (body) => fetch('/api/alerts/templates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
+  deleteAlertTemplate: (id) => fetch(`/api/alerts/templates/${id}`, { method: 'DELETE' }).then(json),
 };

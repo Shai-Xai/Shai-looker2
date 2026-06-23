@@ -47,6 +47,10 @@ app.use((req, res, next) => (parsesOwnBody(req.path) ? next() : jsonParser(req, 
 app.use('/api', (_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
 app.use(cookieParser());
 app.use(auth.attachUser);
+// User action audit — logs every meaningful state-changing request (+ a few
+// deliberate views) for Admin → Users. Mounted here so it sees req.user and wraps
+// every route registered below. Disposable: remove this line + server/audit.js.
+require('./audit').mount(app, { db });
 
 // Serve built React app (client/dist) if present, else raw client/
 const clientDist = path.join(__dirname, '../client/dist');
@@ -66,6 +70,9 @@ app.use(express.static(staticDir, {
 // admin exists.
 migrate.run();
 auth.seedAdmin();
+// Apply any version-controlled release-notes seed (authored at source; prod has no
+// git history to summarise). Idempotent — each entry is applied exactly once.
+require('./releaseNotesSeed').applySeed(db);
 // Outbound email (Resend) — disposable module; senders no-op when unconfigured.
 mailer.init({ db });
 // SMS (Clickatell One API) — second channel; no-ops when unconfigured.
@@ -118,10 +125,13 @@ app.post('/api/auth/login', rateLimit({ windowMs: 15 * 60_000, max: 10, by: 'ip'
   const user = auth.verifyCredentials(email, password);
   if (!user) return res.status(401).json({ error: 'Invalid email or password' });
   auth.issueCookie(res, user);
+  db.touchLastLogin(user.id); // most recent login → Admin → Users
+  db.recordAction({ userId: user.id, action: 'auth.login', label: 'Logged in', method: 'POST', path: '/api/auth/login' });
   res.json({ user: meUser(user) });
 });
 
 app.post('/api/auth/logout', (req, res) => {
+  if (req.user) db.recordAction({ userId: req.user.id, action: 'auth.logout', label: 'Logged out', method: 'POST', path: '/api/auth/logout' });
   auth.clearCookie(res);
   res.json({ ok: true });
 });
@@ -152,7 +162,7 @@ app.put('/api/my/notification-prefs', auth.requireAuth, (req, res) => {
 function teamMembers(entityId) {
   return db.listUsers()
     .filter((u) => u.role !== 'admin' && (u.entityIds || []).includes(entityId))
-    .map((u) => ({ id: u.id, email: u.email, role: (u.memberships || []).find((m) => m.entityId === entityId)?.role || 'owner', alsoOtherClients: (u.entityIds || []).length > 1 }));
+    .map((u) => ({ id: u.id, email: u.email, fullName: u.fullName, firstName: u.firstName, lastName: u.lastName, mobile: u.mobile, role: (u.memberships || []).find((m) => m.entityId === entityId)?.role || 'owner', alsoOtherClients: (u.entityIds || []).length > 1 }));
 }
 const ownerCount = (entityId) => teamMembers(entityId).filter((m) => m.role === 'owner').length;
 
@@ -160,10 +170,10 @@ app.get('/api/my/team/:entityId', auth.requireAuth, auth.requirePermission('team
   res.json({ members: teamMembers(req.params.entityId).map((m) => ({ ...m, isYou: m.id === req.user.id })), roles: roles.catalog() });
 });
 app.post('/api/my/team/:entityId', auth.requireAuth, auth.requirePermission('team.manage'), (req, res) => {
-  const { email, password, role } = req.body || {};
+  const { email, password, role, firstName, lastName, mobile } = req.body || {};
   if (!roles.ROLE_KEYS.includes(String(role || ''))) return res.status(400).json({ error: 'Unknown role' });
   try {
-    const u = auth.createUser({ email, password, role: 'client', entityIds: [req.params.entityId] });
+    const u = auth.createUser({ email, password, role: 'client', entityIds: [req.params.entityId], firstName, lastName, mobile });
     db.setMembershipRole(u.id, req.params.entityId, role);
     res.status(201).json({ ok: true });
   } catch (e) { res.status(400).json({ error: e.message }); }
@@ -209,7 +219,25 @@ app.post('/api/admin/import', auth.requireAdmin, express.json({ limit: '256mb' }
 });
 
 // ─── Admin: users ──────────────────────────────────────────────────────────────
-app.get('/api/admin/users', auth.requireAdmin, (_req, res) => res.json(auth.loadUsers().map(auth.publicUser)));
+// List every user with a directory-style summary: role, client memberships, when
+// they last logged in, and when they were last active (most recent of login /
+// action / dashboard view). Enriched in two batch queries — no per-user N+1.
+app.get('/api/admin/users', auth.requireAdmin, (_req, res) => {
+  const lastActions = db.lastActionsForUsers();
+  const lastViews = db.lastViewForUsers();
+  res.json(auth.loadUsers().map((u) => {
+    const la = lastActions[u.id] || null;
+    const lastActiveAt = [u.lastLogin, la?.at, lastViews[u.id]].filter(Boolean).sort().pop() || null;
+    return {
+      id: u.id, email: u.email, role: u.role,
+      firstName: u.firstName, lastName: u.lastName, fullName: u.fullName, mobile: u.mobile,
+      entityIds: u.entityIds, memberships: u.memberships,
+      notifyEmail: u.notifyEmail, notifyPush: u.notifyPush,
+      createdAt: u.createdAt, lastLogin: u.lastLogin || null, lastActiveAt,
+      lastAction: la ? { action: la.action, label: la.label, at: la.at } : null,
+    };
+  }));
+});
 app.post('/api/admin/users', auth.requireAdmin, (req, res) => {
   try { res.status(201).json(auth.createUser(req.body || {})); }
   catch (e) { res.status(400).json({ error: e.message }); }
@@ -247,6 +275,88 @@ app.post('/api/admin/users/promote', auth.requireAdmin, (req, res) => {
 // Role catalog (for the role pickers).
 const roles = require('./roles');
 app.get('/api/admin/roles', auth.requireAdmin, (_req, res) => res.json({ roles: roles.catalog() }));
+
+// Friendly labels for the merged activity feed's non-audit sources.
+function usageLabel(r) {
+  const name = r.name || 'a feature';
+  if (r.kind === 'guide') {
+    if (r.event === 'complete') return `Completed the “${name}” guide`;
+    if (r.event === 'skip') return `Skipped the “${name}” guide`;
+    if (r.event === 'open') return `Opened the “${name}” guide`;
+    return `Used the “${name}” guide`;
+  }
+  return `Used ${name}`;
+}
+// One user's recent activity, merging three sources into a single time-ordered
+// feed: audited actions (what they did), dashboard opens (what they use), and
+// onboarding/feature telemetry (what they engaged with).
+function buildUserActivity(userId, limit = 120) {
+  const entityName = (id) => (id ? (db.getEntity(id)?.name || '') : '');
+  const actions = db.listActionsForUser(userId, 150).map((a) => ({
+    at: a.at, kind: 'action', action: a.action, label: a.label,
+    entityId: a.entityId, entityName: entityName(a.entityId),
+    targetType: a.targetType, targetId: a.targetId, detail: a.detail,
+  }));
+  const views = db.recentViewsForUser(userId, 80).map((v) => ({
+    at: v.at, kind: 'view', action: 'dashboard.open',
+    label: `Opened ${v.title || 'a dashboard'}`, dashboardId: v.dashboardId, suiteId: v.suiteId,
+  }));
+  const usage = db.recentUsageForUser(userId, 80).map((u) => ({
+    at: u.at, kind: 'usage', action: `${u.kind}.${u.event}`,
+    label: usageLabel(u), entityId: u.entityId, entityName: entityName(u.entityId),
+  }));
+  return [...actions, ...views, ...usage]
+    .filter((e) => e.at)
+    .sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0))
+    .slice(0, limit);
+}
+
+// Full per-user detail for the Admin → Users drill-in: identity, client
+// memberships (with role + lens), usage profile, dashboards (used + accessible)
+// and the merged activity timeline. Never leaks the password hash.
+app.get('/api/admin/users/:id', auth.requireAdmin, (req, res) => {
+  const u = db.getUser(req.params.id);
+  if (!u) return res.status(404).json({ error: 'User not found' });
+  const memberships = (u.memberships || []).map((m) => {
+    const e = db.getEntity(m.entityId);
+    const role = roles.getRole(m.role);
+    return { entityId: m.entityId, entityName: e?.name || m.entityId, entityLogo: e?.logo || '', role: m.role, roleLabel: role.label, lens: role.lens, permissions: role.permissions };
+  });
+  const profile = db.viewProfile(u.id);
+  const titleFor = (id) => db.getDashboard(id)?.title || id;
+  const used = (profile.top || []).map((t) => ({ dashboardId: t.dashboardId, suiteId: t.suiteId, count: t.count, lastAt: t.lastAt, title: titleFor(t.dashboardId) }));
+  // Dashboards this user can reach today: every dashboard bundled into a set in
+  // one of their entities' suites (deduped). Admins see everything → flagged.
+  const accSeen = new Set();
+  const accessible = [];
+  if (u.role !== 'admin') {
+    for (const eid of u.entityIds || []) {
+      for (const su of db.listSuitesForEntity(eid)) {
+        for (const sid of db.suiteSetIds(su.id)) {
+          for (const did of db.dashboardsInSet(sid)) {
+            if (accSeen.has(did)) continue;
+            accSeen.add(did);
+            accessible.push({ dashboardId: did, title: titleFor(did), suiteId: su.id, suiteName: su.name });
+          }
+        }
+      }
+    }
+  }
+  res.json({
+    user: {
+      id: u.id, email: u.email, role: u.role, createdAt: u.createdAt,
+      firstName: u.firstName, lastName: u.lastName, fullName: u.fullName, mobile: u.mobile,
+      lastLogin: u.lastLogin || null, notifyEmail: u.notifyEmail, notifyPush: u.notifyPush,
+      entityIds: u.entityIds,
+    },
+    memberships,
+    profile: { top: used, lastVisit: profile.lastVisit },
+    dashboards: { used, accessible, accessibleAll: u.role === 'admin' },
+    usageByClient: db.usageByClientForUser(u.id),
+    emails: mailer.recipientLog(u.email).map((m) => ({ ...m, entityName: m.entityId ? (db.getEntity(m.entityId)?.name || '') : '' })),
+    activity: buildUserActivity(u.id),
+  });
+});
 // Set a login's role WITHIN a specific client (its membership).
 app.put('/api/admin/entities/:id/logins/:userId/role', auth.requireAdmin, (req, res) => {
   const { id, userId } = req.params;
@@ -782,10 +892,132 @@ async function resolveEventDate({ suiteId, user }) {
 const goalsApi = require('./goals').mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTileSeriesAll, resolveEventDate });
 
 // ── Alerts: metric watchers → server/alerts.js ───────────────────────────────
-// A self-contained module that watches a dashboard tile's live number (the SAME
-// scope-enforced resolveTileValue goals use) and fires through the inbox/push/
-// email/SMS when it crosses a threshold. Background tick evaluates the rules.
-require('./alerts').mount(app, { db, auth, resolveTileValue, os, mailer, push, messaging });
+// A self-contained module that watches a number (a dashboard tile via the SAME
+// scope-enforced resolveTileValue goals use, OR a raw measure + dimension filter
+// built in the editor) and fires through the inbox/push/email/SMS when it crosses
+// a threshold. Background tick evaluates the rules.
+//
+// The "custom metric" source lets a client alert on a slice that has no tile (e.g.
+// "tickets sold where Ticket Type = VIP"). To keep the per-tenant boundary intact,
+// the catalogue is built ONLY from explores the client's dashboards already use —
+// the exact set where applyScope can resolve the organiser lock — and every read
+// still runs through applyScope (fail-closed) with the suite's event lock applied.
+
+// Looker metadata, cached (explore field lists + model/explore labels).
+const _exFieldCache = new Map(); // `${model}::${view}` -> { at, data:{ dimensions, measures } }
+const METRIC_META_TTL = 10 * 60000;
+async function getExploreFieldsCached(model, view) {
+  const key = `${model}::${view}`;
+  const hit = _exFieldCache.get(key);
+  if (hit && Date.now() - hit.at < METRIC_META_TTL) return hit.data;
+  const data = await looker.getExploreFields(model, view);
+  _exFieldCache.set(key, { at: Date.now(), data });
+  return data;
+}
+let _exLabels = null, _exLabelsAt = 0;
+async function exploreLabelMap() {
+  if (!_exLabels || Date.now() - _exLabelsAt > METRIC_META_TTL) {
+    try { const models = await looker.listModels(); _exLabels = new Map(); _exLabelsAt = Date.now();
+      for (const m of models || []) for (const e of m.explores || []) _exLabels.set(`${m.name}::${e.name}`, e.label || e.name);
+    } catch { _exLabels = _exLabels || new Map(); }
+  }
+  return _exLabels;
+}
+const prettifyName = (s) => String(s || '').replace(/_/g, ' ').replace(/\b\w/g, (ch) => ch.toUpperCase());
+
+// A representative tile on a given explore from the client's dashboards. We borrow
+// its filter WIRING (listenTo) + its dashboard's filter defs so a raw metric query
+// scopes to the event/organiser EXACTLY as the dashboards do — no guessing which
+// field is "the event" on this explore. Every catalogue explore has ≥1 such tile
+// (the catalogue is built from them), so this is normally present.
+function representativeTileForExplore(entityId, model, view) {
+  const { catalogue } = clientCatalogue(entityId);
+  let fallback = null;
+  for (const c of catalogue) {
+    const def = store.get(c.dashboardId);
+    if (!def) continue;
+    const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((x) => x.tiles || []))];
+    for (const t of tiles) {
+      const q = t.query; if (q?.model !== model || q?.view !== view) continue;
+      if (t.listenTo && Object.keys(t.listenTo).length) return { def, tile: t }; // prefer a wired one
+      if (!fallback) fallback = { def, tile: t };
+    }
+  }
+  return fallback;
+}
+
+// Build a scoped query body for a raw measure/dimension on an explore, reusing the
+// EXACT dashboard path: a synthetic tile that borrows a real tile's listenTo wiring,
+// run through tileQueryBody (which applies the event/organiser locks via that wiring
+// + effectiveFilterValues, then forces the organiser scope). `extraOverrides` are the
+// user's metric filters (queryField -> value). Returns a body or null (fail closed).
+async function scopedMetricBody({ model, view, fields, sorts, limit, extraOverrides, user, suiteId }) {
+  const su = db.getSuite(suiteId); if (!su) return null;
+  const rep = representativeTileForExplore(su.entityId, model, view);
+  const lockMap = expandLockMap(db.lockedFiltersForSuite(suiteId));
+  if (rep) {
+    const synthetic = { ...rep.tile, id: 'metric', type: 'vis', vis: {}, query: { model, view, fields, ...(sorts ? { sorts } : {}), ...(limit ? { limit } : {}) } };
+    return tileQueryBody(synthetic, rep.def, user, suiteId, lockMap, extraOverrides || {});
+  }
+  // No tile on this explore (shouldn't happen for catalogue explores): organiser scope only.
+  const body = { model, view, fields, filters: { ...(extraOverrides || {}) }, ...(sorts ? { sorts } : {}), ...(limit ? { limit } : {}) };
+  if (!(await applyScope(body, user, suiteId))) return null;
+  return body;
+}
+
+// The catalogue of explores a client can build a metric from — derived from the
+// dashboards they already have, so scope is guaranteed to resolve. Each carries its
+// measures + filterable dimensions (with friendly labels) for the editor's pickers.
+async function metricCatalog(entityId) {
+  const { catalogue } = clientCatalogue(entityId);
+  const seen = new Map(); // `${model}::${view}` -> { model, view }
+  for (const c of catalogue) {
+    const def = store.get(c.dashboardId);
+    if (!def) continue;
+    const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((x) => x.tiles || []))];
+    for (const t of tiles) { const q = t.query; if (q?.model && q?.view) seen.set(`${q.model}::${q.view}`, { model: q.model, view: q.view }); }
+  }
+  const labels = await exploreLabelMap();
+  const explores = [];
+  for (const { model, view } of seen.values()) {
+    try {
+      const f = await getExploreFieldsCached(model, view);
+      if (!f.measures.length) continue; // nothing to alert on
+      const shape = (arr) => arr.map((x) => ({ name: x.name, label: x.label, type: x.type, group: x.group_label || '' }));
+      explores.push({ model, view, label: labels.get(`${model}::${view}`) || prettifyName(view), measures: shape(f.measures), dimensions: shape(f.dimensions) });
+    } catch { /* skip explores Looker won't describe */ }
+  }
+  explores.sort((a, b) => String(a.label).localeCompare(String(b.label)));
+  return { explores };
+}
+
+// Read a built metric's live number — one measure, the user's dimension filters,
+// scoped to THIS event + client exactly like the dashboards. Fail-closed.
+async function resolveCustomMetric({ model, view, measure, filters, user, suiteId }) {
+  if (!model || !view || !measure) return null;
+  const body = await scopedMetricBody({ model, view, fields: [measure], limit: 1, extraOverrides: filters || {}, user, suiteId });
+  if (!body) return null;
+  const data = await runLookerQuery('/queries/run/json_detail', body);
+  return primaryTileValue(data, {});
+}
+
+// Distinct values of a dimension under this event's scope — the choices for a filter
+// (e.g. the Ticket Type values that exist for this event).
+async function metricFilterValues({ model, view, field, user, suiteId }) {
+  const body = await scopedMetricBody({ model, view, fields: [field], sorts: [field], limit: 500, extraOverrides: {}, user, suiteId });
+  if (!body) return [];
+  const data = await runLookerQuery('/queries/run/json_detail', body);
+  const out = [];
+  for (const r of (data?.data || [])) {
+    const cell = r[field];
+    const v = cell ? (cell.rendered != null && cell.rendered !== '' ? cell.rendered : cell.value) : null;
+    if (v != null && v !== '' && !out.includes(String(v))) out.push(String(v));
+    if (out.length >= 200) break;
+  }
+  return out;
+}
+
+require('./alerts').mount(app, { db, auth, resolveTileValue, resolveCustomMetric, metricCatalog, metricFilterValues, os, mailer, push, messaging });
 
 // ── Weekly goal nudge (push) ─────────────────────────────────────────────────
 // One calm "your goals this week" push per entity (not per-event): goals needing

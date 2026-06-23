@@ -4,7 +4,7 @@ import { useState } from 'react';
 // write-only: the form only knows whether a value is set (value.*.keySet /
 // clientSecretSet); typing a new value changes it, blank leaves it unchanged.
 // `onSave(payload)` receives only the fields that changed.
-export default function IntegrationsForm({ value, onSave, showLooker = true, lookerActive = true, showResend = false, showInventive = false, showMeta = false, showTikTok = false, clients = [], onTestEmail, collapsible = false }) {
+export default function IntegrationsForm({ value, onSave, showLooker = true, lookerActive = true, showResend = false, showInventive = false, inventiveWorkspace = null, showMeta = false, showTikTok = false, clients = [], onTestEmail, collapsible = false }) {
   const [baseUrl, setBaseUrl] = useState(value?.looker?.baseUrl || '');
   const [clientId, setClientId] = useState(value?.looker?.clientId || '');
   const [clientSecret, setClientSecret] = useState('');
@@ -19,6 +19,9 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
   const [invToken, setInvToken] = useState('');
   const [clearInvToken, setClearInvToken] = useState(false);
   const [invEndpoint, setInvEndpoint] = useState(value?.inventive?.endpoint || '');
+  // Per-client Inventive workspace mapping (entity fields, saved by the parent).
+  const [invwName, setInvwName] = useState(inventiveWorkspace?.name || '');
+  const [invwRef, setInvwRef] = useState(inventiveWorkspace?.refId || '');
   const [metaToken, setMetaToken] = useState('');
   const [clearMetaToken, setClearMetaToken] = useState(false);
   const [metaAdAccount, setMetaAdAccount] = useState(value?.meta?.adAccountId || '');
@@ -61,6 +64,7 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
         if (invToken) payload.inventive.embedToken = invToken;
         if (clearInvToken) payload.inventive.clearEmbedToken = true;
       }
+      if (inventiveWorkspace) payload.inventiveWorkspace = { name: invwName, refId: invwRef };
       if (showMeta) {
         payload.meta = { adAccountId: metaAdAccount, businessId: metaBusiness };
         if (metaToken) payload.meta.accessToken = metaToken;
@@ -229,8 +233,22 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
       )}
 
       {/* Inventive (embedded AI analyst) — platform-level, one account → per-client workspaces */}
-      {showInventive && (
+      {(showInventive || inventiveWorkspace) && (
         <Section title="✨ Inventive (AI analyst)" collapsible={collapsible}>
+          {inventiveWorkspace && (
+            <>
+              <div style={note}>How this client maps to its Inventive workspace. Blank fields inherit the client's own details.</div>
+              <Lbl>Account name</Lbl>
+              <input value={invwName} onChange={(e) => setInvwName(e.target.value)} placeholder="Use client name" style={input} autoComplete="off" />
+              <Lbl>External reference (UUID)</Lbl>
+              <div style={note}>The <code>externalRefId</code> we send Inventive. Leave blank to use this client's own ID (the default): <code style={{ userSelect: 'all' }}>{inventiveWorkspace.defaultRefId}</code>. Only set it to match a workspace provisioned under a different reference.</div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <input value={invwRef} onChange={(e) => setInvwRef(e.target.value)} placeholder={inventiveWorkspace.defaultRefId} style={{ ...input, fontFamily: 'monospace', fontSize: 12 }} autoComplete="off" />
+                <button type="button" style={{ flexShrink: 0, padding: '8px 12px', fontSize: 12, fontWeight: 600, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 980, cursor: 'pointer' }} onClick={() => { navigator.clipboard?.writeText((invwRef || '').trim() || inventiveWorkspace.defaultRefId).catch(() => {}); }} title="Copy the externalRefId we send Inventive">Copy</button>
+              </div>
+            </>
+          )}
+          {showInventive && (<>
           <div style={note}>
             Powers the <b>Ask</b> conversational analyst embedded per client. Set the API key + the embed auth token you generated for the host URL <code>{`${typeof window !== 'undefined' ? window.location.origin : ''}/ask`}</code>.
           </div>
@@ -273,6 +291,7 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
               </div>
             </>
           )}
+          </>)}
         </Section>
       )}
 

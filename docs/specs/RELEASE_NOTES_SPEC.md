@@ -210,6 +210,25 @@ Grounding the how-to: feed the daily model (a) any `how-to:` / `link:` trailers 
 the day's commits, and (b) a short curated `feature → screen/path` map kept beside
 the prompt — cheap, and keeps it from inventing UI.
 
+### 8a. Two commit sources + an authored seed (works in prod)
+Local `git log` needs the repo's history at runtime, which the deployed server
+**does not have** (Render does a shallow clone). So the commit source is unified
+(`recentCommits()` in `server/index.js`): **local git in dev** (full history),
+falling back to the **GitHub API in production** (`commitsFromGitHub()`). The repo
+is public, so this needs **no token** (60 req/hr unauthenticated is ample for a
+daily tick; an optional `GITHUB_TOKEN` / `github_token` setting + `release_github_repo`
+override exist for private repos or rate limits). With this, the **daily auto-draft
+tick and the "Generate from commits" button work in production too** — fully
+hands-off daily generation, drafts behind the publish gate.
+
+For higher-quality, hand-crafted notes (big features), an **authored seed** also
+ships: a version-controlled `server/releaseNotesSeed.js` holds note objects (all
+three lenses); `applySeed(db)` upserts them **once on boot**. Each entry has a
+stable `key` recorded in the `release_seed_applied` setting, so re-deploys never
+duplicate a note nor resurrect one an admin has edited/deleted. Net: the GitHub
+source gives daily **coverage**; the seed gives authored **quality** — they
+coexist.
+
 ## 9. Surfaces
 - **Admin → Product → Release notes** (extend `ProductReleaseNotes`,
   `AdminPage.jsx:489`): each daily entry shows **Summary · How-to · Dev** fields, all
