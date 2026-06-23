@@ -6,6 +6,11 @@
 const Anthropic = require('@anthropic-ai/sdk');
 
 const MODEL = 'claude-opus-4-8';
+// The home briefing is structured summarization-to-JSON over data we hand the
+// model — a task a faster model handles well. Running it on Sonnet (instead of
+// Opus) is the single biggest lever on briefing latency; flip this back to MODEL
+// if the read quality regresses.
+const BRIEF_MODEL = 'claude-sonnet-4-6';
 const MAX_ROWS = 60; // cap rows sent to keep the prompt small and cheap
 
 // One Anthropic client per API key (admin default from env/DB, or a client's own).
@@ -213,6 +218,13 @@ const REQUEST = (messages, system) => ({
 function systemWith(base, instructions) {
   const extra = (instructions || '').trim();
   return extra ? `${base}\n\nStanding instructions from the Howler team — always follow these:\n${extra}` : base;
+}
+// Same system text, but as a cacheable block: the briefing's big static prompt
+// (rules + standing instructions) is stable across a prewarm+real pair and
+// repeated refreshes, so caching the prefix shaves input-processing latency. The
+// volatile tile data lives in the user message, after this prefix.
+function cachedSystem(base, instructions) {
+  return [{ type: 'text', text: systemWith(base, instructions), cache_control: { type: 'ephemeral' } }];
 }
 
 // Non-streaming (kept for completeness / non-stream callers).
@@ -787,11 +799,11 @@ async function briefHome({ tiles, profile, catalogue, instructions, apiKey, acti
   lines.push('CATALOGUE:');
   for (const d of catalogue || []) lines.push(`- ${d.dashboardId}: ${d.title} [${d.setName}, ${d.suiteName}]`);
   const resp = await c.messages.create({
-    model: MODEL,
+    model: BRIEF_MODEL,
     max_tokens: 1400,
     thinking: { type: 'adaptive' },
     output_config: { effort: 'low' },
-    system: systemWith(HOME_SYSTEM, instructions),
+    system: cachedSystem(HOME_SYSTEM, instructions),
     messages: [{ role: 'user', content: lines.join('\n') }],
   });
   const text = (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
@@ -874,8 +886,8 @@ async function briefHomeOverall({ groups, catalogue, capabilities, actions, toda
   lines.push('CATALOGUE (dashboardId: title [set, event]):');
   for (const d of catalogue || []) lines.push(`- ${d.dashboardId}: ${d.title} [${d.setName}, ${d.suiteName}]`);
   const resp = await c.messages.create({
-    model: MODEL, max_tokens: 1100, thinking: { type: 'adaptive' }, output_config: { effort: 'low' },
-    system: systemWith(HOME_OVERALL_SYSTEM, instructions),
+    model: BRIEF_MODEL, max_tokens: 1100, thinking: { type: 'adaptive' }, output_config: { effort: 'low' },
+    system: cachedSystem(HOME_OVERALL_SYSTEM, instructions),
     messages: [{ role: 'user', content: lines.join('\n') }],
   });
   const text = (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
@@ -888,8 +900,8 @@ async function briefHomeEvents({ groups, today, instructions, apiKey }) {
   if (today) lines.push(`TODAY: ${today} (anchor all time references to this).`, '');
   lines.push('TILES (live data, grouped by event):', '', ...groupedFactLines(groups, { perEvent: 12, rows: 24, withCatalogue: true, withId: true }));
   const resp = await c.messages.create({
-    model: MODEL, max_tokens: 1600, thinking: { type: 'adaptive' }, output_config: { effort: 'low' },
-    system: systemWith(HOME_EVENTS_SYSTEM, instructions),
+    model: BRIEF_MODEL, max_tokens: 1600, thinking: { type: 'adaptive' }, output_config: { effort: 'low' },
+    system: cachedSystem(HOME_EVENTS_SYSTEM, instructions),
     messages: [{ role: 'user', content: lines.join('\n') }],
   });
   const text = (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
