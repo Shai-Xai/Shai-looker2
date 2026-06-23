@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, useEffect } from 'react';
 import TileFrame from './TileFrame.jsx';
 import AlignPicker from './AlignPicker.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
@@ -13,6 +13,8 @@ export default function Carousel({ carousel, filterValues, editable, onEditTile,
   const [dragOver, setDragOver] = useState(false);
   // Drag-to-reorder within the row: track which tile we'd drop BEFORE (or the end).
   const [dropBefore, setDropBefore] = useState(null);
+  // Only surface the ‹ › arrows when the tiles actually overflow the row.
+  const [canScroll, setCanScroll] = useState(false);
   const isGrid = carousel.mode === 'grid'; // a "section": tiles flow in a wrapping grid, not a scroller
   const cardW = carousel.cardW || 300;
   const tiles = carousel.tiles || [];
@@ -53,6 +55,19 @@ export default function Carousel({ carousel, filterValues, editable, onEditTile,
 
   const scroll = (dir) => trackRef.current?.scrollBy({ left: dir * (cardW + GAP) * 2, behavior: 'smooth' });
 
+  // Watch for overflow so the scroll arrows only appear when there's something
+  // off-screen to scroll to (re-checks on resize and when the tiles change).
+  useEffect(() => {
+    const el = trackRef.current;
+    if (!el || isGrid) { setCanScroll(false); return; }
+    const check = () => setCanScroll(el.scrollWidth - el.clientWidth > 2);
+    check();
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    window.addEventListener('resize', check);
+    return () => { ro.disconnect(); window.removeEventListener('resize', check); };
+  }, [isGrid, tiles.length, isMobile]);
+
   // Drag a card's right-edge handle to set THIS card's width (px).
   // stopPropagation so the grid doesn't treat it as a tile/row drag.
   const startTileResize = (tileId, curW) => (e) => {
@@ -91,7 +106,7 @@ export default function Carousel({ carousel, filterValues, editable, onEditTile,
                 // Centered headings overlay the whole row (absolute) so they sit
                 // dead-centre regardless of the scroll arrows on the right —
                 // flex:1 + text-align would centre only the space LEFT of them.
-                ? { position: 'absolute', left: 0, right: 0, textAlign: 'center', padding: isGrid ? 0 : '0 64px', boxSizing: 'border-box', margin: 0, fontSize: 15, fontWeight: 700, pointerEvents: 'none', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }
+                ? { position: 'absolute', left: 0, right: 0, textAlign: 'center', padding: (!isGrid && canScroll) ? '0 56px' : 0, boxSizing: 'border-box', margin: 0, fontSize: 15, fontWeight: 700, pointerEvents: 'none', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }
                 : { flex: 1, minWidth: 0, textAlign: align, margin: 0, fontSize: 15, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{carousel.title}</h3>
             )}
             {(align === 'center' || !carousel.title) && <div style={{ flex: 1 }} />}
@@ -104,7 +119,7 @@ export default function Carousel({ carousel, filterValues, editable, onEditTile,
             <button style={{ ...miniBtn, color: 'var(--error)', borderColor: '#f0c0c0' }} onClick={onRemove}>{isGrid ? 'Delete section' : 'Delete row'}</button>
           </span>
         )}
-        {!isGrid && (
+        {!isGrid && canScroll && (
           <span onMouseDown={(e) => e.stopPropagation()} style={{ display: 'flex', gap: 4 }}>
             <button style={arrowBtn} onClick={() => scroll(-1)} title="Scroll left">‹</button>
             <button style={arrowBtn} onClick={() => scroll(1)} title="Scroll right">›</button>
