@@ -1131,6 +1131,96 @@ function lockedFiltersForSuite(suiteId, dashboardId) {
   return { ...(e?.lockedFilters || {}), ...(s.lockedFilters || {}), ...perDash };
 }
 
+// Fork a (shared) dashboard into a CLIENT-OWNED copy for this suite's entity and
+// wire it into the suite so the client sees their own version. The template is
+// untouched and keeps serving every other client. `def` is the (edited) source
+// definition to copy; `opts` lets the admin choose where it lands:
+//   { title, folder, setId, newSetName }
+//   - setId      → add the fork to that client-owned set (must belong to entity)
+//   - newSetName → create a new client set, add the fork, bundle it into the suite
+//   - neither    → replace the template in-place within the suite's set, cloning
+//                  the set first if it's shared (so other clients are untouched)
+// Returns { dashboard, suite } or null if the suite is missing.
+function forkDashboardForSuite(suiteId, dashboardId, def, opts = {}) {
+  const suite = getSuite(suiteId);
+  if (!suite) return null;
+  const entityId = suite.entityId;
+  const entity = getEntity(entityId);
+  const title = (opts.title && opts.title.trim()) || def?.title || 'Untitled dashboard';
+  const folder = opts.folder !== undefined ? String(opts.folder || '') : `Custom/${entity?.name || 'Client'}`;
+  // Create then update so the FULL edited definition (incl. fields createDashboard
+  // doesn't copy verbatim, e.g. daysBeforeSync/keepImportedFilters) carries over.
+  const created = createDashboard({ title, ownerEntityId: entityId, folder });
+  const body = { ...stripMeta(def || {}), title, folder, ownerEntityId: entityId, variantOf: dashboardId };
+  const fork = updateDashboard(created.id, body);
+
+  let setIds = [...(suite.setIds || [])];
+  if (opts.newSetName && String(opts.newSetName).trim()) {
+    const set = createSet({ name: String(opts.newSetName).trim(), ownerEntityId: entityId });
+    setSetDashboards(set.id, [{ id: fork.id, parentId: null }]);
+    if (!setIds.includes(set.id)) setIds.push(set.id);
+  } else if (opts.setId) {
+    const set = getSet(opts.setId);
+    if (set && set.ownerEntityId === entityId) {
+      setSetDashboards(set.id, [...(set.dashboards || []), { id: fork.id, parentId: null }]);
+      if (!setIds.includes(set.id)) setIds.push(set.id);
+    }
+  } else {
+    // Default: replace the template wherever it lives in this suite's sets.
+    setIds = setIds.map((sid) => {
+      const set = getSet(sid);
+      if (!set || !(set.dashboards || []).some((e) => e.id === dashboardId)) return sid;
+      // A shared set is used by other clients — clone it for this entity first so
+      // the swap only affects this client; the suite then points at the clone.
+      const target = set.ownerEntityId === entityId ? set : cloneSetForEntity(sid, entityId, set.name);
+      const entries = (target.dashboards || []).map((e) => ({
+        id: e.id === dashboardId ? fork.id : e.id,
+        parentId: e.parentId === dashboardId ? fork.id : e.parentId,
+      }));
+      setSetDashboards(target.id, entries);
+      return target.id;
+    });
+  }
+  if (JSON.stringify(setIds) !== JSON.stringify(suite.setIds || [])) setSuiteSets(suiteId, setIds);
+
+  // Carry this client's per-dashboard lock overrides across to the fork (per-tile
+  // locks are keyed by tileId, which the copy preserves, so they apply as-is).
+  if (suite.dashboardLocks && suite.dashboardLocks[dashboardId]) {
+    setSuiteDashboardLocks(suiteId, fork.id, suite.dashboardLocks[dashboardId]);
+  }
+  return { dashboard: fork, suite: getSuite(suiteId) };
+}
+
+// Undo a fork: point the suite back at the original template and discard the
+// client copy (only when nothing else still references it). Returns the template
+// id to send the admin back to, or null if this isn't a revertable fork.
+function revertForkToTemplate(suiteId, forkId) {
+  const suite = getSuite(suiteId);
+  const fork = getDashboard(forkId);
+  if (!suite || !fork || !fork.variantOf) return null;
+  const templateId = fork.variantOf;
+  if (!getDashboard(templateId)) return null; // template was deleted — nothing to revert to
+  for (const sid of suite.setIds || []) {
+    const set = getSet(sid);
+    if (!set || !(set.dashboards || []).some((e) => e.id === forkId)) continue;
+    const entries = (set.dashboards || []).map((e) => ({
+      id: e.id === forkId ? templateId : e.id,
+      parentId: e.parentId === forkId ? templateId : e.parentId,
+    }));
+    setSetDashboards(set.id, entries);
+  }
+  // Move this client's per-dashboard locks back onto the template entry.
+  if (suite.dashboardLocks && suite.dashboardLocks[forkId]) {
+    setSuiteDashboardLocks(suiteId, templateId, suite.dashboardLocks[forkId]);
+    setSuiteDashboardLocks(suiteId, forkId, {});
+  }
+  // Bin the orphaned copy if no set anywhere still points at it.
+  const stillUsed = db.prepare('SELECT 1 FROM set_dashboards WHERE dashboard_id=? LIMIT 1').get(forkId);
+  if (!stillUsed) removeDashboard(forkId);
+  return templateId;
+}
+
+
 // ─── Tile library ─────────────────────────────────────────────────────────────
 // A stable signature for a tile's underlying query + visualization, used to
 // dedupe the same tile imported from many dashboards.
@@ -1420,7 +1510,7 @@ module.exports = {
   listSets, listSetsForEntity, getSet, createSet, cloneSetForEntity, updateSet, deleteSet, setSetDashboards, dashboardsInSet,
   rolesForScope, setContentRoles, contentRolesForEntity, dashboardVisibleToRole,
   // suites (event context)
-  listSuites, listSuitesForEntity, getSuite, createSuite, updateSuite, deleteSuite, setSuiteSets, setSuiteDashboardLocks, setSuiteTileLocks, suiteSetIds, dashboardsInSuite, lockedFiltersForSuite,
+  listSuites, listSuitesForEntity, getSuite, createSuite, updateSuite, deleteSuite, setSuiteSets, setSuiteDashboardLocks, setSuiteTileLocks, suiteSetIds, dashboardsInSuite, lockedFiltersForSuite, forkDashboardForSuite, revertForkToTemplate,
   // tile library
   listLibraryTiles, listLibraryCategories, getLibraryTile, harvestTile, harvestDashboardTiles, updateLibraryTile, deleteLibraryTile, bumpLibraryUsage,
   // settings (key/value)

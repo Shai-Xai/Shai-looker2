@@ -73,6 +73,11 @@ longer they use Pulse, the better it gets."
   what matters right now (leads with ticketing/revenue), tailored to what they
   follow and view.
 - **Mobile-first + installable** ✅ — works great on a phone, installs as an app.
+- **Shared templates + per-client versions** ✅ — most dashboards are shared
+  templates we maintain once for everyone. When a client needs something bespoke,
+  staff can "Save as new" from that client's view to spin off a **client-owned
+  version** (choosing its folder + set) that only they see — and edit it freely
+  without touching anyone else. One click reverts it back to the template.
 
 **Pitch:** "Your data, read for you — no digging. Open the app and you already
 know what changed and what to do."
@@ -348,6 +353,13 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-23** — **Per-client dashboard versions** ✅: editing a shared dashboard from a
+  client's view now offers **Save current** (update the template for everyone) or **Save as
+  new** — forking a **client-owned version** (pick its folder + set) that only that client
+  sees and that edits independently of the template. The editor shows a **Shared template /
+  {Client} version** badge, and **↩ Revert to template** discards the copy and re-points the
+  client back at the shared one. Also: editing from a client view now loads that client's
+  actual filters (locks + saved view), so previews/Results match what they see.
 - **2026-06-23** — **Edit a dashboard's locks in-context** ✅: an admin viewing a client's
   dashboard can now click a locked filter (or **🔒 Edit locks for this dashboard**), change
   the values, tick **Lock here**, and save — it writes the per-dashboard lock override for

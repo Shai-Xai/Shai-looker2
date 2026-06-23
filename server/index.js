@@ -711,6 +711,25 @@ app.put('/api/admin/suites/:suiteId/tile-locks/:tileId', auth.requireAdmin, (req
   if (map == null) return res.status(404).json({ error: 'Suite not found' });
   res.json({ ok: true });
 });
+// Admin: fork a shared dashboard into a CLIENT-OWNED version for this suite's
+// client. The (edited) definition is supplied in the body so "Save as new" can
+// capture in-editor changes without first overwriting the shared template. The
+// admin can pick the destination folder + set; the default replaces the template
+// in place within the suite (cloning a shared set so other clients are untouched).
+app.post('/api/admin/suites/:suiteId/dashboards/:dashboardId/fork', auth.requireAdmin, (req, res) => {
+  const { def, title, folder, setId, newSetName } = req.body || {};
+  if (!def || typeof def !== 'object') return res.status(400).json({ error: 'def is required' });
+  const out = db.forkDashboardForSuite(req.params.suiteId, req.params.dashboardId, def, { title, folder, setId, newSetName });
+  if (!out) return res.status(404).json({ error: 'Suite not found' });
+  res.status(201).json({ dashboard: { id: out.dashboard.id, title: out.dashboard.title }, suiteId: req.params.suiteId });
+});
+// Admin: revert a client version back to the shared template — repoints the suite
+// and discards the copy. Returns the template id to navigate back to.
+app.post('/api/admin/suites/:suiteId/dashboards/:dashboardId/revert', auth.requireAdmin, (req, res) => {
+  const templateId = db.revertForkToTemplate(req.params.suiteId, req.params.dashboardId);
+  if (!templateId) return res.status(400).json({ error: 'Not a revertable client version' });
+  res.json({ dashboardId: templateId, suiteId: req.params.suiteId });
+});
 
 // ─── Dashboards → server/dashboards.js ─────────────────────────────────────────
 // Extracted: dashboard CRUD, Looker import, folders, run-query and drill. The

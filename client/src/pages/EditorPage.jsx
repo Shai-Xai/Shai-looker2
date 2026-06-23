@@ -5,6 +5,7 @@ import FilterBar from '../components/FilterBar.jsx';
 import TileEditorPanel from '../components/editor/TileEditorPanel.jsx';
 import FilterManager from '../components/editor/FilterManager.jsx';
 import TileLibraryPicker from '../components/editor/TileLibraryPicker.jsx';
+import SaveAsClientModal from '../components/editor/SaveAsClientModal.jsx';
 import BackButton from '../components/BackButton.jsx';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/auth.jsx';
@@ -31,6 +32,9 @@ export default function EditorPage() {
   // load that client's per-tile locks so the 🔒 control can manage them here.
   const [suiteTileLocks, setSuiteTileLocks] = useState({});
   const [suiteEntityId, setSuiteEntityId] = useState(null);
+  const [suiteEntityName, setSuiteEntityName] = useState('');
+  const [showSaveAs, setShowSaveAs] = useState(false);
+  const [saveMenuOpen, setSaveMenuOpen] = useState(false);
   const saveTileLock = async (tileId, map) => {
     try {
       await api.setSuiteTileLocks(suiteId, tileId, map);
@@ -64,6 +68,7 @@ export default function EditorPage() {
         setDef(data);
         setSuiteTileLocks(suite?.tileLocks || {});
         setSuiteEntityId(suite?.entityId || null);
+        setSuiteEntityName(suite?.entityName || '');
         const overlay = { ...(saved?.entityDefault || {}), ...(saved?.user || {}) }; // user view wins
         setFilterValues(buildClientFilters(data, suite, overlay, passedFilters));
       })
@@ -90,6 +95,34 @@ export default function EditorPage() {
       setSaving(false);
     }
   }
+
+  // Fork the (edited) dashboard into a client-owned version for this suite, then
+  // jump into editing that copy. The shared template is left as-is.
+  async function saveAsClientVersion(opts) {
+    const out = await api.forkSuiteDashboard(suiteId, id, { def, ...opts });
+    setDirty(false);
+    setShowSaveAs(false);
+    navigate(`/suite/${suiteId}/d/${out.dashboard.id}/edit`, { replace: true });
+  }
+
+  // Discard this client version and point the suite back at the shared template.
+  async function revertToTemplate() {
+    if (!window.confirm(`Discard ${suiteEntityName || 'this client'}’s version and go back to the shared template? This can’t be undone.`)) return;
+    try {
+      const out = await api.revertSuiteDashboard(suiteId, id);
+      setDirty(false);
+      navigate(`/suite/${suiteId}/d/${out.dashboardId}`, { replace: true });
+    } catch (e) {
+      alert('Could not revert: ' + e.message);
+    }
+  }
+
+  // This dashboard is a shared template (no owner) opened inside a client suite:
+  // saving offers a choice between updating the template and forking a client copy.
+  const isTemplate = !def?.ownerEntityId;
+  const canForkHere = !!suiteId && isTemplate;
+  // A client version that was forked from a template can be reverted back to it.
+  const canRevert = !!suiteId && !isTemplate && !!def?.variantOf;
 
   function addTile(type) {
     const nextY = def.tiles.reduce((max, t) => Math.max(max, (t.layout?.y ?? 0) + (t.layout?.h ?? 6)), 0);
@@ -319,6 +352,18 @@ export default function EditorPage() {
           value={def.title}
           onChange={(e) => mutate((d) => ({ ...d, title: e.target.value }))}
         />
+        {suiteId && (
+          <span
+            style={isTemplate ? badgeTemplate : badgeClient}
+            title={isTemplate
+              ? 'Shared template — editing this affects every client that uses it. Use “Save as new” to make a copy just for this client.'
+              : `This is ${suiteEntityName || 'this client'}’s own version — editing it only affects them.`}>
+            {isTemplate ? 'Shared template' : `${suiteEntityName || 'Client'} version`}
+          </span>
+        )}
+        {canRevert && (
+          <button style={btn} onClick={revertToTemplate} title="Discard this client version and use the shared template again">↩ Revert to template</button>
+        )}
         <button style={btn} onClick={() => addTile('vis')}>+ Visualization</button>
         <button style={btn} onClick={() => setShowLibrary(true)}>+ From library</button>
         <button style={btn} onClick={() => addTile('text')}>+ Text</button>
@@ -338,7 +383,30 @@ export default function EditorPage() {
           {dirty ? '● Unsaved changes' : '✓ Saved'}
         </span>
         <button style={viewBtn} onClick={() => navigate(viewPath)}>View</button>
-        <button className="btn-key" style={saveBtn} onClick={save} disabled={saving || !dirty}>{saving ? 'Saving…' : 'Save'}</button>
+        {canForkHere ? (
+          <div style={{ position: 'relative' }}>
+            <button className="btn-key" style={saveBtn} onClick={() => setSaveMenuOpen((v) => !v)} disabled={saving}>
+              {saving ? 'Saving…' : 'Save ▾'}
+            </button>
+            {saveMenuOpen && (
+              <>
+                <div style={{ position: 'fixed', inset: 0, zIndex: 40 }} onClick={() => setSaveMenuOpen(false)} />
+                <div style={saveMenu}>
+                  <button style={saveMenuItem} disabled={!dirty} onClick={() => { setSaveMenuOpen(false); save(); }}>
+                    <strong>Save current</strong>
+                    <span style={saveMenuHint}>Update the shared template (all clients)</span>
+                  </button>
+                  <button style={saveMenuItem} onClick={() => { setSaveMenuOpen(false); setShowSaveAs(true); }}>
+                    <strong>Save as new…</strong>
+                    <span style={saveMenuHint}>Make {suiteEntityName || 'this client'}’s own version</span>
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        ) : (
+          <button className="btn-key" style={saveBtn} onClick={save} disabled={saving || !dirty}>{saving ? 'Saving…' : 'Save'}</button>
+        )}
       </div>
 
       {/* Filter bar preview */}
@@ -388,6 +456,16 @@ export default function EditorPage() {
 
       {showLibrary && (
         <TileLibraryPicker onPick={addLibraryTile} onClose={() => setShowLibrary(false)} />
+      )}
+
+      {showSaveAs && (
+        <SaveAsClientModal
+          entityId={suiteEntityId}
+          entityName={suiteEntityName}
+          defaultTitle={def.title}
+          onConfirm={saveAsClientVersion}
+          onClose={() => setShowSaveAs(false)}
+        />
       )}
 
       {showAiContext && (
@@ -490,6 +568,11 @@ const titleInput = { fontSize: 16, fontWeight: 600, letterSpacing: '-0.01em', bo
 const btn = { padding: '8px 14px', background: 'rgba(0,0,0,0.05)', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer', color: 'var(--text)' };
 const viewBtn = { padding: '8px 16px', background: 'rgba(0,0,0,0.05)', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer', color: 'var(--text)' };
 const saveBtn = { padding: '8px 18px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer' };
+const saveMenu = { position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 50, background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 12, boxShadow: '0 12px 32px rgba(0,0,0,0.18)', padding: 6, minWidth: 240, display: 'flex', flexDirection: 'column', gap: 2 };
+const saveMenuItem = { display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 1, textAlign: 'left', padding: '9px 11px', background: 'transparent', border: 'none', borderRadius: 8, cursor: 'pointer', color: 'var(--text)', fontSize: 13.5 };
+const saveMenuHint = { fontSize: 11.5, color: 'var(--muted)', fontWeight: 400 };
+const badgeTemplate = { fontSize: 11, fontWeight: 700, padding: '3px 9px', borderRadius: 980, background: 'rgba(0,0,0,0.06)', color: 'var(--muted)', whiteSpace: 'nowrap' };
+const badgeClient = { fontSize: 11, fontWeight: 700, padding: '3px 9px', borderRadius: 980, background: 'color-mix(in srgb, var(--brand) 15%, transparent)', color: 'var(--brand)', whiteSpace: 'nowrap' };
 const aiOverlay = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 500, padding: 20 };
 const aiCard = { width: 'min(560px, 96vw)', background: 'var(--card)', borderRadius: 14, boxShadow: '0 12px 48px rgba(0,0,0,0.25)', padding: 22 };
 

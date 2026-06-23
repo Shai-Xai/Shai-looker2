@@ -125,6 +125,15 @@ export const api = {
       body: JSON.stringify(def),
     }).then(json),
   deleteDashboard: (id) => fetch(`/api/dashboards/${id}`, { method: 'DELETE' }),
+  // Fork a shared dashboard into a client-owned version for this suite. `payload`
+  // carries the (edited) def + optional { title, folder, setId, newSetName }.
+  forkSuiteDashboard: (suiteId, dashboardId, payload) =>
+    fetch(`/api/admin/suites/${suiteId}/dashboards/${dashboardId}/fork`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+    }).then(json),
+  // Revert a client version back to the shared template (discards the copy).
+  revertSuiteDashboard: (suiteId, dashboardId) =>
+    fetch(`/api/admin/suites/${suiteId}/dashboards/${dashboardId}/revert`, { method: 'POST' }).then(json),
   // Usage telemetry — fire-and-forget, batched (see _trackBuf below). Never throws.
   // NB: distinct from `track(suiteId, dashboardId)` below, which counts dashboard views.
   trackUsage: (entityId, event) => queueTrack(entityId, event),
