@@ -1,4 +1,6 @@
+import { useState } from 'react';
 import ExploreBrowser from './ExploreBrowser.jsx';
+import CaseBuilder, { parseCaseWhen } from './CaseBuilder.jsx';
 
 const VIS_TYPES = [
   { value: 'single_value', label: 'Metric / KPI card' },
@@ -157,6 +159,7 @@ export default function TileEditorPanel({ tile, dashboardFilters, onChange, onCl
 // expressions can be read and fixed in-app — e.g. correcting a change formula's
 // operand order ("${past} - ${current}" → "${current} - ${past}").
 function TableCalcEditor({ query, onChange }) {
+  const [rawMode, setRawMode] = useState({}); // calc idx -> show raw expression
   const raw = query?.dynamic_fields;
   let list = [];
   if (Array.isArray(raw)) list = raw;
@@ -176,20 +179,36 @@ function TableCalcEditor({ query, onChange }) {
       <div style={divider} />
       <SectionTitle>Table calculations</SectionTitle>
       <div style={{ fontSize: 11.5, color: 'var(--muted)', margin: '5px 0 2px', lineHeight: 1.45 }}>
-        Formulas computed on the results (e.g. a change / % difference). Fields are referenced as <code>{'${field}'}</code>. Editing re-runs the preview.
+        Formulas computed on the results (e.g. a change, or buckets like “Local vs International”). Editing re-runs the preview.
       </div>
       {calcs.map((c) => {
         const idx = list.indexOf(c);
         const name = c.label || c.table_calculation || c.measure || c.dimension || `Calculation ${idx + 1}`;
+        // A bucketing case/when can be edited with the no-code builder; anything
+        // else (or when the user flips to "Expression") shows the raw formula.
+        const buildable = !!parseCaseWhen(c.expression);
+        const showRaw = rawMode[idx] || !buildable;
         return (
-          <div key={idx} style={{ marginTop: 8 }}>
-            <Label>{name}</Label>
-            <textarea
-              style={{ ...input, minHeight: 54, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12, resize: 'vertical', whiteSpace: 'pre-wrap' }}
-              value={c.expression}
-              spellCheck={false}
-              onChange={(e) => setExpr(idx, e.target.value)}
-            />
+          <div key={idx} style={{ marginTop: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Label>{name}</Label>
+              {buildable && (
+                <button
+                  onClick={() => setRawMode((m) => ({ ...m, [idx]: !m[idx] }))}
+                  style={{ marginLeft: 'auto', fontSize: 11, fontWeight: 600, color: 'var(--brand)', background: 'transparent', border: 'none', cursor: 'pointer', padding: '0 0 4px' }}
+                >{showRaw ? '◧ Builder' : '✎ Expression'}</button>
+              )}
+            </div>
+            {showRaw ? (
+              <textarea
+                style={{ ...input, minHeight: 54, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12, resize: 'vertical', whiteSpace: 'pre-wrap' }}
+                value={c.expression}
+                spellCheck={false}
+                onChange={(e) => setExpr(idx, e.target.value)}
+              />
+            ) : (
+              <CaseBuilder expression={c.expression} fields={query?.fields || []} onChange={(expr) => setExpr(idx, expr)} />
+            )}
           </div>
         );
       })}
