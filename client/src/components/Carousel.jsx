@@ -30,8 +30,12 @@ export default function Carousel({ carousel, filterValues, editable, onEditTile,
   // their fixed wrapping size.
   const cardSizeStyle = (w) => {
     if (isGrid) return { flex: `0 0 ${cardBasis(w)}`, width: cardBasis(w), height: cardH };
-    const min = isMobile ? 120 : 150;
-    return { flex: `1 1 ${w}px`, minWidth: Math.min(w, min), height: '100%', scrollSnapAlign: isMobile ? 'start' : undefined };
+    if (isMobile) {
+      // Fit 4 KPI cards across the phone width; a 5th+ scrolls into view.
+      const basis = `calc((100% - ${3 * GAP}px) / 4)`;
+      return { flex: `0 0 ${basis}`, width: basis, height: '100%', scrollSnapAlign: 'start' };
+    }
+    return { flex: `1 1 ${w}px`, minWidth: Math.min(w, 150), height: '100%' };
   };
   // A brand insertion bar on the card we'd drop before (or the row's end).
   const dropAccent = (tid, isLast) => {

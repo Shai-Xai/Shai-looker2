@@ -62,9 +62,10 @@ function StackedGrid({ tiles = [], carousels = [], filterValues }) {
             </div>
           );
         }
-        // A scrolling carousel: a compact capped swipe band.
+        // A scrolling carousel: a compact capped swipe band. Kept short on phones
+        // so four KPI cards sit in view without a tall band.
         return (
-          <div key={c.id} style={{ gridColumn: '1 / -1', height: Math.min(340, Math.max(220, it.h * 22)), background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 10, boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
+          <div key={c.id} style={{ gridColumn: '1 / -1', height: Math.min(230, Math.max(150, it.h * 16)), background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 10, boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
             <Carousel carousel={c} filterValues={filterValues} editable={false} />
           </div>
         );
