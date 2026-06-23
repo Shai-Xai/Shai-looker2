@@ -340,6 +340,7 @@ export default function EditorPage() {
             key={selectedTile.id}
             tile={selectedTile}
             dashboardFilters={def.filters}
+            filterValues={filterValues}
             onChange={updateTile}
             onClose={() => setSelectedTileId(null)}
           />
