@@ -1,6 +1,8 @@
 # Spec — Admin → Users section
 
-**Status:** ✅ built 2026-06-23 (uncommitted in working tree — review & push to ship) · **Drafted:** 2026-06-23
+**Status:** ✅ shipped to `main` 2026-06-23 · **Drafted:** 2026-06-23
+
+> All-users table + role filter (D3 = All). Role filter: All · Howler admins · Client logins.
 
 > Built with **full audit (D1 = B)**. New: `server/audit.js` (route→action middleware),
 > `user_actions` table + `last_login` (db.js), `GET /api/admin/users/:id` aggregator +
