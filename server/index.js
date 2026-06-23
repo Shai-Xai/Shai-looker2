@@ -2150,7 +2150,14 @@ async function buildFacts(user, entityId, force = false, alignDaysBefore = false
   // (each event's days-to-go), so it must not be computed once and reused.
   const dboKey = (p) => `${p.suiteId}|${p.def.id}`;
   const daysBeforeOverlays = {};
-  if (alignDaysBefore) for (const p of picks) if (!(dboKey(p) in daysBeforeOverlays)) daysBeforeOverlays[dboKey(p)] = await daysBeforeOverlayFor(p.def, user, p.suiteId, lockMaps[p.suiteId] || {});
+  if (alignDaysBefore) {
+    // Resolve each unique suite+dashboard overlay in parallel — every one is a
+    // Looker round-trip, so a sequential loop here serialised N calls before the
+    // (already-parallel) tile sweep could even start.
+    const uniq = []; const seenDbo = new Set();
+    for (const p of picks) { const k = dboKey(p); if (!seenDbo.has(k)) { seenDbo.add(k); uniq.push(p); } }
+    await Promise.all(uniq.map(async (p) => { daysBeforeOverlays[dboKey(p)] = await daysBeforeOverlayFor(p.def, user, p.suiteId, lockMaps[p.suiteId] || {}); }));
+  }
 
   const dropped = []; // tiles excluded from the facts, with the reason (logged below)
   const tiles = (await Promise.all(picks.slice(0, maxTiles).map(async (p) => {
@@ -2351,6 +2358,23 @@ async function generateBriefing(user, entityId, segment, { force = false } = {})
   if (!force) { const hit = cacheGet(briefCache, key, 6 * 3600e3); if (hit) return hit; }
   if (briefInflight.has(key)) return briefInflight.get(key); // coalesce concurrent (prewarm + real)
   const p = (async () => {
+    const { suites } = clientCatalogue(entityId);
+    // Resolve the event goals (North Star first) with the SAME rich progress the
+    // Goals page shows. Kick this off CONCURRENTLY with the fact sweep below —
+    // both make Looker round-trips, so overlapping them cuts cold-load latency —
+    // and resolve the goals themselves in parallel (not one await at a time).
+    const goalsP = (async () => {
+      try {
+        const gcaches = goalsApi.makeGoalCaches();
+        const picked = [];
+        for (const su of suites) {
+          for (const g of goalsApi.listGoals(su.id)) { picked.push({ g, suiteName: su.name }); if (picked.length >= 6) break; }
+          if (picked.length >= 6) break;
+        }
+        const resolved = await Promise.all(picked.map(async ({ g, suiteName }) => ({ ...(await goalsApi.attachProgress(g, user, gcaches)), suiteName })));
+        return resolved.sort((a, b) => (b.isNorthStar ? 1 : 0) - (a.isNorthStar ? 1 : 0)); // North Star first
+      } catch (e) { console.error('[briefing] goals failed', e.message); return []; }
+    })();
     // Read facts days-before-aligned (like-for-like to the same point in the
     // past event's cycle) wherever a dashboard has that sync configured — so the
     // briefing's comparisons match what the aligned dashboard shows.
@@ -2362,23 +2386,9 @@ async function generateBriefing(user, entityId, segment, { force = false } = {})
       lastVisit: prof.lastVisit,
       top: prof.top.filter((t) => byId[t.dashboardId]).map((t) => ({ title: byId[t.dashboardId].title, count: t.count })),
     };
-    const { suites } = clientCatalogue(entityId);
     const instructions = [aiInstructionsFor(null), briefingInstructionsFor(user, entityId, suites), timeDefaults()[segment]].filter(Boolean).join('\n\n');
     const msgs = recentMessages(entityId, user.id);
-    // Resolve the event goals (North Star first) with the SAME rich progress the Goals
-    // page shows, so the briefing can anchor on the goal and how it's tracking. Capped.
-    let goals = [];
-    try {
-      const gcaches = goalsApi.makeGoalCaches();
-      for (const su of suites) {
-        for (const g of goalsApi.listGoals(su.id)) {
-          goals.push({ ...(await goalsApi.attachProgress(g, user, gcaches)), suiteName: su.name });
-          if (goals.length >= 6) break;
-        }
-        if (goals.length >= 6) break;
-      }
-      goals.sort((a, b) => (b.isNorthStar ? 1 : 0) - (a.isNorthStar ? 1 : 0)); // North Star first
-    } catch (e) { console.error('[briefing] goals failed', e.message); }
+    const goals = await goalsP;
     const raw = await insights.briefHome({ tiles, profile: profileForAi, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), messages: msgs, capabilities: ACTION_CAPABILITIES, goals, today: todayLabel() });
     const link = (id) => (id && byId[id] ? { dashboardId: id, suiteId: byId[id].suiteId, label: `${byId[id].setName} → ${byId[id].title}` } : null);
     const msgIds = new Set(msgs.map((m) => m.id));
