@@ -1155,18 +1155,18 @@ function forkDashboardForSuite(suiteId, dashboardId, def, opts = {}) {
   const fork = updateDashboard(created.id, body);
 
   let setIds = [...(suite.setIds || [])];
+  const targetSet = opts.setId ? getSet(opts.setId) : null;
   if (opts.newSetName && String(opts.newSetName).trim()) {
     const set = createSet({ name: String(opts.newSetName).trim(), ownerEntityId: entityId });
     setSetDashboards(set.id, [{ id: fork.id, parentId: null }]);
     if (!setIds.includes(set.id)) setIds.push(set.id);
-  } else if (opts.setId) {
-    const set = getSet(opts.setId);
-    if (set && set.ownerEntityId === entityId) {
-      setSetDashboards(set.id, [...(set.dashboards || []), { id: fork.id, parentId: null }]);
-      if (!setIds.includes(set.id)) setIds.push(set.id);
-    }
+  } else if (targetSet && targetSet.ownerEntityId === entityId) {
+    setSetDashboards(targetSet.id, [...(targetSet.dashboards || []), { id: fork.id, parentId: null }]);
+    if (!setIds.includes(targetSet.id)) setIds.push(targetSet.id);
   } else {
-    // Default: replace the template wherever it lives in this suite's sets.
+    // Default (and the fallback when a given setId isn't a set this client owns —
+    // never leave the fork orphaned): replace the template wherever it lives in
+    // this suite's sets.
     setIds = setIds.map((sid) => {
       const set = getSet(sid);
       if (!set || !(set.dashboards || []).some((e) => e.id === dashboardId)) return sid;
