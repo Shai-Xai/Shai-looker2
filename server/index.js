@@ -352,6 +352,7 @@ app.get('/api/admin/users/:id', auth.requireAdmin, (req, res) => {
     memberships,
     profile: { top: used, lastVisit: profile.lastVisit },
     dashboards: { used, accessible, accessibleAll: u.role === 'admin' },
+    usageByClient: db.usageByClientForUser(u.id),
     activity: buildUserActivity(u.id),
   });
 });
@@ -435,6 +436,48 @@ function recentCommitsByDay(days = 14) {
   });
 }
 
+// Fetch recent commits from the GitHub API (the repo is public → no token needed).
+// Used in production, where the runtime has no usable git history (shallow clone).
+// Same shape as recentCommitsByDay: [{ date, sha, commits: [subject + trailers] }].
+async function commitsFromGitHub(days = 14) {
+  const repo = (db.getSetting('release_github_repo', 'Shai-Xai/Shai-looker2') || 'Shai-Xai/Shai-looker2').trim();
+  const token = (process.env.GITHUB_TOKEN || db.getSetting('github_token', '') || '').trim(); // optional (private repos / rate limits)
+  const sinceIso = new Date(Date.now() - Math.max(1, Math.min(90, days)) * 86400000).toISOString();
+  const headers = { Accept: 'application/vnd.github+json', 'User-Agent': 'howler-pulse', 'X-GitHub-Api-Version': '2022-11-28' };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const byDay = new Map(); // newest day first (GitHub returns newest-first)
+  for (let page = 1; page <= 5; page++) {
+    const url = `https://api.github.com/repos/${repo}/commits?since=${encodeURIComponent(sinceIso)}&per_page=100&page=${page}`;
+    const resp = await fetch(url, { headers });
+    if (!resp.ok) throw new Error(`GitHub API ${resp.status} for ${repo}`);
+    const arr = await resp.json();
+    if (!Array.isArray(arr) || arr.length === 0) break;
+    for (const c of arr) {
+      if ((c.parents || []).length > 1) continue; // skip merge commits (mirrors --no-merges)
+      const msg = String(c.commit?.message || '');
+      const [subject, ...rest] = msg.split('\n');
+      const date = String(c.commit?.committer?.date || c.commit?.author?.date || '').slice(0, 10);
+      if (!subject.trim() || !date) continue;
+      const trailers = rest.map((l) => l.trim()).filter((l) => /^(how-to|link)\s*:/i.test(l));
+      const line = subject.trim() + trailers.map((t) => `\n  ${t}`).join('');
+      if (!byDay.has(date)) byDay.set(date, { date, sha: c.sha, commits: [] }); // first record of a day = newest sha
+      byDay.get(date).commits.push(line);
+    }
+    if (arr.length < 100) break;
+  }
+  return [...byDay.values()];
+}
+
+// Unified commit source: local git in dev (full history), GitHub API in prod
+// (shallow clone / no .git). Falls back to GitHub whenever local git yields nothing.
+async function recentCommits(days = 14) {
+  try {
+    const local = await recentCommitsByDay(days);
+    if (local.length) return local;
+  } catch { /* no local git history (prod) — fall back to the GitHub API */ }
+  return commitsFromGitHub(days);
+}
+
 // Auto-populate: summarise the last N days of commits into draft release notes.
 // Only fills days that don't already have a note (manual or auto) — never
 // clobbers edits. New entries are drafts (three lenses) for an admin to review.
@@ -442,7 +485,7 @@ function recentCommitsByDay(days = 14) {
 async function generateReleaseNoteDrafts(days = 14) {
   const apiKey = adminAnthropicKey();
   if (!insights.isConfigured(apiKey)) return { created: 0, items: [], message: 'AI not configured.' };
-  const commitDays = await recentCommitsByDay(days);
+  const commitDays = await recentCommits(days);
   const have = new Set(db.listReleaseNotes().map((n) => n.date));
   const todo = commitDays.filter((d) => !have.has(d.date));
   if (todo.length === 0) {
