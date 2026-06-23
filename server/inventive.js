@@ -31,7 +31,14 @@ function mount(app, { db, auth, homeEntityFor }) {
     if (!entityId) return res.status(400).json({ error: 'No client context for the AI workspace.' });
     const entity = db.getEntity(entityId);
     if (!entity) return res.status(404).json({ error: 'Client not found.' });
-    const { firstname, lastname } = inventiveName(req.user.email);
+    // Prefer the user's saved profile name (First name / Surname from their Pulse
+    // profile); fall back to splitting the email local-part only when the profile
+    // has no first name yet. A set first name means a blank surname is intentional,
+    // so we don't pull a derived one from the email in that case.
+    const profileFirst = (req.user.firstName || '').trim();
+    const { firstname, lastname } = profileFirst
+      ? { firstname: profileFirst, lastname: (req.user.lastName || '').trim() }
+      : inventiveName(req.user.email);
     // Both the workspace display name and the externalRefId can be overridden per
     // client (Admin → client settings). Name blank inherits the Pulse client name.
     // The ref override exists for the manual, no-integration setup: blank uses the
