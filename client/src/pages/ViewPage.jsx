@@ -38,16 +38,12 @@ export default function ViewPage() {
   const scopeEntityId = setInfo?.entityId || previewEntityId || (isAdmin ? null : ((user?.entities || [])[0]?.id || (user?.entityIds || [])[0] || null));
   const [locked, setLocked] = useState({});
   const [filtersOpen, setFiltersOpen] = useState(false);
-  // Admin "edit locks" mode: change which filters are locked on THIS dashboard
-  // for this client, written back to suite.dashboardLocks (same store the suite
-  // editor uses). lockDraft = the set of filter names locked on this dashboard.
-  const [lockEditing, setLockEditing] = useState(false);
-  const [lockDraft, setLockDraft] = useState(() => new Set());
+  // Admin per-dashboard lock editing (in-context): a locked filter is read-only
+  // by default; an admin clicks its 🔒 to unlock + edit, then 🔒 again to re-lock
+  // (which saves to suite.dashboardLocks — the same store the suite editor uses).
+  const [editingLocks, setEditingLocks] = useState(() => new Set()); // filter names unlocked for edit
+  const [lockSavingName, setLockSavingName] = useState('');
   const [lockStatus, setLockStatus] = useState('');
-  const [lockSaving, setLockSaving] = useState(false);
-  const lockEditingRef = useRef(false);
-  const lockSnapshotRef = useRef(null);
-  useEffect(() => { lockEditingRef.current = lockEditing; }, [lockEditing]);
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [entityDefault, setEntityDefault] = useState(null); // the client default (if any), for reset
   const [hasUserView, setHasUserView] = useState(false);    // does this user have a saved view?
@@ -149,10 +145,6 @@ export default function ViewPage() {
 
   const handleFilterChange = useCallback((name, value) => {
     setFilterValues((prev) => ({ ...prev, [name]: value }));
-    // In admin lock-edit mode, changing a filter's value implies "lock it here".
-    if (lockEditingRef.current && value && value !== ANY_VALUE) {
-      setLockDraft((prev) => (prev.has(name) ? prev : new Set(prev).add(name)));
-    }
   }, []);
 
   // Keep an open dashboard current: soft-refresh when the tab regains focus and
@@ -267,7 +259,7 @@ export default function ViewPage() {
   // client pin entity-wide defaults (needs the previewed entity).
   const pinsEnabled = !!suiteId && insightsEnabled && (!isAdmin || !!previewEntityId);
 
-  // ── Admin per-dashboard lock editing ──────────────────────────────────────
+  // ── Admin per-dashboard lock editing (in-context) ─────────────────────────
   // Resolve a filter's value in a lock map by its name or underlying field
   // (mirrors buildFilters' matching), so we can read the current per-dashboard
   // override and the suite-wide value for each dashboard filter.
@@ -278,53 +270,56 @@ export default function ViewPage() {
     const field = (f.field || f.dimension || '').trim().toLowerCase();
     return norm[nameKey] != null ? norm[nameKey] : (field ? norm[field] : undefined);
   };
-  const perDashLockValue = (f) => lockLookup(setInfo?.dashboardLocks?.[id], f);
   const inheritedValueFor = (f) => { const v = lockLookup(setInfo?.lockedFilters, f); return (v != null && v !== '') ? v : (f.default_value || ''); };
-  const enterLockEdit = () => {
-    lockSnapshotRef.current = { values: { ...filterValues }, locked: { ...locked } };
-    const init = new Set();
-    for (const f of def.filters || []) if (perDashLockValue(f) != null) init.add(f.name);
-    setLockDraft(init);
-    setLockStatus('');
-    setLockEditing(true);
-    setFiltersOpen(true);
-  };
-  const toggleLockHere = (name, on) => {
-    setLockDraft((prev) => { const n = new Set(prev); if (on) n.add(name); else n.delete(name); return n; });
-    if (!on) { const f = (def.filters || []).find((x) => x.name === name); if (f) setFilterValues((v) => ({ ...v, [name]: inheritedValueFor(f) })); }
-  };
-  const cancelLockEdit = () => {
-    const snap = lockSnapshotRef.current;
-    if (snap) { setFilterValues(snap.values); setLocked(snap.locked); }
-    setLockEditing(false);
-    setLockStatus('');
-  };
-  const saveLocks = async () => {
-    setLockSaving(true);
+  const filterByName = (name) => (def.filters || []).find((x) => x.name === name) || null;
+  const hasOverride = (name) => { const f = filterByName(name); return f ? (lockLookup(setInfo?.dashboardLocks?.[id], f) != null) : false; };
+  const flashLock = (m) => { setLockStatus(m); setTimeout(() => setLockStatus(''), 1800); };
+  // Persist this dashboard's lock for ONE filter to `value`. Rebuilds the
+  // dashboard's full (name-keyed) lock map from the current overrides + this
+  // change; a value equal to the suite-wide lock (or empty) drops the override so
+  // the filter inherits the suite again.
+  const saveDashLock = async (f, value) => {
+    setLockSavingName(f.name);
+    const cur = setInfo?.dashboardLocks?.[id] || {};
     const map = {};
-    for (const f of def.filters || []) {
-      if (!lockDraft.has(f.name)) continue;
-      const v = filterValues[f.name];
-      if (v != null && String(v).trim() !== '' && v !== ANY_VALUE) map[f.name] = String(v);
+    for (const ff of def.filters || []) {
+      if (ff.name === f.name) continue;
+      const pv = lockLookup(cur, ff);
+      if (pv != null && String(pv) !== '') map[ff.name] = String(pv);
     }
+    const suiteV = lockLookup(setInfo?.lockedFilters, f);
+    const keep = value != null && String(value).trim() !== '' && value !== ANY_VALUE && String(value) !== String(suiteV ?? '');
+    if (keep) map[f.name] = String(value);
     try {
       await api.setSuiteDashboardLocks(suiteId, id, map);
       const nextSuite = { ...setInfo, dashboardLocks: { ...(setInfo?.dashboardLocks || {}), [id]: map } };
       setSetInfo(nextSuite);
-      // Re-derive locked state, keeping current non-locked values as the overlay.
       const { vals, lockedMap } = buildFilters(def, nextSuite, filterValues);
       setFilterValues(vals); setLocked(lockedMap);
-      setLockEditing(false);
-      setLockStatus('Locks saved ✓');
-      setTimeout(() => setLockStatus(''), 2000);
-    } catch {
-      setLockStatus('Could not save');
-    } finally { setLockSaving(false); }
+      flashLock(keep ? 'Locked ✓' : 'Now follows the suite');
+      return true;
+    } catch { flashLock('Could not save'); return false; }
+    finally { setLockSavingName(''); }
+  };
+  const onUnlockFilter = (name) => { setEditingLocks((p) => new Set(p).add(name)); setFiltersOpen(true); };
+  const onRelockFilter = async (name) => {
+    const f = filterByName(name); if (!f) return;
+    const ok = await saveDashLock(f, filterValues[name]);
+    if (ok) setEditingLocks((p) => { const n = new Set(p); n.delete(name); return n; });
+  };
+  const onLockHereFilter = async (name) => { const f = filterByName(name); if (f) await saveDashLock(f, filterValues[name]); };
+  const onInheritFilter = async (name) => {
+    const f = filterByName(name); if (!f) return;
+    const iv = inheritedValueFor(f);
+    setFilterValues((v) => ({ ...v, [name]: iv }));
+    const ok = await saveDashLock(f, iv); // equals the suite value → drops the override
+    if (ok) setEditingLocks((p) => { const n = new Set(p); n.delete(name); return n; });
   };
   const lockEdit = (isAdmin && suiteId && !keepImported) ? {
-    canEdit: true, active: lockEditing, saving: lockSaving, status: lockStatus,
-    onEnter: enterLockEdit, onSave: saveLocks, onCancel: cancelLockEdit,
-    isLockedHere: (name) => lockDraft.has(name), onToggle: toggleLockHere,
+    canEdit: true,
+    isEditing: (name) => editingLocks.has(name),
+    onUnlock: onUnlockFilter, onRelock: onRelockFilter, onLockHere: onLockHereFilter, onInherit: onInheritFilter,
+    hasOverride, savingName: lockSavingName, status: lockStatus,
   } : null;
 
   return (
@@ -393,7 +388,7 @@ export default function ViewPage() {
         {hasFilters && (
           <FilterBar
             filters={def.filters} values={filterValues} onChange={handleFilterChange} locked={locked}
-            open={filtersOpen || lockEditing} onClose={() => setFiltersOpen(false)} viewActions={viewActions} lockEdit={lockEdit}
+            open={filtersOpen} onClose={() => setFiltersOpen(false)} viewActions={viewActions} lockEdit={lockEdit}
           />
         )}
 
