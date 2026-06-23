@@ -31,10 +31,6 @@ export default function EditorPage() {
   // load that client's per-tile locks so the 🔒 control can manage them here.
   const [suiteTileLocks, setSuiteTileLocks] = useState({});
   const [suiteEntityId, setSuiteEntityId] = useState(null);
-  useEffect(() => {
-    if (!suiteId) { setSuiteTileLocks({}); setSuiteEntityId(null); return; }
-    api.mySuite(suiteId).then((s) => { setSuiteTileLocks(s?.tileLocks || {}); setSuiteEntityId(s?.entityId || null); }).catch(() => {});
-  }, [suiteId]);
   const saveTileLock = async (tileId, map) => {
     try {
       await api.setSuiteTileLocks(suiteId, tileId, map);
@@ -50,26 +46,31 @@ export default function EditorPage() {
   const [filterValues, setFilterValues] = useState({});
 
   useEffect(() => {
-    api.getDashboard(id)
-      .then((data) => {
+    // When editing inside a client/suite context, build the SAME filter values
+    // the client actually sees on that dashboard: suite-wide locks → this
+    // dashboard's per-suite locks → client default → the user's saved view. The
+    // live values passed via router state (in-session changes) win last. This
+    // makes the editor's FilterBar + tile previews reflect the real dashboard,
+    // not just each filter's template default_value.
+    const suiteP = suiteId ? api.mySuite(suiteId).catch(() => null) : Promise.resolve(null);
+    const savedP = suiteId
+      ? api.getDashboardFilters(id, suiteId).catch(() => ({ user: null, entityDefault: null }))
+      : Promise.resolve({ user: null, entityDefault: null });
+    Promise.all([api.getDashboard(id), suiteP, savedP])
+      .then(([data, suite, saved]) => {
         // Older dashboards predate carousels — normalise so render code is safe.
         data.carousels = data.carousels || [];
         data.gridAfter = data.gridAfter || 0;
         setDef(data);
-        const defaults = {};
-        for (const f of data.filters || []) defaults[f.name] = f.default_value || '';
-        // Seed with the dashboard's own defaults, then overlay the live values
-        // passed in from the client view (only for filters this dashboard has).
-        if (passedFilters) {
-          for (const f of data.filters || []) {
-            if (passedFilters[f.name] !== undefined) defaults[f.name] = passedFilters[f.name];
-          }
-        }
-        setFilterValues(defaults);
+        setSuiteTileLocks(suite?.tileLocks || {});
+        setSuiteEntityId(suite?.entityId || null);
+        const overlay = { ...(saved?.entityDefault || {}), ...(saved?.user || {}) }; // user view wins
+        setFilterValues(buildClientFilters(data, suite, overlay, passedFilters));
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [id]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, suiteId]);
 
   // Mutate the definition locally and mark dirty.
   const mutate = useCallback((updater) => {
@@ -491,3 +492,34 @@ const viewBtn = { padding: '8px 16px', background: 'rgba(0,0,0,0.05)', border: '
 const saveBtn = { padding: '8px 18px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer' };
 const aiOverlay = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 500, padding: 20 };
 const aiCard = { width: 'min(560px, 96vw)', background: 'var(--card)', borderRadius: 14, boxShadow: '0 12px 48px rgba(0,0,0,0.25)', padding: 22 };
+
+// Reproduce the client's effective filter values for the editor preview, mirroring
+// ViewPage.buildFilters: suite-wide locks → this dashboard's per-suite locks win
+// over the template default_value; then the saved overlay (client default → user
+// view) fills non-locked filters; finally the live values passed via router state
+// (in-session changes from the view the admin came from) win on non-locked filters.
+function buildClientFilters(data, suite, overlay, live) {
+  // "Keep imported filters" dashboards ignore locks/saved/defaults entirely.
+  if (data?.keepImportedFilters || data?.folderKeepImported) {
+    const vals = {};
+    for (const f of data.filters || []) vals[f.name] = f.default_value || '';
+    if (live) for (const f of data.filters || []) if (live[f.name] !== undefined) vals[f.name] = live[f.name];
+    return vals;
+  }
+  const dash = data?.id;
+  const lockMap = { ...(suite?.lockedFilters || {}), ...((suite?.dashboardLocks && dash != null && suite.dashboardLocks[dash]) || {}) };
+  const norm = {};
+  for (const [k, v] of Object.entries(lockMap)) norm[k.trim().toLowerCase()] = v;
+  const vals = {};
+  const locked = {};
+  for (const f of data.filters || []) {
+    vals[f.name] = f.default_value || '';
+    const field = (f.field || f.dimension || '').trim().toLowerCase();
+    const nameKey = (f.name || '').trim().toLowerCase();
+    const v = norm[nameKey] != null ? norm[nameKey] : (field ? norm[field] : undefined);
+    if (v != null) { vals[f.name] = v; if (v !== '') locked[f.name] = true; }
+  }
+  if (overlay) for (const [k, v] of Object.entries(overlay)) { if (k in vals && !locked[k] && typeof v === 'string') vals[k] = v; }
+  if (live) for (const [k, v] of Object.entries(live)) { if (k in vals && !locked[k]) vals[k] = v; }
+  return vals;
+}
