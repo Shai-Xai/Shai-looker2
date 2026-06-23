@@ -8,6 +8,7 @@ import TileLibraryPicker from '../components/editor/TileLibraryPicker.jsx';
 import BackButton from '../components/BackButton.jsx';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/auth.jsx';
+import { ScopeProvider } from '../lib/ScopeContext.jsx';
 
 export default function EditorPage() {
   const { id, suiteId } = useParams();
@@ -21,6 +22,21 @@ export default function EditorPage() {
   const [error, setError] = useState(null);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  // When the editor is opened in a suite context (/suite/:suiteId/d/:id/edit),
+  // load that client's per-tile locks so the 🔒 control can manage them here.
+  const [suiteTileLocks, setSuiteTileLocks] = useState({});
+  const [suiteEntityId, setSuiteEntityId] = useState(null);
+  useEffect(() => {
+    if (!suiteId) { setSuiteTileLocks({}); setSuiteEntityId(null); return; }
+    api.mySuite(suiteId).then((s) => { setSuiteTileLocks(s?.tileLocks || {}); setSuiteEntityId(s?.entityId || null); }).catch(() => {});
+  }, [suiteId]);
+  const saveTileLock = async (tileId, map) => {
+    try {
+      await api.setSuiteTileLocks(suiteId, tileId, map);
+      setSuiteTileLocks((prev) => { const n = { ...prev }; if (map && Object.keys(map).length) n[tileId] = map; else delete n[tileId]; return n; });
+      return true;
+    } catch { return false; }
+  };
   const [selectedTileId, setSelectedTileId] = useState(null);
   const [showFilters, setShowFilters] = useState(false);
   const [showLibrary, setShowLibrary] = useState(false);
@@ -280,6 +296,7 @@ export default function EditorPage() {
   });
 
   return (
+    <ScopeProvider suiteId={suiteId || null} entityId={suiteEntityId} dashboardId={id} tileLocks={suiteTileLocks} lockFilters={def.filters || []} canLockTiles={isAdmin && !!suiteId} onSaveTileLock={saveTileLock}>
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
       {/* Toolbar */}
       <div style={toolbar}>
@@ -383,6 +400,7 @@ export default function EditorPage() {
         <DaysBeforeSyncModal def={def} onChange={(sync) => mutate((d) => ({ ...d, daysBeforeSync: sync }))} onClose={() => setShowDaysSync(false)} />
       )}
     </div>
+    </ScopeProvider>
   );
 }
 

@@ -727,6 +727,19 @@ require('./dashboards').mount(app, {
 // SHARED, scope-enforced query path (so the goal value == what the dashboard
 // shows, and the per-tenant scope can't be bypassed). The suite's filter locks
 // (which event) are applied exactly as a dashboard view would apply them.
+// Per-tile lock overrides (queryField -> value) for ONE tile, from
+// suite.tileLocks. Passed as tileQueryBody's extraOverrides so a server-side
+// read (goals, curves) honours the same per-tile lock the dashboard applies.
+function tileLockOverrides(su, tile) {
+  const lock = (su && su.tileLocks && su.tileLocks[tile.id]) || {};
+  const o = {};
+  for (const [filterName, queryField] of Object.entries(tile.listenTo || {})) {
+    const v = lock[filterName];
+    if (v != null && String(v).trim() !== '') o[queryField] = String(v).trim();
+  }
+  return o;
+}
+
 async function resolveTileValue({ dashboardId, tileId, user, suiteId }) {
   const def = db.getDashboard(dashboardId);
   if (!def) return null;
@@ -739,7 +752,7 @@ async function resolveTileValue({ dashboardId, tileId, user, suiteId }) {
   const su = db.getSuite(suiteId);
   const entityView = su?.entityId ? (db.getFilterView('entity', su.entityId, dashboardId) || {}) : {};
   const lockMap = { ...expandLockMap(entityView), ...expandLockMap(db.lockedFiltersForSuite(suiteId, dashboardId)) };
-  const body = await tileQueryBody(tile, def, user, suiteId, lockMap);
+  const body = await tileQueryBody(tile, def, user, suiteId, lockMap, tileLockOverrides(su, tile));
   if (!body) return null; // scope denied or non-queryable tile
   // Drop any "days before event" / days-to-go clip so a running-total KPI reads the
   // FULL to-date figure the dashboard headline shows (e.g. Total Tickets Sold 44,806),
@@ -799,7 +812,7 @@ async function resolveTileSeries({ dashboardId, tileId, user, suiteId }) {
   const su = db.getSuite(suiteId);
   const entityView = su?.entityId ? (db.getFilterView('entity', su.entityId, dashboardId) || {}) : {};
   const lockMap = { ...expandLockMap(entityView), ...expandLockMap(db.lockedFiltersForSuite(suiteId, dashboardId)) };
-  const body = await tileQueryBody(tile, def, user, suiteId, lockMap);
+  const body = await tileQueryBody(tile, def, user, suiteId, lockMap, tileLockOverrides(su, tile));
   if (!body) return [];
   body.filters = stripDaysBeforeFilters(body.filters, def, tile).filters; // full curve to event day
   body.limit = Math.max(Number(body.limit) || 0, 1000); // enough rows for a full curve
@@ -853,7 +866,7 @@ async function resolveTileSeriesAll({ dashboardId, tileId, user, suiteId }) {
   const su = db.getSuite(suiteId);
   const entityView = su?.entityId ? (db.getFilterView('entity', su.entityId, dashboardId) || {}) : {};
   const lockMap = { ...expandLockMap(entityView), ...expandLockMap(db.lockedFiltersForSuite(suiteId, dashboardId)) };
-  const body = await tileQueryBody(tile, def, user, suiteId, lockMap);
+  const body = await tileQueryBody(tile, def, user, suiteId, lockMap, tileLockOverrides(su, tile));
   if (!body) return null;
   const stripResult = stripDaysBeforeFilters(body.filters, def, tile);
   body.filters = stripResult.filters; // full curve to event day

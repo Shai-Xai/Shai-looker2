@@ -28,7 +28,7 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
   // Admin per-tile lock affordance: only when in a suite, the tile is queryable
   // and it actually listens to a dashboard filter (otherwise there's nothing to lock).
   const tileLockCount = Object.keys(tileLocks?.[tile.id] || {}).length;
-  const canLockThisTile = !!(canLockTiles && !editable && tile.type !== 'text' && Object.keys(tile.listenTo || {}).length > 0 && onSaveTileLock);
+  const canLockThisTile = !!(canLockTiles && editable && tile.type !== 'text' && Object.keys(tile.listenTo || {}).length > 0 && onSaveTileLock);
   const { can } = useAccess();
   const isMobile = useIsMobile();
   const [showInsight, setShowInsight] = useState(false);
@@ -130,7 +130,6 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
               <InsightButton onClick={openInsight} isMobile={isMobile} />
             </>
           )}
-          {canLockThisTile && (!isMobile || tapped) && <LockTileButton onClick={() => setShowTileLock(true)} count={tileLockCount} isMobile={isMobile} />}
           {editable && (
             <span style={{ display: 'flex', gap: 4, alignItems: 'center' }} onMouseDown={(e) => e.stopPropagation()}>
               {inCarousel && <ReorderGrip tileId={tile.id} />}
@@ -138,6 +137,7 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
               <IconBtn title="Duplicate" onClick={onDuplicate}>⧉</IconBtn>
               {onMoveOut && <IconBtn title="Move out to the dashboard grid" onClick={onMoveOut}>⤴</IconBtn>}
               {onToggleHide && <IconBtn title={tile.hidden ? 'Show to viewers' : 'Hide from viewers'} onClick={onToggleHide}>{tile.hidden ? <EyeOff /> : <Eye />}</IconBtn>}
+              {canLockThisTile && <LockTileButton onClick={() => setShowTileLock(true)} count={tileLockCount} isMobile={isMobile} />}
               <IconBtn title="Delete" onClick={onRemove} danger>✕</IconBtn>
             </span>
           )}
@@ -164,7 +164,6 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
           </>
         )}
         {!editable && (!isMobile || tapped) && canSegment && !showHeader && <SegmentButton onClick={() => setShowSegment(true)} isMobile={isMobile} corner />}
-        {canLockThisTile && (!isMobile || tapped) && !showHeader && <LockTileButton onClick={() => setShowTileLock(true)} count={tileLockCount} isMobile={isMobile} corner />}
         {/* Editable metric tile (no header): the move handle + edit controls float
             in the top-RIGHT corner, so the value below stays fully visible. The
             move handle reorders within a carousel (⠿) or moves on the grid (✥). */}
@@ -177,6 +176,7 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
             <IconBtn title="Duplicate" onClick={onDuplicate}>⧉</IconBtn>
             {onMoveOut && <IconBtn title="Move out to the dashboard grid" onClick={onMoveOut}>⤴</IconBtn>}
             {onToggleHide && <IconBtn title={tile.hidden ? 'Show to viewers' : 'Hide from viewers'} onClick={onToggleHide}>{tile.hidden ? <EyeOff /> : <Eye />}</IconBtn>}
+            {canLockThisTile && <LockTileButton onClick={() => setShowTileLock(true)} count={tileLockCount} isMobile={isMobile} />}
             <IconBtn title="Delete" onClick={onRemove} danger>✕</IconBtn>
           </span>
         )}
