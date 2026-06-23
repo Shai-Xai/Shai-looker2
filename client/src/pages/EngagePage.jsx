@@ -58,7 +58,7 @@ export default function EngagePage() {
           sticks to the top of the scroll area so it stays in reach while the
           tab's content scrolls under it. Page-bg background masks that content;
           negative side margins + padding let it span the main's edge padding. */}
-      <div style={{ position: 'sticky', top: 0, zIndex: 5, display: 'flex', gap: 6, overflowX: 'auto', borderBottom: '1px solid var(--hairline)', marginBottom: 18, marginLeft: -22, marginRight: -22, padding: '6px 22px 0', background: 'var(--bg)', WebkitOverflowScrolling: 'touch' }}>
+      <div className="no-scrollbar" style={{ position: 'sticky', top: 0, zIndex: 5, display: 'flex', gap: 6, overflowX: 'auto', borderBottom: '1px solid var(--hairline)', marginBottom: 18, marginLeft: -22, marginRight: -22, padding: '6px 22px 0', background: 'var(--bg)', WebkitOverflowScrolling: 'touch' }}>
         {TABS.map((t) => {
           const on = t.key === active;
           return (

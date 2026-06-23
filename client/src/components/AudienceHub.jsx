@@ -53,7 +53,10 @@ export default function AudienceHub({ entityId }) {
   };
   // Load the active channel's live platform list when it's connected.
   useEffect(() => {
-    if (data && data[active]?.configured) loadPlatform(active);
+    if (data && data[active]?.configured) {
+      loadPlatform(active);
+      if (verify[active] === undefined) doVerify(active); // surface the account profile name without a click
+    }
     // eslint-disable-next-line
   }, [active, data]);
 
@@ -95,11 +98,13 @@ export default function AudienceHub({ entityId }) {
   const platById = {}; for (const a of (plat?.audiences || [])) platById[a.audienceId] = a;
   const external = (plat?.audiences || []).filter((a) => a.audienceId && !pulseIds.has(a.audienceId));
   const vr = verify[active];
+  const accountId = (ch && (ch.advertiserId || ch.adAccountId)) || '';
+  const accountName = (vr && vr !== 'checking' && vr.ok && vr.account) ? vr.account : '';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       {/* Channel sub-tabs */}
-      <div style={subTabBar}>
+      <div className="no-scrollbar" style={subTabBar}>
         {CHANNEL_ORDER.map((key) => {
           const p = PLATFORMS[key]; const cch = data[key]; const on = key === active;
           return (
@@ -152,6 +157,7 @@ export default function AudienceHub({ entityId }) {
               <button onClick={() => doVerify(active)} disabled={vr === 'checking'} style={chip}>{vr === 'checking' ? 'Checking…' : 'Verify connection'}</button>
               {ch.audiencesUrl && <a href={ch.audiencesUrl} target="_blank" rel="noreferrer" style={link}>Open in {meta.label} ↗</a>}
             </div>
+            {(accountName || accountId) && <div style={{ ...muted, fontSize: 12.5, marginTop: 4 }}>Account: <b style={{ color: 'var(--text)' }}>{accountName || accountId}</b>{accountName && accountId ? ` · ${accountId}` : ''}</div>}
             {ch.lastAt && <div style={{ ...muted, fontSize: 12, marginTop: 4 }}>Last activity {when(ch.lastAt)}</div>}
             {vr && vr !== 'checking' && (
               <div style={{ fontSize: 12.5, marginTop: 8, color: vr.ok ? 'var(--success,#10b981)' : 'var(--error,#ef4444)' }}>

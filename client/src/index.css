@@ -286,6 +286,9 @@ input::placeholder, textarea::placeholder { color: #b0b0b6; }
   scrollbar-width: none;
 }
 .subtabs::-webkit-scrollbar { display: none; }
+/* Generic: hide the scrollbar on a swipeable tab/chip row (keeps swipe + wheel). */
+.no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
 /* Carousel tile track — hide the horizontal scrollbar (the ‹ › arrows + swipe
    handle scrolling); keeps the band clean. */
 .howler-carousel-track { scrollbar-width: none; -ms-overflow-style: none; }
