@@ -124,6 +124,9 @@ function clearMembers(entityId, segmentId) {
 
 // ── hashing (SHA-256 of normalised id, same spec as Meta) ──
 const sha256 = (s) => crypto.createHash('sha256').update(s, 'utf8').digest('hex');
+// MD5 of the raw upload body — TikTok's file/upload `file_signature` is an
+// integrity checksum of the FILE (not the member-hash algorithm), and must be MD5.
+const md5 = (s) => crypto.createHash('md5').update(s, 'utf8').digest('hex');
 const hashEmail = (e) => { const v = String(e || '').trim().toLowerCase(); return v ? sha256(v) : ''; };
 function hashPhone(raw, defaultCc = '27') {
   let s = String(raw || '').replace(/[^\d+]/g, '');
@@ -164,7 +167,7 @@ function multipart(fields, file) {
 async function uploadFile({ advertiserId, token, calculateType, values }) {
   const content = values.join('\n');
   const { body, contentType } = multipart(
-    { advertiser_id: advertiserId, calculate_type: calculateType, file_signature: sha256(content) },
+    { advertiser_id: advertiserId, calculate_type: calculateType, file_signature: md5(content) },
     { field: 'file', filename: 'audience.csv', content },
   );
   const res = await fetch(`${BASE}/dmp/custom_audience/file/upload/`, { method: 'POST', headers: { 'Access-Token': token, 'Content-Type': contentType }, body });
