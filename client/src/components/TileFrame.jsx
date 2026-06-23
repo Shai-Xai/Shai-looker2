@@ -19,7 +19,7 @@ import { useIsMobile } from '../lib/useIsMobile.js';
 
 // Renders a single tile (vis or text). In edit mode it shows hover controls
 // (edit / duplicate / delete) and a drag handle on the title bar.
-export default function TileFrame({ tile, filterValues, editable, onEdit, onDuplicate, onRemove, onMoveOut }) {
+export default function TileFrame({ tile, filterValues, editable, onEdit, onDuplicate, onRemove, onMoveOut, inCarousel }) {
   const { data, loading, error } = useTileData(tile, filterValues);
   const { insightsEnabled } = useAuth();
   const { entityId, dashboardId } = useScope();
@@ -88,7 +88,10 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
     >
       {showHeader && (
         <div
-          className={editable ? 'tile-drag-handle' : undefined}
+          // Inside a scrolling carousel the tile must NOT carry the grid's
+          // drag-handle class — that would drag the whole carousel. Reorder there
+          // is via the ⠿ grip instead.
+          className={editable && !inCarousel ? 'tile-drag-handle' : undefined}
           style={{
             padding: '10px 14px',
             fontSize: 13,
@@ -100,7 +103,7 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
             display: 'flex',
             alignItems: 'center',
             gap: 8,
-            cursor: editable ? 'move' : 'default',
+            cursor: editable && !inCarousel ? 'move' : 'default',
           }}
         >
           <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -114,7 +117,8 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
             </>
           )}
           {editable && (
-            <span style={{ display: 'flex', gap: 4 }} onMouseDown={(e) => e.stopPropagation()}>
+            <span style={{ display: 'flex', gap: 4, alignItems: 'center' }} onMouseDown={(e) => e.stopPropagation()}>
+              {inCarousel && <ReorderGrip tileId={tile.id} />}
               <IconBtn title="Edit" onClick={onEdit}>✎</IconBtn>
               <IconBtn title="Duplicate" onClick={onDuplicate}>⧉</IconBtn>
               {onMoveOut && <IconBtn title="Move out to the dashboard grid" onClick={onMoveOut}>⤴</IconBtn>}
@@ -125,12 +129,14 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
       )}
 
       <div style={{ flex: 1, minHeight: 0, position: 'relative', padding: tile.type === 'text' ? 12 : 0 }}>
-        {editable && (
+        {/* Grid/section tiles get a top-right ⠿ to drag INTO a carousel. Tiles
+            already in a carousel reorder via the grip in their control cluster. */}
+        {editable && !inCarousel && (
           <span
             draggable
             onDragStart={(e) => { e.dataTransfer.setData('text/plain', tile.id); e.dataTransfer.effectAllowed = 'move'; }}
             title="Drag into a carousel"
-            style={{ position: 'absolute', top: 6, left: 6, zIndex: 6, cursor: 'grab', fontSize: 12, color: '#999', background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 5, padding: '1px 5px', lineHeight: 1.3 }}
+            style={{ position: 'absolute', top: 6, right: 6, zIndex: 6, cursor: 'grab', fontSize: 12, color: '#999', background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 5, padding: '1px 5px', lineHeight: 1.3 }}
           >⠿</span>
         )}
         {/* No header (metric tiles): the insight button floats in the corner,
@@ -142,11 +148,14 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
           </>
         )}
         {!editable && canSegment && !showHeader && <SegmentButton onClick={() => setShowSegment(true)} isMobile={isMobile} corner />}
-        {/* Editable metric tile (no header): a move handle + edit controls float in
-            the top corners, so the value below stays fully visible. */}
+        {/* Editable metric tile (no header): the move handle + edit controls float
+            in the top-LEFT corner, so the value below stays fully visible. The
+            move handle reorders within a carousel (⠿) or moves on the grid (✥). */}
         {editable && !showHeader && (
-          <span style={{ position: 'absolute', top: 6, right: 6, zIndex: 7, display: 'flex', gap: 4, alignItems: 'center', background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 8, padding: 2 }}>
-            <span className="tile-drag-handle" title="Drag to move" style={{ cursor: 'move', color: '#999', fontSize: 13, padding: '2px 5px', lineHeight: 1.2 }}>✥</span>
+          <span style={{ position: 'absolute', top: 6, left: 6, zIndex: 7, display: 'flex', gap: 4, alignItems: 'center', background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 8, padding: 2 }} onMouseDown={(e) => e.stopPropagation()}>
+            {inCarousel
+              ? <ReorderGrip tileId={tile.id} />
+              : <span className="tile-drag-handle" title="Drag to move" style={{ cursor: 'move', color: '#999', fontSize: 13, padding: '2px 5px', lineHeight: 1.2 }}>✥</span>}
             <IconBtn title="Edit" onClick={onEdit}>✎</IconBtn>
             <IconBtn title="Duplicate" onClick={onDuplicate}>⧉</IconBtn>
             {onMoveOut && <IconBtn title="Move out to the dashboard grid" onClick={onMoveOut}>⤴</IconBtn>}
@@ -191,6 +200,20 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
         />
       )}
     </div>
+  );
+}
+
+// Drag handle for reordering a tile within a carousel (HTML5 drag; the carousel
+// reads the id on drop). Deliberately NOT a .tile-drag-handle so it never drags
+// the parent carousel.
+function ReorderGrip({ tileId }) {
+  return (
+    <span
+      draggable
+      onDragStart={(e) => { e.dataTransfer.setData('text/plain', tileId); e.dataTransfer.effectAllowed = 'move'; }}
+      title="Drag to reorder"
+      style={{ cursor: 'grab', color: '#999', fontSize: 13, padding: '2px 5px', lineHeight: 1.2 }}
+    >⠿</span>
   );
 }
 

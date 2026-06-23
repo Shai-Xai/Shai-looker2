@@ -136,6 +136,7 @@ export default function Carousel({ carousel, filterValues, editable, onEditTile,
                     tile={t}
                     filterValues={filterValues}
                     editable={editable}
+                    inCarousel={!isGrid}
                     onEdit={() => onEditTile?.(t.id)}
                     onRemove={() => onRemoveTile?.(t.id)}
                     onDuplicate={() => onDuplicateTile?.(t.id)}
