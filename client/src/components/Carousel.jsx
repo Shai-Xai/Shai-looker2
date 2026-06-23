@@ -70,7 +70,7 @@ export default function Carousel({ carousel, filterValues, editable, onEditTile,
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <div
         className={editable ? 'tile-drag-handle' : undefined}
-        style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, cursor: editable ? 'move' : 'default', flexShrink: 0 }}
+        style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3, cursor: editable ? 'move' : 'default', flexShrink: 0 }}
       >
         {editable && <span style={{ color: '#bbb', fontSize: 13 }} title="Drag to move row">⠿⠿</span>}
         {editable ? (
@@ -85,7 +85,17 @@ export default function Carousel({ carousel, filterValues, editable, onEditTile,
             {onChangeAlign && <AlignPicker value={align} onChange={onChangeAlign} />}
           </>
         ) : (
-          carousel.title ? <h3 style={{ fontSize: 15, fontWeight: 700, flex: 1, minWidth: 0, margin: 0, textAlign: align }}>{carousel.title}</h3> : <div style={{ flex: 1 }} />
+          <>
+            {carousel.title && (
+              <h3 style={align === 'center'
+                // Centered headings overlay the whole row (absolute) so they sit
+                // dead-centre regardless of the scroll arrows on the right —
+                // flex:1 + text-align would centre only the space LEFT of them.
+                ? { position: 'absolute', left: 0, right: 0, textAlign: 'center', padding: isGrid ? 0 : '0 64px', boxSizing: 'border-box', margin: 0, fontSize: 15, fontWeight: 700, pointerEvents: 'none', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }
+                : { flex: 1, minWidth: 0, textAlign: align, margin: 0, fontSize: 15, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{carousel.title}</h3>
+            )}
+            {(align === 'center' || !carousel.title) && <div style={{ flex: 1 }} />}
+          </>
         )}
         {editable && (
           <span style={{ display: 'flex', gap: 6 }} onMouseDown={(e) => e.stopPropagation()}>
@@ -166,5 +176,5 @@ export default function Carousel({ carousel, filterValues, editable, onEditTile,
 
 const GAP = 12;
 const miniBtn = { padding: '6px 10px', background: 'var(--card)', border: '1.5px solid var(--hairline)', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer' };
-const arrowBtn = { width: 30, height: 30, borderRadius: '50%', border: '1.5px solid var(--hairline)', background: 'var(--card)', cursor: 'pointer', fontSize: 18, lineHeight: 1, color: '#555', flexShrink: 0 };
+const arrowBtn = { width: 24, height: 24, borderRadius: '50%', border: '1.5px solid var(--hairline)', background: 'var(--card)', cursor: 'pointer', fontSize: 15, lineHeight: 1, color: '#555', flexShrink: 0 };
 const tileResizeHandle = { position: 'absolute', top: '32%', right: -3, height: '36%', width: 8, cursor: 'ew-resize', borderRight: '4px solid #cbd5e1', borderRadius: 2, zIndex: 6 };
