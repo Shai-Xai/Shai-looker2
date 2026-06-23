@@ -27,46 +27,72 @@ function StackedGrid({ tiles = [], carousels = [], filterValues }) {
   // Order by grid position (row, then column) so the stack reads the same way
   // the dashboard looks on desktop.
   const items = [
-    ...tiles.map((t) => ({ kind: 'tile', el: t, y: t.layout?.y ?? 0, x: t.layout?.x ?? 0, h: t.layout?.h ?? 6 })),
-    ...carousels.map((c, idx) => ({ kind: 'carousel', el: c, y: c.layout?.y ?? (1000 + idx), x: 0, h: c.layout?.h ?? 7 })),
+    ...tiles.filter((t) => !t.hidden).map((t) => ({ kind: 'tile', el: t, y: t.layout?.y ?? 0, x: t.layout?.x ?? 0, w: t.layout?.w ?? 8, h: t.layout?.h ?? 6 })),
+    ...carousels.filter((c) => (c.tiles || []).some((t) => !t.hidden)).map((c, idx) => ({ kind: 'carousel', el: c, y: c.layout?.y ?? (1000 + idx), x: 0, w: 24, h: c.layout?.h ?? 7 })),
   ].sort((a, b) => a.y - b.y || a.x - b.x);
 
-  // Two-column grid: compact metric/KPI tiles sit 2-up to save vertical space;
-  // charts, tables, text and carousels span the full width. `dense` backfills
-  // gaps so a lone metric before a full-width tile doesn't leave a hole.
+  // Group consecutive tiles that share a desktop row (same y) so a strip of small
+  // KPI/header tiles stays on ONE row on mobile (shrinking to fit) instead of
+  // each dropping onto its own line. Wide tiles and carousels stand alone.
+  const groups = [];
+  let cur = null;
+  for (const it of items) {
+    if (it.kind === 'carousel') { groups.push({ type: 'carousel', it }); cur = null; continue; }
+    if (cur && cur.y === it.y) cur.items.push(it);
+    else { cur = { type: 'row', y: it.y, items: [it] }; groups.push(cur); }
+  }
+
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, gridAutoFlow: 'dense' }}>
-      {items.map((it) => {
-        if (it.kind === 'tile') {
-          return (
-            <div key={it.el.id} style={{ height: mobileTileHeight(it.el), gridColumn: isMetricTile(it.el) ? 'auto' : '1 / -1' }}>
-              <TileFrame tile={it.el} filterValues={filterValues} editable={false} />
-            </div>
-          );
-        }
-        const c = it.el;
-        // A grid "section": stack its tiles like the main mobile view (metrics 2-up).
-        if (c.mode === 'grid') {
-          const stiles = (c.tiles || []).slice().sort((a, b) => (a.layout?.y ?? 0) - (b.layout?.y ?? 0) || (a.layout?.x ?? 0) - (b.layout?.x ?? 0));
-          return (
-            <div key={c.id} style={{ gridColumn: '1 / -1', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 12, boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
-              {c.title && <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 10, textAlign: c.titleAlign || 'left' }}>{c.title}</h3>}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, gridAutoFlow: 'dense' }}>
-                {stiles.map((t) => (
-                  <div key={t.id} style={{ height: mobileTileHeight(t), gridColumn: isMetricTile(t) ? 'auto' : '1 / -1' }}>
-                    <TileFrame tile={t} filterValues={filterValues} editable={false} />
-                  </div>
-                ))}
-                {stiles.length === 0 && <div style={{ gridColumn: '1 / -1', color: '#bbb', fontSize: 13 }}>No tiles</div>}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {groups.map((g, gi) => {
+        if (g.type === 'carousel') {
+          const c = g.it.el;
+          // A grid "section": stack its tiles 2-up like the main mobile view.
+          if (c.mode === 'grid') {
+            const stiles = (c.tiles || []).filter((t) => !t.hidden).slice().sort((a, b) => (a.layout?.y ?? 0) - (b.layout?.y ?? 0) || (a.layout?.x ?? 0) - (b.layout?.x ?? 0));
+            return (
+              <div key={c.id} style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 12, boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
+                {c.title && <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 10, textAlign: c.titleAlign || 'left' }}>{c.title}</h3>}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, gridAutoFlow: 'dense' }}>
+                  {stiles.map((t) => (
+                    <div key={t.id} style={{ height: mobileTileHeight(t), gridColumn: isMetricTile(t) ? 'auto' : '1 / -1' }}>
+                      <TileFrame tile={t} filterValues={filterValues} editable={false} />
+                    </div>
+                  ))}
+                  {stiles.length === 0 && <div style={{ gridColumn: '1 / -1', color: '#bbb', fontSize: 13 }}>No tiles</div>}
+                </div>
               </div>
+            );
+          }
+          // A scrolling carousel: a compact capped swipe band.
+          return (
+            <div key={c.id} style={{ height: Math.min(230, Math.max(150, g.it.h * 16)), background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 10, boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
+              <Carousel carousel={c} filterValues={filterValues} editable={false} />
             </div>
           );
         }
-        // A scrolling carousel: a compact capped swipe band. Kept short on phones
-        // so four KPI cards sit in view without a tall band.
+        // A desktop row of tiles. Keep a strip of small tiles (each ≤ half-width)
+        // on one line, sharing the width proportionally; otherwise stack them.
+        const keepRow = g.items.length >= 2 && g.items.every((it) => it.w <= 12);
+        if (keepRow) {
+          const rowH = Math.max(0, ...g.items.map((it) => mobileTileHeight(it.el) || 0));
+          return (
+            <div key={`row-${gi}`} style={{ display: 'flex', gap: 10, alignItems: 'stretch' }}>
+              {g.items.map((it) => (
+                <div key={it.el.id} style={{ flex: `${it.w} 1 0`, minWidth: 80, height: rowH || undefined }}>
+                  <TileFrame tile={it.el} filterValues={filterValues} editable={false} />
+                </div>
+              ))}
+            </div>
+          );
+        }
         return (
-          <div key={c.id} style={{ gridColumn: '1 / -1', height: Math.min(230, Math.max(150, it.h * 16)), background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 10, boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
-            <Carousel carousel={c} filterValues={filterValues} editable={false} />
+          <div key={`stack-${gi}`} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {g.items.map((it) => (
+              <div key={it.el.id} style={{ height: mobileTileHeight(it.el) }}>
+                <TileFrame tile={it.el} filterValues={filterValues} editable={false} />
+              </div>
+            ))}
           </div>
         );
       })}
@@ -95,14 +121,17 @@ function mobileTileHeight(tile) {
 }
 
 
-function DesktopGrid({ tiles = [], carousels = [], filterValues, editable, onLayoutChange, onEditTile, onDuplicateTile, onRemoveTile, carouselHandlers }) {
+function DesktopGrid({ tiles = [], carousels = [], filterValues, editable, onLayoutChange, onEditTile, onDuplicateTile, onRemoveTile, onHideTile, carouselHandlers }) {
+  // Viewers don't see hidden tiles (or carousels left with nothing visible).
+  const visTiles = editable ? tiles : tiles.filter((t) => !t.hidden);
+  const visCarousels = editable ? carousels : carousels.filter((c) => (c.tiles || []).some((t) => !t.hidden));
   const layout = [
-    ...tiles.map((t) => ({
+    ...visTiles.map((t) => ({
       i: t.id,
       x: t.layout?.x ?? 0, y: t.layout?.y ?? 0, w: t.layout?.w ?? 8, h: t.layout?.h ?? 6,
       minW: 2, minH: 2,
     })),
-    ...carousels.map((c, idx) => ({
+    ...visCarousels.map((c, idx) => ({
       i: c.id,
       x: 0, y: c.layout?.y ?? (1000 + idx), w: 24, h: c.layout?.h ?? 7,
       minW: 24, maxW: 24, minH: 3,
@@ -131,7 +160,7 @@ function DesktopGrid({ tiles = [], carousels = [], filterValues, editable, onLay
       compactType="vertical"
       preventCollision={false}
     >
-      {tiles.map((tile) => (
+      {visTiles.map((tile) => (
         <div key={tile.id}>
           <TileFrame
             tile={tile}
@@ -140,10 +169,11 @@ function DesktopGrid({ tiles = [], carousels = [], filterValues, editable, onLay
             onEdit={() => onEditTile?.(tile.id)}
             onDuplicate={() => onDuplicateTile?.(tile.id)}
             onRemove={() => onRemoveTile?.(tile.id)}
+            onToggleHide={onHideTile ? () => onHideTile(tile.id) : undefined}
           />
         </div>
       ))}
-      {carousels.map((c) => (
+      {visCarousels.map((c) => (
         <div key={c.id} style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: 10, boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
           {c.mode === 'grid'
             ? <SectionGrid carousel={c} filterValues={filterValues} editable={editable} {...(carouselHandlers ? carouselHandlers(c) : {})} />

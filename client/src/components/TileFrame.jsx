@@ -19,7 +19,7 @@ import { useIsMobile } from '../lib/useIsMobile.js';
 
 // Renders a single tile (vis or text). In edit mode it shows hover controls
 // (edit / duplicate / delete) and a drag handle on the title bar.
-export default function TileFrame({ tile, filterValues, editable, onEdit, onDuplicate, onRemove, onMoveOut, inCarousel }) {
+export default function TileFrame({ tile, filterValues, editable, onEdit, onDuplicate, onRemove, onMoveOut, onToggleHide, inCarousel }) {
   const { data, loading, error } = useTileData(tile, filterValues);
   const { insightsEnabled } = useAuth();
   const { entityId, dashboardId } = useScope();
@@ -27,6 +27,9 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
   const isMobile = useIsMobile();
   const [showInsight, setShowInsight] = useState(false);
   const [showSegment, setShowSegment] = useState(false);
+  // On phones the per-tile owl/pin/segment buttons clutter every card, so they
+  // stay hidden until you tap the tile (desktop shows them on hover as before).
+  const [tapped, setTapped] = useState(false);
   // Open the Owl on this tile, recording it as a feature-usage signal (Admin → Onboarding).
   const openInsight = () => { if (entityId) api.trackUsage(entityId, { kind: 'feature', name: 'insight', event: 'use' }); setShowInsight(true); };
 
@@ -75,6 +78,8 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
       // Hover-lift in view mode (matches the home cards). Not while editing — it
       // would fight the drag-to-rearrange transform.
       className={`howler-tile${editable ? '' : ' lift'}`}
+      // Mobile: tap the card to reveal/hide its owl + controls.
+      onClick={isMobile && !editable ? () => setTapped((v) => !v) : undefined}
       style={{
         background: 'var(--tile-bg, #fff)',
         border: '1px solid var(--border)',
@@ -84,6 +89,9 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
         flexDirection: 'column',
         overflow: 'hidden',
         boxShadow: 'var(--shadow-sm)',
+        // Hidden tiles are dimmed in the editor (and not rendered at all for
+        // viewers — the parent filters them out).
+        opacity: editable && tile.hidden ? 0.4 : 1,
       }}
     >
       {showHeader && (
@@ -109,8 +117,8 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
           <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             {isMetric ? null : (tile.title || <em style={{ color: '#bbb', fontWeight: 400 }}>Untitled</em>)}
           </span>
-          {!editable && canSegment && <SegmentButton onClick={() => setShowSegment(true)} isMobile={isMobile} />}
-          {!editable && canInsight && (
+          {!editable && (!isMobile || tapped) && canSegment && <SegmentButton onClick={() => setShowSegment(true)} isMobile={isMobile} />}
+          {!editable && (!isMobile || tapped) && canInsight && (
             <>
               <PinButton tileId={tile.id} isMobile={isMobile} />
               <InsightButton onClick={openInsight} isMobile={isMobile} />
@@ -122,6 +130,7 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
               <IconBtn title="Edit" onClick={onEdit}>✎</IconBtn>
               <IconBtn title="Duplicate" onClick={onDuplicate}>⧉</IconBtn>
               {onMoveOut && <IconBtn title="Move out to the dashboard grid" onClick={onMoveOut}>⤴</IconBtn>}
+              {onToggleHide && <IconBtn title={tile.hidden ? 'Show to viewers' : 'Hide from viewers'} onClick={onToggleHide}>{tile.hidden ? <EyeOff /> : <Eye />}</IconBtn>}
               <IconBtn title="Delete" onClick={onRemove} danger>✕</IconBtn>
             </span>
           )}
@@ -141,13 +150,13 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
         )}
         {/* No header (metric tiles): the insight button floats in the corner,
             with the pin just left of it. Hidden while editing to free the corners. */}
-        {!editable && canInsight && !showHeader && (
+        {!editable && (!isMobile || tapped) && canInsight && !showHeader && (
           <>
             <PinButton tileId={tile.id} isMobile={isMobile} corner />
             <InsightButton onClick={openInsight} isMobile={isMobile} corner />
           </>
         )}
-        {!editable && canSegment && !showHeader && <SegmentButton onClick={() => setShowSegment(true)} isMobile={isMobile} corner />}
+        {!editable && (!isMobile || tapped) && canSegment && !showHeader && <SegmentButton onClick={() => setShowSegment(true)} isMobile={isMobile} corner />}
         {/* Editable metric tile (no header): the move handle + edit controls float
             in the top-RIGHT corner, so the value below stays fully visible. The
             move handle reorders within a carousel (⠿) or moves on the grid (✥). */}
@@ -159,6 +168,7 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
             <IconBtn title="Edit" onClick={onEdit}>✎</IconBtn>
             <IconBtn title="Duplicate" onClick={onDuplicate}>⧉</IconBtn>
             {onMoveOut && <IconBtn title="Move out to the dashboard grid" onClick={onMoveOut}>⤴</IconBtn>}
+            {onToggleHide && <IconBtn title={tile.hidden ? 'Show to viewers' : 'Hide from viewers'} onClick={onToggleHide}>{tile.hidden ? <EyeOff /> : <Eye />}</IconBtn>}
             <IconBtn title="Delete" onClick={onRemove} danger>✕</IconBtn>
           </span>
         )}
@@ -215,6 +225,13 @@ function ReorderGrip({ tileId }) {
       style={{ cursor: 'grab', color: '#999', fontSize: 13, padding: '2px 5px', lineHeight: 1.2 }}
     >⠿</span>
   );
+}
+
+function Eye() {
+  return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z" /><circle cx="12" cy="12" r="3" /></svg>;
+}
+function EyeOff() {
+  return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" /><line x1="1" y1="1" x2="23" y2="23" /></svg>;
 }
 
 // "Create segment" affordance — same visual language as the insight/pin buttons.

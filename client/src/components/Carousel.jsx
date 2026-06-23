@@ -7,7 +7,7 @@ import { useIsMobile } from '../lib/useIsMobile.js';
 // it can be dragged anywhere on the dashboard and resized with the grid's own
 // handles. Cards fill the band height; card width is set with the right-edge
 // drag handle. In edit mode it's also a drop target for existing tiles.
-export default function Carousel({ carousel, filterValues, editable, onEditTile, onRemoveTile, onDuplicateTile, onAddTile, onChangeTitle, onChangeAlign, onRemove, onDropTile, onMoveTileOut, onChangeTileW }) {
+export default function Carousel({ carousel, filterValues, editable, onEditTile, onRemoveTile, onDuplicateTile, onToggleHide, onAddTile, onChangeTitle, onChangeAlign, onRemove, onDropTile, onMoveTileOut, onChangeTileW }) {
   const trackRef = useRef(null);
   const isMobile = useIsMobile();
   const [dragOver, setDragOver] = useState(false);
@@ -17,7 +17,8 @@ export default function Carousel({ carousel, filterValues, editable, onEditTile,
   const [canScroll, setCanScroll] = useState(false);
   const isGrid = carousel.mode === 'grid'; // a "section": tiles flow in a wrapping grid, not a scroller
   const cardW = carousel.cardW || 300;
-  const tiles = carousel.tiles || [];
+  // Viewers don't see hidden tiles; the editor keeps them (dimmed).
+  const tiles = editable ? (carousel.tiles || []) : (carousel.tiles || []).filter((t) => !t.hidden);
   const cardH = carousel.cardH || 220; // fixed card height in grid (section) mode
   const align = carousel.titleAlign || 'left'; // heading alignment: left | center | right
   // On phones a card shouldn't exceed the viewport — show one card plus a peek
@@ -173,6 +174,7 @@ export default function Carousel({ carousel, filterValues, editable, onEditTile,
                     onEdit={() => onEditTile?.(t.id)}
                     onRemove={() => onRemoveTile?.(t.id)}
                     onDuplicate={() => onDuplicateTile?.(t.id)}
+                    onToggleHide={onToggleHide ? () => onToggleHide(t.id) : undefined}
                     onMoveOut={onMoveTileOut ? () => onMoveTileOut(t.id) : undefined}
                   />
                   {/* Per-card width handle (desktop scroller only — grid/mobile size themselves). */}

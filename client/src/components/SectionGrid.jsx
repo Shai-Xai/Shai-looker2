@@ -11,7 +11,7 @@ const ROW_HEIGHT = 30;
 // sibling of Carousel, sharing the same container handlers. The inner grid
 // stops mousedown propagation so dragging a tile here doesn't also drag the
 // whole section in the outer dashboard grid.
-export default function SectionGrid({ carousel, filterValues, editable, onEditTile, onRemoveTile, onDuplicateTile, onAddTile, onChangeTitle, onChangeAlign, onRemove, onDropTile, onMoveTileOut, onTileLayout }) {
+export default function SectionGrid({ carousel, filterValues, editable, onEditTile, onRemoveTile, onDuplicateTile, onToggleHide, onAddTile, onChangeTitle, onChangeAlign, onRemove, onDropTile, onMoveTileOut, onTileLayout }) {
   const align = carousel.titleAlign || 'left';
   const [dragOver, setDragOver] = useState(false);
   // Measure our own width so the nested grid lays out across the real columns
@@ -28,7 +28,7 @@ export default function SectionGrid({ carousel, filterValues, editable, onEditTi
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-  const tiles = carousel.tiles || [];
+  const tiles = editable ? (carousel.tiles || []) : (carousel.tiles || []).filter((t) => !t.hidden);
   const layout = tiles.map((t, i) => ({
     i: t.id,
     x: t.layout?.x ?? 0, y: t.layout?.y ?? i * 6, w: t.layout?.w ?? 8, h: t.layout?.h ?? 6,
@@ -109,6 +109,7 @@ export default function SectionGrid({ carousel, filterValues, editable, onEditTi
                   onEdit={() => onEditTile?.(t.id)}
                   onDuplicate={() => onDuplicateTile?.(t.id)}
                   onRemove={() => onRemoveTile?.(t.id)}
+                  onToggleHide={onToggleHide ? () => onToggleHide(t.id) : undefined}
                   onMoveOut={onMoveTileOut ? () => onMoveTileOut(t.id) : undefined}
                 />
               </div>

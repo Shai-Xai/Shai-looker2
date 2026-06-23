@@ -98,6 +98,15 @@ export default function EditorPage() {
       carousels: (d.carousels || []).map((c) => ({ ...c, tiles: c.tiles.map((t) => (t.id === updated.id ? updated : t)) })),
     }));
   }
+  // Hide / unhide a tile (grid or carousel): keeps it in the definition but it's
+  // skipped when viewers see the dashboard. Shown dimmed in the editor.
+  function toggleHideTile(tileId) {
+    mutate((d) => ({
+      ...d,
+      tiles: d.tiles.map((t) => (t.id === tileId ? { ...t, hidden: !t.hidden } : t)),
+      carousels: (d.carousels || []).map((c) => ({ ...c, tiles: c.tiles.map((t) => (t.id === tileId ? { ...t, hidden: !t.hidden } : t)) })),
+    }));
+  }
   function removeTile(tileId) {
     mutate((d) => ({ ...d, tiles: d.tiles.filter((t) => t.id !== tileId) }));
     if (selectedTileId === tileId) setSelectedTileId(null);
@@ -257,6 +266,7 @@ export default function EditorPage() {
   const canvasInner = { flex: 1, overflowY: 'auto', padding: '16px 24px', ...(dark ? null : { '--tile-bg': theme.tileBackground || '#fff' }) };
   const carouselHandlers = (c) => ({
     onEditTile: setSelectedTileId,
+    onToggleHide: (tid) => toggleHideTile(tid),
     onRemoveTile: (tid) => removeTileFromCarousel(c.id, tid),
     onDuplicateTile: (tid) => duplicateTileInCarousel(c.id, tid),
     onAddTile: (type) => addTileToCarousel(c.id, type),
@@ -328,6 +338,7 @@ export default function EditorPage() {
               onEditTile={setSelectedTileId}
               onDuplicateTile={duplicateTile}
               onRemoveTile={removeTile}
+              onHideTile={toggleHideTile}
               carouselHandlers={carouselHandlers}
             />
           ) : (
