@@ -5,6 +5,7 @@ import { vtNavigate } from '../lib/viewTransition.js';
 import HomeButton from '../components/HomeButton.jsx';
 import CampaignManager from '../components/CampaignManager.jsx';
 import SegmentManager from '../components/SegmentManager.jsx';
+import AudienceHub from '../components/AudienceHub.jsx';
 import TemplateManager from '../components/TemplateManager.jsx';
 
 // Engage — the Action layer of the Experience OS as one first-class area.
@@ -14,6 +15,7 @@ import TemplateManager from '../components/TemplateManager.jsx';
 const TABS = [
   { key: 'campaigns', label: 'Campaigns', icon: '📣', ready: true },
   { key: 'segments', label: 'Segments', icon: '🥧', ready: true },
+  { key: 'audiences', label: 'Ad audiences', icon: '🎯', ready: true },
   { key: 'automations', label: 'Automations', icon: '⏱', ready: false },
   { key: 'templates', label: 'Templates', icon: '📝', ready: true },
   { key: 'connections', label: 'Connections', icon: '🔌', ready: false },
@@ -87,6 +89,11 @@ export default function EngagePage() {
         <>
           <p style={{ color: 'var(--muted)', marginBottom: 18, fontSize: 14 }}>Build reusable, always-live audiences from your data — then act on them in campaigns.</p>
           <SegmentManager entityId={entityId} scope={isAdmin ? 'admin' : 'my'} />
+        </>
+      ) : active === 'audiences' ? (
+        <>
+          <p style={{ color: 'var(--muted)', marginBottom: 18, fontSize: 14 }}>Every audience Pulse mirrors to your Meta &amp; TikTok ad accounts — connection health, live size and status, all in one place.</p>
+          <AudienceHub entityId={entityId} />
         </>
       ) : active === 'templates' ? (
         <>

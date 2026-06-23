@@ -1833,6 +1833,41 @@ app.get('/api/admin/integrations/:entityId/log', auth.requireAdmin, (req, res) =
   res.json({ log: rows });
 });
 
+// ── Client self-service: ad-audience hub (Meta/TikTok) scoped to one entity ──
+// Mirrors the admin connector-health view but for the client's OWN entity, so
+// they can see every audience Pulse mirrors out, its live size/status, and act.
+// Ownership: admins pass; clients must own the entity.
+function ownsEntity(req, id) { return req.user.role === 'admin' || (req.user.entityIds || []).includes(id); }
+function audienceChannel(name) { return name === 'tiktok' ? tiktok : (name === 'meta' ? meta : null); }
+app.get('/api/my/audiences/:entityId', auth.requireAuth, (req, res) => {
+  const id = req.params.entityId;
+  if (!ownsEntity(req, id)) return res.status(403).json({ error: 'Not allowed' });
+  if (!db.getEntity(id)) return res.status(404).json({ error: 'Not found' });
+  res.json({ channels: { meta: meta.summary(id), tiktok: tiktok.summary(id) } });
+});
+app.post('/api/my/audiences/:entityId/verify', auth.requireAuth, async (req, res) => {
+  const id = req.params.entityId;
+  if (!ownsEntity(req, id)) return res.status(403).json({ error: 'Not allowed' });
+  const channel = audienceChannel(req.body?.channel);
+  if (!channel) return res.status(400).json({ error: 'Unknown channel' });
+  res.json(await channel.verify(id));
+});
+app.post('/api/my/audiences/:entityId/audience-status', auth.requireAuth, async (req, res) => {
+  const id = req.params.entityId;
+  if (!ownsEntity(req, id)) return res.status(403).json({ error: 'Not allowed' });
+  const channel = audienceChannel(req.body?.channel);
+  if (!channel) return res.status(400).json({ error: 'Unknown channel' });
+  res.json(await channel.audienceStatus(id, String(req.body?.audienceId || '')));
+});
+app.get('/api/my/audiences/:entityId/log', auth.requireAuth, (req, res) => {
+  const id = req.params.entityId;
+  if (!ownsEntity(req, id)) return res.status(403).json({ error: 'Not allowed' });
+  const limit = Math.min(Number(req.query.limit) || 50, 200);
+  let rows = [];
+  try { rows = db.db.prepare('SELECT entity_id, segment_id, channel, audience_id, received, added, removed, status, error, by, at FROM audience_sync_log WHERE entity_id=? ORDER BY id DESC LIMIT ?').all(id, limit); } catch { /* table may not exist yet */ }
+  res.json({ log: rows });
+});
+
 // Client self-service: the logged-in user's own client(s).
 app.get('/api/my/integrations', auth.requireAuth, (req, res) => {
   const out = (req.user.entityIds || []).map((id) => {

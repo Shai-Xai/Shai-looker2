@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-06-23 · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-06-24 · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -183,12 +183,18 @@ where people open, click and convert."
 - **Mirrors membership** (people who leave the segment are removed on next sync),
   with optional **daily auto-sync**.
 - **Privacy-safe** — emails/phones are **hashed before they leave Pulse**.
+- **Ad audiences hub** (Engage → Ad audiences) ✅ — a client-facing, self-service
+  view of **every audience Pulse mirrors out**: connection health, **live match
+  size / availability** read back from the platform, last-sync detail, and a link
+  straight into Meta/TikTok. (The same roll-up exists for Howler staff in Admin →
+  connector health.)
 - Requires connecting the client's ad account (access token + ad account) in
-  Integrations. *Note: end-to-end push is pending live verification with a real ad
-  account.*
+  Integrations. *TikTok push verified end-to-end against a live ad account; Meta
+  push pending the same live check.*
 
 **Pitch:** "Turn a Pulse audience into a Meta/TikTok ad audience in a click — keep
-it auto-synced, and exclude people who already bought."
+it auto-synced, exclude people who already bought, and see exactly what's live on
+each platform without leaving Pulse."
 
 ## 6. White-label branding & integrations  ✅ / 🟡
 - **Per-client branding** ✅ — logo, colours, email sender display name and
@@ -353,6 +359,13 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-24** — **Ad audiences hub (client self-service)** ✅: new **Engage → Ad
+  audiences** tab gives clients a single, mobile-first view of every audience Pulse
+  mirrors to Meta/TikTok — connection health, a one-tap **Verify connection**, and
+  **live match-size / availability** read back from the platform — so they can see
+  what's actually live without opening Ads Manager. Also fixed the TikTok push
+  (file checksum + create-audience fields) and **verified it end-to-end against a
+  live TikTok ad account**.
 - **2026-06-23** — **Per-client dashboard versions** ✅: editing a shared dashboard from a
   client's view now offers **Save current** (update the template for everyone) or **Save as
   new** — forking a **client-owned version** (pick its folder + set) that only that client
