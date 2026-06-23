@@ -113,7 +113,6 @@ function IconPicker({ value, onChange }) {
 const ADMIN_NAV = [
   ['entities', 'Clients', '👥'],
   ['users', 'Users', '🧑'],
-  ['logins', 'Admin logins', '🔑'],
   ['sets', 'Sets', '🗂️'],
   ['library', 'Tile library', '🧩'],
   ['ai', 'AI', '🤖'],
@@ -136,7 +135,6 @@ export default function AdminPage() {
     <>
       {tab === 'entities' && <Entities fields={fields} />}
       {tab === 'users' && <UsersTab />}
-      {tab === 'logins' && <AdminLoginsTab />}
       {tab === 'sets' && <Sets />}
       {tab === 'library' && <Library />}
       {tab === 'ai' && <AISettings />}
@@ -713,16 +711,6 @@ function Entities({ fields }) {
   );
 }
 
-// Admin team logins — its own top-level admin section (not buried under Clients).
-function AdminLoginsTab() {
-  const [users, setUsers] = useState(null);
-  const [entities, setEntities] = useState([]);
-  const load = () => Promise.all([api.adminListUsers(), api.adminListEntities()]).then(([u, e]) => { setUsers(u); setEntities(e); });
-  useEffect(() => { load(); }, []);
-  if (!users) return <Muted>Loading…</Muted>;
-  return <AdminLogins admins={users.filter((u) => u.role === 'admin')} entities={entities} onChange={load} />;
-}
-
 // ─── Users: every login in one place, with a drill-in detail view ─────────────
 // A directory of ALL users (Howler admins + client logins). Click a user to see
 // their profile, client roles, last login and a full activity timeline (what
@@ -771,17 +759,19 @@ function UsersTab() {
   const [sort, setSort] = useState('active'); // active | email | login
   const [roleFilter, setRoleFilter] = useState('all'); // all | admin | client
   const [selectedId, setSelectedId] = useState(null);
+  const [adding, setAdding] = useState(false);
   const load = () => Promise.all([api.adminListUsers(), api.adminListEntities(), api.getRoles().catch(() => ({ roles: [] }))])
     .then(([u, e, r]) => { setUsers(u); setEntities(e); setRoles(r.roles || []); });
   useEffect(() => { load(); }, []);
   if (!users) return <Muted>Loading…</Muted>;
-  if (selectedId) return <UserDetail userId={selectedId} onBack={() => { setSelectedId(null); load(); }} />;
+  if (selectedId) return <UserDetail userId={selectedId} entities={entities} roles={roles} onBack={() => { setSelectedId(null); load(); }} />;
+  if (adding) return <AddUserForm entities={entities} roles={roles} onCancel={() => setAdding(false)} onCreated={(id) => { setAdding(false); load().then(() => { if (id) setSelectedId(id); }); }} />;
 
   const entName = Object.fromEntries(entities.map((e) => [e.id, e.name]));
   const clientsOf = (u) => (u.memberships || []).map((m) => entName[m.entityId] || m.entityId);
   const ql = q.trim().toLowerCase();
   const byRole = roleFilter === 'all' ? users : users.filter((u) => (roleFilter === 'admin' ? u.role === 'admin' : u.role !== 'admin'));
-  const matched = ql ? byRole.filter((u) => u.email.toLowerCase().includes(ql) || clientsOf(u).some((n) => n.toLowerCase().includes(ql))) : byRole;
+  const matched = ql ? byRole.filter((u) => u.email.toLowerCase().includes(ql) || (u.fullName || '').toLowerCase().includes(ql) || (u.mobile || '').includes(ql) || clientsOf(u).some((n) => n.toLowerCase().includes(ql))) : byRole;
   const sorted = [...matched].sort((a, b) => {
     if (sort === 'email') return a.email.localeCompare(b.email, undefined, { sensitivity: 'base' });
     const key = sort === 'login' ? 'lastLogin' : 'lastActiveAt';
@@ -805,11 +795,14 @@ function UsersTab() {
 
   return (
     <div>
-      <p style={hint}>Every login on Pulse — {users.length} user{users.length === 1 ? '' : 's'} ({adminCount} Howler admin{adminCount === 1 ? '' : 's'}). Click a user to see their profile, roles and activity.</p>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 6 }}>
+        <p style={{ ...hint, marginBottom: 0, flex: 1, minWidth: 180 }}>Every login on Pulse — {users.length} user{users.length === 1 ? '' : 's'} ({adminCount} Howler admin{adminCount === 1 ? '' : 's'}). Click a user for their profile, roles and activity.</p>
+        <button style={{ ...miniBtn, background: 'var(--brand)', color: '#fff', borderColor: 'var(--brand)' }} onClick={() => setAdding(true)}>+ Add user</button>
+      </div>
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
         <div style={{ ...searchWrap, marginBottom: 0 }}>
           <span style={{ color: 'var(--muted)', fontSize: 13, flexShrink: 0 }}>⌕</span>
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by email or client…" style={searchInput} />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by name, email, mobile or client…" style={searchInput} />
           {ql && <button onClick={() => setQ('')} style={searchClear} aria-label="Clear search">✕</button>}
         </div>
         <select style={{ ...input, minWidth: 150 }} value={sort} onChange={(e) => setSort(e.target.value)} title="Sort">
@@ -829,9 +822,9 @@ function UsersTab() {
           {sorted.map((u) => (
             <button key={u.id} className="lift" style={clientRow} onClick={() => setSelectedId(u.id)}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, textAlign: 'left' }}>
-                <span style={{ fontWeight: 600, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis' }}>{u.email} {adminBadge(u)}</span>
-                <span style={{ fontSize: 12, color: 'var(--muted)' }}>{u.role === 'admin' ? 'Howler admin' : 'Client'} · {clientsOf(u).length || (u.role === 'admin' ? '∞' : 0)} client{clientsOf(u).length === 1 ? '' : 's'}</span>
-                <span style={{ fontSize: 12, color: 'var(--muted)' }}>Active {relTime(u.lastActiveAt)}{u.lastAction ? ` · ${u.lastAction.label}` : ''}</span>
+                <span style={{ fontWeight: 600, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis' }}>{u.fullName || u.email} {adminBadge(u)}</span>
+                <span style={{ fontSize: 12, color: 'var(--muted)' }}>{u.fullName ? `${u.email} · ` : ''}{u.role === 'admin' ? 'Howler admin' : 'Client'} · {clientsOf(u).length || (u.role === 'admin' ? '∞' : 0)} client{clientsOf(u).length === 1 ? '' : 's'}</span>
+                <span style={{ fontSize: 12, color: 'var(--muted)' }}>{u.mobile ? `${u.mobile} · ` : ''}active {relTime(u.lastActiveAt)}</span>
               </div>
               <span style={{ color: '#bbb', marginLeft: 'auto' }}>›</span>
             </button>
@@ -842,17 +835,20 @@ function UsersTab() {
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
             <tr>
-              {['User', 'Type', 'Clients', 'Last login', 'Last active'].map((h) => <th key={h} style={thS}>{h}</th>)}
+              {['User', 'Type', 'Clients', 'Mobile', 'Last active'].map((h) => <th key={h} style={thS}>{h}</th>)}
             </tr>
           </thead>
           <tbody>
             {sorted.map((u) => (
               <tr key={u.id} className="lift" style={{ cursor: 'pointer' }} onClick={() => setSelectedId(u.id)}>
-                <td style={td}>{u.email} {adminBadge(u)}</td>
+                <td style={td}>
+                  <div style={{ fontWeight: 600 }}>{u.fullName || u.email} {adminBadge(u)}</div>
+                  {u.fullName && <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>{u.email}</div>}
+                </td>
                 <td style={td}>{u.role === 'admin' ? 'Howler admin' : 'Client'}</td>
                 <td style={td}>{clientsCell(u)}</td>
-                <td style={td} title={fmtWhen(u.lastLogin)}>{relTime(u.lastLogin)}</td>
-                <td style={td} title={fmtWhen(u.lastActiveAt)}>{lastActiveCell(u)}</td>
+                <td style={td}>{u.mobile || <span style={{ color: 'var(--muted)' }}>—</span>}</td>
+                <td style={td} title={`Last login ${fmtWhen(u.lastLogin)}`}>{lastActiveCell(u)}</td>
               </tr>
             ))}
             {sorted.length === 0 && <tr><td style={td} colSpan={5}><Muted>{ql ? `No users match “${q.trim()}”.` : 'No users in this view.'}</Muted></td></tr>}
@@ -863,12 +859,94 @@ function UsersTab() {
   );
 }
 
+// Create either a Howler admin (full access) or a client login (scoped to the
+// clients you pick). Replaces the old separate "Add admin" / per-client "Add
+// login" forms — one entry point for both.
+function AddUserForm({ entities, roles, onCancel, onCreated }) {
+  const [accountType, setAccountType] = useState('client'); // client | admin
+  const [form, setForm] = useState({ firstName: '', lastName: '', email: '', mobile: '', password: '' });
+  const [entityIds, setEntityIds] = useState([]);
+  const [role, setRole] = useState('viewer');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const roleOpts = roles.length ? roles : [{ key: 'owner', label: 'Owner' }];
+  const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+  const isClient = accountType === 'client';
+  const canSubmit = form.email.trim() && form.password && (!isClient || entityIds.length > 0);
+
+  const submit = async () => {
+    setError(''); setBusy(true);
+    const base = { firstName: form.firstName, lastName: form.lastName, email: form.email.trim(), mobile: form.mobile, password: form.password };
+    try {
+      const created = isClient
+        ? await api.adminCreateUser({ ...base, role: 'client', entityIds: entityIds.map((id) => ({ entityId: id, role })) })
+        : await api.adminCreateUser({ ...base, role: 'admin', entityIds });
+      onCreated(created?.id);
+    } catch (e) {
+      // Duplicate email → for an admin, offer to promote the existing login (keeps its access).
+      if (/already exists/i.test(e.message || '') && !isClient
+        && confirm(`A login with ${base.email} already exists. Convert it to a Howler admin?\n\nIt keeps its current client access, plus any clients ticked here.`)) {
+        try { await api.adminPromoteUser({ email: base.email, entityIds }); onCreated(null); return; }
+        catch (e2) { setError(e2.message); }
+      } else if (/already exists/i.test(e.message || '')) {
+        setError('A login with that email already exists — open it from the list to add this client to it.');
+      } else setError(e.message);
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div>
+      <button style={miniBtnOutline} onClick={onCancel}>← All users</button>
+      <h2 style={{ fontSize: 20, fontWeight: 700, margin: '12px 0 4px' }}>Add a user</h2>
+      <p style={{ ...hint, marginBottom: 16 }}>Create a Howler admin (full access to every client + the console) or a client login (scoped to the clients you pick).</p>
+      <div style={{ ...cardStyle, maxWidth: 560 }}>
+        <L>Account type</L>
+        <div style={{ display: 'flex', gap: 6, margin: '4px 0 14px' }}>
+          {[['client', 'Client login'], ['admin', 'Howler admin']].map(([k, label]) => (
+            <button key={k} onClick={() => setAccountType(k)} style={accountType === k ? { ...miniBtn, background: 'var(--brand)', color: '#fff', borderColor: 'var(--brand)' } : miniBtnOutline}>{label}</button>
+          ))}
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+          <Field label="First name"><input style={{ ...input, minWidth: 0 }} value={form.firstName} onChange={set('firstName')} /></Field>
+          <Field label="Surname"><input style={{ ...input, minWidth: 0 }} value={form.lastName} onChange={set('lastName')} /></Field>
+          <Field label="Email"><input style={{ ...input, minWidth: 0 }} value={form.email} onChange={set('email')} autoComplete="off" /></Field>
+          <Field label="Mobile"><input style={{ ...input, minWidth: 0 }} value={form.mobile} onChange={set('mobile')} placeholder="+27…" /></Field>
+          <Field label="Temp password"><input style={{ ...input, minWidth: 0 }} type="text" value={form.password} onChange={set('password')} placeholder="they can change it" autoComplete="off" /></Field>
+        </div>
+        {isClient ? (
+          <>
+            <L>Clients {entityIds.length === 0 && <span style={{ color: 'var(--error)', fontWeight: 400 }}>· pick at least one</span>}</L>
+            <div style={{ marginTop: 4 }}><ClientLinkPicker entities={entities} value={entityIds} onChange={setEntityIds} /></div>
+            <div style={{ marginTop: 10 }}>
+              <Field label="Role at these clients"><select style={input} value={role} onChange={(e) => setRole(e.target.value)}>{roleOpts.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}</select></Field>
+            </div>
+            {roleOpts.find((r) => r.key === role)?.description && <p style={{ ...hint, marginTop: 8 }}>{roleOpts.find((r) => r.key === role).description}</p>}
+          </>
+        ) : (
+          <>
+            <L>Also a customer of (optional)</L>
+            <div style={{ marginTop: 4 }}><ClientLinkPicker entities={entities} value={entityIds} onChange={setEntityIds} /></div>
+            <p style={{ ...hint, marginTop: 8 }}>Howler admins see every client and the console regardless. Ticking clients also gives them that client's customer view.</p>
+          </>
+        )}
+        <div style={{ marginTop: 14, display: 'flex', gap: 8 }}>
+          <button style={{ ...miniBtn, background: 'var(--brand)', color: '#fff', borderColor: 'var(--brand)' }} onClick={submit} disabled={!canSubmit || busy}>{busy ? 'Creating…' : 'Create user'}</button>
+          <button style={miniBtnOutline} onClick={onCancel}>Cancel</button>
+        </div>
+        {error && <div style={{ color: 'var(--error)', fontSize: 13, marginTop: 10 }}>{error}</div>}
+      </div>
+    </div>
+  );
+}
+
 // One user's detail: identity, client roles, usage profile and activity timeline.
-function UserDetail({ userId, onBack }) {
+function UserDetail({ userId, entities = [], roles = [], onBack }) {
   const [data, setData] = useState(null);
   const [err, setErr] = useState('');
   const [section, setSection] = useState('overview');
-  useEffect(() => { setData(null); setErr(''); api.adminGetUser(userId).then(setData).catch((e) => setErr(e.message || 'Failed to load')); }, [userId]);
+  const [editing, setEditing] = useState(false);
+  const load = () => api.adminGetUser(userId).then(setData).catch((e) => setErr(e.message || 'Failed to load'));
+  useEffect(() => { setData(null); setErr(''); setEditing(false); load(); }, [userId]); // eslint-disable-line react-hooks/exhaustive-deps
   if (err) return <div><button style={miniBtnOutline} onClick={onBack}>← All users</button><p style={{ color: 'var(--error)', marginTop: 12 }}>{err}</p></div>;
   if (!data) return <div><button style={miniBtnOutline} onClick={onBack}>← All users</button><p style={{ marginTop: 12 }}><Muted>Loading…</Muted></p></div>;
 
@@ -881,12 +959,23 @@ function UserDetail({ userId, onBack }) {
     ['activity', `Activity (${activity.length})`],
   ];
   const mostRecent = activity[0] || null;
+  const del = async () => {
+    if (!confirm(`Delete ${user.fullName || user.email}? This removes the login for every client.`)) return;
+    try { await api.adminDeleteUser(user.id); onBack(); } catch (e) { alert(e.message); }
+  };
+
+  if (editing) return <UserEditCard user={user} memberships={memberships} entities={entities} roles={roles} onCancel={() => setEditing(false)} onSaved={() => { setEditing(false); setData(null); load(); }} />;
 
   return (
     <div>
-      <button style={miniBtnOutline} onClick={onBack}>← All users</button>
-      <h2 style={{ fontSize: 20, fontWeight: 700, margin: '12px 0 4px', wordBreak: 'break-all' }}>{user.email} {isAdmin && <span style={howlerBadge}>HOWLER</span>}</h2>
-      <p style={{ ...hint, marginBottom: 16 }}>{isAdmin ? 'Howler admin — full access to every client.' : `Client login · ${memberships.length} client${memberships.length === 1 ? '' : 's'}`}</p>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <button style={miniBtnOutline} onClick={onBack}>← All users</button>
+        <span style={{ flex: 1 }} />
+        <button style={miniBtn} onClick={() => setEditing(true)}>✏️ Edit</button>
+        <button style={delBtn} onClick={del}>Delete</button>
+      </div>
+      <h2 style={{ fontSize: 20, fontWeight: 700, margin: '12px 0 4px', wordBreak: 'break-word' }}>{user.fullName || user.email} {isAdmin && <span style={howlerBadge}>HOWLER</span>}</h2>
+      <p style={{ ...hint, marginBottom: 16 }}>{user.fullName ? `${user.email} · ` : ''}{isAdmin ? 'Howler admin — full access to every client.' : `Client login · ${memberships.length} client${memberships.length === 1 ? '' : 's'}`}</p>
       <div style={{ display: 'flex', gap: 18, alignItems: 'flex-start', flexWrap: 'wrap' }}>
         <nav style={detailNav}>
           {nav.map(([key, label]) => (
@@ -896,7 +985,9 @@ function UserDetail({ userId, onBack }) {
         <div style={{ flex: 1, minWidth: 280 }}>
           {section === 'overview' && (
             <div style={cardStyle}>
+              <KV label="Name" value={user.fullName || '—'} />
               <KV label="Email" value={user.email} />
+              <KV label="Mobile" value={user.mobile || '—'} />
               <KV label="Account type" value={isAdmin ? 'Howler admin' : 'Client login'} />
               <KV label="Member of" value={isAdmin ? 'All clients (admin)' : (memberships.length ? memberships.map((m) => m.entityName).join(', ') : 'No clients linked')} />
               <KV label="Last login" value={fmtWhen(user.lastLogin)} sub={user.lastLogin ? relTime(user.lastLogin) : ''} />
@@ -969,6 +1060,55 @@ function UserDetail({ userId, onBack }) {
             </div>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Edit an existing user's identity, account type and client links. Per-client
+// roles stay on each client's Logins tab; this covers everything else in one place.
+function UserEditCard({ user, memberships, entities, roles, onCancel, onSaved }) { // eslint-disable-line no-unused-vars
+  const [form, setForm] = useState({ firstName: user.firstName || '', lastName: user.lastName || '', email: user.email, mobile: user.mobile || '', password: '' });
+  const [accountType, setAccountType] = useState(user.role === 'admin' ? 'admin' : 'client');
+  const [entityIds, setEntityIds] = useState((memberships || []).map((m) => m.entityId));
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+  const save = async () => {
+    setError(''); setBusy(true);
+    try {
+      const patch = { firstName: form.firstName, lastName: form.lastName, email: form.email.trim(), mobile: form.mobile, role: accountType, entityIds };
+      if (form.password) patch.password = form.password; // blank = keep current
+      await api.adminUpdateUser(user.id, patch);
+      onSaved();
+    } catch (e) { setError(e.message); } finally { setBusy(false); }
+  };
+  return (
+    <div>
+      <button style={miniBtnOutline} onClick={onCancel}>← Back</button>
+      <h2 style={{ fontSize: 20, fontWeight: 700, margin: '12px 0 14px', wordBreak: 'break-word' }}>Edit {user.fullName || user.email}</h2>
+      <div style={{ ...cardStyle, maxWidth: 560 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+          <Field label="First name"><input style={{ ...input, minWidth: 0 }} value={form.firstName} onChange={set('firstName')} /></Field>
+          <Field label="Surname"><input style={{ ...input, minWidth: 0 }} value={form.lastName} onChange={set('lastName')} /></Field>
+          <Field label="Email"><input style={{ ...input, minWidth: 0 }} value={form.email} onChange={set('email')} autoComplete="off" /></Field>
+          <Field label="Mobile"><input style={{ ...input, minWidth: 0 }} value={form.mobile} onChange={set('mobile')} placeholder="+27…" /></Field>
+          <Field label="New password (blank = keep)"><input style={{ ...input, minWidth: 0 }} type="text" value={form.password} onChange={set('password')} autoComplete="off" /></Field>
+        </div>
+        <L>Account type</L>
+        <div style={{ display: 'flex', gap: 6, margin: '4px 0 14px' }}>
+          {[['client', 'Client login'], ['admin', 'Howler admin']].map(([k, label]) => (
+            <button key={k} onClick={() => setAccountType(k)} style={accountType === k ? { ...miniBtn, background: 'var(--brand)', color: '#fff', borderColor: 'var(--brand)' } : miniBtnOutline}>{label}</button>
+          ))}
+        </div>
+        <L>{accountType === 'admin' ? 'Also a customer of (optional)' : 'Clients'}</L>
+        <div style={{ marginTop: 4 }}><ClientLinkPicker entities={entities} value={entityIds} onChange={setEntityIds} /></div>
+        <p style={{ ...hint, marginTop: 8 }}>Per-client roles are set on each client's <b>Logins</b> tab; newly-linked clients default to Owner.</p>
+        <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
+          <button style={{ ...miniBtn, background: 'var(--brand)', color: '#fff', borderColor: 'var(--brand)' }} onClick={save} disabled={!form.email.trim() || busy}>{busy ? 'Saving…' : 'Save changes'}</button>
+          <button style={miniBtnOutline} onClick={onCancel}>Cancel</button>
+        </div>
+        {error && <div style={{ color: 'var(--error)', fontSize: 13, marginTop: 10 }}>{error}</div>}
       </div>
     </div>
   );
@@ -1173,98 +1313,6 @@ function ClientSuites({ entity, suites, allEntities, allSets, dashTitle, fields,
   );
 }
 
-// Full-access team logins. An admin sees every client and the admin console;
-// optionally they can ALSO be a customer of chosen clients (the same login can
-// open those clients' customer experience). Linking here = the entity profiles
-// on the admin login.
-function AdminLogins({ admins, entities = [], onChange }) {
-  const [form, setForm] = useState({ email: '', password: '', entityIds: [] });
-  const [error, setError] = useState(null);
-  const [editing, setEditing] = useState(null); // { id, email, password, entityIds }
-  const nameOf = (id) => entities.find((e) => e.id === id)?.name || id;
-  // Convert an EXISTING login (e.g. a client/team member) into an admin — keeps
-  // its current client access plus any ticked here. No new password needed.
-  const promote = async () => {
-    setError(null);
-    try { await api.adminPromoteUser({ email: (form.email || '').trim(), entityIds: form.entityIds }); setForm({ email: '', password: '', entityIds: [] }); onChange(); }
-    catch (e) { setError(e.message); }
-  };
-  const add = async () => {
-    setError(null);
-    try { await api.adminCreateUser({ email: form.email, password: form.password, role: 'admin', entityIds: form.entityIds }); setForm({ email: '', password: '', entityIds: [] }); onChange(); }
-    catch (e) {
-      // Email already in a login → offer to promote that account to admin
-      // instead of a dead-end "already exists" error.
-      if (/already exists/i.test(e.message || '')
-        && confirm(`A login with ${form.email} already exists. Convert it to an admin?\n\nIt keeps its current client access, plus any clients you've ticked here.`)) {
-        return promote();
-      }
-      setError(e.message);
-    }
-  };
-  const del = async (u) => { if (confirm(`Delete admin ${u.email}?`)) { await api.adminDeleteUser(u.id); onChange(); } };
-  const save = async () => {
-    setError(null);
-    try {
-      const patch = { email: editing.email, entityIds: editing.entityIds };
-      if (editing.password) patch.password = editing.password; // blank = keep current
-      await api.adminUpdateUser(editing.id, patch);
-      setEditing(null); onChange();
-    } catch (e) { setError(e.message); }
-  };
-  return (
-    <div style={cardStyle}>
-      <p style={hint}>Full-access logins for your team — they see every client and the admin console. Tick clients to also make a login a <b>customer</b> of those clients (they can open that client's customer view from the profile switcher).</p>
-      {admins.length === 0 ? <Muted>No admin logins.</Muted> : (
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-          <tbody>
-            {admins.map((u) => (
-              editing?.id === u.id ? (
-                <tr key={u.id}>
-                  <td style={td} colSpan={2}>
-                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
-                      <input style={input} value={editing.email} onChange={(e) => setEditing({ ...editing, email: e.target.value })} placeholder="Email" autoComplete="off" />
-                      <input style={input} type="text" value={editing.password} onChange={(e) => setEditing({ ...editing, password: e.target.value })} placeholder="New password (blank = keep)" autoComplete="off" />
-                    </div>
-                    <ClientLinkPicker entities={entities} value={editing.entityIds} onChange={(ids) => setEditing({ ...editing, entityIds: ids })} />
-                    <div style={{ marginTop: 8 }}>
-                      <button style={miniBtn} onClick={save} disabled={!editing.email.trim()}>Save</button>{' '}
-                      <button style={delBtn} onClick={() => setEditing(null)}>Cancel</button>
-                    </div>
-                  </td>
-                </tr>
-              ) : (
-                <tr key={u.id}>
-                  <td style={td}>
-                    {u.email}
-                    {(u.entityIds || []).length > 0 && <span style={{ color: 'var(--muted)', fontSize: 11 }}> · customer of {(u.entityIds || []).map(nameOf).join(', ')}</span>}
-                  </td>
-                  <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}>
-                    <button style={miniBtn} onClick={() => setEditing({ id: u.id, email: u.email, password: '', entityIds: u.entityIds || [] })}>Edit</button>{' '}
-                    <button style={delBtn} onClick={() => del(u)} disabled={admins.length === 1} title={admins.length === 1 ? 'Cannot delete the only admin' : ''}>Delete</button>
-                  </td>
-                </tr>
-              )
-            ))}
-          </tbody>
-        </table>
-      )}
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginTop: 8 }}>
-        <Field label="Email"><input style={input} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>
-        <Field label="Password"><input style={input} type="text" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></Field>
-        <button style={miniBtn} onClick={add} disabled={!form.email || !form.password}>+ Add admin</button>
-        <button style={miniBtnOutline} onClick={promote} disabled={!form.email} title="Make an existing login (e.g. a client team member) an admin — no new password needed">↑ Promote existing</button>
-      </div>
-      {entities.length > 0 && (
-        <div style={{ marginTop: 8 }}>
-          <L>Also a customer of (optional)</L>
-          <ClientLinkPicker entities={entities} value={form.entityIds} onChange={(ids) => setForm({ ...form, entityIds: ids })} />
-        </div>
-      )}
-      {error && <div style={{ color: 'var(--error)', fontSize: 13, marginTop: 6 }}>{error}</div>}
-    </div>
-  );
-}
 // Multi-select of clients as toggle chips — used to attach customer profiles.
 function ClientLinkPicker({ entities, value = [], onChange }) {
   const toggle = (id) => onChange(value.includes(id) ? value.filter((x) => x !== id) : [...value, id]);
@@ -1286,7 +1334,7 @@ function ClientLinkPicker({ entities, value = [], onChange }) {
 // or delete), add a new client login, or LINK an existing login (client or
 // admin) so one person can hold several profiles.
 function EntityLogins({ entity, users, allUsers = [], onChange }) {
-  const [form, setForm] = useState({ email: '', password: '', role: 'owner' });
+  const [form, setForm] = useState({ firstName: '', lastName: '', email: '', mobile: '', password: '', role: 'owner' });
   const [error, setError] = useState(null);
   const [linkId, setLinkId] = useState('');
   const [linkRole, setLinkRole] = useState('viewer');
@@ -1298,9 +1346,9 @@ function EntityLogins({ entity, users, allUsers = [], onChange }) {
   const add = async () => {
     setError(null);
     try {
-      const u = await api.adminCreateUser({ email: form.email, password: form.password, role: 'client', entityIds: [entity.id] });
+      const u = await api.adminCreateUser({ firstName: form.firstName, lastName: form.lastName, email: form.email, mobile: form.mobile, password: form.password, role: 'client', entityIds: [entity.id] });
       if (form.role !== 'owner') await api.setMembershipRole(entity.id, u.id, form.role); // owner is the default
-      setForm({ email: '', password: '', role: 'owner' });
+      setForm({ firstName: '', lastName: '', email: '', mobile: '', password: '', role: 'owner' });
       onChange();
     } catch (e) { setError(e.message); }
   };
@@ -1329,9 +1377,9 @@ function EntityLogins({ entity, users, allUsers = [], onChange }) {
             {users.map((u) => (
               <tr key={u.id}>
                 <td style={td}>
-                  {u.email}
+                  {u.fullName ? <span style={{ fontWeight: 600 }}>{u.fullName}</span> : u.email}
                   {u.role === 'admin' && <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: 'var(--brand)', border: '1px solid var(--brand)', borderRadius: 980, padding: '1px 7px', verticalAlign: 'middle' }}>HOWLER</span>}
-                  {(u.entityIds || []).length > 1 && <span style={{ color: 'var(--muted)', fontSize: 11 }}> · also other clients</span>}
+                  <div style={{ color: 'var(--muted)', fontSize: 11 }}>{u.fullName ? `${u.email} · ` : ''}{u.mobile ? `${u.mobile} · ` : ''}{(u.entityIds || []).length > 1 ? 'also other clients' : 'this client'}</div>
                 </td>
                 <td style={{ ...td, width: 130 }}>
                   {u.role === 'admin'
@@ -1350,7 +1398,10 @@ function EntityLogins({ entity, users, allUsers = [], onChange }) {
         </table>
       )}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginTop: 8 }}>
+        <Field label="First name"><input style={{ ...input, minWidth: 110 }} value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} /></Field>
+        <Field label="Surname"><input style={{ ...input, minWidth: 110 }} value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} /></Field>
         <Field label="Email"><input style={input} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>
+        <Field label="Mobile"><input style={{ ...input, minWidth: 130 }} value={form.mobile} onChange={(e) => setForm({ ...form, mobile: e.target.value })} placeholder="+27…" /></Field>
         <Field label="Password"><input style={input} type="text" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></Field>
         <Field label="Role"><select style={input} value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>{roleOpts.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}</select></Field>
         <button style={miniBtn} onClick={add} disabled={!form.email || !form.password}>+ Add login</button>

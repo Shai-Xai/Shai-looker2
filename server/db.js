@@ -144,6 +144,11 @@ addColumn('users', 'notify_email', 'INTEGER NOT NULL DEFAULT 1');
 addColumn('users', 'notify_push', 'INTEGER NOT NULL DEFAULT 1');
 // Most recent successful login (ISO; null = never logged in). Powers Admin → Users.
 addColumn('users', 'last_login', 'TEXT');
+// Identity captured at creation (optional; blank for legacy users). Names give the
+// admin directory a human label beyond email; mobile is a contact / SMS handle.
+addColumn('users', 'first_name', "TEXT NOT NULL DEFAULT ''");
+addColumn('users', 'last_name', "TEXT NOT NULL DEFAULT ''");
+addColumn('users', 'mobile', "TEXT NOT NULL DEFAULT ''");
 // Persistent per-folder settings for the dashboard library. Folders are "/"-path
 // strings on each dashboard (not records), so a setting keyed by path cascades to
 // every dashboard in that folder + subfolders — and to ones added later.
@@ -765,11 +770,12 @@ function roleForMembership(userId, entityId) {
 function rowToUser(r) {
   if (!r) return null;
   const memberships = membershipsForUser(r.id);
-  return { id: r.id, email: r.email, role: r.role, passwordHash: r.password_hash, entityIds: memberships.map((m) => m.entityId), memberships, notifyEmail: r.notify_email !== 0, notifyPush: r.notify_push !== 0, lastLogin: r.last_login || null, createdAt: r.created_at };
+  const firstName = r.first_name || '', lastName = r.last_name || '';
+  return { id: r.id, email: r.email, role: r.role, passwordHash: r.password_hash, firstName, lastName, fullName: [firstName, lastName].filter(Boolean).join(' '), mobile: r.mobile || '', entityIds: memberships.map((m) => m.entityId), memberships, notifyEmail: r.notify_email !== 0, notifyPush: r.notify_push !== 0, lastLogin: r.last_login || null, createdAt: r.created_at };
 }
 function publicUser(u) {
   if (!u) return null;
-  return { id: u.id, email: u.email, role: u.role, entityIds: u.entityIds || [], memberships: u.memberships || [], notifyEmail: u.notifyEmail !== false, notifyPush: u.notifyPush !== false };
+  return { id: u.id, email: u.email, role: u.role, firstName: u.firstName || '', lastName: u.lastName || '', fullName: u.fullName || '', mobile: u.mobile || '', entityIds: u.entityIds || [], memberships: u.memberships || [], notifyEmail: u.notifyEmail !== false, notifyPush: u.notifyPush !== false };
 }
 // Update a user's notification channel preferences (partial).
 function setNotificationPrefs(userId, prefs = {}) {
@@ -805,14 +811,14 @@ function setMembershipRole(userId, entityId, role) {
 function removeMembership(userId, entityId) {
   return db.prepare('DELETE FROM user_entities WHERE user_id=? AND entity_id=?').run(userId, entityId).changes > 0;
 }
-function createUser({ email, password, role = 'client', entityIds = [] }) {
+function createUser({ email, password, role = 'client', entityIds = [], firstName = '', lastName = '', mobile = '' }) {
   const e = (email || '').trim().toLowerCase();
   if (!e || !password) throw new Error('email and password are required');
   if (db.prepare('SELECT 1 FROM users WHERE email=?').get(e)) throw new Error('A user with that email already exists');
   const id = uuid();
   const r = role === 'admin' ? 'admin' : 'client';
-  db.prepare('INSERT INTO users (id,email,password_hash,role,created_at) VALUES (?,?,?,?,?)')
-    .run(id, e, bcrypt.hashSync(password, 10), r, now());
+  db.prepare('INSERT INTO users (id,email,password_hash,role,first_name,last_name,mobile,created_at) VALUES (?,?,?,?,?,?,?,?)')
+    .run(id, e, bcrypt.hashSync(password, 10), r, String(firstName || '').trim(), String(lastName || '').trim(), String(mobile || '').trim(), now());
   setUserEntities(id, entityIds); // admins may carry entity links too (team surface)
   return publicUser(getUser(id));
 }
@@ -828,7 +834,10 @@ function updateUser(id, patch) {
   }
   const hash = patch.password ? bcrypt.hashSync(patch.password, 10) : cur.password_hash;
   const role = patch.role ? (patch.role === 'admin' ? 'admin' : 'client') : cur.role;
-  db.prepare('UPDATE users SET email=?, password_hash=?, role=? WHERE id=?').run(email, hash, role, id);
+  const firstName = patch.firstName !== undefined ? String(patch.firstName || '').trim() : cur.first_name;
+  const lastName = patch.lastName !== undefined ? String(patch.lastName || '').trim() : cur.last_name;
+  const mobile = patch.mobile !== undefined ? String(patch.mobile || '').trim() : cur.mobile;
+  db.prepare('UPDATE users SET email=?, password_hash=?, role=?, first_name=?, last_name=?, mobile=? WHERE id=?').run(email, hash, role, firstName, lastName, mobile, id);
   if ('entityIds' in patch) setUserEntities(id, patch.entityIds);
   return publicUser(getUser(id));
 }

@@ -39,17 +39,17 @@ function getSecret() {
 // current admin UI, alongside the real `entityIds`.
 function publicUser(u) {
   if (!u) return null;
-  return { id: u.id, email: u.email, role: u.role, tenantId: (u.entityIds || [])[0] || null, entityIds: u.entityIds || [], notifyEmail: u.notifyEmail !== false, notifyPush: u.notifyPush !== false };
+  return { id: u.id, email: u.email, role: u.role, firstName: u.firstName || '', lastName: u.lastName || '', fullName: u.fullName || '', mobile: u.mobile || '', tenantId: (u.entityIds || [])[0] || null, entityIds: u.entityIds || [], notifyEmail: u.notifyEmail !== false, notifyPush: u.notifyPush !== false };
 }
 function loadUsers() { return db.listUsers(); }
 function getUser(id) { return db.getUser(id); }
 function verifyCredentials(email, password) { return db.verifyCredentials(email, password); }
 
-function createUser({ email, password, role = 'client', tenantId = null, entityIds }) {
+function createUser({ email, password, role = 'client', tenantId = null, entityIds, firstName = '', lastName = '', mobile = '' }) {
   const ids = entityIds || (tenantId ? [tenantId] : []);
   // Admins keep entity links too: full access regardless, but a link makes them
   // part of that client's team surface (logins list, digests, notifications).
-  const u = db.createUser({ email, password, role, entityIds: ids });
+  const u = db.createUser({ email, password, role, entityIds: ids, firstName, lastName, mobile });
   return publicUser(u);
 }
 function updateUser(id, patch) {

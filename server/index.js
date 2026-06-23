@@ -162,7 +162,7 @@ app.put('/api/my/notification-prefs', auth.requireAuth, (req, res) => {
 function teamMembers(entityId) {
   return db.listUsers()
     .filter((u) => u.role !== 'admin' && (u.entityIds || []).includes(entityId))
-    .map((u) => ({ id: u.id, email: u.email, role: (u.memberships || []).find((m) => m.entityId === entityId)?.role || 'owner', alsoOtherClients: (u.entityIds || []).length > 1 }));
+    .map((u) => ({ id: u.id, email: u.email, fullName: u.fullName, firstName: u.firstName, lastName: u.lastName, mobile: u.mobile, role: (u.memberships || []).find((m) => m.entityId === entityId)?.role || 'owner', alsoOtherClients: (u.entityIds || []).length > 1 }));
 }
 const ownerCount = (entityId) => teamMembers(entityId).filter((m) => m.role === 'owner').length;
 
@@ -170,10 +170,10 @@ app.get('/api/my/team/:entityId', auth.requireAuth, auth.requirePermission('team
   res.json({ members: teamMembers(req.params.entityId).map((m) => ({ ...m, isYou: m.id === req.user.id })), roles: roles.catalog() });
 });
 app.post('/api/my/team/:entityId', auth.requireAuth, auth.requirePermission('team.manage'), (req, res) => {
-  const { email, password, role } = req.body || {};
+  const { email, password, role, firstName, lastName, mobile } = req.body || {};
   if (!roles.ROLE_KEYS.includes(String(role || ''))) return res.status(400).json({ error: 'Unknown role' });
   try {
-    const u = auth.createUser({ email, password, role: 'client', entityIds: [req.params.entityId] });
+    const u = auth.createUser({ email, password, role: 'client', entityIds: [req.params.entityId], firstName, lastName, mobile });
     db.setMembershipRole(u.id, req.params.entityId, role);
     res.status(201).json({ ok: true });
   } catch (e) { res.status(400).json({ error: e.message }); }
@@ -230,6 +230,7 @@ app.get('/api/admin/users', auth.requireAdmin, (_req, res) => {
     const lastActiveAt = [u.lastLogin, la?.at, lastViews[u.id]].filter(Boolean).sort().pop() || null;
     return {
       id: u.id, email: u.email, role: u.role,
+      firstName: u.firstName, lastName: u.lastName, fullName: u.fullName, mobile: u.mobile,
       entityIds: u.entityIds, memberships: u.memberships,
       notifyEmail: u.notifyEmail, notifyPush: u.notifyPush,
       createdAt: u.createdAt, lastLogin: u.lastLogin || null, lastActiveAt,
@@ -344,6 +345,7 @@ app.get('/api/admin/users/:id', auth.requireAdmin, (req, res) => {
   res.json({
     user: {
       id: u.id, email: u.email, role: u.role, createdAt: u.createdAt,
+      firstName: u.firstName, lastName: u.lastName, fullName: u.fullName, mobile: u.mobile,
       lastLogin: u.lastLogin || null, notifyEmail: u.notifyEmail, notifyPush: u.notifyPush,
       entityIds: u.entityIds,
     },
