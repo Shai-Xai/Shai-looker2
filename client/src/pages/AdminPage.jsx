@@ -749,6 +749,23 @@ function actionGlyph(action = '') {
   if (a.startsWith('guide') || a.startsWith('feature')) return '🚀';
   return '•';
 }
+// Emails received: glyph + friendly label by send kind, colour by delivery status.
+function mailGlyph(kind = '') {
+  const k = String(kind);
+  if (k === 'digest') return '📧';
+  if (k === 'campaign') return '📣';
+  if (k.startsWith('notif') || k === 'alert') return '🔔';
+  if (k === 'otp' || k === 'auth' || k === 'welcome' || k === 'invite') return '🔑';
+  return '✉️';
+}
+const MAIL_KIND_LABELS = { digest: 'Digest', campaign: 'Campaign', notification: 'Notification', alert: 'Alert', welcome: 'Welcome', invite: 'Invite', otp: 'Sign-in code', other: 'Email' };
+const mailKindLabel = (k) => MAIL_KIND_LABELS[k] || (k ? k[0].toUpperCase() + k.slice(1) : 'Email');
+function mailStatusStyle(status = '') {
+  const s = String(status).toLowerCase();
+  if (s.startsWith('sent')) return { color: '#1a7f37', background: '#e8f5ec' };
+  if (s.startsWith('fail')) return { color: 'var(--error)', background: '#fdeceb' };
+  return { color: 'var(--muted)', background: 'var(--elevated)' }; // skipped / other
+}
 
 function UsersTab() {
   const isMobile = useIsMobile();
@@ -950,12 +967,13 @@ function UserDetail({ userId, entities = [], roles = [], onBack }) {
   if (err) return <div><button style={miniBtnOutline} onClick={onBack}>← All users</button><p style={{ color: 'var(--error)', marginTop: 12 }}>{err}</p></div>;
   if (!data) return <div><button style={miniBtnOutline} onClick={onBack}>← All users</button><p style={{ marginTop: 12 }}><Muted>Loading…</Muted></p></div>;
 
-  const { user, memberships, profile, dashboards, activity, usageByClient = [] } = data;
+  const { user, memberships, profile, dashboards, activity, usageByClient = [], emails = [] } = data;
   const isAdmin = user.role === 'admin';
   const nav = [
     ['overview', 'Overview'],
     ['roles', `Clients & roles (${memberships.length})`],
     ['usage', 'Usage'],
+    ['emails', `Emails (${emails.length})`],
     ['activity', `Activity (${activity.length})`],
   ];
   const mostRecent = activity[0] || null;
@@ -1060,6 +1078,26 @@ function UserDetail({ userId, entities = [], roles = [], onBack }) {
                   : (dashboards.accessible || []).length === 0 ? <Muted>No dashboards reachable (no client membership or sets).</Muted>
                   : <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>{dashboards.accessible.map((d) => <span key={d.dashboardId} style={chipNeutral} title={d.suiteName}>{d.title}</span>)}</div>}
               </div>
+            </div>
+          )}
+
+          {section === 'emails' && (
+            <div>
+              <p style={hint}>Emails Pulse has sent to <b>{user.email}</b> — digests, campaigns and notifications.</p>
+              {emails.length === 0 ? <Muted>No emails sent to this address yet.</Muted> : (
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  {emails.map((m, i) => (
+                    <div key={i} style={{ display: 'flex', gap: 11, alignItems: 'center', padding: '9px 0', borderBottom: i < emails.length - 1 ? '1px solid var(--hairline)' : 'none' }}>
+                      <span style={{ fontSize: 16, width: 22, textAlign: 'center', flexShrink: 0 }}>{mailGlyph(m.kind)}</span>
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ fontSize: 13.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.subject || '(no subject)'}</div>
+                        <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 1 }}>{mailKindLabel(m.kind)}{m.entityName ? ` · ${m.entityName}` : ''} · {fmtWhen(m.at)}</div>
+                      </div>
+                      <span style={{ fontSize: 10.5, fontWeight: 700, borderRadius: 980, padding: '2px 8px', flexShrink: 0, ...mailStatusStyle(m.status) }}>{m.status}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 

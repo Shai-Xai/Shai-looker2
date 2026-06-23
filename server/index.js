@@ -353,6 +353,7 @@ app.get('/api/admin/users/:id', auth.requireAdmin, (req, res) => {
     profile: { top: used, lastVisit: profile.lastVisit },
     dashboards: { used, accessible, accessibleAll: u.role === 'admin' },
     usageByClient: db.usageByClientForUser(u.id),
+    emails: mailer.recipientLog(u.email).map((m) => ({ ...m, entityName: m.entityId ? (db.getEntity(m.entityId)?.name || '') : '' })),
     activity: buildUserActivity(u.id),
   });
 });

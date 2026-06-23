@@ -62,6 +62,22 @@ function recent({ limit = 15, kind = '', status = '', entityId = '' } = {}) {
   } catch { return []; }
 }
 
+// Emails addressed to ONE recipient, newest first. `recipient` may be a
+// comma-joined list (one send to several people), so we LIKE-match in SQL then
+// confirm an exact token match in JS — avoids `joe@x.com` matching `joe@x.com.au`.
+function recipientLog(email, limit = 50) {
+  const e = String(email || '').trim().toLowerCase();
+  if (!e) return [];
+  try {
+    const rows = db.db.prepare(
+      'SELECT at, recipient, subject, status, kind, entity_id AS entityId FROM mail_log WHERE LOWER(recipient) LIKE ? ORDER BY id DESC LIMIT ?'
+    ).all(`%${e}%`, Math.min(limit, 500));
+    return rows
+      .filter((r) => String(r.recipient || '').toLowerCase().split(/[,;]\s*/).includes(e))
+      .map((r) => ({ at: r.at, subject: r.subject, status: r.status, kind: r.kind || 'other', entityId: r.entityId || '' }));
+  } catch { return []; }
+}
+
 const setting = (key, env) => ((db && db.getSetting(key)) || process.env[env] || '').trim();
 const apiKey = () => setting('resend_api_key', 'RESEND_API_KEY');
 const from = () => setting('mail_from', 'MAIL_FROM') || 'Howler Pulse <onboarding@resend.dev>';
@@ -410,6 +426,6 @@ function previewBranding({ edits, entityId, suiteId } = {}) {
 }
 
 module.exports = {
-  init, isConfigured, send, status, recent, notificationEmail, baseUrl,
+  init, isConfigured, send, status, recent, recipientLog, notificationEmail, baseUrl,
   DEFAULTS, getPlatformTemplate, setPlatformTemplate, resolveBranding, previewBranding, digestEmail, campaignEmail,
 };
