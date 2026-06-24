@@ -12,7 +12,7 @@ import { useIsMobile } from '../lib/useIsMobile.js';
 //  • a "pop out" button to launch it top-level (first-party = full speed).
 // We reply ONCE to the documented `embed_content_ready` handshake (replying
 // repeatedly makes their app re-initialise in a loop → sluggish).
-export default function AnalystDrawer({ open, onClose, previewEntityId }) {
+export default function AnalystDrawer({ open, prewarm = false, onClose, previewEntityId }) {
   const isMobile = useIsMobile();
   const [state, setState] = useState({ status: 'loading' }); // loading | ready | error | unconfigured
   const [info, setInfo] = useState(null); // { url, tokens, scopeToken, hostUrl }
@@ -21,7 +21,9 @@ export default function AnalystDrawer({ open, onClose, previewEntityId }) {
   const iframeRef = useRef(null);
   const repliedRef = useRef(false);
 
-  useEffect(() => { if (open) setMounted(true); }, [open]);
+  // Mount on first open OR when pre-warmed (owl hover) so the iframe is already
+  // loaded by the time the drawer opens.
+  useEffect(() => { if (open || prewarm) setMounted(true); }, [open, prewarm]);
 
   // Fetch the authorized URL on first open and when the previewed client changes.
   useEffect(() => {
