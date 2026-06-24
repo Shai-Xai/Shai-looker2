@@ -803,6 +803,7 @@ function SetupWizard({ fields }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [tourOn, setTourOn] = useState(false); // the in-step spotlight walkthrough
+  const [preview, setPreview] = useState(null); // { url } → the in-wizard preview modal
   const initFor = useRef(null);
   const bodyRef = useRef(null);
   const autoTourSeen = useRef(new Set());
@@ -927,6 +928,15 @@ function SetupWizard({ fields }) {
       navigate('/');
     } catch (e) { alert('Could not open preview: ' + e.message); }
   };
+  // Resolve the best client-facing URL (first dashboard, else client home) and open
+  // the in-wizard preview panel — without leaving the wizard.
+  const openPreview = async () => {
+    let url = '/';
+    try {
+      for (const su of suitesOf(entity.id)) { const d = await api.mySuite(su.id); const first = d.sets.flatMap((s) => s.dashboards)[0]; if (first) { url = `/suite/${su.id}/d/${first.id}`; break; } }
+    } catch { /* fall back to the client home */ }
+    setPreview({ url });
+  };
 
   // ── Step editor (the ⚙): edit wording, reorder, add custom guidance steps ────
   if (editing) return <WizardEditor steps={steps} onClose={() => setEditing(false)} onSaved={(saved) => { setSteps(mergeWizardSteps(saved)); setEditing(false); }} />;
@@ -1033,10 +1043,13 @@ function SetupWizard({ fields }) {
       <div ref={bodyRef} style={cardStyle}>
         {stepKey !== 'review' && <ReqBadge />}
         <p style={{ fontSize: 13.5, color: 'var(--text)', lineHeight: 1.55, margin: '0 0 14px' }}>{step.blurb}</p>
-        {walkOf(stepKey).length > 0 && (
-          <div style={{ marginBottom: 12 }}>
-            <button style={miniBtn} title="Walk through each part of this step, one at a time"
-              onClick={() => { if (stepKey === 'suites' && !suitesOf(entity?.id).length) { alert('Add a suite first (the “+ Add suite” button), then I’ll walk you through it.'); return; } setTourOn(true); }}>▶ Guide me through this step</button>
+        {(walkOf(stepKey).length > 0 || (entity && stepKey !== 'review')) && (
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+            {walkOf(stepKey).length > 0 && (
+              <button style={miniBtn} title="Walk through each part of this step, one at a time"
+                onClick={() => { if (stepKey === 'suites' && !suitesOf(entity?.id).length) { alert('Add a suite first (the “+ Add suite” button), then I’ll walk you through it.'); return; } setTourOn(true); }}>▶ Guide me through this step</button>
+            )}
+            {entity && stepKey !== 'review' && <button style={miniBtn} onClick={openPreview} title="Preview the client’s live account in a panel — no need to leave the wizard">👁 Preview the client</button>}
           </div>
         )}
 
@@ -1146,6 +1159,7 @@ function SetupWizard({ fields }) {
 
         {error && <div style={{ color: 'var(--error)', fontSize: 13, marginTop: 10 }}>{error}</div>}
         {tourOn && walkOf(stepKey).length > 0 && <SectionTour steps={walkOf(stepKey)} container={bodyRef} onClose={() => setTourOn(false)} />}
+        {preview && entity && <PreviewModal entityId={entity.id} name={entity.name} url={preview.url} onClose={() => setPreview(null)} />}
       </div>
     </div>
   );
@@ -1261,6 +1275,7 @@ function WizardEditor({ steps, onClose, onSaved }) {
   const [list, setList] = useState(() => steps.map((s) => ({ ...s, items: s.items ? s.items.map((it) => ({ ...it })) : undefined, walk: s.walk ? s.walk.map((w) => ({ ...w })) : undefined })));
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
+  const [openEdit, setOpenEdit] = useState({}); // which step cards are expanded (collapsed by default)
 
   const patch = (i, p) => setList((l) => l.map((x, j) => (j === i ? { ...x, ...p } : x)));
   // Walkthrough-point edits (the red-border guide): change text, reorder, on/off.
@@ -1305,16 +1320,21 @@ function WizardEditor({ steps, onClose, onSaved }) {
           const isCustom = s.kind === 'custom';
           return (
             <div key={s.key} style={cardStyle}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-                <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Step {i + 1}</span>
-                {isCustom
-                  ? <span style={{ ...badgeBase, marginBottom: 0, color: 'var(--brand)', background: 'rgba(var(--brand-rgb),0.10)', border: '1px solid rgba(var(--brand-rgb),0.3)' }}>Your guidance step</span>
-                  : <span style={{ ...badgeBase, marginBottom: 0, color: 'var(--muted)', background: 'rgba(128,128,128,0.12)', border: '1px solid var(--hairline)' }} title={def?.does || ''}>Built-in{s.optional ? ' · optional' : ''} — action fixed</span>}
-                <span style={{ flex: 1 }} />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: openEdit[s.key] ? 10 : 0 }}>
+                <button onClick={() => setOpenEdit((o) => ({ ...o, [s.key]: !o[s.key] }))} title={openEdit[s.key] ? 'Collapse' : 'Expand to edit'}
+                  style={{ width: 16, border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--muted)', fontSize: 11, padding: 0, flexShrink: 0, transform: openEdit[s.key] ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</button>
+                <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.04em', flexShrink: 0 }}>Step {i + 1}</span>
+                <button onClick={() => setOpenEdit((o) => ({ ...o, [s.key]: !o[s.key] }))} style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0, border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left', padding: 0, color: 'var(--text)' }}>
+                  {isCustom
+                    ? <span style={{ ...badgeBase, marginBottom: 0, color: 'var(--brand)', background: 'rgba(var(--brand-rgb),0.10)', border: '1px solid rgba(var(--brand-rgb),0.3)' }}>Your step</span>
+                    : <span style={{ ...badgeBase, marginBottom: 0, color: 'var(--muted)', background: 'rgba(128,128,128,0.12)', border: '1px solid var(--hairline)' }} title={def?.does || ''}>Built-in{s.optional ? ' · optional' : ''}</span>}
+                  <span style={{ fontWeight: 700, fontSize: 13.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.icon} {s.title}</span>
+                </button>
                 <button style={miniBtnOutline} onClick={() => move(i, -1)} disabled={s.key === 'client' || i <= 1} title="Move up">↑</button>
                 <button style={miniBtnOutline} onClick={() => move(i, 1)} disabled={s.key === 'client' || i >= list.length - 1} title="Move down">↓</button>
                 {isCustom && <button style={delBtn} onClick={() => removeStep(i)}>Remove</button>}
               </div>
+              {openEdit[s.key] && (<>
               {def?.does && !isCustom && <p style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 10px' }}>What it does: {def.does}</p>}
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
                 <Field label="Icon"><input style={{ ...input, width: 64, minWidth: 0, textAlign: 'center' }} value={s.icon || ''} onChange={(e) => patch(i, { icon: e.target.value })} maxLength={4} /></Field>
@@ -1368,6 +1388,7 @@ function WizardEditor({ steps, onClose, onSaved }) {
                   <button style={miniBtn} onClick={() => addItem(i)}>+ Add checklist item</button>
                 </div>
               )}
+              </>)}
             </div>
           );
         })}
@@ -1379,6 +1400,43 @@ function WizardEditor({ steps, onClose, onSaved }) {
         <button style={delBtn} onClick={reset} disabled={busy}>Reset to defaults</button>
         <span style={{ flex: 1 }} />
         <button style={{ ...saveBtn, opacity: busy ? 0.6 : 1 }} onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save wizard'}</button>
+      </div>
+    </div>
+  );
+}
+
+// ─── In-wizard preview — the client's real account inside a modal iframe ───────
+// Shows exactly what the client will see, scoped to the previewed client via the
+// same localStorage profile keys the app reads on boot (a same-origin iframe
+// shares them). Snapshots + restores those keys on close so the admin's own
+// session view is untouched. No navigation away from the wizard.
+function PreviewModal({ entityId, name, url, onClose }) {
+  const [wide, setWide] = useState(false);
+  const snap = useRef(null);
+  if (snap.current === null) {
+    snap.current = { p: localStorage.getItem('howler_active_profile'), m: localStorage.getItem('howler_active_mode'), v: localStorage.getItem('howler_admin_preview') };
+    localStorage.setItem('howler_active_profile', entityId);
+    localStorage.setItem('howler_active_mode', 'client');
+    localStorage.setItem('howler_admin_preview', JSON.stringify({ id: entityId, name: name || '', logo: '' }));
+  }
+  useEffect(() => () => {
+    const s = snap.current, put = (k, v) => (v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v));
+    put('howler_active_profile', s.p); put('howler_active_mode', s.m); put('howler_admin_preview', s.v);
+  }, []);
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 5000, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: 'var(--card)', borderRadius: 16, boxShadow: '0 24px 64px -12px rgba(0,0,0,0.6)', width: wide ? 'min(1100px, 96vw)' : 'min(420px, 96vw)', height: '90vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 14px', borderBottom: '1px solid var(--hairline)', flexWrap: 'wrap' }}>
+          <span style={{ fontWeight: 800, fontSize: 14 }}>👁 Preview — {name || 'client'}</span>
+          <span style={{ flex: 1 }} />
+          <button style={miniBtnOutline} onClick={() => setWide((w) => !w)}>{wide ? '📱 Phone' : '🖥 Desktop'}</button>
+          <a href={url} target="_blank" rel="noreferrer" style={{ ...miniBtnOutline, textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}>Open ↗</a>
+          <button style={saveBtn} onClick={onClose}>Done</button>
+        </div>
+        <div style={{ flex: 1, minHeight: 0, background: '#fff' }}>
+          <iframe title="Client preview" src={url} style={{ width: '100%', height: '100%', border: 'none' }} />
+        </div>
+        <div style={{ fontSize: 11.5, color: 'var(--muted)', padding: '8px 14px', borderTop: '1px solid var(--hairline)' }}>The live client experience, scoped to {name || 'this client'} — exactly what they’ll see. Your own admin session is untouched.</div>
       </div>
     </div>
   );
