@@ -12,27 +12,17 @@ export default function DashboardInsightModal({ dashboardId, title, filterValues
   const [text, setText] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  // Desktop: dock the panel to the TOP OF THE DASHBOARD CONTENT — i.e. below all
-  // the fixed chrome (global nav, client-preview banner, dashboard header + tabs)
-  // so it never overlays any of it. We measure the scrolling tiles area
-  // (`.dashboard-scroll`), falling back to the global header bottom. Measured live
-  // so it tracks layout (preview banner appearing, resize, etc.).
-  const [topOffset, setTopOffset] = useState(56);
   const abortRef = useRef(null);
 
+  // Desktop: dock the panel as a full-height column on the right and SHIFT THE
+  // WHOLE APP left by the panel width (via `body.owl-docked` → padding-right on
+  // #root) so the nav, header and dashboard all reflow — nothing is overlaid.
+  // Mobile keeps the bottom sheet.
   useEffect(() => {
     if (isMobile) return undefined;
-    const measure = () => {
-      const content = document.querySelector('.dashboard-scroll');
-      if (content) { setTopOffset(Math.round(content.getBoundingClientRect().top)); return; }
-      setTopOffset(Math.round(document.querySelector('.app-chrome')?.getBoundingClientRect().bottom || 56));
-    };
-    measure();
-    // Re-measure after layout settles (the panel opening reflows the dashboard).
-    const raf = requestAnimationFrame(measure);
-    const t = setTimeout(measure, 250);
-    window.addEventListener('resize', measure);
-    return () => { cancelAnimationFrame(raf); clearTimeout(t); window.removeEventListener('resize', measure); };
+    document.body.style.setProperty('--owl-width', `${SIDEBAR_W}px`);
+    document.body.classList.add('owl-docked');
+    return () => { document.body.classList.remove('owl-docked'); document.body.style.removeProperty('--owl-width'); };
   }, [isMobile]);
 
   const run = () => {
@@ -79,10 +69,10 @@ export default function DashboardInsightModal({ dashboardId, title, filterValues
   // `ai-overlay` class, which carries backdrop-filter: blur), and the overlay lets
   // clicks pass through (pointer-events:none) so the dashboard stays fully visible
   // and live beside it. Mobile keeps the dimmed bottom sheet (no room for side-by-side).
-  // Desktop overlay starts below the top nav (topOffset) instead of at the very
-  // top, so the docked panel sits beside the content — not over the header.
+  // Desktop: full-height right column. The app is shifted left (owl-docked), so the
+  // panel fills the cleared space with no overlap. Click-through elsewhere.
   const node = (
-    <div className={isMobile ? 'ai-overlay' : ''} style={isMobile ? { ...overlay, alignItems: 'flex-end', justifyContent: 'center' } : { ...desktopOverlay, top: topOffset }} onClick={isMobile ? onClose : undefined}>
+    <div className={isMobile ? 'ai-overlay' : ''} style={isMobile ? { ...overlay, alignItems: 'flex-end', justifyContent: 'center' } : desktopOverlay} onClick={isMobile ? onClose : undefined}>
       <div className={(isMobile ? 'ai-sheet' : 'ai-panel') + ' ai-glow'} style={isMobile ? { ...panelStyle, ...drag.style } : panelStyle} onClick={(e) => e.stopPropagation()}>
         <style>{`@keyframes blink { 50% { opacity: 0; } } @keyframes spin { to { transform: rotate(360deg); } }`}</style>
         {isMobile && <div className="sheet-grip" {...drag.handlers} style={{ marginTop: 8 }} />}

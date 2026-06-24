@@ -80,6 +80,11 @@
 }
 html { transition: background .3s ease; }
 
+/* Owl dashboard summary docks as a full-height right column on desktop: shift the
+   whole app left by the panel width so nothing is ever overlaid. */
+#root { transition: padding-right .22s ease; }
+body.owl-docked #root { padding-right: var(--owl-width, 420px); }
+
 html, body {
   font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
   background: var(--bg);
