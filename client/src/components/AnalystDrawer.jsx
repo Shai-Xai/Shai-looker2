@@ -76,7 +76,7 @@ export default function AnalystDrawer({ open, prewarm = false, onClose, previewE
       <div style={{ position: 'absolute', top: 0, right: 0, height: '100%', width, background: 'var(--card)', boxShadow: '-10px 0 30px rgba(0,0,0,0.28)', display: 'flex', flexDirection: 'column', transform: open ? 'translateX(0)' : 'translateX(100%)', transition: 'transform .26s var(--ease-spring, ease)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 10px 11px 14px', borderBottom: '1px solid var(--hairline)', flexShrink: 0 }}>
           <span style={{ fontSize: 16 }}>✨</span>
-          <strong style={{ fontSize: 14.5 }}>Your AI analyst</strong>
+          <strong style={{ fontSize: 14.5 }}>Your Data Analyst</strong>
           <span style={{ flex: 1 }} />
           {!isMobile && (
             <button onClick={() => setExpanded((e) => !e)} title={expanded ? 'Exit full screen' : 'Full screen'} aria-label={expanded ? 'Exit full screen' : 'Full screen'} style={{ ...hdrBtn, fontSize: 15, padding: '4px 8px' }}>{expanded ? '⤡' : '⛶'}</button>
