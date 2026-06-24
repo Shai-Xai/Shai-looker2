@@ -407,6 +407,7 @@ export default function ViewPage() {
         )}
 
         <div
+          className="dashboard-scroll"
           style={{
             flex: 1, padding: isMobile ? '12px' : '22px', overflowY: 'auto', WebkitOverflowScrolling: 'touch',
             // When the Owl summary docks as a desktop sidebar, make room so tiles

@@ -12,18 +12,27 @@ export default function DashboardInsightModal({ dashboardId, title, filterValues
   const [text, setText] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  // Desktop: dock the panel BELOW the global top nav (the persistent `.app-chrome`
-  // header) so it never overlays it — the nav stays visible and usable beside the
-  // summary. Measured live so it tracks the header's real height.
+  // Desktop: dock the panel to the TOP OF THE DASHBOARD CONTENT — i.e. below all
+  // the fixed chrome (global nav, client-preview banner, dashboard header + tabs)
+  // so it never overlays any of it. We measure the scrolling tiles area
+  // (`.dashboard-scroll`), falling back to the global header bottom. Measured live
+  // so it tracks layout (preview banner appearing, resize, etc.).
   const [topOffset, setTopOffset] = useState(56);
   const abortRef = useRef(null);
 
   useEffect(() => {
     if (isMobile) return undefined;
-    const measure = () => setTopOffset(Math.round(document.querySelector('.app-chrome')?.getBoundingClientRect().bottom || 56));
+    const measure = () => {
+      const content = document.querySelector('.dashboard-scroll');
+      if (content) { setTopOffset(Math.round(content.getBoundingClientRect().top)); return; }
+      setTopOffset(Math.round(document.querySelector('.app-chrome')?.getBoundingClientRect().bottom || 56));
+    };
     measure();
+    // Re-measure after layout settles (the panel opening reflows the dashboard).
+    const raf = requestAnimationFrame(measure);
+    const t = setTimeout(measure, 250);
     window.addEventListener('resize', measure);
-    return () => window.removeEventListener('resize', measure);
+    return () => { cancelAnimationFrame(raf); clearTimeout(t); window.removeEventListener('resize', measure); };
   }, [isMobile]);
 
   const run = () => {
