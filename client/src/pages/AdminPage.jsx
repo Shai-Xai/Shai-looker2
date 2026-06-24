@@ -814,12 +814,13 @@ function SetupWizard({ fields }) {
   // Close any open walkthrough when moving between steps.
   useEffect(() => { setTourOn(false); }, [stepKey]);
   // Auto-launch the spotlight walkthrough the first time the AM reaches a guided
-  // step for a client (once per client per step). The client step is skipped (the
-  // entity isn't created yet); suites waits until there's a suite to point at.
+  // step (once per client per step). Non-client steps need the entity to exist;
+  // suites also waits until there's a suite to point at.
   useEffect(() => {
-    if (!entity || !TOURS[stepKey] || stepKey === 'client') return;
-    if (stepKey === 'suites' && !data.suites.some((s) => s.entityId === entity.id)) return;
-    const k = `${entity.id}:${stepKey}`;
+    if (!TOURS[stepKey]) return;
+    if (stepKey !== 'client' && !entity) return;
+    if (stepKey === 'suites' && entity && !data.suites.some((s) => s.entityId === entity.id)) return;
+    const k = `${entity?.id || 'new'}:${stepKey}`;
     if (!autoTourSeen.current.has(k)) { autoTourSeen.current.add(k); setTourOn(true); }
   }, [stepKey, entityId, data]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -938,7 +939,7 @@ function SetupWizard({ fields }) {
               </div>
             ))}
           </div>
-          <button style={{ ...saveBtn, padding: '11px 22px', fontSize: 14 }} onClick={() => { setEntityId(null); go('client'); }}>Start a new client →</button>
+          <button style={{ ...saveBtn, padding: '11px 22px', fontSize: 14 }} onClick={() => { autoTourSeen.current = new Set(); setEntityId(null); go('client'); }}>Start a new client →</button>
         </div>
         {incomplete.length > 0 && (
           <div style={cardStyle}>
@@ -1159,9 +1160,16 @@ const LOGINS_TOUR = [
   { tour: 'login-role', icon: '🎚️', title: 'Choose their role', body: 'The role controls what this person can see and do. Pick the access level that fits them.' },
   { tour: 'login-link', icon: '🔗', title: 'Or link an existing person', body: 'If someone already has a login on another client, link them here instead of creating a duplicate account.' },
 ];
+const BRANDING_TOUR = [
+  { tour: 'mte-senderName', icon: '✉️', title: 'Sender name', body: 'The “From” name on this client’s emails — usually their brand. Blank inherits the Howler default.' },
+  { tour: 'mte-brandColor', icon: '🎨', title: 'Brand colours', body: 'The primary (and secondary) colour drive the whole app look — buttons, accents, chart series — and their emails.' },
+  { tour: 'mte-logo', icon: '🖼️', title: 'Logo', body: 'Upload their logo or paste a URL — it shows in the sidebar and atop every email. Tip: “Extract colours” pulls a palette straight from the logo.' },
+  { tour: 'mte-preview', icon: '👀', title: 'Live preview', body: 'See exactly how an email will look as you edit. Anything left blank falls back to the client’s — then Howler’s — defaults.' },
+  { tour: 'mte-save', icon: '💾', title: 'Save the branding', body: 'Save to apply it — the app re-themes live, no reload. You can also send yourself a test email.' },
+];
 // Per-step walkthroughs, keyed by step. Each is an ordered list of { tour, title,
 // body } where `tour` matches a [data-tour] anchor inside that step's content.
-const TOURS = { client: CLIENT_TOUR, scope: SCOPE_TOUR, suites: SUITES_TOUR, logins: LOGINS_TOUR };
+const TOURS = { client: CLIENT_TOUR, scope: SCOPE_TOUR, suites: SUITES_TOUR, logins: LOGINS_TOUR, branding: BRANDING_TOUR };
 
 function SectionTour({ steps, container, onClose }) {
   const [i, setI] = useState(0);

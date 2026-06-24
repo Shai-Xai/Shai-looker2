@@ -88,7 +88,7 @@ export default function MailTemplateEditor({ entityId, scope = 'platform', suite
     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 20, alignItems: 'start' }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {FIELDS.map(([key, label, type, help]) => (
-          <div key={key}>
+          <div key={key} data-tour={`mte-${key}`}>
             <div style={lbl}>{label}</div>
             {type === 'logo' ? (
               <LogoField value={edits[key] || ''} inherited={placeholderFor(key)} onChange={(v) => set(key, v)} onExtract={applyExtracted} />
@@ -120,7 +120,7 @@ export default function MailTemplateEditor({ entityId, scope = 'platform', suite
         <div style={{ fontSize: 11.5, color: 'var(--muted)', background: 'var(--elevated, #f7f7f8)', border: '1px solid var(--hairline)', borderRadius: 8, padding: '8px 10px' }}>
           The primary + secondary pair drives the look of the whole platform (buttons, accents, chart palettes) and these emails. Sends stay on Howler's verified domain, and a “Powered by Howler : Pulse” line stays in the footer.
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
+        <div data-tour="mte-save" style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
           <button style={saveBtn} onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
           {saved && <span style={{ color: 'var(--success, #10b981)', fontSize: 13, fontWeight: 600 }}>✓ Saved</span>}
           {canTest && (
@@ -135,7 +135,7 @@ export default function MailTemplateEditor({ entityId, scope = 'platform', suite
         </div>
       </div>
 
-      <div>
+      <div data-tour="mte-preview">
         <div style={lbl}>Live preview</div>
         <iframe title="Email preview" srcDoc={previewHtml} style={{ width: '100%', height: 460, border: '1px solid var(--hairline)', borderRadius: 12, background: '#fff' }} />
       </div>
