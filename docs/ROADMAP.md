@@ -124,6 +124,27 @@ post/ad publishing. Per-channel OAuth + a sync/send adapter mirroring
 `mailer.js` / `messaging.js`. See **`docs/ENGAGEMENT_ENGINE.md`** for the full
 model. Effort: L (per channel).
 
+### 4.6 Multiple ad accounts per channel (multi-brand)
+*"Clients may have multiple TikTok / Meta accounts for different brands."*
+Today a connection is stored as **flat fields on the client entity** (one
+`tiktokAccessToken` + `tiktokAdvertiserId`, one Meta `adAccountId`) and audiences
+key on **(entity, segment)** — so the pipeline assumes **one account per channel
+per client**. A client running several brands has nowhere to put a second
+TikTok advertiser, and a sync can't choose which brand's account to push to.
+**Proper fix:** an **ad-account sub-record** — entity → N connections per channel,
+each with its own token + account id + brand **label**. Then audiences key on
+**(entity, connection, segment)**, sync routes take a connection/account id, and
+the **Ad audiences hub** gains a per-brand grouping *inside* each channel sub-tab
+(e.g. TikTok ▸ Brand A / Brand B). Migration: new `ad_connections` table; existing
+single connections backfill as one row; audience rows gain `connection_id`.
+**Cheap habit meanwhile:** design any *new* connector (e.g. Google Ads) to store a
+**list of accounts from day one**, so we don't unwind single-account assumptions
+twice. Workaround that exists today: model each brand as its **own client entity**
+(separate scoping/login) — fine when brands are separate, fragmenting when it's one
+client wanting one view. Ties to `tiktok.js` / `meta.js`, the `/api/my/audiences`
+endpoints + `AudienceHub.jsx` (built 2026-06). Effort: M–L (mostly a data-model
+migration; the channel-tab UI already gives it a home).
+
 ### 4.5 Howler app push notifications (channel)
 *"Howler app notifications."*
 A message channel that reaches **attendees in Howler's own app** (highest-reach,
