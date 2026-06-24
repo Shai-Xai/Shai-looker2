@@ -37,8 +37,8 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
   const [clearTtToken, setClearTtToken] = useState(false);
   const [ttAdvertiser, setTtAdvertiser] = useState(value?.tiktok?.advertiserId || '');
   const [testState, setTestState] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [saved, setSaved] = useState(false);
+  const [busyKey, setBusyKey] = useState('');
+  const [savedKey, setSavedKey] = useState('');
 
   const secretSet = value?.looker?.clientSecretSet;
   const keySet = value?.anthropic?.keySet;
@@ -47,51 +47,75 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
   const resendSet = value?.resend?.keySet;
   const envResend = value?.resend?.envFallback;
 
-  async function save() {
-    setBusy(true);
-    try {
-      const payload = { looker: {}, anthropic: {} };
-      if (showLooker) {
-        payload.looker.baseUrl = baseUrl;
-        payload.looker.clientId = clientId;
-        if (clientSecret) payload.looker.clientSecret = clientSecret;
-        if (clearSecret) payload.looker.clearClientSecret = true;
-      }
-      if (anthropicKey) payload.anthropic.apiKey = anthropicKey;
-      if (clearKey) payload.anthropic.clearApiKey = true;
-      if (showResend) {
-        payload.resend = { from: mailFrom };
-        if (resendKey) payload.resend.apiKey = resendKey;
-        if (clearResendKey) payload.resend.clearApiKey = true;
-      }
-      if (showInventive) {
-        payload.inventive = { endpoint: invEndpoint };
-        if (invKey) payload.inventive.apiKey = invKey;
-        if (clearInvKey) payload.inventive.clearApiKey = true;
-        if (invToken) payload.inventive.embedToken = invToken;
-        if (clearInvToken) payload.inventive.clearEmbedToken = true;
-      }
-      if (inventiveWorkspace) payload.inventiveWorkspace = { name: invwName, refId: invwRef };
-      if (showMeta) {
-        payload.meta = { adAccountId: metaAdAccount, businessId: metaBusiness };
-        if (metaToken) payload.meta.accessToken = metaToken;
-        if (clearMetaToken) payload.meta.clearAccessToken = true;
-      }
-      if (showTikTok) {
-        payload.tiktok = { advertiserId: ttAdvertiser };
-        if (ttToken) payload.tiktok.accessToken = ttToken;
-        if (clearTtToken) payload.tiktok.clearAccessToken = true;
-      }
-      await onSave(payload);
-      setClientSecret(''); setAnthropicKey(''); setClearSecret(false); setClearKey(false);
-      setResendKey(''); setClearResendKey(false);
-      setInvKey(''); setInvToken(''); setClearInvKey(false); setClearInvToken(false);
-      setMetaToken(''); setClearMetaToken(false);
-      setTtToken(''); setClearTtToken(false);
-      setSaved(true); setTimeout(() => setSaved(false), 1600);
-    } catch (e) { alert('Save failed: ' + e.message); }
-    finally { setBusy(false); }
+  // Build just the slice for one section (or all if `only` is falsy). The backend
+  // merges partial payloads, so a per-card save only sends its own integration.
+  function buildPayload(only) {
+    const want = (k) => !only || only === k;
+    const p = {};
+    if (showLooker && want('looker')) {
+      p.looker = { baseUrl, clientId };
+      if (clientSecret) p.looker.clientSecret = clientSecret;
+      if (clearSecret) p.looker.clearClientSecret = true;
+    }
+    if (want('anthropic')) {
+      p.anthropic = {};
+      if (anthropicKey) p.anthropic.apiKey = anthropicKey;
+      if (clearKey) p.anthropic.clearApiKey = true;
+    }
+    if (showResend && want('resend')) {
+      p.resend = { from: mailFrom };
+      if (resendKey) p.resend.apiKey = resendKey;
+      if (clearResendKey) p.resend.clearApiKey = true;
+    }
+    if (showInventive && want('inventive')) {
+      p.inventive = { endpoint: invEndpoint };
+      if (invKey) p.inventive.apiKey = invKey;
+      if (clearInvKey) p.inventive.clearApiKey = true;
+      if (invToken) p.inventive.embedToken = invToken;
+      if (clearInvToken) p.inventive.clearEmbedToken = true;
+    }
+    if (inventiveWorkspace && want('inventive')) p.inventiveWorkspace = { name: invwName, refId: invwRef };
+    if (showMeta && want('meta')) {
+      p.meta = { adAccountId: metaAdAccount, businessId: metaBusiness };
+      if (metaToken) p.meta.accessToken = metaToken;
+      if (clearMetaToken) p.meta.clearAccessToken = true;
+    }
+    if (showTikTok && want('tiktok')) {
+      p.tiktok = { advertiserId: ttAdvertiser };
+      if (ttToken) p.tiktok.accessToken = ttToken;
+      if (clearTtToken) p.tiktok.clearAccessToken = true;
+    }
+    return p;
   }
+
+  async function save(only) {
+    setBusyKey(only || 'all');
+    try {
+      await onSave(buildPayload(only));
+      // Clear the transient (write-only) inputs for whatever we just saved.
+      if (!only || only === 'looker') { setClientSecret(''); setClearSecret(false); }
+      if (!only || only === 'anthropic') { setAnthropicKey(''); setClearKey(false); }
+      if (!only || only === 'resend') { setResendKey(''); setClearResendKey(false); }
+      if (!only || only === 'inventive') { setInvKey(''); setInvToken(''); setClearInvKey(false); setClearInvToken(false); }
+      if (!only || only === 'meta') { setMetaToken(''); setClearMetaToken(false); }
+      if (!only || only === 'tiktok') { setTtToken(''); setClearTtToken(false); }
+      setSavedKey(only || 'all'); setTimeout(() => setSavedKey(''), 1600);
+    } catch (e) { alert('Save failed: ' + e.message); }
+    finally { setBusyKey(''); }
+  }
+
+  // Per-card save row — lives at the bottom of each integration card.
+  const SaveRow = ({ k }) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 16 }}>
+      <button type="button" style={saveBtn} onClick={() => save(k)} disabled={busyKey === k}>{busyKey === k ? 'Saving…' : 'Save'}</button>
+      {savedKey === k && (
+        <span className="saved-chip" style={{ color: 'var(--success, #10b981)', fontSize: 13, fontWeight: 600 }}>
+          <svg className="check-anim" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M5 13l4 4L19 7" /></svg>
+          Saved
+        </span>
+      )}
+    </div>
+  );
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
@@ -112,6 +136,7 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
             <input type="checkbox" checked={clearKey} onChange={(e) => setClearKey(e.target.checked)} /> Remove this key
           </label>
         )}
+        <SaveRow k="anthropic" />
       </Section>
 
       {/* Meta (FB/IG) — per-client audience sync */}
@@ -143,6 +168,7 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
           <Lbl>Business ID <span style={{ textTransform: 'none', fontWeight: 400 }}>· optional</span></Lbl>
           <input value={metaBusiness} onChange={(e) => setMetaBusiness(e.target.value)} placeholder="Meta Business Manager ID" style={input} autoComplete="off" />
           {value?.meta?.tokenSet && value?.meta?.adAccountId && <div style={{ ...note, color: 'var(--success, #10b981)', marginTop: 8 }}>✓ Connected — sync segments from Engage → Segments.</div>}
+          <SaveRow k="meta" />
         </Section>
       )}
 
@@ -172,6 +198,7 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
           <Lbl>Advertiser ID</Lbl>
           <input value={ttAdvertiser} onChange={(e) => setTtAdvertiser(e.target.value)} placeholder="TikTok advertiser ID" style={input} autoComplete="off" />
           {value?.tiktok?.tokenSet && value?.tiktok?.advertiserId && <div style={{ ...note, color: 'var(--success, #10b981)', marginTop: 8 }}>✓ Connected — sync segments from Engage → Segments.</div>}
+          <SaveRow k="tiktok" />
         </Section>
       )}
 
@@ -251,6 +278,7 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
               {testState && testState !== 'sending' && <span style={{ fontSize: 12.5, color: testState.startsWith('✓') ? 'var(--success, #10b981)' : 'var(--error, #ef4444)' }}>{testState}</span>}
             </div>
           )}
+          <SaveRow k="resend" />
         </Section>
       )}
 
@@ -314,6 +342,7 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
             </>
           )}
           </>)}
+          <SaveRow k="inventive" />
         </Section>
       )}
 
@@ -342,18 +371,10 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
               <input type="checkbox" checked={clearSecret} onChange={(e) => setClearSecret(e.target.checked)} /> Remove this secret
             </label>
           )}
+          <SaveRow k="looker" />
         </Section>
       )}
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <button style={saveBtn} onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
-        {saved && (
-          <span className="saved-chip" style={{ color: 'var(--success, #10b981)', fontSize: 13, fontWeight: 600 }}>
-            <svg className="check-anim" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M5 13l4 4L19 7" /></svg>
-            Saved
-          </span>
-        )}
-      </div>
     </div>
   );
 }
