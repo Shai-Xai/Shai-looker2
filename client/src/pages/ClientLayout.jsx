@@ -366,17 +366,6 @@ export default function ClientLayout() {
             <span style={ellip}>Alerts</span>
           </button>
           )}
-          {(visibleSuites.length > 0 || isAdmin) && (
-          <button
-            ref={onSocial ? activeRef : null}
-            className={`nav-row${onSocial ? ' active' : ''}`}
-            style={{ ...rowBtn, fontWeight: onSocial ? 600 : 500 }}
-            onClick={() => { if (!onSocial) vtNavigate(navigate, '/social'); if (isMobile) setNavOpen(false); }}
-          >
-            <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>📱</span>
-            <span style={ellip}>Social</span>
-          </button>
-          )}
           {can(PERMS.SETTLEMENTS_VIEW) && (visibleSettlements.length > 0 || isAdmin) && (
           <button
             ref={onSettlements ? activeRef : null}
@@ -432,6 +421,15 @@ export default function ClientLayout() {
           >
             <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>🥧</span>
             <span style={ellip}>Segments</span>
+          </button>
+          <button
+            ref={onSocial ? activeRef : null}
+            className={`nav-row${onSocial ? ' active' : ''}`}
+            style={{ ...rowBtn, fontWeight: onSocial ? 600 : 500 }}
+            onClick={() => { if (!onSocial) vtNavigate(navigate, '/social'); if (isMobile) setNavOpen(false); }}
+          >
+            <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>📱</span>
+            <span style={ellip}>Social</span>
           </button>
           </>
           )}
