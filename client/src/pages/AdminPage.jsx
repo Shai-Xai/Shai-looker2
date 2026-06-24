@@ -785,7 +785,10 @@ function SetupWizard({ fields }) {
   const [allOrg, setAllOrg] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const [tourOn, setTourOn] = useState(false); // the in-step spotlight walkthrough
   const initFor = useRef(null);
+  const suitesRef = useRef(null);
+  const autoTourFor = useRef(null);
 
   const reload = () => Promise.all([api.adminListEntities(), api.adminListSuites(), api.adminListUsers(), api.adminListSets(), api.listDashboards()])
     .then(([entities, suites, users, sets, dash]) => setData({ entities, suites, users, sets, dashTitle: Object.fromEntries(dash.map((d) => [d.id, d.title])) }));
@@ -808,6 +811,15 @@ function SetupWizard({ fields }) {
     if (entityId) api.getSetupWizardProgress(entityId).then((r) => setTicks(r.ticks || {})).catch(() => setTicks({}));
     else setTicks({});
   }, [entityId]);
+  // Auto-launch the spotlight walkthrough the first time the AM reaches the suites
+  // step for a client and there's a suite to point at (once per client per visit).
+  useEffect(() => {
+    if (stepKey === 'suites' && entity && data.suites.some((s) => s.entityId === entity.id) && autoTourFor.current !== entity.id) {
+      autoTourFor.current = entity.id;
+      setTourOn(true);
+    }
+    if (stepKey !== 'suites' && tourOn) setTourOn(false); // close it if they leave the step
+  }, [stepKey, entityId, data]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!data) return <Muted>Loading…</Muted>;
 
@@ -1032,9 +1044,15 @@ function SetupWizard({ fields }) {
 
         {stepKey === 'suites' && entity && (
           <>
-            <ClientSuites entity={entity} suites={suitesOf(entity.id)} allEntities={data.entities} allSets={data.sets} dashTitle={data.dashTitle} fields={fields} onChange={reload} />
+            <div style={{ display: 'flex', marginBottom: 10 }}>
+              <button style={miniBtn} onClick={() => { if (suitesOf(entity.id).length) setTourOn(true); else alert('Add a suite first (the “+ Add suite” button), then I’ll walk you through it.'); }} title="Walk through each part of a suite, one at a time">▶ Guide me through a suite</button>
+            </div>
+            <div ref={suitesRef}>
+              <ClientSuites entity={entity} suites={suitesOf(entity.id)} allEntities={data.entities} allSets={data.sets} dashTitle={data.dashTitle} fields={fields} onChange={reload} />
+            </div>
             {!stepComplete(step) && <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 8 }}>Add at least one suite (the “+ Add suite” button) so the client has dashboards to open — then Continue unlocks.</div>}
             <Footer primary={() => go(nextKey)} />
+            {tourOn && <SectionTour steps={SUITES_TOUR} container={suitesRef} onClose={() => setTourOn(false)} />}
           </>
         )}
 
@@ -1109,6 +1127,81 @@ function SetupWizard({ fields }) {
   );
 }
 const badgeBase = { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5, fontWeight: 700, padding: '3px 10px', borderRadius: 980, marginBottom: 12 };
+
+// ─── Section tour — a forced, spotlight walkthrough of a step's sub-sections ───
+// Highlights each section in turn (a brand ring with the rest dimmed), scrolls it
+// into view, and shows a description with Back / Next. Anchors to elements by their
+// [data-tour="<key>"] attribute, scoped to a container. It never blocks the form
+// underneath (the dim is a pointer-through box-shadow), so the AM can fill a field
+// then hit Next. Reusable for any step — drive it with a list of { tour, title, body }.
+const SUITES_TOUR = [
+  { tour: 'suite-icon', icon: '🎨', title: 'Give the suite an icon', body: 'Pick an emoji (or upload a small image). It’s how this event shows up in the client’s sidebar.' },
+  { tour: 'suite-sets', icon: '🗂️', title: 'Choose the dashboard sets', body: 'Tick the sets this event should include — e.g. Ticketing, Cashless. Expand a set to include or leave out individual dashboards.' },
+  { tour: 'suite-roles', icon: '👥', title: 'Who sees what (optional)', body: 'Restrict a set or dashboard to certain roles — e.g. finance-only views. Leave it alone to show everything to everyone.' },
+  { tour: 'suite-locks', icon: '🔒', title: 'Lock it to the event', body: 'The important one — open this and pick the event (and cashless event, if used) so every dashboard here only shows THIS event’s numbers.' },
+  { tour: 'suite-ticket', icon: '🔗', title: 'Add the ticket link', body: 'Paste the event’s buy / checkout URL. Campaigns for this event auto-fill it as their call-to-action.' },
+  { tour: 'suite-save', icon: '💾', title: 'Save the suite', body: 'Hit Save to apply everything above. (Event branding below saves on its own.)' },
+  { tour: 'suite-branding', icon: '✨', title: 'Event branding (optional)', body: 'Override the look just for this event — logo, colours, sender. Blank fields inherit the client’s branding.' },
+];
+
+function SectionTour({ steps, container, onClose }) {
+  const [i, setI] = useState(0);
+  const [rect, setRect] = useState(null);
+  const last = useRef(null);
+  const cur = steps[i];
+
+  useEffect(() => {
+    const root = () => (container && container.current) || document;
+    const find = () => root().querySelector(`[data-tour="${cur.tour}"]`);
+    const el0 = find();
+    if (el0) el0.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    let raf;
+    const tick = () => {
+      const el = find();
+      if (el) {
+        const r = el.getBoundingClientRect();
+        const nr = { top: r.top, left: r.left, width: r.width, height: r.height };
+        const p = last.current;
+        if (!p || Math.abs(p.top - nr.top) > 0.5 || Math.abs(p.left - nr.left) > 0.5 || Math.abs(p.width - nr.width) > 0.5 || Math.abs(p.height - nr.height) > 0.5) { last.current = nr; setRect(nr); }
+      } else if (last.current) { last.current = null; setRect(null); }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [i, cur.tour, container]);
+
+  const isLast = i === steps.length - 1;
+  const vw = typeof window !== 'undefined' ? window.innerWidth : 360;
+  const vh = typeof window !== 'undefined' ? window.innerHeight : 640;
+  const cardW = Math.min(360, vw - 24);
+  let cardTop, cardLeft;
+  if (rect) {
+    const below = rect.top + rect.height + 12;
+    const placeAbove = below + 170 > vh && rect.top - 170 > 0;
+    cardTop = placeAbove ? Math.max(12, rect.top - 12 - 158) : Math.min(vh - 178, below);
+    cardLeft = Math.min(Math.max(12, rect.left), vw - cardW - 12);
+  } else { cardTop = Math.max(12, vh / 2 - 90); cardLeft = vw / 2 - cardW / 2; }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 4000, pointerEvents: 'none' }}>
+      {rect && <div style={{ position: 'fixed', top: rect.top - 6, left: rect.left - 6, width: rect.width + 12, height: rect.height + 12, border: '2.5px solid var(--brand)', borderRadius: 12, boxShadow: '0 0 0 9999px rgba(0,0,0,0.55)', transition: 'top .2s, left .2s, width .2s, height .2s', pointerEvents: 'none' }} />}
+      <div style={{ position: 'fixed', top: cardTop, left: cardLeft, width: cardW, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 14, boxShadow: '0 16px 48px -10px rgba(0,0,0,0.5)', padding: 16, pointerEvents: 'auto' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+          <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--brand)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Step {i + 1} of {steps.length}</span>
+          <span style={{ flex: 1 }} />
+          <button onClick={onClose} style={{ border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 16, lineHeight: 1 }} title="Close guide">✕</button>
+        </div>
+        <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 6 }}>{cur.icon ? `${cur.icon} ` : ''}{cur.title}</div>
+        <p style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.5, margin: '0 0 14px' }}>{cur.body}</p>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {i > 0 && <button style={miniBtnOutline} onClick={() => setI(i - 1)}>← Back</button>}
+          <span style={{ flex: 1 }} />
+          <button style={saveBtn} onClick={() => (isLast ? onClose() : setI(i + 1))}>{isLast ? 'Done' : 'Next →'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ─── Wizard step editor — edit wording, reorder, add custom guidance steps ─────
 // Back-end editor for the setup wizard itself (opened from the ⚙). The built-in
@@ -2426,9 +2519,9 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
       </Row>
       <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end' }}>
         <Field label="Client"><select style={input} value={entityId} onChange={(e) => setEntityId(e.target.value)}>{entities.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}</select></Field>
-        <Field label="Icon"><IconPicker value={icon} onChange={setIcon} /></Field>
+        <div data-tour="suite-icon"><Field label="Icon"><IconPicker value={icon} onChange={setIcon} /></Field></div>
       </div>
-      <Section title={`Sets in this suite (${setIds.length})`}>
+      <Section tour="suite-sets" title={`Sets in this suite (${setIds.length})`}>
         <p style={{ ...hint, marginTop: 0 }}>Tick a set to include it. Expand a set to choose which of its dashboards this client gets — untick any you want to leave out.</p>
         <div style={checkList}>
           {sets.length === 0 ? <Muted>Create a Set first.</Muted> : setFolderOrder.map((folder) => (
@@ -2491,7 +2584,7 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
         </Section>
       )}
       {roleCat.length > 0 && setIds.length > 0 && (
-        <Section title="Dashboard access by role">
+        <Section tour="suite-roles" title="Dashboard access by role">
           <p style={{ ...hint, marginTop: 0 }}>Who sees what at <b>{entities.find((e) => e.id === entityId)?.name || 'this client'}</b>. A set defaults to <b>Everyone</b>; pick roles to restrict it. Each dashboard can override its set. Saves immediately. (Howler staff always see everything.)</p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {setIds.map((sid) => {
@@ -2522,7 +2615,7 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
           </div>
         </Section>
       )}
-      <Section title="Locked filters (the event, cashless events…)">
+      <Section tour="suite-locks" title="Locked filters (the event, cashless events…)">
         <LockedFilterEditor value={locks} onChange={setLocks} fields={fields} categories={lockCategories} clientOrganiser={organiserValsFromLocks(entities.find((e) => e.id === entityId)?.lockedFilters)} />
       </Section>
       {includedDashboards.length > 0 && (
@@ -2550,13 +2643,13 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
           </div>
         </Section>
       )}
-      <div style={{ marginTop: 12 }}>
+      <div data-tour="suite-ticket" style={{ marginTop: 12 }}>
         <L>Ticket / checkout link</L>
         <div style={{ fontSize: 12, color: 'var(--muted)', margin: '2px 0 6px' }}>The event's buy / checkout URL. Campaigns linked to this event auto-fill it as the call-to-action link.</div>
         <input style={{ ...input, width: '100%' }} value={eventUrl} onChange={(e) => setEventUrl(e.target.value)} placeholder="https://tickets.example.com/your-event" />
       </div>
-      <SaveRow onSave={save} saved={saved} id={suite.id} />
-      <Section title="Event branding (logo / colours / sender)">
+      <div data-tour="suite-save"><SaveRow onSave={save} saved={saved} id={suite.id} /></div>
+      <Section tour="suite-branding" title="Event branding (logo / colours / sender)">
         <p style={hint}>Override this <b>event's</b> look — its logo, colours and sender name — used for this event's campaigns and single-event digests, and the in-app theme while viewing it. Anything left blank inherits <b>{entities.find((e) => e.id === entityId)?.name || 'the client'}</b>'s branding. Saved on its own (separate from the suite settings above).</p>
         <MailTemplateEditor scope="admin-suite" entityId={entityId} suiteId={suite.id} />
       </Section>
@@ -4335,10 +4428,10 @@ function Tab({ active, onClick, children }) {
 }
 function Field({ label, children }) { return <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}><L>{label}</L>{children}</div>; }
 // Collapsible labelled section. Admin-panel rule: sections start collapsed.
-function Section({ title, children, defaultOpen = false }) {
+function Section({ title, children, defaultOpen = false, tour }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div style={{ marginTop: 14 }}>
+    <div data-tour={tour} style={{ marginTop: 14 }}>
       <button onClick={() => setOpen((o) => !o)} style={{ display: 'flex', alignItems: 'center', gap: 7, width: '100%', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer', padding: 0 }}>
         <span style={{ width: 12, color: '#b0b0b6', fontSize: 11, transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}>▶</span>
         <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--muted)' }}>{title}</span>
