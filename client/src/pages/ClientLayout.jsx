@@ -10,6 +10,7 @@ import { useSheetDrag } from '../lib/useSheetDrag.js';
 import { applyBrand, resetBrand, useBrandLogo } from '../lib/brand.js';
 import { useAccess, PERMS } from '../lib/access.js';
 import { FEATURES } from '../lib/features.js';
+import AnalystDrawer from '../components/AnalystDrawer.jsx';
 
 // Persistent client shell: a left sidebar tree of Suites → Sets → Dashboards,
 // with the selected dashboard rendered in the main area.
@@ -31,6 +32,7 @@ export default function ClientLayout() {
   const searching = q.trim().length > 0;
   const [loading, setLoading] = useState(true);
   const [navOpen, setNavOpen] = useState(false); // mobile drawer
+  const [askOpen, setAskOpen] = useState(false); // Inventive analyst slide-in drawer
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('howler_nav_collapsed') === '1'); // desktop
   const toggleCollapsed = () => setCollapsed((c) => { localStorage.setItem('howler_nav_collapsed', c ? '0' : '1'); return !c; });
   const navDrag = useSheetDrag(() => setNavOpen(false)); // mobile bottom-sheet dismiss
@@ -45,7 +47,6 @@ export default function ClientLayout() {
   const onSettlements = location.pathname.startsWith('/settlements');
   const onInbox = location.pathname.startsWith('/inbox');
   const onDigests = location.pathname.startsWith('/digests');
-  const onAsk = location.pathname.startsWith('/ask');
   // Engage hub tabs: Campaigns (/engage/campaigns, default /engage) + Segments.
   const onSegments = location.pathname.startsWith('/segments') || location.pathname.startsWith('/engage/segments');
   const onActions = (location.pathname.startsWith('/actions') || location.pathname.startsWith('/engage')) && !onSegments;
@@ -368,9 +369,9 @@ export default function ClientLayout() {
           )}
           {FEATURES.ask && (
           <button
-            className={`nav-row${onAsk ? ' active' : ''}`}
-            style={{ ...rowBtn, fontWeight: onAsk ? 600 : 500 }}
-            onClick={() => { if (!onAsk) vtNavigate(navigate, '/ask'); if (isMobile) setNavOpen(false); }}
+            className={`nav-row${askOpen ? ' active' : ''}`}
+            style={{ ...rowBtn, fontWeight: askOpen ? 600 : 500 }}
+            onClick={() => { setAskOpen(true); if (isMobile) setNavOpen(false); }}
           >
             <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>✨</span>
             <span style={ellip}>Ask</span>
@@ -539,9 +540,9 @@ export default function ClientLayout() {
                   )}
                   {FEATURES.ask && (
                   <button
-                    className={`nav-row${onAsk ? ' active' : ''}`}
-                    style={{ ...mRowSuite, fontWeight: onAsk ? 700 : 500 }}
-                    onClick={() => { if (!onAsk) vtNavigate(navigate, '/ask'); setNavOpen(false); }}
+                    className={`nav-row${askOpen ? ' active' : ''}`}
+                    style={{ ...mRowSuite, fontWeight: askOpen ? 700 : 500 }}
+                    onClick={() => { setAskOpen(true); setNavOpen(false); }}
                   >
                     <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>✨</span>
                     <span style={ellip}>Ask</span>
@@ -673,6 +674,7 @@ export default function ClientLayout() {
         )}
         <Outlet context={{ previewEntityId: activeEntityId, actionsSlot }} />
       </main>
+      <AnalystDrawer open={askOpen} onClose={() => setAskOpen(false)} previewEntityId={activeEntityId} />
     </div>
   );
 }
