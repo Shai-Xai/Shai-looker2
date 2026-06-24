@@ -2362,6 +2362,7 @@ function EntityLogins({ entity, users, allUsers = [], onChange }) {
   const [error, setError] = useState(null);
   const [linkId, setLinkId] = useState('');
   const [linkRole, setLinkRole] = useState('viewer');
+  const [showAdd, setShowAdd] = useState(false);
   const [roles, setRoles] = useState([]);
   const [howlerRoles, setHowlerRoles] = useState([]);
   useEffect(() => { api.getRoles().then((r) => { setRoles(r.roles || []); setHowlerRoles(r.howlerRoles || []); }).catch(() => setRoles([])); }, []);
@@ -2374,6 +2375,7 @@ function EntityLogins({ entity, users, allUsers = [], onChange }) {
       const u = await api.adminCreateUser({ firstName: form.firstName, lastName: form.lastName, email: form.email, mobile: form.mobile, password: form.password, role: 'client', entityIds: [entity.id] });
       if (form.role !== 'owner') await api.setMembershipRole(entity.id, u.id, form.role); // owner is the default
       setForm({ firstName: '', lastName: '', email: '', mobile: '', password: '', role: 'owner' });
+      setShowAdd(false);
       onChange();
     } catch (e) { setError(e.message); }
   };
@@ -2382,7 +2384,7 @@ function EntityLogins({ entity, users, allUsers = [], onChange }) {
     if (!u) return;
     await api.adminUpdateUser(u.id, { entityIds: [...(u.entityIds || []), entity.id] });
     await api.setMembershipRole(entity.id, u.id, linkRole);
-    setLinkId(''); setLinkRole('viewer'); onChange();
+    setLinkId(''); setLinkRole('viewer'); setShowAdd(false); onChange();
   };
   const changeRole = async (u, role) => { await api.setMembershipRole(entity.id, u.id, role); onChange(); };
   const removeAccess = async (u) => {
@@ -2423,31 +2425,41 @@ function EntityLogins({ entity, users, allUsers = [], onChange }) {
           </tbody>
         </table>
       )}
-      <div data-tour="login-add" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginTop: 8 }}>
-        <Field label="First name"><input style={{ ...input, minWidth: 110 }} value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} /></Field>
-        <Field label="Surname"><input style={{ ...input, minWidth: 110 }} value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} /></Field>
-        <Field label="Email"><input style={input} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>
-        <Field label="Mobile"><input style={{ ...input, minWidth: 130 }} value={form.mobile} onChange={(e) => setForm({ ...form, mobile: e.target.value })} placeholder="+27…" /></Field>
-        <Field label="Password"><input style={input} type="text" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></Field>
-        <div data-tour="login-role"><Field label="Role"><select style={input} value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>{roleOpts.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}</select></Field></div>
-        <button style={miniBtn} onClick={add} disabled={!form.email || !form.password}>+ Add login</button>
-      </div>
-      {linkable.length > 0 && (
-        <div data-tour="login-link" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginTop: 10 }}>
-          <Field label="Or link an existing login (one person, several profiles)">
-            <select style={input} value={linkId} onChange={(e) => setLinkId(e.target.value)}>
-              <option value="">Pick a login…</option>
-              {linkable.map((u) => <option key={u.id} value={u.id}>{u.email}{u.role === 'admin' ? ' (Howler admin)' : ''}</option>)}
-            </select>
-          </Field>
-          <Field label="Role"><select style={input} value={linkRole} onChange={(e) => setLinkRole(e.target.value)}>{roleOpts.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}</select></Field>
-          <button style={miniBtn} onClick={link} disabled={!linkId}>Link to {entity.name}</button>
+      {!showAdd ? (
+        <button data-tour="login-add" style={{ ...miniBtn, background: 'var(--brand)', color: '#fff', borderColor: 'var(--brand)', marginTop: 12 }} onClick={() => { setError(null); setShowAdd(true); }}>+ Add user</button>
+      ) : (
+        <div style={{ ...cardStyle, marginTop: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
+            <span style={{ fontWeight: 700, fontSize: 14, flex: 1 }}>Add a user to {entity.name}</span>
+            <button style={miniBtnOutline} onClick={() => { setShowAdd(false); setError(null); }}>Cancel</button>
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+            <Field label="First name"><input style={{ ...input, minWidth: 110 }} value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} /></Field>
+            <Field label="Surname"><input style={{ ...input, minWidth: 110 }} value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} /></Field>
+            <Field label="Email"><input style={input} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>
+            <Field label="Mobile"><input style={{ ...input, minWidth: 130 }} value={form.mobile} onChange={(e) => setForm({ ...form, mobile: e.target.value })} placeholder="+27…" /></Field>
+            <Field label="Password"><input style={input} type="text" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></Field>
+            <div data-tour="login-role"><Field label="Role"><select style={input} value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>{roleOpts.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}</select></Field></div>
+            <button style={{ ...miniBtn, background: 'var(--brand)', color: '#fff', borderColor: 'var(--brand)' }} onClick={add} disabled={!form.email || !form.password}>+ Add login</button>
+          </div>
+          {roles.length > 0 && (
+            <p style={{ ...hint, marginTop: 8 }}>{roleOpts.find((r) => r.key === form.role)?.description || ''}</p>
+          )}
+          {linkable.length > 0 && (
+            <div data-tour="login-link" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--hairline)' }}>
+              <Field label="Or link an existing login (one person, several profiles)">
+                <select style={input} value={linkId} onChange={(e) => setLinkId(e.target.value)}>
+                  <option value="">Pick a login…</option>
+                  {linkable.map((u) => <option key={u.id} value={u.id}>{u.email}{u.role === 'admin' ? ' (Howler admin)' : ''}</option>)}
+                </select>
+              </Field>
+              <Field label="Role"><select style={input} value={linkRole} onChange={(e) => setLinkRole(e.target.value)}>{roleOpts.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}</select></Field>
+              <button style={miniBtn} onClick={link} disabled={!linkId}>Link to {entity.name}</button>
+            </div>
+          )}
+          {error && <div style={{ color: 'var(--error)', fontSize: 13, marginTop: 6 }}>{error}</div>}
         </div>
       )}
-      {roles.length > 0 && (
-        <p style={{ ...hint, marginTop: 10 }}>{roleOpts.find((r) => r.key === form.role)?.description || ''}</p>
-      )}
-      {error && <div style={{ color: 'var(--error)', fontSize: 13, marginTop: 6 }}>{error}</div>}
     </div>
   );
 }
