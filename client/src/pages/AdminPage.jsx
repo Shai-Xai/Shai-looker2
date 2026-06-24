@@ -716,24 +716,33 @@ function Entities({ fields }) {
 // ─── Client Setup Wizard — a guided, step-by-step path for account managers ────
 // Stands a new client up end to end without hunting through tabs: create the
 // client → lock their data scope → build their suites → add a login → brand it.
-// Every step explains *what* it does and *why* it matters, and performs the work
-// inline (reusing the very same editors the Clients tab uses, so nothing is a
-// throwaway mock). Back-end / admin only — it lives in the Admin console. The AM
-// can start fresh or resume a half-finished client, and finish by previewing the
-// account exactly as the client will see it.
+// It is LINEAR and ENFORCED — each step explains what to do, you do it inline
+// (reusing the very same editors the Clients tab uses, so nothing is a throwaway
+// mock), and the "Continue" button stays locked until that step's REQUIRED fields
+// are done. Optional fields/steps are clearly marked and never block. You can step
+// back, but you can't skip a required step forward. Back-end / admin only. The AM
+// can start fresh or resume a half-finished client (dropping in at the first
+// unfinished step), and finishes by previewing the account as the client sees it.
+//
+// Which fields are required vs optional is declared per step in `req` below — edit
+// that one place to change what the wizard insists on.
 const WIZARD_STEPS = [
   { key: 'client', icon: '🏢', title: 'The client', short: 'Client',
+    req: 'a client name', lock: 'Enter a client name to continue',
     blurb: 'Everything in Pulse hangs off a “client” (internally an entity). Give it a name — usually the organiser or brand you’re onboarding — and, if you have it, their logo. You can change both later.' },
   { key: 'scope', icon: '🔒', title: 'Data scope', short: 'Scope',
+    req: 'an organiser (or “All organisers”)', lock: 'Pick an organiser, or tick “All organisers”',
     blurb: 'This is the most important step. Pulse force-filters every query on the server to this client’s organiser, so they only ever see their own numbers. Until you set a scope the account fails closed — they’ll see nothing. Pick the organiser(s) this client owns.' },
   { key: 'suites', icon: '🗂️', title: 'Suites & dashboards', short: 'Suites',
+    req: 'at least one suite', lock: 'Add at least one suite to continue',
     blurb: 'A suite is one event/context for the client (e.g. “Bushfire 2026”). Inside it you choose which sets of dashboards they get, and lock it to that event. Add one suite per event. You can fine-tune which dashboards each set shows, and reorder them, right here.' },
   { key: 'logins', icon: '🔑', title: 'Logins', short: 'Logins',
+    req: 'at least one login', lock: 'Add (or link) at least one login to continue',
     blurb: 'Create the people who can sign in for this client and set what each can see with a role. Give them a temporary password — they’ll be prompted to change it. You can also link an existing login if someone works across several clients.' },
   { key: 'branding', icon: '🎨', title: 'Branding', short: 'Branding', optional: true,
     blurb: 'Optional, but it makes the account feel like the client’s own. Set their logo, brand colours and email sender name — these white-label the whole app (UI accents + charts) and every email Pulse sends for them. Anything left blank inherits the Howler default.' },
   { key: 'review', icon: '✅', title: 'Review & finish', short: 'Finish',
-    blurb: 'A quick check of what’s in place. Preview the account exactly as the client sees it, and see what’s still worth doing.' },
+    blurb: 'Everything required is in place. Preview the account exactly as the client will see it, or set up another.' },
 ];
 const WIZ_ORDER = WIZARD_STEPS.filter((s) => s.key !== 'review').map((s) => s.key);
 
@@ -772,20 +781,36 @@ function SetupWizard({ fields }) {
 
   const suitesOf = (eid) => data.suites.filter((s) => s.entityId === eid);
   const loginsOf = (eid) => data.users.filter((u) => (u.entityIds || []).includes(eid));
-  // Per-step completion — drives the stepper ticks and the review checklist.
+  const entHasScope = (e) => e.allOrganisers || Object.values(e.lockedFilters || {}).some((v) => String(v || '').trim());
+  // Required-step completion, from SAVED state — drives the stepper ticks, what's
+  // reachable, and the resume target. (Optional steps never appear here.)
+  const reqDone = (e) => ({ client: !!(e.name || '').trim(), scope: entHasScope(e), suites: suitesOf(e.id).length > 0, logins: loginsOf(e.id).length > 0 });
+  const done = entity ? { ...reqDone(entity), branding: !!entity.logo } : {};
+  // LIVE check on the working fields — can the CURRENT step's Continue unlock yet?
   const hasLock = allOrg || Object.values(locks).some((v) => String(v || '').trim());
-  const done = entity ? {
-    client: !!(entity.name || '').trim(),
-    scope: entity.allOrganisers || Object.values(entity.lockedFilters || {}).some((v) => String(v || '').trim()),
-    suites: suitesOf(entity.id).length > 0,
-    logins: loginsOf(entity.id).length > 0,
-    branding: !!entity.logo,
-  } : {};
+  const canProceed = {
+    client: !!name.trim(),
+    scope: hasLock,
+    suites: !!entity && suitesOf(entity.id).length > 0,
+    logins: !!entity && loginsOf(entity.id).length > 0,
+    branding: true,
+    review: true,
+  }[stepKey];
 
   const go = (key) => { setError(null); setStepKey(key); };
   const idx = WIZ_ORDER.indexOf(stepKey);
   const nextKey = stepKey === 'branding' ? 'review' : (idx >= 0 && idx < WIZ_ORDER.length - 1 ? WIZ_ORDER[idx + 1] : 'review');
   const prevKey = idx > 0 ? WIZ_ORDER[idx - 1] : 'start';
+  // A step is reachable only when every REQUIRED step before it is saved-done —
+  // this is what makes the flow linear: you can't jump past unfinished work.
+  const reachable = (key) => {
+    if (key === 'client') return true;
+    if (!entity) return false;
+    const d = reqDone(entity);
+    const i = WIZARD_STEPS.findIndex((s) => s.key === key);
+    return WIZARD_STEPS.slice(0, i).every((s) => s.optional || s.key === 'review' || d[s.key]);
+  };
+  const firstUnfinished = (e) => WIZ_ORDER.find((k) => k !== 'branding' && !reqDone(e)[k]) || 'review';
 
   // Save handlers for the two steps the wizard owns directly.
   const saveClient = async () => {
@@ -817,7 +842,7 @@ function SetupWizard({ fields }) {
   // ── Start screen: explain the journey, then begin (new) or resume (existing) ──
   if (stepKey === 'start') {
     const incomplete = [...data.entities]
-      .map((e) => ({ e, miss: ['scope', 'suites', 'logins'].filter((k) => !({ scope: e.allOrganisers || Object.values(e.lockedFilters || {}).some((v) => String(v || '').trim()), suites: suitesOf(e.id).length > 0, logins: loginsOf(e.id).length > 0 }[k])) }))
+      .map((e) => ({ e, miss: ['scope', 'suites', 'logins'].filter((k) => !reqDone(e)[k]) }))
       .filter((x) => x.miss.length)
       .sort((a, b) => (a.e.name || '').localeCompare(b.e.name || ''));
     return (
@@ -826,7 +851,8 @@ function SetupWizard({ fields }) {
           <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: '-0.02em', marginBottom: 6 }}>🧙 Client setup wizard</div>
           <p style={{ fontSize: 14, color: 'var(--text)', lineHeight: 1.55, margin: '0 0 14px', maxWidth: 620 }}>
             A guided, step-by-step path to stand a new client up — the right way, in order. It walks you through
-            everything a client needs to go live and does the work as you go, so you don’t have to hunt through tabs.
+            each step, doing the work as you go, and won’t let you move on from a step until its required parts are
+            done. Optional bits are marked and can be skipped.
           </p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
             {WIZARD_STEPS.map((s, i) => (
@@ -841,10 +867,10 @@ function SetupWizard({ fields }) {
         {incomplete.length > 0 && (
           <div style={cardStyle}>
             <L>Resume a client that isn’t finished</L>
-            <p style={{ ...hint, marginTop: 4 }}>These clients are missing a setup step. Pick one to continue where it left off.</p>
+            <p style={{ ...hint, marginTop: 4 }}>These clients are missing a required step. Pick one to drop straight back in where it left off.</p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {incomplete.map(({ e, miss }) => (
-                <button key={e.id} className="lift" style={clientRow} onClick={() => { setEntityId(e.id); go('client'); }}>
+                <button key={e.id} className="lift" style={clientRow} onClick={() => { setEntityId(e.id); go(firstUnfinished(e)); }}>
                   <span style={{ fontWeight: 600, fontSize: 14.5 }}>{e.name}</span>
                   <span style={{ marginLeft: 'auto', color: 'var(--muted)', fontSize: 12 }}>needs {miss.map((m) => WIZARD_STEPS.find((s) => s.key === m).short.toLowerCase()).join(' · ')}</span>
                   <span style={{ color: '#bbb', marginLeft: 10 }}>›</span>
@@ -859,19 +885,20 @@ function SetupWizard({ fields }) {
 
   const step = WIZARD_STEPS.find((s) => s.key === stepKey);
 
-  // ── Stepper header: numbered progress, click to jump (once the client exists) ──
+  // ── Stepper header: numbered progress. Click only to revisit a reachable step;
+  //    you can't click forward past a required step that isn't done. ──
   const Stepper = () => (
-    <div style={{ display: 'flex', gap: isMobile ? 6 : 10, marginBottom: 16, overflowX: 'auto', paddingBottom: 4 }}>
+    <div style={{ display: 'flex', gap: isMobile ? 6 : 10, marginBottom: 14, overflowX: 'auto', paddingBottom: 4 }}>
       {WIZARD_STEPS.map((s) => {
         const active = s.key === stepKey;
         const ok = done[s.key];
-        const reachable = !!entity || s.key === 'client';
+        const open = reachable(s.key);
         return (
-          <button key={s.key} onClick={() => reachable && go(s.key)} disabled={!reachable}
-            style={{ display: 'flex', alignItems: 'center', gap: 7, flexShrink: 0, padding: isMobile ? '7px 10px' : '8px 13px', borderRadius: 980, cursor: reachable ? 'pointer' : 'not-allowed',
-              border: active ? '1.5px solid var(--brand)' : '1.5px solid var(--hairline)', background: active ? 'var(--brand)' : 'var(--card)', color: active ? '#fff' : (reachable ? 'var(--text)' : 'var(--muted)') }}>
+          <button key={s.key} onClick={() => open && go(s.key)} disabled={!open} title={open ? '' : 'Finish the earlier steps first'}
+            style={{ display: 'flex', alignItems: 'center', gap: 7, flexShrink: 0, padding: isMobile ? '7px 10px' : '8px 13px', borderRadius: 980, cursor: open ? 'pointer' : 'not-allowed',
+              border: active ? '1.5px solid var(--brand)' : '1.5px solid var(--hairline)', background: active ? 'var(--brand)' : 'var(--card)', color: active ? '#fff' : (open ? 'var(--text)' : 'var(--muted)'), opacity: open ? 1 : 0.55 }}>
             <span style={{ width: 20, height: 20, borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 800,
-              background: active ? 'rgba(255,255,255,0.25)' : (ok ? 'var(--brand)' : 'rgba(128,128,128,0.18)'), color: active || ok ? '#fff' : 'var(--muted)' }}>{ok ? '✓' : WIZARD_STEPS.indexOf(s) + 1}</span>
+              background: active ? 'rgba(255,255,255,0.25)' : (ok ? 'var(--brand)' : 'rgba(128,128,128,0.18)'), color: active || ok ? '#fff' : 'var(--muted)' }}>{ok ? '✓' : (open ? WIZARD_STEPS.indexOf(s) + 1 : '🔒')}</span>
             {(!isMobile || active) && <span style={{ fontSize: 13, fontWeight: active ? 700 : 600 }}>{isMobile ? s.short : s.title}</span>}
           </button>
         );
@@ -879,14 +906,27 @@ function SetupWizard({ fields }) {
     </div>
   );
 
-  const Footer = ({ primary, primaryLabel = 'Continue', secondary }) => (
-    <div style={{ display: 'flex', gap: 10, marginTop: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-      <button style={miniBtnOutline} onClick={() => go(prevKey)} disabled={busy}>← Back</button>
-      <span style={{ flex: 1 }} />
-      {secondary}
-      <button style={{ ...saveBtn, opacity: busy ? 0.6 : 1 }} onClick={primary} disabled={busy}>{busy ? 'Saving…' : primaryLabel}</button>
-    </div>
+  // Required / optional badge shown at the top of each step.
+  const ReqBadge = () => (
+    step.optional
+      ? <div style={{ ...badgeBase, color: 'var(--muted)', background: 'rgba(128,128,128,0.12)', border: '1px solid var(--hairline)' }}>○ Optional — you can skip this step</div>
+      : <div style={{ ...badgeBase, color: 'var(--brand)', background: 'rgba(var(--brand-rgb),0.10)', border: '1px solid rgba(var(--brand-rgb),0.3)' }}>● Required — needs {step.req}</div>
   );
+
+  // Continue stays locked until this step's required fields are done (optional
+  // steps are always unlocked). The lock hint explains exactly what's missing.
+  const Footer = ({ primary, primaryLabel = 'Continue', secondary }) => {
+    const locked = busy || !canProceed;
+    return (
+      <div style={{ display: 'flex', gap: 10, marginTop: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+        <button style={miniBtnOutline} onClick={() => go(prevKey)} disabled={busy}>← Back</button>
+        <span style={{ flex: 1 }} />
+        {!canProceed && step.lock && <span style={{ fontSize: 12, color: 'var(--muted)' }}>🔒 {step.lock}</span>}
+        {secondary}
+        <button style={{ ...saveBtn, opacity: locked ? 0.5 : 1, cursor: locked ? 'not-allowed' : 'pointer' }} onClick={primary} disabled={locked}>{busy ? 'Saving…' : primaryLabel}</button>
+      </div>
+    );
+  };
 
   return (
     <div>
@@ -894,13 +934,14 @@ function SetupWizard({ fields }) {
       <h2 style={{ fontSize: 20, fontWeight: 700, margin: '12px 0 4px' }}>{step.icon} {step.title}{entity ? <span style={{ color: 'var(--muted)', fontWeight: 600 }}> · {entity.name}</span> : ''}</h2>
       <Stepper />
       <div style={cardStyle}>
+        {stepKey !== 'review' && <ReqBadge />}
         <p style={{ fontSize: 13.5, color: 'var(--text)', lineHeight: 1.55, margin: '0 0 14px' }}>{step.blurb}</p>
 
         {stepKey === 'client' && (
           <>
-            <Field label="Client name"><input style={{ ...input, fontWeight: 700, maxWidth: 360 }} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. MTN Bushfire" autoFocus /></Field>
+            <Field label="Client name · required"><input style={{ ...input, fontWeight: 700, maxWidth: 360 }} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. MTN Bushfire" autoFocus /></Field>
             <div style={{ marginTop: 14 }}>
-              <L>Client logo (optional)</L>
+              <L>Client logo · optional</L>
               <div style={{ marginTop: 6 }}><LogoPicker value={logo} onChange={setLogo} /></div>
             </div>
             <Footer primary={saveClient} primaryLabel={entityId ? 'Save & continue' : 'Create client & continue'} />
@@ -918,7 +959,7 @@ function SetupWizard({ fields }) {
             </label>
             {!allOrg && (
               <>
-                <L>Organiser scope (applies across all this client’s suites)</L>
+                <L>Organiser scope · required (applies across all this client’s suites)</L>
                 <LockedFilterEditor value={locks} onChange={setLocks} fields={fields} restrictTo={['Organiser Name']} />
               </>
             )}
@@ -930,7 +971,7 @@ function SetupWizard({ fields }) {
         {stepKey === 'suites' && entity && (
           <>
             <ClientSuites entity={entity} suites={suitesOf(entity.id)} allEntities={data.entities} allSets={data.sets} dashTitle={data.dashTitle} fields={fields} onChange={reload} />
-            {!done.suites && <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 8 }}>Tip: add at least one suite so the client has dashboards to open.</div>}
+            {!done.suites && <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 8 }}>Add at least one suite (the “+ Add suite” button) so the client has dashboards to open — then Continue unlocks.</div>}
             <Footer primary={() => go(nextKey)} primaryLabel="Continue to logins" />
           </>
         )}
@@ -938,6 +979,7 @@ function SetupWizard({ fields }) {
         {stepKey === 'logins' && entity && (
           <>
             <EntityLogins entity={entity} users={loginsOf(entity.id)} allUsers={data.users} onChange={reload} />
+            {!done.logins && <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 8 }}>Add or link at least one login so someone can sign in — then Continue unlocks.</div>}
             <Footer primary={() => go(nextKey)} primaryLabel="Continue to branding" />
           </>
         )}
@@ -946,17 +988,19 @@ function SetupWizard({ fields }) {
           <>
             <MailTemplateEditor scope="admin-client" entityId={entity.id} canTest />
             <Footer primary={() => go('review')} primaryLabel="Continue"
-              secondary={<button style={miniBtnOutline} onClick={() => go('review')} disabled={busy}>Skip for now</button>} />
+              secondary={<button style={miniBtnOutline} onClick={() => go('review')} disabled={busy}>Skip — do it later</button>} />
           </>
         )}
 
         {stepKey === 'review' && entity && (
           <>
+            <div style={{ ...badgeBase, color: 'var(--brand)', background: 'rgba(var(--brand-rgb),0.10)', border: '1px solid rgba(var(--brand-rgb),0.3)', fontSize: 13, padding: '8px 12px' }}>🎉 {entity.name} is ready to go live</div>
+            <p style={{ fontSize: 13.5, color: 'var(--text)', lineHeight: 1.55, margin: '10px 0 14px' }}>{step.blurb}</p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
               {WIZARD_STEPS.filter((s) => s.key !== 'review').map((s) => {
                 const ok = done[s.key];
                 return (
-                  <button key={s.key} onClick={() => go(s.key)} style={{ display: 'flex', alignItems: 'center', gap: 12, textAlign: 'left', background: 'transparent', border: '1px solid var(--hairline)', borderRadius: 10, padding: '10px 12px', cursor: 'pointer' }}>
+                  <button key={s.key} onClick={() => reachable(s.key) && go(s.key)} disabled={!reachable(s.key)} style={{ display: 'flex', alignItems: 'center', gap: 12, textAlign: 'left', background: 'transparent', border: '1px solid var(--hairline)', borderRadius: 10, padding: '10px 12px', cursor: reachable(s.key) ? 'pointer' : 'default' }}>
                     <span style={{ fontSize: 18 }}>{ok ? '✅' : (s.optional ? '➖' : '⚠️')}</span>
                     <span style={{ flex: 1 }}>
                       <span style={{ display: 'block', fontSize: 13.5, fontWeight: 700 }}>{s.title}{s.optional ? <span style={{ color: 'var(--muted)', fontWeight: 600 }}> · optional</span> : ''}</span>
@@ -982,6 +1026,7 @@ function SetupWizard({ fields }) {
     </div>
   );
 }
+const badgeBase = { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5, fontWeight: 700, padding: '3px 10px', borderRadius: 980, marginBottom: 12 };
 
 // ─── Users: every login in one place, with a drill-in detail view ─────────────
 // A directory of ALL users (Howler admins + client logins). Click a user to see
