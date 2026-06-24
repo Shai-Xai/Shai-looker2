@@ -30,12 +30,19 @@ export default function InventiveAskPage() {
   }, [previewEntityId]);
 
   // Handshake: the iframe posts `embed_content_ready`; we reply with the tokens.
+  // Inventive re-broadcasts `embed_content_ready` continuously (~1/sec). Replying
+  // every time makes its app re-initialise in a loop — confirmed live: it keeps
+  // re-emitting `ready` only while we keep replying — which makes the embed
+  // sluggish (input lags). So reply exactly once per embed session.
   useEffect(() => {
     if (!info?.url) return;
     const targetOrigin = (() => { try { return new URL(info.url).origin; } catch { return null; } })();
+    let replied = false;
     const onMessage = (event) => {
       if (!targetOrigin || event.origin !== targetOrigin) return; // only Inventive's origin
       if (event.data?.type !== 'embed_content_ready') return;
+      if (replied) return; // ignore the repeat `ready` pings — replying again restarts the loop
+      replied = true;
       iframeRef.current?.contentWindow?.postMessage(
         { type: 'embed_tokens', tokens: info.tokens, scopeToken: info.scopeToken, hostUrl: info.hostUrl || window.location.href },
         targetOrigin,
