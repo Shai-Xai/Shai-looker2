@@ -407,7 +407,13 @@ export default function ViewPage() {
         )}
 
         <div
-          style={{ flex: 1, padding: isMobile ? '12px' : '22px', overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}
+          style={{
+            flex: 1, padding: isMobile ? '12px' : '22px', overflowY: 'auto', WebkitOverflowScrolling: 'touch',
+            // When the Owl summary docks as a desktop sidebar, make room so tiles
+            // sit beside it (not hidden behind it). Animates with the panel.
+            paddingRight: summaryOpen && !isMobile ? 'calc(22px + 420px)' : undefined,
+            transition: 'padding-right .2s ease',
+          }}
           onTouchStart={family ? onTouchStart : undefined}
           onTouchEnd={family ? onTouchEnd : undefined}
         >
