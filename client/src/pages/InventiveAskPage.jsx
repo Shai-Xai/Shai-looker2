@@ -79,26 +79,30 @@ export default function InventiveAskPage() {
   const embed = mode === 'embed';
   return (
     <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, width: '100%', boxSizing: 'border-box', ...(embed ? { padding: isMobile ? '10px 10px 0' : '14px 16px 0' } : { padding: isMobile ? '14px 12px 0' : '20px 22px 0', maxWidth: 1080, margin: '0 auto' }) }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
         <HomeButton />
         <div>
           <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)' }}>Ask</div>
           <h1 style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em' }}>Your AI analyst</h1>
         </div>
-        {isAdmin && (
-          <div style={{ marginLeft: 'auto', display: 'inline-flex', gap: 2, padding: 3, background: 'var(--elevated, rgba(128,128,128,0.12))', borderRadius: 980 }} title="A/B test the analyst display (admins only)">
+      </div>
+      {isAdmin && (
+        // Admin-only A/B toggle. On its own row so it's never clipped on narrow widths.
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)' }}>Display · testing</span>
+          <div style={{ display: 'inline-flex', gap: 2, padding: 3, background: 'var(--elevated, rgba(128,128,128,0.12))', borderRadius: 980 }}>
             {MODES.map((m) => (
               <button
                 key={m.key}
                 onClick={() => pickMode(m.key)}
-                style={{ padding: '5px 12px', fontSize: 12, fontWeight: 600, borderRadius: 980, border: 'none', cursor: 'pointer', background: mode === m.key ? 'var(--brand)' : 'transparent', color: mode === m.key ? '#fff' : 'var(--text)' }}
+                style={{ padding: '6px 14px', fontSize: 12.5, fontWeight: 600, borderRadius: 980, border: 'none', cursor: 'pointer', background: mode === m.key ? 'var(--brand)' : 'transparent', color: mode === m.key ? '#fff' : 'var(--text)' }}
               >
                 {m.label}
               </button>
             ))}
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {state.status === 'loading' && <p style={{ color: 'var(--muted)', fontSize: 14 }}>Getting your analyst ready…</p>}
       {state.status === 'unconfigured' && (
