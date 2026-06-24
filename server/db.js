@@ -293,6 +293,36 @@ function recentUsageForUser(userId, limit = 60) {
   } catch { return []; }
 }
 
+// Platform-wide activity summary for the admin Users console: how many people are
+// active, who's most active, which dashboards get opened most and which features
+// get used most — aggregated across every user from the view + audit logs.
+function adminActivityReport({ days = 30, limit = 8 } = {}) {
+  const ago = (d) => new Date(Date.now() - d * 864e5).toISOString();
+  const s30 = ago(days), s7 = ago(7), s1 = ago(1);
+  // Active = appears in the view log OR the action log within the window (deduped).
+  const activeIn = (s) => db.prepare('SELECT COUNT(*) c FROM (SELECT user_id FROM user_views WHERE at>=? UNION SELECT user_id FROM user_actions WHERE at>=?)').get(s, s).c;
+  const nameFor = (id) => { const u = getUser(id); return u ? (u.fullName || u.email) : id; };
+  const topUsers = db.prepare(
+    `SELECT user_id AS userId, SUM(c) AS total, MAX(lastAt) AS lastAt FROM (
+       SELECT user_id, COUNT(*) c, MAX(at) lastAt FROM user_views   WHERE at>=? GROUP BY user_id
+       UNION ALL
+       SELECT user_id, COUNT(*) c, MAX(at) lastAt FROM user_actions WHERE at>=? GROUP BY user_id
+     ) GROUP BY user_id ORDER BY total DESC LIMIT ?`,
+  ).all(s30, s30, limit).map((r) => { const u = getUser(r.userId); return { userId: r.userId, name: u ? (u.fullName || u.email) : r.userId, role: u?.role || '', total: r.total, lastAt: r.lastAt }; });
+  const topDashboards = db.prepare('SELECT dashboard_id AS dashboardId, COUNT(*) AS opens, COUNT(DISTINCT user_id) AS users, MAX(at) AS lastAt FROM user_views WHERE at>=? GROUP BY dashboard_id ORDER BY opens DESC LIMIT ?')
+    .all(s30, limit).map((r) => ({ ...r, title: getDashboard(r.dashboardId)?.title || r.dashboardId }));
+  const topFeatures = db.prepare('SELECT action, COUNT(*) AS uses, COUNT(DISTINCT user_id) AS users, MAX(label) AS label FROM user_actions WHERE at>=? GROUP BY action ORDER BY uses DESC LIMIT ?')
+    .all(s30, limit).map((r) => ({ action: r.action, label: r.label || r.action, uses: r.uses, users: r.users }));
+  const totalViews = db.prepare('SELECT COUNT(*) c FROM user_views WHERE at>=?').get(s30).c;
+  const totalActions = db.prepare('SELECT COUNT(*) c FROM user_actions WHERE at>=?').get(s30).c;
+  return {
+    days,
+    active: { d1: activeIn(s1), d7: activeIn(s7), d30: activeIn(s30) },
+    totals: { views: totalViews, actions: totalActions },
+    topUsers, topDashboards, topFeatures,
+  };
+}
+
 // ─── User action audit log (every meaningful action) ─────────────────────────
 // One row per state-changing request (and a few deliberate "views"), recorded by
 // the audit middleware (server/audit.js) and a couple of explicit call sites
@@ -1687,7 +1717,7 @@ module.exports = {
   // event documents (invoices etc.)
   listDocuments, getDocument, getDocumentFile, createDocument, updateDocument, deleteDocument, documentExistsForSource,
   // view tracking
-  recordView, viewProfile, recentViewsForUser, lastViewForUsers, recentUsageForUser, usageByClientForUser,
+  recordView, viewProfile, recentViewsForUser, lastViewForUsers, recentUsageForUser, usageByClientForUser, adminActivityReport,
   // user action audit log
   recordAction, listActionsForUser, lastActionsForUsers,
   // tile marks (pins + follows)

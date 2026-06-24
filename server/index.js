@@ -368,6 +368,12 @@ app.post('/api/admin/users/promote', auth.requireAdmin, (req, res) => {
 // Role catalog (for the role pickers).
 const roles = require('./roles');
 app.get('/api/admin/roles', auth.requireAdmin, (_req, res) => res.json({ roles: roles.catalog(), howlerRoles: roles.HOWLER_ROLES }));
+// Platform-wide user activity summary (active users, top users / dashboards /
+// features) for the admin Users console.
+app.get('/api/admin/users/activity-report', auth.requireAdmin, (req, res) => {
+  const days = Math.min(365, Math.max(1, Number(req.query.days) || 30));
+  res.json(db.adminActivityReport({ days }));
+});
 
 // Friendly labels for the merged activity feed's non-audit sources.
 function usageLabel(r) {

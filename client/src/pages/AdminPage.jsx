@@ -1588,6 +1588,7 @@ function UsersTab() {
   const [selectedId, setSelectedId] = useState(null);
   const [openInEdit, setOpenInEdit] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [showReport, setShowReport] = useState(false);
   const load = () => Promise.all([api.adminListUsers(), api.adminListEntities(), api.getRoles().catch(() => ({ roles: [] }))])
     .then(([u, e, r]) => { setUsers(u); setEntities(e); setRoles(r.roles || []); setHowlerRoles(r.howlerRoles || []); });
   useEffect(() => { load(); }, []);
@@ -1631,8 +1632,10 @@ function UsersTab() {
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 6 }}>
         <p style={{ ...hint, marginBottom: 0, flex: 1, minWidth: 180 }}>Every login on Pulse — {users.length} user{users.length === 1 ? '' : 's'} ({adminCount} Howler admin{adminCount === 1 ? '' : 's'}). Click a user for their profile, roles and activity.</p>
+        <button style={showReport ? { ...miniBtn, background: 'var(--brand)', color: '#fff', borderColor: 'var(--brand)' } : miniBtnOutline} onClick={() => setShowReport((s) => !s)}>📊 Activity report</button>
         <button style={{ ...miniBtn, background: 'var(--brand)', color: '#fff', borderColor: 'var(--brand)' }} onClick={() => setAdding(true)}>+ Add user</button>
       </div>
+      {showReport && <ActivityReport />}
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
         <div style={{ ...searchWrap, marginBottom: 0 }}>
           <span style={{ color: 'var(--muted)', fontSize: 13, flexShrink: 0 }}>⌕</span>
@@ -1694,6 +1697,60 @@ function UsersTab() {
             {sorted.length === 0 && <tr><td style={td} colSpan={7}><Muted>{ql ? `No users match “${q.trim()}”.` : 'No users in this view.'}</Muted></td></tr>}
           </tbody>
         </table>
+      )}
+    </div>
+  );
+}
+
+// Platform-wide usage summary: active users + top users / dashboards / features
+// over a selectable window. Read-only, lazy-loaded when the panel is opened.
+function ActivityReport() {
+  const [days, setDays] = useState(30);
+  const [rep, setRep] = useState(null);
+  const [err, setErr] = useState('');
+  useEffect(() => { setRep(null); setErr(''); api.adminUserActivityReport(days).then(setRep).catch((e) => setErr(e.message || 'Failed to load')); }, [days]);
+  const card = { flex: '1 1 200px', minWidth: 180, border: '1px solid var(--hairline)', borderRadius: 12, padding: '12px 14px', background: 'var(--card)' };
+  const head = { fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', marginBottom: 8 };
+  const row = (left, right) => <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 13, padding: '4px 0', borderTop: '1px solid var(--hairline)' }}><span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{left}</span><span style={{ flexShrink: 0, fontWeight: 700, color: 'var(--brand)' }}>{right}</span></div>;
+  return (
+    <div style={{ border: '1px solid var(--hairline)', borderRadius: 14, padding: 16, margin: '4px 0 16px', background: 'rgba(var(--brand-rgb,255,56,92),0.03)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
+        <span style={{ fontWeight: 700, fontSize: 15, flex: 1 }}>📊 Activity report</span>
+        <select style={{ ...input, width: 'auto' }} value={days} onChange={(e) => setDays(Number(e.target.value))}>
+          <option value={7}>Last 7 days</option>
+          <option value={30}>Last 30 days</option>
+          <option value={90}>Last 90 days</option>
+        </select>
+      </div>
+      {err ? <Muted>{err}</Muted> : !rep ? <Muted>Loading…</Muted> : (
+        <>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
+            <div style={card}><div style={head}>Active users</div>
+              <div style={{ display: 'flex', gap: 16 }}>
+                <div><div style={{ fontSize: 22, fontWeight: 800 }}>{rep.active.d1}</div><div style={{ fontSize: 11, color: 'var(--muted)' }}>today</div></div>
+                <div><div style={{ fontSize: 22, fontWeight: 800 }}>{rep.active.d7}</div><div style={{ fontSize: 11, color: 'var(--muted)' }}>7 days</div></div>
+                <div><div style={{ fontSize: 22, fontWeight: 800 }}>{rep.active.d30}</div><div style={{ fontSize: 11, color: 'var(--muted)' }}>{rep.days} days</div></div>
+              </div>
+            </div>
+            <div style={card}><div style={head}>Volume · last {rep.days} days</div>
+              <div style={{ display: 'flex', gap: 16 }}>
+                <div><div style={{ fontSize: 22, fontWeight: 800 }}>{rep.totals.views}</div><div style={{ fontSize: 11, color: 'var(--muted)' }}>dashboard opens</div></div>
+                <div><div style={{ fontSize: 22, fontWeight: 800 }}>{rep.totals.actions}</div><div style={{ fontSize: 11, color: 'var(--muted)' }}>actions</div></div>
+              </div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <div style={card}><div style={head}>Top users</div>
+              {rep.topUsers.length ? rep.topUsers.map((u) => row(<span title={u.name}>{u.name}{u.role === 'admin' ? ' · Howler' : ''}</span>, u.total)) : <Muted>No activity yet.</Muted>}
+            </div>
+            <div style={card}><div style={head}>Most active dashboards</div>
+              {rep.topDashboards.length ? rep.topDashboards.map((d) => row(<span title={d.title}>{d.title}</span>, d.opens)) : <Muted>No opens yet.</Muted>}
+            </div>
+            <div style={card}><div style={head}>Most used features</div>
+              {rep.topFeatures.length ? rep.topFeatures.map((f) => row(<span title={f.label}>{f.label}</span>, f.uses)) : <Muted>No actions yet.</Muted>}
+            </div>
+          </div>
+        </>
       )}
     </div>
   );

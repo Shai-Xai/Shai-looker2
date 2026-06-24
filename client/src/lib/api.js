@@ -111,6 +111,7 @@ export const api = {
 
   // Users (admin)
   adminListUsers: () => fetch('/api/admin/users').then(json),
+  adminUserActivityReport: (days = 30) => fetch(`/api/admin/users/activity-report?days=${days}`).then(json),
   adminGetUser: (id) => fetch(`/api/admin/users/${id}`).then(json),
   adminCreateUser: (u) => fetch('/api/admin/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(u) }).then(json),
   adminUpdateUser: (id, u) => fetch(`/api/admin/users/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(u) }).then(json),
