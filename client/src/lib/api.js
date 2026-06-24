@@ -520,6 +520,8 @@ export const api = {
   deleteAlert: (id) => fetch(`/api/alerts/${id}`, { method: 'DELETE' }).then((r) => r.ok),
   setAlertStatus: (id, status) => fetch(`/api/alerts/${id}/status`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) }).then(json),
   alertEvents: (id) => fetch(`/api/alerts/${id}/events`).then(json),
+  // Live "pulse" feed: alert fires + tile momentum, merged for the header strip.
+  entityPulse: (entityId, limit = 8) => fetch(`/api/pulse/entities/${entityId}?limit=${limit}`).then(json),
   testAlert: (id) => fetch(`/api/alerts/${id}/test`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(json),
   alertTileValue: (suiteId, dashboardId, tileId) => fetch(`/api/alerts/suites/${suiteId}/tile-value`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dashboardId, tileId }) }).then(json),
   // Custom-metric source: alert on a raw measure + dimension filter (no tile needed).

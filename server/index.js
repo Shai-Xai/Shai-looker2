@@ -1216,7 +1216,11 @@ async function metricFilterValues({ model, view, field, user, suiteId }) {
   return out;
 }
 
-require('./alerts').mount(app, { db, auth, resolveTileValue, resolveCustomMetric, metricCatalog, metricFilterValues, os, mailer, push, messaging });
+const alerts = require('./alerts').mount(app, { db, auth, resolveTileValue, resolveCustomMetric, metricCatalog, metricFilterValues, os, mailer, push, messaging });
+
+// ── Pulse: the header "heartbeat" strip's merged feed → server/pulse.js ──────────
+// Merges alert fires (alerts.recentBeats) with live tile momentum (sampled here).
+require('./pulse').mount(app, { db, auth, resolveTileValue, alertBeats: alerts.recentBeats });
 
 // ── Weekly goal nudge (push) ─────────────────────────────────────────────────
 // One calm "your goals this week" push per entity (not per-event): goals needing

@@ -6,6 +6,7 @@ import EditorPage from './pages/EditorPage.jsx';
 import ClonePage from './pages/ClonePage.jsx';
 import AdminPage from './pages/AdminPage.jsx';
 import InboxNotifier from './components/InboxNotifier.jsx';
+import LivePulse from './components/LivePulse.jsx';
 import LoginPage from './pages/LoginPage.jsx';
 import ResetPasswordPage from './pages/ResetPasswordPage.jsx';
 import MagicLinkPage from './pages/MagicLinkPage.jsx';
@@ -83,7 +84,7 @@ function Header() {
         onConsole={goConsole}
         onHome={goHome}
       />
-      <div style={{ flex: 1 }} />
+      <LivePulse entityId={inClientView ? activeEntityId : null} />
       {/* Admin console: admin controls on the right. Client experience (client
           login OR admin acting as a client): just the Howler·Pulse badge — the
           account actions live in the sidebar's bottom-left profile menu. */}

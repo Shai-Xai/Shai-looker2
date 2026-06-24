@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-06-24 · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-06-25 · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -348,6 +348,12 @@ client's* numbers.
   exactly what will land.
 - **Dual-surface** — clients set their own alerts; Howler can set them on a client's
   behalf during onboarding so the first week already feels proactive.
+- **Live Pulse strip** 🧪 — a glanceable, colour-coded **beat in the top header**
+  (desktop) that streams what's happening right now: **alert fires** *and* **live
+  momentum** off the client's key tiles ("+142 Tickets sold in the last hour", "+R8 500
+  Gross revenue"). Rotates one at a time, newest first, and taps through to Alerts. The
+  product, literally beating. *(Desktop for now; urgent alerts already reach the phone
+  via push. Momentum auto-picks key tiles today; hand-picking comes later.)*
 
 **Pitch:** "Stop watching dashboards — tell Pulse the number that matters and it taps
 you on the shoulder the moment it happens, on whatever screen you're on."
@@ -390,6 +396,11 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-25** — **Live Pulse — the header heartbeat** 🧪: the top header (desktop) now
+  streams a rotating, colour-coded **beat** of what's happening right now — **alert fires**
+  plus **live tile momentum** ("+142 Tickets sold in the last hour", "+R8 500 Gross revenue").
+  Momentum snapshots a client's key single-value tiles on a slow tick and shows the movement;
+  it auto-picks the key tiles for now (hand-picking comes later). Taps through to Alerts.
 - **2026-06-24** — **Social metrics (organic)** 🟡🧪: pull a client's Facebook /
   Instagram / TikTok organic stats into Pulse — daily account trends (followers,
   reach, impressions) + per-post engagement, on a new mobile-first **Social** page
