@@ -1389,48 +1389,100 @@ function WizardEditor({ steps, onClose, onSaved }) {
         <span style={{ flex: 1 }} />
         <button style={{ ...saveBtn, opacity: busy ? 0.6 : 1 }} onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save wizard'}</button>
       </div>
-      {previewStep != null && list[previewStep] && <StepPreviewModal step={list[previewStep]} index={previewStep} onClose={() => setPreviewStep(null)} />}
+      {previewStep != null && list[previewStep] && <StepPreviewModal steps={list} index={previewStep} onClose={() => setPreviewStep(null)} />}
     </div>
   );
 }
 
-// ─── Step preview — how a wizard step looks, rendered from the editor ──────────
-// A faithful, read-only render of the step exactly as the AM meets it in the
-// wizard: the required/optional badge, the icon + title, the explanation, the
-// custom checklist (if any), and each walkthrough point as the card it shows in
-// the red-border guide. Lets you see wording/walkthrough edits without running
-// the wizard against a real client.
-function StepPreviewModal({ step, index, onClose }) {
-  const s = step, isCustom = s.kind === 'custom';
+// ─── Step preview — the actual wizard screen, as the user would see it ─────────
+// A faithful, read-only mock of the whole wizard screen for one step: the
+// numbered stepper, the step card (required/optional badge, icon + title,
+// explanation, the "Guide me" button), a representative sketch of that step's
+// controls, the footer (Back / Continue with its locked-state hint), and the
+// red-border walkthrough points listed below. Driven entirely by the edited
+// config so wording/order/walkthrough edits show exactly as the AM will meet them.
+function StepPreviewModal({ steps, index, onClose }) {
+  const s = steps[index];
+  const isCustom = s.kind === 'custom';
   const walk = (s.walk || []).filter((w) => !w.off);
+  const chips = [...steps, { key: 'review', icon: '✅', title: 'Review & finish', short: 'Finish' }];
   const badge = isCustom
-    ? <div style={{ ...badgeBase, color: 'var(--muted)', background: 'rgba(128,128,128,0.12)', border: '1px solid var(--hairline)' }}>Your guidance step</div>
+    ? <div style={{ ...badgeBase, color: 'var(--muted)', background: 'rgba(128,128,128,0.12)', border: '1px solid var(--hairline)' }}>{(s.items || []).length ? '● Required — tick every item' : '○ Guidance'}</div>
     : s.optional
       ? <div style={{ ...badgeBase, color: 'var(--muted)', background: 'rgba(128,128,128,0.12)', border: '1px solid var(--hairline)' }}>○ Optional — you can skip this step</div>
       : <div style={{ ...badgeBase, color: 'var(--brand)', background: 'rgba(var(--brand-rgb),0.10)', border: '1px solid rgba(var(--brand-rgb),0.3)' }}>● Required{s.req ? ` — needs ${s.req}` : ''}</div>;
+  const lockMsg = isCustom ? ((s.items || []).length ? 'Tick every item to continue' : '') : (s.req ? (s.lock || `needs ${s.req}`) : '');
+  const fauxInput = { ...input, display: 'flex', alignItems: 'center', background: 'rgba(128,128,128,0.06)', color: 'var(--muted)', pointerEvents: 'none' };
+  const lbl = (t) => <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.04em', margin: '12px 0 4px' }}>{t}</div>;
+  const note = (text, cta) => (
+    <div style={{ border: '1px dashed var(--hairline)', borderRadius: 10, padding: 14, background: 'rgba(128,128,128,0.04)', marginTop: 6 }}>
+      <div style={{ fontSize: 12.5, color: 'var(--muted)', lineHeight: 1.5 }}>{text}</div>
+      {cta && <div style={{ ...miniBtn, display: 'inline-block', marginTop: 10, opacity: 0.7, pointerEvents: 'none' }}>{cta}</div>}
+    </div>
+  );
+  const body = () => {
+    if (isCustom) {
+      return (s.items || []).length ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 }}>
+          {s.items.map((it) => (
+            <div key={it.key} style={{ display: 'flex', alignItems: 'center', gap: 10, border: '1px solid var(--hairline)', borderRadius: 10, padding: '10px 12px' }}>
+              <span style={{ width: 22, height: 22, borderRadius: 6, border: '1.5px solid var(--hairline)', flexShrink: 0 }} />
+              <span style={{ fontSize: 13.5, fontWeight: 600 }}>{it.label || <em style={{ color: 'var(--muted)' }}>empty item</em>}</span>
+            </div>
+          ))}
+        </div>
+      ) : note('Guidance only — the AM reads the explanation above, then continues.');
+    }
+    switch (s.key) {
+      case 'client': return (<>
+        {lbl('Client name · required')}<div style={{ ...fauxInput, maxWidth: 320 }}>e.g. MTN Bushfire</div>
+        {lbl('Client logo · optional')}<div style={{ width: 120, height: 44, border: '1px dashed var(--hairline)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12, marginTop: 4 }}>logo</div>
+      </>);
+      case 'scope': return (<>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', border: '1px solid var(--hairline)', borderRadius: 10, margin: '8px 0' }}>
+          <span style={{ width: 16, height: 16, border: '1.5px solid var(--hairline)', borderRadius: 4, flexShrink: 0 }} />
+          <span style={{ fontWeight: 700, fontSize: 13 }}>🌐 All organisers (internal / management)</span>
+        </div>
+        {lbl('Organiser scope · required')}<div style={fauxInput}>Pick the client’s organiser…</div>
+      </>);
+      case 'suites': return note('The suites editor appears here — add a suite, tick its dashboard sets, set who sees what, and lock it to the event.', '+ Add suite');
+      case 'logins': return note('The logins editor appears here — add a person’s name, email, a temporary password and their role (or link an existing login).', '+ Add login');
+      case 'branding': return note('The branding editor appears here — logo, brand colours and sender name, with a live email preview alongside.');
+      default: return note('This step’s controls appear here.');
+    }
+  };
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 5000, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: 'var(--bg, var(--card))', borderRadius: 16, boxShadow: '0 24px 64px -12px rgba(0,0,0,0.6)', width: 'min(560px, 96vw)', maxHeight: '90vh', overflowY: 'auto', padding: 18 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: 'var(--bg, var(--card))', borderRadius: 16, boxShadow: '0 24px 64px -12px rgba(0,0,0,0.6)', width: 'min(720px, 96vw)', maxHeight: '92vh', overflowY: 'auto', padding: 18 }}>
         <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
-          <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Preview — how step {index + 1} looks in the wizard</span>
+          <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Preview — the wizard screen, as the AM sees it</span>
           <span style={{ flex: 1 }} />
           <button onClick={onClose} style={{ border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 18, lineHeight: 1 }} title="Close">✕</button>
         </div>
-        {/* The step card, as the AM sees it */}
+        {/* Faux wizard screen */}
+        <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4, marginBottom: 14 }}>
+          {chips.map((c, k) => {
+            const active = k === index;
+            return (
+              <div key={c.key} style={{ display: 'flex', alignItems: 'center', gap: 7, flexShrink: 0, padding: '7px 11px', borderRadius: 980, border: active ? '1.5px solid var(--brand)' : '1.5px solid var(--hairline)', background: active ? 'var(--brand)' : 'var(--card)', color: active ? '#fff' : 'var(--muted)', opacity: k > index ? 0.55 : 1 }}>
+                <span style={{ width: 20, height: 20, borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 800, background: active ? 'rgba(255,255,255,0.25)' : 'rgba(128,128,128,0.18)', color: active ? '#fff' : 'var(--muted)' }}>{k + 1}</span>
+                {active && <span style={{ fontSize: 13, fontWeight: 700 }}>{c.title}</span>}
+              </div>
+            );
+          })}
+        </div>
         <div style={{ ...cardStyle, marginBottom: 0 }}>
-          <h2 style={{ fontSize: 20, fontWeight: 700, margin: '0 0 8px' }}>{s.icon} {s.title}</h2>
           {badge}
-          <p style={{ fontSize: 13.5, color: 'var(--text)', lineHeight: 1.55, margin: '8px 0 4px' }}>{s.blurb}</p>
-          {isCustom && (s.items || []).length > 0 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
-              {s.items.map((it) => (
-                <div key={it.key} style={{ display: 'flex', alignItems: 'center', gap: 10, border: '1px solid var(--hairline)', borderRadius: 10, padding: '10px 12px' }}>
-                  <span style={{ width: 22, height: 22, borderRadius: 6, border: '1.5px solid var(--hairline)', flexShrink: 0 }} />
-                  <span style={{ fontSize: 13.5, fontWeight: 600 }}>{it.label || <em style={{ color: 'var(--muted)' }}>empty item</em>}</span>
-                </div>
-              ))}
-            </div>
-          )}
+          <h2 style={{ fontSize: 20, fontWeight: 700, margin: '2px 0 8px' }}>{s.icon} {s.title}</h2>
+          <p style={{ fontSize: 13.5, color: 'var(--text)', lineHeight: 1.55, margin: '0 0 12px' }}>{s.blurb}</p>
+          {walk.length > 0 && <div style={{ ...miniBtn, display: 'inline-block', opacity: 0.75, pointerEvents: 'none', marginBottom: 4 }}>▶ Guide me through this step</div>}
+          {body()}
+          <div style={{ display: 'flex', gap: 10, marginTop: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+            <div style={{ ...miniBtnOutline, opacity: 0.7, pointerEvents: 'none' }}>← Back</div>
+            <span style={{ flex: 1 }} />
+            {lockMsg && <span style={{ fontSize: 12, color: 'var(--muted)' }}>🔒 {lockMsg}</span>}
+            <div style={{ ...saveBtn, opacity: lockMsg ? 0.5 : 1, pointerEvents: 'none' }}>{index === 0 ? 'Create client & continue' : 'Continue'}</div>
+          </div>
         </div>
         {!isCustom && walk.length > 0 && (
           <div style={{ marginTop: 14 }}>
