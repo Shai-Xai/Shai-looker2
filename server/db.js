@@ -830,6 +830,35 @@ function setNotificationPrefs(userId, prefs = {}) {
   db.prepare('UPDATE users SET notify_email=?, notify_push=? WHERE id=?').run(email, push, userId);
   return { email: email !== 0, push: push !== 0 };
 }
+// Per-type notification preferences — a granular layer under the email/push
+// channel switches. A user can mute a whole category (digests, goals, alerts,
+// messages) regardless of channel. Stored as JSON in user_prefs; default ON, so
+// existing users keep getting everything until they opt out.
+const NOTIFY_TYPES = [
+  { key: 'digest', label: 'Digests', desc: 'When your scheduled briefing is ready' },
+  { key: 'goals', label: 'Goals', desc: 'Weekly goal-progress nudges' },
+  { key: 'alerts', label: 'Alerts', desc: 'Campaign & data alerts that need attention' },
+  { key: 'messages', label: 'Messages', desc: 'New messages from Howler in your inbox' },
+];
+function getNotifyTypes(userId) {
+  let stored = {};
+  try { stored = JSON.parse(getUserPref(userId, 'notify_types', '') || '{}'); } catch { stored = {}; }
+  const out = {};
+  for (const t of NOTIFY_TYPES) out[t.key] = stored[t.key] !== false; // default on
+  return out;
+}
+function setNotifyTypes(userId, partial = {}) {
+  const cur = getNotifyTypes(userId);
+  for (const t of NOTIFY_TYPES) if (t.key in partial) cur[t.key] = !!partial[t.key];
+  setUserPref(userId, 'notify_types', JSON.stringify(cur));
+  return cur;
+}
+// Is a given notification category on for this user? Unknown/blank type ⇒ allowed.
+function notifyTypeOn(userId, type) {
+  if (!type) return true;
+  return getNotifyTypes(userId)[type] !== false;
+}
+
 function listUsers() { return db.prepare('SELECT * FROM users ORDER BY email').all().map(rowToUser); }
 function getUser(id) { return rowToUser(db.prepare('SELECT * FROM users WHERE id=?').get(id)); }
 function getUserByEmail(email) {
@@ -1503,6 +1532,7 @@ module.exports = {
   getSuiteMailBranding, setSuiteMailBranding,
   ensureInboxToken, regenerateInboxToken, findEntityByInboxToken,
   listUsers, getUser, getUserByEmail, createUser, updateUser, deleteUser, verifyCredentials, publicUser, setUserEntities, setNotificationPrefs, touchLastLogin,
+  NOTIFY_TYPES, getNotifyTypes, setNotifyTypes, notifyTypeOn,
   membershipsForUser, roleForMembership, setMembershipRole, removeMembership,
   listDashboards, getDashboard, createDashboard, updateDashboard, removeDashboard, dashboardPoolFor, sharedDashboards,
   setFolderKeepImported, folderSettingsMap, folderKeepImportedFor,

@@ -107,19 +107,22 @@ async function deliver(rows, payload) {
   return sent;
 }
 
-function sendToUser(userId, payload) {
+function sendToUser(userId, payload, type) {
   if (!enabled()) return Promise.resolve(0);
+  // Respect the user's per-type mute (digests/goals/alerts/messages).
+  if (type && _db.notifyTypeOn && !_db.notifyTypeOn(userId, type)) return Promise.resolve(0);
   const rows = sql.prepare('SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE user_id=?').all(userId);
   return deliver(rows, payload);
 }
 
 // Fan out to every login linked to an entity (the client's whole team). Admins
-// linked to that client are included — same rule as the email nudge.
-function sendToEntity(entityId, payload) {
+// linked to that client are included — same rule as the email nudge. An optional
+// `type` skips users who have muted that notification category.
+function sendToEntity(entityId, payload, type) {
   if (!enabled() || !entityId) return Promise.resolve(0);
-  // Linked to the entity AND hasn't muted push.
+  // Linked to the entity AND hasn't muted push (nor this category).
   const userIds = _db.listUsers()
-    .filter((u) => (u.entityIds || []).includes(entityId) && u.notifyPush !== false)
+    .filter((u) => (u.entityIds || []).includes(entityId) && u.notifyPush !== false && (!type || _db.notifyTypeOn(u.id, type)))
     .map((u) => u.id);
   if (!userIds.length) return Promise.resolve(0);
   const ph = userIds.map(() => '?').join(',');

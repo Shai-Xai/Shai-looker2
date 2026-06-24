@@ -244,7 +244,7 @@ function mount(app, { db, auth, mailer, messaging, push, generateContent, roleLe
                   body: `${lensLabel} digest for ${db.getEntity(job.entityId)?.name || 'your event'} just landed.`,
                   url: '/',
                   tag: `digest-${job.entityId}`,
-                }).catch(() => {});
+                }, 'digest').catch(() => {});
               }
             }
           } catch { /* push is best-effort */ }

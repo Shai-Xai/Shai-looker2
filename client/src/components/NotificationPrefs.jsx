@@ -16,7 +16,7 @@ function Switch({ on, busy }) {
 // device-aware. On iOS Safari, push can't be delivered (only the installed app
 // can), so we guide instead of showing a toggle that lies.
 export default function NotificationPrefs({ compact = false }) {
-  const [n, setN] = useState({ loaded: false, supported: false, pushAvailable: false, email: true, push: false, deviceOn: false, busy: '', testing: false });
+  const [n, setN] = useState({ loaded: false, supported: false, pushAvailable: false, email: true, push: false, deviceOn: false, busy: '', testing: false, types: {}, typeCatalog: [] });
 
   const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent);
   const standalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
@@ -28,9 +28,17 @@ export default function NotificationPrefs({ compact = false }) {
       api.getNotifPrefs().catch(() => ({ email: true, push: true, pushAvailable: false })),
       supported ? isSubscribed() : Promise.resolve(false),
     ]);
-    setN((s) => ({ ...s, loaded: true, supported, pushAvailable: !!prefs.pushAvailable, email: prefs.email !== false, push: prefs.push !== false, deviceOn }));
+    setN((s) => ({ ...s, loaded: true, supported, pushAvailable: !!prefs.pushAvailable, email: prefs.email !== false, push: prefs.push !== false, deviceOn, types: prefs.types || {}, typeCatalog: prefs.typeCatalog || [] }));
   };
   useEffect(() => { load(); }, []);
+
+  // Per-category mute (digests / goals / alerts / messages), under the channels.
+  const toggleType = async (key) => {
+    const next = !(n.types?.[key] !== false);
+    setN((s) => ({ ...s, busy: `type:${key}`, types: { ...s.types, [key]: next } }));
+    try { await api.setNotifPrefs({ types: { [key]: next } }); } catch { setN((s) => ({ ...s, types: { ...s.types, [key]: !next } })); }
+    setN((s) => ({ ...s, busy: '' }));
+  };
 
   const toggleEmail = async () => {
     const next = !n.email;
@@ -87,13 +95,33 @@ export default function NotificationPrefs({ compact = false }) {
         <Row icon="🔔" label="Push" sub="Not supported in this browser" right={null} disabled />
       );
 
+  const cardStyle = { background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden', maxWidth: 520 };
+  const TYPE_ICON = { digest: '🗞️', goals: '🎯', alerts: '🚨', messages: '💬' };
+
   return (
-    <div style={compact ? {} : { background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden', maxWidth: 520 }}>
-      <Row icon="✉️" label="Email" onClick={toggleEmail} disabled={n.busy === 'email'} right={<Switch on={n.email} busy={n.busy === 'email'} />} />
-      {pushRow}
-      {n.supported && n.pushAvailable && n.push && n.deviceOn && !iosNeedsInstall && (
-        <Row icon="📨" label={n.testing ? 'Sending…' : 'Send a test notification'} onClick={test} disabled={n.testing} right={null} />
+    <>
+      <div style={compact ? {} : cardStyle}>
+        <Row icon="✉️" label="Email" onClick={toggleEmail} disabled={n.busy === 'email'} right={<Switch on={n.email} busy={n.busy === 'email'} />} />
+        {pushRow}
+        {n.supported && n.pushAvailable && n.push && n.deviceOn && !iosNeedsInstall && (
+          <Row icon="📨" label={n.testing ? 'Sending…' : 'Send a test notification'} onClick={test} disabled={n.testing} right={null} />
+        )}
+      </div>
+
+      {/* Per-category switches — mute a whole type (digests, goals, alerts,
+          messages) across every channel, without turning email/push off entirely. */}
+      {n.typeCatalog.length > 0 && (
+        <div style={{ marginTop: compact ? 8 : 16, ...(compact ? {} : cardStyle) }}>
+          <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', padding: compact ? '6px 10px 2px' : '12px 12px 4px' }}>
+            What you’re notified about
+          </div>
+          {n.typeCatalog.map((t) => (
+            <Row key={t.key} icon={TYPE_ICON[t.key] || '🔔'} label={t.label} sub={t.desc}
+              onClick={() => toggleType(t.key)} disabled={n.busy === `type:${t.key}`}
+              right={<Switch on={n.types?.[t.key] !== false} busy={n.busy === `type:${t.key}`} />} />
+          ))}
+        </div>
       )}
-    </div>
+    </>
   );
 }

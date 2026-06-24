@@ -1603,7 +1603,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
             tag: `action-${childId}`,
             requireInteraction: true,
             actions: [{ action: `approve:${a.entityId}:${childId}`, title: 'Approve' }, { action: 'review', title: 'Review' }],
-          }).catch(() => {});
+          }, 'alerts').catch(() => {});
         }
       } catch (e) { console.error('[actions] auto-check failed', a.id, e.message); }
     }
@@ -1649,7 +1649,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     if (n) console.log(`[actions] sequence "${a.title}" enrolled ${n} new`);
     if (pausedForCodes) {
       console.log(`[actions] sequence "${a.title}" paused enrolment — promo codes exhausted`);
-      if (push?.isEnabled?.()) push.sendToEntity(a.entityId, { title: 'Promo codes running out', body: `"${a.title || 'Your campaign'}" has paused new sign-ups — upload more codes to resume.`, url: `/actions?action=${a.id}`, tag: `codes-${a.id}` }).catch(() => {});
+      if (push?.isEnabled?.()) push.sendToEntity(a.entityId, { title: 'Promo codes running out', body: `"${a.title || 'Your campaign'}" has paused new sign-ups — upload more codes to resume.`, url: `/actions?action=${a.id}`, tag: `codes-${a.id}` }, 'alerts').catch(() => {});
     }
   }
 

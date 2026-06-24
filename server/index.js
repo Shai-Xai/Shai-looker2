@@ -144,15 +144,19 @@ app.get('/api/auth/me', (req, res) => {
 // Per-user notification channel preferences (self-service).
 app.get('/api/my/notification-prefs', auth.requireAuth, (req, res) => {
   const u = auth.publicUser(db.getUser(req.user.id));
-  res.json({ email: u?.notifyEmail !== false, push: u?.notifyPush !== false, pushAvailable: push.isEnabled() });
+  res.json({
+    email: u?.notifyEmail !== false, push: u?.notifyPush !== false, pushAvailable: push.isEnabled(),
+    types: db.getNotifyTypes(req.user.id), typeCatalog: db.NOTIFY_TYPES,
+  });
 });
 app.put('/api/my/notification-prefs', auth.requireAuth, (req, res) => {
-  const { email, push: wantPush } = req.body || {};
+  const { email, push: wantPush, types } = req.body || {};
   const next = db.setNotificationPrefs(req.user.id, {
     ...(email != null ? { email: !!email } : {}),
     ...(wantPush != null ? { push: !!wantPush } : {}),
   });
-  res.json(next || { email: true, push: true });
+  if (types && typeof types === 'object') db.setNotifyTypes(req.user.id, types);
+  res.json({ ...(next || { email: true, push: true }), types: db.getNotifyTypes(req.user.id) });
 });
 
 // ─── Client self-service team management (team.manage) ─────────────────────────
@@ -1127,7 +1131,7 @@ async function goalNudgeSweep() {
         const { wins, attention, body } = await buildGoalNudge(ent.id);
         db.setSetting(`goal_nudge_week:${ent.id}`, week); // mark done even if nothing to say
         if (!attention.length && !wins.length) continue;
-        await push.sendToEntity(ent.id, { title: 'Your goals this week', body, url: '/goals' });
+        await push.sendToEntity(ent.id, { title: 'Your goals this week', body, url: '/goals' }, 'goals');
       } catch (e) { console.error('[goal-nudge]', ent.id, e.message); }
     }
   } catch (e) { console.error('[goal-nudge] sweep', e.message); }
