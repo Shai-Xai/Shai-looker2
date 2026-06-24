@@ -150,6 +150,10 @@ addColumn('users', 'last_login', 'TEXT');
 addColumn('users', 'first_name', "TEXT NOT NULL DEFAULT ''");
 addColumn('users', 'last_name', "TEXT NOT NULL DEFAULT ''");
 addColumn('users', 'mobile', "TEXT NOT NULL DEFAULT ''");
+// Per-user Inventive workspace mapping — the name + externalRefId we send Inventive.
+addColumn('users', 'inventive_name', "TEXT NOT NULL DEFAULT ''");   // legacy per-user name (dormant)
+addColumn('users', 'inventive_ref_id', "TEXT NOT NULL DEFAULT ''"); // legacy per-user ref (dormant)
+addColumn('users', 'inventive_workspace_id', "TEXT NOT NULL DEFAULT ''"); // link to a reusable inventive_workspaces row
 // Persistent per-folder settings for the dashboard library. Folders are "/"-path
 // strings on each dashboard (not records), so a setting keyed by path cascades to
 // every dashboard in that folder + subfolders — and to ones added later.
@@ -528,6 +532,15 @@ function listMarks({ userId, entityId, kind }) {
 // ─── Settings (simple key/value) ──────────────────────────────────────────────
 db.exec(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '');`);
 
+// Reusable Inventive workspaces: created once (name + reference) and linked to
+// one or more users. A user's linked workspace identifies their Inventive account.
+db.exec(`CREATE TABLE IF NOT EXISTS inventive_workspaces (
+  id         TEXT PRIMARY KEY,
+  name       TEXT NOT NULL DEFAULT '',
+  ref_id     TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);`);
+
 // ─── Mail assets: rendered images embedded in emails (e.g. digest tile charts) ─
 // Stored as bytes + served by an unguessable token, so a digest's chart <img>
 // keeps resolving long after it was sent. Pruned by age on write.
@@ -734,6 +747,34 @@ function updateEntity(id, patch) {
 }
 function deleteEntity(id) { db.prepare('DELETE FROM entities WHERE id=?').run(id); }
 
+// ─── Inventive workspaces (reusable; linked to users) ───────────────────────────
+const rowToInvWs = (r) => r && { id: r.id, name: r.name || '', refId: r.ref_id || '', createdAt: r.created_at };
+function listInventiveWorkspaces() {
+  return db.prepare('SELECT * FROM inventive_workspaces ORDER BY name').all().map((r) => ({
+    ...rowToInvWs(r),
+    userCount: db.prepare('SELECT COUNT(*) c FROM users WHERE inventive_workspace_id=?').get(r.id).c,
+  }));
+}
+function getInventiveWorkspace(id) { return rowToInvWs(db.prepare('SELECT * FROM inventive_workspaces WHERE id=?').get(id)); }
+function createInventiveWorkspace({ name = '', refId = '' } = {}) {
+  const id = uuid();
+  db.prepare('INSERT INTO inventive_workspaces (id,name,ref_id,created_at) VALUES (?,?,?,?)')
+    .run(id, String(name || '').trim(), String(refId || '').trim(), now());
+  return getInventiveWorkspace(id);
+}
+function updateInventiveWorkspace(id, patch = {}) {
+  const cur = db.prepare('SELECT * FROM inventive_workspaces WHERE id=?').get(id);
+  if (!cur) return null;
+  const name = patch.name !== undefined ? String(patch.name || '').trim() : cur.name;
+  const refId = patch.refId !== undefined ? String(patch.refId || '').trim() : cur.ref_id;
+  db.prepare('UPDATE inventive_workspaces SET name=?, ref_id=? WHERE id=?').run(name, refId, id);
+  return getInventiveWorkspace(id);
+}
+function deleteInventiveWorkspace(id) {
+  db.prepare("UPDATE users SET inventive_workspace_id='' WHERE inventive_workspace_id=?").run(id); // unlink users
+  db.prepare('DELETE FROM inventive_workspaces WHERE id=?').run(id);
+}
+
 // Per-client integration credentials (Looker / Anthropic). Kept separate from
 // the general entity object so secrets never ride along to the browser by
 // accident — only the dedicated, masked endpoints expose them.
@@ -831,11 +872,11 @@ function rowToUser(r) {
   if (!r) return null;
   const memberships = membershipsForUser(r.id);
   const firstName = r.first_name || '', lastName = r.last_name || '';
-  return { id: r.id, email: r.email, role: r.role, passwordHash: r.password_hash, firstName, lastName, fullName: [firstName, lastName].filter(Boolean).join(' '), mobile: r.mobile || '', entityIds: memberships.map((m) => m.entityId), memberships, notifyEmail: r.notify_email !== 0, notifyPush: r.notify_push !== 0, lastLogin: r.last_login || null, createdAt: r.created_at };
+  return { id: r.id, email: r.email, role: r.role, passwordHash: r.password_hash, firstName, lastName, fullName: [firstName, lastName].filter(Boolean).join(' '), mobile: r.mobile || '', inventiveWorkspaceId: r.inventive_workspace_id || '', entityIds: memberships.map((m) => m.entityId), memberships, notifyEmail: r.notify_email !== 0, notifyPush: r.notify_push !== 0, lastLogin: r.last_login || null, createdAt: r.created_at };
 }
 function publicUser(u) {
   if (!u) return null;
-  return { id: u.id, email: u.email, role: u.role, firstName: u.firstName || '', lastName: u.lastName || '', fullName: u.fullName || '', mobile: u.mobile || '', entityIds: u.entityIds || [], memberships: u.memberships || [], notifyEmail: u.notifyEmail !== false, notifyPush: u.notifyPush !== false };
+  return { id: u.id, email: u.email, role: u.role, firstName: u.firstName || '', lastName: u.lastName || '', fullName: u.fullName || '', mobile: u.mobile || '', inventiveWorkspaceId: u.inventiveWorkspaceId || '', entityIds: u.entityIds || [], memberships: u.memberships || [], notifyEmail: u.notifyEmail !== false, notifyPush: u.notifyPush !== false };
 }
 // Update a user's notification channel preferences (partial).
 // ─── One-time auth tokens (password reset + magic sign-in link) ───────────────
@@ -995,7 +1036,8 @@ function updateUser(id, patch) {
   const firstName = patch.firstName !== undefined ? String(patch.firstName || '').trim() : cur.first_name;
   const lastName = patch.lastName !== undefined ? String(patch.lastName || '').trim() : cur.last_name;
   const mobile = patch.mobile !== undefined ? String(patch.mobile || '').trim() : cur.mobile;
-  db.prepare('UPDATE users SET email=?, password_hash=?, role=?, first_name=?, last_name=?, mobile=? WHERE id=?').run(email, hash, role, firstName, lastName, mobile, id);
+  const invWs = patch.inventiveWorkspaceId !== undefined ? String(patch.inventiveWorkspaceId || '').trim() : cur.inventive_workspace_id;
+  db.prepare('UPDATE users SET email=?, password_hash=?, role=?, first_name=?, last_name=?, mobile=?, inventive_workspace_id=? WHERE id=?').run(email, hash, role, firstName, lastName, mobile, invWs, id);
   if ('entityIds' in patch) setUserEntities(id, patch.entityIds);
   return publicUser(getUser(id));
 }
@@ -1613,6 +1655,7 @@ module.exports = {
   exportAll, importAll,
   getFilterView, setFilterView, deleteFilterView,
   listEntities, getEntity, createEntity, updateEntity, deleteEntity, getEntityIntegrations, setEntityIntegrations,
+  listInventiveWorkspaces, getInventiveWorkspace, createInventiveWorkspace, updateInventiveWorkspace, deleteInventiveWorkspace,
   getEntityIntegrationLocks, setEntityIntegrationLock,
   getEntityMailBranding, setEntityMailBranding,
   getSuiteMailBranding, setSuiteMailBranding,

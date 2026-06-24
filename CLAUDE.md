@@ -65,6 +65,24 @@ change: adjust the relevant section + status tag, bump **Last updated**, and add
 dated **Changelog** line. Keep it benefit-led and honest (don't overclaim — use the
 status key: ✅ Live · 🟡 needs setup · 🧪 beta · 🔜 coming soon).
 
+## Keep the client setup wizard current
+The back-end **Client setup wizard** (Admin → 🧙 Setup wizard, in `SetupWizard` /
+`server/setupWizard.js`) is the guided, step-by-step path account managers use to
+stand a new client up. **Whenever you add a new back-end setting that is part of
+standing a client up** (a new entity/suite field, a new required integration, a new
+onboarding step), wire it into the wizard in the SAME change — don't let the wizard
+drift behind what setup now requires:
+- If it's a whole new setup stage, add a step to `WIZARD_DEFAULTS` (and its
+  behaviour by `key` in `SetupWizard`), keeping required vs optional honest.
+- If it belongs inside an existing step, add the field there and, where the step
+  has a guided section tour, add a `[data-tour]` anchor + a matching entry in that
+  step's `TOURS` list so the walkthrough still covers every section.
+- Update each step's `canProceed` / `reqDone` if the new setting is required to go
+  live, so "Continue" stays locked until it's done.
+Remember the wizard reuses the real editors (`ClientSuites`, `EntityLogins`,
+`MailTemplateEditor`, …) — adding the setting to those usually surfaces it in the
+wizard automatically; the tour copy is the part that still needs a manual update.
+
 ## Git
 - Develop on the assigned `claude/*` branch; push to it AND to `main`
   (`git push -u origin <branch> && git push origin <branch>:main`). Render

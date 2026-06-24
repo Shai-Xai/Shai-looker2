@@ -10,6 +10,8 @@ import { useSheetDrag } from '../lib/useSheetDrag.js';
 import { applyBrand, resetBrand, useBrandLogo } from '../lib/brand.js';
 import { useAccess, PERMS } from '../lib/access.js';
 import { FEATURES } from '../lib/features.js';
+import AnalystDrawer from '../components/AnalystDrawer.jsx';
+import AiMark from '../components/AiMark.jsx';
 
 // Persistent client shell: a left sidebar tree of Suites → Sets → Dashboards,
 // with the selected dashboard rendered in the main area.
@@ -31,6 +33,27 @@ export default function ClientLayout() {
   const searching = q.trim().length > 0;
   const [loading, setLoading] = useState(true);
   const [navOpen, setNavOpen] = useState(false); // mobile drawer
+  const [askOpen, setAskOpen] = useState(false); // Inventive analyst slide-in drawer
+  const [prewarmAsk, setPrewarmAsk] = useState(false); // load the analyst on owl hover → instant first open
+  // Open the analyst drawer. Best-effort: ask the browser to grant Inventive
+  // first-party storage access (so the embed can run at first-party speed) —
+  // harmless / silent if unsupported or denied, so it never breaks anything.
+  const saTriedRef = useRef(false);
+  const openAsk = () => {
+    if (!saTriedRef.current) {
+      saTriedRef.current = true;
+      try { document.requestStorageAccessFor?.('https://app.madeinventive.com').catch(() => {}); } catch { /* ignore */ }
+    }
+    setPrewarmAsk(true);
+    setAskOpen(true);
+  };
+  // The top-header "Owl Data Analyst" button lives in App.jsx; it opens the drawer
+  // via this event (keeps the drawer state here without lifting it up).
+  useEffect(() => {
+    const h = () => openAsk();
+    window.addEventListener('howler:open-analyst', h);
+    return () => window.removeEventListener('howler:open-analyst', h);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('howler_nav_collapsed') === '1'); // desktop
   const toggleCollapsed = () => setCollapsed((c) => { localStorage.setItem('howler_nav_collapsed', c ? '0' : '1'); return !c; });
   const navDrag = useSheetDrag(() => setNavOpen(false)); // mobile bottom-sheet dismiss
@@ -45,7 +68,6 @@ export default function ClientLayout() {
   const onSettlements = location.pathname.startsWith('/settlements');
   const onInbox = location.pathname.startsWith('/inbox');
   const onDigests = location.pathname.startsWith('/digests');
-  const onAsk = location.pathname.startsWith('/ask');
   // Engage hub tabs: Campaigns (/engage/campaigns, default /engage) + Segments.
   const onSegments = location.pathname.startsWith('/segments') || location.pathname.startsWith('/engage/segments');
   const onActions = (location.pathname.startsWith('/actions') || location.pathname.startsWith('/engage')) && !onSegments;
@@ -368,9 +390,9 @@ export default function ClientLayout() {
           )}
           {FEATURES.ask && (
           <button
-            className={`nav-row${onAsk ? ' active' : ''}`}
-            style={{ ...rowBtn, fontWeight: onAsk ? 600 : 500 }}
-            onClick={() => { if (!onAsk) vtNavigate(navigate, '/ask'); if (isMobile) setNavOpen(false); }}
+            className={`nav-row${askOpen ? ' active' : ''}`}
+            style={{ ...rowBtn, fontWeight: askOpen ? 600 : 500 }}
+            onClick={() => { openAsk(); if (isMobile) setNavOpen(false); }}
           >
             <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>✨</span>
             <span style={ellip}>Ask</span>
@@ -539,9 +561,9 @@ export default function ClientLayout() {
                   )}
                   {FEATURES.ask && (
                   <button
-                    className={`nav-row${onAsk ? ' active' : ''}`}
-                    style={{ ...mRowSuite, fontWeight: onAsk ? 700 : 500 }}
-                    onClick={() => { if (!onAsk) vtNavigate(navigate, '/ask'); setNavOpen(false); }}
+                    className={`nav-row${askOpen ? ' active' : ''}`}
+                    style={{ ...mRowSuite, fontWeight: askOpen ? 700 : 500 }}
+                    onClick={() => { openAsk(); setNavOpen(false); }}
                   >
                     <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>✨</span>
                     <span style={ellip}>Ask</span>
@@ -673,6 +695,21 @@ export default function ClientLayout() {
         )}
         <Outlet context={{ previewEntityId: activeEntityId, actionsSlot }} />
       </main>
+      {FEATURES.ask && !askOpen && (
+        // Floating owl — quick launcher for the analyst drawer (bottom-right).
+        // Hover/focus pre-warms the analyst so the first open is instant.
+        <button
+          onClick={() => openAsk()}
+          onMouseEnter={() => setPrewarmAsk(true)}
+          onFocus={() => setPrewarmAsk(true)}
+          title="Ask your AI analyst"
+          aria-label="Ask your AI analyst"
+          style={{ position: 'fixed', bottom: 20, right: isMobile ? 16 : 24, zIndex: 55, width: 54, height: 54, borderRadius: '50%', border: '1px solid var(--hairline)', background: 'var(--card)', boxShadow: '0 6px 22px rgba(0,0,0,0.3)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        >
+          <AiMark size={28} sparkle={false} />
+        </button>
+      )}
+      <AnalystDrawer open={askOpen} prewarm={prewarmAsk} onClose={() => setAskOpen(false)} previewEntityId={activeEntityId} />
     </div>
   );
 }

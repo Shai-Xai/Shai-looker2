@@ -12,7 +12,7 @@
 
 const fetch = require('node-fetch');
 
-function mount(app, { db, auth, homeEntityFor }) {
+function mount(app, { db, auth }) {
   const inventiveEndpoint = () => (db.getSetting('inventive_api_endpoint') || process.env.INVENTIVE_API_ENDPOINT || 'https://app-api.madeinventive.com').replace(/\/+$/, '');
   const inventiveKey = () => (db.getSetting('inventive_api_key') || process.env.INVENTIVE_API_KEY || '').trim();
   const inventiveEmbedToken = () => (db.getSetting('inventive_embed_auth_token') || process.env.INVENTIVE_EMBED_AUTH_TOKEN || '').trim();
@@ -27,28 +27,28 @@ function mount(app, { db, auth, homeEntityFor }) {
   app.post('/api/inventive/embed-url', auth.requireAuth, async (req, res) => {
     const key = inventiveKey(); const token = inventiveEmbedToken();
     if (!key || !token) return res.status(400).json({ error: 'Inventive is not configured yet.' });
-    const entityId = homeEntityFor(req);
-    if (!entityId) return res.status(400).json({ error: 'No client context for the AI workspace.' });
-    const entity = db.getEntity(entityId);
-    if (!entity) return res.status(404).json({ error: 'Client not found.' });
-    // Prefer the user's saved profile name (First name / Surname from their Pulse
-    // profile); fall back to splitting the email local-part only when the profile
-    // has no first name yet. A set first name means a blank surname is intentional,
-    // so we don't pull a derived one from the email in that case.
-    const profileFirst = (req.user.firstName || '').trim();
-    const { firstname, lastname } = profileFirst
-      ? { firstname: profileFirst, lastname: (req.user.lastName || '').trim() }
-      : inventiveName(req.user.email);
-    // Both the workspace display name and the externalRefId can be overridden per
-    // client (Admin → client settings). Name blank inherits the Pulse client name.
-    // The ref override exists for the manual, no-integration setup: blank uses the
-    // client's own Pulse UUID (the default, stable mapping key); set it to point at
-    // an Inventive workspace provisioned under a different reference.
-    const accountName = (entity.inventiveName || '').trim() || entity.name;
-    const externalRefId = (entity.inventiveRefId || '').trim() || entity.id;
+    // Inventive rejects the request if firstname, lastname OR email is empty, so we
+    // guarantee all three. Prefer the saved profile (First name / Surname); fall back
+    // to the email local-part; split a multi-word first name into first + last; and
+    // as a last resort reuse the first name as the surname (single-name users) so we
+    // never send a blank field.
+    const u = req.user;
+    const email = (u.email || '').trim();
+    let firstname = (u.firstName || '').trim();
+    let lastname = (u.lastName || '').trim();
+    if (!firstname && !lastname) { const d = inventiveName(email); firstname = d.firstname; lastname = d.lastname; }
+    if (!lastname && firstname.includes(' ')) { const p = firstname.split(/\s+/); firstname = p[0]; lastname = p.slice(1).join(' '); }
+    if (!firstname) firstname = email.split('@')[0] || 'User';
+    if (!lastname) lastname = firstname;
+    // The user is linked to a reusable Inventive workspace (Admin → Integrations →
+    // Inventive workspaces). Its name + reference identify the workspace; an unlinked
+    // user falls back to their own name / Howler user ID (the stable default key).
+    const ws = u.inventiveWorkspaceId ? db.getInventiveWorkspace(u.inventiveWorkspaceId) : null;
+    const accountName = (ws?.name || '').trim() || u.fullName || [firstname, lastname].filter(Boolean).join(' ') || u.email;
+    const externalRefId = (ws?.refId || '').trim() || u.id;
     const userInfo = {
-      firstname, lastname, email: req.user.email,
-      // One Inventive workspace per Pulse client (entity).
+      firstname, lastname, email,
+      // One Inventive workspace per Pulse user.
       accountScope: { externalRefId, name: accountName, description: `${accountName} · Pulse` },
     };
     try {

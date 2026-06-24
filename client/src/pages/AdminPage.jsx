@@ -112,6 +112,7 @@ function IconPicker({ value, onChange }) {
 //   Logins (Users)      – credentials, assigned to one or more entities
 const ADMIN_NAV = [
   ['entities', 'Clients', '👥'],
+  ['wizard', 'Setup wizard', '🧙'],
   ['users', 'Users', '🧑'],
   ['sets', 'Sets', '🗂️'],
   ['library', 'Tile library', '🧩'],
@@ -133,7 +134,8 @@ export default function AdminPage() {
 
   const content = (
     <>
-      {tab === 'entities' && <Entities fields={fields} />}
+      {tab === 'entities' && <Entities fields={fields} onOpenWizard={() => setTab('wizard')} />}
+      {tab === 'wizard' && <SetupWizard fields={fields} />}
       {tab === 'users' && <UsersTab />}
       {tab === 'sets' && <Sets />}
       {tab === 'library' && <Library />}
@@ -642,7 +644,7 @@ function Billing() {
 }
 
 // ─── Clients (Entities) ───────────────────────────────────────────────────────
-function Entities({ fields }) {
+function Entities({ fields, onOpenWizard }) {
   const [items, setItems] = useState([]);
   const [suites, setSuites] = useState([]);
   const [sets, setSets] = useState([]);
@@ -685,13 +687,19 @@ function Entities({ fields }) {
   const ql = q.trim().toLowerCase();
   const sorted = [...items].sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }));
   const shown = ql ? sorted.filter((e) => (e.name || '').toLowerCase().includes(ql)) : sorted;
+  const addClient = async () => { const ent = await api.adminCreateEntity({ name: 'New client', lockedFilters: {} }); await load(); setSelectedId(ent.id); };
   return (
     <div>
       <p style={hint}>Pick a client to manage its settings, suites and logins.</p>
-      <div style={searchWrap}>
-        <span style={{ color: 'var(--muted)', fontSize: 13, flexShrink: 0 }}>⌕</span>
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search clients…" style={searchInput} />
-        {ql && <button onClick={() => setQ('')} style={searchClear} aria-label="Clear search">✕</button>}
+      {/* Top bar: search + quick add + the guided wizard, all in reach. */}
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
+        <div style={{ ...searchWrap, marginBottom: 0, flex: '1 1 200px' }}>
+          <span style={{ color: 'var(--muted)', fontSize: 13, flexShrink: 0 }}>⌕</span>
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search clients…" style={searchInput} />
+          {ql && <button onClick={() => setQ('')} style={searchClear} aria-label="Clear search">✕</button>}
+        </div>
+        <button style={addBtn} onClick={addClient}>+ Add client</button>
+        {onOpenWizard && <button style={{ ...addBtn, background: 'var(--brand)', color: '#fff', border: '1.5px solid var(--brand)' }} onClick={onOpenWizard} title="Stand a new client up with the guided, step-by-step wizard">🧙 Setup wizard</button>}
       </div>
       <div style={clientList}>
         {shown.map((e) => (
@@ -706,8 +714,809 @@ function Entities({ fields }) {
         {items.length === 0 && <Muted>No clients yet.</Muted>}
         {items.length > 0 && shown.length === 0 && <Muted>No clients match “{q.trim()}”.</Muted>}
       </div>
-      <button style={addBtn} onClick={async () => { const ent = await api.adminCreateEntity({ name: 'New client', lockedFilters: {} }); await load(); setSelectedId(ent.id); }}>+ Add client</button>
     </div>
+  );
+}
+
+// ─── Client Setup Wizard — a guided, step-by-step path for account managers ────
+// Stands a new client up end to end without hunting through tabs: create the
+// client → lock their data scope → build their suites → add a login → brand it.
+// It is LINEAR and ENFORCED — each step explains what to do, you do it inline
+// (reusing the very same editors the Clients tab uses, so nothing is a throwaway
+// mock), and the "Continue" button stays locked until that step is done. You can
+// step back, but you can't skip ahead past unfinished work. Back-end / admin only.
+//
+// The steps are EDITABLE from the admin UI (the ⚙ on the start screen): wording,
+// order, and the AM's own custom guidance steps are stored server-side via
+// server/setupWizard.js and merged over these built-in DEFAULTS by key. The
+// built-in steps' ACTIONS are fixed (they create real records); only their copy,
+// order and extra guidance steps are configurable.
+const WIZARD_DEFAULTS = [
+  { kind: 'builtin', key: 'client', icon: '🏢', title: 'The client', short: 'Client',
+    req: 'a client name', lock: 'Enter a client name to continue', does: 'Creates the client (entity) record.',
+    blurb: 'Everything in Pulse hangs off a “client” (internally an entity). Give it a name — usually the organiser or brand you’re onboarding — and, if you have it, their logo. You can change both later.' },
+  { kind: 'builtin', key: 'scope', icon: '🔒', title: 'Data scope', short: 'Scope',
+    req: 'an organiser (or “All organisers”)', lock: 'Pick an organiser, or tick “All organisers”', does: 'Locks the client to their organiser(s).',
+    blurb: 'This is the most important step. Pulse force-filters every query on the server to this client’s organiser, so they only ever see their own numbers. Until you set a scope the account fails closed — they’ll see nothing. Pick the organiser(s) this client owns.' },
+  { kind: 'builtin', key: 'suites', icon: '🗂️', title: 'Suites & dashboards', short: 'Suites',
+    req: 'at least one suite', lock: 'Add at least one suite to continue', does: 'Builds the client’s suites of dashboards.',
+    blurb: 'A suite is one event/context for the client (e.g. “Bushfire 2026”). Inside it you choose which sets of dashboards they get, and lock it to that event. Add one suite per event. You can fine-tune which dashboards each set shows, and reorder them, right here.' },
+  { kind: 'builtin', key: 'logins', icon: '🔑', title: 'Logins', short: 'Logins',
+    req: 'at least one login', lock: 'Add (or link) at least one login to continue', does: 'Creates the people who can sign in.',
+    blurb: 'Create the people who can sign in for this client and set what each can see with a role. Give them a temporary password — they’ll be prompted to change it. You can also link an existing login if someone works across several clients.' },
+  { kind: 'builtin', key: 'branding', icon: '🎨', title: 'Branding', short: 'Branding', optional: true, does: 'Opens the per-client branding editor (logo, colours, sender).',
+    blurb: 'Optional, but it makes the account feel like the client’s own. Set their logo, brand colours and email sender name — these white-label the whole app (UI accents + charts) and every email Pulse sends for them. Anything left blank inherits the Howler default.' },
+];
+const REVIEW_STEP = { kind: 'review', key: 'review', icon: '✅', title: 'Review & finish', short: 'Finish',
+  blurb: 'Everything required is in place. Preview the account exactly as the client will see it, or set up another.' };
+const newKey = (p) => `${p}_${Math.random().toString(36).slice(2, 8)}`;
+
+// Merge the saved override (or null) over the built-in defaults, keyed by step.
+// Built-ins keep their behaviour fields from code but take saved wording; custom
+// steps come straight from the saved config; any new built-in (added in code
+// later) is appended; the client step is always pinned first.
+function mergeWizardSteps(saved) {
+  const defByKey = Object.fromEntries(WIZARD_DEFAULTS.map((s) => [s.key, s]));
+  const pick = (o, keys) => { const out = {}; for (const k of keys) if (o[k] != null) out[k] = o[k]; return out; };
+  // Merge a built-in step's walkthrough (the red-border guide): saved overrides
+  // (title/body/off + order) layered over the code defaults, keyed by the section
+  // anchor. Any new default anchor (added in code) is appended; stale saved ones
+  // (anchor no longer in code) are dropped. The anchor + icon stay from code.
+  const mergeWalk = (key, savedWalk) => {
+    const defs = TOUR_DEFAULTS[key] || [];
+    const byTour = Object.fromEntries(defs.map((w) => [w.tour, w]));
+    if (!Array.isArray(savedWalk) || !savedWalk.length) return defs.map((w) => ({ ...w }));
+    const out = savedWalk.filter((w) => w && byTour[w.tour]).map((w) => ({ ...byTour[w.tour], ...pick(w, ['title', 'body']), off: !!w.off }));
+    for (const d of defs) if (!out.some((w) => w.tour === d.tour)) out.push({ ...d });
+    return out;
+  };
+  let list;
+  if (Array.isArray(saved) && saved.length) {
+    list = saved.filter((s) => s && (s.kind === 'custom' || defByKey[s.key])).map((s) => (
+      s.kind === 'custom'
+        ? { kind: 'custom', key: s.key || newKey('custom'), icon: s.icon || '📌', title: s.title || 'Guidance step', blurb: s.blurb || '', items: Array.isArray(s.items) ? s.items.filter((it) => it && it.key).map((it) => ({ key: it.key, label: it.label || '' })) : [] }
+        : { ...defByKey[s.key], ...pick(s, ['icon', 'title', 'blurb', 'req', 'lock']), walk: mergeWalk(s.key, s.walk) }
+    ));
+    for (const d of WIZARD_DEFAULTS) if (!list.some((s) => s.key === d.key)) list.push({ ...d, walk: mergeWalk(d.key) });
+  } else {
+    list = WIZARD_DEFAULTS.map((s) => ({ ...s, walk: mergeWalk(s.key) }));
+  }
+  const client = list.find((s) => s.key === 'client');
+  return client ? [client, ...list.filter((s) => s.key !== 'client')] : list;
+}
+
+function SetupWizard({ fields }) {
+  const navigate = useNavigate();
+  const { setProfile } = useProfile();
+  const isMobile = useIsMobile();
+  const [data, setData] = useState(null); // { entities, suites, users, sets, dashTitle }
+  const [steps, setSteps] = useState(() => mergeWizardSteps(null)); // configurable steps (no review)
+  const [entityId, setEntityId] = useState(null);
+  const [stepKey, setStepKey] = useState('start'); // 'start' then a step key
+  const [ticks, setTicks] = useState({}); // per-client custom-step checklist: { "stepKey:itemKey": 1 }
+  const [editing, setEditing] = useState(false);
+  // Working state for the steps the wizard saves itself (client + scope).
+  const [name, setName] = useState('');
+  const [logo, setLogo] = useState('');
+  const [locks, setLocks] = useState({});
+  const [allOrg, setAllOrg] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const [tourOn, setTourOn] = useState(false); // the in-step spotlight walkthrough
+  const initFor = useRef(null);
+  const bodyRef = useRef(null);
+  const autoTourSeen = useRef(new Set());
+
+  const reload = () => Promise.all([api.adminListEntities(), api.adminListSuites(), api.adminListUsers(), api.adminListSets(), api.listDashboards()])
+    .then(([entities, suites, users, sets, dash]) => setData({ entities, suites, users, sets, dashTitle: Object.fromEntries(dash.map((d) => [d.id, d.title])) }));
+  useEffect(() => { reload(); }, []);
+  // Load the admin-edited step config (falls back to defaults if none / on error).
+  useEffect(() => { api.getSetupWizard().then((r) => setSteps(mergeWizardSteps(r.steps))).catch(() => {}); }, []);
+
+  const entity = data ? (data.entities.find((e) => e.id === entityId) || null) : null;
+  // Seed the editable fields once per client (don't clobber edits on every reload).
+  useEffect(() => {
+    if (entity && initFor.current !== entity.id) {
+      initFor.current = entity.id;
+      setName(entity.name || ''); setLogo(entity.logo || '');
+      setLocks(entity.lockedFilters || {}); setAllOrg(!!entity.allOrganisers);
+    }
+    if (!entityId) { initFor.current = null; setName(''); setLogo(''); setLocks({}); setAllOrg(false); }
+  }, [entityId, entity]);
+  // Load this client's custom-step checklist ticks.
+  useEffect(() => {
+    if (entityId) api.getSetupWizardProgress(entityId).then((r) => setTicks(r.ticks || {})).catch(() => setTicks({}));
+    else setTicks({});
+  }, [entityId]);
+  // Close any open walkthrough when moving between steps.
+  useEffect(() => { setTourOn(false); }, [stepKey]);
+  // Auto-launch the spotlight walkthrough the first time the AM reaches a guided
+  // step (once per client per step). Non-client steps need the entity to exist;
+  // suites also waits until there's a suite to point at.
+  useEffect(() => {
+    const s = steps.find((x) => x.key === stepKey);
+    if (!s || !(s.walk || []).some((w) => !w.off)) return;
+    if (stepKey !== 'client' && !entity) return;
+    if (stepKey === 'suites' && entity && !data.suites.some((x) => x.entityId === entity.id)) return;
+    const k = `${entity?.id || 'new'}:${stepKey}`;
+    if (!autoTourSeen.current.has(k)) { autoTourSeen.current.add(k); setTourOn(true); }
+  }, [stepKey, entityId, data, steps]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!data) return <Muted>Loading…</Muted>;
+
+  const suitesOf = (eid) => data.suites.filter((s) => s.entityId === eid);
+  const loginsOf = (eid) => data.users.filter((u) => (u.entityIds || []).includes(eid));
+  // The enabled walkthrough points for a step (the red-border guide), in order.
+  const walkOf = (key) => { const s = steps.find((x) => x.key === key); return s && s.walk ? s.walk.filter((w) => !w.off) : []; };
+  const entHasScope = (e) => e.allOrganisers || Object.values(e.lockedFilters || {}).some((v) => String(v || '').trim());
+  // Built-in required-step completion, from SAVED state — drives the resume target
+  // and the "needs …" chips. (Branding/custom steps aren't part of this.)
+  const reqDone = (e) => ({ client: !!(e.name || '').trim(), scope: entHasScope(e), suites: suitesOf(e.id).length > 0, logins: loginsOf(e.id).length > 0 });
+  // Has a given step been completed (for ticks / reachability)? Custom steps are
+  // complete once all their checklist items are ticked.
+  const stepComplete = (s) => {
+    if (!s) return false;
+    if (s.kind === 'custom') return (s.items || []).every((it) => ticks[`${s.key}:${it.key}`]);
+    if (!entity) return s.key === 'client' ? !!(name || '').trim() : false;
+    switch (s.key) {
+      case 'client': return !!(entity.name || '').trim();
+      case 'scope': return entHasScope(entity);
+      case 'suites': return suitesOf(entity.id).length > 0;
+      case 'logins': return loginsOf(entity.id).length > 0;
+      case 'branding': return !!entity.logo; // optional — for the ✓ only, never blocks
+      default: return true;
+    }
+  };
+  // LIVE check on the working fields — can the CURRENT step's Continue unlock yet?
+  const hasLock = allOrg || Object.values(locks).some((v) => String(v || '').trim());
+  const curStep = stepKey === 'review' ? REVIEW_STEP : (steps.find((s) => s.key === stepKey) || REVIEW_STEP);
+  const canProceed = stepKey === 'review' ? true
+    : curStep.kind === 'custom' ? (curStep.items || []).every((it) => ticks[`${curStep.key}:${it.key}`])
+    : stepKey === 'client' ? !!name.trim()
+    : stepKey === 'scope' ? hasLock
+    : stepKey === 'suites' ? (!!entity && suitesOf(entity.id).length > 0)
+    : stepKey === 'logins' ? (!!entity && loginsOf(entity.id).length > 0)
+    : true; // branding + anything else
+  const lockHint = curStep.kind === 'custom' ? 'Tick every item to continue' : curStep.lock;
+
+  const go = (key) => { setError(null); setStepKey(key); };
+  const seq = [...steps.map((s) => s.key), 'review'];
+  const sidx = seq.indexOf(stepKey);
+  const nextKey = sidx >= 0 && sidx < seq.length - 1 ? seq[sidx + 1] : 'review';
+  const prevKey = sidx > 0 ? seq[sidx - 1] : 'start';
+  // A step is reachable only when every blocking step before it (in the current
+  // order) is complete — this is what keeps the flow linear. Optional built-ins
+  // (branding) never block; custom steps block until their items are ticked.
+  const reachable = (key) => {
+    if (key === 'client') return true;
+    if (!entity) return false;
+    const i = key === 'review' ? steps.length : steps.findIndex((s) => s.key === key);
+    return steps.slice(0, i < 0 ? steps.length : i).every((s) => s.optional || stepComplete(s));
+  };
+  const firstUnfinished = (e) => ['client', 'scope', 'suites', 'logins'].find((k) => !reqDone(e)[k]) || steps[0]?.key || 'review';
+
+  const toggleTick = (sk, ik, done) => {
+    const k = `${sk}:${ik}`;
+    setTicks((t) => ({ ...t, [k]: done ? 1 : 0 }));
+    if (entityId) api.setSetupWizardProgress(entityId, k, done).then((r) => setTicks(r.ticks || {})).catch(() => {});
+  };
+
+  // Save handlers for the two steps the wizard owns directly.
+  const saveClient = async () => {
+    if (!name.trim()) { setError('Give the client a name to continue.'); return; }
+    setBusy(true); setError(null);
+    try {
+      if (!entityId) { const ent = await api.adminCreateEntity({ name: name.trim(), logo, lockedFilters: {} }); setEntityId(ent.id); initFor.current = ent.id; }
+      else { await api.adminUpdateEntity(entityId, { name: name.trim(), logo }); }
+      await reload();
+      go(nextKey);
+    } catch (e) { setError(e.message); } finally { setBusy(false); }
+  };
+  const saveScope = async () => {
+    setBusy(true); setError(null);
+    try { await api.adminUpdateEntity(entity.id, { lockedFilters: locks, allOrganisers: allOrg }); await reload(); go(nextKey); }
+    catch (e) { setError(e.message); } finally { setBusy(false); }
+  };
+
+  // Preview the account as the client sees it (scope the shell, open first dash).
+  const previewAccount = async () => {
+    const ents = suitesOf(entity.id);
+    setProfile(entity.id, { name: entity.name, logo: entity.logo });
+    try {
+      for (const su of ents) { const d = await api.mySuite(su.id); const first = d.sets.flatMap((s) => s.dashboards)[0]; if (first) { navigate(`/suite/${su.id}/d/${first.id}`); return; } }
+      navigate('/');
+    } catch (e) { alert('Could not open preview: ' + e.message); }
+  };
+
+  // ── Step editor (the ⚙): edit wording, reorder, add custom guidance steps ────
+  if (editing) return <WizardEditor steps={steps} onClose={() => setEditing(false)} onSaved={(saved) => { setSteps(mergeWizardSteps(saved)); setEditing(false); }} />;
+
+  const allSteps = [...steps, REVIEW_STEP];
+
+  // ── Start screen: explain the journey, then begin (new) or resume (existing) ──
+  if (stepKey === 'start') {
+    const incomplete = [...data.entities]
+      .map((e) => ({ e, miss: ['scope', 'suites', 'logins'].filter((k) => !reqDone(e)[k]) }))
+      .filter((x) => x.miss.length)
+      .sort((a, b) => (a.e.name || '').localeCompare(b.e.name || ''));
+    return (
+      <div>
+        <div style={{ ...cardStyle, background: 'linear-gradient(135deg, rgba(var(--brand-rgb),0.10), rgba(var(--brand-rgb),0.02))', borderColor: 'rgba(var(--brand-rgb),0.25)' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+            <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: '-0.02em', marginBottom: 6, flex: 1 }}>🧙 Client setup wizard</div>
+            <button style={miniBtnOutline} onClick={() => setEditing(true)} title="Edit the wizard’s steps, wording and order">⚙ Edit steps</button>
+          </div>
+          <p style={{ fontSize: 14, color: 'var(--text)', lineHeight: 1.55, margin: '0 0 14px', maxWidth: 620 }}>
+            A guided, step-by-step path to stand a new client up — the right way, in order. It walks you through
+            each step, doing the work as you go, and won’t let you move on from a step until it’s done. Optional
+            bits are marked and can be skipped.
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+            {allSteps.map((s, i) => (
+              <div key={s.key} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, fontSize: 13.5 }}>
+                <span style={{ flexShrink: 0, width: 22, height: 22, borderRadius: '50%', background: 'var(--brand)', color: '#fff', fontSize: 12, fontWeight: 800, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{i + 1}</span>
+                <span><b>{s.icon} {s.title}</b>{s.optional ? <span style={{ color: 'var(--muted)' }}> · optional</span> : ''}{s.kind === 'custom' ? <span style={{ color: 'var(--muted)' }}> · your step</span> : ''} — <span style={{ color: 'var(--muted)' }}>{(s.blurb || '').split('. ')[0]}.</span></span>
+              </div>
+            ))}
+          </div>
+          <button style={{ ...saveBtn, padding: '11px 22px', fontSize: 14 }} onClick={() => { autoTourSeen.current = new Set(); setEntityId(null); go('client'); }}>Start a new client →</button>
+        </div>
+        {incomplete.length > 0 && (
+          <div style={cardStyle}>
+            <L>Resume a client that isn’t finished</L>
+            <p style={{ ...hint, marginTop: 4 }}>These clients are missing a required step. Pick one to drop straight back in where it left off.</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {incomplete.map(({ e, miss }) => (
+                <button key={e.id} className="lift" style={clientRow} onClick={() => { setEntityId(e.id); go(firstUnfinished(e)); }}>
+                  <span style={{ fontWeight: 600, fontSize: 14.5 }}>{e.name}</span>
+                  <span style={{ marginLeft: 'auto', color: 'var(--muted)', fontSize: 12 }}>needs {miss.map((m) => (WIZARD_DEFAULTS.find((s) => s.key === m) || {}).short?.toLowerCase() || m).join(' · ')}</span>
+                  <span style={{ color: '#bbb', marginLeft: 10 }}>›</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  const step = curStep;
+
+  // ── Stepper header: numbered progress. Click only to revisit a reachable step;
+  //    you can't click forward past a step that isn't done. ──
+  const Stepper = () => (
+    <div style={{ display: 'flex', gap: isMobile ? 6 : 10, marginBottom: 14, overflowX: 'auto', paddingBottom: 4 }}>
+      {allSteps.map((s, i) => {
+        const active = s.key === stepKey;
+        const ok = s.key === 'review' ? false : stepComplete(s);
+        const open = reachable(s.key);
+        return (
+          <button key={s.key} onClick={() => open && go(s.key)} disabled={!open} title={open ? '' : 'Finish the earlier steps first'}
+            style={{ display: 'flex', alignItems: 'center', gap: 7, flexShrink: 0, padding: isMobile ? '7px 10px' : '8px 13px', borderRadius: 980, cursor: open ? 'pointer' : 'not-allowed',
+              border: active ? '1.5px solid var(--brand)' : '1.5px solid var(--hairline)', background: active ? 'var(--brand)' : 'var(--card)', color: active ? '#fff' : (open ? 'var(--text)' : 'var(--muted)'), opacity: open ? 1 : 0.55 }}>
+            <span style={{ width: 20, height: 20, borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 800,
+              background: active ? 'rgba(255,255,255,0.25)' : (ok ? 'var(--brand)' : 'rgba(128,128,128,0.18)'), color: active || ok ? '#fff' : 'var(--muted)' }}>{ok ? '✓' : (open ? i + 1 : '🔒')}</span>
+            {(!isMobile || active) && <span style={{ fontSize: 13, fontWeight: active ? 700 : 600 }}>{isMobile ? (s.short || s.title) : s.title}</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+
+  // Required / optional badge shown at the top of each step.
+  const ReqBadge = () => (
+    step.optional
+      ? <div style={{ ...badgeBase, color: 'var(--muted)', background: 'rgba(128,128,128,0.12)', border: '1px solid var(--hairline)' }}>○ Optional — you can skip this step</div>
+      : <div style={{ ...badgeBase, color: 'var(--brand)', background: 'rgba(var(--brand-rgb),0.10)', border: '1px solid rgba(var(--brand-rgb),0.3)' }}>● Required{step.req ? ` — needs ${step.req}` : step.kind === 'custom' ? ' — tick every item' : ''}</div>
+  );
+
+  // Continue stays locked until this step is done (optional steps are always
+  // unlocked). The lock hint explains exactly what's missing.
+  const Footer = ({ primary, primaryLabel = 'Continue', secondary }) => {
+    const locked = busy || !canProceed;
+    return (
+      <div style={{ display: 'flex', gap: 10, marginTop: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+        <button style={miniBtnOutline} onClick={() => go(prevKey)} disabled={busy}>← Back</button>
+        <span style={{ flex: 1 }} />
+        {!canProceed && lockHint && <span style={{ fontSize: 12, color: 'var(--muted)' }}>🔒 {lockHint}</span>}
+        {secondary}
+        <button style={{ ...saveBtn, opacity: locked ? 0.5 : 1, cursor: locked ? 'not-allowed' : 'pointer' }} onClick={primary} disabled={locked}>{busy ? 'Saving…' : primaryLabel}</button>
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <AdminBack onBack={() => go('start')}>Setup wizard</AdminBack>
+      <h2 style={{ fontSize: 20, fontWeight: 700, margin: '12px 0 4px' }}>{step.icon} {step.title}{entity ? <span style={{ color: 'var(--muted)', fontWeight: 600 }}> · {entity.name}</span> : ''}</h2>
+      <Stepper />
+      <div ref={bodyRef} style={cardStyle}>
+        {stepKey !== 'review' && <ReqBadge />}
+        <p style={{ fontSize: 13.5, color: 'var(--text)', lineHeight: 1.55, margin: '0 0 14px' }}>{step.blurb}</p>
+        {walkOf(stepKey).length > 0 && (
+          <div style={{ marginBottom: 12 }}>
+            <button style={miniBtn} title="Walk through each part of this step, one at a time"
+              onClick={() => { if (stepKey === 'suites' && !suitesOf(entity?.id).length) { alert('Add a suite first (the “+ Add suite” button), then I’ll walk you through it.'); return; } setTourOn(true); }}>▶ Guide me through this step</button>
+          </div>
+        )}
+
+        {stepKey === 'client' && (
+          <>
+            <div data-tour="client-name"><Field label="Client name · required"><input style={{ ...input, fontWeight: 700, maxWidth: 360 }} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. MTN Bushfire" autoFocus /></Field></div>
+            <div data-tour="client-logo" style={{ marginTop: 14 }}>
+              <L>Client logo · optional</L>
+              <div style={{ marginTop: 6 }}><LogoPicker value={logo} onChange={setLogo} /></div>
+            </div>
+            <Footer primary={saveClient} primaryLabel={entityId ? 'Save & continue' : 'Create client & continue'} />
+          </>
+        )}
+
+        {stepKey === 'scope' && entity && (
+          <>
+            <label data-tour="scope-all" style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 12px', border: '1px solid var(--hairline)', borderRadius: 10, margin: '4px 0 12px', cursor: 'pointer', background: allOrg ? 'rgba(var(--brand-rgb),0.08)' : 'transparent' }}>
+              <input type="checkbox" checked={allOrg} onChange={(e) => setAllOrg(e.target.checked)} style={{ marginTop: 2 }} />
+              <span>
+                <span style={{ fontWeight: 700, fontSize: 13.5 }}>🌐 All organisers (internal / management)</span>
+                <span style={{ display: 'block', fontSize: 12, color: 'var(--muted)', marginTop: 2, lineHeight: 1.45 }}>This client sees <b>every organiser’s</b> data — no scope is applied. Only for Howler-internal logins. Leave off for a normal client.</span>
+              </span>
+            </label>
+            {!allOrg && (
+              <div data-tour="scope-org">
+                <L>Organiser scope · required (applies across all this client’s suites)</L>
+                <LockedFilterEditor value={locks} onChange={setLocks} fields={fields} restrictTo={['Organiser Name']} />
+              </div>
+            )}
+            {!hasLock && <div style={{ fontSize: 12.5, color: 'var(--error)', marginTop: 6 }}>⚠ No scope set yet — pick an organiser above, or the client will see no data.</div>}
+            <Footer primary={saveScope} primaryLabel="Save scope & continue" />
+          </>
+        )}
+
+        {stepKey === 'suites' && entity && (
+          <>
+            <ClientSuites entity={entity} suites={suitesOf(entity.id)} allEntities={data.entities} allSets={data.sets} dashTitle={data.dashTitle} fields={fields} onChange={reload} />
+            {!stepComplete(step) && <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 8 }}>Add at least one suite (the “+ Add suite” button) so the client has dashboards to open — then Continue unlocks.</div>}
+            <Footer primary={() => go(nextKey)} />
+          </>
+        )}
+
+        {stepKey === 'logins' && entity && (
+          <>
+            <EntityLogins entity={entity} users={loginsOf(entity.id)} allUsers={data.users} onChange={reload} />
+            {!stepComplete(step) && <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 8 }}>Add or link at least one login so someone can sign in — then Continue unlocks.</div>}
+            <Footer primary={() => go(nextKey)} />
+          </>
+        )}
+
+        {stepKey === 'branding' && entity && (
+          <>
+            <MailTemplateEditor scope="admin-client" entityId={entity.id} canTest />
+            <Footer primary={() => go(nextKey)} primaryLabel="Continue"
+              secondary={<button style={miniBtnOutline} onClick={() => go(nextKey)} disabled={busy}>Skip — do it later</button>} />
+          </>
+        )}
+
+        {step.kind === 'custom' && entity && (
+          <>
+            {(step.items || []).length === 0
+              ? <p style={{ fontSize: 13, color: 'var(--muted)' }}>No checklist items on this step — read the guidance above, then continue.</p>
+              : <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {step.items.map((it) => {
+                    const on = !!ticks[`${step.key}:${it.key}`];
+                    return (
+                      <button key={it.key} onClick={() => toggleTick(step.key, it.key, !on)} style={{ display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', background: 'transparent', border: '1px solid var(--hairline)', borderRadius: 10, padding: '10px 12px', cursor: 'pointer' }}>
+                        <span style={{ width: 22, height: 22, borderRadius: 6, flexShrink: 0, border: `1.5px solid ${on ? 'var(--brand)' : 'var(--hairline)'}`, background: on ? 'var(--brand)' : 'transparent', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 800 }}>{on ? '✓' : ''}</span>
+                        <span style={{ fontSize: 13.5, fontWeight: 600, textDecoration: on ? 'line-through' : 'none', opacity: on ? 0.65 : 1 }}>{it.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>}
+            <Footer primary={() => go(nextKey)} />
+          </>
+        )}
+
+        {stepKey === 'review' && entity && (
+          <>
+            <div style={{ ...badgeBase, color: 'var(--brand)', background: 'rgba(var(--brand-rgb),0.10)', border: '1px solid rgba(var(--brand-rgb),0.3)', fontSize: 13, padding: '8px 12px' }}>🎉 {entity.name} is ready to go live</div>
+            <p style={{ fontSize: 13.5, color: 'var(--text)', lineHeight: 1.55, margin: '10px 0 14px' }}>{step.blurb}</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
+              {steps.map((s) => {
+                const ok = stepComplete(s);
+                const opt = s.optional;
+                return (
+                  <button key={s.key} onClick={() => reachable(s.key) && go(s.key)} disabled={!reachable(s.key)} style={{ display: 'flex', alignItems: 'center', gap: 12, textAlign: 'left', background: 'transparent', border: '1px solid var(--hairline)', borderRadius: 10, padding: '10px 12px', cursor: reachable(s.key) ? 'pointer' : 'default' }}>
+                    <span style={{ fontSize: 18 }}>{ok ? '✅' : (opt ? '➖' : '⚠️')}</span>
+                    <span style={{ flex: 1 }}>
+                      <span style={{ display: 'block', fontSize: 13.5, fontWeight: 700 }}>{s.title}{opt ? <span style={{ color: 'var(--muted)', fontWeight: 600 }}> · optional</span> : ''}</span>
+                      <span style={{ display: 'block', fontSize: 12, color: ok ? 'var(--muted)' : 'var(--error)' }}>{ok ? 'Done' : (opt ? 'Not set — fine to skip' : 'Still needs attention — tap to finish')}</span>
+                    </span>
+                    <span style={{ color: '#bbb' }}>›</span>
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+              <button style={miniBtnOutline} onClick={() => go(prevKey)}>← Back</button>
+              <span style={{ flex: 1 }} />
+              <button style={previewBtn} onClick={previewAccount} title="Open the account as the client sees it">👁 Preview account</button>
+              <button style={saveBtn} onClick={() => { setEntityId(null); go('start'); }}>Set up another client</button>
+            </div>
+            <p style={{ ...hint, marginTop: 14, marginBottom: 0 }}>Need to go deeper (digests, campaigns, settlements, integrations, per-event briefing)? Find <b>{entity.name}</b> any time under the <b>Clients</b> tab for the full set of controls.</p>
+          </>
+        )}
+
+        {error && <div style={{ color: 'var(--error)', fontSize: 13, marginTop: 10 }}>{error}</div>}
+        {tourOn && walkOf(stepKey).length > 0 && <SectionTour steps={walkOf(stepKey)} container={bodyRef} onClose={() => setTourOn(false)} />}
+      </div>
+    </div>
+  );
+}
+const badgeBase = { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5, fontWeight: 700, padding: '3px 10px', borderRadius: 980, marginBottom: 12 };
+
+// ─── Section tour — a forced, spotlight walkthrough of a step's sub-sections ───
+// Highlights each section in turn (a brand ring with the rest dimmed), scrolls it
+// into view, and shows a description with Back / Next. Anchors to elements by their
+// [data-tour="<key>"] attribute, scoped to a container. It never blocks the form
+// underneath (the dim is a pointer-through box-shadow), so the AM can fill a field
+// then hit Next. Reusable for any step — drive it with a list of { tour, title, body }.
+const CLIENT_TOUR = [
+  { tour: 'client-name', icon: '🏢', title: 'Name the client', body: 'Type the organiser or brand you’re onboarding — this is what everything else hangs off. It’s the only thing you must fill in here.' },
+  { tour: 'client-logo', icon: '🖼️', title: 'Add their logo (optional)', body: 'Upload a logo if you have one — it shows as the client’s brand across the app. You can always add or change it later.' },
+];
+const SCOPE_TOUR = [
+  { tour: 'scope-org', icon: '🔒', title: 'Pick their organiser', body: 'Choose the organiser(s) this client owns. Every dashboard is then force-filtered to only their data on the server — this is what keeps clients apart.' },
+  { tour: 'scope-all', icon: '🌐', title: 'Or: all organisers', body: 'Only for Howler-internal / management logins — this lets them see every organiser’s data. Leave it OFF for a normal client.' },
+];
+const SUITES_TOUR = [
+  { tour: 'suite-name', icon: '🏷️', title: 'Name the suite', body: 'Give the suite a name — usually the event itself (e.g. “Bushfire 2026”). It’s the heading the client sees for this event.' },
+  { tour: 'suite-icon', icon: '🎨', title: 'Give the suite an icon', body: 'Pick an emoji (or upload a small image). It’s how this event shows up in the client’s sidebar.' },
+  { tour: 'suite-sets', icon: '🗂️', title: 'Choose the dashboard sets', body: 'Tick the sets this event should include — e.g. Ticketing, Cashless. Expand a set to include or leave out individual dashboards.' },
+  { tour: 'suite-roles', icon: '👥', title: 'Who sees what (optional)', body: 'Restrict a set or dashboard to certain roles — e.g. finance-only views. Leave it alone to show everything to everyone.' },
+  { tour: 'suite-locks', icon: '🔒', title: 'Lock it to the event', body: 'The important one — open this and pick the event (and cashless event, if used) so every dashboard here only shows THIS event’s numbers.' },
+  { tour: 'suite-ticket', icon: '🔗', title: 'Add the ticket link', body: 'Paste the event’s buy / checkout URL. Campaigns for this event auto-fill it as their call-to-action.' },
+  { tour: 'suite-save', icon: '💾', title: 'Save the suite', body: 'Hit Save to apply everything above. (Event branding below saves on its own.)' },
+  { tour: 'suite-branding', icon: '✨', title: 'Event branding (optional)', body: 'Override the look just for this event — logo, colours, sender. Blank fields inherit the client’s branding.' },
+];
+const LOGINS_TOUR = [
+  { tour: 'login-add', icon: '🔑', title: 'Add a login', body: 'Enter the person’s name, email and a temporary password. They’ll be prompted to change it the first time they sign in.' },
+  { tour: 'login-role', icon: '🎚️', title: 'Choose their role', body: 'The role controls what this person can see and do. Pick the access level that fits them.' },
+  { tour: 'login-link', icon: '🔗', title: 'Or link an existing person', body: 'If someone already has a login on another client, link them here instead of creating a duplicate account.' },
+];
+const BRANDING_TOUR = [
+  { tour: 'mte-senderName', icon: '✉️', title: 'Sender name', body: 'The “From” name on this client’s emails — usually their brand. Blank inherits the Howler default.' },
+  { tour: 'mte-brandColor', icon: '🎨', title: 'Brand colours', body: 'The primary (and secondary) colour drive the whole app look — buttons, accents, chart series — and their emails.' },
+  { tour: 'mte-logo', icon: '🖼️', title: 'Logo', body: 'Upload their logo or paste a URL — it shows in the sidebar and atop every email. Tip: “Extract colours” pulls a palette straight from the logo.' },
+  { tour: 'mte-preview', icon: '👀', title: 'Live preview', body: 'See exactly how an email will look as you edit. Anything left blank falls back to the client’s — then Howler’s — defaults.' },
+  { tour: 'mte-save', icon: '💾', title: 'Save the branding', body: 'Save to apply it — the app re-themes live, no reload. You can also send yourself a test email.' },
+];
+// Per-step walkthrough DEFAULTS, keyed by step. Each is an ordered list of
+// { tour, icon, title, body } where `tour` matches a [data-tour] anchor inside
+// that step's content. The AM can edit the title/body/order/on-off of these from
+// the ⚙ editor (stored as each step's `walk`); the anchor + icon stay from code.
+const TOUR_DEFAULTS = { client: CLIENT_TOUR, scope: SCOPE_TOUR, suites: SUITES_TOUR, logins: LOGINS_TOUR, branding: BRANDING_TOUR };
+
+function SectionTour({ steps, container, onClose, zIndex = 4000 }) {
+  const [i, setI] = useState(0);
+  const [rect, setRect] = useState(null);
+  const last = useRef(null);
+  const cur = steps[i];
+
+  useEffect(() => {
+    const root = () => (container && container.current) || document;
+    const find = () => root().querySelector(`[data-tour="${cur.tour}"]`);
+    const el0 = find();
+    if (el0) el0.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    let raf;
+    const tick = () => {
+      const el = find();
+      if (el) {
+        const r = el.getBoundingClientRect();
+        const nr = { top: r.top, left: r.left, width: r.width, height: r.height };
+        const p = last.current;
+        if (!p || Math.abs(p.top - nr.top) > 0.5 || Math.abs(p.left - nr.left) > 0.5 || Math.abs(p.width - nr.width) > 0.5 || Math.abs(p.height - nr.height) > 0.5) { last.current = nr; setRect(nr); }
+      } else if (last.current) { last.current = null; setRect(null); }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [i, cur.tour, container]);
+
+  const isLast = i === steps.length - 1;
+  const vw = typeof window !== 'undefined' ? window.innerWidth : 360;
+  const vh = typeof window !== 'undefined' ? window.innerHeight : 640;
+  const cardW = Math.min(360, vw - 24);
+  let cardTop, cardLeft;
+  if (rect) {
+    const below = rect.top + rect.height + 12;
+    const placeAbove = below + 170 > vh && rect.top - 170 > 0;
+    cardTop = placeAbove ? Math.max(12, rect.top - 12 - 158) : Math.min(vh - 178, below);
+    cardLeft = Math.min(Math.max(12, rect.left), vw - cardW - 12);
+  } else { cardTop = Math.max(12, vh / 2 - 90); cardLeft = vw / 2 - cardW / 2; }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex, pointerEvents: 'none' }}>
+      {rect && <div style={{ position: 'fixed', top: rect.top - 6, left: rect.left - 6, width: rect.width + 12, height: rect.height + 12, border: '2.5px solid var(--brand)', borderRadius: 12, boxShadow: '0 0 0 9999px rgba(0,0,0,0.55)', transition: 'top .2s, left .2s, width .2s, height .2s', pointerEvents: 'none' }} />}
+      <div style={{ position: 'fixed', top: cardTop, left: cardLeft, width: cardW, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 14, boxShadow: '0 16px 48px -10px rgba(0,0,0,0.5)', padding: 16, pointerEvents: 'auto' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+          <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--brand)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Step {i + 1} of {steps.length}</span>
+          <span style={{ flex: 1 }} />
+          <button onClick={onClose} style={{ border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 16, lineHeight: 1 }} title="Close guide">✕</button>
+        </div>
+        <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 6 }}>{cur.icon ? `${cur.icon} ` : ''}{cur.title}</div>
+        <p style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.5, margin: '0 0 14px' }}>{cur.body}</p>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {i > 0 && <button style={miniBtnOutline} onClick={() => setI(i - 1)}>← Back</button>}
+          <span style={{ flex: 1 }} />
+          <button style={saveBtn} onClick={() => (isLast ? onClose() : setI(i + 1))}>{isLast ? 'Done' : 'Next →'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Wizard step editor — edit wording, reorder, add custom guidance steps ─────
+// Back-end editor for the setup wizard itself (opened from the ⚙). The built-in
+// steps' actions are fixed, so only their copy is editable; the AM can reorder
+// everything (the client step stays first) and add their own guidance steps with
+// a tick-off checklist. Saves the whole ordered list to server/setupWizard.js.
+function WizardEditor({ steps, onClose, onSaved }) {
+  const [list, setList] = useState(() => steps.map((s) => ({ ...s, items: s.items ? s.items.map((it) => ({ ...it })) : undefined, walk: s.walk ? s.walk.map((w) => ({ ...w })) : undefined })));
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const [openEdit, setOpenEdit] = useState({}); // which step cards are expanded (collapsed by default)
+  const [previewStep, setPreviewStep] = useState(null); // index of the step being previewed
+
+  const patch = (i, p) => setList((l) => l.map((x, j) => (j === i ? { ...x, ...p } : x)));
+  // Walkthrough-point edits (the red-border guide): change text, reorder, on/off.
+  const walkPatch = (i, wi, p) => setList((l) => l.map((x, j) => (j === i ? { ...x, walk: x.walk.map((w, k) => (k === wi ? { ...w, ...p } : w)) } : x)));
+  const walkMove = (i, wi, dir) => setList((l) => l.map((x, j) => { if (j !== i) return x; const w = x.walk.slice(); const t = wi + dir; if (t < 0 || t >= w.length) return x; [w[wi], w[t]] = [w[t], w[wi]]; return { ...x, walk: w }; }));
+  const move = (i, dir) => setList((l) => {
+    const j = i + dir;
+    if (l[i].key === 'client' || j < 1 || j >= l.length) return l; // client pinned first; stay in range
+    const n = l.slice(); [n[i], n[j]] = [n[j], n[i]]; return n;
+  });
+  const addCustom = () => setList((l) => [...l, { kind: 'custom', key: newKey('custom'), icon: '📌', title: 'New guidance step', blurb: 'Explain what to do at this step.', items: [] }]);
+  const removeStep = (i) => setList((l) => l.filter((_, j) => j !== i));
+  const addItem = (i) => setList((l) => l.map((x, j) => (j === i ? { ...x, items: [...(x.items || []), { key: newKey('item'), label: '' }] } : x)));
+  const setItem = (i, ii, label) => setList((l) => l.map((x, j) => (j === i ? { ...x, items: x.items.map((it, k) => (k === ii ? { ...it, label } : it)) } : x)));
+  const removeItem = (i, ii) => setList((l) => l.map((x, j) => (j === i ? { ...x, items: x.items.filter((_, k) => k !== ii) } : x)));
+
+  const save = async () => {
+    setBusy(true); setErr(null);
+    try {
+      // Strip behaviour-only fields; the server stores wording + order + customs.
+      const payload = list.map((s) => (s.kind === 'custom'
+        ? { kind: 'custom', key: s.key, icon: s.icon, title: s.title, blurb: s.blurb, items: (s.items || []).filter((it) => (it.label || '').trim()).map((it) => ({ key: it.key, label: it.label.trim() })) }
+        : { kind: 'builtin', key: s.key, icon: s.icon, title: s.title, blurb: s.blurb, ...(s.req != null ? { req: s.req } : {}), ...(s.lock != null ? { lock: s.lock } : {}), walk: (s.walk || []).map((w) => ({ tour: w.tour, title: w.title, body: w.body, off: !!w.off })) }));
+      const r = await api.saveSetupWizard(payload);
+      onSaved(r.steps);
+    } catch (e) { setErr(e.message); } finally { setBusy(false); }
+  };
+  const reset = async () => {
+    if (!confirm('Reset the wizard to its built-in defaults? This removes your wording changes and custom steps.')) return;
+    setBusy(true); setErr(null);
+    try { const r = await api.resetSetupWizard(); onSaved(r.steps); } catch (e) { setErr(e.message); } finally { setBusy(false); }
+  };
+
+  return (
+    <div>
+      <AdminBack onBack={onClose}>Back to wizard</AdminBack>
+      <h2 style={{ fontSize: 20, fontWeight: 700, margin: '12px 0 4px' }}>⚙ Edit the setup wizard</h2>
+      <p style={{ ...hint }}>Change each step’s wording, reorder them, edit the <b>walkthrough points</b> (the red-border guide on each section), and add your own guidance steps. The built-in steps still <b>do</b> their job (create the client, scope, suites, logins, branding) — you’re editing what the AM reads, the order, and any extra steps you add. The “client” step stays first.</p>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {list.map((s, i) => {
+          const def = WIZARD_DEFAULTS.find((d) => d.key === s.key);
+          const isCustom = s.kind === 'custom';
+          return (
+            <div key={s.key} style={cardStyle}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: openEdit[s.key] ? 10 : 0 }}>
+                <button onClick={() => setOpenEdit((o) => ({ ...o, [s.key]: !o[s.key] }))} title={openEdit[s.key] ? 'Collapse' : 'Expand to edit'}
+                  style={{ width: 16, border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--muted)', fontSize: 11, padding: 0, flexShrink: 0, transform: openEdit[s.key] ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</button>
+                <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.04em', flexShrink: 0 }}>Step {i + 1}</span>
+                <button onClick={() => setOpenEdit((o) => ({ ...o, [s.key]: !o[s.key] }))} style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0, border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left', padding: 0, color: 'var(--text)' }}>
+                  {isCustom
+                    ? <span style={{ ...badgeBase, marginBottom: 0, color: 'var(--brand)', background: 'rgba(var(--brand-rgb),0.10)', border: '1px solid rgba(var(--brand-rgb),0.3)' }}>Your step</span>
+                    : <span style={{ ...badgeBase, marginBottom: 0, color: 'var(--muted)', background: 'rgba(128,128,128,0.12)', border: '1px solid var(--hairline)' }} title={def?.does || ''}>Built-in{s.optional ? ' · optional' : ''}</span>}
+                  <span style={{ fontWeight: 700, fontSize: 13.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.icon} {s.title}</span>
+                </button>
+                <button style={miniBtnOutline} onClick={() => setPreviewStep(i)} title="Preview how this step looks in the wizard">👁 Preview</button>
+                <button style={miniBtnOutline} onClick={() => move(i, -1)} disabled={s.key === 'client' || i <= 1} title="Move up">↑</button>
+                <button style={miniBtnOutline} onClick={() => move(i, 1)} disabled={s.key === 'client' || i >= list.length - 1} title="Move down">↓</button>
+                {isCustom && <button style={delBtn} onClick={() => removeStep(i)}>Remove</button>}
+              </div>
+              {openEdit[s.key] && (<>
+              {def?.does && !isCustom && <p style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 10px' }}>What it does: {def.does}</p>}
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                <Field label="Icon"><input style={{ ...input, width: 64, minWidth: 0, textAlign: 'center' }} value={s.icon || ''} onChange={(e) => patch(i, { icon: e.target.value })} maxLength={4} /></Field>
+                <Field label="Title"><input style={{ ...input, minWidth: 220 }} value={s.title || ''} onChange={(e) => patch(i, { title: e.target.value })} /></Field>
+              </div>
+              <div style={{ marginTop: 10 }}>
+                <L>Explanation (what the AM reads)</L>
+                <textarea value={s.blurb || ''} onChange={(e) => patch(i, { blurb: e.target.value })} rows={3} style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 13, outline: 'none', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5, marginTop: 4 }} />
+              </div>
+              {!isCustom && s.req != null && (
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
+                  <Field label="“Needs …” label"><input style={{ ...input, minWidth: 220 }} value={s.req || ''} onChange={(e) => patch(i, { req: e.target.value })} /></Field>
+                  <Field label="Locked-button hint"><input style={{ ...input, minWidth: 260 }} value={s.lock || ''} onChange={(e) => patch(i, { lock: e.target.value })} /></Field>
+                </div>
+              )}
+              {!isCustom && (s.walk || []).length > 0 && (
+                <div style={{ marginTop: 14 }}>
+                  <L>Walkthrough points — the red-border guide</L>
+                  <div style={{ fontSize: 12, color: 'var(--muted)', margin: '4px 0 8px' }}>Edit what each highlighted section says, reorder them, or switch one off. Each point is pinned to a part of this step (you can’t add new highlights — those need a matching field on the page).</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {s.walk.map((w, wi) => (
+                      <div key={w.tour} style={{ border: '1px solid var(--hairline)', borderRadius: 8, padding: 10, opacity: w.off ? 0.55 : 1 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                          <span style={{ fontSize: 15 }}>{w.icon}</span>
+                          <input style={{ ...input, flex: 1, fontWeight: 600 }} value={w.title || ''} onChange={(e) => walkPatch(i, wi, { title: e.target.value })} />
+                          <button style={miniBtnOutline} onClick={() => walkMove(i, wi, -1)} disabled={wi === 0} title="Move up">↑</button>
+                          <button style={miniBtnOutline} onClick={() => walkMove(i, wi, 1)} disabled={wi === s.walk.length - 1} title="Move down">↓</button>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--muted)', cursor: 'pointer' }} title="Show this point in the guide">
+                            <input type="checkbox" checked={!w.off} onChange={() => walkPatch(i, wi, { off: !w.off })} /> on
+                          </label>
+                        </div>
+                        <textarea value={w.body || ''} onChange={(e) => walkPatch(i, wi, { body: e.target.value })} rows={2} style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 12.5, outline: 'none', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.45 }} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {isCustom && (
+                <div style={{ marginTop: 12 }}>
+                  <L>Checklist items (the AM ticks these to continue)</L>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, margin: '6px 0' }}>
+                    {(s.items || []).map((it, ii) => (
+                      <div key={it.key} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                        <span style={{ color: 'var(--muted)' }}>☐</span>
+                        <input style={{ ...input, flex: 1 }} value={it.label} placeholder="e.g. Send the welcome email" onChange={(e) => setItem(i, ii, e.target.value)} />
+                        <button style={delBtn} onClick={() => removeItem(i, ii)}>✕</button>
+                      </div>
+                    ))}
+                    {(s.items || []).length === 0 && <span style={{ fontSize: 12, color: 'var(--muted)' }}>No items — this step is just guidance the AM reads, with nothing to tick.</span>}
+                  </div>
+                  <button style={miniBtn} onClick={() => addItem(i)}>+ Add checklist item</button>
+                </div>
+              )}
+              </>)}
+            </div>
+          );
+        })}
+      </div>
+      <button style={{ ...addBtn, marginTop: 12 }} onClick={addCustom}>+ Add a guidance step</button>
+      {err && <div style={{ color: 'var(--error)', fontSize: 13, marginTop: 10 }}>{err}</div>}
+      <div style={{ display: 'flex', gap: 10, marginTop: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+        <button style={miniBtnOutline} onClick={onClose} disabled={busy}>Cancel</button>
+        <button style={delBtn} onClick={reset} disabled={busy}>Reset to defaults</button>
+        <span style={{ flex: 1 }} />
+        <button style={{ ...saveBtn, opacity: busy ? 0.6 : 1 }} onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save wizard'}</button>
+      </div>
+      {previewStep != null && list[previewStep] && <StepPreviewModal steps={list} index={previewStep} onClose={() => setPreviewStep(null)} />}
+    </div>
+  );
+}
+
+// ─── Step preview — the actual wizard screen, WITH the live walkthrough ───────
+// A faithful mock of the wizard screen for one step (numbered stepper, the step
+// card with its badge/title/explanation, a sketch of that step's controls, and
+// the footer) — crucially, the mock sections carry the SAME [data-tour] anchors
+// as the real step, so the real SectionTour plays its red-border spotlight
+// animation right over them. So the AM sees exactly what the user will see,
+// animation and all, driven entirely by the edited config.
+function StepPreviewModal({ steps, index, onClose }) {
+  const s = steps[index];
+  const isCustom = s.kind === 'custom';
+  const walk = (s.walk || []).filter((w) => !w.off);
+  const chips = [...steps, { key: 'review', icon: '✅', title: 'Review & finish', short: 'Finish' }];
+  const [playing, setPlaying] = useState(false);
+  const bodyRef = useRef(null);
+  // Auto-play the walkthrough shortly after open (lets the mock paint first),
+  // mirroring how the real wizard auto-launches it.
+  useEffect(() => { if (!walk.length) return; const t = setTimeout(() => setPlaying(true), 450); return () => clearTimeout(t); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const badge = isCustom
+    ? <div style={{ ...badgeBase, color: 'var(--muted)', background: 'rgba(128,128,128,0.12)', border: '1px solid var(--hairline)' }}>{(s.items || []).length ? '● Required — tick every item' : '○ Guidance'}</div>
+    : s.optional
+      ? <div style={{ ...badgeBase, color: 'var(--muted)', background: 'rgba(128,128,128,0.12)', border: '1px solid var(--hairline)' }}>○ Optional — you can skip this step</div>
+      : <div style={{ ...badgeBase, color: 'var(--brand)', background: 'rgba(var(--brand-rgb),0.10)', border: '1px solid rgba(var(--brand-rgb),0.3)' }}>● Required{s.req ? ` — needs ${s.req}` : ''}</div>;
+  const lockMsg = isCustom ? ((s.items || []).length ? 'Tick every item to continue' : '') : (s.req ? (s.lock || `needs ${s.req}`) : '');
+  const fauxInput = { ...input, display: 'flex', alignItems: 'center', background: 'rgba(128,128,128,0.06)', color: 'var(--muted)', pointerEvents: 'none' };
+  const lbl = (t) => <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.04em', margin: '2px 0 4px' }}>{t}</div>;
+  // A mock section wrapped with the real [data-tour] anchor so the tour highlights it.
+  const sec = (tour, child) => <div data-tour={tour} style={{ marginTop: 10 }}>{child}</div>;
+  const secHead = (title) => <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '6px 8px', border: '1px solid var(--hairline)', borderRadius: 8 }}><span style={{ color: '#b0b0b6', fontSize: 11 }}>▶</span><span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--muted)' }}>{title}</span></div>;
+  const body = () => {
+    if (isCustom) {
+      return (s.items || []).length ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 }}>
+          {s.items.map((it) => (
+            <div key={it.key} style={{ display: 'flex', alignItems: 'center', gap: 10, border: '1px solid var(--hairline)', borderRadius: 10, padding: '10px 12px' }}>
+              <span style={{ width: 22, height: 22, borderRadius: 6, border: '1.5px solid var(--hairline)', flexShrink: 0 }} />
+              <span style={{ fontSize: 13.5, fontWeight: 600 }}>{it.label || <em style={{ color: 'var(--muted)' }}>empty item</em>}</span>
+            </div>
+          ))}
+        </div>
+      ) : <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 8 }}>Guidance only — the AM reads the explanation above, then continues.</div>;
+    }
+    switch (s.key) {
+      case 'client': return (<>
+        {sec('client-name', <>{lbl('Client name · required')}<div style={{ ...fauxInput, maxWidth: 320 }}>e.g. MTN Bushfire</div></>)}
+        {sec('client-logo', <>{lbl('Client logo · optional')}<div style={{ width: 120, height: 44, border: '1px dashed var(--hairline)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12 }}>logo</div></>)}
+      </>);
+      case 'scope': return (<>
+        {sec('scope-all', <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', border: '1px solid var(--hairline)', borderRadius: 10 }}>
+          <span style={{ width: 16, height: 16, border: '1.5px solid var(--hairline)', borderRadius: 4, flexShrink: 0 }} />
+          <span style={{ fontWeight: 700, fontSize: 13 }}>🌐 All organisers (internal / management)</span>
+        </div>)}
+        {sec('scope-org', <>{lbl('Organiser scope · required')}<div style={fauxInput}>Pick the client’s organiser…</div></>)}
+      </>);
+      case 'suites': return (<>
+        {sec('suite-name', <>{lbl('Suite name')}<div style={fauxInput}>e.g. Bushfire 2026</div></>)}
+        {sec('suite-icon', <>{lbl('Icon')}<div style={{ width: 40, height: 40, border: '1px solid var(--hairline)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>🎟️</div></>)}
+        {sec('suite-sets', secHead('Sets in this suite (1)'))}
+        {sec('suite-roles', secHead('Dashboard access by role'))}
+        {sec('suite-locks', <>{secHead('Locked filters (the event, cashless events…)')}<div style={{ display: 'flex', gap: 8, marginTop: 6 }}><div style={{ ...miniBtn, opacity: 0.8, pointerEvents: 'none' }}>+ Add locked filter</div><div style={{ ...miniBtn, opacity: 0.8, pointerEvents: 'none' }}>+ Add default filters</div></div></>)}
+        {sec('suite-ticket', <>{lbl('Ticket / checkout link')}<div style={fauxInput}>https://tickets.example.com/your-event</div></>)}
+        {sec('suite-save', <div style={{ ...saveBtn, display: 'inline-block', opacity: 0.8, pointerEvents: 'none' }}>Save</div>)}
+        {sec('suite-branding', secHead('Event branding (logo / colours / sender)'))}
+      </>);
+      case 'logins': return (<>
+        {sec('login-add', <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+          <div><div style={fauxInput}>First name</div></div>
+          <div><div style={fauxInput}>Email</div></div>
+          {sec('login-role', <div style={{ ...fauxInput, minWidth: 110 }}>Role ▾</div>)}
+          <div style={{ ...miniBtn, opacity: 0.8, pointerEvents: 'none' }}>+ Add login</div>
+        </div>)}
+        {sec('login-link', <>{lbl('Or link an existing login')}<div style={fauxInput}>Pick a login…</div></>)}
+      </>);
+      case 'branding': return (<>
+        {sec('mte-senderName', <>{lbl('Sender name')}<div style={fauxInput}>e.g. Kunye</div></>)}
+        {sec('mte-brandColor', <>{lbl('Primary colour')}<div style={{ display: 'flex', gap: 8 }}><div style={{ width: 44, height: 34, borderRadius: 8, background: 'var(--brand)' }} /><div style={{ ...fauxInput, flex: 1 }}>#FF385C</div></div></>)}
+        {sec('mte-logo', <>{lbl('Logo')}<div style={{ width: 120, height: 44, border: '1px dashed var(--hairline)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12 }}>logo</div></>)}
+        {sec('mte-preview', <>{lbl('Live preview')}<div style={{ height: 90, border: '1px solid var(--hairline)', borderRadius: 10, background: '#fff' }} /></>)}
+        {sec('mte-save', <div style={{ ...saveBtn, display: 'inline-block', opacity: 0.8, pointerEvents: 'none' }}>Save</div>)}
+      </>);
+      default: return <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 8 }}>This step’s controls appear here.</div>;
+    }
+  };
+  return (
+    <>
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 5000, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: 'var(--bg, var(--card))', borderRadius: 16, boxShadow: '0 24px 64px -12px rgba(0,0,0,0.6)', width: 'min(720px, 96vw)', maxHeight: '92vh', overflowY: 'auto', padding: 18 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Preview — the wizard screen, as the AM sees it</span>
+          <span style={{ flex: 1 }} />
+          {walk.length > 0 && <button style={miniBtn} onClick={() => setPlaying(true)}>▶ Play walkthrough</button>}
+          <button onClick={onClose} style={{ border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 18, lineHeight: 1 }} title="Close">✕</button>
+        </div>
+        <div ref={bodyRef}>
+          <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4, marginBottom: 14 }}>
+            {chips.map((c, k) => {
+              const active = k === index;
+              return (
+                <div key={c.key} style={{ display: 'flex', alignItems: 'center', gap: 7, flexShrink: 0, padding: '7px 11px', borderRadius: 980, border: active ? '1.5px solid var(--brand)' : '1.5px solid var(--hairline)', background: active ? 'var(--brand)' : 'var(--card)', color: active ? '#fff' : 'var(--muted)', opacity: k > index ? 0.55 : 1 }}>
+                  <span style={{ width: 20, height: 20, borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 800, background: active ? 'rgba(255,255,255,0.25)' : 'rgba(128,128,128,0.18)', color: active ? '#fff' : 'var(--muted)' }}>{k + 1}</span>
+                  {active && <span style={{ fontSize: 13, fontWeight: 700 }}>{c.title}</span>}
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ ...cardStyle, marginBottom: 0 }}>
+            {badge}
+            <h2 style={{ fontSize: 20, fontWeight: 700, margin: '2px 0 8px' }}>{s.icon} {s.title}</h2>
+            <p style={{ fontSize: 13.5, color: 'var(--text)', lineHeight: 1.55, margin: '0 0 12px' }}>{s.blurb}</p>
+            {walk.length > 0 && <div style={{ ...miniBtn, display: 'inline-block', opacity: 0.75, pointerEvents: 'none' }}>▶ Guide me through this step</div>}
+            {body()}
+            <div style={{ display: 'flex', gap: 10, marginTop: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+              <div style={{ ...miniBtnOutline, opacity: 0.7, pointerEvents: 'none' }}>← Back</div>
+              <span style={{ flex: 1 }} />
+              {lockMsg && <span style={{ fontSize: 12, color: 'var(--muted)' }}>🔒 {lockMsg}</span>}
+              <div style={{ ...saveBtn, opacity: lockMsg ? 0.5 : 1, pointerEvents: 'none' }}>{index === 0 ? 'Create client & continue' : 'Continue'}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    {playing && walk.length > 0 && <SectionTour steps={walk} container={bodyRef} zIndex={6000} onClose={() => setPlaying(false)} />}
+    </>
   );
 }
 
@@ -1027,6 +1836,7 @@ function UserDetail({ userId, entities = [], roles = [], initialEditing = false,
               <KV label="Most recent action" value={mostRecent ? mostRecent.label : 'No activity yet'} sub={mostRecent ? `${relTime(mostRecent.at)}${mostRecent.entityName ? ` · ${mostRecent.entityName}` : ''}` : ''} />
               <KV label="Account created" value={fmtWhen(user.createdAt)} />
               <KV label="Notifications" value={`Email ${user.notifyEmail ? 'on' : 'off'} · Push ${user.notifyPush ? 'on' : 'off'}`} />
+              <KV label="Inventive workspace" value={user.inventiveWorkspace ? (user.inventiveWorkspace.name || '(unnamed)') : 'Not linked'} sub={user.inventiveWorkspace ? `ref ${user.inventiveWorkspace.refId || '—'}` : 'uses the user’s own ID'} />
             </div>
           )}
 
@@ -1145,16 +1955,18 @@ function UserDetail({ userId, entities = [], roles = [], initialEditing = false,
 // Edit an existing user's identity, account type and client links. Per-client
 // roles stay on each client's Logins tab; this covers everything else in one place.
 function UserEditCard({ user, memberships, entities, roles, onCancel, onSaved }) { // eslint-disable-line no-unused-vars
-  const [form, setForm] = useState({ firstName: user.firstName || '', lastName: user.lastName || '', email: user.email, mobile: user.mobile || '', password: '' });
+  const [form, setForm] = useState({ firstName: user.firstName || '', lastName: user.lastName || '', email: user.email, mobile: user.mobile || '', password: '', inventiveWorkspaceId: user.inventiveWorkspaceId || '' });
   const [accountType, setAccountType] = useState(user.role === 'admin' ? 'admin' : 'client');
   const [entityIds, setEntityIds] = useState((memberships || []).map((m) => m.entityId));
+  const [workspaces, setWorkspaces] = useState([]);
+  useEffect(() => { api.adminListInventiveWorkspaces().then(setWorkspaces).catch(() => {}); }, []);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
   const save = async () => {
     setError(''); setBusy(true);
     try {
-      const patch = { firstName: form.firstName, lastName: form.lastName, email: form.email.trim(), mobile: form.mobile, role: accountType, entityIds };
+      const patch = { firstName: form.firstName, lastName: form.lastName, email: form.email.trim(), mobile: form.mobile, role: accountType, entityIds, inventiveWorkspaceId: form.inventiveWorkspaceId };
       if (form.password) patch.password = form.password; // blank = keep current
       await api.adminUpdateUser(user.id, patch);
       onSaved();
@@ -1181,6 +1993,12 @@ function UserEditCard({ user, memberships, entities, roles, onCancel, onSaved })
         <L>{accountType === 'admin' ? 'Also a customer of (optional)' : 'Clients'}</L>
         <div style={{ marginTop: 4 }}><ClientLinkPicker entities={entities} value={entityIds} onChange={setEntityIds} /></div>
         <p style={{ ...hint, marginTop: 8 }}>Per-client roles are set on each client's <b>Logins</b> tab; newly-linked clients default to Owner.</p>
+        <L>Inventive workspace</L>
+        <p style={{ ...hint, marginTop: 2 }}>Link this user to a workspace (create them in Admin → Integrations → <b>Inventive workspaces</b>). Unlinked → falls back to the user’s own ID.</p>
+        <select style={{ ...input, width: '100%', margin: '4px 0 14px' }} value={form.inventiveWorkspaceId} onChange={set('inventiveWorkspaceId')}>
+          <option value="">— None (use the user’s own ID) —</option>
+          {workspaces.map((w) => <option key={w.id} value={w.id}>{w.name || '(unnamed)'}{w.refId ? ` · ${w.refId}` : ''}</option>)}
+        </select>
         <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
           <button style={{ ...miniBtn, background: 'var(--brand)', color: '#fff', borderColor: 'var(--brand)' }} onClick={save} disabled={!form.email.trim() || busy}>{busy ? 'Saving…' : 'Save changes'}</button>
           <button style={miniBtnOutline} onClick={onCancel}>Cancel</button>
@@ -1474,17 +2292,17 @@ function EntityLogins({ entity, users, allUsers = [], onChange }) {
           </tbody>
         </table>
       )}
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginTop: 8 }}>
+      <div data-tour="login-add" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginTop: 8 }}>
         <Field label="First name"><input style={{ ...input, minWidth: 110 }} value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} /></Field>
         <Field label="Surname"><input style={{ ...input, minWidth: 110 }} value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} /></Field>
         <Field label="Email"><input style={input} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>
         <Field label="Mobile"><input style={{ ...input, minWidth: 130 }} value={form.mobile} onChange={(e) => setForm({ ...form, mobile: e.target.value })} placeholder="+27…" /></Field>
         <Field label="Password"><input style={input} type="text" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></Field>
-        <Field label="Role"><select style={input} value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>{roleOpts.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}</select></Field>
+        <div data-tour="login-role"><Field label="Role"><select style={input} value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>{roleOpts.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}</select></Field></div>
         <button style={miniBtn} onClick={add} disabled={!form.email || !form.password}>+ Add login</button>
       </div>
       {linkable.length > 0 && (
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginTop: 10 }}>
+        <div data-tour="login-link" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginTop: 10 }}>
           <Field label="Or link an existing login (one person, several profiles)">
             <select style={input} value={linkId} onChange={(e) => setLinkId(e.target.value)}>
               <option value="">Pick a login…</option>
@@ -1905,15 +2723,15 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
   return (
     <div style={cardStyle}>
       <Row>
-        <input style={{ ...input, fontWeight: 700, flex: 1 }} value={name} onChange={(e) => setName(e.target.value)} />
+        <input data-tour="suite-name" style={{ ...input, fontWeight: 700, flex: 1 }} value={name} onChange={(e) => setName(e.target.value)} placeholder="Suite name — e.g. Bushfire 2026" />
         <button style={previewBtn} onClick={preview} title="Preview as the client sees it">👁 Preview</button>
         <button style={delBtn} onClick={remove}>Delete</button>
       </Row>
       <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end' }}>
         <Field label="Client"><select style={input} value={entityId} onChange={(e) => setEntityId(e.target.value)}>{entities.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}</select></Field>
-        <Field label="Icon"><IconPicker value={icon} onChange={setIcon} /></Field>
+        <div data-tour="suite-icon"><Field label="Icon"><IconPicker value={icon} onChange={setIcon} /></Field></div>
       </div>
-      <Section title={`Sets in this suite (${setIds.length})`}>
+      <Section tour="suite-sets" title={`Sets in this suite (${setIds.length})`}>
         <p style={{ ...hint, marginTop: 0 }}>Tick a set to include it. Expand a set to choose which of its dashboards this client gets — untick any you want to leave out.</p>
         <div style={checkList}>
           {sets.length === 0 ? <Muted>Create a Set first.</Muted> : setFolderOrder.map((folder) => (
@@ -1976,7 +2794,7 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
         </Section>
       )}
       {roleCat.length > 0 && setIds.length > 0 && (
-        <Section title="Dashboard access by role">
+        <Section tour="suite-roles" title="Dashboard access by role">
           <p style={{ ...hint, marginTop: 0 }}>Who sees what at <b>{entities.find((e) => e.id === entityId)?.name || 'this client'}</b>. A set defaults to <b>Everyone</b>; pick roles to restrict it. Each dashboard can override its set. Saves immediately. (Howler staff always see everything.)</p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {setIds.map((sid) => {
@@ -2007,7 +2825,7 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
           </div>
         </Section>
       )}
-      <Section title="Locked filters (the event, cashless events…)">
+      <Section tour="suite-locks" title="Locked filters (the event, cashless events…)" defaultOpen>
         <LockedFilterEditor value={locks} onChange={setLocks} fields={fields} categories={lockCategories} clientOrganiser={organiserValsFromLocks(entities.find((e) => e.id === entityId)?.lockedFilters)} />
       </Section>
       {includedDashboards.length > 0 && (
@@ -2035,13 +2853,13 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
           </div>
         </Section>
       )}
-      <div style={{ marginTop: 12 }}>
+      <div data-tour="suite-ticket" style={{ marginTop: 12 }}>
         <L>Ticket / checkout link</L>
         <div style={{ fontSize: 12, color: 'var(--muted)', margin: '2px 0 6px' }}>The event's buy / checkout URL. Campaigns linked to this event auto-fill it as the call-to-action link.</div>
         <input style={{ ...input, width: '100%' }} value={eventUrl} onChange={(e) => setEventUrl(e.target.value)} placeholder="https://tickets.example.com/your-event" />
       </div>
-      <SaveRow onSave={save} saved={saved} id={suite.id} />
-      <Section title="Event branding (logo / colours / sender)">
+      <div data-tour="suite-save"><SaveRow onSave={save} saved={saved} id={suite.id} /></div>
+      <Section tour="suite-branding" title="Event branding (logo / colours / sender)">
         <p style={hint}>Override this <b>event's</b> look — its logo, colours and sender name — used for this event's campaigns and single-event digests, and the in-app theme while viewing it. Anything left blank inherits <b>{entities.find((e) => e.id === entityId)?.name || 'the client'}</b>'s branding. Saved on its own (separate from the suite settings above).</p>
         <MailTemplateEditor scope="admin-suite" entityId={entityId} suiteId={suite.id} />
       </Section>
@@ -2764,6 +3582,56 @@ function MailLog() {
 }
 
 // ─── Integrations (admin: primary Looker + Anthropic accounts) ─────────────────
+// Reusable Inventive workspaces: create once (name + reference), link users on
+// their profile (Admin → Users → Edit). One workspace can be shared by many users.
+function InventiveWorkspaces() {
+  const [items, setItems] = useState(null);
+  const [draft, setDraft] = useState({ name: '', refId: '' });
+  const [editId, setEditId] = useState(null);
+  const [edit, setEdit] = useState({ name: '', refId: '' });
+  const load = () => api.adminListInventiveWorkspaces().then(setItems).catch(() => setItems([]));
+  useEffect(() => { load(); }, []);
+  const add = async () => { if (!draft.name.trim()) return; await api.adminCreateInventiveWorkspace(draft); setDraft({ name: '', refId: '' }); load(); };
+  const saveEdit = async () => { await api.adminUpdateInventiveWorkspace(editId, edit); setEditId(null); load(); };
+  const del = async (w) => { if (confirm(`Delete workspace "${w.name || '(unnamed)'}"? ${w.userCount} linked user${w.userCount === 1 ? '' : 's'} will be unlinked.`)) { await api.adminDeleteInventiveWorkspace(w.id); load(); } };
+  if (!items) return <Muted>Loading…</Muted>;
+  return (
+    <div>
+      <p style={hint}>Create one workspace per provisioned Inventive workspace (name + reference), then link users to it on each user's profile (Admin → Users → Edit). Many users can share one workspace.</p>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 12 }}>
+        <Field label="Name"><input style={input} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="e.g. Movement Entertainment" /></Field>
+        <Field label="Reference (externalRefId)"><input style={{ ...input, fontFamily: 'monospace', fontSize: 12, minWidth: 280 }} value={draft.refId} onChange={(e) => setDraft({ ...draft, refId: e.target.value })} placeholder="workspace ref / UUID" /></Field>
+        <button style={miniBtn} onClick={add} disabled={!draft.name.trim()}>+ Add workspace</button>
+      </div>
+      {items.length === 0 ? <Muted>No workspaces yet.</Muted> : (
+        <div style={{ border: '1px solid var(--hairline)', borderRadius: 10, overflow: 'hidden' }}>
+          {items.map((w) => (
+            <div key={w.id} style={{ borderBottom: '1px solid var(--hairline)', padding: '8px 10px' }}>
+              {editId === w.id ? (
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <input style={{ ...input, flex: 1, minWidth: 140 }} value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} />
+                  <input style={{ ...input, flex: 1, minWidth: 200, fontFamily: 'monospace', fontSize: 12 }} value={edit.refId} onChange={(e) => setEdit({ ...edit, refId: e.target.value })} />
+                  <button style={miniBtn} onClick={saveEdit}>Save</button>
+                  <button style={miniBtnOutline} onClick={() => setEditId(null)}>Cancel</button>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <span style={{ fontWeight: 600, minWidth: 0 }}>{w.name || '(unnamed)'}</span>
+                  <code style={{ fontSize: 11.5, color: 'var(--muted)', background: 'rgba(128,128,128,0.12)', padding: '2px 7px', borderRadius: 6, userSelect: 'all' }}>{w.refId || '—'}</code>
+                  <span style={{ fontSize: 12, color: 'var(--muted)' }}>{w.userCount} user{w.userCount === 1 ? '' : 's'}</span>
+                  <span style={{ flex: 1 }} />
+                  <button style={miniBtnOutline} onClick={() => { setEditId(w.id); setEdit({ name: w.name, refId: w.refId }); }}>Edit</button>
+                  <button style={delBtn} onClick={() => del(w)}>Delete</button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AdminIntegrations() {
   const [value, setValue] = useState(null);
   const [clients, setClients] = useState([]);
@@ -2775,6 +3643,9 @@ function AdminIntegrations() {
       <p style={hint}>Accounts (Looker · Anthropic · Email · <b>Inventive</b>) is open below; other sections are collapsed — tap to open. Accounts override the values in <code>.env</code>; clients can set their own Looker/Anthropic (Client → Integrations), which take precedence for their data.</p>
       <Section title="🔑 Accounts — Looker · Anthropic · Email · Inventive">
         <IntegrationsForm value={value} showResend showInventive clients={clients} canManageLock lockableKeys={['looker', 'anthropic', 'resend', 'inventive']} locks={value.locks || {}} onToggleLock={async (k, locked) => setValue(await api.setAdminIntegrationLock(k, locked))} onTestEmail={() => api.sendMailTest()} onSave={async (p) => setValue(await api.saveAdminIntegrations(p))} />
+      </Section>
+      <Section title="✨ Inventive workspaces">
+        <InventiveWorkspaces />
       </Section>
       <Section title="◇ Audience sync — connector health">
         <p style={hint}>Per-client status of the Meta / TikTok audience syncs: which clients are connected, how many audiences are live, and any recent failures. Drill into a client to see each segment's audience.</p>
@@ -3065,13 +3936,6 @@ function ClientIntegrations({ entity }) {
   const [value, setValue] = useState(null);
   useEffect(() => { api.getEntityIntegrations(entity.id).then(setValue); }, [entity.id]);
   if (!value) return <Muted>Loading…</Muted>;
-  // The Inventive workspace name/ref live on the entity (not the integrations
-  // blob), so split them out of the form payload and save them separately.
-  const onSave = async (p) => {
-    const { inventiveWorkspace, ...integ } = p;
-    if (inventiveWorkspace) await api.adminUpdateEntity(entity.id, { inventiveName: inventiveWorkspace.name, inventiveRefId: inventiveWorkspace.refId });
-    setValue(await api.saveEntityIntegrations(entity.id, integ));
-  };
   return (
     <div>
       <p style={hint}>Optional per-client accounts. Anything left blank falls back to the platform default (Admin → Integrations).</p>
@@ -3085,8 +3949,7 @@ function ClientIntegrations({ entity }) {
         lockableKeys={['looker', 'anthropic', 'meta', 'tiktok']}
         locks={value.locks || {}}
         onToggleLock={async (k, locked) => setValue(await api.setEntityIntegrationLock(entity.id, k, locked))}
-        inventiveWorkspace={{ name: entity.inventiveName || '', refId: entity.inventiveRefId || '', defaultRefId: entity.id }}
-        onSave={onSave}
+        onSave={async (p) => setValue(await api.saveEntityIntegrations(entity.id, p))}
       />
     </div>
   );
@@ -3775,10 +4638,10 @@ function Tab({ active, onClick, children }) {
 }
 function Field({ label, children }) { return <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}><L>{label}</L>{children}</div>; }
 // Collapsible labelled section. Admin-panel rule: sections start collapsed.
-function Section({ title, children, defaultOpen = false }) {
+function Section({ title, children, defaultOpen = false, tour }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div style={{ marginTop: 14 }}>
+    <div data-tour={tour} style={{ marginTop: 14 }}>
       <button onClick={() => setOpen((o) => !o)} style={{ display: 'flex', alignItems: 'center', gap: 7, width: '100%', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer', padding: 0 }}>
         <span style={{ width: 12, color: '#b0b0b6', fontSize: 11, transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}>▶</span>
         <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--muted)' }}>{title}</span>
