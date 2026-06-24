@@ -1167,6 +1167,7 @@ const SCOPE_TOUR = [
   { tour: 'scope-all', icon: '🌐', title: 'Or: all organisers', body: 'Only for Howler-internal / management logins — this lets them see every organiser’s data. Leave it OFF for a normal client.' },
 ];
 const SUITES_TOUR = [
+  { tour: 'suite-name', icon: '🏷️', title: 'Name the suite', body: 'Give the suite a name — usually the event itself (e.g. “Bushfire 2026”). It’s the heading the client sees for this event.' },
   { tour: 'suite-icon', icon: '🎨', title: 'Give the suite an icon', body: 'Pick an emoji (or upload a small image). It’s how this event shows up in the client’s sidebar.' },
   { tour: 'suite-sets', icon: '🗂️', title: 'Choose the dashboard sets', body: 'Tick the sets this event should include — e.g. Ticketing, Cashless. Expand a set to include or leave out individual dashboards.' },
   { tour: 'suite-roles', icon: '👥', title: 'Who sees what (optional)', body: 'Restrict a set or dashboard to certain roles — e.g. finance-only views. Leave it alone to show everything to everyone.' },
@@ -1448,10 +1449,11 @@ function StepPreviewModal({ steps, index, onClose }) {
         {sec('scope-org', <>{lbl('Organiser scope · required')}<div style={fauxInput}>Pick the client’s organiser…</div></>)}
       </>);
       case 'suites': return (<>
+        {sec('suite-name', <>{lbl('Suite name')}<div style={fauxInput}>e.g. Bushfire 2026</div></>)}
         {sec('suite-icon', <>{lbl('Icon')}<div style={{ width: 40, height: 40, border: '1px solid var(--hairline)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>🎟️</div></>)}
         {sec('suite-sets', secHead('Sets in this suite (1)'))}
         {sec('suite-roles', secHead('Dashboard access by role'))}
-        {sec('suite-locks', secHead('Locked filters (the event, cashless events…)'))}
+        {sec('suite-locks', <>{secHead('Locked filters (the event, cashless events…)')}<div style={{ display: 'flex', gap: 8, marginTop: 6 }}><div style={{ ...miniBtn, opacity: 0.8, pointerEvents: 'none' }}>+ Add locked filter</div><div style={{ ...miniBtn, opacity: 0.8, pointerEvents: 'none' }}>+ Add default filters</div></div></>)}
         {sec('suite-ticket', <>{lbl('Ticket / checkout link')}<div style={fauxInput}>https://tickets.example.com/your-event</div></>)}
         {sec('suite-save', <div style={{ ...saveBtn, display: 'inline-block', opacity: 0.8, pointerEvents: 'none' }}>Save</div>)}
         {sec('suite-branding', secHead('Event branding (logo / colours / sender)'))}
@@ -2721,7 +2723,7 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
   return (
     <div style={cardStyle}>
       <Row>
-        <input style={{ ...input, fontWeight: 700, flex: 1 }} value={name} onChange={(e) => setName(e.target.value)} />
+        <input data-tour="suite-name" style={{ ...input, fontWeight: 700, flex: 1 }} value={name} onChange={(e) => setName(e.target.value)} placeholder="Suite name — e.g. Bushfire 2026" />
         <button style={previewBtn} onClick={preview} title="Preview as the client sees it">👁 Preview</button>
         <button style={delBtn} onClick={remove}>Delete</button>
       </Row>
@@ -2823,7 +2825,7 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
           </div>
         </Section>
       )}
-      <Section tour="suite-locks" title="Locked filters (the event, cashless events…)">
+      <Section tour="suite-locks" title="Locked filters (the event, cashless events…)" defaultOpen>
         <LockedFilterEditor value={locks} onChange={setLocks} fields={fields} categories={lockCategories} clientOrganiser={organiserValsFromLocks(entities.find((e) => e.id === entityId)?.lockedFilters)} />
       </Section>
       {includedDashboards.length > 0 && (
