@@ -787,8 +787,8 @@ function SetupWizard({ fields }) {
   const [error, setError] = useState(null);
   const [tourOn, setTourOn] = useState(false); // the in-step spotlight walkthrough
   const initFor = useRef(null);
-  const suitesRef = useRef(null);
-  const autoTourFor = useRef(null);
+  const bodyRef = useRef(null);
+  const autoTourSeen = useRef(new Set());
 
   const reload = () => Promise.all([api.adminListEntities(), api.adminListSuites(), api.adminListUsers(), api.adminListSets(), api.listDashboards()])
     .then(([entities, suites, users, sets, dash]) => setData({ entities, suites, users, sets, dashTitle: Object.fromEntries(dash.map((d) => [d.id, d.title])) }));
@@ -811,14 +811,16 @@ function SetupWizard({ fields }) {
     if (entityId) api.getSetupWizardProgress(entityId).then((r) => setTicks(r.ticks || {})).catch(() => setTicks({}));
     else setTicks({});
   }, [entityId]);
-  // Auto-launch the spotlight walkthrough the first time the AM reaches the suites
-  // step for a client and there's a suite to point at (once per client per visit).
+  // Close any open walkthrough when moving between steps.
+  useEffect(() => { setTourOn(false); }, [stepKey]);
+  // Auto-launch the spotlight walkthrough the first time the AM reaches a guided
+  // step for a client (once per client per step). The client step is skipped (the
+  // entity isn't created yet); suites waits until there's a suite to point at.
   useEffect(() => {
-    if (stepKey === 'suites' && entity && data.suites.some((s) => s.entityId === entity.id) && autoTourFor.current !== entity.id) {
-      autoTourFor.current = entity.id;
-      setTourOn(true);
-    }
-    if (stepKey !== 'suites' && tourOn) setTourOn(false); // close it if they leave the step
+    if (!entity || !TOURS[stepKey] || stepKey === 'client') return;
+    if (stepKey === 'suites' && !data.suites.some((s) => s.entityId === entity.id)) return;
+    const k = `${entity.id}:${stepKey}`;
+    if (!autoTourSeen.current.has(k)) { autoTourSeen.current.add(k); setTourOn(true); }
   }, [stepKey, entityId, data]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!data) return <Muted>Loading…</Muted>;
@@ -1007,14 +1009,20 @@ function SetupWizard({ fields }) {
       <AdminBack onBack={() => go('start')}>Setup wizard</AdminBack>
       <h2 style={{ fontSize: 20, fontWeight: 700, margin: '12px 0 4px' }}>{step.icon} {step.title}{entity ? <span style={{ color: 'var(--muted)', fontWeight: 600 }}> · {entity.name}</span> : ''}</h2>
       <Stepper />
-      <div style={cardStyle}>
+      <div ref={bodyRef} style={cardStyle}>
         {stepKey !== 'review' && <ReqBadge />}
         <p style={{ fontSize: 13.5, color: 'var(--text)', lineHeight: 1.55, margin: '0 0 14px' }}>{step.blurb}</p>
+        {TOURS[stepKey] && (
+          <div style={{ marginBottom: 12 }}>
+            <button style={miniBtn} title="Walk through each part of this step, one at a time"
+              onClick={() => { if (stepKey === 'suites' && !suitesOf(entity?.id).length) { alert('Add a suite first (the “+ Add suite” button), then I’ll walk you through it.'); return; } setTourOn(true); }}>▶ Guide me through this step</button>
+          </div>
+        )}
 
         {stepKey === 'client' && (
           <>
-            <Field label="Client name · required"><input style={{ ...input, fontWeight: 700, maxWidth: 360 }} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. MTN Bushfire" autoFocus /></Field>
-            <div style={{ marginTop: 14 }}>
+            <div data-tour="client-name"><Field label="Client name · required"><input style={{ ...input, fontWeight: 700, maxWidth: 360 }} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. MTN Bushfire" autoFocus /></Field></div>
+            <div data-tour="client-logo" style={{ marginTop: 14 }}>
               <L>Client logo · optional</L>
               <div style={{ marginTop: 6 }}><LogoPicker value={logo} onChange={setLogo} /></div>
             </div>
@@ -1024,7 +1032,7 @@ function SetupWizard({ fields }) {
 
         {stepKey === 'scope' && entity && (
           <>
-            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 12px', border: '1px solid var(--hairline)', borderRadius: 10, margin: '4px 0 12px', cursor: 'pointer', background: allOrg ? 'rgba(var(--brand-rgb),0.08)' : 'transparent' }}>
+            <label data-tour="scope-all" style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 12px', border: '1px solid var(--hairline)', borderRadius: 10, margin: '4px 0 12px', cursor: 'pointer', background: allOrg ? 'rgba(var(--brand-rgb),0.08)' : 'transparent' }}>
               <input type="checkbox" checked={allOrg} onChange={(e) => setAllOrg(e.target.checked)} style={{ marginTop: 2 }} />
               <span>
                 <span style={{ fontWeight: 700, fontSize: 13.5 }}>🌐 All organisers (internal / management)</span>
@@ -1032,10 +1040,10 @@ function SetupWizard({ fields }) {
               </span>
             </label>
             {!allOrg && (
-              <>
+              <div data-tour="scope-org">
                 <L>Organiser scope · required (applies across all this client’s suites)</L>
                 <LockedFilterEditor value={locks} onChange={setLocks} fields={fields} restrictTo={['Organiser Name']} />
-              </>
+              </div>
             )}
             {!hasLock && <div style={{ fontSize: 12.5, color: 'var(--error)', marginTop: 6 }}>⚠ No scope set yet — pick an organiser above, or the client will see no data.</div>}
             <Footer primary={saveScope} primaryLabel="Save scope & continue" />
@@ -1044,15 +1052,9 @@ function SetupWizard({ fields }) {
 
         {stepKey === 'suites' && entity && (
           <>
-            <div style={{ display: 'flex', marginBottom: 10 }}>
-              <button style={miniBtn} onClick={() => { if (suitesOf(entity.id).length) setTourOn(true); else alert('Add a suite first (the “+ Add suite” button), then I’ll walk you through it.'); }} title="Walk through each part of a suite, one at a time">▶ Guide me through a suite</button>
-            </div>
-            <div ref={suitesRef}>
-              <ClientSuites entity={entity} suites={suitesOf(entity.id)} allEntities={data.entities} allSets={data.sets} dashTitle={data.dashTitle} fields={fields} onChange={reload} />
-            </div>
+            <ClientSuites entity={entity} suites={suitesOf(entity.id)} allEntities={data.entities} allSets={data.sets} dashTitle={data.dashTitle} fields={fields} onChange={reload} />
             {!stepComplete(step) && <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 8 }}>Add at least one suite (the “+ Add suite” button) so the client has dashboards to open — then Continue unlocks.</div>}
             <Footer primary={() => go(nextKey)} />
-            {tourOn && <SectionTour steps={SUITES_TOUR} container={suitesRef} onClose={() => setTourOn(false)} />}
           </>
         )}
 
@@ -1122,6 +1124,7 @@ function SetupWizard({ fields }) {
         )}
 
         {error && <div style={{ color: 'var(--error)', fontSize: 13, marginTop: 10 }}>{error}</div>}
+        {tourOn && TOURS[stepKey] && <SectionTour steps={TOURS[stepKey]} container={bodyRef} onClose={() => setTourOn(false)} />}
       </div>
     </div>
   );
@@ -1134,6 +1137,14 @@ const badgeBase = { display: 'inline-flex', alignItems: 'center', gap: 6, fontSi
 // [data-tour="<key>"] attribute, scoped to a container. It never blocks the form
 // underneath (the dim is a pointer-through box-shadow), so the AM can fill a field
 // then hit Next. Reusable for any step — drive it with a list of { tour, title, body }.
+const CLIENT_TOUR = [
+  { tour: 'client-name', icon: '🏢', title: 'Name the client', body: 'Type the organiser or brand you’re onboarding — this is what everything else hangs off. It’s the only thing you must fill in here.' },
+  { tour: 'client-logo', icon: '🖼️', title: 'Add their logo (optional)', body: 'Upload a logo if you have one — it shows as the client’s brand across the app. You can always add or change it later.' },
+];
+const SCOPE_TOUR = [
+  { tour: 'scope-org', icon: '🔒', title: 'Pick their organiser', body: 'Choose the organiser(s) this client owns. Every dashboard is then force-filtered to only their data on the server — this is what keeps clients apart.' },
+  { tour: 'scope-all', icon: '🌐', title: 'Or: all organisers', body: 'Only for Howler-internal / management logins — this lets them see every organiser’s data. Leave it OFF for a normal client.' },
+];
 const SUITES_TOUR = [
   { tour: 'suite-icon', icon: '🎨', title: 'Give the suite an icon', body: 'Pick an emoji (or upload a small image). It’s how this event shows up in the client’s sidebar.' },
   { tour: 'suite-sets', icon: '🗂️', title: 'Choose the dashboard sets', body: 'Tick the sets this event should include — e.g. Ticketing, Cashless. Expand a set to include or leave out individual dashboards.' },
@@ -1143,6 +1154,14 @@ const SUITES_TOUR = [
   { tour: 'suite-save', icon: '💾', title: 'Save the suite', body: 'Hit Save to apply everything above. (Event branding below saves on its own.)' },
   { tour: 'suite-branding', icon: '✨', title: 'Event branding (optional)', body: 'Override the look just for this event — logo, colours, sender. Blank fields inherit the client’s branding.' },
 ];
+const LOGINS_TOUR = [
+  { tour: 'login-add', icon: '🔑', title: 'Add a login', body: 'Enter the person’s name, email and a temporary password. They’ll be prompted to change it the first time they sign in.' },
+  { tour: 'login-role', icon: '🎚️', title: 'Choose their role', body: 'The role controls what this person can see and do. Pick the access level that fits them.' },
+  { tour: 'login-link', icon: '🔗', title: 'Or link an existing person', body: 'If someone already has a login on another client, link them here instead of creating a duplicate account.' },
+];
+// Per-step walkthroughs, keyed by step. Each is an ordered list of { tour, title,
+// body } where `tour` matches a [data-tour] anchor inside that step's content.
+const TOURS = { client: CLIENT_TOUR, scope: SCOPE_TOUR, suites: SUITES_TOUR, logins: LOGINS_TOUR };
 
 function SectionTour({ steps, container, onClose }) {
   const [i, setI] = useState(0);
@@ -2082,17 +2101,17 @@ function EntityLogins({ entity, users, allUsers = [], onChange }) {
           </tbody>
         </table>
       )}
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginTop: 8 }}>
+      <div data-tour="login-add" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginTop: 8 }}>
         <Field label="First name"><input style={{ ...input, minWidth: 110 }} value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} /></Field>
         <Field label="Surname"><input style={{ ...input, minWidth: 110 }} value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} /></Field>
         <Field label="Email"><input style={input} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>
         <Field label="Mobile"><input style={{ ...input, minWidth: 130 }} value={form.mobile} onChange={(e) => setForm({ ...form, mobile: e.target.value })} placeholder="+27…" /></Field>
         <Field label="Password"><input style={input} type="text" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></Field>
-        <Field label="Role"><select style={input} value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>{roleOpts.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}</select></Field>
+        <div data-tour="login-role"><Field label="Role"><select style={input} value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>{roleOpts.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}</select></Field></div>
         <button style={miniBtn} onClick={add} disabled={!form.email || !form.password}>+ Add login</button>
       </div>
       {linkable.length > 0 && (
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginTop: 10 }}>
+        <div data-tour="login-link" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginTop: 10 }}>
           <Field label="Or link an existing login (one person, several profiles)">
             <select style={input} value={linkId} onChange={(e) => setLinkId(e.target.value)}>
               <option value="">Pick a login…</option>
