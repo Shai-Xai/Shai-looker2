@@ -134,7 +134,7 @@ export default function AdminPage() {
 
   const content = (
     <>
-      {tab === 'entities' && <Entities fields={fields} />}
+      {tab === 'entities' && <Entities fields={fields} onOpenWizard={() => setTab('wizard')} />}
       {tab === 'wizard' && <SetupWizard fields={fields} />}
       {tab === 'users' && <UsersTab />}
       {tab === 'sets' && <Sets />}
@@ -644,7 +644,7 @@ function Billing() {
 }
 
 // ─── Clients (Entities) ───────────────────────────────────────────────────────
-function Entities({ fields }) {
+function Entities({ fields, onOpenWizard }) {
   const [items, setItems] = useState([]);
   const [suites, setSuites] = useState([]);
   const [sets, setSets] = useState([]);
@@ -687,13 +687,19 @@ function Entities({ fields }) {
   const ql = q.trim().toLowerCase();
   const sorted = [...items].sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }));
   const shown = ql ? sorted.filter((e) => (e.name || '').toLowerCase().includes(ql)) : sorted;
+  const addClient = async () => { const ent = await api.adminCreateEntity({ name: 'New client', lockedFilters: {} }); await load(); setSelectedId(ent.id); };
   return (
     <div>
       <p style={hint}>Pick a client to manage its settings, suites and logins.</p>
-      <div style={searchWrap}>
-        <span style={{ color: 'var(--muted)', fontSize: 13, flexShrink: 0 }}>⌕</span>
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search clients…" style={searchInput} />
-        {ql && <button onClick={() => setQ('')} style={searchClear} aria-label="Clear search">✕</button>}
+      {/* Top bar: search + quick add + the guided wizard, all in reach. */}
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
+        <div style={{ ...searchWrap, marginBottom: 0, flex: '1 1 200px' }}>
+          <span style={{ color: 'var(--muted)', fontSize: 13, flexShrink: 0 }}>⌕</span>
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search clients…" style={searchInput} />
+          {ql && <button onClick={() => setQ('')} style={searchClear} aria-label="Clear search">✕</button>}
+        </div>
+        <button style={addBtn} onClick={addClient}>+ Add client</button>
+        {onOpenWizard && <button style={{ ...addBtn, background: 'var(--brand)', color: '#fff', border: '1.5px solid var(--brand)' }} onClick={onOpenWizard} title="Stand a new client up with the guided, step-by-step wizard">🧙 Setup wizard</button>}
       </div>
       <div style={clientList}>
         {shown.map((e) => (
@@ -708,7 +714,6 @@ function Entities({ fields }) {
         {items.length === 0 && <Muted>No clients yet.</Muted>}
         {items.length > 0 && shown.length === 0 && <Muted>No clients match “{q.trim()}”.</Muted>}
       </div>
-      <button style={addBtn} onClick={async () => { const ent = await api.adminCreateEntity({ name: 'New client', lockedFilters: {} }); await load(); setSelectedId(ent.id); }}>+ Add client</button>
     </div>
   );
 }
