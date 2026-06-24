@@ -289,7 +289,15 @@ function SegmentBuilder({ entityId, tiles, segment, onClose, onSaved }) {
     if (suiteList.length === 1) setSuiteSel(suiteList[0].id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tiles, f.dashboardId]);
-  const suiteDashboards = (tiles?.dashboards || []).filter((d) => !suiteSel || d.suiteId === suiteSel);
+  // A segment needs an email or mobile per person, so only offer tiles whose data
+  // has a contact column — and dashboards that have at least one such tile. The
+  // currently-selected tile/dashboard is always kept (so editing an older segment
+  // never hides its source).
+  const tileUsable = (t) => t.hasContact || t.tileId === f.tileId;
+  const dashHasContact = (d) => (d.tiles || []).some(tileUsable);
+  const suiteDashboards = (tiles?.dashboards || [])
+    .filter((d) => !suiteSel || d.suiteId === suiteSel)
+    .filter((d) => dashHasContact(d) || d.dashboardId === f.dashboardId);
   const [aud, setAud] = useState(null);
   const [busy, setBusy] = useState(false);
   const debounce = useRef();
@@ -358,6 +366,7 @@ function SegmentBuilder({ entityId, tiles, segment, onClose, onSaved }) {
   };
 
   const dash = tiles?.dashboards?.find((d) => d.dashboardId === f.dashboardId);
+  const dashTiles = (dash?.tiles || []).filter(tileUsable);
 
   return (
     <div>
@@ -391,9 +400,10 @@ function SegmentBuilder({ entityId, tiles, segment, onClose, onSaved }) {
               {dash && (
                 <select style={input} value={f.tileId} onChange={(e) => { set('tileId', e.target.value); set('emailField', ''); }}>
                   <option value="">Pick the tile listing the people…</option>
-                  {dash.tiles.map((t) => <option key={t.tileId} value={t.tileId}>{t.title}</option>)}
+                  {dashTiles.map((t) => <option key={t.tileId} value={t.tileId}>{t.title}</option>)}
                 </select>
               )}
+              {dash && dashTiles.length === 0 && <div style={hintS}>No tiles on this dashboard expose an email or mobile column, so there's no one to build a segment from here.</div>}
               {aud?.fields?.length > 0 && (
                 <>
                   <div style={{ display: 'flex', gap: 8 }}>

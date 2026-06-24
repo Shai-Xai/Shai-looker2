@@ -2773,7 +2773,7 @@ function AdminIntegrations() {
   return (
     <div>
       <p style={hint}>Accounts (Looker · Anthropic · Email · <b>Inventive</b>) is open below; other sections are collapsed — tap to open. Accounts override the values in <code>.env</code>; clients can set their own Looker/Anthropic (Client → Integrations), which take precedence for their data.</p>
-      <Section title="🔑 Accounts — Looker · Anthropic · Email · Inventive" defaultOpen>
+      <Section title="🔑 Accounts — Looker · Anthropic · Email · Inventive">
         <IntegrationsForm value={value} showResend showInventive clients={clients} canManageLock lockableKeys={['looker', 'anthropic', 'resend', 'inventive']} locks={value.locks || {}} onToggleLock={async (k, locked) => setValue(await api.setAdminIntegrationLock(k, locked))} onTestEmail={() => api.sendMailTest()} onSave={async (p) => setValue(await api.saveAdminIntegrations(p))} />
       </Section>
       <Section title="◇ Audience sync — connector health">

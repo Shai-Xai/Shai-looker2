@@ -3293,6 +3293,14 @@ function factValueLabel(t) {
 
 // Selectable tiles per client, grouped by dashboard — drives the curated
 // digest picker. Only data tiles (with fields, not text) can be chosen.
+// People-data heuristic: does a tile's query expose an email or phone/mobile
+// column? Used to offer ONLY tiles with usable contact data when building a
+// segment (a segment needs an email or mobile per person). Name-based, mirroring
+// how CreateSegmentModal guesses the email/phone columns.
+const CONTACT_FIELD_RE = /(e-?mail|phone|mobile|cell|msisdn|contact.?number)/i;
+function tileHasContact(t) {
+  return (t.query?.fields || []).some((f) => CONTACT_FIELD_RE.test(String(f)));
+}
 function digestTileCatalogue(entityId) {
   const { catalogue } = clientCatalogue(entityId);
   const dashboards = [];
@@ -3301,7 +3309,7 @@ function digestTileCatalogue(entityId) {
     if (!def) continue;
     const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((x) => x.tiles || []))]
       .filter((t) => t.type !== 'text' && t.query?.fields?.length)
-      .map((t) => ({ tileId: t.id, title: t.title || '(untitled)', visType: t.vis?.type || '' }));
+      .map((t) => ({ tileId: t.id, title: t.title || '(untitled)', visType: t.vis?.type || '', hasContact: tileHasContact(t) }));
     if (tiles.length) dashboards.push({ dashboardId: c.dashboardId, title: c.title, setName: c.setName, suiteId: c.suiteId, suiteName: c.suiteName, tiles });
   }
   return { dashboards };

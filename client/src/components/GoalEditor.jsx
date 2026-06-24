@@ -248,6 +248,19 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
   // Curve candidates are the opposite: charts/tables that carry a value-over-time
   // series (not single-value KPIs), so there's a shape to read.
   const seriesTilesFor = (dId) => (dashboards.find((d) => d.dashboardId === dId)?.tiles || []).filter((t) => !isKpi(t));
+  // Only offer dashboards that actually carry a usable tile for THIS picker — a
+  // KPI (single number) for a metric/baseline, or a chart/table series for a
+  // breakdown/curve — so you never pick a dashboard with nothing to read. The
+  // currently-selected dashboard is always kept (editing an older goal).
+  const dashFor = (kind, curId) => {
+    const ok = kind === 'series' ? (d) => (d.tiles || []).some((t) => !isKpi(t)) : (d) => (d.tiles || []).some(isKpi);
+    const base = dashboards.filter(ok);
+    if (curId && !base.some((d) => d.dashboardId === curId)) {
+      const sel = dashboards.find((d) => d.dashboardId === curId);
+      if (sel) return [...base, sel];
+    }
+    return base;
+  };
 
   // Suggested checkpoints for THIS goal: the SERVER computes each checkpoint's fraction
   // of last time's total using the SAME days-before alignment as the live pace engine
@@ -393,7 +406,7 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
           <Field label="Which number?" hint="Pick a single-value (KPI) tile you already look at — the goal tracks that live number.">
             <select value={dashboardId} onChange={(e) => { setDashboardId(e.target.value); setTileId(''); }} style={inp}>
               <option value="">{cat ? 'Choose a dashboard…' : 'Loading…'}</option>
-              {dashboards.map((d) => <option key={d.dashboardId} value={d.dashboardId}>{d.title}{d.setName ? ` · ${d.setName}` : ''}</option>)}
+              {dashFor('kpi', dashboardId).map((d) => <option key={d.dashboardId} value={d.dashboardId}>{d.title}{d.setName ? ` · ${d.setName}` : ''}</option>)}
             </select>
             {dashboardId && (tilesFor(dashboardId).length ? (
               <select value={tileId} onChange={(e) => setTileId(e.target.value)} style={{ ...inp, marginTop: 8 }}>
@@ -444,7 +457,7 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
             <>
               <select value={baselineDashboardId} onChange={(e) => { setBaselineDashboardId(e.target.value); setBaselineTileId(''); setBaselineValue(''); }} style={{ ...inp, marginTop: 8 }}>
                 <option value="">{cat ? 'Choose a dashboard…' : 'Loading…'}</option>
-                {dashboards.map((dd) => <option key={dd.dashboardId} value={dd.dashboardId}>{dd.title}{dd.setName ? ` · ${dd.setName}` : ''}</option>)}
+                {dashFor('kpi', baselineDashboardId).map((dd) => <option key={dd.dashboardId} value={dd.dashboardId}>{dd.title}{dd.setName ? ` · ${dd.setName}` : ''}</option>)}
               </select>
               {baselineDashboardId && (
                 <select value={baselineTileId} onChange={(e) => setBaselineTileId(e.target.value)} style={{ ...inp, marginTop: 8 }}>
@@ -521,7 +534,7 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
                 <Field label="Breakdown tile" hint="A chart/table split by category (e.g. customers by type, audience by age).">
                   <select value={dashboardId} onChange={(e) => { setDashboardId(e.target.value); setTileId(''); setParts([]); }} style={inp}>
                     <option value="">{cat ? 'Choose a dashboard…' : 'Loading…'}</option>
-                    {dashboards.map((d) => <option key={d.dashboardId} value={d.dashboardId}>{d.title}{d.setName ? ` · ${d.setName}` : ''}</option>)}
+                    {dashFor('series', dashboardId).map((d) => <option key={d.dashboardId} value={d.dashboardId}>{d.title}{d.setName ? ` · ${d.setName}` : ''}</option>)}
                   </select>
                   {dashboardId && (
                     <select value={tileId} onChange={(e) => { setTileId(e.target.value); setParts([]); }} style={{ ...inp, marginTop: 8 }}>
@@ -568,7 +581,7 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
                       </div>
                       <select value={ref.dashboardId || ''} onChange={(e) => setPart({ ref: { dashboardId: e.target.value, tileId: '' } })} style={inp}>
                         <option value="">{cat ? 'Choose a dashboard…' : 'Loading…'}</option>
-                        {dashboards.map((d) => <option key={d.dashboardId} value={d.dashboardId}>{d.title}{d.setName ? ` · ${d.setName}` : ''}</option>)}
+                        {dashFor('kpi', ref.dashboardId).map((d) => <option key={d.dashboardId} value={d.dashboardId}>{d.title}{d.setName ? ` · ${d.setName}` : ''}</option>)}
                       </select>
                       {ref.dashboardId && (
                         <select value={ref.tileId || ''} onChange={(e) => setPart({ ref: { ...ref, tileId: e.target.value } })} style={{ ...inp, marginTop: 6 }}>
@@ -583,7 +596,7 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
                           <summary style={{ fontSize: 11.5, color: 'var(--brand)', cursor: 'pointer', fontWeight: 700 }}>Compare to last year (optional)</summary>
                           <select value={lastRef.dashboardId || ''} onChange={(e) => setPart({ lastRef: { dashboardId: e.target.value, tileId: '' } })} style={{ ...inp, marginTop: 6 }}>
                             <option value="">{cat ? 'Choose a dashboard…' : 'Loading…'}</option>
-                            {dashboards.map((d) => <option key={d.dashboardId} value={d.dashboardId}>{d.title}{d.setName ? ` · ${d.setName}` : ''}</option>)}
+                            {dashFor('kpi', lastRef.dashboardId).map((d) => <option key={d.dashboardId} value={d.dashboardId}>{d.title}{d.setName ? ` · ${d.setName}` : ''}</option>)}
                           </select>
                           {lastRef.dashboardId && (
                             <select value={lastRef.tileId || ''} onChange={(e) => setPart({ lastRef: { ...lastRef, tileId: e.target.value } })} style={{ ...inp, marginTop: 6 }}>
@@ -647,7 +660,7 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
               </div>
               <select value={curveDashboardId} onChange={(e) => { setCurveDashboardId(e.target.value); setCurveTileId(''); }} style={inp}>
                 <option value="">{cat ? 'Choose a dashboard…' : 'Loading…'}</option>
-                {dashboards.map((dd) => <option key={dd.dashboardId} value={dd.dashboardId}>{dd.title}{dd.setName ? ` · ${dd.setName}` : ''}</option>)}
+                {dashFor('series', curveDashboardId).map((dd) => <option key={dd.dashboardId} value={dd.dashboardId}>{dd.title}{dd.setName ? ` · ${dd.setName}` : ''}</option>)}
               </select>
               {curveDashboardId && (
                 <select value={curveTileId} onChange={(e) => setCurveTileId(e.target.value)} style={{ ...inp, marginTop: 8 }}>
