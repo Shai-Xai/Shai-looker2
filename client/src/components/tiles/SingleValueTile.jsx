@@ -2,6 +2,7 @@ import { cellText, formatNumber } from '../../lib/format.js';
 import { useDrill } from '../../lib/DrillContext.jsx';
 import { useIsMobile } from '../../lib/useIsMobile.js';
 import { useCountUp } from '../../lib/useCountUp.js';
+import { useMetricScale } from '../../lib/brand.js';
 import AutoFitText from '../AutoFitText.jsx';
 
 // The big number, animated. A hidden copy of the FINAL text reserves the full
@@ -24,6 +25,7 @@ function CountUpValue({ text }) {
 export default function SingleValueTile({ data, visConfig = {}, label }) {
   const { openDrill, canDrill } = useDrill();
   const isMobile = useIsMobile();
+  const scale = useMetricScale(); // brand-configurable KPI number size (1 = default)
   const fields = data.fields || {};
   const rows = data.data || [];
   if (!rows.length) return <Empty />;
@@ -99,8 +101,8 @@ export default function SingleValueTile({ data, visConfig = {}, label }) {
   return (
     <div style={{ ...wrap, ...(cf?.background ? { background: cf.background } : null) }}>
       <AutoFitText
-        max={isMobile ? 48 : 34}
-        min={isMobile ? 14 : 11}
+        max={Math.round((isMobile ? 48 : 27) * scale)}
+        min={Math.round((isMobile ? 14 : 9) * scale)}
         widthFactor={0.28}
         style={{ flex: 1, minHeight: isMobile ? 34 : 24 }}
         onClick={drillable ? () => openDrill(primaryCell.links, primaryField.label_short || primaryField.label) : undefined}

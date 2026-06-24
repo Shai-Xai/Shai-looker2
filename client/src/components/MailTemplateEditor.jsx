@@ -19,6 +19,7 @@ const FIELDS = [
   ['header', 'Header text', 'textarea', 'Tagline shown under the logo, at the top of every email'],
   ['intro', 'Intro line', 'textarea', 'Optional line above the message, inside the card'],
   ['footer', 'Footer text', 'textarea', 'Small print under the card — supports multiple lines (e.g. contact details)'],
+  ['metricScale', 'Metric number size', 'scale', 'How big KPI numbers render on your dashboards (100% = default). Affects the big single-value tiles only'],
 ];
 
 export default function MailTemplateEditor({ entityId, scope = 'platform', suiteId = '', canTest = false }) {
@@ -93,6 +94,18 @@ export default function MailTemplateEditor({ entityId, scope = 'platform', suite
               <LogoField value={edits[key] || ''} inherited={placeholderFor(key)} onChange={(v) => set(key, v)} onExtract={applyExtracted} />
             ) : type === 'textarea' ? (
               <textarea value={edits[key] || ''} onChange={(e) => set(key, e.target.value)} placeholder={placeholderFor(key)} rows={2} style={{ ...input, resize: 'vertical', fontFamily: 'inherit' }} />
+            ) : type === 'scale' ? (
+              (() => {
+                const isSet = edits[key] !== '' && edits[key] != null;
+                const cur = isSet ? Number(edits[key]) : (Number(placeholderFor(key)) || 1);
+                return (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <input type="range" min="0.7" max="1.4" step="0.05" value={cur} onChange={(e) => set(key, e.target.value)} style={{ flex: 1 }} />
+                    <span style={{ width: 44, textAlign: 'right', fontWeight: 700, fontSize: 13, fontVariantNumeric: 'tabular-nums' }}>{Math.round(cur * 100)}%</span>
+                    {isSet && <button type="button" onClick={() => set(key, '')} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--muted)', borderRadius: 980, fontSize: 11.5, fontWeight: 600, padding: '4px 9px', cursor: 'pointer' }}>Reset</button>}
+                  </div>
+                );
+              })()
             ) : type === 'color' ? (
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 <input type="color" value={/^#[0-9a-f]{6}$/i.test(edits[key] || '') ? edits[key] : (placeholderFor(key) || '#FF385C')} onChange={(e) => set(key, e.target.value)} style={{ width: 44, height: 34, border: '1px solid var(--hairline)', borderRadius: 8, padding: 2, cursor: 'pointer' }} />

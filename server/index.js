@@ -1761,7 +1761,7 @@ app.get('/api/theme/:entityId', auth.requireAuth, (req, res) => {
   // The app-shell logo (top-left identity) is ALWAYS the client's logo — the
   // per-event theme only swaps the colours in-app, never the main profile logo.
   const logo = mailer.resolveBranding(id).logo || '';
-  res.json({ primary: b.brandColor, secondary: b.secondaryColor, chart3: b.chart3, chart4: b.chart4, chart5: b.chart5, logo });
+  res.json({ primary: b.brandColor, secondary: b.secondaryColor, chart3: b.chart3, chart4: b.chart4, chart5: b.chart5, logo, metricScale: b.metricScale });
 });
 
 // Live preview: render the email HTML with unsaved edits layered on the right

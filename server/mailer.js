@@ -160,6 +160,7 @@ const DEFAULTS = {
   header: '',                                // optional tagline under the logo/wordmark
   intro: '',                                 // optional line above the message
   footer: "You're receiving this because you have a Howler : Pulse login. Reply inside Pulse so it's tracked.",
+  metricScale: '',                           // presentation-only: KPI number size multiplier (blank = 1.0). Rides to the browser via /api/theme.
 };
 
 // Merge only the keys a tier actually sets (ignore '' / null / undefined).
