@@ -34,6 +34,7 @@ export default function ClientLayout() {
   const [loading, setLoading] = useState(true);
   const [navOpen, setNavOpen] = useState(false); // mobile drawer
   const [askOpen, setAskOpen] = useState(false); // Inventive analyst slide-in drawer
+  const [prewarmAsk, setPrewarmAsk] = useState(false); // load the analyst on owl hover → instant first open
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('howler_nav_collapsed') === '1'); // desktop
   const toggleCollapsed = () => setCollapsed((c) => { localStorage.setItem('howler_nav_collapsed', c ? '0' : '1'); return !c; });
   const navDrag = useSheetDrag(() => setNavOpen(false)); // mobile bottom-sheet dismiss
@@ -676,18 +677,20 @@ export default function ClientLayout() {
         <Outlet context={{ previewEntityId: activeEntityId, actionsSlot }} />
       </main>
       {FEATURES.ask && !askOpen && (
-        // Floating owl — quick launcher for the analyst drawer. Bottom-left of the
-        // content area (clears the sidebar; shifts left when the nav is collapsed).
+        // Floating owl — quick launcher for the analyst drawer (bottom-right).
+        // Hover/focus pre-warms the analyst so the first open is instant.
         <button
           onClick={() => setAskOpen(true)}
+          onMouseEnter={() => setPrewarmAsk(true)}
+          onFocus={() => setPrewarmAsk(true)}
           title="Ask your AI analyst"
           aria-label="Ask your AI analyst"
-          style={{ position: 'fixed', bottom: 20, left: isMobile ? 16 : (collapsed ? 16 : 366), zIndex: 55, width: 54, height: 54, borderRadius: '50%', border: '1px solid var(--hairline)', background: 'var(--card)', boxShadow: '0 6px 22px rgba(0,0,0,0.3)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'left .3s var(--ease-out, ease)' }}
+          style={{ position: 'fixed', bottom: 20, right: isMobile ? 16 : 24, zIndex: 55, width: 54, height: 54, borderRadius: '50%', border: '1px solid var(--hairline)', background: 'var(--card)', boxShadow: '0 6px 22px rgba(0,0,0,0.3)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
         >
           <AiMark size={28} sparkle={false} />
         </button>
       )}
-      <AnalystDrawer open={askOpen} onClose={() => setAskOpen(false)} previewEntityId={activeEntityId} />
+      <AnalystDrawer open={askOpen} prewarm={prewarmAsk} onClose={() => setAskOpen(false)} previewEntityId={activeEntityId} />
     </div>
   );
 }

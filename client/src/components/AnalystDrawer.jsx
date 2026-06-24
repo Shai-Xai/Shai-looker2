@@ -12,15 +12,18 @@ import { useIsMobile } from '../lib/useIsMobile.js';
 //  • a "pop out" button to launch it top-level (first-party = full speed).
 // We reply ONCE to the documented `embed_content_ready` handshake (replying
 // repeatedly makes their app re-initialise in a loop → sluggish).
-export default function AnalystDrawer({ open, onClose, previewEntityId }) {
+export default function AnalystDrawer({ open, prewarm = false, onClose, previewEntityId }) {
   const isMobile = useIsMobile();
   const [state, setState] = useState({ status: 'loading' }); // loading | ready | error | unconfigured
   const [info, setInfo] = useState(null); // { url, tokens, scopeToken, hostUrl }
   const [mounted, setMounted] = useState(false); // mount on first open, then keep warm
+  const [expanded, setExpanded] = useState(false); // full-screen drawer toggle
   const iframeRef = useRef(null);
   const repliedRef = useRef(false);
 
-  useEffect(() => { if (open) setMounted(true); }, [open]);
+  // Mount on first open OR when pre-warmed (owl hover) so the iframe is already
+  // loaded by the time the drawer opens.
+  useEffect(() => { if (open || prewarm) setMounted(true); }, [open, prewarm]);
 
   // Fetch the authorized URL on first open and when the previewed client changes.
   useEffect(() => {
@@ -62,13 +65,7 @@ export default function AnalystDrawer({ open, onClose, previewEntityId }) {
 
   if (!mounted) return null;
 
-  const popOut = () => {
-    if (!info?.url) return;
-    window.open(info.url, 'inventive_analyst'); // top-level = first-party = full speed
-    setMounted(false); // tear down the in-app iframe; the window takes over
-    onClose();
-  };
-  const width = isMobile ? '100%' : 'min(560px, 94vw)';
+  const width = (expanded || isMobile) ? '100%' : 'min(560px, 94vw)';
   const hdrBtn = { border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' };
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 80, pointerEvents: open ? 'auto' : 'none' }} aria-hidden={!open}>
@@ -81,7 +78,9 @@ export default function AnalystDrawer({ open, onClose, previewEntityId }) {
           <span style={{ fontSize: 16 }}>✨</span>
           <strong style={{ fontSize: 14.5 }}>Your AI analyst</strong>
           <span style={{ flex: 1 }} />
-          <button onClick={popOut} title="Pop out to a faster window" aria-label="Pop out to a window" style={{ ...hdrBtn, fontSize: 17, padding: '4px 8px' }}>⤢</button>
+          {!isMobile && (
+            <button onClick={() => setExpanded((e) => !e)} title={expanded ? 'Exit full screen' : 'Full screen'} aria-label={expanded ? 'Exit full screen' : 'Full screen'} style={{ ...hdrBtn, fontSize: 15, padding: '4px 8px' }}>{expanded ? '⤡' : '⛶'}</button>
+          )}
           <button onClick={onClose} title="Close" aria-label="Close analyst" style={{ ...hdrBtn, fontSize: 20, padding: '2px 6px' }}>✕</button>
         </div>
         <div style={{ flex: 1, minHeight: 0 }}>
