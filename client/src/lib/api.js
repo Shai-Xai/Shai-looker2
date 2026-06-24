@@ -148,6 +148,13 @@ export const api = {
   // Admin: onboarding funnel + feature-usage aggregates.
   adminOnboardingStats: () => fetch('/api/admin/onboarding/stats').then(json),
 
+  // Client setup wizard config (admin-editable steps) + per-client checklist progress
+  getSetupWizard: () => fetch('/api/admin/setup-wizard').then(json),
+  saveSetupWizard: (steps) => fetch('/api/admin/setup-wizard', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ steps }) }).then(json),
+  resetSetupWizard: () => fetch('/api/admin/setup-wizard', { method: 'DELETE' }).then(json),
+  getSetupWizardProgress: (entityId) => fetch(`/api/admin/setup-wizard/progress/${entityId}`).then(json),
+  setSetupWizardProgress: (entityId, itemKey, done) => fetch(`/api/admin/setup-wizard/progress/${entityId}/${encodeURIComponent(itemKey)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ done }) }).then(json),
+
   // Onboarding checklist
   getMyOnboarding: (entityId) => fetch(`/api/my/onboarding/${entityId}`).then(json),
   setMyOnboardingStep: (entityId, key, done) => fetch(`/api/my/onboarding/${entityId}/${key}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ done }) }).then(json),

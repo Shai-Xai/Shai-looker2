@@ -3667,6 +3667,10 @@ require('./scheduler').mount(app, { db, auth, mailer, messaging, push, generateC
 // Onboarding checklist — light-touch "Getting started" guide (auto-detect + manual).
 require('./onboarding').mount(app, { db, auth });
 
+// Client setup wizard config — lets AMs edit the back-end setup wizard (step
+// wording, order, and their own custom guidance steps) from the admin UI.
+require('./setupWizard').mount(app, { db, auth });
+
 // Onboarding & feature telemetry — usage signals to refine the wizard from real behaviour.
 require('./telemetry').mount(app, { db, auth, rateLimit });
 
