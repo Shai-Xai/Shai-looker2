@@ -75,6 +75,10 @@ export const api = {
   consumeMagicLink: (token) => fetch('/api/auth/magic/consume', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) }).then(json),
 
   // Admin — Entities (clients), Sets (reusable collections), Suites (event ctx)
+  adminListInventiveWorkspaces: () => fetch('/api/admin/inventive-workspaces').then(json),
+  adminCreateInventiveWorkspace: (w) => fetch('/api/admin/inventive-workspaces', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(w) }).then(json),
+  adminUpdateInventiveWorkspace: (id, w) => fetch(`/api/admin/inventive-workspaces/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(w) }).then(json),
+  adminDeleteInventiveWorkspace: (id) => fetch(`/api/admin/inventive-workspaces/${id}`, { method: 'DELETE' }),
   adminListEntities: () => fetch('/api/admin/entities').then(json),
   adminCreateEntity: (e) => fetch('/api/admin/entities', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(e) }).then(json),
   adminUpdateEntity: (id, e) => fetch(`/api/admin/entities/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(e) }).then(json),

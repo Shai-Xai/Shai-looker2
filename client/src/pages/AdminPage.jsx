@@ -1027,7 +1027,7 @@ function UserDetail({ userId, entities = [], roles = [], initialEditing = false,
               <KV label="Most recent action" value={mostRecent ? mostRecent.label : 'No activity yet'} sub={mostRecent ? `${relTime(mostRecent.at)}${mostRecent.entityName ? ` · ${mostRecent.entityName}` : ''}` : ''} />
               <KV label="Account created" value={fmtWhen(user.createdAt)} />
               <KV label="Notifications" value={`Email ${user.notifyEmail ? 'on' : 'off'} · Push ${user.notifyPush ? 'on' : 'off'}`} />
-              <KV label="Inventive ref" value={<code style={{ fontSize: 12, userSelect: 'all' }}>{user.inventiveRefId || user.id}</code>} sub={user.inventiveRefId ? 'override' : 'default · user ID'} />
+              <KV label="Inventive workspace" value={user.inventiveWorkspace ? (user.inventiveWorkspace.name || '(unnamed)') : 'Not linked'} sub={user.inventiveWorkspace ? `ref ${user.inventiveWorkspace.refId || '—'}` : 'uses the user’s own ID'} />
             </div>
           )}
 
@@ -1146,16 +1146,18 @@ function UserDetail({ userId, entities = [], roles = [], initialEditing = false,
 // Edit an existing user's identity, account type and client links. Per-client
 // roles stay on each client's Logins tab; this covers everything else in one place.
 function UserEditCard({ user, memberships, entities, roles, onCancel, onSaved }) { // eslint-disable-line no-unused-vars
-  const [form, setForm] = useState({ firstName: user.firstName || '', lastName: user.lastName || '', email: user.email, mobile: user.mobile || '', password: '', inventiveName: user.inventiveName || '', inventiveRefId: user.inventiveRefId || '' });
+  const [form, setForm] = useState({ firstName: user.firstName || '', lastName: user.lastName || '', email: user.email, mobile: user.mobile || '', password: '', inventiveWorkspaceId: user.inventiveWorkspaceId || '' });
   const [accountType, setAccountType] = useState(user.role === 'admin' ? 'admin' : 'client');
   const [entityIds, setEntityIds] = useState((memberships || []).map((m) => m.entityId));
+  const [workspaces, setWorkspaces] = useState([]);
+  useEffect(() => { api.adminListInventiveWorkspaces().then(setWorkspaces).catch(() => {}); }, []);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
   const save = async () => {
     setError(''); setBusy(true);
     try {
-      const patch = { firstName: form.firstName, lastName: form.lastName, email: form.email.trim(), mobile: form.mobile, role: accountType, entityIds, inventiveName: form.inventiveName, inventiveRefId: form.inventiveRefId };
+      const patch = { firstName: form.firstName, lastName: form.lastName, email: form.email.trim(), mobile: form.mobile, role: accountType, entityIds, inventiveWorkspaceId: form.inventiveWorkspaceId };
       if (form.password) patch.password = form.password; // blank = keep current
       await api.adminUpdateUser(user.id, patch);
       onSaved();
@@ -1182,12 +1184,12 @@ function UserEditCard({ user, memberships, entities, roles, onCancel, onSaved })
         <L>{accountType === 'admin' ? 'Also a customer of (optional)' : 'Clients'}</L>
         <div style={{ marginTop: 4 }}><ClientLinkPicker entities={entities} value={entityIds} onChange={setEntityIds} /></div>
         <p style={{ ...hint, marginTop: 8 }}>Per-client roles are set on each client's <b>Logins</b> tab; newly-linked clients default to Owner.</p>
-        <L>Inventive (AI analyst)</L>
-        <p style={{ ...hint, marginTop: 2 }}>How this user maps to its Inventive workspace. Blank inherits their name / own Howler user ID (<code style={{ userSelect: 'all' }}>{user.id}</code>).</p>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, margin: '4px 0 14px' }}>
-          <Field label="Account name"><input style={{ ...input, minWidth: 0 }} value={form.inventiveName} onChange={set('inventiveName')} placeholder={user.fullName || 'Use the user’s name'} /></Field>
-          <Field label="External reference (UUID)"><input style={{ ...input, minWidth: 0, fontFamily: 'monospace', fontSize: 12 }} value={form.inventiveRefId} onChange={set('inventiveRefId')} placeholder={user.id} /></Field>
-        </div>
+        <L>Inventive workspace</L>
+        <p style={{ ...hint, marginTop: 2 }}>Link this user to a workspace (create them in Admin → Integrations → <b>Inventive workspaces</b>). Unlinked → falls back to the user’s own ID.</p>
+        <select style={{ ...input, width: '100%', margin: '4px 0 14px' }} value={form.inventiveWorkspaceId} onChange={set('inventiveWorkspaceId')}>
+          <option value="">— None (use the user’s own ID) —</option>
+          {workspaces.map((w) => <option key={w.id} value={w.id}>{w.name || '(unnamed)'}{w.refId ? ` · ${w.refId}` : ''}</option>)}
+        </select>
         <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
           <button style={{ ...miniBtn, background: 'var(--brand)', color: '#fff', borderColor: 'var(--brand)' }} onClick={save} disabled={!form.email.trim() || busy}>{busy ? 'Saving…' : 'Save changes'}</button>
           <button style={miniBtnOutline} onClick={onCancel}>Cancel</button>
@@ -2771,6 +2773,56 @@ function MailLog() {
 }
 
 // ─── Integrations (admin: primary Looker + Anthropic accounts) ─────────────────
+// Reusable Inventive workspaces: create once (name + reference), link users on
+// their profile (Admin → Users → Edit). One workspace can be shared by many users.
+function InventiveWorkspaces() {
+  const [items, setItems] = useState(null);
+  const [draft, setDraft] = useState({ name: '', refId: '' });
+  const [editId, setEditId] = useState(null);
+  const [edit, setEdit] = useState({ name: '', refId: '' });
+  const load = () => api.adminListInventiveWorkspaces().then(setItems).catch(() => setItems([]));
+  useEffect(() => { load(); }, []);
+  const add = async () => { if (!draft.name.trim()) return; await api.adminCreateInventiveWorkspace(draft); setDraft({ name: '', refId: '' }); load(); };
+  const saveEdit = async () => { await api.adminUpdateInventiveWorkspace(editId, edit); setEditId(null); load(); };
+  const del = async (w) => { if (confirm(`Delete workspace "${w.name || '(unnamed)'}"? ${w.userCount} linked user${w.userCount === 1 ? '' : 's'} will be unlinked.`)) { await api.adminDeleteInventiveWorkspace(w.id); load(); } };
+  if (!items) return <Muted>Loading…</Muted>;
+  return (
+    <div>
+      <p style={hint}>Create one workspace per provisioned Inventive workspace (name + reference), then link users to it on each user's profile (Admin → Users → Edit). Many users can share one workspace.</p>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 12 }}>
+        <Field label="Name"><input style={input} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="e.g. Movement Entertainment" /></Field>
+        <Field label="Reference (externalRefId)"><input style={{ ...input, fontFamily: 'monospace', fontSize: 12, minWidth: 280 }} value={draft.refId} onChange={(e) => setDraft({ ...draft, refId: e.target.value })} placeholder="workspace ref / UUID" /></Field>
+        <button style={miniBtn} onClick={add} disabled={!draft.name.trim()}>+ Add workspace</button>
+      </div>
+      {items.length === 0 ? <Muted>No workspaces yet.</Muted> : (
+        <div style={{ border: '1px solid var(--hairline)', borderRadius: 10, overflow: 'hidden' }}>
+          {items.map((w) => (
+            <div key={w.id} style={{ borderBottom: '1px solid var(--hairline)', padding: '8px 10px' }}>
+              {editId === w.id ? (
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <input style={{ ...input, flex: 1, minWidth: 140 }} value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} />
+                  <input style={{ ...input, flex: 1, minWidth: 200, fontFamily: 'monospace', fontSize: 12 }} value={edit.refId} onChange={(e) => setEdit({ ...edit, refId: e.target.value })} />
+                  <button style={miniBtn} onClick={saveEdit}>Save</button>
+                  <button style={miniBtnOutline} onClick={() => setEditId(null)}>Cancel</button>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <span style={{ fontWeight: 600, minWidth: 0 }}>{w.name || '(unnamed)'}</span>
+                  <code style={{ fontSize: 11.5, color: 'var(--muted)', background: 'rgba(128,128,128,0.12)', padding: '2px 7px', borderRadius: 6, userSelect: 'all' }}>{w.refId || '—'}</code>
+                  <span style={{ fontSize: 12, color: 'var(--muted)' }}>{w.userCount} user{w.userCount === 1 ? '' : 's'}</span>
+                  <span style={{ flex: 1 }} />
+                  <button style={miniBtnOutline} onClick={() => { setEditId(w.id); setEdit({ name: w.name, refId: w.refId }); }}>Edit</button>
+                  <button style={delBtn} onClick={() => del(w)}>Delete</button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AdminIntegrations() {
   const [value, setValue] = useState(null);
   const [clients, setClients] = useState([]);
@@ -2782,6 +2834,9 @@ function AdminIntegrations() {
       <p style={hint}>Accounts (Looker · Anthropic · Email · <b>Inventive</b>) is open below; other sections are collapsed — tap to open. Accounts override the values in <code>.env</code>; clients can set their own Looker/Anthropic (Client → Integrations), which take precedence for their data.</p>
       <Section title="🔑 Accounts — Looker · Anthropic · Email · Inventive" defaultOpen>
         <IntegrationsForm value={value} showResend showInventive clients={clients} canManageLock lockableKeys={['looker', 'anthropic', 'resend', 'inventive']} locks={value.locks || {}} onToggleLock={async (k, locked) => setValue(await api.setAdminIntegrationLock(k, locked))} onTestEmail={() => api.sendMailTest()} onSave={async (p) => setValue(await api.saveAdminIntegrations(p))} />
+      </Section>
+      <Section title="✨ Inventive workspaces">
+        <InventiveWorkspaces />
       </Section>
       <Section title="◇ Audience sync — connector health">
         <p style={hint}>Per-client status of the Meta / TikTok audience syncs: which clients are connected, how many audiences are live, and any recent failures. Drill into a client to see each segment's audience.</p>

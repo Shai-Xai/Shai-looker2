@@ -36,10 +36,12 @@ function mount(app, { db, auth }) {
     const { firstname, lastname } = profileFirst
       ? { firstname: profileFirst, lastname: (u.lastName || '').trim() }
       : inventiveName(u.email);
-    // Account name + externalRefId are override-able per user (Admin → Users); blank
-    // inherits the user's own name / Howler user ID (the stable default mapping key).
-    const accountName = (u.inventiveName || '').trim() || u.fullName || [firstname, lastname].filter(Boolean).join(' ') || u.email;
-    const externalRefId = (u.inventiveRefId || '').trim() || u.id;
+    // The user is linked to a reusable Inventive workspace (Admin → Integrations →
+    // Inventive workspaces). Its name + reference identify the workspace; an unlinked
+    // user falls back to their own name / Howler user ID (the stable default key).
+    const ws = u.inventiveWorkspaceId ? db.getInventiveWorkspace(u.inventiveWorkspaceId) : null;
+    const accountName = (ws?.name || '').trim() || u.fullName || [firstname, lastname].filter(Boolean).join(' ') || u.email;
+    const externalRefId = (ws?.refId || '').trim() || u.id;
     const userInfo = {
       firstname, lastname, email: u.email,
       // One Inventive workspace per Pulse user.

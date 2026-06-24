@@ -426,7 +426,8 @@ app.get('/api/admin/users/:id', auth.requireAdmin, (req, res) => {
     user: {
       id: u.id, email: u.email, role: u.role, createdAt: u.createdAt,
       firstName: u.firstName, lastName: u.lastName, fullName: u.fullName, mobile: u.mobile,
-      inventiveName: u.inventiveName || '', inventiveRefId: u.inventiveRefId || '',
+      inventiveWorkspaceId: u.inventiveWorkspaceId || '',
+      inventiveWorkspace: u.inventiveWorkspaceId ? db.getInventiveWorkspace(u.inventiveWorkspaceId) : null,
       lastLogin: u.lastLogin || null, notifyEmail: u.notifyEmail, notifyPush: u.notifyPush,
       entityIds: u.entityIds,
     },
@@ -469,6 +470,16 @@ app.put('/api/admin/entities/:id', auth.requireAdmin, (req, res) => {
   res.json(e);
 });
 app.delete('/api/admin/entities/:id', auth.requireAdmin, (req, res) => { db.deleteEntity(req.params.id); res.status(204).end(); });
+
+// Reusable Inventive workspaces — create (name + reference), then link users to them.
+app.get('/api/admin/inventive-workspaces', auth.requireAdmin, (_req, res) => res.json(db.listInventiveWorkspaces()));
+app.post('/api/admin/inventive-workspaces', auth.requireAdmin, (req, res) => res.status(201).json(db.createInventiveWorkspace(req.body || {})));
+app.put('/api/admin/inventive-workspaces/:id', auth.requireAdmin, (req, res) => {
+  const w = db.updateInventiveWorkspace(req.params.id, req.body || {});
+  if (!w) return res.status(404).json({ error: 'Workspace not found' });
+  res.json(w);
+});
+app.delete('/api/admin/inventive-workspaces/:id', auth.requireAdmin, (req, res) => { db.deleteInventiveWorkspace(req.params.id); res.status(204).end(); });
 
 // Sets = reusable dashboard collections (Ticketing, Cashless, …).
 app.get('/api/admin/sets', auth.requireAdmin, (_req, res) => res.json(db.listSets()));
