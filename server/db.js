@@ -905,10 +905,43 @@ function setNotifyTypes(userId, partial = {}) {
   setUserPref(userId, 'notify_types', JSON.stringify(cur));
   return cur;
 }
-// Is a given notification category on for this user? Unknown/blank type ⇒ allowed.
-function notifyTypeOn(userId, type) {
+// Per-CHANNEL per-type matrix — the granular layer. A user can switch a category
+// (digests/goals/alerts/messages) off for ONE channel (e.g. no goal emails) while
+// keeping it on for another (push). Stored as { email:{key:bool}, push:{key:bool} }
+// in user_prefs. Defaults ON; a legacy flat `notify_types` mute seeds BOTH channels
+// so existing opt-outs carry over until a per-channel pref is set.
+const NOTIFY_CHANNELS = ['email', 'push'];
+function getNotifyMatrix(userId) {
+  let stored = {}; let legacy = {};
+  try { stored = JSON.parse(getUserPref(userId, 'notify_matrix', '') || '{}'); } catch { stored = {}; }
+  try { legacy = JSON.parse(getUserPref(userId, 'notify_types', '') || '{}'); } catch { legacy = {}; }
+  const out = {};
+  for (const ch of NOTIFY_CHANNELS) {
+    out[ch] = {};
+    for (const t of NOTIFY_TYPES) {
+      const v = stored?.[ch]?.[t.key];
+      out[ch][t.key] = v !== undefined ? v !== false : (legacy[t.key] !== false);
+    }
+  }
+  return out;
+}
+function setNotifyMatrix(userId, partial = {}) {
+  const cur = getNotifyMatrix(userId);
+  for (const ch of NOTIFY_CHANNELS) {
+    if (partial[ch] && typeof partial[ch] === 'object') {
+      for (const t of NOTIFY_TYPES) if (t.key in partial[ch]) cur[ch][t.key] = !!partial[ch][t.key];
+    }
+  }
+  setUserPref(userId, 'notify_matrix', JSON.stringify(cur));
+  return cur;
+}
+// Is a category on for this user on a given channel? With no channel, allow if it's
+// on for ANY channel (safe default for legacy callers). Unknown/blank type ⇒ allowed.
+function notifyTypeOn(userId, type, channel) {
   if (!type) return true;
-  return getNotifyTypes(userId)[type] !== false;
+  const m = getNotifyMatrix(userId);
+  if (channel && NOTIFY_CHANNELS.includes(channel)) return m[channel]?.[type] !== false;
+  return NOTIFY_CHANNELS.some((ch) => m[ch]?.[type] !== false);
 }
 
 function listUsers() { return db.prepare('SELECT * FROM users ORDER BY email').all().map(rowToUser); }
@@ -1585,7 +1618,7 @@ module.exports = {
   getSuiteMailBranding, setSuiteMailBranding,
   ensureInboxToken, regenerateInboxToken, findEntityByInboxToken,
   listUsers, getUser, getUserByEmail, createUser, updateUser, deleteUser, verifyCredentials, publicUser, setUserEntities, setNotificationPrefs, touchLastLogin,
-  NOTIFY_TYPES, getNotifyTypes, setNotifyTypes, notifyTypeOn,
+  NOTIFY_TYPES, NOTIFY_CHANNELS, getNotifyTypes, setNotifyTypes, getNotifyMatrix, setNotifyMatrix, notifyTypeOn,
   createAuthToken, consumeAuthToken, clearAuthTokens,
   membershipsForUser, roleForMembership, setMembershipRole, removeMembership,
   listDashboards, getDashboard, createDashboard, updateDashboard, removeDashboard, dashboardPoolFor, sharedDashboards,

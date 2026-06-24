@@ -219,16 +219,20 @@ app.get('/api/my/notification-prefs', auth.requireAuth, (req, res) => {
   res.json({
     email: u?.notifyEmail !== false, push: u?.notifyPush !== false, pushAvailable: push.isEnabled(),
     types: db.getNotifyTypes(req.user.id), typeCatalog: db.NOTIFY_TYPES,
+    matrix: db.getNotifyMatrix(req.user.id), channels: db.NOTIFY_CHANNELS,
   });
 });
 app.put('/api/my/notification-prefs', auth.requireAuth, (req, res) => {
-  const { email, push: wantPush, types } = req.body || {};
+  const { email, push: wantPush, types, matrix } = req.body || {};
   const next = db.setNotificationPrefs(req.user.id, {
     ...(email != null ? { email: !!email } : {}),
     ...(wantPush != null ? { push: !!wantPush } : {}),
   });
+  // `matrix` is the per-channel layer; `types` kept for older clients (applied to
+  // every channel via the matrix's legacy seed).
   if (types && typeof types === 'object') db.setNotifyTypes(req.user.id, types);
-  res.json({ ...(next || { email: true, push: true }), types: db.getNotifyTypes(req.user.id) });
+  if (matrix && typeof matrix === 'object') db.setNotifyMatrix(req.user.id, matrix);
+  res.json({ ...(next || { email: true, push: true }), types: db.getNotifyTypes(req.user.id), matrix: db.getNotifyMatrix(req.user.id) });
 });
 
 // ─── Client self-service team management (team.manage) ─────────────────────────

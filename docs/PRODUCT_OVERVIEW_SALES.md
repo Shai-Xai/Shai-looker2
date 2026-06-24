@@ -359,6 +359,11 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-24** — **Per-channel notification control** ✅: in **Settings →
+  Notifications**, each category (Digests · Goals · Alerts · Messages) now has a
+  **separate Email and Push switch**, so a client can (e.g.) keep goal **push** on
+  but turn goal **emails** off — instead of muting a type everywhere. Existing
+  opt-outs carry over to both channels. The in-app inbox always receives.
 - **2026-06-24** — **Ad audiences hub (client self-service)** ✅: new **Engage → Ad
   audiences** tab gives clients a single, mobile-first view of every audience Pulse
   mirrors to Meta/TikTok — connection health, a one-tap **Verify connection**, and

@@ -155,7 +155,7 @@ function mount(app, { db, auth, mailer, push, onInbound }) {
     // Every login LINKED to the entity that hasn't muted email — including admins
     // explicitly linked as part of this client's team (admins aren't linked by default).
     const to = db.listUsers()
-      .filter((u) => (u.entityIds || []).includes(entityId) && u.notifyEmail !== false && db.notifyTypeOn(u.id, 'messages'))
+      .filter((u) => (u.entityIds || []).includes(entityId) && u.notifyEmail !== false && db.notifyTypeOn(u.id, 'messages', 'email'))
       .map((u) => u.email);
     if (!to.length) return;
     const subject = t.priority === 'must_ack' ? `Action needed: ${t.title || 'a message from Howler'}`

@@ -110,7 +110,7 @@ async function deliver(rows, payload) {
 function sendToUser(userId, payload, type) {
   if (!enabled()) return Promise.resolve(0);
   // Respect the user's per-type mute (digests/goals/alerts/messages).
-  if (type && _db.notifyTypeOn && !_db.notifyTypeOn(userId, type)) return Promise.resolve(0);
+  if (type && _db.notifyTypeOn && !_db.notifyTypeOn(userId, type, 'push')) return Promise.resolve(0);
   const rows = sql.prepare('SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE user_id=?').all(userId);
   return deliver(rows, payload);
 }
@@ -122,7 +122,7 @@ function sendToEntity(entityId, payload, type) {
   if (!enabled() || !entityId) return Promise.resolve(0);
   // Linked to the entity AND hasn't muted push (nor this category).
   const userIds = _db.listUsers()
-    .filter((u) => (u.entityIds || []).includes(entityId) && u.notifyPush !== false && (!type || _db.notifyTypeOn(u.id, type)))
+    .filter((u) => (u.entityIds || []).includes(entityId) && u.notifyPush !== false && (!type || _db.notifyTypeOn(u.id, type, 'push')))
     .map((u) => u.id);
   if (!userIds.length) return Promise.resolve(0);
   const ph = userIds.map(() => '?').join(',');
