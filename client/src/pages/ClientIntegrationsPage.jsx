@@ -104,7 +104,12 @@ export default function ClientIntegrationsPage() {
                 lookerActive={false}
                 showMeta
                 showTikTok
-                canEdit={isAdmin || role === 'owner'}
+                canManageLock={isAdmin || role === 'owner'}
+                locks={activeItem.locks || {}}
+                onToggleLock={async (key, locked) => {
+                  const v = await api.setMyIntegrationLock(activeItem.entityId, key, locked);
+                  setItems((arr) => arr.map((x) => (x.entityId === activeItem.entityId ? { ...x, ...v } : x)));
+                }}
                 onSave={async (p) => {
                   const v = await api.saveMyIntegrations(activeItem.entityId, p);
                   setItems((arr) => arr.map((x) => (x.entityId === activeItem.entityId ? { ...x, ...v } : x)));

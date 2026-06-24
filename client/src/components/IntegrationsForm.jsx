@@ -4,12 +4,11 @@ import { useState } from 'react';
 // write-only: the form only knows whether a value is set (value.*.keySet /
 // clientSecretSet); typing a new value changes it, blank leaves it unchanged.
 // `onSave(payload)` receives only the fields that changed.
-export default function IntegrationsForm({ value, onSave, showLooker = true, lookerActive = true, showResend = false, showInventive = false, inventiveWorkspace = null, showMeta = false, showTikTok = false, clients = [], onTestEmail, collapsible = false, canEdit = true }) {
-  // Integrations are LOCKED by default — read-only, never sitting there as open
-  // editable text. Only an admin or the account Owner (canEdit) can unlock to
-  // edit; saving (or Cancel) re-locks. `locked` drives the <fieldset disabled>.
-  const [editing, setEditing] = useState(false);
-  const locked = !editing;
+export default function IntegrationsForm({ value, onSave, showLooker = true, lookerActive = true, showResend = false, showInventive = false, inventiveWorkspace = null, showMeta = false, showTikTok = false, clients = [], onTestEmail, collapsible = false, canManageLock = false, locks = {}, onToggleLock }) {
+  // Each integration can be FROZEN (a per-integration lock). While frozen its
+  // fields are read-only; only an admin/Owner (canManageLock) can unlock to edit,
+  // then re-lock — a guard against accidental changes to a working connection.
+  const lockProps = (key) => ({ lockKey: key, locked: !!locks?.[key], canManageLock, onToggleLock });
   const [baseUrl, setBaseUrl] = useState(value?.looker?.baseUrl || '');
   const [clientId, setClientId] = useState(value?.looker?.clientId || '');
   const [clientSecret, setClientSecret] = useState('');
@@ -81,53 +80,20 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
         if (clearTtToken) payload.tiktok.clearAccessToken = true;
       }
       await onSave(payload);
-      clearTransient();
-      setEditing(false); // re-lock after a successful save
+      setClientSecret(''); setAnthropicKey(''); setClearSecret(false); setClearKey(false);
+      setResendKey(''); setClearResendKey(false);
+      setInvKey(''); setInvToken(''); setClearInvKey(false); setClearInvToken(false);
+      setMetaToken(''); setClearMetaToken(false);
+      setTtToken(''); setClearTtToken(false);
       setSaved(true); setTimeout(() => setSaved(false), 1600);
     } catch (e) { alert('Save failed: ' + e.message); }
     finally { setBusy(false); }
   }
 
-  // Drop any half-typed secrets / clear-flags (used by both a successful save and
-  // Cancel) so an aborted edit never leaves stale values behind.
-  function clearTransient() {
-    setClientSecret(''); setAnthropicKey(''); setClearSecret(false); setClearKey(false);
-    setResendKey(''); setClearResendKey(false);
-    setInvKey(''); setInvToken(''); setClearInvKey(false); setClearInvToken(false);
-    setMetaToken(''); setClearMetaToken(false);
-    setTtToken(''); setClearTtToken(false);
-  }
-  function cancelEdit() {
-    clearTransient();
-    // Reset the non-secret text fields back to the saved values.
-    setBaseUrl(value?.looker?.baseUrl || ''); setClientId(value?.looker?.clientId || '');
-    setMailFrom(value?.resend?.from || ''); setInvEndpoint(value?.inventive?.endpoint || '');
-    setMetaAdAccount(value?.meta?.adAccountId || ''); setMetaBusiness(value?.meta?.businessId || '');
-    setTtAdvertiser(value?.tiktok?.advertiserId || '');
-    setEditing(false);
-  }
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      {/* Lock bar — always shown, OUTSIDE the disabled fieldset so the Unlock
-          button stays clickable. Unlock is offered only to admins/owners. */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, border: `1px solid ${editing ? 'var(--brand)' : 'var(--hairline)'}`, background: editing ? 'rgba(255,56,92,0.05)' : 'rgba(128,128,128,0.06)', borderRadius: 10, padding: '11px 14px' }}>
-        <span style={{ fontSize: 17 }}>{editing ? '🔓' : '🔒'}</span>
-        <span style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.45, flex: 1 }}>
-          {editing
-            ? <><b>Editing.</b> Make your changes, then Save to apply and re-lock.</>
-            : canEdit
-              ? <><b>Locked.</b> These settings are read-only. Unlock to make changes.</>
-              : <><b>Locked.</b> Only an admin or the account <b>Owner</b> can edit integrations.</>}
-        </span>
-        {!editing && canEdit && (
-          <button type="button" onClick={() => setEditing(true)} style={{ ...saveBtn, flexShrink: 0, background: 'var(--card)', color: 'var(--brand)', border: '1px solid var(--brand)' }}>🔓 Unlock to edit</button>
-        )}
-      </div>
-
-      <fieldset disabled={locked} style={{ border: 'none', margin: 0, padding: 0, minInlineSize: 'auto', display: 'flex', flexDirection: 'column', gap: 18 }}>
       {/* Anthropic */}
-      <Section title="🤖 Anthropic (AI insights)" collapsible={collapsible}>
+      <Section title="🤖 Anthropic (AI insights)" collapsible={collapsible} {...lockProps('anthropic')}>
         <Lbl>API key</Lbl>
         <input
           type="password"
@@ -147,7 +113,7 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
 
       {/* Meta (FB/IG) — per-client audience sync */}
       {showMeta && (
-        <Section title="◇ Meta (Facebook / Instagram)" collapsible={collapsible}>
+        <Section title="◇ Meta (Facebook / Instagram)" collapsible={collapsible} {...lockProps('meta')}>
           <div style={note}>
             Push a <b>segment</b> to a Meta <b>Custom Audience</b> for ad targeting or exclusion. Emails/phones are hashed before they leave Pulse. Use a system-user / long-lived token with <code>ads_management</code>.
           </div>
@@ -178,7 +144,7 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
 
       {/* TikTok — per-client audience sync */}
       {showTikTok && (
-        <Section title="♪ TikTok" collapsible={collapsible}>
+        <Section title="♪ TikTok" collapsible={collapsible} {...lockProps('tiktok')}>
           <div style={note}>
             Push a <b>segment</b> to a TikTok <b>Custom Audience</b> for ad targeting. Emails/phones are hashed before they leave Pulse. Use an access token with audience (DMP) scope and the advertiser ID the audience should live under.
           </div>
@@ -348,7 +314,7 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
 
       {/* Looker */}
       {showLooker && (
-        <Section title="📊 Looker" collapsible={collapsible}>
+        <Section title="📊 Looker" collapsible={collapsible} {...lockProps('looker')}>
           {!lookerActive && (
             <div style={note}>Per-client Looker isn't active yet — the primary (admin) Looker account is used for now. Your settings here are saved for when it's enabled.</div>
           )}
@@ -374,36 +340,56 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
         </Section>
       )}
 
-      {editing && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <button style={saveBtn} onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save & lock'}</button>
-          <button type="button" style={{ ...saveBtn, background: 'var(--card)', color: 'var(--text)', border: '1px solid var(--hairline)' }} onClick={cancelEdit} disabled={busy}>Cancel</button>
-          {saved && (
-            <span className="saved-chip" style={{ color: 'var(--success, #10b981)', fontSize: 13, fontWeight: 600 }}>
-              <svg className="check-anim" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M5 13l4 4L19 7" /></svg>
-              Saved
-            </span>
-          )}
-        </div>
-      )}
-      </fieldset>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <button style={saveBtn} onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
+        {saved && (
+          <span className="saved-chip" style={{ color: 'var(--success, #10b981)', fontSize: 13, fontWeight: 600 }}>
+            <svg className="check-anim" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M5 13l4 4L19 7" /></svg>
+            Saved
+          </span>
+        )}
+      </div>
     </div>
   );
 }
 
 // A card section that can optionally collapse (admin integrations starts each
 // section collapsed so the long page is scannable).
-function Section({ title, collapsible, children }) {
+// A card section that can optionally collapse, and optionally be FROZEN (a
+// per-integration lock). When `lockKey` is set the header carries a lock toggle
+// (visible to admins/owners) and, while locked, the section's fields are disabled.
+function Section({ title, collapsible, children, lockKey, locked = false, canManageLock = false, onToggleLock }) {
   const [open, setOpen] = useState(!collapsible);
+  const [busy, setBusy] = useState(false);
+  const toggle = async () => {
+    if (!onToggleLock || busy) return;
+    setBusy(true);
+    try { await onToggleLock(lockKey, !locked); } finally { setBusy(false); }
+  };
+  const lockable = !!lockKey;
   return (
-    <section style={card}>
-      {collapsible ? (
-        <button type="button" onClick={() => setOpen((o) => !o)} style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', background: 'none', border: 'none', padding: 0, cursor: 'pointer', font: 'inherit', textAlign: 'left' }}>
-          <span style={{ width: 12, fontSize: 10, color: 'var(--muted)', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</span>
-          <span style={secTitle}>{title}</span>
-        </button>
-      ) : <div style={secTitle}>{title}</div>}
-      {open && <div style={collapsible ? { marginTop: 10 } : undefined}>{children}</div>}
+    <section style={{ ...card, ...(locked ? { borderColor: 'var(--hairline)', background: 'rgba(128,128,128,0.04)' } : null) }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        {collapsible ? (
+          <button type="button" onClick={() => setOpen((o) => !o)} style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0, background: 'none', border: 'none', padding: 0, cursor: 'pointer', font: 'inherit', textAlign: 'left' }}>
+            <span style={{ width: 12, fontSize: 10, color: 'var(--muted)', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</span>
+            <span style={secTitle}>{title}</span>
+          </button>
+        ) : <div style={{ ...secTitle, flex: 1, minWidth: 0 }}>{title}</div>}
+        {lockable && locked && <span title="This integration is locked" style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)' }}>🔒 Locked</span>}
+        {lockable && canManageLock && (
+          <button type="button" onClick={toggle} disabled={busy}
+            title={locked ? 'Unlock to edit this integration' : 'Lock this integration to prevent edits'}
+            style={{ flexShrink: 0, border: `1px solid ${locked ? 'var(--brand)' : 'var(--hairline)'}`, background: 'var(--card)', color: locked ? 'var(--brand)' : 'var(--muted)', borderRadius: 980, fontSize: 12, fontWeight: 700, padding: '4px 11px', cursor: 'pointer' }}>
+            {busy ? '…' : locked ? '🔓 Unlock' : '🔒 Lock'}
+          </button>
+        )}
+      </div>
+      {open && (
+        <fieldset disabled={lockable && locked} style={{ border: 'none', margin: 0, padding: 0, minInlineSize: 'auto', ...(collapsible ? { marginTop: 10 } : { marginTop: 0 }), opacity: lockable && locked ? 0.6 : 1 }}>
+          {children}
+        </fieldset>
+      )}
     </section>
   );
 }

@@ -134,6 +134,7 @@ addColumn('suites', 'icon', "TEXT NOT NULL DEFAULT ''");
 addColumn('entities', 'logo', "TEXT NOT NULL DEFAULT ''"); // client brand image data-URL / emoji
 addColumn('entities', 'ai_context', "TEXT NOT NULL DEFAULT ''"); // client-specific AI background
 addColumn('entities', 'integrations', "TEXT NOT NULL DEFAULT '{}'"); // per-client API credentials (Looker / Anthropic)
+addColumn('entities', 'integration_locks', "TEXT NOT NULL DEFAULT '{}'"); // per-integration freeze locks { key: true }
 addColumn('entities', 'inventive_name', "TEXT NOT NULL DEFAULT ''"); // optional Inventive workspace name override ('' = use the client name)
 addColumn('entities', 'inventive_ref_id', "TEXT NOT NULL DEFAULT ''"); // optional Inventive externalRefId override ('' = use the client's own UUID)
 addColumn('entities', 'mail_branding', "TEXT NOT NULL DEFAULT '{}'"); // per-client email branding (logo/colour/sender/wording)
@@ -745,6 +746,20 @@ function setEntityIntegrations(id, patch) {
   const next = { ...cur, ...(patch || {}) }; // patch carries only the keys to change
   db.prepare('UPDATE entities SET integrations=? WHERE id=?').run(JSON.stringify(next), id);
   return getEntityIntegrations(id);
+}
+// Per-integration FREEZE locks for a client: { looker:true, meta:true, … }. A
+// frozen integration can't be edited until an admin/owner unlocks it — a guard
+// against accidental changes to a working connection. Non-secret presentation
+// state, fine to send to the browser.
+function getEntityIntegrationLocks(id) {
+  const r = db.prepare('SELECT integration_locks FROM entities WHERE id=?').get(id);
+  return r ? J(r.integration_locks, {}) : {};
+}
+function setEntityIntegrationLock(id, key, locked) {
+  const cur = getEntityIntegrationLocks(id);
+  if (locked) cur[key] = true; else delete cur[key];
+  db.prepare('UPDATE entities SET integration_locks=? WHERE id=?').run(JSON.stringify(cur), id);
+  return cur;
 }
 // Per-client email branding (logo / brand colour / sender name / wording). A
 // plain JSON blob on the entity — safe to send to the browser, unlike creds.
@@ -1564,6 +1579,7 @@ module.exports = {
   exportAll, importAll,
   getFilterView, setFilterView, deleteFilterView,
   listEntities, getEntity, createEntity, updateEntity, deleteEntity, getEntityIntegrations, setEntityIntegrations,
+  getEntityIntegrationLocks, setEntityIntegrationLock,
   getEntityMailBranding, setEntityMailBranding,
   getSuiteMailBranding, setSuiteMailBranding,
   ensureInboxToken, regenerateInboxToken, findEntityByInboxToken,

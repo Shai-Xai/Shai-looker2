@@ -3081,6 +3081,9 @@ function ClientIntegrations({ entity }) {
         lookerActive={false}
         showMeta
         showTikTok
+        canManageLock
+        locks={value.locks || {}}
+        onToggleLock={async (k, locked) => setValue(await api.setEntityIntegrationLock(entity.id, k, locked))}
         inventiveWorkspace={{ name: entity.inventiveName || '', refId: entity.inventiveRefId || '', defaultRefId: entity.id }}
         onSave={onSave}
       />

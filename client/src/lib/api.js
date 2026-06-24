@@ -268,6 +268,8 @@ export const api = {
   saveEntityIntegrations: (id, p) => fetch(`/api/admin/entities/${id}/integrations`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),
   getMyIntegrations: () => fetch('/api/my/integrations').then(json),
   saveMyIntegrations: (entityId, p) => fetch(`/api/my/integrations/${entityId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),
+  setMyIntegrationLock: (entityId, key, locked) => fetch(`/api/my/integrations/${entityId}/lock`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, locked }) }).then(json),
+  setEntityIntegrationLock: (id, key, locked) => fetch(`/api/admin/entities/${id}/integrations/lock`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, locked }) }).then(json),
 
   // Email templates / branding (platform default + per-client overrides)
   getMailTemplate: () => fetch('/api/admin/mail-template').then(json),

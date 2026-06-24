@@ -1628,7 +1628,18 @@ function entityIntegrationsView(entityId) {
     anthropic: { keySet: !!i.anthropicApiKey, keyHint: maskSecret(i.anthropicApiKey) },
     meta: { tokenSet: !!i.metaAccessToken, tokenHint: maskSecret(i.metaAccessToken), adAccountId: i.metaAdAccountId || '', businessId: i.metaBusinessId || '' },
     tiktok: { tokenSet: !!i.tiktokAccessToken, tokenHint: maskSecret(i.tiktokAccessToken), advertiserId: i.tiktokAdvertiserId || '' },
+    locks: db.getEntityIntegrationLocks(entityId), // { key: true } — frozen integrations
   };
+}
+// Per-entity integration keys that can be frozen. A frozen section's changes are
+// dropped server-side (defence in depth — the UI also disables it), so a freeze
+// can't be bypassed by a hand-crafted request.
+const ENTITY_INTEGRATION_KEYS = ['looker', 'anthropic', 'meta', 'tiktok'];
+function dropFrozenSections(entityId, body) {
+  const locks = db.getEntityIntegrationLocks(entityId);
+  const b = { ...(body || {}) };
+  for (const k of ENTITY_INTEGRATION_KEYS) if (locks[k]) delete b[k];
+  return b;
 }
 
 // Admin: primary accounts.
@@ -1880,8 +1891,15 @@ app.get('/api/admin/entities/:id/integrations', auth.requireAdmin, (req, res) =>
 app.put('/api/admin/entities/:id/integrations', auth.requireAdmin, (req, res) => {
   if (!db.getEntity(req.params.id)) return res.status(404).json({ error: 'Not found' });
   const patch = {};
-  applyIntegrationsPatch(req.body || {}, (k, v) => { patch[k] = v; });
+  applyIntegrationsPatch(dropFrozenSections(req.params.id, req.body || {}), (k, v) => { patch[k] = v; });
   db.setEntityIntegrations(req.params.id, patch);
+  res.json(entityIntegrationsView(req.params.id));
+});
+app.put('/api/admin/entities/:id/integrations/lock', auth.requireAdmin, (req, res) => {
+  if (!db.getEntity(req.params.id)) return res.status(404).json({ error: 'Not found' });
+  const { key, locked } = req.body || {};
+  if (!ENTITY_INTEGRATION_KEYS.includes(key)) return res.status(400).json({ error: 'Unknown integration' });
+  db.setEntityIntegrationLock(req.params.id, key, !!locked);
   res.json(entityIntegrationsView(req.params.id));
 });
 
@@ -1981,8 +1999,16 @@ app.get('/api/my/integrations', auth.requireAuth, (req, res) => {
 app.put('/api/my/integrations/:entityId', auth.requireAuth, auth.requirePermission('integrations.manage'), (req, res) => {
   if (!(req.user.entityIds || []).includes(req.params.entityId)) return res.status(403).json({ error: 'Not allowed' });
   const patch = {};
-  applyIntegrationsPatch(req.body || {}, (k, v) => { patch[k] = v; });
+  applyIntegrationsPatch(dropFrozenSections(req.params.entityId, req.body || {}), (k, v) => { patch[k] = v; });
   db.setEntityIntegrations(req.params.entityId, patch);
+  res.json(entityIntegrationsView(req.params.entityId));
+});
+// Freeze / unfreeze a single integration for this client (admin or Owner).
+app.put('/api/my/integrations/:entityId/lock', auth.requireAuth, auth.requirePermission('integrations.manage'), (req, res) => {
+  if (!(req.user.entityIds || []).includes(req.params.entityId)) return res.status(403).json({ error: 'Not allowed' });
+  const { key, locked } = req.body || {};
+  if (!ENTITY_INTEGRATION_KEYS.includes(key)) return res.status(400).json({ error: 'Unknown integration' });
+  db.setEntityIntegrationLock(req.params.entityId, key, !!locked);
   res.json(entityIntegrationsView(req.params.entityId));
 });
 
