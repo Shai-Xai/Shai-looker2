@@ -112,6 +112,7 @@ function IconPicker({ value, onChange }) {
 //   Logins (Users)      – credentials, assigned to one or more entities
 const ADMIN_NAV = [
   ['entities', 'Clients', '👥'],
+  ['wizard', 'Setup wizard', '🧙'],
   ['users', 'Users', '🧑'],
   ['sets', 'Sets', '🗂️'],
   ['library', 'Tile library', '🧩'],
@@ -134,6 +135,7 @@ export default function AdminPage() {
   const content = (
     <>
       {tab === 'entities' && <Entities fields={fields} />}
+      {tab === 'wizard' && <SetupWizard fields={fields} />}
       {tab === 'users' && <UsersTab />}
       {tab === 'sets' && <Sets />}
       {tab === 'library' && <Library />}
@@ -707,6 +709,276 @@ function Entities({ fields }) {
         {items.length > 0 && shown.length === 0 && <Muted>No clients match “{q.trim()}”.</Muted>}
       </div>
       <button style={addBtn} onClick={async () => { const ent = await api.adminCreateEntity({ name: 'New client', lockedFilters: {} }); await load(); setSelectedId(ent.id); }}>+ Add client</button>
+    </div>
+  );
+}
+
+// ─── Client Setup Wizard — a guided, step-by-step path for account managers ────
+// Stands a new client up end to end without hunting through tabs: create the
+// client → lock their data scope → build their suites → add a login → brand it.
+// Every step explains *what* it does and *why* it matters, and performs the work
+// inline (reusing the very same editors the Clients tab uses, so nothing is a
+// throwaway mock). Back-end / admin only — it lives in the Admin console. The AM
+// can start fresh or resume a half-finished client, and finish by previewing the
+// account exactly as the client will see it.
+const WIZARD_STEPS = [
+  { key: 'client', icon: '🏢', title: 'The client', short: 'Client',
+    blurb: 'Everything in Pulse hangs off a “client” (internally an entity). Give it a name — usually the organiser or brand you’re onboarding — and, if you have it, their logo. You can change both later.' },
+  { key: 'scope', icon: '🔒', title: 'Data scope', short: 'Scope',
+    blurb: 'This is the most important step. Pulse force-filters every query on the server to this client’s organiser, so they only ever see their own numbers. Until you set a scope the account fails closed — they’ll see nothing. Pick the organiser(s) this client owns.' },
+  { key: 'suites', icon: '🗂️', title: 'Suites & dashboards', short: 'Suites',
+    blurb: 'A suite is one event/context for the client (e.g. “Bushfire 2026”). Inside it you choose which sets of dashboards they get, and lock it to that event. Add one suite per event. You can fine-tune which dashboards each set shows, and reorder them, right here.' },
+  { key: 'logins', icon: '🔑', title: 'Logins', short: 'Logins',
+    blurb: 'Create the people who can sign in for this client and set what each can see with a role. Give them a temporary password — they’ll be prompted to change it. You can also link an existing login if someone works across several clients.' },
+  { key: 'branding', icon: '🎨', title: 'Branding', short: 'Branding', optional: true,
+    blurb: 'Optional, but it makes the account feel like the client’s own. Set their logo, brand colours and email sender name — these white-label the whole app (UI accents + charts) and every email Pulse sends for them. Anything left blank inherits the Howler default.' },
+  { key: 'review', icon: '✅', title: 'Review & finish', short: 'Finish',
+    blurb: 'A quick check of what’s in place. Preview the account exactly as the client sees it, and see what’s still worth doing.' },
+];
+const WIZ_ORDER = WIZARD_STEPS.filter((s) => s.key !== 'review').map((s) => s.key);
+
+function SetupWizard({ fields }) {
+  const navigate = useNavigate();
+  const { setProfile } = useProfile();
+  const isMobile = useIsMobile();
+  const [data, setData] = useState(null); // { entities, suites, users, sets, dashTitle }
+  const [entityId, setEntityId] = useState(null);
+  const [stepKey, setStepKey] = useState('start'); // 'start' then a WIZARD_STEPS key
+  // Working state for the steps the wizard saves itself (client + scope).
+  const [name, setName] = useState('');
+  const [logo, setLogo] = useState('');
+  const [locks, setLocks] = useState({});
+  const [allOrg, setAllOrg] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const initFor = useRef(null);
+
+  const reload = () => Promise.all([api.adminListEntities(), api.adminListSuites(), api.adminListUsers(), api.adminListSets(), api.listDashboards()])
+    .then(([entities, suites, users, sets, dash]) => setData({ entities, suites, users, sets, dashTitle: Object.fromEntries(dash.map((d) => [d.id, d.title])) }));
+  useEffect(() => { reload(); }, []);
+
+  const entity = data ? (data.entities.find((e) => e.id === entityId) || null) : null;
+  // Seed the editable fields once per client (don't clobber edits on every reload).
+  useEffect(() => {
+    if (entity && initFor.current !== entity.id) {
+      initFor.current = entity.id;
+      setName(entity.name || ''); setLogo(entity.logo || '');
+      setLocks(entity.lockedFilters || {}); setAllOrg(!!entity.allOrganisers);
+    }
+    if (!entityId) { initFor.current = null; setName(''); setLogo(''); setLocks({}); setAllOrg(false); }
+  }, [entityId, entity]);
+
+  if (!data) return <Muted>Loading…</Muted>;
+
+  const suitesOf = (eid) => data.suites.filter((s) => s.entityId === eid);
+  const loginsOf = (eid) => data.users.filter((u) => (u.entityIds || []).includes(eid));
+  // Per-step completion — drives the stepper ticks and the review checklist.
+  const hasLock = allOrg || Object.values(locks).some((v) => String(v || '').trim());
+  const done = entity ? {
+    client: !!(entity.name || '').trim(),
+    scope: entity.allOrganisers || Object.values(entity.lockedFilters || {}).some((v) => String(v || '').trim()),
+    suites: suitesOf(entity.id).length > 0,
+    logins: loginsOf(entity.id).length > 0,
+    branding: !!entity.logo,
+  } : {};
+
+  const go = (key) => { setError(null); setStepKey(key); };
+  const idx = WIZ_ORDER.indexOf(stepKey);
+  const nextKey = stepKey === 'branding' ? 'review' : (idx >= 0 && idx < WIZ_ORDER.length - 1 ? WIZ_ORDER[idx + 1] : 'review');
+  const prevKey = idx > 0 ? WIZ_ORDER[idx - 1] : 'start';
+
+  // Save handlers for the two steps the wizard owns directly.
+  const saveClient = async () => {
+    if (!name.trim()) { setError('Give the client a name to continue.'); return; }
+    setBusy(true); setError(null);
+    try {
+      if (!entityId) { const ent = await api.adminCreateEntity({ name: name.trim(), logo, lockedFilters: {} }); setEntityId(ent.id); initFor.current = ent.id; }
+      else { await api.adminUpdateEntity(entityId, { name: name.trim(), logo }); }
+      await reload();
+      go('scope');
+    } catch (e) { setError(e.message); } finally { setBusy(false); }
+  };
+  const saveScope = async () => {
+    setBusy(true); setError(null);
+    try { await api.adminUpdateEntity(entity.id, { lockedFilters: locks, allOrganisers: allOrg }); await reload(); go('suites'); }
+    catch (e) { setError(e.message); } finally { setBusy(false); }
+  };
+
+  // Preview the account as the client sees it (scope the shell, open first dash).
+  const previewAccount = async () => {
+    const ents = suitesOf(entity.id);
+    setProfile(entity.id, { name: entity.name, logo: entity.logo });
+    try {
+      for (const su of ents) { const d = await api.mySuite(su.id); const first = d.sets.flatMap((s) => s.dashboards)[0]; if (first) { navigate(`/suite/${su.id}/d/${first.id}`); return; } }
+      navigate('/');
+    } catch (e) { alert('Could not open preview: ' + e.message); }
+  };
+
+  // ── Start screen: explain the journey, then begin (new) or resume (existing) ──
+  if (stepKey === 'start') {
+    const incomplete = [...data.entities]
+      .map((e) => ({ e, miss: ['scope', 'suites', 'logins'].filter((k) => !({ scope: e.allOrganisers || Object.values(e.lockedFilters || {}).some((v) => String(v || '').trim()), suites: suitesOf(e.id).length > 0, logins: loginsOf(e.id).length > 0 }[k])) }))
+      .filter((x) => x.miss.length)
+      .sort((a, b) => (a.e.name || '').localeCompare(b.e.name || ''));
+    return (
+      <div>
+        <div style={{ ...cardStyle, background: 'linear-gradient(135deg, rgba(var(--brand-rgb),0.10), rgba(var(--brand-rgb),0.02))', borderColor: 'rgba(var(--brand-rgb),0.25)' }}>
+          <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: '-0.02em', marginBottom: 6 }}>🧙 Client setup wizard</div>
+          <p style={{ fontSize: 14, color: 'var(--text)', lineHeight: 1.55, margin: '0 0 14px', maxWidth: 620 }}>
+            A guided, step-by-step path to stand a new client up — the right way, in order. It walks you through
+            everything a client needs to go live and does the work as you go, so you don’t have to hunt through tabs.
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+            {WIZARD_STEPS.map((s, i) => (
+              <div key={s.key} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, fontSize: 13.5 }}>
+                <span style={{ flexShrink: 0, width: 22, height: 22, borderRadius: '50%', background: 'var(--brand)', color: '#fff', fontSize: 12, fontWeight: 800, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{i + 1}</span>
+                <span><b>{s.icon} {s.title}</b>{s.optional ? <span style={{ color: 'var(--muted)' }}> · optional</span> : ''} — <span style={{ color: 'var(--muted)' }}>{s.blurb.split('. ')[0]}.</span></span>
+              </div>
+            ))}
+          </div>
+          <button style={{ ...saveBtn, padding: '11px 22px', fontSize: 14 }} onClick={() => { setEntityId(null); go('client'); }}>Start a new client →</button>
+        </div>
+        {incomplete.length > 0 && (
+          <div style={cardStyle}>
+            <L>Resume a client that isn’t finished</L>
+            <p style={{ ...hint, marginTop: 4 }}>These clients are missing a setup step. Pick one to continue where it left off.</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {incomplete.map(({ e, miss }) => (
+                <button key={e.id} className="lift" style={clientRow} onClick={() => { setEntityId(e.id); go('client'); }}>
+                  <span style={{ fontWeight: 600, fontSize: 14.5 }}>{e.name}</span>
+                  <span style={{ marginLeft: 'auto', color: 'var(--muted)', fontSize: 12 }}>needs {miss.map((m) => WIZARD_STEPS.find((s) => s.key === m).short.toLowerCase()).join(' · ')}</span>
+                  <span style={{ color: '#bbb', marginLeft: 10 }}>›</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  const step = WIZARD_STEPS.find((s) => s.key === stepKey);
+
+  // ── Stepper header: numbered progress, click to jump (once the client exists) ──
+  const Stepper = () => (
+    <div style={{ display: 'flex', gap: isMobile ? 6 : 10, marginBottom: 16, overflowX: 'auto', paddingBottom: 4 }}>
+      {WIZARD_STEPS.map((s) => {
+        const active = s.key === stepKey;
+        const ok = done[s.key];
+        const reachable = !!entity || s.key === 'client';
+        return (
+          <button key={s.key} onClick={() => reachable && go(s.key)} disabled={!reachable}
+            style={{ display: 'flex', alignItems: 'center', gap: 7, flexShrink: 0, padding: isMobile ? '7px 10px' : '8px 13px', borderRadius: 980, cursor: reachable ? 'pointer' : 'not-allowed',
+              border: active ? '1.5px solid var(--brand)' : '1.5px solid var(--hairline)', background: active ? 'var(--brand)' : 'var(--card)', color: active ? '#fff' : (reachable ? 'var(--text)' : 'var(--muted)') }}>
+            <span style={{ width: 20, height: 20, borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 800,
+              background: active ? 'rgba(255,255,255,0.25)' : (ok ? 'var(--brand)' : 'rgba(128,128,128,0.18)'), color: active || ok ? '#fff' : 'var(--muted)' }}>{ok ? '✓' : WIZARD_STEPS.indexOf(s) + 1}</span>
+            {(!isMobile || active) && <span style={{ fontSize: 13, fontWeight: active ? 700 : 600 }}>{isMobile ? s.short : s.title}</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+
+  const Footer = ({ primary, primaryLabel = 'Continue', secondary }) => (
+    <div style={{ display: 'flex', gap: 10, marginTop: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+      <button style={miniBtnOutline} onClick={() => go(prevKey)} disabled={busy}>← Back</button>
+      <span style={{ flex: 1 }} />
+      {secondary}
+      <button style={{ ...saveBtn, opacity: busy ? 0.6 : 1 }} onClick={primary} disabled={busy}>{busy ? 'Saving…' : primaryLabel}</button>
+    </div>
+  );
+
+  return (
+    <div>
+      <AdminBack onBack={() => go('start')}>Setup wizard</AdminBack>
+      <h2 style={{ fontSize: 20, fontWeight: 700, margin: '12px 0 4px' }}>{step.icon} {step.title}{entity ? <span style={{ color: 'var(--muted)', fontWeight: 600 }}> · {entity.name}</span> : ''}</h2>
+      <Stepper />
+      <div style={cardStyle}>
+        <p style={{ fontSize: 13.5, color: 'var(--text)', lineHeight: 1.55, margin: '0 0 14px' }}>{step.blurb}</p>
+
+        {stepKey === 'client' && (
+          <>
+            <Field label="Client name"><input style={{ ...input, fontWeight: 700, maxWidth: 360 }} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. MTN Bushfire" autoFocus /></Field>
+            <div style={{ marginTop: 14 }}>
+              <L>Client logo (optional)</L>
+              <div style={{ marginTop: 6 }}><LogoPicker value={logo} onChange={setLogo} /></div>
+            </div>
+            <Footer primary={saveClient} primaryLabel={entityId ? 'Save & continue' : 'Create client & continue'} />
+          </>
+        )}
+
+        {stepKey === 'scope' && entity && (
+          <>
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 12px', border: '1px solid var(--hairline)', borderRadius: 10, margin: '4px 0 12px', cursor: 'pointer', background: allOrg ? 'rgba(var(--brand-rgb),0.08)' : 'transparent' }}>
+              <input type="checkbox" checked={allOrg} onChange={(e) => setAllOrg(e.target.checked)} style={{ marginTop: 2 }} />
+              <span>
+                <span style={{ fontWeight: 700, fontSize: 13.5 }}>🌐 All organisers (internal / management)</span>
+                <span style={{ display: 'block', fontSize: 12, color: 'var(--muted)', marginTop: 2, lineHeight: 1.45 }}>This client sees <b>every organiser’s</b> data — no scope is applied. Only for Howler-internal logins. Leave off for a normal client.</span>
+              </span>
+            </label>
+            {!allOrg && (
+              <>
+                <L>Organiser scope (applies across all this client’s suites)</L>
+                <LockedFilterEditor value={locks} onChange={setLocks} fields={fields} restrictTo={['Organiser Name']} />
+              </>
+            )}
+            {!hasLock && <div style={{ fontSize: 12.5, color: 'var(--error)', marginTop: 6 }}>⚠ No scope set yet — pick an organiser above, or the client will see no data.</div>}
+            <Footer primary={saveScope} primaryLabel="Save scope & continue" />
+          </>
+        )}
+
+        {stepKey === 'suites' && entity && (
+          <>
+            <ClientSuites entity={entity} suites={suitesOf(entity.id)} allEntities={data.entities} allSets={data.sets} dashTitle={data.dashTitle} fields={fields} onChange={reload} />
+            {!done.suites && <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 8 }}>Tip: add at least one suite so the client has dashboards to open.</div>}
+            <Footer primary={() => go(nextKey)} primaryLabel="Continue to logins" />
+          </>
+        )}
+
+        {stepKey === 'logins' && entity && (
+          <>
+            <EntityLogins entity={entity} users={loginsOf(entity.id)} allUsers={data.users} onChange={reload} />
+            <Footer primary={() => go(nextKey)} primaryLabel="Continue to branding" />
+          </>
+        )}
+
+        {stepKey === 'branding' && entity && (
+          <>
+            <MailTemplateEditor scope="admin-client" entityId={entity.id} canTest />
+            <Footer primary={() => go('review')} primaryLabel="Continue"
+              secondary={<button style={miniBtnOutline} onClick={() => go('review')} disabled={busy}>Skip for now</button>} />
+          </>
+        )}
+
+        {stepKey === 'review' && entity && (
+          <>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
+              {WIZARD_STEPS.filter((s) => s.key !== 'review').map((s) => {
+                const ok = done[s.key];
+                return (
+                  <button key={s.key} onClick={() => go(s.key)} style={{ display: 'flex', alignItems: 'center', gap: 12, textAlign: 'left', background: 'transparent', border: '1px solid var(--hairline)', borderRadius: 10, padding: '10px 12px', cursor: 'pointer' }}>
+                    <span style={{ fontSize: 18 }}>{ok ? '✅' : (s.optional ? '➖' : '⚠️')}</span>
+                    <span style={{ flex: 1 }}>
+                      <span style={{ display: 'block', fontSize: 13.5, fontWeight: 700 }}>{s.title}{s.optional ? <span style={{ color: 'var(--muted)', fontWeight: 600 }}> · optional</span> : ''}</span>
+                      <span style={{ display: 'block', fontSize: 12, color: ok ? 'var(--muted)' : 'var(--error)' }}>{ok ? 'Done' : (s.optional ? 'Not set — fine to skip' : 'Still needs attention — tap to finish')}</span>
+                    </span>
+                    <span style={{ color: '#bbb' }}>›</span>
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+              <button style={miniBtnOutline} onClick={() => go(prevKey)}>← Back</button>
+              <span style={{ flex: 1 }} />
+              <button style={previewBtn} onClick={previewAccount} title="Open the account as the client sees it">👁 Preview account</button>
+              <button style={saveBtn} onClick={() => { setEntityId(null); go('start'); }}>Set up another client</button>
+            </div>
+            <p style={{ ...hint, marginTop: 14, marginBottom: 0 }}>Need to go deeper (digests, campaigns, settlements, integrations, per-event briefing)? Find <b>{entity.name}</b> any time under the <b>Clients</b> tab for the full set of controls.</p>
+          </>
+        )}
+
+        {error && <div style={{ color: 'var(--error)', fontSize: 13, marginTop: 10 }}>{error}</div>}
+      </div>
     </div>
   );
 }
