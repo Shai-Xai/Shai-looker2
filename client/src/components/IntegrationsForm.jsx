@@ -4,7 +4,8 @@ import { useState } from 'react';
 // write-only: the form only knows whether a value is set (value.*.keySet /
 // clientSecretSet); typing a new value changes it, blank leaves it unchanged.
 // `onSave(payload)` receives only the fields that changed.
-export default function IntegrationsForm({ value, onSave, showLooker = true, lookerActive = true, showResend = false, showInventive = false, inventiveWorkspace = null, showMeta = false, showTikTok = false, clients = [], onTestEmail, collapsible = false }) {
+export default function IntegrationsForm({ value, onSave, showLooker = true, lookerActive = true, showResend = false, showInventive = false, inventiveWorkspace = null, showMeta = false, showTikTok = false, clients = [], onTestEmail, collapsible = false, canEdit = true }) {
+  const locked = !canEdit;
   const [baseUrl, setBaseUrl] = useState(value?.looker?.baseUrl || '');
   const [clientId, setClientId] = useState(value?.looker?.clientId || '');
   const [clientSecret, setClientSecret] = useState('');
@@ -87,7 +88,15 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+    <fieldset disabled={locked} style={{ border: 'none', margin: 0, padding: 0, minInlineSize: 'auto', display: 'flex', flexDirection: 'column', gap: 18 }}>
+      {locked && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, border: '1px solid var(--hairline)', background: 'rgba(128,128,128,0.06)', borderRadius: 10, padding: '11px 14px' }}>
+          <span style={{ fontSize: 17 }}>🔒</span>
+          <span style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.45 }}>
+            <b>Locked.</b> Only an admin or the account <b>Owner</b> can change these integrations. Ask them to make changes, or have an Owner unlock it for you.
+          </span>
+        </div>
+      )}
       {/* Anthropic */}
       <Section title="🤖 Anthropic (AI insights)" collapsible={collapsible}>
         <Lbl>API key</Lbl>
@@ -113,6 +122,13 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
           <div style={note}>
             Push a <b>segment</b> to a Meta <b>Custom Audience</b> for ad targeting or exclusion. Emails/phones are hashed before they leave Pulse. Use a system-user / long-lived token with <code>ads_management</code>.
           </div>
+          <HowTo title="How to get your Meta access details" steps={[
+            <>Open <b>Meta Business Settings</b> → <b>Users → System users</b>. Create (or pick) a system user with <b>Admin</b> access.</>,
+            <>Under <b>Assigned assets</b>, add your <b>Ad account</b> and grant <b>Manage campaigns</b> (full) control.</>,
+            <>Click <b>Generate new token</b>, choose your app, and tick the <code>ads_management</code> scope (add <code>business_management</code> too). Pick a long-lived / non-expiring token and copy it into <b>Access token</b> above.</>,
+            <>Find your <b>Ad account ID</b> in <b>Ads Manager</b> — the <code>act_…</code> number in the account dropdown (top-left). Paste the digits as <code>act_1234567890</code>.</>,
+            <><b>Business ID</b> (optional) lives in <b>Business Settings → Business info</b>.</>,
+          ]} />
           <Lbl>Access token</Lbl>
           <input
             type="password" autoComplete="off"
@@ -137,6 +153,12 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
           <div style={note}>
             Push a <b>segment</b> to a TikTok <b>Custom Audience</b> for ad targeting. Emails/phones are hashed before they leave Pulse. Use an access token with audience (DMP) scope and the advertiser ID the audience should live under.
           </div>
+          <HowTo title="How to get your TikTok access details" steps={[
+            <>In <b>TikTok Ads Manager</b>, open <b>Assets → Audiences</b> to confirm you have a Custom Audience (DMP) enabled advertiser account. If not, ask your TikTok rep to enable it.</>,
+            <>Go to the <b>TikTok for Business Developers</b> portal and create an app under <b>Marketing API</b> (or use your agency's app). Add the <b>Audience / DMP</b> scope.</>,
+            <>Authorise the app for your advertiser account, then generate a <b>long-lived access token</b>. Copy it into <b>Access token</b> above.</>,
+            <>Find your <b>Advertiser ID</b> in Ads Manager — the account dropdown (top-right), or the <code>advertiser_id</code> in the page URL. Paste it into <b>Advertiser ID</b>.</>,
+          ]} />
           <Lbl>Access token</Lbl>
           <input
             type="password" autoComplete="off"
@@ -323,16 +345,18 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
         </Section>
       )}
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <button style={saveBtn} onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
-        {saved && (
-          <span className="saved-chip" style={{ color: 'var(--success, #10b981)', fontSize: 13, fontWeight: 600 }}>
-            <svg className="check-anim" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M5 13l4 4L19 7" /></svg>
-            Saved
-          </span>
-        )}
-      </div>
-    </div>
+      {!locked && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <button style={saveBtn} onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
+          {saved && (
+            <span className="saved-chip" style={{ color: 'var(--success, #10b981)', fontSize: 13, fontWeight: 600 }}>
+              <svg className="check-anim" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M5 13l4 4L19 7" /></svg>
+              Saved
+            </span>
+          )}
+        </div>
+      )}
+    </fieldset>
   );
 }
 
@@ -354,6 +378,26 @@ function Section({ title, collapsible, children }) {
 }
 
 function Lbl({ children }) { return <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', margin: '12px 0 5px' }}>{children}</div>; }
+
+// Collapsible "how to get your access details" — closed by default so it never
+// clutters the form, but a step-by-step is one tap away when a client is stuck.
+function HowTo({ title, steps = [] }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ border: '1px solid var(--hairline)', borderRadius: 8, margin: '4px 0 6px', overflow: 'hidden' }}>
+      <button type="button" onClick={() => setOpen((o) => !o)} style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '9px 11px', background: 'rgba(128,128,128,0.05)', border: 'none', cursor: 'pointer', font: 'inherit', textAlign: 'left' }}>
+        <span style={{ fontSize: 13 }}>💡</span>
+        <span style={{ fontSize: 12.5, fontWeight: 700, flex: 1, color: 'var(--text)' }}>{title}</span>
+        <span style={{ width: 12, fontSize: 10, color: 'var(--muted)', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</span>
+      </button>
+      {open && (
+        <ol style={{ margin: 0, padding: '10px 12px 10px 28px', display: 'flex', flexDirection: 'column', gap: 7, fontSize: 12.5, color: 'var(--text)', lineHeight: 1.5 }}>
+          {steps.map((s, i) => <li key={i}>{s}</li>)}
+        </ol>
+      )}
+    </div>
+  );
+}
 
 const card = { background: 'var(--card)', border: '1px solid #e6e6e6', borderRadius: 12, padding: 18 };
 const secTitle = { fontSize: 14, fontWeight: 700, marginBottom: 4 };
