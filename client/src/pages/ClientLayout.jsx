@@ -11,6 +11,7 @@ import { applyBrand, resetBrand, useBrandLogo } from '../lib/brand.js';
 import { useAccess, PERMS } from '../lib/access.js';
 import { FEATURES } from '../lib/features.js';
 import AnalystDrawer from '../components/AnalystDrawer.jsx';
+import AiMark from '../components/AiMark.jsx';
 
 // Persistent client shell: a left sidebar tree of Suites → Sets → Dashboards,
 // with the selected dashboard rendered in the main area.
@@ -674,6 +675,18 @@ export default function ClientLayout() {
         )}
         <Outlet context={{ previewEntityId: activeEntityId, actionsSlot }} />
       </main>
+      {FEATURES.ask && !askOpen && (
+        // Floating owl — quick launcher for the analyst drawer. Bottom-left of the
+        // content area (clears the sidebar; shifts left when the nav is collapsed).
+        <button
+          onClick={() => setAskOpen(true)}
+          title="Ask your AI analyst"
+          aria-label="Ask your AI analyst"
+          style={{ position: 'fixed', bottom: 20, left: isMobile ? 16 : (collapsed ? 16 : 366), zIndex: 55, width: 54, height: 54, borderRadius: '50%', border: '1px solid var(--hairline)', background: 'var(--card)', boxShadow: '0 6px 22px rgba(0,0,0,0.3)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'left .3s var(--ease-out, ease)' }}
+        >
+          <AiMark size={28} sparkle={false} />
+        </button>
+      )}
       <AnalystDrawer open={askOpen} onClose={() => setAskOpen(false)} previewEntityId={activeEntityId} />
     </div>
   );
