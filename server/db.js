@@ -155,7 +155,8 @@ addColumn('users', 'inventive_name', "TEXT NOT NULL DEFAULT ''");   // legacy pe
 addColumn('users', 'inventive_ref_id', "TEXT NOT NULL DEFAULT ''"); // legacy per-user ref (dormant)
 addColumn('users', 'inventive_workspace_id', "TEXT NOT NULL DEFAULT ''"); // link to a reusable inventive_workspaces row
 addColumn('users', 'howler_role', "TEXT NOT NULL DEFAULT ''"); // Howler-staff job title (Senior KAM / KAM / AM) — admins only
-addColumn('entities', 'howler_owner_user_id', "TEXT NOT NULL DEFAULT ''"); // the Howler admin who owns/supports this client
+addColumn('entities', 'howler_owner_user_id', "TEXT NOT NULL DEFAULT ''"); // the Howler admin who created this client (legacy/primary)
+addColumn('entities', 'howler_support_ids', "TEXT NOT NULL DEFAULT '[]'"); // Howler admins who support this client (shown as "Your Howler Support")
 // Persistent per-folder settings for the dashboard library. Folders are "/"-path
 // strings on each dashboard (not records), so a setting keyed by path cascades to
 // every dashboard in that folder + subfolders — and to ones added later.
@@ -753,15 +754,27 @@ CREATE INDEX IF NOT EXISTS idx_tile_library_category ON tile_library(category);
 
 // ─── Entities ─────────────────────────────────────────────────────────────────
 function rowToEntity(r) {
-  return r && { id: r.id, name: r.name, logo: r.logo || '', aiContext: r.ai_context || '', inventiveName: r.inventive_name || '', inventiveRefId: r.inventive_ref_id || '', howlerOwnerUserId: r.howler_owner_user_id || '', lockedFilters: J(r.locked_filters, {}), scopeFields: J(r.scope_fields, {}), allOrganisers: !!r.all_organisers, createdAt: r.created_at };
+  // Howler support = the list column if set, else fall back to the legacy single
+  // owner — so existing clients keep their creator as support until edited.
+  const support = J(r.howler_support_ids, []);
+  const howlerSupportIds = support.length ? support : (r.howler_owner_user_id ? [r.howler_owner_user_id] : []);
+  return r && { id: r.id, name: r.name, logo: r.logo || '', aiContext: r.ai_context || '', inventiveName: r.inventive_name || '', inventiveRefId: r.inventive_ref_id || '', howlerOwnerUserId: r.howler_owner_user_id || '', howlerSupportIds, lockedFilters: J(r.locked_filters, {}), scopeFields: J(r.scope_fields, {}), allOrganisers: !!r.all_organisers, createdAt: r.created_at };
 }
 function listEntities() { return db.prepare('SELECT * FROM entities ORDER BY name').all().map(rowToEntity); }
 function getEntity(id) { return rowToEntity(db.prepare('SELECT * FROM entities WHERE id=?').get(id)); }
 function createEntity({ name, logo = '', aiContext = '', lockedFilters = {}, scopeFields = {}, howlerOwnerUserId = '' }) {
+  // The creator seeds both the legacy owner field and the support list.
+  const support = howlerOwnerUserId ? [howlerOwnerUserId] : [];
   const e = { id: uuid(), name: name || 'Untitled entity', logo: logo || '', aiContext: aiContext || '', lockedFilters, scopeFields, howlerOwnerUserId: howlerOwnerUserId || '', createdAt: now() };
-  db.prepare('INSERT INTO entities (id,name,logo,ai_context,locked_filters,scope_fields,howler_owner_user_id,created_at) VALUES (?,?,?,?,?,?,?,?)')
-    .run(e.id, e.name, e.logo, e.aiContext, JSON.stringify(lockedFilters), JSON.stringify(scopeFields), e.howlerOwnerUserId, e.createdAt);
+  db.prepare('INSERT INTO entities (id,name,logo,ai_context,locked_filters,scope_fields,howler_owner_user_id,howler_support_ids,created_at) VALUES (?,?,?,?,?,?,?,?,?)')
+    .run(e.id, e.name, e.logo, e.aiContext, JSON.stringify(lockedFilters), JSON.stringify(scopeFields), e.howlerOwnerUserId, JSON.stringify(support), e.createdAt);
   return e;
+}
+// Replace a client's Howler support contacts (a list of admin user ids).
+function setEntityHowlerSupport(id, userIds = []) {
+  const ids = [...new Set((userIds || []).map((x) => String(x)).filter(Boolean))];
+  db.prepare('UPDATE entities SET howler_support_ids=? WHERE id=?').run(JSON.stringify(ids), id);
+  return getEntity(id);
 }
 function updateEntity(id, patch) {
   const cur = db.prepare('SELECT * FROM entities WHERE id=?').get(id);
@@ -1691,7 +1704,7 @@ module.exports = {
   getFilterView, setFilterView, deleteFilterView,
   listEntities, getEntity, createEntity, updateEntity, deleteEntity, getEntityIntegrations, setEntityIntegrations,
   listInventiveWorkspaces, getInventiveWorkspace, createInventiveWorkspace, updateInventiveWorkspace, deleteInventiveWorkspace,
-  getEntityIntegrationLocks, setEntityIntegrationLock,
+  getEntityIntegrationLocks, setEntityIntegrationLock, setEntityHowlerSupport,
   getEntityMailBranding, setEntityMailBranding,
   getSuiteMailBranding, setSuiteMailBranding,
   ensureInboxToken, regenerateInboxToken, findEntityByInboxToken,

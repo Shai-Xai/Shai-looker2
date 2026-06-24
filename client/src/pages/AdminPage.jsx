@@ -2026,18 +2026,19 @@ function UserDetail({ userId, entities = [], roles = [], initialEditing = false,
 // Edit an existing user's identity, account type and client links. Per-client
 // roles stay on each client's Logins tab; this covers everything else in one place.
 function UserEditCard({ user, memberships, entities, roles, onCancel, onSaved }) { // eslint-disable-line no-unused-vars
-  const [form, setForm] = useState({ firstName: user.firstName || '', lastName: user.lastName || '', email: user.email, mobile: user.mobile || '', password: '', inventiveWorkspaceId: user.inventiveWorkspaceId || '' });
+  const [form, setForm] = useState({ firstName: user.firstName || '', lastName: user.lastName || '', email: user.email, mobile: user.mobile || '', password: '', inventiveWorkspaceId: user.inventiveWorkspaceId || '', howlerRole: user.howlerRole || '' });
   const [accountType, setAccountType] = useState(user.role === 'admin' ? 'admin' : 'client');
   const [entityIds, setEntityIds] = useState((memberships || []).map((m) => m.entityId));
   const [workspaces, setWorkspaces] = useState([]);
-  useEffect(() => { api.adminListInventiveWorkspaces().then(setWorkspaces).catch(() => {}); }, []);
+  const [howlerRoles, setHowlerRoles] = useState([]);
+  useEffect(() => { api.adminListInventiveWorkspaces().then(setWorkspaces).catch(() => {}); api.getRoles().then((r) => setHowlerRoles(r.howlerRoles || [])).catch(() => {}); }, []);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
   const save = async () => {
     setError(''); setBusy(true);
     try {
-      const patch = { firstName: form.firstName, lastName: form.lastName, email: form.email.trim(), mobile: form.mobile, role: accountType, entityIds, inventiveWorkspaceId: form.inventiveWorkspaceId };
+      const patch = { firstName: form.firstName, lastName: form.lastName, email: form.email.trim(), mobile: form.mobile, role: accountType, entityIds, inventiveWorkspaceId: form.inventiveWorkspaceId, howlerRole: form.howlerRole };
       if (form.password) patch.password = form.password; // blank = keep current
       await api.adminUpdateUser(user.id, patch);
       onSaved();
@@ -2061,6 +2062,16 @@ function UserEditCard({ user, memberships, entities, roles, onCancel, onSaved })
             <button key={k} onClick={() => setAccountType(k)} style={accountType === k ? { ...miniBtn, background: 'var(--brand)', color: '#fff', borderColor: 'var(--brand)' } : miniBtnOutline}>{label}</button>
           ))}
         </div>
+        {accountType === 'admin' && howlerRoles.length > 0 && (
+          <>
+            <L>Howler role</L>
+            <p style={{ ...hint, marginTop: 2 }}>Their job title at Howler — shown to clients they support as “Your Howler Support”.</p>
+            <select style={{ ...input, width: '100%', margin: '4px 0 14px' }} value={form.howlerRole} onChange={set('howlerRole')}>
+              <option value="">— none —</option>
+              {howlerRoles.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
+            </select>
+          </>
+        )}
         <L>{accountType === 'admin' ? 'Also a customer of (optional)' : 'Clients'}</L>
         <div style={{ marginTop: 4 }}><ClientLinkPicker entities={entities} value={entityIds} onChange={setEntityIds} /></div>
         <p style={{ ...hint, marginTop: 8 }}>Per-client roles are set on each client's <b>Logins</b> tab; newly-linked clients default to Owner.</p>
@@ -2299,13 +2310,61 @@ function ClientLinkPicker({ entities, value = [], onChange }) {
 // Compact login management scoped to one client: list its logins (remove access
 // or delete), add a new client login, or LINK an existing login (client or
 // admin) so one person can hold several profiles.
+// Who at Howler supports this client — the contacts the client sees as "Your
+// Howler Support". An admin can reassign, add a second, or change each one's job
+// title (the title is the admin's global Howler role).
+function HowlerSupportCard({ entity, allUsers = [], howlerRoles = [], onChange }) {
+  const admins = allUsers.filter((u) => u.role === 'admin');
+  const byId = Object.fromEntries(admins.map((u) => [u.id, u]));
+  const current = (entity.howlerSupportIds || []).filter((id) => byId[id]);
+  const [addId, setAddId] = useState('');
+  const [busy, setBusy] = useState(false);
+  const save = async (ids) => { setBusy(true); try { await api.setEntityHowlerSupport(entity.id, ids); onChange(); } finally { setBusy(false); } };
+  const addOne = async () => { if (!addId) return; await save([...current, addId]); setAddId(''); };
+  const setTitle = async (id, howlerRole) => { setBusy(true); try { await api.adminUpdateUser(id, { howlerRole }); onChange(); } finally { setBusy(false); } };
+  const available = admins.filter((u) => !current.includes(u.id));
+  return (
+    <div style={{ ...cardStyle, marginBottom: 16 }}>
+      <L>🦉 Howler support</L>
+      <p style={{ ...hint, margin: '2px 0 10px' }}>The Howler contact(s) this client sees under <b>Settings → Team</b>. Reassign, add a second, or change each one's job title.</p>
+      {current.length === 0 ? <Muted>No Howler support assigned yet.</Muted> : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {current.map((id) => { const u = byId[id]; return (
+            <div key={id} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <div style={{ flex: 1, minWidth: 140 }}>
+                <div style={{ fontWeight: 600, fontSize: 13 }}>{u.fullName || u.email}</div>
+                <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>{u.email}</div>
+              </div>
+              <select style={{ ...input, width: 'auto', minWidth: 180 }} value={u.howlerRole || ''} disabled={busy} onChange={(e) => setTitle(id, e.target.value)}>
+                <option value="">— no job title —</option>
+                {howlerRoles.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
+              </select>
+              <button style={delBtn} disabled={busy} onClick={() => save(current.filter((x) => x !== id))}>Remove</button>
+            </div>
+          ); })}
+        </div>
+      )}
+      {available.length > 0 && (
+        <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+          <select style={{ ...input, flex: 1, minWidth: 200 }} value={addId} onChange={(e) => setAddId(e.target.value)}>
+            <option value="">Add a Howler admin…</option>
+            {available.map((u) => <option key={u.id} value={u.id}>{u.fullName || u.email}{u.howlerRoleLabel ? ` · ${u.howlerRoleLabel}` : ''}</option>)}
+          </select>
+          <button style={{ ...miniBtn, background: 'var(--brand)', color: '#fff', borderColor: 'var(--brand)' }} disabled={!addId || busy} onClick={addOne}>+ Add</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function EntityLogins({ entity, users, allUsers = [], onChange }) {
   const [form, setForm] = useState({ firstName: '', lastName: '', email: '', mobile: '', password: '', role: 'owner' });
   const [error, setError] = useState(null);
   const [linkId, setLinkId] = useState('');
   const [linkRole, setLinkRole] = useState('viewer');
   const [roles, setRoles] = useState([]);
-  useEffect(() => { api.getRoles().then((r) => setRoles(r.roles || [])).catch(() => setRoles([])); }, []);
+  const [howlerRoles, setHowlerRoles] = useState([]);
+  useEffect(() => { api.getRoles().then((r) => { setRoles(r.roles || []); setHowlerRoles(r.howlerRoles || []); }).catch(() => setRoles([])); }, []);
   const linkable = allUsers.filter((u) => !(u.entityIds || []).includes(entity.id));
   // This login's role at THIS client (from its membership list).
   const roleOf = (u) => (u.memberships || []).find((m) => m.entityId === entity.id)?.role || 'owner';
@@ -2335,6 +2394,7 @@ function EntityLogins({ entity, users, allUsers = [], onChange }) {
   const roleOpts = roles.length ? roles : [{ key: 'owner', label: 'Owner' }];
   return (
     <div>
+      <HowlerSupportCard entity={entity} allUsers={allUsers} howlerRoles={howlerRoles} onChange={onChange} />
       {users.length === 0 ? (
         <Muted>No logins yet for this client.</Muted>
       ) : (

@@ -246,14 +246,14 @@ function teamMembers(entityId) {
 }
 const ownerCount = (entityId) => teamMembers(entityId).filter((m) => m.role === 'owner').length;
 
-// The client's Howler support contact — the admin who owns the account, shown to
-// the client as "Your Howler Support" with their job title + an email link.
+// The client's Howler support contacts — the admins assigned to the account,
+// shown to the client as "Your Howler Support" with each one's job title + email.
 function howlerSupportFor(entityId) {
   const ent = db.getEntity(entityId);
-  if (!ent?.howlerOwnerUserId) return null;
-  const u = db.getUser(ent.howlerOwnerUserId);
-  if (!u || u.role !== 'admin') return null;
-  return { name: u.fullName || u.email, email: u.email, mobile: u.mobile || '', roleLabel: roles.howlerRoleLabel(u.howlerRole) || 'Account Manager' };
+  return (ent?.howlerSupportIds || [])
+    .map((id) => db.getUser(id))
+    .filter((u) => u && u.role === 'admin')
+    .map((u) => ({ id: u.id, name: u.fullName || u.email, email: u.email, mobile: u.mobile || '', roleLabel: roles.howlerRoleLabel(u.howlerRole) || 'Account Manager' }));
 }
 
 app.get('/api/my/team/:entityId', auth.requireAuth, auth.requirePermission('team.manage'), (req, res) => {
@@ -485,6 +485,13 @@ app.get('/api/admin/entities', auth.requireAdmin, (_req, res) => res.json(db.lis
 // The admin who creates a client becomes its default Howler support contact
 // (shown to the client under Settings → Team). Reassignable later via the entity.
 app.post('/api/admin/entities', auth.requireAdmin, (req, res) => res.status(201).json(db.createEntity({ ...(req.body || {}), howlerOwnerUserId: (req.body || {}).howlerOwnerUserId || req.user.id })));
+// Manage a client's Howler support contacts (a list of admin user ids). Only
+// admins can be assigned; non-admin ids are dropped.
+app.put('/api/admin/entities/:id/howler-support', auth.requireAdmin, (req, res) => {
+  if (!db.getEntity(req.params.id)) return res.status(404).json({ error: 'Not found' });
+  const ids = (Array.isArray(req.body?.userIds) ? req.body.userIds : []).filter((id) => db.getUser(id)?.role === 'admin');
+  res.json(db.setEntityHowlerSupport(req.params.id, ids));
+});
 app.put('/api/admin/entities/:id', auth.requireAdmin, (req, res) => {
   const e = db.updateEntity(req.params.id, req.body || {});
   if (!e) return res.status(404).json({ error: 'Entity not found' });

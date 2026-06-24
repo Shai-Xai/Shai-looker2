@@ -37,16 +37,20 @@ export default function TeamManager({ entityId, entityName }) {
         <button style={addBtn} onClick={() => { setError(''); setAdding(true); }}>+ Add user</button>
       </div>
 
-      {/* Your Howler Support — the Howler account contact for this client. */}
-      {data.support && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', borderRadius: 14, border: '1px solid var(--hairline)', background: 'rgba(var(--brand-rgb,255,56,92),0.05)', marginBottom: 16, flexWrap: 'wrap' }}>
-          <div style={{ fontSize: 22, flexShrink: 0 }}>🦉</div>
-          <div style={{ flex: 1, minWidth: 160 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)' }}>Your Howler Support</div>
-            <div style={{ fontSize: 14, fontWeight: 700 }}>{data.support.name}</div>
-            <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>{data.support.roleLabel}</div>
-          </div>
-          <a href={`mailto:${data.support.email}`} style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 980, background: 'var(--brand)', color: '#fff', fontSize: 13, fontWeight: 600, textDecoration: 'none' }}>✉️ Email</a>
+      {/* Your Howler Support — the Howler account contact(s) for this client. */}
+      {Array.isArray(data.support) && data.support.length > 0 && (
+        <div style={{ borderRadius: 14, border: '1px solid var(--hairline)', background: 'rgba(var(--brand-rgb,255,56,92),0.05)', marginBottom: 16, overflow: 'hidden' }}>
+          <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', padding: '10px 14px 4px' }}>Your Howler Support</div>
+          {data.support.map((s, i) => (
+            <div key={s.id || i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderTop: i ? '1px solid var(--hairline)' : 'none', flexWrap: 'wrap' }}>
+              <div style={{ fontSize: 20, flexShrink: 0 }}>🦉</div>
+              <div style={{ flex: 1, minWidth: 160 }}>
+                <div style={{ fontSize: 14, fontWeight: 700 }}>{s.name}</div>
+                <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>{s.roleLabel}</div>
+              </div>
+              <a href={`mailto:${s.email}`} style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 980, background: 'var(--brand)', color: '#fff', fontSize: 13, fontWeight: 600, textDecoration: 'none' }}>✉️ Email</a>
+            </div>
+          ))}
         </div>
       )}
 
