@@ -1043,13 +1043,17 @@ function SetupWizard({ fields }) {
       <div ref={bodyRef} style={cardStyle}>
         {stepKey !== 'review' && <ReqBadge />}
         <p style={{ fontSize: 13.5, color: 'var(--text)', lineHeight: 1.55, margin: '0 0 14px' }}>{step.blurb}</p>
-        {(walkOf(stepKey).length > 0 || (entity && stepKey !== 'review')) && (
+        {stepKey !== 'review' && (
           <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
             {walkOf(stepKey).length > 0 && (
               <button style={miniBtn} title="Walk through each part of this step, one at a time"
                 onClick={() => { if (stepKey === 'suites' && !suitesOf(entity?.id).length) { alert('Add a suite first (the “+ Add suite” button), then I’ll walk you through it.'); return; } setTourOn(true); }}>▶ Guide me through this step</button>
             )}
-            {entity && stepKey !== 'review' && <button style={miniBtn} onClick={openPreview} title="Preview the client’s live account in a panel — no need to leave the wizard">👁 Preview the client</button>}
+            {/* Always visible so the option is discoverable; disabled until the
+                client exists (nothing to preview on the very first step yet). */}
+            <button style={{ ...miniBtn, background: 'var(--brand)', color: '#fff', border: '1.5px solid var(--brand)', opacity: entity ? 1 : 0.5, cursor: entity ? 'pointer' : 'not-allowed' }}
+              disabled={!entity} onClick={openPreview}
+              title={entity ? 'Preview the client’s live account in a panel — no need to leave the wizard' : 'Create the client first, then you can preview their account here'}>👁 Preview the client</button>
           </div>
         )}
 
