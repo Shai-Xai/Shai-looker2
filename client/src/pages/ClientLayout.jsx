@@ -388,16 +388,6 @@ export default function ClientLayout() {
               {inbox.unread > 0 && <span style={{ ...countChip, background: 'var(--brand)', color: '#fff' }}>{inbox.unread}</span>}
             </button>
           )}
-          {FEATURES.ask && (
-          <button
-            className={`nav-row${askOpen ? ' active' : ''}`}
-            style={{ ...rowBtn, fontWeight: askOpen ? 600 : 500 }}
-            onClick={() => { openAsk(); if (isMobile) setNavOpen(false); }}
-          >
-            <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>✨</span>
-            <span style={ellip}>Ask</span>
-          </button>
-          )}
           {can(PERMS.DIGESTS_MANAGE) && (
           <button
             ref={onDigests ? activeRef : null}
@@ -558,16 +548,6 @@ export default function ClientLayout() {
                       <span style={ellip}>Inbox</span>
                       {inbox.unread > 0 && <span style={{ ...countChip, background: 'var(--brand)', color: '#fff' }}>{inbox.unread}</span>}
                     </button>
-                  )}
-                  {FEATURES.ask && (
-                  <button
-                    className={`nav-row${askOpen ? ' active' : ''}`}
-                    style={{ ...mRowSuite, fontWeight: askOpen ? 700 : 500 }}
-                    onClick={() => { openAsk(); setNavOpen(false); }}
-                  >
-                    <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>✨</span>
-                    <span style={ellip}>Ask</span>
-                  </button>
                   )}
                   {can(PERMS.DIGESTS_MANAGE) && (
                   <button

@@ -17,9 +17,11 @@ export default function AnalystDrawer({ open, prewarm = false, onClose, previewE
   const [mounted, setMounted] = useState(false); // mount on first open, then keep warm
   const [expanded, setExpanded] = useState(false); // overlay full-screen toggle
   const [dock, setDock] = useState(() => localStorage.getItem('howler_ask_dock') || 'overlay'); // 'overlay' | 'docked'
+  const [zoom, setZoom] = useState(() => parseFloat(localStorage.getItem('howler_ask_zoom')) || 1); // scale the whole embed (text + UI)
   const iframeRef = useRef(null);
   const repliedRef = useRef(false);
   const pickDock = (m) => { localStorage.setItem('howler_ask_dock', m); setDock(m); };
+  const bumpZoom = (d) => setZoom((z) => { const n = Math.min(1.3, Math.max(0.7, Math.round((z + d) * 100) / 100)); localStorage.setItem('howler_ask_zoom', String(n)); return n; });
 
   // Mount on first open OR when pre-warmed (owl hover) so it's loaded by open time.
   useEffect(() => { if (open || prewarm) setMounted(true); }, [open, prewarm]);
@@ -74,8 +76,12 @@ export default function AnalystDrawer({ open, prewarm = false, onClose, previewE
     <div className="ai-glow" style={{ height: '100%', width: '100%', background: 'var(--card)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 10px 11px 14px', borderBottom: '1px solid var(--hairline)', flexShrink: 0 }}>
         <span style={{ fontSize: 16 }}>✨</span>
-        <strong style={{ fontSize: 14.5 }}>Your Data Analyst</strong>
+        <strong style={{ fontSize: 14.5, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Your Data Analyst</strong>
         <span style={{ flex: 1 }} />
+        <div style={{ display: 'inline-flex', gap: 2, marginRight: 2 }} title="Text size">
+          <button onClick={() => bumpZoom(-0.1)} aria-label="Smaller" style={{ ...hdrBtn, fontSize: 11.5, fontWeight: 700, padding: '4px 6px' }}>A−</button>
+          <button onClick={() => bumpZoom(0.1)} aria-label="Larger" style={{ ...hdrBtn, fontSize: 14.5, fontWeight: 700, padding: '4px 6px' }}>A+</button>
+        </div>
         {!isMobile && (
           <div style={{ display: 'inline-flex', gap: 2, padding: 2, background: 'var(--elevated, rgba(128,128,128,0.12))', borderRadius: 980, marginRight: 2 }} title="A/B: how the analyst opens">
             <button onClick={() => pickDock('overlay')} style={segBtn(!docked)}>Overlay</button>
@@ -92,7 +98,7 @@ export default function AnalystDrawer({ open, prewarm = false, onClose, previewE
         {state.status === 'unconfigured' && <p style={msg}>The Data Analyst isn't connected yet.</p>}
         {state.status === 'error' && <p style={{ ...msg, color: 'var(--error,#ef4444)' }}>Couldn't open the analyst.</p>}
         {state.status === 'ready' && info?.url && (
-          <iframe ref={iframeRef} title="Data analyst" src={info.url} allow="storage-access; clipboard-write" style={{ width: '100%', height: '100%', border: 'none', background: 'var(--card)' }} />
+          <iframe ref={iframeRef} title="Data analyst" src={info.url} allow="storage-access; clipboard-write" style={{ zoom, width: `${100 / zoom}%`, height: `${100 / zoom}%`, border: 'none', background: 'var(--card)' }} />
         )}
       </div>
     </div>
