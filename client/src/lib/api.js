@@ -69,6 +69,10 @@ export const api = {
       body: JSON.stringify({ email, password }),
     }).then(json),
   logout: () => fetch('/api/auth/logout', { method: 'POST' }).then(json),
+  forgotPassword: (email) => fetch('/api/auth/forgot', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) }).then(json),
+  resetPassword: (token, password) => fetch('/api/auth/reset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token, password }) }).then(json),
+  requestMagicLink: (email) => fetch('/api/auth/magic', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) }).then(json),
+  consumeMagicLink: (token) => fetch('/api/auth/magic/consume', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) }).then(json),
 
   // Admin — Entities (clients), Sets (reusable collections), Suites (event ctx)
   adminListEntities: () => fetch('/api/admin/entities').then(json),

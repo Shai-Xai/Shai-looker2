@@ -7,6 +7,8 @@ import ClonePage from './pages/ClonePage.jsx';
 import AdminPage from './pages/AdminPage.jsx';
 import InboxNotifier from './components/InboxNotifier.jsx';
 import LoginPage from './pages/LoginPage.jsx';
+import ResetPasswordPage from './pages/ResetPasswordPage.jsx';
+import MagicLinkPage from './pages/MagicLinkPage.jsx';
 import ClientLayout from './pages/ClientLayout.jsx';
 import ClientHome from './pages/ClientHome.jsx';
 import ClientIntegrationsPage from './pages/ClientIntegrationsPage.jsx';
@@ -208,7 +210,14 @@ function Shell() {
   if (loading) {
     return <div style={{ minHeight: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)' }}>Loading…</div>;
   }
-  if (!user) return <LoginPage />;
+  // Logged out: the recovery/passwordless landing pages live OUTSIDE the router
+  // (which only mounts once authenticated), so dispatch on the path here.
+  if (!user) {
+    const path = window.location.pathname;
+    if (path === '/reset') return <ResetPasswordPage />;
+    if (path === '/magic') return <MagicLinkPage />;
+    return <LoginPage />;
+  }
 
   // An admin who has switched into one of their client accounts gets the real
   // client shell (scoped to that entity), not the admin console.

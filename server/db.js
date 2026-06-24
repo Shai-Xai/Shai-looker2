@@ -822,6 +822,42 @@ function publicUser(u) {
   return { id: u.id, email: u.email, role: u.role, firstName: u.firstName || '', lastName: u.lastName || '', fullName: u.fullName || '', mobile: u.mobile || '', entityIds: u.entityIds || [], memberships: u.memberships || [], notifyEmail: u.notifyEmail !== false, notifyPush: u.notifyPush !== false };
 }
 // Update a user's notification channel preferences (partial).
+// ─── One-time auth tokens (password reset + magic sign-in link) ───────────────
+// We store only a SHA-256 HASH of the random token, never the token itself, so a
+// DB leak can't be replayed. Each is single-use (used_at) and time-boxed.
+db.exec(`
+CREATE TABLE IF NOT EXISTS auth_tokens (
+  token_hash TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL,
+  kind       TEXT NOT NULL,            -- 'reset' | 'magic'
+  expires_at INTEGER NOT NULL,         -- epoch ms
+  used_at    INTEGER                   -- epoch ms once consumed
+);
+`);
+const sha256 = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
+// Create a token of `kind` for a user, valid for ttlMs. Returns the RAW token
+// (emailed once); only its hash is persisted.
+function createAuthToken(userId, kind, ttlMs) {
+  const raw = crypto.randomBytes(32).toString('base64url');
+  db.prepare('INSERT INTO auth_tokens (token_hash,user_id,kind,expires_at,used_at) VALUES (?,?,?,?,NULL)')
+    .run(sha256(raw), userId, kind, Date.now() + ttlMs);
+  return raw;
+}
+// Consume a token: valid only if it exists, matches `kind`, is unused and unexpired.
+// Marks it used and returns the userId, else null. (One-time, atomic enough for
+// the single-instance deployment.)
+function consumeAuthToken(raw, kind) {
+  if (!raw) return null;
+  const row = db.prepare('SELECT * FROM auth_tokens WHERE token_hash=?').get(sha256(raw));
+  if (!row || row.kind !== kind || row.used_at || row.expires_at < Date.now()) return null;
+  db.prepare('UPDATE auth_tokens SET used_at=? WHERE token_hash=?').run(Date.now(), row.token_hash);
+  return row.user_id;
+}
+// Invalidate every outstanding token of a kind for a user (e.g. after a reset).
+function clearAuthTokens(userId, kind) {
+  db.prepare('DELETE FROM auth_tokens WHERE user_id=? AND kind=?').run(userId, kind);
+}
+
 function setNotificationPrefs(userId, prefs = {}) {
   const cur = db.prepare('SELECT notify_email, notify_push FROM users WHERE id=?').get(userId);
   if (!cur) return null;
@@ -1533,6 +1569,7 @@ module.exports = {
   ensureInboxToken, regenerateInboxToken, findEntityByInboxToken,
   listUsers, getUser, getUserByEmail, createUser, updateUser, deleteUser, verifyCredentials, publicUser, setUserEntities, setNotificationPrefs, touchLastLogin,
   NOTIFY_TYPES, getNotifyTypes, setNotifyTypes, notifyTypeOn,
+  createAuthToken, consumeAuthToken, clearAuthTokens,
   membershipsForUser, roleForMembership, setMembershipRole, removeMembership,
   listDashboards, getDashboard, createDashboard, updateDashboard, removeDashboard, dashboardPoolFor, sharedDashboards,
   setFolderKeepImported, folderSettingsMap, folderKeepImportedFor,
