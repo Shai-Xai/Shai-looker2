@@ -747,17 +747,18 @@ function setEntityIntegrations(id, patch) {
   db.prepare('UPDATE entities SET integrations=? WHERE id=?').run(JSON.stringify(next), id);
   return getEntityIntegrations(id);
 }
-// Per-integration FREEZE locks for a client: { looker:true, meta:true, … }. A
-// frozen integration can't be edited until an admin/owner unlocks it — a guard
-// against accidental changes to a working connection. Non-secret presentation
-// state, fine to send to the browser.
+// Per-integration FREEZE locks for a client: { looker:false, meta:true, … }.
+// Integrations are LOCKED BY DEFAULT — a key is only unlocked when stored
+// explicitly as `false`, so a missing key reads as locked. A frozen integration
+// can't be edited until an admin/owner unlocks it — a guard against accidental
+// changes to a working connection. Non-secret presentation state.
 function getEntityIntegrationLocks(id) {
   const r = db.prepare('SELECT integration_locks FROM entities WHERE id=?').get(id);
   return r ? J(r.integration_locks, {}) : {};
 }
 function setEntityIntegrationLock(id, key, locked) {
   const cur = getEntityIntegrationLocks(id);
-  if (locked) cur[key] = true; else delete cur[key];
+  cur[key] = !!locked; // store explicit state — absent still reads as locked
   db.prepare('UPDATE entities SET integration_locks=? WHERE id=?').run(JSON.stringify(cur), id);
   return cur;
 }

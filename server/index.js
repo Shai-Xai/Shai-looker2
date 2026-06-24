@@ -1639,7 +1639,8 @@ const ENTITY_INTEGRATION_KEYS = ['looker', 'anthropic', 'meta', 'tiktok'];
 function dropFrozenSections(entityId, body) {
   const locks = db.getEntityIntegrationLocks(entityId);
   const b = { ...(body || {}) };
-  for (const k of ENTITY_INTEGRATION_KEYS) if (locks[k]) delete b[k];
+  // Locked by default: a section is editable only when explicitly unlocked (false).
+  for (const k of ENTITY_INTEGRATION_KEYS) if (locks[k] !== false) delete b[k];
   return b;
 }
 
@@ -1650,7 +1651,7 @@ const PLATFORM_INTEGRATION_KEYS = ['looker', 'anthropic', 'resend', 'inventive']
 function getPlatformIntegrationLocks() { try { return JSON.parse(db.getSetting('integration_locks') || '{}') || {}; } catch { return {}; } }
 function setPlatformIntegrationLock(key, locked) {
   const cur = getPlatformIntegrationLocks();
-  if (locked) cur[key] = true; else delete cur[key];
+  cur[key] = !!locked; // store explicit state — absent reads as locked (default)
   db.setSetting('integration_locks', JSON.stringify(cur));
   return cur;
 }
@@ -1660,19 +1661,20 @@ app.get('/api/admin/integrations', auth.requireAdmin, (_req, res) => res.json(ad
 app.put('/api/admin/integrations', auth.requireAdmin, (req, res) => {
   const locks = getPlatformIntegrationLocks();
   const body = { ...(req.body || {}) };
-  if (locks.looker) delete body.looker;
-  if (locks.anthropic) delete body.anthropic;
+  // Locked by default: a section is editable only when explicitly unlocked (false).
+  if (locks.looker !== false) delete body.looker;
+  if (locks.anthropic !== false) delete body.anthropic;
   const map = { lookerBaseUrl: 'looker_base_url', lookerClientId: 'looker_client_id', lookerClientSecret: 'looker_client_secret', anthropicApiKey: 'anthropic_api_key' };
   applyIntegrationsPatch(body, (k, v) => db.setSetting(map[k], v));
   // Resend (email) — admin-only, so handled here rather than in the shared patch.
-  const re = (locks.resend ? {} : (req.body || {}).resend) || {};
+  const re = (locks.resend !== false ? {} : (req.body || {}).resend) || {};
   if (re.apiKey) db.setSetting('resend_api_key', String(re.apiKey));
   if (re.clearApiKey) db.setSetting('resend_api_key', '');
   if (re.from !== undefined) db.setSetting('mail_from', String(re.from || '').trim());
   // Global kill switch: '0' makes every outbound email a no-op (all clients).
   if (re.enabled !== undefined) db.setSetting('mail_enabled', re.enabled ? '1' : '0');
   // Inventive (embedded AI analyst) — admin-only, platform-level.
-  const inv = (locks.inventive ? {} : (req.body || {}).inventive) || {};
+  const inv = (locks.inventive !== false ? {} : (req.body || {}).inventive) || {};
   if (inv.apiKey) db.setSetting('inventive_api_key', String(inv.apiKey));
   if (inv.clearApiKey) db.setSetting('inventive_api_key', '');
   if (inv.embedToken) db.setSetting('inventive_embed_auth_token', String(inv.embedToken));

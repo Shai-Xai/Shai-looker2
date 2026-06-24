@@ -5,12 +5,13 @@ import { useState } from 'react';
 // clientSecretSet); typing a new value changes it, blank leaves it unchanged.
 // `onSave(payload)` receives only the fields that changed.
 export default function IntegrationsForm({ value, onSave, showLooker = true, lookerActive = true, showResend = false, showInventive = false, inventiveWorkspace = null, showMeta = false, showTikTok = false, clients = [], onTestEmail, collapsible = false, canManageLock = false, locks = {}, onToggleLock, lockableKeys = [] }) {
-  // Each integration can be FROZEN (a per-integration lock). While frozen its
-  // fields are read-only; only an admin/Owner (canManageLock) can unlock to edit,
-  // then re-lock — a guard against accidental changes to a working connection.
+  // Each integration is FROZEN by default — fields are read-only until an
+  // admin/Owner (canManageLock) explicitly unlocks it, then re-locks. A guard
+  // against accidental changes to a working connection. A section reads as locked
+  // unless its lock is stored explicitly as `false`.
   // `lockableKeys` scopes which sections are freezable on THIS surface (per-client
   // vs platform), so e.g. the per-client Inventive workspace map gets no toggle.
-  const lockProps = (key) => (lockableKeys.includes(key) ? { lockKey: key, locked: !!locks?.[key], canManageLock, onToggleLock } : {});
+  const lockProps = (key) => (lockableKeys.includes(key) ? { lockKey: key, locked: locks?.[key] !== false, canManageLock, onToggleLock } : {});
   const [baseUrl, setBaseUrl] = useState(value?.looker?.baseUrl || '');
   const [clientId, setClientId] = useState(value?.looker?.clientId || '');
   const [clientSecret, setClientSecret] = useState('');
