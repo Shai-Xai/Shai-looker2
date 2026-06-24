@@ -1027,6 +1027,7 @@ function UserDetail({ userId, entities = [], roles = [], initialEditing = false,
               <KV label="Most recent action" value={mostRecent ? mostRecent.label : 'No activity yet'} sub={mostRecent ? `${relTime(mostRecent.at)}${mostRecent.entityName ? ` · ${mostRecent.entityName}` : ''}` : ''} />
               <KV label="Account created" value={fmtWhen(user.createdAt)} />
               <KV label="Notifications" value={`Email ${user.notifyEmail ? 'on' : 'off'} · Push ${user.notifyPush ? 'on' : 'off'}`} />
+              <KV label="Inventive ref" value={<code style={{ fontSize: 12, userSelect: 'all' }}>{user.inventiveRefId || user.id}</code>} sub={user.inventiveRefId ? 'override' : 'default · user ID'} />
             </div>
           )}
 
@@ -1145,7 +1146,7 @@ function UserDetail({ userId, entities = [], roles = [], initialEditing = false,
 // Edit an existing user's identity, account type and client links. Per-client
 // roles stay on each client's Logins tab; this covers everything else in one place.
 function UserEditCard({ user, memberships, entities, roles, onCancel, onSaved }) { // eslint-disable-line no-unused-vars
-  const [form, setForm] = useState({ firstName: user.firstName || '', lastName: user.lastName || '', email: user.email, mobile: user.mobile || '', password: '' });
+  const [form, setForm] = useState({ firstName: user.firstName || '', lastName: user.lastName || '', email: user.email, mobile: user.mobile || '', password: '', inventiveName: user.inventiveName || '', inventiveRefId: user.inventiveRefId || '' });
   const [accountType, setAccountType] = useState(user.role === 'admin' ? 'admin' : 'client');
   const [entityIds, setEntityIds] = useState((memberships || []).map((m) => m.entityId));
   const [error, setError] = useState('');
@@ -1154,7 +1155,7 @@ function UserEditCard({ user, memberships, entities, roles, onCancel, onSaved })
   const save = async () => {
     setError(''); setBusy(true);
     try {
-      const patch = { firstName: form.firstName, lastName: form.lastName, email: form.email.trim(), mobile: form.mobile, role: accountType, entityIds };
+      const patch = { firstName: form.firstName, lastName: form.lastName, email: form.email.trim(), mobile: form.mobile, role: accountType, entityIds, inventiveName: form.inventiveName, inventiveRefId: form.inventiveRefId };
       if (form.password) patch.password = form.password; // blank = keep current
       await api.adminUpdateUser(user.id, patch);
       onSaved();
@@ -1181,6 +1182,12 @@ function UserEditCard({ user, memberships, entities, roles, onCancel, onSaved })
         <L>{accountType === 'admin' ? 'Also a customer of (optional)' : 'Clients'}</L>
         <div style={{ marginTop: 4 }}><ClientLinkPicker entities={entities} value={entityIds} onChange={setEntityIds} /></div>
         <p style={{ ...hint, marginTop: 8 }}>Per-client roles are set on each client's <b>Logins</b> tab; newly-linked clients default to Owner.</p>
+        <L>Inventive (AI analyst)</L>
+        <p style={{ ...hint, marginTop: 2 }}>How this user maps to its Inventive workspace. Blank inherits their name / own Howler user ID (<code style={{ userSelect: 'all' }}>{user.id}</code>).</p>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, margin: '4px 0 14px' }}>
+          <Field label="Account name"><input style={{ ...input, minWidth: 0 }} value={form.inventiveName} onChange={set('inventiveName')} placeholder={user.fullName || 'Use the user’s name'} /></Field>
+          <Field label="External reference (UUID)"><input style={{ ...input, minWidth: 0, fontFamily: 'monospace', fontSize: 12 }} value={form.inventiveRefId} onChange={set('inventiveRefId')} placeholder={user.id} /></Field>
+        </div>
         <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
           <button style={{ ...miniBtn, background: 'var(--brand)', color: '#fff', borderColor: 'var(--brand)' }} onClick={save} disabled={!form.email.trim() || busy}>{busy ? 'Saving…' : 'Save changes'}</button>
           <button style={miniBtnOutline} onClick={onCancel}>Cancel</button>
@@ -3065,13 +3072,6 @@ function ClientIntegrations({ entity }) {
   const [value, setValue] = useState(null);
   useEffect(() => { api.getEntityIntegrations(entity.id).then(setValue); }, [entity.id]);
   if (!value) return <Muted>Loading…</Muted>;
-  // The Inventive workspace name/ref live on the entity (not the integrations
-  // blob), so split them out of the form payload and save them separately.
-  const onSave = async (p) => {
-    const { inventiveWorkspace, ...integ } = p;
-    if (inventiveWorkspace) await api.adminUpdateEntity(entity.id, { inventiveName: inventiveWorkspace.name, inventiveRefId: inventiveWorkspace.refId });
-    setValue(await api.saveEntityIntegrations(entity.id, integ));
-  };
   return (
     <div>
       <p style={hint}>Optional per-client accounts. Anything left blank falls back to the platform default (Admin → Integrations).</p>
@@ -3085,8 +3085,7 @@ function ClientIntegrations({ entity }) {
         lockableKeys={['looker', 'anthropic', 'meta', 'tiktok']}
         locks={value.locks || {}}
         onToggleLock={async (k, locked) => setValue(await api.setEntityIntegrationLock(entity.id, k, locked))}
-        inventiveWorkspace={{ name: entity.inventiveName || '', refId: entity.inventiveRefId || '', defaultRefId: entity.id }}
-        onSave={onSave}
+        onSave={async (p) => setValue(await api.saveEntityIntegrations(entity.id, p))}
       />
     </div>
   );

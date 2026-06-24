@@ -426,6 +426,7 @@ app.get('/api/admin/users/:id', auth.requireAdmin, (req, res) => {
     user: {
       id: u.id, email: u.email, role: u.role, createdAt: u.createdAt,
       firstName: u.firstName, lastName: u.lastName, fullName: u.fullName, mobile: u.mobile,
+      inventiveName: u.inventiveName || '', inventiveRefId: u.inventiveRefId || '',
       lastLogin: u.lastLogin || null, notifyEmail: u.notifyEmail, notifyPush: u.notifyPush,
       entityIds: u.entityIds,
     },

@@ -150,6 +150,9 @@ addColumn('users', 'last_login', 'TEXT');
 addColumn('users', 'first_name', "TEXT NOT NULL DEFAULT ''");
 addColumn('users', 'last_name', "TEXT NOT NULL DEFAULT ''");
 addColumn('users', 'mobile', "TEXT NOT NULL DEFAULT ''");
+// Per-user Inventive workspace mapping — the name + externalRefId we send Inventive.
+addColumn('users', 'inventive_name', "TEXT NOT NULL DEFAULT ''");   // '' = use the user's name
+addColumn('users', 'inventive_ref_id', "TEXT NOT NULL DEFAULT ''"); // '' = use the user's own ID
 // Persistent per-folder settings for the dashboard library. Folders are "/"-path
 // strings on each dashboard (not records), so a setting keyed by path cascades to
 // every dashboard in that folder + subfolders — and to ones added later.
@@ -831,11 +834,11 @@ function rowToUser(r) {
   if (!r) return null;
   const memberships = membershipsForUser(r.id);
   const firstName = r.first_name || '', lastName = r.last_name || '';
-  return { id: r.id, email: r.email, role: r.role, passwordHash: r.password_hash, firstName, lastName, fullName: [firstName, lastName].filter(Boolean).join(' '), mobile: r.mobile || '', entityIds: memberships.map((m) => m.entityId), memberships, notifyEmail: r.notify_email !== 0, notifyPush: r.notify_push !== 0, lastLogin: r.last_login || null, createdAt: r.created_at };
+  return { id: r.id, email: r.email, role: r.role, passwordHash: r.password_hash, firstName, lastName, fullName: [firstName, lastName].filter(Boolean).join(' '), mobile: r.mobile || '', inventiveName: r.inventive_name || '', inventiveRefId: r.inventive_ref_id || '', entityIds: memberships.map((m) => m.entityId), memberships, notifyEmail: r.notify_email !== 0, notifyPush: r.notify_push !== 0, lastLogin: r.last_login || null, createdAt: r.created_at };
 }
 function publicUser(u) {
   if (!u) return null;
-  return { id: u.id, email: u.email, role: u.role, firstName: u.firstName || '', lastName: u.lastName || '', fullName: u.fullName || '', mobile: u.mobile || '', entityIds: u.entityIds || [], memberships: u.memberships || [], notifyEmail: u.notifyEmail !== false, notifyPush: u.notifyPush !== false };
+  return { id: u.id, email: u.email, role: u.role, firstName: u.firstName || '', lastName: u.lastName || '', fullName: u.fullName || '', mobile: u.mobile || '', inventiveName: u.inventiveName || '', inventiveRefId: u.inventiveRefId || '', entityIds: u.entityIds || [], memberships: u.memberships || [], notifyEmail: u.notifyEmail !== false, notifyPush: u.notifyPush !== false };
 }
 // Update a user's notification channel preferences (partial).
 // ─── One-time auth tokens (password reset + magic sign-in link) ───────────────
@@ -995,7 +998,9 @@ function updateUser(id, patch) {
   const firstName = patch.firstName !== undefined ? String(patch.firstName || '').trim() : cur.first_name;
   const lastName = patch.lastName !== undefined ? String(patch.lastName || '').trim() : cur.last_name;
   const mobile = patch.mobile !== undefined ? String(patch.mobile || '').trim() : cur.mobile;
-  db.prepare('UPDATE users SET email=?, password_hash=?, role=?, first_name=?, last_name=?, mobile=? WHERE id=?').run(email, hash, role, firstName, lastName, mobile, id);
+  const invName = patch.inventiveName !== undefined ? String(patch.inventiveName || '').trim() : cur.inventive_name;
+  const invRef = patch.inventiveRefId !== undefined ? String(patch.inventiveRefId || '').trim() : cur.inventive_ref_id;
+  db.prepare('UPDATE users SET email=?, password_hash=?, role=?, first_name=?, last_name=?, mobile=?, inventive_name=?, inventive_ref_id=? WHERE id=?').run(email, hash, role, firstName, lastName, mobile, invName, invRef, id);
   if ('entityIds' in patch) setUserEntities(id, patch.entityIds);
   return publicUser(getUser(id));
 }
