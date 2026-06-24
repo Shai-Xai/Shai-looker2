@@ -16,7 +16,7 @@ export default function AnalystDrawer({ open, prewarm = false, onClose, previewE
   const [info, setInfo] = useState(null); // { url, tokens, scopeToken, hostUrl }
   const [mounted, setMounted] = useState(false); // mount on first open, then keep warm
   const [expanded, setExpanded] = useState(false); // overlay full-screen toggle
-  const [dock, setDock] = useState(() => localStorage.getItem('howler_ask_dock') || 'overlay'); // 'overlay' | 'docked'
+  const [dock, setDock] = useState(() => localStorage.getItem('howler_ask_dock') || 'docked'); // default in-app; toggle to 'overlay'
   const [zoom, setZoom] = useState(() => parseFloat(localStorage.getItem('howler_ask_zoom')) || 1); // scale the whole embed (text + UI)
   const iframeRef = useRef(null);
   const repliedRef = useRef(false);
