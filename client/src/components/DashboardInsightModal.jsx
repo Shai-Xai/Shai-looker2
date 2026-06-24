@@ -54,11 +54,12 @@ export default function DashboardInsightModal({ dashboardId, title, filterValues
 
   const drag = useSheetDrag(onClose);
   const panelStyle = isMobile ? { ...panel, width: '100%', maxHeight: '92dvh', borderRadius: '18px 18px 0 0' } : panel;
-  // Desktop: a true side-docked sidebar — no dimming backdrop, and the overlay
-  // lets clicks pass through (pointer-events:none) so the dashboard stays live
-  // beside it. Mobile keeps the dimmed bottom sheet (no room for side-by-side).
+  // Desktop: a true side-docked sidebar — no dimming/blur backdrop (we drop the
+  // `ai-overlay` class, which carries backdrop-filter: blur), and the overlay lets
+  // clicks pass through (pointer-events:none) so the dashboard stays fully visible
+  // and live beside it. Mobile keeps the dimmed bottom sheet (no room for side-by-side).
   const node = (
-    <div className="ai-overlay" style={isMobile ? { ...overlay, alignItems: 'flex-end', justifyContent: 'center' } : desktopOverlay} onClick={isMobile ? onClose : undefined}>
+    <div className={isMobile ? 'ai-overlay' : ''} style={isMobile ? { ...overlay, alignItems: 'flex-end', justifyContent: 'center' } : desktopOverlay} onClick={isMobile ? onClose : undefined}>
       <div className={(isMobile ? 'ai-sheet' : 'ai-panel') + ' ai-glow'} style={isMobile ? { ...panelStyle, ...drag.style } : panelStyle} onClick={(e) => e.stopPropagation()}>
         <style>{`@keyframes blink { 50% { opacity: 0; } } @keyframes spin { to { transform: rotate(360deg); } }`}</style>
         {isMobile && <div className="sheet-grip" {...drag.handlers} style={{ marginTop: 8 }} />}
