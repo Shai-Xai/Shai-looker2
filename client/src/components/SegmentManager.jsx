@@ -270,6 +270,26 @@ function SegmentBuilder({ entityId, tiles, segment, onClose, onSaved }) {
     lookerFilters: def.lookerFilters || {},
   });
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
+  // Event/suite picker — choose the event first, then its dashboards. Distinct
+  // suites from the tile catalogue (only shown for multi-event clients).
+  const suiteList = (() => {
+    const out = []; const seen = new Set();
+    for (const d of (tiles?.dashboards || [])) { if (d.suiteId && !seen.has(d.suiteId)) { seen.add(d.suiteId); out.push({ id: d.suiteId, name: d.suiteName || d.setName || 'Event' }); } }
+    return out;
+  })();
+  const [suiteSel, setSuiteSel] = useState('');
+  // Derive the suite from an existing dashboard (when editing), or auto-pick the
+  // only suite, once the catalogue has loaded.
+  useEffect(() => {
+    if (suiteSel) return;
+    if (f.dashboardId) {
+      const d = (tiles?.dashboards || []).find((x) => x.dashboardId === f.dashboardId);
+      if (d?.suiteId) { setSuiteSel(d.suiteId); return; }
+    }
+    if (suiteList.length === 1) setSuiteSel(suiteList[0].id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tiles, f.dashboardId]);
+  const suiteDashboards = (tiles?.dashboards || []).filter((d) => !suiteSel || d.suiteId === suiteSel);
   const [aud, setAud] = useState(null);
   const [busy, setBusy] = useState(false);
   const debounce = useRef();
@@ -358,9 +378,15 @@ function SegmentBuilder({ entityId, tiles, segment, onClose, onSaved }) {
         {f.mode === 'tile' ? (
           <Field label="Audience">
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <select style={input} value={f.dashboardId} onChange={(e) => { set('dashboardId', e.target.value); set('tileId', ''); set('emailField', ''); }}>
-                <option value="">Pick a dashboard…</option>
-                {(tiles?.dashboards || []).map((d) => <option key={d.dashboardId} value={d.dashboardId}>{d.title} — {d.setName}</option>)}
+              {suiteList.length > 1 && (
+                <select style={input} value={suiteSel} onChange={(e) => { setSuiteSel(e.target.value); set('dashboardId', ''); set('tileId', ''); set('emailField', ''); }}>
+                  <option value="">Pick an event…</option>
+                  {suiteList.map((s) => <option key={s.id} value={s.id}>🗓 {s.name}</option>)}
+                </select>
+              )}
+              <select style={input} value={f.dashboardId} disabled={suiteList.length > 1 && !suiteSel} onChange={(e) => { set('dashboardId', e.target.value); set('tileId', ''); set('emailField', ''); }}>
+                <option value="">{suiteList.length > 1 && !suiteSel ? 'Pick an event first…' : 'Pick a dashboard…'}</option>
+                {suiteDashboards.map((d) => <option key={d.dashboardId} value={d.dashboardId}>{d.title} — {d.setName}</option>)}
               </select>
               {dash && (
                 <select style={input} value={f.tileId} onChange={(e) => { set('tileId', e.target.value); set('emailField', ''); }}>

@@ -359,6 +359,10 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-24** — **Segment builder is event-first** ✅: when building a segment
+  from a dashboard tile, multi-event clients now pick the **event (suite)** first,
+  then only that event's dashboards are listed — so a segment is clearly tied to
+  the right event instead of scrolling one long mixed dashboard list.
 - **2026-06-24** — **Per-channel notification control** ✅: in **Settings →
   Notifications**, each category (Digests · Goals · Alerts · Messages) now has a
   **separate Email and Push switch**, so a client can (e.g.) keep goal **push** on

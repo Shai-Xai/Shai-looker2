@@ -3302,7 +3302,7 @@ function digestTileCatalogue(entityId) {
     const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((x) => x.tiles || []))]
       .filter((t) => t.type !== 'text' && t.query?.fields?.length)
       .map((t) => ({ tileId: t.id, title: t.title || '(untitled)', visType: t.vis?.type || '' }));
-    if (tiles.length) dashboards.push({ dashboardId: c.dashboardId, title: c.title, setName: c.setName, suiteName: c.suiteName, tiles });
+    if (tiles.length) dashboards.push({ dashboardId: c.dashboardId, title: c.title, setName: c.setName, suiteId: c.suiteId, suiteName: c.suiteName, tiles });
   }
   return { dashboards };
 }
