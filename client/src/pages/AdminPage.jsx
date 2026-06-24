@@ -753,16 +753,28 @@ const newKey = (p) => `${p}_${Math.random().toString(36).slice(2, 8)}`;
 function mergeWizardSteps(saved) {
   const defByKey = Object.fromEntries(WIZARD_DEFAULTS.map((s) => [s.key, s]));
   const pick = (o, keys) => { const out = {}; for (const k of keys) if (o[k] != null) out[k] = o[k]; return out; };
+  // Merge a built-in step's walkthrough (the red-border guide): saved overrides
+  // (title/body/off + order) layered over the code defaults, keyed by the section
+  // anchor. Any new default anchor (added in code) is appended; stale saved ones
+  // (anchor no longer in code) are dropped. The anchor + icon stay from code.
+  const mergeWalk = (key, savedWalk) => {
+    const defs = TOUR_DEFAULTS[key] || [];
+    const byTour = Object.fromEntries(defs.map((w) => [w.tour, w]));
+    if (!Array.isArray(savedWalk) || !savedWalk.length) return defs.map((w) => ({ ...w }));
+    const out = savedWalk.filter((w) => w && byTour[w.tour]).map((w) => ({ ...byTour[w.tour], ...pick(w, ['title', 'body']), off: !!w.off }));
+    for (const d of defs) if (!out.some((w) => w.tour === d.tour)) out.push({ ...d });
+    return out;
+  };
   let list;
   if (Array.isArray(saved) && saved.length) {
     list = saved.filter((s) => s && (s.kind === 'custom' || defByKey[s.key])).map((s) => (
       s.kind === 'custom'
         ? { kind: 'custom', key: s.key || newKey('custom'), icon: s.icon || '📌', title: s.title || 'Guidance step', blurb: s.blurb || '', items: Array.isArray(s.items) ? s.items.filter((it) => it && it.key).map((it) => ({ key: it.key, label: it.label || '' })) : [] }
-        : { ...defByKey[s.key], ...pick(s, ['icon', 'title', 'blurb', 'req', 'lock']) }
+        : { ...defByKey[s.key], ...pick(s, ['icon', 'title', 'blurb', 'req', 'lock']), walk: mergeWalk(s.key, s.walk) }
     ));
-    for (const d of WIZARD_DEFAULTS) if (!list.some((s) => s.key === d.key)) list.push({ ...d });
+    for (const d of WIZARD_DEFAULTS) if (!list.some((s) => s.key === d.key)) list.push({ ...d, walk: mergeWalk(d.key) });
   } else {
-    list = WIZARD_DEFAULTS.map((s) => ({ ...s }));
+    list = WIZARD_DEFAULTS.map((s) => ({ ...s, walk: mergeWalk(s.key) }));
   }
   const client = list.find((s) => s.key === 'client');
   return client ? [client, ...list.filter((s) => s.key !== 'client')] : list;
@@ -817,17 +829,20 @@ function SetupWizard({ fields }) {
   // step (once per client per step). Non-client steps need the entity to exist;
   // suites also waits until there's a suite to point at.
   useEffect(() => {
-    if (!TOURS[stepKey]) return;
+    const s = steps.find((x) => x.key === stepKey);
+    if (!s || !(s.walk || []).some((w) => !w.off)) return;
     if (stepKey !== 'client' && !entity) return;
-    if (stepKey === 'suites' && entity && !data.suites.some((s) => s.entityId === entity.id)) return;
+    if (stepKey === 'suites' && entity && !data.suites.some((x) => x.entityId === entity.id)) return;
     const k = `${entity?.id || 'new'}:${stepKey}`;
     if (!autoTourSeen.current.has(k)) { autoTourSeen.current.add(k); setTourOn(true); }
-  }, [stepKey, entityId, data]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [stepKey, entityId, data, steps]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!data) return <Muted>Loading…</Muted>;
 
   const suitesOf = (eid) => data.suites.filter((s) => s.entityId === eid);
   const loginsOf = (eid) => data.users.filter((u) => (u.entityIds || []).includes(eid));
+  // The enabled walkthrough points for a step (the red-border guide), in order.
+  const walkOf = (key) => { const s = steps.find((x) => x.key === key); return s && s.walk ? s.walk.filter((w) => !w.off) : []; };
   const entHasScope = (e) => e.allOrganisers || Object.values(e.lockedFilters || {}).some((v) => String(v || '').trim());
   // Built-in required-step completion, from SAVED state — drives the resume target
   // and the "needs …" chips. (Branding/custom steps aren't part of this.)
@@ -1013,7 +1028,7 @@ function SetupWizard({ fields }) {
       <div ref={bodyRef} style={cardStyle}>
         {stepKey !== 'review' && <ReqBadge />}
         <p style={{ fontSize: 13.5, color: 'var(--text)', lineHeight: 1.55, margin: '0 0 14px' }}>{step.blurb}</p>
-        {TOURS[stepKey] && (
+        {walkOf(stepKey).length > 0 && (
           <div style={{ marginBottom: 12 }}>
             <button style={miniBtn} title="Walk through each part of this step, one at a time"
               onClick={() => { if (stepKey === 'suites' && !suitesOf(entity?.id).length) { alert('Add a suite first (the “+ Add suite” button), then I’ll walk you through it.'); return; } setTourOn(true); }}>▶ Guide me through this step</button>
@@ -1125,7 +1140,7 @@ function SetupWizard({ fields }) {
         )}
 
         {error && <div style={{ color: 'var(--error)', fontSize: 13, marginTop: 10 }}>{error}</div>}
-        {tourOn && TOURS[stepKey] && <SectionTour steps={TOURS[stepKey]} container={bodyRef} onClose={() => setTourOn(false)} />}
+        {tourOn && walkOf(stepKey).length > 0 && <SectionTour steps={walkOf(stepKey)} container={bodyRef} onClose={() => setTourOn(false)} />}
       </div>
     </div>
   );
@@ -1167,9 +1182,11 @@ const BRANDING_TOUR = [
   { tour: 'mte-preview', icon: '👀', title: 'Live preview', body: 'See exactly how an email will look as you edit. Anything left blank falls back to the client’s — then Howler’s — defaults.' },
   { tour: 'mte-save', icon: '💾', title: 'Save the branding', body: 'Save to apply it — the app re-themes live, no reload. You can also send yourself a test email.' },
 ];
-// Per-step walkthroughs, keyed by step. Each is an ordered list of { tour, title,
-// body } where `tour` matches a [data-tour] anchor inside that step's content.
-const TOURS = { client: CLIENT_TOUR, scope: SCOPE_TOUR, suites: SUITES_TOUR, logins: LOGINS_TOUR, branding: BRANDING_TOUR };
+// Per-step walkthrough DEFAULTS, keyed by step. Each is an ordered list of
+// { tour, icon, title, body } where `tour` matches a [data-tour] anchor inside
+// that step's content. The AM can edit the title/body/order/on-off of these from
+// the ⚙ editor (stored as each step's `walk`); the anchor + icon stay from code.
+const TOUR_DEFAULTS = { client: CLIENT_TOUR, scope: SCOPE_TOUR, suites: SUITES_TOUR, logins: LOGINS_TOUR, branding: BRANDING_TOUR };
 
 function SectionTour({ steps, container, onClose }) {
   const [i, setI] = useState(0);
@@ -1236,11 +1253,14 @@ function SectionTour({ steps, container, onClose }) {
 // everything (the client step stays first) and add their own guidance steps with
 // a tick-off checklist. Saves the whole ordered list to server/setupWizard.js.
 function WizardEditor({ steps, onClose, onSaved }) {
-  const [list, setList] = useState(() => steps.map((s) => ({ ...s, items: s.items ? s.items.map((it) => ({ ...it })) : undefined })));
+  const [list, setList] = useState(() => steps.map((s) => ({ ...s, items: s.items ? s.items.map((it) => ({ ...it })) : undefined, walk: s.walk ? s.walk.map((w) => ({ ...w })) : undefined })));
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
 
   const patch = (i, p) => setList((l) => l.map((x, j) => (j === i ? { ...x, ...p } : x)));
+  // Walkthrough-point edits (the red-border guide): change text, reorder, on/off.
+  const walkPatch = (i, wi, p) => setList((l) => l.map((x, j) => (j === i ? { ...x, walk: x.walk.map((w, k) => (k === wi ? { ...w, ...p } : w)) } : x)));
+  const walkMove = (i, wi, dir) => setList((l) => l.map((x, j) => { if (j !== i) return x; const w = x.walk.slice(); const t = wi + dir; if (t < 0 || t >= w.length) return x; [w[wi], w[t]] = [w[t], w[wi]]; return { ...x, walk: w }; }));
   const move = (i, dir) => setList((l) => {
     const j = i + dir;
     if (l[i].key === 'client' || j < 1 || j >= l.length) return l; // client pinned first; stay in range
@@ -1258,7 +1278,7 @@ function WizardEditor({ steps, onClose, onSaved }) {
       // Strip behaviour-only fields; the server stores wording + order + customs.
       const payload = list.map((s) => (s.kind === 'custom'
         ? { kind: 'custom', key: s.key, icon: s.icon, title: s.title, blurb: s.blurb, items: (s.items || []).filter((it) => (it.label || '').trim()).map((it) => ({ key: it.key, label: it.label.trim() })) }
-        : { kind: 'builtin', key: s.key, icon: s.icon, title: s.title, blurb: s.blurb, ...(s.req != null ? { req: s.req } : {}), ...(s.lock != null ? { lock: s.lock } : {}) }));
+        : { kind: 'builtin', key: s.key, icon: s.icon, title: s.title, blurb: s.blurb, ...(s.req != null ? { req: s.req } : {}), ...(s.lock != null ? { lock: s.lock } : {}), walk: (s.walk || []).map((w) => ({ tour: w.tour, title: w.title, body: w.body, off: !!w.off })) }));
       const r = await api.saveSetupWizard(payload);
       onSaved(r.steps);
     } catch (e) { setErr(e.message); } finally { setBusy(false); }
@@ -1273,7 +1293,7 @@ function WizardEditor({ steps, onClose, onSaved }) {
     <div>
       <AdminBack onBack={onClose}>Back to wizard</AdminBack>
       <h2 style={{ fontSize: 20, fontWeight: 700, margin: '12px 0 4px' }}>⚙ Edit the setup wizard</h2>
-      <p style={{ ...hint }}>Change each step’s wording, reorder them, and add your own guidance steps. The built-in steps still <b>do</b> their job (create the client, scope, suites, logins, branding) — you’re editing what the AM reads, the order, and any extra steps you add. The “client” step stays first.</p>
+      <p style={{ ...hint }}>Change each step’s wording, reorder them, edit the <b>walkthrough points</b> (the red-border guide on each section), and add your own guidance steps. The built-in steps still <b>do</b> their job (create the client, scope, suites, logins, branding) — you’re editing what the AM reads, the order, and any extra steps you add. The “client” step stays first.</p>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         {list.map((s, i) => {
           const def = WIZARD_DEFAULTS.find((d) => d.key === s.key);
@@ -1303,6 +1323,28 @@ function WizardEditor({ steps, onClose, onSaved }) {
                 <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
                   <Field label="“Needs …” label"><input style={{ ...input, minWidth: 220 }} value={s.req || ''} onChange={(e) => patch(i, { req: e.target.value })} /></Field>
                   <Field label="Locked-button hint"><input style={{ ...input, minWidth: 260 }} value={s.lock || ''} onChange={(e) => patch(i, { lock: e.target.value })} /></Field>
+                </div>
+              )}
+              {!isCustom && (s.walk || []).length > 0 && (
+                <div style={{ marginTop: 14 }}>
+                  <L>Walkthrough points — the red-border guide</L>
+                  <div style={{ fontSize: 12, color: 'var(--muted)', margin: '4px 0 8px' }}>Edit what each highlighted section says, reorder them, or switch one off. Each point is pinned to a part of this step (you can’t add new highlights — those need a matching field on the page).</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {s.walk.map((w, wi) => (
+                      <div key={w.tour} style={{ border: '1px solid var(--hairline)', borderRadius: 8, padding: 10, opacity: w.off ? 0.55 : 1 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                          <span style={{ fontSize: 15 }}>{w.icon}</span>
+                          <input style={{ ...input, flex: 1, fontWeight: 600 }} value={w.title || ''} onChange={(e) => walkPatch(i, wi, { title: e.target.value })} />
+                          <button style={miniBtnOutline} onClick={() => walkMove(i, wi, -1)} disabled={wi === 0} title="Move up">↑</button>
+                          <button style={miniBtnOutline} onClick={() => walkMove(i, wi, 1)} disabled={wi === s.walk.length - 1} title="Move down">↓</button>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--muted)', cursor: 'pointer' }} title="Show this point in the guide">
+                            <input type="checkbox" checked={!w.off} onChange={() => walkPatch(i, wi, { off: !w.off })} /> on
+                          </label>
+                        </div>
+                        <textarea value={w.body || ''} onChange={(e) => walkPatch(i, wi, { body: e.target.value })} rows={2} style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 12.5, outline: 'none', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.45 }} />
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
               {isCustom && (
