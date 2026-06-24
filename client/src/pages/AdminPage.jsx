@@ -803,7 +803,6 @@ function SetupWizard({ fields }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [tourOn, setTourOn] = useState(false); // the in-step spotlight walkthrough
-  const [preview, setPreview] = useState(null); // { url } → the in-wizard preview modal
   const initFor = useRef(null);
   const bodyRef = useRef(null);
   const autoTourSeen = useRef(new Set());
@@ -928,15 +927,6 @@ function SetupWizard({ fields }) {
       navigate('/');
     } catch (e) { alert('Could not open preview: ' + e.message); }
   };
-  // Resolve the best client-facing URL (first dashboard, else client home) and open
-  // the in-wizard preview panel — without leaving the wizard.
-  const openPreview = async () => {
-    let url = '/';
-    try {
-      for (const su of suitesOf(entity.id)) { const d = await api.mySuite(su.id); const first = d.sets.flatMap((s) => s.dashboards)[0]; if (first) { url = `/suite/${su.id}/d/${first.id}`; break; } }
-    } catch { /* fall back to the client home */ }
-    setPreview({ url });
-  };
 
   // ── Step editor (the ⚙): edit wording, reorder, add custom guidance steps ────
   if (editing) return <WizardEditor steps={steps} onClose={() => setEditing(false)} onSaved={(saved) => { setSteps(mergeWizardSteps(saved)); setEditing(false); }} />;
@@ -1043,17 +1033,10 @@ function SetupWizard({ fields }) {
       <div ref={bodyRef} style={cardStyle}>
         {stepKey !== 'review' && <ReqBadge />}
         <p style={{ fontSize: 13.5, color: 'var(--text)', lineHeight: 1.55, margin: '0 0 14px' }}>{step.blurb}</p>
-        {stepKey !== 'review' && (
-          <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
-            {walkOf(stepKey).length > 0 && (
-              <button style={miniBtn} title="Walk through each part of this step, one at a time"
-                onClick={() => { if (stepKey === 'suites' && !suitesOf(entity?.id).length) { alert('Add a suite first (the “+ Add suite” button), then I’ll walk you through it.'); return; } setTourOn(true); }}>▶ Guide me through this step</button>
-            )}
-            {/* Always visible so the option is discoverable; disabled until the
-                client exists (nothing to preview on the very first step yet). */}
-            <button style={{ ...miniBtn, background: 'var(--brand)', color: '#fff', border: '1.5px solid var(--brand)', opacity: entity ? 1 : 0.5, cursor: entity ? 'pointer' : 'not-allowed' }}
-              disabled={!entity} onClick={openPreview}
-              title={entity ? 'Preview the client’s live account in a panel — no need to leave the wizard' : 'Create the client first, then you can preview their account here'}>👁 Preview the client</button>
+        {walkOf(stepKey).length > 0 && (
+          <div style={{ marginBottom: 12 }}>
+            <button style={miniBtn} title="Walk through each part of this step, one at a time"
+              onClick={() => { if (stepKey === 'suites' && !suitesOf(entity?.id).length) { alert('Add a suite first (the “+ Add suite” button), then I’ll walk you through it.'); return; } setTourOn(true); }}>▶ Guide me through this step</button>
           </div>
         )}
 
@@ -1163,7 +1146,6 @@ function SetupWizard({ fields }) {
 
         {error && <div style={{ color: 'var(--error)', fontSize: 13, marginTop: 10 }}>{error}</div>}
         {tourOn && walkOf(stepKey).length > 0 && <SectionTour steps={walkOf(stepKey)} container={bodyRef} onClose={() => setTourOn(false)} />}
-        {preview && entity && <PreviewModal entityId={entity.id} name={entity.name} url={preview.url} onClose={() => setPreview(null)} />}
       </div>
     </div>
   );
@@ -1280,6 +1262,7 @@ function WizardEditor({ steps, onClose, onSaved }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   const [openEdit, setOpenEdit] = useState({}); // which step cards are expanded (collapsed by default)
+  const [previewStep, setPreviewStep] = useState(null); // index of the step being previewed
 
   const patch = (i, p) => setList((l) => l.map((x, j) => (j === i ? { ...x, ...p } : x)));
   // Walkthrough-point edits (the red-border guide): change text, reorder, on/off.
@@ -1334,6 +1317,7 @@ function WizardEditor({ steps, onClose, onSaved }) {
                     : <span style={{ ...badgeBase, marginBottom: 0, color: 'var(--muted)', background: 'rgba(128,128,128,0.12)', border: '1px solid var(--hairline)' }} title={def?.does || ''}>Built-in{s.optional ? ' · optional' : ''}</span>}
                   <span style={{ fontWeight: 700, fontSize: 13.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.icon} {s.title}</span>
                 </button>
+                <button style={miniBtnOutline} onClick={() => setPreviewStep(i)} title="Preview how this step looks in the wizard">👁 Preview</button>
                 <button style={miniBtnOutline} onClick={() => move(i, -1)} disabled={s.key === 'client' || i <= 1} title="Move up">↑</button>
                 <button style={miniBtnOutline} onClick={() => move(i, 1)} disabled={s.key === 'client' || i >= list.length - 1} title="Move down">↓</button>
                 {isCustom && <button style={delBtn} onClick={() => removeStep(i)}>Remove</button>}
@@ -1405,42 +1389,63 @@ function WizardEditor({ steps, onClose, onSaved }) {
         <span style={{ flex: 1 }} />
         <button style={{ ...saveBtn, opacity: busy ? 0.6 : 1 }} onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save wizard'}</button>
       </div>
+      {previewStep != null && list[previewStep] && <StepPreviewModal step={list[previewStep]} index={previewStep} onClose={() => setPreviewStep(null)} />}
     </div>
   );
 }
 
-// ─── In-wizard preview — the client's real account inside a modal iframe ───────
-// Shows exactly what the client will see, scoped to the previewed client via the
-// same localStorage profile keys the app reads on boot (a same-origin iframe
-// shares them). Snapshots + restores those keys on close so the admin's own
-// session view is untouched. No navigation away from the wizard.
-function PreviewModal({ entityId, name, url, onClose }) {
-  const [wide, setWide] = useState(false);
-  const snap = useRef(null);
-  if (snap.current === null) {
-    snap.current = { p: localStorage.getItem('howler_active_profile'), m: localStorage.getItem('howler_active_mode'), v: localStorage.getItem('howler_admin_preview') };
-    localStorage.setItem('howler_active_profile', entityId);
-    localStorage.setItem('howler_active_mode', 'client');
-    localStorage.setItem('howler_admin_preview', JSON.stringify({ id: entityId, name: name || '', logo: '' }));
-  }
-  useEffect(() => () => {
-    const s = snap.current, put = (k, v) => (v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v));
-    put('howler_active_profile', s.p); put('howler_active_mode', s.m); put('howler_admin_preview', s.v);
-  }, []);
+// ─── Step preview — how a wizard step looks, rendered from the editor ──────────
+// A faithful, read-only render of the step exactly as the AM meets it in the
+// wizard: the required/optional badge, the icon + title, the explanation, the
+// custom checklist (if any), and each walkthrough point as the card it shows in
+// the red-border guide. Lets you see wording/walkthrough edits without running
+// the wizard against a real client.
+function StepPreviewModal({ step, index, onClose }) {
+  const s = step, isCustom = s.kind === 'custom';
+  const walk = (s.walk || []).filter((w) => !w.off);
+  const badge = isCustom
+    ? <div style={{ ...badgeBase, color: 'var(--muted)', background: 'rgba(128,128,128,0.12)', border: '1px solid var(--hairline)' }}>Your guidance step</div>
+    : s.optional
+      ? <div style={{ ...badgeBase, color: 'var(--muted)', background: 'rgba(128,128,128,0.12)', border: '1px solid var(--hairline)' }}>○ Optional — you can skip this step</div>
+      : <div style={{ ...badgeBase, color: 'var(--brand)', background: 'rgba(var(--brand-rgb),0.10)', border: '1px solid rgba(var(--brand-rgb),0.3)' }}>● Required{s.req ? ` — needs ${s.req}` : ''}</div>;
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 5000, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: 'var(--card)', borderRadius: 16, boxShadow: '0 24px 64px -12px rgba(0,0,0,0.6)', width: wide ? 'min(1100px, 96vw)' : 'min(420px, 96vw)', height: '90vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 14px', borderBottom: '1px solid var(--hairline)', flexWrap: 'wrap' }}>
-          <span style={{ fontWeight: 800, fontSize: 14 }}>👁 Preview — {name || 'client'}</span>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: 'var(--bg, var(--card))', borderRadius: 16, boxShadow: '0 24px 64px -12px rgba(0,0,0,0.6)', width: 'min(560px, 96vw)', maxHeight: '90vh', overflowY: 'auto', padding: 18 }}>
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+          <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Preview — how step {index + 1} looks in the wizard</span>
           <span style={{ flex: 1 }} />
-          <button style={miniBtnOutline} onClick={() => setWide((w) => !w)}>{wide ? '📱 Phone' : '🖥 Desktop'}</button>
-          <a href={url} target="_blank" rel="noreferrer" style={{ ...miniBtnOutline, textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}>Open ↗</a>
-          <button style={saveBtn} onClick={onClose}>Done</button>
+          <button onClick={onClose} style={{ border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 18, lineHeight: 1 }} title="Close">✕</button>
         </div>
-        <div style={{ flex: 1, minHeight: 0, background: '#fff' }}>
-          <iframe title="Client preview" src={url} style={{ width: '100%', height: '100%', border: 'none' }} />
+        {/* The step card, as the AM sees it */}
+        <div style={{ ...cardStyle, marginBottom: 0 }}>
+          <h2 style={{ fontSize: 20, fontWeight: 700, margin: '0 0 8px' }}>{s.icon} {s.title}</h2>
+          {badge}
+          <p style={{ fontSize: 13.5, color: 'var(--text)', lineHeight: 1.55, margin: '8px 0 4px' }}>{s.blurb}</p>
+          {isCustom && (s.items || []).length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
+              {s.items.map((it) => (
+                <div key={it.key} style={{ display: 'flex', alignItems: 'center', gap: 10, border: '1px solid var(--hairline)', borderRadius: 10, padding: '10px 12px' }}>
+                  <span style={{ width: 22, height: 22, borderRadius: 6, border: '1.5px solid var(--hairline)', flexShrink: 0 }} />
+                  <span style={{ fontSize: 13.5, fontWeight: 600 }}>{it.label || <em style={{ color: 'var(--muted)' }}>empty item</em>}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
-        <div style={{ fontSize: 11.5, color: 'var(--muted)', padding: '8px 14px', borderTop: '1px solid var(--hairline)' }}>The live client experience, scoped to {name || 'this client'} — exactly what they’ll see. Your own admin session is untouched.</div>
+        {!isCustom && walk.length > 0 && (
+          <div style={{ marginTop: 14 }}>
+            <div style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--muted)', marginBottom: 8 }}>The red-border walkthrough — {walk.length} point{walk.length === 1 ? '' : 's'}</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {walk.map((w, k) => (
+                <div key={w.tour} style={{ border: '1px solid var(--border)', borderLeft: '3px solid var(--brand)', borderRadius: 10, padding: '10px 12px', background: 'var(--card)' }}>
+                  <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--brand)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>Step {k + 1} of {walk.length}</div>
+                  <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 3 }}>{w.icon ? `${w.icon} ` : ''}{w.title}</div>
+                  <div style={{ fontSize: 12.5, color: 'var(--text)', lineHeight: 1.5 }}>{w.body}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
