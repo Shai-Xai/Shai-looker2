@@ -63,12 +63,6 @@ export default function AnalystDrawer({ open, onClose, previewEntityId }) {
 
   if (!mounted) return null;
 
-  const popOut = () => {
-    if (!info?.url) return;
-    window.open(info.url, 'inventive_analyst'); // top-level = first-party = full speed
-    setMounted(false); // tear down the in-app iframe; the window takes over
-    onClose();
-  };
   const width = (expanded || isMobile) ? '100%' : 'min(560px, 94vw)';
   const hdrBtn = { border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' };
   return (
@@ -85,7 +79,6 @@ export default function AnalystDrawer({ open, onClose, previewEntityId }) {
           {!isMobile && (
             <button onClick={() => setExpanded((e) => !e)} title={expanded ? 'Exit full screen' : 'Full screen'} aria-label={expanded ? 'Exit full screen' : 'Full screen'} style={{ ...hdrBtn, fontSize: 15, padding: '4px 8px' }}>{expanded ? '⤡' : '⛶'}</button>
           )}
-          <button onClick={popOut} title="Pop out to a faster window" aria-label="Pop out to a window" style={{ ...hdrBtn, fontSize: 17, padding: '4px 8px' }}>⤢</button>
           <button onClick={onClose} title="Close" aria-label="Close analyst" style={{ ...hdrBtn, fontSize: 20, padding: '2px 6px' }}>✕</button>
         </div>
         <div style={{ flex: 1, minHeight: 0 }}>
