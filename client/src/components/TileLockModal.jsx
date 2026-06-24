@@ -50,15 +50,22 @@ export default function TileLockModal({ tile, filters, suiteId, current, onSave,
   );
 }
 
-// One filter row: chip for the current value + a searchable picker (Looker
-// suggestions scoped to the suite). Single value (comma-separate for several).
+// One filter row. Numeric "is in range" filters (Looker advanced on a number
+// field, e.g. Days Before Event "is between -3 AND 18") get a min→max range
+// control matching the dashboard; everything else gets a searchable value picker
+// (Looker suggestions scoped to the suite). Single value (comma-separate several).
 function ValueRow({ filter, suiteId, value, onChange }) {
   const [q, setQ] = useState('');
   const [open, setOpen] = useState(false);
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const field = filter.field || filter.dimension;
-  const canSuggest = !!(filter.model && filter.explore && field);
+  const uiType = filter.ui_config?.type;
+  const opts = filter.ui_config?.options || {};
+  // Same range detection as the dashboard FilterBar, so a tile lock offers the
+  // exact control the filter uses (and stores the same [lo,hi] expression).
+  const isRange = uiType === 'advanced' && (RANGE_RE.test(String(value || filter.default_value || '')) || opts.min != null || opts.max != null);
+  const canSuggest = !isRange && !!(filter.model && filter.explore && field);
 
   useEffect(() => {
     if (!open || !canSuggest) return;
@@ -77,6 +84,9 @@ function ValueRow({ filter, suiteId, value, onChange }) {
   return (
     <div>
       <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', marginBottom: 5 }}>{filter.title || filter.name}</div>
+      {isRange ? (
+        <RangeLock value={value || ''} onChange={onChange} opts={opts} />
+      ) : (<>
       {value && (
         <div style={{ marginBottom: 6 }}>
           <span style={chip}>{value}<span style={{ cursor: 'pointer', fontWeight: 700 }} onClick={() => onChange('')}> ✕</span></span>
@@ -103,6 +113,34 @@ function ValueRow({ filter, suiteId, value, onChange }) {
           </ul>
         )}
       </div>
+      </>)}
+    </div>
+  );
+}
+
+// Looker numeric range value, e.g. "[26,360]" / "(0,100)" — bracket = inclusive,
+// paren = exclusive. Empty ends allowed ("[26,]"). Mirrors FilterBar.
+const RANGE_RE = /^\s*([[(])\s*(-?\d+(?:\.\d+)?)?\s*,\s*(-?\d+(?:\.\d+)?)?\s*([\])])\s*$/;
+
+// "is in range" lock: two number inputs writing the bracketed expression Looker
+// expects (preserving inclusive/exclusive brackets). Clearing both ends drops
+// the lock (empty value) so the tile falls back to the dashboard.
+function RangeLock({ value, onChange, opts }) {
+  const m = RANGE_RE.exec(String(value || ''));
+  const lb = m ? m[1] : '[';
+  const rb = m ? m[4] : ']';
+  const lo = m ? (m[2] ?? '') : '';
+  const hi = m ? (m[3] ?? '') : '';
+  const write = (nlo, nhi) => {
+    if (String(nlo) === '' && String(nhi) === '') return onChange('');
+    onChange(`${lb}${nlo === '' ? '' : nlo},${nhi === '' ? '' : nhi}${rb}`);
+  };
+  return (
+    <div style={rangeWrap}>
+      <span style={rangeOp}>is in range</span>
+      <input type="number" value={lo} min={opts.min} max={opts.max} onChange={(e) => write(e.target.value, hi)} style={rangeInput} aria-label="from" />
+      <span style={{ color: 'var(--muted)', fontSize: 12 }}>to</span>
+      <input type="number" value={hi} min={opts.min} max={opts.max} onChange={(e) => write(lo, e.target.value)} style={rangeInput} aria-label="to" />
     </div>
   );
 }
@@ -117,3 +155,6 @@ const ddItem = { padding: '8px 11px', cursor: 'pointer', fontSize: 13, whiteSpac
 const ddMuted = { padding: '8px 11px', fontSize: 13, color: 'var(--muted)' };
 const saveBtn = { padding: '8px 18px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer' };
 const linkBtn = { padding: '8px 12px', background: 'transparent', color: 'var(--text)', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer' };
+const rangeWrap = { display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', border: '1.5px solid var(--hairline)', borderRadius: 8, background: 'var(--card)' };
+const rangeOp = { fontSize: 12, color: 'var(--muted)', fontWeight: 600, whiteSpace: 'nowrap' };
+const rangeInput = { width: 70, padding: '6px 8px', border: '1px solid var(--hairline)', borderRadius: 8, fontSize: 13, outline: 'none', textAlign: 'center', background: 'var(--card)', color: 'var(--text)', boxSizing: 'border-box' };
