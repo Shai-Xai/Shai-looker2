@@ -30,7 +30,7 @@ const SECTIONS = [
 
 export default function ClientIntegrationsPage() {
   const isMobile = useIsMobile();
-  const { can } = useAccess();
+  const { can, role, isAdmin } = useAccess();
   const { active } = useProfile(); // every section is scoped to the active client profile
   const ctx = useOutletContext() || {};
   const [items, setItems] = useState(null);
@@ -104,6 +104,7 @@ export default function ClientIntegrationsPage() {
                 lookerActive={false}
                 showMeta
                 showTikTok
+                canEdit={isAdmin || role === 'owner'}
                 onSave={async (p) => {
                   const v = await api.saveMyIntegrations(activeItem.entityId, p);
                   setItems((arr) => arr.map((x) => (x.entityId === activeItem.entityId ? { ...x, ...v } : x)));
