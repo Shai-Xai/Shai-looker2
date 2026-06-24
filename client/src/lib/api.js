@@ -261,6 +261,7 @@ export const api = {
   myPlatformAudiences: (entityId, channel) => fetch(`/api/my/audiences/${entityId}/platform/${channel}`).then(json),
   myAudienceSyncLog: (entityId, limit = 50) => fetch(`/api/my/audiences/${entityId}/log?limit=${limit}`).then(json),
   saveAdminIntegrations: (p) => fetch('/api/admin/integrations', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),
+  setAdminIntegrationLock: (key, locked) => fetch('/api/admin/integrations/lock', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, locked }) }).then(json),
   sendMailTest: (entityId) => fetch('/api/admin/mail/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entityId }) }).then(json),
   getMailLog: (params = {}) => fetch(`/api/admin/mail-log?${new URLSearchParams(params)}`).then(json),
   getMyMailLog: (entityId, params = {}) => fetch(`/api/my/mail-log/${entityId}?${new URLSearchParams(params)}`).then(json),

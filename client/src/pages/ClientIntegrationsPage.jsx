@@ -105,6 +105,7 @@ export default function ClientIntegrationsPage() {
                 showMeta
                 showTikTok
                 canManageLock={isAdmin || role === 'owner'}
+                lockableKeys={['looker', 'anthropic', 'meta', 'tiktok']}
                 locks={activeItem.locks || {}}
                 onToggleLock={async (key, locked) => {
                   const v = await api.setMyIntegrationLock(activeItem.entityId, key, locked);

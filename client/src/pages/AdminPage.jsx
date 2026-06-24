@@ -2774,7 +2774,7 @@ function AdminIntegrations() {
     <div>
       <p style={hint}>Accounts (Looker · Anthropic · Email · <b>Inventive</b>) is open below; other sections are collapsed — tap to open. Accounts override the values in <code>.env</code>; clients can set their own Looker/Anthropic (Client → Integrations), which take precedence for their data.</p>
       <Section title="🔑 Accounts — Looker · Anthropic · Email · Inventive" defaultOpen>
-        <IntegrationsForm value={value} showResend showInventive clients={clients} onTestEmail={() => api.sendMailTest()} onSave={async (p) => setValue(await api.saveAdminIntegrations(p))} />
+        <IntegrationsForm value={value} showResend showInventive clients={clients} canManageLock lockableKeys={['looker', 'anthropic', 'resend', 'inventive']} locks={value.locks || {}} onToggleLock={async (k, locked) => setValue(await api.setAdminIntegrationLock(k, locked))} onTestEmail={() => api.sendMailTest()} onSave={async (p) => setValue(await api.saveAdminIntegrations(p))} />
       </Section>
       <Section title="◇ Audience sync — connector health">
         <p style={hint}>Per-client status of the Meta / TikTok audience syncs: which clients are connected, how many audiences are live, and any recent failures. Drill into a client to see each segment's audience.</p>
@@ -3082,6 +3082,7 @@ function ClientIntegrations({ entity }) {
         showMeta
         showTikTok
         canManageLock
+        lockableKeys={['looker', 'anthropic', 'meta', 'tiktok']}
         locks={value.locks || {}}
         onToggleLock={async (k, locked) => setValue(await api.setEntityIntegrationLock(entity.id, k, locked))}
         inventiveWorkspace={{ name: entity.inventiveName || '', refId: entity.inventiveRefId || '', defaultRefId: entity.id }}

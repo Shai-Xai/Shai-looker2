@@ -4,11 +4,13 @@ import { useState } from 'react';
 // write-only: the form only knows whether a value is set (value.*.keySet /
 // clientSecretSet); typing a new value changes it, blank leaves it unchanged.
 // `onSave(payload)` receives only the fields that changed.
-export default function IntegrationsForm({ value, onSave, showLooker = true, lookerActive = true, showResend = false, showInventive = false, inventiveWorkspace = null, showMeta = false, showTikTok = false, clients = [], onTestEmail, collapsible = false, canManageLock = false, locks = {}, onToggleLock }) {
+export default function IntegrationsForm({ value, onSave, showLooker = true, lookerActive = true, showResend = false, showInventive = false, inventiveWorkspace = null, showMeta = false, showTikTok = false, clients = [], onTestEmail, collapsible = false, canManageLock = false, locks = {}, onToggleLock, lockableKeys = [] }) {
   // Each integration can be FROZEN (a per-integration lock). While frozen its
   // fields are read-only; only an admin/Owner (canManageLock) can unlock to edit,
   // then re-lock — a guard against accidental changes to a working connection.
-  const lockProps = (key) => ({ lockKey: key, locked: !!locks?.[key], canManageLock, onToggleLock });
+  // `lockableKeys` scopes which sections are freezable on THIS surface (per-client
+  // vs platform), so e.g. the per-client Inventive workspace map gets no toggle.
+  const lockProps = (key) => (lockableKeys.includes(key) ? { lockKey: key, locked: !!locks?.[key], canManageLock, onToggleLock } : {});
   const [baseUrl, setBaseUrl] = useState(value?.looker?.baseUrl || '');
   const [clientId, setClientId] = useState(value?.looker?.clientId || '');
   const [clientSecret, setClientSecret] = useState('');
@@ -172,7 +174,7 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
 
       {/* Resend (email) — platform-level only */}
       {showResend && (
-        <Section title="✉️ Email (Resend)" collapsible={collapsible}>
+        <Section title="✉️ Email (Resend)" collapsible={collapsible} {...lockProps('resend')}>
           {/* Emergency brake: instantly no-ops ALL outbound email (every client,
               every campaign/digest/notification) without touching Resend keys. */}
           <div style={{ border: `1.5px solid ${value?.resend?.enabled === false ? 'var(--error,#ef4444)' : 'var(--hairline)'}`, background: value?.resend?.enabled === false ? 'rgba(239,68,68,0.08)' : 'transparent', borderRadius: 10, padding: '10px 12px', marginBottom: 12 }}>
@@ -251,7 +253,7 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
 
       {/* Inventive (embedded AI analyst) — platform-level, one account → per-client workspaces */}
       {(showInventive || inventiveWorkspace) && (
-        <Section title="✨ Inventive (AI analyst)" collapsible={collapsible}>
+        <Section title="✨ Inventive (AI analyst)" collapsible={collapsible} {...lockProps('inventive')}>
           {inventiveWorkspace && (
             <>
               <div style={note}>How this client maps to its Inventive workspace. Blank fields inherit the client's own details.</div>

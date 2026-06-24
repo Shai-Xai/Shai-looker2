@@ -1619,6 +1619,7 @@ function adminIntegrationsView() {
       envFallback: !db.getSetting('inventive_api_key') && !!process.env.INVENTIVE_API_KEY,
       configured: !!((db.getSetting('inventive_api_key') || process.env.INVENTIVE_API_KEY) && (db.getSetting('inventive_embed_auth_token') || process.env.INVENTIVE_EMBED_AUTH_TOKEN)),
     },
+    locks: getPlatformIntegrationLocks(), // { key: true } — frozen platform integrations
   };
 }
 function entityIntegrationsView(entityId) {
@@ -1642,25 +1643,48 @@ function dropFrozenSections(entityId, body) {
   return b;
 }
 
+// Platform-level integration freeze locks — same idea as per-client, but for
+// Howler's own accounts, kept in a single setting. Frozen sections are dropped
+// from any save (defence in depth) so a freeze can't be bypassed.
+const PLATFORM_INTEGRATION_KEYS = ['looker', 'anthropic', 'resend', 'inventive'];
+function getPlatformIntegrationLocks() { try { return JSON.parse(db.getSetting('integration_locks') || '{}') || {}; } catch { return {}; } }
+function setPlatformIntegrationLock(key, locked) {
+  const cur = getPlatformIntegrationLocks();
+  if (locked) cur[key] = true; else delete cur[key];
+  db.setSetting('integration_locks', JSON.stringify(cur));
+  return cur;
+}
+
 // Admin: primary accounts.
 app.get('/api/admin/integrations', auth.requireAdmin, (_req, res) => res.json(adminIntegrationsView()));
 app.put('/api/admin/integrations', auth.requireAdmin, (req, res) => {
+  const locks = getPlatformIntegrationLocks();
+  const body = { ...(req.body || {}) };
+  if (locks.looker) delete body.looker;
+  if (locks.anthropic) delete body.anthropic;
   const map = { lookerBaseUrl: 'looker_base_url', lookerClientId: 'looker_client_id', lookerClientSecret: 'looker_client_secret', anthropicApiKey: 'anthropic_api_key' };
-  applyIntegrationsPatch(req.body || {}, (k, v) => db.setSetting(map[k], v));
+  applyIntegrationsPatch(body, (k, v) => db.setSetting(map[k], v));
   // Resend (email) — admin-only, so handled here rather than in the shared patch.
-  const re = (req.body || {}).resend || {};
+  const re = (locks.resend ? {} : (req.body || {}).resend) || {};
   if (re.apiKey) db.setSetting('resend_api_key', String(re.apiKey));
   if (re.clearApiKey) db.setSetting('resend_api_key', '');
   if (re.from !== undefined) db.setSetting('mail_from', String(re.from || '').trim());
   // Global kill switch: '0' makes every outbound email a no-op (all clients).
   if (re.enabled !== undefined) db.setSetting('mail_enabled', re.enabled ? '1' : '0');
   // Inventive (embedded AI analyst) — admin-only, platform-level.
-  const inv = (req.body || {}).inventive || {};
+  const inv = (locks.inventive ? {} : (req.body || {}).inventive) || {};
   if (inv.apiKey) db.setSetting('inventive_api_key', String(inv.apiKey));
   if (inv.clearApiKey) db.setSetting('inventive_api_key', '');
   if (inv.embedToken) db.setSetting('inventive_embed_auth_token', String(inv.embedToken));
   if (inv.clearEmbedToken) db.setSetting('inventive_embed_auth_token', '');
   if (inv.endpoint !== undefined) db.setSetting('inventive_api_endpoint', String(inv.endpoint || '').trim());
+  res.json(adminIntegrationsView());
+});
+// Freeze / unfreeze a platform integration.
+app.put('/api/admin/integrations/lock', auth.requireAdmin, (req, res) => {
+  const { key, locked } = req.body || {};
+  if (!PLATFORM_INTEGRATION_KEYS.includes(key)) return res.status(400).json({ error: 'Unknown integration' });
+  setPlatformIntegrationLock(key, !!locked);
   res.json(adminIntegrationsView());
 });
 
