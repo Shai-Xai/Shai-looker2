@@ -27,15 +27,19 @@ function mount(app, { db, auth }) {
   app.post('/api/inventive/embed-url', auth.requireAuth, async (req, res) => {
     const key = inventiveKey(); const token = inventiveEmbedToken();
     if (!key || !token) return res.status(400).json({ error: 'Inventive is not configured yet.' });
-    // One Inventive workspace per Pulse USER (linked to the logged-in user, not a
-    // client). firstname/lastname come from the saved profile (First name / Surname),
-    // falling back to splitting the email local-part when there's no profile first
-    // name. A set first name keeps an intentionally-blank surname.
+    // Inventive rejects the request if firstname, lastname OR email is empty, so we
+    // guarantee all three. Prefer the saved profile (First name / Surname); fall back
+    // to the email local-part; split a multi-word first name into first + last; and
+    // as a last resort reuse the first name as the surname (single-name users) so we
+    // never send a blank field.
     const u = req.user;
-    const profileFirst = (u.firstName || '').trim();
-    const { firstname, lastname } = profileFirst
-      ? { firstname: profileFirst, lastname: (u.lastName || '').trim() }
-      : inventiveName(u.email);
+    const email = (u.email || '').trim();
+    let firstname = (u.firstName || '').trim();
+    let lastname = (u.lastName || '').trim();
+    if (!firstname && !lastname) { const d = inventiveName(email); firstname = d.firstname; lastname = d.lastname; }
+    if (!lastname && firstname.includes(' ')) { const p = firstname.split(/\s+/); firstname = p[0]; lastname = p.slice(1).join(' '); }
+    if (!firstname) firstname = email.split('@')[0] || 'User';
+    if (!lastname) lastname = firstname;
     // The user is linked to a reusable Inventive workspace (Admin → Integrations →
     // Inventive workspaces). Its name + reference identify the workspace; an unlinked
     // user falls back to their own name / Howler user ID (the stable default key).
@@ -43,7 +47,7 @@ function mount(app, { db, auth }) {
     const accountName = (ws?.name || '').trim() || u.fullName || [firstname, lastname].filter(Boolean).join(' ') || u.email;
     const externalRefId = (ws?.refId || '').trim() || u.id;
     const userInfo = {
-      firstname, lastname, email: u.email,
+      firstname, lastname, email,
       // One Inventive workspace per Pulse user.
       accountScope: { externalRefId, name: accountName, description: `${accountName} · Pulse` },
     };
