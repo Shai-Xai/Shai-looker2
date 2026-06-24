@@ -167,12 +167,14 @@ input::placeholder, textarea::placeholder { color: #b0b0b6; }
 @keyframes overlay-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes panel-in-right { from { transform: translateX(26px); opacity: 0; } to { transform: none; opacity: 1; } }
 @keyframes sheet-up { from { transform: translateY(100%); } to { transform: none; } }
+@keyframes drawer-in-right { from { transform: translateX(100%); } to { transform: none; } }
 @keyframes msg-in { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: none; } }
 @keyframes modal-in { from { opacity: 0; transform: scale(0.96) translateY(8px); } to { opacity: 1; transform: none; } }
 
 .ai-overlay { animation: overlay-in .2s ease both; backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); }
 .ai-panel { animation: panel-in-right .36s var(--ease-spring) both; }
 .ai-sheet { animation: sheet-up .36s var(--ease-spring) both; }
+.analyst-drawer { animation: drawer-in-right .26s var(--ease-spring) both; }
 .modal-in { animation: modal-in .26s var(--ease-spring) both; }
 .msg-in { animation: msg-in .3s var(--ease-out) both; }
 
