@@ -116,7 +116,7 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
 
       {/* Meta (FB/IG) — per-client audience sync */}
       {showMeta && (
-        <Section title="◇ Meta (Facebook / Instagram)" collapsible={collapsible} {...lockProps('meta')}>
+        <Section title="◇ Meta (Facebook / Instagram)" collapsible={collapsible} {...lockProps('meta')} guide={<>
           <div style={note}>
             Push a <b>segment</b> to a Meta <b>Custom Audience</b> for ad targeting or exclusion. Emails/phones are hashed before they leave Pulse. Use a system-user / long-lived token with <code>ads_management</code>.
           </div>
@@ -127,6 +127,7 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
             <>Find your <b>Ad account ID</b> in <b>Ads Manager</b> — the <code>act_…</code> number in the account dropdown (top-left). Paste the digits as <code>act_1234567890</code>.</>,
             <><b>Business ID</b> (optional) lives in <b>Business Settings → Business info</b>.</>,
           ]} />
+        </>}>
           <Lbl>Access token</Lbl>
           <input
             type="password" autoComplete="off"
@@ -147,7 +148,7 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
 
       {/* TikTok — per-client audience sync */}
       {showTikTok && (
-        <Section title="♪ TikTok" collapsible={collapsible} {...lockProps('tiktok')}>
+        <Section title="♪ TikTok" collapsible={collapsible} {...lockProps('tiktok')} guide={<>
           <div style={note}>
             Push a <b>segment</b> to a TikTok <b>Custom Audience</b> for ad targeting. Emails/phones are hashed before they leave Pulse. Use an access token with audience (DMP) scope and the advertiser ID the audience should live under.
           </div>
@@ -157,6 +158,7 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
             <>Authorise the app for your advertiser account, then generate a <b>long-lived access token</b>. Copy it into <b>Access token</b> above.</>,
             <>Find your <b>Advertiser ID</b> in Ads Manager — the account dropdown (top-right), or the <code>advertiser_id</code> in the page URL. Paste it into <b>Advertiser ID</b>.</>,
           ]} />
+        </>}>
           <Lbl>Access token</Lbl>
           <input
             type="password" autoComplete="off"
@@ -361,7 +363,7 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
 // A card section that can optionally collapse, and optionally be FROZEN (a
 // per-integration lock). When `lockKey` is set the header carries a lock toggle
 // (visible to admins/owners) and, while locked, the section's fields are disabled.
-function Section({ title, collapsible, children, lockKey, locked = false, canManageLock = false, onToggleLock }) {
+function Section({ title, collapsible, children, guide, lockKey, locked = false, canManageLock = false, onToggleLock }) {
   const [open, setOpen] = useState(!collapsible);
   const [busy, setBusy] = useState(false);
   const toggle = async () => {
@@ -389,9 +391,14 @@ function Section({ title, collapsible, children, lockKey, locked = false, canMan
         )}
       </div>
       {open && (
-        <fieldset disabled={lockable && locked} style={{ border: 'none', margin: 0, padding: 0, minInlineSize: 'auto', ...(collapsible ? { marginTop: 10 } : { marginTop: 0 }), opacity: lockable && locked ? 0.6 : 1 }}>
-          {children}
-        </fieldset>
+        <>
+          {/* Help/guide content stays OUTSIDE the disabled fieldset so it's always
+              readable and expandable, even when the integration is locked. */}
+          {guide && <div style={{ marginTop: collapsible ? 10 : 8 }}>{guide}</div>}
+          <fieldset disabled={lockable && locked} style={{ border: 'none', margin: 0, padding: 0, minInlineSize: 'auto', marginTop: guide ? 6 : (collapsible ? 10 : 0), opacity: lockable && locked ? 0.6 : 1 }}>
+            {children}
+          </fieldset>
+        </>
       )}
     </section>
   );
