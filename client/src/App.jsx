@@ -19,6 +19,7 @@ import InboxPage from './os/InboxPage.jsx';
 import DigestsPage from './pages/DigestsPage.jsx';
 import EngagePage from './pages/EngagePage.jsx';
 import GoalsPage from './pages/GoalsPage.jsx';
+import SocialPage from './pages/SocialPage.jsx';
 import AlertsPage from './pages/AlertsPage.jsx';
 import InventiveAskPage from './pages/InventiveAskPage.jsx';
 import Logo from './components/Logo.jsx';
@@ -262,6 +263,7 @@ function Shell() {
                 <Route path="/suite/:suiteId/d/:id" element={<ViewPage />} />
                 <Route path="/goals" element={<GoalsPage />} />
                 <Route path="/alerts" element={<AlertsPage />} />
+                <Route path="/social" element={<SocialPage />} />
                 <Route path="/settlements" element={<SettlementsPage />} />
                 <Route path="/settlements/:id" element={<SettlementViewPage />} />
                 <Route path="/documents/:id" element={<DocumentViewPage />} />
@@ -289,6 +291,7 @@ function Shell() {
                 <Route path="/suite/:suiteId/d/:id/edit" element={<EditorPage />} />
                 <Route path="/goals" element={<GoalsPage />} />
                 <Route path="/alerts" element={<AlertsPage />} />
+                <Route path="/social" element={<SocialPage />} />
                 <Route path="/settlements" element={<SettlementsPage />} />
                 <Route path="/settlements/:id" element={<SettlementViewPage />} />
                 <Route path="/documents/:id" element={<DocumentViewPage />} />

@@ -228,6 +228,18 @@ export const api = {
   mySuites: () => fetch('/api/my/suites').then(json),
   mySuite: (id) => fetch(`/api/my/suites/${id}`).then(json),
 
+  // Social metrics (inbound organic stats). Admins pass the ownership check, so
+  // both admin-preview and client self-service use the same /api/my/social path.
+  mySocial: (entityId, { metric = 'reach', days = 30, platform, accountRef, sort } = {}) => {
+    const q = new URLSearchParams({ metric, days: String(days) });
+    if (platform) q.set('platform', platform);
+    if (accountRef) q.set('accountRef', accountRef);
+    if (sort) q.set('sort', sort);
+    return fetch(`/api/my/social/${entityId}?${q}`).then(json);
+  },
+  syncSocial: (entityId) => fetch(`/api/my/social/${entityId}/sync`, { method: 'POST' }).then(json),
+  verifySocial: (entityId) => fetch(`/api/my/social/${entityId}/verify`, { method: 'POST' }).then(json),
+
   // Inventive embedded AI analyst (server-proxied; key stays server-side).
   inventiveStatus: () => fetch('/api/inventive/status').then(json),
   inventiveEmbedUrl: (entityId, options) => fetch('/api/inventive/embed-url', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entityId, options }) }).then(json),

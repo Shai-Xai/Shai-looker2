@@ -196,6 +196,27 @@ where people open, click and convert."
 it auto-synced, exclude people who already bought, and see exactly what's live on
 each platform without leaving Pulse."
 
+### 5e. Social metrics — organic performance  🟡 (needs connection) · 🧪
+- Pulls a client's **organic social stats into Pulse** — the read direction, the
+  opposite of audience sync. Covers **Facebook Pages, Instagram (Business/Creator)
+  and TikTok**.
+- **Two grains:** account-level (followers, reach, impressions, profile views) as
+  a **daily trend**, and **per-post** stats (reach, likes, comments, shares, saves,
+  video views) ranked by engagement.
+- **Social page** (client self-service + admin, mobile-first) ✅ — connected
+  accounts at a glance, a 30-day trend with a metric switcher, and **top posts**;
+  one-tap **Refresh now**, otherwise it syncs **daily** in the background.
+- Reuses the client's existing **Meta / TikTok connection** — just add the
+  **Facebook Page ID** / **Instagram account ID** in Integrations (TikTok needs the
+  token's user scopes). Secrets stay write-only.
+- *Connectors are built and unit-tested, but the live Graph / Display API calls are
+  pending an end-to-end check against real accounts (no test credentials yet).*
+- 🔜 **Next:** surface these metrics as **dashboard tiles** alongside Looker data.
+
+**Pitch:** "See how a client's Facebook, Instagram and TikTok are really doing —
+followers, reach and the posts that landed — next to their ticketing numbers, all
+in one place that updates itself."
+
 ## 6. White-label branding & integrations  ✅ / 🟡
 - **Per-client branding** ✅ — logo, colours, email sender display name and
   wording. Emails look like the client, sent from Howler's verified domain.
@@ -369,6 +390,13 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-24** — **Social metrics (organic)** 🟡🧪: pull a client's Facebook /
+  Instagram / TikTok organic stats into Pulse — daily account trends (followers,
+  reach, impressions) + per-post engagement, on a new mobile-first **Social** page
+  (client self-service + admin). Reuses the Meta/TikTok connection (add the Page /
+  IG account id in Integrations); syncs daily with a one-tap refresh. Connectors
+  unit-tested; live API check pending real credentials. Dashboard-tile surfacing
+  is the next step.
 - **2026-06-24** — **Your Howler Support on the client's Team page** ✅: every client
   now sees who at Howler looks after them — name, job title and an email link — under
   **Settings → Team**. Howler can assign more than one contact and repoint them per

@@ -83,6 +83,11 @@ meta.init({ db });
 // TikTok audience-sync — same pattern as Meta; per-client pasted token.
 const tiktok = require('./tiktok');
 tiktok.init({ db });
+// Social metrics INBOUND — pull organic FB/IG/TikTok stats into Pulse (the read
+// direction; reuses the meta/tiktok tokens + extra asset ids). Daily sync started
+// after the app is up (see startDailySync below).
+const socialMetrics = require('./socialMetrics');
+socialMetrics.init({ db });
 // Web Push — installable-app notifications (disposable module, own table +
 // routes under /api/push, kill switch `push_enabled`). Mounted before os so the
 // comms spine can push alongside email.
@@ -1631,6 +1636,9 @@ function applyIntegrationsPatch(body, set) {
   if (mt.clearAccessToken) set('metaAccessToken', '');
   if (mt.adAccountId !== undefined) set('metaAdAccountId', String(mt.adAccountId || ''));
   if (mt.businessId !== undefined) set('metaBusinessId', String(mt.businessId || ''));
+  // Organic-insights assets (inbound social metrics) — non-secret ids.
+  if (mt.pageId !== undefined) set('metaPageId', String(mt.pageId || ''));
+  if (mt.igUserId !== undefined) set('metaIgUserId', String(mt.igUserId || ''));
   const tt = body.tiktok || {};
   if (tt.accessToken) set('tiktokAccessToken', String(tt.accessToken));
   if (tt.clearAccessToken) set('tiktokAccessToken', '');
@@ -1671,7 +1679,7 @@ function entityIntegrationsView(entityId) {
   return {
     looker: { baseUrl: i.lookerBaseUrl || '', clientId: i.lookerClientId || '', clientSecretSet: !!i.lookerClientSecret },
     anthropic: { keySet: !!i.anthropicApiKey, keyHint: maskSecret(i.anthropicApiKey) },
-    meta: { tokenSet: !!i.metaAccessToken, tokenHint: maskSecret(i.metaAccessToken), adAccountId: i.metaAdAccountId || '', businessId: i.metaBusinessId || '' },
+    meta: { tokenSet: !!i.metaAccessToken, tokenHint: maskSecret(i.metaAccessToken), adAccountId: i.metaAdAccountId || '', businessId: i.metaBusinessId || '', pageId: i.metaPageId || '', igUserId: i.metaIgUserId || '' },
     tiktok: { tokenSet: !!i.tiktokAccessToken, tokenHint: maskSecret(i.tiktokAccessToken), advertiserId: i.tiktokAdvertiserId || '' },
     locks: db.getEntityIntegrationLocks(entityId), // { key: true } — frozen integrations
   };
@@ -1979,9 +1987,9 @@ app.put('/api/admin/entities/:id/integrations/lock', auth.requireAdmin, (req, re
 app.get('/api/admin/integrations/health', auth.requireAdmin, (_req, res) => {
   const clients = [];
   for (const e of db.listEntities()) {
-    const m = meta.summary(e.id); const t = tiktok.summary(e.id);
-    if (!(m.configured || t.configured || m.audienceCount || t.audienceCount)) continue;
-    clients.push({ entityId: e.id, name: e.name, channels: { meta: m, tiktok: t } });
+    const m = meta.summary(e.id); const t = tiktok.summary(e.id); const s = socialMetrics.summary(e.id);
+    if (!(m.configured || t.configured || m.audienceCount || t.audienceCount || s.configured || s.accountCount)) continue;
+    clients.push({ entityId: e.id, name: e.name, channels: { meta: m, tiktok: t, social: s } });
   }
   // Most recently active (or failing) clients first.
   clients.sort((a, b) => String(b.channels.meta.lastAt || b.channels.tiktok.lastAt || '').localeCompare(String(a.channels.meta.lastAt || a.channels.tiktok.lastAt || '')));
@@ -2056,6 +2064,54 @@ app.get('/api/my/audiences/:entityId/log', auth.requireAuth, (req, res) => {
   let rows = [];
   try { rows = db.db.prepare('SELECT entity_id, segment_id, channel, audience_id, received, added, removed, status, error, by, at FROM audience_sync_log WHERE entity_id=? ORDER BY id DESC LIMIT ?').all(id, limit); } catch { /* table may not exist yet */ }
   res.json({ log: rows });
+});
+
+// ── Social metrics (INBOUND) — organic FB/IG/TikTok stats pulled into Pulse ──
+// Dual-surface: admins read/refresh any client; clients read/refresh their OWN.
+// `socialView` is the shared payload (summary + accounts + a default series +
+// top posts); the caller can narrow with ?platform=&accountRef=&metric=&days=.
+function socialView(id, q = {}) {
+  const platform = q.platform ? String(q.platform) : undefined;
+  const accountRef = q.accountRef ? String(q.accountRef) : undefined;
+  const metric = q.metric ? String(q.metric) : 'reach';
+  const sort = q.sort ? String(q.sort) : 'engagement';
+  const days = Math.min(Math.max(Number(q.days) || 30, 1), 365);
+  return {
+    summary: socialMetrics.summary(id),
+    accounts: socialMetrics.accounts(id),
+    series: socialMetrics.accountSeries(id, { platform, accountRef, metric, days }),
+    topPosts: socialMetrics.topPosts(id, { platform, sort, limit: 12 }),
+  };
+}
+// Admin: any client.
+app.get('/api/admin/entities/:id/social', auth.requireAdmin, (req, res) => {
+  if (!db.getEntity(req.params.id)) return res.status(404).json({ error: 'Not found' });
+  res.json(socialView(req.params.id, req.query));
+});
+app.post('/api/admin/entities/:id/social/sync', auth.requireAdmin, async (req, res) => {
+  if (!db.getEntity(req.params.id)) return res.status(404).json({ error: 'Not found' });
+  res.json(await socialMetrics.syncEntity(req.params.id));
+});
+app.post('/api/admin/entities/:id/social/verify', auth.requireAdmin, async (req, res) => {
+  if (!db.getEntity(req.params.id)) return res.status(404).json({ error: 'Not found' });
+  res.json(await socialMetrics.verify(req.params.id));
+});
+// Client self-service: the caller's OWN entity (ownership enforced).
+app.get('/api/my/social/:entityId', auth.requireAuth, (req, res) => {
+  const id = req.params.entityId;
+  if (!ownsEntity(req, id)) return res.status(403).json({ error: 'Not allowed' });
+  if (!db.getEntity(id)) return res.status(404).json({ error: 'Not found' });
+  res.json(socialView(id, req.query));
+});
+app.post('/api/my/social/:entityId/sync', auth.requireAuth, auth.requirePermission('integrations.manage'), async (req, res) => {
+  const id = req.params.entityId;
+  if (!ownsEntity(req, id)) return res.status(403).json({ error: 'Not allowed' });
+  res.json(await socialMetrics.syncEntity(id));
+});
+app.post('/api/my/social/:entityId/verify', auth.requireAuth, async (req, res) => {
+  const id = req.params.entityId;
+  if (!ownsEntity(req, id)) return res.status(403).json({ error: 'Not allowed' });
+  res.json(await socialMetrics.verify(id));
 });
 
 // Client self-service: the logged-in user's own client(s).
@@ -4097,4 +4153,6 @@ const PORT = process.env.PORT || 3045;
 app.listen(PORT, () => {
   console.log(`Howler Looker Tool running on http://localhost:${PORT}`);
   console.log(`Looker instance: ${looker.lookerBaseUrl() || '(not configured — set in Admin → Integrations)'}`);
+  // Pull organic social stats once a day for every connected client (best-effort).
+  socialMetrics.startDailySync({ listEntities: () => db.listEntities() });
 });
