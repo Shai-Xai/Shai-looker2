@@ -206,6 +206,16 @@ each platform without leaving Pulse."
   - **Inventive** embedded AI analyst 🧪 ("Ask")
 - **Secrets are write-only** — Pulse shows only whether a value is set, never the
   value.
+- **Each integration is locked by default** ✅ — a 🔒 guard so a working connection
+  can't be changed by accident; an admin or the account **Owner** unlocks to edit,
+  then re-locks. Setup steps ("How to get your Meta/TikTok details") stay readable
+  even while locked.
+- **One-tap connect** ✅ — when an ad platform isn't linked, the **Ad audiences** hub
+  shows a **Connect Meta/TikTok →** button that drops the client straight into the
+  right Settings page.
+- **Your Howler Support** ✅ — every client sees their Howler contact(s) — name, job
+  title and an email link — under **Settings → Team**. Howler assigns/repoints them
+  per client.
 
 **Pitch:** "It's their brand, their accounts, their data — Howler just powers it."
 
@@ -359,6 +369,25 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-24** — **Your Howler Support on the client's Team page** ✅: every client
+  now sees who at Howler looks after them — name, job title and an email link — under
+  **Settings → Team**. Howler can assign more than one contact and repoint them per
+  client.
+- **2026-06-24** — **Integration safety + self-service connect** ✅: each integration
+  is **locked by default** (a 🔒 guard against accidental edits to a live connection —
+  Owner/admin unlocks to change, the setup guide stays readable while locked), and an
+  unconnected ad platform now offers a **Connect Meta/TikTok →** button that opens the
+  right Settings page. Integration cards collapse for a cleaner page.
+- **2026-06-24** — **Notifications: choose channel per type** ✅: mute a category
+  (digests / goals / alerts / messages) on **email** while keeping it on **push** (or
+  vice-versa) — a per-channel switch instead of one all-or-nothing toggle.
+- **2026-06-24** — **Smarter source pickers** ✅: building a **segment** only offers
+  dashboards/tiles that actually hold contact data (email/mobile), and building a
+  **goal** only offers tiles you can track (a KPI number or a time series) — no more
+  dead-end picks.
+- **2026-06-24** — **Dashboard summary docks beside the dashboard** ✅: the Owl's
+  whole-dashboard summary opens as a side panel that pushes the dashboard across (no
+  overlay), so you can read the write-up next to the live tiles.
 - **2026-06-24** — **Segment builder is event-first** ✅: when building a segment
   from a dashboard tile, multi-event clients now pick the **event (suite)** first,
   then only that event's dashboards are listed — so a segment is clearly tied to
