@@ -1,14 +1,14 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../lib/api.js';
+import { lockableFilters } from '../lib/tileLockFields.js';
 
 // Admin: lock one tile's filter(s) to a specific value for THIS client, written
-// to suite.tileLocks[tileId]. Only the filters this tile actually listens to are
-// offered; each lock overrides the dashboard value for that one tile.
+// to suite.tileLocks[tileId]. Every dashboard filter applicable to this tile is
+// offered (its wired `listenTo` filters PLUS any whose field the tile's query
+// uses); each lock overrides the dashboard value for that one tile.
 export default function TileLockModal({ tile, filters, suiteId, current, onSave, onClose }) {
-  // Filters this tile listens to, resolved to their metadata (for value search).
-  const listened = Object.keys(tile.listenTo || {});
-  const fields = (filters || []).filter((f) => listened.includes(f.name));
+  const fields = lockableFilters(tile, filters || []);
   const [vals, setVals] = useState(() => ({ ...(current || {}) }));
   const [saving, setSaving] = useState(false);
 

@@ -825,14 +825,30 @@ require('./dashboards').mount(app, {
 // Per-tile lock overrides (queryField -> value) for ONE tile, from
 // suite.tileLocks. Passed as tileQueryBody's extraOverrides so a server-side
 // read (goals, curves) honours the same per-tile lock the dashboard applies.
-function tileLockOverrides(su, tile) {
+function tileLockOverrides(su, tile, def) {
   const lock = (su && su.tileLocks && su.tileLocks[tile.id]) || {};
   const o = {};
-  for (const [filterName, queryField] of Object.entries(tile.listenTo || {})) {
-    const v = lock[filterName];
-    if (v != null && String(v).trim() !== '') o[queryField] = String(v).trim();
+  for (const [filterName, v] of Object.entries(lock)) {
+    if (v == null || String(v).trim() === '') continue;
+    const queryField = tileLockField(tile, filterName, def && def.filters);
+    if (queryField) o[queryField] = String(v).trim();
   }
   return o;
+}
+// The query field a per-tile lock on `filterName` writes to: the tile's listenTo
+// wiring if present, else the dashboard filter's own field when the tile's query
+// already uses that field's view (mirrors client lib/tileLockFields.js).
+function tileLockField(tile, filterName, dashFilters) {
+  if (tile.listenTo && tile.listenTo[filterName]) return tile.listenTo[filterName];
+  const f = (dashFilters || []).find((x) => x.name === filterName);
+  const field = f && (f.field || f.dimension);
+  if (!field || !String(field).includes('.')) return null;
+  const q = tile.query || {};
+  const views = new Set();
+  if (q.view) views.add(q.view);
+  for (const ff of q.fields || []) views.add(String(ff).split('.')[0]);
+  for (const k of Object.keys(q.filters || {})) views.add(String(k).split('.')[0]);
+  return views.has(String(field).split('.')[0]) ? field : null;
 }
 
 async function resolveTileValue({ dashboardId, tileId, user, suiteId }) {
@@ -847,7 +863,7 @@ async function resolveTileValue({ dashboardId, tileId, user, suiteId }) {
   const su = db.getSuite(suiteId);
   const entityView = su?.entityId ? (db.getFilterView('entity', su.entityId, dashboardId) || {}) : {};
   const lockMap = { ...expandLockMap(entityView), ...expandLockMap(db.lockedFiltersForSuite(suiteId, dashboardId)) };
-  const body = await tileQueryBody(tile, def, user, suiteId, lockMap, tileLockOverrides(su, tile));
+  const body = await tileQueryBody(tile, def, user, suiteId, lockMap, tileLockOverrides(su, tile, def));
   if (!body) return null; // scope denied or non-queryable tile
   // Drop any "days before event" / days-to-go clip so a running-total KPI reads the
   // FULL to-date figure the dashboard headline shows (e.g. Total Tickets Sold 44,806),
@@ -907,7 +923,7 @@ async function resolveTileSeries({ dashboardId, tileId, user, suiteId }) {
   const su = db.getSuite(suiteId);
   const entityView = su?.entityId ? (db.getFilterView('entity', su.entityId, dashboardId) || {}) : {};
   const lockMap = { ...expandLockMap(entityView), ...expandLockMap(db.lockedFiltersForSuite(suiteId, dashboardId)) };
-  const body = await tileQueryBody(tile, def, user, suiteId, lockMap, tileLockOverrides(su, tile));
+  const body = await tileQueryBody(tile, def, user, suiteId, lockMap, tileLockOverrides(su, tile, def));
   if (!body) return [];
   body.filters = stripDaysBeforeFilters(body.filters, def, tile).filters; // full curve to event day
   body.limit = Math.max(Number(body.limit) || 0, 1000); // enough rows for a full curve
@@ -961,7 +977,7 @@ async function resolveTileSeriesAll({ dashboardId, tileId, user, suiteId }) {
   const su = db.getSuite(suiteId);
   const entityView = su?.entityId ? (db.getFilterView('entity', su.entityId, dashboardId) || {}) : {};
   const lockMap = { ...expandLockMap(entityView), ...expandLockMap(db.lockedFiltersForSuite(suiteId, dashboardId)) };
-  const body = await tileQueryBody(tile, def, user, suiteId, lockMap, tileLockOverrides(su, tile));
+  const body = await tileQueryBody(tile, def, user, suiteId, lockMap, tileLockOverrides(su, tile, def));
   if (!body) return null;
   const stripResult = stripDaysBeforeFilters(body.filters, def, tile);
   body.filters = stripResult.filters; // full curve to event day

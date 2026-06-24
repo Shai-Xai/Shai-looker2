@@ -3,6 +3,7 @@ import { api } from './api.js';
 import { withLimit } from './limit.js';
 import { useScope } from './ScopeContext.jsx';
 import { ANY_VALUE } from './filterConstants.js';
+import { lockFieldFor } from './tileLockFields.js';
 
 // A query is only worth running once it has a model, an explore (view) and at
 // least one field — otherwise Looker returns a validation error.
@@ -14,7 +15,7 @@ export function isRunnableQuery(q) {
 // values change. Returns { data, loading, error }. Looker does the calculation;
 // we only receive json_detail rows.
 export function useTileData(tile, filterValues) {
-  const { suiteId, refreshKey = 0, softKey = 0, tileLocks = {} } = useScope();
+  const { suiteId, refreshKey = 0, softKey = 0, tileLocks = {}, lockFilters = [] } = useScope();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(tile.type !== 'text' && isRunnableQuery(tile.query));
   const [error, setError] = useState(null);
@@ -39,6 +40,14 @@ export function useTileData(tile, filterValues) {
     // work — Looker reads "" as "is blank", not "no constraint".
     if (val === ANY_VALUE) overrides[queryField] = ANY_VALUE;
     else if (val && String(val).trim()) overrides[queryField] = String(val).trim();
+  }
+  // Per-tile locks on filters the tile ISN'T wired to via listenTo — resolve the
+  // filter to a query field the tile's own query already uses, and apply it.
+  for (const [filterName, locked] of Object.entries(myLocks)) {
+    if (tile.listenTo && filterName in tile.listenTo) continue; // handled above
+    if (locked == null || String(locked).trim() === '') continue;
+    const queryField = lockFieldFor(tile, filterName, lockFilters);
+    if (queryField) overrides[queryField] = String(locked).trim();
   }
 
   const queryKey = JSON.stringify(tile.query);

@@ -10,6 +10,7 @@ import AiMark from './AiMark.jsx';
 import { usePins } from '../lib/PinContext.jsx';
 import { useTileData, isRunnableQuery } from '../lib/useTileData.js';
 import { ANY_VALUE } from '../lib/filterConstants.js';
+import { lockableFilters } from '../lib/tileLockFields.js';
 import { useAuth } from '../lib/auth.jsx';
 import { useScope } from '../lib/ScopeContext.jsx';
 import { api } from '../lib/api.js';
@@ -26,9 +27,10 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
   const { entityId, dashboardId, suiteId, canLockTiles, tileLocks = {}, lockFilters = [], onSaveTileLock } = useScope();
   const [showTileLock, setShowTileLock] = useState(false);
   // Admin per-tile lock affordance: only when in a suite, the tile is queryable
-  // and it actually listens to a dashboard filter (otherwise there's nothing to lock).
+  // and at least one dashboard filter is lockable on it (wired via listenTo OR
+  // applicable because the tile's query already uses that filter's field).
   const tileLockCount = Object.keys(tileLocks?.[tile.id] || {}).length;
-  const canLockThisTile = !!(canLockTiles && editable && tile.type !== 'text' && Object.keys(tile.listenTo || {}).length > 0 && onSaveTileLock);
+  const canLockThisTile = !!(canLockTiles && editable && tile.type !== 'text' && onSaveTileLock && lockableFilters(tile, lockFilters).length > 0);
   const { can } = useAccess();
   const isMobile = useIsMobile();
   const [showInsight, setShowInsight] = useState(false);
