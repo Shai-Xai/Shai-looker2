@@ -45,11 +45,11 @@ function loadUsers() { return db.listUsers(); }
 function getUser(id) { return db.getUser(id); }
 function verifyCredentials(email, password) { return db.verifyCredentials(email, password); }
 
-function createUser({ email, password, role = 'client', tenantId = null, entityIds, firstName = '', lastName = '', mobile = '' }) {
+function createUser({ email, password, role = 'client', tenantId = null, entityIds, firstName = '', lastName = '', mobile = '', howlerRole = '' }) {
   const ids = entityIds || (tenantId ? [tenantId] : []);
   // Admins keep entity links too: full access regardless, but a link makes them
   // part of that client's team surface (logins list, digests, notifications).
-  const u = db.createUser({ email, password, role, entityIds: ids, firstName, lastName, mobile });
+  const u = db.createUser({ email, password, role, entityIds: ids, firstName, lastName, mobile, howlerRole });
   return publicUser(u);
 }
 function updateUser(id, patch) {

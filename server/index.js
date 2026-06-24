@@ -246,8 +246,18 @@ function teamMembers(entityId) {
 }
 const ownerCount = (entityId) => teamMembers(entityId).filter((m) => m.role === 'owner').length;
 
+// The client's Howler support contact — the admin who owns the account, shown to
+// the client as "Your Howler Support" with their job title + an email link.
+function howlerSupportFor(entityId) {
+  const ent = db.getEntity(entityId);
+  if (!ent?.howlerOwnerUserId) return null;
+  const u = db.getUser(ent.howlerOwnerUserId);
+  if (!u || u.role !== 'admin') return null;
+  return { name: u.fullName || u.email, email: u.email, mobile: u.mobile || '', roleLabel: roles.howlerRoleLabel(u.howlerRole) || 'Account Manager' };
+}
+
 app.get('/api/my/team/:entityId', auth.requireAuth, auth.requirePermission('team.manage'), (req, res) => {
-  res.json({ members: teamMembers(req.params.entityId).map((m) => ({ ...m, isYou: m.id === req.user.id })), roles: roles.catalog() });
+  res.json({ members: teamMembers(req.params.entityId).map((m) => ({ ...m, isYou: m.id === req.user.id })), roles: roles.catalog(), support: howlerSupportFor(req.params.entityId) });
 });
 app.post('/api/my/team/:entityId', auth.requireAuth, auth.requirePermission('team.manage'), (req, res) => {
   const { email, password, role, firstName, lastName, mobile } = req.body || {};
@@ -305,6 +315,7 @@ app.post('/api/admin/import', auth.requireAdmin, express.json({ limit: '256mb' }
 app.get('/api/admin/users', auth.requireAdmin, (_req, res) => {
   const lastActions = db.lastActionsForUsers();
   const lastViews = db.lastViewForUsers();
+  const wsName = Object.fromEntries(db.listInventiveWorkspaces().map((w) => [w.id, w.name]));
   res.json(auth.loadUsers().map((u) => {
     const la = lastActions[u.id] || null;
     const lastActiveAt = [u.lastLogin, la?.at, lastViews[u.id]].filter(Boolean).sort().pop() || null;
@@ -312,6 +323,8 @@ app.get('/api/admin/users', auth.requireAdmin, (_req, res) => {
       id: u.id, email: u.email, role: u.role,
       firstName: u.firstName, lastName: u.lastName, fullName: u.fullName, mobile: u.mobile,
       entityIds: u.entityIds, memberships: u.memberships,
+      inventiveWorkspaceId: u.inventiveWorkspaceId, inventiveWorkspaceName: wsName[u.inventiveWorkspaceId] || '',
+      howlerRole: u.howlerRole, howlerRoleLabel: roles.howlerRoleLabel(u.howlerRole),
       notifyEmail: u.notifyEmail, notifyPush: u.notifyPush,
       createdAt: u.createdAt, lastLogin: u.lastLogin || null, lastActiveAt,
       lastAction: la ? { action: la.action, label: la.label, at: la.at } : null,
@@ -354,7 +367,7 @@ app.post('/api/admin/users/promote', auth.requireAdmin, (req, res) => {
 
 // Role catalog (for the role pickers).
 const roles = require('./roles');
-app.get('/api/admin/roles', auth.requireAdmin, (_req, res) => res.json({ roles: roles.catalog() }));
+app.get('/api/admin/roles', auth.requireAdmin, (_req, res) => res.json({ roles: roles.catalog(), howlerRoles: roles.HOWLER_ROLES }));
 
 // Friendly labels for the merged activity feed's non-audit sources.
 function usageLabel(r) {
@@ -463,7 +476,9 @@ app.put('/api/admin/entities/:id/content-roles/:scopeType/:scopeId', auth.requir
 
 // ─── Admin: entities / sets / suites (the model) ───────────────────────────────
 app.get('/api/admin/entities', auth.requireAdmin, (_req, res) => res.json(db.listEntities()));
-app.post('/api/admin/entities', auth.requireAdmin, (req, res) => res.status(201).json(db.createEntity(req.body || {})));
+// The admin who creates a client becomes its default Howler support contact
+// (shown to the client under Settings → Team). Reassignable later via the entity.
+app.post('/api/admin/entities', auth.requireAdmin, (req, res) => res.status(201).json(db.createEntity({ ...(req.body || {}), howlerOwnerUserId: (req.body || {}).howlerOwnerUserId || req.user.id })));
 app.put('/api/admin/entities/:id', auth.requireAdmin, (req, res) => {
   const e = db.updateEntity(req.params.id, req.body || {});
   if (!e) return res.status(404).json({ error: 'Entity not found' });

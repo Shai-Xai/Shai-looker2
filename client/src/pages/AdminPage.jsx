@@ -1581,6 +1581,7 @@ function UsersTab() {
   const [users, setUsers] = useState(null);
   const [entities, setEntities] = useState([]);
   const [roles, setRoles] = useState([]);
+  const [howlerRoles, setHowlerRoles] = useState([]);
   const [q, setQ] = useState('');
   const [sort, setSort] = useState('active'); // active | email | login
   const [roleFilter, setRoleFilter] = useState('all'); // all | admin | client
@@ -1588,7 +1589,7 @@ function UsersTab() {
   const [openInEdit, setOpenInEdit] = useState(false);
   const [adding, setAdding] = useState(false);
   const load = () => Promise.all([api.adminListUsers(), api.adminListEntities(), api.getRoles().catch(() => ({ roles: [] }))])
-    .then(([u, e, r]) => { setUsers(u); setEntities(e); setRoles(r.roles || []); });
+    .then(([u, e, r]) => { setUsers(u); setEntities(e); setRoles(r.roles || []); setHowlerRoles(r.howlerRoles || []); });
   useEffect(() => { load(); }, []);
   // Open a user's detail; `edit` jumps straight into the edit form.
   const openUser = (u, edit = false) => { setOpenInEdit(edit); setSelectedId(u.id); };
@@ -1598,7 +1599,7 @@ function UsersTab() {
   };
   if (!users) return <Muted>Loading…</Muted>;
   if (selectedId) return <UserDetail userId={selectedId} entities={entities} roles={roles} initialEditing={openInEdit} onBack={() => { setSelectedId(null); setOpenInEdit(false); load(); }} />;
-  if (adding) return <AddUserForm entities={entities} roles={roles} onCancel={() => setAdding(false)} onCreated={(id) => { setAdding(false); load().then(() => { if (id) setSelectedId(id); }); }} />;
+  if (adding) return <AddUserForm entities={entities} roles={roles} howlerRoles={howlerRoles} onCancel={() => setAdding(false)} onCreated={(id) => { setAdding(false); load().then(() => { if (id) setSelectedId(id); }); }} />;
 
   const entName = Object.fromEntries(entities.map((e) => [e.id, e.name]));
   const clientsOf = (u) => (u.memberships || []).map((m) => entName[m.entityId] || m.entityId);
@@ -1669,7 +1670,7 @@ function UsersTab() {
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
             <tr>
-              {['User', 'Type', 'Clients', 'Mobile', 'Last active', ''].map((h, i) => <th key={i} style={thS}>{h}</th>)}
+              {['User', 'Type', 'Clients', 'Inventive workspace', 'Mobile', 'Last active', ''].map((h, i) => <th key={i} style={thS}>{h}</th>)}
             </tr>
           </thead>
           <tbody>
@@ -1679,8 +1680,9 @@ function UsersTab() {
                   <div style={{ fontWeight: 600 }}>{u.fullName || u.email} {adminBadge(u)}</div>
                   {u.fullName && <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>{u.email}</div>}
                 </td>
-                <td style={td}>{u.role === 'admin' ? 'Howler admin' : 'Client'}</td>
+                <td style={td}>{u.role === 'admin' ? (u.howlerRoleLabel ? `Howler · ${u.howlerRoleLabel}` : 'Howler admin') : 'Client'}</td>
                 <td style={td}>{clientsCell(u)}</td>
+                <td style={td}>{u.inventiveWorkspaceName || <span style={{ color: 'var(--muted)' }}>—</span>}</td>
                 <td style={td}>{u.mobile || <span style={{ color: 'var(--muted)' }}>—</span>}</td>
                 <td style={td} title={`Last login ${fmtWhen(u.lastLogin)}`}>{lastActiveCell(u)}</td>
                 <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
@@ -1689,7 +1691,7 @@ function UsersTab() {
                 </td>
               </tr>
             ))}
-            {sorted.length === 0 && <tr><td style={td} colSpan={6}><Muted>{ql ? `No users match “${q.trim()}”.` : 'No users in this view.'}</Muted></td></tr>}
+            {sorted.length === 0 && <tr><td style={td} colSpan={7}><Muted>{ql ? `No users match “${q.trim()}”.` : 'No users in this view.'}</Muted></td></tr>}
           </tbody>
         </table>
       )}
@@ -1700,11 +1702,12 @@ function UsersTab() {
 // Create either a Howler admin (full access) or a client login (scoped to the
 // clients you pick). Replaces the old separate "Add admin" / per-client "Add
 // login" forms — one entry point for both.
-function AddUserForm({ entities, roles, onCancel, onCreated }) {
+function AddUserForm({ entities, roles, howlerRoles = [], onCancel, onCreated }) {
   const [accountType, setAccountType] = useState('client'); // client | admin
   const [form, setForm] = useState({ firstName: '', lastName: '', email: '', mobile: '', password: '' });
   const [entityIds, setEntityIds] = useState([]);
   const [role, setRole] = useState('viewer');
+  const [howlerRole, setHowlerRole] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const roleOpts = roles.length ? roles : [{ key: 'owner', label: 'Owner' }];
@@ -1718,7 +1721,7 @@ function AddUserForm({ entities, roles, onCancel, onCreated }) {
     try {
       const created = isClient
         ? await api.adminCreateUser({ ...base, role: 'client', entityIds: entityIds.map((id) => ({ entityId: id, role })) })
-        : await api.adminCreateUser({ ...base, role: 'admin', entityIds });
+        : await api.adminCreateUser({ ...base, role: 'admin', entityIds, howlerRole });
       onCreated(created?.id);
     } catch (e) {
       // Duplicate email → for an admin, offer to promote the existing login (keeps its access).
@@ -1762,6 +1765,17 @@ function AddUserForm({ entities, roles, onCancel, onCreated }) {
           </>
         ) : (
           <>
+            {howlerRoles.length > 0 && (
+              <div style={{ marginBottom: 10 }}>
+                <Field label="Howler role">
+                  <select style={input} value={howlerRole} onChange={(e) => setHowlerRole(e.target.value)}>
+                    <option value="">— none —</option>
+                    {howlerRoles.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
+                  </select>
+                </Field>
+                <p style={{ ...hint, marginTop: 6 }}>Their job title at Howler. Shown to clients they own as “Your Howler Support”.</p>
+              </div>
+            )}
             <L>Also a customer of (optional)</L>
             <div style={{ marginTop: 4 }}><ClientLinkPicker entities={entities} value={entityIds} onChange={setEntityIds} /></div>
             <p style={{ ...hint, marginTop: 8 }}>Howler admins see every client and the console regardless. Ticking clients also gives them that client's customer view.</p>
