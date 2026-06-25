@@ -196,6 +196,7 @@ export const api = {
   testSetupNudge: (entityId, audience) => fetch(`/api/admin/entities/${entityId}/setup-nudge/test`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ audience }) }).then(json),
   getSetupNudgeSettings: () => fetch('/api/admin/setup-nudge/settings').then(json),
   saveSetupNudgeSettings: (b) => fetch('/api/admin/setup-nudge/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  testSetupNudgeSettings: () => fetch('/api/admin/setup-nudge/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(json),
   setSetupWizardProgress: (entityId, itemKey, done) => fetch(`/api/admin/setup-wizard/progress/${entityId}/${encodeURIComponent(itemKey)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ done }) }).then(json),
 
   // Onboarding checklist

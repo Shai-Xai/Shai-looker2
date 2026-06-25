@@ -284,6 +284,19 @@ function mount(app, { db, auth, mailer, insights, resolveRecipe, audienceFor, an
     if (b.copy && typeof b.copy === 'object') for (const k of COPY_KEYS) { if (typeof b.copy[k] === 'string') db.setSetting(`setup_nudge_copy_${k}`, b.copy[k].slice(0, 400)); }
     res.json({ ok: true });
   });
+  // Email the logged-in admin a sample client nudge rendered with the current
+  // (saved) wording — a quick preview of how the copy reads. Uses sample data so
+  // it isn't tied to any one client.
+  app.post('/api/admin/setup-nudge/test', auth.requireAdmin, (req, res) => {
+    const to = req.user?.email;
+    if (!to) return res.status(400).json({ error: 'Your account has no email address.' });
+    if (!mailer.isConfigured?.()) return res.status(400).json({ error: 'Email is not configured.' });
+    const sample = { id: 'sample', name: 'Sample Client' };
+    const st = { account: ['Branding', 'A digest'], events: [{ name: 'Summer Festival', missing: ['goals', 'alerts'] }], missing: 4 };
+    const opp = { count: 128, line: '128 customers abandoned checkout — a win-back campaign could bring them back.' };
+    try { mailer.send({ to, subject: copy('subject'), html: clientHtml(sample, st, opp), kind: 'setup-nudge' }); res.json({ ok: true, to }); }
+    catch { res.status(500).json({ error: 'Send failed' }); }
+  });
   // Send the nudges for this one client right now (ignores grace/throttle) — a test.
   app.post('/api/admin/entities/:id/setup-nudge/test', auth.requireAdmin, async (req, res) => {
     const e = db.getEntity(req.params.id); if (!e) return res.status(404).json({ error: 'No such client' });

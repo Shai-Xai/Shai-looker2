@@ -218,11 +218,15 @@ function NudgeGlobalSettings() {
   const [s, setS] = useState(null);
   const [saved, setSaved] = useState(false);
   const [open, setOpen] = useState(false);
+  const [testMsg, setTestMsg] = useState('');
   useEffect(() => { api.getSetupNudgeSettings().then(setS).catch(() => setS(null)); }, []);
   if (!s) return null;
   const set = (k, v) => setS((c) => ({ ...c, [k]: v }));
   const setCopy = (k, v) => setS((c) => ({ ...c, copy: { ...c.copy, [k]: v } }));
-  const save = async () => { try { await api.saveSetupNudgeSettings({ enabled: s.enabled, graceDays: s.graceDays, repeatDays: s.repeatDays, hour: s.hour, copy: s.copy }); flash(setSaved); } catch (e) { alert(e.message); } };
+  const persist = () => api.saveSetupNudgeSettings({ enabled: s.enabled, graceDays: s.graceDays, repeatDays: s.repeatDays, hour: s.hour, copy: s.copy });
+  const save = async () => { try { await persist(); flash(setSaved); } catch (e) { alert(e.message); } };
+  // Save first so the preview reflects what's on screen, then email the admin.
+  const test = async () => { setTestMsg('Sending…'); try { await persist(); const r = await api.testSetupNudgeSettings(); setTestMsg(`✓ Sent to ${r.to}`); } catch (e) { setTestMsg(`✗ ${e.message || 'Send failed'}`); } };
   const fld = { ...input, minWidth: 0, width: '100%' };
   const num = (k, label, h) => (
     <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -270,9 +274,12 @@ function NudgeGlobalSettings() {
             </div>
             <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8 }}>The list of outstanding items and the personalised opportunity line are added automatically. Clear a field to fall back to the default.</p>
           </div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <button style={saveBtn} onClick={save}>Save defaults</button>
             {saved && <span style={{ color: 'var(--brand)', fontSize: 13, fontWeight: 600 }}>✓ Saved</span>}
+            <span style={{ flex: 1 }} />
+            <button style={miniBtnOutline} onClick={test}>Send me a test</button>
+            {testMsg && <span style={{ fontSize: 12, color: 'var(--muted)' }}>{testMsg}</span>}
           </div>
         </div>
       )}
