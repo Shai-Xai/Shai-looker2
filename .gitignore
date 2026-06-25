@@ -13,3 +13,10 @@ dnd.mjs
 *.shot.mjs
 shot*.mjs
 st.mjs
+
+# Throwaway curl scratch: cookie jars + response dumps (never commit — may hold
+# live session tokens). See the *.txt cookie jars / bare response blobs.
+*.cookies
+cookies.txt
+*.cookie
+
