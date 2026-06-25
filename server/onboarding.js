@@ -34,6 +34,7 @@ function mount(app, { db, auth }) {
     { key: 'team', phase: 'Make it yours', guide: 'team', icon: '👥', title: 'Invite your team', desc: 'Add the people who should get access and briefings.', cta: '/settings?section=team', auto: (e) => count('SELECT COUNT(*) n FROM user_entities WHERE entity_id=?', e) >= 2 },
     // Phase 2 — Stay in the loop
     { key: 'notifications', phase: 'Stay in the loop', guide: 'notifications', icon: '🔔', title: 'Turn on notifications', desc: 'Get a nudge on your phone when something needs you — even when Pulse is closed.', cta: '/settings?section=notifications' },
+    { key: 'alerts', phase: 'Stay in the loop', guide: 'alerts', icon: '🚨', title: 'Set up an alert', desc: 'Watch a number that matters — tickets, revenue, low stock — and get pinged the moment it crosses your threshold.', cta: '/alerts', auto: (e) => count('SELECT COUNT(*) n FROM alerts WHERE entity_id=?', e) > 0 },
     { key: 'digest', phase: 'Stay in the loop', guide: 'digest', icon: '🗓', title: 'Set up your weekly briefing', desc: 'An automated briefing emailed to your team on the schedule you choose.', cta: '/digests', auto: (e) => count("SELECT COUNT(*) n FROM scheduled_jobs WHERE entity_id=? AND type='digest'", e) > 0 },
     // Phase 3 — See & act on your data
     { key: 'explore', phase: 'See & act on your data', guide: 'explore', icon: '📊', title: 'Take a tour of your dashboards', desc: 'Open your suites and get a feel for your live data.', cta: '/' },

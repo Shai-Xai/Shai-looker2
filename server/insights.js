@@ -364,6 +364,43 @@ const LIBRARY_SYSTEM = `You catalogue analytics tiles for Howler, an events tick
 - category: one short bucket from this set when it fits, else your own: "Revenue", "Tickets", "Attendance", "Cashless", "Access Control", "Marketing", "Customers", "Operations".
 Be concrete and business-focused. Do not invent fields that aren't listed.`;
 
+const OPPORTUNITY_SYSTEM = `You are a friendly marketing & insights manager for an events organiser using Howler Pulse (customers buy tickets; amounts are in South African Rand, ZAR).
+Write ONE short, punchy sentence (max ~22 words) nudging them to act on an outstanding Pulse setup item. When a live number from their own data is given, lead with it to make the opportunity concrete and compelling — the value they're leaving on the table, never the chore. Warm and specific, not salesy. No greeting, no emoji, no markdown — just the single line.`;
+
+// A one-line, value-led nudge about an outstanding setup item, grounded in a live
+// metric from the client's data when one is supplied. Best-effort — callers fall
+// back to plain copy if AI isn't configured or this throws.
+async function opportunityLine({ clientName, item, metric, apiKey, instructions }) {
+  const c = requireClient(apiKey);
+  const prompt = [clientName ? `Client: ${clientName}` : null, `Outstanding setup item: ${item}`, metric ? `Live number from their data: ${metric}` : null].filter(Boolean).join('\n');
+  const resp = await c.messages.create({
+    model: MODEL, max_tokens: 120, thinking: { type: 'adaptive' }, output_config: { effort: 'low' },
+    system: systemWith(OPPORTUNITY_SYSTEM, instructions),
+    messages: [{ role: 'user', content: prompt }],
+  });
+  return (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
+}
+
+const NUDGE_COPY_SYSTEM = `You are a friendly marketing & insights manager at Howler writing a short nudge email to a client who hasn't finished setting up Pulse (their events/insights platform; customers buy tickets in South African Rand, ZAR).
+You are given the client's name, the list of setup items they still haven't done, and optionally a live data opportunity. Write a PERSONALISED subject line and a one-sentence opening that speak to THOSE SPECIFIC outstanding items and the value of finishing them — so the email feels tailored, not generic, and reads differently as their outstanding list changes.
+Lead with value, never the chore. If a live opportunity is given, you may nod to it. Warm, specific, concise — not salesy.
+Return ONLY a JSON object: {"subject": "...", "intro": "..."}. Subject ≤ 9 words, no emoji. Intro ONE sentence (≤ 28 words), may use a single friendly emoji. No markdown, no extra keys, no text outside the JSON.`;
+
+// A personalised subject + opening line tailored to a client's current outstanding
+// setup items, so repeat nudges read differently as the list changes. Returns
+// { subject, intro } or null. Best-effort — callers fall back to static copy.
+async function nudgeCopy({ clientName, outstanding = [], metric, apiKey, instructions }) {
+  const c = requireClient(apiKey);
+  const prompt = [clientName ? `Client: ${clientName}` : null, `Outstanding setup items:\n${outstanding.map((x) => `- ${x}`).join('\n')}`, metric ? `Live data opportunity: ${metric}` : null].filter(Boolean).join('\n');
+  const resp = await c.messages.create({ model: MODEL, max_tokens: 220, thinking: { type: 'adaptive' }, output_config: { effort: 'low' }, system: systemWith(NUDGE_COPY_SYSTEM, instructions), messages: [{ role: 'user', content: prompt }] });
+  const text = (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
+  try {
+    const obj = JSON.parse((text.match(/\{[\s\S]*\}/) || [text])[0]);
+    const subject = String(obj.subject || '').trim(); const intro = String(obj.intro || '').trim();
+    return subject && intro ? { subject, intro } : null;
+  } catch { return null; }
+}
+
 async function describeTile({ title, visType, fields, model, explore, instructions, apiKey }) {
   const c = requireClient(apiKey);
   const prompt = [
@@ -1085,6 +1122,8 @@ function promptRegistry() {
     { key: 'digest', label: 'Scheduled digest', scope: 'Role-lensed digest emails', text: DIGEST_SYSTEM },
     { key: 'digestMulti', label: 'Scheduled digest — multi-event', scope: 'Role-lensed digest for promoters running several events: portfolio overview + a section per event', text: DIGEST_MULTI_SYSTEM },
     { key: 'campaign', label: 'Campaign copy', scope: 'Marketing email drafting', text: CAMPAIGN_SYSTEM },
+    { key: 'opportunity', label: 'Setup opportunity line', scope: 'One-line, value-led nudge about an outstanding setup item, grounded in a live metric', text: OPPORTUNITY_SYSTEM },
+    { key: 'nudgeCopy', label: 'Setup nudge subject & opening', scope: 'Personalised subject line + one-sentence opening for a client setup-reminder email, tailored to their outstanding items', text: NUDGE_COPY_SYSTEM },
     { key: 'refine', label: 'Refine note', scope: 'The ✨ refine button', text: REFINE_SYSTEM },
     { key: 'releaseNotes', label: 'Release notes', scope: 'Daily release notes summarised from git commits', text: RELEASE_NOTES_SYSTEM },
     { key: 'settlement', label: 'Settlement extraction', scope: 'PDF settlement → JSON', text: SETTLEMENT_SYSTEM },
@@ -1097,7 +1136,7 @@ function promptRegistry() {
   ];
 }
 
-module.exports = { generateInsight, streamInsight, streamDashboardInsight, streamGoalsBrief, describeTile, extractSettlement, extractInvoice, classifyDocument, briefHome, briefHomeOverall, briefHomeEvents, digestBrief, digestBriefMulti, draftCampaign, goalGapPlan, refineText, distilPreferences, summariseReleaseNotes, promptRegistry, systemWith, isConfigured: (apiKey) => !!(apiKey || process.env.ANTHROPIC_API_KEY),
+module.exports = { generateInsight, streamInsight, streamDashboardInsight, streamGoalsBrief, describeTile, opportunityLine, nudgeCopy, extractSettlement, extractInvoice, classifyDocument, briefHome, briefHomeOverall, briefHomeEvents, digestBrief, digestBriefMulti, draftCampaign, goalGapPlan, refineText, distilPreferences, summariseReleaseNotes, promptRegistry, systemWith, isConfigured: (apiKey) => !!(apiKey || process.env.ANTHROPIC_API_KEY),
   // Exposed for tests: the deterministic JSON-salvage layer that guards every
   // model→JSON path (no network — pure parsing + repair).
   parseModelJson, parseModelJsonResilient };

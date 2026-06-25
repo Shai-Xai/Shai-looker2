@@ -69,6 +69,9 @@ longer they use Pulse, the better it gets."
   (no clunky Looker embeds). Drill-through into detail.
 - **Per-tile AI insight** ✅ — tap any tile and the Owl explains what the numbers
   mean in plain English, and answers follow-up questions, grounded in that data.
+- **Share an insight or a tile** ✅ — a Share button on any tile and on the Owl's
+  insight/summary panels hands the finding off to **email, WhatsApp or Slack** in
+  one tap, with room to add a personal note and a link back to the view.
 - **Personalised home briefing** ✅ — each client lands on an AI-written summary of
   what matters right now (leads with ticketing/revenue), tailored to what they
   follow and view.
@@ -413,6 +416,12 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-25** — **Share an insight or a tile** ✅: a **Share** button now sits on every
+  (titled) tile and on the Owl's per-tile insight and whole-dashboard summary panels. One tap
+  hands the finding off to **email, WhatsApp or Slack** — the reader can add a personal note,
+  and we attach the insight/value text plus a link back to the view. Client-side hand-off (opens
+  the reader's own mail/WhatsApp/Slack; Slack copies a ready-to-paste message), so it works on
+  any phone or desktop with no setup.
 - **2026-06-25** — **Live Pulse — the header heartbeat** 🧪: the top header (desktop) now
   streams a rotating, colour-coded **beat** of what's happening right now — **alert fires**
   plus **live tile momentum** ("+142 Tickets sold in the last hour", "+R8 500 Gross revenue").
