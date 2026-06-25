@@ -74,7 +74,24 @@ module.exports = function createQueryEngine({ looker, auth }) {
   async function applyScope(query, user, suiteId) {
     const scope = await auth.scopeForQuery(query, user, suiteId);
     if (scope === false) return false; // fail closed
-    query.filters = { ...(query.filters || {}), ...scope };
+    query.filters = { ...(query.filters || {}) };
+    // The forced organiser scope is a CEILING, not an override. If the dashboard
+    // already narrowed this field (e.g. the user picked one of several organisers
+    // the client owns), keep that narrower selection — but only to values inside
+    // the allowed set, so it can never widen past the security boundary. With no
+    // selection (or a selection wholly outside the allowed set), fall back to the
+    // full allowed set. This fixes multi-organiser clients where narrowing the
+    // Organiser filter was being clobbered back to "all organisers".
+    for (const [field, allowedVal] of Object.entries(scope)) {
+      const requested = query.filters[field];
+      if (requested && typeof requested === 'string' && requested.trim()) {
+        const allowed = new Set(String(allowedVal).split(',').map((s) => s.trim()).filter(Boolean));
+        const kept = requested.split(',').map((s) => s.trim()).filter((v) => allowed.has(v));
+        query.filters[field] = kept.length ? kept.join(',') : allowedVal;
+      } else {
+        query.filters[field] = allowedVal;
+      }
+    }
     return true;
   }
 

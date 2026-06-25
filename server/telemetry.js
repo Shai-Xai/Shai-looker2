@@ -24,6 +24,9 @@ function mount(app, { db, auth, rateLimit }) {
     ts         TEXT NOT NULL
   );`);
   try { sql.exec('CREATE INDEX IF NOT EXISTS idx_usage_kind ON usage_events(kind, name)'); } catch { /* older sqlite */ }
+  // Admin user-detail timeline filters by user_id ORDER BY ts — index it so it
+  // doesn't scan the whole (growing) events table on every admin user view.
+  try { sql.exec('CREATE INDEX IF NOT EXISTS idx_usage_user ON usage_events(user_id, ts)'); } catch { /* older sqlite */ }
 
   const canEntity = (req, entityId) => req.user.role === 'admin' || (req.user.entityIds || []).includes(entityId);
   const KINDS = new Set(['guide', 'feature']);

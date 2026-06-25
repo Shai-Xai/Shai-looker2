@@ -1,10 +1,7 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Link, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import HomePage from './pages/HomePage.jsx';
 import ViewPage from './pages/ViewPage.jsx';
-import EditorPage from './pages/EditorPage.jsx';
-import ClonePage from './pages/ClonePage.jsx';
-import AdminPage from './pages/AdminPage.jsx';
 import InboxNotifier from './components/InboxNotifier.jsx';
 import LivePulse from './components/LivePulse.jsx';
 import LoginPage from './pages/LoginPage.jsx';
@@ -14,15 +11,21 @@ import ClientLayout from './pages/ClientLayout.jsx';
 import ClientHome from './pages/ClientHome.jsx';
 import ClientIntegrationsPage from './pages/ClientIntegrationsPage.jsx';
 import SettlementsPage from './pages/SettlementsPage.jsx';
-import SettlementViewPage from './pages/SettlementViewPage.jsx';
-import DocumentViewPage from './pages/DocumentViewPage.jsx';
 import InboxPage from './os/InboxPage.jsx';
-import DigestsPage from './pages/DigestsPage.jsx';
-import EngagePage from './pages/EngagePage.jsx';
 import GoalsPage from './pages/GoalsPage.jsx';
-import SocialPage from './pages/SocialPage.jsx';
 import AlertsPage from './pages/AlertsPage.jsx';
-import InventiveAskPage from './pages/InventiveAskPage.jsx';
+// Code-split the heavy / admin-only / secondary screens out of the initial
+// bundle — they load on first navigation (and clients never download the admin +
+// editor surfaces at all). The common client path stays eager for instant paint.
+const AdminPage = lazy(() => import('./pages/AdminPage.jsx'));
+const EditorPage = lazy(() => import('./pages/EditorPage.jsx'));
+const ClonePage = lazy(() => import('./pages/ClonePage.jsx'));
+const EngagePage = lazy(() => import('./pages/EngagePage.jsx'));
+const SettlementViewPage = lazy(() => import('./pages/SettlementViewPage.jsx'));
+const DocumentViewPage = lazy(() => import('./pages/DocumentViewPage.jsx'));
+const DigestsPage = lazy(() => import('./pages/DigestsPage.jsx'));
+const SocialPage = lazy(() => import('./pages/SocialPage.jsx'));
+const InventiveAskPage = lazy(() => import('./pages/InventiveAskPage.jsx'));
 import Logo from './components/Logo.jsx';
 import { useBrandLogo } from './lib/brand.js';
 import { api } from './lib/api.js';
@@ -33,6 +36,10 @@ import { AuthProvider, useAuth } from './lib/auth.jsx';
 import { ProfileProvider, useProfile } from './lib/profile.jsx';
 import { ThemeProvider, useTheme } from './lib/theme.jsx';
 import { useIsMobile } from './lib/useIsMobile.js';
+
+// Shown while a lazy-loaded route chunk is fetched. An empty flex filler keeps the
+// layout stable (no spinner flash) — split chunks resolve in a few ms once cached.
+function ScreenFallback() { return <div style={{ flex: 1 }} aria-busy="true" />; }
 
 // Legacy /actions and /segments now live as tabs under the Engage hub. Redirect
 // while preserving the query string so deep links (?action=, ?goal=) survive.
@@ -239,6 +246,7 @@ function Shell() {
         <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh' }}>
           <Header />
           <InboxNotifier entityId={mode === 'client' ? activeEntityId : undefined} />
+          <Suspense fallback={<ScreenFallback />}>
           {isAdmin && !actingAsClient ? (
             <Routes>
               <Route path="/" element={<Navigate to="/admin" replace />} />
@@ -299,6 +307,7 @@ function Shell() {
               </Route>
             </Routes>
           )}
+          </Suspense>
         </div>
       </DrillProvider>
     </BrowserRouter>
