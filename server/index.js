@@ -2021,18 +2021,20 @@ function briefingInstructionsFor(user, entityId, suites) {
 
 
 
-// In-memory caches: light snapshot (10 min) and briefing (6 h) per user+entity.
+// In-memory snapshot cache (10 min). The briefing cache (memory + persisted disk +
+// the 15-min warmer) lives in server/briefingCache.js so it survives redeploys.
 const snapCache = new Map();
-const briefCache = new Map();
 const cacheGet = (map, key, ttl) => { const e = map.get(key); return e && Date.now() - e.at < ttl ? e.val : null; };
 const cachePut = (map, key, val) => { map.set(key, { at: Date.now(), val }); if (map.size > 500) map.delete(map.keys().next().value); };
-const bustHome = (userId, entityId) => {
-  const k = `${userId}:${entityId}`;
-  snapCache.delete(k);
-  // Clear every briefing cache entry for this user+client — single segment keys
-  // AND the multi-event overall/events keys (which carry the suite selection).
-  for (const key of [...briefCache.keys()]) if (key.startsWith(`${k}:`)) briefCache.delete(key);
-};
+const briefStore = require('./briefingCache')({
+  sql: db.db,
+  getUser: (id) => db.getUser(id),
+  regenerate: async (user, entityId, segment) => {
+    await generateBriefing(user, entityId, segment, { force: true });
+    if (clientCatalogue(entityId).suites.length > 1) await generateEvents(user, entityId, segment, { force: true });
+  },
+});
+const bustHome = (userId, entityId) => { snapCache.delete(`${userId}:${entityId}`); briefStore.bust(userId, entityId); };
 
 app.get('/api/my/snapshot', auth.requireAuth, (req, res) => {
   const entityId = homeEntityFor(req);
@@ -2056,34 +2058,6 @@ app.get('/api/my/snapshot', auth.requireAuth, (req, res) => {
 // with in-flight de-duplication so the prewarm and the real request never do the
 // same generation twice. Segmented by the reader's local time of day.
 const briefInflight = new Map(); // key -> Promise
-const BRIEF_TTL = 6 * 3600e3;
-// Persisted briefing store (survives redeploys) + a 15-min warmer that keeps
-// recently-active users' briefings fresh in the background. See briefingCache.js.
-const briefStore = require('./briefingCache')({
-  sql: db.db,
-  getUser: (id) => db.getUser(id),
-  regenerate: async (user, entityId, segment) => {
-    await generateBriefing(user, entityId, segment, { force: true });
-    if (clientCatalogue(entityId).suites.length > 1) await generateEvents(user, entityId, segment, { force: true });
-  },
-});
-// Persist a generated briefing to memory AND disk (survives redeploys).
-const saveBrief = (key, val) => { cachePut(briefCache, key, val); briefStore.save(key, val); };
-// Serve a cached briefing instantly (memory, then the persisted copy), refreshing
-// a stale persisted copy in the background. Returns the payload to serve, or null
-// when nothing is cached anywhere (only then does the caller generate inline).
-function swrBrief(key, regen) {
-  const mem = cacheGet(briefCache, key, BRIEF_TTL);
-  if (mem) { briefStore.touch(key); return mem; }
-  const saved = briefStore.get(key);
-  if (saved) {
-    cachePut(briefCache, key, saved.payload); // warm memory for the next reader
-    briefStore.touch(key);
-    if (Date.now() - saved.at >= BRIEF_TTL && !briefInflight.has(key)) regen().catch(() => {});
-    return saved.payload;
-  }
-  return null;
-}
 // ── Multi-event briefing (portfolio overall + per-event sections) ─────────────
 // The selected events for a client's briefing: default = ACTIVE events (phase not
 // post_event); a user pref `briefing_suites:{entityId}` overrides. Returns the
@@ -2123,7 +2097,7 @@ async function generateOverall(user, entityId, segment, { force = false } = {}) 
   const base = { available: true, multi: true, generatedAt: new Date().toISOString(), suites };
   if (!insights.isConfigured(apiKey) || !selected.length) return { ...base, headline: '', bullets: [] };
   const key = `${user.id}:${entityId}:${segment}:overall:${selected.join(',')}`;
-  if (!force) { const hit = swrBrief(key, () => generateOverall(user, entityId, segment, { force: true })); if (hit) return hit; }
+  if (!force) { const hit = briefStore.serve(key, () => generateOverall(user, entityId, segment, { force: true })); if (hit) return hit; }
   if (briefInflight.has(key)) return briefInflight.get(key);
   const p = (async () => {
     const tStart = Date.now();
@@ -2147,7 +2121,7 @@ async function generateOverall(user, entityId, segment, { force = false } = {}) 
         .filter((s) => s.title && (s.link || s.action)),
       _timing: { totalMs, factsMs, llmMs, facts: factTiming },
     };
-    saveBrief(key, out);
+    briefStore.put(key, out);
     return out;
   })().finally(() => briefInflight.delete(key));
   briefInflight.set(key, p);
@@ -2176,7 +2150,7 @@ async function generateEvents(user, entityId, segment, { force = false, debug = 
   }
   if (!insights.isConfigured(apiKey)) return { events: [] };
   const key = `${user.id}:${entityId}:events:${selected.join(',')}`;
-  if (!force) { const hit = swrBrief(key, () => generateEvents(user, entityId, segment, { force: true })); if (hit) return hit; }
+  if (!force) { const hit = briefStore.serve(key, () => generateEvents(user, entityId, segment, { force: true })); if (hit) return hit; }
   if (briefInflight.has(key)) return briefInflight.get(key);
   const p = (async () => {
     const tStart = Date.now();
@@ -2201,7 +2175,7 @@ async function generateEvents(user, entityId, segment, { force = false, debug = 
       return { suiteId: id, suiteName: nameById[id] || '', headline: haveFacts.has(id) ? 'No headline available for this event right now.' : 'No sales/activity recorded for this event yet.', bullets: [], empty: true };
     });
     const out = { events, generatedAt: new Date().toISOString(), _timing: { totalMs: Date.now() - tStart, factsMs } };
-    saveBrief(key, out);
+    briefStore.put(key, out);
     return out;
   })().finally(() => briefInflight.delete(key));
   briefInflight.set(key, p);
@@ -2214,7 +2188,7 @@ async function generateBriefing(user, entityId, segment, { force = false } = {})
   // Multi-event client → portfolio overall (per-event sections load separately).
   if (clientCatalogue(entityId).suites.length > 1) return generateOverall(user, entityId, segment, { force });
   const key = `${user.id}:${entityId}:${segment}`;
-  if (!force) { const hit = swrBrief(key, () => generateBriefing(user, entityId, segment, { force: true })); if (hit) return hit; }
+  if (!force) { const hit = briefStore.serve(key, () => generateBriefing(user, entityId, segment, { force: true })); if (hit) return hit; }
   if (briefInflight.has(key)) return briefInflight.get(key); // coalesce concurrent (prewarm + real)
   const p = (async () => {
     const { suites } = clientCatalogue(entityId);
@@ -2272,7 +2246,7 @@ async function generateBriefing(user, entityId, segment, { force = false } = {})
         .filter((s) => s.title && s.link),
       _timing,
     };
-    saveBrief(key, out);
+    briefStore.put(key, out);
     return out;
   })().finally(() => briefInflight.delete(key));
   briefInflight.set(key, p);
@@ -2946,7 +2920,7 @@ app.put('/api/admin/briefing-settings', auth.requireAdmin, (req, res) => {
     for (const t of TIMES) if (typeof td[t.key] === 'string') clean[t.key] = td[t.key].slice(0, 2000);
     db.setSetting('briefing_time_defaults', JSON.stringify(clean));
   }
-  briefCache.clear();
+  briefStore.clearMem();
   res.json({ instructions: db.getSetting('briefing_instructions'), phases: PHASES, phaseDefaults: phaseDefaults(), times: TIMES, timeDefaults: timeDefaults() });
 });
 
@@ -2981,7 +2955,7 @@ app.put('/api/my/briefing-config/suite/:id', auth.requireAuth, (req, res) => {
     for (const p of PHASES) if (typeof b.phaseOverrides[p.key] === 'string' && b.phaseOverrides[p.key].trim()) cfg.phaseOverrides[p.key] = b.phaseOverrides[p.key].slice(0, 2000);
   }
   const updated = db.updateSuite(su.id, { briefing: cfg });
-  briefCache.clear(); // next briefing for anyone on this client reflects it
+  briefStore.clearMem(); // next briefing for anyone on this client reflects it
   res.json({ id: updated.id, briefing: updated.briefing, phase: resolvePhase(updated.briefing) });
 });
 // Sharpen a short instruction note (briefing focus, digest intro) with AI —

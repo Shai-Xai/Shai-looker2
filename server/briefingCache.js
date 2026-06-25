@@ -34,6 +34,34 @@ module.exports = function createBriefingCache({ sql, getUser, regenerate, log = 
   }
   function touch(key) { try { sql.prepare('UPDATE briefing_cache SET last_used=? WHERE key=?').run(Date.now(), key); } catch { /* best-effort */ } }
 
+  // ── In-memory layer + stale-while-revalidate ──
+  const TTL = 6 * 60 * 60 * 1000;
+  const mem = new Map(); // key -> { at, val }
+  // Serve a cached briefing instantly: fresh memory, else the persisted copy
+  // (warming memory + refreshing in the background if it's stale). Returns the
+  // payload, or null when nothing is cached anywhere (caller then generates
+  // inline). `regen` is a force-regenerate thunk — coalesced by the generator.
+  function serve(key, regen) {
+    const m = mem.get(key);
+    if (m && Date.now() - m.at < TTL) { touch(key); return m.val; }
+    const saved = get(key);
+    if (saved) {
+      mem.set(key, { at: Date.now(), val: saved.payload });
+      touch(key);
+      if (Date.now() - saved.at >= TTL) regen().catch(() => {});
+      return saved.payload;
+    }
+    return null;
+  }
+  function put(key, val) { mem.set(key, { at: Date.now(), val }); if (mem.size > 500) mem.delete(mem.keys().next().value); save(key, val); }
+  // Invalidate a client's briefings (memory AND disk) so the next load regenerates.
+  function bust(userId, entityId) {
+    const prefix = `${userId}:${entityId}:`;
+    for (const k of [...mem.keys()]) if (k.startsWith(prefix)) mem.delete(k);
+    try { sql.prepare("DELETE FROM briefing_cache WHERE key LIKE ?").run(`${prefix}%`); } catch { /* best-effort */ }
+  }
+  function clearMem() { mem.clear(); }
+
   // ── Warmer ──
   const INTERVAL = Number(process.env.BRIEFING_WARM_INTERVAL_MS) || 15 * 60 * 1000;
   const ACTIVE_WINDOW = Number(process.env.BRIEFING_WARM_ACTIVE_MS) || 24 * 60 * 60 * 1000;
@@ -71,5 +99,5 @@ module.exports = function createBriefingCache({ sql, getUser, regenerate, log = 
   if (timer.unref) timer.unref();
   setTimeout(() => warm().catch(() => {}), 60 * 1000); // once, shortly after boot
 
-  return { get, save, touch, warm, stop: () => clearInterval(timer) };
+  return { get, save, touch, serve, put, bust, clearMem, warm, stop: () => clearInterval(timer) };
 };
