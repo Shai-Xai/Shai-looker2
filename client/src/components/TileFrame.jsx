@@ -170,16 +170,22 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
             in the top-RIGHT corner, so the value below stays fully visible. The
             move handle reorders within a carousel (⠿) or moves on the grid (✥). */}
         {editable && !showHeader && (
-          <span style={{ position: 'absolute', top: 6, right: 6, zIndex: 7, display: 'flex', gap: 4, alignItems: 'center', background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 8, padding: 2 }} onMouseDown={(e) => e.stopPropagation()}>
+          // NB: only the buttons stop mousedown propagation — NOT the drag handle.
+          // The grid handle (✥) must let its mousedown reach react-grid-layout, or
+          // the tile won't drag. (Headerless KPI tiles regressed by wrapping the
+          // handle in the buttons' stopPropagation span.)
+          <span style={{ position: 'absolute', top: 6, right: 6, zIndex: 7, display: 'flex', gap: 4, alignItems: 'center', background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 8, padding: 2 }}>
             {inCarousel
               ? <ReorderGrip tileId={tile.id} />
               : <span className="tile-drag-handle" title="Drag to move" style={{ cursor: 'move', color: '#999', fontSize: 13, padding: '2px 5px', lineHeight: 1.2 }}>✥</span>}
-            <IconBtn title="Edit" onClick={onEdit}>✎</IconBtn>
-            <IconBtn title="Duplicate" onClick={onDuplicate}>⧉</IconBtn>
-            {onMoveOut && <IconBtn title="Move out to the dashboard grid" onClick={onMoveOut}>⤴</IconBtn>}
-            {onToggleHide && <IconBtn title={tile.hidden ? 'Show to viewers' : 'Hide from viewers'} onClick={onToggleHide}>{tile.hidden ? <EyeOff /> : <Eye />}</IconBtn>}
-            {canLockThisTile && <LockTileButton onClick={() => setShowTileLock(true)} count={tileLockCount} isMobile={isMobile} />}
-            <IconBtn title="Delete" onClick={onRemove} danger>✕</IconBtn>
+            <span style={{ display: 'flex', gap: 4, alignItems: 'center' }} onMouseDown={(e) => e.stopPropagation()}>
+              <IconBtn title="Edit" onClick={onEdit}>✎</IconBtn>
+              <IconBtn title="Duplicate" onClick={onDuplicate}>⧉</IconBtn>
+              {onMoveOut && <IconBtn title="Move out to the dashboard grid" onClick={onMoveOut}>⤴</IconBtn>}
+              {onToggleHide && <IconBtn title={tile.hidden ? 'Show to viewers' : 'Hide from viewers'} onClick={onToggleHide}>{tile.hidden ? <EyeOff /> : <Eye />}</IconBtn>}
+              {canLockThisTile && <LockTileButton onClick={() => setShowTileLock(true)} count={tileLockCount} isMobile={isMobile} />}
+              <IconBtn title="Delete" onClick={onRemove} danger>✕</IconBtn>
+            </span>
           </span>
         )}
         {tile.type === 'text' ? (
