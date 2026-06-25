@@ -82,6 +82,23 @@ longer they use Pulse, the better it gets."
 **Pitch:** "Your data, read for you — no digging. Open the app and you already
 know what changed and what to do."
 
+## Ask — your AI Data Analyst  🧪
+A conversational **Data Analyst** (the Owl) clients open from anywhere in Pulse —
+the floating **owl** (bottom-right) or the **Owl Data Analyst** button in the top
+bar. Ask about your data in plain language ("what's on sale right now?", "how does
+this compare to last year?") and get answers scoped to the client's own data.
+- **Opens in-app** as a slide-in panel — **docked beside your dashboards** by
+  default, or as an **overlay** (a toggle lets us A/B both with clients). Animated
+  AI border, **text-size** control, full-screen, and "keep-warm" so re-opens are
+  instant and the conversation persists.
+- **Per-user / per-workspace** — each user maps to its Inventive workspace (set in
+  **Admin → Users**); the workspace name + reference are configurable per client.
+- **Status 🧪:** powered by **Inventive** — needs the API key + a per-client
+  workspace set up. It's an embedded third-party tool, so in-app speed depends on
+  Inventive's side (cookie/storage handling); we've optimised everything on ours.
+
+**Pitch:** "Ask your data anything, in plain language — your own analyst, in-app."
+
 ## 2. Scheduled digests  ✅
 - Automated **email digests** (e.g. morning briefing) written for a **named role**
   (exec / marketing / finance / ops), with headline KPIs, a short narrative and
@@ -224,7 +241,7 @@ in one place that updates itself."
   - **Looker** / **Anthropic (AI)** keys ✅ (fall back to Howler defaults)
   - **Email (Resend)** ✅, **SMS (Clickatell)** ✅
   - **Meta / TikTok** ad accounts 🟡
-  - **Inventive** embedded AI analyst 🧪 ("Ask")
+  - **Inventive** — the embedded AI **Data Analyst** 🧪 (see "Ask" above)
 - **Secrets are write-only** — Pulse shows only whether a value is set, never the
   value.
 - **Each integration is locked by default** ✅ — a 🔒 guard so a working connection
@@ -401,6 +418,14 @@ Use these to set direction, **not** to promise dates.
   plus **live tile momentum** ("+142 Tickets sold in the last hour", "+R8 500 Gross revenue").
   Momentum snapshots a client's key single-value tiles on a slow tick and shows the movement;
   it auto-picks the key tiles for now (hand-picking comes later). Taps through to Alerts.
+- **2026-06-25** — **Ask — AI Data Analyst** 🧪: a conversational analyst (the Owl)
+  clients open from the floating owl or the top-bar **Owl Data Analyst** button —
+  ask about your data in plain language, scoped to the client. Opens **in-app**
+  (docked beside dashboards by default, or overlay — A/B toggle), with a text-size
+  control and an animated AI border. Powered by **Inventive** (per-client workspace
+  setup). Embedded speed is bounded by third-party-iframe storage limits — being
+  worked through with Inventive.
+
 - **2026-06-24** — **Social metrics (organic)** 🟡🧪: pull a client's Facebook /
   Instagram / TikTok organic stats into Pulse — daily account trends (followers,
   reach, impressions) + per-post engagement, on a new mobile-first **Social** page
