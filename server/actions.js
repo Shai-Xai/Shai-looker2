@@ -12,7 +12,6 @@
 // lifecycle.
 
 const crypto = require('crypto');
-const fetch = require('node-fetch');
 
 // Parse a free-text contact list — ONE PERSON PER LINE. Within a line we pull out
 // an email + a mobile + a name, so "John Smith, john@x.com, 083…" is one contact.
@@ -110,7 +109,7 @@ function googleSheetCsvUrl(url) {
 async function fetchGoogleSheetCsv(url) {
   const csvUrl = googleSheetCsvUrl(url);
   if (!csvUrl) throw new Error('That doesn’t look like a Google Sheets link.');
-  const res = await fetch(csvUrl, { redirect: 'follow' });
+  const res = await fetch(csvUrl, { redirect: 'follow', signal: AbortSignal.timeout(20000) });
   const text = res.ok ? await res.text() : '';
   // A non-public sheet returns 401/403 or an HTML sign-in page rather than CSV.
   if (!res.ok || /^\s*<(!doctype|html)/i.test(text)) {

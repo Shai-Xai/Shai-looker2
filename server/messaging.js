@@ -8,7 +8,6 @@
 //   clickatell_api_key   — the One API key (write-only; never returned)
 //   sms_sender           — alphanumeric sender ID (e.g. "MTNBush") or number
 //   clickatell_endpoint  — One API URL (kept configurable; verify vs current docs)
-const fetch = require('node-fetch');
 
 let db = null;
 const DEFAULT_ENDPOINT = 'https://platform.clickatell.com/v1/message';
@@ -43,7 +42,7 @@ async function sendSms({ to, text }) {
       method: 'POST',
       headers: { Authorization: apiKey(), 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify(body),
-      timeout: 20000, // node-fetch: fail a stuck SMS send instead of hanging forever
+      signal: AbortSignal.timeout(20000), // fail a stuck SMS send instead of hanging forever
     });
     const data = await res.json().catch(() => ({}));
     // Clickatell returns per-message accepted/error; treat HTTP 2xx + no error as ok.
