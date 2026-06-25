@@ -14,6 +14,30 @@ async function json(res) {
   return data;
 }
 
+// Tiny cache for read-mostly GETs that screens re-fire on every navigation — e.g.
+// the suites sidebar + settlements list ClientLayout reloads on each client route
+// change. In-flight dedup (concurrent identical GETs share one request) + a short
+// self-healing TTL (a repeat within the window serves the cached result instantly).
+// These resources only change via admin actions, never the browsing client, so the
+// brief staleness is safe; bustCache(prefix) clears it after a relevant mutation.
+const _getCache = new Map();    // url -> { at, data }
+const _getInflight = new Map(); // url -> Promise
+function cachedGet(url, ttl = 60000) {
+  const hit = _getCache.get(url);
+  if (hit && Date.now() - hit.at < ttl) return Promise.resolve(hit.data);
+  if (_getInflight.has(url)) return _getInflight.get(url);
+  const p = fetch(url).then(json).then((data) => {
+    _getCache.set(url, { at: Date.now(), data });
+    _getInflight.delete(url);
+    return data;
+  }).catch((e) => { _getInflight.delete(url); throw e; });
+  _getInflight.set(url, p);
+  return p;
+}
+function bustCache(prefix = '') {
+  for (const k of [..._getCache.keys()]) if (!prefix || k.startsWith(prefix)) _getCache.delete(k);
+}
+
 // Usage telemetry: buffer events and flush in small batches (after a short idle,
 // when the buffer fills, or when the tab is hidden). Fire-and-forget — a failed
 // flush is dropped silently so it can never affect the UI.
@@ -233,7 +257,8 @@ export const api = {
     }).then(json),
 
   // Client navigation: Suites
-  mySuites: () => fetch('/api/my/suites').then(json),
+  bustCache,
+  mySuites: () => cachedGet('/api/my/suites'),
   mySuite: (id) => fetch(`/api/my/suites/${id}`).then(json),
 
   // Social metrics (inbound organic stats). Admins pass the ownership check, so
@@ -420,7 +445,7 @@ export const api = {
   importData: (data) => fetch('/api/admin/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(json),
 
   // Settlements
-  mySettlements: () => fetch('/api/my/settlements').then(json),
+  mySettlements: () => cachedGet('/api/my/settlements'),
   getSettlement: (id) => fetch(`/api/settlements/${id}`).then(json),
   saveSettlementNotes: (id, notes) => fetch(`/api/settlements/${id}/notes`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ notes }) }).then(json),
   adminListSettlements: () => fetch('/api/admin/settlements').then(json),
