@@ -2108,23 +2108,24 @@ function KV({ label, value, sub }) {
 // (reusing the setup-wizard progress store, prefixed amchk_). Split into the
 // client-wide ACCOUNT SETUP (done once) and the PER-EVENT work (repeated for each
 // suite the client runs — goals, briefing, audiences, abandoned-cart campaigns).
+// Account-level tasks — the client-wide foundation, set once.
 const AM_TASKS = [
-  // Account setup — the client-wide foundation, set once.
-  { key: 'client', phase: 'Account setup', icon: '🏢', title: 'Set up the client', desc: 'Name, logo and AI context.', section: 'settings', auto: (d) => !!(d.entity.name || '').trim() },
-  { key: 'scope', phase: 'Account setup', icon: '🔒', title: 'Lock their data scope', desc: 'Pick the organiser so they only ever see their own data.', section: 'settings', auto: (d) => d.entity.allOrganisers || Object.values(d.entity.lockedFilters || {}).some((v) => String(v || '').trim()) },
-  { key: 'branding', phase: 'Account setup', icon: '🎨', title: 'Add branding', desc: 'Logo, colours and sender — white-labels the app and emails.', section: 'email', auto: (d) => d.brandingSet },
-  { key: 'logins', phase: 'Account setup', icon: '🔑', title: 'Create logins & roles', desc: 'Add the people who sign in and set each one’s role.', section: 'logins', auto: (d) => d.users.length > 0 },
-  { key: 'inventive', phase: 'Account setup', icon: '✨', title: 'Assign Inventive', desc: 'Link the client’s Inventive analyst workspace.', section: 'integrations', auto: (d) => !!(d.entity.inventiveRefId || d.entity.inventiveName) },
-  { key: 'integrations', phase: 'Account setup', icon: '🔌', title: 'Add integrations', desc: 'Connect Looker / Meta / TikTok / email as needed.', section: 'integrations' },
-  { key: 'digest', phase: 'Account setup', icon: '🗓', title: 'Create a digest', desc: 'Schedule a recurring briefing email to their team.', section: 'digests', auto: (d) => d.digests > 0 },
-  // Per event — repeat for each event (suite) the client runs.
-  { key: 'suites', phase: 'Per event', icon: '🗂️', title: 'Create the event (suite)', desc: 'A suite per event — its dashboard sets and the event lock.', section: 'suites', auto: (d) => d.suites.length > 0 },
-  { key: 'briefing', phase: 'Per event', icon: '📝', title: 'Tune the event briefing', desc: 'Key dates, phase and instructions so the Owl reads the event right.', section: 'briefing' },
-  { key: 'goals', phase: 'Per event', icon: '⭐', title: 'Set event goals', desc: 'Give the event a live target — preview the suite to add one.', section: 'suites', auto: (d) => d.goals > 0 },
-  { key: 'segment', phase: 'Per event', icon: '🎯', title: 'Build an audience', desc: 'A reusable segment — e.g. everyone who abandoned a cart.', section: 'segments', auto: (d) => d.segments > 0 },
-  { key: 'cart', phase: 'Per event', icon: '🛒', title: 'Set up an abandoned-cart campaign', desc: 'Win back checkouts that didn’t finish — email/SMS the abandoned-cart audience.', section: 'campaigns', auto: (d) => d.campaigns > 0 },
+  { key: 'client', icon: '🏢', title: 'Set up the client', desc: 'Name, logo and AI context.', section: 'settings', auto: (d) => !!(d.entity.name || '').trim() },
+  { key: 'scope', icon: '🔒', title: 'Lock their data scope', desc: 'Pick the organiser so they only ever see their own data.', section: 'settings', auto: (d) => d.entity.allOrganisers || Object.values(d.entity.lockedFilters || {}).some((v) => String(v || '').trim()) },
+  { key: 'branding', icon: '🎨', title: 'Add branding', desc: 'Logo, colours and sender — white-labels the app and emails.', section: 'email', auto: (d) => d.brandingSet },
+  { key: 'logins', icon: '🔑', title: 'Create logins & roles', desc: 'Add the people who sign in and set each one’s role.', section: 'logins', auto: (d) => d.users.length > 0 },
+  { key: 'inventive', icon: '✨', title: 'Assign Inventive', desc: 'Link the client’s Inventive analyst workspace.', section: 'integrations', auto: (d) => !!(d.entity.inventiveRefId || d.entity.inventiveName) },
+  { key: 'integrations', icon: '🔌', title: 'Add integrations', desc: 'Connect Looker / Meta / TikTok / email as needed.', section: 'integrations' },
+  { key: 'digest', icon: '🗓', title: 'Create a digest', desc: 'Schedule a recurring briefing email to their team.', section: 'digests', auto: (d) => d.digests > 0 },
 ];
-const AM_PHASE_DESC = { 'Account setup': 'The client-wide foundation — set once.', 'Per event': 'Repeat for each event (suite) the client runs.' };
+// Per-event tasks — repeated for EACH event (suite). `auto` reads the suite's own
+// data; the rest are manual ticks scoped to that suite.
+const EVENT_TASKS = [
+  { key: 'goals', icon: '⭐', title: 'Set event goals', desc: 'A live target for this event — preview the suite to add one.', section: 'suites', auto: (sd) => sd.goals > 0 },
+  { key: 'briefing', icon: '📝', title: 'Tune the briefing', desc: 'Key dates, phase and instructions so the Owl reads this event right.', section: 'briefing' },
+  { key: 'segment', icon: '🎯', title: 'Build the audience', desc: 'e.g. everyone who abandoned a cart for this event.', section: 'segments' },
+  { key: 'cart', icon: '🛒', title: 'Abandoned-cart campaign', desc: 'Win back checkouts that didn’t finish for this event.', section: 'campaigns' },
+];
 function ClientSetupChecklist({ entity, suites, users, go }) {
   const [aux, setAux] = useState(null);
   useEffect(() => {
@@ -2133,37 +2134,64 @@ function ClientSetupChecklist({ entity, suites, users, go }) {
     Promise.all([
       api.getEntityMailTemplate(entity.id).catch(() => null),
       api.getDigests(entity.id).catch(() => []),
-      api.listSegments(entity.id).catch(() => []),
-      api.listActions(entity.id).catch(() => []),
       api.getSetupWizardProgress(entity.id).catch(() => ({ ticks: {} })),
       Promise.all(suites.map((su) => api.suiteGoals(su.id).then((r) => (Array.isArray(r) ? r : r.goals || [])).catch(() => []))),
-    ]).then(([mt, digests, segments, actions, prog, goalsArr]) => {
+    ]).then(([mt, digests, prog, goalsArr]) => {
       if (!alive) return;
       setAux({
         brandingSet: brandingDone(mt),
         digests: (digests || []).length,
-        segments: (segments || []).length,
-        campaigns: (actions || []).length,
-        goals: goalsArr.reduce((n, g) => n + (g ? g.length : 0), 0),
+        goalsBySuite: Object.fromEntries(suites.map((su, i) => [su.id, (goalsArr[i] || []).length])),
         ticks: prog.ticks || {},
       });
     });
     return () => { alive = false; };
   }, [entity.id, suites.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const data = { entity, suites, users, brandingSet: aux?.brandingSet, digests: aux?.digests || 0, segments: aux?.segments || 0, campaigns: aux?.campaigns || 0, goals: aux?.goals || 0 };
-  const autoDone = (t) => !!(t.auto && t.auto(data));
-  const manualDone = (t) => aux?.ticks?.['amchk_' + t.key] === 1;
-  const done = (t) => autoDone(t) || manualDone(t);
-  const tick = (t, v) => {
-    setAux((a) => ({ ...a, ticks: { ...(a?.ticks || {}), ['amchk_' + t.key]: v ? 1 : 0 } }));
-    api.setSetupWizardProgress(entity.id, 'amchk_' + t.key, v).then((r) => setAux((a) => ({ ...a, ticks: r.ticks || a.ticks }))).catch(() => {});
+  const ticks = aux?.ticks || {};
+  const setTick = (key, v) => {
+    setAux((a) => ({ ...a, ticks: { ...(a?.ticks || {}), [key]: v ? 1 : 0 } }));
+    api.setSetupWizardProgress(entity.id, key, v).then((r) => setAux((a) => ({ ...a, ticks: r.ticks || a.ticks }))).catch(() => {});
   };
-  const total = AM_TASKS.length;
-  const doneCount = AM_TASKS.filter(done).length;
-  const pct = Math.round((doneCount / total) * 100);
-  const phases = [];
-  for (const t of AM_TASKS) { const g = phases.find((p) => p.phase === t.phase); if (g) g.tasks.push(t); else phases.push({ phase: t.phase, tasks: [t] }); }
+  // Account tasks
+  const accData = { entity, suites, users, brandingSet: aux?.brandingSet, digests: aux?.digests || 0 };
+  const accAuto = (t) => !!(t.auto && t.auto(accData));
+  const accManual = (t) => ticks['amchk_' + t.key] === 1;
+  const accDone = (t) => accAuto(t) || accManual(t);
+  // Per-event tasks (keyed by suite)
+  const evData = (su) => ({ goals: aux?.goalsBySuite?.[su.id] || 0 });
+  const evAuto = (su, t) => !!(t.auto && t.auto(evData(su)));
+  const evManual = (su, t) => ticks[`amchk_${su.id}_${t.key}`] === 1;
+  const evDone = (su, t) => evAuto(su, t) || evManual(su, t);
+
+  const accDoneCount = AM_TASKS.filter(accDone).length;
+  const evDoneCount = suites.reduce((n, su) => n + EVENT_TASKS.filter((t) => evDone(su, t)).length, 0);
+  const total = AM_TASKS.length + suites.length * EVENT_TASKS.length;
+  const doneCount = accDoneCount + evDoneCount;
+  const pct = total ? Math.round((doneCount / total) * 100) : 0;
+
+  const taskRow = (key, icon, title, desc, ok, onGo, onTick) => (
+    <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 12, background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 12, padding: '11px 13px', opacity: ok ? 0.72 : 1 }}>
+      <span style={{ fontSize: 19, width: 24, textAlign: 'center', flexShrink: 0 }}>{ok ? '✅' : icon}</span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13.5, fontWeight: 700, textDecoration: ok ? 'line-through' : 'none' }}>{title}</div>
+        <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.4 }}>{desc}</div>
+      </div>
+      <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+        <button style={miniBtn} onClick={onGo}>Go →</button>
+        {onTick && <button style={{ ...chkTick, ...(ok ? { color: 'var(--brand)', borderColor: 'var(--brand)' } : null) }} onClick={onTick} title={ok ? 'Mark not done' : 'Mark done'}>✓</button>}
+      </div>
+    </div>
+  );
+  const sectionHead = (title, caption, n, m) => (
+    <div style={{ margin: '16px 2px 8px' }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+        <span style={{ fontSize: 11.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text)' }}>{title}</span>
+        <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--muted)' }}>{n}/{m}</span>
+      </div>
+      {caption && <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{caption}</div>}
+    </div>
+  );
 
   return (
     <div>
@@ -2175,38 +2203,34 @@ function ClientSetupChecklist({ entity, suites, users, go }) {
         <div style={{ height: 8, borderRadius: 999, background: 'rgba(128,128,128,0.15)', overflow: 'hidden' }}>
           <div style={{ height: '100%', width: `${pct}%`, background: 'var(--brand)', borderRadius: 999, transition: 'width .3s' }} />
         </div>
-        <p style={{ ...hint, marginTop: 10, marginBottom: 0 }}>Auto-ticks as you go. Tap <b>Go →</b> to jump to a task, or tick the manual ones. Everything an account manager needs to stand a client up and switch on the value.</p>
+        <p style={{ ...hint, marginTop: 10, marginBottom: 0 }}>Auto-ticks as you go. Tap <b>Go →</b> to jump to a task, or tick the manual ones. Account setup is done once; the event tasks repeat for every event you run.</p>
       </div>
-      {phases.map((p) => {
-        const pDone = p.tasks.filter(done).length;
-        return (
-        <div key={p.phase} style={{ marginBottom: 4 }}>
-          <div style={{ margin: '16px 2px 8px' }}>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-              <span style={{ fontSize: 11.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text)' }}>{p.phase}</span>
-              <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--muted)' }}>{pDone}/{p.tasks.length}</span>
-            </div>
-            {AM_PHASE_DESC[p.phase] && <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{AM_PHASE_DESC[p.phase]}</div>}
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {p.tasks.map((t) => {
-              const ok = done(t);
-              return (
-                <div key={t.key} style={{ display: 'flex', alignItems: 'center', gap: 12, background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 12, padding: '12px 14px', opacity: ok ? 0.72 : 1 }}>
-                  <span style={{ fontSize: 20, width: 26, textAlign: 'center', flexShrink: 0 }}>{ok ? '✅' : t.icon}</span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 14, fontWeight: 700, textDecoration: ok ? 'line-through' : 'none' }}>{t.title}</div>
-                    <div style={{ fontSize: 12.5, color: 'var(--muted)', lineHeight: 1.4 }}>{t.desc}</div>
-                  </div>
-                  <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-                    <button style={miniBtn} onClick={() => go(t.section)}>Go →</button>
-                    {!autoDone(t) && <button style={{ ...chkTick, ...(manualDone(t) ? { color: 'var(--brand)', borderColor: 'var(--brand)' } : null) }} onClick={() => tick(t, !manualDone(t))} title={manualDone(t) ? 'Mark not done' : 'Mark done'}>✓</button>}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+
+      {/* Account setup */}
+      {sectionHead('Account setup', 'The client-wide foundation — set once.', accDoneCount, AM_TASKS.length)}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {AM_TASKS.map((t) => taskRow(t.key, t.icon, t.title, t.desc, accDone(t), () => go(t.section), accAuto(t) ? null : () => setTick('amchk_' + t.key, !accManual(t))))}
+      </div>
+
+      {/* Per event — one block per suite */}
+      {sectionHead('Per event', 'Repeat for each event (suite) the client runs.', evDoneCount, suites.length * EVENT_TASKS.length)}
+      {suites.length === 0 ? (
+        <div style={{ ...cardStyle, marginBottom: 0, textAlign: 'center' }}>
+          <p style={{ fontSize: 13, color: 'var(--muted)', margin: '0 0 10px' }}>No events yet. Create the client’s first event (suite) to start its checklist.</p>
+          <button style={addBtn} onClick={() => go('suites')}>+ Create the first event</button>
         </div>
+      ) : suites.map((su) => {
+        const sDone = EVENT_TASKS.filter((t) => evDone(su, t)).length;
+        return (
+          <div key={su.id} style={{ ...cardStyle, marginBottom: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 14.5, fontWeight: 800 }}>{su.icon && !String(su.icon).startsWith('data:') ? `${su.icon} ` : '🗂️ '}{su.name}</span>
+              <span style={{ fontSize: 12, fontWeight: 700, color: sDone === EVENT_TASKS.length ? 'var(--brand)' : 'var(--muted)' }}>{sDone}/{EVENT_TASKS.length}</span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {EVENT_TASKS.map((t) => taskRow(`${su.id}_${t.key}`, t.icon, t.title, t.desc, evDone(su, t), () => go(t.section), evAuto(su, t) ? null : () => setTick(`amchk_${su.id}_${t.key}`, !evManual(su, t))))}
+            </div>
+          </div>
         );
       })}
     </div>
