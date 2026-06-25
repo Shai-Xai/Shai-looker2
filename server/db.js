@@ -1095,10 +1095,13 @@ function touchLastLogin(userId) {
   if (!userId) return;
   try { db.prepare('UPDATE users SET last_login=? WHERE id=?').run(now(), userId); } catch { /* ignore */ }
 }
-function verifyCredentials(email, password) {
+// Async so the bcrypt hash comparison (~60-100ms of CPU) doesn't block the single
+// event loop on every login — bcryptjs's async path yields between rounds, so
+// concurrent requests aren't stalled waiting on a sign-in.
+async function verifyCredentials(email, password) {
   const u = getUserByEmail(email);
   if (!u) return null;
-  return bcrypt.compareSync(password || '', u.passwordHash) ? u : null;
+  return (await bcrypt.compare(password || '', u.passwordHash)) ? u : null;
 }
 
 // ─── Dashboards (content kept as JSON blob) ───────────────────────────────────

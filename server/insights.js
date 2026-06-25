@@ -381,9 +381,7 @@ async function describeTile({ title, visType, fields, model, explore, instructio
     messages: [{ role: 'user', content: prompt }],
   });
   const text = (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
-  const match = text.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error('AI did not return JSON');
-  const out = JSON.parse(match[0]);
+  const out = await parseModelJsonResilient(c, text, 'tile description');
   return {
     name: (out.name || '').toString().trim(),
     description: (out.description || '').toString().trim(),
@@ -636,9 +634,7 @@ async function draftCampaign({ goal, clientName, clientContext, audienceCount, i
     messages: [{ role: 'user', content: lines.join('\n') }],
   });
   const text = (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
-  const match = text.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error('AI did not return JSON for the campaign draft');
-  return JSON.parse(match[0]);
+  return parseModelJsonResilient(c, text, 'campaign draft');
 }
 
 // ─── Goal "gap plan" (marketing & insights manager) ──────────────────────────────
@@ -969,9 +965,7 @@ async function extractSettlement({ pdfBase64, apiKey, onProgress }) {
   }
   const resp = await stream.finalMessage();
   const text = (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
-  const match = text.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error('AI did not return JSON for the settlement report');
-  return JSON.parse(match[0]);
+  return parseModelJsonResilient(c, text, 'settlement report');
 }
 
 // ─── Invoice extraction ─────────────────────────────────────────────────────────
@@ -1027,9 +1021,7 @@ async function extractInvoice({ pdfBase64, apiKey, onProgress }) {
   }
   const resp = await stream.finalMessage();
   const text = (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
-  const match = text.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error('AI did not return JSON for the invoice');
-  return JSON.parse(match[0]);
+  return parseModelJsonResilient(c, text, 'invoice');
 }
 
 // Read-only registry of the hardcoded system prompts — the fixed base each AI

@@ -146,15 +146,15 @@ function meUser(user) {
 }
 // Brute-force guard: cap login attempts per IP (fixed 15-minute window). Fails
 // open if the limiter errors, so it can never lock out legitimate traffic.
-app.post('/api/auth/login', rateLimit({ windowMs: 15 * 60_000, max: 10, by: 'ip', scope: 'login' }), (req, res) => {
+app.post('/api/auth/login', rateLimit({ windowMs: 15 * 60_000, max: 10, by: 'ip', scope: 'login' }), asyncHandler(async (req, res) => {
   const { email, password } = req.body || {};
-  const user = auth.verifyCredentials(email, password);
+  const user = await auth.verifyCredentials(email, password);
   if (!user) return res.status(401).json({ error: 'Invalid email or password' });
   auth.issueCookie(res, user);
   db.touchLastLogin(user.id); // most recent login → Admin → Users
   db.recordAction({ userId: user.id, action: 'auth.login', label: 'Logged in', method: 'POST', path: '/api/auth/login' });
   res.json({ user: meUser(user) });
-});
+}));
 
 app.post('/api/auth/logout', (req, res) => {
   if (req.user) db.recordAction({ userId: req.user.id, action: 'auth.logout', label: 'Logged out', method: 'POST', path: '/api/auth/logout' });
