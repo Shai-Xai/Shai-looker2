@@ -10,7 +10,6 @@
 // doesn't expose it yet) — this is the embed only. The admin config UI for these
 // keys lives with the integrations routes in index.js, not here.
 
-const fetch = require('node-fetch');
 
 function mount(app, { db, auth }) {
   const inventiveEndpoint = () => (db.getSetting('inventive_api_endpoint') || process.env.INVENTIVE_API_ENDPOINT || 'https://app-api.madeinventive.com').replace(/\/+$/, '');
@@ -56,6 +55,7 @@ function mount(app, { db, auth }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'INVENTIVE-API-KEY': key },
         body: JSON.stringify({ embedAuthToken: token, userInfo, options: req.body?.options || {} }),
+        signal: AbortSignal.timeout(20000),
       });
       if (!r.ok) {
         const detail = await r.text().catch(() => '');

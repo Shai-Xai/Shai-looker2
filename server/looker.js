@@ -3,7 +3,6 @@
 // request helper, dashboard fetching/query-resolution, and LookML metadata
 // browsing. Looker is used purely as a headless calculation engine — no embeds.
 
-const fetch = require('node-fetch');
 const db = require('./db');
 
 // The primary Looker account is configurable in Admin → Integrations (stored in
@@ -40,7 +39,7 @@ async function getAccessToken() {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ client_id: clientId, client_secret: clientSecret }),
-      timeout: 30000,
+      signal: AbortSignal.timeout(30000),
     });
     if (!res.ok) {
       const text = await res.text();
@@ -94,7 +93,7 @@ async function _request(method, path, body = null, retry = true) {
       Authorization: `token ${token}`,
       'Content-Type': 'application/json',
     },
-    timeout: 120000, // fail a stuck query after 2 min instead of hanging forever
+    signal: AbortSignal.timeout(120000), // fail a stuck query after 2 min instead of hanging forever
   };
   if (body) options.body = JSON.stringify(body);
 

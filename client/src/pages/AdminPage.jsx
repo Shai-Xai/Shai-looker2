@@ -1581,14 +1581,16 @@ function UsersTab() {
   const [users, setUsers] = useState(null);
   const [entities, setEntities] = useState([]);
   const [roles, setRoles] = useState([]);
+  const [howlerRoles, setHowlerRoles] = useState([]);
   const [q, setQ] = useState('');
   const [sort, setSort] = useState('active'); // active | email | login
   const [roleFilter, setRoleFilter] = useState('all'); // all | admin | client
   const [selectedId, setSelectedId] = useState(null);
   const [openInEdit, setOpenInEdit] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [showReport, setShowReport] = useState(false);
   const load = () => Promise.all([api.adminListUsers(), api.adminListEntities(), api.getRoles().catch(() => ({ roles: [] }))])
-    .then(([u, e, r]) => { setUsers(u); setEntities(e); setRoles(r.roles || []); });
+    .then(([u, e, r]) => { setUsers(u); setEntities(e); setRoles(r.roles || []); setHowlerRoles(r.howlerRoles || []); });
   useEffect(() => { load(); }, []);
   // Open a user's detail; `edit` jumps straight into the edit form.
   const openUser = (u, edit = false) => { setOpenInEdit(edit); setSelectedId(u.id); };
@@ -1598,7 +1600,7 @@ function UsersTab() {
   };
   if (!users) return <Muted>Loading…</Muted>;
   if (selectedId) return <UserDetail userId={selectedId} entities={entities} roles={roles} initialEditing={openInEdit} onBack={() => { setSelectedId(null); setOpenInEdit(false); load(); }} />;
-  if (adding) return <AddUserForm entities={entities} roles={roles} onCancel={() => setAdding(false)} onCreated={(id) => { setAdding(false); load().then(() => { if (id) setSelectedId(id); }); }} />;
+  if (adding) return <AddUserForm entities={entities} roles={roles} howlerRoles={howlerRoles} onCancel={() => setAdding(false)} onCreated={(id) => { setAdding(false); load().then(() => { if (id) setSelectedId(id); }); }} />;
 
   const entName = Object.fromEntries(entities.map((e) => [e.id, e.name]));
   const clientsOf = (u) => (u.memberships || []).map((m) => entName[m.entityId] || m.entityId);
@@ -1630,8 +1632,10 @@ function UsersTab() {
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 6 }}>
         <p style={{ ...hint, marginBottom: 0, flex: 1, minWidth: 180 }}>Every login on Pulse — {users.length} user{users.length === 1 ? '' : 's'} ({adminCount} Howler admin{adminCount === 1 ? '' : 's'}). Click a user for their profile, roles and activity.</p>
+        <button style={showReport ? { ...miniBtn, background: 'var(--brand)', color: '#fff', borderColor: 'var(--brand)' } : miniBtnOutline} onClick={() => setShowReport((s) => !s)}>📊 Activity report</button>
         <button style={{ ...miniBtn, background: 'var(--brand)', color: '#fff', borderColor: 'var(--brand)' }} onClick={() => setAdding(true)}>+ Add user</button>
       </div>
+      {showReport && <ActivityReport />}
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
         <div style={{ ...searchWrap, marginBottom: 0 }}>
           <span style={{ color: 'var(--muted)', fontSize: 13, flexShrink: 0 }}>⌕</span>
@@ -1669,7 +1673,7 @@ function UsersTab() {
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
             <tr>
-              {['User', 'Type', 'Clients', 'Mobile', 'Last active', ''].map((h, i) => <th key={i} style={thS}>{h}</th>)}
+              {['User', 'Type', 'Clients', 'Inventive workspace', 'Mobile', 'Last active', ''].map((h, i) => <th key={i} style={thS}>{h}</th>)}
             </tr>
           </thead>
           <tbody>
@@ -1679,8 +1683,9 @@ function UsersTab() {
                   <div style={{ fontWeight: 600 }}>{u.fullName || u.email} {adminBadge(u)}</div>
                   {u.fullName && <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>{u.email}</div>}
                 </td>
-                <td style={td}>{u.role === 'admin' ? 'Howler admin' : 'Client'}</td>
+                <td style={td}>{u.role === 'admin' ? (u.howlerRoleLabel ? `Howler · ${u.howlerRoleLabel}` : 'Howler admin') : 'Client'}</td>
                 <td style={td}>{clientsCell(u)}</td>
+                <td style={td}>{u.inventiveWorkspaceName || <span style={{ color: 'var(--muted)' }}>—</span>}</td>
                 <td style={td}>{u.mobile || <span style={{ color: 'var(--muted)' }}>—</span>}</td>
                 <td style={td} title={`Last login ${fmtWhen(u.lastLogin)}`}>{lastActiveCell(u)}</td>
                 <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
@@ -1689,9 +1694,63 @@ function UsersTab() {
                 </td>
               </tr>
             ))}
-            {sorted.length === 0 && <tr><td style={td} colSpan={6}><Muted>{ql ? `No users match “${q.trim()}”.` : 'No users in this view.'}</Muted></td></tr>}
+            {sorted.length === 0 && <tr><td style={td} colSpan={7}><Muted>{ql ? `No users match “${q.trim()}”.` : 'No users in this view.'}</Muted></td></tr>}
           </tbody>
         </table>
+      )}
+    </div>
+  );
+}
+
+// Platform-wide usage summary: active users + top users / dashboards / features
+// over a selectable window. Read-only, lazy-loaded when the panel is opened.
+function ActivityReport() {
+  const [days, setDays] = useState(30);
+  const [rep, setRep] = useState(null);
+  const [err, setErr] = useState('');
+  useEffect(() => { setRep(null); setErr(''); api.adminUserActivityReport(days).then(setRep).catch((e) => setErr(e.message || 'Failed to load')); }, [days]);
+  const card = { flex: '1 1 200px', minWidth: 180, border: '1px solid var(--hairline)', borderRadius: 12, padding: '12px 14px', background: 'var(--card)' };
+  const head = { fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', marginBottom: 8 };
+  const row = (left, right) => <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 13, padding: '4px 0', borderTop: '1px solid var(--hairline)' }}><span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{left}</span><span style={{ flexShrink: 0, fontWeight: 700, color: 'var(--brand)' }}>{right}</span></div>;
+  return (
+    <div style={{ border: '1px solid var(--hairline)', borderRadius: 14, padding: 16, margin: '4px 0 16px', background: 'rgba(var(--brand-rgb,255,56,92),0.03)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
+        <span style={{ fontWeight: 700, fontSize: 15, flex: 1 }}>📊 Activity report</span>
+        <select style={{ ...input, width: 'auto' }} value={days} onChange={(e) => setDays(Number(e.target.value))}>
+          <option value={7}>Last 7 days</option>
+          <option value={30}>Last 30 days</option>
+          <option value={90}>Last 90 days</option>
+        </select>
+      </div>
+      {err ? <Muted>{err}</Muted> : !rep ? <Muted>Loading…</Muted> : (
+        <>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
+            <div style={card}><div style={head}>Active users</div>
+              <div style={{ display: 'flex', gap: 16 }}>
+                <div><div style={{ fontSize: 22, fontWeight: 800 }}>{rep.active.d1}</div><div style={{ fontSize: 11, color: 'var(--muted)' }}>today</div></div>
+                <div><div style={{ fontSize: 22, fontWeight: 800 }}>{rep.active.d7}</div><div style={{ fontSize: 11, color: 'var(--muted)' }}>7 days</div></div>
+                <div><div style={{ fontSize: 22, fontWeight: 800 }}>{rep.active.d30}</div><div style={{ fontSize: 11, color: 'var(--muted)' }}>{rep.days} days</div></div>
+              </div>
+            </div>
+            <div style={card}><div style={head}>Volume · last {rep.days} days</div>
+              <div style={{ display: 'flex', gap: 16 }}>
+                <div><div style={{ fontSize: 22, fontWeight: 800 }}>{rep.totals.views}</div><div style={{ fontSize: 11, color: 'var(--muted)' }}>dashboard opens</div></div>
+                <div><div style={{ fontSize: 22, fontWeight: 800 }}>{rep.totals.actions}</div><div style={{ fontSize: 11, color: 'var(--muted)' }}>actions</div></div>
+              </div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <div style={card}><div style={head}>Top users</div>
+              {rep.topUsers.length ? rep.topUsers.map((u) => row(<span title={u.name}>{u.name}{u.role === 'admin' ? ' · Howler' : ''}</span>, u.total)) : <Muted>No activity yet.</Muted>}
+            </div>
+            <div style={card}><div style={head}>Most active dashboards</div>
+              {rep.topDashboards.length ? rep.topDashboards.map((d) => row(<span title={d.title}>{d.title}</span>, d.opens)) : <Muted>No opens yet.</Muted>}
+            </div>
+            <div style={card}><div style={head}>Most used features</div>
+              {rep.topFeatures.length ? rep.topFeatures.map((f) => row(<span title={f.label}>{f.label}</span>, f.uses)) : <Muted>No actions yet.</Muted>}
+            </div>
+          </div>
+        </>
       )}
     </div>
   );
@@ -1700,11 +1759,12 @@ function UsersTab() {
 // Create either a Howler admin (full access) or a client login (scoped to the
 // clients you pick). Replaces the old separate "Add admin" / per-client "Add
 // login" forms — one entry point for both.
-function AddUserForm({ entities, roles, onCancel, onCreated }) {
+function AddUserForm({ entities, roles, howlerRoles = [], onCancel, onCreated }) {
   const [accountType, setAccountType] = useState('client'); // client | admin
   const [form, setForm] = useState({ firstName: '', lastName: '', email: '', mobile: '', password: '' });
   const [entityIds, setEntityIds] = useState([]);
   const [role, setRole] = useState('viewer');
+  const [howlerRole, setHowlerRole] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const roleOpts = roles.length ? roles : [{ key: 'owner', label: 'Owner' }];
@@ -1718,7 +1778,7 @@ function AddUserForm({ entities, roles, onCancel, onCreated }) {
     try {
       const created = isClient
         ? await api.adminCreateUser({ ...base, role: 'client', entityIds: entityIds.map((id) => ({ entityId: id, role })) })
-        : await api.adminCreateUser({ ...base, role: 'admin', entityIds });
+        : await api.adminCreateUser({ ...base, role: 'admin', entityIds, howlerRole });
       onCreated(created?.id);
     } catch (e) {
       // Duplicate email → for an admin, offer to promote the existing login (keeps its access).
@@ -1762,6 +1822,17 @@ function AddUserForm({ entities, roles, onCancel, onCreated }) {
           </>
         ) : (
           <>
+            {howlerRoles.length > 0 && (
+              <div style={{ marginBottom: 10 }}>
+                <Field label="Howler role">
+                  <select style={input} value={howlerRole} onChange={(e) => setHowlerRole(e.target.value)}>
+                    <option value="">— none —</option>
+                    {howlerRoles.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
+                  </select>
+                </Field>
+                <p style={{ ...hint, marginTop: 6 }}>Their job title at Howler. Shown to clients they own as “Your Howler Support”.</p>
+              </div>
+            )}
             <L>Also a customer of (optional)</L>
             <div style={{ marginTop: 4 }}><ClientLinkPicker entities={entities} value={entityIds} onChange={setEntityIds} /></div>
             <p style={{ ...hint, marginTop: 8 }}>Howler admins see every client and the console regardless. Ticking clients also gives them that client's customer view.</p>
@@ -1955,18 +2026,19 @@ function UserDetail({ userId, entities = [], roles = [], initialEditing = false,
 // Edit an existing user's identity, account type and client links. Per-client
 // roles stay on each client's Logins tab; this covers everything else in one place.
 function UserEditCard({ user, memberships, entities, roles, onCancel, onSaved }) { // eslint-disable-line no-unused-vars
-  const [form, setForm] = useState({ firstName: user.firstName || '', lastName: user.lastName || '', email: user.email, mobile: user.mobile || '', password: '', inventiveWorkspaceId: user.inventiveWorkspaceId || '' });
+  const [form, setForm] = useState({ firstName: user.firstName || '', lastName: user.lastName || '', email: user.email, mobile: user.mobile || '', password: '', inventiveWorkspaceId: user.inventiveWorkspaceId || '', howlerRole: user.howlerRole || '' });
   const [accountType, setAccountType] = useState(user.role === 'admin' ? 'admin' : 'client');
   const [entityIds, setEntityIds] = useState((memberships || []).map((m) => m.entityId));
   const [workspaces, setWorkspaces] = useState([]);
-  useEffect(() => { api.adminListInventiveWorkspaces().then(setWorkspaces).catch(() => {}); }, []);
+  const [howlerRoles, setHowlerRoles] = useState([]);
+  useEffect(() => { api.adminListInventiveWorkspaces().then(setWorkspaces).catch(() => {}); api.getRoles().then((r) => setHowlerRoles(r.howlerRoles || [])).catch(() => {}); }, []);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
   const save = async () => {
     setError(''); setBusy(true);
     try {
-      const patch = { firstName: form.firstName, lastName: form.lastName, email: form.email.trim(), mobile: form.mobile, role: accountType, entityIds, inventiveWorkspaceId: form.inventiveWorkspaceId };
+      const patch = { firstName: form.firstName, lastName: form.lastName, email: form.email.trim(), mobile: form.mobile, role: accountType, entityIds, inventiveWorkspaceId: form.inventiveWorkspaceId, howlerRole: form.howlerRole };
       if (form.password) patch.password = form.password; // blank = keep current
       await api.adminUpdateUser(user.id, patch);
       onSaved();
@@ -1990,6 +2062,16 @@ function UserEditCard({ user, memberships, entities, roles, onCancel, onSaved })
             <button key={k} onClick={() => setAccountType(k)} style={accountType === k ? { ...miniBtn, background: 'var(--brand)', color: '#fff', borderColor: 'var(--brand)' } : miniBtnOutline}>{label}</button>
           ))}
         </div>
+        {accountType === 'admin' && howlerRoles.length > 0 && (
+          <>
+            <L>Howler role</L>
+            <p style={{ ...hint, marginTop: 2 }}>Their job title at Howler — shown to clients they support as “Your Howler Support”.</p>
+            <select style={{ ...input, width: '100%', margin: '4px 0 14px' }} value={form.howlerRole} onChange={set('howlerRole')}>
+              <option value="">— none —</option>
+              {howlerRoles.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
+            </select>
+          </>
+        )}
         <L>{accountType === 'admin' ? 'Also a customer of (optional)' : 'Clients'}</L>
         <div style={{ marginTop: 4 }}><ClientLinkPicker entities={entities} value={entityIds} onChange={setEntityIds} /></div>
         <p style={{ ...hint, marginTop: 8 }}>Per-client roles are set on each client's <b>Logins</b> tab; newly-linked clients default to Owner.</p>
@@ -2325,13 +2407,62 @@ function ClientLinkPicker({ entities, value = [], onChange }) {
 // Compact login management scoped to one client: list its logins (remove access
 // or delete), add a new client login, or LINK an existing login (client or
 // admin) so one person can hold several profiles.
+// Who at Howler supports this client — the contacts the client sees as "Your
+// Howler Support". An admin can reassign, add a second, or change each one's job
+// title (the title is the admin's global Howler role).
+function HowlerSupportCard({ entity, allUsers = [], howlerRoles = [], onChange }) {
+  const admins = allUsers.filter((u) => u.role === 'admin');
+  const byId = Object.fromEntries(admins.map((u) => [u.id, u]));
+  const current = (entity.howlerSupportIds || []).filter((id) => byId[id]);
+  const [addId, setAddId] = useState('');
+  const [busy, setBusy] = useState(false);
+  const save = async (ids) => { setBusy(true); try { await api.setEntityHowlerSupport(entity.id, ids); onChange(); } finally { setBusy(false); } };
+  const addOne = async () => { if (!addId) return; await save([...current, addId]); setAddId(''); };
+  const setTitle = async (id, howlerRole) => { setBusy(true); try { await api.adminUpdateUser(id, { howlerRole }); onChange(); } finally { setBusy(false); } };
+  const available = admins.filter((u) => !current.includes(u.id));
+  return (
+    <div style={{ ...cardStyle, marginBottom: 16 }}>
+      <L>🦉 Howler support</L>
+      <p style={{ ...hint, margin: '2px 0 10px' }}>The Howler contact(s) this client sees under <b>Settings → Team</b>. Reassign, add a second, or change each one's job title.</p>
+      {current.length === 0 ? <Muted>No Howler support assigned yet.</Muted> : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {current.map((id) => { const u = byId[id]; return (
+            <div key={id} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <div style={{ flex: 1, minWidth: 140 }}>
+                <div style={{ fontWeight: 600, fontSize: 13 }}>{u.fullName || u.email}</div>
+                <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>{u.email}</div>
+              </div>
+              <select style={{ ...input, width: 'auto', minWidth: 180 }} value={u.howlerRole || ''} disabled={busy} onChange={(e) => setTitle(id, e.target.value)}>
+                <option value="">— no job title —</option>
+                {howlerRoles.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
+              </select>
+              <button style={delBtn} disabled={busy} onClick={() => save(current.filter((x) => x !== id))}>Remove</button>
+            </div>
+          ); })}
+        </div>
+      )}
+      {available.length > 0 && (
+        <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+          <select style={{ ...input, flex: 1, minWidth: 200 }} value={addId} onChange={(e) => setAddId(e.target.value)}>
+            <option value="">Add a Howler admin…</option>
+            {available.map((u) => <option key={u.id} value={u.id}>{u.fullName || u.email}{u.howlerRoleLabel ? ` · ${u.howlerRoleLabel}` : ''}</option>)}
+          </select>
+          <button style={{ ...miniBtn, background: 'var(--brand)', color: '#fff', borderColor: 'var(--brand)' }} disabled={!addId || busy} onClick={addOne}>+ Add</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function EntityLogins({ entity, users, allUsers = [], onChange }) {
   const [form, setForm] = useState({ firstName: '', lastName: '', email: '', mobile: '', password: '', role: 'owner' });
   const [error, setError] = useState(null);
   const [linkId, setLinkId] = useState('');
   const [linkRole, setLinkRole] = useState('viewer');
+  const [showAdd, setShowAdd] = useState(false);
   const [roles, setRoles] = useState([]);
-  useEffect(() => { api.getRoles().then((r) => setRoles(r.roles || [])).catch(() => setRoles([])); }, []);
+  const [howlerRoles, setHowlerRoles] = useState([]);
+  useEffect(() => { api.getRoles().then((r) => { setRoles(r.roles || []); setHowlerRoles(r.howlerRoles || []); }).catch(() => setRoles([])); }, []);
   const linkable = allUsers.filter((u) => !(u.entityIds || []).includes(entity.id));
   // This login's role at THIS client (from its membership list).
   const roleOf = (u) => (u.memberships || []).find((m) => m.entityId === entity.id)?.role || 'owner';
@@ -2341,6 +2472,7 @@ function EntityLogins({ entity, users, allUsers = [], onChange }) {
       const u = await api.adminCreateUser({ firstName: form.firstName, lastName: form.lastName, email: form.email, mobile: form.mobile, password: form.password, role: 'client', entityIds: [entity.id] });
       if (form.role !== 'owner') await api.setMembershipRole(entity.id, u.id, form.role); // owner is the default
       setForm({ firstName: '', lastName: '', email: '', mobile: '', password: '', role: 'owner' });
+      setShowAdd(false);
       onChange();
     } catch (e) { setError(e.message); }
   };
@@ -2349,7 +2481,7 @@ function EntityLogins({ entity, users, allUsers = [], onChange }) {
     if (!u) return;
     await api.adminUpdateUser(u.id, { entityIds: [...(u.entityIds || []), entity.id] });
     await api.setMembershipRole(entity.id, u.id, linkRole);
-    setLinkId(''); setLinkRole('viewer'); onChange();
+    setLinkId(''); setLinkRole('viewer'); setShowAdd(false); onChange();
   };
   const changeRole = async (u, role) => { await api.setMembershipRole(entity.id, u.id, role); onChange(); };
   const removeAccess = async (u) => {
@@ -2359,8 +2491,45 @@ function EntityLogins({ entity, users, allUsers = [], onChange }) {
   };
   const del = async (u) => { if (confirm(`Delete login ${u.email}? (removes it for all clients)`)) { await api.adminDeleteUser(u.id); onChange(); } };
   const roleOpts = roles.length ? roles : [{ key: 'owner', label: 'Owner' }];
+  const addUI = !showAdd ? (
+    <button data-tour="login-add" style={{ ...miniBtn, background: 'var(--brand)', color: '#fff', borderColor: 'var(--brand)', marginBottom: 12 }} onClick={() => { setError(null); setShowAdd(true); }}>+ Add user</button>
+  ) : (
+    <div style={{ ...cardStyle, marginBottom: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
+        <span style={{ fontWeight: 700, fontSize: 14, flex: 1 }}>Add a user to {entity.name}</span>
+        <button style={miniBtnOutline} onClick={() => { setShowAdd(false); setError(null); }}>Cancel</button>
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        <Field label="First name"><input style={{ ...input, minWidth: 110 }} value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} /></Field>
+        <Field label="Surname"><input style={{ ...input, minWidth: 110 }} value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} /></Field>
+        <Field label="Email"><input style={input} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>
+        <Field label="Mobile"><input style={{ ...input, minWidth: 130 }} value={form.mobile} onChange={(e) => setForm({ ...form, mobile: e.target.value })} placeholder="+27…" /></Field>
+        <Field label="Password"><input style={input} type="text" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></Field>
+        <div data-tour="login-role"><Field label="Role"><select style={input} value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>{roleOpts.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}</select></Field></div>
+        <button style={{ ...miniBtn, background: 'var(--brand)', color: '#fff', borderColor: 'var(--brand)' }} onClick={add} disabled={!form.email || !form.password}>+ Add login</button>
+      </div>
+      {roles.length > 0 && (
+        <p style={{ ...hint, marginTop: 8 }}>{roleOpts.find((r) => r.key === form.role)?.description || ''}</p>
+      )}
+      {linkable.length > 0 && (
+        <div data-tour="login-link" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--hairline)' }}>
+          <Field label="Or link an existing login (one person, several profiles)">
+            <select style={input} value={linkId} onChange={(e) => setLinkId(e.target.value)}>
+              <option value="">Pick a login…</option>
+              {linkable.map((u) => <option key={u.id} value={u.id}>{u.email}{u.role === 'admin' ? ' (Howler admin)' : ''}</option>)}
+            </select>
+          </Field>
+          <Field label="Role"><select style={input} value={linkRole} onChange={(e) => setLinkRole(e.target.value)}>{roleOpts.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}</select></Field>
+          <button style={miniBtn} onClick={link} disabled={!linkId}>Link to {entity.name}</button>
+        </div>
+      )}
+      {error && <div style={{ color: 'var(--error)', fontSize: 13, marginTop: 6 }}>{error}</div>}
+    </div>
+  );
   return (
     <div>
+      <HowlerSupportCard entity={entity} allUsers={allUsers} howlerRoles={howlerRoles} onChange={onChange} />
+      {addUI}
       {users.length === 0 ? (
         <Muted>No logins yet for this client.</Muted>
       ) : (
@@ -2389,31 +2558,6 @@ function EntityLogins({ entity, users, allUsers = [], onChange }) {
           </tbody>
         </table>
       )}
-      <div data-tour="login-add" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginTop: 8 }}>
-        <Field label="First name"><input style={{ ...input, minWidth: 110 }} value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} /></Field>
-        <Field label="Surname"><input style={{ ...input, minWidth: 110 }} value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} /></Field>
-        <Field label="Email"><input style={input} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>
-        <Field label="Mobile"><input style={{ ...input, minWidth: 130 }} value={form.mobile} onChange={(e) => setForm({ ...form, mobile: e.target.value })} placeholder="+27…" /></Field>
-        <Field label="Password"><input style={input} type="text" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></Field>
-        <div data-tour="login-role"><Field label="Role"><select style={input} value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>{roleOpts.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}</select></Field></div>
-        <button style={miniBtn} onClick={add} disabled={!form.email || !form.password}>+ Add login</button>
-      </div>
-      {linkable.length > 0 && (
-        <div data-tour="login-link" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginTop: 10 }}>
-          <Field label="Or link an existing login (one person, several profiles)">
-            <select style={input} value={linkId} onChange={(e) => setLinkId(e.target.value)}>
-              <option value="">Pick a login…</option>
-              {linkable.map((u) => <option key={u.id} value={u.id}>{u.email}{u.role === 'admin' ? ' (Howler admin)' : ''}</option>)}
-            </select>
-          </Field>
-          <Field label="Role"><select style={input} value={linkRole} onChange={(e) => setLinkRole(e.target.value)}>{roleOpts.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}</select></Field>
-          <button style={miniBtn} onClick={link} disabled={!linkId}>Link to {entity.name}</button>
-        </div>
-      )}
-      {roles.length > 0 && (
-        <p style={{ ...hint, marginTop: 10 }}>{roleOpts.find((r) => r.key === form.role)?.description || ''}</p>
-      )}
-      {error && <div style={{ color: 'var(--error)', fontSize: 13, marginTop: 6 }}>{error}</div>}
     </div>
   );
 }
@@ -3738,8 +3882,8 @@ function AdminIntegrations() {
   return (
     <div>
       <p style={hint}>Accounts (Looker · Anthropic · Email · <b>Inventive</b>) is open below; other sections are collapsed — tap to open. Accounts override the values in <code>.env</code>; clients can set their own Looker/Anthropic (Client → Integrations), which take precedence for their data.</p>
-      <Section title="🔑 Accounts — Looker · Anthropic · Email · Inventive" defaultOpen>
-        <IntegrationsForm value={value} showResend showInventive clients={clients} canManageLock lockableKeys={['looker', 'anthropic', 'resend', 'inventive']} locks={value.locks || {}} onToggleLock={async (k, locked) => setValue(await api.setAdminIntegrationLock(k, locked))} onTestEmail={() => api.sendMailTest()} onSave={async (p) => setValue(await api.saveAdminIntegrations(p))} />
+      <Section title="🔑 Accounts — Looker · Anthropic · Email · Inventive">
+        <IntegrationsForm value={value} collapsible showResend showInventive clients={clients} canManageLock lockableKeys={['looker', 'anthropic', 'resend', 'inventive']} locks={value.locks || {}} onToggleLock={async (k, locked) => setValue(await api.setAdminIntegrationLock(k, locked))} onTestEmail={() => api.sendMailTest()} onSave={async (p) => setValue(await api.saveAdminIntegrations(p))} />
       </Section>
       <Section title="✨ Inventive workspaces">
         <InventiveWorkspaces />

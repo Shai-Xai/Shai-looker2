@@ -102,6 +102,7 @@ export default function ClientIntegrationsPage() {
               <IntegrationsForm
                 value={activeItem}
                 lookerActive={false}
+                collapsible
                 showMeta
                 showTikTok
                 canManageLock={isAdmin || role === 'owner'}

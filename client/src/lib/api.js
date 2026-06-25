@@ -2,6 +2,14 @@
 
 async function json(res) {
   const data = await res.json().catch(() => ({}));
+  // Session expired/invalid mid-use: a 401 is otherwise indistinguishable from a
+  // 500 to each page's local catch, so the user is stranded on a generic error.
+  // Tell the auth layer (AuthProvider listens) to drop back to the login screen.
+  // Still throw so the calling promise rejects rather than continuing with empty
+  // data.
+  if (res.status === 401 && typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('auth:unauthorized'));
+  }
   if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
   return data;
 }
@@ -111,6 +119,8 @@ export const api = {
 
   // Users (admin)
   adminListUsers: () => fetch('/api/admin/users').then(json),
+  adminUserActivityReport: (days = 30) => fetch(`/api/admin/users/activity-report?days=${days}`).then(json),
+  setEntityHowlerSupport: (id, userIds) => fetch(`/api/admin/entities/${id}/howler-support`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userIds }) }).then(json),
   adminGetUser: (id) => fetch(`/api/admin/users/${id}`).then(json),
   adminCreateUser: (u) => fetch('/api/admin/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(u) }).then(json),
   adminUpdateUser: (id, u) => fetch(`/api/admin/users/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(u) }).then(json),
@@ -225,6 +235,18 @@ export const api = {
   // Client navigation: Suites
   mySuites: () => fetch('/api/my/suites').then(json),
   mySuite: (id) => fetch(`/api/my/suites/${id}`).then(json),
+
+  // Social metrics (inbound organic stats). Admins pass the ownership check, so
+  // both admin-preview and client self-service use the same /api/my/social path.
+  mySocial: (entityId, { metric = 'reach', days = 30, platform, accountRef, sort } = {}) => {
+    const q = new URLSearchParams({ metric, days: String(days) });
+    if (platform) q.set('platform', platform);
+    if (accountRef) q.set('accountRef', accountRef);
+    if (sort) q.set('sort', sort);
+    return fetch(`/api/my/social/${entityId}?${q}`).then(json);
+  },
+  syncSocial: (entityId) => fetch(`/api/my/social/${entityId}/sync`, { method: 'POST' }).then(json),
+  verifySocial: (entityId) => fetch(`/api/my/social/${entityId}/verify`, { method: 'POST' }).then(json),
 
   // Inventive embedded AI analyst (server-proxied; key stays server-side).
   inventiveStatus: () => fetch('/api/inventive/status').then(json),
@@ -506,6 +528,8 @@ export const api = {
   deleteAlert: (id) => fetch(`/api/alerts/${id}`, { method: 'DELETE' }).then((r) => r.ok),
   setAlertStatus: (id, status) => fetch(`/api/alerts/${id}/status`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) }).then(json),
   alertEvents: (id) => fetch(`/api/alerts/${id}/events`).then(json),
+  // Live "pulse" feed: alert fires + tile momentum, merged for the header strip.
+  entityPulse: (entityId, limit = 8) => fetch(`/api/pulse/entities/${entityId}?limit=${limit}`).then(json),
   testAlert: (id) => fetch(`/api/alerts/${id}/test`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(json),
   alertTileValue: (suiteId, dashboardId, tileId) => fetch(`/api/alerts/suites/${suiteId}/tile-value`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dashboardId, tileId }) }).then(json),
   // Custom-metric source: alert on a raw measure + dimension filter (no tile needed).

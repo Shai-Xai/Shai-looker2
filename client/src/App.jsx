@@ -6,6 +6,7 @@ import EditorPage from './pages/EditorPage.jsx';
 import ClonePage from './pages/ClonePage.jsx';
 import AdminPage from './pages/AdminPage.jsx';
 import InboxNotifier from './components/InboxNotifier.jsx';
+import LivePulse from './components/LivePulse.jsx';
 import LoginPage from './pages/LoginPage.jsx';
 import ResetPasswordPage from './pages/ResetPasswordPage.jsx';
 import MagicLinkPage from './pages/MagicLinkPage.jsx';
@@ -19,9 +20,12 @@ import InboxPage from './os/InboxPage.jsx';
 import DigestsPage from './pages/DigestsPage.jsx';
 import EngagePage from './pages/EngagePage.jsx';
 import GoalsPage from './pages/GoalsPage.jsx';
+import SocialPage from './pages/SocialPage.jsx';
 import AlertsPage from './pages/AlertsPage.jsx';
 import InventiveAskPage from './pages/InventiveAskPage.jsx';
 import Logo from './components/Logo.jsx';
+import AiMark from './components/AiMark.jsx';
+import { FEATURES } from './lib/features.js';
 import { useBrandLogo } from './lib/brand.js';
 import RootErrorBoundary from './components/RootErrorBoundary.jsx';
 import { DrillProvider } from './lib/DrillContext.jsx';
@@ -80,7 +84,7 @@ function Header() {
         onConsole={goConsole}
         onHome={goHome}
       />
-      <div style={{ flex: 1 }} />
+      <LivePulse entityId={inClientView ? activeEntityId : null} />
       {/* Admin console: admin controls on the right. Client experience (client
           login OR admin acting as a client): just the Howler·Pulse badge — the
           account actions live in the sidebar's bottom-left profile menu. */}
@@ -97,10 +101,24 @@ function Header() {
         </>
         )
       ) : inClientView && (
-        <button onClick={() => navigate('/')} title="Powered by Howler Pulse" style={{ display: 'flex', alignItems: 'center', gap: 7, border: 'none', background: 'transparent', cursor: 'pointer', padding: 0, opacity: 0.85 }}>
-          <Logo size={22} radius={6} />
-          {!isMobile && <span style={{ fontSize: 13, fontWeight: 600, letterSpacing: '-0.2px', color: 'var(--muted)' }}>Howler&nbsp;:&nbsp;Pulse</span>}
-        </button>
+        <>
+          {FEATURES.ask && (
+            <button
+              onClick={() => window.dispatchEvent(new Event('howler:open-analyst'))}
+              title="Ask your Data Analyst"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: isMobile ? '6px 9px' : '7px 14px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 980, fontSize: 13.5, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}
+            >
+              <span style={{ width: 22, height: 22, borderRadius: '50%', background: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <AiMark size={16} sparkle={false} />
+              </span>
+              {!isMobile && <span>Owl Data Analyst</span>}
+            </button>
+          )}
+          <button onClick={() => navigate('/')} title="Powered by Howler Pulse" style={{ display: 'flex', alignItems: 'center', gap: 7, border: 'none', background: 'transparent', cursor: 'pointer', padding: 0, opacity: 0.85 }}>
+            <Logo size={22} radius={6} />
+            {!isMobile && <span style={{ fontSize: 13, fontWeight: 600, letterSpacing: '-0.2px', color: 'var(--muted)' }}>Howler&nbsp;:&nbsp;Pulse</span>}
+          </button>
+        </>
       )}
     </header>
   );
@@ -246,6 +264,7 @@ function Shell() {
                 <Route path="/suite/:suiteId/d/:id" element={<ViewPage />} />
                 <Route path="/goals" element={<GoalsPage />} />
                 <Route path="/alerts" element={<AlertsPage />} />
+                <Route path="/social" element={<SocialPage />} />
                 <Route path="/settlements" element={<SettlementsPage />} />
                 <Route path="/settlements/:id" element={<SettlementViewPage />} />
                 <Route path="/documents/:id" element={<DocumentViewPage />} />
@@ -273,6 +292,7 @@ function Shell() {
                 <Route path="/suite/:suiteId/d/:id/edit" element={<EditorPage />} />
                 <Route path="/goals" element={<GoalsPage />} />
                 <Route path="/alerts" element={<AlertsPage />} />
+                <Route path="/social" element={<SocialPage />} />
                 <Route path="/settlements" element={<SettlementsPage />} />
                 <Route path="/settlements/:id" element={<SettlementViewPage />} />
                 <Route path="/documents/:id" element={<DocumentViewPage />} />

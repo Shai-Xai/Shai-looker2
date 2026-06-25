@@ -45,11 +45,11 @@ function loadUsers() { return db.listUsers(); }
 function getUser(id) { return db.getUser(id); }
 function verifyCredentials(email, password) { return db.verifyCredentials(email, password); }
 
-function createUser({ email, password, role = 'client', tenantId = null, entityIds, firstName = '', lastName = '', mobile = '' }) {
+function createUser({ email, password, role = 'client', tenantId = null, entityIds, firstName = '', lastName = '', mobile = '', howlerRole = '' }) {
   const ids = entityIds || (tenantId ? [tenantId] : []);
   // Admins keep entity links too: full access regardless, but a link makes them
   // part of that client's team surface (logins list, digests, notifications).
-  const u = db.createUser({ email, password, role, entityIds: ids, firstName, lastName, mobile });
+  const u = db.createUser({ email, password, role, entityIds: ids, firstName, lastName, mobile, howlerRole });
   return publicUser(u);
 }
 function updateUser(id, patch) {
@@ -64,7 +64,15 @@ function deleteUser(id) { db.deleteUser(id); }
 function seedAdmin() {
   if (db.listUsers().length > 0) return;
   const email = process.env.ADMIN_EMAIL || 'admin@howler.local';
-  const password = process.env.ADMIN_PASSWORD || 'changeme123';
+  // Never seed a KNOWN password in production: if ADMIN_PASSWORD is unset there,
+  // mint a strong random one-time password (printed once below) so a fresh deploy
+  // can't boot with publicly-known credentials. The convenient default is dev-only.
+  let password = process.env.ADMIN_PASSWORD;
+  if (!password) {
+    password = process.env.NODE_ENV === 'production'
+      ? crypto.randomBytes(12).toString('base64url')
+      : 'changeme123';
+  }
   db.createUser({ email, password, role: 'admin' });
   console.log('\n  ┌─────────────────────────────────────────────────────────┐');
   console.log('  │  Seeded admin account (change the password after login):  │');

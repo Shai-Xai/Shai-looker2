@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-06-24 · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-06-25 · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -81,6 +81,23 @@ longer they use Pulse, the better it gets."
 
 **Pitch:** "Your data, read for you — no digging. Open the app and you already
 know what changed and what to do."
+
+## Ask — your AI Data Analyst  🧪
+A conversational **Data Analyst** (the Owl) clients open from anywhere in Pulse —
+the floating **owl** (bottom-right) or the **Owl Data Analyst** button in the top
+bar. Ask about your data in plain language ("what's on sale right now?", "how does
+this compare to last year?") and get answers scoped to the client's own data.
+- **Opens in-app** as a slide-in panel — **docked beside your dashboards** by
+  default, or as an **overlay** (a toggle lets us A/B both with clients). Animated
+  AI border, **text-size** control, full-screen, and "keep-warm" so re-opens are
+  instant and the conversation persists.
+- **Per-user / per-workspace** — each user maps to its Inventive workspace (set in
+  **Admin → Users**); the workspace name + reference are configurable per client.
+- **Status 🧪:** powered by **Inventive** — needs the API key + a per-client
+  workspace set up. It's an embedded third-party tool, so in-app speed depends on
+  Inventive's side (cookie/storage handling); we've optimised everything on ours.
+
+**Pitch:** "Ask your data anything, in plain language — your own analyst, in-app."
 
 ## 2. Scheduled digests  ✅
 - Automated **email digests** (e.g. morning briefing) written for a **named role**
@@ -196,6 +213,27 @@ where people open, click and convert."
 it auto-synced, exclude people who already bought, and see exactly what's live on
 each platform without leaving Pulse."
 
+### 5e. Social metrics — organic performance  🟡 (needs connection) · 🧪
+- Pulls a client's **organic social stats into Pulse** — the read direction, the
+  opposite of audience sync. Covers **Facebook Pages, Instagram (Business/Creator)
+  and TikTok**.
+- **Two grains:** account-level (followers, reach, impressions, profile views) as
+  a **daily trend**, and **per-post** stats (reach, likes, comments, shares, saves,
+  video views) ranked by engagement.
+- **Social page** (client self-service + admin, mobile-first) ✅ — connected
+  accounts at a glance, a 30-day trend with a metric switcher, and **top posts**;
+  one-tap **Refresh now**, otherwise it syncs **daily** in the background.
+- Reuses the client's existing **Meta / TikTok connection** — just add the
+  **Facebook Page ID** / **Instagram account ID** in Integrations (TikTok needs the
+  token's user scopes). Secrets stay write-only.
+- *Connectors are built and unit-tested, but the live Graph / Display API calls are
+  pending an end-to-end check against real accounts (no test credentials yet).*
+- 🔜 **Next:** surface these metrics as **dashboard tiles** alongside Looker data.
+
+**Pitch:** "See how a client's Facebook, Instagram and TikTok are really doing —
+followers, reach and the posts that landed — next to their ticketing numbers, all
+in one place that updates itself."
+
 ## 6. White-label branding & integrations  ✅ / 🟡
 - **Per-client branding** ✅ — logo, colours, email sender display name and
   wording. Emails look like the client, sent from Howler's verified domain.
@@ -203,9 +241,19 @@ each platform without leaving Pulse."
   - **Looker** / **Anthropic (AI)** keys ✅ (fall back to Howler defaults)
   - **Email (Resend)** ✅, **SMS (Clickatell)** ✅
   - **Meta / TikTok** ad accounts 🟡
-  - **Inventive** embedded AI analyst 🧪 ("Ask")
+  - **Inventive** — the embedded AI **Data Analyst** 🧪 (see "Ask" above)
 - **Secrets are write-only** — Pulse shows only whether a value is set, never the
   value.
+- **Each integration is locked by default** ✅ — a 🔒 guard so a working connection
+  can't be changed by accident; an admin or the account **Owner** unlocks to edit,
+  then re-locks. Setup steps ("How to get your Meta/TikTok details") stay readable
+  even while locked.
+- **One-tap connect** ✅ — when an ad platform isn't linked, the **Ad audiences** hub
+  shows a **Connect Meta/TikTok →** button that drops the client straight into the
+  right Settings page.
+- **Your Howler Support** ✅ — every client sees their Howler contact(s) — name, job
+  title and an email link — under **Settings → Team**. Howler assigns/repoints them
+  per client.
 
 **Pitch:** "It's their brand, their accounts, their data — Howler just powers it."
 
@@ -317,6 +365,12 @@ client's* numbers.
   exactly what will land.
 - **Dual-surface** — clients set their own alerts; Howler can set them on a client's
   behalf during onboarding so the first week already feels proactive.
+- **Live Pulse strip** 🧪 — a glanceable, colour-coded **beat in the top header**
+  (desktop) that streams what's happening right now: **alert fires** *and* **live
+  momentum** off the client's key tiles ("+142 Tickets sold in the last hour", "+R8 500
+  Gross revenue"). Rotates one at a time, newest first, and taps through to Alerts. The
+  product, literally beating. *(Desktop for now; urgent alerts already reach the phone
+  via push. Momentum auto-picks key tiles today; hand-picking comes later.)*
 
 **Pitch:** "Stop watching dashboards — tell Pulse the number that matters and it taps
 you on the shoulder the moment it happens, on whatever screen you're on."
@@ -359,6 +413,45 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-25** — **Live Pulse — the header heartbeat** 🧪: the top header (desktop) now
+  streams a rotating, colour-coded **beat** of what's happening right now — **alert fires**
+  plus **live tile momentum** ("+142 Tickets sold in the last hour", "+R8 500 Gross revenue").
+  Momentum snapshots a client's key single-value tiles on a slow tick and shows the movement;
+  it auto-picks the key tiles for now (hand-picking comes later). Taps through to Alerts.
+- **2026-06-25** — **Ask — AI Data Analyst** 🧪: a conversational analyst (the Owl)
+  clients open from the floating owl or the top-bar **Owl Data Analyst** button —
+  ask about your data in plain language, scoped to the client. Opens **in-app**
+  (docked beside dashboards by default, or overlay — A/B toggle), with a text-size
+  control and an animated AI border. Powered by **Inventive** (per-client workspace
+  setup). Embedded speed is bounded by third-party-iframe storage limits — being
+  worked through with Inventive.
+
+- **2026-06-24** — **Social metrics (organic)** 🟡🧪: pull a client's Facebook /
+  Instagram / TikTok organic stats into Pulse — daily account trends (followers,
+  reach, impressions) + per-post engagement, on a new mobile-first **Social** page
+  (client self-service + admin). Reuses the Meta/TikTok connection (add the Page /
+  IG account id in Integrations); syncs daily with a one-tap refresh. Connectors
+  unit-tested; live API check pending real credentials. Dashboard-tile surfacing
+  is the next step.
+- **2026-06-24** — **Your Howler Support on the client's Team page** ✅: every client
+  now sees who at Howler looks after them — name, job title and an email link — under
+  **Settings → Team**. Howler can assign more than one contact and repoint them per
+  client.
+- **2026-06-24** — **Integration safety + self-service connect** ✅: each integration
+  is **locked by default** (a 🔒 guard against accidental edits to a live connection —
+  Owner/admin unlocks to change, the setup guide stays readable while locked), and an
+  unconnected ad platform now offers a **Connect Meta/TikTok →** button that opens the
+  right Settings page. Integration cards collapse for a cleaner page.
+- **2026-06-24** — **Notifications: choose channel per type** ✅: mute a category
+  (digests / goals / alerts / messages) on **email** while keeping it on **push** (or
+  vice-versa) — a per-channel switch instead of one all-or-nothing toggle.
+- **2026-06-24** — **Smarter source pickers** ✅: building a **segment** only offers
+  dashboards/tiles that actually hold contact data (email/mobile), and building a
+  **goal** only offers tiles you can track (a KPI number or a time series) — no more
+  dead-end picks.
+- **2026-06-24** — **Dashboard summary docks beside the dashboard** ✅: the Owl's
+  whole-dashboard summary opens as a side panel that pushes the dashboard across (no
+  overlay), so you can read the write-up next to the live tiles.
 - **2026-06-24** — **Segment builder is event-first** ✅: when building a segment
   from a dashboard tile, multi-event clients now pick the **event (suite)** first,
   then only that event's dashboards are listed — so a segment is clearly tied to

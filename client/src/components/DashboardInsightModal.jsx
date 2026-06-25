@@ -14,6 +14,17 @@ export default function DashboardInsightModal({ dashboardId, title, filterValues
   const [error, setError] = useState(null);
   const abortRef = useRef(null);
 
+  // Desktop: dock the panel as a full-height column on the right and SHIFT THE
+  // WHOLE APP left by the panel width (via `body.owl-docked` → padding-right on
+  // #root) so the nav, header and dashboard all reflow — nothing is overlaid.
+  // Mobile keeps the bottom sheet.
+  useEffect(() => {
+    if (isMobile) return undefined;
+    document.body.style.setProperty('--owl-width', `${SIDEBAR_W}px`);
+    document.body.classList.add('owl-docked');
+    return () => { document.body.classList.remove('owl-docked'); document.body.style.removeProperty('--owl-width'); };
+  }, [isMobile]);
+
   const run = () => {
     abortRef.current?.abort();
     const controller = new AbortController();
@@ -58,6 +69,8 @@ export default function DashboardInsightModal({ dashboardId, title, filterValues
   // `ai-overlay` class, which carries backdrop-filter: blur), and the overlay lets
   // clicks pass through (pointer-events:none) so the dashboard stays fully visible
   // and live beside it. Mobile keeps the dimmed bottom sheet (no room for side-by-side).
+  // Desktop: full-height right column. The app is shifted left (owl-docked), so the
+  // panel fills the cleared space with no overlap. Click-through elsewhere.
   const node = (
     <div className={isMobile ? 'ai-overlay' : ''} style={isMobile ? { ...overlay, alignItems: 'flex-end', justifyContent: 'center' } : desktopOverlay} onClick={isMobile ? onClose : undefined}>
       <div className={(isMobile ? 'ai-sheet' : 'ai-panel') + ' ai-glow'} style={isMobile ? { ...panelStyle, ...drag.style } : panelStyle} onClick={(e) => e.stopPropagation()}>
@@ -122,7 +135,9 @@ function renderMarkdownish(text) {
 const overlay = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', justifyContent: 'flex-end', zIndex: 400 };
 // Desktop sidebar: transparent, click-through overlay so the dashboard stays
 // usable; only the panel itself captures clicks.
-const desktopOverlay = { position: 'fixed', inset: 0, background: 'transparent', pointerEvents: 'none', display: 'flex', justifyContent: 'flex-end', zIndex: 400 };
+// Explicit edges (not `inset`) so the caller can override `top` cleanly to dock
+// the panel below the global header. `bottom:0` keeps the panel full-height down.
+const desktopOverlay = { position: 'fixed', top: 0, right: 0, bottom: 0, left: 0, background: 'transparent', pointerEvents: 'none', display: 'flex', justifyContent: 'flex-end', zIndex: 400 };
 const SIDEBAR_W = 420; // keep in sync with ViewPage's reflow padding
 const panel = { width: `min(${SIDEBAR_W}px, 94vw)`, height: '100%', background: 'var(--card)', boxShadow: '-4px 0 24px rgba(0,0,0,0.15)', borderLeft: '1px solid var(--border)', pointerEvents: 'auto', display: 'flex', flexDirection: 'column' };
 const header = { display: 'flex', alignItems: 'center', gap: 10, padding: '16px 18px', borderBottom: '1px solid var(--border)' };

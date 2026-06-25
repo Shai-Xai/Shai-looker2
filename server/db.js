@@ -154,6 +154,9 @@ addColumn('users', 'mobile', "TEXT NOT NULL DEFAULT ''");
 addColumn('users', 'inventive_name', "TEXT NOT NULL DEFAULT ''");   // legacy per-user name (dormant)
 addColumn('users', 'inventive_ref_id', "TEXT NOT NULL DEFAULT ''"); // legacy per-user ref (dormant)
 addColumn('users', 'inventive_workspace_id', "TEXT NOT NULL DEFAULT ''"); // link to a reusable inventive_workspaces row
+addColumn('users', 'howler_role', "TEXT NOT NULL DEFAULT ''"); // Howler-staff job title (Senior KAM / KAM / AM) — admins only
+addColumn('entities', 'howler_owner_user_id', "TEXT NOT NULL DEFAULT ''"); // the Howler admin who created this client (legacy/primary)
+addColumn('entities', 'howler_support_ids', "TEXT NOT NULL DEFAULT '[]'"); // Howler admins who support this client (shown as "Your Howler Support")
 // Persistent per-folder settings for the dashboard library. Folders are "/"-path
 // strings on each dashboard (not records), so a setting keyed by path cascades to
 // every dashboard in that folder + subfolders — and to ones added later.
@@ -289,6 +292,36 @@ function recentUsageForUser(userId, limit = 60) {
     return db.prepare('SELECT entity_id AS entityId, kind, name, event, ts AS at FROM usage_events WHERE user_id=? ORDER BY ts DESC LIMIT ?')
       .all(userId, Math.min(200, limit));
   } catch { return []; }
+}
+
+// Platform-wide activity summary for the admin Users console: how many people are
+// active, who's most active, which dashboards get opened most and which features
+// get used most — aggregated across every user from the view + audit logs.
+function adminActivityReport({ days = 30, limit = 8 } = {}) {
+  const ago = (d) => new Date(Date.now() - d * 864e5).toISOString();
+  const s30 = ago(days), s7 = ago(7), s1 = ago(1);
+  // Active = appears in the view log OR the action log within the window (deduped).
+  const activeIn = (s) => db.prepare('SELECT COUNT(*) c FROM (SELECT user_id FROM user_views WHERE at>=? UNION SELECT user_id FROM user_actions WHERE at>=?)').get(s, s).c;
+  const nameFor = (id) => { const u = getUser(id); return u ? (u.fullName || u.email) : id; };
+  const topUsers = db.prepare(
+    `SELECT user_id AS userId, SUM(c) AS total, MAX(lastAt) AS lastAt FROM (
+       SELECT user_id, COUNT(*) c, MAX(at) lastAt FROM user_views   WHERE at>=? GROUP BY user_id
+       UNION ALL
+       SELECT user_id, COUNT(*) c, MAX(at) lastAt FROM user_actions WHERE at>=? GROUP BY user_id
+     ) GROUP BY user_id ORDER BY total DESC LIMIT ?`,
+  ).all(s30, s30, limit).map((r) => { const u = getUser(r.userId); return { userId: r.userId, name: u ? (u.fullName || u.email) : r.userId, role: u?.role || '', total: r.total, lastAt: r.lastAt }; });
+  const topDashboards = db.prepare('SELECT dashboard_id AS dashboardId, COUNT(*) AS opens, COUNT(DISTINCT user_id) AS users, MAX(at) AS lastAt FROM user_views WHERE at>=? GROUP BY dashboard_id ORDER BY opens DESC LIMIT ?')
+    .all(s30, limit).map((r) => ({ ...r, title: getDashboard(r.dashboardId)?.title || r.dashboardId }));
+  const topFeatures = db.prepare('SELECT action, COUNT(*) AS uses, COUNT(DISTINCT user_id) AS users, MAX(label) AS label FROM user_actions WHERE at>=? GROUP BY action ORDER BY uses DESC LIMIT ?')
+    .all(s30, limit).map((r) => ({ action: r.action, label: r.label || r.action, uses: r.uses, users: r.users }));
+  const totalViews = db.prepare('SELECT COUNT(*) c FROM user_views WHERE at>=?').get(s30).c;
+  const totalActions = db.prepare('SELECT COUNT(*) c FROM user_actions WHERE at>=?').get(s30).c;
+  return {
+    days,
+    active: { d1: activeIn(s1), d7: activeIn(s7), d30: activeIn(s30) },
+    totals: { views: totalViews, actions: totalActions },
+    topUsers, topDashboards, topFeatures,
+  };
 }
 
 // ─── User action audit log (every meaningful action) ─────────────────────────
@@ -721,15 +754,27 @@ CREATE INDEX IF NOT EXISTS idx_tile_library_category ON tile_library(category);
 
 // ─── Entities ─────────────────────────────────────────────────────────────────
 function rowToEntity(r) {
-  return r && { id: r.id, name: r.name, logo: r.logo || '', aiContext: r.ai_context || '', inventiveName: r.inventive_name || '', inventiveRefId: r.inventive_ref_id || '', lockedFilters: J(r.locked_filters, {}), scopeFields: J(r.scope_fields, {}), allOrganisers: !!r.all_organisers, createdAt: r.created_at };
+  // Howler support = the list column if set, else fall back to the legacy single
+  // owner — so existing clients keep their creator as support until edited.
+  const support = J(r.howler_support_ids, []);
+  const howlerSupportIds = support.length ? support : (r.howler_owner_user_id ? [r.howler_owner_user_id] : []);
+  return r && { id: r.id, name: r.name, logo: r.logo || '', aiContext: r.ai_context || '', inventiveName: r.inventive_name || '', inventiveRefId: r.inventive_ref_id || '', howlerOwnerUserId: r.howler_owner_user_id || '', howlerSupportIds, lockedFilters: J(r.locked_filters, {}), scopeFields: J(r.scope_fields, {}), allOrganisers: !!r.all_organisers, createdAt: r.created_at };
 }
 function listEntities() { return db.prepare('SELECT * FROM entities ORDER BY name').all().map(rowToEntity); }
 function getEntity(id) { return rowToEntity(db.prepare('SELECT * FROM entities WHERE id=?').get(id)); }
-function createEntity({ name, logo = '', aiContext = '', lockedFilters = {}, scopeFields = {} }) {
-  const e = { id: uuid(), name: name || 'Untitled entity', logo: logo || '', aiContext: aiContext || '', lockedFilters, scopeFields, createdAt: now() };
-  db.prepare('INSERT INTO entities (id,name,logo,ai_context,locked_filters,scope_fields,created_at) VALUES (?,?,?,?,?,?,?)')
-    .run(e.id, e.name, e.logo, e.aiContext, JSON.stringify(lockedFilters), JSON.stringify(scopeFields), e.createdAt);
+function createEntity({ name, logo = '', aiContext = '', lockedFilters = {}, scopeFields = {}, howlerOwnerUserId = '' }) {
+  // The creator seeds both the legacy owner field and the support list.
+  const support = howlerOwnerUserId ? [howlerOwnerUserId] : [];
+  const e = { id: uuid(), name: name || 'Untitled entity', logo: logo || '', aiContext: aiContext || '', lockedFilters, scopeFields, howlerOwnerUserId: howlerOwnerUserId || '', createdAt: now() };
+  db.prepare('INSERT INTO entities (id,name,logo,ai_context,locked_filters,scope_fields,howler_owner_user_id,howler_support_ids,created_at) VALUES (?,?,?,?,?,?,?,?,?)')
+    .run(e.id, e.name, e.logo, e.aiContext, JSON.stringify(lockedFilters), JSON.stringify(scopeFields), e.howlerOwnerUserId, JSON.stringify(support), e.createdAt);
   return e;
+}
+// Replace a client's Howler support contacts (a list of admin user ids).
+function setEntityHowlerSupport(id, userIds = []) {
+  const ids = [...new Set((userIds || []).map((x) => String(x)).filter(Boolean))];
+  db.prepare('UPDATE entities SET howler_support_ids=? WHERE id=?').run(JSON.stringify(ids), id);
+  return getEntity(id);
 }
 function updateEntity(id, patch) {
   const cur = db.prepare('SELECT * FROM entities WHERE id=?').get(id);
@@ -742,7 +787,8 @@ function updateEntity(id, patch) {
   const lf = patch.lockedFilters !== undefined ? JSON.stringify(patch.lockedFilters) : cur.locked_filters;
   const sf = patch.scopeFields !== undefined ? JSON.stringify(patch.scopeFields) : cur.scope_fields;
   const allOrg = patch.allOrganisers !== undefined ? (patch.allOrganisers ? 1 : 0) : cur.all_organisers;
-  db.prepare('UPDATE entities SET name=?, logo=?, ai_context=?, inventive_name=?, inventive_ref_id=?, locked_filters=?, scope_fields=?, all_organisers=? WHERE id=?').run(name, logo, aiContext, invName, invRef, lf, sf, allOrg, id);
+  const owner = patch.howlerOwnerUserId !== undefined ? String(patch.howlerOwnerUserId || '') : (cur.howler_owner_user_id || '');
+  db.prepare('UPDATE entities SET name=?, logo=?, ai_context=?, inventive_name=?, inventive_ref_id=?, locked_filters=?, scope_fields=?, all_organisers=?, howler_owner_user_id=? WHERE id=?').run(name, logo, aiContext, invName, invRef, lf, sf, allOrg, owner, id);
   return getEntity(id);
 }
 function deleteEntity(id) { db.prepare('DELETE FROM entities WHERE id=?').run(id); }
@@ -872,11 +918,11 @@ function rowToUser(r) {
   if (!r) return null;
   const memberships = membershipsForUser(r.id);
   const firstName = r.first_name || '', lastName = r.last_name || '';
-  return { id: r.id, email: r.email, role: r.role, passwordHash: r.password_hash, firstName, lastName, fullName: [firstName, lastName].filter(Boolean).join(' '), mobile: r.mobile || '', inventiveWorkspaceId: r.inventive_workspace_id || '', entityIds: memberships.map((m) => m.entityId), memberships, notifyEmail: r.notify_email !== 0, notifyPush: r.notify_push !== 0, lastLogin: r.last_login || null, createdAt: r.created_at };
+  return { id: r.id, email: r.email, role: r.role, passwordHash: r.password_hash, firstName, lastName, fullName: [firstName, lastName].filter(Boolean).join(' '), mobile: r.mobile || '', inventiveWorkspaceId: r.inventive_workspace_id || '', howlerRole: r.howler_role || '', entityIds: memberships.map((m) => m.entityId), memberships, notifyEmail: r.notify_email !== 0, notifyPush: r.notify_push !== 0, lastLogin: r.last_login || null, createdAt: r.created_at };
 }
 function publicUser(u) {
   if (!u) return null;
-  return { id: u.id, email: u.email, role: u.role, firstName: u.firstName || '', lastName: u.lastName || '', fullName: u.fullName || '', mobile: u.mobile || '', inventiveWorkspaceId: u.inventiveWorkspaceId || '', entityIds: u.entityIds || [], memberships: u.memberships || [], notifyEmail: u.notifyEmail !== false, notifyPush: u.notifyPush !== false };
+  return { id: u.id, email: u.email, role: u.role, firstName: u.firstName || '', lastName: u.lastName || '', fullName: u.fullName || '', mobile: u.mobile || '', inventiveWorkspaceId: u.inventiveWorkspaceId || '', howlerRole: u.howlerRole || '', entityIds: u.entityIds || [], memberships: u.memberships || [], notifyEmail: u.notifyEmail !== false, notifyPush: u.notifyPush !== false };
 }
 // Update a user's notification channel preferences (partial).
 // ─── One-time auth tokens (password reset + magic sign-in link) ───────────────
@@ -1010,14 +1056,14 @@ function setMembershipRole(userId, entityId, role) {
 function removeMembership(userId, entityId) {
   return db.prepare('DELETE FROM user_entities WHERE user_id=? AND entity_id=?').run(userId, entityId).changes > 0;
 }
-function createUser({ email, password, role = 'client', entityIds = [], firstName = '', lastName = '', mobile = '' }) {
+function createUser({ email, password, role = 'client', entityIds = [], firstName = '', lastName = '', mobile = '', howlerRole = '' }) {
   const e = (email || '').trim().toLowerCase();
   if (!e || !password) throw new Error('email and password are required');
   if (db.prepare('SELECT 1 FROM users WHERE email=?').get(e)) throw new Error('A user with that email already exists');
   const id = uuid();
   const r = role === 'admin' ? 'admin' : 'client';
-  db.prepare('INSERT INTO users (id,email,password_hash,role,first_name,last_name,mobile,created_at) VALUES (?,?,?,?,?,?,?,?)')
-    .run(id, e, bcrypt.hashSync(password, 10), r, String(firstName || '').trim(), String(lastName || '').trim(), String(mobile || '').trim(), now());
+  db.prepare('INSERT INTO users (id,email,password_hash,role,first_name,last_name,mobile,howler_role,created_at) VALUES (?,?,?,?,?,?,?,?,?)')
+    .run(id, e, bcrypt.hashSync(password, 10), r, String(firstName || '').trim(), String(lastName || '').trim(), String(mobile || '').trim(), r === 'admin' ? String(howlerRole || '').trim() : '', now());
   setUserEntities(id, entityIds); // admins may carry entity links too (team surface)
   return publicUser(getUser(id));
 }
@@ -1037,7 +1083,9 @@ function updateUser(id, patch) {
   const lastName = patch.lastName !== undefined ? String(patch.lastName || '').trim() : cur.last_name;
   const mobile = patch.mobile !== undefined ? String(patch.mobile || '').trim() : cur.mobile;
   const invWs = patch.inventiveWorkspaceId !== undefined ? String(patch.inventiveWorkspaceId || '').trim() : cur.inventive_workspace_id;
-  db.prepare('UPDATE users SET email=?, password_hash=?, role=?, first_name=?, last_name=?, mobile=?, inventive_workspace_id=? WHERE id=?').run(email, hash, role, firstName, lastName, mobile, invWs, id);
+  // Howler job title only applies to admins; clearing role to client drops it.
+  const howlerRole = role !== 'admin' ? '' : (patch.howlerRole !== undefined ? String(patch.howlerRole || '').trim() : cur.howler_role);
+  db.prepare('UPDATE users SET email=?, password_hash=?, role=?, first_name=?, last_name=?, mobile=?, inventive_workspace_id=?, howler_role=? WHERE id=?').run(email, hash, role, firstName, lastName, mobile, invWs, howlerRole, id);
   if ('entityIds' in patch) setUserEntities(id, patch.entityIds);
   return publicUser(getUser(id));
 }
@@ -1047,10 +1095,13 @@ function touchLastLogin(userId) {
   if (!userId) return;
   try { db.prepare('UPDATE users SET last_login=? WHERE id=?').run(now(), userId); } catch { /* ignore */ }
 }
-function verifyCredentials(email, password) {
+// Async so the bcrypt hash comparison (~60-100ms of CPU) doesn't block the single
+// event loop on every login — bcryptjs's async path yields between rounds, so
+// concurrent requests aren't stalled waiting on a sign-in.
+async function verifyCredentials(email, password) {
   const u = getUserByEmail(email);
   if (!u) return null;
-  return bcrypt.compareSync(password || '', u.passwordHash) ? u : null;
+  return (await bcrypt.compare(password || '', u.passwordHash)) ? u : null;
 }
 
 // ─── Dashboards (content kept as JSON blob) ───────────────────────────────────
@@ -1656,7 +1707,7 @@ module.exports = {
   getFilterView, setFilterView, deleteFilterView,
   listEntities, getEntity, createEntity, updateEntity, deleteEntity, getEntityIntegrations, setEntityIntegrations,
   listInventiveWorkspaces, getInventiveWorkspace, createInventiveWorkspace, updateInventiveWorkspace, deleteInventiveWorkspace,
-  getEntityIntegrationLocks, setEntityIntegrationLock,
+  getEntityIntegrationLocks, setEntityIntegrationLock, setEntityHowlerSupport,
   getEntityMailBranding, setEntityMailBranding,
   getSuiteMailBranding, setSuiteMailBranding,
   ensureInboxToken, regenerateInboxToken, findEntityByInboxToken,
@@ -1682,7 +1733,7 @@ module.exports = {
   // event documents (invoices etc.)
   listDocuments, getDocument, getDocumentFile, createDocument, updateDocument, deleteDocument, documentExistsForSource,
   // view tracking
-  recordView, viewProfile, recentViewsForUser, lastViewForUsers, recentUsageForUser, usageByClientForUser,
+  recordView, viewProfile, recentViewsForUser, lastViewForUsers, recentUsageForUser, usageByClientForUser, adminActivityReport,
   // user action audit log
   recordAction, listActionsForUser, lastActionsForUsers,
   // tile marks (pins + follows)

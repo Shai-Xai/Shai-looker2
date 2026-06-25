@@ -13,11 +13,11 @@ test('passwords are bcrypt-hashed, never stored or returned in plaintext', () =>
   assert.match(full.passwordHash, /^\$2[aby]\$/, 'looks like a bcrypt hash');
 });
 
-test('verifyCredentials accepts the right password and rejects the wrong one', () => {
+test('verifyCredentials accepts the right password and rejects the wrong one', async () => {
   h.db.createUser({ email: 'login@test.local', password: 'correct-horse', role: 'client' });
-  assert.ok(h.db.verifyCredentials('login@test.local', 'correct-horse'), 'correct password verifies');
-  assert.equal(h.db.verifyCredentials('login@test.local', 'wrong'), null, 'wrong password rejected');
-  assert.equal(h.db.verifyCredentials('nobody@test.local', 'whatever'), null, 'unknown user rejected');
+  assert.ok(await h.db.verifyCredentials('login@test.local', 'correct-horse'), 'correct password verifies');
+  assert.equal(await h.db.verifyCredentials('login@test.local', 'wrong'), null, 'wrong password rejected');
+  assert.equal(await h.db.verifyCredentials('nobody@test.local', 'whatever'), null, 'unknown user rejected');
 });
 
 test('an admin has every permission on any entity', () => {

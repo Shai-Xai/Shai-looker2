@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import PlatformIcon, { PLATFORMS } from './PlatformIcon.jsx';
 
@@ -16,6 +17,7 @@ const when = (iso) => {
 const fmtSize = (n, label) => (n == null || n < 0 ? `still processing on ${label}` : `~${n} matched on ${label}`);
 
 export default function AudienceHub({ entityId }) {
+  const navigate = useNavigate();
   const [data, setData] = useState(null);       // { meta, tiktok } Pulse summaries
   const [err, setErr] = useState('');
   const [active, setActive] = useState('tiktok');
@@ -138,9 +140,14 @@ export default function AudienceHub({ entityId }) {
       {/* Live channel, not connected */}
       {meta.live && !ch?.configured && (
         <div style={card}>
-          <p style={{ ...muted, margin: 0 }}>
-            {meta.label} isn’t connected yet. Add it under <b>Settings → Integrations</b> (or ask your Howler contact), then sync a segment from the <b>Segments</b> tab to manage it here.
+          <p style={{ ...muted, margin: '0 0 12px' }}>
+            {meta.label} isn’t connected yet. Add your {meta.label} access token under <b>Settings → Integrations</b>, then sync a segment from the <b>Segments</b> tab to manage it here.
           </p>
+          <button
+            onClick={() => navigate('/settings?section=integrations')}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '9px 16px', borderRadius: 980, border: 'none', background: 'var(--brand)', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+            <PlatformIcon channel={active} size={15} /> Connect {meta.label} →
+          </button>
         </div>
       )}
 

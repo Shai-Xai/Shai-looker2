@@ -7,8 +7,7 @@
 const http = require('http');
 const express = require('express');
 const cookieParser = require('cookie-parser');
-const fetch = require('node-fetch');
-const h = require('./helpers');
+const h = require('./helpers'); // fetch is a Node 20 global — no node-fetch needed
 
 // A signed session cookie for `user`, produced by the REAL issueCookie path
 // (so the token is signed/verified exactly as in production). issueCookie wants

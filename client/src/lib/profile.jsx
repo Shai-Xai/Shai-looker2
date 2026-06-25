@@ -13,7 +13,9 @@ const PREVIEW_KEY = 'howler_admin_preview'; // admins: a previewed client NOT in
 
 export function ProfileProvider({ children }) {
   const { user, isAdmin, refresh } = useAuth();
-  const entities = user?.entities || [];
+  // Memoise so a falsy `entities` doesn't hand a fresh [] to downstream
+  // useMemo/useEffect every render (which would defeat their dependency arrays).
+  const entities = useMemo(() => user?.entities || [], [user]);
   const [activeId, setActiveId] = useState(() => localStorage.getItem(KEY) || null);
   // Admins default to the console; clients are always in client mode.
   const [mode, setMode] = useState(() => (isAdmin ? (localStorage.getItem(MODE_KEY) || 'console') : 'client'));

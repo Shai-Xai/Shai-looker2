@@ -112,6 +112,9 @@ async function deliver({ to, subject, html, text, from: fromOverride, replyTo })
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey()}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
+    // Don't hang forever on a stuck Resend socket — a hung send would otherwise
+    // pin the scheduler's tick flag and stall all future digests. (global fetch)
+    signal: AbortSignal.timeout(20000),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data?.message || `Resend responded ${res.status}`);
