@@ -45,6 +45,15 @@ should inherit the tier below, and the UI should show what's inherited.
 ## Architecture notes
 - Disposable modules: self-contained features own their tables + routes and mount
   with one line (e.g. `server/os.js`, `server/mailer.js`). Easy to remove.
+- **Keep modules small — no god-files.** `server/index.js` is the composition root
+  (wiring + a thin route layer), NOT a home for feature engines. When you add a
+  feature, give it its own `server/<feature>.js` that mounts in one line; don't
+  inline a new route-cluster or engine into `index.js`. This is enforced:
+  `test/architecture.test.js` caps every `server/*.js` at a line budget (new files
+  default to 1500). The budgets **ratchet down only** — if a file outgrows its
+  budget, extract a module; never raise the number. When you shrink a file, lower
+  its budget to lock the win in. (Shared, non-routes logic that several modules
+  need can be a factory library instead — see `server/query.js`, `server/briefing.js`.)
 - Secrets are write-only: responses report whether a value is set + a mask, never
   the value. Branding/presentation (non-secret) can ride to the browser freely.
 - Email sends from one verified Resend domain; per-client "branding" is the look
