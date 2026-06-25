@@ -1541,6 +1541,16 @@ function fmtWhen(iso) {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 }
+// A short, friendly device label from a user-agent (for the install marker).
+function shortDevice(ua = '') {
+  const s = String(ua);
+  if (/iphone/i.test(s)) return 'iPhone';
+  if (/ipad/i.test(s)) return 'iPad';
+  if (/android/i.test(s)) return 'Android';
+  if (/mac os x|macintosh/i.test(s)) return 'Mac';
+  if (/windows/i.test(s)) return 'Windows';
+  return 'device';
+}
 // One emoji per action family — keeps the timeline scannable at a glance.
 function actionGlyph(action = '') {
   const a = String(action);
@@ -1589,8 +1599,9 @@ function UsersTab() {
   const [openInEdit, setOpenInEdit] = useState(false);
   const [adding, setAdding] = useState(false);
   const [showReport, setShowReport] = useState(false);
-  const load = () => Promise.all([api.adminListUsers(), api.adminListEntities(), api.getRoles().catch(() => ({ roles: [] }))])
-    .then(([u, e, r]) => { setUsers(u); setEntities(e); setRoles(r.roles || []); setHowlerRoles(r.howlerRoles || []); });
+  const [installs, setInstalls] = useState({});
+  const load = () => Promise.all([api.adminListUsers(), api.adminListEntities(), api.getRoles().catch(() => ({ roles: [] })), api.adminInstalls().catch(() => ({ installs: {} }))])
+    .then(([u, e, r, ins]) => { setUsers(u); setEntities(e); setRoles(r.roles || []); setHowlerRoles(r.howlerRoles || []); setInstalls(ins.installs || {}); });
   useEffect(() => { load(); }, []);
   // Open a user's detail; `edit` jumps straight into the edit form.
   const openUser = (u, edit = false) => { setOpenInEdit(edit); setSelectedId(u.id); };
@@ -1599,7 +1610,7 @@ function UsersTab() {
     try { await api.adminDeleteUser(u.id); load(); } catch (e) { alert(e.message); }
   };
   if (!users) return <Muted>Loading…</Muted>;
-  if (selectedId) return <UserDetail userId={selectedId} entities={entities} roles={roles} initialEditing={openInEdit} onBack={() => { setSelectedId(null); setOpenInEdit(false); load(); }} />;
+  if (selectedId) return <UserDetail userId={selectedId} entities={entities} roles={roles} install={installs[selectedId] || null} initialEditing={openInEdit} onBack={() => { setSelectedId(null); setOpenInEdit(false); load(); }} />;
   if (adding) return <AddUserForm entities={entities} roles={roles} howlerRoles={howlerRoles} onCancel={() => setAdding(false)} onCreated={(id) => { setAdding(false); load().then(() => { if (id) setSelectedId(id); }); }} />;
 
   const entName = Object.fromEntries(entities.map((e) => [e.id, e.name]));
@@ -1621,6 +1632,8 @@ function UsersTab() {
     return <span title={names.join(', ')}>{names.length === 1 ? names[0] : `${names.length} clients`}</span>;
   };
   const adminBadge = (u) => u.role === 'admin' && <span style={howlerBadge}>HOWLER</span>;
+  // 📱 marker when the user has opened Pulse as an installed app (PWA on their phone).
+  const installMark = (u) => { const i = installs[u.id]; return i ? <span title={`📱 App installed · last opened ${fmtWhen(i.lastAt)}`} style={{ fontSize: 13, cursor: 'help' }}>📱</span> : null; };
   const lastActiveCell = (u) => (
     <>
       <span>{relTime(u.lastActiveAt)}</span>
@@ -1659,7 +1672,7 @@ function UsersTab() {
           {sorted.map((u) => (
             <div key={u.id} className="lift" style={{ ...clientRow, gap: 8 }}>
               <div onClick={() => openUser(u)} style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, textAlign: 'left', flex: 1, cursor: 'pointer' }}>
-                <span style={{ fontWeight: 600, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis' }}>{u.fullName || u.email} {adminBadge(u)}</span>
+                <span style={{ fontWeight: 600, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis' }}>{u.fullName || u.email} {adminBadge(u)} {installMark(u)}</span>
                 <span style={{ fontSize: 12, color: 'var(--muted)' }}>{u.fullName ? `${u.email} · ` : ''}{u.role === 'admin' ? 'Howler admin' : 'Client'} · {clientsOf(u).length || (u.role === 'admin' ? '∞' : 0)} client{clientsOf(u).length === 1 ? '' : 's'}</span>
                 <span style={{ fontSize: 12, color: 'var(--muted)' }}>{u.mobile ? `${u.mobile} · ` : ''}active {relTime(u.lastActiveAt)}</span>
               </div>
@@ -1680,7 +1693,7 @@ function UsersTab() {
             {sorted.map((u) => (
               <tr key={u.id} className="lift" style={{ cursor: 'pointer' }} onClick={() => openUser(u)}>
                 <td style={td}>
-                  <div style={{ fontWeight: 600 }}>{u.fullName || u.email} {adminBadge(u)}</div>
+                  <div style={{ fontWeight: 600 }}>{u.fullName || u.email} {adminBadge(u)} {installMark(u)}</div>
                   {u.fullName && <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>{u.email}</div>}
                 </td>
                 <td style={td}>{u.role === 'admin' ? (u.howlerRoleLabel ? `Howler · ${u.howlerRoleLabel}` : 'Howler admin') : 'Client'}</td>
@@ -1849,7 +1862,7 @@ function AddUserForm({ entities, roles, howlerRoles = [], onCancel, onCreated })
 }
 
 // One user's detail: identity, client roles, usage profile and activity timeline.
-function UserDetail({ userId, entities = [], roles = [], initialEditing = false, onBack }) {
+function UserDetail({ userId, entities = [], roles = [], install = null, initialEditing = false, onBack }) {
   const [data, setData] = useState(null);
   const [err, setErr] = useState('');
   const [section, setSection] = useState('overview');
@@ -1904,6 +1917,7 @@ function UserDetail({ userId, entities = [], roles = [], initialEditing = false,
               <KV label="Account type" value={isAdmin ? 'Howler admin' : 'Client login'} />
               <KV label="Member of" value={isAdmin ? 'All clients (admin)' : (memberships.length ? memberships.map((m) => m.entityName).join(', ') : 'No clients linked')} />
               <KV label="Last login" value={fmtWhen(user.lastLogin)} sub={user.lastLogin ? relTime(user.lastLogin) : ''} />
+              <KV label="App installed" value={install ? '📱 Yes — on their phone' : 'Not detected'} sub={install ? `last opened ${relTime(install.lastAt)}` : 'never opened as an installed app'} />
               <KV label="Most recent action" value={mostRecent ? mostRecent.label : 'No activity yet'} sub={mostRecent ? `${relTime(mostRecent.at)}${mostRecent.entityName ? ` · ${mostRecent.entityName}` : ''}` : ''} />
               <KV label="Account created" value={fmtWhen(user.createdAt)} />
               <KV label="Notifications" value={`Email ${user.notifyEmail ? 'on' : 'off'} · Push ${user.notifyPush ? 'on' : 'off'}`} />
@@ -1999,6 +2013,18 @@ function UserDetail({ userId, entities = [], roles = [], initialEditing = false,
 
           {section === 'activity' && (
             <div>
+              {/* App install — is Pulse on their phone, and when did they last open it as an app? */}
+              <div style={{ ...cardStyle, display: 'flex', alignItems: 'center', gap: 12 }}>
+                <span style={{ fontSize: 24, width: 30, textAlign: 'center', flexShrink: 0 }}>{install ? '📱' : '🌐'}</span>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontWeight: 700, fontSize: 14 }}>{install ? 'Pulse installed on their phone' : 'Not installed as an app'}</div>
+                  <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.45 }}>
+                    {install
+                      ? <>Last opened in-app {relTime(install.lastAt)} · first installed {fmtWhen(install.firstAt)}{install.ua ? ` · ${shortDevice(install.ua)}` : ''}</>
+                      : 'We haven’t seen this user open Pulse from a home-screen / installed app — they may only use it in a browser tab.'}
+                  </div>
+                </div>
+              </div>
               {activity.length === 0 ? <Muted>No activity recorded yet.</Muted> : (
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
                   {activity.map((e, i) => (
@@ -2102,9 +2128,177 @@ function KV({ label, value, sub }) {
 }
 
 // One client's settings hub: a left nav (Settings / Suites / Logins) + panel.
+// ─── Account-manager setup checklist — the full lifecycle of standing a client up ──
+// Auto-detects what's done from real data, lets the AM tick the manual ones, and
+// jumps straight to the right tab for each task. Manual ticks persist per client
+// (reusing the setup-wizard progress store, prefixed amchk_). Split into the
+// client-wide ACCOUNT SETUP (done once) and the PER-EVENT work (repeated for each
+// suite the client runs — goals, briefing, audiences, abandoned-cart campaigns).
+// Account-level tasks — the client-wide foundation, set once.
+const AM_TASKS = [
+  { key: 'client', icon: '🏢', title: 'Set up the client', desc: 'Name, logo and AI context.', section: 'settings', auto: (d) => !!(d.entity.name || '').trim() },
+  { key: 'scope', icon: '🔒', title: 'Lock their data scope', desc: 'Pick the organiser so they only ever see their own data.', section: 'settings', auto: (d) => d.entity.allOrganisers || Object.values(d.entity.lockedFilters || {}).some((v) => String(v || '').trim()) },
+  { key: 'branding', icon: '🎨', title: 'Add branding', desc: 'Logo, colours and sender — white-labels the app and emails.', section: 'email', auto: (d) => d.brandingSet },
+  { key: 'emailtmpl', icon: '✉️', title: 'Email template added', desc: 'Set the email header, intro and footer wording.', section: 'email', auto: (d) => d.emailTemplateSet },
+  { key: 'logins', icon: '🔑', title: 'Create logins & roles', desc: 'Add the people who sign in and set each one’s role.', section: 'logins', auto: (d) => d.users.length > 0 },
+  { key: 'inventive', icon: '✨', title: 'Assign Inventive', desc: 'Link the client’s Inventive analyst workspace.', section: 'integrations', auto: (d) => !!(d.entity.inventiveRefId || d.entity.inventiveName) },
+  { key: 'integrations', icon: '🔌', title: 'Add integrations', desc: 'Connect Looker / Meta / TikTok / email as needed.', section: 'integrations' },
+  { key: 'digest', icon: '🗓', title: 'Create a digest', desc: 'Schedule a recurring briefing email to their team.', section: 'digests', auto: (d) => d.digests > 0 },
+  { key: 'briefing', icon: '📝', title: 'Tune the briefing', desc: 'Global briefing focus, phase defaults and instructions for the Owl.', section: 'briefing' },
+];
+// Per-event tasks — repeated for EACH event (suite). `auto` reads the suite's own
+// data; the rest are manual ticks scoped to that suite.
+const EVENT_TASKS = [
+  { key: 'goals', icon: '⭐', title: 'Set event goals', desc: 'A live target for this event — preview the suite to add one.', section: 'suites', auto: (sd) => sd.goals > 0 },
+  { key: 'alerts', icon: '🔔', title: 'Set up alerts', desc: 'Metric watchers for this event — preview the suite to add one.', section: 'suites', auto: (sd) => sd.alerts > 0 },
+  { key: 'branding', icon: '🎨', title: 'Custom event branding', desc: 'Override the look for this event — logo, colours, sender.', section: 'suites', auto: (sd) => sd.brandingSet },
+  { key: 'emailtmpl', icon: '✉️', title: 'Email template added', desc: 'Tailor this event’s email header, intro and footer.', section: 'suites', auto: (sd) => sd.templateSet },
+  { key: 'briefing', icon: '📝', title: 'Tune the briefing', desc: 'Key dates, phase and instructions so the Owl reads this event right.', section: 'briefing' },
+  { key: 'digest', icon: '🗓', title: 'Schedule an event digest', desc: 'A recurring briefing email focused on this event.', section: 'digests' },
+  { key: 'segment', icon: '🎯', title: 'Build the audience', desc: 'e.g. everyone who abandoned a cart for this event.', section: 'segments' },
+  { key: 'cart', icon: '🛒', title: 'Abandoned-cart campaign', desc: 'Win back checkouts that didn’t finish for this event.', section: 'campaigns' },
+];
+function ClientSetupChecklist({ entity, suites, users, go }) {
+  const [aux, setAux] = useState(null);
+  const [open, setOpen] = useState({}); // section key → expanded? (collapsed by default)
+  const toggle = (k) => setOpen((o) => ({ ...o, [k]: !o[k] }));
+  useEffect(() => {
+    let alive = true;
+    const tmplOf = (m) => (m && (m.template || m.branding)) || {};
+    const hasBranding = (t) => !!(t.logo || t.brandColor || t.senderName || t.secondaryColor);
+    const hasTemplate = (t) => !!(t.header || t.intro || t.footer);
+    Promise.all([
+      api.getEntityMailTemplate(entity.id).catch(() => null),
+      api.getDigests(entity.id).catch(() => []),
+      api.getSetupWizardProgress(entity.id).catch(() => ({ ticks: {} })),
+      Promise.all(suites.map((su) => api.suiteGoals(su.id).then((r) => (Array.isArray(r) ? r : r.goals || [])).catch(() => []))),
+      Promise.all(suites.map((su) => api.getSuiteMailTemplate(su.id).catch(() => null))),
+      Promise.all(suites.map((su) => api.suiteAlerts(su.id).then((r) => (Array.isArray(r) ? r : r.alerts || [])).catch(() => []))),
+    ]).then(([mt, digests, prog, goalsArr, suiteMtArr, alertsArr]) => {
+      if (!alive) return;
+      const acc = tmplOf(mt);
+      setAux({
+        brandingSet: hasBranding(acc) || !!entity.logo,
+        emailTemplateSet: hasTemplate(acc),
+        digests: (digests || []).length,
+        goalsBySuite: Object.fromEntries(suites.map((su, i) => [su.id, (goalsArr[i] || []).length])),
+        brandingBySuite: Object.fromEntries(suites.map((su, i) => [su.id, hasBranding(tmplOf(suiteMtArr[i]))])),
+        templateBySuite: Object.fromEntries(suites.map((su, i) => [su.id, hasTemplate(tmplOf(suiteMtArr[i]))])),
+        alertsBySuite: Object.fromEntries(suites.map((su, i) => [su.id, (alertsArr[i] || []).length])),
+        ticks: prog.ticks || {},
+      });
+    });
+    return () => { alive = false; };
+  }, [entity.id, suites.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const ticks = aux?.ticks || {};
+  const setTick = (key, v) => {
+    setAux((a) => ({ ...a, ticks: { ...(a?.ticks || {}), [key]: v ? 1 : 0 } }));
+    api.setSetupWizardProgress(entity.id, key, v).then((r) => setAux((a) => ({ ...a, ticks: r.ticks || a.ticks }))).catch(() => {});
+  };
+  const accData = { entity, suites, users, brandingSet: aux?.brandingSet, emailTemplateSet: aux?.emailTemplateSet, digests: aux?.digests || 0 };
+  const accAuto = (t) => !!(t.auto && t.auto(accData));
+  const accManual = (t) => ticks['amchk_' + t.key] === 1;
+  const accDone = (t) => accAuto(t) || accManual(t);
+  const evData = (su) => ({ goals: aux?.goalsBySuite?.[su.id] || 0, brandingSet: aux?.brandingBySuite?.[su.id], templateSet: aux?.templateBySuite?.[su.id], alerts: aux?.alertsBySuite?.[su.id] || 0 });
+  const evAuto = (su, t) => !!(t.auto && t.auto(evData(su)));
+  const evManual = (su, t) => ticks[`amchk_${su.id}_${t.key}`] === 1;
+  const evDone = (su, t) => evAuto(su, t) || evManual(su, t);
+
+  const accDoneCount = AM_TASKS.filter(accDone).length;
+  const evDoneCount = suites.reduce((n, su) => n + EVENT_TASKS.filter((t) => evDone(su, t)).length, 0);
+  const total = AM_TASKS.length + suites.length * EVENT_TASKS.length;
+  const doneCount = accDoneCount + evDoneCount;
+  const pct = total ? Math.round((doneCount / total) * 100) : 0;
+
+  const taskRow = (key, icon, title, desc, ok, onGo, onTick) => (
+    <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 12, background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 12, padding: '11px 13px', opacity: ok ? 0.72 : 1 }}>
+      <span style={{ fontSize: 19, width: 24, textAlign: 'center', flexShrink: 0 }}>{ok ? '✅' : icon}</span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13.5, fontWeight: 700, textDecoration: ok ? 'line-through' : 'none' }}>{title}</div>
+        <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.4 }}>{desc}</div>
+      </div>
+      <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+        <button style={miniBtn} onClick={onGo}>Go →</button>
+        {onTick && <button style={{ ...chkTick, ...(ok ? { color: 'var(--brand)', borderColor: 'var(--brand)' } : null) }} onClick={onTick} title={ok ? 'Mark not done' : 'Mark done'}>✓</button>}
+      </div>
+    </div>
+  );
+  // Collapsible section header bar. `big` = an event (suite) heading. Turns brand
+  // red once every task in the section is done.
+  const bar = (k, title, caption, n, m, big) => {
+    const complete = m > 0 && n === m;
+    return (
+      <button onClick={() => toggle(k)} style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', background: complete ? 'rgba(var(--brand-rgb),0.09)' : 'var(--card)', border: complete ? '1.5px solid var(--brand)' : '1px solid var(--hairline)', borderRadius: 12, padding: '12px 14px', cursor: 'pointer', color: 'var(--text)' }}>
+        <span style={{ fontSize: 11, color: complete ? 'var(--brand)' : 'var(--muted)', flexShrink: 0, transform: open[k] ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</span>
+        <span style={{ flex: 1, minWidth: 0 }}>
+          <span style={{ display: 'block', fontSize: big ? 14.5 : 12, fontWeight: 800, textTransform: big ? 'none' : 'uppercase', letterSpacing: big ? 0 : '0.05em', color: complete ? 'var(--brand)' : 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
+          {caption && !open[k] && <span style={{ display: 'block', fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{caption}</span>}
+        </span>
+        <span style={{ fontSize: 12, fontWeight: 800, color: complete ? 'var(--brand)' : 'var(--muted)', flexShrink: 0 }}>{complete ? `✓ ${n}/${m}` : `${n}/${m}`}</span>
+      </button>
+    );
+  };
+
+  return (
+    <div>
+      <div style={cardStyle}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 8, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 16, fontWeight: 800 }}>Setting up {entity.name}</span>
+          <span style={{ fontSize: 13, color: 'var(--muted)', fontWeight: 600 }}>{doneCount} of {total} done{aux ? '' : ' · checking…'}</span>
+        </div>
+        <div style={{ height: 8, borderRadius: 999, background: 'rgba(128,128,128,0.15)', overflow: 'hidden' }}>
+          <div style={{ height: '100%', width: `${pct}%`, background: 'var(--brand)', borderRadius: 999, transition: 'width .3s' }} />
+        </div>
+        <p style={{ ...hint, marginTop: 10, marginBottom: 0 }}>Tap a section to expand it. Tasks auto-tick as you go; tick the manual ones, or hit <b>Go →</b> to jump straight to it. Account setup is done once; the event tasks repeat for every event.</p>
+      </div>
+
+      {/* Account setup — collapsible */}
+      <div style={{ marginTop: 14 }}>
+        {bar('account', 'Account setup', 'The client-wide foundation — set once.', accDoneCount, AM_TASKS.length, false)}
+        {open.account && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+            {AM_TASKS.map((t) => taskRow(t.key, t.icon, t.title, t.desc, accDone(t), () => go(t.section), accAuto(t) ? null : () => setTick('amchk_' + t.key, !accManual(t))))}
+          </div>
+        )}
+      </div>
+
+      {/* Per event — one collapsible block per suite */}
+      <div style={{ margin: '18px 2px 8px' }}>
+        <div style={{ fontSize: 11.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text)' }}>Per event <span style={{ color: 'var(--muted)' }}>{evDoneCount}/{suites.length * EVENT_TASKS.length}</span></div>
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>Repeat for each event (suite) the client runs.</div>
+      </div>
+      {suites.length === 0 ? (
+        <div style={{ ...cardStyle, marginBottom: 0, textAlign: 'center' }}>
+          <p style={{ fontSize: 13, color: 'var(--muted)', margin: '0 0 10px' }}>No events yet. Create the client’s first event (suite) to start its checklist.</p>
+          <button style={addBtn} onClick={() => go('suites')}>+ Create the first event</button>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {suites.map((su) => {
+            const sDone = EVENT_TASKS.filter((t) => evDone(su, t)).length;
+            const title = `${su.icon && !String(su.icon).startsWith('data:') ? `${su.icon} ` : '🗂️ '}${su.name}`;
+            return (
+              <div key={su.id}>
+                {bar(su.id, title, null, sDone, EVENT_TASKS.length, true)}
+                {open[su.id] && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+                    {EVENT_TASKS.map((t) => taskRow(`${su.id}_${t.key}`, t.icon, t.title, t.desc, evDone(su, t), () => go(t.section), evAuto(su, t) ? null : () => setTick(`amchk_${su.id}_${t.key}`, !evManual(su, t))))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+const chkTick = { padding: '6px 10px', borderRadius: 8, border: '1.5px solid var(--hairline)', background: 'var(--card)', color: 'var(--muted)', fontSize: 13, fontWeight: 700, cursor: 'pointer' };
+
 function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites, users, allUsers, onChange, onBack }) {
-  const [section, setSection] = useState('settings');
-  const nav = [['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['sets', 'Custom sets'], ['briefing', 'Briefing'], ['messages', 'Messages'], ['digests', 'Digests'], ['campaigns', 'Campaigns'], ['segments', 'Segments'], ['fees', 'Fees'], ['settlements', 'Settlements'], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations'], ['email', 'Branding']];
+  const [section, setSection] = useState('checklist');
+  const nav = [['checklist', '✅ Setup checklist'], ['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['sets', 'Custom sets'], ['briefing', 'Briefing'], ['messages', 'Messages'], ['digests', 'Digests'], ['campaigns', 'Campaigns'], ['segments', 'Segments'], ['fees', 'Fees'], ['settlements', 'Settlements'], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations'], ['email', 'Branding']];
   return (
     <div>
       <AdminBack onBack={onBack}>All clients</AdminBack>
@@ -2116,6 +2310,7 @@ function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites,
           ))}
         </nav>
         <div style={{ flex: 1, minWidth: 280 }}>
+          {section === 'checklist' && <ClientSetupChecklist entity={entity} suites={suites} users={users} go={setSection} />}
           {section === 'settings' && <ClientSettings entity={entity} suites={suites} fields={fields} onChange={onChange} onBack={onBack} />}
           {section === 'suites' && <ClientSuites entity={entity} suites={suites} allEntities={allEntities} allSets={allSets} dashTitle={dashTitle} fields={fields} onChange={onChange} />}
           {section === 'sets' && <CustomSets entity={entity} />}

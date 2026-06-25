@@ -2815,6 +2815,9 @@ require('./onboarding').mount(app, { db, auth });
 // wording, order, and their own custom guidance steps) from the admin UI.
 require('./setupWizard').mount(app, { db, auth });
 
+// PWA install tracking — records when a user opens Pulse as an installed app.
+require('./installs').mount(app, { db, auth });
+
 // Onboarding & feature telemetry — usage signals to refine the wizard from real behaviour.
 require('./telemetry').mount(app, { db, auth, rateLimit });
 
