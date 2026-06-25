@@ -2818,6 +2818,10 @@ require('./setupWizard').mount(app, { db, auth });
 // PWA install tracking — records when a user opens Pulse as an installed app.
 require('./installs').mount(app, { db, auth });
 
+// Setup nudges — daily reminders to clients + the account team about outstanding
+// setup, bulked per recipient. Managed per client in the onboarding section.
+require('./setupNudge').mount(app, { db, auth, mailer });
+
 // Onboarding & feature telemetry — usage signals to refine the wizard from real behaviour.
 require('./telemetry').mount(app, { db, auth, rateLimit });
 

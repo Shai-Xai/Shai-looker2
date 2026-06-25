@@ -166,6 +166,10 @@ export const api = {
   // PWA install: client self-reports when running as the installed app; admin reads the map.
   markInstalled: () => fetch('/api/my/installed', { method: 'POST' }).catch(() => {}),
   adminInstalls: () => fetch('/api/admin/installs').then(json),
+  // Setup nudges — per-client reminder config (managed in the onboarding section).
+  getSetupNudge: (entityId) => fetch(`/api/admin/entities/${entityId}/setup-nudge`).then(json),
+  saveSetupNudge: (entityId, b) => fetch(`/api/admin/entities/${entityId}/setup-nudge`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  testSetupNudge: (entityId, audience) => fetch(`/api/admin/entities/${entityId}/setup-nudge/test`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ audience }) }).then(json),
   setSetupWizardProgress: (entityId, itemKey, done) => fetch(`/api/admin/setup-wizard/progress/${entityId}/${encodeURIComponent(itemKey)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ done }) }).then(json),
 
   // Onboarding checklist

@@ -2134,6 +2134,49 @@ function KV({ label, value, sub }) {
 // (reusing the setup-wizard progress store, prefixed amchk_). Split into the
 // client-wide ACCOUNT SETUP (done once) and the PER-EVENT work (repeated for each
 // suite the client runs — goals, briefing, audiences, abandoned-cart campaigns).
+// Per-client reminder config — who gets nudged about outstanding setup, managed
+// right here in the onboarding section. Account team = factual; clients = value-led
+// (opt-in). Blank recipient lists fall back to sensible defaults server-side.
+function SetupNudgeConfig({ entity, clientUsers = [], adminUsers = [] }) {
+  const [cfg, setCfg] = useState(null);
+  const [saved, setSaved] = useState(false);
+  const [testMsg, setTestMsg] = useState('');
+  useEffect(() => { api.getSetupNudge(entity.id).then(setCfg).catch(() => setCfg(null)); }, [entity.id]);
+  if (!cfg) return <div style={cardStyle}><Muted>Loading…</Muted></div>;
+  const has = (key, id) => (cfg[key] || []).includes(id);
+  const toggleId = (key, id) => setCfg((c) => ({ ...c, [key]: has(key, id) ? c[key].filter((x) => x !== id) : [...(c[key] || []), id] }));
+  const save = async () => { try { await api.saveSetupNudge(entity.id, { clientOn: cfg.clientOn, clientRecipients: cfg.clientRecipients || [], adminRecipients: cfg.adminRecipients || [] }); flash(setSaved); } catch (e) { alert(e.message); } };
+  const test = async (audience) => { setTestMsg('Sending…'); try { const r = await api.testSetupNudge(entity.id, audience); setTestMsg(`✓ Sent · ${r.missing} outstanding`); } catch { setTestMsg('✗ Send failed'); } };
+  const chip = (key, u) => { const on = has(key, u.id); return <button key={u.id} type="button" onClick={() => toggleId(key, u.id)} style={{ ...folderChip, borderColor: on ? 'var(--brand)' : 'var(--border)', color: on ? 'var(--brand)' : 'var(--text)', fontWeight: on ? 700 : 400 }}>{on ? '✓ ' : ''}{u.fullName || u.email}</button>; };
+  const sub = { fontWeight: 400, textTransform: 'none', color: 'var(--muted)' };
+  return (
+    <div style={cardStyle}>
+      <p style={{ ...hint, marginTop: 0 }}>A daily reminder while setup is outstanding (after a short grace period, then repeated weekly — never more). The account team gets a factual summary bulked across their clients; clients get a value-led nudge.</p>
+      <L>Account team <span style={sub}>· who at Howler gets the summary · blank = the client’s owner/support</span></L>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '6px 0 14px' }}>{adminUsers.length ? adminUsers.map((u) => chip('adminRecipients', u)) : <Muted>No admins.</Muted>}</div>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: cfg.clientOn ? 8 : 0, cursor: 'pointer' }}>
+        <input type="checkbox" checked={!!cfg.clientOn} onChange={(e) => setCfg({ ...cfg, clientOn: e.target.checked })} />
+        <span style={{ fontWeight: 700, fontSize: 13.5 }}>Also nudge the client’s users to finish</span>
+      </label>
+      {cfg.clientOn && (
+        <div style={{ marginBottom: 8 }}>
+          <L>Client recipients <span style={sub}>· blank = all the client’s users</span></L>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>{clientUsers.length ? clientUsers.map((u) => chip('clientRecipients', u)) : <Muted>No client logins yet.</Muted>}</div>
+        </div>
+      )}
+      <div style={{ display: 'flex', gap: 8, marginTop: 14, alignItems: 'center', flexWrap: 'wrap' }}>
+        <button style={saveBtn} onClick={save}>Save</button>
+        {saved && <span style={{ color: 'var(--brand)', fontSize: 13, fontWeight: 600 }}>✓ Saved</span>}
+        <span style={{ flex: 1 }} />
+        <button style={miniBtnOutline} onClick={() => test('admin')}>Send me a test</button>
+        {cfg.clientOn && <button style={miniBtnOutline} onClick={() => test('client')}>Test client nudge</button>}
+        {testMsg && <span style={{ fontSize: 12, color: 'var(--muted)' }}>{testMsg}</span>}
+      </div>
+      {cfg.settings && !cfg.settings.enabled && <div style={{ fontSize: 12, color: 'var(--error)', marginTop: 8 }}>⚠ Setup nudges are globally turned off.</div>}
+    </div>
+  );
+}
+
 // Account-level tasks — the client-wide foundation, set once.
 const AM_TASKS = [
   { key: 'client', icon: '🏢', title: 'Set up the client', desc: 'Name, logo and AI context.', section: 'settings', auto: (d) => !!(d.entity.name || '').trim() },
@@ -2158,7 +2201,7 @@ const EVENT_TASKS = [
   { key: 'segment', icon: '🎯', title: 'Build the audience', desc: 'e.g. everyone who abandoned a cart for this event.', section: 'segments' },
   { key: 'cart', icon: '🛒', title: 'Abandoned-cart campaign', desc: 'Win back checkouts that didn’t finish for this event.', section: 'campaigns' },
 ];
-function ClientSetupChecklist({ entity, suites, users, go }) {
+function ClientSetupChecklist({ entity, suites, users, allUsers = [], go }) {
   const [aux, setAux] = useState(null);
   const [open, setOpen] = useState({}); // section key → expanded? (collapsed by default)
   const toggle = (k) => setOpen((o) => ({ ...o, [k]: !o[k] }));
@@ -2253,6 +2296,18 @@ function ClientSetupChecklist({ entity, suites, users, go }) {
         <p style={{ ...hint, marginTop: 10, marginBottom: 0 }}>Tap a section to expand it. Tasks auto-tick as you go; tick the manual ones, or hit <b>Go →</b> to jump straight to it. Account setup is done once; the event tasks repeat for every event.</p>
       </div>
 
+      {/* Reminders — who gets nudged about outstanding setup */}
+      <div style={{ marginTop: 14 }}>
+        <button onClick={() => toggle('reminders')} style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 12, padding: '12px 14px', cursor: 'pointer', color: 'var(--text)' }}>
+          <span style={{ fontSize: 11, color: 'var(--muted)', flexShrink: 0, transform: open.reminders ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</span>
+          <span style={{ flex: 1, minWidth: 0 }}>
+            <span style={{ display: 'block', fontSize: 12, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' }}>🔔 Reminders</span>
+            {!open.reminders && <span style={{ display: 'block', fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>Who gets nudged about outstanding setup.</span>}
+          </span>
+        </button>
+        {open.reminders && <div style={{ marginTop: 8 }}><SetupNudgeConfig entity={entity} clientUsers={users} adminUsers={(allUsers || []).filter((u) => u.role === 'admin')} /></div>}
+      </div>
+
       {/* Account setup — collapsible */}
       <div style={{ marginTop: 14 }}>
         {bar('account', 'Account setup', 'The client-wide foundation — set once.', accDoneCount, AM_TASKS.length, false)}
@@ -2310,7 +2365,7 @@ function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites,
           ))}
         </nav>
         <div style={{ flex: 1, minWidth: 280 }}>
-          {section === 'checklist' && <ClientSetupChecklist entity={entity} suites={suites} users={users} go={setSection} />}
+          {section === 'checklist' && <ClientSetupChecklist entity={entity} suites={suites} users={users} allUsers={allUsers} go={setSection} />}
           {section === 'settings' && <ClientSettings entity={entity} suites={suites} fields={fields} onChange={onChange} onBack={onBack} />}
           {section === 'suites' && <ClientSuites entity={entity} suites={suites} allEntities={allEntities} allSets={allSets} dashTitle={dashTitle} fields={fields} onChange={onChange} />}
           {section === 'sets' && <CustomSets entity={entity} />}
