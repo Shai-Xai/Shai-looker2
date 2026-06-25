@@ -2056,6 +2056,34 @@ app.get('/api/my/snapshot', auth.requireAuth, (req, res) => {
 // with in-flight de-duplication so the prewarm and the real request never do the
 // same generation twice. Segmented by the reader's local time of day.
 const briefInflight = new Map(); // key -> Promise
+const BRIEF_TTL = 6 * 3600e3;
+// Persisted briefing store (survives redeploys) + a 15-min warmer that keeps
+// recently-active users' briefings fresh in the background. See briefingCache.js.
+const briefStore = require('./briefingCache')({
+  sql: db.db,
+  getUser: (id) => db.getUser(id),
+  regenerate: async (user, entityId, segment) => {
+    await generateBriefing(user, entityId, segment, { force: true });
+    if (clientCatalogue(entityId).suites.length > 1) await generateEvents(user, entityId, segment, { force: true });
+  },
+});
+// Persist a generated briefing to memory AND disk (survives redeploys).
+const saveBrief = (key, val) => { cachePut(briefCache, key, val); briefStore.save(key, val); };
+// Serve a cached briefing instantly (memory, then the persisted copy), refreshing
+// a stale persisted copy in the background. Returns the payload to serve, or null
+// when nothing is cached anywhere (only then does the caller generate inline).
+function swrBrief(key, regen) {
+  const mem = cacheGet(briefCache, key, BRIEF_TTL);
+  if (mem) { briefStore.touch(key); return mem; }
+  const saved = briefStore.get(key);
+  if (saved) {
+    cachePut(briefCache, key, saved.payload); // warm memory for the next reader
+    briefStore.touch(key);
+    if (Date.now() - saved.at >= BRIEF_TTL && !briefInflight.has(key)) regen().catch(() => {});
+    return saved.payload;
+  }
+  return null;
+}
 // ── Multi-event briefing (portfolio overall + per-event sections) ─────────────
 // The selected events for a client's briefing: default = ACTIVE events (phase not
 // post_event); a user pref `briefing_suites:{entityId}` overrides. Returns the
@@ -2095,7 +2123,7 @@ async function generateOverall(user, entityId, segment, { force = false } = {}) 
   const base = { available: true, multi: true, generatedAt: new Date().toISOString(), suites };
   if (!insights.isConfigured(apiKey) || !selected.length) return { ...base, headline: '', bullets: [] };
   const key = `${user.id}:${entityId}:${segment}:overall:${selected.join(',')}`;
-  if (!force) { const hit = cacheGet(briefCache, key, 6 * 3600e3); if (hit) return hit; }
+  if (!force) { const hit = swrBrief(key, () => generateOverall(user, entityId, segment, { force: true })); if (hit) return hit; }
   if (briefInflight.has(key)) return briefInflight.get(key);
   const p = (async () => {
     const tStart = Date.now();
@@ -2119,7 +2147,7 @@ async function generateOverall(user, entityId, segment, { force = false } = {}) 
         .filter((s) => s.title && (s.link || s.action)),
       _timing: { totalMs, factsMs, llmMs, facts: factTiming },
     };
-    cachePut(briefCache, key, out);
+    saveBrief(key, out);
     return out;
   })().finally(() => briefInflight.delete(key));
   briefInflight.set(key, p);
@@ -2148,7 +2176,7 @@ async function generateEvents(user, entityId, segment, { force = false, debug = 
   }
   if (!insights.isConfigured(apiKey)) return { events: [] };
   const key = `${user.id}:${entityId}:events:${selected.join(',')}`;
-  if (!force) { const hit = cacheGet(briefCache, key, 6 * 3600e3); if (hit) return hit; }
+  if (!force) { const hit = swrBrief(key, () => generateEvents(user, entityId, segment, { force: true })); if (hit) return hit; }
   if (briefInflight.has(key)) return briefInflight.get(key);
   const p = (async () => {
     const tStart = Date.now();
@@ -2173,7 +2201,7 @@ async function generateEvents(user, entityId, segment, { force = false, debug = 
       return { suiteId: id, suiteName: nameById[id] || '', headline: haveFacts.has(id) ? 'No headline available for this event right now.' : 'No sales/activity recorded for this event yet.', bullets: [], empty: true };
     });
     const out = { events, generatedAt: new Date().toISOString(), _timing: { totalMs: Date.now() - tStart, factsMs } };
-    cachePut(briefCache, key, out);
+    saveBrief(key, out);
     return out;
   })().finally(() => briefInflight.delete(key));
   briefInflight.set(key, p);
@@ -2186,7 +2214,7 @@ async function generateBriefing(user, entityId, segment, { force = false } = {})
   // Multi-event client → portfolio overall (per-event sections load separately).
   if (clientCatalogue(entityId).suites.length > 1) return generateOverall(user, entityId, segment, { force });
   const key = `${user.id}:${entityId}:${segment}`;
-  if (!force) { const hit = cacheGet(briefCache, key, 6 * 3600e3); if (hit) return hit; }
+  if (!force) { const hit = swrBrief(key, () => generateBriefing(user, entityId, segment, { force: true })); if (hit) return hit; }
   if (briefInflight.has(key)) return briefInflight.get(key); // coalesce concurrent (prewarm + real)
   const p = (async () => {
     const { suites } = clientCatalogue(entityId);
@@ -2244,7 +2272,7 @@ async function generateBriefing(user, entityId, segment, { force = false } = {})
         .filter((s) => s.title && s.link),
       _timing,
     };
-    cachePut(briefCache, key, out);
+    saveBrief(key, out);
     return out;
   })().finally(() => briefInflight.delete(key));
   briefInflight.set(key, p);
