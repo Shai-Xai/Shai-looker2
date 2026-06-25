@@ -15,6 +15,7 @@ const { convertDashboard } = require('./convert');
 const { recreateDashboard, fetchDashboard } = require('./recreate');
 const { parseDrillUrl } = require('./drill');
 const insights = require('./insights');
+const { asyncHandler, errorMiddleware } = require('./http');
 const mailer = require('./mailer');
 const messaging = require('./messaging');
 const rateLimit = require('./ratelimit');
@@ -37,6 +38,16 @@ const {
 } = require('./briefing')({ db, store, query });
 
 const app = express();
+
+// Safety net: a rejected promise that nothing awaited (the "never throws"
+// convention in the integration modules is load-bearing but not guaranteed) is
+// logged instead of crashing this single instance. We do NOT add an
+// uncaughtException handler — Node's default crash-on-uncaught is the safe
+// behaviour there (the platform restarts; SQLite is on a persistent disk).
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', (reason && reason.stack) || reason);
+});
+
 // Behind a reverse proxy (Caddy/Nginx) in production so Secure cookies + the
 // real client IP/protocol are honoured.
 if (process.env.NODE_ENV === 'production' || process.env.TRUST_PROXY === '1') app.set('trust proxy', 1);
@@ -1472,7 +1483,7 @@ app.get('/api/my/mail-log/:entityId', auth.requireAuth, (req, res) => {
 });
 // Optional { entityId } renders with that client's branding so you can preview
 // exactly what a client's recipients will get.
-app.post('/api/admin/mail/test', auth.requireAdmin, async (req, res) => {
+app.post('/api/admin/mail/test', auth.requireAdmin, asyncHandler(async (req, res) => {
   const entityId = (req.body || {}).entityId || null;
   const branding = entityId ? mailer.resolveBranding(entityId) : undefined;
   const { html, text } = mailer.notificationEmail({
@@ -1483,7 +1494,7 @@ app.post('/api/admin/mail/test', auth.requireAdmin, async (req, res) => {
   const r = await mailer.send({ to: req.user.email, subject: 'Howler : Pulse — test email', html, text, fromName: branding?.senderName, kind: 'test', entity: entityId || '' });
   if (r.ok) return res.json({ ok: true, to: req.user.email });
   res.status(400).json({ error: r.error || r.reason || 'Email is not configured yet' });
-});
+}));
 
 // ─── Email templates / branding ────────────────────────────────────────────────
 // Platform default (admin) and per-client overrides (admin + client self-serve).
@@ -1689,20 +1700,20 @@ app.get('/api/admin/integrations/health', auth.requireAdmin, (_req, res) => {
 });
 
 // Live token check for one client's connector (makes a real API call).
-app.post('/api/admin/integrations/:entityId/verify', auth.requireAdmin, async (req, res) => {
+app.post('/api/admin/integrations/:entityId/verify', auth.requireAdmin, asyncHandler(async (req, res) => {
   if (!db.getEntity(req.params.entityId)) return res.status(404).json({ error: 'Not found' });
   const channel = req.body?.channel === 'tiktok' ? tiktok : (req.body?.channel === 'meta' ? meta : null);
   if (!channel) return res.status(400).json({ error: 'Unknown channel' });
   res.json(await channel.verify(req.params.entityId));
-});
+}));
 
 // Live audience size/status read-back from the platform (real API call).
-app.post('/api/admin/integrations/:entityId/audience-status', auth.requireAdmin, async (req, res) => {
+app.post('/api/admin/integrations/:entityId/audience-status', auth.requireAdmin, asyncHandler(async (req, res) => {
   if (!db.getEntity(req.params.entityId)) return res.status(404).json({ error: 'Not found' });
   const channel = req.body?.channel === 'tiktok' ? tiktok : (req.body?.channel === 'meta' ? meta : null);
   if (!channel) return res.status(400).json({ error: 'Unknown channel' });
   res.json(await channel.audienceStatus(req.params.entityId, String(req.body?.audienceId || '')));
-});
+}));
 
 // Append-only change-log timeline for a client's audience syncs.
 app.get('/api/admin/integrations/:entityId/log', auth.requireAdmin, (req, res) => {
@@ -1725,30 +1736,30 @@ app.get('/api/my/audiences/:entityId', auth.requireAuth, (req, res) => {
   if (!db.getEntity(id)) return res.status(404).json({ error: 'Not found' });
   res.json({ channels: { meta: meta.summary(id), tiktok: tiktok.summary(id) } });
 });
-app.post('/api/my/audiences/:entityId/verify', auth.requireAuth, async (req, res) => {
+app.post('/api/my/audiences/:entityId/verify', auth.requireAuth, asyncHandler(async (req, res) => {
   const id = req.params.entityId;
   if (!ownsEntity(req, id)) return res.status(403).json({ error: 'Not allowed' });
   const channel = audienceChannel(req.body?.channel);
   if (!channel) return res.status(400).json({ error: 'Unknown channel' });
   res.json(await channel.verify(id));
-});
-app.post('/api/my/audiences/:entityId/audience-status', auth.requireAuth, async (req, res) => {
+}));
+app.post('/api/my/audiences/:entityId/audience-status', auth.requireAuth, asyncHandler(async (req, res) => {
   const id = req.params.entityId;
   if (!ownsEntity(req, id)) return res.status(403).json({ error: 'Not allowed' });
   const channel = audienceChannel(req.body?.channel);
   if (!channel) return res.status(400).json({ error: 'Unknown channel' });
   res.json(await channel.audienceStatus(id, String(req.body?.audienceId || '')));
-});
+}));
 // Live list of EVERY audience on the platform (Pulse-made or external). The hub
 // reconciles these against Pulse's own records to flag what it manages.
-app.get('/api/my/audiences/:entityId/platform/:channel', auth.requireAuth, async (req, res) => {
+app.get('/api/my/audiences/:entityId/platform/:channel', auth.requireAuth, asyncHandler(async (req, res) => {
   const id = req.params.entityId;
   if (!ownsEntity(req, id)) return res.status(403).json({ error: 'Not allowed' });
   const channel = audienceChannel(req.params.channel);
   if (!channel) return res.status(400).json({ error: 'Unknown channel' });
   if (typeof channel.listAudiences !== 'function') return res.json({ ok: false, error: 'Listing isn’t supported for this channel yet.' });
   res.json(await channel.listAudiences(id));
-});
+}));
 app.get('/api/my/audiences/:entityId/log', auth.requireAuth, (req, res) => {
   const id = req.params.entityId;
   if (!ownsEntity(req, id)) return res.status(403).json({ error: 'Not allowed' });
@@ -1780,14 +1791,14 @@ app.get('/api/admin/entities/:id/social', auth.requireAdmin, (req, res) => {
   if (!db.getEntity(req.params.id)) return res.status(404).json({ error: 'Not found' });
   res.json(socialView(req.params.id, req.query));
 });
-app.post('/api/admin/entities/:id/social/sync', auth.requireAdmin, async (req, res) => {
+app.post('/api/admin/entities/:id/social/sync', auth.requireAdmin, asyncHandler(async (req, res) => {
   if (!db.getEntity(req.params.id)) return res.status(404).json({ error: 'Not found' });
   res.json(await socialMetrics.syncEntity(req.params.id));
-});
-app.post('/api/admin/entities/:id/social/verify', auth.requireAdmin, async (req, res) => {
+}));
+app.post('/api/admin/entities/:id/social/verify', auth.requireAdmin, asyncHandler(async (req, res) => {
   if (!db.getEntity(req.params.id)) return res.status(404).json({ error: 'Not found' });
   res.json(await socialMetrics.verify(req.params.id));
-});
+}));
 // Client self-service: the caller's OWN entity (ownership enforced).
 app.get('/api/my/social/:entityId', auth.requireAuth, (req, res) => {
   const id = req.params.entityId;
@@ -1795,16 +1806,16 @@ app.get('/api/my/social/:entityId', auth.requireAuth, (req, res) => {
   if (!db.getEntity(id)) return res.status(404).json({ error: 'Not found' });
   res.json(socialView(id, req.query));
 });
-app.post('/api/my/social/:entityId/sync', auth.requireAuth, auth.requirePermission('integrations.manage'), async (req, res) => {
+app.post('/api/my/social/:entityId/sync', auth.requireAuth, auth.requirePermission('integrations.manage'), asyncHandler(async (req, res) => {
   const id = req.params.entityId;
   if (!ownsEntity(req, id)) return res.status(403).json({ error: 'Not allowed' });
   res.json(await socialMetrics.syncEntity(id));
-});
-app.post('/api/my/social/:entityId/verify', auth.requireAuth, async (req, res) => {
+}));
+app.post('/api/my/social/:entityId/verify', auth.requireAuth, asyncHandler(async (req, res) => {
   const id = req.params.entityId;
   if (!ownsEntity(req, id)) return res.status(403).json({ error: 'Not allowed' });
   res.json(await socialMetrics.verify(id));
-});
+}));
 
 // Client self-service: the logged-in user's own client(s).
 app.get('/api/my/integrations', auth.requireAuth, (req, res) => {
@@ -2681,12 +2692,12 @@ app.put('/api/admin/sms-config', auth.requireAdmin, (req, res) => {
   res.json({ configured: !!key, keyHint: maskSecret(key), sender: db.getSetting('sms_sender', ''), endpoint: db.getSetting('clickatell_endpoint', '') });
 });
 // Send a test SMS to a number (admin) — confirms the provider end to end.
-app.post('/api/admin/sms-test', auth.requireAdmin, async (req, res) => {
+app.post('/api/admin/sms-test', auth.requireAdmin, asyncHandler(async (req, res) => {
   const to = String((req.body || {}).to || '').trim();
   if (!to) return res.status(400).json({ error: 'A phone number is required' });
   const r = await messaging.sendSms({ to, text: 'Howler : Pulse — SMS is connected ✓' });
   res.json(r);
-});
+}));
 
 // Platform notification settings (admin). Small allowlisted key/values.
 app.get('/api/admin/notification-settings', auth.requireAdmin, (_req, res) => {
@@ -3189,6 +3200,11 @@ app.get('*', (_req, res) => {
   res.setHeader('Cache-Control', 'no-cache, must-revalidate');
   res.sendFile(path.join(staticDir, 'index.html'));
 });
+
+// Single error-handling middleware (mounted last). Catches sync throws from any
+// route + async rejections forwarded by asyncHandler; logs full 5xx server-side
+// and returns a sanitized message (never leaks internal error text). See http.js.
+app.use(errorMiddleware);
 
 const PORT = process.env.PORT || 3045;
 app.listen(PORT, () => {

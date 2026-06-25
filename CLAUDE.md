@@ -54,6 +54,15 @@ should inherit the tier below, and the UI should show what's inherited.
   budget, extract a module; never raise the number. When you shrink a file, lower
   its budget to lock the win in. (Shared, non-routes logic that several modules
   need can be a factory library instead — see `server/query.js`, `server/briefing.js`.)
+- Error handling: a single `errorMiddleware` (`server/http.js`, mounted last in
+  `index.js`) is the one place errors are turned into responses — it logs full 5xx
+  detail server-side and returns a **generic** message (never leak raw error text).
+  Wrap async route handlers with `asyncHandler(...)` so a rejected promise reaches
+  the middleware instead of hanging the request (Express 4 doesn't auto-catch async
+  rejections). For an intentional, client-safe error throw `new HttpError(status,
+  msg)` — its status + message are shown; everything else is a sanitized 500. A
+  `process.on('unhandledRejection')` logs (doesn't exit). Prefer this over
+  hand-rolled `try/catch { res.status(500).json({ error: e.message }) }`.
 - Secrets are write-only: responses report whether a value is set + a mask, never
   the value. Branding/presentation (non-secret) can ride to the browser freely.
 - Email sends from one verified Resend domain; per-client "branding" is the look
