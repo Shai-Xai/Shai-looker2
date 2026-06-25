@@ -16,6 +16,7 @@ import { useScope } from '../lib/ScopeContext.jsx';
 import { api } from '../lib/api.js';
 import { useAccess, PERMS } from '../lib/access.js';
 import CreateSegmentModal from './CreateSegmentModal.jsx';
+import ShareMenu from './ShareMenu.jsx';
 import TileLockModal from './TileLockModal.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
 
@@ -126,6 +127,7 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
             {isMetric ? null : (tile.title || <em style={{ color: '#bbb', fontWeight: 400 }}>Untitled</em>)}
           </span>
           {!editable && (!isMobile || tapped) && canSegment && <SegmentButton onClick={() => setShowSegment(true)} isMobile={isMobile} />}
+          {!editable && (!isMobile || tapped) && <ShareMenu variant="tile" isMobile={isMobile} heading={tile.title || 'Dashboard tile'} />}
           {!editable && (!isMobile || tapped) && canInsight && (
             <>
               <PinButton tileId={tile.id} isMobile={isMobile} />

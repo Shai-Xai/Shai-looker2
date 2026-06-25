@@ -4,6 +4,7 @@ import { useIsMobile } from '../lib/useIsMobile.js';
 import { useSheetDrag } from '../lib/useSheetDrag.js';
 import AiMark from './AiMark.jsx';
 import OwlQuips from './OwlQuips.jsx';
+import ShareMenu from './ShareMenu.jsx';
 
 // Whole-dashboard AI summary. Streams an executive summary built from every
 // tile's data (scoped + filtered exactly like the live view).
@@ -82,6 +83,14 @@ export default function DashboardInsightModal({ dashboardId, title, filterValues
             <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)' }}>Dashboard summary</div>
             <div style={{ fontSize: 15, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{title || 'This dashboard'}</div>
           </div>
+          {text.trim() && !loading && (
+            <ShareMenu
+              variant="header"
+              isMobile={isMobile}
+              heading={`Dashboard summary · ${title || 'This dashboard'}`}
+              text={text}
+            />
+          )}
           <button style={btn} onClick={run} disabled={loading} title="Regenerate">↻</button>
           <button style={{ ...btn, fontSize: isMobile ? 22 : 17 }} onClick={onClose} aria-label="Close">✕</button>
         </div>
