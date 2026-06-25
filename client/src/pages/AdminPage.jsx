@@ -1541,6 +1541,16 @@ function fmtWhen(iso) {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 }
+// A short, friendly device label from a user-agent (for the install marker).
+function shortDevice(ua = '') {
+  const s = String(ua);
+  if (/iphone/i.test(s)) return 'iPhone';
+  if (/ipad/i.test(s)) return 'iPad';
+  if (/android/i.test(s)) return 'Android';
+  if (/mac os x|macintosh/i.test(s)) return 'Mac';
+  if (/windows/i.test(s)) return 'Windows';
+  return 'device';
+}
 // One emoji per action family — keeps the timeline scannable at a glance.
 function actionGlyph(action = '') {
   const a = String(action);
@@ -1589,8 +1599,9 @@ function UsersTab() {
   const [openInEdit, setOpenInEdit] = useState(false);
   const [adding, setAdding] = useState(false);
   const [showReport, setShowReport] = useState(false);
-  const load = () => Promise.all([api.adminListUsers(), api.adminListEntities(), api.getRoles().catch(() => ({ roles: [] }))])
-    .then(([u, e, r]) => { setUsers(u); setEntities(e); setRoles(r.roles || []); setHowlerRoles(r.howlerRoles || []); });
+  const [installs, setInstalls] = useState({});
+  const load = () => Promise.all([api.adminListUsers(), api.adminListEntities(), api.getRoles().catch(() => ({ roles: [] })), api.adminInstalls().catch(() => ({ installs: {} }))])
+    .then(([u, e, r, ins]) => { setUsers(u); setEntities(e); setRoles(r.roles || []); setHowlerRoles(r.howlerRoles || []); setInstalls(ins.installs || {}); });
   useEffect(() => { load(); }, []);
   // Open a user's detail; `edit` jumps straight into the edit form.
   const openUser = (u, edit = false) => { setOpenInEdit(edit); setSelectedId(u.id); };
@@ -1599,7 +1610,7 @@ function UsersTab() {
     try { await api.adminDeleteUser(u.id); load(); } catch (e) { alert(e.message); }
   };
   if (!users) return <Muted>Loading…</Muted>;
-  if (selectedId) return <UserDetail userId={selectedId} entities={entities} roles={roles} initialEditing={openInEdit} onBack={() => { setSelectedId(null); setOpenInEdit(false); load(); }} />;
+  if (selectedId) return <UserDetail userId={selectedId} entities={entities} roles={roles} install={installs[selectedId] || null} initialEditing={openInEdit} onBack={() => { setSelectedId(null); setOpenInEdit(false); load(); }} />;
   if (adding) return <AddUserForm entities={entities} roles={roles} howlerRoles={howlerRoles} onCancel={() => setAdding(false)} onCreated={(id) => { setAdding(false); load().then(() => { if (id) setSelectedId(id); }); }} />;
 
   const entName = Object.fromEntries(entities.map((e) => [e.id, e.name]));
@@ -1621,6 +1632,8 @@ function UsersTab() {
     return <span title={names.join(', ')}>{names.length === 1 ? names[0] : `${names.length} clients`}</span>;
   };
   const adminBadge = (u) => u.role === 'admin' && <span style={howlerBadge}>HOWLER</span>;
+  // 📱 marker when the user has opened Pulse as an installed app (PWA on their phone).
+  const installMark = (u) => { const i = installs[u.id]; return i ? <span title={`📱 App installed · last opened ${fmtWhen(i.lastAt)}`} style={{ fontSize: 13, cursor: 'help' }}>📱</span> : null; };
   const lastActiveCell = (u) => (
     <>
       <span>{relTime(u.lastActiveAt)}</span>
@@ -1659,7 +1672,7 @@ function UsersTab() {
           {sorted.map((u) => (
             <div key={u.id} className="lift" style={{ ...clientRow, gap: 8 }}>
               <div onClick={() => openUser(u)} style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, textAlign: 'left', flex: 1, cursor: 'pointer' }}>
-                <span style={{ fontWeight: 600, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis' }}>{u.fullName || u.email} {adminBadge(u)}</span>
+                <span style={{ fontWeight: 600, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis' }}>{u.fullName || u.email} {adminBadge(u)} {installMark(u)}</span>
                 <span style={{ fontSize: 12, color: 'var(--muted)' }}>{u.fullName ? `${u.email} · ` : ''}{u.role === 'admin' ? 'Howler admin' : 'Client'} · {clientsOf(u).length || (u.role === 'admin' ? '∞' : 0)} client{clientsOf(u).length === 1 ? '' : 's'}</span>
                 <span style={{ fontSize: 12, color: 'var(--muted)' }}>{u.mobile ? `${u.mobile} · ` : ''}active {relTime(u.lastActiveAt)}</span>
               </div>
@@ -1680,7 +1693,7 @@ function UsersTab() {
             {sorted.map((u) => (
               <tr key={u.id} className="lift" style={{ cursor: 'pointer' }} onClick={() => openUser(u)}>
                 <td style={td}>
-                  <div style={{ fontWeight: 600 }}>{u.fullName || u.email} {adminBadge(u)}</div>
+                  <div style={{ fontWeight: 600 }}>{u.fullName || u.email} {adminBadge(u)} {installMark(u)}</div>
                   {u.fullName && <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>{u.email}</div>}
                 </td>
                 <td style={td}>{u.role === 'admin' ? (u.howlerRoleLabel ? `Howler · ${u.howlerRoleLabel}` : 'Howler admin') : 'Client'}</td>
@@ -1849,7 +1862,7 @@ function AddUserForm({ entities, roles, howlerRoles = [], onCancel, onCreated })
 }
 
 // One user's detail: identity, client roles, usage profile and activity timeline.
-function UserDetail({ userId, entities = [], roles = [], initialEditing = false, onBack }) {
+function UserDetail({ userId, entities = [], roles = [], install = null, initialEditing = false, onBack }) {
   const [data, setData] = useState(null);
   const [err, setErr] = useState('');
   const [section, setSection] = useState('overview');
@@ -1904,6 +1917,7 @@ function UserDetail({ userId, entities = [], roles = [], initialEditing = false,
               <KV label="Account type" value={isAdmin ? 'Howler admin' : 'Client login'} />
               <KV label="Member of" value={isAdmin ? 'All clients (admin)' : (memberships.length ? memberships.map((m) => m.entityName).join(', ') : 'No clients linked')} />
               <KV label="Last login" value={fmtWhen(user.lastLogin)} sub={user.lastLogin ? relTime(user.lastLogin) : ''} />
+              <KV label="App installed" value={install ? '📱 Yes — on their phone' : 'Not detected'} sub={install ? `last opened ${relTime(install.lastAt)}` : 'never opened as an installed app'} />
               <KV label="Most recent action" value={mostRecent ? mostRecent.label : 'No activity yet'} sub={mostRecent ? `${relTime(mostRecent.at)}${mostRecent.entityName ? ` · ${mostRecent.entityName}` : ''}` : ''} />
               <KV label="Account created" value={fmtWhen(user.createdAt)} />
               <KV label="Notifications" value={`Email ${user.notifyEmail ? 'on' : 'off'} · Push ${user.notifyPush ? 'on' : 'off'}`} />
@@ -1999,6 +2013,18 @@ function UserDetail({ userId, entities = [], roles = [], initialEditing = false,
 
           {section === 'activity' && (
             <div>
+              {/* App install — is Pulse on their phone, and when did they last open it as an app? */}
+              <div style={{ ...cardStyle, display: 'flex', alignItems: 'center', gap: 12 }}>
+                <span style={{ fontSize: 24, width: 30, textAlign: 'center', flexShrink: 0 }}>{install ? '📱' : '🌐'}</span>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontWeight: 700, fontSize: 14 }}>{install ? 'Pulse installed on their phone' : 'Not installed as an app'}</div>
+                  <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.45 }}>
+                    {install
+                      ? <>Last opened in-app {relTime(install.lastAt)} · first installed {fmtWhen(install.firstAt)}{install.ua ? ` · ${shortDevice(install.ua)}` : ''}</>
+                      : 'We haven’t seen this user open Pulse from a home-screen / installed app — they may only use it in a browser tab.'}
+                  </div>
+                </div>
+              </div>
               {activity.length === 0 ? <Muted>No activity recorded yet.</Muted> : (
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
                   {activity.map((e, i) => (

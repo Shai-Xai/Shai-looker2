@@ -25,6 +25,8 @@ import AlertsPage from './pages/AlertsPage.jsx';
 import InventiveAskPage from './pages/InventiveAskPage.jsx';
 import Logo from './components/Logo.jsx';
 import { useBrandLogo } from './lib/brand.js';
+import { api } from './lib/api.js';
+import { isStandalone } from './lib/pwa.js';
 import RootErrorBoundary from './components/RootErrorBoundary.jsx';
 import { DrillProvider } from './lib/DrillContext.jsx';
 import { AuthProvider, useAuth } from './lib/auth.jsx';
@@ -210,6 +212,10 @@ const themeBtn = { border: 'none', background: 'rgba(128,128,128,0.12)', borderR
 function Shell() {
   const { user, loading, isAdmin } = useAuth();
   const { mode, activeEntityId } = useProfile();
+
+  // Tell the server when this user is running Pulse as an installed app (home
+  // screen / standalone) — stamps their install + last-opened so admin can see it.
+  useEffect(() => { if (user && isStandalone()) api.markInstalled(); }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) {
     return <div style={{ minHeight: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)' }}>Loading…</div>;

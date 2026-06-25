@@ -163,6 +163,9 @@ export const api = {
   saveSetupWizard: (steps) => fetch('/api/admin/setup-wizard', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ steps }) }).then(json),
   resetSetupWizard: () => fetch('/api/admin/setup-wizard', { method: 'DELETE' }).then(json),
   getSetupWizardProgress: (entityId) => fetch(`/api/admin/setup-wizard/progress/${entityId}`).then(json),
+  // PWA install: client self-reports when running as the installed app; admin reads the map.
+  markInstalled: () => fetch('/api/my/installed', { method: 'POST' }).catch(() => {}),
+  adminInstalls: () => fetch('/api/admin/installs').then(json),
   setSetupWizardProgress: (entityId, itemKey, done) => fetch(`/api/admin/setup-wizard/progress/${entityId}/${encodeURIComponent(itemKey)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ done }) }).then(json),
 
   // Onboarding checklist
