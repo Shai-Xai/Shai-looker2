@@ -2,6 +2,14 @@
 
 async function json(res) {
   const data = await res.json().catch(() => ({}));
+  // Session expired/invalid mid-use: a 401 is otherwise indistinguishable from a
+  // 500 to each page's local catch, so the user is stranded on a generic error.
+  // Tell the auth layer (AuthProvider listens) to drop back to the login screen.
+  // Still throw so the calling promise rejects rather than continuing with empty
+  // data.
+  if (res.status === 401 && typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('auth:unauthorized'));
+  }
   if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
   return data;
 }
