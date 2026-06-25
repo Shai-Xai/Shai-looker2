@@ -28,9 +28,18 @@ function mount(app, { db, auth, mailer, insights, resolveRecipe, audienceFor, an
   sql.exec(`CREATE TABLE IF NOT EXISTS setup_nudge_metric (
     entity_id TEXT PRIMARY KEY, n INTEGER NOT NULL DEFAULT 0, line TEXT NOT NULL DEFAULT '', at TEXT NOT NULL DEFAULT ''
   );`);
+  // Cached AI-personalised subject + opening per client, keyed on a signature of
+  // the outstanding items — regenerated only when that set changes (so repeat
+  // nudges read differently as the client completes setup, without re-calling AI
+  // on every run).
+  sql.exec(`CREATE TABLE IF NOT EXISTS setup_nudge_copy (
+    entity_id TEXT PRIMARY KEY, sig TEXT NOT NULL DEFAULT '', subject TEXT NOT NULL DEFAULT '', intro TEXT NOT NULL DEFAULT '', at TEXT NOT NULL DEFAULT ''
+  );`);
 
   const setting = (k, d) => db.getSetting(k, d);
   const enabled = () => setting('setup_nudge_enabled', '1') !== '0';
+  // Personalise the subject + opening with AI, tailored to the outstanding items.
+  const aiCopyOn = () => setting('setup_nudge_ai_copy', '1') !== '0';
   // Cadence — a global default with an optional per-client override (blank = inherit
   // the global). Pass an entity id to honour its override; omit it for the global.
   const cadence = (eid, key, dflt) => {
@@ -147,17 +156,43 @@ function mount(app, { db, auth, mailer, insights, resolveRecipe, audienceFor, an
     return { count, line };
   }
 
+  // ── Personalised subject + opening (AI, tailored to the outstanding items) ──
+  // A signature of what's outstanding — the copy is regenerated only when this
+  // changes, so a client whose gaps haven't moved keeps consistent wording, and
+  // a client who's completed items gets fresh copy next time.
+  const copySig = (st) => `${st.account.join('|')}#${st.events.map((x) => `${x.name}:${x.missing.join(',')}`).join(';')}`;
+  // Resolve the subject + opening line for a client's nudge: the AI-personalised
+  // pair when it's on and succeeds (cached by signature), else the editable static
+  // copy. Always returns a usable { subject, intro }. Best-effort — never throws.
+  async function resolveCopy(e, st, opp) {
+    const fallback = { subject: copy('subject'), intro: copy('intro') };
+    if (!aiCopyOn() || typeof insights?.nudgeCopy !== 'function') return fallback;
+    const apiKey = anthropicKeyForEntity?.(e.id);
+    if (!apiKey || !insights.isConfigured?.(apiKey)) return fallback;
+    const sig = copySig(st);
+    try { const c = sql.prepare('SELECT sig, subject, intro FROM setup_nudge_copy WHERE entity_id=?').get(e.id); if (c && c.sig === sig && c.subject && c.intro) return { subject: c.subject, intro: c.intro }; } catch { /* ignore */ }
+    try {
+      const outstanding = [...st.account, ...st.events.map((x) => `${x.name}: ${x.missing.join(', ')}`)];
+      const out = await insights.nudgeCopy({ clientName: e.name, outstanding, metric: opp?.line || '', apiKey, instructions: aiInstructionsFor?.(null) || '' });
+      if (out?.subject && out?.intro) {
+        try { sql.prepare('INSERT INTO setup_nudge_copy (entity_id,sig,subject,intro,at) VALUES (?,?,?,?,?) ON CONFLICT(entity_id) DO UPDATE SET sig=excluded.sig, subject=excluded.subject, intro=excluded.intro, at=excluded.at').run(e.id, sig, out.subject, out.intro, new Date().toISOString()); } catch { /* ignore */ }
+        return out;
+      }
+    } catch { /* fall back to static */ }
+    return fallback;
+  }
+
   // ── Messages (value-led for clients, factual for the team) ──────────────────
   const li = (s) => `<li style="margin:4px 0">${s}</li>`;
   // Escape admin-editable copy before it lands in the HTML email.
   const esc = (s) => String(s || '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const VALUE = { 'Data scope': 'See only your events’ live numbers', 'A suite of dashboards': 'Your live dashboards, organised by event', 'A login': 'Get your team into Pulse', Branding: 'Make Pulse look like you — logo & colours', 'Email template': 'Brand the emails Pulse sends for you', Inventive: 'Ask your data questions with the AI analyst', Integrations: 'Sync audiences to Meta & TikTok', 'A digest': 'An automated briefing emailed to your team', 'Briefing tuned': 'A sharper daily read from the Owl' };
-  function clientHtml(e, st, opp) {
+  function clientHtml(e, st, opp, intro) {
     const wins = st.account.map((a) => li(VALUE[a] || a)).join('');
     const evs = st.events.length ? `<p style="margin:14px 0 4px;font-weight:600">Per event, you could still add:</p><ul style="padding-left:18px;margin:0">${st.events.map((x) => li(`<b>${x.name}</b> — ${x.missing.join(', ')}`)).join('')}</ul>` : '';
     const hook = opp?.line ? `<div style="background:#fff0f3;border:1px solid #ffd2dd;border-radius:10px;padding:12px 14px;margin:0 0 14px;font-weight:600">💸 ${opp.line}</div>` : '';
     return `<div style="font-family:system-ui,Arial,sans-serif;font-size:15px;line-height:1.5;color:#1d1d1f">
-      <p>${esc(copy('intro'))}</p>
+      <p>${esc(intro || copy('intro'))}</p>
       ${hook}
       <p>A few quick wins are still open${st.account.length ? ':' : '.'}</p>
       ${wins ? `<ul style="padding-left:18px;margin:8px 0">${wins}</ul>` : ''}${evs}
@@ -166,8 +201,8 @@ function mount(app, { db, auth, mailer, insights, resolveRecipe, audienceFor, an
   }
   // Plain-text version for the in-app inbox thread (the OS spine stores message
   // bodies as text, not HTML). Same value-led framing as the email.
-  function clientInboxBody(e, st, opp) {
-    const lines = [copy('intro')];
+  function clientInboxBody(e, st, opp, intro) {
+    const lines = [intro || copy('intro')];
     if (opp?.line) lines.push('', `💸 ${opp.line}`);
     if (st.account.length) { lines.push('', 'Still to set up:'); for (const a of st.account) lines.push(`• ${VALUE[a] || a}`); }
     if (st.events.length) { lines.push('', 'Per event, you could still add:'); for (const x of st.events) lines.push(`• ${x.name} — ${x.missing.join(', ')}`); }
@@ -177,8 +212,8 @@ function mount(app, { db, auth, mailer, insights, resolveRecipe, audienceFor, an
   // Post (or re-raise) ONE thread on the client's shared inbox. channels:[] keeps
   // it inbox-only — the targeted email is sent separately. A stable subject means
   // a repeat nudge reopens the same thread instead of spawning a new one.
-  const postClientInbox = (e, st, opp) => {
-    try { return !!os?.announce?.({ entityId: e.id, title: copy('title'), body: clientInboxBody(e, st, opp), priority: 'fyi', channels: [], subjectType: 'setup-nudge', subjectId: 'setup' }); } catch { return false; }
+  const postClientInbox = (e, st, opp, cc) => {
+    try { return !!os?.announce?.({ entityId: e.id, title: cc?.subject || copy('title'), body: clientInboxBody(e, st, opp, cc?.intro), priority: 'fyi', channels: [], subjectType: 'setup-nudge', subjectId: 'setup' }); } catch { return false; }
   };
   function adminHtml(rows) {
     const body = rows.map(({ e, st, opp }) => `<div style="margin:0 0 14px"><div style="font-weight:700">${e.name} <span style="color:#86868b;font-weight:400">— ${st.missing} outstanding</span></div>
@@ -204,9 +239,10 @@ function mount(app, { db, auth, mailer, insights, resolveRecipe, audienceFor, an
       // Client nudge (opt-in, value-led) on BOTH surfaces: an in-app inbox thread
       // (the shared client inbox) + a targeted email to the chosen client users.
       if (clientNudgeOn(e.id) && (force || !throttled(e.id, 'client', e.id))) {
-        let delivered = postClientInbox(e, st, opp);
+        const cc = await resolveCopy(e, st, opp).catch(() => ({ subject: copy('subject'), intro: copy('intro') }));
+        let delivered = postClientInbox(e, st, opp, cc);
         const emails = emailsOf(clientRecipients(e));
-        if (emails.length && mailer.isConfigured?.()) { try { mailer.send({ to: emails, subject: copy('subject'), html: clientHtml(e, st, opp), kind: 'setup-nudge', entity: e.id }); delivered = true; } catch { /* ignore */ } }
+        if (emails.length && mailer.isConfigured?.()) { try { mailer.send({ to: emails, subject: cc.subject, html: clientHtml(e, st, opp, cc.intro), kind: 'setup-nudge', entity: e.id }); delivered = true; } catch { /* ignore */ } }
         if (delivered) { if (!force) mark(e.id, 'client'); clientSent += 1; }
       }
       // Aggregate for the account team.
@@ -270,13 +306,14 @@ function mount(app, { db, auth, mailer, insights, resolveRecipe, audienceFor, an
   // ── Global Reminders settings (cadence + editable wording) — Admin → Onboarding ─
   app.get('/api/admin/setup-nudge/settings', auth.requireAdmin, (_req, res) => {
     res.json({
-      enabled: enabled(), graceDays: graceDays(), repeatDays: repeatDays(), hour: sendHour(),
+      enabled: enabled(), aiCopy: aiCopyOn(), graceDays: graceDays(), repeatDays: repeatDays(), hour: sendHour(),
       copy: Object.fromEntries(COPY_KEYS.map((k) => [k, copy(k)])), copyDefaults: COPY_DEFAULTS,
     });
   });
   app.put('/api/admin/setup-nudge/settings', auth.requireAdmin, (req, res) => {
     const b = req.body || {};
     if (typeof b.enabled === 'boolean') db.setSetting('setup_nudge_enabled', b.enabled ? '1' : '0');
+    if (typeof b.aiCopy === 'boolean') db.setSetting('setup_nudge_ai_copy', b.aiCopy ? '1' : '0');
     const posInt = (v) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? String(Math.round(n)) : null; };
     if (posInt(b.graceDays)) db.setSetting('setup_nudge_grace_days', posInt(b.graceDays));
     if (posInt(b.repeatDays)) db.setSetting('setup_nudge_repeat_days', posInt(b.repeatDays));
@@ -287,14 +324,23 @@ function mount(app, { db, auth, mailer, insights, resolveRecipe, audienceFor, an
   // Email the logged-in admin a sample client nudge rendered with the current
   // (saved) wording — a quick preview of how the copy reads. Uses sample data so
   // it isn't tied to any one client.
-  app.post('/api/admin/setup-nudge/test', auth.requireAdmin, (req, res) => {
+  app.post('/api/admin/setup-nudge/test', auth.requireAdmin, async (req, res) => {
     const to = req.user?.email;
     if (!to) return res.status(400).json({ error: 'Your account has no email address.' });
     if (!mailer.isConfigured?.()) return res.status(400).json({ error: 'Email is not configured.' });
     const sample = { id: 'sample', name: 'Sample Client' };
     const st = { account: ['Branding', 'A digest'], events: [{ name: 'Summer Festival', missing: ['goals', 'alerts'] }], missing: 4 };
     const opp = { count: 128, line: '128 customers abandoned checkout — a win-back campaign could bring them back.' };
-    try { mailer.send({ to, subject: copy('subject'), html: clientHtml(sample, st, opp), kind: 'setup-nudge' }); res.json({ ok: true, to }); }
+    // Preview the personalised copy when AI is on (using the platform key, since the
+    // sample isn't a real client); otherwise the static editable wording.
+    let cc = { subject: copy('subject'), intro: copy('intro') };
+    if (aiCopyOn() && typeof insights?.nudgeCopy === 'function') {
+      const apiKey = anthropicKeyForEntity?.(null);
+      if (apiKey && insights.isConfigured?.(apiKey)) {
+        try { const out = await insights.nudgeCopy({ clientName: sample.name, outstanding: [...st.account, ...st.events.map((x) => `${x.name}: ${x.missing.join(', ')}`)], metric: opp.line, apiKey, instructions: aiInstructionsFor?.(null) || '' }); if (out?.subject && out?.intro) cc = out; } catch { /* static fallback */ }
+      }
+    }
+    try { mailer.send({ to, subject: cc.subject, html: clientHtml(sample, st, opp, cc.intro), kind: 'setup-nudge' }); res.json({ ok: true, to, personalised: cc.subject !== copy('subject') }); }
     catch { res.status(500).json({ error: 'Send failed' }); }
   });
   // Send the nudges for this one client right now (ignores grace/throttle) — a test.
@@ -306,8 +352,9 @@ function mount(app, { db, auth, mailer, insights, resolveRecipe, audienceFor, an
       const emails = emailsOf(clientRecipients(e));
       let inboxed = false;
       if (req.body?.audience !== 'admin' && clientNudgeOn(e.id)) {
-        inboxed = postClientInbox(e, st, opp);
-        if (emails.length && mailer.isConfigured?.()) mailer.send({ to: emails, subject: copy('subject'), html: clientHtml(e, st, opp), kind: 'setup-nudge', entity: e.id });
+        const cc = await resolveCopy(e, st, opp).catch(() => ({ subject: copy('subject'), intro: copy('intro') }));
+        inboxed = postClientInbox(e, st, opp, cc);
+        if (emails.length && mailer.isConfigured?.()) mailer.send({ to: emails, subject: cc.subject, html: clientHtml(e, st, opp, cc.intro), kind: 'setup-nudge', entity: e.id });
       }
       const adminEmails = emailsOf(adminRecipients(e));
       if (req.body?.audience !== 'client' && adminEmails.length && mailer.isConfigured?.()) mailer.send({ to: adminEmails, subject: `Pulse setup: ${e.name} needs attention`, html: adminHtml([{ e, st, opp }]), kind: 'setup-nudge' });

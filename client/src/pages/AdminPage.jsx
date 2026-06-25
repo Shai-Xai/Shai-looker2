@@ -223,7 +223,7 @@ function NudgeGlobalSettings() {
   if (!s) return null;
   const set = (k, v) => setS((c) => ({ ...c, [k]: v }));
   const setCopy = (k, v) => setS((c) => ({ ...c, copy: { ...c.copy, [k]: v } }));
-  const persist = () => api.saveSetupNudgeSettings({ enabled: s.enabled, graceDays: s.graceDays, repeatDays: s.repeatDays, hour: s.hour, copy: s.copy });
+  const persist = () => api.saveSetupNudgeSettings({ enabled: s.enabled, aiCopy: s.aiCopy, graceDays: s.graceDays, repeatDays: s.repeatDays, hour: s.hour, copy: s.copy });
   const save = async () => { try { await persist(); flash(setSaved); } catch (e) { alert(e.message); } };
   // Save first so the preview reflects what's on screen, then email the admin.
   const test = async () => { setTestMsg('Sending…'); try { await persist(); const r = await api.testSetupNudgeSettings(); setTestMsg(`✓ Sent to ${r.to}`); } catch (e) { setTestMsg(`✗ ${e.message || 'Send failed'}`); } };
@@ -263,12 +263,19 @@ function NudgeGlobalSettings() {
             {num('repeatDays', 'Repeat (days)', 'How often to re-nudge while items stay open.')}
             {num('hour', 'Send hour (0–23)', 'Hour of day the daily check runs.')}
           </div>
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer' }}>
+            <input type="checkbox" checked={!!s.aiCopy} onChange={(e) => set('aiCopy', e.target.checked)} style={{ marginTop: 3 }} />
+            <span>
+              <span style={{ display: 'block', fontWeight: 700, fontSize: 13.5 }}>Personalise the subject & opening with AI</span>
+              <span style={{ display: 'block', fontSize: 12, color: 'var(--muted)' }}>Writes a fresh subject + opening line tailored to each client’s outstanding items, so repeat emails read differently as they finish setup. Falls back to the wording below when AI is off or unavailable.</span>
+            </span>
+          </label>
           <div>
-            <L>Client message wording</L>
+            <L>Client message wording {s.aiCopy && <span style={{ fontWeight: 400, textTransform: 'none', color: 'var(--muted)' }}>· fallback when AI is off/unavailable</span>}</L>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 6 }}>
-              {txt('subject', 'Email subject')}
+              {txt('subject', `Email subject${s.aiCopy ? ' (fallback)' : ''}`)}
               {txt('title', 'In-app title')}
-              {txt('intro', 'Opening line (email + in-app)')}
+              {txt('intro', `Opening line${s.aiCopy ? ' (fallback)' : ''}`)}
               {txt('button', 'Button label (email)')}
               {txt('signoff', 'Sign-off line')}
             </div>
