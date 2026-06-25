@@ -2151,7 +2151,7 @@ function SetupNudgeConfig({ entity, clientUsers = [], adminUsers = [] }) {
   const sub = { fontWeight: 400, textTransform: 'none', color: 'var(--muted)' };
   return (
     <div style={cardStyle}>
-      <p style={{ ...hint, marginTop: 0 }}>A daily reminder while setup is outstanding (after a short grace period, then repeated weekly — never more). The account team gets a factual summary bulked across their clients; clients get a value-led nudge.</p>
+      <p style={{ ...hint, marginTop: 0 }}>A daily reminder while setup is outstanding (after a short grace period, then repeated weekly — never more). The account team gets a factual summary bulked across their clients; clients get a value-led nudge in-app and by email.</p>
       <L>Account team <span style={sub}>· who at Howler gets the summary · blank = the client’s owner/support</span></L>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '6px 0 14px' }}>{adminUsers.length ? adminUsers.map((u) => chip('adminRecipients', u)) : <Muted>No admins.</Muted>}</div>
       <label style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: cfg.clientOn ? 8 : 0, cursor: 'pointer' }}>
@@ -2160,6 +2160,7 @@ function SetupNudgeConfig({ entity, clientUsers = [], adminUsers = [] }) {
       </label>
       {cfg.clientOn && (
         <div style={{ marginBottom: 8 }}>
+          <p style={{ ...hint, margin: '0 0 6px' }}>Delivered on both surfaces: an in-app message in the client’s Pulse inbox <b>and</b> an email to the recipients below.</p>
           <L>Client recipients <span style={sub}>· blank = all the client’s users</span></L>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>{clientUsers.length ? clientUsers.map((u) => chip('clientRecipients', u)) : <Muted>No client logins yet.</Muted>}</div>
         </div>

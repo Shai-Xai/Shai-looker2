@@ -1,9 +1,10 @@
 // ─── Setup nudges — SELF-CONTAINED, DISPOSABLE MODULE ─────────────────────────
 // A once-a-day evaluator that finds clients whose setup has been outstanding for
 // a while and nudges the right people — BULKED so nobody gets a flood:
-//   • the CLIENT's users get a value-led "get more out of Pulse" email (opt-in
-//     per client), covering all that client's gaps at once. (The persistent
-//     in-app onboarding card already nudges them inside Pulse.)
+//   • the CLIENT's users get a value-led "get more out of Pulse" nudge (opt-in
+//     per client), covering all that client's gaps at once, on BOTH surfaces:
+//     an in-app inbox thread (their shared client inbox) + a targeted email to
+//     the chosen client recipients.
 //   • the ACCOUNT TEAM (Howler admins) get a factual "these clients need setup"
 //     email summary, bulked across all the clients assigned to them.
 // Who receives it is configured per client in the back-end onboarding section
@@ -12,7 +13,9 @@
 //
 // Mount: require('./setupNudge').mount(app, { db, auth, mailer });
 
-function mount(app, { db, auth, mailer, insights, resolveRecipe, audienceFor, anthropicKeyForEntity, aiInstructionsFor }) {
+function mount(app, { db, auth, mailer, insights, resolveRecipe, audienceFor, anthropicKeyForEntity, aiInstructionsFor, os }) {
+  const NUDGE_SUBJECT = 'Get more out of Pulse — a few quick steps left';
+  const NUDGE_TITLE = 'Get more out of Pulse — a few steps left';
   const sql = db.db;
   sql.exec(`CREATE TABLE IF NOT EXISTS setup_nudge_recipients (
     entity_id TEXT NOT NULL, audience TEXT NOT NULL, user_id TEXT NOT NULL,
@@ -140,6 +143,22 @@ function mount(app, { db, auth, mailer, insights, resolveRecipe, audienceFor, an
       <p style="margin-top:16px"><a href="${mailer.baseUrl ? mailer.baseUrl() : ''}" style="background:#FF385C;color:#fff;text-decoration:none;padding:10px 18px;border-radius:8px;font-weight:600;display:inline-block">Open Pulse</a></p>
       <p style="color:#86868b;font-size:13px;margin-top:14px">Need a hand? Just reply — your Howler team is happy to help.</p></div>`;
   }
+  // Plain-text version for the in-app inbox thread (the OS spine stores message
+  // bodies as text, not HTML). Same value-led framing as the email.
+  function clientInboxBody(e, st, opp) {
+    const lines = ["You're close to getting the most out of Pulse — a few quick steps are still open."];
+    if (opp?.line) lines.push('', `💸 ${opp.line}`);
+    if (st.account.length) { lines.push('', 'Still to set up:'); for (const a of st.account) lines.push(`• ${VALUE[a] || a}`); }
+    if (st.events.length) { lines.push('', 'Per event, you could still add:'); for (const x of st.events) lines.push(`• ${x.name} — ${x.missing.join(', ')}`); }
+    lines.push('', 'Open Pulse to finish — or just reply here and your Howler team will help.');
+    return lines.join('\n');
+  }
+  // Post (or re-raise) ONE thread on the client's shared inbox. channels:[] keeps
+  // it inbox-only — the targeted email is sent separately. A stable subject means
+  // a repeat nudge reopens the same thread instead of spawning a new one.
+  const postClientInbox = (e, st, opp) => {
+    try { return !!os?.announce?.({ entityId: e.id, title: NUDGE_TITLE, body: clientInboxBody(e, st, opp), priority: 'fyi', channels: [], subjectType: 'setup-nudge', subjectId: 'setup' }); } catch { return false; }
+  };
   function adminHtml(rows) {
     const body = rows.map(({ e, st, opp }) => `<div style="margin:0 0 14px"><div style="font-weight:700">${e.name} <span style="color:#86868b;font-weight:400">— ${st.missing} outstanding</span></div>
       ${opp?.count ? `<div style="font-size:13px;color:#b00020">~${opp.count.toLocaleString()} abandoned carts unactioned</div>` : ''}
@@ -161,11 +180,13 @@ function mount(app, { db, auth, mailer, insights, resolveRecipe, audienceFor, an
       if (!st.missing) continue;
       // Personalised opportunity (live abandoned-cart count + AI line) — best-effort.
       const opp = await cartOpportunity(e).catch(() => null);
-      // Client nudge (opt-in, value-led) — a targeted email to the chosen client
-      // users (the persistent in-app onboarding card already nudges them in-app).
+      // Client nudge (opt-in, value-led) on BOTH surfaces: an in-app inbox thread
+      // (the shared client inbox) + a targeted email to the chosen client users.
       if (clientNudgeOn(e.id) && (force || !throttled(e.id, 'client'))) {
+        let delivered = postClientInbox(e, st, opp);
         const emails = emailsOf(clientRecipients(e));
-        if (emails.length && mailer.isConfigured?.()) { try { mailer.send({ to: emails, subject: 'Get more out of Pulse — a few quick steps left', html: clientHtml(e, st, opp), kind: 'setup-nudge', entity: e.id }); } catch { /* ignore */ } if (!force) mark(e.id, 'client'); clientSent += 1; }
+        if (emails.length && mailer.isConfigured?.()) { try { mailer.send({ to: emails, subject: NUDGE_SUBJECT, html: clientHtml(e, st, opp), kind: 'setup-nudge', entity: e.id }); delivered = true; } catch { /* ignore */ } }
+        if (delivered) { if (!force) mark(e.id, 'client'); clientSent += 1; }
       }
       // Aggregate for the account team.
       for (const uid of adminRecipients(e)) { (adminAgg[uid] = adminAgg[uid] || []).push({ e, st, opp }); }
@@ -220,10 +241,14 @@ function mount(app, { db, auth, mailer, insights, resolveRecipe, audienceFor, an
     const opp = await cartOpportunity(e).catch(() => null);
     try {
       const emails = emailsOf(clientRecipients(e));
-      if (req.body?.audience !== 'admin' && clientNudgeOn(e.id) && emails.length && mailer.isConfigured?.()) mailer.send({ to: emails, subject: 'Get more out of Pulse — a few quick steps left', html: clientHtml(e, st, opp), kind: 'setup-nudge', entity: e.id });
+      let inboxed = false;
+      if (req.body?.audience !== 'admin' && clientNudgeOn(e.id)) {
+        inboxed = postClientInbox(e, st, opp);
+        if (emails.length && mailer.isConfigured?.()) mailer.send({ to: emails, subject: NUDGE_SUBJECT, html: clientHtml(e, st, opp), kind: 'setup-nudge', entity: e.id });
+      }
       const adminEmails = emailsOf(adminRecipients(e));
       if (req.body?.audience !== 'client' && adminEmails.length && mailer.isConfigured?.()) mailer.send({ to: adminEmails, subject: `Pulse setup: ${e.name} needs attention`, html: adminHtml([{ e, st, opp }]), kind: 'setup-nudge' });
-      res.json({ ok: true, sentTo: { client: clientNudgeOn(e.id) ? emailsOf(clientRecipients(e)) : [], admin: emailsOf(adminRecipients(e)) }, missing: st.missing, opportunity: opp || null });
+      res.json({ ok: true, sentTo: { client: clientNudgeOn(e.id) ? emailsOf(clientRecipients(e)) : [], admin: emailsOf(adminRecipients(e)) }, clientInbox: inboxed, missing: st.missing, opportunity: opp || null });
     } catch (err) { res.status(500).json({ error: 'Send failed' }); }
   });
 

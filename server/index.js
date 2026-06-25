@@ -2894,7 +2894,7 @@ const segmentsApi = require('./segments').mount(app, {
 // setup, bulked per recipient. Managed per client in the onboarding section. Mounted
 // here (after the action engine + resolveRecipe) so its personalised live metric
 // (the abandoned-cart count) can reuse the campaign audience resolver.
-require('./setupNudge').mount(app, { db, auth, mailer, insights, resolveRecipe, audienceFor: actionsApi.audienceFor, anthropicKeyForEntity, aiInstructionsFor });
+require('./setupNudge').mount(app, { db, auth, mailer, os, insights, resolveRecipe, audienceFor: actionsApi.audienceFor, anthropicKeyForEntity, aiInstructionsFor });
 
 // ─── Briefing configuration ─────────────────────────────────────────────────────
 // Admin: global briefing rules + editable phase defaults.
