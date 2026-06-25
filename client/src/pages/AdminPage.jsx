@@ -2150,6 +2150,7 @@ const AM_TASKS = [
 // data; the rest are manual ticks scoped to that suite.
 const EVENT_TASKS = [
   { key: 'goals', icon: '⭐', title: 'Set event goals', desc: 'A live target for this event — preview the suite to add one.', section: 'suites', auto: (sd) => sd.goals > 0 },
+  { key: 'alerts', icon: '🔔', title: 'Set up alerts', desc: 'Metric watchers for this event — preview the suite to add one.', section: 'suites', auto: (sd) => sd.alerts > 0 },
   { key: 'branding', icon: '🎨', title: 'Custom event branding', desc: 'Override the look for this event — logo, colours, sender.', section: 'suites', auto: (sd) => sd.brandingSet },
   { key: 'emailtmpl', icon: '✉️', title: 'Email template added', desc: 'Tailor this event’s email header, intro and footer.', section: 'suites', auto: (sd) => sd.templateSet },
   { key: 'briefing', icon: '📝', title: 'Tune the briefing', desc: 'Key dates, phase and instructions so the Owl reads this event right.', section: 'briefing' },
@@ -2172,7 +2173,8 @@ function ClientSetupChecklist({ entity, suites, users, go }) {
       api.getSetupWizardProgress(entity.id).catch(() => ({ ticks: {} })),
       Promise.all(suites.map((su) => api.suiteGoals(su.id).then((r) => (Array.isArray(r) ? r : r.goals || [])).catch(() => []))),
       Promise.all(suites.map((su) => api.getSuiteMailTemplate(su.id).catch(() => null))),
-    ]).then(([mt, digests, prog, goalsArr, suiteMtArr]) => {
+      Promise.all(suites.map((su) => api.suiteAlerts(su.id).then((r) => (Array.isArray(r) ? r : r.alerts || [])).catch(() => []))),
+    ]).then(([mt, digests, prog, goalsArr, suiteMtArr, alertsArr]) => {
       if (!alive) return;
       const acc = tmplOf(mt);
       setAux({
@@ -2182,6 +2184,7 @@ function ClientSetupChecklist({ entity, suites, users, go }) {
         goalsBySuite: Object.fromEntries(suites.map((su, i) => [su.id, (goalsArr[i] || []).length])),
         brandingBySuite: Object.fromEntries(suites.map((su, i) => [su.id, hasBranding(tmplOf(suiteMtArr[i]))])),
         templateBySuite: Object.fromEntries(suites.map((su, i) => [su.id, hasTemplate(tmplOf(suiteMtArr[i]))])),
+        alertsBySuite: Object.fromEntries(suites.map((su, i) => [su.id, (alertsArr[i] || []).length])),
         ticks: prog.ticks || {},
       });
     });
@@ -2197,7 +2200,7 @@ function ClientSetupChecklist({ entity, suites, users, go }) {
   const accAuto = (t) => !!(t.auto && t.auto(accData));
   const accManual = (t) => ticks['amchk_' + t.key] === 1;
   const accDone = (t) => accAuto(t) || accManual(t);
-  const evData = (su) => ({ goals: aux?.goalsBySuite?.[su.id] || 0, brandingSet: aux?.brandingBySuite?.[su.id], templateSet: aux?.templateBySuite?.[su.id] });
+  const evData = (su) => ({ goals: aux?.goalsBySuite?.[su.id] || 0, brandingSet: aux?.brandingBySuite?.[su.id], templateSet: aux?.templateBySuite?.[su.id], alerts: aux?.alertsBySuite?.[su.id] || 0 });
   const evAuto = (su, t) => !!(t.auto && t.auto(evData(su)));
   const evManual = (su, t) => ticks[`amchk_${su.id}_${t.key}`] === 1;
   const evDone = (su, t) => evAuto(su, t) || evManual(su, t);
