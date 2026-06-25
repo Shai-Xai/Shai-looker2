@@ -1231,21 +1231,33 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
 
   // Send a due scheduled campaign — resolves the audience live, then runs.
   async function runScheduledSend(a) {
+    // Atomically CLAIM the job before the (slow) audience resolution: flip
+    // scheduled → running only if it's still scheduled. If we didn't win the
+    // claim (changes !== 1), an overlapping tick or a concurrent manual launch
+    // already took it — bail, so the campaign can't be sent twice. (Previously
+    // the status flip happened AFTER `await audienceFor`, leaving a multi-second
+    // window where the same 'scheduled' row could be re-selected and re-sent.)
+    const claim = sql.prepare("UPDATE actions SET status='running', updated_at=? WHERE id=? AND status='scheduled'").run(now(), a.id);
+    if (claim.changes !== 1) return;
     let list;
     if (a.config.audience.mode === 'snapshot') { const sup = suppressed(a.entityId); list = a.audience.filter((r) => !sup.has(r.email)); }
     else { ({ list } = await audienceFor(a.entityId, a.config, { id: 'scheduler', email: 'scheduler@pulse', role: 'admin', entityIds: [] })); }
     if (!list.length) { saveResults(a.id, { ...a.results, lastError: 'Audience was empty at the scheduled time' }); setStatus(a.id, 'failed'); return; }
-    sql.prepare("UPDATE actions SET status='running', audience=?, updated_at=? WHERE id=?").run(JSON.stringify(list), now(), a.id);
+    sql.prepare("UPDATE actions SET audience=?, updated_at=? WHERE id=?").run(JSON.stringify(list), now(), a.id);
     const rootId = a.parentId || a.id;
     const ins = sql.prepare('INSERT OR IGNORE INTO action_sent (root_id, email, at) VALUES (?,?,?)');
     for (const r of list) ins.run(rootId, r.email, now());
     runCampaign(a.id).catch((e) => { console.error('[actions] scheduled run failed', a.id, e.message); setStatus(a.id, 'failed'); });
   }
+  let schedTicking = false; // re-entrancy guard: never let two ticks overlap
   async function processScheduled() {
-    if (!enabled()) return;
-    const nowIso = now();
-    const due = sql.prepare("SELECT id FROM actions WHERE status='scheduled' AND json_extract(config,'$.scheduledAt') <= ?").all(nowIso);
-    for (const { id } of due) { const a = getAction(id); if (a && a.status === 'scheduled') await runScheduledSend(a).catch((e) => console.error('[actions] schedule tick', id, e.message)); }
+    if (!enabled() || schedTicking) return;
+    schedTicking = true;
+    try {
+      const nowIso = now();
+      const due = sql.prepare("SELECT id FROM actions WHERE status='scheduled' AND json_extract(config,'$.scheduledAt') <= ?").all(nowIso);
+      for (const { id } of due) { const a = getAction(id); if (a && a.status === 'scheduled') await runScheduledSend(a).catch((e) => console.error('[actions] schedule tick', id, e.message)); }
+    } finally { schedTicking = false; }
   }
   const schedTimer = setInterval(() => processScheduled().catch(() => {}), 60000);
   if (schedTimer.unref) schedTimer.unref();
