@@ -2818,10 +2818,6 @@ require('./setupWizard').mount(app, { db, auth });
 // PWA install tracking — records when a user opens Pulse as an installed app.
 require('./installs').mount(app, { db, auth });
 
-// Setup nudges — daily reminders to clients + the account team about outstanding
-// setup, bulked per recipient. Managed per client in the onboarding section.
-require('./setupNudge').mount(app, { db, auth, mailer, insights, resolveRecipe, audienceFor: actionsApi.audienceFor, anthropicKeyForEntity, aiInstructionsFor });
-
 // Onboarding & feature telemetry — usage signals to refine the wizard from real behaviour.
 require('./telemetry').mount(app, { db, auth, rateLimit });
 
@@ -2893,6 +2889,12 @@ const resolveRecipe = (entityId, key) => {
 const segmentsApi = require('./segments').mount(app, {
   db, auth, meta, tiktok, resolveAudience: actionsApi.audienceFor, resolveRecipe,
 });
+
+// Setup nudges — daily reminders to clients + the account team about outstanding
+// setup, bulked per recipient. Managed per client in the onboarding section. Mounted
+// here (after the action engine + resolveRecipe) so its personalised live metric
+// (the abandoned-cart count) can reuse the campaign audience resolver.
+require('./setupNudge').mount(app, { db, auth, mailer, insights, resolveRecipe, audienceFor: actionsApi.audienceFor, anthropicKeyForEntity, aiInstructionsFor });
 
 // ─── Briefing configuration ─────────────────────────────────────────────────────
 // Admin: global briefing rules + editable phase defaults.
