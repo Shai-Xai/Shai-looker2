@@ -2113,35 +2113,49 @@ const AM_TASKS = [
   { key: 'client', icon: '🏢', title: 'Set up the client', desc: 'Name, logo and AI context.', section: 'settings', auto: (d) => !!(d.entity.name || '').trim() },
   { key: 'scope', icon: '🔒', title: 'Lock their data scope', desc: 'Pick the organiser so they only ever see their own data.', section: 'settings', auto: (d) => d.entity.allOrganisers || Object.values(d.entity.lockedFilters || {}).some((v) => String(v || '').trim()) },
   { key: 'branding', icon: '🎨', title: 'Add branding', desc: 'Logo, colours and sender — white-labels the app and emails.', section: 'email', auto: (d) => d.brandingSet },
+  { key: 'emailtmpl', icon: '✉️', title: 'Email template added', desc: 'Set the email header, intro and footer wording.', section: 'email', auto: (d) => d.emailTemplateSet },
   { key: 'logins', icon: '🔑', title: 'Create logins & roles', desc: 'Add the people who sign in and set each one’s role.', section: 'logins', auto: (d) => d.users.length > 0 },
   { key: 'inventive', icon: '✨', title: 'Assign Inventive', desc: 'Link the client’s Inventive analyst workspace.', section: 'integrations', auto: (d) => !!(d.entity.inventiveRefId || d.entity.inventiveName) },
   { key: 'integrations', icon: '🔌', title: 'Add integrations', desc: 'Connect Looker / Meta / TikTok / email as needed.', section: 'integrations' },
   { key: 'digest', icon: '🗓', title: 'Create a digest', desc: 'Schedule a recurring briefing email to their team.', section: 'digests', auto: (d) => d.digests > 0 },
+  { key: 'briefing', icon: '📝', title: 'Tune the briefing', desc: 'Global briefing focus, phase defaults and instructions for the Owl.', section: 'briefing' },
 ];
 // Per-event tasks — repeated for EACH event (suite). `auto` reads the suite's own
 // data; the rest are manual ticks scoped to that suite.
 const EVENT_TASKS = [
   { key: 'goals', icon: '⭐', title: 'Set event goals', desc: 'A live target for this event — preview the suite to add one.', section: 'suites', auto: (sd) => sd.goals > 0 },
+  { key: 'branding', icon: '🎨', title: 'Custom event branding', desc: 'Override the look for this event — logo, colours, sender.', section: 'suites', auto: (sd) => sd.brandingSet },
+  { key: 'emailtmpl', icon: '✉️', title: 'Email template added', desc: 'Tailor this event’s email header, intro and footer.', section: 'suites', auto: (sd) => sd.templateSet },
   { key: 'briefing', icon: '📝', title: 'Tune the briefing', desc: 'Key dates, phase and instructions so the Owl reads this event right.', section: 'briefing' },
+  { key: 'digest', icon: '🗓', title: 'Schedule an event digest', desc: 'A recurring briefing email focused on this event.', section: 'digests' },
   { key: 'segment', icon: '🎯', title: 'Build the audience', desc: 'e.g. everyone who abandoned a cart for this event.', section: 'segments' },
   { key: 'cart', icon: '🛒', title: 'Abandoned-cart campaign', desc: 'Win back checkouts that didn’t finish for this event.', section: 'campaigns' },
 ];
 function ClientSetupChecklist({ entity, suites, users, go }) {
   const [aux, setAux] = useState(null);
+  const [open, setOpen] = useState({}); // section key → expanded? (collapsed by default)
+  const toggle = (k) => setOpen((o) => ({ ...o, [k]: !o[k] }));
   useEffect(() => {
     let alive = true;
-    const brandingDone = (mt) => { const t = (mt && (mt.template || mt.branding)) || {}; return !!(t.logo || t.brandColor || t.senderName || t.secondaryColor || t.header) || !!entity.logo; };
+    const tmplOf = (m) => (m && (m.template || m.branding)) || {};
+    const hasBranding = (t) => !!(t.logo || t.brandColor || t.senderName || t.secondaryColor);
+    const hasTemplate = (t) => !!(t.header || t.intro || t.footer);
     Promise.all([
       api.getEntityMailTemplate(entity.id).catch(() => null),
       api.getDigests(entity.id).catch(() => []),
       api.getSetupWizardProgress(entity.id).catch(() => ({ ticks: {} })),
       Promise.all(suites.map((su) => api.suiteGoals(su.id).then((r) => (Array.isArray(r) ? r : r.goals || [])).catch(() => []))),
-    ]).then(([mt, digests, prog, goalsArr]) => {
+      Promise.all(suites.map((su) => api.getSuiteMailTemplate(su.id).catch(() => null))),
+    ]).then(([mt, digests, prog, goalsArr, suiteMtArr]) => {
       if (!alive) return;
+      const acc = tmplOf(mt);
       setAux({
-        brandingSet: brandingDone(mt),
+        brandingSet: hasBranding(acc) || !!entity.logo,
+        emailTemplateSet: hasTemplate(acc),
         digests: (digests || []).length,
         goalsBySuite: Object.fromEntries(suites.map((su, i) => [su.id, (goalsArr[i] || []).length])),
+        brandingBySuite: Object.fromEntries(suites.map((su, i) => [su.id, hasBranding(tmplOf(suiteMtArr[i]))])),
+        templateBySuite: Object.fromEntries(suites.map((su, i) => [su.id, hasTemplate(tmplOf(suiteMtArr[i]))])),
         ticks: prog.ticks || {},
       });
     });
@@ -2153,13 +2167,11 @@ function ClientSetupChecklist({ entity, suites, users, go }) {
     setAux((a) => ({ ...a, ticks: { ...(a?.ticks || {}), [key]: v ? 1 : 0 } }));
     api.setSetupWizardProgress(entity.id, key, v).then((r) => setAux((a) => ({ ...a, ticks: r.ticks || a.ticks }))).catch(() => {});
   };
-  // Account tasks
-  const accData = { entity, suites, users, brandingSet: aux?.brandingSet, digests: aux?.digests || 0 };
+  const accData = { entity, suites, users, brandingSet: aux?.brandingSet, emailTemplateSet: aux?.emailTemplateSet, digests: aux?.digests || 0 };
   const accAuto = (t) => !!(t.auto && t.auto(accData));
   const accManual = (t) => ticks['amchk_' + t.key] === 1;
   const accDone = (t) => accAuto(t) || accManual(t);
-  // Per-event tasks (keyed by suite)
-  const evData = (su) => ({ goals: aux?.goalsBySuite?.[su.id] || 0 });
+  const evData = (su) => ({ goals: aux?.goalsBySuite?.[su.id] || 0, brandingSet: aux?.brandingBySuite?.[su.id], templateSet: aux?.templateBySuite?.[su.id] });
   const evAuto = (su, t) => !!(t.auto && t.auto(evData(su)));
   const evManual = (su, t) => ticks[`amchk_${su.id}_${t.key}`] === 1;
   const evDone = (su, t) => evAuto(su, t) || evManual(su, t);
@@ -2183,14 +2195,16 @@ function ClientSetupChecklist({ entity, suites, users, go }) {
       </div>
     </div>
   );
-  const sectionHead = (title, caption, n, m) => (
-    <div style={{ margin: '16px 2px 8px' }}>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-        <span style={{ fontSize: 11.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text)' }}>{title}</span>
-        <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--muted)' }}>{n}/{m}</span>
-      </div>
-      {caption && <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{caption}</div>}
-    </div>
+  // Collapsible section header bar. `big` = an event (suite) heading.
+  const bar = (k, title, caption, n, m, big) => (
+    <button onClick={() => toggle(k)} style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 12, padding: '12px 14px', cursor: 'pointer', color: 'var(--text)' }}>
+      <span style={{ fontSize: 11, color: 'var(--muted)', flexShrink: 0, transform: open[k] ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</span>
+      <span style={{ flex: 1, minWidth: 0 }}>
+        <span style={{ display: 'block', fontSize: big ? 14.5 : 12, fontWeight: 800, textTransform: big ? 'none' : 'uppercase', letterSpacing: big ? 0 : '0.05em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
+        {caption && !open[k] && <span style={{ display: 'block', fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{caption}</span>}
+      </span>
+      <span style={{ fontSize: 12, fontWeight: 700, color: m > 0 && n === m ? 'var(--brand)' : 'var(--muted)', flexShrink: 0 }}>{n}/{m}</span>
+    </button>
   );
 
   return (
@@ -2203,36 +2217,47 @@ function ClientSetupChecklist({ entity, suites, users, go }) {
         <div style={{ height: 8, borderRadius: 999, background: 'rgba(128,128,128,0.15)', overflow: 'hidden' }}>
           <div style={{ height: '100%', width: `${pct}%`, background: 'var(--brand)', borderRadius: 999, transition: 'width .3s' }} />
         </div>
-        <p style={{ ...hint, marginTop: 10, marginBottom: 0 }}>Auto-ticks as you go. Tap <b>Go →</b> to jump to a task, or tick the manual ones. Account setup is done once; the event tasks repeat for every event you run.</p>
+        <p style={{ ...hint, marginTop: 10, marginBottom: 0 }}>Tap a section to expand it. Tasks auto-tick as you go; tick the manual ones, or hit <b>Go →</b> to jump straight to it. Account setup is done once; the event tasks repeat for every event.</p>
       </div>
 
-      {/* Account setup */}
-      {sectionHead('Account setup', 'The client-wide foundation — set once.', accDoneCount, AM_TASKS.length)}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {AM_TASKS.map((t) => taskRow(t.key, t.icon, t.title, t.desc, accDone(t), () => go(t.section), accAuto(t) ? null : () => setTick('amchk_' + t.key, !accManual(t))))}
+      {/* Account setup — collapsible */}
+      <div style={{ marginTop: 14 }}>
+        {bar('account', 'Account setup', 'The client-wide foundation — set once.', accDoneCount, AM_TASKS.length, false)}
+        {open.account && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+            {AM_TASKS.map((t) => taskRow(t.key, t.icon, t.title, t.desc, accDone(t), () => go(t.section), accAuto(t) ? null : () => setTick('amchk_' + t.key, !accManual(t))))}
+          </div>
+        )}
       </div>
 
-      {/* Per event — one block per suite */}
-      {sectionHead('Per event', 'Repeat for each event (suite) the client runs.', evDoneCount, suites.length * EVENT_TASKS.length)}
+      {/* Per event — one collapsible block per suite */}
+      <div style={{ margin: '18px 2px 8px' }}>
+        <div style={{ fontSize: 11.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text)' }}>Per event <span style={{ color: 'var(--muted)' }}>{evDoneCount}/{suites.length * EVENT_TASKS.length}</span></div>
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>Repeat for each event (suite) the client runs.</div>
+      </div>
       {suites.length === 0 ? (
         <div style={{ ...cardStyle, marginBottom: 0, textAlign: 'center' }}>
           <p style={{ fontSize: 13, color: 'var(--muted)', margin: '0 0 10px' }}>No events yet. Create the client’s first event (suite) to start its checklist.</p>
           <button style={addBtn} onClick={() => go('suites')}>+ Create the first event</button>
         </div>
-      ) : suites.map((su) => {
-        const sDone = EVENT_TASKS.filter((t) => evDone(su, t)).length;
-        return (
-          <div key={su.id} style={{ ...cardStyle, marginBottom: 10 }}>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
-              <span style={{ fontSize: 14.5, fontWeight: 800 }}>{su.icon && !String(su.icon).startsWith('data:') ? `${su.icon} ` : '🗂️ '}{su.name}</span>
-              <span style={{ fontSize: 12, fontWeight: 700, color: sDone === EVENT_TASKS.length ? 'var(--brand)' : 'var(--muted)' }}>{sDone}/{EVENT_TASKS.length}</span>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {EVENT_TASKS.map((t) => taskRow(`${su.id}_${t.key}`, t.icon, t.title, t.desc, evDone(su, t), () => go(t.section), evAuto(su, t) ? null : () => setTick(`amchk_${su.id}_${t.key}`, !evManual(su, t))))}
-            </div>
-          </div>
-        );
-      })}
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {suites.map((su) => {
+            const sDone = EVENT_TASKS.filter((t) => evDone(su, t)).length;
+            const title = `${su.icon && !String(su.icon).startsWith('data:') ? `${su.icon} ` : '🗂️ '}${su.name}`;
+            return (
+              <div key={su.id}>
+                {bar(su.id, title, null, sDone, EVENT_TASKS.length, true)}
+                {open[su.id] && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+                    {EVENT_TASKS.map((t) => taskRow(`${su.id}_${t.key}`, t.icon, t.title, t.desc, evDone(su, t), () => go(t.section), evAuto(su, t) ? null : () => setTick(`amchk_${su.id}_${t.key}`, !evManual(su, t))))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
