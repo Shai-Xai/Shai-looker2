@@ -14,8 +14,6 @@
 // Mount: require('./setupNudge').mount(app, { db, auth, mailer });
 
 function mount(app, { db, auth, mailer, insights, resolveRecipe, audienceFor, anthropicKeyForEntity, aiInstructionsFor, os }) {
-  const NUDGE_SUBJECT = 'Get more out of Pulse — a few quick steps left';
-  const NUDGE_TITLE = 'Get more out of Pulse — a few steps left';
   const sql = db.db;
   sql.exec(`CREATE TABLE IF NOT EXISTS setup_nudge_recipients (
     entity_id TEXT NOT NULL, audience TEXT NOT NULL, user_id TEXT NOT NULL,
@@ -33,9 +31,30 @@ function mount(app, { db, auth, mailer, insights, resolveRecipe, audienceFor, an
 
   const setting = (k, d) => db.getSetting(k, d);
   const enabled = () => setting('setup_nudge_enabled', '1') !== '0';
-  const graceDays = () => Number(setting('setup_nudge_grace_days', '3')) || 3;
-  const repeatDays = () => Number(setting('setup_nudge_repeat_days', '7')) || 7;
+  // Cadence — a global default with an optional per-client override (blank = inherit
+  // the global). Pass an entity id to honour its override; omit it for the global.
+  const cadence = (eid, key, dflt) => {
+    if (eid) { const o = Number(setting(`${key}:${eid}`, '')); if (o > 0) return o; }
+    return Number(setting(key, String(dflt))) || dflt;
+  };
+  const graceDays = (eid) => cadence(eid, 'setup_nudge_grace_days', 3);
+  const repeatDays = (eid) => cadence(eid, 'setup_nudge_repeat_days', 7);
   const sendHour = () => Number(setting('setup_nudge_hour', '9')) || 9;
+
+  // Editable wording (global) — defaults are the original hardcoded copy. Only the
+  // client-facing value copy is editable; the dynamic lists (outstanding items, the
+  // opportunity line) and the factual admin summary are always generated.
+  const COPY_DEFAULTS = {
+    subject: 'Get more out of Pulse — a few quick steps left',
+    title: 'Get more out of Pulse — a few steps left',
+    intro: "Hi 👋 — you're close to getting the most out of Pulse.",
+    button: 'Open Pulse',
+    signoff: 'Need a hand? Just reply — your Howler team is happy to help.',
+  };
+  const COPY_KEYS = Object.keys(COPY_DEFAULTS);
+  // Empty (unset OR explicitly cleared) falls back to the default, so blanking a
+  // field in the editor resets it rather than sending an empty email line.
+  const copy = (k) => setting(`setup_nudge_copy_${k}`, '') || COPY_DEFAULTS[k] || '';
 
   const count = (q, ...a) => { try { return sql.prepare(q).get(...a)?.n || 0; } catch { return 0; } };
   const ticksFor = (eid) => { const m = {}; try { for (const r of sql.prepare('SELECT key, done FROM setup_wizard_progress WHERE entity_id=?').all(eid)) m[r.key] = r.done; } catch { /* new */ } return m; };
@@ -96,8 +115,8 @@ function mount(app, { db, auth, mailer, insights, resolveRecipe, audienceFor, an
   const emailsOf = (ids) => ids.map((id) => db.getUser(id)).filter((u) => u && u.email && u.notifyEmail !== false).map((u) => u.email);
 
   // ── Throttle ──────────────────────────────────────────────────────────────
-  const throttled = (key, audience) => {
-    try { const r = sql.prepare('SELECT last_sent_at FROM setup_nudge_state WHERE key=? AND audience=?').get(key, audience); if (!r?.last_sent_at) return false; return (Date.now() - new Date(r.last_sent_at).getTime()) < repeatDays() * 86400000; } catch { return false; }
+  const throttled = (key, audience, eid) => {
+    try { const r = sql.prepare('SELECT last_sent_at FROM setup_nudge_state WHERE key=? AND audience=?').get(key, audience); if (!r?.last_sent_at) return false; return (Date.now() - new Date(r.last_sent_at).getTime()) < repeatDays(eid) * 86400000; } catch { return false; }
   };
   const mark = (key, audience) => { try { sql.prepare('INSERT INTO setup_nudge_state (key,audience,last_sent_at) VALUES (?,?,?) ON CONFLICT(key,audience) DO UPDATE SET last_sent_at=excluded.last_sent_at').run(key, audience, new Date().toISOString()); } catch { /* ignore */ } };
 
@@ -130,34 +149,36 @@ function mount(app, { db, auth, mailer, insights, resolveRecipe, audienceFor, an
 
   // ── Messages (value-led for clients, factual for the team) ──────────────────
   const li = (s) => `<li style="margin:4px 0">${s}</li>`;
+  // Escape admin-editable copy before it lands in the HTML email.
+  const esc = (s) => String(s || '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const VALUE = { 'Data scope': 'See only your events’ live numbers', 'A suite of dashboards': 'Your live dashboards, organised by event', 'A login': 'Get your team into Pulse', Branding: 'Make Pulse look like you — logo & colours', 'Email template': 'Brand the emails Pulse sends for you', Inventive: 'Ask your data questions with the AI analyst', Integrations: 'Sync audiences to Meta & TikTok', 'A digest': 'An automated briefing emailed to your team', 'Briefing tuned': 'A sharper daily read from the Owl' };
   function clientHtml(e, st, opp) {
     const wins = st.account.map((a) => li(VALUE[a] || a)).join('');
     const evs = st.events.length ? `<p style="margin:14px 0 4px;font-weight:600">Per event, you could still add:</p><ul style="padding-left:18px;margin:0">${st.events.map((x) => li(`<b>${x.name}</b> — ${x.missing.join(', ')}`)).join('')}</ul>` : '';
     const hook = opp?.line ? `<div style="background:#fff0f3;border:1px solid #ffd2dd;border-radius:10px;padding:12px 14px;margin:0 0 14px;font-weight:600">💸 ${opp.line}</div>` : '';
     return `<div style="font-family:system-ui,Arial,sans-serif;font-size:15px;line-height:1.5;color:#1d1d1f">
-      <p>Hi 👋 — you're close to getting the most out of <b>Pulse</b>.</p>
+      <p>${esc(copy('intro'))}</p>
       ${hook}
       <p>A few quick wins are still open${st.account.length ? ':' : '.'}</p>
       ${wins ? `<ul style="padding-left:18px;margin:8px 0">${wins}</ul>` : ''}${evs}
-      <p style="margin-top:16px"><a href="${mailer.baseUrl ? mailer.baseUrl() : ''}" style="background:#FF385C;color:#fff;text-decoration:none;padding:10px 18px;border-radius:8px;font-weight:600;display:inline-block">Open Pulse</a></p>
-      <p style="color:#86868b;font-size:13px;margin-top:14px">Need a hand? Just reply — your Howler team is happy to help.</p></div>`;
+      <p style="margin-top:16px"><a href="${mailer.baseUrl ? mailer.baseUrl() : ''}" style="background:#FF385C;color:#fff;text-decoration:none;padding:10px 18px;border-radius:8px;font-weight:600;display:inline-block">${esc(copy('button'))}</a></p>
+      <p style="color:#86868b;font-size:13px;margin-top:14px">${esc(copy('signoff'))}</p></div>`;
   }
   // Plain-text version for the in-app inbox thread (the OS spine stores message
   // bodies as text, not HTML). Same value-led framing as the email.
   function clientInboxBody(e, st, opp) {
-    const lines = ["You're close to getting the most out of Pulse — a few quick steps are still open."];
+    const lines = [copy('intro')];
     if (opp?.line) lines.push('', `💸 ${opp.line}`);
     if (st.account.length) { lines.push('', 'Still to set up:'); for (const a of st.account) lines.push(`• ${VALUE[a] || a}`); }
     if (st.events.length) { lines.push('', 'Per event, you could still add:'); for (const x of st.events) lines.push(`• ${x.name} — ${x.missing.join(', ')}`); }
-    lines.push('', 'Open Pulse to finish — or just reply here and your Howler team will help.');
+    lines.push('', copy('signoff'));
     return lines.join('\n');
   }
   // Post (or re-raise) ONE thread on the client's shared inbox. channels:[] keeps
   // it inbox-only — the targeted email is sent separately. A stable subject means
   // a repeat nudge reopens the same thread instead of spawning a new one.
   const postClientInbox = (e, st, opp) => {
-    try { return !!os?.announce?.({ entityId: e.id, title: NUDGE_TITLE, body: clientInboxBody(e, st, opp), priority: 'fyi', channels: [], subjectType: 'setup-nudge', subjectId: 'setup' }); } catch { return false; }
+    try { return !!os?.announce?.({ entityId: e.id, title: copy('title'), body: clientInboxBody(e, st, opp), priority: 'fyi', channels: [], subjectType: 'setup-nudge', subjectId: 'setup' }); } catch { return false; }
   };
   function adminHtml(rows) {
     const body = rows.map(({ e, st, opp }) => `<div style="margin:0 0 14px"><div style="font-weight:700">${e.name} <span style="color:#86868b;font-weight:400">— ${st.missing} outstanding</span></div>
@@ -175,17 +196,17 @@ function mount(app, { db, auth, mailer, insights, resolveRecipe, audienceFor, an
     let entities = []; try { entities = sql.prepare('SELECT id FROM entities').all().map((r) => db.getEntity(r.id)).filter(Boolean); } catch { return { error: 'no entities' }; }
     const adminAgg = {}; let clientSent = 0;
     for (const e of entities) {
-      if (!force && e.createdAt && (Date.now() - new Date(e.createdAt).getTime()) < graceDays() * 86400000) continue;
+      if (!force && e.createdAt && (Date.now() - new Date(e.createdAt).getTime()) < graceDays(e.id) * 86400000) continue;
       const st = setupStatus(e.id);
       if (!st.missing) continue;
       // Personalised opportunity (live abandoned-cart count + AI line) — best-effort.
       const opp = await cartOpportunity(e).catch(() => null);
       // Client nudge (opt-in, value-led) on BOTH surfaces: an in-app inbox thread
       // (the shared client inbox) + a targeted email to the chosen client users.
-      if (clientNudgeOn(e.id) && (force || !throttled(e.id, 'client'))) {
+      if (clientNudgeOn(e.id) && (force || !throttled(e.id, 'client', e.id))) {
         let delivered = postClientInbox(e, st, opp);
         const emails = emailsOf(clientRecipients(e));
-        if (emails.length && mailer.isConfigured?.()) { try { mailer.send({ to: emails, subject: NUDGE_SUBJECT, html: clientHtml(e, st, opp), kind: 'setup-nudge', entity: e.id }); delivered = true; } catch { /* ignore */ } }
+        if (emails.length && mailer.isConfigured?.()) { try { mailer.send({ to: emails, subject: copy('subject'), html: clientHtml(e, st, opp), kind: 'setup-nudge', entity: e.id }); delivered = true; } catch { /* ignore */ } }
         if (delivered) { if (!force) mark(e.id, 'client'); clientSent += 1; }
       }
       // Aggregate for the account team.
@@ -223,7 +244,15 @@ function mount(app, { db, auth, mailer, insights, resolveRecipe, audienceFor, an
       defaultAdmins: [e.howlerOwnerUserId, ...(e.howlerSupportIds || [])].filter(Boolean),
       clientUsers: clientUsersOf(e.id),
       status: setupStatus(e.id),
+      // Effective cadence for this client + the raw override (blank = inheriting the
+      // global default, which is sent alongside so the UI can show what's inherited).
       settings: { enabled: enabled(), graceDays: graceDays(), repeatDays: repeatDays() },
+      cadence: {
+        graceDays: graceDays(e.id), repeatDays: repeatDays(e.id),
+        graceOverride: setting(`setup_nudge_grace_days:${e.id}`, ''),
+        repeatOverride: setting(`setup_nudge_repeat_days:${e.id}`, ''),
+        globalGrace: graceDays(), globalRepeat: repeatDays(),
+      },
     });
   });
   app.put('/api/admin/entities/:id/setup-nudge', auth.requireAdmin, (req, res) => {
@@ -232,6 +261,27 @@ function mount(app, { db, auth, mailer, insights, resolveRecipe, audienceFor, an
     if (typeof b.clientOn === 'boolean') db.setSetting(`setup_nudge_client_on:${e.id}`, b.clientOn ? '1' : '0');
     const setList = (audience, ids) => { if (!Array.isArray(ids)) return; sql.prepare('DELETE FROM setup_nudge_recipients WHERE entity_id=? AND audience=?').run(e.id, audience); const ins = sql.prepare('INSERT OR IGNORE INTO setup_nudge_recipients (entity_id,audience,user_id) VALUES (?,?,?)'); for (const uid of ids) ins.run(e.id, audience, uid); };
     setList('client', b.clientRecipients); setList('admin', b.adminRecipients);
+    // Per-client cadence override: '' / null clears it (back to the global default).
+    const setOverride = (field, key) => { if (!(field in b)) return; const n = Number(b[field]); db.setSetting(`${key}:${e.id}`, n > 0 ? String(Math.round(n)) : ''); };
+    setOverride('graceOverride', 'setup_nudge_grace_days'); setOverride('repeatOverride', 'setup_nudge_repeat_days');
+    res.json({ ok: true });
+  });
+
+  // ── Global Reminders settings (cadence + editable wording) — Admin → Onboarding ─
+  app.get('/api/admin/setup-nudge/settings', auth.requireAdmin, (_req, res) => {
+    res.json({
+      enabled: enabled(), graceDays: graceDays(), repeatDays: repeatDays(), hour: sendHour(),
+      copy: Object.fromEntries(COPY_KEYS.map((k) => [k, copy(k)])), copyDefaults: COPY_DEFAULTS,
+    });
+  });
+  app.put('/api/admin/setup-nudge/settings', auth.requireAdmin, (req, res) => {
+    const b = req.body || {};
+    if (typeof b.enabled === 'boolean') db.setSetting('setup_nudge_enabled', b.enabled ? '1' : '0');
+    const posInt = (v) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? String(Math.round(n)) : null; };
+    if (posInt(b.graceDays)) db.setSetting('setup_nudge_grace_days', posInt(b.graceDays));
+    if (posInt(b.repeatDays)) db.setSetting('setup_nudge_repeat_days', posInt(b.repeatDays));
+    if (b.hour != null) { const h = Number(b.hour); if (Number.isFinite(h) && h >= 0 && h <= 23) db.setSetting('setup_nudge_hour', String(Math.round(h))); }
+    if (b.copy && typeof b.copy === 'object') for (const k of COPY_KEYS) { if (typeof b.copy[k] === 'string') db.setSetting(`setup_nudge_copy_${k}`, b.copy[k].slice(0, 400)); }
     res.json({ ok: true });
   });
   // Send the nudges for this one client right now (ignores grace/throttle) — a test.
@@ -244,7 +294,7 @@ function mount(app, { db, auth, mailer, insights, resolveRecipe, audienceFor, an
       let inboxed = false;
       if (req.body?.audience !== 'admin' && clientNudgeOn(e.id)) {
         inboxed = postClientInbox(e, st, opp);
-        if (emails.length && mailer.isConfigured?.()) mailer.send({ to: emails, subject: NUDGE_SUBJECT, html: clientHtml(e, st, opp), kind: 'setup-nudge', entity: e.id });
+        if (emails.length && mailer.isConfigured?.()) mailer.send({ to: emails, subject: copy('subject'), html: clientHtml(e, st, opp), kind: 'setup-nudge', entity: e.id });
       }
       const adminEmails = emailsOf(adminRecipients(e));
       if (req.body?.audience !== 'client' && adminEmails.length && mailer.isConfigured?.()) mailer.send({ to: adminEmails, subject: `Pulse setup: ${e.name} needs attention`, html: adminHtml([{ e, st, opp }]), kind: 'setup-nudge' });

@@ -211,13 +211,86 @@ const FEATURE_LABELS = {
   notifications_enabled: '🔔 Turned on notifications', install: '📲 Installed the app',
 };
 
+// Global Reminders defaults — cadence + the editable client-nudge wording. Applies
+// to every client; each client can still override the timing in its own Reminders
+// panel. Lives in the onboarding tab next to the funnel insights.
+function NudgeGlobalSettings() {
+  const [s, setS] = useState(null);
+  const [saved, setSaved] = useState(false);
+  const [open, setOpen] = useState(false);
+  useEffect(() => { api.getSetupNudgeSettings().then(setS).catch(() => setS(null)); }, []);
+  if (!s) return null;
+  const set = (k, v) => setS((c) => ({ ...c, [k]: v }));
+  const setCopy = (k, v) => setS((c) => ({ ...c, copy: { ...c.copy, [k]: v } }));
+  const save = async () => { try { await api.saveSetupNudgeSettings({ enabled: s.enabled, graceDays: s.graceDays, repeatDays: s.repeatDays, hour: s.hour, copy: s.copy }); flash(setSaved); } catch (e) { alert(e.message); } };
+  const fld = { ...input, minWidth: 0, width: '100%' };
+  const num = (k, label, h) => (
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <L>{label}</L>
+      <input type="number" min="0" value={s[k]} onChange={(e) => set(k, e.target.value)} style={fld} />
+      {h && <span style={{ fontSize: 11, color: 'var(--muted)' }}>{h}</span>}
+    </label>
+  );
+  const txt = (k, label) => (
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <L>{label}</L>
+      <input value={s.copy[k]} onChange={(e) => setCopy(k, e.target.value)} placeholder={s.copyDefaults?.[k] || ''} style={fld} />
+    </label>
+  );
+  return (
+    <div style={{ border: '1px solid var(--border)', borderRadius: 14, background: 'var(--card)', overflow: 'hidden' }}>
+      <button onClick={() => setOpen((v) => !v)} style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', background: 'transparent', border: 'none', padding: 16, cursor: 'pointer', color: 'var(--text)' }}>
+        <span style={{ fontSize: 11, color: 'var(--muted)', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</span>
+        <span style={{ flex: 1, minWidth: 0 }}>
+          <span style={{ display: 'block', fontSize: 14.5, fontWeight: 800 }}>🔔 Reminder defaults</span>
+          <span style={{ display: 'block', fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>Cadence + wording for the outstanding-setup nudges. Applies to all clients; each client can override the timing in its own Reminders panel.</span>
+        </span>
+        {!s.enabled && <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--error)', flexShrink: 0 }}>OFF</span>}
+      </button>
+      {open && (
+        <div style={{ padding: '0 16px 16px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
+            <input type="checkbox" checked={!!s.enabled} onChange={(e) => set('enabled', e.target.checked)} />
+            <span style={{ fontWeight: 700, fontSize: 13.5 }}>Reminders enabled</span>
+            <span style={{ fontSize: 12, color: 'var(--muted)' }}>· global kill switch</span>
+          </label>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(130px,1fr))', gap: 12 }}>
+            {num('graceDays', 'Grace (days)', 'Wait after a client is created before the first nudge.')}
+            {num('repeatDays', 'Repeat (days)', 'How often to re-nudge while items stay open.')}
+            {num('hour', 'Send hour (0–23)', 'Hour of day the daily check runs.')}
+          </div>
+          <div>
+            <L>Client message wording</L>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 6 }}>
+              {txt('subject', 'Email subject')}
+              {txt('title', 'In-app title')}
+              {txt('intro', 'Opening line (email + in-app)')}
+              {txt('button', 'Button label (email)')}
+              {txt('signoff', 'Sign-off line')}
+            </div>
+            <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8 }}>The list of outstanding items and the personalised opportunity line are added automatically. Clear a field to fall back to the default.</p>
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button style={saveBtn} onClick={save}>Save defaults</button>
+            {saved && <span style={{ color: 'var(--brand)', fontSize: 13, fontWeight: 600 }}>✓ Saved</span>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function OnboardingInsights() {
   const [stats, setStats] = useState(null);
   const [err, setErr] = useState(false);
   useEffect(() => { api.adminOnboardingStats().then(setStats).catch(() => setErr(true)); }, []);
 
-  if (err) return <p style={{ color: 'var(--muted)', fontSize: 13 }}>Couldn’t load usage stats.</p>;
-  if (!stats) return <p style={{ color: 'var(--muted)', fontSize: 13 }}>Loading…</p>;
+  if (err || !stats) return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18, maxWidth: 720 }}>
+      <NudgeGlobalSettings />
+      <p style={{ color: 'var(--muted)', fontSize: 13 }}>{err ? 'Couldn’t load usage stats.' : 'Loading…'}</p>
+    </div>
+  );
 
   // Build an ordered funnel per guide using the real step order from guides.js.
   const guideIds = Object.keys(stats.guides || {}).filter((id) => GUIDES[id]).sort((a, b) => (stats.guides[b].opens || 0) - (stats.guides[a].opens || 0));
@@ -245,6 +318,7 @@ function OnboardingInsights() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18, maxWidth: 720 }}>
+      <NudgeGlobalSettings />
       <div>
         <h2 style={{ fontSize: 17, fontWeight: 800 }}>Onboarding insights</h2>
         <p style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 3 }}>
@@ -2145,13 +2219,15 @@ function SetupNudgeConfig({ entity, clientUsers = [], adminUsers = [] }) {
   if (!cfg) return <div style={cardStyle}><Muted>Loading…</Muted></div>;
   const has = (key, id) => (cfg[key] || []).includes(id);
   const toggleId = (key, id) => setCfg((c) => ({ ...c, [key]: has(key, id) ? c[key].filter((x) => x !== id) : [...(c[key] || []), id] }));
-  const save = async () => { try { await api.saveSetupNudge(entity.id, { clientOn: cfg.clientOn, clientRecipients: cfg.clientRecipients || [], adminRecipients: cfg.adminRecipients || [] }); flash(setSaved); } catch (e) { alert(e.message); } };
+  const cad = cfg.cadence || {};
+  const setCad = (k, v) => setCfg((c) => ({ ...c, cadence: { ...(c.cadence || {}), [k]: v } }));
+  const save = async () => { try { await api.saveSetupNudge(entity.id, { clientOn: cfg.clientOn, clientRecipients: cfg.clientRecipients || [], adminRecipients: cfg.adminRecipients || [], graceOverride: cad.graceOverride ?? '', repeatOverride: cad.repeatOverride ?? '' }); flash(setSaved); } catch (e) { alert(e.message); } };
   const test = async (audience) => { setTestMsg('Sending…'); try { const r = await api.testSetupNudge(entity.id, audience); setTestMsg(`✓ Sent · ${r.missing} outstanding`); } catch { setTestMsg('✗ Send failed'); } };
   const chip = (key, u) => { const on = has(key, u.id); return <button key={u.id} type="button" onClick={() => toggleId(key, u.id)} style={{ ...folderChip, borderColor: on ? 'var(--brand)' : 'var(--border)', color: on ? 'var(--brand)' : 'var(--text)', fontWeight: on ? 700 : 400 }}>{on ? '✓ ' : ''}{u.fullName || u.email}</button>; };
   const sub = { fontWeight: 400, textTransform: 'none', color: 'var(--muted)' };
   return (
     <div style={cardStyle}>
-      <p style={{ ...hint, marginTop: 0 }}>A daily reminder while setup is outstanding (after a short grace period, then repeated weekly — never more). The account team gets a factual summary bulked across their clients; clients get a value-led nudge in-app and by email.</p>
+      <p style={{ ...hint, marginTop: 0 }}>A reminder while setup is outstanding (after a grace period, then on a repeat cadence — set below or globally). The account team gets a factual summary bulked across their clients; clients get a value-led nudge in-app and by email.</p>
       <L>Account team <span style={sub}>· who at Howler gets the summary · blank = the client’s owner/support</span></L>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '6px 0 14px' }}>{adminUsers.length ? adminUsers.map((u) => chip('adminRecipients', u)) : <Muted>No admins.</Muted>}</div>
       <label style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: cfg.clientOn ? 8 : 0, cursor: 'pointer' }}>
@@ -2165,6 +2241,20 @@ function SetupNudgeConfig({ entity, clientUsers = [], adminUsers = [] }) {
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>{clientUsers.length ? clientUsers.map((u) => chip('clientRecipients', u)) : <Muted>No client logins yet.</Muted>}</div>
         </div>
       )}
+      <div style={{ marginTop: 14 }}>
+        <L>Timing for this client <span style={sub}>· blank = use the global default</span></L>
+        <div style={{ display: 'flex', gap: 12, marginTop: 6, flexWrap: 'wrap' }}>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <span style={{ fontSize: 11, color: 'var(--muted)' }}>Grace (days)</span>
+            <input type="number" min="0" value={cad.graceOverride ?? ''} placeholder={cad.globalGrace != null ? String(cad.globalGrace) : ''} onChange={(e) => setCad('graceOverride', e.target.value)} style={{ ...input, minWidth: 0, width: 120 }} />
+          </label>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <span style={{ fontSize: 11, color: 'var(--muted)' }}>Repeat (days)</span>
+            <input type="number" min="0" value={cad.repeatOverride ?? ''} placeholder={cad.globalRepeat != null ? String(cad.globalRepeat) : ''} onChange={(e) => setCad('repeatOverride', e.target.value)} style={{ ...input, minWidth: 0, width: 120 }} />
+          </label>
+        </div>
+        <p style={{ ...hint, margin: '6px 0 0' }}>Edit the wording + global defaults in Admin → 📋 Onboarding → Reminder defaults.</p>
+      </div>
       <div style={{ display: 'flex', gap: 8, marginTop: 14, alignItems: 'center', flexWrap: 'wrap' }}>
         <button style={saveBtn} onClick={save}>Save</button>
         {saved && <span style={{ color: 'var(--brand)', fontSize: 13, fontWeight: 600 }}>✓ Saved</span>}
