@@ -474,7 +474,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     for (const fl of filters || []) {
       const cell = cellVal(row[fl.field]);
       if (fl.op === 'between') {
-        const n = Number(String(cell).replace(/[^0-9.\-]/g, ''));
+        const n = Number(String(cell).replace(/[^0-9.-]/g, ''));
         if (!Number.isFinite(n)) return false;
         if (fl.min != null && n < fl.min) return false;
         if (fl.max != null && n > fl.max) return false;

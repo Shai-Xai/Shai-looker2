@@ -6,6 +6,19 @@ on:
   pull_request:
 
 jobs:
+  lint:
+    name: ESLint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      # Fails on errors (genuine bugs); warnings are reported but don't block.
+      - run: npm run lint
+
   test:
     name: Server tests
     runs-on: ubuntu-latest

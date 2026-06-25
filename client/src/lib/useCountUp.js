@@ -15,10 +15,10 @@ const REDUCED = typeof window !== 'undefined'
 
 // "R18,191,613.50" → { prefix:"R", value:18191613.5, suffix:"", decimals:2, grouped:true }
 export function parseRendered(text) {
-  const m = String(text).match(/^([^\d\-+]*)([-+]?[\d.,\s ]*\d)(.*)$/);
+  const m = String(text).match(/^([^\d\-+]*)([-+]?[\d.,\s]*\d)(.*)$/);
   if (!m) return null;
   if (/\d/.test(m[3])) return null; // digits after the number → a date/compound, not a metric
-  const numStr = m[2].replace(/[\s ,]/g, '');
+  const numStr = m[2].replace(/[\s,]/g, '');
   const value = Number(numStr);
   if (!Number.isFinite(value)) return null;
   return {
