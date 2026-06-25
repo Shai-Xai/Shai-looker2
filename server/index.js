@@ -2820,7 +2820,7 @@ require('./installs').mount(app, { db, auth });
 
 // Setup nudges — daily reminders to clients + the account team about outstanding
 // setup, bulked per recipient. Managed per client in the onboarding section.
-require('./setupNudge').mount(app, { db, auth, mailer });
+require('./setupNudge').mount(app, { db, auth, mailer, insights, resolveRecipe, audienceFor: actionsApi.audienceFor, anthropicKeyForEntity, aiInstructionsFor });
 
 // Onboarding & feature telemetry — usage signals to refine the wizard from real behaviour.
 require('./telemetry').mount(app, { db, auth, rateLimit });
@@ -2871,26 +2871,27 @@ const actionsApi = require('./actions').mount(app, {
   },
 });
 
+// Materialise a built-in recipe (e.g. 'abandoned_cart') as a real audience source
+// by auto-resolving its tile from this client's data. Shared by segments + the
+// setup-nudge personalisation (the live abandoned-cart count).
+const resolveRecipe = (entityId, key) => {
+  const t = actionTemplates.get(key);
+  if (!t) return null;
+  const resolved = actionTemplates.resolveAudience(t, tileCatalogueWithFields(entityId));
+  if (!resolved.ready) return null;
+  return {
+    name: t.category || t.label,
+    definition: {
+      mode: 'tile', dashboardId: resolved.dashboardId, tileId: resolved.tileId,
+      emailField: resolved.emailField, nameField: resolved.nameField || '',
+      ticketField: resolved.ticketField || '', emailConsentField: resolved.consentField || '',
+    },
+  };
+};
 // Segments — reusable live audiences. Reuses the campaign engine's audience
 // resolver (audienceFor) so resolution logic + the org-scope boundary are shared.
 const segmentsApi = require('./segments').mount(app, {
-  db, auth, meta, tiktok, resolveAudience: actionsApi.audienceFor,
-  // Materialise a built-in recipe (e.g. abandoned cart) as a real segment by
-  // auto-resolving its audience source from this client's data.
-  resolveRecipe: (entityId, key) => {
-    const t = actionTemplates.get(key);
-    if (!t) return null;
-    const resolved = actionTemplates.resolveAudience(t, tileCatalogueWithFields(entityId));
-    if (!resolved.ready) return null;
-    return {
-      name: t.category || t.label,
-      definition: {
-        mode: 'tile', dashboardId: resolved.dashboardId, tileId: resolved.tileId,
-        emailField: resolved.emailField, nameField: resolved.nameField || '',
-        ticketField: resolved.ticketField || '', emailConsentField: resolved.consentField || '',
-      },
-    };
-  },
+  db, auth, meta, tiktok, resolveAudience: actionsApi.audienceFor, resolveRecipe,
 });
 
 // ─── Briefing configuration ─────────────────────────────────────────────────────

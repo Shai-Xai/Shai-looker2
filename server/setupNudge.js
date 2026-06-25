@@ -12,7 +12,7 @@
 //
 // Mount: require('./setupNudge').mount(app, { db, auth, mailer });
 
-function mount(app, { db, auth, mailer }) {
+function mount(app, { db, auth, mailer, insights, resolveRecipe, audienceFor, anthropicKeyForEntity, aiInstructionsFor }) {
   const sql = db.db;
   sql.exec(`CREATE TABLE IF NOT EXISTS setup_nudge_recipients (
     entity_id TEXT NOT NULL, audience TEXT NOT NULL, user_id TEXT NOT NULL,
@@ -21,6 +21,11 @@ function mount(app, { db, auth, mailer }) {
   sql.exec(`CREATE TABLE IF NOT EXISTS setup_nudge_state (
     key TEXT NOT NULL, audience TEXT NOT NULL, last_sent_at TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (key, audience)
+  );`);
+  // Cached live metric per client (the abandoned-cart count + its AI-polished
+  // line) — refreshed at most once a day so we don't re-query Looker on each run.
+  sql.exec(`CREATE TABLE IF NOT EXISTS setup_nudge_metric (
+    entity_id TEXT PRIMARY KEY, n INTEGER NOT NULL DEFAULT 0, line TEXT NOT NULL DEFAULT '', at TEXT NOT NULL DEFAULT ''
   );`);
 
   const setting = (k, d) => db.getSetting(k, d);
@@ -93,20 +98,51 @@ function mount(app, { db, auth, mailer }) {
   };
   const mark = (key, audience) => { try { sql.prepare('INSERT INTO setup_nudge_state (key,audience,last_sent_at) VALUES (?,?,?) ON CONFLICT(key,audience) DO UPDATE SET last_sent_at=excluded.last_sent_at').run(key, audience, new Date().toISOString()); } catch { /* ignore */ } };
 
+  // ── Personalisation: a live abandoned-cart count + AI-polished line ─────────
+  // Entirely best-effort — runs a live audience query (so it needs the client to
+  // actually have the data/tile) and an AI call. ANY failure → returns null and
+  // the nudge just uses its plain value-led copy. Cached for a day.
+  const cacheMetric = (eid, n, line) => { try { sql.prepare('INSERT INTO setup_nudge_metric (entity_id,n,line,at) VALUES (?,?,?,?) ON CONFLICT(entity_id) DO UPDATE SET n=excluded.n, line=excluded.line, at=excluded.at').run(eid, n, line || '', new Date().toISOString()); } catch { /* ignore */ } };
+  async function cartOpportunity(e) {
+    if (typeof resolveRecipe !== 'function' || typeof audienceFor !== 'function') return null;
+    try { const c = sql.prepare('SELECT n, line, at FROM setup_nudge_metric WHERE entity_id=?').get(e.id); if (c?.at && (Date.now() - new Date(c.at).getTime()) < 86400000) return c.n > 0 ? { count: c.n, line: c.line } : null; } catch { /* ignore */ }
+    let count = 0;
+    try {
+      const rec = resolveRecipe(e.id, 'abandoned_cart');
+      if (!rec?.definition?.dashboardId) { cacheMetric(e.id, 0, ''); return null; }
+      const user = { id: 'system:nudge', email: '', role: 'admin', entityIds: [e.id] };
+      const res = await audienceFor({ entityId: e.id, dashboardId: rec.definition.dashboardId, tileId: rec.definition.tileId, user, suiteId: '' });
+      count = Array.isArray(res?.rows) ? res.rows.length : 0;
+    } catch { cacheMetric(e.id, 0, ''); return null; }
+    if (count <= 0) { cacheMetric(e.id, 0, ''); return null; }
+    let line = '';
+    try {
+      const apiKey = anthropicKeyForEntity?.(e.id);
+      if (apiKey && insights?.isConfigured?.(apiKey)) line = await insights.opportunityLine({ clientName: e.name, item: 'an abandoned-cart win-back campaign', metric: `${count} customers abandoned checkout without buying`, apiKey, instructions: aiInstructionsFor?.(null) || '' });
+    } catch { /* fall back to templated */ }
+    if (!line) line = `${count.toLocaleString()} customers abandoned checkout — a win-back campaign could bring them back.`;
+    cacheMetric(e.id, count, line);
+    return { count, line };
+  }
+
   // ── Messages (value-led for clients, factual for the team) ──────────────────
   const li = (s) => `<li style="margin:4px 0">${s}</li>`;
   const VALUE = { 'Data scope': 'See only your events’ live numbers', 'A suite of dashboards': 'Your live dashboards, organised by event', 'A login': 'Get your team into Pulse', Branding: 'Make Pulse look like you — logo & colours', 'Email template': 'Brand the emails Pulse sends for you', Inventive: 'Ask your data questions with the AI analyst', Integrations: 'Sync audiences to Meta & TikTok', 'A digest': 'An automated briefing emailed to your team', 'Briefing tuned': 'A sharper daily read from the Owl' };
-  function clientHtml(e, st) {
+  function clientHtml(e, st, opp) {
     const wins = st.account.map((a) => li(VALUE[a] || a)).join('');
     const evs = st.events.length ? `<p style="margin:14px 0 4px;font-weight:600">Per event, you could still add:</p><ul style="padding-left:18px;margin:0">${st.events.map((x) => li(`<b>${x.name}</b> — ${x.missing.join(', ')}`)).join('')}</ul>` : '';
+    const hook = opp?.line ? `<div style="background:#fff0f3;border:1px solid #ffd2dd;border-radius:10px;padding:12px 14px;margin:0 0 14px;font-weight:600">💸 ${opp.line}</div>` : '';
     return `<div style="font-family:system-ui,Arial,sans-serif;font-size:15px;line-height:1.5;color:#1d1d1f">
-      <p>Hi 👋 — you're close to getting the most out of <b>Pulse</b>. A few quick wins are still open${st.account.length ? ':' : '.'}</p>
+      <p>Hi 👋 — you're close to getting the most out of <b>Pulse</b>.</p>
+      ${hook}
+      <p>A few quick wins are still open${st.account.length ? ':' : '.'}</p>
       ${wins ? `<ul style="padding-left:18px;margin:8px 0">${wins}</ul>` : ''}${evs}
       <p style="margin-top:16px"><a href="${mailer.baseUrl ? mailer.baseUrl() : ''}" style="background:#FF385C;color:#fff;text-decoration:none;padding:10px 18px;border-radius:8px;font-weight:600;display:inline-block">Open Pulse</a></p>
       <p style="color:#86868b;font-size:13px;margin-top:14px">Need a hand? Just reply — your Howler team is happy to help.</p></div>`;
   }
   function adminHtml(rows) {
-    const body = rows.map(({ e, st }) => `<div style="margin:0 0 14px"><div style="font-weight:700">${e.name} <span style="color:#86868b;font-weight:400">— ${st.missing} outstanding</span></div>
+    const body = rows.map(({ e, st, opp }) => `<div style="margin:0 0 14px"><div style="font-weight:700">${e.name} <span style="color:#86868b;font-weight:400">— ${st.missing} outstanding</span></div>
+      ${opp?.count ? `<div style="font-size:13px;color:#b00020">~${opp.count.toLocaleString()} abandoned carts unactioned</div>` : ''}
       ${st.account.length ? `<div style="font-size:13px;color:#444">Account: ${st.account.join(', ')}</div>` : ''}
       ${st.events.map((x) => `<div style="font-size:13px;color:#444">${x.name}: ${x.missing.join(', ')}</div>`).join('')}</div>`).join('');
     return `<div style="font-family:system-ui,Arial,sans-serif;font-size:14px;line-height:1.5;color:#1d1d1f">
@@ -115,7 +151,7 @@ function mount(app, { db, auth, mailer }) {
   }
 
   // ── The daily run ───────────────────────────────────────────────────────────
-  function evaluate({ force = false } = {}) {
+  async function evaluate({ force = false } = {}) {
     if (!enabled() && !force) return { skipped: 'disabled' };
     let entities = []; try { entities = sql.prepare('SELECT id FROM entities').all().map((r) => db.getEntity(r.id)).filter(Boolean); } catch { return { error: 'no entities' }; }
     const adminAgg = {}; let clientSent = 0;
@@ -123,14 +159,16 @@ function mount(app, { db, auth, mailer }) {
       if (!force && e.createdAt && (Date.now() - new Date(e.createdAt).getTime()) < graceDays() * 86400000) continue;
       const st = setupStatus(e.id);
       if (!st.missing) continue;
+      // Personalised opportunity (live abandoned-cart count + AI line) — best-effort.
+      const opp = await cartOpportunity(e).catch(() => null);
       // Client nudge (opt-in, value-led) — a targeted email to the chosen client
       // users (the persistent in-app onboarding card already nudges them in-app).
       if (clientNudgeOn(e.id) && (force || !throttled(e.id, 'client'))) {
         const emails = emailsOf(clientRecipients(e));
-        if (emails.length && mailer.isConfigured?.()) { try { mailer.send({ to: emails, subject: 'Get more out of Pulse — a few quick steps left', html: clientHtml(e, st), kind: 'setup-nudge', entity: e.id }); } catch { /* ignore */ } if (!force) mark(e.id, 'client'); clientSent += 1; }
+        if (emails.length && mailer.isConfigured?.()) { try { mailer.send({ to: emails, subject: 'Get more out of Pulse — a few quick steps left', html: clientHtml(e, st, opp), kind: 'setup-nudge', entity: e.id }); } catch { /* ignore */ } if (!force) mark(e.id, 'client'); clientSent += 1; }
       }
       // Aggregate for the account team.
-      for (const uid of adminRecipients(e)) { (adminAgg[uid] = adminAgg[uid] || []).push({ e, st }); }
+      for (const uid of adminRecipients(e)) { (adminAgg[uid] = adminAgg[uid] || []).push({ e, st, opp }); }
     }
     // One bulked email per admin recipient.
     let adminSent = 0;
@@ -151,7 +189,7 @@ function mount(app, { db, auth, mailer }) {
     const today = now.toISOString().slice(0, 10);
     if (setting('setup_nudge_last_run', '') === today) return;
     db.setSetting('setup_nudge_last_run', today);
-    try { evaluate(); } catch (e) { console.error('[setupNudge] run failed:', e.message); }
+    evaluate().catch((e) => console.error('[setupNudge] run failed:', e.message));
   }, 20 * 60 * 1000);
 
   // ── Admin API — managed in the client onboarding section ────────────────────
@@ -176,15 +214,16 @@ function mount(app, { db, auth, mailer }) {
     res.json({ ok: true });
   });
   // Send the nudges for this one client right now (ignores grace/throttle) — a test.
-  app.post('/api/admin/entities/:id/setup-nudge/test', auth.requireAdmin, (req, res) => {
+  app.post('/api/admin/entities/:id/setup-nudge/test', auth.requireAdmin, async (req, res) => {
     const e = db.getEntity(req.params.id); if (!e) return res.status(404).json({ error: 'No such client' });
     const st = setupStatus(e.id);
+    const opp = await cartOpportunity(e).catch(() => null);
     try {
       const emails = emailsOf(clientRecipients(e));
-      if (req.body?.audience !== 'admin' && clientNudgeOn(e.id) && emails.length && mailer.isConfigured?.()) mailer.send({ to: emails, subject: 'Get more out of Pulse — a few quick steps left', html: clientHtml(e, st), kind: 'setup-nudge', entity: e.id });
+      if (req.body?.audience !== 'admin' && clientNudgeOn(e.id) && emails.length && mailer.isConfigured?.()) mailer.send({ to: emails, subject: 'Get more out of Pulse — a few quick steps left', html: clientHtml(e, st, opp), kind: 'setup-nudge', entity: e.id });
       const adminEmails = emailsOf(adminRecipients(e));
-      if (req.body?.audience !== 'client' && adminEmails.length && mailer.isConfigured?.()) mailer.send({ to: adminEmails, subject: `Pulse setup: ${e.name} needs attention`, html: adminHtml([{ e, st }]), kind: 'setup-nudge' });
-      res.json({ ok: true, sentTo: { client: clientNudgeOn(e.id) ? emailsOf(clientRecipients(e)) : [], admin: emailsOf(adminRecipients(e)) }, missing: st.missing });
+      if (req.body?.audience !== 'client' && adminEmails.length && mailer.isConfigured?.()) mailer.send({ to: adminEmails, subject: `Pulse setup: ${e.name} needs attention`, html: adminHtml([{ e, st, opp }]), kind: 'setup-nudge' });
+      res.json({ ok: true, sentTo: { client: clientNudgeOn(e.id) ? emailsOf(clientRecipients(e)) : [], admin: emailsOf(adminRecipients(e)) }, missing: st.missing, opportunity: opp || null });
     } catch (err) { res.status(500).json({ error: 'Send failed' }); }
   });
 
