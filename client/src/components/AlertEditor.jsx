@@ -297,7 +297,7 @@ export default function AlertEditor({ entityId, suiteId, suiteName, alert, smsAv
         {/* Template gallery — tap a starting point, then tweak one number. */}
         {!editing && (
           <Field label="Start from">
-            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : '1fr 1fr', gap: 8 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 8 }}>
               {TEMPLATES.map((t) => (
                 <button key={t.key} type="button" onClick={() => applyTemplate(t)} style={tmplCard(ruleType === t.ruleType)}>
                   <span style={{ fontSize: 18 }}>{t.emoji}</span>
