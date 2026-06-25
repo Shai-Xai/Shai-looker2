@@ -56,9 +56,10 @@ function updateUser(id, patch) {
   const p = { ...patch };
   if ('tenantId' in patch && !('entityIds' in patch)) p.entityIds = patch.tenantId ? [patch.tenantId] : [];
   const u = db.updateUser(id, p);
+  invalidateUser(id); // reflect role/entity/pref changes immediately, not after the TTL
   return u ? publicUser(u) : null;
 }
-function deleteUser(id) { db.deleteUser(id); }
+function deleteUser(id) { db.deleteUser(id); invalidateUser(id); }
 
 // Seed an admin on first run so the app is usable out of the box.
 function seedAdmin() {
@@ -94,10 +95,27 @@ function issueCookie(res, user) {
 }
 function clearCookie(res) { res.clearCookie(COOKIE, COOKIE_OPTS); }
 
+// Short-TTL cache of the authenticated user. A single screen fires 10-20 parallel
+// tile/data requests, and attachUser runs on each — without this, that's 10-20 ×
+// getUser() (2 SQLite queries each) for the SAME user per navigation. 2s collapses
+// the burst while keeping any mid-session permission change near-immediate; user
+// mutations also invalidate explicitly (see updateUser/deleteUser).
+const USER_CACHE_TTL = 2000;
+const userCache = new Map(); // id -> { at, user }
+function cachedUser(id) {
+  const e = userCache.get(id);
+  if (e && Date.now() - e.at < USER_CACHE_TTL) return e.user;
+  const user = db.getUser(id);
+  userCache.set(id, { at: Date.now(), user });
+  if (userCache.size > 2000) userCache.delete(userCache.keys().next().value);
+  return user;
+}
+function invalidateUser(id) { userCache.delete(id); }
+
 function attachUser(req, _res, next) {
   const token = req.cookies?.[COOKIE];
   if (token) {
-    try { const { sub } = jwt.verify(token, getSecret()); req.user = db.getUser(sub) || null; }
+    try { const { sub } = jwt.verify(token, getSecret()); req.user = cachedUser(sub) || null; }
     catch { req.user = null; }
   }
   next();

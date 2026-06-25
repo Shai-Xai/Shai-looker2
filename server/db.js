@@ -26,6 +26,12 @@ const DB_FILE = process.env.DB_FILE || path.join(DATA_DIR, 'howler.db');
 
 const db = new Database(DB_FILE);
 db.pragma('journal_mode = WAL');
+// NORMAL is the standard pairing with WAL: it stops fsync-on-every-commit (the
+// default FULL), which is a broad win on the per-request write paths (audit log,
+// view tracking, last-login touch) with no durability loss under WAL. busy_timeout
+// lets a write wait briefly for a lock instead of throwing SQLITE_BUSY.
+db.pragma('synchronous = NORMAL');
+db.pragma('busy_timeout = 5000');
 db.pragma('foreign_keys = ON');
 
 db.exec(`
@@ -532,6 +538,8 @@ CREATE TABLE IF NOT EXISTS tile_marks (
   at           TEXT NOT NULL,
   PRIMARY KEY (scope, scope_id, dashboard_id, tile_id, kind)
 );
+-- listMarks() runs on every home load (pins + follows), filtered by scope/kind.
+CREATE INDEX IF NOT EXISTS idx_tile_marks_scope ON tile_marks(scope, scope_id, kind);
 `);
 // One-time migration from the short-lived home_pins table (those were created
 // by the pin button, so they become 'pin' marks).
@@ -1261,12 +1269,29 @@ function dashboardVisibleToRole(entityId, setId, dashboardId, role) {
 function suiteSetIds(suiteId) {
   return db.prepare('SELECT set_id FROM suite_sets WHERE suite_id=? ORDER BY position').all(suiteId).map((r) => r.set_id);
 }
-function rowToSuite(r) {
-  return r && { id: r.id, entityId: r.entity_id, name: r.name, icon: r.icon || '', eventUrl: r.event_url || '', lockedFilters: J(r.locked_filters, {}), dashboardLocks: J(r.dashboard_locks, {}), tileLocks: J(r.tile_locks, {}), excludedDashboards: J(r.excluded_dashboards, []), briefing: J(r.briefing, {}), setIds: suiteSetIds(r.id), position: r.position, createdAt: r.created_at };
+// Batch the set-ids for many suites in ONE query (avoids the N+1 where every
+// rowToSuite ran its own suiteSetIds — list functions run on basically every
+// page load via the nav). Returns { suiteId: [setId, …] } in position order.
+function setIdsForSuites(suiteIds) {
+  if (!suiteIds.length) return {};
+  const ph = suiteIds.map(() => '?').join(',');
+  const rows = db.prepare(`SELECT suite_id, set_id FROM suite_sets WHERE suite_id IN (${ph}) ORDER BY position`).all(...suiteIds);
+  const map = {};
+  for (const r of rows) (map[r.suite_id] = map[r.suite_id] || []).push(r.set_id);
+  return map;
 }
-function listSuites() { return db.prepare('SELECT * FROM suites ORDER BY position, name').all().map(rowToSuite); }
+function rowToSuite(r, setIds) {
+  return r && { id: r.id, entityId: r.entity_id, name: r.name, icon: r.icon || '', eventUrl: r.event_url || '', lockedFilters: J(r.locked_filters, {}), dashboardLocks: J(r.dashboard_locks, {}), tileLocks: J(r.tile_locks, {}), excludedDashboards: J(r.excluded_dashboards, []), briefing: J(r.briefing, {}), setIds: setIds || suiteSetIds(r.id), position: r.position, createdAt: r.created_at };
+}
+function listSuites() {
+  const rows = db.prepare('SELECT * FROM suites ORDER BY position, name').all();
+  const m = setIdsForSuites(rows.map((r) => r.id));
+  return rows.map((r) => rowToSuite(r, m[r.id] || []));
+}
 function listSuitesForEntity(entityId) {
-  return db.prepare('SELECT * FROM suites WHERE entity_id=? ORDER BY position, name').all(entityId).map(rowToSuite);
+  const rows = db.prepare('SELECT * FROM suites WHERE entity_id=? ORDER BY position, name').all(entityId);
+  const m = setIdsForSuites(rows.map((r) => r.id));
+  return rows.map((r) => rowToSuite(r, m[r.id] || []));
 }
 function getSuite(id) { return rowToSuite(db.prepare('SELECT * FROM suites WHERE id=?').get(id)); }
 const setSuiteSets = db.transaction((suiteId, setIds) => {
