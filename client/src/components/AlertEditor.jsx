@@ -148,7 +148,7 @@ export default function AlertEditor({ entityId, suiteId, suiteName, alert, smsAv
 
   // Opened from a template (the page's Templates tab) — apply it once.
   const tmplApplied = useRef(false);
-  useEffect(() => { if (initialTemplate && !tmplApplied.current) { tmplApplied.current = true; applySavedTemplate(initialTemplate); } }, [initialTemplate]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (initialTemplate && !tmplApplied.current) { tmplApplied.current = true; applySavedTemplate(initialTemplate); } }, [initialTemplate]);  
 
   const dashboards = cat?.dashboards || [];
   // An alert watches ONE headline number, so only single-value (KPI) tiles qualify

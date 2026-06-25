@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { api } from '../lib/api.js';
 import { useProfile } from '../lib/profile.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
@@ -32,14 +32,14 @@ export default function SocialPage() {
   const [syncing, setSyncing] = useState(false);
   const [metric, setMetric] = useState('reach');
 
-  async function load() {
+  const load = useCallback(async () => {
     if (!activeEntityId) { setLoading(false); return; }
     setLoading(true); setError('');
     try { setData(await api.mySocial(activeEntityId, { metric, days: 30 })); }
     catch (e) { setError(e.message); }
     finally { setLoading(false); }
-  }
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [activeEntityId, metric]);
+  }, [activeEntityId, metric]);
+  useEffect(() => { load(); }, [load]);
 
   async function sync() {
     if (!activeEntityId) return;
