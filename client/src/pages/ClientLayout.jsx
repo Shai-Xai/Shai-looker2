@@ -53,7 +53,7 @@ export default function ClientLayout() {
     const h = () => openAsk();
     window.addEventListener('howler:open-analyst', h);
     return () => window.removeEventListener('howler:open-analyst', h);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);  
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('howler_nav_collapsed') === '1'); // desktop
   const toggleCollapsed = () => setCollapsed((c) => { localStorage.setItem('howler_nav_collapsed', c ? '0' : '1'); return !c; });
   const navDrag = useSheetDrag(() => setNavOpen(false)); // mobile bottom-sheet dismiss
@@ -65,6 +65,7 @@ export default function ClientLayout() {
   useEffect(() => { api.mySettlements().then(setSettlements).catch(() => {}); }, []);
   const onGoals = location.pathname.startsWith('/goals');
   const onAlerts = location.pathname.startsWith('/alerts');
+  const onSocial = location.pathname.startsWith('/social');
   const onSettlements = location.pathname.startsWith('/settlements');
   const onInbox = location.pathname.startsWith('/inbox');
   const onDigests = location.pathname.startsWith('/digests');
@@ -107,7 +108,7 @@ export default function ClientLayout() {
         setOpenSets((p) => ({ ...p, [set.id]: true }));
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [details, suiteId, id]);
 
   const go = (sid, did) => {
@@ -138,7 +139,7 @@ export default function ClientLayout() {
     // Re-measure after the expand/collapse animation settles (positions shift).
     const t = setTimeout(measure, 300);
     return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [id, suiteId, openSuites, openSets, details, collapsed, loading, isMobile, navOpen, location.pathname, settlements, q]);
 
   // Title of the active dashboard (for the mobile menu bar) — may be a tab.
@@ -207,7 +208,7 @@ export default function ClientLayout() {
     document.addEventListener('visibilitychange', onVis);
     window.addEventListener('focus', onVis);
     return () => { alive = false; clearInterval(t); window.removeEventListener('os-refresh', poll); document.removeEventListener('visibilitychange', onVis); window.removeEventListener('focus', onVis); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [location.pathname, activeEntityId]);
 
   // White-label: apply the active client's brand pair (primary + secondary) to
@@ -420,6 +421,15 @@ export default function ClientLayout() {
           >
             <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>🥧</span>
             <span style={ellip}>Segments</span>
+          </button>
+          <button
+            ref={onSocial ? activeRef : null}
+            className={`nav-row${onSocial ? ' active' : ''}`}
+            style={{ ...rowBtn, fontWeight: onSocial ? 600 : 500 }}
+            onClick={() => { if (!onSocial) vtNavigate(navigate, '/social'); if (isMobile) setNavOpen(false); }}
+          >
+            <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>📱</span>
+            <span style={ellip}>Social</span>
           </button>
           </>
           )}

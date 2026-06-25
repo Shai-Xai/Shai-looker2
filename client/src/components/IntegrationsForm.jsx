@@ -33,6 +33,9 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
   const [clearMetaToken, setClearMetaToken] = useState(false);
   const [metaAdAccount, setMetaAdAccount] = useState(value?.meta?.adAccountId || '');
   const [metaBusiness, setMetaBusiness] = useState(value?.meta?.businessId || '');
+  // Organic-insights assets (inbound social metrics): the Page / IG account we read.
+  const [metaPageId, setMetaPageId] = useState(value?.meta?.pageId || '');
+  const [metaIgUserId, setMetaIgUserId] = useState(value?.meta?.igUserId || '');
   const [ttToken, setTtToken] = useState('');
   const [clearTtToken, setClearTtToken] = useState(false);
   const [ttAdvertiser, setTtAdvertiser] = useState(value?.tiktok?.advertiserId || '');
@@ -76,7 +79,7 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
     }
     if (inventiveWorkspace && want('inventive')) p.inventiveWorkspace = { name: invwName, refId: invwRef };
     if (showMeta && want('meta')) {
-      p.meta = { adAccountId: metaAdAccount, businessId: metaBusiness };
+      p.meta = { adAccountId: metaAdAccount, businessId: metaBusiness, pageId: metaPageId, igUserId: metaIgUserId };
       if (metaToken) p.meta.accessToken = metaToken;
       if (clearMetaToken) p.meta.clearAccessToken = true;
     }
@@ -168,6 +171,16 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
           <Lbl>Business ID <span style={{ textTransform: 'none', fontWeight: 400 }}>· optional</span></Lbl>
           <input value={metaBusiness} onChange={(e) => setMetaBusiness(e.target.value)} placeholder="Meta Business Manager ID" style={input} autoComplete="off" />
           {value?.meta?.tokenSet && value?.meta?.adAccountId && <div style={{ ...note, color: 'var(--success, #10b981)', marginTop: 8 }}>✓ Connected — sync segments from Engage → Segments.</div>}
+
+          {/* Organic social metrics (INBOUND) — read Page/IG stats into Pulse. */}
+          <div style={{ ...note, marginTop: 14 }}>
+            <b>Social metrics (read-only):</b> to pull <b>organic</b> followers, reach &amp; post engagement into Pulse, add the Page / Instagram account below. The same token is reused — it needs <code>pages_read_engagement</code>, <code>read_insights</code> and (for IG) <code>instagram_basic</code> + <code>instagram_manage_insights</code>.
+          </div>
+          <Lbl>Facebook Page ID <span style={{ textTransform: 'none', fontWeight: 400 }}>· optional</span></Lbl>
+          <input value={metaPageId} onChange={(e) => setMetaPageId(e.target.value)} placeholder="e.g. 1029384756" style={input} autoComplete="off" />
+          <Lbl>Instagram account ID <span style={{ textTransform: 'none', fontWeight: 400 }}>· optional</span></Lbl>
+          <input value={metaIgUserId} onChange={(e) => setMetaIgUserId(e.target.value)} placeholder="IG Business/Creator user id" style={input} autoComplete="off" />
+          {value?.meta?.tokenSet && (value?.meta?.pageId || value?.meta?.igUserId) && <div style={{ ...note, color: 'var(--success, #10b981)', marginTop: 8 }}>✓ Social metrics on — view trends in <b>Social</b>.</div>}
           <SaveRow k="meta" />
         </Section>
       )}
@@ -198,6 +211,9 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
           <Lbl>Advertiser ID</Lbl>
           <input value={ttAdvertiser} onChange={(e) => setTtAdvertiser(e.target.value)} placeholder="TikTok advertiser ID" style={input} autoComplete="off" />
           {value?.tiktok?.tokenSet && value?.tiktok?.advertiserId && <div style={{ ...note, color: 'var(--success, #10b981)', marginTop: 8 }}>✓ Connected — sync segments from Engage → Segments.</div>}
+          <div style={{ ...note, marginTop: 14 }}>
+            <b>Social metrics (read-only):</b> if this token also carries the user scopes <code>user.info.stats</code> + <code>video.list</code>, Pulse pulls your <b>organic</b> follower count and recent video stats into <b>Social</b> automatically — no extra field needed.
+          </div>
           <SaveRow k="tiktok" />
         </Section>
       )}

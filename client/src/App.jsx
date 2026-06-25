@@ -6,6 +6,7 @@ import EditorPage from './pages/EditorPage.jsx';
 import ClonePage from './pages/ClonePage.jsx';
 import AdminPage from './pages/AdminPage.jsx';
 import InboxNotifier from './components/InboxNotifier.jsx';
+import LivePulse from './components/LivePulse.jsx';
 import LoginPage from './pages/LoginPage.jsx';
 import ResetPasswordPage from './pages/ResetPasswordPage.jsx';
 import MagicLinkPage from './pages/MagicLinkPage.jsx';
@@ -19,6 +20,7 @@ import InboxPage from './os/InboxPage.jsx';
 import DigestsPage from './pages/DigestsPage.jsx';
 import EngagePage from './pages/EngagePage.jsx';
 import GoalsPage from './pages/GoalsPage.jsx';
+import SocialPage from './pages/SocialPage.jsx';
 import AlertsPage from './pages/AlertsPage.jsx';
 import InventiveAskPage from './pages/InventiveAskPage.jsx';
 import Logo from './components/Logo.jsx';
@@ -82,7 +84,7 @@ function Header() {
         onConsole={goConsole}
         onHome={goHome}
       />
-      <div style={{ flex: 1 }} />
+      <LivePulse entityId={inClientView ? activeEntityId : null} />
       {/* Admin console: admin controls on the right. Client experience (client
           login OR admin acting as a client): just the Howler·Pulse badge — the
           account actions live in the sidebar's bottom-left profile menu. */}
@@ -262,6 +264,7 @@ function Shell() {
                 <Route path="/suite/:suiteId/d/:id" element={<ViewPage />} />
                 <Route path="/goals" element={<GoalsPage />} />
                 <Route path="/alerts" element={<AlertsPage />} />
+                <Route path="/social" element={<SocialPage />} />
                 <Route path="/settlements" element={<SettlementsPage />} />
                 <Route path="/settlements/:id" element={<SettlementViewPage />} />
                 <Route path="/documents/:id" element={<DocumentViewPage />} />
@@ -289,6 +292,7 @@ function Shell() {
                 <Route path="/suite/:suiteId/d/:id/edit" element={<EditorPage />} />
                 <Route path="/goals" element={<GoalsPage />} />
                 <Route path="/alerts" element={<AlertsPage />} />
+                <Route path="/social" element={<SocialPage />} />
                 <Route path="/settlements" element={<SettlementsPage />} />
                 <Route path="/settlements/:id" element={<SettlementViewPage />} />
                 <Route path="/documents/:id" element={<DocumentViewPage />} />

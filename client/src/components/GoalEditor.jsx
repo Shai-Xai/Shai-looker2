@@ -143,7 +143,7 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
   };
   // Opened from the Templates tab → pre-fill from the chosen template once.
   const tmplApplied = useRef(false);
-  useEffect(() => { if (initialTemplate && !tmplApplied.current) { tmplApplied.current = true; applyTemplate(initialTemplate); } }, [initialTemplate]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (initialTemplate && !tmplApplied.current) { tmplApplied.current = true; applyTemplate(initialTemplate); } }, [initialTemplate]);  
 
   // Resolve queued template refs against this client's catalogue (by id, else by name).
   useEffect(() => {

@@ -14,7 +14,7 @@ const cellLabel = (cell) => (cell == null ? '' : String(cell.rendered != null ? 
 const num = (v) => {
   if (v == null) return null;
   if (typeof v === 'number') return Number.isFinite(v) ? v : null;
-  const n = Number(String(v).replace(/[^0-9.\-]/g, ''));
+  const n = Number(String(v).replace(/[^0-9.-]/g, ''));
   return Number.isFinite(n) ? n : null;
 };
 // A measure value for a row, resolving a pivot column when present. Mirrors the

@@ -23,7 +23,7 @@ export default function DrillModal({ links, title, onClose }) {
       .then((r) => setData(r.data))
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [selected]);
+  }, [selected, suiteId]);
 
   const rowCount = data?.data?.length ?? null;
 
