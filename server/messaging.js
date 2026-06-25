@@ -43,6 +43,7 @@ async function sendSms({ to, text }) {
       method: 'POST',
       headers: { Authorization: apiKey(), 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify(body),
+      timeout: 20000, // node-fetch: fail a stuck SMS send instead of hanging forever
     });
     const data = await res.json().catch(() => ({}));
     // Clickatell returns per-message accepted/error; treat HTTP 2xx + no error as ok.

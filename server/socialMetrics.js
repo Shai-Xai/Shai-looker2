@@ -126,7 +126,7 @@ function status(entityId) {
 // ── small fetch helpers ──
 async function graph(path, { token } = {}) {
   const url = `${GRAPH}/${path}${path.includes('?') ? '&' : '?'}access_token=${encodeURIComponent(token)}`;
-  const res = await fetch(url);
+  const res = await fetch(url, { timeout: 20000 });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || data.error) {
     const e = data.error || {};
@@ -137,7 +137,7 @@ async function graph(path, { token } = {}) {
   return data;
 }
 async function ttGet(path, token) {
-  const res = await fetch(`${TIKTOK}/${path}`, { headers: { Authorization: `Bearer ${token}` } });
+  const res = await fetch(`${TIKTOK}/${path}`, { headers: { Authorization: `Bearer ${token}` }, timeout: 20000 });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || data.error?.code && data.error.code !== 'ok') {
     const err = new Error(data.error?.message || `TikTok HTTP ${res.status}`);
@@ -146,7 +146,7 @@ async function ttGet(path, token) {
   return data;
 }
 async function ttPost(path, token, body) {
-  const res = await fetch(`${TIKTOK}/${path}`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+  const res = await fetch(`${TIKTOK}/${path}`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}), timeout: 20000 });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || (data.error?.code && data.error.code !== 'ok')) {
     const err = new Error(data.error?.message || `TikTok HTTP ${res.status}`);

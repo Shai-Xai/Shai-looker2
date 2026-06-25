@@ -139,7 +139,7 @@ function hashPhone(raw, defaultCc = '27') {
 
 // TikTok responses are { code, message, data }; code 0 = OK.
 async function api(path, { token, body } = {}) {
-  const res = await fetch(`${BASE}/${path}`, { method: 'POST', headers: { 'Access-Token': token, 'Content-Type': 'application/json' }, body });
+  const res = await fetch(`${BASE}/${path}`, { method: 'POST', headers: { 'Access-Token': token, 'Content-Type': 'application/json' }, body, timeout: 20000 });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || (data && data.code)) {
     const err = new Error((data && data.message) || `TikTok HTTP ${res.status}`);
@@ -170,7 +170,7 @@ async function uploadFile({ advertiserId, token, calculateType, values }) {
     { advertiser_id: advertiserId, calculate_type: calculateType, file_signature: md5(content) },
     { field: 'file', filename: 'audience.csv', content },
   );
-  const res = await fetch(`${BASE}/dmp/custom_audience/file/upload/`, { method: 'POST', headers: { 'Access-Token': token, 'Content-Type': contentType }, body });
+  const res = await fetch(`${BASE}/dmp/custom_audience/file/upload/`, { method: 'POST', headers: { 'Access-Token': token, 'Content-Type': contentType }, body, timeout: 60000 });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || (data && data.code)) throw new Error((data && data.message) || `TikTok upload HTTP ${res.status}`);
   return (data.data && (data.data.file_path || data.data.path)) || '';
@@ -265,7 +265,7 @@ async function audienceStatus(entityId, audienceId) {
   const { accessToken: token, advertiserId } = connection(entityId);
   try {
     const url = `${BASE}/dmp/custom_audience/get/?advertiser_id=${encodeURIComponent(advertiserId)}&custom_audience_ids=${encodeURIComponent(JSON.stringify([audienceId]))}`;
-    const res = await fetch(url, { headers: { 'Access-Token': token } });
+    const res = await fetch(url, { headers: { 'Access-Token': token }, timeout: 20000 });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || (data && data.code)) return { ok: false, error: (data && data.message) || `TikTok HTTP ${res.status}` };
     const a = (data.data && (data.data.list || [])[0]) || {};
@@ -281,7 +281,7 @@ async function verify(entityId) {
   const { accessToken: token, advertiserId } = connection(entityId);
   try {
     const url = `${BASE}/advertiser/info/?advertiser_ids=${encodeURIComponent(JSON.stringify([advertiserId]))}&fields=${encodeURIComponent(JSON.stringify(['name', 'status']))}`;
-    const res = await fetch(url, { headers: { 'Access-Token': token } });
+    const res = await fetch(url, { headers: { 'Access-Token': token }, timeout: 20000 });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || (data && data.code)) {
       const status = data && (data.code === 40105 || data.code === 40100) ? 'token_invalid' : 'error';
@@ -302,7 +302,7 @@ async function listAudiences(entityId) {
     const audiences = []; let page = 1; let totalPage = 1;
     do {
       const url = `${BASE}/dmp/custom_audience/list/?advertiser_id=${encodeURIComponent(advertiserId)}&page=${page}&page_size=100`;
-      const res = await fetch(url, { headers: { 'Access-Token': token } });
+      const res = await fetch(url, { headers: { 'Access-Token': token }, timeout: 20000 });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || (data && data.code)) return { ok: false, error: (data && data.message) || `TikTok HTTP ${res.status}` };
       const d = data.data || {};
