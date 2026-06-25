@@ -2105,21 +2105,26 @@ function KV({ label, value, sub }) {
 // ─── Account-manager setup checklist — the full lifecycle of standing a client up ──
 // Auto-detects what's done from real data, lets the AM tick the manual ones, and
 // jumps straight to the right tab for each task. Manual ticks persist per client
-// (reusing the setup-wizard progress store, prefixed amchk_). Covers go-live plus
-// the value-add steps: Inventive, digests, segments, goals, briefing, integrations.
+// (reusing the setup-wizard progress store, prefixed amchk_). Split into the
+// client-wide ACCOUNT SETUP (done once) and the PER-EVENT work (repeated for each
+// suite the client runs — goals, briefing, audiences, abandoned-cart campaigns).
 const AM_TASKS = [
-  { key: 'client', phase: 'Stand it up', icon: '🏢', title: 'Set up the client', desc: 'Name, logo and AI context.', section: 'settings', auto: (d) => !!(d.entity.name || '').trim() },
-  { key: 'scope', phase: 'Stand it up', icon: '🔒', title: 'Lock their data scope', desc: 'Pick the organiser so they only ever see their own data.', section: 'settings', auto: (d) => d.entity.allOrganisers || Object.values(d.entity.lockedFilters || {}).some((v) => String(v || '').trim()) },
-  { key: 'suites', phase: 'Stand it up', icon: '🗂️', title: 'Build their suites', desc: 'One suite per event — its dashboard sets and the event lock.', section: 'suites', auto: (d) => d.suites.length > 0 },
-  { key: 'branding', phase: 'Stand it up', icon: '🎨', title: 'Add branding', desc: 'Logo, colours and sender — white-labels the app and emails.', section: 'email', auto: (d) => d.brandingSet },
-  { key: 'logins', phase: 'Stand it up', icon: '🔑', title: 'Create logins & roles', desc: 'Add the people who sign in and set each one’s role.', section: 'logins', auto: (d) => d.users.length > 0 },
-  { key: 'inventive', phase: 'Switch it on', icon: '✨', title: 'Assign Inventive', desc: 'Link the client’s Inventive analyst workspace.', section: 'integrations', auto: (d) => !!(d.entity.inventiveRefId || d.entity.inventiveName) },
-  { key: 'digest', phase: 'Switch it on', icon: '🗓', title: 'Create a digest', desc: 'Schedule a recurring briefing email to their team.', section: 'digests', auto: (d) => d.digests > 0 },
-  { key: 'segment', phase: 'Switch it on', icon: '🎯', title: 'Set up a segment', desc: 'Build a reusable audience for campaigns.', section: 'segments', auto: (d) => d.segments > 0 },
-  { key: 'goals', phase: 'Switch it on', icon: '⭐', title: 'Set event goals', desc: 'Give each event a live target — preview a suite to add one.', section: 'suites', auto: (d) => d.goals > 0 },
-  { key: 'briefing', phase: 'Switch it on', icon: '📝', title: 'Tune the briefing', desc: 'Key dates, phase and event instructions for the Owl.', section: 'briefing' },
-  { key: 'integrations', phase: 'Switch it on', icon: '🔌', title: 'Add integrations', desc: 'Connect Looker / Meta / TikTok / email as needed.', section: 'integrations' },
+  // Account setup — the client-wide foundation, set once.
+  { key: 'client', phase: 'Account setup', icon: '🏢', title: 'Set up the client', desc: 'Name, logo and AI context.', section: 'settings', auto: (d) => !!(d.entity.name || '').trim() },
+  { key: 'scope', phase: 'Account setup', icon: '🔒', title: 'Lock their data scope', desc: 'Pick the organiser so they only ever see their own data.', section: 'settings', auto: (d) => d.entity.allOrganisers || Object.values(d.entity.lockedFilters || {}).some((v) => String(v || '').trim()) },
+  { key: 'branding', phase: 'Account setup', icon: '🎨', title: 'Add branding', desc: 'Logo, colours and sender — white-labels the app and emails.', section: 'email', auto: (d) => d.brandingSet },
+  { key: 'logins', phase: 'Account setup', icon: '🔑', title: 'Create logins & roles', desc: 'Add the people who sign in and set each one’s role.', section: 'logins', auto: (d) => d.users.length > 0 },
+  { key: 'inventive', phase: 'Account setup', icon: '✨', title: 'Assign Inventive', desc: 'Link the client’s Inventive analyst workspace.', section: 'integrations', auto: (d) => !!(d.entity.inventiveRefId || d.entity.inventiveName) },
+  { key: 'integrations', phase: 'Account setup', icon: '🔌', title: 'Add integrations', desc: 'Connect Looker / Meta / TikTok / email as needed.', section: 'integrations' },
+  { key: 'digest', phase: 'Account setup', icon: '🗓', title: 'Create a digest', desc: 'Schedule a recurring briefing email to their team.', section: 'digests', auto: (d) => d.digests > 0 },
+  // Per event — repeat for each event (suite) the client runs.
+  { key: 'suites', phase: 'Per event', icon: '🗂️', title: 'Create the event (suite)', desc: 'A suite per event — its dashboard sets and the event lock.', section: 'suites', auto: (d) => d.suites.length > 0 },
+  { key: 'briefing', phase: 'Per event', icon: '📝', title: 'Tune the event briefing', desc: 'Key dates, phase and instructions so the Owl reads the event right.', section: 'briefing' },
+  { key: 'goals', phase: 'Per event', icon: '⭐', title: 'Set event goals', desc: 'Give the event a live target — preview the suite to add one.', section: 'suites', auto: (d) => d.goals > 0 },
+  { key: 'segment', phase: 'Per event', icon: '🎯', title: 'Build an audience', desc: 'A reusable segment — e.g. everyone who abandoned a cart.', section: 'segments', auto: (d) => d.segments > 0 },
+  { key: 'cart', phase: 'Per event', icon: '🛒', title: 'Set up an abandoned-cart campaign', desc: 'Win back checkouts that didn’t finish — email/SMS the abandoned-cart audience.', section: 'campaigns', auto: (d) => d.campaigns > 0 },
 ];
+const AM_PHASE_DESC = { 'Account setup': 'The client-wide foundation — set once.', 'Per event': 'Repeat for each event (suite) the client runs.' };
 function ClientSetupChecklist({ entity, suites, users, go }) {
   const [aux, setAux] = useState(null);
   useEffect(() => {
@@ -2129,14 +2134,16 @@ function ClientSetupChecklist({ entity, suites, users, go }) {
       api.getEntityMailTemplate(entity.id).catch(() => null),
       api.getDigests(entity.id).catch(() => []),
       api.listSegments(entity.id).catch(() => []),
+      api.listActions(entity.id).catch(() => []),
       api.getSetupWizardProgress(entity.id).catch(() => ({ ticks: {} })),
       Promise.all(suites.map((su) => api.suiteGoals(su.id).then((r) => (Array.isArray(r) ? r : r.goals || [])).catch(() => []))),
-    ]).then(([mt, digests, segments, prog, goalsArr]) => {
+    ]).then(([mt, digests, segments, actions, prog, goalsArr]) => {
       if (!alive) return;
       setAux({
         brandingSet: brandingDone(mt),
         digests: (digests || []).length,
         segments: (segments || []).length,
+        campaigns: (actions || []).length,
         goals: goalsArr.reduce((n, g) => n + (g ? g.length : 0), 0),
         ticks: prog.ticks || {},
       });
@@ -2144,7 +2151,7 @@ function ClientSetupChecklist({ entity, suites, users, go }) {
     return () => { alive = false; };
   }, [entity.id, suites.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const data = { entity, suites, users, brandingSet: aux?.brandingSet, digests: aux?.digests || 0, segments: aux?.segments || 0, goals: aux?.goals || 0 };
+  const data = { entity, suites, users, brandingSet: aux?.brandingSet, digests: aux?.digests || 0, segments: aux?.segments || 0, campaigns: aux?.campaigns || 0, goals: aux?.goals || 0 };
   const autoDone = (t) => !!(t.auto && t.auto(data));
   const manualDone = (t) => aux?.ticks?.['amchk_' + t.key] === 1;
   const done = (t) => autoDone(t) || manualDone(t);
@@ -2170,9 +2177,17 @@ function ClientSetupChecklist({ entity, suites, users, go }) {
         </div>
         <p style={{ ...hint, marginTop: 10, marginBottom: 0 }}>Auto-ticks as you go. Tap <b>Go →</b> to jump to a task, or tick the manual ones. Everything an account manager needs to stand a client up and switch on the value.</p>
       </div>
-      {phases.map((p) => (
+      {phases.map((p) => {
+        const pDone = p.tasks.filter(done).length;
+        return (
         <div key={p.phase} style={{ marginBottom: 4 }}>
-          <div style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', margin: '14px 2px 8px' }}>{p.phase}</div>
+          <div style={{ margin: '16px 2px 8px' }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+              <span style={{ fontSize: 11.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text)' }}>{p.phase}</span>
+              <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--muted)' }}>{pDone}/{p.tasks.length}</span>
+            </div>
+            {AM_PHASE_DESC[p.phase] && <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{AM_PHASE_DESC[p.phase]}</div>}
+          </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {p.tasks.map((t) => {
               const ok = done(t);
@@ -2192,7 +2207,8 @@ function ClientSetupChecklist({ entity, suites, users, go }) {
             })}
           </div>
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
