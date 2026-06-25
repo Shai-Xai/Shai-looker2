@@ -2195,17 +2195,21 @@ function ClientSetupChecklist({ entity, suites, users, go }) {
       </div>
     </div>
   );
-  // Collapsible section header bar. `big` = an event (suite) heading.
-  const bar = (k, title, caption, n, m, big) => (
-    <button onClick={() => toggle(k)} style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 12, padding: '12px 14px', cursor: 'pointer', color: 'var(--text)' }}>
-      <span style={{ fontSize: 11, color: 'var(--muted)', flexShrink: 0, transform: open[k] ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</span>
-      <span style={{ flex: 1, minWidth: 0 }}>
-        <span style={{ display: 'block', fontSize: big ? 14.5 : 12, fontWeight: 800, textTransform: big ? 'none' : 'uppercase', letterSpacing: big ? 0 : '0.05em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
-        {caption && !open[k] && <span style={{ display: 'block', fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{caption}</span>}
-      </span>
-      <span style={{ fontSize: 12, fontWeight: 700, color: m > 0 && n === m ? 'var(--brand)' : 'var(--muted)', flexShrink: 0 }}>{n}/{m}</span>
-    </button>
-  );
+  // Collapsible section header bar. `big` = an event (suite) heading. Turns brand
+  // red once every task in the section is done.
+  const bar = (k, title, caption, n, m, big) => {
+    const complete = m > 0 && n === m;
+    return (
+      <button onClick={() => toggle(k)} style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', background: complete ? 'rgba(var(--brand-rgb),0.09)' : 'var(--card)', border: complete ? '1.5px solid var(--brand)' : '1px solid var(--hairline)', borderRadius: 12, padding: '12px 14px', cursor: 'pointer', color: 'var(--text)' }}>
+        <span style={{ fontSize: 11, color: complete ? 'var(--brand)' : 'var(--muted)', flexShrink: 0, transform: open[k] ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</span>
+        <span style={{ flex: 1, minWidth: 0 }}>
+          <span style={{ display: 'block', fontSize: big ? 14.5 : 12, fontWeight: 800, textTransform: big ? 'none' : 'uppercase', letterSpacing: big ? 0 : '0.05em', color: complete ? 'var(--brand)' : 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
+          {caption && !open[k] && <span style={{ display: 'block', fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{caption}</span>}
+        </span>
+        <span style={{ fontSize: 12, fontWeight: 800, color: complete ? 'var(--brand)' : 'var(--muted)', flexShrink: 0 }}>{complete ? `✓ ${n}/${m}` : `${n}/${m}`}</span>
+      </button>
+    );
+  };
 
   return (
     <div>
