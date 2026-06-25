@@ -191,10 +191,11 @@ function parseModelJson(text, what = 'response') {
   throw lastErr;
 }
 // Last-resort: ask the model to repair its own malformed JSON (only on parse failure).
+const JSON_REPAIR_SYSTEM = `You fix malformed JSON. Return ONLY the corrected, valid JSON — no prose, no markdown fences. Preserve all content and keys; fix only syntax (missing commas, unescaped quotes/newlines, trailing commas).`;
 async function repairJsonViaModel(c, broken) {
   const resp = await c.messages.create({
     model: MODEL, max_tokens: 8192, output_config: { effort: 'low' },
-    system: 'You fix malformed JSON. Return ONLY the corrected, valid JSON — no prose, no markdown fences. Preserve all content and keys; fix only syntax (missing commas, unescaped quotes/newlines, trailing commas).',
+    system: JSON_REPAIR_SYSTEM,
     messages: [{ role: 'user', content: String(broken || '').slice(0, 24000) }],
   });
   return (resp.content || []).filter((bk) => bk.type === 'text').map((bk) => bk.text).join('');
@@ -1100,6 +1101,7 @@ function promptRegistry() {
     { key: 'classify', label: 'Document classification', scope: 'Owl email ingest: settlement vs invoice vs other', text: CLASSIFY_SYSTEM },
     { key: 'goals', label: 'Goals summary', scope: 'Owl summary of an event\'s goals on the Goals page', text: GOALS_SYSTEM },
     { key: 'goalGap', label: 'Goal gap plan', scope: 'Marketing/insights plan to close a behind-pace goal (→ targeted campaign)', text: GOAL_GAP_SYSTEM },
+    { key: 'jsonRepair', label: 'JSON repair', scope: 'Last-resort model repair of malformed AI JSON before parsing', text: JSON_REPAIR_SYSTEM },
   ];
 }
 
