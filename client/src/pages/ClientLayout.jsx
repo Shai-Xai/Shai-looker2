@@ -365,6 +365,17 @@ export default function ClientLayout() {
             <span style={ellip}>Alerts</span>
           </button>
           )}
+          {can(PERMS.DIGESTS_MANAGE) && (
+          <button
+            ref={onDigests ? activeRef : null}
+            className={`nav-row${onDigests ? ' active' : ''}`}
+            style={{ ...rowBtn, fontWeight: onDigests ? 600 : 500 }}
+            onClick={() => { if (!onDigests) vtNavigate(navigate, '/digests'); if (isMobile) setNavOpen(false); }}
+          >
+            <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>🗓</span>
+            <span style={ellip}>Digests</span>
+          </button>
+          )}
           {can(PERMS.SETTLEMENTS_VIEW) && (visibleSettlements.length > 0 || isAdmin) && (
           <button
             ref={onSettlements ? activeRef : null}
@@ -387,17 +398,6 @@ export default function ClientLayout() {
               <span style={ellip}>Inbox</span>
               {inbox.unread > 0 && <span style={{ ...countChip, background: 'var(--brand)', color: '#fff' }}>{inbox.unread}</span>}
             </button>
-          )}
-          {can(PERMS.DIGESTS_MANAGE) && (
-          <button
-            ref={onDigests ? activeRef : null}
-            className={`nav-row${onDigests ? ' active' : ''}`}
-            style={{ ...rowBtn, fontWeight: onDigests ? 600 : 500 }}
-            onClick={() => { if (!onDigests) vtNavigate(navigate, '/digests'); if (isMobile) setNavOpen(false); }}
-          >
-            <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>🗓</span>
-            <span style={ellip}>Digests</span>
-          </button>
           )}
           {(can(PERMS.CAMPAIGNS_VIEW)) && (
           <>
