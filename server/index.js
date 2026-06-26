@@ -2438,15 +2438,19 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
 
   const byId = Object.fromEntries(catalogue.map((c) => [c.dashboardId, c]));
   const instructions = [aiInstructionsFor(null), briefingInstructionsFor(user, entityId, clientCatalogue(entityId).suites)].filter(Boolean).join('\n\n');
-  const href = (id) => { const c = id && byId[id]; return c ? `${mailer.baseUrl()}/suite/${c.suiteId}/d/${id}` : ''; };
+  // Deep links carry the EVENT the content is about (`evSuite`), not byId's
+  // last-wins suite — a dashboard shared across events would otherwise link to
+  // the wrong one. Per-event sections pass their own suite; the cross-event
+  // overview passes the AI-identified suite; a single-event digest its one suite.
+  const href = (id, evSuite) => { const c = id && byId[id]; return c ? `${mailer.baseUrl()}/suite/${evSuite || c.suiteId}/d/${id}` : ''; };
   // A suggested action with an executable capability deep-links into the
   // pre-filled "Make it happen" campaign editor (recipe auto-resolves the
-  // audience + copy); otherwise it links to the relevant dashboard.
-  const actionHref = (a) => (CAPABILITY_KEYS.has(a.action)
-    ? `${mailer.baseUrl()}/engage/campaigns?type=${encodeURIComponent(a.action)}&goal=${encodeURIComponent(String(a.text || '').slice(0, 200))}`
-    : href(a.dashboardId));
-  const mapKpi = (k) => ({ label: String(k.label || '').slice(0, 40), value: String(k.value || '').slice(0, 30), delta: String(k.delta || '').slice(0, 40), href: href(k.dashboardId) });
-  const mapAction = (a) => ({ text: String(a.text || '').slice(0, 200), href: actionHref(a), action: CAPABILITY_KEYS.has(a.action) ? a.action : null });
+  // audience + copy), scoped to its event; otherwise it links to the dashboard.
+  const actionHref = (a, evSuite) => (CAPABILITY_KEYS.has(a.action)
+    ? `${mailer.baseUrl()}/engage/campaigns?type=${encodeURIComponent(a.action)}&goal=${encodeURIComponent(String(a.text || '').slice(0, 200))}${evSuite ? `&suite=${encodeURIComponent(evSuite)}` : ''}`
+    : href(a.dashboardId, evSuite));
+  const mapKpi = (k, evSuite) => ({ label: String(k.label || '').slice(0, 40), value: String(k.value || '').slice(0, 30), delta: String(k.delta || '').slice(0, 40), href: href(k.dashboardId, evSuite) });
+  const mapAction = (a, evSuite) => ({ text: String(a.text || '').slice(0, 200), href: actionHref(a, evSuite), action: CAPABILITY_KEYS.has(a.action) ? a.action : null });
   // Render a set of followed-tile facts as email visuals — chart tiles become a
   // PNG mail asset, single-value/table tiles become a metric chip. Best-effort.
   const renderFollowed = (facts) => {
@@ -2461,10 +2465,10 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
       if (png) {
         const token = crypto.randomUUID();
         db.putMailAsset(token, 'image/png', png);
-        charts.push({ title: ft.title, imageUrl: `${base}/mail-assets/img/${token}`, href: href(ft.dashboardId) });
+        charts.push({ title: ft.title, imageUrl: `${base}/mail-assets/img/${token}`, href: href(ft.dashboardId, ft.suiteId) });
       } else {
         const v = factValueLabel(ft);
-        if (v && v !== '—') kpis.push({ label: String(ft.title || '').slice(0, 40), value: String(v).slice(0, 30), delta: '', href: href(ft.dashboardId) });
+        if (v && v !== '—') kpis.push({ label: String(ft.title || '').slice(0, 40), value: String(v).slice(0, 30), delta: '', href: href(ft.dashboardId, ft.suiteId) });
       }
     }
     return { charts, kpis };
@@ -2474,12 +2478,15 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
   // clients, and as the safety net if the multi-event pass can't be produced.
   const buildFlat = async () => {
     const raw = await insights.digestBrief({ tiles: factTilesAll, roleLabel: lens.label, roleFocus: effectiveFocus, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), capabilities: ACTION_CAPABILITIES, goals, today: todayLabel() });
+    // A single-event digest scopes all its links/actions to that one event; the
+    // multi-event fallback (flat over several) has no single event to assert.
+    const flatSuite = selSuiteIds.length === 1 ? selSuiteIds[0] : '';
     const o = {
       subject: String(raw.subject || '').slice(0, 120),
       headline: String(raw.headline || '').slice(0, 600),
       narrative: (raw.narrative || []).slice(0, 5).map((s) => String(s).slice(0, 800)).filter(Boolean),
-      kpis: (raw.kpis || []).slice(0, 6).map(mapKpi).filter((k) => k.label && k.value),
-      actions: (raw.actions || []).slice(0, 3).map(mapAction).filter((a) => a.text),
+      kpis: (raw.kpis || []).slice(0, 6).map((k) => mapKpi(k, flatSuite)).filter((k) => k.label && k.value),
+      actions: (raw.actions || []).slice(0, 3).map((a) => mapAction(a, flatSuite)).filter((a) => a.text),
     };
     // Followed-tile visuals lead the single-event KPI strip / add chart blocks.
     if (followedVisual && followedFacts.length) {
@@ -2522,19 +2529,22 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
           suiteId: g.suiteId, suiteName: g.suiteName,
           headline: r ? String(e.headline || '').slice(0, 400) : 'Summary unavailable for this event right now.',
           narrative: (e.narrative || []).slice(0, 3).map((s) => String(s).slice(0, 800)).filter(Boolean),
-          kpis: (e.kpis || []).slice(0, 6).map(mapKpi).filter((k) => k.label && k.value),
-          actions: (e.actions || []).slice(0, 3).map(mapAction).filter((a) => a.text),
+          kpis: (e.kpis || []).slice(0, 6).map((k) => mapKpi(k, g.suiteId)).filter((k) => k.label && k.value),
+          actions: (e.actions || []).slice(0, 3).map((a) => mapAction(a, g.suiteId)).filter((a) => a.text),
         };
         const vis = visualsBySuite[g.suiteId];
         if (vis) { if (vis.charts.length) sect.charts = vis.charts.slice(0, 6); if (vis.kpis.length) sect.kpis = [...vis.kpis, ...sect.kpis].slice(0, 9); }
         return sect;
       });
+      // The overview's executable actions target one event, which the AI returns
+      // as suiteId; trust it only when it's one of the events this digest covers.
+      const selSet = new Set(selSuiteIds);
       out = {
         subject: String(ovRaw.subject || '').slice(0, 120),
         headline: String(ovRaw.headline || '').slice(0, 600),
         narrative: (ovRaw.narrative || []).slice(0, 4).map((s) => String(s).slice(0, 800)).filter(Boolean),
-        kpis: (ovRaw.kpis || []).slice(0, 6).map(mapKpi).filter((k) => k.label && k.value),
-        actions: (ovRaw.actions || []).slice(0, 3).map(mapAction).filter((a) => a.text),
+        kpis: (ovRaw.kpis || []).slice(0, 6).map((k) => mapKpi(k)).filter((k) => k.label && k.value),
+        actions: (ovRaw.actions || []).slice(0, 3).map((a) => mapAction(a, selSet.has(a.suiteId) ? a.suiteId : '')).filter((a) => a.text),
         events,
         eventCount: events.length,
       };

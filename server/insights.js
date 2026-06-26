@@ -591,10 +591,11 @@ Respond with ONLY strict JSON (no markdown fences):
   "headline": "1 tight sentence: the single most important cross-event story for THIS role, led by daily-sales pace (may use **bold**)",
   "narrative": [ "1-3 TIGHT cross-event points. Start EACH with a SHORT bold heading (2-4 words) + colon. The FIRST point MUST be '**Daily sales:** …' — the recent daily-sales pace across the events vs the comparison. Then the standout/biggest mover and anything needing attention; name events explicitly. One sentence each (two only if essential), ~20% leaner than usual. Include ONE '**Goals:** …' point if GOALS given." ],
   "kpis": [ { "label": "short metric (prefix the event if useful)", "value": "figure verbatim from TILES", "delta": "movement vs a comparison or empty", "dashboardId": "id from any CATALOGUE or null" } ],
-  "actions": [ { "text": "a concrete, role-appropriate cross-event next step (imperative, one line)", "dashboardId": "id from CATALOGUE or null", "action": "a CAPABILITIES key ONLY if directly executable, else omit" } ]
+  "actions": [ { "text": "a concrete, role-appropriate cross-event next step (imperative, one line)", "dashboardId": "id from CATALOGUE or null", "suiteId": "the EVENT id this action targets — copy it VERBATIM from that event's [id:…] heading", "action": "a CAPABILITIES key ONLY if directly executable, else omit" } ]
 }
 
 Rules:
+- Each action with an "action" key targets ONE event — set "suiteId" to that event's id, read from its "## EVENT: … [id:…]" heading and copied exactly. REQUIRED so an executable action opens the campaign on the right event (a dashboard shared across events can't identify the event on its own).
 - This is the OVERVIEW only — synthesise ACROSS events; do NOT write a separate paragraph per event (each event has its own section below this).
 - LEAD with DAILY SALES: the first narrative point and the first KPI should be the recent daily-sales pace across the events (this report's focus), before anything else.
 - Every narrative point opens with a 2-4 word **bold heading** + colon, then one tight sentence (two only if essential); trim filler so points run ~20% shorter than usual.
