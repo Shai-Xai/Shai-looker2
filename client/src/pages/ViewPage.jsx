@@ -14,7 +14,6 @@ import { useAuth } from '../lib/auth.jsx';
 import { useProfile } from '../lib/profile.jsx';
 import { useTheme } from '../lib/theme.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
-import { isStandalone } from '../lib/pwa.js';
 import { ScopeProvider } from '../lib/ScopeContext.jsx';
 
 // Read-only render of a saved dashboard. When opened inside a Suite
@@ -22,7 +21,6 @@ import { ScopeProvider } from '../lib/ScopeContext.jsx';
 // every query is scoped to that suite. Admins opening /d/:id directly are unscoped.
 export default function ViewPage() {
   const isMobile = useIsMobile();
-  const standalone = isStandalone(); // installed app → offer "open in new window"
   const { id, suiteId } = useParams();
   const navigate = useNavigate();
   const { isAdmin, insightsEnabled, user } = useAuth();
@@ -370,9 +368,6 @@ export default function ViewPage() {
                 <span style={{ color: activeCount > 0 ? 'var(--brand)' : 'inherit', fontSize: 15 }}>⚲</span>
                 <span style={{ fontSize: 11, opacity: 0.7 }}>{filtersOpen ? '▴' : '▾'}</span>
               </button>
-            )}
-            {!isMobile && standalone && (
-              <button className="btn-key no-print" style={{ ...summaryBtn, padding: '8px 12px' }} onClick={() => window.open(window.location.href, '_blank', 'noopener')} title="Open this dashboard in a new window — handy for watching two events side by side" aria-label="Open in a new window">⧉</button>
             )}
             {!isMobile && <ActionsMenu suiteId={suiteId} dashboardId={id} filterValues={filterValues} />}
             {isAdmin && !isMobile && <button style={editBtn} onClick={() => navigate(suiteId ? `/suite/${suiteId}/d/${id}/edit` : `/d/${id}/edit`, { state: { filterValues } })}>Edit</button>}
