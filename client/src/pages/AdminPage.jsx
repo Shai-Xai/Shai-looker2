@@ -1864,6 +1864,16 @@ function ActivityReport() {
               {rep.topFeatures.length ? rep.topFeatures.map((f) => row(<span title={f.label}>{f.label}</span>, f.uses)) : <Muted>No actions yet.</Muted>}
             </div>
           </div>
+          {rep.inactiveClients && (
+            <div style={{ ...card, marginTop: 10, maxHeight: 320, overflowY: 'auto' }}>
+              <div style={head} title="Clients with no login, dashboard open or action in the window — 'Never' means no engagement ever (incl. clients with no logins set up).">😴 Inactive clients · no activity in {winLabel} ({rep.inactiveClients.length})</div>
+              {rep.inactiveClients.length === 0 ? <Muted>Every client has been active in this window. 🎉</Muted>
+                : rep.inactiveClients.map((c) => row(
+                    <span title={c.entityName}>{c.entityName}{c.userCount === 0 ? ' · no logins yet' : ''}</span>,
+                    <span style={{ color: c.never ? 'var(--error,#ef4444)' : 'var(--muted)', fontWeight: 600 }}>{c.never ? 'Never' : relTime(c.lastActiveAt)}</span>,
+                  ))}
+            </div>
+          )}
         </>
         );
       })()}

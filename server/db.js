@@ -305,14 +305,12 @@ function recentUsageForUser(userId, limit = 60) {
 // get used most — aggregated across every user from the view + audit logs.
 function adminActivityReport({ days = 30, limit = 8 } = {}) {
   const ago = (d) => new Date(Date.now() - d * 864e5).toISOString();
-  const win = ago(days);            // the selected window — drives the breakdowns
-  const f1 = ago(1), f7 = ago(7), f30 = ago(30); // FIXED windows for the snapshot card
-  // Active = a user who appears in the view log OR the action log in the window
-  // (a dashboard open or any audited action), deduped.
+  const win = ago(days);                          // selected window → breakdowns
+  const f1 = ago(1), f7 = ago(7), f30 = ago(30);  // FIXED windows for the snapshot card
+  // Active = a user in the view log OR action log in the window (deduped).
   const activeIds = (s) => db.prepare('SELECT user_id FROM (SELECT user_id FROM user_views WHERE at>=? UNION SELECT user_id FROM user_actions WHERE at>=?)').all(s, s).map((r) => r.user_id);
   const winIds = activeIds(win);
-  // Surface split: of the window's active users, how many opened the INSTALLED
-  // app (PWA / standalone) in the window vs only a regular browser/desktop.
+  // Surface split: window's active users who opened the INSTALLED app vs only a browser.
   const appUsers = new Set();
   try { for (const r of db.prepare('SELECT user_id FROM app_installs WHERE last_at>=?').all(win)) appUsers.add(r.user_id); } catch { /* table new */ }
   const app = winIds.filter((id) => appUsers.has(id)).length;
@@ -330,12 +328,24 @@ function adminActivityReport({ days = 30, limit = 8 } = {}) {
   const totalViews = db.prepare('SELECT COUNT(*) c FROM user_views WHERE at>=?').get(win).c;
   const totalActions = db.prepare('SELECT COUNT(*) c FROM user_actions WHERE at>=?').get(win).c;
   return {
-    days,
-    active: { d1: activeIds(f1).length, d7: activeIds(f7).length, d30: activeIds(f30).length },
+    days, active: { d1: activeIds(f1).length, d7: activeIds(f7).length, d30: activeIds(f30).length },
     surfaces: { total: winIds.length, app, web: winIds.length - app },
-    totals: { views: totalViews, actions: totalActions },
-    topUsers, topDashboards, topFeatures,
+    totals: { views: totalViews, actions: totalActions }, topUsers, topDashboards, topFeatures,
   };
+}
+// Clients (entities) with no client-side engagement in `days` — last login /
+// dashboard open / audited action across their non-admin logins. `never` = none ever.
+function inactiveClients(days = 30, limit = 60) {
+  const cutoff = new Date(Date.now() - days * 864e5).toISOString();
+  const lv = lastViewForUsers(), la = lastActionsForUsers();
+  const lastOf = (u) => [u.lastLogin, lv[u.id], la[u.id]?.at].filter(Boolean).sort().pop() || null;
+  const byE = new Map();
+  for (const u of listUsers().filter((x) => x.role !== 'admin')) { const t = lastOf(u);
+    for (const eid of u.entityIds || []) { const b = byE.get(eid) || { lastActiveAt: null, userCount: 0 }; b.userCount += 1; if (t && (!b.lastActiveAt || t > b.lastActiveAt)) b.lastActiveAt = t; byE.set(eid, b); } }
+  return listEntities().map((e) => { const b = byE.get(e.id) || { lastActiveAt: null, userCount: 0 }; return { entityId: e.id, entityName: e.name, lastActiveAt: b.lastActiveAt, userCount: b.userCount, never: !b.lastActiveAt }; })
+    .filter((c) => c.never || c.lastActiveAt < cutoff)
+    .sort((a, c) => (!!a.never === !!c.never ? String(a.lastActiveAt || '').localeCompare(String(c.lastActiveAt || '')) : (a.never ? -1 : 1)))
+    .slice(0, limit);
 }
 
 // ─── User action audit log (every meaningful action) ─────────────────────────
@@ -1766,7 +1776,7 @@ module.exports = {
   // event documents (invoices etc.)
   listDocuments, getDocument, getDocumentFile, createDocument, updateDocument, deleteDocument, documentExistsForSource,
   // view tracking
-  recordView, viewProfile, recentViewsForUser, lastViewForUsers, recentUsageForUser, usageByClientForUser, adminActivityReport,
+  recordView, viewProfile, recentViewsForUser, lastViewForUsers, recentUsageForUser, usageByClientForUser, adminActivityReport, inactiveClients,
   // user action audit log
   recordAction, listActionsForUser, lastActionsForUsers,
   // tile marks (pins + follows)
