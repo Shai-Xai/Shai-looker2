@@ -10,16 +10,18 @@ import { createPortal } from 'react-dom';
 // Trigger is rendered here so we can anchor the popover to it. Callers pass a
 // `variant` to match the surrounding visual language:
 //   'tile'   — bordered card icon, sits in a tile's header button cluster
-//   'header' — transparent icon, sits in an insight panel's header
+//   'header' — prominent outlined "↗ Share" pill, in an insight panel's header
+//   'footer' — full-width solid "↗ Share" button, at the bottom of a panel
 //
 // On phones the menu is a bottom sheet (big tap targets); on desktop it's a
-// popover anchored under the trigger.
+// popover anchored to the trigger (flips above it when near the bottom edge).
 export default function ShareMenu({
   heading = '',
   text = '',
   url,
   isMobile = false,
   variant = 'tile',
+  label = 'Share',
   title = 'Share',
 }) {
   const [open, setOpen] = useState(false);
@@ -43,7 +45,12 @@ export default function ShareMenu({
       const r = btnRef.current.getBoundingClientRect();
       const width = Math.min(300, window.innerWidth - 16);
       const left = Math.min(Math.max(8, r.right - width), window.innerWidth - width - 8);
-      setPos({ top: r.bottom + 8, left, width });
+      // Open below the trigger, but flip above it when there isn't room (the
+      // footer button sits near the bottom of the panel/viewport).
+      const estH = 300;
+      const below = r.bottom + 8;
+      const top = below + estH > window.innerHeight - 8 ? Math.max(8, r.top - estH - 8) : below;
+      setPos({ top, left, width });
     }
     setSlackDone(false);
     setOpen(true);
@@ -75,25 +82,31 @@ export default function ShareMenu({
     setTimeout(close, 1500);
   }
 
-  const triggerStyle = variant === 'header'
-    ? { border: 'none', background: 'transparent', cursor: 'pointer', fontSize: isMobile ? 20 : 17, color: '#888', padding: isMobile ? '6px 8px' : 4, lineHeight: 1 }
-    : { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--muted)', borderRadius: 7, fontSize: isMobile ? 14 : 12, lineHeight: 1, width: isMobile ? 28 : 24, height: isMobile ? 28 : 24, flexShrink: 0 };
-
   const panelStyle = isMobile
     ? { position: 'fixed', left: 0, right: 0, bottom: 0, width: '100%', borderRadius: '18px 18px 0 0', paddingBottom: 'calc(12px + env(safe-area-inset-bottom))', ...panelBase }
     : { position: 'fixed', top: pos?.top, left: pos?.left, width: pos?.width, borderRadius: 14, ...panelBase };
 
+  // The trigger varies by surface: an icon on dense tiles, a prominent labelled
+  // pill in an insight panel's header, a full-width solid button in its footer.
+  const commonProps = {
+    ref: btnRef,
+    className: 'no-print',
+    title,
+    'aria-label': title,
+    onClick: openMenu,
+    onMouseDown: (e) => e.stopPropagation(),
+  };
+  const trigger = variant === 'footer' ? (
+    <button {...commonProps} style={footerBtn}><span style={{ fontSize: 16 }}>↗</span>{label}</button>
+  ) : variant === 'header' ? (
+    <button {...commonProps} style={{ ...headerPill, padding: isMobile ? '7px 13px' : '6px 12px' }}><span style={{ fontSize: 15 }}>↗</span>{label}</button>
+  ) : (
+    <button {...commonProps} style={{ ...tileIcon, width: isMobile ? 28 : 24, height: isMobile ? 28 : 24, fontSize: isMobile ? 14 : 12 }}>↗</button>
+  );
+
   return (
     <>
-      <button
-        ref={btnRef}
-        className="no-print"
-        title={title}
-        aria-label={title}
-        onClick={openMenu}
-        onMouseDown={(e) => e.stopPropagation()}
-        style={triggerStyle}
-      >↗</button>
+      {trigger}
 
       {open && (pos || isMobile) && createPortal(
         <>
@@ -165,6 +178,11 @@ function plainify(s = '') {
     .trim();
 }
 
+const tileIcon = { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--muted)', borderRadius: 7, lineHeight: 1, flexShrink: 0 };
+// Prominent outlined pill — stands out next to the plain ↻ / ✕ header icons.
+const headerPill = { display: 'inline-flex', alignItems: 'center', gap: 6, border: '1.5px solid var(--brand)', background: 'transparent', color: 'var(--brand)', borderRadius: 980, fontSize: 13, fontWeight: 700, cursor: 'pointer', lineHeight: 1, flexShrink: 0, whiteSpace: 'nowrap' };
+// Full-width solid call-to-action for the bottom of a panel.
+const footerBtn = { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8, width: '100%', boxSizing: 'border-box', border: 'none', background: 'var(--brand)', color: '#fff', borderRadius: 12, padding: '12px 16px', fontSize: 14.5, fontWeight: 700, cursor: 'pointer', lineHeight: 1, minHeight: 44 };
 const panelBase = { zIndex: 499, boxSizing: 'border-box', background: 'var(--card)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-pop)', padding: 10, display: 'flex', flexDirection: 'column' };
 const noteArea = { width: '100%', border: '1px solid var(--hairline)', borderRadius: 10, padding: '9px 11px', fontSize: 14, outline: 'none', resize: 'none', boxSizing: 'border-box', fontFamily: 'inherit', background: 'var(--input-bg, var(--card))', color: 'var(--text)' };
 const channelItem = { display: 'flex', alignItems: 'center', gap: 12, width: '100%', border: 'none', background: 'transparent', cursor: 'pointer', padding: '11px 10px', borderRadius: 10, fontSize: 14, fontWeight: 600, color: 'var(--text)', minHeight: 44 };
