@@ -442,46 +442,40 @@ function buildUserActivity(userId, limit = 120) {
 app.get('/api/admin/users/:id', auth.requireAdmin, (req, res) => {
   const u = db.getUser(req.params.id);
   if (!u) return res.status(404).json({ error: 'User not found' });
-  const memberships = (u.memberships || []).map((m) => {
-    const e = db.getEntity(m.entityId);
-    const role = roles.getRole(m.role);
-    return { entityId: m.entityId, entityName: e?.name || m.entityId, entityLogo: e?.logo || '', role: m.role, roleLabel: role.label, lens: role.lens, permissions: role.permissions };
-  });
-  const profile = db.viewProfile(u.id);
-  const titleFor = (id) => db.getDashboard(id)?.title || id;
-  const used = (profile.top || []).map((t) => ({ dashboardId: t.dashboardId, suiteId: t.suiteId, count: t.count, lastAt: t.lastAt, title: titleFor(t.dashboardId) }));
-  // Dashboards this user can reach today: every dashboard bundled into a set in
-  // one of their entities' suites (deduped). Admins see everything → flagged.
-  const accSeen = new Set();
-  const accessible = [];
-  if (u.role !== 'admin') {
-    for (const eid of u.entityIds || []) {
-      for (const su of db.listSuitesForEntity(eid)) {
-        for (const sid of db.suiteSetIds(su.id)) {
-          for (const did of db.dashboardsInSet(sid)) {
-            if (accSeen.has(did)) continue;
-            accSeen.add(did);
-            accessible.push({ dashboardId: did, title: titleFor(did), suiteId: su.id, suiteName: su.name });
-          }
-        }
-      }
+  // Each enrichment is independent — a failure in one (stale ref, odd data) must
+  // NOT 500 the whole user view; degrade and log the real culprit.
+  const safe = (fn, fallback, label) => { try { return fn(); } catch (e) { console.error(`[admin user ${u.id}] ${label} failed:`, e?.message || e); return fallback; } };
+  const titleFor = (id) => { try { return db.getDashboard(id)?.title || id; } catch { return id; } };
+  const memberships = safe(() => (u.memberships || []).map((m) => {
+    const e = db.getEntity(m.entityId); const role = roles.getRole(m.role);
+    return { entityId: m.entityId, entityName: e?.name || m.entityId, entityLogo: e?.logo || '', role: m.role, roleLabel: role?.label || m.role, lens: role?.lens || 'exec', permissions: role?.permissions || [] };
+  }), [], 'memberships');
+  const profile = safe(() => db.viewProfile(u.id), { top: [], lastVisit: null }, 'profile');
+  const used = safe(() => (profile.top || []).map((t) => ({ dashboardId: t.dashboardId, suiteId: t.suiteId, count: t.count, lastAt: t.lastAt, title: titleFor(t.dashboardId) })), [], 'used');
+  // Dashboards this user can reach: every dashboard in a set in one of their
+  // entities' suites (deduped). Admins see everything → flagged below.
+  const accessible = safe(() => {
+    const seen = new Set(); const acc = [];
+    if (u.role !== 'admin') for (const eid of u.entityIds || []) for (const su of db.listSuitesForEntity(eid)) for (const sid of db.suiteSetIds(su.id)) for (const did of db.dashboardsInSet(sid)) {
+      if (seen.has(did)) continue; seen.add(did); acc.push({ dashboardId: did, title: titleFor(did), suiteId: su.id, suiteName: su.name });
     }
-  }
+    return acc;
+  }, [], 'accessible');
   res.json({
     user: {
       id: u.id, email: u.email, role: u.role, createdAt: u.createdAt,
       firstName: u.firstName, lastName: u.lastName, fullName: u.fullName, mobile: u.mobile,
       inventiveWorkspaceId: u.inventiveWorkspaceId || '',
-      inventiveWorkspace: u.inventiveWorkspaceId ? db.getInventiveWorkspace(u.inventiveWorkspaceId) : null,
+      inventiveWorkspace: safe(() => (u.inventiveWorkspaceId ? (db.getInventiveWorkspace(u.inventiveWorkspaceId) || null) : null), null, 'inventiveWorkspace'),
       lastLogin: u.lastLogin || null, notifyEmail: u.notifyEmail, notifyPush: u.notifyPush,
       entityIds: u.entityIds,
     },
     memberships,
     profile: { top: used, lastVisit: profile.lastVisit },
     dashboards: { used, accessible, accessibleAll: u.role === 'admin' },
-    usageByClient: db.usageByClientForUser(u.id),
-    emails: mailer.recipientLog(u.email).map((m) => ({ ...m, entityName: m.entityId ? (db.getEntity(m.entityId)?.name || '') : '' })),
-    activity: buildUserActivity(u.id),
+    usageByClient: safe(() => db.usageByClientForUser(u.id), [], 'usageByClient'),
+    emails: safe(() => mailer.recipientLog(u.email).map((m) => ({ ...m, entityName: m.entityId ? (db.getEntity(m.entityId)?.name || '') : '' })), [], 'emails'),
+    activity: safe(() => buildUserActivity(u.id), [], 'activity'),
   });
 });
 // Set a login's role WITHIN a specific client (its membership).
