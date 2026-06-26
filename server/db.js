@@ -305,26 +305,34 @@ function recentUsageForUser(userId, limit = 60) {
 // get used most — aggregated across every user from the view + audit logs.
 function adminActivityReport({ days = 30, limit = 8 } = {}) {
   const ago = (d) => new Date(Date.now() - d * 864e5).toISOString();
-  const s30 = ago(days), s7 = ago(7), s1 = ago(1);
-  // Active = appears in the view log OR the action log within the window (deduped).
-  const activeIn = (s) => db.prepare('SELECT COUNT(*) c FROM (SELECT user_id FROM user_views WHERE at>=? UNION SELECT user_id FROM user_actions WHERE at>=?)').get(s, s).c;
-  const nameFor = (id) => { const u = getUser(id); return u ? (u.fullName || u.email) : id; };
+  const win = ago(days);            // the selected window — drives the breakdowns
+  const f1 = ago(1), f7 = ago(7), f30 = ago(30); // FIXED windows for the snapshot card
+  // Active = a user who appears in the view log OR the action log in the window
+  // (a dashboard open or any audited action), deduped.
+  const activeIds = (s) => db.prepare('SELECT user_id FROM (SELECT user_id FROM user_views WHERE at>=? UNION SELECT user_id FROM user_actions WHERE at>=?)').all(s, s).map((r) => r.user_id);
+  const winIds = activeIds(win);
+  // Surface split: of the window's active users, how many opened the INSTALLED
+  // app (PWA / standalone) in the window vs only a regular browser/desktop.
+  const appUsers = new Set();
+  try { for (const r of db.prepare('SELECT user_id FROM app_installs WHERE last_at>=?').all(win)) appUsers.add(r.user_id); } catch { /* table new */ }
+  const app = winIds.filter((id) => appUsers.has(id)).length;
   const topUsers = db.prepare(
     `SELECT user_id AS userId, SUM(c) AS total, MAX(lastAt) AS lastAt FROM (
        SELECT user_id, COUNT(*) c, MAX(at) lastAt FROM user_views   WHERE at>=? GROUP BY user_id
        UNION ALL
        SELECT user_id, COUNT(*) c, MAX(at) lastAt FROM user_actions WHERE at>=? GROUP BY user_id
      ) GROUP BY user_id ORDER BY total DESC LIMIT ?`,
-  ).all(s30, s30, limit).map((r) => { const u = getUser(r.userId); return { userId: r.userId, name: u ? (u.fullName || u.email) : r.userId, role: u?.role || '', total: r.total, lastAt: r.lastAt }; });
+  ).all(win, win, limit).map((r) => { const u = getUser(r.userId); return { userId: r.userId, name: u ? (u.fullName || u.email) : r.userId, role: u?.role || '', total: r.total, lastAt: r.lastAt }; });
   const topDashboards = db.prepare('SELECT dashboard_id AS dashboardId, COUNT(*) AS opens, COUNT(DISTINCT user_id) AS users, MAX(at) AS lastAt FROM user_views WHERE at>=? GROUP BY dashboard_id ORDER BY opens DESC LIMIT ?')
-    .all(s30, limit).map((r) => ({ ...r, title: getDashboard(r.dashboardId)?.title || r.dashboardId }));
+    .all(win, limit).map((r) => ({ ...r, title: getDashboard(r.dashboardId)?.title || r.dashboardId }));
   const topFeatures = db.prepare('SELECT action, COUNT(*) AS uses, COUNT(DISTINCT user_id) AS users, MAX(label) AS label FROM user_actions WHERE at>=? GROUP BY action ORDER BY uses DESC LIMIT ?')
-    .all(s30, limit).map((r) => ({ action: r.action, label: r.label || r.action, uses: r.uses, users: r.users }));
-  const totalViews = db.prepare('SELECT COUNT(*) c FROM user_views WHERE at>=?').get(s30).c;
-  const totalActions = db.prepare('SELECT COUNT(*) c FROM user_actions WHERE at>=?').get(s30).c;
+    .all(win, limit).map((r) => ({ action: r.action, label: r.label || r.action, uses: r.uses, users: r.users }));
+  const totalViews = db.prepare('SELECT COUNT(*) c FROM user_views WHERE at>=?').get(win).c;
+  const totalActions = db.prepare('SELECT COUNT(*) c FROM user_actions WHERE at>=?').get(win).c;
   return {
     days,
-    active: { d1: activeIn(s1), d7: activeIn(s7), d30: activeIn(s30) },
+    active: { d1: activeIds(f1).length, d7: activeIds(f7).length, d30: activeIds(f30).length },
+    surfaces: { total: winIds.length, app, web: winIds.length - app },
     totals: { views: totalViews, actions: totalActions },
     topUsers, topDashboards, topFeatures,
   };

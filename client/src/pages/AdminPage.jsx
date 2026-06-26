@@ -1818,25 +1818,38 @@ function ActivityReport() {
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
         <span style={{ fontWeight: 700, fontSize: 15, flex: 1 }}>📊 Activity report</span>
         <select style={{ ...input, width: 'auto' }} value={days} onChange={(e) => setDays(Number(e.target.value))}>
+          <option value={1}>Today</option>
           <option value={7}>Last 7 days</option>
           <option value={30}>Last 30 days</option>
           <option value={90}>Last 90 days</option>
         </select>
       </div>
-      {err ? <Muted>{err}</Muted> : !rep ? <Muted>Loading…</Muted> : (
+      {err ? <Muted>{err}</Muted> : !rep ? <Muted>Loading…</Muted> : (() => {
+        const num = { fontSize: 22, fontWeight: 800 };
+        const sub = { fontSize: 11, color: 'var(--muted)' };
+        const winLabel = rep.days === 1 ? 'today' : `last ${rep.days} days`;
+        return (
         <>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
-            <div style={card}><div style={head}>Active users</div>
+            <div style={card}><div style={head} title="An active user opened a dashboard or performed an audited action in the window.">Active users ⓘ</div>
               <div style={{ display: 'flex', gap: 16 }}>
-                <div><div style={{ fontSize: 22, fontWeight: 800 }}>{rep.active.d1}</div><div style={{ fontSize: 11, color: 'var(--muted)' }}>today</div></div>
-                <div><div style={{ fontSize: 22, fontWeight: 800 }}>{rep.active.d7}</div><div style={{ fontSize: 11, color: 'var(--muted)' }}>7 days</div></div>
-                <div><div style={{ fontSize: 22, fontWeight: 800 }}>{rep.active.d30}</div><div style={{ fontSize: 11, color: 'var(--muted)' }}>{rep.days} days</div></div>
+                <div><div style={num}>{rep.active.d1}</div><div style={sub}>today</div></div>
+                <div><div style={num}>{rep.active.d7}</div><div style={sub}>7 days</div></div>
+                <div><div style={num}>{rep.active.d30}</div><div style={sub}>30 days</div></div>
               </div>
             </div>
-            <div style={card}><div style={head}>Volume · last {rep.days} days</div>
+            {rep.surfaces && (
+              <div style={card}><div style={head} title="Of the active users in this window, how many opened the installed app (PWA) vs only a regular browser.">Active by surface · {winLabel}</div>
+                <div style={{ display: 'flex', gap: 16 }}>
+                  <div><div style={num}>{rep.surfaces.app}</div><div style={sub}>📱 app</div></div>
+                  <div><div style={num}>{rep.surfaces.web}</div><div style={sub}>🖥 web/desktop</div></div>
+                </div>
+              </div>
+            )}
+            <div style={card}><div style={head}>Volume · {winLabel}</div>
               <div style={{ display: 'flex', gap: 16 }}>
-                <div><div style={{ fontSize: 22, fontWeight: 800 }}>{rep.totals.views}</div><div style={{ fontSize: 11, color: 'var(--muted)' }}>dashboard opens</div></div>
-                <div><div style={{ fontSize: 22, fontWeight: 800 }}>{rep.totals.actions}</div><div style={{ fontSize: 11, color: 'var(--muted)' }}>actions</div></div>
+                <div><div style={num}>{rep.totals.views}</div><div style={sub}>dashboard opens</div></div>
+                <div><div style={num}>{rep.totals.actions}</div><div style={sub}>actions</div></div>
               </div>
             </div>
           </div>
@@ -1852,7 +1865,8 @@ function ActivityReport() {
             </div>
           </div>
         </>
-      )}
+        );
+      })()}
     </div>
   );
 }
