@@ -398,7 +398,8 @@ app.get('/api/admin/roles', auth.requireAdmin, (_req, res) => res.json({ roles: 
 // features) for the admin Users console.
 app.get('/api/admin/users/activity-report', auth.requireAdmin, (req, res) => {
   const days = Math.min(365, Math.max(1, Number(req.query.days) || 30));
-  res.json({ ...db.adminActivityReport({ days }), inactiveClients: db.inactiveClients(days) });
+  const inact = db.inactivity(days);
+  res.json({ ...db.adminActivityReport({ days }), inactiveClients: inact.clients, inactiveUsers: inact.users });
 });
 
 // Friendly labels for the merged activity feed's non-audit sources.

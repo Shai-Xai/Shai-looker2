@@ -1874,6 +1874,16 @@ function ActivityReport() {
                   ))}
             </div>
           )}
+          {rep.inactiveUsers && (
+            <div style={{ ...card, marginTop: 10, maxHeight: 320, overflowY: 'auto' }}>
+              <div style={head} title="Client logins with no login, dashboard open or action in the window — 'Never' means they've never engaged.">😴 Inactive users · no activity in {winLabel} ({rep.inactiveUsers.length})</div>
+              {rep.inactiveUsers.length === 0 ? <Muted>Every client user has been active in this window. 🎉</Muted>
+                : rep.inactiveUsers.map((u) => row(
+                    <span title={`${u.name} · ${u.email}`}>{u.name}{u.client ? ` · ${u.client}` : ''}</span>,
+                    <span style={{ color: u.never ? 'var(--error,#ef4444)' : 'var(--muted)', fontWeight: 600 }}>{u.never ? 'Never' : relTime(u.lastActiveAt)}</span>,
+                  ))}
+            </div>
+          )}
         </>
         );
       })()}

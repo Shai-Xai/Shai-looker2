@@ -335,17 +335,18 @@ function adminActivityReport({ days = 30, limit = 8 } = {}) {
 }
 // Clients (entities) with no client-side engagement in `days` — last login /
 // dashboard open / audited action across their non-admin logins. `never` = none ever.
-function inactiveClients(days = 30, limit = 60) {
+function inactivity(days = 30, limit = 60) {
   const cutoff = new Date(Date.now() - days * 864e5).toISOString();
   const lv = lastViewForUsers(), la = lastActionsForUsers();
   const lastOf = (u) => [u.lastLogin, lv[u.id], la[u.id]?.at].filter(Boolean).sort().pop() || null;
-  const byE = new Map();
+  const byE = new Map(); const users = [];
   for (const u of listUsers().filter((x) => x.role !== 'admin')) { const t = lastOf(u);
-    for (const eid of u.entityIds || []) { const b = byE.get(eid) || { lastActiveAt: null, userCount: 0 }; b.userCount += 1; if (t && (!b.lastActiveAt || t > b.lastActiveAt)) b.lastActiveAt = t; byE.set(eid, b); } }
-  return listEntities().map((e) => { const b = byE.get(e.id) || { lastActiveAt: null, userCount: 0 }; return { entityId: e.id, entityName: e.name, lastActiveAt: b.lastActiveAt, userCount: b.userCount, never: !b.lastActiveAt }; })
-    .filter((c) => c.never || c.lastActiveAt < cutoff)
-    .sort((a, c) => (!!a.never === !!c.never ? String(a.lastActiveAt || '').localeCompare(String(c.lastActiveAt || '')) : (a.never ? -1 : 1)))
-    .slice(0, limit);
+    if (!t || t < cutoff) users.push({ id: u.id, name: u.fullName || u.email, email: u.email, lastActiveAt: t, never: !t, client: (u.entityIds || []).map((eid) => getEntity(eid)?.name || '').filter(Boolean).join(', ') });
+    for (const eid of u.entityIds || []) { const b = byE.get(eid) || { lastActiveAt: null, userCount: 0 }; b.userCount += 1; if (t && (!b.lastActiveAt || t > b.lastActiveAt)) b.lastActiveAt = t; byE.set(eid, b); }
+  }
+  const bySort = (a, c) => (!!a.never === !!c.never ? String(a.lastActiveAt || '').localeCompare(String(c.lastActiveAt || '')) : (a.never ? -1 : 1));
+  const clients = listEntities().map((e) => { const b = byE.get(e.id) || { lastActiveAt: null, userCount: 0 }; return { entityId: e.id, entityName: e.name, lastActiveAt: b.lastActiveAt, userCount: b.userCount, never: !b.lastActiveAt }; }).filter((c) => c.never || c.lastActiveAt < cutoff).sort(bySort).slice(0, limit);
+  return { clients, users: users.sort(bySort).slice(0, limit) };
 }
 
 // ─── User action audit log (every meaningful action) ─────────────────────────
@@ -1776,7 +1777,7 @@ module.exports = {
   // event documents (invoices etc.)
   listDocuments, getDocument, getDocumentFile, createDocument, updateDocument, deleteDocument, documentExistsForSource,
   // view tracking
-  recordView, viewProfile, recentViewsForUser, lastViewForUsers, recentUsageForUser, usageByClientForUser, adminActivityReport, inactiveClients,
+  recordView, viewProfile, recentViewsForUser, lastViewForUsers, recentUsageForUser, usageByClientForUser, adminActivityReport, inactivity,
   // user action audit log
   recordAction, listActionsForUser, lastActionsForUsers,
   // tile marks (pins + follows)
