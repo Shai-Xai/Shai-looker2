@@ -8,7 +8,7 @@ import { useRef, useLayoutEffect } from 'react';
 //
 // The box must have a real height — callers pass `style` to give it one
 // (e.g. flex:1 to fill remaining space, or a fixed height).
-export default function AutoFitText({ children, max = 40, min = 12, spanStyle, style, onClick, title }) {
+export default function AutoFitText({ children, max = 40, min = 12, widthFactor = 0, spanStyle, style, onClick, title }) {
   const boxRef = useRef(null);
   const spanRef = useRef(null);
 
@@ -21,7 +21,10 @@ export default function AutoFitText({ children, max = 40, min = 12, spanStyle, s
       const w = box.clientWidth;
       const h = box.clientHeight;
       if (!w || !h) return;
-      let lo = min, hi = max, best = min;
+      // Tie the cap to the box WIDTH so tiles of the same width render at the
+      // same size (a short "785" doesn't balloon next to a long "1,903,565").
+      const cap = widthFactor ? Math.max(min, Math.min(max, w * widthFactor)) : max;
+      let lo = min, hi = cap, best = min;
       for (let i = 0; i < 12; i++) {
         const mid = (lo + hi) / 2;
         span.style.fontSize = `${mid}px`;
@@ -37,7 +40,7 @@ export default function AutoFitText({ children, max = 40, min = 12, spanStyle, s
       ro.observe(box);
     }
     return () => ro && ro.disconnect();
-  }, [children, max, min]);
+  }, [children, max, min, widthFactor]);
 
   return (
     <div

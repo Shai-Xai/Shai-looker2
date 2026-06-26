@@ -155,7 +155,7 @@ function mount(app, { db, auth, mailer, push, onInbound }) {
     // Every login LINKED to the entity that hasn't muted email — including admins
     // explicitly linked as part of this client's team (admins aren't linked by default).
     const to = db.listUsers()
-      .filter((u) => (u.entityIds || []).includes(entityId) && u.notifyEmail !== false)
+      .filter((u) => (u.entityIds || []).includes(entityId) && u.notifyEmail !== false && db.notifyTypeOn(u.id, 'messages', 'email'))
       .map((u) => u.email);
     if (!to.length) return;
     const subject = t.priority === 'must_ack' ? `Action needed: ${t.title || 'a message from Howler'}`
@@ -190,7 +190,7 @@ function mount(app, { db, auth, mailer, push, onInbound }) {
       requireInteraction: t.priority === 'must_ack',
       // Acknowledge straight from the notification (where action buttons render).
       actions: t.priority === 'must_ack' ? [{ action: `ack:${t.id}`, title: 'Acknowledge' }, { action: 'review', title: 'Open' }] : undefined,
-    }).catch(() => {});
+    }, 'messages').catch(() => {});
   }
 
   // Periodic reminder: a must-acknowledge thread that's still unacknowledged
@@ -218,7 +218,7 @@ function mount(app, { db, auth, mailer, push, onInbound }) {
           tag: `ack-${t.id}`,
           requireInteraction: true,
           actions: [{ action: `ack:${t.id}`, title: 'Acknowledge' }, { action: 'review', title: 'Open' }],
-        }).catch(() => {});
+        }, 'messages').catch(() => {});
         sql.prepare("INSERT OR REPLACE INTO os_receipts (thread_id, user_id, kind, at) VALUES (?,?,?,?)").run(t.id, u.id, 'remind', now());
       }
     }

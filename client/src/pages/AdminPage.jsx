@@ -112,6 +112,7 @@ function IconPicker({ value, onChange }) {
 //   Logins (Users)      – credentials, assigned to one or more entities
 const ADMIN_NAV = [
   ['entities', 'Clients', '👥'],
+  ['wizard', 'Setup wizard', '🧙'],
   ['users', 'Users', '🧑'],
   ['sets', 'Sets', '🗂️'],
   ['library', 'Tile library', '🧩'],
@@ -133,7 +134,8 @@ export default function AdminPage() {
 
   const content = (
     <>
-      {tab === 'entities' && <Entities fields={fields} />}
+      {tab === 'entities' && <Entities fields={fields} onOpenWizard={() => setTab('wizard')} />}
+      {tab === 'wizard' && <SetupWizard fields={fields} />}
       {tab === 'users' && <UsersTab />}
       {tab === 'sets' && <Sets />}
       {tab === 'library' && <Library />}
@@ -209,13 +211,100 @@ const FEATURE_LABELS = {
   notifications_enabled: '🔔 Turned on notifications', install: '📲 Installed the app',
 };
 
+// Global Reminders defaults — cadence + the editable client-nudge wording. Applies
+// to every client; each client can still override the timing in its own Reminders
+// panel. Lives in the onboarding tab next to the funnel insights.
+function NudgeGlobalSettings() {
+  const [s, setS] = useState(null);
+  const [saved, setSaved] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [testMsg, setTestMsg] = useState('');
+  useEffect(() => { api.getSetupNudgeSettings().then(setS).catch(() => setS(null)); }, []);
+  if (!s) return null;
+  const set = (k, v) => setS((c) => ({ ...c, [k]: v }));
+  const setCopy = (k, v) => setS((c) => ({ ...c, copy: { ...c.copy, [k]: v } }));
+  const persist = () => api.saveSetupNudgeSettings({ enabled: s.enabled, aiCopy: s.aiCopy, graceDays: s.graceDays, repeatDays: s.repeatDays, hour: s.hour, copy: s.copy });
+  const save = async () => { try { await persist(); flash(setSaved); } catch (e) { alert(e.message); } };
+  // Save first so the preview reflects what's on screen, then email the admin.
+  const test = async () => { setTestMsg('Sending…'); try { await persist(); const r = await api.testSetupNudgeSettings(); setTestMsg(`✓ Sent to ${r.to}`); } catch (e) { setTestMsg(`✗ ${e.message || 'Send failed'}`); } };
+  const fld = { ...input, minWidth: 0, width: '100%' };
+  const num = (k, label, h) => (
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <L>{label}</L>
+      <input type="number" min="0" value={s[k]} onChange={(e) => set(k, e.target.value)} style={fld} />
+      {h && <span style={{ fontSize: 11, color: 'var(--muted)' }}>{h}</span>}
+    </label>
+  );
+  const txt = (k, label) => (
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <L>{label}</L>
+      <input value={s.copy[k]} onChange={(e) => setCopy(k, e.target.value)} placeholder={s.copyDefaults?.[k] || ''} style={fld} />
+    </label>
+  );
+  return (
+    <div style={{ border: '1px solid var(--border)', borderRadius: 14, background: 'var(--card)', overflow: 'hidden' }}>
+      <button onClick={() => setOpen((v) => !v)} style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', background: 'transparent', border: 'none', padding: 16, cursor: 'pointer', color: 'var(--text)' }}>
+        <span style={{ fontSize: 11, color: 'var(--muted)', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</span>
+        <span style={{ flex: 1, minWidth: 0 }}>
+          <span style={{ display: 'block', fontSize: 14.5, fontWeight: 800 }}>🔔 Reminder defaults</span>
+          <span style={{ display: 'block', fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>Cadence + wording for the outstanding-setup nudges. Applies to all clients; each client can override the timing in its own Reminders panel.</span>
+        </span>
+        {!s.enabled && <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--error)', flexShrink: 0 }}>OFF</span>}
+      </button>
+      {open && (
+        <div style={{ padding: '0 16px 16px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
+            <input type="checkbox" checked={!!s.enabled} onChange={(e) => set('enabled', e.target.checked)} />
+            <span style={{ fontWeight: 700, fontSize: 13.5 }}>Reminders enabled</span>
+            <span style={{ fontSize: 12, color: 'var(--muted)' }}>· global kill switch</span>
+          </label>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(130px,1fr))', gap: 12 }}>
+            {num('graceDays', 'Grace (days)', 'Wait after a client is created before the first nudge.')}
+            {num('repeatDays', 'Repeat (days)', 'How often to re-nudge while items stay open.')}
+            {num('hour', 'Send hour (0–23)', 'Hour of day the daily check runs.')}
+          </div>
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer' }}>
+            <input type="checkbox" checked={!!s.aiCopy} onChange={(e) => set('aiCopy', e.target.checked)} style={{ marginTop: 3 }} />
+            <span>
+              <span style={{ display: 'block', fontWeight: 700, fontSize: 13.5 }}>Personalise the subject & opening with AI</span>
+              <span style={{ display: 'block', fontSize: 12, color: 'var(--muted)' }}>Writes a fresh subject + opening line tailored to each client’s outstanding items, so repeat emails read differently as they finish setup. Falls back to the wording below when AI is off or unavailable.</span>
+            </span>
+          </label>
+          <div>
+            <L>Client message wording {s.aiCopy && <span style={{ fontWeight: 400, textTransform: 'none', color: 'var(--muted)' }}>· fallback when AI is off/unavailable</span>}</L>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 6 }}>
+              {txt('subject', `Email subject${s.aiCopy ? ' (fallback)' : ''}`)}
+              {txt('title', 'In-app title')}
+              {txt('intro', `Opening line${s.aiCopy ? ' (fallback)' : ''}`)}
+              {txt('button', 'Button label (email)')}
+              {txt('signoff', 'Sign-off line')}
+            </div>
+            <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8 }}>The list of outstanding items and the personalised opportunity line are added automatically. Clear a field to fall back to the default.</p>
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button style={saveBtn} onClick={save}>Save defaults</button>
+            {saved && <span style={{ color: 'var(--brand)', fontSize: 13, fontWeight: 600 }}>✓ Saved</span>}
+            <span style={{ flex: 1 }} />
+            <button style={miniBtnOutline} onClick={test}>Send me a test</button>
+            {testMsg && <span style={{ fontSize: 12, color: 'var(--muted)' }}>{testMsg}</span>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function OnboardingInsights() {
   const [stats, setStats] = useState(null);
   const [err, setErr] = useState(false);
   useEffect(() => { api.adminOnboardingStats().then(setStats).catch(() => setErr(true)); }, []);
 
-  if (err) return <p style={{ color: 'var(--muted)', fontSize: 13 }}>Couldn’t load usage stats.</p>;
-  if (!stats) return <p style={{ color: 'var(--muted)', fontSize: 13 }}>Loading…</p>;
+  if (err || !stats) return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18, maxWidth: 720 }}>
+      <NudgeGlobalSettings />
+      <p style={{ color: 'var(--muted)', fontSize: 13 }}>{err ? 'Couldn’t load usage stats.' : 'Loading…'}</p>
+    </div>
+  );
 
   // Build an ordered funnel per guide using the real step order from guides.js.
   const guideIds = Object.keys(stats.guides || {}).filter((id) => GUIDES[id]).sort((a, b) => (stats.guides[b].opens || 0) - (stats.guides[a].opens || 0));
@@ -243,6 +332,7 @@ function OnboardingInsights() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18, maxWidth: 720 }}>
+      <NudgeGlobalSettings />
       <div>
         <h2 style={{ fontSize: 17, fontWeight: 800 }}>Onboarding insights</h2>
         <p style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 3 }}>
@@ -642,7 +732,7 @@ function Billing() {
 }
 
 // ─── Clients (Entities) ───────────────────────────────────────────────────────
-function Entities({ fields }) {
+function Entities({ fields, onOpenWizard }) {
   const [items, setItems] = useState([]);
   const [suites, setSuites] = useState([]);
   const [sets, setSets] = useState([]);
@@ -685,13 +775,19 @@ function Entities({ fields }) {
   const ql = q.trim().toLowerCase();
   const sorted = [...items].sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }));
   const shown = ql ? sorted.filter((e) => (e.name || '').toLowerCase().includes(ql)) : sorted;
+  const addClient = async () => { const ent = await api.adminCreateEntity({ name: 'New client', lockedFilters: {} }); await load(); setSelectedId(ent.id); };
   return (
     <div>
       <p style={hint}>Pick a client to manage its settings, suites and logins.</p>
-      <div style={searchWrap}>
-        <span style={{ color: 'var(--muted)', fontSize: 13, flexShrink: 0 }}>⌕</span>
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search clients…" style={searchInput} />
-        {ql && <button onClick={() => setQ('')} style={searchClear} aria-label="Clear search">✕</button>}
+      {/* Top bar: search + quick add + the guided wizard, all in reach. */}
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
+        <div style={{ ...searchWrap, marginBottom: 0, flex: '1 1 200px' }}>
+          <span style={{ color: 'var(--muted)', fontSize: 13, flexShrink: 0 }}>⌕</span>
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search clients…" style={searchInput} />
+          {ql && <button onClick={() => setQ('')} style={searchClear} aria-label="Clear search">✕</button>}
+        </div>
+        <button style={addBtn} onClick={addClient}>+ Add client</button>
+        {onOpenWizard && <button style={{ ...addBtn, background: 'var(--brand)', color: '#fff', border: '1.5px solid var(--brand)' }} onClick={onOpenWizard} title="Stand a new client up with the guided, step-by-step wizard">🧙 Setup wizard</button>}
       </div>
       <div style={clientList}>
         {shown.map((e) => (
@@ -706,8 +802,809 @@ function Entities({ fields }) {
         {items.length === 0 && <Muted>No clients yet.</Muted>}
         {items.length > 0 && shown.length === 0 && <Muted>No clients match “{q.trim()}”.</Muted>}
       </div>
-      <button style={addBtn} onClick={async () => { const ent = await api.adminCreateEntity({ name: 'New client', lockedFilters: {} }); await load(); setSelectedId(ent.id); }}>+ Add client</button>
     </div>
+  );
+}
+
+// ─── Client Setup Wizard — a guided, step-by-step path for account managers ────
+// Stands a new client up end to end without hunting through tabs: create the
+// client → lock their data scope → build their suites → add a login → brand it.
+// It is LINEAR and ENFORCED — each step explains what to do, you do it inline
+// (reusing the very same editors the Clients tab uses, so nothing is a throwaway
+// mock), and the "Continue" button stays locked until that step is done. You can
+// step back, but you can't skip ahead past unfinished work. Back-end / admin only.
+//
+// The steps are EDITABLE from the admin UI (the ⚙ on the start screen): wording,
+// order, and the AM's own custom guidance steps are stored server-side via
+// server/setupWizard.js and merged over these built-in DEFAULTS by key. The
+// built-in steps' ACTIONS are fixed (they create real records); only their copy,
+// order and extra guidance steps are configurable.
+const WIZARD_DEFAULTS = [
+  { kind: 'builtin', key: 'client', icon: '🏢', title: 'The client', short: 'Client',
+    req: 'a client name', lock: 'Enter a client name to continue', does: 'Creates the client (entity) record.',
+    blurb: 'Everything in Pulse hangs off a “client” (internally an entity). Give it a name — usually the organiser or brand you’re onboarding — and, if you have it, their logo. You can change both later.' },
+  { kind: 'builtin', key: 'scope', icon: '🔒', title: 'Data scope', short: 'Scope',
+    req: 'an organiser (or “All organisers”)', lock: 'Pick an organiser, or tick “All organisers”', does: 'Locks the client to their organiser(s).',
+    blurb: 'This is the most important step. Pulse force-filters every query on the server to this client’s organiser, so they only ever see their own numbers. Until you set a scope the account fails closed — they’ll see nothing. Pick the organiser(s) this client owns.' },
+  { kind: 'builtin', key: 'suites', icon: '🗂️', title: 'Suites & dashboards', short: 'Suites',
+    req: 'at least one suite', lock: 'Add at least one suite to continue', does: 'Builds the client’s suites of dashboards.',
+    blurb: 'A suite is one event/context for the client (e.g. “Bushfire 2026”). Inside it you choose which sets of dashboards they get, and lock it to that event. Add one suite per event. You can fine-tune which dashboards each set shows, and reorder them, right here.' },
+  { kind: 'builtin', key: 'logins', icon: '🔑', title: 'Logins', short: 'Logins',
+    req: 'at least one login', lock: 'Add (or link) at least one login to continue', does: 'Creates the people who can sign in.',
+    blurb: 'Create the people who can sign in for this client and set what each can see with a role. Give them a temporary password — they’ll be prompted to change it. You can also link an existing login if someone works across several clients.' },
+  { kind: 'builtin', key: 'branding', icon: '🎨', title: 'Branding', short: 'Branding', optional: true, does: 'Opens the per-client branding editor (logo, colours, sender).',
+    blurb: 'Optional, but it makes the account feel like the client’s own. Set their logo, brand colours and email sender name — these white-label the whole app (UI accents + charts) and every email Pulse sends for them. Anything left blank inherits the Howler default.' },
+];
+const REVIEW_STEP = { kind: 'review', key: 'review', icon: '✅', title: 'Review & finish', short: 'Finish',
+  blurb: 'Everything required is in place. Preview the account exactly as the client will see it, or set up another.' };
+const newKey = (p) => `${p}_${Math.random().toString(36).slice(2, 8)}`;
+
+// Merge the saved override (or null) over the built-in defaults, keyed by step.
+// Built-ins keep their behaviour fields from code but take saved wording; custom
+// steps come straight from the saved config; any new built-in (added in code
+// later) is appended; the client step is always pinned first.
+function mergeWizardSteps(saved) {
+  const defByKey = Object.fromEntries(WIZARD_DEFAULTS.map((s) => [s.key, s]));
+  const pick = (o, keys) => { const out = {}; for (const k of keys) if (o[k] != null) out[k] = o[k]; return out; };
+  // Merge a built-in step's walkthrough (the red-border guide): saved overrides
+  // (title/body/off + order) layered over the code defaults, keyed by the section
+  // anchor. Any new default anchor (added in code) is appended; stale saved ones
+  // (anchor no longer in code) are dropped. The anchor + icon stay from code.
+  const mergeWalk = (key, savedWalk) => {
+    const defs = TOUR_DEFAULTS[key] || [];
+    const byTour = Object.fromEntries(defs.map((w) => [w.tour, w]));
+    if (!Array.isArray(savedWalk) || !savedWalk.length) return defs.map((w) => ({ ...w }));
+    const out = savedWalk.filter((w) => w && byTour[w.tour]).map((w) => ({ ...byTour[w.tour], ...pick(w, ['title', 'body']), off: !!w.off }));
+    for (const d of defs) if (!out.some((w) => w.tour === d.tour)) out.push({ ...d });
+    return out;
+  };
+  let list;
+  if (Array.isArray(saved) && saved.length) {
+    list = saved.filter((s) => s && (s.kind === 'custom' || defByKey[s.key])).map((s) => (
+      s.kind === 'custom'
+        ? { kind: 'custom', key: s.key || newKey('custom'), icon: s.icon || '📌', title: s.title || 'Guidance step', blurb: s.blurb || '', items: Array.isArray(s.items) ? s.items.filter((it) => it && it.key).map((it) => ({ key: it.key, label: it.label || '' })) : [] }
+        : { ...defByKey[s.key], ...pick(s, ['icon', 'title', 'blurb', 'req', 'lock']), walk: mergeWalk(s.key, s.walk) }
+    ));
+    for (const d of WIZARD_DEFAULTS) if (!list.some((s) => s.key === d.key)) list.push({ ...d, walk: mergeWalk(d.key) });
+  } else {
+    list = WIZARD_DEFAULTS.map((s) => ({ ...s, walk: mergeWalk(s.key) }));
+  }
+  const client = list.find((s) => s.key === 'client');
+  return client ? [client, ...list.filter((s) => s.key !== 'client')] : list;
+}
+
+function SetupWizard({ fields }) {
+  const navigate = useNavigate();
+  const { setProfile } = useProfile();
+  const isMobile = useIsMobile();
+  const [data, setData] = useState(null); // { entities, suites, users, sets, dashTitle }
+  const [steps, setSteps] = useState(() => mergeWizardSteps(null)); // configurable steps (no review)
+  const [entityId, setEntityId] = useState(null);
+  const [stepKey, setStepKey] = useState('start'); // 'start' then a step key
+  const [ticks, setTicks] = useState({}); // per-client custom-step checklist: { "stepKey:itemKey": 1 }
+  const [editing, setEditing] = useState(false);
+  // Working state for the steps the wizard saves itself (client + scope).
+  const [name, setName] = useState('');
+  const [logo, setLogo] = useState('');
+  const [locks, setLocks] = useState({});
+  const [allOrg, setAllOrg] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const [tourOn, setTourOn] = useState(false); // the in-step spotlight walkthrough
+  const initFor = useRef(null);
+  const bodyRef = useRef(null);
+  const autoTourSeen = useRef(new Set());
+
+  const reload = () => Promise.all([api.adminListEntities(), api.adminListSuites(), api.adminListUsers(), api.adminListSets(), api.listDashboards()])
+    .then(([entities, suites, users, sets, dash]) => setData({ entities, suites, users, sets, dashTitle: Object.fromEntries(dash.map((d) => [d.id, d.title])) }));
+  useEffect(() => { reload(); }, []);
+  // Load the admin-edited step config (falls back to defaults if none / on error).
+  useEffect(() => { api.getSetupWizard().then((r) => setSteps(mergeWizardSteps(r.steps))).catch(() => {}); }, []);
+
+  const entity = data ? (data.entities.find((e) => e.id === entityId) || null) : null;
+  // Seed the editable fields once per client (don't clobber edits on every reload).
+  useEffect(() => {
+    if (entity && initFor.current !== entity.id) {
+      initFor.current = entity.id;
+      setName(entity.name || ''); setLogo(entity.logo || '');
+      setLocks(entity.lockedFilters || {}); setAllOrg(!!entity.allOrganisers);
+    }
+    if (!entityId) { initFor.current = null; setName(''); setLogo(''); setLocks({}); setAllOrg(false); }
+  }, [entityId, entity]);
+  // Load this client's custom-step checklist ticks.
+  useEffect(() => {
+    if (entityId) api.getSetupWizardProgress(entityId).then((r) => setTicks(r.ticks || {})).catch(() => setTicks({}));
+    else setTicks({});
+  }, [entityId]);
+  // Close any open walkthrough when moving between steps.
+  useEffect(() => { setTourOn(false); }, [stepKey]);
+  // Auto-launch the spotlight walkthrough the first time the AM reaches a guided
+  // step (once per client per step). Non-client steps need the entity to exist;
+  // suites also waits until there's a suite to point at.
+  useEffect(() => {
+    const s = steps.find((x) => x.key === stepKey);
+    if (!s || !(s.walk || []).some((w) => !w.off)) return;
+    if (stepKey !== 'client' && !entity) return;
+    if (stepKey === 'suites' && entity && !data.suites.some((x) => x.entityId === entity.id)) return;
+    const k = `${entity?.id || 'new'}:${stepKey}`;
+    if (!autoTourSeen.current.has(k)) { autoTourSeen.current.add(k); setTourOn(true); }
+  }, [stepKey, entityId, data, steps]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!data) return <Muted>Loading…</Muted>;
+
+  const suitesOf = (eid) => data.suites.filter((s) => s.entityId === eid);
+  const loginsOf = (eid) => data.users.filter((u) => (u.entityIds || []).includes(eid));
+  // The enabled walkthrough points for a step (the red-border guide), in order.
+  const walkOf = (key) => { const s = steps.find((x) => x.key === key); return s && s.walk ? s.walk.filter((w) => !w.off) : []; };
+  const entHasScope = (e) => e.allOrganisers || Object.values(e.lockedFilters || {}).some((v) => String(v || '').trim());
+  // Built-in required-step completion, from SAVED state — drives the resume target
+  // and the "needs …" chips. (Branding/custom steps aren't part of this.)
+  const reqDone = (e) => ({ client: !!(e.name || '').trim(), scope: entHasScope(e), suites: suitesOf(e.id).length > 0, logins: loginsOf(e.id).length > 0 });
+  // Has a given step been completed (for ticks / reachability)? Custom steps are
+  // complete once all their checklist items are ticked.
+  const stepComplete = (s) => {
+    if (!s) return false;
+    if (s.kind === 'custom') return (s.items || []).every((it) => ticks[`${s.key}:${it.key}`]);
+    if (!entity) return s.key === 'client' ? !!(name || '').trim() : false;
+    switch (s.key) {
+      case 'client': return !!(entity.name || '').trim();
+      case 'scope': return entHasScope(entity);
+      case 'suites': return suitesOf(entity.id).length > 0;
+      case 'logins': return loginsOf(entity.id).length > 0;
+      case 'branding': return !!entity.logo; // optional — for the ✓ only, never blocks
+      default: return true;
+    }
+  };
+  // LIVE check on the working fields — can the CURRENT step's Continue unlock yet?
+  const hasLock = allOrg || Object.values(locks).some((v) => String(v || '').trim());
+  const curStep = stepKey === 'review' ? REVIEW_STEP : (steps.find((s) => s.key === stepKey) || REVIEW_STEP);
+  const canProceed = stepKey === 'review' ? true
+    : curStep.kind === 'custom' ? (curStep.items || []).every((it) => ticks[`${curStep.key}:${it.key}`])
+    : stepKey === 'client' ? !!name.trim()
+    : stepKey === 'scope' ? hasLock
+    : stepKey === 'suites' ? (!!entity && suitesOf(entity.id).length > 0)
+    : stepKey === 'logins' ? (!!entity && loginsOf(entity.id).length > 0)
+    : true; // branding + anything else
+  const lockHint = curStep.kind === 'custom' ? 'Tick every item to continue' : curStep.lock;
+
+  const go = (key) => { setError(null); setStepKey(key); };
+  const seq = [...steps.map((s) => s.key), 'review'];
+  const sidx = seq.indexOf(stepKey);
+  const nextKey = sidx >= 0 && sidx < seq.length - 1 ? seq[sidx + 1] : 'review';
+  const prevKey = sidx > 0 ? seq[sidx - 1] : 'start';
+  // A step is reachable only when every blocking step before it (in the current
+  // order) is complete — this is what keeps the flow linear. Optional built-ins
+  // (branding) never block; custom steps block until their items are ticked.
+  const reachable = (key) => {
+    if (key === 'client') return true;
+    if (!entity) return false;
+    const i = key === 'review' ? steps.length : steps.findIndex((s) => s.key === key);
+    return steps.slice(0, i < 0 ? steps.length : i).every((s) => s.optional || stepComplete(s));
+  };
+  const firstUnfinished = (e) => ['client', 'scope', 'suites', 'logins'].find((k) => !reqDone(e)[k]) || steps[0]?.key || 'review';
+
+  const toggleTick = (sk, ik, done) => {
+    const k = `${sk}:${ik}`;
+    setTicks((t) => ({ ...t, [k]: done ? 1 : 0 }));
+    if (entityId) api.setSetupWizardProgress(entityId, k, done).then((r) => setTicks(r.ticks || {})).catch(() => {});
+  };
+
+  // Save handlers for the two steps the wizard owns directly.
+  const saveClient = async () => {
+    if (!name.trim()) { setError('Give the client a name to continue.'); return; }
+    setBusy(true); setError(null);
+    try {
+      if (!entityId) { const ent = await api.adminCreateEntity({ name: name.trim(), logo, lockedFilters: {} }); setEntityId(ent.id); initFor.current = ent.id; }
+      else { await api.adminUpdateEntity(entityId, { name: name.trim(), logo }); }
+      await reload();
+      go(nextKey);
+    } catch (e) { setError(e.message); } finally { setBusy(false); }
+  };
+  const saveScope = async () => {
+    setBusy(true); setError(null);
+    try { await api.adminUpdateEntity(entity.id, { lockedFilters: locks, allOrganisers: allOrg }); await reload(); go(nextKey); }
+    catch (e) { setError(e.message); } finally { setBusy(false); }
+  };
+
+  // Preview the account as the client sees it (scope the shell, open first dash).
+  const previewAccount = async () => {
+    const ents = suitesOf(entity.id);
+    setProfile(entity.id, { name: entity.name, logo: entity.logo });
+    try {
+      for (const su of ents) { const d = await api.mySuite(su.id); const first = d.sets.flatMap((s) => s.dashboards)[0]; if (first) { navigate(`/suite/${su.id}/d/${first.id}`); return; } }
+      navigate('/');
+    } catch (e) { alert('Could not open preview: ' + e.message); }
+  };
+
+  // ── Step editor (the ⚙): edit wording, reorder, add custom guidance steps ────
+  if (editing) return <WizardEditor steps={steps} onClose={() => setEditing(false)} onSaved={(saved) => { setSteps(mergeWizardSteps(saved)); setEditing(false); }} />;
+
+  const allSteps = [...steps, REVIEW_STEP];
+
+  // ── Start screen: explain the journey, then begin (new) or resume (existing) ──
+  if (stepKey === 'start') {
+    const incomplete = [...data.entities]
+      .map((e) => ({ e, miss: ['scope', 'suites', 'logins'].filter((k) => !reqDone(e)[k]) }))
+      .filter((x) => x.miss.length)
+      .sort((a, b) => (a.e.name || '').localeCompare(b.e.name || ''));
+    return (
+      <div>
+        <div style={{ ...cardStyle, background: 'linear-gradient(135deg, rgba(var(--brand-rgb),0.10), rgba(var(--brand-rgb),0.02))', borderColor: 'rgba(var(--brand-rgb),0.25)' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+            <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: '-0.02em', marginBottom: 6, flex: 1 }}>🧙 Client setup wizard</div>
+            <button style={miniBtnOutline} onClick={() => setEditing(true)} title="Edit the wizard’s steps, wording and order">⚙ Edit steps</button>
+          </div>
+          <p style={{ fontSize: 14, color: 'var(--text)', lineHeight: 1.55, margin: '0 0 14px', maxWidth: 620 }}>
+            A guided, step-by-step path to stand a new client up — the right way, in order. It walks you through
+            each step, doing the work as you go, and won’t let you move on from a step until it’s done. Optional
+            bits are marked and can be skipped.
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+            {allSteps.map((s, i) => (
+              <div key={s.key} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, fontSize: 13.5 }}>
+                <span style={{ flexShrink: 0, width: 22, height: 22, borderRadius: '50%', background: 'var(--brand)', color: '#fff', fontSize: 12, fontWeight: 800, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{i + 1}</span>
+                <span><b>{s.icon} {s.title}</b>{s.optional ? <span style={{ color: 'var(--muted)' }}> · optional</span> : ''}{s.kind === 'custom' ? <span style={{ color: 'var(--muted)' }}> · your step</span> : ''} — <span style={{ color: 'var(--muted)' }}>{(s.blurb || '').split('. ')[0]}.</span></span>
+              </div>
+            ))}
+          </div>
+          <button style={{ ...saveBtn, padding: '11px 22px', fontSize: 14 }} onClick={() => { autoTourSeen.current = new Set(); setEntityId(null); go('client'); }}>Start a new client →</button>
+        </div>
+        {incomplete.length > 0 && (
+          <div style={cardStyle}>
+            <L>Resume a client that isn’t finished</L>
+            <p style={{ ...hint, marginTop: 4 }}>These clients are missing a required step. Pick one to drop straight back in where it left off.</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {incomplete.map(({ e, miss }) => (
+                <button key={e.id} className="lift" style={clientRow} onClick={() => { setEntityId(e.id); go(firstUnfinished(e)); }}>
+                  <span style={{ fontWeight: 600, fontSize: 14.5 }}>{e.name}</span>
+                  <span style={{ marginLeft: 'auto', color: 'var(--muted)', fontSize: 12 }}>needs {miss.map((m) => (WIZARD_DEFAULTS.find((s) => s.key === m) || {}).short?.toLowerCase() || m).join(' · ')}</span>
+                  <span style={{ color: '#bbb', marginLeft: 10 }}>›</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  const step = curStep;
+
+  // ── Stepper header: numbered progress. Click only to revisit a reachable step;
+  //    you can't click forward past a step that isn't done. ──
+  const Stepper = () => (
+    <div style={{ display: 'flex', gap: isMobile ? 6 : 10, marginBottom: 14, overflowX: 'auto', paddingBottom: 4 }}>
+      {allSteps.map((s, i) => {
+        const active = s.key === stepKey;
+        const ok = s.key === 'review' ? false : stepComplete(s);
+        const open = reachable(s.key);
+        return (
+          <button key={s.key} onClick={() => open && go(s.key)} disabled={!open} title={open ? '' : 'Finish the earlier steps first'}
+            style={{ display: 'flex', alignItems: 'center', gap: 7, flexShrink: 0, padding: isMobile ? '7px 10px' : '8px 13px', borderRadius: 980, cursor: open ? 'pointer' : 'not-allowed',
+              border: active ? '1.5px solid var(--brand)' : '1.5px solid var(--hairline)', background: active ? 'var(--brand)' : 'var(--card)', color: active ? '#fff' : (open ? 'var(--text)' : 'var(--muted)'), opacity: open ? 1 : 0.55 }}>
+            <span style={{ width: 20, height: 20, borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 800,
+              background: active ? 'rgba(255,255,255,0.25)' : (ok ? 'var(--brand)' : 'rgba(128,128,128,0.18)'), color: active || ok ? '#fff' : 'var(--muted)' }}>{ok ? '✓' : (open ? i + 1 : '🔒')}</span>
+            {(!isMobile || active) && <span style={{ fontSize: 13, fontWeight: active ? 700 : 600 }}>{isMobile ? (s.short || s.title) : s.title}</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+
+  // Required / optional badge shown at the top of each step.
+  const ReqBadge = () => (
+    step.optional
+      ? <div style={{ ...badgeBase, color: 'var(--muted)', background: 'rgba(128,128,128,0.12)', border: '1px solid var(--hairline)' }}>○ Optional — you can skip this step</div>
+      : <div style={{ ...badgeBase, color: 'var(--brand)', background: 'rgba(var(--brand-rgb),0.10)', border: '1px solid rgba(var(--brand-rgb),0.3)' }}>● Required{step.req ? ` — needs ${step.req}` : step.kind === 'custom' ? ' — tick every item' : ''}</div>
+  );
+
+  // Continue stays locked until this step is done (optional steps are always
+  // unlocked). The lock hint explains exactly what's missing.
+  const Footer = ({ primary, primaryLabel = 'Continue', secondary }) => {
+    const locked = busy || !canProceed;
+    return (
+      <div style={{ display: 'flex', gap: 10, marginTop: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+        <button style={miniBtnOutline} onClick={() => go(prevKey)} disabled={busy}>← Back</button>
+        <span style={{ flex: 1 }} />
+        {!canProceed && lockHint && <span style={{ fontSize: 12, color: 'var(--muted)' }}>🔒 {lockHint}</span>}
+        {secondary}
+        <button style={{ ...saveBtn, opacity: locked ? 0.5 : 1, cursor: locked ? 'not-allowed' : 'pointer' }} onClick={primary} disabled={locked}>{busy ? 'Saving…' : primaryLabel}</button>
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <AdminBack onBack={() => go('start')}>Setup wizard</AdminBack>
+      <h2 style={{ fontSize: 20, fontWeight: 700, margin: '12px 0 4px' }}>{step.icon} {step.title}{entity ? <span style={{ color: 'var(--muted)', fontWeight: 600 }}> · {entity.name}</span> : ''}</h2>
+      <Stepper />
+      <div ref={bodyRef} style={cardStyle}>
+        {stepKey !== 'review' && <ReqBadge />}
+        <p style={{ fontSize: 13.5, color: 'var(--text)', lineHeight: 1.55, margin: '0 0 14px' }}>{step.blurb}</p>
+        {walkOf(stepKey).length > 0 && (
+          <div style={{ marginBottom: 12 }}>
+            <button style={miniBtn} title="Walk through each part of this step, one at a time"
+              onClick={() => { if (stepKey === 'suites' && !suitesOf(entity?.id).length) { alert('Add a suite first (the “+ Add suite” button), then I’ll walk you through it.'); return; } setTourOn(true); }}>▶ Guide me through this step</button>
+          </div>
+        )}
+
+        {stepKey === 'client' && (
+          <>
+            <div data-tour="client-name"><Field label="Client name · required"><input style={{ ...input, fontWeight: 700, maxWidth: 360 }} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. MTN Bushfire" autoFocus /></Field></div>
+            <div data-tour="client-logo" style={{ marginTop: 14 }}>
+              <L>Client logo · optional</L>
+              <div style={{ marginTop: 6 }}><LogoPicker value={logo} onChange={setLogo} /></div>
+            </div>
+            <Footer primary={saveClient} primaryLabel={entityId ? 'Save & continue' : 'Create client & continue'} />
+          </>
+        )}
+
+        {stepKey === 'scope' && entity && (
+          <>
+            <label data-tour="scope-all" style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 12px', border: '1px solid var(--hairline)', borderRadius: 10, margin: '4px 0 12px', cursor: 'pointer', background: allOrg ? 'rgba(var(--brand-rgb),0.08)' : 'transparent' }}>
+              <input type="checkbox" checked={allOrg} onChange={(e) => setAllOrg(e.target.checked)} style={{ marginTop: 2 }} />
+              <span>
+                <span style={{ fontWeight: 700, fontSize: 13.5 }}>🌐 All organisers (internal / management)</span>
+                <span style={{ display: 'block', fontSize: 12, color: 'var(--muted)', marginTop: 2, lineHeight: 1.45 }}>This client sees <b>every organiser’s</b> data — no scope is applied. Only for Howler-internal logins. Leave off for a normal client.</span>
+              </span>
+            </label>
+            {!allOrg && (
+              <div data-tour="scope-org">
+                <L>Organiser scope · required (applies across all this client’s suites)</L>
+                <LockedFilterEditor value={locks} onChange={setLocks} fields={fields} restrictTo={['Organiser Name']} />
+              </div>
+            )}
+            {!hasLock && <div style={{ fontSize: 12.5, color: 'var(--error)', marginTop: 6 }}>⚠ No scope set yet — pick an organiser above, or the client will see no data.</div>}
+            <Footer primary={saveScope} primaryLabel="Save scope & continue" />
+          </>
+        )}
+
+        {stepKey === 'suites' && entity && (
+          <>
+            <ClientSuites entity={entity} suites={suitesOf(entity.id)} allEntities={data.entities} allSets={data.sets} dashTitle={data.dashTitle} fields={fields} onChange={reload} />
+            {!stepComplete(step) && <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 8 }}>Add at least one suite (the “+ Add suite” button) so the client has dashboards to open — then Continue unlocks.</div>}
+            <Footer primary={() => go(nextKey)} />
+          </>
+        )}
+
+        {stepKey === 'logins' && entity && (
+          <>
+            <EntityLogins entity={entity} users={loginsOf(entity.id)} allUsers={data.users} onChange={reload} />
+            {!stepComplete(step) && <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 8 }}>Add or link at least one login so someone can sign in — then Continue unlocks.</div>}
+            <Footer primary={() => go(nextKey)} />
+          </>
+        )}
+
+        {stepKey === 'branding' && entity && (
+          <>
+            <MailTemplateEditor scope="admin-client" entityId={entity.id} canTest />
+            <Footer primary={() => go(nextKey)} primaryLabel="Continue"
+              secondary={<button style={miniBtnOutline} onClick={() => go(nextKey)} disabled={busy}>Skip — do it later</button>} />
+          </>
+        )}
+
+        {step.kind === 'custom' && entity && (
+          <>
+            {(step.items || []).length === 0
+              ? <p style={{ fontSize: 13, color: 'var(--muted)' }}>No checklist items on this step — read the guidance above, then continue.</p>
+              : <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {step.items.map((it) => {
+                    const on = !!ticks[`${step.key}:${it.key}`];
+                    return (
+                      <button key={it.key} onClick={() => toggleTick(step.key, it.key, !on)} style={{ display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', background: 'transparent', border: '1px solid var(--hairline)', borderRadius: 10, padding: '10px 12px', cursor: 'pointer' }}>
+                        <span style={{ width: 22, height: 22, borderRadius: 6, flexShrink: 0, border: `1.5px solid ${on ? 'var(--brand)' : 'var(--hairline)'}`, background: on ? 'var(--brand)' : 'transparent', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 800 }}>{on ? '✓' : ''}</span>
+                        <span style={{ fontSize: 13.5, fontWeight: 600, textDecoration: on ? 'line-through' : 'none', opacity: on ? 0.65 : 1 }}>{it.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>}
+            <Footer primary={() => go(nextKey)} />
+          </>
+        )}
+
+        {stepKey === 'review' && entity && (
+          <>
+            <div style={{ ...badgeBase, color: 'var(--brand)', background: 'rgba(var(--brand-rgb),0.10)', border: '1px solid rgba(var(--brand-rgb),0.3)', fontSize: 13, padding: '8px 12px' }}>🎉 {entity.name} is ready to go live</div>
+            <p style={{ fontSize: 13.5, color: 'var(--text)', lineHeight: 1.55, margin: '10px 0 14px' }}>{step.blurb}</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
+              {steps.map((s) => {
+                const ok = stepComplete(s);
+                const opt = s.optional;
+                return (
+                  <button key={s.key} onClick={() => reachable(s.key) && go(s.key)} disabled={!reachable(s.key)} style={{ display: 'flex', alignItems: 'center', gap: 12, textAlign: 'left', background: 'transparent', border: '1px solid var(--hairline)', borderRadius: 10, padding: '10px 12px', cursor: reachable(s.key) ? 'pointer' : 'default' }}>
+                    <span style={{ fontSize: 18 }}>{ok ? '✅' : (opt ? '➖' : '⚠️')}</span>
+                    <span style={{ flex: 1 }}>
+                      <span style={{ display: 'block', fontSize: 13.5, fontWeight: 700 }}>{s.title}{opt ? <span style={{ color: 'var(--muted)', fontWeight: 600 }}> · optional</span> : ''}</span>
+                      <span style={{ display: 'block', fontSize: 12, color: ok ? 'var(--muted)' : 'var(--error)' }}>{ok ? 'Done' : (opt ? 'Not set — fine to skip' : 'Still needs attention — tap to finish')}</span>
+                    </span>
+                    <span style={{ color: '#bbb' }}>›</span>
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+              <button style={miniBtnOutline} onClick={() => go(prevKey)}>← Back</button>
+              <span style={{ flex: 1 }} />
+              <button style={previewBtn} onClick={previewAccount} title="Open the account as the client sees it">👁 Preview account</button>
+              <button style={saveBtn} onClick={() => { setEntityId(null); go('start'); }}>Set up another client</button>
+            </div>
+            <p style={{ ...hint, marginTop: 14, marginBottom: 0 }}>Need to go deeper (digests, campaigns, settlements, integrations, per-event briefing)? Find <b>{entity.name}</b> any time under the <b>Clients</b> tab for the full set of controls.</p>
+          </>
+        )}
+
+        {error && <div style={{ color: 'var(--error)', fontSize: 13, marginTop: 10 }}>{error}</div>}
+        {tourOn && walkOf(stepKey).length > 0 && <SectionTour steps={walkOf(stepKey)} container={bodyRef} onClose={() => setTourOn(false)} />}
+      </div>
+    </div>
+  );
+}
+const badgeBase = { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5, fontWeight: 700, padding: '3px 10px', borderRadius: 980, marginBottom: 12 };
+
+// ─── Section tour — a forced, spotlight walkthrough of a step's sub-sections ───
+// Highlights each section in turn (a brand ring with the rest dimmed), scrolls it
+// into view, and shows a description with Back / Next. Anchors to elements by their
+// [data-tour="<key>"] attribute, scoped to a container. It never blocks the form
+// underneath (the dim is a pointer-through box-shadow), so the AM can fill a field
+// then hit Next. Reusable for any step — drive it with a list of { tour, title, body }.
+const CLIENT_TOUR = [
+  { tour: 'client-name', icon: '🏢', title: 'Name the client', body: 'Type the organiser or brand you’re onboarding — this is what everything else hangs off. It’s the only thing you must fill in here.' },
+  { tour: 'client-logo', icon: '🖼️', title: 'Add their logo (optional)', body: 'Upload a logo if you have one — it shows as the client’s brand across the app. You can always add or change it later.' },
+];
+const SCOPE_TOUR = [
+  { tour: 'scope-org', icon: '🔒', title: 'Pick their organiser', body: 'Choose the organiser(s) this client owns. Every dashboard is then force-filtered to only their data on the server — this is what keeps clients apart.' },
+  { tour: 'scope-all', icon: '🌐', title: 'Or: all organisers', body: 'Only for Howler-internal / management logins — this lets them see every organiser’s data. Leave it OFF for a normal client.' },
+];
+const SUITES_TOUR = [
+  { tour: 'suite-name', icon: '🏷️', title: 'Name the suite', body: 'Give the suite a name — usually the event itself (e.g. “Bushfire 2026”). It’s the heading the client sees for this event.' },
+  { tour: 'suite-icon', icon: '🎨', title: 'Give the suite an icon', body: 'Pick an emoji (or upload a small image). It’s how this event shows up in the client’s sidebar.' },
+  { tour: 'suite-sets', icon: '🗂️', title: 'Choose the dashboard sets', body: 'Tick the sets this event should include — e.g. Ticketing, Cashless. Expand a set to include or leave out individual dashboards.' },
+  { tour: 'suite-roles', icon: '👥', title: 'Who sees what (optional)', body: 'Restrict a set or dashboard to certain roles — e.g. finance-only views. Leave it alone to show everything to everyone.' },
+  { tour: 'suite-locks', icon: '🔒', title: 'Lock it to the event', body: 'The important one — open this and pick the event (and cashless event, if used) so every dashboard here only shows THIS event’s numbers.' },
+  { tour: 'suite-ticket', icon: '🔗', title: 'Add the ticket link', body: 'Paste the event’s buy / checkout URL. Campaigns for this event auto-fill it as their call-to-action.' },
+  { tour: 'suite-save', icon: '💾', title: 'Save the suite', body: 'Hit Save to apply everything above. (Event branding below saves on its own.)' },
+  { tour: 'suite-branding', icon: '✨', title: 'Event branding (optional)', body: 'Override the look just for this event — logo, colours, sender. Blank fields inherit the client’s branding.' },
+];
+const LOGINS_TOUR = [
+  { tour: 'login-add', icon: '🔑', title: 'Add a login', body: 'Enter the person’s name, email and a temporary password. They’ll be prompted to change it the first time they sign in.' },
+  { tour: 'login-role', icon: '🎚️', title: 'Choose their role', body: 'The role controls what this person can see and do. Pick the access level that fits them.' },
+  { tour: 'login-link', icon: '🔗', title: 'Or link an existing person', body: 'If someone already has a login on another client, link them here instead of creating a duplicate account.' },
+];
+const BRANDING_TOUR = [
+  { tour: 'mte-senderName', icon: '✉️', title: 'Sender name', body: 'The “From” name on this client’s emails — usually their brand. Blank inherits the Howler default.' },
+  { tour: 'mte-brandColor', icon: '🎨', title: 'Brand colours', body: 'The primary (and secondary) colour drive the whole app look — buttons, accents, chart series — and their emails.' },
+  { tour: 'mte-logo', icon: '🖼️', title: 'Logo', body: 'Upload their logo or paste a URL — it shows in the sidebar and atop every email. Tip: “Extract colours” pulls a palette straight from the logo.' },
+  { tour: 'mte-preview', icon: '👀', title: 'Live preview', body: 'See exactly how an email will look as you edit. Anything left blank falls back to the client’s — then Howler’s — defaults.' },
+  { tour: 'mte-save', icon: '💾', title: 'Save the branding', body: 'Save to apply it — the app re-themes live, no reload. You can also send yourself a test email.' },
+];
+// Per-step walkthrough DEFAULTS, keyed by step. Each is an ordered list of
+// { tour, icon, title, body } where `tour` matches a [data-tour] anchor inside
+// that step's content. The AM can edit the title/body/order/on-off of these from
+// the ⚙ editor (stored as each step's `walk`); the anchor + icon stay from code.
+const TOUR_DEFAULTS = { client: CLIENT_TOUR, scope: SCOPE_TOUR, suites: SUITES_TOUR, logins: LOGINS_TOUR, branding: BRANDING_TOUR };
+
+function SectionTour({ steps, container, onClose, zIndex = 4000 }) {
+  const [i, setI] = useState(0);
+  const [rect, setRect] = useState(null);
+  const last = useRef(null);
+  const cur = steps[i];
+
+  useEffect(() => {
+    const root = () => (container && container.current) || document;
+    const find = () => root().querySelector(`[data-tour="${cur.tour}"]`);
+    const el0 = find();
+    if (el0) el0.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    let raf;
+    const tick = () => {
+      const el = find();
+      if (el) {
+        const r = el.getBoundingClientRect();
+        const nr = { top: r.top, left: r.left, width: r.width, height: r.height };
+        const p = last.current;
+        if (!p || Math.abs(p.top - nr.top) > 0.5 || Math.abs(p.left - nr.left) > 0.5 || Math.abs(p.width - nr.width) > 0.5 || Math.abs(p.height - nr.height) > 0.5) { last.current = nr; setRect(nr); }
+      } else if (last.current) { last.current = null; setRect(null); }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [i, cur.tour, container]);
+
+  const isLast = i === steps.length - 1;
+  const vw = typeof window !== 'undefined' ? window.innerWidth : 360;
+  const vh = typeof window !== 'undefined' ? window.innerHeight : 640;
+  const cardW = Math.min(360, vw - 24);
+  let cardTop, cardLeft;
+  if (rect) {
+    const below = rect.top + rect.height + 12;
+    const placeAbove = below + 170 > vh && rect.top - 170 > 0;
+    cardTop = placeAbove ? Math.max(12, rect.top - 12 - 158) : Math.min(vh - 178, below);
+    cardLeft = Math.min(Math.max(12, rect.left), vw - cardW - 12);
+  } else { cardTop = Math.max(12, vh / 2 - 90); cardLeft = vw / 2 - cardW / 2; }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex, pointerEvents: 'none' }}>
+      {rect && <div style={{ position: 'fixed', top: rect.top - 6, left: rect.left - 6, width: rect.width + 12, height: rect.height + 12, border: '2.5px solid var(--brand)', borderRadius: 12, boxShadow: '0 0 0 9999px rgba(0,0,0,0.55)', transition: 'top .2s, left .2s, width .2s, height .2s', pointerEvents: 'none' }} />}
+      <div style={{ position: 'fixed', top: cardTop, left: cardLeft, width: cardW, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 14, boxShadow: '0 16px 48px -10px rgba(0,0,0,0.5)', padding: 16, pointerEvents: 'auto' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+          <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--brand)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Step {i + 1} of {steps.length}</span>
+          <span style={{ flex: 1 }} />
+          <button onClick={onClose} style={{ border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 16, lineHeight: 1 }} title="Close guide">✕</button>
+        </div>
+        <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 6 }}>{cur.icon ? `${cur.icon} ` : ''}{cur.title}</div>
+        <p style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.5, margin: '0 0 14px' }}>{cur.body}</p>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {i > 0 && <button style={miniBtnOutline} onClick={() => setI(i - 1)}>← Back</button>}
+          <span style={{ flex: 1 }} />
+          <button style={saveBtn} onClick={() => (isLast ? onClose() : setI(i + 1))}>{isLast ? 'Done' : 'Next →'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Wizard step editor — edit wording, reorder, add custom guidance steps ─────
+// Back-end editor for the setup wizard itself (opened from the ⚙). The built-in
+// steps' actions are fixed, so only their copy is editable; the AM can reorder
+// everything (the client step stays first) and add their own guidance steps with
+// a tick-off checklist. Saves the whole ordered list to server/setupWizard.js.
+function WizardEditor({ steps, onClose, onSaved }) {
+  const [list, setList] = useState(() => steps.map((s) => ({ ...s, items: s.items ? s.items.map((it) => ({ ...it })) : undefined, walk: s.walk ? s.walk.map((w) => ({ ...w })) : undefined })));
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const [openEdit, setOpenEdit] = useState({}); // which step cards are expanded (collapsed by default)
+  const [previewStep, setPreviewStep] = useState(null); // index of the step being previewed
+
+  const patch = (i, p) => setList((l) => l.map((x, j) => (j === i ? { ...x, ...p } : x)));
+  // Walkthrough-point edits (the red-border guide): change text, reorder, on/off.
+  const walkPatch = (i, wi, p) => setList((l) => l.map((x, j) => (j === i ? { ...x, walk: x.walk.map((w, k) => (k === wi ? { ...w, ...p } : w)) } : x)));
+  const walkMove = (i, wi, dir) => setList((l) => l.map((x, j) => { if (j !== i) return x; const w = x.walk.slice(); const t = wi + dir; if (t < 0 || t >= w.length) return x; [w[wi], w[t]] = [w[t], w[wi]]; return { ...x, walk: w }; }));
+  const move = (i, dir) => setList((l) => {
+    const j = i + dir;
+    if (l[i].key === 'client' || j < 1 || j >= l.length) return l; // client pinned first; stay in range
+    const n = l.slice(); [n[i], n[j]] = [n[j], n[i]]; return n;
+  });
+  const addCustom = () => setList((l) => [...l, { kind: 'custom', key: newKey('custom'), icon: '📌', title: 'New guidance step', blurb: 'Explain what to do at this step.', items: [] }]);
+  const removeStep = (i) => setList((l) => l.filter((_, j) => j !== i));
+  const addItem = (i) => setList((l) => l.map((x, j) => (j === i ? { ...x, items: [...(x.items || []), { key: newKey('item'), label: '' }] } : x)));
+  const setItem = (i, ii, label) => setList((l) => l.map((x, j) => (j === i ? { ...x, items: x.items.map((it, k) => (k === ii ? { ...it, label } : it)) } : x)));
+  const removeItem = (i, ii) => setList((l) => l.map((x, j) => (j === i ? { ...x, items: x.items.filter((_, k) => k !== ii) } : x)));
+
+  const save = async () => {
+    setBusy(true); setErr(null);
+    try {
+      // Strip behaviour-only fields; the server stores wording + order + customs.
+      const payload = list.map((s) => (s.kind === 'custom'
+        ? { kind: 'custom', key: s.key, icon: s.icon, title: s.title, blurb: s.blurb, items: (s.items || []).filter((it) => (it.label || '').trim()).map((it) => ({ key: it.key, label: it.label.trim() })) }
+        : { kind: 'builtin', key: s.key, icon: s.icon, title: s.title, blurb: s.blurb, ...(s.req != null ? { req: s.req } : {}), ...(s.lock != null ? { lock: s.lock } : {}), walk: (s.walk || []).map((w) => ({ tour: w.tour, title: w.title, body: w.body, off: !!w.off })) }));
+      const r = await api.saveSetupWizard(payload);
+      onSaved(r.steps);
+    } catch (e) { setErr(e.message); } finally { setBusy(false); }
+  };
+  const reset = async () => {
+    if (!confirm('Reset the wizard to its built-in defaults? This removes your wording changes and custom steps.')) return;
+    setBusy(true); setErr(null);
+    try { const r = await api.resetSetupWizard(); onSaved(r.steps); } catch (e) { setErr(e.message); } finally { setBusy(false); }
+  };
+
+  return (
+    <div>
+      <AdminBack onBack={onClose}>Back to wizard</AdminBack>
+      <h2 style={{ fontSize: 20, fontWeight: 700, margin: '12px 0 4px' }}>⚙ Edit the setup wizard</h2>
+      <p style={{ ...hint }}>Change each step’s wording, reorder them, edit the <b>walkthrough points</b> (the red-border guide on each section), and add your own guidance steps. The built-in steps still <b>do</b> their job (create the client, scope, suites, logins, branding) — you’re editing what the AM reads, the order, and any extra steps you add. The “client” step stays first.</p>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {list.map((s, i) => {
+          const def = WIZARD_DEFAULTS.find((d) => d.key === s.key);
+          const isCustom = s.kind === 'custom';
+          return (
+            <div key={s.key} style={cardStyle}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: openEdit[s.key] ? 10 : 0 }}>
+                <button onClick={() => setOpenEdit((o) => ({ ...o, [s.key]: !o[s.key] }))} title={openEdit[s.key] ? 'Collapse' : 'Expand to edit'}
+                  style={{ width: 16, border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--muted)', fontSize: 11, padding: 0, flexShrink: 0, transform: openEdit[s.key] ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</button>
+                <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.04em', flexShrink: 0 }}>Step {i + 1}</span>
+                <button onClick={() => setOpenEdit((o) => ({ ...o, [s.key]: !o[s.key] }))} style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0, border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left', padding: 0, color: 'var(--text)' }}>
+                  {isCustom
+                    ? <span style={{ ...badgeBase, marginBottom: 0, color: 'var(--brand)', background: 'rgba(var(--brand-rgb),0.10)', border: '1px solid rgba(var(--brand-rgb),0.3)' }}>Your step</span>
+                    : <span style={{ ...badgeBase, marginBottom: 0, color: 'var(--muted)', background: 'rgba(128,128,128,0.12)', border: '1px solid var(--hairline)' }} title={def?.does || ''}>Built-in{s.optional ? ' · optional' : ''}</span>}
+                  <span style={{ fontWeight: 700, fontSize: 13.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.icon} {s.title}</span>
+                </button>
+                <button style={miniBtnOutline} onClick={() => setPreviewStep(i)} title="Preview how this step looks in the wizard">👁 Preview</button>
+                <button style={miniBtnOutline} onClick={() => move(i, -1)} disabled={s.key === 'client' || i <= 1} title="Move up">↑</button>
+                <button style={miniBtnOutline} onClick={() => move(i, 1)} disabled={s.key === 'client' || i >= list.length - 1} title="Move down">↓</button>
+                {isCustom && <button style={delBtn} onClick={() => removeStep(i)}>Remove</button>}
+              </div>
+              {openEdit[s.key] && (<>
+              {def?.does && !isCustom && <p style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 10px' }}>What it does: {def.does}</p>}
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                <Field label="Icon"><input style={{ ...input, width: 64, minWidth: 0, textAlign: 'center' }} value={s.icon || ''} onChange={(e) => patch(i, { icon: e.target.value })} maxLength={4} /></Field>
+                <Field label="Title"><input style={{ ...input, minWidth: 220 }} value={s.title || ''} onChange={(e) => patch(i, { title: e.target.value })} /></Field>
+              </div>
+              <div style={{ marginTop: 10 }}>
+                <L>Explanation (what the AM reads)</L>
+                <textarea value={s.blurb || ''} onChange={(e) => patch(i, { blurb: e.target.value })} rows={3} style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 13, outline: 'none', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5, marginTop: 4 }} />
+              </div>
+              {!isCustom && s.req != null && (
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
+                  <Field label="“Needs …” label"><input style={{ ...input, minWidth: 220 }} value={s.req || ''} onChange={(e) => patch(i, { req: e.target.value })} /></Field>
+                  <Field label="Locked-button hint"><input style={{ ...input, minWidth: 260 }} value={s.lock || ''} onChange={(e) => patch(i, { lock: e.target.value })} /></Field>
+                </div>
+              )}
+              {!isCustom && (s.walk || []).length > 0 && (
+                <div style={{ marginTop: 14 }}>
+                  <L>Walkthrough points — the red-border guide</L>
+                  <div style={{ fontSize: 12, color: 'var(--muted)', margin: '4px 0 8px' }}>Edit what each highlighted section says, reorder them, or switch one off. Each point is pinned to a part of this step (you can’t add new highlights — those need a matching field on the page).</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {s.walk.map((w, wi) => (
+                      <div key={w.tour} style={{ border: '1px solid var(--hairline)', borderRadius: 8, padding: 10, opacity: w.off ? 0.55 : 1 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                          <span style={{ fontSize: 15 }}>{w.icon}</span>
+                          <input style={{ ...input, flex: 1, fontWeight: 600 }} value={w.title || ''} onChange={(e) => walkPatch(i, wi, { title: e.target.value })} />
+                          <button style={miniBtnOutline} onClick={() => walkMove(i, wi, -1)} disabled={wi === 0} title="Move up">↑</button>
+                          <button style={miniBtnOutline} onClick={() => walkMove(i, wi, 1)} disabled={wi === s.walk.length - 1} title="Move down">↓</button>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--muted)', cursor: 'pointer' }} title="Show this point in the guide">
+                            <input type="checkbox" checked={!w.off} onChange={() => walkPatch(i, wi, { off: !w.off })} /> on
+                          </label>
+                        </div>
+                        <textarea value={w.body || ''} onChange={(e) => walkPatch(i, wi, { body: e.target.value })} rows={2} style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 12.5, outline: 'none', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.45 }} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {isCustom && (
+                <div style={{ marginTop: 12 }}>
+                  <L>Checklist items (the AM ticks these to continue)</L>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, margin: '6px 0' }}>
+                    {(s.items || []).map((it, ii) => (
+                      <div key={it.key} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                        <span style={{ color: 'var(--muted)' }}>☐</span>
+                        <input style={{ ...input, flex: 1 }} value={it.label} placeholder="e.g. Send the welcome email" onChange={(e) => setItem(i, ii, e.target.value)} />
+                        <button style={delBtn} onClick={() => removeItem(i, ii)}>✕</button>
+                      </div>
+                    ))}
+                    {(s.items || []).length === 0 && <span style={{ fontSize: 12, color: 'var(--muted)' }}>No items — this step is just guidance the AM reads, with nothing to tick.</span>}
+                  </div>
+                  <button style={miniBtn} onClick={() => addItem(i)}>+ Add checklist item</button>
+                </div>
+              )}
+              </>)}
+            </div>
+          );
+        })}
+      </div>
+      <button style={{ ...addBtn, marginTop: 12 }} onClick={addCustom}>+ Add a guidance step</button>
+      {err && <div style={{ color: 'var(--error)', fontSize: 13, marginTop: 10 }}>{err}</div>}
+      <div style={{ display: 'flex', gap: 10, marginTop: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+        <button style={miniBtnOutline} onClick={onClose} disabled={busy}>Cancel</button>
+        <button style={delBtn} onClick={reset} disabled={busy}>Reset to defaults</button>
+        <span style={{ flex: 1 }} />
+        <button style={{ ...saveBtn, opacity: busy ? 0.6 : 1 }} onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save wizard'}</button>
+      </div>
+      {previewStep != null && list[previewStep] && <StepPreviewModal steps={list} index={previewStep} onClose={() => setPreviewStep(null)} />}
+    </div>
+  );
+}
+
+// ─── Step preview — the actual wizard screen, WITH the live walkthrough ───────
+// A faithful mock of the wizard screen for one step (numbered stepper, the step
+// card with its badge/title/explanation, a sketch of that step's controls, and
+// the footer) — crucially, the mock sections carry the SAME [data-tour] anchors
+// as the real step, so the real SectionTour plays its red-border spotlight
+// animation right over them. So the AM sees exactly what the user will see,
+// animation and all, driven entirely by the edited config.
+function StepPreviewModal({ steps, index, onClose }) {
+  const s = steps[index];
+  const isCustom = s.kind === 'custom';
+  const walk = (s.walk || []).filter((w) => !w.off);
+  const chips = [...steps, { key: 'review', icon: '✅', title: 'Review & finish', short: 'Finish' }];
+  const [playing, setPlaying] = useState(false);
+  const bodyRef = useRef(null);
+  // Auto-play the walkthrough shortly after open (lets the mock paint first),
+  // mirroring how the real wizard auto-launches it.
+  useEffect(() => { if (!walk.length) return; const t = setTimeout(() => setPlaying(true), 450); return () => clearTimeout(t); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const badge = isCustom
+    ? <div style={{ ...badgeBase, color: 'var(--muted)', background: 'rgba(128,128,128,0.12)', border: '1px solid var(--hairline)' }}>{(s.items || []).length ? '● Required — tick every item' : '○ Guidance'}</div>
+    : s.optional
+      ? <div style={{ ...badgeBase, color: 'var(--muted)', background: 'rgba(128,128,128,0.12)', border: '1px solid var(--hairline)' }}>○ Optional — you can skip this step</div>
+      : <div style={{ ...badgeBase, color: 'var(--brand)', background: 'rgba(var(--brand-rgb),0.10)', border: '1px solid rgba(var(--brand-rgb),0.3)' }}>● Required{s.req ? ` — needs ${s.req}` : ''}</div>;
+  const lockMsg = isCustom ? ((s.items || []).length ? 'Tick every item to continue' : '') : (s.req ? (s.lock || `needs ${s.req}`) : '');
+  const fauxInput = { ...input, display: 'flex', alignItems: 'center', background: 'rgba(128,128,128,0.06)', color: 'var(--muted)', pointerEvents: 'none' };
+  const lbl = (t) => <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.04em', margin: '2px 0 4px' }}>{t}</div>;
+  // A mock section wrapped with the real [data-tour] anchor so the tour highlights it.
+  const sec = (tour, child) => <div data-tour={tour} style={{ marginTop: 10 }}>{child}</div>;
+  const secHead = (title) => <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '6px 8px', border: '1px solid var(--hairline)', borderRadius: 8 }}><span style={{ color: '#b0b0b6', fontSize: 11 }}>▶</span><span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--muted)' }}>{title}</span></div>;
+  const body = () => {
+    if (isCustom) {
+      return (s.items || []).length ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 }}>
+          {s.items.map((it) => (
+            <div key={it.key} style={{ display: 'flex', alignItems: 'center', gap: 10, border: '1px solid var(--hairline)', borderRadius: 10, padding: '10px 12px' }}>
+              <span style={{ width: 22, height: 22, borderRadius: 6, border: '1.5px solid var(--hairline)', flexShrink: 0 }} />
+              <span style={{ fontSize: 13.5, fontWeight: 600 }}>{it.label || <em style={{ color: 'var(--muted)' }}>empty item</em>}</span>
+            </div>
+          ))}
+        </div>
+      ) : <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 8 }}>Guidance only — the AM reads the explanation above, then continues.</div>;
+    }
+    switch (s.key) {
+      case 'client': return (<>
+        {sec('client-name', <>{lbl('Client name · required')}<div style={{ ...fauxInput, maxWidth: 320 }}>e.g. MTN Bushfire</div></>)}
+        {sec('client-logo', <>{lbl('Client logo · optional')}<div style={{ width: 120, height: 44, border: '1px dashed var(--hairline)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12 }}>logo</div></>)}
+      </>);
+      case 'scope': return (<>
+        {sec('scope-all', <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', border: '1px solid var(--hairline)', borderRadius: 10 }}>
+          <span style={{ width: 16, height: 16, border: '1.5px solid var(--hairline)', borderRadius: 4, flexShrink: 0 }} />
+          <span style={{ fontWeight: 700, fontSize: 13 }}>🌐 All organisers (internal / management)</span>
+        </div>)}
+        {sec('scope-org', <>{lbl('Organiser scope · required')}<div style={fauxInput}>Pick the client’s organiser…</div></>)}
+      </>);
+      case 'suites': return (<>
+        {sec('suite-name', <>{lbl('Suite name')}<div style={fauxInput}>e.g. Bushfire 2026</div></>)}
+        {sec('suite-icon', <>{lbl('Icon')}<div style={{ width: 40, height: 40, border: '1px solid var(--hairline)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>🎟️</div></>)}
+        {sec('suite-sets', secHead('Sets in this suite (1)'))}
+        {sec('suite-roles', secHead('Dashboard access by role'))}
+        {sec('suite-locks', <>{secHead('Locked filters (the event, cashless events…)')}<div style={{ display: 'flex', gap: 8, marginTop: 6 }}><div style={{ ...miniBtn, opacity: 0.8, pointerEvents: 'none' }}>+ Add locked filter</div><div style={{ ...miniBtn, opacity: 0.8, pointerEvents: 'none' }}>+ Add default filters</div></div></>)}
+        {sec('suite-ticket', <>{lbl('Ticket / checkout link')}<div style={fauxInput}>https://tickets.example.com/your-event</div></>)}
+        {sec('suite-save', <div style={{ ...saveBtn, display: 'inline-block', opacity: 0.8, pointerEvents: 'none' }}>Save</div>)}
+        {sec('suite-branding', secHead('Event branding (logo / colours / sender)'))}
+      </>);
+      case 'logins': return (<>
+        {sec('login-add', <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+          <div><div style={fauxInput}>First name</div></div>
+          <div><div style={fauxInput}>Email</div></div>
+          {sec('login-role', <div style={{ ...fauxInput, minWidth: 110 }}>Role ▾</div>)}
+          <div style={{ ...miniBtn, opacity: 0.8, pointerEvents: 'none' }}>+ Add login</div>
+        </div>)}
+        {sec('login-link', <>{lbl('Or link an existing login')}<div style={fauxInput}>Pick a login…</div></>)}
+      </>);
+      case 'branding': return (<>
+        {sec('mte-senderName', <>{lbl('Sender name')}<div style={fauxInput}>e.g. Kunye</div></>)}
+        {sec('mte-brandColor', <>{lbl('Primary colour')}<div style={{ display: 'flex', gap: 8 }}><div style={{ width: 44, height: 34, borderRadius: 8, background: 'var(--brand)' }} /><div style={{ ...fauxInput, flex: 1 }}>#FF385C</div></div></>)}
+        {sec('mte-logo', <>{lbl('Logo')}<div style={{ width: 120, height: 44, border: '1px dashed var(--hairline)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12 }}>logo</div></>)}
+        {sec('mte-preview', <>{lbl('Live preview')}<div style={{ height: 90, border: '1px solid var(--hairline)', borderRadius: 10, background: '#fff' }} /></>)}
+        {sec('mte-save', <div style={{ ...saveBtn, display: 'inline-block', opacity: 0.8, pointerEvents: 'none' }}>Save</div>)}
+      </>);
+      default: return <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 8 }}>This step’s controls appear here.</div>;
+    }
+  };
+  return (
+    <>
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 5000, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: 'var(--bg, var(--card))', borderRadius: 16, boxShadow: '0 24px 64px -12px rgba(0,0,0,0.6)', width: 'min(720px, 96vw)', maxHeight: '92vh', overflowY: 'auto', padding: 18 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Preview — the wizard screen, as the AM sees it</span>
+          <span style={{ flex: 1 }} />
+          {walk.length > 0 && <button style={miniBtn} onClick={() => setPlaying(true)}>▶ Play walkthrough</button>}
+          <button onClick={onClose} style={{ border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 18, lineHeight: 1 }} title="Close">✕</button>
+        </div>
+        <div ref={bodyRef}>
+          <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4, marginBottom: 14 }}>
+            {chips.map((c, k) => {
+              const active = k === index;
+              return (
+                <div key={c.key} style={{ display: 'flex', alignItems: 'center', gap: 7, flexShrink: 0, padding: '7px 11px', borderRadius: 980, border: active ? '1.5px solid var(--brand)' : '1.5px solid var(--hairline)', background: active ? 'var(--brand)' : 'var(--card)', color: active ? '#fff' : 'var(--muted)', opacity: k > index ? 0.55 : 1 }}>
+                  <span style={{ width: 20, height: 20, borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 800, background: active ? 'rgba(255,255,255,0.25)' : 'rgba(128,128,128,0.18)', color: active ? '#fff' : 'var(--muted)' }}>{k + 1}</span>
+                  {active && <span style={{ fontSize: 13, fontWeight: 700 }}>{c.title}</span>}
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ ...cardStyle, marginBottom: 0 }}>
+            {badge}
+            <h2 style={{ fontSize: 20, fontWeight: 700, margin: '2px 0 8px' }}>{s.icon} {s.title}</h2>
+            <p style={{ fontSize: 13.5, color: 'var(--text)', lineHeight: 1.55, margin: '0 0 12px' }}>{s.blurb}</p>
+            {walk.length > 0 && <div style={{ ...miniBtn, display: 'inline-block', opacity: 0.75, pointerEvents: 'none' }}>▶ Guide me through this step</div>}
+            {body()}
+            <div style={{ display: 'flex', gap: 10, marginTop: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+              <div style={{ ...miniBtnOutline, opacity: 0.7, pointerEvents: 'none' }}>← Back</div>
+              <span style={{ flex: 1 }} />
+              {lockMsg && <span style={{ fontSize: 12, color: 'var(--muted)' }}>🔒 {lockMsg}</span>}
+              <div style={{ ...saveBtn, opacity: lockMsg ? 0.5 : 1, pointerEvents: 'none' }}>{index === 0 ? 'Create client & continue' : 'Continue'}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    {playing && walk.length > 0 && <SectionTour steps={walk} container={bodyRef} zIndex={6000} onClose={() => setPlaying(false)} />}
+    </>
   );
 }
 
@@ -731,6 +1628,16 @@ function fmtWhen(iso) {
   if (!iso) return 'Never';
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+}
+// A short, friendly device label from a user-agent (for the install marker).
+function shortDevice(ua = '') {
+  const s = String(ua);
+  if (/iphone/i.test(s)) return 'iPhone';
+  if (/ipad/i.test(s)) return 'iPad';
+  if (/android/i.test(s)) return 'Android';
+  if (/mac os x|macintosh/i.test(s)) return 'Mac';
+  if (/windows/i.test(s)) return 'Windows';
+  return 'device';
 }
 // One emoji per action family — keeps the timeline scannable at a glance.
 function actionGlyph(action = '') {
@@ -772,14 +1679,17 @@ function UsersTab() {
   const [users, setUsers] = useState(null);
   const [entities, setEntities] = useState([]);
   const [roles, setRoles] = useState([]);
+  const [howlerRoles, setHowlerRoles] = useState([]);
   const [q, setQ] = useState('');
   const [sort, setSort] = useState('active'); // active | email | login
   const [roleFilter, setRoleFilter] = useState('all'); // all | admin | client
   const [selectedId, setSelectedId] = useState(null);
   const [openInEdit, setOpenInEdit] = useState(false);
   const [adding, setAdding] = useState(false);
-  const load = () => Promise.all([api.adminListUsers(), api.adminListEntities(), api.getRoles().catch(() => ({ roles: [] }))])
-    .then(([u, e, r]) => { setUsers(u); setEntities(e); setRoles(r.roles || []); });
+  const [showReport, setShowReport] = useState(false);
+  const [installs, setInstalls] = useState({});
+  const load = () => Promise.all([api.adminListUsers(), api.adminListEntities(), api.getRoles().catch(() => ({ roles: [] })), api.adminInstalls().catch(() => ({ installs: {} }))])
+    .then(([u, e, r, ins]) => { setUsers(u); setEntities(e); setRoles(r.roles || []); setHowlerRoles(r.howlerRoles || []); setInstalls(ins.installs || {}); });
   useEffect(() => { load(); }, []);
   // Open a user's detail; `edit` jumps straight into the edit form.
   const openUser = (u, edit = false) => { setOpenInEdit(edit); setSelectedId(u.id); };
@@ -788,8 +1698,8 @@ function UsersTab() {
     try { await api.adminDeleteUser(u.id); load(); } catch (e) { alert(e.message); }
   };
   if (!users) return <Muted>Loading…</Muted>;
-  if (selectedId) return <UserDetail userId={selectedId} entities={entities} roles={roles} initialEditing={openInEdit} onBack={() => { setSelectedId(null); setOpenInEdit(false); load(); }} />;
-  if (adding) return <AddUserForm entities={entities} roles={roles} onCancel={() => setAdding(false)} onCreated={(id) => { setAdding(false); load().then(() => { if (id) setSelectedId(id); }); }} />;
+  if (selectedId) return <UserDetail userId={selectedId} entities={entities} roles={roles} install={installs[selectedId] || null} initialEditing={openInEdit} onBack={() => { setSelectedId(null); setOpenInEdit(false); load(); }} />;
+  if (adding) return <AddUserForm entities={entities} roles={roles} howlerRoles={howlerRoles} onCancel={() => setAdding(false)} onCreated={(id) => { setAdding(false); load().then(() => { if (id) setSelectedId(id); }); }} />;
 
   const entName = Object.fromEntries(entities.map((e) => [e.id, e.name]));
   const clientsOf = (u) => (u.memberships || []).map((m) => entName[m.entityId] || m.entityId);
@@ -810,6 +1720,8 @@ function UsersTab() {
     return <span title={names.join(', ')}>{names.length === 1 ? names[0] : `${names.length} clients`}</span>;
   };
   const adminBadge = (u) => u.role === 'admin' && <span style={howlerBadge}>HOWLER</span>;
+  // 📱 marker when the user has opened Pulse as an installed app (PWA on their phone).
+  const installMark = (u) => { const i = installs[u.id]; return i ? <span title={`📱 App installed · last opened ${fmtWhen(i.lastAt)}`} style={{ fontSize: 13, cursor: 'help' }}>📱</span> : null; };
   const lastActiveCell = (u) => (
     <>
       <span>{relTime(u.lastActiveAt)}</span>
@@ -821,8 +1733,10 @@ function UsersTab() {
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 6 }}>
         <p style={{ ...hint, marginBottom: 0, flex: 1, minWidth: 180 }}>Every login on Pulse — {users.length} user{users.length === 1 ? '' : 's'} ({adminCount} Howler admin{adminCount === 1 ? '' : 's'}). Click a user for their profile, roles and activity.</p>
+        <button style={showReport ? { ...miniBtn, background: 'var(--brand)', color: '#fff', borderColor: 'var(--brand)' } : miniBtnOutline} onClick={() => setShowReport((s) => !s)}>📊 Activity report</button>
         <button style={{ ...miniBtn, background: 'var(--brand)', color: '#fff', borderColor: 'var(--brand)' }} onClick={() => setAdding(true)}>+ Add user</button>
       </div>
+      {showReport && <ActivityReport />}
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
         <div style={{ ...searchWrap, marginBottom: 0 }}>
           <span style={{ color: 'var(--muted)', fontSize: 13, flexShrink: 0 }}>⌕</span>
@@ -846,7 +1760,7 @@ function UsersTab() {
           {sorted.map((u) => (
             <div key={u.id} className="lift" style={{ ...clientRow, gap: 8 }}>
               <div onClick={() => openUser(u)} style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, textAlign: 'left', flex: 1, cursor: 'pointer' }}>
-                <span style={{ fontWeight: 600, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis' }}>{u.fullName || u.email} {adminBadge(u)}</span>
+                <span style={{ fontWeight: 600, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis' }}>{u.fullName || u.email} {adminBadge(u)} {installMark(u)}</span>
                 <span style={{ fontSize: 12, color: 'var(--muted)' }}>{u.fullName ? `${u.email} · ` : ''}{u.role === 'admin' ? 'Howler admin' : 'Client'} · {clientsOf(u).length || (u.role === 'admin' ? '∞' : 0)} client{clientsOf(u).length === 1 ? '' : 's'}</span>
                 <span style={{ fontSize: 12, color: 'var(--muted)' }}>{u.mobile ? `${u.mobile} · ` : ''}active {relTime(u.lastActiveAt)}</span>
               </div>
@@ -860,18 +1774,19 @@ function UsersTab() {
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
             <tr>
-              {['User', 'Type', 'Clients', 'Mobile', 'Last active', ''].map((h, i) => <th key={i} style={thS}>{h}</th>)}
+              {['User', 'Type', 'Clients', 'Inventive workspace', 'Mobile', 'Last active', ''].map((h, i) => <th key={i} style={thS}>{h}</th>)}
             </tr>
           </thead>
           <tbody>
             {sorted.map((u) => (
               <tr key={u.id} className="lift" style={{ cursor: 'pointer' }} onClick={() => openUser(u)}>
                 <td style={td}>
-                  <div style={{ fontWeight: 600 }}>{u.fullName || u.email} {adminBadge(u)}</div>
+                  <div style={{ fontWeight: 600 }}>{u.fullName || u.email} {adminBadge(u)} {installMark(u)}</div>
                   {u.fullName && <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>{u.email}</div>}
                 </td>
-                <td style={td}>{u.role === 'admin' ? 'Howler admin' : 'Client'}</td>
+                <td style={td}>{u.role === 'admin' ? (u.howlerRoleLabel ? `Howler · ${u.howlerRoleLabel}` : 'Howler admin') : 'Client'}</td>
                 <td style={td}>{clientsCell(u)}</td>
+                <td style={td}>{u.inventiveWorkspaceName || <span style={{ color: 'var(--muted)' }}>—</span>}</td>
                 <td style={td}>{u.mobile || <span style={{ color: 'var(--muted)' }}>—</span>}</td>
                 <td style={td} title={`Last login ${fmtWhen(u.lastLogin)}`}>{lastActiveCell(u)}</td>
                 <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
@@ -880,9 +1795,63 @@ function UsersTab() {
                 </td>
               </tr>
             ))}
-            {sorted.length === 0 && <tr><td style={td} colSpan={6}><Muted>{ql ? `No users match “${q.trim()}”.` : 'No users in this view.'}</Muted></td></tr>}
+            {sorted.length === 0 && <tr><td style={td} colSpan={7}><Muted>{ql ? `No users match “${q.trim()}”.` : 'No users in this view.'}</Muted></td></tr>}
           </tbody>
         </table>
+      )}
+    </div>
+  );
+}
+
+// Platform-wide usage summary: active users + top users / dashboards / features
+// over a selectable window. Read-only, lazy-loaded when the panel is opened.
+function ActivityReport() {
+  const [days, setDays] = useState(30);
+  const [rep, setRep] = useState(null);
+  const [err, setErr] = useState('');
+  useEffect(() => { setRep(null); setErr(''); api.adminUserActivityReport(days).then(setRep).catch((e) => setErr(e.message || 'Failed to load')); }, [days]);
+  const card = { flex: '1 1 200px', minWidth: 180, border: '1px solid var(--hairline)', borderRadius: 12, padding: '12px 14px', background: 'var(--card)' };
+  const head = { fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', marginBottom: 8 };
+  const row = (left, right) => <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 13, padding: '4px 0', borderTop: '1px solid var(--hairline)' }}><span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{left}</span><span style={{ flexShrink: 0, fontWeight: 700, color: 'var(--brand)' }}>{right}</span></div>;
+  return (
+    <div style={{ border: '1px solid var(--hairline)', borderRadius: 14, padding: 16, margin: '4px 0 16px', background: 'rgba(var(--brand-rgb,255,56,92),0.03)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
+        <span style={{ fontWeight: 700, fontSize: 15, flex: 1 }}>📊 Activity report</span>
+        <select style={{ ...input, width: 'auto' }} value={days} onChange={(e) => setDays(Number(e.target.value))}>
+          <option value={7}>Last 7 days</option>
+          <option value={30}>Last 30 days</option>
+          <option value={90}>Last 90 days</option>
+        </select>
+      </div>
+      {err ? <Muted>{err}</Muted> : !rep ? <Muted>Loading…</Muted> : (
+        <>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
+            <div style={card}><div style={head}>Active users</div>
+              <div style={{ display: 'flex', gap: 16 }}>
+                <div><div style={{ fontSize: 22, fontWeight: 800 }}>{rep.active.d1}</div><div style={{ fontSize: 11, color: 'var(--muted)' }}>today</div></div>
+                <div><div style={{ fontSize: 22, fontWeight: 800 }}>{rep.active.d7}</div><div style={{ fontSize: 11, color: 'var(--muted)' }}>7 days</div></div>
+                <div><div style={{ fontSize: 22, fontWeight: 800 }}>{rep.active.d30}</div><div style={{ fontSize: 11, color: 'var(--muted)' }}>{rep.days} days</div></div>
+              </div>
+            </div>
+            <div style={card}><div style={head}>Volume · last {rep.days} days</div>
+              <div style={{ display: 'flex', gap: 16 }}>
+                <div><div style={{ fontSize: 22, fontWeight: 800 }}>{rep.totals.views}</div><div style={{ fontSize: 11, color: 'var(--muted)' }}>dashboard opens</div></div>
+                <div><div style={{ fontSize: 22, fontWeight: 800 }}>{rep.totals.actions}</div><div style={{ fontSize: 11, color: 'var(--muted)' }}>actions</div></div>
+              </div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <div style={card}><div style={head}>Top users</div>
+              {rep.topUsers.length ? rep.topUsers.map((u) => row(<span title={u.name}>{u.name}{u.role === 'admin' ? ' · Howler' : ''}</span>, u.total)) : <Muted>No activity yet.</Muted>}
+            </div>
+            <div style={card}><div style={head}>Most active dashboards</div>
+              {rep.topDashboards.length ? rep.topDashboards.map((d) => row(<span title={d.title}>{d.title}</span>, d.opens)) : <Muted>No opens yet.</Muted>}
+            </div>
+            <div style={card}><div style={head}>Most used features</div>
+              {rep.topFeatures.length ? rep.topFeatures.map((f) => row(<span title={f.label}>{f.label}</span>, f.uses)) : <Muted>No actions yet.</Muted>}
+            </div>
+          </div>
+        </>
       )}
     </div>
   );
@@ -891,11 +1860,12 @@ function UsersTab() {
 // Create either a Howler admin (full access) or a client login (scoped to the
 // clients you pick). Replaces the old separate "Add admin" / per-client "Add
 // login" forms — one entry point for both.
-function AddUserForm({ entities, roles, onCancel, onCreated }) {
+function AddUserForm({ entities, roles, howlerRoles = [], onCancel, onCreated }) {
   const [accountType, setAccountType] = useState('client'); // client | admin
   const [form, setForm] = useState({ firstName: '', lastName: '', email: '', mobile: '', password: '' });
   const [entityIds, setEntityIds] = useState([]);
   const [role, setRole] = useState('viewer');
+  const [howlerRole, setHowlerRole] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const roleOpts = roles.length ? roles : [{ key: 'owner', label: 'Owner' }];
@@ -909,7 +1879,7 @@ function AddUserForm({ entities, roles, onCancel, onCreated }) {
     try {
       const created = isClient
         ? await api.adminCreateUser({ ...base, role: 'client', entityIds: entityIds.map((id) => ({ entityId: id, role })) })
-        : await api.adminCreateUser({ ...base, role: 'admin', entityIds });
+        : await api.adminCreateUser({ ...base, role: 'admin', entityIds, howlerRole });
       onCreated(created?.id);
     } catch (e) {
       // Duplicate email → for an admin, offer to promote the existing login (keeps its access).
@@ -925,7 +1895,7 @@ function AddUserForm({ entities, roles, onCancel, onCreated }) {
 
   return (
     <div>
-      <button style={miniBtnOutline} onClick={onCancel}>← All users</button>
+      <AdminBack onBack={onCancel}>All users</AdminBack>
       <h2 style={{ fontSize: 20, fontWeight: 700, margin: '12px 0 4px' }}>Add a user</h2>
       <p style={{ ...hint, marginBottom: 16 }}>Create a Howler admin (full access to every client + the console) or a client login (scoped to the clients you pick).</p>
       <div style={{ ...cardStyle, maxWidth: 560 }}>
@@ -953,6 +1923,17 @@ function AddUserForm({ entities, roles, onCancel, onCreated }) {
           </>
         ) : (
           <>
+            {howlerRoles.length > 0 && (
+              <div style={{ marginBottom: 10 }}>
+                <Field label="Howler role">
+                  <select style={input} value={howlerRole} onChange={(e) => setHowlerRole(e.target.value)}>
+                    <option value="">— none —</option>
+                    {howlerRoles.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
+                  </select>
+                </Field>
+                <p style={{ ...hint, marginTop: 6 }}>Their job title at Howler. Shown to clients they own as “Your Howler Support”.</p>
+              </div>
+            )}
             <L>Also a customer of (optional)</L>
             <div style={{ marginTop: 4 }}><ClientLinkPicker entities={entities} value={entityIds} onChange={setEntityIds} /></div>
             <p style={{ ...hint, marginTop: 8 }}>Howler admins see every client and the console regardless. Ticking clients also gives them that client's customer view.</p>
@@ -969,15 +1950,15 @@ function AddUserForm({ entities, roles, onCancel, onCreated }) {
 }
 
 // One user's detail: identity, client roles, usage profile and activity timeline.
-function UserDetail({ userId, entities = [], roles = [], initialEditing = false, onBack }) {
+function UserDetail({ userId, entities = [], roles = [], install = null, initialEditing = false, onBack }) {
   const [data, setData] = useState(null);
   const [err, setErr] = useState('');
   const [section, setSection] = useState('overview');
   const [editing, setEditing] = useState(!!initialEditing);
   const load = () => api.adminGetUser(userId).then(setData).catch((e) => setErr(e.message || 'Failed to load'));
   useEffect(() => { setData(null); setErr(''); setEditing(!!initialEditing); load(); }, [userId]); // eslint-disable-line react-hooks/exhaustive-deps
-  if (err) return <div><button style={miniBtnOutline} onClick={onBack}>← All users</button><p style={{ color: 'var(--error)', marginTop: 12 }}>{err}</p></div>;
-  if (!data) return <div><button style={miniBtnOutline} onClick={onBack}>← All users</button><p style={{ marginTop: 12 }}><Muted>Loading…</Muted></p></div>;
+  if (err) return <div><AdminBack onBack={onBack}>All users</AdminBack><p style={{ color: 'var(--error)', marginTop: 12 }}>{err}</p></div>;
+  if (!data) return <div><AdminBack onBack={onBack}>All users</AdminBack><p style={{ marginTop: 12 }}><Muted>Loading…</Muted></p></div>;
 
   const { user, memberships, profile, dashboards, activity, usageByClient = [], emails = [] } = data;
   const isAdmin = user.role === 'admin';
@@ -999,7 +1980,10 @@ function UserDetail({ userId, entities = [], roles = [], initialEditing = false,
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-        <button style={miniBtnOutline} onClick={onBack}>← All users</button>
+        <button style={adminBackBtn} onClick={onBack}>
+          <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
+          All users
+        </button>
         <span style={{ flex: 1 }} />
         <button style={miniBtn} onClick={() => setEditing(true)}>✏️ Edit</button>
         <button style={delBtn} onClick={del}>Delete</button>
@@ -1021,9 +2005,11 @@ function UserDetail({ userId, entities = [], roles = [], initialEditing = false,
               <KV label="Account type" value={isAdmin ? 'Howler admin' : 'Client login'} />
               <KV label="Member of" value={isAdmin ? 'All clients (admin)' : (memberships.length ? memberships.map((m) => m.entityName).join(', ') : 'No clients linked')} />
               <KV label="Last login" value={fmtWhen(user.lastLogin)} sub={user.lastLogin ? relTime(user.lastLogin) : ''} />
+              <KV label="App installed" value={install ? '📱 Yes — on their phone' : 'Not detected'} sub={install ? `last opened ${relTime(install.lastAt)}` : 'never opened as an installed app'} />
               <KV label="Most recent action" value={mostRecent ? mostRecent.label : 'No activity yet'} sub={mostRecent ? `${relTime(mostRecent.at)}${mostRecent.entityName ? ` · ${mostRecent.entityName}` : ''}` : ''} />
               <KV label="Account created" value={fmtWhen(user.createdAt)} />
               <KV label="Notifications" value={`Email ${user.notifyEmail ? 'on' : 'off'} · Push ${user.notifyPush ? 'on' : 'off'}`} />
+              <KV label="Inventive workspace" value={user.inventiveWorkspace ? (user.inventiveWorkspace.name || '(unnamed)') : 'Not linked'} sub={user.inventiveWorkspace ? `ref ${user.inventiveWorkspace.refId || '—'}` : 'uses the user’s own ID'} />
             </div>
           )}
 
@@ -1115,6 +2101,18 @@ function UserDetail({ userId, entities = [], roles = [], initialEditing = false,
 
           {section === 'activity' && (
             <div>
+              {/* App install — is Pulse on their phone, and when did they last open it as an app? */}
+              <div style={{ ...cardStyle, display: 'flex', alignItems: 'center', gap: 12 }}>
+                <span style={{ fontSize: 24, width: 30, textAlign: 'center', flexShrink: 0 }}>{install ? '📱' : '🌐'}</span>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontWeight: 700, fontSize: 14 }}>{install ? 'Pulse installed on their phone' : 'Not installed as an app'}</div>
+                  <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.45 }}>
+                    {install
+                      ? <>Last opened in-app {relTime(install.lastAt)} · first installed {fmtWhen(install.firstAt)}{install.ua ? ` · ${shortDevice(install.ua)}` : ''}</>
+                      : 'We haven’t seen this user open Pulse from a home-screen / installed app — they may only use it in a browser tab.'}
+                  </div>
+                </div>
+              </div>
               {activity.length === 0 ? <Muted>No activity recorded yet.</Muted> : (
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
                   {activity.map((e, i) => (
@@ -1142,16 +2140,19 @@ function UserDetail({ userId, entities = [], roles = [], initialEditing = false,
 // Edit an existing user's identity, account type and client links. Per-client
 // roles stay on each client's Logins tab; this covers everything else in one place.
 function UserEditCard({ user, memberships, entities, roles, onCancel, onSaved }) { // eslint-disable-line no-unused-vars
-  const [form, setForm] = useState({ firstName: user.firstName || '', lastName: user.lastName || '', email: user.email, mobile: user.mobile || '', password: '' });
+  const [form, setForm] = useState({ firstName: user.firstName || '', lastName: user.lastName || '', email: user.email, mobile: user.mobile || '', password: '', inventiveWorkspaceId: user.inventiveWorkspaceId || '', howlerRole: user.howlerRole || '' });
   const [accountType, setAccountType] = useState(user.role === 'admin' ? 'admin' : 'client');
   const [entityIds, setEntityIds] = useState((memberships || []).map((m) => m.entityId));
+  const [workspaces, setWorkspaces] = useState([]);
+  const [howlerRoles, setHowlerRoles] = useState([]);
+  useEffect(() => { api.adminListInventiveWorkspaces().then(setWorkspaces).catch(() => {}); api.getRoles().then((r) => setHowlerRoles(r.howlerRoles || [])).catch(() => {}); }, []);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
   const save = async () => {
     setError(''); setBusy(true);
     try {
-      const patch = { firstName: form.firstName, lastName: form.lastName, email: form.email.trim(), mobile: form.mobile, role: accountType, entityIds };
+      const patch = { firstName: form.firstName, lastName: form.lastName, email: form.email.trim(), mobile: form.mobile, role: accountType, entityIds, inventiveWorkspaceId: form.inventiveWorkspaceId, howlerRole: form.howlerRole };
       if (form.password) patch.password = form.password; // blank = keep current
       await api.adminUpdateUser(user.id, patch);
       onSaved();
@@ -1159,7 +2160,7 @@ function UserEditCard({ user, memberships, entities, roles, onCancel, onSaved })
   };
   return (
     <div>
-      <button style={miniBtnOutline} onClick={onCancel}>← Back</button>
+      <AdminBack onBack={onCancel}>Back</AdminBack>
       <h2 style={{ fontSize: 20, fontWeight: 700, margin: '12px 0 14px', wordBreak: 'break-word' }}>Edit {user.fullName || user.email}</h2>
       <div style={{ ...cardStyle, maxWidth: 560 }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
@@ -1175,9 +2176,25 @@ function UserEditCard({ user, memberships, entities, roles, onCancel, onSaved })
             <button key={k} onClick={() => setAccountType(k)} style={accountType === k ? { ...miniBtn, background: 'var(--brand)', color: '#fff', borderColor: 'var(--brand)' } : miniBtnOutline}>{label}</button>
           ))}
         </div>
+        {accountType === 'admin' && howlerRoles.length > 0 && (
+          <>
+            <L>Howler role</L>
+            <p style={{ ...hint, marginTop: 2 }}>Their job title at Howler — shown to clients they support as “Your Howler Support”.</p>
+            <select style={{ ...input, width: '100%', margin: '4px 0 14px' }} value={form.howlerRole} onChange={set('howlerRole')}>
+              <option value="">— none —</option>
+              {howlerRoles.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
+            </select>
+          </>
+        )}
         <L>{accountType === 'admin' ? 'Also a customer of (optional)' : 'Clients'}</L>
         <div style={{ marginTop: 4 }}><ClientLinkPicker entities={entities} value={entityIds} onChange={setEntityIds} /></div>
         <p style={{ ...hint, marginTop: 8 }}>Per-client roles are set on each client's <b>Logins</b> tab; newly-linked clients default to Owner.</p>
+        <L>Inventive workspace</L>
+        <p style={{ ...hint, marginTop: 2 }}>Link this user to a workspace (create them in Admin → Integrations → <b>Inventive workspaces</b>). Unlinked → falls back to the user’s own ID.</p>
+        <select style={{ ...input, width: '100%', margin: '4px 0 14px' }} value={form.inventiveWorkspaceId} onChange={set('inventiveWorkspaceId')}>
+          <option value="">— None (use the user’s own ID) —</option>
+          {workspaces.map((w) => <option key={w.id} value={w.id}>{w.name || '(unnamed)'}{w.refId ? ` · ${w.refId}` : ''}</option>)}
+        </select>
         <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
           <button style={{ ...miniBtn, background: 'var(--brand)', color: '#fff', borderColor: 'var(--brand)' }} onClick={save} disabled={!form.email.trim() || busy}>{busy ? 'Saving…' : 'Save changes'}</button>
           <button style={miniBtnOutline} onClick={onCancel}>Cancel</button>
@@ -1199,12 +2216,252 @@ function KV({ label, value, sub }) {
 }
 
 // One client's settings hub: a left nav (Settings / Suites / Logins) + panel.
-function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites, users, allUsers, onChange, onBack }) {
-  const [section, setSection] = useState('settings');
-  const nav = [['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['sets', 'Custom sets'], ['briefing', 'Briefing'], ['messages', 'Messages'], ['digests', 'Digests'], ['campaigns', 'Campaigns'], ['segments', 'Segments'], ['fees', 'Fees'], ['settlements', 'Settlements'], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations'], ['email', 'Branding']];
+// ─── Account-manager setup checklist — the full lifecycle of standing a client up ──
+// Auto-detects what's done from real data, lets the AM tick the manual ones, and
+// jumps straight to the right tab for each task. Manual ticks persist per client
+// (reusing the setup-wizard progress store, prefixed amchk_). Split into the
+// client-wide ACCOUNT SETUP (done once) and the PER-EVENT work (repeated for each
+// suite the client runs — goals, briefing, audiences, abandoned-cart campaigns).
+// Per-client reminder config — who gets nudged about outstanding setup, managed
+// right here in the onboarding section. Account team = factual; clients = value-led
+// (opt-in). Blank recipient lists fall back to sensible defaults server-side.
+function SetupNudgeConfig({ entity, clientUsers = [], adminUsers = [] }) {
+  const [cfg, setCfg] = useState(null);
+  const [saved, setSaved] = useState(false);
+  const [testMsg, setTestMsg] = useState('');
+  useEffect(() => { api.getSetupNudge(entity.id).then(setCfg).catch(() => setCfg(null)); }, [entity.id]);
+  if (!cfg) return <div style={cardStyle}><Muted>Loading…</Muted></div>;
+  const has = (key, id) => (cfg[key] || []).includes(id);
+  const toggleId = (key, id) => setCfg((c) => ({ ...c, [key]: has(key, id) ? c[key].filter((x) => x !== id) : [...(c[key] || []), id] }));
+  const cad = cfg.cadence || {};
+  const setCad = (k, v) => setCfg((c) => ({ ...c, cadence: { ...(c.cadence || {}), [k]: v } }));
+  const save = async () => { try { await api.saveSetupNudge(entity.id, { clientOn: cfg.clientOn, clientRecipients: cfg.clientRecipients || [], adminRecipients: cfg.adminRecipients || [], graceOverride: cad.graceOverride ?? '', repeatOverride: cad.repeatOverride ?? '' }); flash(setSaved); } catch (e) { alert(e.message); } };
+  const test = async (audience) => { setTestMsg('Sending…'); try { const r = await api.testSetupNudge(entity.id, audience); setTestMsg(`✓ Sent · ${r.missing} outstanding`); } catch { setTestMsg('✗ Send failed'); } };
+  const chip = (key, u) => { const on = has(key, u.id); return <button key={u.id} type="button" onClick={() => toggleId(key, u.id)} style={{ ...folderChip, borderColor: on ? 'var(--brand)' : 'var(--border)', color: on ? 'var(--brand)' : 'var(--text)', fontWeight: on ? 700 : 400 }}>{on ? '✓ ' : ''}{u.fullName || u.email}</button>; };
+  const sub = { fontWeight: 400, textTransform: 'none', color: 'var(--muted)' };
+  return (
+    <div style={cardStyle}>
+      <p style={{ ...hint, marginTop: 0 }}>A reminder while setup is outstanding (after a grace period, then on a repeat cadence — set below or globally). The account team gets a factual summary bulked across their clients; clients get a value-led nudge in-app and by email.</p>
+      <L>Account team <span style={sub}>· who at Howler gets the summary · blank = the client’s owner/support</span></L>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '6px 0 14px' }}>{adminUsers.length ? adminUsers.map((u) => chip('adminRecipients', u)) : <Muted>No admins.</Muted>}</div>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: cfg.clientOn ? 8 : 0, cursor: 'pointer' }}>
+        <input type="checkbox" checked={!!cfg.clientOn} onChange={(e) => setCfg({ ...cfg, clientOn: e.target.checked })} />
+        <span style={{ fontWeight: 700, fontSize: 13.5 }}>Also nudge the client’s users to finish</span>
+      </label>
+      {cfg.clientOn && (
+        <div style={{ marginBottom: 8 }}>
+          <p style={{ ...hint, margin: '0 0 6px' }}>Delivered on both surfaces: an in-app message in the client’s Pulse inbox <b>and</b> an email to the recipients below.</p>
+          <L>Client recipients <span style={sub}>· blank = all the client’s users</span></L>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>{clientUsers.length ? clientUsers.map((u) => chip('clientRecipients', u)) : <Muted>No client logins yet.</Muted>}</div>
+        </div>
+      )}
+      <div style={{ marginTop: 14 }}>
+        <L>Timing for this client <span style={sub}>· blank = use the global default</span></L>
+        <div style={{ display: 'flex', gap: 12, marginTop: 6, flexWrap: 'wrap' }}>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <span style={{ fontSize: 11, color: 'var(--muted)' }}>Grace (days)</span>
+            <input type="number" min="0" value={cad.graceOverride ?? ''} placeholder={cad.globalGrace != null ? String(cad.globalGrace) : ''} onChange={(e) => setCad('graceOverride', e.target.value)} style={{ ...input, minWidth: 0, width: 120 }} />
+          </label>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <span style={{ fontSize: 11, color: 'var(--muted)' }}>Repeat (days)</span>
+            <input type="number" min="0" value={cad.repeatOverride ?? ''} placeholder={cad.globalRepeat != null ? String(cad.globalRepeat) : ''} onChange={(e) => setCad('repeatOverride', e.target.value)} style={{ ...input, minWidth: 0, width: 120 }} />
+          </label>
+        </div>
+        <p style={{ ...hint, margin: '6px 0 0' }}>Edit the wording + global defaults in Admin → 📋 Onboarding → Reminder defaults.</p>
+      </div>
+      <div style={{ display: 'flex', gap: 8, marginTop: 14, alignItems: 'center', flexWrap: 'wrap' }}>
+        <button style={saveBtn} onClick={save}>Save</button>
+        {saved && <span style={{ color: 'var(--brand)', fontSize: 13, fontWeight: 600 }}>✓ Saved</span>}
+        <span style={{ flex: 1 }} />
+        <button style={miniBtnOutline} onClick={() => test('admin')}>Send me a test</button>
+        {cfg.clientOn && <button style={miniBtnOutline} onClick={() => test('client')}>Test client nudge</button>}
+        {testMsg && <span style={{ fontSize: 12, color: 'var(--muted)' }}>{testMsg}</span>}
+      </div>
+      {cfg.settings && !cfg.settings.enabled && <div style={{ fontSize: 12, color: 'var(--error)', marginTop: 8 }}>⚠ Setup nudges are globally turned off.</div>}
+    </div>
+  );
+}
+
+// Account-level tasks — the client-wide foundation, set once.
+const AM_TASKS = [
+  { key: 'client', icon: '🏢', title: 'Set up the client', desc: 'Name, logo and AI context.', section: 'settings', auto: (d) => !!(d.entity.name || '').trim() },
+  { key: 'scope', icon: '🔒', title: 'Lock their data scope', desc: 'Pick the organiser so they only ever see their own data.', section: 'settings', auto: (d) => d.entity.allOrganisers || Object.values(d.entity.lockedFilters || {}).some((v) => String(v || '').trim()) },
+  { key: 'branding', icon: '🎨', title: 'Add branding', desc: 'Logo, colours and sender — white-labels the app and emails.', section: 'email', auto: (d) => d.brandingSet },
+  { key: 'emailtmpl', icon: '✉️', title: 'Email template added', desc: 'Set the email header, intro and footer wording.', section: 'email', auto: (d) => d.emailTemplateSet },
+  { key: 'logins', icon: '🔑', title: 'Create logins & roles', desc: 'Add the people who sign in and set each one’s role.', section: 'logins', auto: (d) => d.users.length > 0 },
+  { key: 'inventive', icon: '✨', title: 'Assign Inventive', desc: 'Link the client’s Inventive analyst workspace.', section: 'integrations', auto: (d) => !!(d.entity.inventiveRefId || d.entity.inventiveName) },
+  { key: 'integrations', icon: '🔌', title: 'Add integrations', desc: 'Connect Looker / Meta / TikTok / email as needed.', section: 'integrations' },
+  { key: 'digest', icon: '🗓', title: 'Create a digest', desc: 'Schedule a recurring briefing email to their team.', section: 'digests', auto: (d) => d.digests > 0 },
+  { key: 'briefing', icon: '📝', title: 'Tune the briefing', desc: 'Global briefing focus, phase defaults and instructions for the Owl.', section: 'briefing' },
+];
+// Per-event tasks — repeated for EACH event (suite). `auto` reads the suite's own
+// data; the rest are manual ticks scoped to that suite.
+const EVENT_TASKS = [
+  { key: 'goals', icon: '⭐', title: 'Set event goals', desc: 'A live target for this event — preview the suite to add one.', section: 'suites', auto: (sd) => sd.goals > 0 },
+  { key: 'alerts', icon: '🔔', title: 'Set up alerts', desc: 'Metric watchers for this event — preview the suite to add one.', section: 'suites', auto: (sd) => sd.alerts > 0 },
+  { key: 'branding', icon: '🎨', title: 'Custom event branding', desc: 'Override the look for this event — logo, colours, sender.', section: 'suites', auto: (sd) => sd.brandingSet },
+  { key: 'emailtmpl', icon: '✉️', title: 'Email template added', desc: 'Tailor this event’s email header, intro and footer.', section: 'suites', auto: (sd) => sd.templateSet },
+  { key: 'briefing', icon: '📝', title: 'Tune the briefing', desc: 'Key dates, phase and instructions so the Owl reads this event right.', section: 'briefing' },
+  { key: 'digest', icon: '🗓', title: 'Schedule an event digest', desc: 'A recurring briefing email focused on this event.', section: 'digests' },
+  { key: 'segment', icon: '🎯', title: 'Build the audience', desc: 'e.g. everyone who abandoned a cart for this event.', section: 'segments' },
+  { key: 'cart', icon: '🛒', title: 'Abandoned-cart campaign', desc: 'Win back checkouts that didn’t finish for this event.', section: 'campaigns' },
+];
+function ClientSetupChecklist({ entity, suites, users, allUsers = [], go }) {
+  const [aux, setAux] = useState(null);
+  const [open, setOpen] = useState({}); // section key → expanded? (collapsed by default)
+  const toggle = (k) => setOpen((o) => ({ ...o, [k]: !o[k] }));
+  useEffect(() => {
+    let alive = true;
+    const tmplOf = (m) => (m && (m.template || m.branding)) || {};
+    const hasBranding = (t) => !!(t.logo || t.brandColor || t.senderName || t.secondaryColor);
+    const hasTemplate = (t) => !!(t.header || t.intro || t.footer);
+    Promise.all([
+      api.getEntityMailTemplate(entity.id).catch(() => null),
+      api.getDigests(entity.id).catch(() => []),
+      api.getSetupWizardProgress(entity.id).catch(() => ({ ticks: {} })),
+      Promise.all(suites.map((su) => api.suiteGoals(su.id).then((r) => (Array.isArray(r) ? r : r.goals || [])).catch(() => []))),
+      Promise.all(suites.map((su) => api.getSuiteMailTemplate(su.id).catch(() => null))),
+      Promise.all(suites.map((su) => api.suiteAlerts(su.id).then((r) => (Array.isArray(r) ? r : r.alerts || [])).catch(() => []))),
+    ]).then(([mt, digests, prog, goalsArr, suiteMtArr, alertsArr]) => {
+      if (!alive) return;
+      const acc = tmplOf(mt);
+      setAux({
+        brandingSet: hasBranding(acc) || !!entity.logo,
+        emailTemplateSet: hasTemplate(acc),
+        digests: (digests || []).length,
+        goalsBySuite: Object.fromEntries(suites.map((su, i) => [su.id, (goalsArr[i] || []).length])),
+        brandingBySuite: Object.fromEntries(suites.map((su, i) => [su.id, hasBranding(tmplOf(suiteMtArr[i]))])),
+        templateBySuite: Object.fromEntries(suites.map((su, i) => [su.id, hasTemplate(tmplOf(suiteMtArr[i]))])),
+        alertsBySuite: Object.fromEntries(suites.map((su, i) => [su.id, (alertsArr[i] || []).length])),
+        ticks: prog.ticks || {},
+      });
+    });
+    return () => { alive = false; };
+  }, [entity.id, suites.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const ticks = aux?.ticks || {};
+  const setTick = (key, v) => {
+    setAux((a) => ({ ...a, ticks: { ...(a?.ticks || {}), [key]: v ? 1 : 0 } }));
+    api.setSetupWizardProgress(entity.id, key, v).then((r) => setAux((a) => ({ ...a, ticks: r.ticks || a.ticks }))).catch(() => {});
+  };
+  const accData = { entity, suites, users, brandingSet: aux?.brandingSet, emailTemplateSet: aux?.emailTemplateSet, digests: aux?.digests || 0 };
+  const accAuto = (t) => !!(t.auto && t.auto(accData));
+  const accManual = (t) => ticks['amchk_' + t.key] === 1;
+  const accDone = (t) => accAuto(t) || accManual(t);
+  const evData = (su) => ({ goals: aux?.goalsBySuite?.[su.id] || 0, brandingSet: aux?.brandingBySuite?.[su.id], templateSet: aux?.templateBySuite?.[su.id], alerts: aux?.alertsBySuite?.[su.id] || 0 });
+  const evAuto = (su, t) => !!(t.auto && t.auto(evData(su)));
+  const evManual = (su, t) => ticks[`amchk_${su.id}_${t.key}`] === 1;
+  const evDone = (su, t) => evAuto(su, t) || evManual(su, t);
+
+  const accDoneCount = AM_TASKS.filter(accDone).length;
+  const evDoneCount = suites.reduce((n, su) => n + EVENT_TASKS.filter((t) => evDone(su, t)).length, 0);
+  const total = AM_TASKS.length + suites.length * EVENT_TASKS.length;
+  const doneCount = accDoneCount + evDoneCount;
+  const pct = total ? Math.round((doneCount / total) * 100) : 0;
+
+  const taskRow = (key, icon, title, desc, ok, onGo, onTick) => (
+    <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 12, background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 12, padding: '11px 13px', opacity: ok ? 0.72 : 1 }}>
+      <span style={{ fontSize: 19, width: 24, textAlign: 'center', flexShrink: 0 }}>{ok ? '✅' : icon}</span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13.5, fontWeight: 700, textDecoration: ok ? 'line-through' : 'none' }}>{title}</div>
+        <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.4 }}>{desc}</div>
+      </div>
+      <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+        <button style={miniBtn} onClick={onGo}>Go →</button>
+        {onTick && <button style={{ ...chkTick, ...(ok ? { color: 'var(--brand)', borderColor: 'var(--brand)' } : null) }} onClick={onTick} title={ok ? 'Mark not done' : 'Mark done'}>✓</button>}
+      </div>
+    </div>
+  );
+  // Collapsible section header bar. `big` = an event (suite) heading. Turns brand
+  // red once every task in the section is done.
+  const bar = (k, title, caption, n, m, big) => {
+    const complete = m > 0 && n === m;
+    return (
+      <button onClick={() => toggle(k)} style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', background: complete ? 'rgba(var(--brand-rgb),0.09)' : 'var(--card)', border: complete ? '1.5px solid var(--brand)' : '1px solid var(--hairline)', borderRadius: 12, padding: '12px 14px', cursor: 'pointer', color: 'var(--text)' }}>
+        <span style={{ fontSize: 11, color: complete ? 'var(--brand)' : 'var(--muted)', flexShrink: 0, transform: open[k] ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</span>
+        <span style={{ flex: 1, minWidth: 0 }}>
+          <span style={{ display: 'block', fontSize: big ? 14.5 : 12, fontWeight: 800, textTransform: big ? 'none' : 'uppercase', letterSpacing: big ? 0 : '0.05em', color: complete ? 'var(--brand)' : 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
+          {caption && !open[k] && <span style={{ display: 'block', fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{caption}</span>}
+        </span>
+        <span style={{ fontSize: 12, fontWeight: 800, color: complete ? 'var(--brand)' : 'var(--muted)', flexShrink: 0 }}>{complete ? `✓ ${n}/${m}` : `${n}/${m}`}</span>
+      </button>
+    );
+  };
+
   return (
     <div>
-      <button style={miniBtnOutline} onClick={onBack}>← All clients</button>
+      <div style={cardStyle}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 8, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 16, fontWeight: 800 }}>Setting up {entity.name}</span>
+          <span style={{ fontSize: 13, color: 'var(--muted)', fontWeight: 600 }}>{doneCount} of {total} done{aux ? '' : ' · checking…'}</span>
+        </div>
+        <div style={{ height: 8, borderRadius: 999, background: 'rgba(128,128,128,0.15)', overflow: 'hidden' }}>
+          <div style={{ height: '100%', width: `${pct}%`, background: 'var(--brand)', borderRadius: 999, transition: 'width .3s' }} />
+        </div>
+        <p style={{ ...hint, marginTop: 10, marginBottom: 0 }}>Tap a section to expand it. Tasks auto-tick as you go; tick the manual ones, or hit <b>Go →</b> to jump straight to it. Account setup is done once; the event tasks repeat for every event.</p>
+      </div>
+
+      {/* Reminders — who gets nudged about outstanding setup */}
+      <div style={{ marginTop: 14 }}>
+        <button onClick={() => toggle('reminders')} style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 12, padding: '12px 14px', cursor: 'pointer', color: 'var(--text)' }}>
+          <span style={{ fontSize: 11, color: 'var(--muted)', flexShrink: 0, transform: open.reminders ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</span>
+          <span style={{ flex: 1, minWidth: 0 }}>
+            <span style={{ display: 'block', fontSize: 12, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' }}>🔔 Reminders</span>
+            {!open.reminders && <span style={{ display: 'block', fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>Who gets nudged about outstanding setup.</span>}
+          </span>
+        </button>
+        {open.reminders && <div style={{ marginTop: 8 }}><SetupNudgeConfig entity={entity} clientUsers={users} adminUsers={(allUsers || []).filter((u) => u.role === 'admin')} /></div>}
+      </div>
+
+      {/* Account setup — collapsible */}
+      <div style={{ marginTop: 14 }}>
+        {bar('account', 'Account setup', 'The client-wide foundation — set once.', accDoneCount, AM_TASKS.length, false)}
+        {open.account && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+            {AM_TASKS.map((t) => taskRow(t.key, t.icon, t.title, t.desc, accDone(t), () => go(t.section), accAuto(t) ? null : () => setTick('amchk_' + t.key, !accManual(t))))}
+          </div>
+        )}
+      </div>
+
+      {/* Per event — one collapsible block per suite */}
+      <div style={{ margin: '18px 2px 8px' }}>
+        <div style={{ fontSize: 11.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text)' }}>Per event <span style={{ color: 'var(--muted)' }}>{evDoneCount}/{suites.length * EVENT_TASKS.length}</span></div>
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>Repeat for each event (suite) the client runs.</div>
+      </div>
+      {suites.length === 0 ? (
+        <div style={{ ...cardStyle, marginBottom: 0, textAlign: 'center' }}>
+          <p style={{ fontSize: 13, color: 'var(--muted)', margin: '0 0 10px' }}>No events yet. Create the client’s first event (suite) to start its checklist.</p>
+          <button style={addBtn} onClick={() => go('suites')}>+ Create the first event</button>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {suites.map((su) => {
+            const sDone = EVENT_TASKS.filter((t) => evDone(su, t)).length;
+            const title = `${su.icon && !String(su.icon).startsWith('data:') ? `${su.icon} ` : '🗂️ '}${su.name}`;
+            return (
+              <div key={su.id}>
+                {bar(su.id, title, null, sDone, EVENT_TASKS.length, true)}
+                {open[su.id] && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+                    {EVENT_TASKS.map((t) => taskRow(`${su.id}_${t.key}`, t.icon, t.title, t.desc, evDone(su, t), () => go(t.section), evAuto(su, t) ? null : () => setTick(`amchk_${su.id}_${t.key}`, !evManual(su, t))))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+const chkTick = { padding: '6px 10px', borderRadius: 8, border: '1.5px solid var(--hairline)', background: 'var(--card)', color: 'var(--muted)', fontSize: 13, fontWeight: 700, cursor: 'pointer' };
+
+function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites, users, allUsers, onChange, onBack }) {
+  const [section, setSection] = useState('checklist');
+  const nav = [['checklist', '✅ Setup checklist'], ['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['sets', 'Custom sets'], ['briefing', 'Briefing'], ['messages', 'Messages'], ['digests', 'Digests'], ['campaigns', 'Campaigns'], ['segments', 'Segments'], ['fees', 'Fees'], ['settlements', 'Settlements'], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations'], ['email', 'Branding']];
+  return (
+    <div>
+      <AdminBack onBack={onBack}>All clients</AdminBack>
       <h2 style={{ fontSize: 20, fontWeight: 700, margin: '12px 0 16px' }}>{entity.name}</h2>
       <div style={{ display: 'flex', gap: 18, alignItems: 'flex-start', flexWrap: 'wrap' }}>
         <nav style={detailNav}>
@@ -1213,6 +2470,7 @@ function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites,
           ))}
         </nav>
         <div style={{ flex: 1, minWidth: 280 }}>
+          {section === 'checklist' && <ClientSetupChecklist entity={entity} suites={suites} users={users} allUsers={allUsers} go={setSection} />}
           {section === 'settings' && <ClientSettings entity={entity} suites={suites} fields={fields} onChange={onChange} onBack={onBack} />}
           {section === 'suites' && <ClientSuites entity={entity} suites={suites} allEntities={allEntities} allSets={allSets} dashTitle={dashTitle} fields={fields} onChange={onChange} />}
           {section === 'sets' && <CustomSets entity={entity} />}
@@ -1407,13 +2665,62 @@ function ClientLinkPicker({ entities, value = [], onChange }) {
 // Compact login management scoped to one client: list its logins (remove access
 // or delete), add a new client login, or LINK an existing login (client or
 // admin) so one person can hold several profiles.
+// Who at Howler supports this client — the contacts the client sees as "Your
+// Howler Support". An admin can reassign, add a second, or change each one's job
+// title (the title is the admin's global Howler role).
+function HowlerSupportCard({ entity, allUsers = [], howlerRoles = [], onChange }) {
+  const admins = allUsers.filter((u) => u.role === 'admin');
+  const byId = Object.fromEntries(admins.map((u) => [u.id, u]));
+  const current = (entity.howlerSupportIds || []).filter((id) => byId[id]);
+  const [addId, setAddId] = useState('');
+  const [busy, setBusy] = useState(false);
+  const save = async (ids) => { setBusy(true); try { await api.setEntityHowlerSupport(entity.id, ids); onChange(); } finally { setBusy(false); } };
+  const addOne = async () => { if (!addId) return; await save([...current, addId]); setAddId(''); };
+  const setTitle = async (id, howlerRole) => { setBusy(true); try { await api.adminUpdateUser(id, { howlerRole }); onChange(); } finally { setBusy(false); } };
+  const available = admins.filter((u) => !current.includes(u.id));
+  return (
+    <div style={{ ...cardStyle, marginBottom: 16 }}>
+      <L>🦉 Howler support</L>
+      <p style={{ ...hint, margin: '2px 0 10px' }}>The Howler contact(s) this client sees under <b>Settings → Team</b>. Reassign, add a second, or change each one's job title.</p>
+      {current.length === 0 ? <Muted>No Howler support assigned yet.</Muted> : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {current.map((id) => { const u = byId[id]; return (
+            <div key={id} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <div style={{ flex: 1, minWidth: 140 }}>
+                <div style={{ fontWeight: 600, fontSize: 13 }}>{u.fullName || u.email}</div>
+                <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>{u.email}</div>
+              </div>
+              <select style={{ ...input, width: 'auto', minWidth: 180 }} value={u.howlerRole || ''} disabled={busy} onChange={(e) => setTitle(id, e.target.value)}>
+                <option value="">— no job title —</option>
+                {howlerRoles.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
+              </select>
+              <button style={delBtn} disabled={busy} onClick={() => save(current.filter((x) => x !== id))}>Remove</button>
+            </div>
+          ); })}
+        </div>
+      )}
+      {available.length > 0 && (
+        <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+          <select style={{ ...input, flex: 1, minWidth: 200 }} value={addId} onChange={(e) => setAddId(e.target.value)}>
+            <option value="">Add a Howler admin…</option>
+            {available.map((u) => <option key={u.id} value={u.id}>{u.fullName || u.email}{u.howlerRoleLabel ? ` · ${u.howlerRoleLabel}` : ''}</option>)}
+          </select>
+          <button style={{ ...miniBtn, background: 'var(--brand)', color: '#fff', borderColor: 'var(--brand)' }} disabled={!addId || busy} onClick={addOne}>+ Add</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function EntityLogins({ entity, users, allUsers = [], onChange }) {
   const [form, setForm] = useState({ firstName: '', lastName: '', email: '', mobile: '', password: '', role: 'owner' });
   const [error, setError] = useState(null);
   const [linkId, setLinkId] = useState('');
   const [linkRole, setLinkRole] = useState('viewer');
+  const [showAdd, setShowAdd] = useState(false);
   const [roles, setRoles] = useState([]);
-  useEffect(() => { api.getRoles().then((r) => setRoles(r.roles || [])).catch(() => setRoles([])); }, []);
+  const [howlerRoles, setHowlerRoles] = useState([]);
+  useEffect(() => { api.getRoles().then((r) => { setRoles(r.roles || []); setHowlerRoles(r.howlerRoles || []); }).catch(() => setRoles([])); }, []);
   const linkable = allUsers.filter((u) => !(u.entityIds || []).includes(entity.id));
   // This login's role at THIS client (from its membership list).
   const roleOf = (u) => (u.memberships || []).find((m) => m.entityId === entity.id)?.role || 'owner';
@@ -1423,6 +2730,7 @@ function EntityLogins({ entity, users, allUsers = [], onChange }) {
       const u = await api.adminCreateUser({ firstName: form.firstName, lastName: form.lastName, email: form.email, mobile: form.mobile, password: form.password, role: 'client', entityIds: [entity.id] });
       if (form.role !== 'owner') await api.setMembershipRole(entity.id, u.id, form.role); // owner is the default
       setForm({ firstName: '', lastName: '', email: '', mobile: '', password: '', role: 'owner' });
+      setShowAdd(false);
       onChange();
     } catch (e) { setError(e.message); }
   };
@@ -1431,7 +2739,7 @@ function EntityLogins({ entity, users, allUsers = [], onChange }) {
     if (!u) return;
     await api.adminUpdateUser(u.id, { entityIds: [...(u.entityIds || []), entity.id] });
     await api.setMembershipRole(entity.id, u.id, linkRole);
-    setLinkId(''); setLinkRole('viewer'); onChange();
+    setLinkId(''); setLinkRole('viewer'); setShowAdd(false); onChange();
   };
   const changeRole = async (u, role) => { await api.setMembershipRole(entity.id, u.id, role); onChange(); };
   const removeAccess = async (u) => {
@@ -1441,8 +2749,45 @@ function EntityLogins({ entity, users, allUsers = [], onChange }) {
   };
   const del = async (u) => { if (confirm(`Delete login ${u.email}? (removes it for all clients)`)) { await api.adminDeleteUser(u.id); onChange(); } };
   const roleOpts = roles.length ? roles : [{ key: 'owner', label: 'Owner' }];
+  const addUI = !showAdd ? (
+    <button data-tour="login-add" style={{ ...miniBtn, background: 'var(--brand)', color: '#fff', borderColor: 'var(--brand)', marginBottom: 12 }} onClick={() => { setError(null); setShowAdd(true); }}>+ Add user</button>
+  ) : (
+    <div style={{ ...cardStyle, marginBottom: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
+        <span style={{ fontWeight: 700, fontSize: 14, flex: 1 }}>Add a user to {entity.name}</span>
+        <button style={miniBtnOutline} onClick={() => { setShowAdd(false); setError(null); }}>Cancel</button>
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        <Field label="First name"><input style={{ ...input, minWidth: 110 }} value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} /></Field>
+        <Field label="Surname"><input style={{ ...input, minWidth: 110 }} value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} /></Field>
+        <Field label="Email"><input style={input} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>
+        <Field label="Mobile"><input style={{ ...input, minWidth: 130 }} value={form.mobile} onChange={(e) => setForm({ ...form, mobile: e.target.value })} placeholder="+27…" /></Field>
+        <Field label="Password"><input style={input} type="text" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></Field>
+        <div data-tour="login-role"><Field label="Role"><select style={input} value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>{roleOpts.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}</select></Field></div>
+        <button style={{ ...miniBtn, background: 'var(--brand)', color: '#fff', borderColor: 'var(--brand)' }} onClick={add} disabled={!form.email || !form.password}>+ Add login</button>
+      </div>
+      {roles.length > 0 && (
+        <p style={{ ...hint, marginTop: 8 }}>{roleOpts.find((r) => r.key === form.role)?.description || ''}</p>
+      )}
+      {linkable.length > 0 && (
+        <div data-tour="login-link" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--hairline)' }}>
+          <Field label="Or link an existing login (one person, several profiles)">
+            <select style={input} value={linkId} onChange={(e) => setLinkId(e.target.value)}>
+              <option value="">Pick a login…</option>
+              {linkable.map((u) => <option key={u.id} value={u.id}>{u.email}{u.role === 'admin' ? ' (Howler admin)' : ''}</option>)}
+            </select>
+          </Field>
+          <Field label="Role"><select style={input} value={linkRole} onChange={(e) => setLinkRole(e.target.value)}>{roleOpts.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}</select></Field>
+          <button style={miniBtn} onClick={link} disabled={!linkId}>Link to {entity.name}</button>
+        </div>
+      )}
+      {error && <div style={{ color: 'var(--error)', fontSize: 13, marginTop: 6 }}>{error}</div>}
+    </div>
+  );
   return (
     <div>
+      <HowlerSupportCard entity={entity} allUsers={allUsers} howlerRoles={howlerRoles} onChange={onChange} />
+      {addUI}
       {users.length === 0 ? (
         <Muted>No logins yet for this client.</Muted>
       ) : (
@@ -1471,31 +2816,6 @@ function EntityLogins({ entity, users, allUsers = [], onChange }) {
           </tbody>
         </table>
       )}
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginTop: 8 }}>
-        <Field label="First name"><input style={{ ...input, minWidth: 110 }} value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} /></Field>
-        <Field label="Surname"><input style={{ ...input, minWidth: 110 }} value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} /></Field>
-        <Field label="Email"><input style={input} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>
-        <Field label="Mobile"><input style={{ ...input, minWidth: 130 }} value={form.mobile} onChange={(e) => setForm({ ...form, mobile: e.target.value })} placeholder="+27…" /></Field>
-        <Field label="Password"><input style={input} type="text" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></Field>
-        <Field label="Role"><select style={input} value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>{roleOpts.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}</select></Field>
-        <button style={miniBtn} onClick={add} disabled={!form.email || !form.password}>+ Add login</button>
-      </div>
-      {linkable.length > 0 && (
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginTop: 10 }}>
-          <Field label="Or link an existing login (one person, several profiles)">
-            <select style={input} value={linkId} onChange={(e) => setLinkId(e.target.value)}>
-              <option value="">Pick a login…</option>
-              {linkable.map((u) => <option key={u.id} value={u.id}>{u.email}{u.role === 'admin' ? ' (Howler admin)' : ''}</option>)}
-            </select>
-          </Field>
-          <Field label="Role"><select style={input} value={linkRole} onChange={(e) => setLinkRole(e.target.value)}>{roleOpts.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}</select></Field>
-          <button style={miniBtn} onClick={link} disabled={!linkId}>Link to {entity.name}</button>
-        </div>
-      )}
-      {roles.length > 0 && (
-        <p style={{ ...hint, marginTop: 10 }}>{roleOpts.find((r) => r.key === form.role)?.description || ''}</p>
-      )}
-      {error && <div style={{ color: 'var(--error)', fontSize: 13, marginTop: 6 }}>{error}</div>}
     </div>
   );
 }
@@ -1833,8 +3153,18 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
   const [entityId, setEntityId] = useState(suite.entityId);
   const [setIds, setSetIds] = useState(suite.setIds || []);
   const [locks, setLocks] = useState(suite.lockedFilters || {});
+  // Dashboards an admin left OUT of a selected set for this client, and
+  // per-dashboard locked-filter overrides ({ dashboardId: { field: 'v1,v2' } }).
+  const [excluded, setExcluded] = useState(suite.excludedDashboards || []);
+  const [dashLocks, setDashLocks] = useState(suite.dashboardLocks || {});
   const [eventUrl, setEventUrl] = useState(suite.eventUrl || '');
   const [saved, setSaved] = useState(false);
+  const toggleDash = (did) => setExcluded((cur) => (cur.includes(did) ? cur.filter((x) => x !== did) : [...cur, did]));
+  const setDashLock = (did, map) => setDashLocks((cur) => {
+    const next = { ...cur };
+    if (map && Object.keys(map).length) next[did] = map; else delete next[did];
+    return next;
+  });
   // Role-based visibility for this client (keyed to the suite's entity).
   const [cr, setCr] = useState({ sets: {}, dashboards: {} });
   const [roleCat, setRoleCat] = useState([]);
@@ -1863,7 +3193,18 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
     setSetIds((cur) => { const n = cur.slice(); const [m] = n.splice(from, 1); n.splice(i, 0, m); return n; });
     dragFrom.current = i; setDragOver(i);
   };
-  const save = async () => { await api.adminUpdateSuite(suite.id, { name, icon, entityId, setIds, lockedFilters: locks, eventUrl }); flash(setSaved); onChange(); };
+  const save = async () => { await api.adminUpdateSuite(suite.id, { name, icon, entityId, setIds, lockedFilters: locks, excludedDashboards: excluded, dashboardLocks: dashLocks, eventUrl }); flash(setSaved); onChange(); };
+  // Sets grouped by their library folder (item: show folder → set → dashboards),
+  // named folders first then the ungrouped bucket.
+  const setsByFolder = (() => { const m = {}; for (const s of sets) { const f = s.folder || ''; (m[f] = m[f] || []).push(s); } return m; })();
+  const setFolderOrder = Object.keys(setsByFolder).sort((a, b) => (a === '' ? 1 : b === '' ? -1 : a.localeCompare(b)));
+  // The dashboards actually reaching the client through this suite (selected sets
+  // minus per-dashboard exclusions), de-duped — drives the per-dashboard lock list.
+  const includedDashboards = (() => {
+    const seen = new Set(); const out = [];
+    for (const sid of setIds) { const s = setById[sid]; if (!s) continue; for (const did of (s.dashboardIds || [])) { if (excluded.includes(did) || seen.has(did)) continue; seen.add(did); out.push({ id: did, title: dashTitle[did] || did }); } }
+    return out;
+  })();
   const remove = async () => { if (confirm(`Delete suite "${suite.name}"?`)) { await api.adminDeleteSuite(suite.id); onChange(); } };
   // Open this suite exactly as the client sees it (preview), jumping to its
   // first dashboard. Uses the client suite endpoint (admins can read any suite).
@@ -1881,40 +3222,52 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
   return (
     <div style={cardStyle}>
       <Row>
-        <input style={{ ...input, fontWeight: 700, flex: 1 }} value={name} onChange={(e) => setName(e.target.value)} />
+        <input data-tour="suite-name" style={{ ...input, fontWeight: 700, flex: 1 }} value={name} onChange={(e) => setName(e.target.value)} placeholder="Suite name — e.g. Bushfire 2026" />
         <button style={previewBtn} onClick={preview} title="Preview as the client sees it">👁 Preview</button>
         <button style={delBtn} onClick={remove}>Delete</button>
       </Row>
       <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end' }}>
         <Field label="Client"><select style={input} value={entityId} onChange={(e) => setEntityId(e.target.value)}>{entities.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}</select></Field>
-        <Field label="Icon"><IconPicker value={icon} onChange={setIcon} /></Field>
+        <div data-tour="suite-icon"><Field label="Icon"><IconPicker value={icon} onChange={setIcon} /></Field></div>
       </div>
-      <Section title={`Sets in this suite (${setIds.length})`}>
+      <Section tour="suite-sets" title={`Sets in this suite (${setIds.length})`}>
+        <p style={{ ...hint, marginTop: 0 }}>Tick a set to include it. Expand a set to choose which of its dashboards this client gets — untick any you want to leave out.</p>
         <div style={checkList}>
-          {sets.map((s) => {
-            const open = !!openSets[s.id];
-            return (
-              <div key={s.id}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <button onClick={() => setOpenSets((p) => ({ ...p, [s.id]: !p[s.id] }))} title="Show dashboards" style={{ width: 14, border: 'none', background: 'transparent', cursor: 'pointer', color: '#b0b0b6', fontSize: 10, padding: 0, transform: open ? 'rotate(90deg)' : 'none' }}>▶</button>
-                  <label style={{ ...checkItem, flex: 1 }}>
-                    <input type="checkbox" checked={setIds.includes(s.id)} onChange={() => toggleSet(s.id)} />
-                    <span>{s.name} <span style={{ color: 'var(--muted)' }}>({s.dashboardIds.length})</span></span>
-                  </label>
-                </div>
-                {open && (
-                  <div style={{ paddingLeft: 26, margin: '2px 0 6px' }}>
-                    {s.dashboardIds.length === 0 ? (
-                      <div style={{ fontSize: 12, color: 'var(--muted)' }}>No dashboards in this set.</div>
-                    ) : s.dashboardIds.map((id) => (
-                      <div key={id} style={{ fontSize: 12.5, color: 'var(--muted-2, #555)', padding: '2px 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>• {dashTitle[id] || id}</div>
-                    ))}
+          {sets.length === 0 ? <Muted>Create a Set first.</Muted> : setFolderOrder.map((folder) => (
+            <div key={folder || '__ungrouped__'} style={{ marginBottom: 4 }}>
+              <div style={{ fontSize: 11, fontWeight: 800, textTransform: folder ? 'none' : 'uppercase', letterSpacing: folder ? 0 : '0.06em', color: 'var(--muted)', padding: '4px 0 2px' }}>{folder ? `📁 ${folder}` : 'Ungrouped'}</div>
+              {setsByFolder[folder].map((s) => {
+                const open = !!openSets[s.id];
+                const setOn = setIds.includes(s.id);
+                return (
+                  <div key={s.id} style={{ paddingLeft: folder ? 8 : 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <button onClick={() => setOpenSets((p) => ({ ...p, [s.id]: !p[s.id] }))} title="Show dashboards" style={{ width: 14, border: 'none', background: 'transparent', cursor: 'pointer', color: '#b0b0b6', fontSize: 10, padding: 0, transform: open ? 'rotate(90deg)' : 'none' }}>▶</button>
+                      <label style={{ ...checkItem, flex: 1 }}>
+                        <input type="checkbox" checked={setOn} onChange={() => toggleSet(s.id)} />
+                        <span>{s.name} <span style={{ color: 'var(--muted)' }}>({s.dashboardIds.length})</span></span>
+                      </label>
+                    </div>
+                    {open && (
+                      <div style={{ paddingLeft: 26, margin: '2px 0 6px' }}>
+                        {s.dashboardIds.length === 0 ? (
+                          <div style={{ fontSize: 12, color: 'var(--muted)' }}>No dashboards in this set.</div>
+                        ) : s.dashboardIds.map((did) => {
+                          const included = setOn && !excluded.includes(did);
+                          return (
+                            <label key={did} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, padding: '2px 0', opacity: setOn ? 1 : 0.45, cursor: setOn ? 'pointer' : 'default' }}>
+                              <input type="checkbox" disabled={!setOn} checked={included} onChange={() => toggleDash(did)} />
+                              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{dashTitle[did] || did}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-            );
-          })}
-          {sets.length === 0 && <Muted>Create a Set first.</Muted>}
+                );
+              })}
+            </div>
+          ))}
         </div>
       </Section>
       {setIds.length > 1 && (
@@ -1940,7 +3293,7 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
         </Section>
       )}
       {roleCat.length > 0 && setIds.length > 0 && (
-        <Section title="Dashboard access by role">
+        <Section tour="suite-roles" title="Dashboard access by role">
           <p style={{ ...hint, marginTop: 0 }}>Who sees what at <b>{entities.find((e) => e.id === entityId)?.name || 'this client'}</b>. A set defaults to <b>Everyone</b>; pick roles to restrict it. Each dashboard can override its set. Saves immediately. (Howler staff always see everything.)</p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {setIds.map((sid) => {
@@ -1971,16 +3324,41 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
           </div>
         </Section>
       )}
-      <Section title="Locked filters (the event, cashless events…)">
+      <Section tour="suite-locks" title="Locked filters (the event, cashless events…)" defaultOpen>
         <LockedFilterEditor value={locks} onChange={setLocks} fields={fields} categories={lockCategories} clientOrganiser={organiserValsFromLocks(entities.find((e) => e.id === entityId)?.lockedFilters)} />
       </Section>
-      <div style={{ marginTop: 12 }}>
+      {includedDashboards.length > 0 && (
+        <Section title="Per-dashboard locked filters (override the suite locks for one dashboard)">
+          <p style={{ ...hint, marginTop: 0 }}>Lock a filter on just ONE dashboard for <b>{entities.find((e) => e.id === entityId)?.name || 'this client'}</b> — e.g. pin a specific event on a single dashboard while the rest of the suite uses the suite-wide locks above. Leave a dashboard untouched to follow those.</p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {includedDashboards.map((d) => {
+              const open = !!openSets[`lock-${d.id}`];
+              const count = Object.values(dashLocks[d.id] || {}).filter((v) => String(v || '') !== '').length;
+              return (
+                <div key={d.id} style={{ border: '1px solid var(--hairline)', borderRadius: 8, padding: '8px 10px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <button onClick={() => setOpenSets((p) => ({ ...p, [`lock-${d.id}`]: !p[`lock-${d.id}`] }))} style={{ width: 14, border: 'none', background: 'transparent', cursor: 'pointer', color: '#b0b0b6', fontSize: 10, padding: 0, transform: open ? 'rotate(90deg)' : 'none' }}>▶</button>
+                    <span style={{ fontWeight: 600, fontSize: 13, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.title}</span>
+                    {count > 0 && <span style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--brand)', background: 'rgba(var(--brand-rgb,255,56,92),0.10)', borderRadius: 980, padding: '2px 8px', flexShrink: 0 }}>{count} locked</span>}
+                  </div>
+                  {open && (
+                    <div style={{ marginTop: 8 }}>
+                      <LockedFilterEditor value={dashLocks[d.id] || {}} onChange={(m) => setDashLock(d.id, m)} fields={fields} categories={[]} clientOrganiser={organiserValsFromLocks(entities.find((e) => e.id === entityId)?.lockedFilters)} />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </Section>
+      )}
+      <div data-tour="suite-ticket" style={{ marginTop: 12 }}>
         <L>Ticket / checkout link</L>
         <div style={{ fontSize: 12, color: 'var(--muted)', margin: '2px 0 6px' }}>The event's buy / checkout URL. Campaigns linked to this event auto-fill it as the call-to-action link.</div>
         <input style={{ ...input, width: '100%' }} value={eventUrl} onChange={(e) => setEventUrl(e.target.value)} placeholder="https://tickets.example.com/your-event" />
       </div>
-      <SaveRow onSave={save} saved={saved} id={suite.id} />
-      <Section title="Event branding (logo / colours / sender)">
+      <div data-tour="suite-save"><SaveRow onSave={save} saved={saved} id={suite.id} /></div>
+      <Section tour="suite-branding" title="Event branding (logo / colours / sender)">
         <p style={hint}>Override this <b>event's</b> look — its logo, colours and sender name — used for this event's campaigns and single-event digests, and the in-app theme while viewing it. Anything left blank inherits <b>{entities.find((e) => e.id === entityId)?.name || 'the client'}</b>'s branding. Saved on its own (separate from the suite settings above).</p>
         <MailTemplateEditor scope="admin-suite" entityId={entityId} suiteId={suite.id} />
       </Section>
@@ -2267,6 +3645,20 @@ function ValuePicker({ meta, value, onChange, extraFilters = null }) {
 
 // ─── Small shared bits ────────────────────────────────────────────────────────
 function flash(setSaved) { setSaved(true); setTimeout(() => setSaved(false), 1500); }
+// Shared back affordance for the admin console's drill-downs (client / user
+// detail, add-user). Sticky so it stays reachable down a long detail page, and a
+// round chevron + label to match the back buttons everywhere else in the app.
+function AdminBack({ onBack, children }) {
+  return (
+    <div style={{ position: 'sticky', top: 0, zIndex: 6, background: 'var(--bg)', padding: '6px 0 8px', margin: '-6px 0 4px' }}>
+      <button style={adminBackBtn} onClick={onBack}>
+        <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
+        {children}
+      </button>
+    </div>
+  );
+}
+const adminBackBtn = { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 14px 7px 10px', background: 'var(--card)', border: '1.5px solid var(--hairline)', borderRadius: 980, fontWeight: 600, fontSize: 13, cursor: 'pointer', color: 'var(--text)' };
 function Row({ children }) { return <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 10 }}>{children}</div>; }
 function SaveRow({ onSave, saved, id }) {
   return (
@@ -2689,6 +4081,56 @@ function MailLog() {
 }
 
 // ─── Integrations (admin: primary Looker + Anthropic accounts) ─────────────────
+// Reusable Inventive workspaces: create once (name + reference), link users on
+// their profile (Admin → Users → Edit). One workspace can be shared by many users.
+function InventiveWorkspaces() {
+  const [items, setItems] = useState(null);
+  const [draft, setDraft] = useState({ name: '', refId: '' });
+  const [editId, setEditId] = useState(null);
+  const [edit, setEdit] = useState({ name: '', refId: '' });
+  const load = () => api.adminListInventiveWorkspaces().then(setItems).catch(() => setItems([]));
+  useEffect(() => { load(); }, []);
+  const add = async () => { if (!draft.name.trim()) return; await api.adminCreateInventiveWorkspace(draft); setDraft({ name: '', refId: '' }); load(); };
+  const saveEdit = async () => { await api.adminUpdateInventiveWorkspace(editId, edit); setEditId(null); load(); };
+  const del = async (w) => { if (confirm(`Delete workspace "${w.name || '(unnamed)'}"? ${w.userCount} linked user${w.userCount === 1 ? '' : 's'} will be unlinked.`)) { await api.adminDeleteInventiveWorkspace(w.id); load(); } };
+  if (!items) return <Muted>Loading…</Muted>;
+  return (
+    <div>
+      <p style={hint}>Create one workspace per provisioned Inventive workspace (name + reference), then link users to it on each user's profile (Admin → Users → Edit). Many users can share one workspace.</p>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 12 }}>
+        <Field label="Name"><input style={input} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="e.g. Movement Entertainment" /></Field>
+        <Field label="Reference (externalRefId)"><input style={{ ...input, fontFamily: 'monospace', fontSize: 12, minWidth: 280 }} value={draft.refId} onChange={(e) => setDraft({ ...draft, refId: e.target.value })} placeholder="workspace ref / UUID" /></Field>
+        <button style={miniBtn} onClick={add} disabled={!draft.name.trim()}>+ Add workspace</button>
+      </div>
+      {items.length === 0 ? <Muted>No workspaces yet.</Muted> : (
+        <div style={{ border: '1px solid var(--hairline)', borderRadius: 10, overflow: 'hidden' }}>
+          {items.map((w) => (
+            <div key={w.id} style={{ borderBottom: '1px solid var(--hairline)', padding: '8px 10px' }}>
+              {editId === w.id ? (
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <input style={{ ...input, flex: 1, minWidth: 140 }} value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} />
+                  <input style={{ ...input, flex: 1, minWidth: 200, fontFamily: 'monospace', fontSize: 12 }} value={edit.refId} onChange={(e) => setEdit({ ...edit, refId: e.target.value })} />
+                  <button style={miniBtn} onClick={saveEdit}>Save</button>
+                  <button style={miniBtnOutline} onClick={() => setEditId(null)}>Cancel</button>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <span style={{ fontWeight: 600, minWidth: 0 }}>{w.name || '(unnamed)'}</span>
+                  <code style={{ fontSize: 11.5, color: 'var(--muted)', background: 'rgba(128,128,128,0.12)', padding: '2px 7px', borderRadius: 6, userSelect: 'all' }}>{w.refId || '—'}</code>
+                  <span style={{ fontSize: 12, color: 'var(--muted)' }}>{w.userCount} user{w.userCount === 1 ? '' : 's'}</span>
+                  <span style={{ flex: 1 }} />
+                  <button style={miniBtnOutline} onClick={() => { setEditId(w.id); setEdit({ name: w.name, refId: w.refId }); }}>Edit</button>
+                  <button style={delBtn} onClick={() => del(w)}>Delete</button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AdminIntegrations() {
   const [value, setValue] = useState(null);
   const [clients, setClients] = useState([]);
@@ -2698,8 +4140,11 @@ function AdminIntegrations() {
   return (
     <div>
       <p style={hint}>Accounts (Looker · Anthropic · Email · <b>Inventive</b>) is open below; other sections are collapsed — tap to open. Accounts override the values in <code>.env</code>; clients can set their own Looker/Anthropic (Client → Integrations), which take precedence for their data.</p>
-      <Section title="🔑 Accounts — Looker · Anthropic · Email · Inventive" defaultOpen>
-        <IntegrationsForm value={value} showResend showInventive clients={clients} onTestEmail={() => api.sendMailTest()} onSave={async (p) => setValue(await api.saveAdminIntegrations(p))} />
+      <Section title="🔑 Accounts — Looker · Anthropic · Email · Inventive">
+        <IntegrationsForm value={value} collapsible showResend showInventive clients={clients} canManageLock lockableKeys={['looker', 'anthropic', 'resend', 'inventive']} locks={value.locks || {}} onToggleLock={async (k, locked) => setValue(await api.setAdminIntegrationLock(k, locked))} onTestEmail={() => api.sendMailTest()} onSave={async (p) => setValue(await api.saveAdminIntegrations(p))} />
+      </Section>
+      <Section title="✨ Inventive workspaces">
+        <InventiveWorkspaces />
       </Section>
       <Section title="◇ Audience sync — connector health">
         <p style={hint}>Per-client status of the Meta / TikTok audience syncs: which clients are connected, how many audiences are live, and any recent failures. Drill into a client to see each segment's audience.</p>
@@ -2990,13 +4435,6 @@ function ClientIntegrations({ entity }) {
   const [value, setValue] = useState(null);
   useEffect(() => { api.getEntityIntegrations(entity.id).then(setValue); }, [entity.id]);
   if (!value) return <Muted>Loading…</Muted>;
-  // The Inventive workspace name/ref live on the entity (not the integrations
-  // blob), so split them out of the form payload and save them separately.
-  const onSave = async (p) => {
-    const { inventiveWorkspace, ...integ } = p;
-    if (inventiveWorkspace) await api.adminUpdateEntity(entity.id, { inventiveName: inventiveWorkspace.name, inventiveRefId: inventiveWorkspace.refId });
-    setValue(await api.saveEntityIntegrations(entity.id, integ));
-  };
   return (
     <div>
       <p style={hint}>Optional per-client accounts. Anything left blank falls back to the platform default (Admin → Integrations).</p>
@@ -3006,8 +4444,11 @@ function ClientIntegrations({ entity }) {
         lookerActive={false}
         showMeta
         showTikTok
-        inventiveWorkspace={{ name: entity.inventiveName || '', refId: entity.inventiveRefId || '', defaultRefId: entity.id }}
-        onSave={onSave}
+        canManageLock
+        lockableKeys={['looker', 'anthropic', 'meta', 'tiktok']}
+        locks={value.locks || {}}
+        onToggleLock={async (k, locked) => setValue(await api.setEntityIntegrationLock(entity.id, k, locked))}
+        onSave={async (p) => setValue(await api.saveEntityIntegrations(entity.id, p))}
       />
     </div>
   );
@@ -3696,10 +5137,10 @@ function Tab({ active, onClick, children }) {
 }
 function Field({ label, children }) { return <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}><L>{label}</L>{children}</div>; }
 // Collapsible labelled section. Admin-panel rule: sections start collapsed.
-function Section({ title, children, defaultOpen = false }) {
+function Section({ title, children, defaultOpen = false, tour }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div style={{ marginTop: 14 }}>
+    <div data-tour={tour} style={{ marginTop: 14 }}>
       <button onClick={() => setOpen((o) => !o)} style={{ display: 'flex', alignItems: 'center', gap: 7, width: '100%', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer', padding: 0 }}>
         <span style={{ width: 12, color: '#b0b0b6', fontSize: 11, transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}>▶</span>
         <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--muted)' }}>{title}</span>

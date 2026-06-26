@@ -26,6 +26,12 @@ const DB_FILE = process.env.DB_FILE || path.join(DATA_DIR, 'howler.db');
 
 const db = new Database(DB_FILE);
 db.pragma('journal_mode = WAL');
+// NORMAL is the standard pairing with WAL: it stops fsync-on-every-commit (the
+// default FULL), which is a broad win on the per-request write paths (audit log,
+// view tracking, last-login touch) with no durability loss under WAL. busy_timeout
+// lets a write wait briefly for a lock instead of throwing SQLITE_BUSY.
+db.pragma('synchronous = NORMAL');
+db.pragma('busy_timeout = 5000');
 db.pragma('foreign_keys = ON');
 
 db.exec(`
@@ -134,6 +140,7 @@ addColumn('suites', 'icon', "TEXT NOT NULL DEFAULT ''");
 addColumn('entities', 'logo', "TEXT NOT NULL DEFAULT ''"); // client brand image data-URL / emoji
 addColumn('entities', 'ai_context', "TEXT NOT NULL DEFAULT ''"); // client-specific AI background
 addColumn('entities', 'integrations', "TEXT NOT NULL DEFAULT '{}'"); // per-client API credentials (Looker / Anthropic)
+addColumn('entities', 'integration_locks', "TEXT NOT NULL DEFAULT '{}'"); // per-integration freeze locks { key: true }
 addColumn('entities', 'inventive_name', "TEXT NOT NULL DEFAULT ''"); // optional Inventive workspace name override ('' = use the client name)
 addColumn('entities', 'inventive_ref_id', "TEXT NOT NULL DEFAULT ''"); // optional Inventive externalRefId override ('' = use the client's own UUID)
 addColumn('entities', 'mail_branding', "TEXT NOT NULL DEFAULT '{}'"); // per-client email branding (logo/colour/sender/wording)
@@ -149,6 +156,13 @@ addColumn('users', 'last_login', 'TEXT');
 addColumn('users', 'first_name', "TEXT NOT NULL DEFAULT ''");
 addColumn('users', 'last_name', "TEXT NOT NULL DEFAULT ''");
 addColumn('users', 'mobile', "TEXT NOT NULL DEFAULT ''");
+// Per-user Inventive workspace mapping — the name + externalRefId we send Inventive.
+addColumn('users', 'inventive_name', "TEXT NOT NULL DEFAULT ''");   // legacy per-user name (dormant)
+addColumn('users', 'inventive_ref_id', "TEXT NOT NULL DEFAULT ''"); // legacy per-user ref (dormant)
+addColumn('users', 'inventive_workspace_id', "TEXT NOT NULL DEFAULT ''"); // link to a reusable inventive_workspaces row
+addColumn('users', 'howler_role', "TEXT NOT NULL DEFAULT ''"); // Howler-staff job title (Senior KAM / KAM / AM) — admins only
+addColumn('entities', 'howler_owner_user_id', "TEXT NOT NULL DEFAULT ''"); // the Howler admin who created this client (legacy/primary)
+addColumn('entities', 'howler_support_ids', "TEXT NOT NULL DEFAULT '[]'"); // Howler admins who support this client (shown as "Your Howler Support")
 // Persistent per-folder settings for the dashboard library. Folders are "/"-path
 // strings on each dashboard (not records), so a setting keyed by path cascades to
 // every dashboard in that folder + subfolders — and to ones added later.
@@ -180,6 +194,17 @@ addColumn('set_dashboards', 'parent_dashboard_id', 'TEXT');
 addColumn('suites', 'briefing', "TEXT NOT NULL DEFAULT '{}'");
 addColumn('suites', 'mail_branding', "TEXT NOT NULL DEFAULT '{}'"); // per-event branding override (logo/colour/sender/wording); blank inherits the client
 addColumn('suites', 'event_url', "TEXT NOT NULL DEFAULT ''"); // the event's ticket/checkout link — default CTA for campaigns
+// Per-suite dashboard tweaks layered over the bundled sets:
+//   excluded_dashboards — dashboard ids hidden from THIS suite even though their
+//     set includes them (so an admin can pick a subset of a set per client).
+//   dashboard_locks — { dashboardId: { field: "v1,v2" } } locked-filter overrides
+//     applied to one dashboard within this suite, on top of the suite-wide locks.
+addColumn('suites', 'excluded_dashboards', "TEXT NOT NULL DEFAULT '[]'");
+addColumn('suites', 'dashboard_locks', "TEXT NOT NULL DEFAULT '{}'");
+// Per-tile lock overrides for THIS suite (one client): { tileId: { filterName:
+// value } } — forces a single tile's filter to a value for this client, on top
+// of the dashboard/suite locks. Applied to that tile's query only.
+addColumn('suites', 'tile_locks', "TEXT NOT NULL DEFAULT '{}'");
 // settlements.notes/.kind added after the table shipped, so migrate existing DBs.
 if (tableExists('settlements')) {
   addColumn('settlements', 'notes', "TEXT NOT NULL DEFAULT '[]'");
@@ -273,6 +298,36 @@ function recentUsageForUser(userId, limit = 60) {
     return db.prepare('SELECT entity_id AS entityId, kind, name, event, ts AS at FROM usage_events WHERE user_id=? ORDER BY ts DESC LIMIT ?')
       .all(userId, Math.min(200, limit));
   } catch { return []; }
+}
+
+// Platform-wide activity summary for the admin Users console: how many people are
+// active, who's most active, which dashboards get opened most and which features
+// get used most — aggregated across every user from the view + audit logs.
+function adminActivityReport({ days = 30, limit = 8 } = {}) {
+  const ago = (d) => new Date(Date.now() - d * 864e5).toISOString();
+  const s30 = ago(days), s7 = ago(7), s1 = ago(1);
+  // Active = appears in the view log OR the action log within the window (deduped).
+  const activeIn = (s) => db.prepare('SELECT COUNT(*) c FROM (SELECT user_id FROM user_views WHERE at>=? UNION SELECT user_id FROM user_actions WHERE at>=?)').get(s, s).c;
+  const nameFor = (id) => { const u = getUser(id); return u ? (u.fullName || u.email) : id; };
+  const topUsers = db.prepare(
+    `SELECT user_id AS userId, SUM(c) AS total, MAX(lastAt) AS lastAt FROM (
+       SELECT user_id, COUNT(*) c, MAX(at) lastAt FROM user_views   WHERE at>=? GROUP BY user_id
+       UNION ALL
+       SELECT user_id, COUNT(*) c, MAX(at) lastAt FROM user_actions WHERE at>=? GROUP BY user_id
+     ) GROUP BY user_id ORDER BY total DESC LIMIT ?`,
+  ).all(s30, s30, limit).map((r) => { const u = getUser(r.userId); return { userId: r.userId, name: u ? (u.fullName || u.email) : r.userId, role: u?.role || '', total: r.total, lastAt: r.lastAt }; });
+  const topDashboards = db.prepare('SELECT dashboard_id AS dashboardId, COUNT(*) AS opens, COUNT(DISTINCT user_id) AS users, MAX(at) AS lastAt FROM user_views WHERE at>=? GROUP BY dashboard_id ORDER BY opens DESC LIMIT ?')
+    .all(s30, limit).map((r) => ({ ...r, title: getDashboard(r.dashboardId)?.title || r.dashboardId }));
+  const topFeatures = db.prepare('SELECT action, COUNT(*) AS uses, COUNT(DISTINCT user_id) AS users, MAX(label) AS label FROM user_actions WHERE at>=? GROUP BY action ORDER BY uses DESC LIMIT ?')
+    .all(s30, limit).map((r) => ({ action: r.action, label: r.label || r.action, uses: r.uses, users: r.users }));
+  const totalViews = db.prepare('SELECT COUNT(*) c FROM user_views WHERE at>=?').get(s30).c;
+  const totalActions = db.prepare('SELECT COUNT(*) c FROM user_actions WHERE at>=?').get(s30).c;
+  return {
+    days,
+    active: { d1: activeIn(s1), d7: activeIn(s7), d30: activeIn(s30) },
+    totals: { views: totalViews, actions: totalActions },
+    topUsers, topDashboards, topFeatures,
+  };
 }
 
 // ─── User action audit log (every meaningful action) ─────────────────────────
@@ -483,6 +538,8 @@ CREATE TABLE IF NOT EXISTS tile_marks (
   at           TEXT NOT NULL,
   PRIMARY KEY (scope, scope_id, dashboard_id, tile_id, kind)
 );
+-- listMarks() runs on every home load (pins + follows), filtered by scope/kind.
+CREATE INDEX IF NOT EXISTS idx_tile_marks_scope ON tile_marks(scope, scope_id, kind);
 `);
 // One-time migration from the short-lived home_pins table (those were created
 // by the pin button, so they become 'pin' marks).
@@ -515,6 +572,15 @@ function listMarks({ userId, entityId, kind }) {
 
 // ─── Settings (simple key/value) ──────────────────────────────────────────────
 db.exec(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '');`);
+
+// Reusable Inventive workspaces: created once (name + reference) and linked to
+// one or more users. A user's linked workspace identifies their Inventive account.
+db.exec(`CREATE TABLE IF NOT EXISTS inventive_workspaces (
+  id         TEXT PRIMARY KEY,
+  name       TEXT NOT NULL DEFAULT '',
+  ref_id     TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);`);
 
 // ─── Mail assets: rendered images embedded in emails (e.g. digest tile charts) ─
 // Stored as bytes + served by an unguessable token, so a digest's chart <img>
@@ -696,15 +762,27 @@ CREATE INDEX IF NOT EXISTS idx_tile_library_category ON tile_library(category);
 
 // ─── Entities ─────────────────────────────────────────────────────────────────
 function rowToEntity(r) {
-  return r && { id: r.id, name: r.name, logo: r.logo || '', aiContext: r.ai_context || '', inventiveName: r.inventive_name || '', inventiveRefId: r.inventive_ref_id || '', lockedFilters: J(r.locked_filters, {}), scopeFields: J(r.scope_fields, {}), allOrganisers: !!r.all_organisers, createdAt: r.created_at };
+  // Howler support = the list column if set, else fall back to the legacy single
+  // owner — so existing clients keep their creator as support until edited.
+  const support = J(r.howler_support_ids, []);
+  const howlerSupportIds = support.length ? support : (r.howler_owner_user_id ? [r.howler_owner_user_id] : []);
+  return r && { id: r.id, name: r.name, logo: r.logo || '', aiContext: r.ai_context || '', inventiveName: r.inventive_name || '', inventiveRefId: r.inventive_ref_id || '', howlerOwnerUserId: r.howler_owner_user_id || '', howlerSupportIds, lockedFilters: J(r.locked_filters, {}), scopeFields: J(r.scope_fields, {}), allOrganisers: !!r.all_organisers, createdAt: r.created_at };
 }
 function listEntities() { return db.prepare('SELECT * FROM entities ORDER BY name').all().map(rowToEntity); }
 function getEntity(id) { return rowToEntity(db.prepare('SELECT * FROM entities WHERE id=?').get(id)); }
-function createEntity({ name, logo = '', aiContext = '', lockedFilters = {}, scopeFields = {} }) {
-  const e = { id: uuid(), name: name || 'Untitled entity', logo: logo || '', aiContext: aiContext || '', lockedFilters, scopeFields, createdAt: now() };
-  db.prepare('INSERT INTO entities (id,name,logo,ai_context,locked_filters,scope_fields,created_at) VALUES (?,?,?,?,?,?,?)')
-    .run(e.id, e.name, e.logo, e.aiContext, JSON.stringify(lockedFilters), JSON.stringify(scopeFields), e.createdAt);
+function createEntity({ name, logo = '', aiContext = '', lockedFilters = {}, scopeFields = {}, howlerOwnerUserId = '' }) {
+  // The creator seeds both the legacy owner field and the support list.
+  const support = howlerOwnerUserId ? [howlerOwnerUserId] : [];
+  const e = { id: uuid(), name: name || 'Untitled entity', logo: logo || '', aiContext: aiContext || '', lockedFilters, scopeFields, howlerOwnerUserId: howlerOwnerUserId || '', createdAt: now() };
+  db.prepare('INSERT INTO entities (id,name,logo,ai_context,locked_filters,scope_fields,howler_owner_user_id,howler_support_ids,created_at) VALUES (?,?,?,?,?,?,?,?,?)')
+    .run(e.id, e.name, e.logo, e.aiContext, JSON.stringify(lockedFilters), JSON.stringify(scopeFields), e.howlerOwnerUserId, JSON.stringify(support), e.createdAt);
   return e;
+}
+// Replace a client's Howler support contacts (a list of admin user ids).
+function setEntityHowlerSupport(id, userIds = []) {
+  const ids = [...new Set((userIds || []).map((x) => String(x)).filter(Boolean))];
+  db.prepare('UPDATE entities SET howler_support_ids=? WHERE id=?').run(JSON.stringify(ids), id);
+  return getEntity(id);
 }
 function updateEntity(id, patch) {
   const cur = db.prepare('SELECT * FROM entities WHERE id=?').get(id);
@@ -717,10 +795,39 @@ function updateEntity(id, patch) {
   const lf = patch.lockedFilters !== undefined ? JSON.stringify(patch.lockedFilters) : cur.locked_filters;
   const sf = patch.scopeFields !== undefined ? JSON.stringify(patch.scopeFields) : cur.scope_fields;
   const allOrg = patch.allOrganisers !== undefined ? (patch.allOrganisers ? 1 : 0) : cur.all_organisers;
-  db.prepare('UPDATE entities SET name=?, logo=?, ai_context=?, inventive_name=?, inventive_ref_id=?, locked_filters=?, scope_fields=?, all_organisers=? WHERE id=?').run(name, logo, aiContext, invName, invRef, lf, sf, allOrg, id);
+  const owner = patch.howlerOwnerUserId !== undefined ? String(patch.howlerOwnerUserId || '') : (cur.howler_owner_user_id || '');
+  db.prepare('UPDATE entities SET name=?, logo=?, ai_context=?, inventive_name=?, inventive_ref_id=?, locked_filters=?, scope_fields=?, all_organisers=?, howler_owner_user_id=? WHERE id=?').run(name, logo, aiContext, invName, invRef, lf, sf, allOrg, owner, id);
   return getEntity(id);
 }
 function deleteEntity(id) { db.prepare('DELETE FROM entities WHERE id=?').run(id); }
+
+// ─── Inventive workspaces (reusable; linked to users) ───────────────────────────
+const rowToInvWs = (r) => r && { id: r.id, name: r.name || '', refId: r.ref_id || '', createdAt: r.created_at };
+function listInventiveWorkspaces() {
+  return db.prepare('SELECT * FROM inventive_workspaces ORDER BY name').all().map((r) => ({
+    ...rowToInvWs(r),
+    userCount: db.prepare('SELECT COUNT(*) c FROM users WHERE inventive_workspace_id=?').get(r.id).c,
+  }));
+}
+function getInventiveWorkspace(id) { return rowToInvWs(db.prepare('SELECT * FROM inventive_workspaces WHERE id=?').get(id)); }
+function createInventiveWorkspace({ name = '', refId = '' } = {}) {
+  const id = uuid();
+  db.prepare('INSERT INTO inventive_workspaces (id,name,ref_id,created_at) VALUES (?,?,?,?)')
+    .run(id, String(name || '').trim(), String(refId || '').trim(), now());
+  return getInventiveWorkspace(id);
+}
+function updateInventiveWorkspace(id, patch = {}) {
+  const cur = db.prepare('SELECT * FROM inventive_workspaces WHERE id=?').get(id);
+  if (!cur) return null;
+  const name = patch.name !== undefined ? String(patch.name || '').trim() : cur.name;
+  const refId = patch.refId !== undefined ? String(patch.refId || '').trim() : cur.ref_id;
+  db.prepare('UPDATE inventive_workspaces SET name=?, ref_id=? WHERE id=?').run(name, refId, id);
+  return getInventiveWorkspace(id);
+}
+function deleteInventiveWorkspace(id) {
+  db.prepare("UPDATE users SET inventive_workspace_id='' WHERE inventive_workspace_id=?").run(id); // unlink users
+  db.prepare('DELETE FROM inventive_workspaces WHERE id=?').run(id);
+}
 
 // Per-client integration credentials (Looker / Anthropic). Kept separate from
 // the general entity object so secrets never ride along to the browser by
@@ -734,6 +841,21 @@ function setEntityIntegrations(id, patch) {
   const next = { ...cur, ...(patch || {}) }; // patch carries only the keys to change
   db.prepare('UPDATE entities SET integrations=? WHERE id=?').run(JSON.stringify(next), id);
   return getEntityIntegrations(id);
+}
+// Per-integration FREEZE locks for a client: { looker:false, meta:true, … }.
+// Integrations are LOCKED BY DEFAULT — a key is only unlocked when stored
+// explicitly as `false`, so a missing key reads as locked. A frozen integration
+// can't be edited until an admin/owner unlocks it — a guard against accidental
+// changes to a working connection. Non-secret presentation state.
+function getEntityIntegrationLocks(id) {
+  const r = db.prepare('SELECT integration_locks FROM entities WHERE id=?').get(id);
+  return r ? J(r.integration_locks, {}) : {};
+}
+function setEntityIntegrationLock(id, key, locked) {
+  const cur = getEntityIntegrationLocks(id);
+  cur[key] = !!locked; // store explicit state — absent still reads as locked
+  db.prepare('UPDATE entities SET integration_locks=? WHERE id=?').run(JSON.stringify(cur), id);
+  return cur;
 }
 // Per-client email branding (logo / brand colour / sender name / wording). A
 // plain JSON blob on the entity — safe to send to the browser, unlike creds.
@@ -804,13 +926,49 @@ function rowToUser(r) {
   if (!r) return null;
   const memberships = membershipsForUser(r.id);
   const firstName = r.first_name || '', lastName = r.last_name || '';
-  return { id: r.id, email: r.email, role: r.role, passwordHash: r.password_hash, firstName, lastName, fullName: [firstName, lastName].filter(Boolean).join(' '), mobile: r.mobile || '', entityIds: memberships.map((m) => m.entityId), memberships, notifyEmail: r.notify_email !== 0, notifyPush: r.notify_push !== 0, lastLogin: r.last_login || null, createdAt: r.created_at };
+  return { id: r.id, email: r.email, role: r.role, passwordHash: r.password_hash, firstName, lastName, fullName: [firstName, lastName].filter(Boolean).join(' '), mobile: r.mobile || '', inventiveWorkspaceId: r.inventive_workspace_id || '', howlerRole: r.howler_role || '', entityIds: memberships.map((m) => m.entityId), memberships, notifyEmail: r.notify_email !== 0, notifyPush: r.notify_push !== 0, lastLogin: r.last_login || null, createdAt: r.created_at };
 }
 function publicUser(u) {
   if (!u) return null;
-  return { id: u.id, email: u.email, role: u.role, firstName: u.firstName || '', lastName: u.lastName || '', fullName: u.fullName || '', mobile: u.mobile || '', entityIds: u.entityIds || [], memberships: u.memberships || [], notifyEmail: u.notifyEmail !== false, notifyPush: u.notifyPush !== false };
+  return { id: u.id, email: u.email, role: u.role, firstName: u.firstName || '', lastName: u.lastName || '', fullName: u.fullName || '', mobile: u.mobile || '', inventiveWorkspaceId: u.inventiveWorkspaceId || '', howlerRole: u.howlerRole || '', entityIds: u.entityIds || [], memberships: u.memberships || [], notifyEmail: u.notifyEmail !== false, notifyPush: u.notifyPush !== false };
 }
 // Update a user's notification channel preferences (partial).
+// ─── One-time auth tokens (password reset + magic sign-in link) ───────────────
+// We store only a SHA-256 HASH of the random token, never the token itself, so a
+// DB leak can't be replayed. Each is single-use (used_at) and time-boxed.
+db.exec(`
+CREATE TABLE IF NOT EXISTS auth_tokens (
+  token_hash TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL,
+  kind       TEXT NOT NULL,            -- 'reset' | 'magic'
+  expires_at INTEGER NOT NULL,         -- epoch ms
+  used_at    INTEGER                   -- epoch ms once consumed
+);
+`);
+const sha256 = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
+// Create a token of `kind` for a user, valid for ttlMs. Returns the RAW token
+// (emailed once); only its hash is persisted.
+function createAuthToken(userId, kind, ttlMs) {
+  const raw = crypto.randomBytes(32).toString('base64url');
+  db.prepare('INSERT INTO auth_tokens (token_hash,user_id,kind,expires_at,used_at) VALUES (?,?,?,?,NULL)')
+    .run(sha256(raw), userId, kind, Date.now() + ttlMs);
+  return raw;
+}
+// Consume a token: valid only if it exists, matches `kind`, is unused and unexpired.
+// Marks it used and returns the userId, else null. (One-time, atomic enough for
+// the single-instance deployment.)
+function consumeAuthToken(raw, kind) {
+  if (!raw) return null;
+  const row = db.prepare('SELECT * FROM auth_tokens WHERE token_hash=?').get(sha256(raw));
+  if (!row || row.kind !== kind || row.used_at || row.expires_at < Date.now()) return null;
+  db.prepare('UPDATE auth_tokens SET used_at=? WHERE token_hash=?').run(Date.now(), row.token_hash);
+  return row.user_id;
+}
+// Invalidate every outstanding token of a kind for a user (e.g. after a reset).
+function clearAuthTokens(userId, kind) {
+  db.prepare('DELETE FROM auth_tokens WHERE user_id=? AND kind=?').run(userId, kind);
+}
+
 function setNotificationPrefs(userId, prefs = {}) {
   const cur = db.prepare('SELECT notify_email, notify_push FROM users WHERE id=?').get(userId);
   if (!cur) return null;
@@ -819,6 +977,68 @@ function setNotificationPrefs(userId, prefs = {}) {
   db.prepare('UPDATE users SET notify_email=?, notify_push=? WHERE id=?').run(email, push, userId);
   return { email: email !== 0, push: push !== 0 };
 }
+// Per-type notification preferences — a granular layer under the email/push
+// channel switches. A user can mute a whole category (digests, goals, alerts,
+// messages) regardless of channel. Stored as JSON in user_prefs; default ON, so
+// existing users keep getting everything until they opt out.
+const NOTIFY_TYPES = [
+  { key: 'digest', label: 'Digests', desc: 'When your scheduled briefing is ready' },
+  { key: 'goals', label: 'Goals', desc: 'Weekly goal-progress nudges' },
+  { key: 'alerts', label: 'Alerts', desc: 'Campaign & data alerts that need attention' },
+  { key: 'messages', label: 'Messages', desc: 'New messages from Howler in your inbox' },
+];
+function getNotifyTypes(userId) {
+  let stored = {};
+  try { stored = JSON.parse(getUserPref(userId, 'notify_types', '') || '{}'); } catch { stored = {}; }
+  const out = {};
+  for (const t of NOTIFY_TYPES) out[t.key] = stored[t.key] !== false; // default on
+  return out;
+}
+function setNotifyTypes(userId, partial = {}) {
+  const cur = getNotifyTypes(userId);
+  for (const t of NOTIFY_TYPES) if (t.key in partial) cur[t.key] = !!partial[t.key];
+  setUserPref(userId, 'notify_types', JSON.stringify(cur));
+  return cur;
+}
+// Per-CHANNEL per-type matrix — the granular layer. A user can switch a category
+// (digests/goals/alerts/messages) off for ONE channel (e.g. no goal emails) while
+// keeping it on for another (push). Stored as { email:{key:bool}, push:{key:bool} }
+// in user_prefs. Defaults ON; a legacy flat `notify_types` mute seeds BOTH channels
+// so existing opt-outs carry over until a per-channel pref is set.
+const NOTIFY_CHANNELS = ['email', 'push'];
+function getNotifyMatrix(userId) {
+  let stored = {}; let legacy = {};
+  try { stored = JSON.parse(getUserPref(userId, 'notify_matrix', '') || '{}'); } catch { stored = {}; }
+  try { legacy = JSON.parse(getUserPref(userId, 'notify_types', '') || '{}'); } catch { legacy = {}; }
+  const out = {};
+  for (const ch of NOTIFY_CHANNELS) {
+    out[ch] = {};
+    for (const t of NOTIFY_TYPES) {
+      const v = stored?.[ch]?.[t.key];
+      out[ch][t.key] = v !== undefined ? v !== false : (legacy[t.key] !== false);
+    }
+  }
+  return out;
+}
+function setNotifyMatrix(userId, partial = {}) {
+  const cur = getNotifyMatrix(userId);
+  for (const ch of NOTIFY_CHANNELS) {
+    if (partial[ch] && typeof partial[ch] === 'object') {
+      for (const t of NOTIFY_TYPES) if (t.key in partial[ch]) cur[ch][t.key] = !!partial[ch][t.key];
+    }
+  }
+  setUserPref(userId, 'notify_matrix', JSON.stringify(cur));
+  return cur;
+}
+// Is a category on for this user on a given channel? With no channel, allow if it's
+// on for ANY channel (safe default for legacy callers). Unknown/blank type ⇒ allowed.
+function notifyTypeOn(userId, type, channel) {
+  if (!type) return true;
+  const m = getNotifyMatrix(userId);
+  if (channel && NOTIFY_CHANNELS.includes(channel)) return m[channel]?.[type] !== false;
+  return NOTIFY_CHANNELS.some((ch) => m[ch]?.[type] !== false);
+}
+
 function listUsers() { return db.prepare('SELECT * FROM users ORDER BY email').all().map(rowToUser); }
 function getUser(id) { return rowToUser(db.prepare('SELECT * FROM users WHERE id=?').get(id)); }
 function getUserByEmail(email) {
@@ -844,14 +1064,14 @@ function setMembershipRole(userId, entityId, role) {
 function removeMembership(userId, entityId) {
   return db.prepare('DELETE FROM user_entities WHERE user_id=? AND entity_id=?').run(userId, entityId).changes > 0;
 }
-function createUser({ email, password, role = 'client', entityIds = [], firstName = '', lastName = '', mobile = '' }) {
+function createUser({ email, password, role = 'client', entityIds = [], firstName = '', lastName = '', mobile = '', howlerRole = '' }) {
   const e = (email || '').trim().toLowerCase();
   if (!e || !password) throw new Error('email and password are required');
   if (db.prepare('SELECT 1 FROM users WHERE email=?').get(e)) throw new Error('A user with that email already exists');
   const id = uuid();
   const r = role === 'admin' ? 'admin' : 'client';
-  db.prepare('INSERT INTO users (id,email,password_hash,role,first_name,last_name,mobile,created_at) VALUES (?,?,?,?,?,?,?,?)')
-    .run(id, e, bcrypt.hashSync(password, 10), r, String(firstName || '').trim(), String(lastName || '').trim(), String(mobile || '').trim(), now());
+  db.prepare('INSERT INTO users (id,email,password_hash,role,first_name,last_name,mobile,howler_role,created_at) VALUES (?,?,?,?,?,?,?,?,?)')
+    .run(id, e, bcrypt.hashSync(password, 10), r, String(firstName || '').trim(), String(lastName || '').trim(), String(mobile || '').trim(), r === 'admin' ? String(howlerRole || '').trim() : '', now());
   setUserEntities(id, entityIds); // admins may carry entity links too (team surface)
   return publicUser(getUser(id));
 }
@@ -870,7 +1090,10 @@ function updateUser(id, patch) {
   const firstName = patch.firstName !== undefined ? String(patch.firstName || '').trim() : cur.first_name;
   const lastName = patch.lastName !== undefined ? String(patch.lastName || '').trim() : cur.last_name;
   const mobile = patch.mobile !== undefined ? String(patch.mobile || '').trim() : cur.mobile;
-  db.prepare('UPDATE users SET email=?, password_hash=?, role=?, first_name=?, last_name=?, mobile=? WHERE id=?').run(email, hash, role, firstName, lastName, mobile, id);
+  const invWs = patch.inventiveWorkspaceId !== undefined ? String(patch.inventiveWorkspaceId || '').trim() : cur.inventive_workspace_id;
+  // Howler job title only applies to admins; clearing role to client drops it.
+  const howlerRole = role !== 'admin' ? '' : (patch.howlerRole !== undefined ? String(patch.howlerRole || '').trim() : cur.howler_role);
+  db.prepare('UPDATE users SET email=?, password_hash=?, role=?, first_name=?, last_name=?, mobile=?, inventive_workspace_id=?, howler_role=? WHERE id=?').run(email, hash, role, firstName, lastName, mobile, invWs, howlerRole, id);
   if ('entityIds' in patch) setUserEntities(id, patch.entityIds);
   return publicUser(getUser(id));
 }
@@ -880,10 +1103,13 @@ function touchLastLogin(userId) {
   if (!userId) return;
   try { db.prepare('UPDATE users SET last_login=? WHERE id=?').run(now(), userId); } catch { /* ignore */ }
 }
-function verifyCredentials(email, password) {
+// Async so the bcrypt hash comparison (~60-100ms of CPU) doesn't block the single
+// event loop on every login — bcryptjs's async path yields between rounds, so
+// concurrent requests aren't stalled waiting on a sign-in.
+async function verifyCredentials(email, password) {
   const u = getUserByEmail(email);
   if (!u) return null;
-  return bcrypt.compareSync(password || '', u.passwordHash) ? u : null;
+  return (await bcrypt.compare(password || '', u.passwordHash)) ? u : null;
 }
 
 // ─── Dashboards (content kept as JSON blob) ───────────────────────────────────
@@ -1043,12 +1269,29 @@ function dashboardVisibleToRole(entityId, setId, dashboardId, role) {
 function suiteSetIds(suiteId) {
   return db.prepare('SELECT set_id FROM suite_sets WHERE suite_id=? ORDER BY position').all(suiteId).map((r) => r.set_id);
 }
-function rowToSuite(r) {
-  return r && { id: r.id, entityId: r.entity_id, name: r.name, icon: r.icon || '', eventUrl: r.event_url || '', lockedFilters: J(r.locked_filters, {}), briefing: J(r.briefing, {}), setIds: suiteSetIds(r.id), position: r.position, createdAt: r.created_at };
+// Batch the set-ids for many suites in ONE query (avoids the N+1 where every
+// rowToSuite ran its own suiteSetIds — list functions run on basically every
+// page load via the nav). Returns { suiteId: [setId, …] } in position order.
+function setIdsForSuites(suiteIds) {
+  if (!suiteIds.length) return {};
+  const ph = suiteIds.map(() => '?').join(',');
+  const rows = db.prepare(`SELECT suite_id, set_id FROM suite_sets WHERE suite_id IN (${ph}) ORDER BY position`).all(...suiteIds);
+  const map = {};
+  for (const r of rows) (map[r.suite_id] = map[r.suite_id] || []).push(r.set_id);
+  return map;
 }
-function listSuites() { return db.prepare('SELECT * FROM suites ORDER BY position, name').all().map(rowToSuite); }
+function rowToSuite(r, setIds) {
+  return r && { id: r.id, entityId: r.entity_id, name: r.name, icon: r.icon || '', eventUrl: r.event_url || '', lockedFilters: J(r.locked_filters, {}), dashboardLocks: J(r.dashboard_locks, {}), tileLocks: J(r.tile_locks, {}), excludedDashboards: J(r.excluded_dashboards, []), briefing: J(r.briefing, {}), setIds: setIds || suiteSetIds(r.id), position: r.position, createdAt: r.created_at };
+}
+function listSuites() {
+  const rows = db.prepare('SELECT * FROM suites ORDER BY position, name').all();
+  const m = setIdsForSuites(rows.map((r) => r.id));
+  return rows.map((r) => rowToSuite(r, m[r.id] || []));
+}
 function listSuitesForEntity(entityId) {
-  return db.prepare('SELECT * FROM suites WHERE entity_id=? ORDER BY position, name').all(entityId).map(rowToSuite);
+  const rows = db.prepare('SELECT * FROM suites WHERE entity_id=? ORDER BY position, name').all(entityId);
+  const m = setIdsForSuites(rows.map((r) => r.id));
+  return rows.map((r) => rowToSuite(r, m[r.id] || []));
 }
 function getSuite(id) { return rowToSuite(db.prepare('SELECT * FROM suites WHERE id=?').get(id)); }
 const setSuiteSets = db.transaction((suiteId, setIds) => {
@@ -1073,11 +1316,34 @@ function updateSuite(id, patch) {
   const pos = patch.position ?? cur.position;
   const ent = patch.entityId ?? cur.entity_id;
   const eventUrl = patch.eventUrl !== undefined ? String(patch.eventUrl || '') : (cur.event_url || '');
-  db.prepare('UPDATE suites SET name=?, icon=?, entity_id=?, locked_filters=?, briefing=?, position=?, event_url=? WHERE id=?').run(name, icon, ent, lf, brief, pos, eventUrl, id);
+  const excluded = patch.excludedDashboards !== undefined ? JSON.stringify(patch.excludedDashboards || []) : (cur.excluded_dashboards || '[]');
+  const dashLocks = patch.dashboardLocks !== undefined ? JSON.stringify(patch.dashboardLocks || {}) : (cur.dashboard_locks || '{}');
+  const tileLocks = patch.tileLocks !== undefined ? JSON.stringify(patch.tileLocks || {}) : (cur.tile_locks || '{}');
+  db.prepare('UPDATE suites SET name=?, icon=?, entity_id=?, locked_filters=?, briefing=?, position=?, event_url=?, excluded_dashboards=?, dashboard_locks=?, tile_locks=? WHERE id=?').run(name, icon, ent, lf, brief, pos, eventUrl, excluded, dashLocks, tileLocks, id);
   if (patch.setIds !== undefined) setSuiteSets(id, patch.setIds);
   return getSuite(id);
 }
 function deleteSuite(id) { db.prepare('DELETE FROM suites WHERE id=?').run(id); }
+// Set (or clear) the per-tile lock overrides for ONE tile within a suite. Empty
+// map removes the tile's entry.
+function setSuiteTileLocks(suiteId, tileId, locks) {
+  const row = db.prepare('SELECT tile_locks FROM suites WHERE id=?').get(suiteId);
+  if (!row) return null;
+  const map = J(row.tile_locks, {});
+  if (locks && Object.keys(locks).length) map[tileId] = locks; else delete map[tileId];
+  db.prepare('UPDATE suites SET tile_locks=? WHERE id=?').run(JSON.stringify(map), suiteId);
+  return map;
+}
+// Set (or clear) the per-dashboard lock overrides for ONE dashboard within a
+// suite, without disturbing the others. Empty map removes the dashboard's entry.
+function setSuiteDashboardLocks(suiteId, dashboardId, locks) {
+  const row = db.prepare('SELECT dashboard_locks FROM suites WHERE id=?').get(suiteId);
+  if (!row) return null;
+  const map = J(row.dashboard_locks, {});
+  if (locks && Object.keys(locks).length) map[dashboardId] = locks; else delete map[dashboardId];
+  db.prepare('UPDATE suites SET dashboard_locks=? WHERE id=?').run(JSON.stringify(map), suiteId);
+  return map;
+}
 
 // All dashboards reachable through a suite (union across its sets).
 function dashboardsInSuite(suiteId) {
@@ -1086,13 +1352,106 @@ function dashboardsInSuite(suiteId) {
   return [...out];
 }
 // Merged locked filters for a suite = entity locks (organiser) + suite locks
-// (event/cashless). The map forced onto the user's Looker queries.
-function lockedFiltersForSuite(suiteId) {
+// (event/cashless) + (when a dashboardId is given) that dashboard's per-suite
+// lock overrides. The map forced onto the user's Looker queries — most specific
+// wins, so a per-dashboard lock beats the suite-wide one.
+function lockedFiltersForSuite(suiteId, dashboardId) {
   const s = getSuite(suiteId);
   if (!s) return {};
   const e = getEntity(s.entityId);
-  return { ...(e?.lockedFilters || {}), ...(s.lockedFilters || {}) };
+  const perDash = (dashboardId && s.dashboardLocks && s.dashboardLocks[dashboardId]) || {};
+  return { ...(e?.lockedFilters || {}), ...(s.lockedFilters || {}), ...perDash };
 }
+
+// Fork a (shared) dashboard into a CLIENT-OWNED copy for this suite's entity and
+// wire it into the suite so the client sees their own version. The template is
+// untouched and keeps serving every other client. `def` is the (edited) source
+// definition to copy; `opts` lets the admin choose where it lands:
+//   { title, folder, setId, newSetName }
+//   - setId      → add the fork to that client-owned set (must belong to entity)
+//   - newSetName → create a new client set, add the fork, bundle it into the suite
+//   - neither    → replace the template in-place within the suite's set, cloning
+//                  the set first if it's shared (so other clients are untouched)
+// Returns { dashboard, suite } or null if the suite is missing.
+function forkDashboardForSuite(suiteId, dashboardId, def, opts = {}) {
+  const suite = getSuite(suiteId);
+  if (!suite) return null;
+  const entityId = suite.entityId;
+  const entity = getEntity(entityId);
+  const title = (opts.title && opts.title.trim()) || def?.title || 'Untitled dashboard';
+  const folder = opts.folder !== undefined ? String(opts.folder || '') : `Custom/${entity?.name || 'Client'}`;
+  // Create then update so the FULL edited definition (incl. fields createDashboard
+  // doesn't copy verbatim, e.g. daysBeforeSync/keepImportedFilters) carries over.
+  const created = createDashboard({ title, ownerEntityId: entityId, folder });
+  const body = { ...stripMeta(def || {}), title, folder, ownerEntityId: entityId, variantOf: dashboardId };
+  const fork = updateDashboard(created.id, body);
+
+  let setIds = [...(suite.setIds || [])];
+  const targetSet = opts.setId ? getSet(opts.setId) : null;
+  if (opts.newSetName && String(opts.newSetName).trim()) {
+    const set = createSet({ name: String(opts.newSetName).trim(), ownerEntityId: entityId });
+    setSetDashboards(set.id, [{ id: fork.id, parentId: null }]);
+    if (!setIds.includes(set.id)) setIds.push(set.id);
+  } else if (targetSet && targetSet.ownerEntityId === entityId) {
+    setSetDashboards(targetSet.id, [...(targetSet.dashboards || []), { id: fork.id, parentId: null }]);
+    if (!setIds.includes(targetSet.id)) setIds.push(targetSet.id);
+  } else {
+    // Default (and the fallback when a given setId isn't a set this client owns —
+    // never leave the fork orphaned): replace the template wherever it lives in
+    // this suite's sets.
+    setIds = setIds.map((sid) => {
+      const set = getSet(sid);
+      if (!set || !(set.dashboards || []).some((e) => e.id === dashboardId)) return sid;
+      // A shared set is used by other clients — clone it for this entity first so
+      // the swap only affects this client; the suite then points at the clone.
+      const target = set.ownerEntityId === entityId ? set : cloneSetForEntity(sid, entityId, set.name);
+      const entries = (target.dashboards || []).map((e) => ({
+        id: e.id === dashboardId ? fork.id : e.id,
+        parentId: e.parentId === dashboardId ? fork.id : e.parentId,
+      }));
+      setSetDashboards(target.id, entries);
+      return target.id;
+    });
+  }
+  if (JSON.stringify(setIds) !== JSON.stringify(suite.setIds || [])) setSuiteSets(suiteId, setIds);
+
+  // Carry this client's per-dashboard lock overrides across to the fork (per-tile
+  // locks are keyed by tileId, which the copy preserves, so they apply as-is).
+  if (suite.dashboardLocks && suite.dashboardLocks[dashboardId]) {
+    setSuiteDashboardLocks(suiteId, fork.id, suite.dashboardLocks[dashboardId]);
+  }
+  return { dashboard: fork, suite: getSuite(suiteId) };
+}
+
+// Undo a fork: point the suite back at the original template and discard the
+// client copy (only when nothing else still references it). Returns the template
+// id to send the admin back to, or null if this isn't a revertable fork.
+function revertForkToTemplate(suiteId, forkId) {
+  const suite = getSuite(suiteId);
+  const fork = getDashboard(forkId);
+  if (!suite || !fork || !fork.variantOf) return null;
+  const templateId = fork.variantOf;
+  if (!getDashboard(templateId)) return null; // template was deleted — nothing to revert to
+  for (const sid of suite.setIds || []) {
+    const set = getSet(sid);
+    if (!set || !(set.dashboards || []).some((e) => e.id === forkId)) continue;
+    const entries = (set.dashboards || []).map((e) => ({
+      id: e.id === forkId ? templateId : e.id,
+      parentId: e.parentId === forkId ? templateId : e.parentId,
+    }));
+    setSetDashboards(set.id, entries);
+  }
+  // Move this client's per-dashboard locks back onto the template entry.
+  if (suite.dashboardLocks && suite.dashboardLocks[forkId]) {
+    setSuiteDashboardLocks(suiteId, templateId, suite.dashboardLocks[forkId]);
+    setSuiteDashboardLocks(suiteId, forkId, {});
+  }
+  // Bin the orphaned copy if no set anywhere still points at it.
+  const stillUsed = db.prepare('SELECT 1 FROM set_dashboards WHERE dashboard_id=? LIMIT 1').get(forkId);
+  if (!stillUsed) removeDashboard(forkId);
+  return templateId;
+}
+
 
 // ─── Tile library ─────────────────────────────────────────────────────────────
 // A stable signature for a tile's underlying query + visualization, used to
@@ -1372,10 +1731,14 @@ module.exports = {
   exportAll, importAll,
   getFilterView, setFilterView, deleteFilterView,
   listEntities, getEntity, createEntity, updateEntity, deleteEntity, getEntityIntegrations, setEntityIntegrations,
+  listInventiveWorkspaces, getInventiveWorkspace, createInventiveWorkspace, updateInventiveWorkspace, deleteInventiveWorkspace,
+  getEntityIntegrationLocks, setEntityIntegrationLock, setEntityHowlerSupport,
   getEntityMailBranding, setEntityMailBranding,
   getSuiteMailBranding, setSuiteMailBranding,
   ensureInboxToken, regenerateInboxToken, findEntityByInboxToken,
   listUsers, getUser, getUserByEmail, createUser, updateUser, deleteUser, verifyCredentials, publicUser, setUserEntities, setNotificationPrefs, touchLastLogin,
+  NOTIFY_TYPES, NOTIFY_CHANNELS, getNotifyTypes, setNotifyTypes, getNotifyMatrix, setNotifyMatrix, notifyTypeOn,
+  createAuthToken, consumeAuthToken, clearAuthTokens,
   membershipsForUser, roleForMembership, setMembershipRole, removeMembership,
   listDashboards, getDashboard, createDashboard, updateDashboard, removeDashboard, dashboardPoolFor, sharedDashboards,
   setFolderKeepImported, folderSettingsMap, folderKeepImportedFor,
@@ -1383,7 +1746,7 @@ module.exports = {
   listSets, listSetsForEntity, getSet, createSet, cloneSetForEntity, updateSet, deleteSet, setSetDashboards, dashboardsInSet,
   rolesForScope, setContentRoles, contentRolesForEntity, dashboardVisibleToRole,
   // suites (event context)
-  listSuites, listSuitesForEntity, getSuite, createSuite, updateSuite, deleteSuite, setSuiteSets, suiteSetIds, dashboardsInSuite, lockedFiltersForSuite,
+  listSuites, listSuitesForEntity, getSuite, createSuite, updateSuite, deleteSuite, setSuiteSets, setSuiteDashboardLocks, setSuiteTileLocks, suiteSetIds, dashboardsInSuite, lockedFiltersForSuite, forkDashboardForSuite, revertForkToTemplate,
   // tile library
   listLibraryTiles, listLibraryCategories, getLibraryTile, harvestTile, harvestDashboardTiles, updateLibraryTile, deleteLibraryTile, bumpLibraryUsage,
   // settings (key/value)
@@ -1395,7 +1758,7 @@ module.exports = {
   // event documents (invoices etc.)
   listDocuments, getDocument, getDocumentFile, createDocument, updateDocument, deleteDocument, documentExistsForSource,
   // view tracking
-  recordView, viewProfile, recentViewsForUser, lastViewForUsers, recentUsageForUser, usageByClientForUser,
+  recordView, viewProfile, recentViewsForUser, lastViewForUsers, recentUsageForUser, usageByClientForUser, adminActivityReport,
   // user action audit log
   recordAction, listActionsForUser, lastActionsForUsers,
   // tile marks (pins + follows)

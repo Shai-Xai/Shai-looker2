@@ -16,7 +16,7 @@ function Switch({ on, busy }) {
 // device-aware. On iOS Safari, push can't be delivered (only the installed app
 // can), so we guide instead of showing a toggle that lies.
 export default function NotificationPrefs({ compact = false }) {
-  const [n, setN] = useState({ loaded: false, supported: false, pushAvailable: false, email: true, push: false, deviceOn: false, busy: '', testing: false });
+  const [n, setN] = useState({ loaded: false, supported: false, pushAvailable: false, email: true, push: false, deviceOn: false, busy: '', testing: false, types: {}, typeCatalog: [], matrix: { email: {}, push: {} } });
 
   const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent);
   const standalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
@@ -28,9 +28,19 @@ export default function NotificationPrefs({ compact = false }) {
       api.getNotifPrefs().catch(() => ({ email: true, push: true, pushAvailable: false })),
       supported ? isSubscribed() : Promise.resolve(false),
     ]);
-    setN((s) => ({ ...s, loaded: true, supported, pushAvailable: !!prefs.pushAvailable, email: prefs.email !== false, push: prefs.push !== false, deviceOn }));
+    setN((s) => ({ ...s, loaded: true, supported, pushAvailable: !!prefs.pushAvailable, email: prefs.email !== false, push: prefs.push !== false, deviceOn, types: prefs.types || {}, typeCatalog: prefs.typeCatalog || [], matrix: prefs.matrix || { email: {}, push: {} } }));
   };
   useEffect(() => { load(); }, []);
+
+  // Per-channel, per-category switch — e.g. mute goal emails but keep goal push.
+  const toggleMatrix = async (channel, key) => {
+    const next = !(n.matrix?.[channel]?.[key] !== false);
+    const busyId = `m:${channel}:${key}`;
+    setN((s) => ({ ...s, busy: busyId, matrix: { ...s.matrix, [channel]: { ...s.matrix[channel], [key]: next } } }));
+    try { await api.setNotifPrefs({ matrix: { [channel]: { [key]: next } } }); }
+    catch { setN((s) => ({ ...s, matrix: { ...s.matrix, [channel]: { ...s.matrix[channel], [key]: !next } } })); }
+    setN((s) => ({ ...s, busy: '' }));
+  };
 
   const toggleEmail = async () => {
     const next = !n.email;
@@ -87,13 +97,54 @@ export default function NotificationPrefs({ compact = false }) {
         <Row icon="🔔" label="Push" sub="Not supported in this browser" right={null} disabled />
       );
 
+  const cardStyle = { background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden', maxWidth: 520 };
+  const TYPE_ICON = { digest: '🗞️', goals: '🎯', alerts: '🚨', messages: '💬' };
+
   return (
-    <div style={compact ? {} : { background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden', maxWidth: 520 }}>
-      <Row icon="✉️" label="Email" onClick={toggleEmail} disabled={n.busy === 'email'} right={<Switch on={n.email} busy={n.busy === 'email'} />} />
-      {pushRow}
-      {n.supported && n.pushAvailable && n.push && n.deviceOn && !iosNeedsInstall && (
-        <Row icon="📨" label={n.testing ? 'Sending…' : 'Send a test notification'} onClick={test} disabled={n.testing} right={null} />
+    <>
+      <div style={compact ? {} : cardStyle}>
+        <Row icon="✉️" label="Email" onClick={toggleEmail} disabled={n.busy === 'email'} right={<Switch on={n.email} busy={n.busy === 'email'} />} />
+        {pushRow}
+        {n.supported && n.pushAvailable && n.push && n.deviceOn && !iosNeedsInstall && (
+          <Row icon="📨" label={n.testing ? 'Sending…' : 'Send a test notification'} onClick={test} disabled={n.testing} right={null} />
+        )}
+      </div>
+
+      {/* Per-channel category switches — turn a type (digests, goals, alerts,
+          messages) off for ONE channel while keeping it on for the other, e.g.
+          no goal emails but still goal push. The in-app inbox always receives. */}
+      {n.typeCatalog.length > 0 && (
+        <div style={{ marginTop: compact ? 8 : 16, ...(compact ? {} : cardStyle) }}>
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, padding: compact ? '6px 10px 4px' : '12px 12px 6px' }}>
+            <div style={{ flex: 1, fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)' }}>What you’re notified about</div>
+            <div style={{ width: 40, textAlign: 'center', fontSize: 11, color: 'var(--muted)' }} title="Email">✉️</div>
+            {n.pushAvailable && <div style={{ width: 40, textAlign: 'center', fontSize: 11, color: 'var(--muted)' }} title="Push">🔔</div>}
+          </div>
+          {n.typeCatalog.map((t) => {
+            const emailOff = n.email === false; // master channel off greys the column
+            const pushOff = !(n.push && n.deviceOn);
+            return (
+              <div key={t.key} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: compact ? '9px 10px' : '11px 12px', borderBottom: compact ? 'none' : '1px solid var(--hairline)' }}>
+                <span style={{ width: 20, textAlign: 'center', fontSize: 15, flexShrink: 0 }}>{TYPE_ICON[t.key] || '🔔'}</span>
+                <span style={{ flex: 1, fontSize: 13, fontWeight: 600 }}>{t.label}<div style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 400, marginTop: 1 }}>{t.desc}</div></span>
+                <MiniToggle on={n.matrix?.email?.[t.key] !== false} dimmed={emailOff} busy={n.busy === `m:email:${t.key}`} onClick={() => toggleMatrix('email', t.key)} />
+                {n.pushAvailable && <MiniToggle on={n.matrix?.push?.[t.key] !== false} dimmed={pushOff} busy={n.busy === `m:push:${t.key}`} onClick={() => toggleMatrix('push', t.key)} />}
+              </div>
+            );
+          })}
+        </div>
       )}
-    </div>
+    </>
+  );
+}
+
+// A tappable on/off pill for one channel/type cell. `dimmed` shows the column's
+// master channel is off (the cell value is kept, just visually de-emphasised).
+function MiniToggle({ on, busy, dimmed, onClick }) {
+  return (
+    <button onClick={onClick} disabled={busy}
+      style={{ width: 40, display: 'flex', justifyContent: 'center', background: 'none', border: 'none', padding: 0, cursor: busy ? 'default' : 'pointer', opacity: dimmed ? 0.4 : 1 }}>
+      <Switch on={on} busy={busy} />
+    </button>
   );
 }

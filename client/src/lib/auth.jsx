@@ -21,6 +21,15 @@ export function AuthProvider({ children }) {
 
   useEffect(() => { refresh(); }, [refresh]);
 
+  // Global 401 handling: any API call whose session has expired dispatches
+  // `auth:unauthorized` (see lib/api.js). Drop the user so the app routes back to
+  // the login screen instead of leaving every page on a generic error.
+  useEffect(() => {
+    const onUnauthorized = () => setUser(null);
+    window.addEventListener('auth:unauthorized', onUnauthorized);
+    return () => window.removeEventListener('auth:unauthorized', onUnauthorized);
+  }, []);
+
   // Once logged in, check whether AI insights are configured on the server.
   useEffect(() => {
     if (!user) { setInsightsEnabled(false); return; }

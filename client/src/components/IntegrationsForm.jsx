@@ -4,7 +4,14 @@ import { useState } from 'react';
 // write-only: the form only knows whether a value is set (value.*.keySet /
 // clientSecretSet); typing a new value changes it, blank leaves it unchanged.
 // `onSave(payload)` receives only the fields that changed.
-export default function IntegrationsForm({ value, onSave, showLooker = true, lookerActive = true, showResend = false, showInventive = false, inventiveWorkspace = null, showMeta = false, showTikTok = false, clients = [], onTestEmail, collapsible = false }) {
+export default function IntegrationsForm({ value, onSave, showLooker = true, lookerActive = true, showResend = false, showInventive = false, inventiveWorkspace = null, showMeta = false, showTikTok = false, clients = [], onTestEmail, collapsible = false, canManageLock = false, locks = {}, onToggleLock, lockableKeys = [] }) {
+  // Each integration is FROZEN by default — fields are read-only until an
+  // admin/Owner (canManageLock) explicitly unlocks it, then re-locks. A guard
+  // against accidental changes to a working connection. A section reads as locked
+  // unless its lock is stored explicitly as `false`.
+  // `lockableKeys` scopes which sections are freezable on THIS surface (per-client
+  // vs platform), so e.g. the per-client Inventive workspace map gets no toggle.
+  const lockProps = (key) => (lockableKeys.includes(key) ? { lockKey: key, locked: locks?.[key] !== false, canManageLock, onToggleLock } : {});
   const [baseUrl, setBaseUrl] = useState(value?.looker?.baseUrl || '');
   const [clientId, setClientId] = useState(value?.looker?.clientId || '');
   const [clientSecret, setClientSecret] = useState('');
@@ -26,12 +33,15 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
   const [clearMetaToken, setClearMetaToken] = useState(false);
   const [metaAdAccount, setMetaAdAccount] = useState(value?.meta?.adAccountId || '');
   const [metaBusiness, setMetaBusiness] = useState(value?.meta?.businessId || '');
+  // Organic-insights assets (inbound social metrics): the Page / IG account we read.
+  const [metaPageId, setMetaPageId] = useState(value?.meta?.pageId || '');
+  const [metaIgUserId, setMetaIgUserId] = useState(value?.meta?.igUserId || '');
   const [ttToken, setTtToken] = useState('');
   const [clearTtToken, setClearTtToken] = useState(false);
   const [ttAdvertiser, setTtAdvertiser] = useState(value?.tiktok?.advertiserId || '');
   const [testState, setTestState] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [saved, setSaved] = useState(false);
+  const [busyKey, setBusyKey] = useState('');
+  const [savedKey, setSavedKey] = useState('');
 
   const secretSet = value?.looker?.clientSecretSet;
   const keySet = value?.anthropic?.keySet;
@@ -40,56 +50,80 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
   const resendSet = value?.resend?.keySet;
   const envResend = value?.resend?.envFallback;
 
-  async function save() {
-    setBusy(true);
-    try {
-      const payload = { looker: {}, anthropic: {} };
-      if (showLooker) {
-        payload.looker.baseUrl = baseUrl;
-        payload.looker.clientId = clientId;
-        if (clientSecret) payload.looker.clientSecret = clientSecret;
-        if (clearSecret) payload.looker.clearClientSecret = true;
-      }
-      if (anthropicKey) payload.anthropic.apiKey = anthropicKey;
-      if (clearKey) payload.anthropic.clearApiKey = true;
-      if (showResend) {
-        payload.resend = { from: mailFrom };
-        if (resendKey) payload.resend.apiKey = resendKey;
-        if (clearResendKey) payload.resend.clearApiKey = true;
-      }
-      if (showInventive) {
-        payload.inventive = { endpoint: invEndpoint };
-        if (invKey) payload.inventive.apiKey = invKey;
-        if (clearInvKey) payload.inventive.clearApiKey = true;
-        if (invToken) payload.inventive.embedToken = invToken;
-        if (clearInvToken) payload.inventive.clearEmbedToken = true;
-      }
-      if (inventiveWorkspace) payload.inventiveWorkspace = { name: invwName, refId: invwRef };
-      if (showMeta) {
-        payload.meta = { adAccountId: metaAdAccount, businessId: metaBusiness };
-        if (metaToken) payload.meta.accessToken = metaToken;
-        if (clearMetaToken) payload.meta.clearAccessToken = true;
-      }
-      if (showTikTok) {
-        payload.tiktok = { advertiserId: ttAdvertiser };
-        if (ttToken) payload.tiktok.accessToken = ttToken;
-        if (clearTtToken) payload.tiktok.clearAccessToken = true;
-      }
-      await onSave(payload);
-      setClientSecret(''); setAnthropicKey(''); setClearSecret(false); setClearKey(false);
-      setResendKey(''); setClearResendKey(false);
-      setInvKey(''); setInvToken(''); setClearInvKey(false); setClearInvToken(false);
-      setMetaToken(''); setClearMetaToken(false);
-      setTtToken(''); setClearTtToken(false);
-      setSaved(true); setTimeout(() => setSaved(false), 1600);
-    } catch (e) { alert('Save failed: ' + e.message); }
-    finally { setBusy(false); }
+  // Build just the slice for one section (or all if `only` is falsy). The backend
+  // merges partial payloads, so a per-card save only sends its own integration.
+  function buildPayload(only) {
+    const want = (k) => !only || only === k;
+    const p = {};
+    if (showLooker && want('looker')) {
+      p.looker = { baseUrl, clientId };
+      if (clientSecret) p.looker.clientSecret = clientSecret;
+      if (clearSecret) p.looker.clearClientSecret = true;
+    }
+    if (want('anthropic')) {
+      p.anthropic = {};
+      if (anthropicKey) p.anthropic.apiKey = anthropicKey;
+      if (clearKey) p.anthropic.clearApiKey = true;
+    }
+    if (showResend && want('resend')) {
+      p.resend = { from: mailFrom };
+      if (resendKey) p.resend.apiKey = resendKey;
+      if (clearResendKey) p.resend.clearApiKey = true;
+    }
+    if (showInventive && want('inventive')) {
+      p.inventive = { endpoint: invEndpoint };
+      if (invKey) p.inventive.apiKey = invKey;
+      if (clearInvKey) p.inventive.clearApiKey = true;
+      if (invToken) p.inventive.embedToken = invToken;
+      if (clearInvToken) p.inventive.clearEmbedToken = true;
+    }
+    if (inventiveWorkspace && want('inventive')) p.inventiveWorkspace = { name: invwName, refId: invwRef };
+    if (showMeta && want('meta')) {
+      p.meta = { adAccountId: metaAdAccount, businessId: metaBusiness, pageId: metaPageId, igUserId: metaIgUserId };
+      if (metaToken) p.meta.accessToken = metaToken;
+      if (clearMetaToken) p.meta.clearAccessToken = true;
+    }
+    if (showTikTok && want('tiktok')) {
+      p.tiktok = { advertiserId: ttAdvertiser };
+      if (ttToken) p.tiktok.accessToken = ttToken;
+      if (clearTtToken) p.tiktok.clearAccessToken = true;
+    }
+    return p;
   }
+
+  async function save(only) {
+    setBusyKey(only || 'all');
+    try {
+      await onSave(buildPayload(only));
+      // Clear the transient (write-only) inputs for whatever we just saved.
+      if (!only || only === 'looker') { setClientSecret(''); setClearSecret(false); }
+      if (!only || only === 'anthropic') { setAnthropicKey(''); setClearKey(false); }
+      if (!only || only === 'resend') { setResendKey(''); setClearResendKey(false); }
+      if (!only || only === 'inventive') { setInvKey(''); setInvToken(''); setClearInvKey(false); setClearInvToken(false); }
+      if (!only || only === 'meta') { setMetaToken(''); setClearMetaToken(false); }
+      if (!only || only === 'tiktok') { setTtToken(''); setClearTtToken(false); }
+      setSavedKey(only || 'all'); setTimeout(() => setSavedKey(''), 1600);
+    } catch (e) { alert('Save failed: ' + e.message); }
+    finally { setBusyKey(''); }
+  }
+
+  // Per-card save row — lives at the bottom of each integration card.
+  const SaveRow = ({ k }) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 16 }}>
+      <button type="button" style={saveBtn} onClick={() => save(k)} disabled={busyKey === k}>{busyKey === k ? 'Saving…' : 'Save'}</button>
+      {savedKey === k && (
+        <span className="saved-chip" style={{ color: 'var(--success, #10b981)', fontSize: 13, fontWeight: 600 }}>
+          <svg className="check-anim" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M5 13l4 4L19 7" /></svg>
+          Saved
+        </span>
+      )}
+    </div>
+  );
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       {/* Anthropic */}
-      <Section title="🤖 Anthropic (AI insights)" collapsible={collapsible}>
+      <Section title="🤖 Anthropic (AI insights)" collapsible={collapsible} {...lockProps('anthropic')}>
         <Lbl>API key</Lbl>
         <input
           type="password"
@@ -105,14 +139,23 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
             <input type="checkbox" checked={clearKey} onChange={(e) => setClearKey(e.target.checked)} /> Remove this key
           </label>
         )}
+        <SaveRow k="anthropic" />
       </Section>
 
       {/* Meta (FB/IG) — per-client audience sync */}
       {showMeta && (
-        <Section title="◇ Meta (Facebook / Instagram)" collapsible={collapsible}>
+        <Section title="◇ Meta (Facebook / Instagram)" collapsible={collapsible} {...lockProps('meta')} guide={<>
           <div style={note}>
             Push a <b>segment</b> to a Meta <b>Custom Audience</b> for ad targeting or exclusion. Emails/phones are hashed before they leave Pulse. Use a system-user / long-lived token with <code>ads_management</code>.
           </div>
+          <HowTo title="How to get your Meta access details" steps={[
+            <>Open <b>Meta Business Settings</b> → <b>Users → System users</b>. Create (or pick) a system user with <b>Admin</b> access.</>,
+            <>Under <b>Assigned assets</b>, add your <b>Ad account</b> and grant <b>Manage campaigns</b> (full) control.</>,
+            <>Click <b>Generate new token</b>, choose your app, and tick the <code>ads_management</code> scope (add <code>business_management</code> too). Pick a long-lived / non-expiring token and copy it into <b>Access token</b> above.</>,
+            <>Find your <b>Ad account ID</b> in <b>Ads Manager</b> — the <code>act_…</code> number in the account dropdown (top-left). Paste the digits as <code>act_1234567890</code>.</>,
+            <><b>Business ID</b> (optional) lives in <b>Business Settings → Business info</b>.</>,
+          ]} />
+        </>}>
           <Lbl>Access token</Lbl>
           <input
             type="password" autoComplete="off"
@@ -128,15 +171,33 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
           <Lbl>Business ID <span style={{ textTransform: 'none', fontWeight: 400 }}>· optional</span></Lbl>
           <input value={metaBusiness} onChange={(e) => setMetaBusiness(e.target.value)} placeholder="Meta Business Manager ID" style={input} autoComplete="off" />
           {value?.meta?.tokenSet && value?.meta?.adAccountId && <div style={{ ...note, color: 'var(--success, #10b981)', marginTop: 8 }}>✓ Connected — sync segments from Engage → Segments.</div>}
+
+          {/* Organic social metrics (INBOUND) — read Page/IG stats into Pulse. */}
+          <div style={{ ...note, marginTop: 14 }}>
+            <b>Social metrics (read-only):</b> to pull <b>organic</b> followers, reach &amp; post engagement into Pulse, add the Page / Instagram account below. The same token is reused — it needs <code>pages_read_engagement</code>, <code>read_insights</code> and (for IG) <code>instagram_basic</code> + <code>instagram_manage_insights</code>.
+          </div>
+          <Lbl>Facebook Page ID <span style={{ textTransform: 'none', fontWeight: 400 }}>· optional</span></Lbl>
+          <input value={metaPageId} onChange={(e) => setMetaPageId(e.target.value)} placeholder="e.g. 1029384756" style={input} autoComplete="off" />
+          <Lbl>Instagram account ID <span style={{ textTransform: 'none', fontWeight: 400 }}>· optional</span></Lbl>
+          <input value={metaIgUserId} onChange={(e) => setMetaIgUserId(e.target.value)} placeholder="IG Business/Creator user id" style={input} autoComplete="off" />
+          {value?.meta?.tokenSet && (value?.meta?.pageId || value?.meta?.igUserId) && <div style={{ ...note, color: 'var(--success, #10b981)', marginTop: 8 }}>✓ Social metrics on — view trends in <b>Social</b>.</div>}
+          <SaveRow k="meta" />
         </Section>
       )}
 
       {/* TikTok — per-client audience sync */}
       {showTikTok && (
-        <Section title="♪ TikTok" collapsible={collapsible}>
+        <Section title="♪ TikTok" collapsible={collapsible} {...lockProps('tiktok')} guide={<>
           <div style={note}>
             Push a <b>segment</b> to a TikTok <b>Custom Audience</b> for ad targeting. Emails/phones are hashed before they leave Pulse. Use an access token with audience (DMP) scope and the advertiser ID the audience should live under.
           </div>
+          <HowTo title="How to get your TikTok access details" steps={[
+            <>In <b>TikTok Ads Manager</b>, open <b>Assets → Audiences</b> to confirm you have a Custom Audience (DMP) enabled advertiser account. If not, ask your TikTok rep to enable it.</>,
+            <>Go to the <b>TikTok for Business Developers</b> portal and create an app under <b>Marketing API</b> (or use your agency's app). Add the <b>Audience / DMP</b> scope.</>,
+            <>Authorise the app for your advertiser account, then generate a <b>long-lived access token</b>. Copy it into <b>Access token</b> above.</>,
+            <>Find your <b>Advertiser ID</b> in Ads Manager — the account dropdown (top-right), or the <code>advertiser_id</code> in the page URL. Paste it into <b>Advertiser ID</b>.</>,
+          ]} />
+        </>}>
           <Lbl>Access token</Lbl>
           <input
             type="password" autoComplete="off"
@@ -150,12 +211,16 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
           <Lbl>Advertiser ID</Lbl>
           <input value={ttAdvertiser} onChange={(e) => setTtAdvertiser(e.target.value)} placeholder="TikTok advertiser ID" style={input} autoComplete="off" />
           {value?.tiktok?.tokenSet && value?.tiktok?.advertiserId && <div style={{ ...note, color: 'var(--success, #10b981)', marginTop: 8 }}>✓ Connected — sync segments from Engage → Segments.</div>}
+          <div style={{ ...note, marginTop: 14 }}>
+            <b>Social metrics (read-only):</b> if this token also carries the user scopes <code>user.info.stats</code> + <code>video.list</code>, Pulse pulls your <b>organic</b> follower count and recent video stats into <b>Social</b> automatically — no extra field needed.
+          </div>
+          <SaveRow k="tiktok" />
         </Section>
       )}
 
       {/* Resend (email) — platform-level only */}
       {showResend && (
-        <Section title="✉️ Email (Resend)" collapsible={collapsible}>
+        <Section title="✉️ Email (Resend)" collapsible={collapsible} {...lockProps('resend')}>
           {/* Emergency brake: instantly no-ops ALL outbound email (every client,
               every campaign/digest/notification) without touching Resend keys. */}
           <div style={{ border: `1.5px solid ${value?.resend?.enabled === false ? 'var(--error,#ef4444)' : 'var(--hairline)'}`, background: value?.resend?.enabled === false ? 'rgba(239,68,68,0.08)' : 'transparent', borderRadius: 10, padding: '10px 12px', marginBottom: 12 }}>
@@ -229,12 +294,13 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
               {testState && testState !== 'sending' && <span style={{ fontSize: 12.5, color: testState.startsWith('✓') ? 'var(--success, #10b981)' : 'var(--error, #ef4444)' }}>{testState}</span>}
             </div>
           )}
+          <SaveRow k="resend" />
         </Section>
       )}
 
       {/* Inventive (embedded AI analyst) — platform-level, one account → per-client workspaces */}
       {(showInventive || inventiveWorkspace) && (
-        <Section title="✨ Inventive (AI analyst)" collapsible={collapsible}>
+        <Section title="✨ Inventive (AI analyst)" collapsible={collapsible} {...lockProps('inventive')}>
           {inventiveWorkspace && (
             <>
               <div style={note}>How this client maps to its Inventive workspace. Blank fields inherit the client's own details.</div>
@@ -275,29 +341,14 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
           <Lbl>API endpoint <span style={{ textTransform: 'none', fontWeight: 400 }}>· optional</span></Lbl>
           <input value={invEndpoint} onChange={(e) => setInvEndpoint(e.target.value)} placeholder="https://app-api.madeinventive.com" style={input} autoComplete="off" />
           {value?.inventive?.configured && <div style={{ ...note, color: 'var(--success, #10b981)', marginTop: 8 }}>✓ Connected — the Ask analyst is live.</div>}
-
-          {clients.length > 0 && (
-            <>
-              <Lbl>Client workspace refs <span style={{ textTransform: 'none', fontWeight: 400 }}>· for provisioning</span></Lbl>
-              <div style={note}>Give your Inventive PoC each client's <b>name + email + this Ref ID</b> as the workspace <code>externalRefId</code> (manual mode). One Ref per client.</div>
-              <div style={{ border: '1px solid var(--hairline)', borderRadius: 10, overflow: 'hidden', marginTop: 6 }}>
-                {clients.map((c) => (
-                  <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', borderBottom: '1px solid var(--hairline)' }}>
-                    <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
-                    <code style={{ fontSize: 11.5, color: 'var(--muted)', background: 'rgba(128,128,128,0.12)', padding: '2px 7px', borderRadius: 6, userSelect: 'all' }}>{c.id}</code>
-                    <button type="button" style={{ flexShrink: 0, padding: '3px 9px', fontSize: 11, fontWeight: 600, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 980, cursor: 'pointer' }} onClick={() => { navigator.clipboard?.writeText(c.id).catch(() => {}); }}>Copy</button>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
           </>)}
+          <SaveRow k="inventive" />
         </Section>
       )}
 
       {/* Looker */}
       {showLooker && (
-        <Section title="📊 Looker" collapsible={collapsible}>
+        <Section title="📊 Looker" collapsible={collapsible} {...lockProps('looker')}>
           {!lookerActive && (
             <div style={note}>Per-client Looker isn't active yet — the primary (admin) Looker account is used for now. Your settings here are saved for when it's enabled.</div>
           )}
@@ -320,40 +371,81 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
               <input type="checkbox" checked={clearSecret} onChange={(e) => setClearSecret(e.target.checked)} /> Remove this secret
             </label>
           )}
+          <SaveRow k="looker" />
         </Section>
       )}
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <button style={saveBtn} onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
-        {saved && (
-          <span className="saved-chip" style={{ color: 'var(--success, #10b981)', fontSize: 13, fontWeight: 600 }}>
-            <svg className="check-anim" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M5 13l4 4L19 7" /></svg>
-            Saved
-          </span>
-        )}
-      </div>
     </div>
   );
 }
 
 // A card section that can optionally collapse (admin integrations starts each
 // section collapsed so the long page is scannable).
-function Section({ title, collapsible, children }) {
+// A card section that can optionally collapse, and optionally be FROZEN (a
+// per-integration lock). When `lockKey` is set the header carries a lock toggle
+// (visible to admins/owners) and, while locked, the section's fields are disabled.
+function Section({ title, collapsible, children, guide, lockKey, locked = false, canManageLock = false, onToggleLock }) {
   const [open, setOpen] = useState(!collapsible);
+  const [busy, setBusy] = useState(false);
+  const toggle = async () => {
+    if (!onToggleLock || busy) return;
+    setBusy(true);
+    try { await onToggleLock(lockKey, !locked); } finally { setBusy(false); }
+  };
+  const lockable = !!lockKey;
   return (
-    <section style={card}>
-      {collapsible ? (
-        <button type="button" onClick={() => setOpen((o) => !o)} style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', background: 'none', border: 'none', padding: 0, cursor: 'pointer', font: 'inherit', textAlign: 'left' }}>
-          <span style={{ width: 12, fontSize: 10, color: 'var(--muted)', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</span>
-          <span style={secTitle}>{title}</span>
-        </button>
-      ) : <div style={secTitle}>{title}</div>}
-      {open && <div style={collapsible ? { marginTop: 10 } : undefined}>{children}</div>}
+    <section style={{ ...card, ...(locked ? { borderColor: 'var(--hairline)', background: 'rgba(128,128,128,0.04)' } : null) }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        {collapsible ? (
+          <button type="button" onClick={() => setOpen((o) => !o)} style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0, background: 'none', border: 'none', padding: 0, cursor: 'pointer', font: 'inherit', textAlign: 'left' }}>
+            <span style={{ width: 12, fontSize: 10, color: 'var(--muted)', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</span>
+            <span style={secTitle}>{title}</span>
+          </button>
+        ) : <div style={{ ...secTitle, flex: 1, minWidth: 0 }}>{title}</div>}
+        {lockable && locked && <span title="This integration is locked" style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)' }}>🔒 Locked</span>}
+        {lockable && canManageLock && (
+          <button type="button" onClick={toggle} disabled={busy}
+            title={locked ? 'Unlock to edit this integration' : 'Lock this integration to prevent edits'}
+            style={{ flexShrink: 0, border: `1px solid ${locked ? 'var(--brand)' : 'var(--hairline)'}`, background: 'var(--card)', color: locked ? 'var(--brand)' : 'var(--muted)', borderRadius: 980, fontSize: 12, fontWeight: 700, padding: '4px 11px', cursor: 'pointer' }}>
+            {busy ? '…' : locked ? '🔓 Unlock' : '🔒 Lock'}
+          </button>
+        )}
+      </div>
+      {open && (
+        <>
+          {/* Help/guide content stays OUTSIDE the disabled fieldset so it's always
+              readable and expandable, even when the integration is locked. */}
+          {guide && <div style={{ marginTop: collapsible ? 10 : 8 }}>{guide}</div>}
+          <fieldset disabled={lockable && locked} style={{ border: 'none', margin: 0, padding: 0, minInlineSize: 'auto', marginTop: guide ? 6 : (collapsible ? 10 : 0), opacity: lockable && locked ? 0.6 : 1 }}>
+            {children}
+          </fieldset>
+        </>
+      )}
     </section>
   );
 }
 
 function Lbl({ children }) { return <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', margin: '12px 0 5px' }}>{children}</div>; }
+
+// Collapsible "how to get your access details" — closed by default so it never
+// clutters the form, but a step-by-step is one tap away when a client is stuck.
+function HowTo({ title, steps = [] }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ border: '1px solid var(--hairline)', borderRadius: 8, margin: '4px 0 6px', overflow: 'hidden' }}>
+      <button type="button" onClick={() => setOpen((o) => !o)} style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '9px 11px', background: 'rgba(128,128,128,0.05)', border: 'none', cursor: 'pointer', font: 'inherit', textAlign: 'left' }}>
+        <span style={{ fontSize: 13 }}>💡</span>
+        <span style={{ fontSize: 12.5, fontWeight: 700, flex: 1, color: 'var(--text)' }}>{title}</span>
+        <span style={{ width: 12, fontSize: 10, color: 'var(--muted)', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</span>
+      </button>
+      {open && (
+        <ol style={{ margin: 0, padding: '10px 12px 10px 28px', display: 'flex', flexDirection: 'column', gap: 7, fontSize: 12.5, color: 'var(--text)', lineHeight: 1.5 }}>
+          {steps.map((s, i) => <li key={i}>{s}</li>)}
+        </ol>
+      )}
+    </div>
+  );
+}
 
 const card = { background: 'var(--card)', border: '1px solid #e6e6e6', borderRadius: 12, padding: 18 };
 const secTitle = { fontSize: 14, fontWeight: 700, marginBottom: 4 };

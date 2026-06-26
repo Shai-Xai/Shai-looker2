@@ -2,6 +2,7 @@ import { cellText, formatNumber } from '../../lib/format.js';
 import { useDrill } from '../../lib/DrillContext.jsx';
 import { useIsMobile } from '../../lib/useIsMobile.js';
 import { useCountUp } from '../../lib/useCountUp.js';
+import { useMetricScale } from '../../lib/brand.js';
 import AutoFitText from '../AutoFitText.jsx';
 
 // The big number, animated. A hidden copy of the FINAL text reserves the full
@@ -24,6 +25,7 @@ function CountUpValue({ text }) {
 export default function SingleValueTile({ data, visConfig = {}, label }) {
   const { openDrill, canDrill } = useDrill();
   const isMobile = useIsMobile();
+  const scale = useMetricScale(); // brand-configurable KPI number size (1 = default)
   const fields = data.fields || {};
   const rows = data.data || [];
   if (!rows.length) return <Empty />;
@@ -99,9 +101,10 @@ export default function SingleValueTile({ data, visConfig = {}, label }) {
   return (
     <div style={{ ...wrap, ...(cf?.background ? { background: cf.background } : null) }}>
       <AutoFitText
-        max={isMobile ? 34 : 22}
-        min={isMobile ? 14 : 11}
-        style={{ flex: 1, minHeight: isMobile ? 30 : 22 }}
+        max={Math.round((isMobile ? 48 : 27) * scale)}
+        min={Math.round((isMobile ? 14 : 9) * scale)}
+        widthFactor={0.28}
+        style={{ flex: 1, minHeight: isMobile ? 34 : 24 }}
         onClick={drillable ? () => openDrill(primaryCell.links, primaryField.label_short || primaryField.label) : undefined}
         spanStyle={{
           fontWeight: cf?.bold ? 800 : 700, color: valueColor, letterSpacing: '-0.5px',
@@ -111,13 +114,13 @@ export default function SingleValueTile({ data, visConfig = {}, label }) {
         <CountUpValue text={primaryValue} />
       </AutoFitText>
       {comparison && (
-        <div className="chip-in" style={{ fontSize: 12.5, marginTop: 3, fontWeight: 600, color: comparison.color, flexShrink: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%', animationDelay: '420ms' }}>
+        <div className="chip-in" style={{ fontSize: isMobile ? 11 : 12.5, marginTop: 2, fontWeight: 600, color: comparison.color, flexShrink: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%', animationDelay: '420ms' }}>
           {comparison.text}
           <span style={{ color: 'var(--muted)', fontWeight: 400, marginLeft: 6 }}>{comparison.label}</span>
         </div>
       )}
       {labelText && (
-        <div className="chip-in" style={{ fontSize: 13, color: labelColor, marginTop: 3, fontWeight: 500, lineHeight: 1.2, textAlign: 'center', overflow: 'hidden', flexShrink: 0, animationDelay: '240ms' }}>
+        <div className="chip-in" style={{ fontSize: isMobile ? 10.5 : 13, color: labelColor, marginTop: 2, fontWeight: 500, lineHeight: 1.15, textAlign: 'center', overflow: 'hidden', flexShrink: 0, animationDelay: '240ms' }}>
           {labelText}
         </div>
       )}

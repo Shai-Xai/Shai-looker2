@@ -40,17 +40,11 @@ test('status reflects whether Inventive keys are configured', async () => {
   assert.equal((await app.req('GET', '/api/inventive/status', { as: u })).body.configured, true);
 });
 
-test('embed-url 400s when unconfigured, and when there is no client context', async () => {
+test('embed-url 400s when unconfigured (pre-network gate)', async () => {
   const u = h.makeClient('inv2@test.local', [h.makeEntity('Inv2 Co', 'inv2-org').id], 'owner');
-  // Unconfigured → 400 before any network call.
-  let r = await app.req('POST', '/api/inventive/embed-url', { as: u, body: {} });
+  // Unconfigured → 400 before any network call. (The workspace is now linked to
+  // the logged-in user, so there's no client-context gate any more.)
+  const r = await app.req('POST', '/api/inventive/embed-url', { as: u, body: {} });
   assert.equal(r.status, 400);
   assert.match(r.body.error, /not configured/i);
-  // Configured but no resolvable client context → 400 (still no network call).
-  h.db.setSetting('inventive_api_key', 'k');
-  h.db.setSetting('inventive_embed_auth_token', 't');
-  homeEntityId = '';
-  r = await app.req('POST', '/api/inventive/embed-url', { as: u, body: {} });
-  assert.equal(r.status, 400);
-  assert.match(r.body.error, /client context/i);
 });

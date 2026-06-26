@@ -30,23 +30,48 @@ export function activeFilterCount(filters, values) {
 // `onClose`); this component then renders only the panel of controls when open.
 // On mobile it stays self-contained: a "Filters" trigger + bottom sheet, since
 // the suite view hides its header there.
-export default function FilterBar({ filters, values, onChange, locked = {}, open = false, onClose, viewActions = null }) {
+export default function FilterBar({ filters, values, onChange, locked = {}, open = false, onClose, viewActions = null, lockEdit = null }) {
   const isMobile = useIsMobile();
 
-  const controls = filters.map(filter => (
-    <FilterControl
-      key={filter.id}
-      filter={filter}
-      value={values[filter.name] ?? ''}
-      onChange={val => onChange(filter.name, val)}
-      locked={!!locked[filter.name]}
-    />
-  ));
+  // Per-filter admin lock editing: a locked filter is read-only until the admin
+  // clicks its 🔒 (onUnlock) — then it's editable with a "🔒 Lock" button that
+  // saves and re-locks. A free filter shows a "🔓 Lock here" to pin it.
+  const controls = filters.map(filter => {
+    const name = filter.name;
+    const isLocked = !!locked[name];
+    const adminEdit = !!lockEdit?.canEdit;
+    const editingThis = adminEdit && lockEdit.isEditing(name);
+    const showLocked = isLocked && !editingThis;
+    const saving = adminEdit && lockEdit.savingName === name;
+    return (
+      <div key={filter.id} style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+        <FilterControl
+          filter={filter}
+          value={values[name] ?? ''}
+          onChange={val => onChange(name, val)}
+          locked={showLocked}
+          onLockClick={showLocked && adminEdit ? () => lockEdit.onUnlock(name) : null}
+        />
+        {adminEdit && !showLocked && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            {isLocked ? (
+              <>
+                <button type="button" onClick={() => lockEdit.onRelock(name)} disabled={saving} style={lockActionBtn} title="Save this value and lock it on this dashboard">{saving ? 'Saving…' : '🔒 Lock'}</button>
+                {lockEdit.hasOverride?.(name) && <button type="button" onClick={() => lockEdit.onInherit(name)} disabled={saving} style={lockLinkBtn} title="Drop this dashboard's override and follow the suite-wide lock">↺ Use suite lock</button>}
+              </>
+            ) : (
+              <button type="button" onClick={() => lockEdit.onLockHere(name)} disabled={saving} style={lockLinkBtn} title="Lock this filter on this dashboard for this client">{saving ? 'Saving…' : '🔓 Lock here'}</button>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  });
 
   // Mobile: the trigger now lives in the ☰ Menu bar (ViewPage drives `open`),
   // so here we only render the bottom sheet itself.
   if (isMobile) {
-    return open ? <FilterSheet onClose={onClose}>{controls}<FilterViewFooter va={viewActions} /></FilterSheet> : null;
+    return open ? <FilterSheet onClose={onClose}>{controls}<FilterViewFooter va={viewActions} lockStatus={lockEdit?.status} /></FilterSheet> : null;
   }
 
   // Desktop: the header owns the toggle. Render nothing until opened, then drop
@@ -58,26 +83,29 @@ export default function FilterBar({ filters, values, onChange, locked = {}, open
         <h3 style={{ fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', flex: 1 }}>Filters</h3>
         {onClose && <button onClick={onClose} style={doneBtn}>Done</button>}
       </div>
+      {lockEdit?.canEdit && (
+        <p style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 12px' }}>🔒 = locked for this client. Click a lock to edit it on this dashboard, then lock it again to save.</p>
+      )}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'flex-end' }}>
         {controls}
       </div>
-      <FilterViewFooter va={viewActions} />
+      <FilterViewFooter va={viewActions} lockStatus={lockEdit?.status} />
     </div>
   );
 }
 
 // Save/reset the current filter selection: a per-user "save my view" (re-opens
 // with these next time), and — for admins — set them as the client's default.
-function FilterViewFooter({ va }) {
-  if (!va) return null;
-  if (!va.onSave && !va.hasSaved && !va.canSetDefault && !va.note && !va.status) return null;
+function FilterViewFooter({ va, lockStatus }) {
+  const hasVa = va && (va.onSave || va.hasSaved || va.canSetDefault || va.note || va.status);
+  if (!hasVa && !lockStatus) return null;
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--hairline)' }}>
-      {va.onSave && <button onClick={va.onSave} style={saveViewBtn}>Save filters</button>}
-      {va.hasSaved && <button onClick={va.onReset} style={linkBtn}>Reset to default</button>}
-      {va.canSetDefault && <button onClick={va.onSetDefault} style={linkBtn} title="Make these the default for everyone on this client">Set as client default</button>}
-      {va.note && <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>{va.note}</span>}
-      {va.status && <span style={{ fontSize: 12.5, color: 'var(--muted)', marginLeft: 'auto' }}>{va.status}</span>}
+      {va?.onSave && <button onClick={va.onSave} style={saveViewBtn}>Save filters</button>}
+      {va?.hasSaved && <button onClick={va.onReset} style={linkBtn}>Reset to default</button>}
+      {va?.canSetDefault && <button onClick={va.onSetDefault} style={linkBtn} title="Make these the default for everyone on this client">Set as client default</button>}
+      {va?.note && <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>{va.note}</span>}
+      {(va?.status || lockStatus) && <span style={{ fontSize: 12.5, color: 'var(--muted)', marginLeft: 'auto' }}>{va?.status || lockStatus}</span>}
     </div>
   );
 }
@@ -89,16 +117,22 @@ const sheet = { background: 'var(--card)', width: '100%', maxHeight: '80dvh', ov
 const doneBtn = { padding: '7px 16px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer' };
 const saveViewBtn = { minHeight: 40, padding: '8px 18px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 980, fontSize: 13.5, fontWeight: 600, cursor: 'pointer' };
 const linkBtn = { minHeight: 40, padding: '8px 12px', background: 'transparent', color: 'var(--text)', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer' };
+const lockActionBtn = { alignSelf: 'flex-start', display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 11px', borderRadius: 980, fontSize: 11.5, fontWeight: 700, cursor: 'pointer', border: '1px solid var(--brand)', color: '#fff', background: 'var(--brand)' };
+const lockLinkBtn = { alignSelf: 'flex-start', display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 9px', borderRadius: 980, fontSize: 11, fontWeight: 700, cursor: 'pointer', border: '1px solid var(--hairline)', color: 'var(--muted)', background: 'transparent' };
 
 // A scoped, non-editable filter (the client's organiser/event). Shows the
 // value with a lock so it's clear it's fixed to their account.
-function LockedField({ filter, value }) {
+function LockedField({ filter, value, onLockClick }) {
   return (
     <div style={fieldStyle}>
       <label style={labelStyle}>{filter.title}</label>
-      <div style={{ ...inputStyle, background: 'var(--elevated)', color: 'var(--muted-2)', display: 'flex', alignItems: 'center', gap: 6, cursor: 'not-allowed' }} title="Locked to your account">
+      <div
+        style={{ ...inputStyle, background: 'var(--elevated)', color: 'var(--muted-2)', display: 'flex', alignItems: 'center', gap: 6, cursor: onLockClick ? 'pointer' : 'not-allowed', ...(onLockClick ? { borderColor: 'var(--brand)' } : null) }}
+        title={onLockClick ? 'Admin: click the lock to edit this filter on this dashboard' : 'Locked to your account'}
+        onClick={onLockClick || undefined}
+      >
         <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{value || '—'}</span>
-        <span style={{ fontSize: 12 }}>🔒</span>
+        <span style={{ fontSize: 12, color: onLockClick ? 'var(--brand)' : undefined }}>🔒</span>
       </div>
     </div>
   );
@@ -111,8 +145,8 @@ const MULTI_TYPES = new Set(['checkboxes', 'tag_list', 'advanced']);
 // paren = exclusive. Empty ends are allowed: "[26,]".
 const RANGE_RE = /^\s*([[(])\s*(-?\d+(?:\.\d+)?)?\s*,\s*(-?\d+(?:\.\d+)?)?\s*([\])])\s*$/;
 
-function FilterControl({ filter, value, onChange, locked }) {
-  if (locked) return <LockedField filter={filter} value={value} />;
+function FilterControl({ filter, value, onChange, locked, onLockClick }) {
+  if (locked) return <LockedField filter={filter} value={value} onLockClick={onLockClick} />;
   const uiType = filter.ui_config?.type;
   const isDate = uiType === 'relative_timeframes' || uiType === 'date_range_picker' || filter.type === 'date_filter';
   const field = filter.field || filter.dimension;

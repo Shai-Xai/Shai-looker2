@@ -90,7 +90,7 @@ export default function GuideModal({ guide, entityId, onClose, onComplete }) {
               <span key={n} style={{ height: 5, flex: 1, maxWidth: 34, borderRadius: 999, background: n <= i ? 'var(--brand)' : 'rgba(128,128,128,0.22)', transition: 'background .2s' }} />
             ))}
           </div>
-          <button type="button" onClick={close} aria-label="Close" style={{ flexShrink: 0, width: 32, height: 32, borderRadius: 980, border: 'none', background: 'rgba(128,128,128,0.12)', color: 'var(--muted)', fontSize: 16, cursor: 'pointer', lineHeight: 1 }}>✕</button>
+          <button type="button" onClick={close} aria-label="Close" style={{ flexShrink: 0, width: 40, height: 40, borderRadius: 980, border: 'none', background: 'rgba(128,128,128,0.12)', color: 'var(--muted)', fontSize: 16, cursor: 'pointer', lineHeight: 1 }}>✕</button>
         </div>
 
         {/* Body */}

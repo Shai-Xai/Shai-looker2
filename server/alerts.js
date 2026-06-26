@@ -588,11 +588,34 @@ function mount(app, { db, auth, resolveTileValue, resolveCustomMetric, metricCat
     res.json({ ok: true });
   });
 
+  // ── Recent alert FIRES as Pulse "beats" ──────────────────────────────────────
+  // Exposed (returned from mount) so server/pulse.js can MERGE these with momentum +
+  // future sources into the header strip's feed — keeping this module decoupled (it
+  // owns alerts; pulse owns the strip). Entity-scoped via alert_events.entity_id,
+  // newest first, last 48h by default. Returns [] when alerts are disabled.
+  function pulseTier(ruleType, operator) {
+    if (ruleType === 'sold_out') return 'success';                 // celebrate
+    if (ruleType === 'depletion') return 'warning';                // low stock
+    if (operator === 'lte' || operator === 'lt') return 'warning'; // dropped below a floor
+    return 'info';                                                 // reached
+  }
+  function recentBeats(entityId, { limit = 8, sinceMs = 48 * 3600 * 1000 } = {}) {
+    if (!enabled() || !entityId) return [];
+    const since = new Date(Date.now() - sinceMs).toISOString();
+    const rows = sql.prepare(`SELECT e.id, e.at, e.value, e.message, a.name AS name, a.rule_type AS rule_type, a.operator AS operator
+       FROM alert_events e LEFT JOIN alerts a ON a.id = e.alert_id
+       WHERE e.entity_id=? AND e.status='fired' AND e.at>=? ORDER BY e.at DESC LIMIT ?`).all(entityId, since, Math.max(1, limit));
+    return rows.map((r) => ({
+      id: r.id, kind: 'alert', at: r.at, tier: pulseTier(r.rule_type, r.operator),
+      message: r.message, name: r.name || '', value: r.value,
+    }));
+  }
+
   // Status (client uses it to decide whether to show the feature).
   app.get('/api/alerts/status', auth.requireAuth, (req, res) => res.json({ enabled: enabled() }));
 
   console.log('[alerts] mounted', enabled() ? '(enabled)' : '(disabled — set alerts_enabled=1)');
-  return { evaluate, tick };
+  return { evaluate, tick, recentBeats };
 }
 
 module.exports = { mount };

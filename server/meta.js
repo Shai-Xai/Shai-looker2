@@ -22,7 +22,6 @@
 // Identity is hashed (SHA-256 of normalised email/phone) BEFORE it leaves Pulse,
 // per Meta's Customer File requirements — raw PII is never sent.
 const crypto = require('crypto');
-const fetch = require('node-fetch');
 
 const GRAPH = 'https://graph.facebook.com/v19.0';
 
@@ -120,7 +119,7 @@ function hashPhone(raw, defaultCc = '27') {
 
 async function graph(path, { method = 'GET', token, body } = {}) {
   const url = `${GRAPH}/${path}`;
-  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  const opts = { method, headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(20000) }; // no infinite hang
   if (body) opts.body = JSON.stringify({ ...body, access_token: token });
   const res = await fetch(method === 'GET' ? `${url}${url.includes('?') ? '&' : '?'}access_token=${encodeURIComponent(token)}` : url, opts);
   const data = await res.json().catch(() => ({}));

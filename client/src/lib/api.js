@@ -2,8 +2,40 @@
 
 async function json(res) {
   const data = await res.json().catch(() => ({}));
+  // Session expired/invalid mid-use: a 401 is otherwise indistinguishable from a
+  // 500 to each page's local catch, so the user is stranded on a generic error.
+  // Tell the auth layer (AuthProvider listens) to drop back to the login screen.
+  // Still throw so the calling promise rejects rather than continuing with empty
+  // data.
+  if (res.status === 401 && typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('auth:unauthorized'));
+  }
   if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
   return data;
+}
+
+// Tiny cache for read-mostly GETs that screens re-fire on every navigation — e.g.
+// the suites sidebar + settlements list ClientLayout reloads on each client route
+// change. In-flight dedup (concurrent identical GETs share one request) + a short
+// self-healing TTL (a repeat within the window serves the cached result instantly).
+// These resources only change via admin actions, never the browsing client, so the
+// brief staleness is safe; bustCache(prefix) clears it after a relevant mutation.
+const _getCache = new Map();    // url -> { at, data }
+const _getInflight = new Map(); // url -> Promise
+function cachedGet(url, ttl = 60000) {
+  const hit = _getCache.get(url);
+  if (hit && Date.now() - hit.at < ttl) return Promise.resolve(hit.data);
+  if (_getInflight.has(url)) return _getInflight.get(url);
+  const p = fetch(url).then(json).then((data) => {
+    _getCache.set(url, { at: Date.now(), data });
+    _getInflight.delete(url);
+    return data;
+  }).catch((e) => { _getInflight.delete(url); throw e; });
+  _getInflight.set(url, p);
+  return p;
+}
+function bustCache(prefix = '') {
+  for (const k of [..._getCache.keys()]) if (!prefix || k.startsWith(prefix)) _getCache.delete(k);
 }
 
 // Usage telemetry: buffer events and flush in small batches (after a short idle,
@@ -69,8 +101,16 @@ export const api = {
       body: JSON.stringify({ email, password }),
     }).then(json),
   logout: () => fetch('/api/auth/logout', { method: 'POST' }).then(json),
+  forgotPassword: (email) => fetch('/api/auth/forgot', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) }).then(json),
+  resetPassword: (token, password) => fetch('/api/auth/reset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token, password }) }).then(json),
+  requestMagicLink: (email) => fetch('/api/auth/magic', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) }).then(json),
+  consumeMagicLink: (token) => fetch('/api/auth/magic/consume', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) }).then(json),
 
   // Admin — Entities (clients), Sets (reusable collections), Suites (event ctx)
+  adminListInventiveWorkspaces: () => fetch('/api/admin/inventive-workspaces').then(json),
+  adminCreateInventiveWorkspace: (w) => fetch('/api/admin/inventive-workspaces', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(w) }).then(json),
+  adminUpdateInventiveWorkspace: (id, w) => fetch(`/api/admin/inventive-workspaces/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(w) }).then(json),
+  adminDeleteInventiveWorkspace: (id) => fetch(`/api/admin/inventive-workspaces/${id}`, { method: 'DELETE' }),
   adminListEntities: () => fetch('/api/admin/entities').then(json),
   adminCreateEntity: (e) => fetch('/api/admin/entities', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(e) }).then(json),
   adminUpdateEntity: (id, e) => fetch(`/api/admin/entities/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(e) }).then(json),
@@ -103,6 +143,8 @@ export const api = {
 
   // Users (admin)
   adminListUsers: () => fetch('/api/admin/users').then(json),
+  adminUserActivityReport: (days = 30) => fetch(`/api/admin/users/activity-report?days=${days}`).then(json),
+  setEntityHowlerSupport: (id, userIds) => fetch(`/api/admin/entities/${id}/howler-support`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userIds }) }).then(json),
   adminGetUser: (id) => fetch(`/api/admin/users/${id}`).then(json),
   adminCreateUser: (u) => fetch('/api/admin/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(u) }).then(json),
   adminUpdateUser: (id, u) => fetch(`/api/admin/users/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(u) }).then(json),
@@ -125,11 +167,37 @@ export const api = {
       body: JSON.stringify(def),
     }).then(json),
   deleteDashboard: (id) => fetch(`/api/dashboards/${id}`, { method: 'DELETE' }),
+  // Fork a shared dashboard into a client-owned version for this suite. `payload`
+  // carries the (edited) def + optional { title, folder, setId, newSetName }.
+  forkSuiteDashboard: (suiteId, dashboardId, payload) =>
+    fetch(`/api/admin/suites/${suiteId}/dashboards/${dashboardId}/fork`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+    }).then(json),
+  // Revert a client version back to the shared template (discards the copy).
+  revertSuiteDashboard: (suiteId, dashboardId) =>
+    fetch(`/api/admin/suites/${suiteId}/dashboards/${dashboardId}/revert`, { method: 'POST' }).then(json),
   // Usage telemetry — fire-and-forget, batched (see _trackBuf below). Never throws.
   // NB: distinct from `track(suiteId, dashboardId)` below, which counts dashboard views.
   trackUsage: (entityId, event) => queueTrack(entityId, event),
   // Admin: onboarding funnel + feature-usage aggregates.
   adminOnboardingStats: () => fetch('/api/admin/onboarding/stats').then(json),
+
+  // Client setup wizard config (admin-editable steps) + per-client checklist progress
+  getSetupWizard: () => fetch('/api/admin/setup-wizard').then(json),
+  saveSetupWizard: (steps) => fetch('/api/admin/setup-wizard', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ steps }) }).then(json),
+  resetSetupWizard: () => fetch('/api/admin/setup-wizard', { method: 'DELETE' }).then(json),
+  getSetupWizardProgress: (entityId) => fetch(`/api/admin/setup-wizard/progress/${entityId}`).then(json),
+  // PWA install: client self-reports when running as the installed app; admin reads the map.
+  markInstalled: () => fetch('/api/my/installed', { method: 'POST' }).catch(() => {}),
+  adminInstalls: () => fetch('/api/admin/installs').then(json),
+  // Setup nudges — per-client reminder config (managed in the onboarding section).
+  getSetupNudge: (entityId) => fetch(`/api/admin/entities/${entityId}/setup-nudge`).then(json),
+  saveSetupNudge: (entityId, b) => fetch(`/api/admin/entities/${entityId}/setup-nudge`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  testSetupNudge: (entityId, audience) => fetch(`/api/admin/entities/${entityId}/setup-nudge/test`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ audience }) }).then(json),
+  getSetupNudgeSettings: () => fetch('/api/admin/setup-nudge/settings').then(json),
+  saveSetupNudgeSettings: (b) => fetch('/api/admin/setup-nudge/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  testSetupNudgeSettings: () => fetch('/api/admin/setup-nudge/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(json),
+  setSetupWizardProgress: (entityId, itemKey, done) => fetch(`/api/admin/setup-wizard/progress/${entityId}/${encodeURIComponent(itemKey)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ done }) }).then(json),
 
   // Onboarding checklist
   getMyOnboarding: (entityId) => fetch(`/api/my/onboarding/${entityId}`).then(json),
@@ -199,8 +267,21 @@ export const api = {
     }).then(json),
 
   // Client navigation: Suites
-  mySuites: () => fetch('/api/my/suites').then(json),
+  bustCache,
+  mySuites: () => cachedGet('/api/my/suites'),
   mySuite: (id) => fetch(`/api/my/suites/${id}`).then(json),
+
+  // Social metrics (inbound organic stats). Admins pass the ownership check, so
+  // both admin-preview and client self-service use the same /api/my/social path.
+  mySocial: (entityId, { metric = 'reach', days = 30, platform, accountRef, sort } = {}) => {
+    const q = new URLSearchParams({ metric, days: String(days) });
+    if (platform) q.set('platform', platform);
+    if (accountRef) q.set('accountRef', accountRef);
+    if (sort) q.set('sort', sort);
+    return fetch(`/api/my/social/${entityId}?${q}`).then(json);
+  },
+  syncSocial: (entityId) => fetch(`/api/my/social/${entityId}/sync`, { method: 'POST' }).then(json),
+  verifySocial: (entityId) => fetch(`/api/my/social/${entityId}/verify`, { method: 'POST' }).then(json),
 
   // Inventive embedded AI analyst (server-proxied; key stays server-side).
   inventiveStatus: () => fetch('/api/inventive/status').then(json),
@@ -212,6 +293,11 @@ export const api = {
   resetMyDashboardFilters: (dashboardId) => fetch(`/api/my/dashboard-filters/${dashboardId}`, { method: 'DELETE' }).then(json),
   setClientDashboardFilters: (entityId, dashboardId, filters) => fetch(`/api/admin/entities/${entityId}/dashboard-filters/${dashboardId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filters }) }).then(json),
   resetClientDashboardFilters: (entityId, dashboardId) => fetch(`/api/admin/entities/${entityId}/dashboard-filters/${dashboardId}`, { method: 'DELETE' }).then(json),
+  // Admin: per-dashboard locked-filter overrides for a suite dashboard (writes to
+  // suite.dashboardLocks). `locks` is { filterName: value } — empty clears it.
+  setSuiteDashboardLocks: (suiteId, dashboardId, locks) => fetch(`/api/admin/suites/${suiteId}/dashboard-locks/${dashboardId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ locks }) }).then(json),
+  // Per-tile lock overrides for one tile in a suite ({ filterName: value }).
+  setSuiteTileLocks: (suiteId, tileId, locks) => fetch(`/api/admin/suites/${suiteId}/tile-locks/${tileId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ locks }) }).then(json),
 
   // Tile library
   libraryList: (params = {}) => {
@@ -236,7 +322,14 @@ export const api = {
   verifyConnector: (entityId, channel) => fetch(`/api/admin/integrations/${entityId}/verify`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ channel }) }).then(json),
   audienceStatus: (entityId, channel, audienceId) => fetch(`/api/admin/integrations/${entityId}/audience-status`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ channel, audienceId }) }).then(json),
   getAudienceSyncLog: (entityId, limit = 50) => fetch(`/api/admin/integrations/${entityId}/log?limit=${limit}`).then(json),
+  // Client self-service ad-audience hub (own entity, /api/my).
+  myAudiences: (entityId) => fetch(`/api/my/audiences/${entityId}`).then(json),
+  myVerifyConnector: (entityId, channel) => fetch(`/api/my/audiences/${entityId}/verify`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ channel }) }).then(json),
+  myAudienceStatus: (entityId, channel, audienceId) => fetch(`/api/my/audiences/${entityId}/audience-status`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ channel, audienceId }) }).then(json),
+  myPlatformAudiences: (entityId, channel) => fetch(`/api/my/audiences/${entityId}/platform/${channel}`).then(json),
+  myAudienceSyncLog: (entityId, limit = 50) => fetch(`/api/my/audiences/${entityId}/log?limit=${limit}`).then(json),
   saveAdminIntegrations: (p) => fetch('/api/admin/integrations', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),
+  setAdminIntegrationLock: (key, locked) => fetch('/api/admin/integrations/lock', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, locked }) }).then(json),
   sendMailTest: (entityId) => fetch('/api/admin/mail/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entityId }) }).then(json),
   getMailLog: (params = {}) => fetch(`/api/admin/mail-log?${new URLSearchParams(params)}`).then(json),
   getMyMailLog: (entityId, params = {}) => fetch(`/api/my/mail-log/${entityId}?${new URLSearchParams(params)}`).then(json),
@@ -244,6 +337,8 @@ export const api = {
   saveEntityIntegrations: (id, p) => fetch(`/api/admin/entities/${id}/integrations`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),
   getMyIntegrations: () => fetch('/api/my/integrations').then(json),
   saveMyIntegrations: (entityId, p) => fetch(`/api/my/integrations/${entityId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),
+  setMyIntegrationLock: (entityId, key, locked) => fetch(`/api/my/integrations/${entityId}/lock`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, locked }) }).then(json),
+  setEntityIntegrationLock: (id, key, locked) => fetch(`/api/admin/entities/${id}/integrations/lock`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, locked }) }).then(json),
 
   // Email templates / branding (platform default + per-client overrides)
   getMailTemplate: () => fetch('/api/admin/mail-template').then(json),
@@ -360,7 +455,7 @@ export const api = {
   importData: (data) => fetch('/api/admin/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(json),
 
   // Settlements
-  mySettlements: () => fetch('/api/my/settlements').then(json),
+  mySettlements: () => cachedGet('/api/my/settlements'),
   getSettlement: (id) => fetch(`/api/settlements/${id}`).then(json),
   saveSettlementNotes: (id, notes) => fetch(`/api/settlements/${id}/notes`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ notes }) }).then(json),
   adminListSettlements: () => fetch('/api/admin/settlements').then(json),
@@ -468,6 +563,8 @@ export const api = {
   deleteAlert: (id) => fetch(`/api/alerts/${id}`, { method: 'DELETE' }).then((r) => r.ok),
   setAlertStatus: (id, status) => fetch(`/api/alerts/${id}/status`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) }).then(json),
   alertEvents: (id) => fetch(`/api/alerts/${id}/events`).then(json),
+  // Live "pulse" feed: alert fires + tile momentum, merged for the header strip.
+  entityPulse: (entityId, limit = 8) => fetch(`/api/pulse/entities/${entityId}?limit=${limit}`).then(json),
   testAlert: (id) => fetch(`/api/alerts/${id}/test`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(json),
   alertTileValue: (suiteId, dashboardId, tileId) => fetch(`/api/alerts/suites/${suiteId}/tile-value`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dashboardId, tileId }) }).then(json),
   // Custom-metric source: alert on a raw measure + dimension filter (no tile needed).

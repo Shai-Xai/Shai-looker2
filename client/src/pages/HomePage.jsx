@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/auth.jsx';
 import FolderImportModal from '../components/FolderImportModal.jsx';
+import BackButton from '../components/BackButton.jsx';
 
 export default function HomePage() {
   const navigate = useNavigate();
@@ -178,8 +179,14 @@ export default function HomePage() {
       {/* shared datalist of existing folders for the import input */}
       <datalist id="folder-list">{folders.map((f) => <option key={f} value={f} />)}</datalist>
 
-      {/* Header: breadcrumb + actions */}
+      {/* Header: back + breadcrumb + actions. The back button steps UP a folder
+          when you're inside one, otherwise returns to the previous page. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
+        {path
+          ? <button onClick={() => setPath(path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '')} title="Up a folder" aria-label="Up a folder" className="btn-key" style={homeBackBtn}>
+              <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
+            </button>
+          : <BackButton fallback="/admin" />}
         <h2 style={{ fontSize: 18, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
           <button style={crumbBtn} onClick={() => setPath('')}>{isAdmin ? 'Your dashboards' : 'Dashboards'}</button>
           {segs.map((s, i) => (
@@ -314,4 +321,5 @@ const viewToggleOn = { background: 'var(--brand)', color: '#fff' };
 const deleteBtn = { border: 'none', background: 'transparent', color: '#bbb', cursor: 'pointer', fontSize: 14, padding: 2 };
 const folderEditBtn = { border: 'none', background: 'rgba(0,0,0,0.05)', color: 'var(--muted)', cursor: 'pointer', fontSize: 13, borderRadius: 8, width: 28, height: 28, flexShrink: 0 };
 const crumbBtn = { border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 18, fontWeight: 700, color: 'var(--text)', padding: 0 };
+const homeBackBtn = { flexShrink: 0, width: 34, height: 34, borderRadius: '50%', background: 'rgba(128,128,128,0.15)', color: 'var(--text)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer' };
 const folderTag = { fontSize: 11, fontWeight: 600, background: '#eef2ff', color: '#4f46e5', padding: '2px 8px', borderRadius: 980 };

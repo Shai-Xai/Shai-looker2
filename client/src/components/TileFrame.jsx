@@ -10,23 +10,35 @@ import AiMark from './AiMark.jsx';
 import { usePins } from '../lib/PinContext.jsx';
 import { useTileData, isRunnableQuery } from '../lib/useTileData.js';
 import { ANY_VALUE } from '../lib/filterConstants.js';
+import { lockableFilters } from '../lib/tileLockFields.js';
 import { useAuth } from '../lib/auth.jsx';
 import { useScope } from '../lib/ScopeContext.jsx';
 import { api } from '../lib/api.js';
 import { useAccess, PERMS } from '../lib/access.js';
 import CreateSegmentModal from './CreateSegmentModal.jsx';
+import ShareMenu from './ShareMenu.jsx';
+import TileLockModal from './TileLockModal.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
 
 // Renders a single tile (vis or text). In edit mode it shows hover controls
 // (edit / duplicate / delete) and a drag handle on the title bar.
-export default function TileFrame({ tile, filterValues, editable, onEdit, onDuplicate, onRemove }) {
+export default function TileFrame({ tile, filterValues, editable, onEdit, onDuplicate, onRemove, onMoveOut, onToggleHide, inCarousel }) {
   const { data, loading, error } = useTileData(tile, filterValues);
   const { insightsEnabled } = useAuth();
-  const { entityId, dashboardId } = useScope();
+  const { entityId, dashboardId, suiteId, canLockTiles, tileLocks = {}, lockFilters = [], onSaveTileLock } = useScope();
+  const [showTileLock, setShowTileLock] = useState(false);
+  // Admin per-tile lock affordance: only when in a suite, the tile is queryable
+  // and at least one dashboard filter is lockable on it (wired via listenTo OR
+  // applicable because the tile's query already uses that filter's field).
+  const tileLockCount = Object.keys(tileLocks?.[tile.id] || {}).length;
+  const canLockThisTile = !!(canLockTiles && editable && tile.type !== 'text' && onSaveTileLock && lockableFilters(tile, lockFilters).length > 0);
   const { can } = useAccess();
   const isMobile = useIsMobile();
   const [showInsight, setShowInsight] = useState(false);
   const [showSegment, setShowSegment] = useState(false);
+  // On phones the per-tile owl/pin/segment buttons clutter every card, so they
+  // stay hidden until you tap the tile (desktop shows them on hover as before).
+  const [tapped, setTapped] = useState(false);
   // Open the Owl on this tile, recording it as a feature-usage signal (Admin → Onboarding).
   const openInsight = () => { if (entityId) api.trackUsage(entityId, { kind: 'feature', name: 'insight', event: 'use' }); setShowInsight(true); };
 
@@ -75,6 +87,8 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
       // Hover-lift in view mode (matches the home cards). Not while editing — it
       // would fight the drag-to-rearrange transform.
       className={`howler-tile${editable ? '' : ' lift'}`}
+      // Mobile: tap the card to reveal/hide its owl + controls.
+      onClick={isMobile && !editable ? () => setTapped((v) => !v) : undefined}
       style={{
         background: 'var(--tile-bg, #fff)',
         border: '1px solid var(--border)',
@@ -84,11 +98,17 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
         flexDirection: 'column',
         overflow: 'hidden',
         boxShadow: 'var(--shadow-sm)',
+        // Hidden tiles are dimmed in the editor (and not rendered at all for
+        // viewers — the parent filters them out).
+        opacity: editable && tile.hidden ? 0.4 : 1,
       }}
     >
       {showHeader && (
         <div
-          className={editable ? 'tile-drag-handle' : undefined}
+          // Inside a scrolling carousel the tile must NOT carry the grid's
+          // drag-handle class — that would drag the whole carousel. Reorder there
+          // is via the ⠿ grip instead.
+          className={editable && !inCarousel ? 'tile-drag-handle' : undefined}
           style={{
             padding: '10px 14px',
             fontSize: 13,
@@ -100,23 +120,28 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
             display: 'flex',
             alignItems: 'center',
             gap: 8,
-            cursor: editable ? 'move' : 'default',
+            cursor: editable && !inCarousel ? 'move' : 'default',
           }}
         >
           <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             {isMetric ? null : (tile.title || <em style={{ color: '#bbb', fontWeight: 400 }}>Untitled</em>)}
           </span>
-          {!editable && canSegment && <SegmentButton onClick={() => setShowSegment(true)} isMobile={isMobile} />}
-          {!editable && canInsight && (
+          {!editable && (!isMobile || tapped) && canSegment && <SegmentButton onClick={() => setShowSegment(true)} isMobile={isMobile} />}
+          {!editable && (!isMobile || tapped) && <ShareMenu variant="tile" isMobile={isMobile} heading={tile.title || 'Dashboard tile'} />}
+          {!editable && (!isMobile || tapped) && canInsight && (
             <>
               <PinButton tileId={tile.id} isMobile={isMobile} />
               <InsightButton onClick={openInsight} isMobile={isMobile} />
             </>
           )}
           {editable && (
-            <span style={{ display: 'flex', gap: 4 }} onMouseDown={(e) => e.stopPropagation()}>
+            <span style={{ display: 'flex', gap: 4, alignItems: 'center' }} onMouseDown={(e) => e.stopPropagation()}>
+              {inCarousel && <ReorderGrip tileId={tile.id} />}
               <IconBtn title="Edit" onClick={onEdit}>✎</IconBtn>
               <IconBtn title="Duplicate" onClick={onDuplicate}>⧉</IconBtn>
+              {onMoveOut && <IconBtn title="Move out to the dashboard grid" onClick={onMoveOut}>⤴</IconBtn>}
+              {onToggleHide && <IconBtn title={tile.hidden ? 'Show to viewers' : 'Hide from viewers'} onClick={onToggleHide}>{tile.hidden ? <EyeOff /> : <Eye />}</IconBtn>}
+              {canLockThisTile && <LockTileButton onClick={() => setShowTileLock(true)} count={tileLockCount} isMobile={isMobile} />}
               <IconBtn title="Delete" onClick={onRemove} danger>✕</IconBtn>
             </span>
           )}
@@ -124,7 +149,9 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
       )}
 
       <div style={{ flex: 1, minHeight: 0, position: 'relative', padding: tile.type === 'text' ? 12 : 0 }}>
-        {editable && (
+        {/* Grid/section tiles get a top-right ⠿ to drag INTO a carousel. Tiles
+            already in a carousel reorder via the grip in their control cluster. */}
+        {editable && !inCarousel && (
           <span
             draggable
             onDragStart={(e) => { e.dataTransfer.setData('text/plain', tile.id); e.dataTransfer.effectAllowed = 'move'; }}
@@ -134,21 +161,33 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
         )}
         {/* No header (metric tiles): the insight button floats in the corner,
             with the pin just left of it. Hidden while editing to free the corners. */}
-        {!editable && canInsight && !showHeader && (
+        {!editable && (!isMobile || tapped) && canInsight && !showHeader && (
           <>
             <PinButton tileId={tile.id} isMobile={isMobile} corner />
             <InsightButton onClick={openInsight} isMobile={isMobile} corner />
           </>
         )}
-        {!editable && canSegment && !showHeader && <SegmentButton onClick={() => setShowSegment(true)} isMobile={isMobile} corner />}
-        {/* Editable metric tile (no header): a move handle + edit controls float in
-            the top corners, so the value below stays fully visible. */}
+        {!editable && (!isMobile || tapped) && canSegment && !showHeader && <SegmentButton onClick={() => setShowSegment(true)} isMobile={isMobile} corner />}
+        {/* Editable metric tile (no header): the move handle + edit controls float
+            in the top-RIGHT corner, so the value below stays fully visible. The
+            move handle reorders within a carousel (⠿) or moves on the grid (✥). */}
         {editable && !showHeader && (
+          // NB: only the buttons stop mousedown propagation — NOT the drag handle.
+          // The grid handle (✥) must let its mousedown reach react-grid-layout, or
+          // the tile won't drag. (Headerless KPI tiles regressed by wrapping the
+          // handle in the buttons' stopPropagation span.)
           <span style={{ position: 'absolute', top: 6, right: 6, zIndex: 7, display: 'flex', gap: 4, alignItems: 'center', background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 8, padding: 2 }}>
-            <span className="tile-drag-handle" title="Drag to move" style={{ cursor: 'move', color: '#999', fontSize: 13, padding: '2px 5px', lineHeight: 1.2 }}>✥</span>
-            <IconBtn title="Edit" onClick={onEdit}>✎</IconBtn>
-            <IconBtn title="Duplicate" onClick={onDuplicate}>⧉</IconBtn>
-            <IconBtn title="Delete" onClick={onRemove} danger>✕</IconBtn>
+            {inCarousel
+              ? <ReorderGrip tileId={tile.id} />
+              : <span className="tile-drag-handle" title="Drag to move" style={{ cursor: 'move', color: '#999', fontSize: 13, padding: '2px 5px', lineHeight: 1.2 }}>✥</span>}
+            <span style={{ display: 'flex', gap: 4, alignItems: 'center' }} onMouseDown={(e) => e.stopPropagation()}>
+              <IconBtn title="Edit" onClick={onEdit}>✎</IconBtn>
+              <IconBtn title="Duplicate" onClick={onDuplicate}>⧉</IconBtn>
+              {onMoveOut && <IconBtn title="Move out to the dashboard grid" onClick={onMoveOut}>⤴</IconBtn>}
+              {onToggleHide && <IconBtn title={tile.hidden ? 'Show to viewers' : 'Hide from viewers'} onClick={onToggleHide}>{tile.hidden ? <EyeOff /> : <Eye />}</IconBtn>}
+              {canLockThisTile && <LockTileButton onClick={() => setShowTileLock(true)} count={tileLockCount} isMobile={isMobile} />}
+              <IconBtn title="Delete" onClick={onRemove} danger>✕</IconBtn>
+            </span>
           </span>
         )}
         {tile.type === 'text' ? (
@@ -188,7 +227,48 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
           onClose={() => setShowSegment(false)}
         />
       )}
+      {showTileLock && (
+        <TileLockModal
+          tile={tile}
+          filters={lockFilters}
+          suiteId={suiteId}
+          current={tileLocks?.[tile.id] || {}}
+          onSave={onSaveTileLock}
+          onClose={() => setShowTileLock(false)}
+        />
+      )}
     </div>
+  );
+}
+
+// Drag handle for reordering a tile within a carousel (HTML5 drag; the carousel
+// reads the id on drop). Deliberately NOT a .tile-drag-handle so it never drags
+// the parent carousel.
+function ReorderGrip({ tileId }) {
+  return (
+    <span
+      draggable
+      onDragStart={(e) => { e.dataTransfer.setData('text/plain', tileId); e.dataTransfer.effectAllowed = 'move'; }}
+      title="Drag to reorder"
+      style={{ cursor: 'grab', color: '#999', fontSize: 13, padding: '2px 5px', lineHeight: 1.2 }}
+    >⠿</span>
+  );
+}
+
+function Eye() {
+  return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z" /><circle cx="12" cy="12" r="3" /></svg>;
+}
+function EyeOff() {
+  return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" /><line x1="1" y1="1" x2="23" y2="23" /></svg>;
+}
+
+// Admin: lock this tile's filter(s) for the client. Brand-tinted when it has
+// active locks. Corner variant floats bottom-left (clear of the owl/segment).
+function LockTileButton({ onClick, count, isMobile, corner }) {
+  const base = { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', border: `1px solid ${count ? 'var(--brand)' : 'var(--hairline)'}`, background: 'var(--card)', color: count ? 'var(--brand)' : 'var(--muted)', borderRadius: 7, fontSize: isMobile ? 13 : 11, lineHeight: 1, minWidth: isMobile ? 28 : 24, height: isMobile ? 28 : 24, padding: '0 5px', fontWeight: 700 };
+  const cornerStyle = corner ? { position: 'absolute', bottom: 6, left: 6, zIndex: 6 } : null;
+  return (
+    <button className="no-print" title="Lock this tile's filters for this client" onClick={(e) => { e.stopPropagation(); onClick(); }} style={{ ...base, ...cornerStyle }}>🔒{count ? ` ${count}` : ''}</button>
   );
 }
 

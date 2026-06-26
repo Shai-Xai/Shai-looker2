@@ -16,5 +16,20 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: true,
+    rollupOptions: {
+      output: {
+        // Split the single app chunk into app + echarts + the rest of the
+        // vendor tree. Smaller chunks lower peak build memory (the prod
+        // sourcemap is large) and cut the initial load. echarts is a clean leaf
+        // (nothing else imports it), so it splits without a circular chunk; the
+        // interdependent React ecosystem stays together in one `vendor` chunk to
+        // avoid cross-chunk init cycles.
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined;
+          if (id.includes('echarts')) return 'echarts';
+          return 'vendor';
+        },
+      },
+    },
   },
 });

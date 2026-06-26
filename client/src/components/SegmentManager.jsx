@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { api } from '../lib/api.js';
+import PlatformIcon from './PlatformIcon.jsx';
 import { AudienceFilters } from './CampaignManager.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
 
@@ -126,8 +127,8 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
           {segments.map((s) => {
             const lbl = sourceLabel(s);
             return (
-              <div key={s.id} style={{ border: '1px solid var(--hairline)', borderRadius: 14, padding: isMobile ? '16px' : '14px 16px', display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'stretch' : 'center', gap: isMobile ? 12 : 14, background: 'var(--card)' }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
+              <div key={s.id} style={{ border: '1px solid var(--hairline)', borderRadius: 14, padding: isMobile ? '16px' : '14px 16px', display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'stretch' : 'center', flexWrap: isMobile ? 'nowrap' : 'wrap', gap: isMobile ? 12 : 14, background: 'var(--card)' }}>
+                <div style={{ flex: isMobile ? undefined : '1 1 240px', minWidth: isMobile ? 0 : 220 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                     <span style={{ fontWeight: 700, fontSize: isMobile ? 17 : 15 }}>{s.name}</span>
                     <span style={{ fontSize: 10.5, fontWeight: 700, borderRadius: 980, padding: '2px 9px', background: 'rgba(128,128,128,0.14)', color: 'var(--muted)' }}>{s.source === 'mix' ? 'Combined' : s.source === 'paste' ? 'Uploaded / pasted' : s.source === 'gsheet' ? 'Google Sheet' : 'Dashboard tile'}</span>
@@ -149,10 +150,10 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
                 <div style={{ display: 'flex', gap: 8, flexShrink: 0, flexWrap: 'wrap' }}>
                   <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding }} onClick={() => viewPeople(s)}>👥 List</button>
                   <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding }} onClick={() => refresh(s)} disabled={busyId === s.id}>{busyId === s.id ? '…' : '↻ Refresh'}</button>
-                  {metaConnected && <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding }} onClick={() => syncMeta(s)} disabled={busyId === s.id} title="Mirror this audience to a Meta Custom Audience (hashed match)">◇ Sync to Meta</button>}
-                  {metaConnected && <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding, ...(s.metaAuto ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }} onClick={() => api.setSegmentAuto(entityId, s.id, 'meta', !s.metaAuto).then(load)} title="Keep the Meta audience mirrored automatically (~daily)">{s.metaAuto ? '◇ Auto: on' : '◇ Auto: off'}</button>}
-                  {tiktokConnected && <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding }} onClick={() => syncTikTok(s)} disabled={busyId === s.id} title="Mirror this audience to a TikTok Custom Audience (hashed match)">♪ Sync to TikTok</button>}
-                  {tiktokConnected && <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding, ...(s.tiktokAuto ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }} onClick={() => api.setSegmentAuto(entityId, s.id, 'tiktok', !s.tiktokAuto).then(load)} title="Keep the TikTok audience mirrored automatically (~daily)">{s.tiktokAuto ? '♪ Auto: on' : '♪ Auto: off'}</button>}
+                  {metaConnected && <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding }} onClick={() => syncMeta(s)} disabled={busyId === s.id} title="Mirror this audience to a Meta Custom Audience (hashed match)"><PlatformIcon channel="meta" size={13} /> Sync to Meta</button>}
+                  {metaConnected && <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding, ...(s.metaAuto ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }} onClick={() => api.setSegmentAuto(entityId, s.id, 'meta', !s.metaAuto).then(load)} title="Keep the Meta audience mirrored automatically (~daily)"><PlatformIcon channel="meta" size={13} /> {s.metaAuto ? 'Auto: on' : 'Auto: off'}</button>}
+                  {tiktokConnected && <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding }} onClick={() => syncTikTok(s)} disabled={busyId === s.id} title="Mirror this audience to a TikTok Custom Audience (hashed match)"><PlatformIcon channel="tiktok" size={13} /> Sync to TikTok</button>}
+                  {tiktokConnected && <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding, ...(s.tiktokAuto ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }} onClick={() => api.setSegmentAuto(entityId, s.id, 'tiktok', !s.tiktokAuto).then(load)} title="Keep the TikTok audience mirrored automatically (~daily)"><PlatformIcon channel="tiktok" size={13} /> {s.tiktokAuto ? 'Auto: on' : 'Auto: off'}</button>}
                   <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding }} onClick={() => setEditing(s)}>Edit</button>
                   <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding, color: 'var(--error,#ef4444)' }} onClick={() => del(s)}>Delete</button>
                 </div>
@@ -160,8 +161,8 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
                   ? <div style={{ fontSize: 11.5, color: syncMsg[s.id].startsWith('✗') ? 'var(--error,#ef4444)' : 'var(--muted)', flexBasis: '100%', marginTop: isMobile ? 0 : 4 }}>{syncMsg[s.id]}</div>
                   : (connectors.meta?.connected || connectors.tiktok?.connected || s.metaSync || s.tiktokSync) && (
                     <div style={{ flexBasis: '100%', marginTop: isMobile ? 0 : 4, display: 'flex', flexDirection: 'column', gap: 2 }}>
-                      {(connectors.meta?.connected || s.metaSync) && connLine('◇', 'Meta', s.metaSync, connectors.meta?.audiencesUrl)}
-                      {(connectors.tiktok?.connected || s.tiktokSync) && connLine('♪', 'TikTok', s.tiktokSync, connectors.tiktok?.audiencesUrl)}
+                      {(connectors.meta?.connected || s.metaSync) && connLine(<PlatformIcon channel="meta" size={12} />, 'Meta', s.metaSync, connectors.meta?.audiencesUrl)}
+                      {(connectors.tiktok?.connected || s.tiktokSync) && connLine(<PlatformIcon channel="tiktok" size={12} />, 'TikTok', s.tiktokSync, connectors.tiktok?.audiencesUrl)}
                     </div>
                   )}
               </div>
@@ -269,6 +270,34 @@ function SegmentBuilder({ entityId, tiles, segment, onClose, onSaved }) {
     lookerFilters: def.lookerFilters || {},
   });
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
+  // Event/suite picker — choose the event first, then its dashboards. Distinct
+  // suites from the tile catalogue (only shown for multi-event clients).
+  const suiteList = (() => {
+    const out = []; const seen = new Set();
+    for (const d of (tiles?.dashboards || [])) { if (d.suiteId && !seen.has(d.suiteId)) { seen.add(d.suiteId); out.push({ id: d.suiteId, name: d.suiteName || d.setName || 'Event' }); } }
+    return out;
+  })();
+  const [suiteSel, setSuiteSel] = useState('');
+  // Derive the suite from an existing dashboard (when editing), or auto-pick the
+  // only suite, once the catalogue has loaded.
+  useEffect(() => {
+    if (suiteSel) return;
+    if (f.dashboardId) {
+      const d = (tiles?.dashboards || []).find((x) => x.dashboardId === f.dashboardId);
+      if (d?.suiteId) { setSuiteSel(d.suiteId); return; }
+    }
+    if (suiteList.length === 1) setSuiteSel(suiteList[0].id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tiles, f.dashboardId]);
+  // A segment needs an email or mobile per person, so only offer tiles whose data
+  // has a contact column — and dashboards that have at least one such tile. The
+  // currently-selected tile/dashboard is always kept (so editing an older segment
+  // never hides its source).
+  const tileUsable = (t) => t.hasContact || t.tileId === f.tileId;
+  const dashHasContact = (d) => (d.tiles || []).some(tileUsable);
+  const suiteDashboards = (tiles?.dashboards || [])
+    .filter((d) => !suiteSel || d.suiteId === suiteSel)
+    .filter((d) => dashHasContact(d) || d.dashboardId === f.dashboardId);
   const [aud, setAud] = useState(null);
   const [busy, setBusy] = useState(false);
   const debounce = useRef();
@@ -337,6 +366,7 @@ function SegmentBuilder({ entityId, tiles, segment, onClose, onSaved }) {
   };
 
   const dash = tiles?.dashboards?.find((d) => d.dashboardId === f.dashboardId);
+  const dashTiles = (dash?.tiles || []).filter(tileUsable);
 
   return (
     <div>
@@ -357,16 +387,23 @@ function SegmentBuilder({ entityId, tiles, segment, onClose, onSaved }) {
         {f.mode === 'tile' ? (
           <Field label="Audience">
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <select style={input} value={f.dashboardId} onChange={(e) => { set('dashboardId', e.target.value); set('tileId', ''); set('emailField', ''); }}>
-                <option value="">Pick a dashboard…</option>
-                {(tiles?.dashboards || []).map((d) => <option key={d.dashboardId} value={d.dashboardId}>{d.title} — {d.setName}</option>)}
+              {suiteList.length > 1 && (
+                <select style={input} value={suiteSel} onChange={(e) => { setSuiteSel(e.target.value); set('dashboardId', ''); set('tileId', ''); set('emailField', ''); }}>
+                  <option value="">Pick an event…</option>
+                  {suiteList.map((s) => <option key={s.id} value={s.id}>🗓 {s.name}</option>)}
+                </select>
+              )}
+              <select style={input} value={f.dashboardId} disabled={suiteList.length > 1 && !suiteSel} onChange={(e) => { set('dashboardId', e.target.value); set('tileId', ''); set('emailField', ''); }}>
+                <option value="">{suiteList.length > 1 && !suiteSel ? 'Pick an event first…' : 'Pick a dashboard…'}</option>
+                {suiteDashboards.map((d) => <option key={d.dashboardId} value={d.dashboardId}>{d.title} — {d.setName}</option>)}
               </select>
               {dash && (
                 <select style={input} value={f.tileId} onChange={(e) => { set('tileId', e.target.value); set('emailField', ''); }}>
                   <option value="">Pick the tile listing the people…</option>
-                  {dash.tiles.map((t) => <option key={t.tileId} value={t.tileId}>{t.title}</option>)}
+                  {dashTiles.map((t) => <option key={t.tileId} value={t.tileId}>{t.title}</option>)}
                 </select>
               )}
+              {dash && dashTiles.length === 0 && <div style={hintS}>No tiles on this dashboard expose an email or mobile column, so there's no one to build a segment from here.</div>}
               {aud?.fields?.length > 0 && (
                 <>
                   <div style={{ display: 'flex', gap: 8 }}>
@@ -581,7 +618,7 @@ function Toggle({ on, onClick, children }) {
 }
 
 const input = { width: '100%', boxSizing: 'border-box', padding: '9px 12px', border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 13, outline: 'none', background: 'var(--card)', color: 'var(--text)' };
-const mini = { padding: '7px 12px', borderRadius: 8, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', fontSize: 12.5, fontWeight: 600, cursor: 'pointer' };
+const mini = { padding: '7px 12px', borderRadius: 8, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' };
 const primary = { padding: '9px 18px', borderRadius: 980, border: 'none', background: 'var(--brand)', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' };
 const hintS = { fontSize: 11.5, color: 'var(--muted)', marginTop: 4 };
 const lbl = { fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--muted)', marginBottom: 5 };

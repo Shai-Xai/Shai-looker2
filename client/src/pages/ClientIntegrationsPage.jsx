@@ -30,7 +30,7 @@ const SECTIONS = [
 
 export default function ClientIntegrationsPage() {
   const isMobile = useIsMobile();
-  const { can } = useAccess();
+  const { can, role, isAdmin } = useAccess();
   const { active } = useProfile(); // every section is scoped to the active client profile
   const ctx = useOutletContext() || {};
   const [items, setItems] = useState(null);
@@ -102,8 +102,16 @@ export default function ClientIntegrationsPage() {
               <IntegrationsForm
                 value={activeItem}
                 lookerActive={false}
+                collapsible
                 showMeta
                 showTikTok
+                canManageLock={isAdmin || role === 'owner'}
+                lockableKeys={['looker', 'anthropic', 'meta', 'tiktok']}
+                locks={activeItem.locks || {}}
+                onToggleLock={async (key, locked) => {
+                  const v = await api.setMyIntegrationLock(activeItem.entityId, key, locked);
+                  setItems((arr) => arr.map((x) => (x.entityId === activeItem.entityId ? { ...x, ...v } : x)));
+                }}
                 onSave={async (p) => {
                   const v = await api.saveMyIntegrations(activeItem.entityId, p);
                   setItems((arr) => arr.map((x) => (x.entityId === activeItem.entityId ? { ...x, ...v } : x)));
@@ -113,21 +121,16 @@ export default function ClientIntegrationsPage() {
           )}
 
           {section === 'email' && (
-            <div>
-              <details style={{ marginBottom: 8 }}>
-                <summary style={summaryRow}>
-                  <span style={subhead}>Account &amp; portfolio</span>
-                  <span style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 500 }}>your overall look · used on portfolio digests</span>
-                </summary>
-                <div style={{ marginTop: 12 }}>
-                  <p style={hint}>Your colours and logo — they style your whole Pulse platform (buttons, accents, charts) and your notification emails. Used everywhere by default, and on portfolio (multi-event) digests. Blank fields keep Howler's defaults.</p>
-                  <MailTemplateEditor scope="my" entityId={activeItem.entityId} />
-                </div>
-              </details>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <BrandingSection title="Account &amp; portfolio" subtitle="your overall look · used on portfolio digests">
+                <p style={hint}>Your colours and logo — they style your whole Pulse platform (buttons, accents, charts) and your notification emails. Used everywhere by default, and on portfolio (multi-event) digests. Blank fields keep Howler's defaults.</p>
+                <MailTemplateEditor scope="my" entityId={activeItem.entityId} />
+              </BrandingSection>
 
-              <h3 style={{ ...subhead, marginTop: 26 }}>Events</h3>
-              <p style={hint}>Give a specific event its own logo, colours and sender name — used for that event's campaigns and digests, and the in-app look while you're viewing it. Blank fields inherit your account branding above.</p>
-              <EventBranding entityId={activeItem.entityId} />
+              <BrandingSection title="Events" subtitle="brand a specific event">
+                <p style={hint}>Give a specific event its own logo, colours and sender name — used for that event's campaigns and digests, and the in-app look while you're viewing it. Blank fields inherit your account branding above.</p>
+                <EventBranding entityId={activeItem.entityId} />
+              </BrandingSection>
             </div>
           )}
 
@@ -164,8 +167,27 @@ const tabBtn = (active) => ({
   color: active ? 'var(--brand)' : 'var(--text)',
 });
 const hint = { color: 'var(--muted)', fontSize: 13, marginBottom: 14, lineHeight: 1.5 };
-const subhead = { fontSize: 15, fontWeight: 700, marginBottom: 6 };
-const summaryRow = { cursor: 'pointer', display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap', listStyle: 'revert' };
+// A branding sub-section as a clearly-expandable white card (the old <details>
+// hid its disclosure triangle behind a flex summary, so it read as a dead
+// heading). Open by default so the controls — and the fact it expands — are
+// obvious; collapsible via the chevron to keep the page tidy. Used for both the
+// account branding and the per-event branding so they match.
+function BrandingSection({ title, subtitle, defaultOpen = false, children }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div style={acctCard}>
+      <button type="button" onClick={() => setOpen((o) => !o)} style={acctHeader} aria-expanded={open}>
+        <span style={{ ...acctChevron, transform: open ? 'rotate(90deg)' : 'none' }}>▸</span>
+        <span style={{ fontSize: 15, fontWeight: 700 }}>{title}</span>
+        {subtitle && <span style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 500 }}>{subtitle}</span>}
+      </button>
+      {open && <div style={{ padding: '0 14px 14px' }}>{children}</div>}
+    </div>
+  );
+}
+const acctCard = { border: '1px solid var(--hairline)', borderRadius: 12, overflow: 'hidden', background: 'var(--card)' };
+const acctHeader = { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', width: '100%', textAlign: 'left', cursor: 'pointer', background: 'transparent', border: 'none', padding: '13px 14px', color: 'var(--text)' };
+const acctChevron = { color: 'var(--muted)', fontSize: 12, transition: 'transform 0.15s', flexShrink: 0 };
 
 // Per-event branding self-service: pick one of this client's events, then edit
 // its branding override (inherits the account branding above where left blank).

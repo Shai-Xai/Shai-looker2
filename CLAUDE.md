@@ -45,6 +45,24 @@ should inherit the tier below, and the UI should show what's inherited.
 ## Architecture notes
 - Disposable modules: self-contained features own their tables + routes and mount
   with one line (e.g. `server/os.js`, `server/mailer.js`). Easy to remove.
+- **Keep modules small — no god-files.** `server/index.js` is the composition root
+  (wiring + a thin route layer), NOT a home for feature engines. When you add a
+  feature, give it its own `server/<feature>.js` that mounts in one line; don't
+  inline a new route-cluster or engine into `index.js`. This is enforced:
+  `test/architecture.test.js` caps every `server/*.js` at a line budget (new files
+  default to 1500). The budgets **ratchet down only** — if a file outgrows its
+  budget, extract a module; never raise the number. When you shrink a file, lower
+  its budget to lock the win in. (Shared, non-routes logic that several modules
+  need can be a factory library instead — see `server/query.js`, `server/briefing.js`.)
+- Error handling: a single `errorMiddleware` (`server/http.js`, mounted last in
+  `index.js`) is the one place errors are turned into responses — it logs full 5xx
+  detail server-side and returns a **generic** message (never leak raw error text).
+  Wrap async route handlers with `asyncHandler(...)` so a rejected promise reaches
+  the middleware instead of hanging the request (Express 4 doesn't auto-catch async
+  rejections). For an intentional, client-safe error throw `new HttpError(status,
+  msg)` — its status + message are shown; everything else is a sanitized 500. A
+  `process.on('unhandledRejection')` logs (doesn't exit). Prefer this over
+  hand-rolled `try/catch { res.status(500).json({ error: e.message }) }`.
 - Secrets are write-only: responses report whether a value is set + a mask, never
   the value. Branding/presentation (non-secret) can ride to the browser freely.
 - Email sends from one verified Resend domain; per-client "branding" is the look
@@ -64,6 +82,24 @@ ship (or change the status of) a **client-relevant** feature, update it in the S
 change: adjust the relevant section + status tag, bump **Last updated**, and add a
 dated **Changelog** line. Keep it benefit-led and honest (don't overclaim — use the
 status key: ✅ Live · 🟡 needs setup · 🧪 beta · 🔜 coming soon).
+
+## Keep the client setup wizard current
+The back-end **Client setup wizard** (Admin → 🧙 Setup wizard, in `SetupWizard` /
+`server/setupWizard.js`) is the guided, step-by-step path account managers use to
+stand a new client up. **Whenever you add a new back-end setting that is part of
+standing a client up** (a new entity/suite field, a new required integration, a new
+onboarding step), wire it into the wizard in the SAME change — don't let the wizard
+drift behind what setup now requires:
+- If it's a whole new setup stage, add a step to `WIZARD_DEFAULTS` (and its
+  behaviour by `key` in `SetupWizard`), keeping required vs optional honest.
+- If it belongs inside an existing step, add the field there and, where the step
+  has a guided section tour, add a `[data-tour]` anchor + a matching entry in that
+  step's `TOURS` list so the walkthrough still covers every section.
+- Update each step's `canProceed` / `reqDone` if the new setting is required to go
+  live, so "Continue" stays locked until it's done.
+Remember the wizard reuses the real editors (`ClientSuites`, `EntityLogins`,
+`MailTemplateEditor`, …) — adding the setting to those usually surfaces it in the
+wizard automatically; the tour copy is the part that still needs a manual update.
 
 ## Git
 - Develop on the assigned `claude/*` branch; push to it AND to `main`

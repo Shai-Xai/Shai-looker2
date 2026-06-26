@@ -31,6 +31,7 @@ export default function GoalsPage() {
   const handled = useRef(false);
   const [suitesLoading, setSuitesLoading] = useState(true);
   const [tab, setTab] = useState('goals');        // 'goals' | 'templates'
+  const [activeSuite, setActiveSuite] = useState(''); // which event's goals are shown (one at a time)
   const [templates, setTemplates] = useState(null); // reusable templates for this client (+ global)
 
   const loadTemplates = useCallback(() => {
@@ -123,10 +124,10 @@ export default function GoalsPage() {
     const newSuite = params.get('new');
     if (goalId) {
       const found = rows.find((r) => goalsIn(r).some((g) => g.id === goalId));
-      if (found) { setDetail({ suiteId: found.suite.id, goalId }); handled.current = true; }
+      if (found) { setActiveSuite(found.suite.id); setDetail({ suiteId: found.suite.id, goalId }); handled.current = true; }
     } else if (newSuite) {
       const target = rows.find((r) => r.suite.id === newSuite && r.canManage) || rows.find((r) => r.canManage);
-      if (target) { setEditor({ suiteId: target.suite.id, goal: null, scope: 'event' }); handled.current = true; }
+      if (target) { setActiveSuite(target.suite.id); setEditor({ suiteId: target.suite.id, goal: null, scope: 'event' }); handled.current = true; }
     }
     if (goalId || newSuite) { const next = new URLSearchParams(params); next.delete('goal'); next.delete('new'); setParams(next, { replace: true }); }
   }, [bySuite, rows, params, setParams]);
@@ -149,6 +150,11 @@ export default function GoalsPage() {
     const text = plan?.campaignGoal || 'Re-engage the most likely buyers to lift sales before the deadline.';
     vtNavigate(navigate, `/engage/campaigns?goal=${encodeURIComponent(text)}&type=email_campaign`);
   };
+
+  // One event at a time: a tab strip picks which event's goals show. Fall back to
+  // the first event when nothing's selected yet (or the selection went away).
+  const activeSuiteId = rows.some((r) => r.suite.id === activeSuite) ? activeSuite : (rows[0]?.suite.id || '');
+  const activeRow = rows.find((r) => r.suite.id === activeSuiteId) || null;
 
   const suiteData = (detail && bySuite[detail.suiteId]) || {};
   const detailGoal = detail && [...(suiteData.goals || []), ...(suiteData.personalGoals || [])].find((g) => g.id === detail.goalId);
@@ -192,8 +198,14 @@ export default function GoalsPage() {
         </div>
       )}
 
+      {/* One tab per event — view a single event's goals at a time instead of a long
+          stacked list. Horizontally scrollable so it stays tidy on a phone. */}
+      {rows.length > 1 && (
+        <EventTabs rows={rows} active={activeSuiteId} onPick={setActiveSuite} />
+      )}
+
       <div style={{ display: 'flex', flexDirection: 'column', gap: 26 }}>
-        {rows.map(({ suite, goals = [], personalGoals = [], canManage, loaded }) => (
+        {(activeRow ? [activeRow] : []).map(({ suite, goals = [], personalGoals = [], canManage, loaded }) => (
           <section key={suite.id}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
               <h2 style={eventName}>{suite.name}</h2>
@@ -331,6 +343,30 @@ function SectionSkeleton() {
     <div style={{ marginBottom: 26 }}>
       <Skel w={120} h={12} style={{ marginBottom: 12 }} />
       <SuiteSkeleton />
+    </div>
+  );
+}
+
+// Event picker — one pill per event, the selected one highlighted. Scrolls
+// horizontally (hidden scrollbar) so a long event list stays a single tidy row
+// on mobile. Shows a goal count once the event has loaded.
+function EventTabs({ rows, active, onPick }) {
+  return (
+    <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4, marginBottom: 18, scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' }}>
+      {rows.map(({ suite, goals = [], personalGoals = [], loaded }) => {
+        const n = (goals.length || 0) + (personalGoals.length || 0);
+        const on = suite.id === active;
+        return (
+          <button key={suite.id} type="button" onClick={() => onPick(suite.id)} style={{
+            flexShrink: 0, whiteSpace: 'nowrap', cursor: 'pointer', font: 'inherit',
+            border: `1px solid ${on ? 'var(--brand)' : 'var(--hairline)'}`,
+            background: on ? 'var(--brand)' : 'var(--card)', color: on ? '#fff' : 'var(--text)',
+            borderRadius: 980, padding: '8px 15px', fontSize: 13, fontWeight: on ? 800 : 600,
+          }}>
+            {suite.name}{loaded && n > 0 && <span style={{ marginLeft: 7, opacity: 0.75, fontWeight: 600 }}>{n}</span>}
+          </button>
+        );
+      })}
     </div>
   );
 }

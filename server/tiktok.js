@@ -26,7 +26,6 @@
 //   tiktokAccessToken    — long-lived access token (write-only)
 //   tiktokAdvertiserId   — the advertiser id the audience lives under
 const crypto = require('crypto');
-const fetch = require('node-fetch');
 
 const BASE = 'https://business-api.tiktok.com/open_api/v1.3';
 
@@ -124,6 +123,9 @@ function clearMembers(entityId, segmentId) {
 
 // ── hashing (SHA-256 of normalised id, same spec as Meta) ──
 const sha256 = (s) => crypto.createHash('sha256').update(s, 'utf8').digest('hex');
+// MD5 of the raw upload body — TikTok's file/upload `file_signature` is an
+// integrity checksum of the FILE (not the member-hash algorithm), and must be MD5.
+const md5 = (s) => crypto.createHash('md5').update(s, 'utf8').digest('hex');
 const hashEmail = (e) => { const v = String(e || '').trim().toLowerCase(); return v ? sha256(v) : ''; };
 function hashPhone(raw, defaultCc = '27') {
   let s = String(raw || '').replace(/[^\d+]/g, '');
@@ -136,7 +138,7 @@ function hashPhone(raw, defaultCc = '27') {
 
 // TikTok responses are { code, message, data }; code 0 = OK.
 async function api(path, { token, body } = {}) {
-  const res = await fetch(`${BASE}/${path}`, { method: 'POST', headers: { 'Access-Token': token, 'Content-Type': 'application/json' }, body });
+  const res = await fetch(`${BASE}/${path}`, { method: 'POST', headers: { 'Access-Token': token, 'Content-Type': 'application/json' }, body, signal: AbortSignal.timeout(20000) });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || (data && data.code)) {
     const err = new Error((data && data.message) || `TikTok HTTP ${res.status}`);
@@ -164,17 +166,20 @@ function multipart(fields, file) {
 async function uploadFile({ advertiserId, token, calculateType, values }) {
   const content = values.join('\n');
   const { body, contentType } = multipart(
-    { advertiser_id: advertiserId, calculate_type: calculateType, file_signature: sha256(content) },
+    { advertiser_id: advertiserId, calculate_type: calculateType, file_signature: md5(content) },
     { field: 'file', filename: 'audience.csv', content },
   );
-  const res = await fetch(`${BASE}/dmp/custom_audience/file/upload/`, { method: 'POST', headers: { 'Access-Token': token, 'Content-Type': contentType }, body });
+  const res = await fetch(`${BASE}/dmp/custom_audience/file/upload/`, { method: 'POST', headers: { 'Access-Token': token, 'Content-Type': contentType }, body, signal: AbortSignal.timeout(60000) });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || (data && data.code)) throw new Error((data && data.message) || `TikTok upload HTTP ${res.status}`);
   return (data.data && (data.data.file_path || data.data.path)) || '';
 }
 
-async function createAudience({ advertiserId, token, name, filePaths }) {
-  const d = await api('dmp/custom_audience/create/', { token, body: JSON.stringify({ advertiser_id: advertiserId, custom_audience_name: name, file_paths: filePaths }) });
+// `create` requires a single calculate_type, so an audience is seeded from ONE
+// id kind; the other kind is added afterwards via update/APPEND (which doesn't
+// take a calculate_type). calculateType: 'EMAIL_SHA256' | 'PHONE_SHA256'.
+async function createAudience({ advertiserId, token, name, calculateType, filePaths }) {
+  const d = await api('dmp/custom_audience/create/', { token, body: JSON.stringify({ advertiser_id: advertiserId, custom_audience_name: name, calculate_type: calculateType, file_paths: filePaths }) });
   return d.custom_audience_id || d.audience_id || '';
 }
 // action: 'APPEND' | 'DELETE'.
@@ -208,12 +213,21 @@ async function syncAudience({ entityId, segmentId, name, members = [], by = '' }
   try {
     let audienceId = mapRow(entityId, segmentId)?.audience_id || '';
     const createFresh = async () => {
-      const paths = [];
-      if (newEmails.size) paths.push(await uploadFile({ advertiserId, token, calculateType: 'EMAIL_SHA256', values: [...newEmails] }));
-      if (newPhones.size) paths.push(await uploadFile({ advertiserId, token, calculateType: 'PHONE_SHA256', values: [...newPhones] }));
-      const clean = paths.filter(Boolean);
-      if (!clean.length) throw new Error('TikTok accepted no files for this segment.');
-      return createAudience({ advertiserId, token, name: audienceName, filePaths: clean });
+      // Seed the audience from whichever id kind we have first, then APPEND the
+      // other — `create` takes a single calculate_type, but APPEND mixes types.
+      let id = '';
+      const seed = async (kind, values) => {
+        if (!values.length) return;
+        const calculateType = kind === 'phone' ? 'PHONE_SHA256' : 'EMAIL_SHA256';
+        const path = await uploadFile({ advertiserId, token, calculateType, values });
+        if (!path) return;
+        if (!id) id = await createAudience({ advertiserId, token, name: audienceName, calculateType, filePaths: [path] });
+        else await updateAudience({ advertiserId, token, audienceId: id, action: 'APPEND', filePaths: [path] });
+      };
+      await seed('email', [...newEmails]);
+      await seed('phone', [...newPhones]);
+      if (!id) throw new Error('TikTok accepted no files for this segment.');
+      return id;
     };
     let added = count; let removed = 0;
     if (audienceId) {
@@ -250,7 +264,7 @@ async function audienceStatus(entityId, audienceId) {
   const { accessToken: token, advertiserId } = connection(entityId);
   try {
     const url = `${BASE}/dmp/custom_audience/get/?advertiser_id=${encodeURIComponent(advertiserId)}&custom_audience_ids=${encodeURIComponent(JSON.stringify([audienceId]))}`;
-    const res = await fetch(url, { headers: { 'Access-Token': token } });
+    const res = await fetch(url, { headers: { 'Access-Token': token }, signal: AbortSignal.timeout(20000) });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || (data && data.code)) return { ok: false, error: (data && data.message) || `TikTok HTTP ${res.status}` };
     const a = (data.data && (data.data.list || [])[0]) || {};
@@ -266,7 +280,7 @@ async function verify(entityId) {
   const { accessToken: token, advertiserId } = connection(entityId);
   try {
     const url = `${BASE}/advertiser/info/?advertiser_ids=${encodeURIComponent(JSON.stringify([advertiserId]))}&fields=${encodeURIComponent(JSON.stringify(['name', 'status']))}`;
-    const res = await fetch(url, { headers: { 'Access-Token': token } });
+    const res = await fetch(url, { headers: { 'Access-Token': token }, signal: AbortSignal.timeout(20000) });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || (data && data.code)) {
       const status = data && (data.code === 40105 || data.code === 40100) ? 'token_invalid' : 'error';
@@ -275,6 +289,36 @@ async function verify(entityId) {
     const adv = (data.data && (data.data.list || [])[0]) || {};
     return { ok: true, status: 'ok', account: adv.name || advertiserId, accountStatus: adv.status, checkedAt };
   } catch (e) { return { ok: false, status: 'error', detail: e.message, checkedAt }; }
+}
+
+// Live list of ALL custom audiences on the advertiser — Pulse-made or created
+// directly in TikTok Ads. Paginates; best-effort; never throws.
+// Returns { ok, audiences:[{audienceId,name,size,valid,type,calculateType,createdAt}] }.
+async function listAudiences(entityId) {
+  if (!isConfigured(entityId)) return { ok: false, error: 'not connected' };
+  const { accessToken: token, advertiserId } = connection(entityId);
+  try {
+    const audiences = []; let page = 1; let totalPage = 1;
+    do {
+      const url = `${BASE}/dmp/custom_audience/list/?advertiser_id=${encodeURIComponent(advertiserId)}&page=${page}&page_size=100`;
+      const res = await fetch(url, { headers: { 'Access-Token': token }, signal: AbortSignal.timeout(20000) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || (data && data.code)) return { ok: false, error: (data && data.message) || `TikTok HTTP ${res.status}` };
+      const d = data.data || {};
+      for (const a of d.list || []) audiences.push({
+        audienceId: String(a.audience_id || ''),
+        name: a.name || '',
+        size: a.cover_num ?? null,
+        valid: a.is_valid !== false,
+        type: a.audience_type || '',
+        calculateType: a.calculate_type || '',
+        createdAt: a.create_time || '',
+      });
+      totalPage = (d.page_info && d.page_info.total_page) || 1;
+      page += 1;
+    } while (page <= totalPage && page <= 20); // hard cap so a huge account can't spin forever
+    return { ok: true, audiences };
+  } catch (e) { return { ok: false, error: e.message }; }
 }
 
 // Best-effort deep link to this advertiser's audiences in TikTok Ads.
@@ -293,4 +337,4 @@ function summary(entityId) {
   return { channel: 'tiktok', configured: isConfigured(entityId), advertiserId: connection(entityId).advertiserId, audiencesUrl: audiencesUrl(entityId), audienceCount: audiences.length, ok: audiences.length - errors, errors, lastAt, lastError: lastError ? { at: lastError.at, error: lastError.error, segmentId: lastError.segmentId } : null, audiences };
 }
 
-module.exports = { init, isConfigured, status, connection, syncAudience, lastSyncFor, clearMembers, verify, audienceStatus, audiencesUrl, summary, hashEmail, hashPhone };
+module.exports = { init, isConfigured, status, connection, syncAudience, lastSyncFor, clearMembers, verify, audienceStatus, listAudiences, audiencesUrl, summary, hashEmail, hashPhone };

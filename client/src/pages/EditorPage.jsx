@@ -1,20 +1,47 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate, useLocation, Navigate } from 'react-router-dom';
 import EditableGrid from '../components/EditableGrid.jsx';
 import FilterBar from '../components/FilterBar.jsx';
 import TileEditorPanel from '../components/editor/TileEditorPanel.jsx';
 import FilterManager from '../components/editor/FilterManager.jsx';
 import TileLibraryPicker from '../components/editor/TileLibraryPicker.jsx';
+import SaveAsClientModal from '../components/editor/SaveAsClientModal.jsx';
+import BackButton from '../components/BackButton.jsx';
 import { api } from '../lib/api.js';
+import { useAuth } from '../lib/auth.jsx';
+import { ScopeProvider } from '../lib/ScopeContext.jsx';
 
 export default function EditorPage() {
-  const { id } = useParams();
+  const { id, suiteId } = useParams();
   const navigate = useNavigate();
+  // When opened from a client/suite view via the Edit button, the live filter
+  // values applied on that dashboard (suite + per-dashboard locks already
+  // merged in) ride along in router state — so the editor's preview and the
+  // Results grid reflect the actual filters the client sees, not just defaults.
+  const passedFilters = useLocation().state?.filterValues || null;
+  const { isAdmin } = useAuth();
+  // Where "View" / Save-and-return goes — back to the suite view when we got
+  // here from inside a suite, otherwise the standalone dashboard view.
+  const viewPath = suiteId ? `/suite/${suiteId}/d/${id}` : `/d/${id}`;
   const [def, setDef] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  // When the editor is opened in a suite context (/suite/:suiteId/d/:id/edit),
+  // load that client's per-tile locks so the 🔒 control can manage them here.
+  const [suiteTileLocks, setSuiteTileLocks] = useState({});
+  const [suiteEntityId, setSuiteEntityId] = useState(null);
+  const [suiteEntityName, setSuiteEntityName] = useState('');
+  const [showSaveAs, setShowSaveAs] = useState(false);
+  const [saveMenuOpen, setSaveMenuOpen] = useState(false);
+  const saveTileLock = async (tileId, map) => {
+    try {
+      await api.setSuiteTileLocks(suiteId, tileId, map);
+      setSuiteTileLocks((prev) => { const n = { ...prev }; if (map && Object.keys(map).length) n[tileId] = map; else delete n[tileId]; return n; });
+      return true;
+    } catch { return false; }
+  };
   const [selectedTileId, setSelectedTileId] = useState(null);
   const [showFilters, setShowFilters] = useState(false);
   const [showLibrary, setShowLibrary] = useState(false);
@@ -23,19 +50,32 @@ export default function EditorPage() {
   const [filterValues, setFilterValues] = useState({});
 
   useEffect(() => {
-    api.getDashboard(id)
-      .then((data) => {
+    // When editing inside a client/suite context, build the SAME filter values
+    // the client actually sees on that dashboard: suite-wide locks → this
+    // dashboard's per-suite locks → client default → the user's saved view. The
+    // live values passed via router state (in-session changes) win last. This
+    // makes the editor's FilterBar + tile previews reflect the real dashboard,
+    // not just each filter's template default_value.
+    const suiteP = suiteId ? api.mySuite(suiteId).catch(() => null) : Promise.resolve(null);
+    const savedP = suiteId
+      ? api.getDashboardFilters(id, suiteId).catch(() => ({ user: null, entityDefault: null }))
+      : Promise.resolve({ user: null, entityDefault: null });
+    Promise.all([api.getDashboard(id), suiteP, savedP])
+      .then(([data, suite, saved]) => {
         // Older dashboards predate carousels — normalise so render code is safe.
         data.carousels = data.carousels || [];
         data.gridAfter = data.gridAfter || 0;
         setDef(data);
-        const defaults = {};
-        for (const f of data.filters || []) defaults[f.name] = f.default_value || '';
-        setFilterValues(defaults);
+        setSuiteTileLocks(suite?.tileLocks || {});
+        setSuiteEntityId(suite?.entityId || null);
+        setSuiteEntityName(suite?.entityName || '');
+        const overlay = { ...(saved?.entityDefault || {}), ...(saved?.user || {}) }; // user view wins
+        setFilterValues(buildClientFilters(data, suite, overlay, passedFilters));
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [id]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, suiteId]);
 
   // Mutate the definition locally and mark dirty.
   const mutate = useCallback((updater) => {
@@ -55,6 +95,34 @@ export default function EditorPage() {
       setSaving(false);
     }
   }
+
+  // Fork the (edited) dashboard into a client-owned version for this suite, then
+  // jump into editing that copy. The shared template is left as-is.
+  async function saveAsClientVersion(opts) {
+    const out = await api.forkSuiteDashboard(suiteId, id, { def, ...opts });
+    setDirty(false);
+    setShowSaveAs(false);
+    navigate(`/suite/${suiteId}/d/${out.dashboard.id}/edit`, { replace: true });
+  }
+
+  // Discard this client version and point the suite back at the shared template.
+  async function revertToTemplate() {
+    if (!window.confirm(`Discard ${suiteEntityName || 'this client'}’s version and go back to the shared template? This can’t be undone.`)) return;
+    try {
+      const out = await api.revertSuiteDashboard(suiteId, id);
+      setDirty(false);
+      navigate(`/suite/${suiteId}/d/${out.dashboardId}`, { replace: true });
+    } catch (e) {
+      alert('Could not revert: ' + e.message);
+    }
+  }
+
+  // This dashboard is a shared template (no owner) opened inside a client suite:
+  // saving offers a choice between updating the template and forking a client copy.
+  const isTemplate = !def?.ownerEntityId;
+  const canForkHere = !!suiteId && isTemplate;
+  // A client version that was forked from a template can be reverted back to it.
+  const canRevert = !!suiteId && !isTemplate && !!def?.variantOf;
 
   function addTile(type) {
     const nextY = def.tiles.reduce((max, t) => Math.max(max, (t.layout?.y ?? 0) + (t.layout?.h ?? 6)), 0);
@@ -90,6 +158,15 @@ export default function EditorPage() {
       ...d,
       tiles: d.tiles.map((t) => (t.id === updated.id ? updated : t)),
       carousels: (d.carousels || []).map((c) => ({ ...c, tiles: c.tiles.map((t) => (t.id === updated.id ? updated : t)) })),
+    }));
+  }
+  // Hide / unhide a tile (grid or carousel): keeps it in the definition but it's
+  // skipped when viewers see the dashboard. Shown dimmed in the editor.
+  function toggleHideTile(tileId) {
+    mutate((d) => ({
+      ...d,
+      tiles: d.tiles.map((t) => (t.id === tileId ? { ...t, hidden: !t.hidden } : t)),
+      carousels: (d.carousels || []).map((c) => ({ ...c, tiles: c.tiles.map((t) => (t.id === tileId ? { ...t, hidden: !t.hidden } : t)) })),
     }));
   }
   function removeTile(tileId) {
@@ -133,6 +210,9 @@ export default function EditorPage() {
   function changeCarouselTitle(cid, title) {
     mutate((d) => ({ ...d, carousels: (d.carousels || []).map((c) => (c.id === cid ? { ...c, title } : c)) }));
   }
+  function setCarouselAlign(cid, titleAlign) {
+    mutate((d) => ({ ...d, carousels: (d.carousels || []).map((c) => (c.id === cid ? { ...c, titleAlign } : c)) }));
+  }
   // Per-tile width inside a carousel (each card sized on its own).
   function setTileWidth(tileId, w) {
     mutate((d) => ({
@@ -168,7 +248,11 @@ export default function EditorPage() {
     if (selectedTileId === tileId) setSelectedTileId(null);
   }
   // Move an existing tile (from the grid or another carousel) into a carousel.
-  function moveTileToCarousel(tileId, targetId) {
+  // Move/insert a tile into a carousel. `beforeId` (a tile id, or '__end__'/null)
+  // sets the drop position, so this powers both dragging a tile IN and dragging
+  // to REORDER within the same carousel (drop position preserved, no index drift
+  // since we resolve by id after removing the dragged tile).
+  function moveTileToCarousel(tileId, targetId, beforeId = null) {
     mutate((d) => {
       let moved = null;
       const tiles = d.tiles.filter((t) => { if (t.id === tileId) { moved = { ...t }; return false; } return true; });
@@ -177,15 +261,38 @@ export default function EditorPage() {
         tiles: c.tiles.filter((t) => { if (t.id === tileId) { moved = { ...t }; return false; } return true; }),
       }));
       if (!moved) return d;
-      // Drop at the bottom of the target container; cap the width to half so it
-      // can sit beside another tile. Grid sections use this layout; scrolling
-      // carousels ignore it (they size by card width).
+      // Cap the width to half so it can sit beside another tile. Grid sections use
+      // this layout; scrolling carousels ignore it (they size by card width).
       moved.layout = { x: 0, y: 9999, w: Math.min(moved.layout?.w || 8, 12), h: moved.layout?.h || 6 };
       return {
         ...d,
         tiles,
-        carousels: carousels.map((c) => (c.id === targetId ? { ...c, tiles: [...c.tiles, moved] } : c)),
+        carousels: carousels.map((c) => {
+          if (c.id !== targetId) return c;
+          const arr = c.tiles.slice();
+          let idx = arr.length;
+          if (beforeId && beforeId !== '__end__') { const j = arr.findIndex((t) => t.id === beforeId); if (j >= 0) idx = j; }
+          arr.splice(idx, 0, moved);
+          return { ...c, tiles: arr };
+        }),
       };
+    });
+  }
+
+  // Move a tile OUT of a carousel/section back onto the main dashboard grid,
+  // keeping the tile (the inverse of moveTileToCarousel). Lands it full-ish width
+  // at the bottom of the grid.
+  function moveTileOutOfCarousel(cid, tileId) {
+    mutate((d) => {
+      let moved = null;
+      const carousels = (d.carousels || []).map((c) => {
+        if (c.id !== cid) return c;
+        return { ...c, tiles: c.tiles.filter((t) => { if (t.id === tileId) { moved = { ...t }; return false; } return true; }) };
+      });
+      if (!moved) return d;
+      const nextY = d.tiles.reduce((max, t) => Math.max(max, (t.layout?.y ?? 0) + (t.layout?.h ?? 6)), 0);
+      moved.layout = { x: 0, y: nextY, w: Math.min(moved.layout?.w || 8, 12), h: moved.layout?.h || 6 };
+      return { ...d, tiles: [...d.tiles, moved], carousels };
     });
   }
 
@@ -201,6 +308,9 @@ export default function EditorPage() {
     }));
   }
 
+  // The editor is a Howler-staff tool. Mounted on client routes only so an admin
+  // acting as a client can reach it; a real client who deep-links here is sent home.
+  if (!isAdmin) return <Navigate to={viewPath} replace />;
   if (loading) return <Centered>Loading…</Centered>;
   if (error) return <Centered error>Error: {error}</Centered>;
   if (!def) return null;
@@ -218,26 +328,42 @@ export default function EditorPage() {
   const canvasInner = { flex: 1, overflowY: 'auto', padding: '16px 24px', ...(dark ? null : { '--tile-bg': theme.tileBackground || '#fff' }) };
   const carouselHandlers = (c) => ({
     onEditTile: setSelectedTileId,
+    onToggleHide: (tid) => toggleHideTile(tid),
     onRemoveTile: (tid) => removeTileFromCarousel(c.id, tid),
     onDuplicateTile: (tid) => duplicateTileInCarousel(c.id, tid),
     onAddTile: (type) => addTileToCarousel(c.id, type),
     onChangeTitle: (t) => changeCarouselTitle(c.id, t),
+    onChangeAlign: (a) => setCarouselAlign(c.id, a),
     onRemove: () => removeCarousel(c.id),
-    onDropTile: (tileId) => moveTileToCarousel(tileId, c.id),
+    onDropTile: (tileId, beforeId) => moveTileToCarousel(tileId, c.id, beforeId),
+    onMoveTileOut: (tid) => moveTileOutOfCarousel(c.id, tid),
     onChangeTileW: (tileId, w) => setTileWidth(tileId, w),
     onTileLayout: (map) => setSectionTileLayouts(c.id, map),
   });
 
   return (
+    <ScopeProvider suiteId={suiteId || null} entityId={suiteEntityId} dashboardId={id} tileLocks={suiteTileLocks} lockFilters={def.filters || []} canLockTiles={isAdmin && !!suiteId} onSaveTileLock={saveTileLock}>
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
       {/* Toolbar */}
       <div style={toolbar}>
-        <Link to="/dashboards" style={{ color: 'var(--muted)', fontSize: 13, textDecoration: 'none' }}>← Back</Link>
+        <BackButton fallback={viewPath} title="Back" />
         <input
           style={titleInput}
           value={def.title}
           onChange={(e) => mutate((d) => ({ ...d, title: e.target.value }))}
         />
+        {suiteId && (
+          <span
+            style={isTemplate ? badgeTemplate : badgeClient}
+            title={isTemplate
+              ? 'Shared template — editing this affects every client that uses it. Use “Save as new” to make a copy just for this client.'
+              : `This is ${suiteEntityName || 'this client'}’s own version — editing it only affects them.`}>
+            {isTemplate ? 'Shared template' : `${suiteEntityName || 'Client'} version`}
+          </span>
+        )}
+        {canRevert && (
+          <button style={btn} onClick={revertToTemplate} title="Discard this client version and use the shared template again">↩ Revert to template</button>
+        )}
         <button style={btn} onClick={() => addTile('vis')}>+ Visualization</button>
         <button style={btn} onClick={() => setShowLibrary(true)}>+ From library</button>
         <button style={btn} onClick={() => addTile('text')}>+ Text</button>
@@ -256,8 +382,31 @@ export default function EditorPage() {
         <span style={{ fontSize: 12, color: dirty ? 'var(--warn)' : 'var(--muted)' }}>
           {dirty ? '● Unsaved changes' : '✓ Saved'}
         </span>
-        <button style={viewBtn} onClick={() => navigate(`/d/${id}`)}>View</button>
-        <button className="btn-key" style={saveBtn} onClick={save} disabled={saving || !dirty}>{saving ? 'Saving…' : 'Save'}</button>
+        <button style={viewBtn} onClick={() => navigate(viewPath)}>View</button>
+        {canForkHere ? (
+          <div style={{ position: 'relative' }}>
+            <button className="btn-key" style={saveBtn} onClick={() => setSaveMenuOpen((v) => !v)} disabled={saving}>
+              {saving ? 'Saving…' : 'Save ▾'}
+            </button>
+            {saveMenuOpen && (
+              <>
+                <div style={{ position: 'fixed', inset: 0, zIndex: 40 }} onClick={() => setSaveMenuOpen(false)} />
+                <div style={saveMenu}>
+                  <button style={saveMenuItem} disabled={!dirty} onClick={() => { setSaveMenuOpen(false); save(); }}>
+                    <strong>Save current</strong>
+                    <span style={saveMenuHint}>Update the shared template (all clients)</span>
+                  </button>
+                  <button style={saveMenuItem} onClick={() => { setSaveMenuOpen(false); setShowSaveAs(true); }}>
+                    <strong>Save as new…</strong>
+                    <span style={saveMenuHint}>Make {suiteEntityName || 'this client'}’s own version</span>
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        ) : (
+          <button className="btn-key" style={saveBtn} onClick={save} disabled={saving || !dirty}>{saving ? 'Saving…' : 'Save'}</button>
+        )}
       </div>
 
       {/* Filter bar preview */}
@@ -265,8 +414,18 @@ export default function EditorPage() {
         <FilterBar filters={def.filters} values={filterValues} onChange={(name, value) => setFilterValues((p) => ({ ...p, [name]: value }))} />
       )}
 
-      {/* Canvas + side panel */}
+      {/* Side panel (left) + canvas */}
       <div style={{ flex: 1, display: 'flex', minHeight: 0, background: canvasBg }}>
+        {selectedTile && (
+          <TileEditorPanel
+            key={selectedTile.id}
+            tile={selectedTile}
+            dashboardFilters={def.filters}
+            filterValues={filterValues}
+            onChange={updateTile}
+            onClose={() => setSelectedTileId(null)}
+          />
+        )}
         <div style={canvasInner}>
           {def.tiles.length > 0 || def.carousels.length > 0 ? (
             <EditableGrid
@@ -278,22 +437,13 @@ export default function EditorPage() {
               onEditTile={setSelectedTileId}
               onDuplicateTile={duplicateTile}
               onRemoveTile={removeTile}
+              onHideTile={toggleHideTile}
               carouselHandlers={carouselHandlers}
             />
           ) : (
             <Centered>Empty dashboard — add a visualization, text tile, or carousel to begin.</Centered>
           )}
         </div>
-
-        {selectedTile && (
-          <TileEditorPanel
-            key={selectedTile.id}
-            tile={selectedTile}
-            dashboardFilters={def.filters}
-            onChange={updateTile}
-            onClose={() => setSelectedTileId(null)}
-          />
-        )}
       </div>
 
       {showFilters && (
@@ -306,6 +456,16 @@ export default function EditorPage() {
 
       {showLibrary && (
         <TileLibraryPicker onPick={addLibraryTile} onClose={() => setShowLibrary(false)} />
+      )}
+
+      {showSaveAs && (
+        <SaveAsClientModal
+          entityId={suiteEntityId}
+          entityName={suiteEntityName}
+          defaultTitle={def.title}
+          onConfirm={saveAsClientVersion}
+          onClose={() => setShowSaveAs(false)}
+        />
       )}
 
       {showAiContext && (
@@ -332,6 +492,7 @@ export default function EditorPage() {
         <DaysBeforeSyncModal def={def} onChange={(sync) => mutate((d) => ({ ...d, daysBeforeSync: sync }))} onClose={() => setShowDaysSync(false)} />
       )}
     </div>
+    </ScopeProvider>
   );
 }
 
@@ -402,10 +563,49 @@ function Centered({ children, error }) {
   );
 }
 
-const toolbar = { background: 'var(--frost)', backdropFilter: 'saturate(180%) blur(20px)', WebkitBackdropFilter: 'saturate(180%) blur(20px)', borderBottom: '1px solid var(--hairline)', padding: '10px 20px', display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' };
+// position+zIndex lift the toolbar's stacking context (created by backdrop-filter)
+// ABOVE the tile area below it — otherwise the Save dropdown, trapped inside this
+// context, renders behind the later-painted tiles.
+const toolbar = { position: 'relative', zIndex: 60, background: 'var(--frost)', backdropFilter: 'saturate(180%) blur(20px)', WebkitBackdropFilter: 'saturate(180%) blur(20px)', borderBottom: '1px solid var(--hairline)', padding: '10px 20px', display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' };
 const titleInput = { fontSize: 16, fontWeight: 600, letterSpacing: '-0.01em', border: '1px solid transparent', borderRadius: 8, padding: '6px 10px', outline: 'none', minWidth: 200, background: 'rgba(0,0,0,0.04)' };
 const btn = { padding: '8px 14px', background: 'rgba(0,0,0,0.05)', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer', color: 'var(--text)' };
 const viewBtn = { padding: '8px 16px', background: 'rgba(0,0,0,0.05)', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer', color: 'var(--text)' };
 const saveBtn = { padding: '8px 18px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer' };
+const saveMenu = { position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 50, background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 12, boxShadow: '0 12px 32px rgba(0,0,0,0.18)', padding: 6, minWidth: 240, display: 'flex', flexDirection: 'column', gap: 2 };
+const saveMenuItem = { display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 1, textAlign: 'left', padding: '9px 11px', background: 'transparent', border: 'none', borderRadius: 8, cursor: 'pointer', color: 'var(--text)', fontSize: 13.5 };
+const saveMenuHint = { fontSize: 11.5, color: 'var(--muted)', fontWeight: 400 };
+const badgeTemplate = { fontSize: 11, fontWeight: 700, padding: '3px 9px', borderRadius: 980, background: 'rgba(0,0,0,0.06)', color: 'var(--muted)', whiteSpace: 'nowrap' };
+const badgeClient = { fontSize: 11, fontWeight: 700, padding: '3px 9px', borderRadius: 980, background: 'color-mix(in srgb, var(--brand) 15%, transparent)', color: 'var(--brand)', whiteSpace: 'nowrap' };
 const aiOverlay = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 500, padding: 20 };
 const aiCard = { width: 'min(560px, 96vw)', background: 'var(--card)', borderRadius: 14, boxShadow: '0 12px 48px rgba(0,0,0,0.25)', padding: 22 };
+
+// Reproduce the client's effective filter values for the editor preview, mirroring
+// ViewPage.buildFilters: suite-wide locks → this dashboard's per-suite locks win
+// over the template default_value; then the saved overlay (client default → user
+// view) fills non-locked filters; finally the live values passed via router state
+// (in-session changes from the view the admin came from) win on non-locked filters.
+function buildClientFilters(data, suite, overlay, live) {
+  // "Keep imported filters" dashboards ignore locks/saved/defaults entirely.
+  if (data?.keepImportedFilters || data?.folderKeepImported) {
+    const vals = {};
+    for (const f of data.filters || []) vals[f.name] = f.default_value || '';
+    if (live) for (const f of data.filters || []) if (live[f.name] !== undefined) vals[f.name] = live[f.name];
+    return vals;
+  }
+  const dash = data?.id;
+  const lockMap = { ...(suite?.lockedFilters || {}), ...((suite?.dashboardLocks && dash != null && suite.dashboardLocks[dash]) || {}) };
+  const norm = {};
+  for (const [k, v] of Object.entries(lockMap)) norm[k.trim().toLowerCase()] = v;
+  const vals = {};
+  const locked = {};
+  for (const f of data.filters || []) {
+    vals[f.name] = f.default_value || '';
+    const field = (f.field || f.dimension || '').trim().toLowerCase();
+    const nameKey = (f.name || '').trim().toLowerCase();
+    const v = norm[nameKey] != null ? norm[nameKey] : (field ? norm[field] : undefined);
+    if (v != null) { vals[f.name] = v; if (v !== '') locked[f.name] = true; }
+  }
+  if (overlay) for (const [k, v] of Object.entries(overlay)) { if (k in vals && !locked[k] && typeof v === 'string') vals[k] = v; }
+  if (live) for (const [k, v] of Object.entries(live)) { if (k in vals && !locked[k]) vals[k] = v; }
+  return vals;
+}

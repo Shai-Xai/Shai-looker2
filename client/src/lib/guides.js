@@ -104,6 +104,15 @@ export const GUIDES = {
       { icon: '📧', title: 'It emails your team', body: "The Owl writes a briefing on your numbers and emails it to whoever you choose, on time, without you lifting a finger.", cta: { label: 'Open Digests', to: '/digests' } },
     ],
   },
+  alerts: {
+    id: 'alerts',
+    title: 'Set up an alert',
+    steps: [
+      { icon: '🚨', title: 'Open Alerts', body: 'Go to Alerts to put a watcher on any number that matters to you.', cta: { label: 'Open Alerts', to: '/alerts' } },
+      { icon: '🎯', title: 'Pick what to watch', body: 'Choose a dashboard tile or a raw metric — tickets sold, revenue, remaining stock — and set the threshold that should trigger you.' },
+      { icon: '📲', title: 'Get told the moment it happens', body: 'When your number crosses the line, Pulse pings you — in-app and on your phone — so you can act while it still matters.', cta: { label: 'Open Alerts', to: '/alerts' } },
+    ],
+  },
   explore: {
     id: 'explore',
     title: 'Take a tour of your dashboards',
