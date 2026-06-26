@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Link, Navigate, useNavigate, useLocation 
 import HomePage from './pages/HomePage.jsx';
 import ViewPage from './pages/ViewPage.jsx';
 import InboxNotifier from './components/InboxNotifier.jsx';
+import UpdateBanner from './components/UpdateBanner.jsx';
 import LivePulse from './components/LivePulse.jsx';
 import LoginPage from './pages/LoginPage.jsx';
 import ResetPasswordPage from './pages/ResetPasswordPage.jsx';
@@ -245,6 +246,7 @@ function Shell() {
       <DrillProvider>
         <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh' }}>
           <Header />
+          <UpdateBanner />
           <InboxNotifier entityId={mode === 'client' ? activeEntityId : undefined} />
           <Suspense fallback={<ScreenFallback />}>
           {isAdmin && !actingAsClient ? (
