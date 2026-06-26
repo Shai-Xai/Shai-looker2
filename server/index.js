@@ -2533,13 +2533,23 @@ async function generateOverall(user, entityId, segment, { force = false } = {}) 
     const totalMs = Date.now() - tStart;
     console.log(`[briefing-timing] overall entity=${entityId} force=${!!force} events=${selected.length} total=${totalMs}ms facts=${factsMs}ms llm=${llmMs}ms`);
     const link = (id) => (id && byId[id] ? { dashboardId: id, suiteId: byId[id].suiteId, label: `${byId[id].setName} → ${byId[id].title}` } : null);
+    // Each portfolio suggestion targets ONE event, which the AI returns as suiteId
+    // (a shared dashboard can't identify the event on its own — byId is last-wins).
+    // Trust the AI's suiteId only when it's one of the selected events.
+    const selSet = new Set(selected);
     const out = {
       ...base,
       headline: String(raw.headline || '').slice(0, 600),
       bullets: (raw.bullets || []).slice(0, 4).map((b) => ({ text: String(b.text || '').slice(0, 400) })).filter((b) => b.text),
       // Cross-event "Worth a look" suggestions (so the portfolio home keeps them).
       suggestions: (raw.suggestions || []).slice(0, 3)
-        .map((s) => ({ title: String(s.title || '').slice(0, 80), reason: String(s.reason || '').slice(0, 200), link: link(s.dashboardId), action: CAPABILITY_KEYS.has(s.action) ? s.action : null }))
+        .map((s) => {
+          const lk = link(s.dashboardId);
+          const evSuite = selSet.has(s.suiteId) ? s.suiteId : '';
+          // The event the campaign should open against: the AI's, else the link's.
+          const linkOut = lk ? { ...lk, suiteId: evSuite || lk.suiteId } : (evSuite ? { suiteId: evSuite } : null);
+          return { title: String(s.title || '').slice(0, 80), reason: String(s.reason || '').slice(0, 200), link: linkOut, action: CAPABILITY_KEYS.has(s.action) ? s.action : null };
+        })
         .filter((s) => s.title && (s.link || s.action)),
       _timing: { totalMs, factsMs, llmMs, facts: factTiming },
     };

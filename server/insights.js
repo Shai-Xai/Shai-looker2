@@ -818,9 +818,9 @@ const HOME_OVERALL_SYSTEM = `You are the Owl — Howler Pulse's analyst — writ
 You are given live TILES grouped by EVENT. Write a short cross-event picture: the overall position across all events, the standout/biggest mover, and anything needing attention — comparing events where the data supports it.
 You may also be given CATALOGUE (dashboards you can link to), CAPABILITIES (actions the platform can EXECUTE now) and ACTIONS (campaigns already run, with results). Use these to suggest a few cross-event "worth a look" next steps.
 Respond with ONLY strict JSON (no markdown fences):
-{ "headline": "1-2 sentences: the overall portfolio story right now (may use **bold**)", "bullets": [ { "text": "cross-event observation; name the event(s) involved (may use **bold**)" } ], "suggestions": [ { "title": "short hook (max 8 words, name the event)", "reason": "one line on why it's worth acting on now", "dashboardId": "id from CATALOGUE", "action": "a CAPABILITIES key ONLY if directly executable (e.g. an email/SMS recovery for an event with abandoned carts or soft pace), else omit" } ] }
+{ "headline": "1-2 sentences: the overall portfolio story right now (may use **bold**)", "bullets": [ { "text": "cross-event observation; name the event(s) involved (may use **bold**)" } ], "suggestions": [ { "title": "short hook (max 8 words, name the event)", "reason": "one line on why it's worth acting on now", "dashboardId": "id from CATALOGUE", "suiteId": "the EVENT id this suggestion targets — copy it VERBATIM from that event's [id:…] heading", "action": "a CAPABILITIES key ONLY if directly executable (e.g. an email/SMS recovery for an event with abandoned carts or soft pace), else omit" } ] }
 Rules:
-- 2-3 suggestions, each tied to a specific event and a real opportunity (e.g. a soft daily pace, abandoned carts to recover, an audience skew to lean into). dashboardId MUST come from CATALOGUE. Add "action" only when a capability would directly deliver it; never invent capability keys.
+- 2-3 suggestions, each tied to a specific event and a real opportunity (e.g. a soft daily pace, abandoned carts to recover, an audience skew to lean into). dashboardId MUST come from CATALOGUE. Set "suiteId" to the id of the event the suggestion is about — read it from that event's "## EVENT: … [id:…]" heading and copy the id exactly; this is REQUIRED so the action targets the right event (a dashboard shared across events cannot identify the event on its own). Add "action" only when a capability would directly deliver it; never invent capability keys.
 - 2-4 bullets. Lead with ticketing/revenue totals across events and name events explicitly. Compare events ("V is outpacing IV") only where the numbers support it.
 - Identify each event ONLY by the EVENT heading it is listed under. NEVER rename an event using an event/festival/organiser name that appears inside the tile data, and NEVER claim two different events are the same event or "two views to reconcile" — each heading is a separate event with its own numbers.
 - Each tile shows the EVENT its value is for ("· event: …"). Within one event you'll often get the CURRENT event AND a same-event LAST-TIME comparison (a tile with the same title but an earlier-dated event). Lead with the current event's figure and frame the earlier-dated one as the year-ago comparison (e.g. "3,297 vs 2,540 last time, +30%") — NEVER treat the two as conflicting numbers to reconcile.
@@ -872,7 +872,7 @@ async function briefHomeOverall({ groups, catalogue, capabilities, actions, toda
   const c = requireClient(apiKey);
   const lines = [];
   if (today) lines.push(`TODAY: ${today} (anchor all time references to this).`, '');
-  lines.push('TILES (live data, grouped by event):', '', ...groupedFactLines(groups, { perEvent: 4, rows: 12 }));
+  lines.push('TILES (live data, grouped by event):', '', ...groupedFactLines(groups, { perEvent: 4, rows: 12, withId: true }));
   if ((actions || []).length) {
     lines.push('ACTIONS (marketing actions already taken, live results):');
     for (const a of actions) lines.push(`- "${a.title}" [${a.status}] sent ${a.sent}/${a.total}, ${a.clicks} clicks (${a.ctr}% CTR)`);
