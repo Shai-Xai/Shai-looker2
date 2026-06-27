@@ -13,7 +13,7 @@ const HOWLER_PALETTE = ['#FF385C', '#FF6B35', '#FFB020', '#06B6D4', '#7C3AED', '
 // The fixed tail (series 6-10) for the Howler default.
 const HOWLER_TAIL = ['#10B981', '#EC4899', '#3B82F6', '#F97316', '#14B8A6'];
 
-let current = { primary: HOWLER_PRIMARY, secondary: HOWLER_SECONDARY, chart3: '', chart4: '', chart5: '', logo: '', logoDark: '', metricScale: 1 };
+let current = { primary: HOWLER_PRIMARY, secondary: HOWLER_SECONDARY, chart3: '', chart4: '', chart5: '', logo: '', logoDark: '', metricScale: 1, currency: 'ZAR' };
 
 // Clamp a metric-size multiplier to a sane range; blank/garbage → 1 (default).
 function cleanScale(v) { const n = Number(v); return Number.isFinite(n) && n > 0 ? Math.max(0.6, Math.min(1.6, n)) : 1; }
@@ -95,8 +95,8 @@ export function chartPalette() {
 export const brandPrimary = () => current.primary;
 
 // ── CSS variable application ──
-export function applyBrand({ primary, secondary, chart3, chart4, chart5, logo, logoDark, metricScale } = {}) {
-  current = { primary: primary || HOWLER_PRIMARY, secondary: secondary || HOWLER_SECONDARY, chart3: chart3 || '', chart4: chart4 || '', chart5: chart5 || '', logo: logo || '', logoDark: logoDark || '', metricScale: cleanScale(metricScale) };
+export function applyBrand({ primary, secondary, chart3, chart4, chart5, logo, logoDark, metricScale, currency } = {}) {
+  current = { primary: primary || HOWLER_PRIMARY, secondary: secondary || HOWLER_SECONDARY, chart3: chart3 || '', chart4: chart4 || '', chart5: chart5 || '', logo: logo || '', logoDark: logoDark || '', metricScale: cleanScale(metricScale), currency: currency || 'ZAR' };
   const root = document.documentElement;
   root.style.setProperty('--brand', current.primary);
   root.style.setProperty('--brand-2', current.secondary);
@@ -105,7 +105,7 @@ export function applyBrand({ primary, secondary, chart3, chart4, chart5, logo, l
   window.dispatchEvent(new Event('brand-changed'));
 }
 export function resetBrand() {
-  current = { primary: HOWLER_PRIMARY, secondary: HOWLER_SECONDARY, chart3: '', chart4: '', chart5: '', logo: '', logoDark: '', metricScale: 1 };
+  current = { primary: HOWLER_PRIMARY, secondary: HOWLER_SECONDARY, chart3: '', chart4: '', chart5: '', logo: '', logoDark: '', metricScale: 1, currency: 'ZAR' };
   const root = document.documentElement;
   for (const v of ['--brand', '--brand-2', '--brand-dark', '--brand-rgb']) root.style.removeProperty(v);
   window.dispatchEvent(new Event('brand-changed'));
@@ -117,6 +117,19 @@ export function useMetricScale() {
   const [v, setV] = useState(current.metricScale);
   useEffect(() => {
     const on = () => setV(current.metricScale);
+    window.addEventListener('brand-changed', on);
+    return () => window.removeEventListener('brand-changed', on);
+  }, []);
+  return v;
+}
+
+// The active client's reporting currency (ISO code; 'ZAR' = platform default).
+// Drives how Pulse-rendered money is shown. Subscribe with useCurrency().
+export const brandCurrency = () => current.currency;
+export function useCurrency() {
+  const [v, setV] = useState(current.currency);
+  useEffect(() => {
+    const on = () => setV(current.currency);
     window.addEventListener('brand-changed', on);
     return () => window.removeEventListener('brand-changed', on);
   }, []);

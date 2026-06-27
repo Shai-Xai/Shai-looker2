@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { api } from '../lib/api.js';
 import { extractPaletteFromImage } from '../lib/colorExtract.js';
+import { currencyList } from '../lib/currency.js';
 import UploadHint from './UploadHint.jsx';
 
 // Editable email branding/template with a live preview. Used at two scopes:
@@ -22,6 +23,7 @@ const FIELDS = [
   ['intro', 'Intro line', 'textarea', 'Optional line above the message, inside the card'],
   ['footer', 'Footer text', 'textarea', 'Small print under the card — supports multiple lines (e.g. contact details)'],
   ['metricScale', 'Metric number size', 'scale', 'How big KPI numbers render on your dashboards (100% = default). Affects the big single-value tiles only'],
+  ['currency', 'Reporting currency', 'currency', 'The currency Pulse shows money in and the Owl writes amounts in — across insights, briefings, goals, alerts and digests. Set once per client; an event can override it. Dashboard tile values keep the format from their data source'],
 ];
 
 export default function MailTemplateEditor({ entityId, scope = 'platform', suiteId = '', canTest = false }) {
@@ -98,6 +100,11 @@ export default function MailTemplateEditor({ entityId, scope = 'platform', suite
               <LogoField value={edits[key] || ''} inherited={placeholderFor(key)} onChange={(v) => set(key, v)} dark />
             ) : type === 'textarea' ? (
               <textarea value={edits[key] || ''} onChange={(e) => set(key, e.target.value)} placeholder={placeholderFor(key)} rows={2} style={{ ...input, resize: 'vertical', fontFamily: 'inherit' }} />
+            ) : type === 'currency' ? (
+              <select value={edits[key] || ''} onChange={(e) => set(key, e.target.value)} style={{ ...input, cursor: 'pointer' }}>
+                <option value="">{`Inherit${placeholderFor(key) ? ` (${placeholderFor(key)})` : ' (ZAR)'}`}</option>
+                {currencyList().map((c) => <option key={c.code} value={c.code}>{`${c.code} — ${c.name} (${c.symbol})`}</option>)}
+              </select>
             ) : type === 'scale' ? (
               (() => {
                 const isSet = edits[key] !== '' && edits[key] != null;

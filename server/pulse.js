@@ -119,15 +119,17 @@ function mount(app, { db, auth, resolveTileValue, alertBeats }) {
 
   // ── momentum beats: latest value vs ~1h ago, per tracked tile ─────────────────
   const fmtNum = (n) => (Math.abs(n) >= 1000 ? Math.round(n).toLocaleString('en-ZA') : String(Math.round(n * 100) / 100));
-  function fmtDelta(d, unit) {
+  function fmtDelta(d, unit, moneySym = 'R') {
     const sign = d < 0 ? '-' : '+';
     const a = Math.abs(d);
-    if (unit === 'ZAR') return `${sign}R${fmtNum(a)}`;
+    if (unit === 'ZAR') return `${sign}${moneySym}${fmtNum(a)}`; // money unit; symbol follows the client's reporting currency
     if (unit === '%') return `${sign}${fmtNum(a)} pts`;
     return `${sign}${fmtNum(a)}`;
   }
   function momentumBeats(entityId, { windowMs = 3600 * 1000 } = {}) {
     const beats = [];
+    let sym = 'R';
+    try { sym = require('./currency').symbolFor(require('./mailer').resolveBranding(entityId).currency); } catch { /* default R */ }
     for (const t of pickMomentumTiles(entityId)) {
       const latest = sql.prepare('SELECT value, at FROM tile_snapshots WHERE entity_id=? AND dashboard_id=? AND tile_id=? ORDER BY at DESC LIMIT 1').get(entityId, t.dashboardId, t.tileId);
       if (!latest || latest.value == null) continue;
@@ -145,7 +147,7 @@ function mount(app, { db, auth, resolveTileValue, alertBeats }) {
       beats.push({
         id: `mom:${t.dashboardId}:${t.tileId}:${latest.at}`,
         kind: 'momentum', at: latest.at, tier: 'info',
-        message: `${fmtDelta(delta, t.unit)} ${t.title} in the last hour`,
+        message: `${fmtDelta(delta, t.unit, sym)} ${t.title} in the last hour`,
         name: t.title, value: Number(latest.value), abs: Math.abs(delta),
       });
     }

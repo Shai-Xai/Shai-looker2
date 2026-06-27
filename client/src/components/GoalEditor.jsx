@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import { api } from '../lib/api.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import { useAuth } from '../lib/auth.jsx';
+import { brandCurrency } from '../lib/brand.js';
+import { currencySymbol } from '../lib/currency.js';
 
 // Set or edit an event goal (the Results pillar). Two ways to track it, per the
 // spec: a LIVE number off a dashboard tile (the tile you look at becomes the goal
@@ -800,7 +802,7 @@ function fmtNum(v, unit) {
   const n = Number(v);
   if (!Number.isFinite(n)) return String(v);
   const s = Math.abs(n) >= 1000 ? n.toLocaleString('en-ZA') : String(n);
-  if (unit === 'ZAR') return `R${s}`;
+  if (unit === 'ZAR') return `${currencySymbol(brandCurrency())}${s}`; // money unit; symbol follows the client's reporting currency
   if (unit === '%') return `${s}%`;
   return unit && unit !== 'count' ? `${s} ${unit}` : s;
 }

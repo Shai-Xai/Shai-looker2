@@ -230,25 +230,31 @@ function mount(app, { db, auth, resolveTileValue, resolveCustomMetric, metricCat
     if (operator === 'lt') return v < threshold;
     return false;
   }
-  function fmtNum(v, unit) {
+  function fmtNum(v, unit, moneySym = 'R') {
     if (v == null) return '—';
     const n = Number(v);
     if (!Number.isFinite(n)) return String(v);
     const s = Math.abs(n) >= 1000 ? Math.round(n).toLocaleString('en-ZA') : String(n);
-    if (unit === 'ZAR') return `R${s}`;
+    if (unit === 'ZAR') return `${moneySym}${s}`; // 'ZAR' is the generic money unit; symbol follows the client's reporting currency
     if (unit === '%') return `${s}%`;
     return unit && unit !== 'count' ? `${s} ${unit}` : s;
+  }
+  // The client's reporting-currency symbol for a money alert (defaults to R / ZAR).
+  function moneySymFor(a) {
+    try { return require('./currency').symbolFor(mailer.resolveBranding(a.entityId, a.suiteId).currency); }
+    catch { return 'R'; }
   }
   // A plain-English line for the notification body. Kept template-driven for Wave 1
   // (the AI-written version is a later wave). The metric label is the tile's title.
   function buildMessage(a, value) {
     const metric = (a.source === 'metric' ? (a.metricLabel || a.measureLabel) : a.tileName) || a.name || 'A metric';
-    const val = fmtNum(value, a.unit);
+    const sym = moneySymFor(a);
+    const val = fmtNum(value, a.unit, sym);
     if (a.ruleType === 'sold_out') return `🎉 Sold out — ${metric} reached ${val}.`;
-    if (a.ruleType === 'depletion') return `⚠️ Low stock — only ${val} left on ${metric} (alert set below ${fmtNum(a.threshold, a.unit)}).`;
+    if (a.ruleType === 'depletion') return `⚠️ Low stock — only ${val} left on ${metric} (alert set below ${fmtNum(a.threshold, a.unit, sym)}).`;
     // threshold
     const dir = (a.operator === 'lte' || a.operator === 'lt') ? 'dropped to' : 'reached';
-    return `📈 ${metric} ${dir} ${val} (alert at ${fmtNum(a.threshold, a.unit)}).`;
+    return `📈 ${metric} ${dir} ${val} (alert at ${fmtNum(a.threshold, a.unit, sym)}).`;
   }
   function emoji(a) { return a.ruleType === 'sold_out' ? '🎉' : a.ruleType === 'depletion' ? '⚠️' : '📈'; }
 

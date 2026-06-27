@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { chartPalette } from '../../lib/brand.js';
+import { chartPalette, brandCurrency } from '../../lib/brand.js';
+import { currencySymbol } from '../../lib/currency.js';
 import { useIsMobile } from '../../lib/useIsMobile.js';
 
 // Shared presentational pieces for the Results pillar — the compact goal card and
@@ -422,7 +423,7 @@ export function fmtVal(v, unit) {
   if (!Number.isFinite(n)) return String(v);
   if (unit === '%') return `${n}%`;
   const s = Math.abs(n) >= 1000 ? n.toLocaleString('en-ZA') : String(n);
-  if (unit === 'ZAR') return `R${s}`;
+  if (unit === 'ZAR') return `${currencySymbol(brandCurrency())}${s}`; // 'ZAR' = the money unit; symbol follows the client's reporting currency
   return unit && unit !== 'count' ? `${s} ${unit}` : s;
 }
 

@@ -17,6 +17,7 @@ const { parseDrillUrl } = require('./drill');
 const insights = require('./insights');
 const { asyncHandler, errorMiddleware } = require('./http');
 const mailer = require('./mailer');
+const currency = require('./currency');
 const messaging = require('./messaging');
 const rateLimit = require('./ratelimit');
 // Query & scope engine (shared library): the single place Looker queries run and
@@ -1198,16 +1199,16 @@ const maskSecret = (v) => (v && v.length ? `••••••${String(v).slice(
 
 // Combined AI instructions: the global standing instructions, plus the
 // per-client context when the request is in a suite (client) context.
-function aiInstructionsFor(suiteId) {
+function aiInstructionsFor(suiteId, entityId) {
   const parts = [];
   const global = db.getSetting('ai_instructions');
   if (global && global.trim()) parts.push(global.trim());
-  if (suiteId) {
-    const su = db.getSuite(suiteId);
-    const ent = su && db.getEntity(su.entityId);
-    if (ent?.aiContext && ent.aiContext.trim()) parts.push(`Context for the client "${ent.name}":\n${ent.aiContext.trim()}`);
-  }
-  return parts.join('\n\n');
+  const su = suiteId ? db.getSuite(suiteId) : null;
+  const eid = entityId || su?.entityId;
+  const ent = eid && db.getEntity(eid);
+  if (su && ent?.aiContext && ent.aiContext.trim()) parts.push(`Context for the client "${ent.name}":\n${ent.aiContext.trim()}`);
+  if (eid) parts.push(currency.aiNote(mailer.resolveBranding(eid, suiteId).currency)); // reporting-currency note (blank for ZAR)
+  return parts.filter(Boolean).join('\n\n');
 }
 
 // ─── AI insight for a tile ─────────────────────────────────────────────────────
@@ -1642,7 +1643,7 @@ app.get('/api/theme/:entityId', auth.requireAuth, (req, res) => {
   // per-event theme only swaps the colours in-app, never the main profile logo.
   // logoDark is the optional dark-mode variant (blank → shell uses `logo`).
   const shell = mailer.resolveBranding(id);
-  res.json({ primary: b.brandColor, secondary: b.secondaryColor, chart3: b.chart3, chart4: b.chart4, chart5: b.chart5, logo: shell.logo || '', logoDark: shell.logoDark || '', metricScale: b.metricScale });
+  res.json({ primary: b.brandColor, secondary: b.secondaryColor, chart3: b.chart3, chart4: b.chart4, chart5: b.chart5, logo: shell.logo || '', logoDark: shell.logoDark || '', metricScale: b.metricScale, currency: currency.normalize(b.currency) });
 });
 
 // Live preview: render the email HTML with unsaved edits layered on the right
@@ -2077,7 +2078,7 @@ function briefingSuites(user, entityId) {
   const sel = new Set(selected);
   return { suites: list.map((s) => ({ ...s, selected: sel.has(s.id) })), selected, raw };
 }
-const briefInstructions = (user, entityId, segment) => [aiInstructionsFor(null), briefingInstructionsFor(user, entityId, clientCatalogue(entityId).suites), segment ? timeDefaults()[segment] : ''].filter(Boolean).join('\n\n');
+const briefInstructions = (user, entityId, segment) => [aiInstructionsFor(null, entityId), briefingInstructionsFor(user, entityId, clientCatalogue(entityId).suites), segment ? timeDefaults()[segment] : ''].filter(Boolean).join('\n\n');
 // Build briefing facts scoped to the selected events, grouped by event (in the
 // selected order). Reuses buildFacts (and its Looker query cache).
 async function factGroups(user, entityId, selectedIds, force) {
@@ -2232,7 +2233,7 @@ async function generateBriefing(user, entityId, segment, { force = false } = {})
       lastVisit: prof.lastVisit,
       top: prof.top.filter((t) => byId[t.dashboardId]).map((t) => ({ title: byId[t.dashboardId].title, count: t.count })),
     };
-    const instructions = [aiInstructionsFor(null), briefingInstructionsFor(user, entityId, suites), timeDefaults()[segment]].filter(Boolean).join('\n\n');
+    const instructions = [aiInstructionsFor(null, entityId), briefingInstructionsFor(user, entityId, suites), timeDefaults()[segment]].filter(Boolean).join('\n\n');
     const msgs = recentMessages(entityId, user.id);
     const tGoals = Date.now();
     const goals = await goalsP;
@@ -2438,7 +2439,7 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
   }
 
   const byId = Object.fromEntries(catalogue.map((c) => [c.dashboardId, c]));
-  const instructions = [aiInstructionsFor(null), briefingInstructionsFor(user, entityId, clientCatalogue(entityId).suites)].filter(Boolean).join('\n\n');
+  const instructions = [aiInstructionsFor(null, entityId), briefingInstructionsFor(user, entityId, clientCatalogue(entityId).suites)].filter(Boolean).join('\n\n');
   // Deep links carry the EVENT the content is about (`evSuite`), not byId's
   // last-wins suite — a dashboard shared across events would otherwise link to
   // the wrong one. Per-event sections pass their own suite; the cross-event
@@ -2886,7 +2887,7 @@ const actionsApi = require('./actions').mount(app, {
     const apiKey = anthropicKeyForEntity(entityId);
     if (!insights.isConfigured(apiKey)) throw new Error('AI is not configured for this client');
     const ent = db.getEntity(entityId);
-    return insights.draftCampaign({ goal, clientName: ent?.name, clientContext: ent?.aiContext || '', audienceCount, instructions: aiInstructionsFor(null), apiKey });
+    return insights.draftCampaign({ goal, clientName: ent?.name, clientContext: ent?.aiContext || '', audienceCount, instructions: aiInstructionsFor(null, entityId), apiKey });
   },
 });
 
