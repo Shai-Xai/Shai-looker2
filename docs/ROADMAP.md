@@ -6,8 +6,14 @@
 > [Experience OS vision](EXPERIENCE_OS_BRIEF.md) and what's already built.
 > Last updated June 2026.
 
-Legend: **Effort** S/M/L/XL · **Status** idea (all idea for now) ·
-**Ties to** = existing module or vision layer.
+Legend: **Effort** S/M/L/XL · **Status** 💡 idea · 🏗️ in progress ·
+✅ shipped · ⏸️ parked · **Ties to** = existing module or vision layer.
+
+> **How this stays current.** This roadmap is the deduplicated source of truth.
+> Its raw input is `docs/whats-next/` — the per-session notes. Periodically a
+> session *reconciles* the notes into this file (see the reconcile prompt in
+> `docs/whats-next/README.md`): mark shipped items ✅, move started ones to 🏗️,
+> add genuinely new items, and re-sequence. Bump "Last updated" when you do.
 
 ---
 

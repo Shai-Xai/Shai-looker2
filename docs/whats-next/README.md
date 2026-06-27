@@ -17,6 +17,18 @@
 3. **To take stock**, ask any session: *"Review docs/whats-next and give me a
    consolidated what's-next."* It reads every note (newest first) and
    synthesises themes, priorities, blockers, and duplicates.
+4. **To refresh the roadmap**, run the *reconcile* prompt below. The notes are
+   the raw input; `docs/ROADMAP.md` is the deduplicated source of truth.
+
+## The loop
+
+```
+each session  ──writes──►  docs/whats-next/<date>__<branch>.md   (raw, append-only)
+                                      │
+                              reconcile prompt
+                                      ▼
+                            docs/ROADMAP.md   (deduplicated, status-tracked, sequenced)
+```
 
 ## File naming
 
@@ -38,6 +50,22 @@ than overwriting.
 > priority order, and any open questions or blockers. If a file for today +
 > this branch already exists, append a new dated section instead of overwriting.
 > Then commit and push it per the CLAUDE.md git rules.
+
+## The prompt to reconcile notes into the roadmap
+
+Run this when you want the roadmap refreshed (e.g. after a few sessions, or
+before planning):
+
+> Read every note in `docs/whats-next/` and the current `docs/ROADMAP.md`, and
+> cross-check against recent git history (`git log`) for what actually shipped.
+> Then update `docs/ROADMAP.md` to reflect reality: mark shipped items ✅, move
+> started ones to 🏗️ (with a one-line "what's left"), add genuinely new items
+> surfaced in the notes into the right themed section (keep the existing format —
+> verbatim note in *italic* where one exists, description, Ties to, Effort),
+> de-duplicate against items already there, and refresh the "Suggested
+> sequencing" + "Last updated". Don't delete ideas — park them ⏸️ with a reason.
+> Show me a short diff summary of what changed and why, then commit and push per
+> the CLAUDE.md git rules.
 
 ## Template for each note
 
