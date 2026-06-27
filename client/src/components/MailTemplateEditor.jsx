@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { api } from '../lib/api.js';
 import { extractPaletteFromImage } from '../lib/colorExtract.js';
+import UploadHint from './UploadHint.jsx';
 
 // Editable email branding/template with a live preview. Used at two scopes:
 //   • platform  (entityId omitted) — Howler's default for all notifications
@@ -198,6 +199,7 @@ function LogoField({ value, inherited, onChange, onExtract }) {
       {!value?.startsWith('data:') && (
         <input value={value || ''} onChange={(e) => onChange(e.target.value)} placeholder={inherited && !inherited.startsWith('data:') ? inherited : 'or paste an image URL: https://…/logo.png'} style={input} />
       )}
+      <UploadHint kind="logo" />
     </div>
   );
 }

@@ -15,6 +15,7 @@ import SegmentManager from '../components/SegmentManager.jsx';
 import RateCard from '../components/RateCard.jsx';
 import { BriefingConfigForm } from '../components/BriefingTuneModal.jsx';
 import StatusNoticesAdmin from '../components/StatusNoticesAdmin.jsx';
+import UploadHint from '../components/UploadHint.jsx';
 import { GUIDES } from '../lib/guides.js';
 
 // Icon control: an emoji, or an uploaded image (downscaled to a small data-URL).
@@ -47,13 +48,16 @@ function LogoPicker({ value, onChange }) {
     reader.readAsDataURL(f);
   };
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-      <div style={logoPreview}>
-        {value ? <img src={value} alt="" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} /> : <span style={{ color: '#c8c8cc', fontSize: 12 }}>No logo</span>}
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div style={logoPreview}>
+          {value ? <img src={value} alt="" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} /> : <span style={{ color: '#c8c8cc', fontSize: 12 }}>No logo</span>}
+        </div>
+        <button style={miniBtn} onClick={() => fileRef.current?.click()}>Upload logo</button>
+        <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={onFile} />
+        {value && <button style={delBtn} onClick={() => onChange('')}>Remove</button>}
       </div>
-      <button style={miniBtn} onClick={() => fileRef.current?.click()}>Upload logo</button>
-      <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={onFile} />
-      {value && <button style={delBtn} onClick={() => onChange('')}>Remove</button>}
+      <UploadHint kind="logo" />
     </div>
   );
 }
@@ -102,6 +106,7 @@ function IconPicker({ value, onChange }) {
           </button>
         ))}
       </div>
+      <UploadHint kind="icon" />
     </div>
   );
 }
