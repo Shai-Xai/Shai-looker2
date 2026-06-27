@@ -1,27 +1,27 @@
 Module,Raw LOC,Code LOC,Effort factor
-Client — Pages,7305,6387,1.0
-Client — Components,6876,5916,1.0
-"Server — Core, auth & API",3848,2982,1.0
-Server — Dashboard configs (data),9346,9346,0.3
-Server — Campaign engine,2406,1875,1.0
-Docs,3117,2603,0.593
-Server — Data & Looker,1842,1503,1.0
-Client — Lib & shell,1343,1004,1.0
-Client — Tiles,924,749,1.0
-Server — Messaging & email,739,545,1.0
-Server — AI & insights,641,525,1.0
-Server — Experience OS spine,641,493,1.0
-Client — Editor,516,459,1.0
-Other,588,484,0.891
-Server — Ad-platform sync,550,420,1.0
-Docs — Product overview,651,551,0.589
-Server — Digests & scheduler,393,318,1.0
+Client — Components,11577,9873,1.0
+Client — Pages,11250,9833,1.0
+Server — Other,5502,4135,1.0
+"Server — Core, auth & API",3841,2894,1.0
+Docs,4004,3376,0.594
+Server — Data & Looker,2406,1927,1.0
+Tests,2494,1918,1.0
+Server — Campaign engine,2443,1893,1.0
+Client — Lib & shell,1986,1496,1.0
+Server — AI & insights,1143,933,1.0
+Client — Editor,987,871,1.0
+Client — Tiles,932,752,1.0
+Server — Messaging & email,795,587,1.0
+Other,794,633,0.87
+Docs — Product overview,1028,917,0.593
+Server — Experience OS spine,669,507,1.0
+Docs — Specs,910,786,0.6
+Server — Ad-platform sync,593,452,1.0
+Server — Digests & scheduler,402,326,1.0
+Client — App shell,347,292,1.0
 Client — Inbox (OS),313,262,1.0
-Client — App shell,296,255,1.0
-Tests,337,243,1.0
-Docs — Specs,459,398,0.6
-Client — Styles,425,327,0.6
-Client — Config,180,159,0.741
+Client — Styles,439,335,0.6
+Client — Config,197,169,0.755
 Docs — Experience OS pitch,164,152,0.55
-Server — Onboarding,78,55,1.0
+Server — Onboarding,89,59,1.0
 Server — Fixtures & data,127,127,0.3
