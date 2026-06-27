@@ -389,6 +389,35 @@ you on the shoulder the moment it happens, on whatever screen you're on."
 sales-surge/stall detection, AI-written alert messages, and one-tap actions from the
 alert itself.*
 
+> **Not to be confused with Status notices (below).** Alerts watch *data* and fire
+> automatically; Status notices are *Howler telling clients about a platform issue*.
+
+---
+
+## 11. Status notices — keep clients in the loop on platform issues  ✅
+When something's up with the platform — dashboards loading slowly, a planned
+maintenance window, an outage — Howler can **post a status notice** and every
+affected client sees it in their app, no support tickets needed. It's a proper
+status-page-style incident: post it, **update it** as you learn more, and **mark it
+resolved**.
+- **Company-wide or specific clients** — set a notice **across all clients** (a
+  platform-wide issue) or aim it at **one or several specific clients** (only those
+  on a given integration, say).
+- **A living timeline** — the opening post, every update ("we've identified the
+  cause", "a fix is rolling out") and the resolution stack into one **timeline** the
+  client can expand, so they always see the latest without chasing.
+- **Severity sets how loud it is** — **ℹ️ Info / 🛠️ Maintenance** notify by **email**,
+  **🟠 Degraded** adds **push**, **🔴 Outage** adds **SMS** on top — plus an always-on
+  **in-app banner**. Architected so the fan-out per severity is a single dial.
+- **Resolves cleanly** — once resolved, the banner clears automatically; the notice
+  lingers in the client's status feed briefly so anyone returning sees it was handled.
+- **Dual-surface** — Howler staff author and manage notices in **Admin → 🚨 Status**;
+  clients simply see them. Read-only for clients ("just see it" — no acknowledgement
+  to chase).
+
+**Pitch:** "If anything ever goes wrong, you'll know before you have to ask — and
+you'll see exactly when it's fixed."
+
 ---
 
 ## On the horizon (🔜 — not yet usable; for roadmap conversations only)
@@ -428,6 +457,12 @@ Use these to set direction, **not** to promise dates.
   mode, in admin branding *and* client self-service (account + per-event). In dark mode Pulse uses
   the dark logo when set; if it's blank, the normal logo is shown on a subtle light chip so a
   dark-ink logo never disappears against the dark header. Emails always use the main logo.
+- **2026-06-27** — **Status notices** ✅: Howler can post a platform-issue notice
+  **company-wide or to specific clients**, **update it** on a timeline as it develops,
+  and **mark it resolved**. Clients see an always-on **in-app banner** plus a status
+  feed; how loudly it's sent (email · push · SMS) follows the **severity**
+  (info/maintenance → email, degraded → +push, outage → +SMS). Authored in
+  **Admin → 🚨 Status**; read-only for clients. (See §11.)
 - **2026-06-27** — **Image upload specs** ✅: every logo / icon / banner upload now shows
   short spec guidance (format · size · transparency · how small it renders) right under the
   picker — consistent across the admin console and client self-service, so we get correctly
