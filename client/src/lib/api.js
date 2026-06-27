@@ -340,6 +340,8 @@ export const api = {
   setMyIntegrationLock: (entityId, key, locked) => fetch(`/api/my/integrations/${entityId}/lock`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, locked }) }).then(json),
   testEntitySlack: (id) => fetch(`/api/admin/entities/${id}/slack/test`, { method: 'POST' }).then(json),
   testMySlack: (entityId) => fetch(`/api/my/slack/${entityId}/test`, { method: 'POST' }).then(json),
+  slackShareStatus: () => fetch('/api/my/slack/share-status').then(json),
+  slackShare: (p) => fetch('/api/my/slack/share', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),
   setEntityIntegrationLock: (id, key, locked) => fetch(`/api/admin/entities/${id}/integrations/lock`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, locked }) }).then(json),
 
   // Email templates / branding (platform default + per-client overrides)

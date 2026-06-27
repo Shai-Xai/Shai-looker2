@@ -104,7 +104,7 @@ meta.init({ db });
 // TikTok audience-sync — same pattern as Meta; per-client pasted token.
 const tiktok = require('./tiktok');
 tiktok.init({ db });
-const slack = require('./slack').mount(app, { db, auth }); // OUTBOUND — mirror inbox notifications into a client's Slack (+ test-send routes)
+const slack = require('./slack').mount(app, { db, auth, mailer }); // OUTBOUND — mirror inbox notifications into a client's Slack (+ test/share routes)
 // Social metrics INBOUND — pull organic FB/IG/TikTok stats into Pulse (the read
 // direction; reuses the meta/tiktok tokens + extra asset ids). Daily sync started
 // after the app is up (see startDailySync below).

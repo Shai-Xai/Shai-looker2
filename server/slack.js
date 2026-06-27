@@ -17,8 +17,10 @@
 // inbox) is a separate, larger piece — see docs and the os.js inbound webhook.
 
 let db = null;
+let mailer = null;
 function init(deps) {
   db = deps.db;
+  mailer = deps.mailer || null;
   // Audit trail of every attempt (sent / failed / skipped). Self-owned — drop this
   // file + the slack_messages table to fully uninstall.
   db.db.exec(`
@@ -114,6 +116,34 @@ async function notify({ entityId, title, body, url, username, iconUrl, kind = 'n
   return send({ entityId, text, blocks, username, iconUrl, kind });
 }
 
+// Per-message brand (name + logo) from the client's branding, for webhook posts.
+function brandingFor(entityId) {
+  const b = (mailer && mailer.resolveBranding) ? (mailer.resolveBranding(entityId) || {}) : {};
+  return { username: b.senderName || undefined, iconUrl: (b.logo && /^https?:\/\//.test(b.logo)) ? b.logo : undefined };
+}
+
+// ── manual "Share to Slack" (direct post to a user's connected channel) ──
+// A user shares an insight/tile straight into their own client's connected Slack,
+// rather than copy-pasting. Resolves the user's own entities — no entity id from
+// the browser — and posts to each one that has Slack connected (usually one).
+function shareStatusForUser(user) {
+  const ids = (user.entityIds || []).filter((id) => isConfigured(id));
+  if (!ids.length) return { connected: false };
+  const label = ids.length === 1 ? (connection(ids[0]).channel || 'your Slack channel') : `${ids.length} Slack channels`;
+  return { connected: true, label, count: ids.length };
+}
+async function shareForUser(user, { heading, text, url, note } = {}) {
+  const ids = (user.entityIds || []).filter((id) => isConfigured(id));
+  if (!ids.length) return { ok: false, connected: false, error: 'No connected Slack for your account.' };
+  const body = [String(note || '').trim(), String(text || '').trim()].filter(Boolean).join('\n\n');
+  let sent = 0;
+  for (const id of ids) {
+    const r = await notify({ entityId: id, title: heading || 'Shared from Pulse', body, url, kind: 'share', ...brandingFor(id) });
+    if (r.ok) sent += 1;
+  }
+  return { ok: sent > 0, sent };
+}
+
 // Post a friendly test message — lets staff/clients confirm the wiring without
 // sending a real inbox message. Best-effort; never throws.
 async function sendTest(entityId) {
@@ -183,7 +213,13 @@ function mount(app, deps) {
     if (!(req.user.entityIds || []).includes(req.params.entityId)) return res.status(403).json({ error: 'Not allowed' });
     res.json(await sendTest(req.params.entityId));
   }));
+  // Manual share → the signed-in user's own connected channel (any team member can
+  // share; no integrations.manage needed — that's only for connecting Slack).
+  app.get('/api/my/slack/share-status', auth.requireAuth, (req, res) => res.json(shareStatusForUser(req.user)));
+  app.post('/api/my/slack/share', auth.requireAuth, asyncHandler(async (req, res) => {
+    res.json(await shareForUser(req.user, req.body || {}));
+  }));
   return module.exports;
 }
 
-module.exports = { init, mount, isConfigured, status, connection, send, notify, sendTest, verify, applyPatch, view };
+module.exports = { init, mount, isConfigured, status, connection, send, notify, sendTest, shareForUser, shareStatusForUser, verify, applyPatch, view };
