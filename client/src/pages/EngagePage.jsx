@@ -5,7 +5,6 @@ import { vtNavigate } from '../lib/viewTransition.js';
 import HomeButton from '../components/HomeButton.jsx';
 import CampaignManager from '../components/CampaignManager.jsx';
 import SegmentManager from '../components/SegmentManager.jsx';
-import JourneyWizard from '../components/JourneyWizard.jsx';
 import AudienceHub from '../components/AudienceHub.jsx';
 import TemplateManager from '../components/TemplateManager.jsx';
 
@@ -15,7 +14,6 @@ import TemplateManager from '../components/TemplateManager.jsx';
 // before each ships. Deep links to /actions and /segments redirect in here.
 const TABS = [
   { key: 'campaigns', label: 'Campaigns', icon: '📣', ready: true },
-  { key: 'journeys', label: 'Journeys', icon: '🧭', ready: true },
   { key: 'segments', label: 'Segments', icon: '🥧', ready: true },
   { key: 'audiences', label: 'Ad audiences', icon: '🎯', ready: true },
   { key: 'automations', label: 'Automations', icon: '⏱', ready: false },
@@ -91,11 +89,6 @@ export default function EngagePage() {
         <>
           <p style={{ color: 'var(--muted)', marginBottom: 18, fontSize: 14 }}>Build reusable, always-live audiences from your data — then act on them in campaigns.</p>
           <SegmentManager entityId={entityId} scope={isAdmin ? 'admin' : 'my'} />
-        </>
-      ) : active === 'journeys' ? (
-        <>
-          <p style={{ color: 'var(--muted)', marginBottom: 18, fontSize: 14 }}>Set up a multi-step, multi-channel journey in minutes — pick a recipe or just describe what you want and let AI draft it. You review it before anything is created.</p>
-          <JourneyWizard entityId={entityId} scope={isAdmin ? 'admin' : 'my'} />
         </>
       ) : active === 'audiences' ? (
         <>

@@ -2890,7 +2890,7 @@ const actionsApi = require('./actions').mount(app, {
     return insights.draftCampaign({ goal, clientName: ent?.name, clientContext: ent?.aiContext || '', audienceCount, instructions: aiInstructionsFor(null), apiKey });
   },
 });
-require('./journeys').mount(app, { auth, resolveContext: (entityId) => { const ent = db.getEntity(entityId); return { apiKey: anthropicKeyForEntity(entityId), clientName: ent?.name, clientContext: ent?.aiContext || '', instructions: aiInstructionsFor(null) }; } }); // Engage → Journeys: recipes + AI drafter (disposable module)
+
 // Materialise a built-in recipe (e.g. 'abandoned_cart') as a real audience source
 // by auto-resolving its tile from this client's data. Shared by segments + the
 // setup-nudge personalisation (the live abandoned-cart count).

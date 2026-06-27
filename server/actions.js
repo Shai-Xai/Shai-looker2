@@ -1092,9 +1092,6 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     } catch (e) { res.status(400).json({ error: e.message }); }
   });
 
-  // (Journeys — recipes + AI drafter — live in the disposable `journeys.js`
-  // module, mounted separately in index.js.)
-
   // Email preview (sample recipient) + test-send to self.
   app.post('/api/actions/:entityId/preview-email', auth.requireAuth, auth.requirePermission('campaigns.approve'), (req, res) => {
     if (!guard(req, res, req.params.entityId)) return;
