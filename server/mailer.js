@@ -159,6 +159,7 @@ const DEFAULTS = {
   chart4: '#06B6D4',
   chart5: '#7C3AED',
   logo: '',                                  // image URL/data-URL; blank → text wordmark
+  logoDark: '',                              // optional dark-mode app-shell logo; blank → falls back to `logo` (shown on a light chip). App-only — emails always use `logo`.
   wordmark: 'Howler : Pulse',
   header: '',                                // optional tagline under the logo/wordmark
   intro: '',                                 // optional line above the message

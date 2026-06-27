@@ -714,7 +714,7 @@ function readJson(key) {
 function ProfileFooter({ user, isAdmin, activeEntityId, brand, onNavigate }) {
   const { theme, toggle } = useTheme();
   const { logout } = useAuth();
-  const brandLogoUrl = useBrandLogo(); // the active client's resolved branding logo
+  const brandLogoUrl = useBrandLogo(theme); // the active client's resolved branding logo (dark-mode variant when set)
   const [open, setOpen] = useState(false);
   const entity = user?.entities?.[0];
   const name = isAdmin ? 'Howler · Admin' : (brand?.entityName || entity?.name || (user?.email || '').split('@')[0]);

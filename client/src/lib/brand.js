@@ -13,7 +13,7 @@ const HOWLER_PALETTE = ['#FF385C', '#FF6B35', '#FFB020', '#06B6D4', '#7C3AED', '
 // The fixed tail (series 6-10) for the Howler default.
 const HOWLER_TAIL = ['#10B981', '#EC4899', '#3B82F6', '#F97316', '#14B8A6'];
 
-let current = { primary: HOWLER_PRIMARY, secondary: HOWLER_SECONDARY, chart3: '', chart4: '', chart5: '', logo: '', metricScale: 1 };
+let current = { primary: HOWLER_PRIMARY, secondary: HOWLER_SECONDARY, chart3: '', chart4: '', chart5: '', logo: '', logoDark: '', metricScale: 1 };
 
 // Clamp a metric-size multiplier to a sane range; blank/garbage → 1 (default).
 function cleanScale(v) { const n = Number(v); return Number.isFinite(n) && n > 0 ? Math.max(0.6, Math.min(1.6, n)) : 1; }
@@ -95,8 +95,8 @@ export function chartPalette() {
 export const brandPrimary = () => current.primary;
 
 // ── CSS variable application ──
-export function applyBrand({ primary, secondary, chart3, chart4, chart5, logo, metricScale } = {}) {
-  current = { primary: primary || HOWLER_PRIMARY, secondary: secondary || HOWLER_SECONDARY, chart3: chart3 || '', chart4: chart4 || '', chart5: chart5 || '', logo: logo || '', metricScale: cleanScale(metricScale) };
+export function applyBrand({ primary, secondary, chart3, chart4, chart5, logo, logoDark, metricScale } = {}) {
+  current = { primary: primary || HOWLER_PRIMARY, secondary: secondary || HOWLER_SECONDARY, chart3: chart3 || '', chart4: chart4 || '', chart5: chart5 || '', logo: logo || '', logoDark: logoDark || '', metricScale: cleanScale(metricScale) };
   const root = document.documentElement;
   root.style.setProperty('--brand', current.primary);
   root.style.setProperty('--brand-2', current.secondary);
@@ -105,7 +105,7 @@ export function applyBrand({ primary, secondary, chart3, chart4, chart5, logo, m
   window.dispatchEvent(new Event('brand-changed'));
 }
 export function resetBrand() {
-  current = { primary: HOWLER_PRIMARY, secondary: HOWLER_SECONDARY, chart3: '', chart4: '', chart5: '', logo: '', metricScale: 1 };
+  current = { primary: HOWLER_PRIMARY, secondary: HOWLER_SECONDARY, chart3: '', chart4: '', chart5: '', logo: '', logoDark: '', metricScale: 1 };
   const root = document.documentElement;
   for (const v of ['--brand', '--brand-2', '--brand-dark', '--brand-rgb']) root.style.removeProperty(v);
   window.dispatchEvent(new Event('brand-changed'));
@@ -126,11 +126,27 @@ export function useMetricScale() {
 // The active client's resolved brand logo (their branding logo, falling back to
 // their entity logo) — shown across the app shell. '' = Howler default (no logo).
 export const brandLogo = () => current.logo;
-// Subscribe a component to the current brand logo; re-renders when it changes.
-export function useBrandLogo() {
-  const [v, setV] = useState(current.logo);
+// The active client's optional DARK-MODE logo ('' = none → fall back to `logo`).
+export const brandLogoDark = () => current.logoDark;
+// Subscribe a component to the current brand logo, resolved for the active theme:
+// in dark mode the dark-specific logo wins when set, else the normal logo (which
+// the shell puts on a light chip so it stays legible). Pass the theme string;
+// omit it to always get the light logo. Re-renders when branding changes.
+export function useBrandLogo(theme) {
+  const [v, setV] = useState({ logo: current.logo, logoDark: current.logoDark });
   useEffect(() => {
-    const on = () => setV(current.logo);
+    const on = () => setV({ logo: current.logo, logoDark: current.logoDark });
+    window.addEventListener('brand-changed', on);
+    return () => window.removeEventListener('brand-changed', on);
+  }, []);
+  return theme === 'dark' && v.logoDark ? v.logoDark : v.logo;
+}
+// Whether the active brand has a dedicated dark-mode logo — lets the shell skip
+// the legibility chip when the client has supplied a proper dark variant.
+export function useBrandHasDarkLogo() {
+  const [v, setV] = useState(!!current.logoDark);
+  useEffect(() => {
+    const on = () => setV(!!current.logoDark);
     window.addEventListener('brand-changed', on);
     return () => window.removeEventListener('brand-changed', on);
   }, []);

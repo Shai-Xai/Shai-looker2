@@ -16,6 +16,7 @@ const FIELDS = [
   ['chart4', 'Chart colour 4', 'color', 'Fourth chart series'],
   ['chart5', 'Chart colour 5', 'color', 'Fifth chart series — further series are generated from your palette'],
   ['logo', 'Logo image', 'logo', 'Shown across your Pulse app (sidebar + identity) and at the top of your emails. Upload an image or paste a URL — blank uses the wordmark'],
+  ['logoDark', 'Dark-mode logo', 'logoDark', 'Optional — a light/white version of your logo for dark mode in the app. Leave blank and we show your normal logo on a light chip so it stays visible. Emails always use the logo above'],
   ['wordmark', 'Wordmark', 'text', 'Text shown if there is no logo'],
   ['header', 'Header text', 'textarea', 'Tagline shown under the logo, at the top of every email'],
   ['intro', 'Intro line', 'textarea', 'Optional line above the message, inside the card'],
@@ -93,6 +94,8 @@ export default function MailTemplateEditor({ entityId, scope = 'platform', suite
             <div style={lbl}>{label}</div>
             {type === 'logo' ? (
               <LogoField value={edits[key] || ''} inherited={placeholderFor(key)} onChange={(v) => set(key, v)} onExtract={applyExtracted} />
+            ) : type === 'logoDark' ? (
+              <LogoField value={edits[key] || ''} inherited={placeholderFor(key)} onChange={(v) => set(key, v)} dark />
             ) : type === 'textarea' ? (
               <textarea value={edits[key] || ''} onChange={(e) => set(key, e.target.value)} placeholder={placeholderFor(key)} rows={2} style={{ ...input, resize: 'vertical', fontFamily: 'inherit' }} />
             ) : type === 'scale' ? (
@@ -147,7 +150,7 @@ export default function MailTemplateEditor({ entityId, scope = 'platform', suite
 // Logo: upload an image (resized client-side to ≤320px, stored as a data-URL —
 // emails reference it via /mail-assets/logo/:scope since Gmail strips data-URLs)
 // or paste a hosted URL. Shows the inherited logo when nothing is set here.
-function LogoField({ value, inherited, onChange, onExtract }) {
+function LogoField({ value, inherited, onChange, onExtract, dark = false }) {
   const fileRef = useRef(null);
   const shown = value || inherited;
   const [extractState, setExtractState] = useState('');
@@ -181,8 +184,8 @@ function LogoField({ value, inherited, onChange, onExtract }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-        <div style={{ width: 120, height: 44, border: '1px dashed var(--hairline)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', background: '#fff' }}>
-          {shown ? <img src={shown} alt="" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', opacity: value ? 1 : 0.45 }} /> : <span style={{ fontSize: 11, color: 'var(--muted)' }}>No logo</span>}
+        <div style={{ width: 120, height: 44, border: '1px dashed var(--hairline)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', background: dark ? '#1c1c1e' : '#fff' }}>
+          {shown ? <img src={shown} alt="" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', opacity: value ? 1 : 0.45 }} /> : <span style={{ fontSize: 11, color: dark ? '#8e8e93' : 'var(--muted)' }}>No logo</span>}
         </div>
         <button type="button" style={smallBtn} onClick={() => fileRef.current?.click()}>Upload image</button>
         {shown && onExtract && (
@@ -199,7 +202,7 @@ function LogoField({ value, inherited, onChange, onExtract }) {
       {!value?.startsWith('data:') && (
         <input value={value || ''} onChange={(e) => onChange(e.target.value)} placeholder={inherited && !inherited.startsWith('data:') ? inherited : 'or paste an image URL: https://…/logo.png'} style={input} />
       )}
-      <UploadHint kind="logo" />
+      <UploadHint kind="logo" text={dark ? 'PNG or SVG, transparent background — a light/white version made to sit on a dark header. Square at least 512×512px, or a landscape lockup up to about 1200px wide. Under 2MB. Optional: blank falls back to your normal logo on a light chip.' : undefined} />
     </div>
   );
 }

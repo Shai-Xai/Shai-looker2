@@ -243,6 +243,11 @@ in one place that updates itself."
   Every logo/icon/image upload now shows **clear spec guidance** (format, size,
   transparency) right under the picker, on both the admin and client surfaces —
   so the assets we get back are the right shape first time.
+- **Dark-mode logo** ✅ (dual-surface) — an optional second logo for dark mode.
+  If a client's logo is a dark/black mark it can vanish on the dark header, so
+  they (or we) can upload a light version that's used automatically in dark mode.
+  Leave it blank and Pulse shows the normal logo on a subtle light chip so it
+  always stays legible. Emails always use the main logo.
 - **Integrations** (dual-surface: Howler-managed *and* client self-service):
   - **Looker** / **Anthropic (AI)** keys ✅ (fall back to Howler defaults)
   - **Email (Resend)** ✅, **SMS (Clickatell)** ✅
@@ -419,6 +424,10 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-27** — **Dark-mode logo** ✅ (dual-surface): an optional second brand logo for dark
+  mode, in admin branding *and* client self-service (account + per-event). In dark mode Pulse uses
+  the dark logo when set; if it's blank, the normal logo is shown on a subtle light chip so a
+  dark-ink logo never disappears against the dark header. Emails always use the main logo.
 - **2026-06-27** — **Image upload specs** ✅: every logo / icon / banner upload now shows
   short spec guidance (format · size · transparency · how small it renders) right under the
   picker — consistent across the admin console and client self-service, so we get correctly

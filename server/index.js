@@ -1499,7 +1499,7 @@ const MAIL_FIELDS = Object.keys(mailer.DEFAULTS);
 const cleanBrandingPatch = (body) => {
   const out = {};
   // Logo can be an uploaded data-URL (resized client-side, but still big).
-  for (const k of MAIL_FIELDS) if (body && k in body) out[k] = String(body[k] ?? '').slice(0, k === 'logo' ? 800000 : 4000);
+  for (const k of MAIL_FIELDS) if (body && k in body) out[k] = String(body[k] ?? '').slice(0, (k === 'logo' || k === 'logoDark') ? 800000 : 4000);
   return out;
 };
 
@@ -1635,8 +1635,9 @@ app.get('/api/theme/:entityId', auth.requireAuth, (req, res) => {
   const b = mailer.resolveBranding(id, suite && suite.entityId === id ? suiteId : '');
   // The app-shell logo (top-left identity) is ALWAYS the client's logo — the
   // per-event theme only swaps the colours in-app, never the main profile logo.
-  const logo = mailer.resolveBranding(id).logo || '';
-  res.json({ primary: b.brandColor, secondary: b.secondaryColor, chart3: b.chart3, chart4: b.chart4, chart5: b.chart5, logo, metricScale: b.metricScale });
+  // logoDark is the optional dark-mode variant (blank → shell uses `logo`).
+  const shell = mailer.resolveBranding(id);
+  res.json({ primary: b.brandColor, secondary: b.secondaryColor, chart3: b.chart3, chart4: b.chart4, chart5: b.chart5, logo: shell.logo || '', logoDark: shell.logoDark || '', metricScale: b.metricScale });
 });
 
 // Live preview: render the email HTML with unsaved edits layered on the right

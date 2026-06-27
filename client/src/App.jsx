@@ -28,7 +28,7 @@ const DigestsPage = lazy(() => import('./pages/DigestsPage.jsx'));
 const SocialPage = lazy(() => import('./pages/SocialPage.jsx'));
 const InventiveAskPage = lazy(() => import('./pages/InventiveAskPage.jsx'));
 import Logo from './components/Logo.jsx';
-import { useBrandLogo } from './lib/brand.js';
+import BrandLogo from './components/BrandLogo.jsx';
 import { api } from './lib/api.js';
 import { isStandalone } from './lib/pwa.js';
 import RootErrorBoundary from './components/RootErrorBoundary.jsx';
@@ -126,7 +126,6 @@ function Header() {
 // each linked client; for clients, their profiles.
 function WorkspaceSwitcher({ inClientView, active, entities, activeEntityId, isAdmin, canSwitch, onEnterClient, onConsole, onHome }) {
   const [open, setOpen] = useState(false);
-  const brandLogoUrl = useBrandLogo(); // the active client's resolved branding logo (shell-wide)
   const ref = useRef(null);
   useEffect(() => {
     if (!open) return;
@@ -141,7 +140,7 @@ function WorkspaceSwitcher({ inClientView, active, entities, activeEntityId, isA
   );
   const idRow = inClientView ? (
     <span style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-      <Avatar e={{ ...active, logo: brandLogoUrl || active?.logo }} size={30} />
+      <BrandLogo size={30} name={active?.name} fallback={active?.logo} />
       <span style={{ fontSize: 16, fontWeight: 700, letterSpacing: '-0.2px', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{active.name}</span>
     </span>
   ) : (
