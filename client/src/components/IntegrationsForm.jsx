@@ -4,7 +4,7 @@ import { useState } from 'react';
 // write-only: the form only knows whether a value is set (value.*.keySet /
 // clientSecretSet); typing a new value changes it, blank leaves it unchanged.
 // `onSave(payload)` receives only the fields that changed.
-export default function IntegrationsForm({ value, onSave, showLooker = true, lookerActive = true, showResend = false, showInventive = false, inventiveWorkspace = null, showMeta = false, showTikTok = false, clients = [], onTestEmail, collapsible = false, canManageLock = false, locks = {}, onToggleLock, lockableKeys = [] }) {
+export default function IntegrationsForm({ value, onSave, showLooker = true, lookerActive = true, showResend = false, showInventive = false, inventiveWorkspace = null, showMeta = false, showTikTok = false, showSlack = false, clients = [], onTestEmail, onTestSlack, collapsible = false, canManageLock = false, locks = {}, onToggleLock, lockableKeys = [] }) {
   // Each integration is FROZEN by default — fields are read-only until an
   // admin/Owner (canManageLock) explicitly unlocks it, then re-locks. A guard
   // against accidental changes to a working connection. A section reads as locked
@@ -39,7 +39,13 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
   const [ttToken, setTtToken] = useState('');
   const [clearTtToken, setClearTtToken] = useState(false);
   const [ttAdvertiser, setTtAdvertiser] = useState(value?.tiktok?.advertiserId || '');
+  const [slackWebhook, setSlackWebhook] = useState('');
+  const [clearSlackWebhook, setClearSlackWebhook] = useState(false);
+  const [slackBotToken, setSlackBotToken] = useState('');
+  const [clearSlackBot, setClearSlackBot] = useState(false);
+  const [slackChannel, setSlackChannel] = useState(value?.slack?.channel || '');
   const [testState, setTestState] = useState('');
+  const [slackTestState, setSlackTestState] = useState('');
   const [busyKey, setBusyKey] = useState('');
   const [savedKey, setSavedKey] = useState('');
 
@@ -88,6 +94,13 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
       if (ttToken) p.tiktok.accessToken = ttToken;
       if (clearTtToken) p.tiktok.clearAccessToken = true;
     }
+    if (showSlack && want('slack')) {
+      p.slack = { channel: slackChannel };
+      if (slackWebhook) p.slack.webhookUrl = slackWebhook;
+      if (clearSlackWebhook) p.slack.clearWebhookUrl = true;
+      if (slackBotToken) p.slack.botToken = slackBotToken;
+      if (clearSlackBot) p.slack.clearBotToken = true;
+    }
     return p;
   }
 
@@ -102,6 +115,7 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
       if (!only || only === 'inventive') { setInvKey(''); setInvToken(''); setClearInvKey(false); setClearInvToken(false); }
       if (!only || only === 'meta') { setMetaToken(''); setClearMetaToken(false); }
       if (!only || only === 'tiktok') { setTtToken(''); setClearTtToken(false); }
+      if (!only || only === 'slack') { setSlackWebhook(''); setSlackBotToken(''); setClearSlackWebhook(false); setClearSlackBot(false); }
       setSavedKey(only || 'all'); setTimeout(() => setSavedKey(''), 1600);
     } catch (e) { alert('Save failed: ' + e.message); }
     finally { setBusyKey(''); }
@@ -215,6 +229,60 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
             <b>Social metrics (read-only):</b> if this token also carries the user scopes <code>user.info.stats</code> + <code>video.list</code>, Pulse pulls your <b>organic</b> follower count and recent video stats into <b>Social</b> automatically — no extra field needed.
           </div>
           <SaveRow k="tiktok" />
+        </Section>
+      )}
+
+      {/* Slack — per-client outbound notifications */}
+      {showSlack && (
+        <Section title="💬 Slack" collapsible={collapsible} {...lockProps('slack')} guide={<>
+          <div style={note}>
+            Mirror Pulse inbox notifications into your <b>Slack</b> — when Howler messages you (or an automation nudges you), it also posts to your Slack channel. <b>Outbound only.</b> Use <b>either</b> an Incoming Webhook (simplest) <b>or</b> a bot token + channel (richer).
+          </div>
+          <HowTo title="How to connect Slack" steps={[
+            <><b>Easiest — Incoming Webhook:</b> in Slack, open <b>Apps → Incoming Webhooks</b> (or create an app at <code>api.slack.com/apps</code> → <b>Incoming Webhooks</b> → <b>Add New Webhook</b>), pick the channel to post to, and copy the <code>https://hooks.slack.com/services/…</code> URL into <b>Webhook URL</b> above.</>,
+            <><b>Or — Bot token:</b> create a Slack app, add the <code>chat:write</code> scope under <b>OAuth &amp; Permissions</b>, install it to your workspace, copy the <b>Bot User OAuth Token</b> (<code>xoxb-…</code>) into <b>Bot token</b>, and <b>/invite</b> the bot to the target channel.</>,
+            <>For a bot token, set <b>Channel</b> to the channel id (e.g. <code>C0123456789</code>) or name (e.g. <code>#client-updates</code>). The webhook already knows its channel, so leave Channel blank when using a webhook.</>,
+          ]} />
+        </>}>
+          <Lbl>Webhook URL</Lbl>
+          <input
+            type="password" autoComplete="off"
+            value={slackWebhook} onChange={(e) => setSlackWebhook(e.target.value)}
+            placeholder={value?.slack?.webhookSet ? `Set (${value.slack.webhookHint || '••••'}) — leave blank to keep` : 'https://hooks.slack.com/services/…'}
+            style={input} disabled={clearSlackWebhook}
+          />
+          {value?.slack?.webhookSet && (
+            <label style={clearRow}><input type="checkbox" checked={clearSlackWebhook} onChange={(e) => setClearSlackWebhook(e.target.checked)} /> Remove this webhook</label>
+          )}
+          <Lbl>Bot token <span style={{ textTransform: 'none', fontWeight: 400 }}>· alternative to a webhook</span></Lbl>
+          <input
+            type="password" autoComplete="off"
+            value={slackBotToken} onChange={(e) => setSlackBotToken(e.target.value)}
+            placeholder={value?.slack?.botTokenSet ? `Set (${value.slack.botHint || '••••'}) — leave blank to keep` : 'xoxb-…'}
+            style={input} disabled={clearSlackBot}
+          />
+          {value?.slack?.botTokenSet && (
+            <label style={clearRow}><input type="checkbox" checked={clearSlackBot} onChange={(e) => setClearSlackBot(e.target.checked)} /> Remove this token</label>
+          )}
+          <Lbl>Channel <span style={{ textTransform: 'none', fontWeight: 400 }}>· required with a bot token</span></Lbl>
+          <input value={slackChannel} onChange={(e) => setSlackChannel(e.target.value)} placeholder="#client-updates or C0123456789" style={input} autoComplete="off" />
+          {value?.slack?.configured && <div style={{ ...note, color: 'var(--success, #10b981)', marginTop: 8 }}>✓ Connected — Howler messages will also post to Slack.</div>}
+          {onTestSlack && value?.slack?.configured && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12 }}>
+              <button
+                type="button"
+                style={{ ...saveBtn, background: 'rgba(128,128,128,0.14)', color: 'var(--text)' }}
+                disabled={slackTestState === 'sending'}
+                onClick={async () => {
+                  setSlackTestState('sending');
+                  try { const r = await onTestSlack(); setSlackTestState(r?.ok ? '✓ Sent — check your Slack channel' : `✗ ${r?.error || 'Failed'}`); }
+                  catch (e) { setSlackTestState(`✗ ${e.message}`); }
+                }}
+              >{slackTestState === 'sending' ? 'Sending…' : 'Send a test to Slack'}</button>
+              {slackTestState && slackTestState !== 'sending' && <span style={{ fontSize: 12.5, color: slackTestState.startsWith('✓') ? 'var(--success, #10b981)' : 'var(--error, #ef4444)' }}>{slackTestState}</span>}
+            </div>
+          )}
+          <SaveRow k="slack" />
         </Section>
       )}
 

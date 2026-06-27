@@ -16,7 +16,7 @@ const fs = require('fs');
 const path = require('path');
 const express = require('express');
 
-function mount(app, { db, auth, mailer, push, onInbound }) {
+function mount(app, { db, auth, mailer, push, slack, onInbound }) {
   const sql = db.db;            // raw better-sqlite3 handle
   const now = () => new Date().toISOString();
   const uuid = () => crypto.randomUUID();
@@ -229,15 +229,29 @@ function mount(app, { db, auth, mailer, push, onInbound }) {
   // Notify a client's team. `channels` chooses which methods this message uses
   // (admin's send-time choice); each recipient's own preference still applies
   // inside emailEntity / sendToEntity. Default = both.
-  const VALID_CHANNELS = ['email', 'push'];
+  const VALID_CHANNELS = ['email', 'push', 'slack'];
   function cleanChannels(ch) {
     const list = Array.isArray(ch) ? ch.filter((c) => VALID_CHANNELS.includes(c)) : VALID_CHANNELS;
     return list.length ? list : VALID_CHANNELS; // never silently drop everything
+  }
+  // Mirror the nudge into the client's Slack, if they've connected one. Always-on
+  // (not part of the admin's email/push channel choice) — connecting Slack just
+  // works. Best-effort: no-ops when unconfigured, never blocks the API call.
+  function slackEntity(entityId, t, body) {
+    if (!slack?.isConfigured?.(entityId)) return;
+    const link = mailer?.baseUrl?.() ? `${mailer.baseUrl()}/inbox?thread=${t.id}` : '';
+    // Brand the Slack post with the client's sender name + logo (webhooks honour a
+    // per-message name/avatar). Only pass an https logo — Slack can't fetch a
+    // data: URL, and a bot token ignores these anyway (handled in slack.send).
+    const brand = mailer?.resolveBranding?.(entityId) || {};
+    const iconUrl = brand.logo && /^https?:\/\//.test(brand.logo) ? brand.logo : undefined;
+    slack.notify({ entityId, title: t.title || 'New message in Pulse', body: String(body || '').slice(0, 2500), url: link, username: brand.senderName || undefined, iconUrl, kind: 'notification' }).catch(() => {});
   }
   function notifyEntity(entityId, t, body, channels) {
     const ch = cleanChannels(channels);
     if (ch.includes('email')) emailEntity(entityId, t, body);
     if (ch.includes('push')) pushEntity(entityId, t, body);
+    if (ch.includes('slack')) slackEntity(entityId, t, body);
   }
 
   // ── Client + shared reads ───────────────────────────────────────────────────
@@ -376,7 +390,9 @@ function mount(app, { db, auth, mailer, push, onInbound }) {
       .run(mid, id, 'howler', req.user.email, '', 'pulse', String(body || '(attachment)').slice(0, 8000), ts);
     const nAtt = saveAttachments(id, mid, Array.isArray(attachments) ? attachments : []);
     const t = thread(id);
-    notifyEntity(entityId, t, `${String(body || '').slice(0, 8000)}${nAtt ? `\n\n📎 ${nAtt} attachment${nAtt === 1 ? '' : 's'} — view in Pulse` : ''}`.trim(), channels);
+    // Admin announcements always mirror to a connected Slack (as they did before
+    // Slack became a per-message channel) — append it to any explicit selection.
+    notifyEntity(entityId, t, `${String(body || '').slice(0, 8000)}${nAtt ? `\n\n📎 ${nAtt} attachment${nAtt === 1 ? '' : 's'} — view in Pulse` : ''}`.trim(), Array.isArray(channels) ? [...channels, 'slack'] : channels);
     res.status(201).json({ thread: t });
   });
 

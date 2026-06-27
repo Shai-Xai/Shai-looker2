@@ -24,7 +24,7 @@ const TEMPLATES = [
   { key: 'category', emoji: '🏷', label: 'Ticket category', hint: 'Filter to a category', metric: true, filterHint: 'category', ruleType: 'threshold', operator: 'gte', unit: 'tickets', name: 'Category alert' },
 ];
 
-export default function AlertEditor({ entityId, suiteId, suiteName, alert, smsAvailable = false, initialTemplate = null, onClose, onSaved }) {
+export default function AlertEditor({ entityId, suiteId, suiteName, alert, smsAvailable = false, slackAvailable = false, initialTemplate = null, onClose, onSaved }) {
   const isMobile = useIsMobile();
   const { isAdmin } = useAuth();
   const editing = !!alert;
@@ -233,7 +233,7 @@ export default function AlertEditor({ entityId, suiteId, suiteName, alert, smsAv
     if (ruleType === 'sold_out') when = `${metric} sells out`;
     else if (ruleType === 'depletion') when = `${metric} drops below ${tval}`;
     else when = `${metric} ${operator === 'lte' || operator === 'lt' ? 'drops to' : 'reaches'} ${tval}`;
-    const via = ['in your inbox', ...channels.map((c) => ({ push: 'push', email: 'email', sms: 'SMS' }[c]))].filter(Boolean);
+    const via = ['in your inbox', ...channels.map((c) => ({ push: 'push', email: 'email', sms: 'SMS', slack: 'Slack' }[c]))].filter(Boolean);
     const viaTxt = via.length > 1 ? `${via.slice(0, -1).join(', ')} and ${via[via.length - 1]}` : via[0];
     const freq = frequency === 'once' ? 'once' : `repeatedly (max once per ${cooldownMin || 60} min)`;
     return `When ${when}, notify me via ${viaTxt} — ${freq}.`;
@@ -459,6 +459,7 @@ export default function AlertEditor({ entityId, suiteId, suiteName, alert, smsAv
             <Chip active={channels.includes('push')} onClick={() => toggleChannel('push')}>📱 Push</Chip>
             <Chip active={channels.includes('email')} onClick={() => toggleChannel('email')}>✉️ Email</Chip>
             <Chip active={channels.includes('sms')} onClick={() => toggleChannel('sms')} disabled={!smsAvailable} title={smsAvailable ? '' : 'SMS isn’t configured for this client yet'}>💬 SMS</Chip>
+            <Chip active={channels.includes('slack')} onClick={() => toggleChannel('slack')} disabled={!slackAvailable} title={slackAvailable ? '' : 'Slack isn’t connected for this client yet (Settings → Integrations)'}># Slack</Chip>
           </div>
           {channels.includes('sms') && (
             <input value={smsRecipients} onChange={(e) => setSmsRecipients(e.target.value)} placeholder="Mobile numbers, comma-separated (e.g. 0821234567)" style={{ ...inp, marginTop: 8 }} />

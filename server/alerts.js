@@ -25,11 +25,11 @@ const crypto = require('crypto');
 const DEFAULT_TZ = 'Africa/Johannesburg'; // GMT+2
 const RULE_TYPES = ['threshold', 'depletion', 'sold_out'];
 const OPERATORS = ['gte', 'lte', 'gt', 'lt'];
-const CHANNELS = ['push', 'email', 'sms'];        // inbox is always-on (the canonical record)
+const CHANNELS = ['push', 'email', 'sms', 'slack']; // inbox is always-on (the canonical record)
 const FREQUENCIES = ['once', 'repeat'];
 const PRIORITIES = ['normal', 'important'];
 
-function mount(app, { db, auth, resolveTileValue, resolveCustomMetric, metricCatalog, metricFilterValues, os, mailer, push, messaging }) {
+function mount(app, { db, auth, resolveTileValue, resolveCustomMetric, metricCatalog, metricFilterValues, os, mailer, push, messaging, slack }) {
   const sql = db.db;
   const now = () => new Date().toISOString();
   const uuid = () => crypto.randomUUID();
@@ -296,7 +296,9 @@ function mount(app, { db, auth, resolveTileValue, resolveCustomMetric, metricCat
   // ── deliver: inbox (always) + email/push (via the OS spine) + SMS (direct) ──
   function deliver(a, value, message) {
     const delivered = ['inbox'];
-    const emailPush = (a.channels || []).filter((c) => c === 'email' || c === 'push');
+    // email/push/slack all fan out through the OS spine; Slack fires only when the
+    // alert explicitly opted into it (it's a ticked channel, not an auto-mirror).
+    const osChannels = (a.channels || []).filter((c) => c === 'email' || c === 'push' || c === 'slack');
     // The OS spine posts ONE thread per alert (subjectType/subjectId), re-raising it
     // each fire, and fans out to the entity team honouring each user's notify prefs.
     try {
@@ -307,10 +309,10 @@ function mount(app, { db, auth, resolveTileValue, resolveCustomMetric, metricCat
           body: message,
           priority: a.priority === 'important' ? 'normal' : 'fyi',
           createdBy: 'alerts', authorType: 'system',
-          channels: emailPush,            // [] => inbox only (no email/push fan-out)
+          channels: osChannels,           // [] => inbox only (no email/push/slack fan-out)
           subjectType: 'alert', subjectId: a.id,
         });
-        for (const c of emailPush) delivered.push(c);
+        for (const c of osChannels) delivered.push(c);
       }
     } catch (e) { console.error('[alerts] inbox/announce failed', a.id, e.message); }
     // SMS goes direct to the alert's configured numbers (the OS spine doesn't do SMS).
@@ -407,7 +409,7 @@ function mount(app, { db, auth, resolveTileValue, resolveCustomMetric, metricCat
     if (!su) return res.status(404).json({ error: 'Event not found' });
     if (!canView(req.user, req.params.suiteId)) return res.status(403).json({ error: 'Not allowed' });
     const alerts = listForSuite(req.params.suiteId).map((a) => ({ ...a, recent: eventsFor(a.id, 5) }));
-    res.json({ alerts, canManage: canManage(req.user, req.params.suiteId), smsAvailable: !!(messaging?.status?.() || {}).configured });
+    res.json({ alerts, canManage: canManage(req.user, req.params.suiteId), smsAvailable: !!(messaging?.status?.() || {}).configured, slackAvailable: !!(slack?.isConfigured?.(su.entityId)) });
   });
 
   app.post('/api/alerts/suites/:suiteId', auth.requireAuth, (req, res) => {

@@ -1,10 +1,20 @@
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import { api } from '../lib/api.js';
+
+// Whether the signed-in user has a connected Slack channel to post into. Fetched
+// once per page load and shared across every ShareMenu instance (one tiny GET).
+let _slackStatus = null;
+function slackStatus() {
+  if (!_slackStatus) _slackStatus = api.slackShareStatus().catch(() => ({ connected: false }));
+  return _slackStatus;
+}
 
 // Reusable "Share" affordance — a one-tap hand-off to the reader's OWN email,
 // WhatsApp or Slack. No backend: email opens a mailto: link, WhatsApp a
-// wa.me/?text= link, and Slack copies a ready-to-paste message (Slack has no
-// public "share text" URL). The reader can add a custom note; we attach the
+// wa.me/?text= link, and Slack copies a ready-to-paste message then opens Slack
+// (the native app via slack://, falling back to the web client) — Slack has no
+// public "share text" URL. The reader can add a custom note; we attach the
 // heading, the insight/value text and a link back to this view.
 //
 // Trigger is rendered here so we can anchor the popover to it. Callers pass a
@@ -28,6 +38,9 @@ export default function ShareMenu({
   const [pos, setPos] = useState(null);
   const [note, setNote] = useState('');
   const [slackDone, setSlackDone] = useState(false);
+  const [slackConn, setSlackConn] = useState(null); // { connected, label } once fetched
+  const [posting, setPosting] = useState(false);
+  const [posted, setPosted] = useState(false); // true | 'err'
   const btnRef = useRef(null);
 
   const link = url || (typeof window !== 'undefined' ? window.location.href : '');
@@ -53,6 +66,9 @@ export default function ShareMenu({
       setPos({ top, left, width });
     }
     setSlackDone(false);
+    setPosted(false);
+    // Show the "Post to Slack" option only if this user has a connected channel.
+    slackStatus().then((s) => setSlackConn(s || { connected: false }));
     setOpen(true);
   }
   const close = () => setOpen(false);
@@ -73,13 +89,36 @@ export default function ShareMenu({
     window.open(`https://wa.me/?text=${encodeURIComponent(blob)}`, '_blank', 'noopener');
     close();
   }
+  // Direct post into the user's connected Slack channel (no copy-paste). Uses the
+  // same heading/text/link/note we'd otherwise hand off, branded server-side.
+  async function postToSlack() {
+    if (posting) return;
+    setPosting(true);
+    setPosted(false);
+    try {
+      const r = await api.slackShare({ heading, text: clean, url: link, note: note.trim() });
+      setPosting(false);
+      if (r && r.ok) { setPosted(true); setTimeout(close, 1300); }
+      else setPosted('err');
+    } catch { setPosting(false); setPosted('err'); }
+  }
   async function shareSlack() {
     try { await navigator.clipboard.writeText(blob); } catch { /* clipboard blocked — fall back to manual copy */ }
     setSlackDone(true);
-    // No public "share text to Slack" URL exists, so we copy the message and
-    // open Slack for them to paste into any channel/DM.
-    window.open('https://app.slack.com/client', '_blank', 'noopener');
-    setTimeout(close, 1500);
+    // No public "share text to Slack" URL exists, so we copy the message, then try
+    // to open the NATIVE Slack app (slack://) for them to paste into a channel —
+    // falling back to Slack on the web only if the app isn't installed. (Slack
+    // can't be deep-linked to a specific channel without team/channel ids, so this
+    // lands them in Slack to pick one.)
+    let done = false;
+    const onBlur = () => { done = true; window.removeEventListener('blur', onBlur); }; // app grabbed focus → don't also open web
+    window.addEventListener('blur', onBlur);
+    setTimeout(() => {
+      window.removeEventListener('blur', onBlur);
+      if (!done) window.open('https://app.slack.com/client', '_blank', 'noopener');
+    }, 1200);
+    window.location.href = 'slack://open';
+    setTimeout(close, 1800);
   }
 
   const panelStyle = isMobile
@@ -131,17 +170,28 @@ export default function ShareMenu({
             <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: 8 }}>
               <ChannelRow icon="✉️" label="Email" sub="Opens your mail app" accent="var(--brand)" onClick={shareEmail} />
               <ChannelRow icon="💬" label="WhatsApp" sub="Opens WhatsApp with your message" accent="#25D366" onClick={shareWhatsApp} />
+              {slackConn?.connected && (
+                <ChannelRow
+                  icon="📨"
+                  label="Post to Slack"
+                  sub={posting ? 'Posting…' : posted === true ? '✓ Posted to your channel' : posted === 'err' ? '✗ Couldn’t post — try Open in Slack below' : `Sends straight to ${slackConn.label}`}
+                  accent="#611f69"
+                  onClick={postToSlack}
+                />
+              )}
               <ChannelRow
                 icon="#"
-                label="Slack"
-                sub={slackDone ? '✓ Copied — paste into Slack' : 'Copies a ready-to-paste message'}
+                label="Open in Slack"
+                sub={slackDone ? '✓ Copied — opening Slack to paste' : 'Copies the message & opens Slack'}
                 accent="#611f69"
                 onClick={shareSlack}
               />
             </div>
 
             <div style={{ fontSize: 10.5, color: 'var(--muted)', padding: '8px 4px 2px', lineHeight: 1.45 }}>
-              We attach a link back to this view. Slack has no direct share link, so we copy a ready-to-paste message.
+              We attach a link back to this view. {slackConn?.connected
+                ? '“Post to Slack” sends it straight to your connected channel. “Open in Slack” copies the message and opens Slack to paste anywhere.'
+                : 'Slack has no direct share link, so we copy a ready-to-paste message and open Slack (the app if it’s installed, otherwise the web) for you to paste.'}
             </div>
           </div>
         </>,

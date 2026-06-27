@@ -104,6 +104,7 @@ meta.init({ db });
 // TikTok audience-sync — same pattern as Meta; per-client pasted token.
 const tiktok = require('./tiktok');
 tiktok.init({ db });
+const slack = require('./slack').mount(app, { db, auth, mailer }); // OUTBOUND — mirror inbox notifications into a client's Slack (+ test/share routes)
 // Social metrics INBOUND — pull organic FB/IG/TikTok stats into Pulse (the read
 // direction; reuses the meta/tiktok tokens + extra asset ids). Daily sync started
 // after the app is up (see startDailySync below).
@@ -122,7 +123,7 @@ const owlIngest = require('./owlIngest').mount({ db, insights, anthropicKeyForEn
 // Experience OS comms spine — self-contained module (own tables + routes under
 // /api/os). Remove this line + server/os.js to fully uninstall the feature.
 let osApi;
-const os = require('./os').mount(app, { db, auth, mailer, push,
+const os = require('./os').mount(app, { db, auth, mailer, push, slack,
   onInbound: (p) => owlIngest.handle({ ...p, getAttachmentBuffer: osApi.getAttachmentBuffer }) });
 osApi = os;
 
@@ -910,7 +911,7 @@ async function metricFilterValues({ model, view, field, user, suiteId }) {
   return out;
 }
 
-const alerts = require('./alerts').mount(app, { db, auth, resolveTileValue, resolveCustomMetric, metricCatalog, metricFilterValues, os, mailer, push, messaging });
+const alerts = require('./alerts').mount(app, { db, auth, resolveTileValue, resolveCustomMetric, metricCatalog, metricFilterValues, os, mailer, push, messaging, slack });
 
 // ── Status notices: human-authored platform incidents → server/notices.js ────────
 // Howler staff post a platform issue (global or per-client), update it, resolve it.
@@ -1345,7 +1346,7 @@ function applyIntegrationsPatch(body, set) {
   const tt = body.tiktok || {};
   if (tt.accessToken) set('tiktokAccessToken', String(tt.accessToken));
   if (tt.clearAccessToken) set('tiktokAccessToken', '');
-  if (tt.advertiserId !== undefined) set('tiktokAdvertiserId', String(tt.advertiserId || ''));
+  if (tt.advertiserId !== undefined) set('tiktokAdvertiserId', String(tt.advertiserId || '')); slack.applyPatch(body, set); // Slack: webhook / bot token / channel
 }
 function adminIntegrationsView() {
   return {
@@ -1383,14 +1384,14 @@ function entityIntegrationsView(entityId) {
     looker: { baseUrl: i.lookerBaseUrl || '', clientId: i.lookerClientId || '', clientSecretSet: !!i.lookerClientSecret },
     anthropic: { keySet: !!i.anthropicApiKey, keyHint: maskSecret(i.anthropicApiKey) },
     meta: { tokenSet: !!i.metaAccessToken, tokenHint: maskSecret(i.metaAccessToken), adAccountId: i.metaAdAccountId || '', businessId: i.metaBusinessId || '', pageId: i.metaPageId || '', igUserId: i.metaIgUserId || '' },
-    tiktok: { tokenSet: !!i.tiktokAccessToken, tokenHint: maskSecret(i.tiktokAccessToken), advertiserId: i.tiktokAdvertiserId || '' },
+    tiktok: { tokenSet: !!i.tiktokAccessToken, tokenHint: maskSecret(i.tiktokAccessToken), advertiserId: i.tiktokAdvertiserId || '' }, slack: slack.view(i),
     locks: db.getEntityIntegrationLocks(entityId), // { key: true } — frozen integrations
   };
 }
 // Per-entity integration keys that can be frozen. A frozen section's changes are
 // dropped server-side (defence in depth — the UI also disables it), so a freeze
 // can't be bypassed by a hand-crafted request.
-const ENTITY_INTEGRATION_KEYS = ['looker', 'anthropic', 'meta', 'tiktok'];
+const ENTITY_INTEGRATION_KEYS = ['looker', 'anthropic', 'meta', 'tiktok', 'slack'];
 function dropFrozenSections(entityId, body) {
   const locks = db.getEntityIntegrationLocks(entityId);
   const b = { ...(body || {}) };
@@ -1703,7 +1704,7 @@ app.get('/api/admin/integrations/health', auth.requireAdmin, (_req, res) => {
 // Live token check for one client's connector (makes a real API call).
 app.post('/api/admin/integrations/:entityId/verify', auth.requireAdmin, asyncHandler(async (req, res) => {
   if (!db.getEntity(req.params.entityId)) return res.status(404).json({ error: 'Not found' });
-  const channel = req.body?.channel === 'tiktok' ? tiktok : (req.body?.channel === 'meta' ? meta : null);
+  const channel = req.body?.channel === 'tiktok' ? tiktok : (req.body?.channel === 'meta' ? meta : (req.body?.channel === 'slack' ? slack : null));
   if (!channel) return res.status(400).json({ error: 'Unknown channel' });
   res.json(await channel.verify(req.params.entityId));
 }));
@@ -1711,7 +1712,7 @@ app.post('/api/admin/integrations/:entityId/verify', auth.requireAdmin, asyncHan
 // Live audience size/status read-back from the platform (real API call).
 app.post('/api/admin/integrations/:entityId/audience-status', auth.requireAdmin, asyncHandler(async (req, res) => {
   if (!db.getEntity(req.params.entityId)) return res.status(404).json({ error: 'Not found' });
-  const channel = req.body?.channel === 'tiktok' ? tiktok : (req.body?.channel === 'meta' ? meta : null);
+  const channel = req.body?.channel === 'tiktok' ? tiktok : (req.body?.channel === 'meta' ? meta : (req.body?.channel === 'slack' ? slack : null));
   if (!channel) return res.status(400).json({ error: 'Unknown channel' });
   res.json(await channel.audienceStatus(req.params.entityId, String(req.body?.audienceId || '')));
 }));

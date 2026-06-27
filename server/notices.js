@@ -139,6 +139,9 @@ function mount(app, { db, auth, os, mailer, messaging }) {
     if (!enabled() || !os?.announce) return;
     const channels = resolveChannels(n);
     const emailPush = channels.filter((c) => c === 'email' || c === 'push');
+    // Notices mirror to a connected Slack whenever they also email/push (matches
+    // the pre-channel behaviour). Inbox-only notices stay inbox-only.
+    const osChannels = emailPush.length ? [...emailPush, 'slack'] : emailPush;
     const resolved = n.status === 'resolved';
     const title = `${resolved ? '✅' : (SEV_EMOJI[n.severity] || '📣')} ${resolved ? 'Resolved' : STATUS_LABEL[n.status] || ''} — ${n.title}`.slice(0, 200);
     const body = String(update?.body || '').slice(0, 8000);
@@ -150,7 +153,7 @@ function mount(app, { db, auth, os, mailer, messaging }) {
           body,
           priority: n.severity === 'outage' ? 'normal' : 'fyi',
           createdBy: 'status', authorType: 'system',
-          channels: emailPush,                   // [] => inbox only (banner still shows)
+          channels: osChannels,                  // [] => inbox only (banner still shows)
           subjectType: 'notice', subjectId: n.id, // one thread per notice, re-raised each update
         });
       } catch (e) { console.error('[notices] announce failed', n.id, entityId, e.message); }
