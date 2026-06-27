@@ -130,6 +130,7 @@ export default function AlertsPage() {
           alert={editor.alert}
           initialTemplate={editor.template || null}
           smsAvailable={!!bySuite[editor.suiteId]?.smsAvailable}
+          slackAvailable={!!bySuite[editor.suiteId]?.slackAvailable}
           onClose={() => setEditor(null)}
           onSaved={() => { reloadAll(); loadTemplates(); }}
         />

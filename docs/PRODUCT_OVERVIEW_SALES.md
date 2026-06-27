@@ -455,6 +455,12 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-27** — **Slack for alerts & goals** 🟡: **Alerts** now have a **# Slack**
+  channel (next to Push/Email/SMS) — tick it to route that alert to the client's
+  connected Slack (enabled only when Slack is connected). The **goals** Owl brief
+  gains a **Share → Post to Slack** so a goals summary can be posted straight to
+  the channel. Both build on the Slack integration; Slack is now a first-class
+  notification channel (alerts only go to Slack when ticked).
 - **2026-06-27** — **Slack notifications (outbound)** 🟡: clients can connect Slack
   in **Settings → Integrations** (and Howler staff in Admin → client → Integrations)
   so Howler inbox messages also drop into their Slack channel. Connect with an

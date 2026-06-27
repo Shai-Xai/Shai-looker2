@@ -911,7 +911,7 @@ async function metricFilterValues({ model, view, field, user, suiteId }) {
   return out;
 }
 
-const alerts = require('./alerts').mount(app, { db, auth, resolveTileValue, resolveCustomMetric, metricCatalog, metricFilterValues, os, mailer, push, messaging });
+const alerts = require('./alerts').mount(app, { db, auth, resolveTileValue, resolveCustomMetric, metricCatalog, metricFilterValues, os, mailer, push, messaging, slack });
 
 // ── Status notices: human-authored platform incidents → server/notices.js ────────
 // Howler staff post a platform issue (global or per-client), update it, resolve it.

@@ -229,7 +229,7 @@ function mount(app, { db, auth, mailer, push, slack, onInbound }) {
   // Notify a client's team. `channels` chooses which methods this message uses
   // (admin's send-time choice); each recipient's own preference still applies
   // inside emailEntity / sendToEntity. Default = both.
-  const VALID_CHANNELS = ['email', 'push'];
+  const VALID_CHANNELS = ['email', 'push', 'slack'];
   function cleanChannels(ch) {
     const list = Array.isArray(ch) ? ch.filter((c) => VALID_CHANNELS.includes(c)) : VALID_CHANNELS;
     return list.length ? list : VALID_CHANNELS; // never silently drop everything
@@ -251,7 +251,7 @@ function mount(app, { db, auth, mailer, push, slack, onInbound }) {
     const ch = cleanChannels(channels);
     if (ch.includes('email')) emailEntity(entityId, t, body);
     if (ch.includes('push')) pushEntity(entityId, t, body);
-    slackEntity(entityId, t, body);
+    if (ch.includes('slack')) slackEntity(entityId, t, body);
   }
 
   // ── Client + shared reads ───────────────────────────────────────────────────
@@ -390,7 +390,9 @@ function mount(app, { db, auth, mailer, push, slack, onInbound }) {
       .run(mid, id, 'howler', req.user.email, '', 'pulse', String(body || '(attachment)').slice(0, 8000), ts);
     const nAtt = saveAttachments(id, mid, Array.isArray(attachments) ? attachments : []);
     const t = thread(id);
-    notifyEntity(entityId, t, `${String(body || '').slice(0, 8000)}${nAtt ? `\n\n📎 ${nAtt} attachment${nAtt === 1 ? '' : 's'} — view in Pulse` : ''}`.trim(), channels);
+    // Admin announcements always mirror to a connected Slack (as they did before
+    // Slack became a per-message channel) — append it to any explicit selection.
+    notifyEntity(entityId, t, `${String(body || '').slice(0, 8000)}${nAtt ? `\n\n📎 ${nAtt} attachment${nAtt === 1 ? '' : 's'} — view in Pulse` : ''}`.trim(), Array.isArray(channels) ? [...channels, 'slack'] : channels);
     res.status(201).json({ thread: t });
   });
 
