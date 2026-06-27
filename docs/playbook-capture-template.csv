@@ -1,0 +1,23 @@
+Task,How it's done (links/templates),Owner (organiser/AM/ops),Due anchor (Launch±Nd / Event±Nd / phase),Proof of done (manual/document/data signal),Data signal (if any),Blocks (what can't happen until this is done),Comms channel today (email/whatsapp/slack/call),Needs formal acknowledgement? (y/n),What typically goes wrong,Notes / corrections
+Contract signed,DRAFT — replace with real process & template link,organiser,Launch-21d,document,,Event on sale,email,y,Chasing signatures for weeks; no record of who agreed what,SEED ROW — correct me
+Event created in Howler,DRAFT,ops,Launch-14d,data signal,Event exists in platform,Ticket setup,slack,n,,SEED ROW — correct me
+Ticket tiers & pricing loaded,DRAFT,ops,Launch-7d,manual,,On-sale,email,y,Last-minute price changes after load,SEED ROW — correct me
+Pricing approved by organiser,DRAFT,organiser,Launch-5d,manual,,On-sale,whatsapp,y,Verbal approvals with no trail,SEED ROW — correct me
+Payment/settlement details confirmed,DRAFT — banking & settlement schedule,organiser,Launch-7d,document,,First settlement,email,y,,SEED ROW — correct me
+Event on sale,Flip the switch + announce,ops,Launch day,data signal,First ticket sale > 0,Marketing push,whatsapp,n,On-sale goes live late or with wrong tiers visible,SEED ROW — correct me
+Launch-day monitoring,DRAFT — who watches what on day one,AM,Launch day,manual,,,slack,n,,SEED ROW — correct me
+Comp ticket list agreed,DRAFT,organiser,Mid Campaign,manual,,Comp issuance,email,y,Comps balloon past agreed %,SEED ROW — correct me
+Resale enabled,DRAFT — criteria for switching on,ops,Mid Campaign,data signal,Resale transactions appear,,email,n,Enabled too late; fans buy scalped instead,SEED ROW — correct me
+Artist drop coordination,DRAFT — align announcement with ticket push,AM,per drop (manual phase),manual,,,whatsapp,n,Announcement lands with no sales capacity ready,SEED ROW — correct me
+Cashless configured,DRAFT — tokens/top-ups/vendors,ops,Event-30d,data signal,Cashless config present,Device order quantities,email,n,,SEED ROW — correct me
+Device order placed (scanners/POS),DRAFT — quantities from capacity & layout,ops,Event-30d,document,,Device delivery & staff training,email,y,Ordered late = wrong quantities or rush shipping,SEED ROW — correct me
+Staffing order confirmed,DRAFT — gates/support/supervisors,ops,Event-21d,document,,Staff briefing,email,y,,SEED ROW — correct me
+Access control plan,DRAFT — gates/zones/scanning config,ops,Event-14d,manual,,Device config,slack,n,,SEED ROW — correct me
+Team briefing pack issued,DRAFT — template link,AM,Event-7d (Build Up),document,,Event day readiness,email,y,Pack sent night before; nobody reads it,SEED ROW — correct me
+Staff training session,DRAFT,ops,Event-5d,manual,,,whatsapp,n,,SEED ROW — correct me
+Door list / final comps locked,DRAFT,organiser,Event-2d,manual,,Event day,whatsapp,y,Changes at the gate,SEED ROW — correct me
+On-site support roster,DRAFT — who's on the ground,ops,Event-7d,manual,,,slack,n,,SEED ROW — correct me
+Event-day live monitoring,DRAFT — gate counts/cashless/sales,AM,Event day,manual,,,whatsapp,n,,SEED ROW — correct me
+Post-event debrief,DRAFT — template + meeting,AM,Event+3d (Day After),document,,Final settlement conversation,email,n,Never happens; learnings lost,SEED ROW — correct me
+Final settlement issued,Already in Pulse — settlement upload flow,ops,Event+7d (Post Event),data signal,Final settlement published in Pulse,,email,y,,SEED ROW — correct me
+Device return / reconciliation,DRAFT,ops,Event+7d,manual,,,email,n,,SEED ROW — correct me
