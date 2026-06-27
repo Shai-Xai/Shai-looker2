@@ -11,6 +11,7 @@ import { applyBrand, resetBrand, useBrandLogo } from '../lib/brand.js';
 import { useAccess, PERMS } from '../lib/access.js';
 import { FEATURES } from '../lib/features.js';
 import AnalystDrawer from '../components/AnalystDrawer.jsx';
+import StatusNoticeBanner from '../components/StatusNoticeBanner.jsx';
 import AiMark from '../components/AiMark.jsx';
 
 // Persistent client shell: a left sidebar tree of Suites → Sets → Dashboards,
@@ -604,6 +605,9 @@ export default function ClientLayout() {
         </div>
       )}
       <main style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'auto' }}>
+        {/* Platform status notices — active incidents (and recently-resolved ones)
+            affecting this client. Self-contained: polls /api/my/notices. */}
+        <StatusNoticeBanner />
         {/* Must-acknowledge banner — Howler messages that need a response,
             persistent until acknowledged. Tapping opens the inbox. */}
         {!onInbox && inbox.pending.length > 0 && (

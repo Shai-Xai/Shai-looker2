@@ -575,4 +575,14 @@ export const api = {
   alertTemplates: (entityId) => fetch(`/api/alerts/templates/${entityId}`).then(json),
   saveAlertTemplate: (body) => fetch('/api/alerts/templates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
   deleteAlertTemplate: (id) => fetch(`/api/alerts/templates/${id}`, { method: 'DELETE' }).then(json),
+
+  // Status notices — human-authored platform incidents. Admin authors + updates +
+  // resolves; clients read the banner/feed via myNotices (scoped server-side).
+  adminListNotices: () => fetch('/api/admin/notices').then(json),
+  adminCreateNotice: (b) => fetch('/api/admin/notices', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  adminUpdateNotice: (id, b) => fetch(`/api/admin/notices/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  adminPostNoticeUpdate: (id, b) => fetch(`/api/admin/notices/${id}/updates`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  adminResolveNotice: (id, b) => fetch(`/api/admin/notices/${id}/resolve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b || {}) }).then(json),
+  adminDeleteNotice: (id) => fetch(`/api/admin/notices/${id}`, { method: 'DELETE' }).then((r) => r.ok),
+  myNotices: () => fetch('/api/my/notices').then(json),
 };

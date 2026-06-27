@@ -14,6 +14,7 @@ import CampaignManager from '../components/CampaignManager.jsx';
 import SegmentManager from '../components/SegmentManager.jsx';
 import RateCard from '../components/RateCard.jsx';
 import { BriefingConfigForm } from '../components/BriefingTuneModal.jsx';
+import StatusNoticesAdmin from '../components/StatusNoticesAdmin.jsx';
 import { GUIDES } from '../lib/guides.js';
 
 // Icon control: an emoji, or an uploaded image (downscaled to a small data-URL).
@@ -122,6 +123,7 @@ const ADMIN_NAV = [
   ['billing', 'Billing', '💳'],
   ['integrations', 'Integrations', '🔌'],
   ['email', 'Email', '✉️'],
+  ['status', 'Status', '🚨'],
   ['product', 'Product', '📦'],
   ['backup', 'Backup', '💾'],
 ];
@@ -145,6 +147,7 @@ export default function AdminPage() {
       {tab === 'billing' && <Billing />}
       {tab === 'integrations' && <AdminIntegrations />}
       {tab === 'email' && <MailLog />}
+      {tab === 'status' && <StatusNoticesAdmin />}
       {tab === 'product' && <Product />}
       {tab === 'backup' && <BackupRestore />}
     </>
