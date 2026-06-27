@@ -16,7 +16,7 @@ const fs = require('fs');
 const path = require('path');
 const express = require('express');
 
-function mount(app, { db, auth, mailer, push, onInbound }) {
+function mount(app, { db, auth, mailer, push, slack, onInbound }) {
   const sql = db.db;            // raw better-sqlite3 handle
   const now = () => new Date().toISOString();
   const uuid = () => crypto.randomUUID();
@@ -234,10 +234,19 @@ function mount(app, { db, auth, mailer, push, onInbound }) {
     const list = Array.isArray(ch) ? ch.filter((c) => VALID_CHANNELS.includes(c)) : VALID_CHANNELS;
     return list.length ? list : VALID_CHANNELS; // never silently drop everything
   }
+  // Mirror the nudge into the client's Slack, if they've connected one. Always-on
+  // (not part of the admin's email/push channel choice) — connecting Slack just
+  // works. Best-effort: no-ops when unconfigured, never blocks the API call.
+  function slackEntity(entityId, t, body) {
+    if (!slack?.isConfigured?.(entityId)) return;
+    const link = mailer?.baseUrl?.() ? `${mailer.baseUrl()}/inbox?thread=${t.id}` : '';
+    slack.notify({ entityId, title: t.title || 'New message in Pulse', body: String(body || '').slice(0, 2500), url: link, kind: 'notification' }).catch(() => {});
+  }
   function notifyEntity(entityId, t, body, channels) {
     const ch = cleanChannels(channels);
     if (ch.includes('email')) emailEntity(entityId, t, body);
     if (ch.includes('push')) pushEntity(entityId, t, body);
+    slackEntity(entityId, t, body);
   }
 
   // ── Client + shared reads ───────────────────────────────────────────────────

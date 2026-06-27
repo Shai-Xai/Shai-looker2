@@ -4486,8 +4486,9 @@ function ClientIntegrations({ entity }) {
         lookerActive={false}
         showMeta
         showTikTok
+        showSlack
         canManageLock
-        lockableKeys={['looker', 'anthropic', 'meta', 'tiktok']}
+        lockableKeys={['looker', 'anthropic', 'meta', 'tiktok', 'slack']}
         locks={value.locks || {}}
         onToggleLock={async (k, locked) => setValue(await api.setEntityIntegrationLock(entity.id, k, locked))}
         onSave={async (p) => setValue(await api.saveEntityIntegrations(entity.id, p))}
