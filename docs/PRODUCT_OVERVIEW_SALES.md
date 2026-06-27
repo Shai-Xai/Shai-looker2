@@ -258,6 +258,8 @@ in one place that updates itself."
   - **Looker** / **Anthropic (AI)** keys ✅ (fall back to Howler defaults)
   - **Email (Resend)** ✅, **SMS (Clickatell)** ✅
   - **Meta / TikTok** ad accounts 🟡
+  - **Slack** 🟡 — mirror inbox notifications into a client's Slack channel
+    (outbound; connect with an Incoming Webhook or a bot token + channel)
   - **Inventive** — the embedded AI **Data Analyst** 🧪 (see "Ask" above)
 - **Secrets are write-only** — Pulse shows only whether a value is set, never the
   value.
@@ -465,6 +467,18 @@ Use these to set direction, **not** to promise dates.
   describe money in the client's currency. Set in **Branding → Reporting currency** (admin + client
   self-service). Not a data filter and not the messaging-cost/billing currency (those stay separate);
   dashboard tile values keep the formatting from their data source.
+- **2026-06-27** — **Slack for alerts & goals** 🟡: **Alerts** now have a **# Slack**
+  channel (next to Push/Email/SMS) — tick it to route that alert to the client's
+  connected Slack (enabled only when Slack is connected). The **goals** Owl brief
+  gains a **Share → Post to Slack** so a goals summary can be posted straight to
+  the channel. Both build on the Slack integration; Slack is now a first-class
+  notification channel (alerts only go to Slack when ticked).
+- **2026-06-27** — **Slack notifications (outbound)** 🟡: clients can connect Slack
+  in **Settings → Integrations** (and Howler staff in Admin → client → Integrations)
+  so Howler inbox messages also drop into their Slack channel. Connect with an
+  **Incoming Webhook** or a **bot token + channel**; secrets are write-only and the
+  integration is locked-by-default like the others. Outbound only for now — replies
+  from Slack landing back in the Pulse inbox are a planned next phase.
 - **2026-06-27** — **Dark-mode logo** ✅ (dual-surface): an optional second brand logo for dark
   mode, in admin branding *and* client self-service (account + per-event). In dark mode Pulse uses
   the dark logo when set; if it's blank, the normal logo is shown on a subtle light chip so a

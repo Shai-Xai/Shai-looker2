@@ -46,6 +46,12 @@ campaign engine. North star: `docs/EXPERIENCE_OS_BRIEF.md`; stack/state:
   filter per the query's own explore; GA4 etc. resolve their own organiser field.
 - **Never** put the model identifier in commits/PRs/code/artifacts (chat only).
 - Run `npm test` (24 tests) + `cd client && npm run build` before pushing.
+- **What's-next notes → roadmap:** at the end of a session, drop a dated note in
+  `docs/whats-next/` (convention + prompts in its `README.md`); periodically
+  reconcile those notes into `docs/ROADMAP.md` (the deduplicated source of truth,
+  status-tracked). The folder + README already live on `main` — **`git pull
+  origin main` first** and reuse the existing README; do **not** create a new
+  one (the dated notes never collide, but a re-authored README will conflict).
 
 ## Module map (where things live)
 - Server (`server/*.js`, mounted in `index.js`): `actions.js` (campaign engine),
