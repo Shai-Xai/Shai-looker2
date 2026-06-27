@@ -13,11 +13,11 @@ test('passwords are bcrypt-hashed, never stored or returned in plaintext', () =>
   assert.match(full.passwordHash, /^\$2[aby]\$/, 'looks like a bcrypt hash');
 });
 
-test('verifyCredentials accepts the right password and rejects the wrong one', () => {
+test('verifyCredentials accepts the right password and rejects the wrong one', async () => {
   h.db.createUser({ email: 'login@test.local', password: 'correct-horse', role: 'client' });
-  assert.ok(h.db.verifyCredentials('login@test.local', 'correct-horse'), 'correct password verifies');
-  assert.equal(h.db.verifyCredentials('login@test.local', 'wrong'), null, 'wrong password rejected');
-  assert.equal(h.db.verifyCredentials('nobody@test.local', 'whatever'), null, 'unknown user rejected');
+  assert.ok(await h.db.verifyCredentials('login@test.local', 'correct-horse'), 'correct password verifies');
+  assert.equal(await h.db.verifyCredentials('login@test.local', 'wrong'), null, 'wrong password rejected');
+  assert.equal(await h.db.verifyCredentials('nobody@test.local', 'whatever'), null, 'unknown user rejected');
 });
 
 test('an admin has every permission on any entity', () => {
@@ -45,6 +45,15 @@ test('role permissions are enforced: finance can view settlements but not approv
   assert.ok(h.auth.hasPermission(user, ent.id, P.DASHBOARDS_VIEW), 'finance sees dashboards');
   assert.equal(h.auth.hasPermission(user, ent.id, P.CAMPAIGNS_APPROVE), false, 'finance cannot approve campaigns');
   assert.equal(h.auth.hasPermission(user, ent.id, P.INTEGRATIONS_MANAGE), false, 'finance cannot manage integrations');
+});
+
+test('goals.manage: owner/manager/marketing/finance can set goals; a viewer cannot', () => {
+  const ent = h.makeEntity('Goals Perm Co', 'gp-org');
+  const P = h.roles.PERMISSIONS;
+  for (const role of ['owner', 'manager', 'marketing', 'finance']) {
+    assert.ok(h.auth.hasPermission(h.makeClient(`gm-${role}@test.local`, [ent.id], role), ent.id, P.GOALS_MANAGE), `${role} can manage goals`);
+  }
+  assert.equal(h.auth.hasPermission(h.makeClient('gm-viewer@test.local', [ent.id], 'viewer'), ent.id, P.GOALS_MANAGE), false, 'viewer cannot');
 });
 
 test('a viewer is read-only: dashboards yes, everything else no', () => {

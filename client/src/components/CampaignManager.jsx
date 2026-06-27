@@ -1,13 +1,17 @@
 import { useState, useEffect, useRef } from 'react';
 import { api } from '../lib/api.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
+import UploadHint from './UploadHint.jsx';
+
+// Format a money amount in the campaign's currency (ZAR → "R1,234.00").
+const money = (cur, n) => `${cur === 'ZAR' || !cur ? 'R' : `${cur} `}${Number(n || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 // Action Engine v1 — email campaigns (e.g. abandoned cart). The lifecycle IS
 // the product: draft (AI-written, editable) → preview audience + email →
 // APPROVE (explicit, shows the count) → running → done with results.
 // One component for both surfaces (admin + client self-service) — the server
 // enforces entity access on every call.
-export default function CampaignManager({ entityId, scope = 'admin', initialGoal = '', initialType = '', initialActionId = '' }) {
+export default function CampaignManager({ entityId, scope = 'admin', initialGoal = '', initialType = '', initialActionId = '', initialDashboardId = '', initialSuiteId = '' }) {
   const isAdmin = scope === 'admin';
   const [data, setData] = useState(null);
   const [editing, setEditing] = useState(null); // action object | 'new'
@@ -29,16 +33,34 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
   }, [openMasters, mastersKey]);
   const [channelFilter, setChannelFilter] = useState('all'); // all | email | sms | both
   const [stateFilter, setStateFilter] = useState('all'); // all | draft | pending | scheduled | sent | automated
-  useEffect(() => { api.getActionTemplates(entityId).then((r) => setTemplates(r.templates || [])).catch(() => setTemplates([])); }, [entityId]);
+  const [templatesLoaded, setTemplatesLoaded] = useState(false);
+  useEffect(() => { api.getActionTemplates(entityId).then((r) => setTemplates(r.templates || [])).catch(() => setTemplates([])).finally(() => setTemplatesLoaded(true)); }, [entityId]);
   const loadMasters = () => api.getMasters(entityId).then((r) => setMasters(r.masters || [])).catch(() => setMasters([]));
   useEffect(() => { loadMasters(); }, [entityId]); // eslint-disable-line react-hooks/exhaustive-deps
   // "Make it happen": arriving with a goal (from a briefing/digest suggestion)
-  // opens a fresh campaign — pre-filled from the matching template if ?type names one.
+  // opens a fresh campaign — pre-filled from the matching template if ?type names
+  // one. We wait until the templates have loaded (so the recipe's resolved audience
+  // is present — opening earlier would mount the editor with an empty source), and
+  // when the suggestion named a dashboard/event we re-resolve the recipe scoped to
+  // THAT tile/event so a multi-event client pre-fills the right audience.
+  const [prefilled, setPrefilled] = useState(false);
   useEffect(() => {
-    if (!initialGoal && !initialType) return;
-    const t = templates.find((x) => x.key === initialType || x.capability === initialType);
-    setTpl(t || null); setEditing('new');
-  }, [initialGoal, initialType, templates]);
+    if (prefilled || (!initialGoal && !initialType) || !templatesLoaded) return;
+    let cancelled = false;
+    (async () => {
+      let pool = templates;
+      if (initialType && initialDashboardId) {
+        try {
+          const r = await api.getActionTemplates(entityId, { dashboard: initialDashboardId, suite: initialSuiteId });
+          if (r.templates) pool = r.templates;
+        } catch { /* fall back to the unscoped templates */ }
+      }
+      if (cancelled) return;
+      const t = pool.find((x) => x.key === initialType || x.capability === initialType);
+      setTpl(t || null); setEditing('new'); setPrefilled(true);
+    })();
+    return () => { cancelled = true; };
+  }, [initialGoal, initialType, initialDashboardId, initialSuiteId, templatesLoaded, templates, entityId, prefilled]);
 
   const load = () => api.listActions(entityId).then(setData).catch(() => setData({ actions: [] }));
   useEffect(() => { load(); }, [entityId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -146,6 +168,8 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
         const items = [];
         if (a.config?.campaignMode === 'sequence' && a.status === 'auto') items.push({ label: '🪜 Journey', onClick: () => setJourney(a) });
         if (a.status === 'auto') items.push({ label: '⏸ Pause', onClick: () => api.pauseAction(entityId, a.id).then(load) });
+        if (a.status === 'scheduled') items.push({ label: '✖ Cancel schedule', onClick: () => { if (confirm('Cancel the scheduled send? It moves back to draft.')) api.pauseAction(entityId, a.id).then(load); } });
+        if (a.status === 'running') items.push({ label: '⛔ Stop sending', danger: true, onClick: () => { if (confirm('Stop this send now? It halts within a few seconds — already-sent emails can’t be recalled.')) api.pauseAction(entityId, a.id).then(load); } });
         items.push({ label: '⧉ Duplicate', onClick: () => api.duplicateAction(entityId, a.id).then((r) => { load(); setEditing(r.action); }).catch((e) => alert(e.message)) });
         if (a.status !== 'running') items.push({ label: '🗑 Delete', danger: true, onClick: () => { if (confirm('Delete this campaign?')) api.deleteAction(entityId, a.id).then(load); } });
         return (
@@ -259,6 +283,7 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
         <>
           {groups.named.map(([name, list]) => {
             const t = agg(list);
+            const mc = masters.find((mm) => mm.name === name); // server rollup (incl. cost)
             const open = !!openMasters[name];
             return (
               <div key={name} style={{ marginBottom: 16 }}>
@@ -268,7 +293,7 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
                     <span style={{ fontSize: 13, fontWeight: 800 }}>🗂 {name}</span>
                   </button>
                   <span style={{ fontSize: 12, color: 'var(--muted)' }}>
-                    {list.length} campaign{list.length === 1 ? '' : 's'} · {t.sent} sent · {t.clicks} clicks{t.converted ? ` · ${t.converted} converted` : ''}
+                    {list.length} campaign{list.length === 1 ? '' : 's'} · {t.sent} sent · {t.clicks} clicks{t.converted ? ` · ${t.converted} converted` : ''}{mc?.stats?.cost > 0 ? ` · ${money(mc.currency, mc.stats.cost)}` : ''}
                   </span>
                   <button style={{ ...mini, padding: '4px 10px' }} onClick={() => setMasterReport(name)}>📊 Report</button>
                 </div>
@@ -317,7 +342,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
     filters: cfg.audience?.filters || [], // [{field, op:'in'|'between', values:[], min, max}]
     attrDashboardId: cfg.audience?.attrDashboardId || '', // optional 2nd source for targeting fields
     attrTileId: cfg.audience?.attrTileId || '',
-    eventSuiteId: cfg.eventSuiteId || '',
+    eventSuiteId: cfg.eventSuiteId || ta.eventSuiteId || '',
     contentMode: cfg.contentMode || 'template',
     heroImage: cfg.heroImage || '',
     customHtml: cfg.customHtml || '',
@@ -357,6 +382,21 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
   const isMobile = useIsMobile();
   const [events, setEvents] = useState([]);
   useEffect(() => { api.listCampaignEvents(entityId).then((r) => setEvents(r.events || [])).catch(() => {}); }, [entityId]);
+  // Saved email templates — apply one as a starting point, or save current content.
+  const [templates, setTemplates] = useState([]);
+  const loadTemplates = () => api.listCampaignTemplates(entityId).then((r) => setTemplates(r.templates || [])).catch(() => {});
+  useEffect(() => { loadTemplates(); }, [entityId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const applyTemplate = (id) => {
+    const t = templates.find((x) => x.id === id);
+    if (!t) return;
+    setF((s) => ({ ...s, contentMode: t.contentMode || 'template', subject: t.subject || s.subject, body: t.body || s.body, customHtml: t.customHtml || s.customHtml, heroImage: t.heroImage || s.heroImage, ctaText: t.ctaText || s.ctaText }));
+  };
+  const saveAsTemplate = async () => {
+    const name = (window.prompt('Save this email as a template — name it:') || '').trim();
+    if (!name) return;
+    try { await api.createCampaignTemplate(entityId, { name, subject: f.subject, contentMode: f.contentMode, body: f.body, customHtml: f.customHtml, heroImage: f.heroImage, ctaText: f.ctaText }); await loadTemplates(); alert('Saved to Templates ✓'); }
+    catch (e) { alert('Could not save template: ' + e.message); }
+  };
   // Auto-select the event when there's exactly one and none is chosen yet — so
   // "Event (optional)" isn't left blank on a single-event client.
   useEffect(() => {
@@ -375,6 +415,8 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
   const [segments, setSegments] = useState([]); // saved segments to pick as an audience
   const [aud, setAud] = useState(null); // { count, excluded, sample, fields }
   const [audBusy, setAudBusy] = useState(false);
+  const [rates, setRates] = useState(null); // per-channel rate card → estimated cost before send
+  useEffect(() => { api.getMyBilling(entityId).then(setRates).catch(() => setRates(null)); }, [entityId]);
   const [preview, setPreview] = useState('');
   const [previewAll, setPreviewAll] = useState(false); // sequence: render every step
   const [activeStep, setActiveStep] = useState(0); // sequence: which step the single preview shows
@@ -416,7 +458,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
   const removeFilter = (i) => setF((s) => ({ ...s, filters: s.filters.filter((_, j) => j !== i) }));
   // Step helpers (sequence mode).
   const setStep = (i, patch) => setF((s) => ({ ...s, steps: s.steps.map((st, j) => (j === i ? { ...st, ...patch } : st)) }));
-  const addStep = (delayHours = 24) => setF((s) => ({ ...s, steps: [...s.steps, { delayHours, subject: '', body: '', ctaText: s.steps[0]?.ctaText || '' }] }));
+  const addStep = (delayHours = 24) => setF((s) => ({ ...s, steps: [...s.steps, { delayHours, subject: '', body: '', ctaText: s.steps[0]?.ctaText || '', contentMode: 'template', customHtml: '', heroImage: '' }] }));
   const removeStep = (i) => setF((s) => ({ ...s, steps: s.steps.filter((_, j) => j !== i) }));
   const isSequence = f.campaignMode === 'sequence';
   // Columns available to pick the abandonment-time anchor from (tile fields or a list's headers).
@@ -459,7 +501,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
     setAudBusy(true);
     api.actionAudiencePreview(entityId, payload()).then(setAud).catch((e) => setAud({ error: e.message })).finally(() => setAudBusy(false));
   };
-  useEffect(() => { refreshAudience(); }, [f.audienceMode, f.segmentId, f.dashboardId, f.tileId, f.emailField, f.consentField, f.emailConsentField, f.smsConsentField, f.ignoreConsent, f.phoneField, f.channel, f.attrDashboardId, f.attrTileId, JSON.stringify(f.filters)]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { refreshAudience(); }, [f.audienceMode, f.segmentId, f.dashboardId, f.tileId, f.emailField, f.consentField, f.emailConsentField, f.smsConsentField, f.ignoreConsent, f.phoneField, f.channel, f.attrDashboardId, f.attrTileId, f.eventSuiteId, JSON.stringify(f.filters)]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Debounced email preview. For a sequence, preview the step you're editing.
   useEffect(() => {
@@ -467,11 +509,11 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
     debounce.current = setTimeout(() => {
       const base = payload();
       const st = isSequence ? (f.steps[activeStep] || f.steps[0]) : null;
-      const p = st ? { ...base, subject: st.subject, body: st.body, ctaText: st.ctaText } : base;
+      const p = st ? { ...base, subject: st.subject, body: st.body, ctaText: st.ctaText, contentMode: st.contentMode || 'template', customHtml: st.customHtml || '', heroImage: st.heroImage || '' } : base;
       api.actionPreviewEmail(entityId, p).then((r) => { setPreview(r.html || ''); setPreviewSms(r.sms || ''); }).catch(() => {});
     }, 350);
     return () => clearTimeout(debounce.current);
-  }, [f.subject, f.body, f.smsBody, f.ctaText, f.ctaUrl, f.contentMode, f.customHtml, f.heroImage, f.campaignMode, activeStep, JSON.stringify(f.steps), JSON.stringify(f.promo), f.anchorField]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [f.subject, f.body, f.smsBody, f.ctaText, f.ctaUrl, f.contentMode, f.customHtml, f.heroImage, f.campaignMode, f.eventSuiteId, activeStep, JSON.stringify(f.steps), JSON.stringify(f.promo), f.anchorField]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Preview EVERY step of a sequence together (rendered each with its own copy).
   useEffect(() => {
@@ -482,7 +524,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
       const out = [];
       for (let i = 0; i < f.steps.length; i++) {
         const st = f.steps[i];
-        const p = { ...base, subject: st.subject, body: st.body, ctaText: st.ctaText };
+        const p = { ...base, subject: st.subject, body: st.body, ctaText: st.ctaText, contentMode: st.contentMode || 'template', customHtml: st.customHtml || '', heroImage: st.heroImage || '' };
         try { const r = await api.actionPreviewEmail(entityId, p); out.push({ label: `Step ${i + 1} · +${st.delayHours % 24 === 0 && st.delayHours >= 24 ? `${st.delayHours / 24}d` : `${st.delayHours}h`}`, html: r.html || '', sms: r.sms || '' }); }
         catch { out.push({ label: `Step ${i + 1}`, html: '', sms: '' }); }
       }
@@ -799,7 +841,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
                   </>
                 )}
                 {aud?.fields?.length > 0 && (
-                  <AudienceFilters entityId={entityId}
+                  <AudienceFilters entityId={entityId} eventSuiteId={f.eventSuiteId}
                     fields={(aud.filterFields && aud.filterFields.length) ? aud.filterFields : aud.fields.map((fl) => ({ ...fl, dashboardId: f.dashboardId, tileId: f.tileId }))}
                     filters={f.filters} addFilter={addFilter} setFilter={setFilter} removeFilter={removeFilter}
                     attr={{ dashboardId: f.attrDashboardId, tileId: f.attrTileId }}
@@ -820,6 +862,12 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
                     <b style={{ color: 'var(--brand)' }}>{aud.count}</b> recipient{aud.count === 1 ? '' : 's'}
                     {aud.reach && hasEmail && <span style={{ color: 'var(--muted)' }}> · {aud.reach.email} emailable</span>}
                     {aud.reach && hasSms && <span style={{ color: 'var(--muted)' }}> · {aud.reach.sms} SMS</span>}
+                    {(() => {
+                      // Estimated cost before send: reach on each active channel × its rate.
+                      if (!rates?.rates || !aud.reach) return null;
+                      const est = (hasEmail ? (aud.reach.email || 0) * (rates.rates.email || 0) : 0) + (hasSms ? (aud.reach.sms || 0) * (rates.rates.sms || 0) : 0);
+                      return est > 0 ? <span style={{ color: 'var(--brand)', fontWeight: 700 }}> · est. {money(rates.currency, est)}</span> : null;
+                    })()}
                     {aud.filteredOut > 0 && <span style={{ color: 'var(--muted)' }}> · {aud.filteredOut} filtered out</span>}
                     {!f.ignoreConsent && aud.noConsent > 0 && <span style={{ color: 'var(--muted)' }}> · {aud.noConsent} no consent</span>}
                     {aud.excluded > 0 && <span style={{ color: 'var(--muted)' }}> · {aud.excluded} unsubscribed</span>}
@@ -900,6 +948,16 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
           {!isSequence && hasEmail && (f.channel !== 'both' || emailOpen) && (
           <Field label="Content">
             {f.channel === 'both' && <div style={{ ...hintS, marginTop: 0, marginBottom: 6 }}>This is the email. The SMS will use the body text below (plus the link &amp; opt-out).</div>}
+            {/* Templates: start from a saved one, or save the current content. */}
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
+              {templates.length > 0 && (
+                <select style={{ ...input, flex: '1 1 200px' }} value="" onChange={(e) => { if (e.target.value) applyTemplate(e.target.value); }}>
+                  <option value="">📝 Start from a template…</option>
+                  {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+              )}
+              <button type="button" style={mini} onClick={saveAsTemplate} title="Save this email as a reusable template">💾 Save as template</button>
+            </div>
             <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
               <Toggle on={f.contentMode === 'template'} onClick={() => set('contentMode', 'template')}>Built template</Toggle>
               <Toggle on={f.contentMode === 'html'} onClick={() => set('contentMode', 'html')}>Custom HTML</Toggle>
@@ -1110,13 +1168,24 @@ function JourneyReport({ entityId, action, onClose }) {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {/* Enrolled baseline */}
             <FunnelBar label="Enrolled" sub="entered the journey" value={d.enrolled} total={d.enrolled} accent="var(--brand)" />
-            {d.steps.map((s) => (
-              <FunnelBar key={s.index} label={`Step ${s.index + 1} · +${unit(s.delayHours)}`} sub={s.subject || ''} value={s.received} total={d.enrolled || 1}
-                engage={[s.opened ? `📨 ${s.opened} opened` : '', s.clicked ? `👆 ${s.clicked} clicked` : ''].filter(Boolean).join(' · ')}
-                note={s.converted ? `${s.converted} converted after this step` : ''} />
-            ))}
+            {d.steps.map((s, i) => {
+              const prev = i === 0 ? d.enrolled : d.steps[i - 1].received;
+              const dropped = Math.max(0, prev - s.received);
+              const dropPct = prev > 0 ? Math.round((dropped / prev) * 100) : 0;
+              const rate = (n) => (s.received > 0 ? Math.min(100, Math.round((n / s.received) * 100)) : 0);
+              return (
+                <div key={s.index} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {dropped > 0 && (
+                    <div style={{ fontSize: 11, color: 'var(--muted)', paddingLeft: 2 }} title="Fewer people reached this step than the previous one — they converted, unsubscribed, or are still en route.">↓ {dropped} didn’t reach this step ({dropPct}%)</div>
+                  )}
+                  <FunnelBar label={`Step ${s.index + 1} · +${unit(s.delayHours)}`} sub={s.subject || ''} value={s.received} total={d.enrolled || 1}
+                    engage={[s.opened ? `📨 ${s.opened} opened (${rate(s.opened)}%)` : '', s.clicked ? `👆 ${s.clicked} clicked (${rate(s.clicked)}%)` : ''].filter(Boolean).join(' · ')}
+                    note={s.converted ? `${s.converted} converted after this step` : ''} />
+                </div>
+              );
+            })}
           </div>
-          <div style={hintS}>“Received” counts everyone who advanced past that step; opened/clicked are tracked per step. People leave the journey the moment they buy (converted) or unsubscribe.</div>
+          <div style={hintS}>“Received” counts everyone who advanced past that step; opened/clicked (% of received) are tracked per step. People leave the journey the moment they buy (converted) or unsubscribe.</div>
         </>
       )}
     </div>
@@ -1211,6 +1280,7 @@ function MasterReport({ entityId, name, master, campaigns, onOpen, onNew, onChan
         <Stat label="Clicks" value={t.clicks} />
         <Stat label="Click rate" value={`${ctr}%`} />
         {anySeq && <Stat label="Converted" value={t.converted} accent="var(--success,#10b981)" />}
+        {master?.stats?.cost > 0 && <Stat label="Cost" value={money(master.currency, master.stats.cost)} />}
       </div>
 
       {/* Per-channel rollup across all segment campaigns in this master. */}
@@ -1304,6 +1374,7 @@ function CampaignReport({ entityId, action, onClose }) {
         {stat('CTR', `${r.ctr}%`, 'var(--brand)')}
         {(r.converted > 0) && stat('Converted', r.converted, 'var(--success,#10b981)')}
         {(r.converted > 0) && stat('Conv. rate', `${r.convRate}%`, 'var(--success,#10b981)')}
+        {r.cost && r.cost.total > 0 && stat('Cost', money(r.cost.currency, r.cost.total))}
       </div>
 
       {/* Per-channel split — only meaningful when a campaign used both channels. */}
@@ -1420,7 +1491,7 @@ function CampaignReport({ entityId, action, onClose }) {
 }
 
 // Hero image: upload (resized ≤1000px wide, data-URL) or paste a URL.
-function ImageField({ label, value, onChange }) {
+export function ImageField({ label, value, onChange }) {
   const ref = useRef(null);
   const onFile = (e) => {
     const file = e.target.files?.[0]; if (!file) return;
@@ -1451,12 +1522,13 @@ function ImageField({ label, value, onChange }) {
         <input ref={ref} type="file" accept="image/*" style={{ display: 'none' }} onChange={onFile} />
       </div>
       {!value?.startsWith('data:') && <input value={value || ''} onChange={(e) => onChange(e.target.value)} placeholder="or paste an image URL" style={{ ...input, marginTop: 6 }} />}
+      <UploadHint kind="banner" />
     </div>
   );
 }
 
 // Custom HTML: upload an .html file or paste/edit markup directly.
-function HtmlField({ value, onChange }) {
+export function HtmlField({ value, onChange }) {
   const ref = useRef(null);
   const onFile = (e) => {
     const file = e.target.files?.[0]; if (!file) return;
@@ -1585,7 +1657,7 @@ function StatusChip({ status }) {
 
 const fmt = (iso) => { try { return new Date(iso).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch { return ''; } };
 function Field({ label, children }) { return <div><div style={hintLbl}>{label}</div>{children}</div>; }
-function Toggle({ on, onClick, children }) {
+export function Toggle({ on, onClick, children }) {
   return <button type="button" onClick={onClick} style={{ flex: 1, padding: '8px 10px', borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', border: on ? '1.5px solid var(--brand)' : '1.5px solid var(--hairline)', background: on ? 'rgba(var(--brand-rgb), 0.08)' : 'transparent', color: on ? 'var(--brand)' : 'var(--text)' }}>{children}</button>;
 }
 // SMS length helper — GSM-7 is 160 chars (153/segment when multipart). The
@@ -1626,13 +1698,13 @@ function Accordion({ title, defaultOpen = false, open: controlledOpen, onToggle,
 // Optional targeting filters on the audience tile's columns (city, age, ticket
 // category, new/returning…). 'is one of' picks real values from the data;
 // 'between' is a numeric range (e.g. age). All filters narrow the segment (AND).
-export function AudienceFilters({ entityId, fields, filters, addFilter, setFilter, removeFilter, attr, tiles, onAttr, hideAttrSource }) {
+export function AudienceFilters({ entityId, fields, filters, addFilter, setFilter, removeFilter, attr, tiles, onAttr, hideAttrSource, eventSuiteId = '' }) {
   const attrDash = tiles?.dashboards?.find((d) => d.dashboardId === attr?.dashboardId);
   return (
     <div style={{ marginTop: 8, borderTop: '1px dashed var(--hairline)', paddingTop: 10 }}>
       <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', marginBottom: 6 }}>🎯 Target a segment (optional)</div>
       {filters.map((fl, i) => (
-        <FilterRow key={i} entityId={entityId} fields={fields} filter={fl}
+        <FilterRow key={i} entityId={entityId} fields={fields} filter={fl} eventSuiteId={eventSuiteId}
           onChange={(p) => setFilter(i, p)} onRemove={() => removeFilter(i)} />
       ))}
       <button type="button" style={{ ...mini, marginTop: filters.length ? 6 : 0 }} onClick={addFilter}>＋ Add filter</button>
@@ -1658,7 +1730,7 @@ export function AudienceFilters({ entityId, fields, filters, addFilter, setFilte
     </div>
   );
 }
-function FilterRow({ entityId, fields, filter, onChange, onRemove }) {
+function FilterRow({ entityId, fields, filter, onChange, onRemove, eventSuiteId = '' }) {
   const [values, setValues] = useState(null); // distinct values for the chosen field
   const [open, setOpen] = useState(false);
   const fieldDef = fields.find((fl) => fl.name === filter.field);
@@ -1668,9 +1740,9 @@ function FilterRow({ entityId, fields, filter, onChange, onRemove }) {
     if (fieldDef?.values) { setValues(fieldDef.values); return; }
     if (!fieldDef?.dashboardId || !fieldDef?.tileId) { setValues(null); return; }
     let alive = true;
-    api.actionFieldValues(entityId, { dashboardId: fieldDef.dashboardId, tileId: fieldDef.tileId, field: filter.field }).then((r) => { if (alive) setValues(r.values || []); }).catch(() => { if (alive) setValues([]); });
+    api.actionFieldValues(entityId, { dashboardId: fieldDef.dashboardId, tileId: fieldDef.tileId, field: filter.field, eventSuiteId }).then((r) => { if (alive) setValues(r.values || []); }).catch(() => { if (alive) setValues([]); });
     return () => { alive = false; };
-  }, [filter.field, filter.op, fieldDef?.dashboardId, fieldDef?.tileId, fieldDef?.values, entityId]);
+  }, [filter.field, filter.op, fieldDef?.dashboardId, fieldDef?.tileId, fieldDef?.values, entityId, eventSuiteId]);
   const toggleVal = (v) => onChange({ values: filter.values.includes(v) ? filter.values.filter((x) => x !== v) : [...filter.values, v] });
   return (
     <div style={{ border: '1px solid var(--hairline)', borderRadius: 8, padding: 8, marginBottom: 6 }}>
@@ -1742,9 +1814,32 @@ function SequenceSteps({ steps, setStep, addStep, removeStep, activeStep = 0, on
               <span style={{ flex: 1 }} />
               {steps.length > 1 && <button type="button" style={{ ...mini, color: 'var(--error,#ef4444)' }} onClick={() => removeStep(i)}>✕</button>}
             </div>
-            {!sms && <input style={{ ...input, fontWeight: 700, marginBottom: 6 }} value={st.subject} onFocus={focus(i)} onChange={(e) => setStep(i, { subject: e.target.value })} placeholder={`Step ${i + 1} subject`} />}
-            <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit', marginBottom: 6 }} rows={4} value={st.body} onFocus={focus(i)} onChange={(e) => setStep(i, { body: e.target.value })} placeholder={sms ? 'Hi {{name}}, your {{ticketType}} tickets are waiting…' : 'Hi {{name}}, …  (tokens: {{ticketType}}, {{promo}})'} />
-            {sms ? <SmsMeter body={st.body} /> : <input style={input} value={st.ctaText} onFocus={focus(i)} onChange={(e) => setStep(i, { ctaText: e.target.value })} placeholder="Button text (e.g. Complete my purchase)" />}
+            {sms ? (
+              <>
+                <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit', marginBottom: 6 }} rows={4} value={st.body} onFocus={focus(i)} onChange={(e) => setStep(i, { body: e.target.value })} placeholder={'Hi {{name}}, your {{ticketType}} tickets are waiting…'} />
+                <SmsMeter body={st.body} />
+              </>
+            ) : (
+              <>
+                <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                  <Toggle on={(st.contentMode || 'template') === 'template'} onClick={() => { focus(i)(); setStep(i, { contentMode: 'template' }); }}>Built template</Toggle>
+                  <Toggle on={st.contentMode === 'html'} onClick={() => { focus(i)(); setStep(i, { contentMode: 'html' }); }}>Custom HTML</Toggle>
+                </div>
+                <input style={{ ...input, fontWeight: 700, marginBottom: 6 }} value={st.subject} onFocus={focus(i)} onChange={(e) => setStep(i, { subject: e.target.value })} placeholder={`Step ${i + 1} subject`} />
+                {(st.contentMode || 'template') === 'template' ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <ImageField label="Hero image (optional)" value={st.heroImage || ''} onChange={(v) => setStep(i, { heroImage: v })} />
+                    <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit' }} rows={4} value={st.body} onFocus={focus(i)} onChange={(e) => setStep(i, { body: e.target.value })} placeholder={'Hi {{name}}, …  (tokens: {{ticketType}}, {{promo}})'} />
+                    <input style={input} value={st.ctaText} onFocus={focus(i)} onChange={(e) => setStep(i, { ctaText: e.target.value })} placeholder="Button text (e.g. Complete my purchase)" />
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }} onClick={focus(i)}>
+                    <HtmlField value={st.customHtml || ''} onChange={(v) => setStep(i, { customHtml: v })} />
+                    <div style={hintS}>Tokens work inside your HTML: <b>{'{{name}}'}</b>, <b>{'{{ticketType}}'}</b>, <b>{'{{cta}}'}</b> (the shared tracked buy link), <b>{'{{unsubscribe}}'}</b>. An unsubscribe link is added if you omit one.</div>
+                  </div>
+                )}
+              </>
+            )}
           </div>
         );
       })}

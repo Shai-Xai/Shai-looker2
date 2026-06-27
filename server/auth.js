@@ -39,32 +39,41 @@ function getSecret() {
 // current admin UI, alongside the real `entityIds`.
 function publicUser(u) {
   if (!u) return null;
-  return { id: u.id, email: u.email, role: u.role, tenantId: (u.entityIds || [])[0] || null, entityIds: u.entityIds || [], notifyEmail: u.notifyEmail !== false, notifyPush: u.notifyPush !== false };
+  return { id: u.id, email: u.email, role: u.role, firstName: u.firstName || '', lastName: u.lastName || '', fullName: u.fullName || '', mobile: u.mobile || '', tenantId: (u.entityIds || [])[0] || null, entityIds: u.entityIds || [], notifyEmail: u.notifyEmail !== false, notifyPush: u.notifyPush !== false };
 }
 function loadUsers() { return db.listUsers(); }
 function getUser(id) { return db.getUser(id); }
 function verifyCredentials(email, password) { return db.verifyCredentials(email, password); }
 
-function createUser({ email, password, role = 'client', tenantId = null, entityIds }) {
+function createUser({ email, password, role = 'client', tenantId = null, entityIds, firstName = '', lastName = '', mobile = '', howlerRole = '' }) {
   const ids = entityIds || (tenantId ? [tenantId] : []);
   // Admins keep entity links too: full access regardless, but a link makes them
   // part of that client's team surface (logins list, digests, notifications).
-  const u = db.createUser({ email, password, role, entityIds: ids });
+  const u = db.createUser({ email, password, role, entityIds: ids, firstName, lastName, mobile, howlerRole });
   return publicUser(u);
 }
 function updateUser(id, patch) {
   const p = { ...patch };
   if ('tenantId' in patch && !('entityIds' in patch)) p.entityIds = patch.tenantId ? [patch.tenantId] : [];
   const u = db.updateUser(id, p);
+  invalidateUser(id); // reflect role/entity/pref changes immediately, not after the TTL
   return u ? publicUser(u) : null;
 }
-function deleteUser(id) { db.deleteUser(id); }
+function deleteUser(id) { db.deleteUser(id); invalidateUser(id); }
 
 // Seed an admin on first run so the app is usable out of the box.
 function seedAdmin() {
   if (db.listUsers().length > 0) return;
   const email = process.env.ADMIN_EMAIL || 'admin@howler.local';
-  const password = process.env.ADMIN_PASSWORD || 'changeme123';
+  // Never seed a KNOWN password in production: if ADMIN_PASSWORD is unset there,
+  // mint a strong random one-time password (printed once below) so a fresh deploy
+  // can't boot with publicly-known credentials. The convenient default is dev-only.
+  let password = process.env.ADMIN_PASSWORD;
+  if (!password) {
+    password = process.env.NODE_ENV === 'production'
+      ? crypto.randomBytes(12).toString('base64url')
+      : 'changeme123';
+  }
   db.createUser({ email, password, role: 'admin' });
   console.log('\n  ┌─────────────────────────────────────────────────────────┐');
   console.log('  │  Seeded admin account (change the password after login):  │');
@@ -86,10 +95,27 @@ function issueCookie(res, user) {
 }
 function clearCookie(res) { res.clearCookie(COOKIE, COOKIE_OPTS); }
 
+// Short-TTL cache of the authenticated user. A single screen fires 10-20 parallel
+// tile/data requests, and attachUser runs on each — without this, that's 10-20 ×
+// getUser() (2 SQLite queries each) for the SAME user per navigation. 2s collapses
+// the burst while keeping any mid-session permission change near-immediate; user
+// mutations also invalidate explicitly (see updateUser/deleteUser).
+const USER_CACHE_TTL = 2000;
+const userCache = new Map(); // id -> { at, user }
+function cachedUser(id) {
+  const e = userCache.get(id);
+  if (e && Date.now() - e.at < USER_CACHE_TTL) return e.user;
+  const user = db.getUser(id);
+  userCache.set(id, { at: Date.now(), user });
+  if (userCache.size > 2000) userCache.delete(userCache.keys().next().value);
+  return user;
+}
+function invalidateUser(id) { userCache.delete(id); }
+
 function attachUser(req, _res, next) {
   const token = req.cookies?.[COOKIE];
   if (token) {
-    try { const { sub } = jwt.verify(token, getSecret()); req.user = db.getUser(sub) || null; }
+    try { const { sub } = jwt.verify(token, getSecret()); req.user = cachedUser(sub) || null; }
     catch { req.user = null; }
   }
   next();

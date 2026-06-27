@@ -6,6 +6,13 @@ import { useIsMobile } from '../lib/useIsMobile.js';
 import { vtNavigate } from '../lib/viewTransition.js';
 import AiMark from '../components/AiMark.jsx';
 import BriefingTuneModal from '../components/BriefingTuneModal.jsx';
+import OnboardingCard from '../components/OnboardingCard.jsx';
+import GoalsStrip from '../components/GoalsStrip.jsx';
+import GuideModal from '../components/GuideModal.jsx';
+import { GUIDES, FEATURE_GUIDES, getGuide } from '../lib/guides.js';
+import { isStandalone } from '../lib/pwa.js';
+import DigestHistory from '../components/DigestHistory.jsx';
+import { useProfile } from '../lib/profile.jsx';
 import OwlQuips from '../components/OwlQuips.jsx';
 import TileFrame from '../components/TileFrame.jsx';
 import { ScopeProvider } from '../lib/ScopeContext.jsx';
@@ -22,15 +29,22 @@ export default function ClientHome() {
   const isMobile = useIsMobile();
   const { user, isAdmin } = useAuth();
   const { can } = useAccess(); // role gates the campaign affordances on home
+  const { activeEntityId } = useProfile();
   const { previewEntityId } = useOutletContext() || {};
+  const homeEntityId = previewEntityId || activeEntityId || (user?.entityIds || [])[0] || '';
   const [suites, setSuites] = useState([]);
   const [snap, setSnap] = useState(null);
   const [brief, setBrief] = useState(null); // null=loading, {available:false}=hidden
+  const [events, setEvents] = useState(null); // multi-event: per-event sections (null=loading)
+  const [openEvents, setOpenEvents] = useState({}); // which event sections are expanded
+  const [savingSuites, setSavingSuites] = useState(false);
+  const [diag, setDiag] = useState(null); // admin: resolved filters per event ('loading' | [])
   const [refreshing, setRefreshing] = useState(false);
   const [refreshErr, setRefreshErr] = useState(false);
   const [tuneOpen, setTuneOpen] = useState(false);
   const [messages, setMessages] = useState([]);
   const [dismissed, setDismissed] = useState([]);
+  const [guide, setGuide] = useState(null); // open walkthrough/explainer, or null
 
   useEffect(() => { api.mySuites().then(setSuites).catch(() => {}); }, []);
   useEffect(() => {
@@ -39,17 +53,39 @@ export default function ClientHome() {
     // otherwise shows the WRONG client's briefing/snapshot when an older, slower
     // fetch resolves last. Only the current entity's responses are applied.
     let alive = true;
-    setSnap(null); setBrief(null); setMessages([]);
+    setSnap(null); setBrief(null); setEvents(null); setMessages([]);
     // Pre-warm in the background: top dashboards' tiles into the query cache +
     // the briefing (coalesced with our own fetch below), so the first click and
     // briefing of the session are warm. Same hour as the briefing so it hits.
-    api.prewarm(previewEntityId, new Date().getHours());
-    api.mySnapshot(previewEntityId).then((s) => { if (alive) setSnap(s); }).catch(() => { if (alive) setSnap({ kpis: [], shortcuts: [], settlement: null, lastVisit: null }); });
-    api.myBriefing(previewEntityId).then((b) => { if (alive) setBrief(b); }).catch(() => { if (alive) setBrief({ available: false }); });
-    api.osInbox(previewEntityId).then((r) => { if (alive) setMessages(r.threads || []); }).catch(() => {});
+    api.prewarm(homeEntityId, new Date().getHours());
+    api.mySnapshot(homeEntityId).then((s) => { if (alive) setSnap(s); }).catch(() => { if (alive) setSnap({ kpis: [], shortcuts: [], settlement: null, lastVisit: null }); });
+    api.myBriefing(homeEntityId).then((b) => {
+      if (!alive) return;
+      setBrief(b);
+      // Multi-event: the overall summary is here now; load the per-event sections
+      // (the slower pass) separately so they fill in without blocking the summary.
+      if (b?.multi) { setEvents(null); setOpenEvents({}); api.myBriefingEvents(homeEntityId).then((r) => { if (alive) setEvents(r.events || []); }).catch(() => { if (alive) setEvents([]); }); }
+    }).catch(() => { if (alive) setBrief({ available: false }); });
+    api.osInbox(homeEntityId).then((r) => { if (alive) setMessages(r.threads || []); }).catch(() => {});
     api.getDismissedThreads().then((r) => { if (alive) setDismissed(r.dismissed || []); }).catch(() => {});
+    // First run: show the essentials welcome wizard once per entity (remembered
+    // in localStorage so it never nags again), unless they've dismissed setup or
+    // already finished. Auto-refinement: steps the client has already done are
+    // dropped, so the wizard only walks them through what's actually left.
+    if (homeEntityId) {
+      const seenKey = `howler_onboarding_welcomed:${homeEntityId}`;
+      if (!localStorage.getItem(seenKey)) {
+        api.getMyOnboarding(homeEntityId).then((o) => {
+          if (!alive || !o || o.dismissed || o.complete) return;
+          localStorage.setItem(seenKey, '1');
+          const done = new Set((o.steps || []).filter((s) => s.done).map((s) => s.key));
+          const steps = GUIDES.essentials.steps.filter((s) => !s.skipIfDone || !done.has(s.skipIfDone));
+          setGuide({ ...GUIDES.essentials, steps });
+        }).catch(() => {});
+      }
+    }
     return () => { alive = false; };
-  }, [previewEntityId]);
+  }, [homeEntityId]);
   const dismissMessage = (id) => {
     setDismissed((d) => [...d, id]); // optimistic
     api.dismissThread(id).catch(() => {});
@@ -61,7 +97,7 @@ export default function ClientHome() {
       const j = index + dir;
       if (j < 0 || j >= list.length) return s;
       [list[index], list[j]] = [list[j], list[index]];
-      api.savePinOrder(previewEntityId, list.map((p) => `${p.dashboardId}|${p.tile.id}`)).catch(() => {});
+      api.savePinOrder(homeEntityId, list.map((p) => `${p.dashboardId}|${p.tile.id}`)).catch(() => {});
       return { ...s, pinnedTiles: list };
     });
   };
@@ -71,11 +107,25 @@ export default function ClientHome() {
   const refreshBrief = () => {
     setRefreshing(true);
     setRefreshErr(false);
-    api.mySnapshot(previewEntityId, true).then(setSnap).catch(() => {});
-    api.myBriefing(previewEntityId, true)
-      .then((b) => setBrief(b))
+    api.mySnapshot(homeEntityId, true).then(setSnap).catch(() => {});
+    api.myBriefing(homeEntityId, true)
+      .then((b) => { setBrief(b); if (b?.multi) { setEvents(null); api.myBriefingEvents(homeEntityId, true).then((r) => setEvents(r.events || [])).catch(() => setEvents([])); } })
       .catch(() => setRefreshErr(true))
       .finally(() => setRefreshing(false));
+  };
+
+  // Multi-event: choose which events the briefing covers (persisted per user).
+  // Re-pulls the overall + per-event sections for the new selection.
+  const toggleEventSuite = (id) => {
+    const cur = (brief?.suites || []).filter((s) => s.selected).map((s) => s.id);
+    const next = cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id];
+    if (!next.length) return; // keep at least one event
+    setSavingSuites(true);
+    api.setBriefingSuites(homeEntityId, next)
+      .then(() => { setBrief(null); setEvents(null); return api.myBriefing(homeEntityId, true); })
+      .then((b) => { setBrief(b); if (b?.multi) { api.myBriefingEvents(homeEntityId, true).then((r) => setEvents(r.events || [])).catch(() => setEvents([])); } })
+      .catch(() => {})
+      .finally(() => setSavingSuites(false));
   };
 
   const go = (suiteId, dashboardId) => vtNavigate(navigate, `/suite/${suiteId}/d/${dashboardId}`);
@@ -88,7 +138,7 @@ export default function ClientHome() {
   }
 
   const firstName = deriveFirstName(user?.email);
-  const visibleSuites = previewEntityId ? suites.filter((s) => s.entityId === previewEntityId) : suites;
+  const visibleSuites = homeEntityId ? suites.filter((s) => s.entityId === homeEntityId) : suites;
   const shortcuts = snap?.shortcuts || [];
 
   return (
@@ -103,7 +153,11 @@ export default function ClientHome() {
             {todayLine()}{snap?.lastVisit ? ` · Here's what changed since your last visit ${relDay(snap.lastVisit)}.` : ''}
           </p>
         </div>
+        <LearnMenu onPick={(id) => setGuide(getGuide(id))} />
       </div>
+
+      {/* Getting-started checklist — hides once complete or dismissed */}
+      <div style={{ marginTop: 16 }}><OnboardingCard entityId={homeEntityId} /></div>
 
       {/* The Owl's briefing */}
       {brief?.available !== false && (
@@ -114,7 +168,7 @@ export default function ClientHome() {
             <span style={{ flex: 1 }} />
             {brief?.generatedAt && <span style={{ fontSize: 11, color: 'var(--muted)' }}>{new Date(brief.generatedAt).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}</span>}
             {refreshErr && <span style={{ fontSize: 11, color: 'var(--error)' }} title="Couldn't refresh — try again">⚠</span>}
-            <button onClick={() => setTuneOpen(true)} title="Tune your briefing — focus, event dates, phases" style={refreshBtn}>⚙ Tune</button>
+            <button onClick={() => { api.trackUsage(homeEntityId, { kind: 'feature', name: 'briefing_tune', event: 'use' }); setTuneOpen(true); }} title="Tune your briefing — focus, event dates, phases" style={refreshBtn}>⚙ Tune</button>
             <button onClick={refreshBrief} disabled={refreshing} title="Regenerate briefing" style={refreshBtn}>{refreshing ? '…' : '↻ Refresh'}</button>
           </div>
           {brief == null || refreshing ? (
@@ -144,11 +198,92 @@ export default function ClientHome() {
                   ))}
                 </div>
               )}
-              <FeedbackRow brief={brief} entityId={previewEntityId} />
+              <FeedbackRow brief={brief} entityId={homeEntityId} />
+              {brief.multi && (
+                <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--hairline)' }}>
+                  {/* Which events the briefing covers — toggle to include/exclude. */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+                    <span style={{ fontSize: 10.5, color: 'var(--muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginRight: 2 }}>Events</span>
+                    {(brief.suites || []).map((s) => (
+                      <button key={s.id} onClick={() => toggleEventSuite(s.id)} disabled={savingSuites} style={eventChip(s.selected)} title={s.active ? 'Included' : 'Past event'}>
+                        {s.selected ? '✓ ' : ''}{s.name}{!s.active ? ' · past' : ''}
+                      </button>
+                    ))}
+                    {isAdmin && <button onClick={() => { setDiag('loading'); api.myBriefingEvents(homeEntityId, true, true).then((r) => setDiag(r || {})).catch(() => setDiag({ diag: [] })); }} style={{ ...eventChip(false), marginLeft: 'auto' }} title="Admin: show the filters each event's tiles resolved to">🔍 Diagnose</button>}
+                  </div>
+                  {/* Admin diagnostic: per selected event, the FILTERS each tile ran with
+                      (so a wrong/absent event lock is visible) + tiles dropped and why
+                      (e.g. 'no rows' = no sales for that event). */}
+                  {isAdmin && diag && (
+                    <div style={{ marginBottom: 12, border: '1px solid var(--hairline)', borderRadius: 8, padding: '8px 10px', fontSize: 11.5, background: 'var(--elevated, rgba(128,128,128,0.06))' }}>
+                      {diag === 'loading' ? <span style={{ color: 'var(--muted)' }}>Resolving live filters…</span> : (
+                        <>
+                          {(diag.diag || []).map((g) => (
+                            <div key={g.suiteId} style={{ marginBottom: 8 }}>
+                              <div style={{ fontWeight: 800 }}>{g.suiteName}{!g.tiles.length ? ' — no tiles returned data' : ''}</div>
+                              {g.tiles.map((t, i) => (
+                                <div key={i} style={{ color: 'var(--muted-2)', marginTop: 2, lineHeight: 1.45 }}>
+                                  <b>{t.title}</b> = {t.value} <span style={{ color: 'var(--muted)' }}>· {Object.entries(t.filters || {}).map(([k, v]) => `${k}=${v}`).join(', ') || 'no filters'}</span>
+                                </div>
+                              ))}
+                            </div>
+                          ))}
+                          {(diag.dropped || []).length > 0 && (
+                            <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--hairline)' }}>
+                              <div style={{ fontWeight: 800, color: '#b45309' }}>Dropped tiles ({diag.dropped.length})</div>
+                              {diag.dropped.map((d, i) => <div key={i} style={{ color: 'var(--muted)', marginTop: 2 }}>{d}</div>)}
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
+                  {/* Per-event sections — collapsed; busiest (first) expanded. */}
+                  {events == null ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <div className="skel" style={{ width: '62%', height: 13 }} />
+                      <div className="skel" style={{ width: '74%', height: 13 }} />
+                    </div>
+                  ) : events.map((ev, i) => {
+                    const open = openEvents[ev.suiteId] ?? (i === 0);
+                    return (
+                      <div key={ev.suiteId} style={{ borderTop: i ? '1px solid var(--hairline)' : 'none', padding: '8px 0' }}>
+                        <button onClick={() => setOpenEvents((o) => ({ ...o, [ev.suiteId]: !open }))} style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', background: 'none', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left', color: 'var(--text)' }}>
+                          <span style={{ width: 12, fontSize: 10, color: 'var(--muted)', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s', flexShrink: 0 }}>▶</span>
+                          <span style={{ fontSize: 12.5, fontWeight: 800, flexShrink: 0 }}>{ev.suiteName}</span>
+                          {!open && <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: 'var(--muted-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ev.headline.replace(/\*\*/g, '')}</span>}
+                        </button>
+                        {open && (
+                          <div style={{ paddingLeft: 20, marginTop: 4 }}>
+                            <p style={{ fontSize: 13.5, lineHeight: 1.55 }}>{bold(ev.headline)}</p>
+                            {(ev.bullets || []).length > 0 && (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6 }}>
+                                {ev.bullets.map((b, j) => (
+                                  <div key={j} style={{ display: 'flex', gap: 8, fontSize: 13, lineHeight: 1.5 }}>
+                                    <span style={{ color: 'var(--brand)', flexShrink: 0 }}>●</span>
+                                    <span>{bold(b.text)}{' '}{b.link && <button onClick={() => go(b.link.suiteId, b.link.dashboardId)} style={inlineLink}>{b.link.label} →</button>}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </>
           )}
         </div>
       )}
+
+      {/* Goals — the Results pillar. North Star leads; tracks live off a tile or
+          a manual value. Hidden when there's nothing set and nothing to manage. */}
+      <GoalsStrip entityId={homeEntityId} suites={visibleSuites} />
+
+      {/* Past digests — react/comment to tune future ones. Hidden until any exist. */}
+      <DigestHistory entityId={homeEntityId} compact />
 
       {/* Messages from Howler — recent threads, surfaced on home. Handled ones
           can be dismissed (per-user; the inbox record is untouched). */}
@@ -175,8 +310,8 @@ export default function ClientHome() {
                 onMove={(dir) => movePin(i, dir)}
                 onOpen={() => go(p.suiteId, p.dashboardId)}
                 onUnpin={() => {
-                  api.togglePin({ dashboardId: p.dashboardId, tileId: p.tile.id, kind: 'pin', on: false, scope: isAdmin ? 'entity' : 'user', entityId: previewEntityId })
-                    .then(() => api.mySnapshot(previewEntityId, true).then(setSnap))
+                  api.togglePin({ dashboardId: p.dashboardId, tileId: p.tile.id, kind: 'pin', on: false, scope: isAdmin ? 'entity' : 'user', entityId: homeEntityId })
+                    .then(() => api.mySnapshot(homeEntityId, true).then(setSnap))
                     .catch(() => {});
                 }}
               />
@@ -202,7 +337,15 @@ export default function ClientHome() {
                     <span
                       role="button" tabIndex={0}
                       title="Turn this suggestion into a campaign"
-                      onClick={(e) => { e.stopPropagation(); vtNavigate(navigate, `/actions?goal=${encodeURIComponent(`${s.title}${s.reason ? ` — ${s.reason}` : ''}`)}&type=${s.action}`); }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        // Carry the dashboard + event the suggestion pointed at, so the
+                        // campaign editor pre-fills the audience from THAT tile/event.
+                        const q = new URLSearchParams({ goal: `${s.title}${s.reason ? ` — ${s.reason}` : ''}`, type: s.action });
+                        if (s.link?.dashboardId) q.set('dashboard', s.link.dashboardId);
+                        if (s.link?.suiteId) q.set('suite', s.link.suiteId);
+                        vtNavigate(navigate, `/actions?${q.toString()}`);
+                      }}
                       style={{ fontSize: 11.5, fontWeight: 700, color: '#7c3aed', background: 'rgba(124,58,237,0.10)', borderRadius: 980, padding: '3px 10px' }}
                     >⚡ Make it happen</span>
                   )}
@@ -215,7 +358,7 @@ export default function ClientHome() {
 
       {/* Your actions — campaigns taken + how they're performing (campaigns role only) */}
       {can(PERMS.CAMPAIGNS_VIEW) && (
-        <YourActions entityId={previewEntityId || (isAdmin ? null : ((user?.entities || [])[0]?.id || (user?.entityIds || [])[0]))} isMobile={isMobile} onOpen={() => vtNavigate(navigate, '/engage/campaigns')} />
+        <YourActions entityId={homeEntityId || (isAdmin ? null : ((user?.entities || [])[0]?.id || (user?.entityIds || [])[0]))} isMobile={isMobile} onOpen={() => vtNavigate(navigate, '/engage/campaigns')} />
       )}
 
       {/* Personal shortcuts (browsing-based) */}
@@ -252,8 +395,10 @@ export default function ClientHome() {
       )}
 
       {tuneOpen && (
-        <BriefingTuneModal entityId={previewEntityId} onClose={() => setTuneOpen(false)} onSaved={refreshBrief} />
+        <BriefingTuneModal entityId={homeEntityId} onClose={() => setTuneOpen(false)} onSaved={refreshBrief} />
       )}
+
+      {guide && <GuideModal guide={guide} entityId={homeEntityId} onClose={() => setGuide(null)} />}
 
       {/* Suites */}
       <SectionHead>Your suites</SectionHead>
@@ -421,7 +566,7 @@ function MessagesFromHowler({ messages, isMobile, onOpen, onDismiss }) {
           // A pending must-ack can't be cleared off home — acknowledge it first.
           const dismissible = !(m.priority === 'must_ack' && !m.acked);
           return (
-            <div key={m.id} className="lift" role="button" tabIndex={0} style={{ ...cardBtn, position: 'relative', textAlign: 'left', cursor: 'pointer' }}
+            <div key={m.id} className="lift" role="button" tabIndex={0} style={{ ...cardBtn, position: 'relative', textAlign: 'left', cursor: 'pointer', minWidth: 0 }}
               onClick={() => onOpen(m.id)}
               onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(m.id); } }}>
               {dismissible && (
@@ -484,6 +629,41 @@ function YourActions({ entityId, isMobile, onOpen }) {
   );
 }
 
+// Small "Learn" launcher in the greeting: a button that opens a popover of the
+// feature explainers (home, briefing, pins, insights). Closes on outside click.
+function LearnMenu({ onPick }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+  return (
+    <div ref={ref} style={{ position: 'relative', flexShrink: 0 }}>
+      <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open}
+        style={{ minHeight: 36, padding: '7px 13px', borderRadius: 980, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}>
+        ❔ Learn
+      </button>
+      {open && (
+        <div style={{ position: 'absolute', right: 0, top: '110%', zIndex: 60, width: 230, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, boxShadow: 'var(--shadow-lg, 0 10px 30px rgba(0,0,0,0.22))', padding: 6, display: 'flex', flexDirection: 'column', gap: 2 }}>
+          {/* Drop the install explainer once Pulse is already installed. */}
+          {FEATURE_GUIDES.filter((g) => !(g.id === 'install' && isStandalone())).map((g) => (
+            <button key={g.id} type="button" onClick={() => { setOpen(false); onPick(g.id); }}
+              style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', textAlign: 'left', padding: '9px 10px', minHeight: 40, border: 'none', background: 'transparent', color: 'var(--text)', fontSize: 13, fontWeight: 600, borderRadius: 8, cursor: 'pointer' }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(128,128,128,0.10)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}>
+              <span style={{ fontSize: 16, width: 20, textAlign: 'center', flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{g.owl ? <AiMark size={16} sparkle={false} quiet /> : g.icon}</span>
+              <span>{g.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SectionHead({ icon, children }) {
   return <h2 style={{ fontSize: 14, fontWeight: 800, letterSpacing: '-0.01em', margin: '22px 0 10px', display: 'flex', alignItems: 'center', gap: 7 }}>{icon && <span>{icon}</span>}{children}</h2>;
 }
@@ -515,3 +695,4 @@ const cardBtn = { textAlign: 'left', background: 'var(--tile-bg, var(--card))', 
 const settleCard = { display: 'flex', alignItems: 'center', gap: 12, width: '100%', marginTop: 16, background: 'linear-gradient(90deg, rgba(52,199,89,0.10), transparent 60%) var(--tile-bg, var(--card))', border: '1px solid rgba(52,199,89,0.35)', borderRadius: 14, padding: '13px 16px', cursor: 'pointer', color: 'var(--text)' };
 const refreshBtn = { border: 'none', background: 'var(--ai-bg, rgba(124,58,237,0.08))', color: 'var(--ai, #7c3aed)', borderRadius: 980, padding: '4px 11px', fontSize: 11, fontWeight: 700, cursor: 'pointer', flexShrink: 0 };
 const inlineLink = { border: 'none', background: 'transparent', color: 'var(--ai, #7c3aed)', fontWeight: 700, fontSize: 12.5, cursor: 'pointer', padding: 0, fontFamily: 'inherit' };
+const eventChip = (on) => ({ border: `1.5px solid ${on ? 'var(--brand)' : 'var(--hairline)'}`, background: on ? 'rgba(var(--brand-rgb), 0.08)' : 'transparent', color: on ? 'var(--brand)' : 'var(--muted-2)', borderRadius: 980, padding: '3px 11px', fontSize: 12, fontWeight: 600, cursor: 'pointer' });

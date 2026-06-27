@@ -34,7 +34,7 @@ export default function FolderImportModal({ preview, alreadyImported, onClose, o
     setBusy(true);
     for (const d of list) {
       if (status[d.id] === 'done') continue;
-      // eslint-disable-next-line no-await-in-loop
+       
       await importOne(d, d.folderName);
     }
     setBusy(false);

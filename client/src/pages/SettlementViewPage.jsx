@@ -378,7 +378,7 @@ function PaymentsChart({ d, dark, isMobile }) {
 
 // ─── Sales table: flat or grouped-by-category, with search ────────────────────
 function SalesTable({ group, isMobile }) {
-  const rows = group.rows || [];
+  const rows = useMemo(() => group.rows || [], [group]);
   // Two-level roll-up: Category → Sub-category (phase) → line items.
   const cats = useMemo(() => {
     const acc = (o, r) => { o.qty += r.qty || 0; o.sales += r.sales || 0; o.fees += r.fees || 0; o.total += r.total || 0; };

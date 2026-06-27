@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/auth.jsx';
 import FolderImportModal from '../components/FolderImportModal.jsx';
+import BackButton from '../components/BackButton.jsx';
 
 export default function HomePage() {
   const navigate = useNavigate();
@@ -22,12 +23,17 @@ export default function HomePage() {
   const [folderBusy, setFolderBusy] = useState(false);
   const [includeSubfolders, setIncludeSubfolders] = useState(true);
   const [showFolderModal, setShowFolderModal] = useState(false);
+  const [folderSettings, setFolderSettings] = useState({}); // { "<path>": { keepImported } } — persistent, cascading
+  const [view, setView] = useState(() => localStorage.getItem('howler_lib_view') || 'list'); // 'tile' | 'list'
+  const setViewMode = (v) => { setView(v); localStorage.setItem('howler_lib_view', v); };
 
   function load() {
     setLoading(true);
     api.listDashboards().then(setDashboards).catch((e) => setError(e.message)).finally(() => setLoading(false));
   }
+  const loadFolderSettings = () => { if (isAdmin) api.getFolderSettings().then(setFolderSettings).catch(() => {}); };
   useEffect(() => { load(); }, []);
+  useEffect(() => { loadFolderSettings(); }, [isAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Nested-folder navigation. Folders are stored as "/"-separated paths on each
   // dashboard (e.g. "Festivals/MTN Bushfire/Cashless").
@@ -42,9 +48,18 @@ export default function HomePage() {
     }
     return [...set].sort((a, b) => a.localeCompare(b));
   })();
-  const dashHere = dashboards.filter((d) => (d.folder || '') === path); // dashboards directly in this folder
+  // Dashboards directly in this folder, sorted by name (A→Z).
+  const dashHere = dashboards.filter((d) => (d.folder || '') === path).sort((a, b) => (a.title || '').localeCompare(b.title || '', undefined, { numeric: true }));
   const folderCountOf = (fp) => dashboards.filter((d) => { const f = d.folder || ''; return f === fp || f.startsWith(fp + '/'); }).length;
   const segs = path ? path.split('/') : [];
+
+  // Persistent per-folder "📌 Imported filters": one toggle that cascades to every
+  // dashboard in this folder (+ subfolders), including ones added later.
+  const folderKeepOn = !!folderSettings[path]?.keepImported;
+  async function toggleFolderKeepImported() {
+    try { await api.setFolderKeepImported(path, !folderKeepOn); loadFolderSettings(); }
+    catch (e) { alert('Could not update folder: ' + (e.message || e)); }
+  }
 
   async function previewFolder() {
     if (!lookerFolderId.trim()) return;
@@ -164,8 +179,14 @@ export default function HomePage() {
       {/* shared datalist of existing folders for the import input */}
       <datalist id="folder-list">{folders.map((f) => <option key={f} value={f} />)}</datalist>
 
-      {/* Header: breadcrumb + actions */}
+      {/* Header: back + breadcrumb + actions. The back button steps UP a folder
+          when you're inside one, otherwise returns to the previous page. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
+        {path
+          ? <button onClick={() => setPath(path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '')} title="Up a folder" aria-label="Up a folder" className="btn-key" style={homeBackBtn}>
+              <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
+            </button>
+          : <BackButton fallback="/admin" />}
         <h2 style={{ fontSize: 18, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
           <button style={crumbBtn} onClick={() => setPath('')}>{isAdmin ? 'Your dashboards' : 'Dashboards'}</button>
           {segs.map((s, i) => (
@@ -178,12 +199,24 @@ export default function HomePage() {
         {isAdmin && path && (
           <>
             <button style={{ ...miniBtnOutline, fontSize: 12 }} onClick={(e) => renameFolder(path, e)} title="Rename this folder">✎ Rename</button>
+            <button
+              style={{ ...miniBtnOutline, fontSize: 12, ...(folderKeepOn ? { background: 'var(--success,#10b981)', borderColor: 'var(--success,#10b981)', color: '#fff' } : null) }}
+              onClick={toggleFolderKeepImported}
+              title="When ON, the imported (Looker) default filters are authoritative for EVERY dashboard in this folder (incl. subfolders, and ones added later) — client defaults, saved views & suite locks won't override them.">
+              📌 Imported filters: {folderKeepOn ? 'On' : 'Off'}
+            </button>
             <button style={{ ...miniBtnOutline, fontSize: 12, color: 'var(--error)' }} onClick={(e) => deleteFolderAction(path, e)} title="Delete this folder">🗑 Delete</button>
           </>
         )}
         {isAdmin && !path && dashboards.some((d) => !d.folder) && (
           <button style={{ ...miniBtnOutline, fontSize: 12 }} onClick={syncFolders} title="Look up each imported dashboard's Looker folder">↻ Sync folders from Looker</button>
         )}
+        <div style={{ flex: 1 }} />
+        {/* Tile / List view toggle for the dashboard list. */}
+        <div style={{ display: 'inline-flex', border: '1px solid var(--hairline)', borderRadius: 8, overflow: 'hidden' }}>
+          <button style={{ ...viewToggleBtn, ...(view === 'tile' ? viewToggleOn : null) }} onClick={() => setViewMode('tile')} title="Tile view">▦ Tiles</button>
+          <button style={{ ...viewToggleBtn, ...(view === 'list' ? viewToggleOn : null) }} onClick={() => setViewMode('list')} title="List view">☰ List</button>
+        </div>
       </div>
 
       {loading ? (
@@ -218,8 +251,8 @@ export default function HomePage() {
             </div>
           )}
 
-          {/* Dashboards directly in the current folder */}
-          {dashHere.length > 0 && (
+          {/* Dashboards directly in the current folder — tile cards or compact list */}
+          {dashHere.length > 0 && view === 'tile' && (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 16 }}>
               {dashHere.map((d) => (
                 <div key={d.id} style={listCardStyle} onClick={() => navigate(`/d/${d.id}`)}>
@@ -233,6 +266,25 @@ export default function HomePage() {
                     <button style={miniBtn} onClick={(e) => { e.stopPropagation(); navigate(`/d/${d.id}`); }}>View</button>
                     {isAdmin && <button style={miniBtnOutline} onClick={(e) => { e.stopPropagation(); navigate(`/d/${d.id}/edit`); }}>Edit</button>}
                     {isAdmin && <button style={miniBtnOutline} onClick={(e) => moveToFolder(d, e)}>📁 Move</button>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {dashHere.length > 0 && view === 'list' && (
+            <div style={{ display: 'flex', flexDirection: 'column', border: '1px solid var(--hairline)', borderRadius: 12, overflow: 'hidden' }}>
+              {dashHere.map((d, i) => (
+                <div key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderTop: i ? '1px solid var(--hairline)' : 'none', background: 'var(--card)', cursor: 'pointer' }} onClick={() => navigate(`/d/${d.id}`)}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.title}</div>
+                    {d.description && <div style={{ fontSize: 12, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.description}</div>}
+                  </div>
+                  <span style={{ fontSize: 12, color: 'var(--muted)', flexShrink: 0 }}>{d.tileCount} tiles</span>
+                  <div style={{ display: 'flex', gap: 6, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
+                    <button style={miniBtn} onClick={() => navigate(`/d/${d.id}`)}>View</button>
+                    {isAdmin && <button style={miniBtnOutline} onClick={() => navigate(`/d/${d.id}/edit`)}>Edit</button>}
+                    {isAdmin && <button style={miniBtnOutline} onClick={(e) => moveToFolder(d, e)}>📁</button>}
+                    {isAdmin && <button style={deleteBtn} title="Delete" onClick={(e) => handleDelete(d.id, e)}>✕</button>}
                   </div>
                 </div>
               ))}
@@ -264,7 +316,10 @@ const primaryBtn = { padding: '9px 18px', background: 'var(--brand)', color: '#f
 const inputStyle = { flex: '1 1 140px', padding: '9px 12px', border: '1px solid var(--hairline)', borderRadius: 10, fontSize: 13, outline: 'none', background: 'var(--card)' };
 const miniBtn = { padding: '7px 16px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer' };
 const miniBtnOutline = { padding: '7px 14px', background: 'rgba(0,0,0,0.05)', color: 'var(--text)', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer' };
+const viewToggleBtn = { padding: '6px 12px', background: 'var(--card)', color: 'var(--muted)', border: 'none', fontSize: 12.5, fontWeight: 600, cursor: 'pointer' };
+const viewToggleOn = { background: 'var(--brand)', color: '#fff' };
 const deleteBtn = { border: 'none', background: 'transparent', color: '#bbb', cursor: 'pointer', fontSize: 14, padding: 2 };
 const folderEditBtn = { border: 'none', background: 'rgba(0,0,0,0.05)', color: 'var(--muted)', cursor: 'pointer', fontSize: 13, borderRadius: 8, width: 28, height: 28, flexShrink: 0 };
 const crumbBtn = { border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 18, fontWeight: 700, color: 'var(--text)', padding: 0 };
+const homeBackBtn = { flexShrink: 0, width: 34, height: 34, borderRadius: '50%', background: 'rgba(128,128,128,0.15)', color: 'var(--text)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer' };
 const folderTag = { fontSize: 11, fontWeight: 600, background: '#eef2ff', color: '#4f46e5', padding: '2px 8px', borderRadius: 980 };

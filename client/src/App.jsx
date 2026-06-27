@@ -1,29 +1,46 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Link, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import HomePage from './pages/HomePage.jsx';
 import ViewPage from './pages/ViewPage.jsx';
-import EditorPage from './pages/EditorPage.jsx';
-import ClonePage from './pages/ClonePage.jsx';
-import AdminPage from './pages/AdminPage.jsx';
 import InboxNotifier from './components/InboxNotifier.jsx';
+import UpdateBanner from './components/UpdateBanner.jsx';
+import LivePulse from './components/LivePulse.jsx';
 import LoginPage from './pages/LoginPage.jsx';
+import ResetPasswordPage from './pages/ResetPasswordPage.jsx';
+import MagicLinkPage from './pages/MagicLinkPage.jsx';
 import ClientLayout from './pages/ClientLayout.jsx';
 import ClientHome from './pages/ClientHome.jsx';
 import ClientIntegrationsPage from './pages/ClientIntegrationsPage.jsx';
 import SettlementsPage from './pages/SettlementsPage.jsx';
-import SettlementViewPage from './pages/SettlementViewPage.jsx';
-import DocumentViewPage from './pages/DocumentViewPage.jsx';
 import InboxPage from './os/InboxPage.jsx';
-import DigestsPage from './pages/DigestsPage.jsx';
-import EngagePage from './pages/EngagePage.jsx';
-import InventiveAskPage from './pages/InventiveAskPage.jsx';
+import GoalsPage from './pages/GoalsPage.jsx';
+import AlertsPage from './pages/AlertsPage.jsx';
+// Code-split the heavy / admin-only / secondary screens out of the initial
+// bundle — they load on first navigation (and clients never download the admin +
+// editor surfaces at all). The common client path stays eager for instant paint.
+const AdminPage = lazy(() => import('./pages/AdminPage.jsx'));
+const EditorPage = lazy(() => import('./pages/EditorPage.jsx'));
+const ClonePage = lazy(() => import('./pages/ClonePage.jsx'));
+const EngagePage = lazy(() => import('./pages/EngagePage.jsx'));
+const SettlementViewPage = lazy(() => import('./pages/SettlementViewPage.jsx'));
+const DocumentViewPage = lazy(() => import('./pages/DocumentViewPage.jsx'));
+const DigestsPage = lazy(() => import('./pages/DigestsPage.jsx'));
+const SocialPage = lazy(() => import('./pages/SocialPage.jsx'));
+const InventiveAskPage = lazy(() => import('./pages/InventiveAskPage.jsx'));
 import Logo from './components/Logo.jsx';
+import BrandLogo from './components/BrandLogo.jsx';
+import { api } from './lib/api.js';
+import { isStandalone } from './lib/pwa.js';
 import RootErrorBoundary from './components/RootErrorBoundary.jsx';
 import { DrillProvider } from './lib/DrillContext.jsx';
 import { AuthProvider, useAuth } from './lib/auth.jsx';
 import { ProfileProvider, useProfile } from './lib/profile.jsx';
 import { ThemeProvider, useTheme } from './lib/theme.jsx';
 import { useIsMobile } from './lib/useIsMobile.js';
+
+// Shown while a lazy-loaded route chunk is fetched. An empty flex filler keeps the
+// layout stable (no spinner flash) — split chunks resolve in a few ms once cached.
+function ScreenFallback() { return <div style={{ flex: 1 }} aria-busy="true" />; }
 
 // Legacy /actions and /segments now live as tabs under the Engage hub. Redirect
 // while preserving the query string so deep links (?action=, ?goal=) survive.
@@ -46,7 +63,9 @@ function Header() {
   // The top-left identity doubles as the workspace switcher when there's
   // somewhere else to go: a client with >1 profile, or ANY admin that's linked
   // to client accounts (so they can flip between console and those clients).
-  const canSwitch = isAdmin ? entities.length > 0 : entities.length > 1;
+  // Admins always need the switcher while in a client experience (incl. previewing
+  // a client they aren't linked to) so they can get back to the console.
+  const canSwitch = isAdmin ? (entities.length > 0 || inClientView) : entities.length > 1;
   const enterClient = (id) => { setProfile(id); navigate('/'); };
   const goConsole = () => { enterConsole(); navigate('/admin'); };
   const location = useLocation();
@@ -73,7 +92,7 @@ function Header() {
         onConsole={goConsole}
         onHome={goHome}
       />
-      <div style={{ flex: 1 }} />
+      <LivePulse entityId={inClientView ? activeEntityId : null} />
       {/* Admin console: admin controls on the right. Client experience (client
           login OR admin acting as a client): just the Howler·Pulse badge — the
           account actions live in the sidebar's bottom-left profile menu. */}
@@ -90,10 +109,12 @@ function Header() {
         </>
         )
       ) : inClientView && (
-        <button onClick={() => navigate('/')} title="Powered by Howler Pulse" style={{ display: 'flex', alignItems: 'center', gap: 7, border: 'none', background: 'transparent', cursor: 'pointer', padding: 0, opacity: 0.85 }}>
-          <Logo size={22} radius={6} />
-          {!isMobile && <span style={{ fontSize: 13, fontWeight: 600, letterSpacing: '-0.2px', color: 'var(--muted)' }}>Howler&nbsp;:&nbsp;Pulse</span>}
-        </button>
+        <>
+          <button onClick={() => navigate('/')} title="Powered by Howler Pulse" style={{ display: 'flex', alignItems: 'center', gap: 7, border: 'none', background: 'transparent', cursor: 'pointer', padding: 0, opacity: 0.85 }}>
+            <Logo size={22} radius={6} />
+            {!isMobile && <span style={{ fontSize: 13, fontWeight: 600, letterSpacing: '-0.2px', color: 'var(--muted)' }}>Howler&nbsp;:&nbsp;Pulse</span>}
+          </button>
+        </>
       )}
     </header>
   );
@@ -119,7 +140,7 @@ function WorkspaceSwitcher({ inClientView, active, entities, activeEntityId, isA
   );
   const idRow = inClientView ? (
     <span style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-      <Avatar e={active} size={30} />
+      <BrandLogo size={30} name={active?.name} fallback={active?.logo} />
       <span style={{ fontSize: 16, fontWeight: 700, letterSpacing: '-0.2px', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{active.name}</span>
     </span>
   ) : (
@@ -199,10 +220,21 @@ function Shell() {
   const { user, loading, isAdmin } = useAuth();
   const { mode, activeEntityId } = useProfile();
 
+  // Tell the server when this user is running Pulse as an installed app (home
+  // screen / standalone) — stamps their install + last-opened so admin can see it.
+  useEffect(() => { if (user && isStandalone()) api.markInstalled(); }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   if (loading) {
     return <div style={{ minHeight: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)' }}>Loading…</div>;
   }
-  if (!user) return <LoginPage />;
+  // Logged out: the recovery/passwordless landing pages live OUTSIDE the router
+  // (which only mounts once authenticated), so dispatch on the path here.
+  if (!user) {
+    const path = window.location.pathname;
+    if (path === '/reset') return <ResetPasswordPage />;
+    if (path === '/magic') return <MagicLinkPage />;
+    return <LoginPage />;
+  }
 
   // An admin who has switched into one of their client accounts gets the real
   // client shell (scoped to that entity), not the admin console.
@@ -213,19 +245,27 @@ function Shell() {
       <DrillProvider>
         <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh' }}>
           <Header />
+          <UpdateBanner />
           <InboxNotifier entityId={mode === 'client' ? activeEntityId : undefined} />
+          <Suspense fallback={<ScreenFallback />}>
           {isAdmin && !actingAsClient ? (
             <Routes>
               <Route path="/" element={<Navigate to="/admin" replace />} />
               <Route path="/dashboards" element={<HomePage />} />
               <Route path="/d/:id" element={<ViewPage />} />
               <Route path="/d/:id/edit" element={<EditorPage />} />
+              {/* Editing a dashboard opened inside a suite keeps the suite in the
+                  URL so the editor's Back/View return to the suite view. */}
+              <Route path="/suite/:suiteId/d/:id/edit" element={<EditorPage />} />
               <Route path="/clone" element={<ClonePage />} />
               <Route path="/admin" element={<AdminPage />} />
               {/* Preview the client experience without logging in as them. */}
               <Route element={<ClientLayout />}>
                 <Route path="/preview" element={<ClientHome />} />
                 <Route path="/suite/:suiteId/d/:id" element={<ViewPage />} />
+                <Route path="/goals" element={<GoalsPage />} />
+                <Route path="/alerts" element={<AlertsPage />} />
+                <Route path="/social" element={<SocialPage />} />
                 <Route path="/settlements" element={<SettlementsPage />} />
                 <Route path="/settlements/:id" element={<SettlementViewPage />} />
                 <Route path="/documents/:id" element={<DocumentViewPage />} />
@@ -246,6 +286,14 @@ function Shell() {
                 <Route path="/" element={<ClientHome />} />
                 <Route path="/settings" element={<ClientIntegrationsPage />} />
                 <Route path="/suite/:suiteId/d/:id" element={<ViewPage />} />
+                {/* Editor is admin-only (guarded inside EditorPage) but mounted
+                    here too so an admin acting as a client can edit without the
+                    route falling through to "home". */}
+                <Route path="/d/:id/edit" element={<EditorPage />} />
+                <Route path="/suite/:suiteId/d/:id/edit" element={<EditorPage />} />
+                <Route path="/goals" element={<GoalsPage />} />
+                <Route path="/alerts" element={<AlertsPage />} />
+                <Route path="/social" element={<SocialPage />} />
                 <Route path="/settlements" element={<SettlementsPage />} />
                 <Route path="/settlements/:id" element={<SettlementViewPage />} />
                 <Route path="/documents/:id" element={<DocumentViewPage />} />
@@ -260,6 +308,7 @@ function Shell() {
               </Route>
             </Routes>
           )}
+          </Suspense>
         </div>
       </DrillProvider>
     </BrowserRouter>

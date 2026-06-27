@@ -7,9 +7,11 @@ import FilterBar, { activeFilterCount } from '../components/FilterBar.jsx';
 import DashboardInsightModal from '../components/DashboardInsightModal.jsx';
 import AiMark from '../components/AiMark.jsx';
 import EditableGrid from '../components/EditableGrid.jsx';
+import BackButton from '../components/BackButton.jsx';
 import { api } from '../lib/api.js';
 import { ANY_VALUE } from '../lib/filterConstants.js';
 import { useAuth } from '../lib/auth.jsx';
+import { useProfile } from '../lib/profile.jsx';
 import { useTheme } from '../lib/theme.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import { ScopeProvider } from '../lib/ScopeContext.jsx';
@@ -22,6 +24,7 @@ export default function ViewPage() {
   const { id, suiteId } = useParams();
   const navigate = useNavigate();
   const { isAdmin, insightsEnabled, user } = useAuth();
+  const { mode } = useProfile();
   const { previewEntityId, actionsSlot } = useOutletContext() || {};
   const { theme: appTheme } = useTheme();
   const [def, setDef] = useState(null);
@@ -35,6 +38,12 @@ export default function ViewPage() {
   const scopeEntityId = setInfo?.entityId || previewEntityId || (isAdmin ? null : ((user?.entities || [])[0]?.id || (user?.entityIds || [])[0] || null));
   const [locked, setLocked] = useState({});
   const [filtersOpen, setFiltersOpen] = useState(false);
+  // Admin per-dashboard lock editing (in-context): a locked filter is read-only
+  // by default; an admin clicks its 🔒 to unlock + edit, then 🔒 again to re-lock
+  // (which saves to suite.dashboardLocks — the same store the suite editor uses).
+  const [editingLocks, setEditingLocks] = useState(() => new Set()); // filter names unlocked for edit
+  const [lockSavingName, setLockSavingName] = useState('');
+  const [lockStatus, setLockStatus] = useState('');
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [entityDefault, setEntityDefault] = useState(null); // the client default (if any), for reset
   const [hasUserView, setHasUserView] = useState(false);    // does this user have a saved view?
@@ -51,12 +60,15 @@ export default function ViewPage() {
     // "Keep imported filters": the dashboard's own (Looker-imported) default_value
     // is authoritative — ignore suite locks, the client default AND saved user
     // views. Only live in-session changes (and the days-to-go sync) apply on top.
-    if (data?.keepImportedFilters) {
+    if (data?.keepImportedFilters || data?.folderKeepImported) {
       const vals = {};
       for (const f of data.filters || []) vals[f.name] = f.default_value || '';
       return { vals, lockedMap: {} };
     }
-    const lockMap = suite?.lockedFilters || {};
+    // Suite-wide locks, then this dashboard's own per-suite lock overrides on top
+    // (most specific wins) — lets an admin lock one dashboard's filters for a
+    // single client without touching the rest of the suite.
+    const lockMap = { ...(suite?.lockedFilters || {}), ...((suite?.dashboardLocks && suite.dashboardLocks[id]) || {}) };
     const norm = {};
     for (const [k, v] of Object.entries(lockMap)) norm[k.trim().toLowerCase()] = v;
     const vals = {};
@@ -163,11 +175,13 @@ export default function ViewPage() {
   };
   // On a "keep imported filters" dashboard, saved views/client defaults are
   // ignored on load — so don't offer to save them (it would silently do nothing).
-  const keepImported = !!def?.keepImportedFilters;
+  const keepImported = !!(def?.keepImportedFilters || def?.folderKeepImported);
   const viewActions = { onSave: keepImported ? null : saveMyView, onReset: resetMyView, hasSaved: hasUserView && !keepImported, canSetDefault: isAdmin && !keepImported, onSetDefault: setClientDefault, status: viewStatus, note: keepImported ? '🔒 Filters follow this dashboard’s imported defaults.' : '' };
 
   // View tracking (fire-and-forget) — powers home-page personalisation.
   useEffect(() => { if (suiteId && id) api.track(suiteId, id); }, [suiteId, id]);
+  // Feature-usage signal: a client opened a dashboard (Admin → Onboarding insights).
+  useEffect(() => { if (scopeEntityId && id) api.trackUsage(scopeEntityId, { kind: 'feature', name: 'dashboard', event: 'use' }); }, [id, scopeEntityId]);
 
   // Sub-dashboard tabs: if this dashboard is a parent with children — or one of
   // the children — surface the whole family as a tab bar (parent first).
@@ -227,7 +241,11 @@ export default function ViewPage() {
     background: dark ? 'var(--bg)' : (theme.background || 'var(--bg)'),
     ...(dark ? null : { '--tile-bg': theme.tileBackground || '#fff' }),
   };
-  const backTo = '/';
+  // Home target: an admin previewing a client (console mode, inside the client
+  // shell via /suite/...) goes to the preview home, not the admin console — '/'
+  // redirects admins to /admin. Real clients and direct /d/:id admin views use '/'.
+  const previewMode = isAdmin && mode === 'console';
+  const backTo = suiteId && previewMode ? '/preview' : '/';
   const hasFilters = (def.filters?.length || 0) > 0;
   const activeCount = hasFilters ? activeFilterCount(def.filters, filterValues) : 0;
   const hasTiles = !!(def.tiles?.length || def.carousels?.length);
@@ -241,14 +259,92 @@ export default function ViewPage() {
   // client pin entity-wide defaults (needs the previewed entity).
   const pinsEnabled = !!suiteId && insightsEnabled && (!isAdmin || !!previewEntityId);
 
+  // ── Admin per-dashboard lock editing (in-context) ─────────────────────────
+  // Resolve a filter's value in a lock map by its name or underlying field
+  // (mirrors buildFilters' matching), so we can read the current per-dashboard
+  // override and the suite-wide value for each dashboard filter.
+  const lockLookup = (map, f) => {
+    const norm = {};
+    for (const [k, v] of Object.entries(map || {})) norm[k.trim().toLowerCase()] = v;
+    const nameKey = (f.name || '').trim().toLowerCase();
+    const field = (f.field || f.dimension || '').trim().toLowerCase();
+    return norm[nameKey] != null ? norm[nameKey] : (field ? norm[field] : undefined);
+  };
+  const inheritedValueFor = (f) => { const v = lockLookup(setInfo?.lockedFilters, f); return (v != null && v !== '') ? v : (f.default_value || ''); };
+  const filterByName = (name) => (def.filters || []).find((x) => x.name === name) || null;
+  const hasOverride = (name) => { const f = filterByName(name); return f ? (lockLookup(setInfo?.dashboardLocks?.[id], f) != null) : false; };
+  const flashLock = (m) => { setLockStatus(m); setTimeout(() => setLockStatus(''), 1800); };
+  // Persist this dashboard's lock for ONE filter to `value`. Rebuilds the
+  // dashboard's full (name-keyed) lock map from the current overrides + this
+  // change; a value equal to the suite-wide lock (or empty) drops the override so
+  // the filter inherits the suite again.
+  const saveDashLock = async (f, value) => {
+    setLockSavingName(f.name);
+    const cur = setInfo?.dashboardLocks?.[id] || {};
+    const map = {};
+    for (const ff of def.filters || []) {
+      if (ff.name === f.name) continue;
+      const pv = lockLookup(cur, ff);
+      if (pv != null && String(pv) !== '') map[ff.name] = String(pv);
+    }
+    const suiteV = lockLookup(setInfo?.lockedFilters, f);
+    const keep = value != null && String(value).trim() !== '' && value !== ANY_VALUE && String(value) !== String(suiteV ?? '');
+    if (keep) map[f.name] = String(value);
+    try {
+      await api.setSuiteDashboardLocks(suiteId, id, map);
+      const nextSuite = { ...setInfo, dashboardLocks: { ...(setInfo?.dashboardLocks || {}), [id]: map } };
+      setSetInfo(nextSuite);
+      const { vals, lockedMap } = buildFilters(def, nextSuite, filterValues);
+      setFilterValues(vals); setLocked(lockedMap);
+      flashLock(keep ? 'Locked ✓' : 'Now follows the suite');
+      return true;
+    } catch { flashLock('Could not save'); return false; }
+    finally { setLockSavingName(''); }
+  };
+  const onUnlockFilter = (name) => { setEditingLocks((p) => new Set(p).add(name)); setFiltersOpen(true); };
+  const onRelockFilter = async (name) => {
+    const f = filterByName(name); if (!f) return;
+    const ok = await saveDashLock(f, filterValues[name]);
+    if (ok) setEditingLocks((p) => { const n = new Set(p); n.delete(name); return n; });
+  };
+  const onLockHereFilter = async (name) => { const f = filterByName(name); if (f) await saveDashLock(f, filterValues[name]); };
+  const onInheritFilter = async (name) => {
+    const f = filterByName(name); if (!f) return;
+    const iv = inheritedValueFor(f);
+    setFilterValues((v) => ({ ...v, [name]: iv }));
+    const ok = await saveDashLock(f, iv); // equals the suite value → drops the override
+    if (ok) setEditingLocks((p) => { const n = new Set(p); n.delete(name); return n; });
+  };
+  const lockEdit = (isAdmin && suiteId && !keepImported) ? {
+    canEdit: true,
+    isEditing: (name) => editingLocks.has(name),
+    onUnlock: onUnlockFilter, onRelock: onRelockFilter, onLockHere: onLockHereFilter, onInherit: onInheritFilter,
+    hasOverride, savingName: lockSavingName, status: lockStatus,
+  } : null;
+  // Persist a single tile's per-client lock overrides (suite.tileLocks[tileId]),
+  // updating the loaded suite so the tile re-queries immediately.
+  const saveTileLock = async (tileId, map) => {
+    try {
+      await api.setSuiteTileLocks(suiteId, tileId, map);
+      setSetInfo((prev) => {
+        const next = { ...(prev || {}), tileLocks: { ...((prev || {}).tileLocks || {}) } };
+        if (map && Object.keys(map).length) next.tileLocks[tileId] = map; else delete next.tileLocks[tileId];
+        return next;
+      });
+      return true;
+    } catch { return false; }
+  };
+
   return (
-    <ScopeProvider suiteId={suiteId || null} dashboardContext={def.aiContext || ''} entityId={scopeEntityId} dashboardId={id} refreshKey={refreshKey} softKey={softKey}>
+    <ScopeProvider suiteId={suiteId || null} dashboardContext={def.aiContext || ''} entityId={scopeEntityId} dashboardId={id} refreshKey={refreshKey} softKey={softKey}
+      tileLocks={setInfo?.tileLocks || {}} lockFilters={def.filters || []} canLockTiles={isAdmin && !!suiteId && !keepImported} onSaveTileLock={saveTileLock}>
     <PinProvider dashboardId={id} entityId={previewEntityId || null} isAdmin={isAdmin} enabled={pinsEnabled}>
       <div style={shellStyle}>
         {/* On mobile inside a suite the sticky "☰ Menu" bar already shows the
             context, so skip this header to avoid stacking two titles. */}
         {!(isMobile && suiteId) && (
           <div style={{ background: 'var(--frost)', backdropFilter: 'saturate(180%) blur(20px)', WebkitBackdropFilter: 'saturate(180%) blur(20px)', borderBottom: '1px solid var(--hairline)', padding: isMobile ? '12px 14px' : '16px 22px', display: 'flex', alignItems: 'center', gap: isMobile ? 10 : 16 }}>
+            <BackButton fallback={backTo} style={homeBtn} />
             <Link to={backTo} title="Home" aria-label="Home" className="btn-key" style={homeBtn}><HomeIcon /></Link>
             <div style={{ flex: 1, minWidth: 0 }}>
               {(setInfo || daysToGo != null) && (
@@ -274,7 +370,7 @@ export default function ViewPage() {
               </button>
             )}
             {!isMobile && <ActionsMenu suiteId={suiteId} dashboardId={id} filterValues={filterValues} />}
-            {isAdmin && !isMobile && <button style={editBtn} onClick={() => navigate(`/d/${id}/edit`)}>Edit</button>}
+            {isAdmin && !isMobile && <button style={editBtn} onClick={() => navigate(suiteId ? `/suite/${suiteId}/d/${id}/edit` : `/d/${id}/edit`, { state: { filterValues } })}>Edit</button>}
           </div>
         )}
 
@@ -306,12 +402,17 @@ export default function ViewPage() {
         {hasFilters && (
           <FilterBar
             filters={def.filters} values={filterValues} onChange={handleFilterChange} locked={locked}
-            open={filtersOpen} onClose={() => setFiltersOpen(false)} viewActions={viewActions}
+            open={filtersOpen} onClose={() => setFiltersOpen(false)} viewActions={viewActions} lockEdit={lockEdit}
           />
         )}
 
         <div
-          style={{ flex: 1, padding: isMobile ? '12px' : '22px', overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}
+          className="dashboard-scroll"
+          style={{
+            flex: 1, padding: isMobile ? '12px' : '22px', overflowY: 'auto', WebkitOverflowScrolling: 'touch',
+            // The Owl summary docks by shifting the WHOLE app left (body.owl-docked
+            // → #root padding-right), so the tiles area needs no extra padding here.
+          }}
           onTouchStart={family ? onTouchStart : undefined}
           onTouchEnd={family ? onTouchEnd : undefined}
         >

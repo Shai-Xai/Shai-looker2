@@ -93,20 +93,56 @@ export default function ExploreBrowser({ query, onChange }) {
   );
 }
 
+// Shows the SELECTED fields as removable chips, then a search box that drops
+// down the remaining (unselected) fields to add — so you're not scrolling a wall
+// of every dimension/measure to find the few you want.
 function FieldGroup({ title, items, selected, onToggle }) {
+  const [q, setQ] = useState('');
+  const [open, setOpen] = useState(false);
   if (!items.length) return null;
+  const label = (f) => f.label_short || f.label || f.name;
+  const sel = items.filter((f) => selected.includes(f.name));
+  const unsel = items.filter((f) => !selected.includes(f.name));
+  const ql = q.trim().toLowerCase();
+  const filtered = ql ? unsel.filter((f) => label(f).toLowerCase().includes(ql) || f.name.toLowerCase().includes(ql)) : unsel;
   return (
     <div style={{ marginTop: 12 }}>
-      <Label>{title}</Label>
-      <div style={{ maxHeight: 180, overflowY: 'auto', border: '1px solid var(--hairline)', borderRadius: 6 }}>
-        {items.map((f) => (
-          <label key={f.name} style={fieldRow} title={f.description || f.name}>
-            <input type="checkbox" checked={selected.includes(f.name)} onChange={() => onToggle(f.name)} />
-            <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {f.label_short || f.label}
+      <Label>{title}{sel.length ? ` · ${sel.length} selected` : ''}</Label>
+      {sel.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 6 }}>
+          {sel.map((f) => (
+            <span key={f.name} style={chip} title={f.name}>
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 200 }}>{label(f)}</span>
+              <span style={chipX} title="Remove" onClick={() => onToggle(f.name)}>✕</span>
             </span>
-          </label>
-        ))}
+          ))}
+        </div>
+      )}
+      <div style={{ position: 'relative' }}>
+        <input
+          value={q}
+          onChange={(e) => { setQ(e.target.value); if (!open) setOpen(true); }}
+          onFocus={() => setOpen(true)}
+          onBlur={() => setTimeout(() => setOpen(false), 150)}
+          placeholder={`+ Add ${title.toLowerCase()}${unsel.length ? ` (${unsel.length})` : ''}…`}
+          style={addInput}
+        />
+        {open && (
+          <ul style={ddList}>
+            {filtered.length === 0 ? (
+              <li style={ddMuted}>{ql ? 'No matches' : 'All added'}</li>
+            ) : (
+              filtered.slice(0, 200).map((f) => (
+                <li key={f.name} style={ddItem} title={f.description || f.name}
+                  onMouseDown={(e) => { e.preventDefault(); onToggle(f.name); }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(128,128,128,0.12)'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}>
+                  {label(f)}
+                </li>
+              ))
+            )}
+          </ul>
+        )}
       </div>
     </div>
   );
@@ -120,4 +156,9 @@ function Hint({ children, error }) {
 }
 
 const select = { width: '100%', padding: '7px 10px', border: '1.5px solid var(--hairline)', borderRadius: 6, fontSize: 13, outline: 'none', background: 'var(--card)' };
-const fieldRow = { display: 'flex', alignItems: 'center', gap: 8, padding: '5px 10px', fontSize: 13, cursor: 'pointer', borderBottom: '1px solid #f5f5f5' };
+const addInput = { width: '100%', boxSizing: 'border-box', padding: '7px 10px', border: '1.5px solid var(--hairline)', borderRadius: 6, fontSize: 13, outline: 'none', background: 'var(--card)', color: 'var(--text)' };
+const chip = { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 6px 3px 9px', borderRadius: 980, fontSize: 12.5, fontWeight: 600, background: 'rgba(var(--brand-rgb,255,56,92),0.10)', color: 'var(--brand)', border: '1px solid rgba(var(--brand-rgb,255,56,92),0.30)' };
+const chipX = { cursor: 'pointer', fontWeight: 700, fontSize: 11, opacity: 0.8 };
+const ddList = { position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50, marginTop: 4, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 6px 20px rgba(0,0,0,0.12)', maxHeight: 240, overflowY: 'auto', listStyle: 'none', margin: 0, padding: '4px 0' };
+const ddItem = { padding: '7px 11px', cursor: 'pointer', fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
+const ddMuted = { padding: '7px 11px', fontSize: 13, color: 'var(--muted)' };

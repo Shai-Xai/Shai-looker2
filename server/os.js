@@ -16,7 +16,7 @@ const fs = require('fs');
 const path = require('path');
 const express = require('express');
 
-function mount(app, { db, auth, mailer, push }) {
+function mount(app, { db, auth, mailer, push, slack, onInbound }) {
   const sql = db.db;            // raw better-sqlite3 handle
   const now = () => new Date().toISOString();
   const uuid = () => crypto.randomUUID();
@@ -115,14 +115,16 @@ function mount(app, { db, auth, mailer, push }) {
       .map((r) => ({ ...messageRow(r), attachments: byMsg[r.id] || [] }));
   }
 
-  // Persist base64 attachments for a message. Hard limits: 5 files, 10MB each.
+  // Persist base64 attachments for a message. Defaults suit in-app uploads
+  // (5 files, 10MB each); callers can raise the caps — inbound email carries
+  // settlement/invoice PDFs that can run larger.
   const MAX_FILES = 5, MAX_BYTES = 10 * 1024 * 1024;
-  function saveAttachments(threadId, messageId, list) {
+  function saveAttachments(threadId, messageId, list, { maxFiles = MAX_FILES, maxBytes = MAX_BYTES } = {}) {
     let n = 0;
-    for (const f of (list || []).slice(0, MAX_FILES)) {
+    for (const f of (list || []).slice(0, maxFiles)) {
       try {
         const buf = Buffer.from(String(f.data || ''), 'base64');
-        if (!buf.length || buf.length > MAX_BYTES) continue;
+        if (!buf.length || buf.length > maxBytes) continue;
         const id = uuid();
         fs.writeFileSync(path.join(ATT_DIR, id), buf);
         sql.prepare('INSERT INTO os_attachments (id, message_id, thread_id, name, mime, size, created_at) VALUES (?,?,?,?,?,?,?)')
@@ -153,7 +155,7 @@ function mount(app, { db, auth, mailer, push }) {
     // Every login LINKED to the entity that hasn't muted email — including admins
     // explicitly linked as part of this client's team (admins aren't linked by default).
     const to = db.listUsers()
-      .filter((u) => (u.entityIds || []).includes(entityId) && u.notifyEmail !== false)
+      .filter((u) => (u.entityIds || []).includes(entityId) && u.notifyEmail !== false && db.notifyTypeOn(u.id, 'messages', 'email'))
       .map((u) => u.email);
     if (!to.length) return;
     const subject = t.priority === 'must_ack' ? `Action needed: ${t.title || 'a message from Howler'}`
@@ -188,7 +190,7 @@ function mount(app, { db, auth, mailer, push }) {
       requireInteraction: t.priority === 'must_ack',
       // Acknowledge straight from the notification (where action buttons render).
       actions: t.priority === 'must_ack' ? [{ action: `ack:${t.id}`, title: 'Acknowledge' }, { action: 'review', title: 'Open' }] : undefined,
-    }).catch(() => {});
+    }, 'messages').catch(() => {});
   }
 
   // Periodic reminder: a must-acknowledge thread that's still unacknowledged
@@ -216,7 +218,7 @@ function mount(app, { db, auth, mailer, push }) {
           tag: `ack-${t.id}`,
           requireInteraction: true,
           actions: [{ action: `ack:${t.id}`, title: 'Acknowledge' }, { action: 'review', title: 'Open' }],
-        }).catch(() => {});
+        }, 'messages').catch(() => {});
         sql.prepare("INSERT OR REPLACE INTO os_receipts (thread_id, user_id, kind, at) VALUES (?,?,?,?)").run(t.id, u.id, 'remind', now());
       }
     }
@@ -227,15 +229,29 @@ function mount(app, { db, auth, mailer, push }) {
   // Notify a client's team. `channels` chooses which methods this message uses
   // (admin's send-time choice); each recipient's own preference still applies
   // inside emailEntity / sendToEntity. Default = both.
-  const VALID_CHANNELS = ['email', 'push'];
+  const VALID_CHANNELS = ['email', 'push', 'slack'];
   function cleanChannels(ch) {
     const list = Array.isArray(ch) ? ch.filter((c) => VALID_CHANNELS.includes(c)) : VALID_CHANNELS;
     return list.length ? list : VALID_CHANNELS; // never silently drop everything
+  }
+  // Mirror the nudge into the client's Slack, if they've connected one. Always-on
+  // (not part of the admin's email/push channel choice) — connecting Slack just
+  // works. Best-effort: no-ops when unconfigured, never blocks the API call.
+  function slackEntity(entityId, t, body) {
+    if (!slack?.isConfigured?.(entityId)) return;
+    const link = mailer?.baseUrl?.() ? `${mailer.baseUrl()}/inbox?thread=${t.id}` : '';
+    // Brand the Slack post with the client's sender name + logo (webhooks honour a
+    // per-message name/avatar). Only pass an https logo — Slack can't fetch a
+    // data: URL, and a bot token ignores these anyway (handled in slack.send).
+    const brand = mailer?.resolveBranding?.(entityId) || {};
+    const iconUrl = brand.logo && /^https?:\/\//.test(brand.logo) ? brand.logo : undefined;
+    slack.notify({ entityId, title: t.title || 'New message in Pulse', body: String(body || '').slice(0, 2500), url: link, username: brand.senderName || undefined, iconUrl, kind: 'notification' }).catch(() => {});
   }
   function notifyEntity(entityId, t, body, channels) {
     const ch = cleanChannels(channels);
     if (ch.includes('email')) emailEntity(entityId, t, body);
     if (ch.includes('push')) pushEntity(entityId, t, body);
+    if (ch.includes('slack')) slackEntity(entityId, t, body);
   }
 
   // ── Client + shared reads ───────────────────────────────────────────────────
@@ -374,7 +390,9 @@ function mount(app, { db, auth, mailer, push }) {
       .run(mid, id, 'howler', req.user.email, '', 'pulse', String(body || '(attachment)').slice(0, 8000), ts);
     const nAtt = saveAttachments(id, mid, Array.isArray(attachments) ? attachments : []);
     const t = thread(id);
-    notifyEntity(entityId, t, `${String(body || '').slice(0, 8000)}${nAtt ? `\n\n📎 ${nAtt} attachment${nAtt === 1 ? '' : 's'} — view in Pulse` : ''}`.trim(), channels);
+    // Admin announcements always mirror to a connected Slack (as they did before
+    // Slack became a per-message channel) — append it to any explicit selection.
+    notifyEntity(entityId, t, `${String(body || '').slice(0, 8000)}${nAtt ? `\n\n📎 ${nAtt} attachment${nAtt === 1 ? '' : 's'} — view in Pulse` : ''}`.trim(), Array.isArray(channels) ? [...channels, 'slack'] : channels);
     res.status(201).json({ thread: t });
   });
 
@@ -402,7 +420,11 @@ function mount(app, { db, auth, mailer, push }) {
     sql.prepare('INSERT INTO os_messages (id, thread_id, author_type, author_email, author_name, channel, body, created_at) VALUES (?,?,?,?,?,?,?,?)')
       .run(uuid(), id, authorType, createdBy, '', 'pulse', String(body || '').slice(0, 8000), ts);
     const t = thread(id);
-    notifyEntity(entityId, t, String(body || '').slice(0, 8000), channels);
+    // `channels` undefined → default fan-out (email+push). An explicit array is taken
+    // literally (even empty = inbox only) so callers like Alerts can land a thread
+    // WITHOUT email/push when the user picked neither.
+    if (channels === undefined) notifyEntity(entityId, t, String(body || '').slice(0, 8000));
+    else { const ch = (Array.isArray(channels) ? channels : []).filter((c) => VALID_CHANNELS.includes(c)); if (ch.length) notifyEntity(entityId, t, String(body || '').slice(0, 8000), ch); }
     return t;
   }
 
@@ -436,7 +458,99 @@ function mount(app, { db, auth, mailer, push }) {
   };
   // Local part of any recipient that matches a known client token wins.
   const tokenFromAddress = (addr) => String(addr || '').split('@')[0].trim().toLowerCase();
-  const normSubject = (s) => String(s || '').replace(/^((re|fwd|fw)\s*:\s*)+/i, '').trim().slice(0, 200);
+
+  // ── MIME tolerance ──
+  // Some forwarders hand us the RAW message (encoded-word subject + multipart
+  // body) instead of clean fields. Decode those so a CC'd email reads as plain
+  // text in the inbox, not "=?UTF-8?Q?…" / "--boundary Content-Type: …".
+  const decodeQP = (s, isWord = false) => String(s || '')
+    .replace(/=\r?\n/g, '') // soft line breaks (body only; harmless for words)
+    .replace(/_/g, isWord ? ' ' : '_') // '_' is space in encoded-words
+    .replace(/=([0-9A-Fa-f]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
+  const decodeWordChunk = (charset, enc, data) => {
+    try {
+      const bytes = enc.toUpperCase() === 'B'
+        ? Buffer.from(data, 'base64')
+        : Buffer.from(decodeQP(data, true), 'binary');
+      return bytes.toString(/utf-?8/i.test(charset) ? 'utf8' : 'latin1');
+    } catch { return data; }
+  };
+  // Decode RFC 2047 "encoded-words" (subjects/headers), incl. adjacent chunks.
+  const decodeEncodedWords = (s) => String(s || '')
+    .replace(/=\?([^?]+)\?([BbQq])\?([^?]*)\?=(\s+)(?==\?)/g, (_, c, e, d) => decodeWordChunk(c, e, d))
+    .replace(/=\?([^?]+)\?([BbQq])\?([^?]*)\?=/g, (_, c, e, d) => decodeWordChunk(c, e, d));
+  const stripHtml = (h) => String(h || '')
+    .replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<\/(p|div|br|tr|li|h[1-6])>/gi, '\n').replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>')
+    .replace(/\n{3,}/g, '\n\n').trim();
+  // Decode one MIME part's body per its transfer-encoding + charset (so multi-byte
+  // UTF-8 like em-dashes/emoji come through, not mojibake).
+  const decodePart = (headers, raw) => {
+    const cte = (headers.match(/content-transfer-encoding:\s*([^\r\n;]+)/i) || [])[1]?.trim().toLowerCase();
+    const charset = (headers.match(/charset="?([^"\r\n;]+)"?/i) || [])[1] || 'utf-8';
+    const toStr = (buf) => buf.toString(/utf-?8/i.test(charset) ? 'utf8' : 'latin1');
+    if (cte === 'base64') { try { return toStr(Buffer.from(raw.replace(/\s+/g, ''), 'base64')); } catch { return raw; } }
+    if (cte === 'quoted-printable') return toStr(Buffer.from(decodeQP(raw), 'binary'));
+    return raw;
+  };
+  // Turn a raw (possibly multipart) MIME body into readable text. Prefers the
+  // text/plain part; falls back to a stripped text/html part. Non-MIME passes
+  // through untouched.
+  const mimeToText = (body) => {
+    const s = String(body || '');
+    const boundary = (s.match(/boundary="?([^"\r\n;]+)"?/i) || [])[1];
+    if (boundary) {
+      const parts = s.split(new RegExp(`--${boundary.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:--)?`));
+      let plain = '', html = '';
+      for (const part of parts) {
+        const split = part.search(/\r?\n\r?\n/);
+        if (split === -1) continue;
+        const headers = part.slice(0, split);
+        const raw = part.slice(split).replace(/^\r?\n\r?\n/, '');
+        if (/content-type:\s*text\/plain/i.test(headers)) plain = plain || decodePart(headers, raw);
+        else if (/content-type:\s*text\/html/i.test(headers)) html = html || decodePart(headers, raw);
+        else if (/content-type:\s*multipart/i.test(headers)) { const inner = mimeToText(raw); if (inner) plain = plain || inner; }
+      }
+      const out = (plain || stripHtml(html)).trim();
+      if (out) return out;
+    }
+    // A single part that still carries its own headers (Content-Type + a blank line).
+    if (/^content-type:/im.test(s) && /\r?\n\r?\n/.test(s)) {
+      const split = s.search(/\r?\n\r?\n/);
+      const headers = s.slice(0, split); const raw = s.slice(split).replace(/^\r?\n\r?\n/, '');
+      const decoded = decodePart(headers, raw);
+      return /content-type:\s*text\/html/i.test(headers) ? stripHtml(decoded) : decoded;
+    }
+    return s;
+  };
+  const normSubject = (s) => decodeEncodedWords(String(s || '')).replace(/^((re|fwd|fw)\s*:\s*)+/i, '').trim().slice(0, 200);
+
+  // Trim a reply email down to just the NEW text: cut the quoted original
+  // ("On <date>, <name> wrote:", Outlook "From:" headers, "-----Original
+  // Message-----", a ">" quote block) and common signature delimiters. Keeps the
+  // inbox readable instead of carrying the whole thread each time. Conservative —
+  // only trims when there's still meaningful text above the cut.
+  const stripQuotedReply = (text) => {
+    const s = String(text || '').replace(/\r\n/g, '\n');
+    const lines = s.split('\n');
+    let cut = -1;
+    for (let i = 0; i < lines.length; i++) {
+      const ln = lines[i].trim();
+      if (/^on\b.*\bwrote:\s*$/i.test(ln) // "On Wed, 17 Jun 2026 … wrote:"
+        || /^-{2,}\s*original message\s*-{2,}/i.test(ln)
+        || /^_{5,}\s*$/.test(ln) // Outlook divider
+        || /^from:\s.+/i.test(ln) && /sent:|to:|subject:/i.test(lines.slice(i, i + 4).join(' ')) // Outlook header block
+        || /^>\s?/.test(lines[i])) { cut = i; break; }
+    }
+    let body = cut >= 0 ? lines.slice(0, cut).join('\n') : s;
+    // Strip a trailing signature ("-- " delimiter, or "Sent from my…").
+    body = body.replace(/\n-- \n[\s\S]*$/,'').replace(/\n+sent from my [^\n]*$/i, '');
+    body = body.replace(/\n{3,}/g, '\n\n').trim();
+    // Only use the trimmed version if something substantial remains; else keep the
+    // original (don't blank a message that's mostly a forward/quote).
+    return body.length >= 2 ? body : s.trim();
+  };
   const stripAngle = (a) => String(a || '').replace(/.*<([^>]+)>.*/, '$1').trim().toLowerCase();
   const asList = (v) => (Array.isArray(v) ? v : String(v || '').split(',')).map(stripAngle).filter(Boolean);
 
@@ -456,7 +570,7 @@ function mount(app, { db, auth, mailer, push }) {
   }
 
   // Idempotent ingest. Returns { ok, threadId } | { skipped } | { error }.
-  function ingestInbound({ from, to, cc, subject, text, html, messageId }) {
+  function ingestInbound({ from, to, cc, subject, text, html, raw, email, messageId, attachments }) {
     const fromEmail = stripAngle(from);
     const recipients = [...asList(to), ...asList(cc)];
     const ent = routeEntity(recipients);
@@ -465,7 +579,13 @@ function mount(app, { db, auth, mailer, push }) {
       const dup = sql.prepare('SELECT 1 FROM os_messages WHERE ext_id=? LIMIT 1').get(String(messageId));
       if (dup) return { skipped: true, reason: 'duplicate message-id' };
     }
-    const body = String(text || html || '').slice(0, 16000).trim() || '(no body)';
+    // Prefer a clean text part; fall back to stripped html, then to parsing a raw
+    // MIME payload (some forwarders dump the whole message into one field).
+    const looksRaw = (v) => /content-type:\s*(multipart|text)\//i.test(String(v || '')) || /boundary=/i.test(String(v || ''));
+    let bodySrc = text && !looksRaw(text) ? text
+      : (html ? stripHtml(html) : '');
+    if (!bodySrc) bodySrc = mimeToText(text || html || raw || email || '');
+    const body = stripQuotedReply(String(bodySrc || '')).slice(0, 16000).trim() || '(no body)';
     const subj = normSubject(subject) || '(no subject)';
     const ts = now();
     // Thread by normalised subject within the client; else open a new one.
@@ -478,21 +598,58 @@ function mount(app, { db, auth, mailer, push }) {
         .run(threadId, ent.id, '', 'message', '', subj, 'normal', 'open', fromEmail, ts, ts);
     }
     const authorType = authorTypeFor(ent.id, fromEmail);
+    const mid = uuid();
     sql.prepare('INSERT INTO os_messages (id, thread_id, author_type, author_email, author_name, channel, body, created_at, ext_id) VALUES (?,?,?,?,?,?,?,?,?)')
-      .run(uuid(), threadId, authorType, fromEmail, '', 'email', body, ts, String(messageId || ''));
+      .run(mid, threadId, authorType, fromEmail, '', 'email', body, ts, String(messageId || ''));
+    // Inbound attachments (PDFs etc.). Forwarder posts [{ name, mime, data(base64) }].
+    // Bigger caps than in-app uploads — settlement/invoice PDFs run larger. These
+    // are the files the Owl's settlement auto-ingest (next slice) reads.
+    const nAtt = saveAttachments(threadId, mid, Array.isArray(attachments) ? attachments : [], { maxFiles: 10, maxBytes: 25 * 1024 * 1024 });
     touch(threadId);
-    return { ok: true, threadId, entityId: ent.id, created: !t };
+    // Hand stored attachments to the Owl auto-ingest (settlements/invoices), if
+    // wired. Fire-and-forget: extraction is slow (AI) and must never block or
+    // break the webhook response. Errors are swallowed + logged downstream.
+    if (nAtt && typeof onInbound === 'function') {
+      const meta = sql.prepare('SELECT id, name, mime, size FROM os_attachments WHERE message_id=?').all(mid);
+      Promise.resolve().then(() => onInbound({ entityId: ent.id, threadId, messageId: mid, from: fromEmail, subject: subj, attachments: meta }))
+        .catch((e) => console.error('[os] onInbound handler error:', e.message));
+    }
+    return { ok: true, threadId, messageId: mid, entityId: ent.id, created: !t, attachments: nAtt };
   }
+
+  // One-time cleanup of messages/threads ingested before MIME decoding existed —
+  // re-decodes raw multipart bodies and encoded-word subjects already in the DB.
+  // Idempotent (only touches rows that still look raw) and guarded by a flag so
+  // it scans once.
+  function fixupLegacyInbound() {
+    if (db.getSetting('inbound_mime_fixup_v1', '') === 'done') return;
+    try {
+      const msgs = sql.prepare("SELECT id, body FROM os_messages WHERE channel='email' AND (body LIKE '%Content-Type:%' OR body LIKE '%=?%?=%')").all();
+      const upd = sql.prepare('UPDATE os_messages SET body=? WHERE id=?');
+      let n = 0;
+      for (const m of msgs) {
+        const fixed = decodeEncodedWords(String(mimeToText(m.body) || '')).slice(0, 16000).trim();
+        if (fixed && fixed !== m.body) { upd.run(fixed, m.id); n += 1; }
+      }
+      const ths = sql.prepare("SELECT id, title FROM os_threads WHERE title LIKE '%=?%?=%'").all();
+      const updT = sql.prepare('UPDATE os_threads SET title=? WHERE id=?');
+      let tn = 0;
+      for (const th of ths) { const d = normSubject(th.title); if (d && d !== th.title) { updT.run(d, th.id); tn += 1; } }
+      db.setSetting('inbound_mime_fixup_v1', 'done');
+      if (n || tn) console.log(`[os] inbound MIME cleanup: fixed ${n} message(s), ${tn} subject(s)`);
+    } catch (e) { console.error('[os] inbound MIME cleanup failed:', e.message); }
+  }
+  fixupLegacyInbound();
 
   // The webhook. NOT cookie-authed — protected by a shared secret (header
   // `x-owl-secret` or `?secret=`) that whatever forwards mail must include.
   // Transport-agnostic: Cloudflare Email Worker, SendGrid Parse, Resend inbound,
   // etc. all just POST this JSON shape.
-  app.post('/api/inbound/email', requireOn, (req, res) => {
+  app.post('/api/inbound/email', bigJson, requireOn, (req, res) => {
     const given = req.get('x-owl-secret') || req.query.secret || (req.body || {}).secret || '';
     if (given !== inboundSecret()) return res.status(401).json({ error: 'bad secret' });
     const r = ingestInbound(req.body || {});
-    if (r.ok) return res.status(201).json({ ok: true, threadId: r.threadId });
+    if (r.ok) return res.status(201).json({ ok: true, threadId: r.threadId, attachments: r.attachments || 0 });
     if (r.skipped) return res.json({ ok: true, skipped: r.reason });
     console.warn('[os] inbound unrouted:', r.error, r.recipients || '');
     return res.status(202).json({ ok: false, error: r.error }); // 202: accepted but ignored
@@ -512,8 +669,17 @@ function mount(app, { db, auth, mailer, push }) {
     res.json({ domain: db.getSetting('inbound_domain', ''), secret: inboundSecret(), webhookPath: '/api/inbound/email' });
   });
 
+  // Read a stored attachment's bytes (for the Owl auto-ingest to extract PDFs).
+  // Scoped by the caller (the inbound hook only hands ids it just stored).
+  function getAttachmentBuffer(id) {
+    const a = sql.prepare('SELECT id, name, mime FROM os_attachments WHERE id=?').get(id);
+    if (!a) return null;
+    try { return { buf: fs.readFileSync(path.join(ATT_DIR, a.id)), name: a.name, mime: a.mime }; }
+    catch (e) { console.error('[os] attachment read failed:', e.message); return null; }
+  }
+
   console.log('[os] Experience OS spine mounted', enabled() ? '(enabled)' : '(disabled — set os_enabled=1)');
-  return { announce, subjectThread };
+  return { announce, subjectThread, getAttachmentBuffer };
 }
 
 module.exports = { mount };

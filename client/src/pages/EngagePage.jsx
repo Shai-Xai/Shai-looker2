@@ -6,6 +6,8 @@ import HomeButton from '../components/HomeButton.jsx';
 import CampaignManager from '../components/CampaignManager.jsx';
 import SegmentManager from '../components/SegmentManager.jsx';
 import JourneyWizard from '../components/JourneyWizard.jsx';
+import AudienceHub from '../components/AudienceHub.jsx';
+import TemplateManager from '../components/TemplateManager.jsx';
 
 // Engage — the Action layer of the Experience OS as one first-class area.
 // Sub-areas live as tabs: Campaigns + Segments today; Automations, Templates and
@@ -13,10 +15,11 @@ import JourneyWizard from '../components/JourneyWizard.jsx';
 // before each ships. Deep links to /actions and /segments redirect in here.
 const TABS = [
   { key: 'campaigns', label: 'Campaigns', icon: '📣', ready: true },
-  { key: 'segments', label: 'Segments', icon: '🎯', ready: true },
   { key: 'journeys', label: 'Journeys', icon: '🧭', ready: true },
+  { key: 'segments', label: 'Segments', icon: '🥧', ready: true },
+  { key: 'audiences', label: 'Ad audiences', icon: '🎯', ready: true },
   { key: 'automations', label: 'Automations', icon: '⏱', ready: false },
-  { key: 'templates', label: 'Templates', icon: '📝', ready: false },
+  { key: 'templates', label: 'Templates', icon: '📝', ready: true },
   { key: 'connections', label: 'Connections', icon: '🔌', ready: false },
 ];
 
@@ -38,6 +41,10 @@ export default function EngagePage() {
   const initialGoal = params.get('goal') || '';
   const initialType = params.get('type') || '';
   const initialActionId = params.get('action') || '';
+  // The dashboard + event a "Worth a look" suggestion pointed at — so the campaign
+  // editor scopes its pre-filled audience to that exact tile/event.
+  const initialDashboardId = params.get('dashboard') || '';
+  const initialSuiteId = params.get('suite') || '';
 
   return (
     <main style={{ flex: 1, padding: '26px 22px', maxWidth: 1080, margin: '0 auto', width: '100%', boxSizing: 'border-box', overflowY: 'auto' }}>
@@ -53,7 +60,7 @@ export default function EngagePage() {
           sticks to the top of the scroll area so it stays in reach while the
           tab's content scrolls under it. Page-bg background masks that content;
           negative side margins + padding let it span the main's edge padding. */}
-      <div style={{ position: 'sticky', top: 0, zIndex: 5, display: 'flex', gap: 6, overflowX: 'auto', borderBottom: '1px solid var(--hairline)', marginBottom: 18, marginLeft: -22, marginRight: -22, padding: '6px 22px 0', background: 'var(--bg)', WebkitOverflowScrolling: 'touch' }}>
+      <div className="no-scrollbar" style={{ position: 'sticky', top: 0, zIndex: 5, display: 'flex', gap: 6, overflowX: 'auto', borderBottom: '1px solid var(--hairline)', marginBottom: 18, marginLeft: -22, marginRight: -22, padding: '6px 22px 0', background: 'var(--bg)', WebkitOverflowScrolling: 'touch' }}>
         {TABS.map((t) => {
           const on = t.key === active;
           return (
@@ -90,10 +97,20 @@ export default function EngagePage() {
           <p style={{ color: 'var(--muted)', marginBottom: 18, fontSize: 14 }}>Set up a multi-step, multi-channel journey in minutes — pick a recipe or just describe what you want and let AI draft it. You review it before anything is created.</p>
           <JourneyWizard entityId={entityId} scope={isAdmin ? 'admin' : 'my'} />
         </>
+      ) : active === 'audiences' ? (
+        <>
+          <p style={{ color: 'var(--muted)', marginBottom: 18, fontSize: 14 }}>Every audience Pulse mirrors to your Meta &amp; TikTok ad accounts — connection health, live size and status, all in one place.</p>
+          <AudienceHub entityId={entityId} />
+        </>
+      ) : active === 'templates' ? (
+        <>
+          <p style={{ color: 'var(--muted)', marginBottom: 18, fontSize: 14 }}>Create reusable email templates, then apply them when building a campaign.</p>
+          <TemplateManager entityId={entityId} scope={isAdmin ? 'admin' : 'my'} />
+        </>
       ) : (
         <>
           <p style={{ color: 'var(--muted)', marginBottom: 18, fontSize: 14 }}>Turn your data into action — e.g. email customers who abandoned checkout. Preview the audience and copy, then explicitly approve the send.</p>
-          <CampaignManager entityId={entityId} scope={isAdmin ? 'admin' : 'my'} initialGoal={initialGoal} initialType={initialType} initialActionId={initialActionId} />
+          <CampaignManager entityId={entityId} scope={isAdmin ? 'admin' : 'my'} initialGoal={initialGoal} initialType={initialType} initialActionId={initialActionId} initialDashboardId={initialDashboardId} initialSuiteId={initialSuiteId} />
         </>
       )}
     </main>

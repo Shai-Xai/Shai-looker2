@@ -7,8 +7,12 @@ import { useProfile } from '../lib/profile.jsx';
 import { useTheme } from '../lib/theme.jsx';
 import { vtNavigate } from '../lib/viewTransition.js';
 import { useSheetDrag } from '../lib/useSheetDrag.js';
-import { applyBrand, resetBrand } from '../lib/brand.js';
+import { applyBrand, resetBrand, useBrandLogo } from '../lib/brand.js';
 import { useAccess, PERMS } from '../lib/access.js';
+import { FEATURES } from '../lib/features.js';
+import AnalystDrawer from '../components/AnalystDrawer.jsx';
+import StatusNoticeBanner from '../components/StatusNoticeBanner.jsx';
+import AiMark from '../components/AiMark.jsx';
 
 // Persistent client shell: a left sidebar tree of Suites → Sets → Dashboards,
 // with the selected dashboard rendered in the main area.
@@ -30,6 +34,27 @@ export default function ClientLayout() {
   const searching = q.trim().length > 0;
   const [loading, setLoading] = useState(true);
   const [navOpen, setNavOpen] = useState(false); // mobile drawer
+  const [askOpen, setAskOpen] = useState(false); // Inventive analyst slide-in drawer
+  const [prewarmAsk, setPrewarmAsk] = useState(false); // load the analyst on owl hover → instant first open
+  // Open the analyst drawer. Best-effort: ask the browser to grant Inventive
+  // first-party storage access (so the embed can run at first-party speed) —
+  // harmless / silent if unsupported or denied, so it never breaks anything.
+  const saTriedRef = useRef(false);
+  const openAsk = () => {
+    if (!saTriedRef.current) {
+      saTriedRef.current = true;
+      try { document.requestStorageAccessFor?.('https://app.madeinventive.com').catch(() => {}); } catch { /* ignore */ }
+    }
+    setPrewarmAsk(true);
+    setAskOpen(true);
+  };
+  // The top-header "Owl Data Analyst" button lives in App.jsx; it opens the drawer
+  // via this event (keeps the drawer state here without lifting it up).
+  useEffect(() => {
+    const h = () => openAsk();
+    window.addEventListener('howler:open-analyst', h);
+    return () => window.removeEventListener('howler:open-analyst', h);
+  }, []);  
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('howler_nav_collapsed') === '1'); // desktop
   const toggleCollapsed = () => setCollapsed((c) => { localStorage.setItem('howler_nav_collapsed', c ? '0' : '1'); return !c; });
   const navDrag = useSheetDrag(() => setNavOpen(false)); // mobile bottom-sheet dismiss
@@ -39,10 +64,12 @@ export default function ClientLayout() {
 
   useEffect(() => { api.mySuites().then(setSuites).catch(() => {}).finally(() => setLoading(false)); }, []);
   useEffect(() => { api.mySettlements().then(setSettlements).catch(() => {}); }, []);
+  const onGoals = location.pathname.startsWith('/goals');
+  const onAlerts = location.pathname.startsWith('/alerts');
+  const onSocial = location.pathname.startsWith('/social');
   const onSettlements = location.pathname.startsWith('/settlements');
   const onInbox = location.pathname.startsWith('/inbox');
   const onDigests = location.pathname.startsWith('/digests');
-  const onAsk = location.pathname.startsWith('/ask');
   // Engage hub tabs: Campaigns (/engage/campaigns, default /engage) + Segments.
   const onSegments = location.pathname.startsWith('/segments') || location.pathname.startsWith('/engage/segments');
   const onActions = (location.pathname.startsWith('/actions') || location.pathname.startsWith('/engage')) && !onSegments;
@@ -82,7 +109,7 @@ export default function ClientLayout() {
         setOpenSets((p) => ({ ...p, [set.id]: true }));
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [details, suiteId, id]);
 
   const go = (sid, did) => {
@@ -113,7 +140,7 @@ export default function ClientLayout() {
     // Re-measure after the expand/collapse animation settles (positions shift).
     const t = setTimeout(measure, 300);
     return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [id, suiteId, openSuites, openSets, details, collapsed, loading, isMobile, navOpen, location.pathname, settlements, q]);
 
   // Title of the active dashboard (for the mobile menu bar) — may be a tab.
@@ -147,7 +174,7 @@ export default function ClientLayout() {
   // home, digests, actions — and persists across visits. An admin in the console
   // who opens a suite is "previewing"; an admin who switched INTO a client
   // account (mode 'client') is acting as that client (no preview banner).
-  const { activeEntityId: profileEntityId, mode: profileMode } = useProfile();
+  const { activeEntityId: profileEntityId, mode: profileMode, enterConsole, active } = useProfile();
   const { can } = useAccess(); // role-gated nav for the active profile (admins: all)
   const previewMode = isAdmin && profileMode === 'console';
   const activeEntityId = isAdmin
@@ -182,7 +209,7 @@ export default function ClientLayout() {
     document.addEventListener('visibilitychange', onVis);
     window.addEventListener('focus', onVis);
     return () => { alive = false; clearInterval(t); window.removeEventListener('os-refresh', poll); document.removeEventListener('visibilitychange', onVis); window.removeEventListener('focus', onVis); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [location.pathname, activeEntityId]);
 
   // White-label: apply the active client's brand pair (primary + secondary) to
@@ -192,12 +219,21 @@ export default function ClientLayout() {
   const themeEntityId = activeEntityId;
   useEffect(() => {
     let alive = true;
-    if (!themeEntityId) { resetBrand(); return; }
-    api.getEntityTheme(themeEntityId)
-      .then((t) => { if (alive) applyBrand(t); })
-      .catch(() => { if (alive) resetBrand(); });
-    return () => { alive = false; resetBrand(); };
-  }, [themeEntityId]);
+    const load = () => {
+      if (!themeEntityId) { resetBrand(); return; }
+      // While viewing an event, theme to that EVENT's branding (its logo/colours,
+      // inheriting the client's where unset); the home/portfolio uses the client.
+      api.getEntityTheme(themeEntityId, suiteId || '')
+        .then((t) => { if (alive) applyBrand(t); })
+        .catch(() => { if (alive) resetBrand(); });
+    };
+    load();
+    // Re-pull the moment branding is saved (client or this event), so the shell
+    // updates live without a reload.
+    const onSaved = (e) => { if (!e.detail || e.detail.entityId === themeEntityId || (e.detail.suiteId && e.detail.suiteId === suiteId)) load(); };
+    window.addEventListener('pulse-branding-saved', onSaved);
+    return () => { alive = false; resetBrand(); window.removeEventListener('pulse-branding-saved', onSaved); };
+  }, [themeEntityId, suiteId]);
 
   // Mobile sheet skips the suite level for single-suite clients — make sure
   // that suite's detail is loaded the moment the sheet opens.
@@ -309,6 +345,39 @@ export default function ClientLayout() {
         <>
           <div style={{ borderTop: '1px solid var(--hairline)', margin: '12px 6px 10px' }} />
           <div style={{ padding: '0 8px 8px 14px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)' }}>Workspace</div>
+          {(visibleSuites.length > 0 || isAdmin) && (
+          <button
+            ref={onGoals ? activeRef : null}
+            className={`nav-row${onGoals ? ' active' : ''}`}
+            style={{ ...rowBtn, fontWeight: onGoals ? 600 : 500 }}
+            onClick={() => { if (!onGoals) vtNavigate(navigate, '/goals'); if (isMobile) setNavOpen(false); }}
+          >
+            <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>🎯</span>
+            <span style={ellip}>Goals</span>
+          </button>
+          )}
+          {(visibleSuites.length > 0 || isAdmin) && (
+          <button
+            ref={onAlerts ? activeRef : null}
+            className={`nav-row${onAlerts ? ' active' : ''}`}
+            style={{ ...rowBtn, fontWeight: onAlerts ? 600 : 500 }}
+            onClick={() => { if (!onAlerts) vtNavigate(navigate, '/alerts'); if (isMobile) setNavOpen(false); }}
+          >
+            <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>🔔</span>
+            <span style={ellip}>Alerts</span>
+          </button>
+          )}
+          {can(PERMS.DIGESTS_MANAGE) && (
+          <button
+            ref={onDigests ? activeRef : null}
+            className={`nav-row${onDigests ? ' active' : ''}`}
+            style={{ ...rowBtn, fontWeight: onDigests ? 600 : 500 }}
+            onClick={() => { if (!onDigests) vtNavigate(navigate, '/digests'); if (isMobile) setNavOpen(false); }}
+          >
+            <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>🗓</span>
+            <span style={ellip}>Digests</span>
+          </button>
+          )}
           {can(PERMS.SETTLEMENTS_VIEW) && (visibleSettlements.length > 0 || isAdmin) && (
           <button
             ref={onSettlements ? activeRef : null}
@@ -332,25 +401,6 @@ export default function ClientLayout() {
               {inbox.unread > 0 && <span style={{ ...countChip, background: 'var(--brand)', color: '#fff' }}>{inbox.unread}</span>}
             </button>
           )}
-          <button
-            className={`nav-row${onAsk ? ' active' : ''}`}
-            style={{ ...rowBtn, fontWeight: onAsk ? 600 : 500 }}
-            onClick={() => { if (!onAsk) vtNavigate(navigate, '/ask'); if (isMobile) setNavOpen(false); }}
-          >
-            <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>✨</span>
-            <span style={ellip}>Ask</span>
-          </button>
-          {can(PERMS.DIGESTS_MANAGE) && (
-          <button
-            ref={onDigests ? activeRef : null}
-            className={`nav-row${onDigests ? ' active' : ''}`}
-            style={{ ...rowBtn, fontWeight: onDigests ? 600 : 500 }}
-            onClick={() => { if (!onDigests) vtNavigate(navigate, '/digests'); if (isMobile) setNavOpen(false); }}
-          >
-            <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>🗓</span>
-            <span style={ellip}>Digests</span>
-          </button>
-          )}
           {(can(PERMS.CAMPAIGNS_VIEW)) && (
           <>
           <div style={{ borderTop: '1px solid var(--hairline)', margin: '12px 6px 10px' }} />
@@ -370,8 +420,17 @@ export default function ClientLayout() {
             style={{ ...rowBtn, fontWeight: onSegments ? 600 : 500 }}
             onClick={() => { if (!onSegments) vtNavigate(navigate, '/engage/segments'); if (isMobile) setNavOpen(false); }}
           >
-            <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>🎯</span>
+            <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>🥧</span>
             <span style={ellip}>Segments</span>
+          </button>
+          <button
+            ref={onSocial ? activeRef : null}
+            className={`nav-row${onSocial ? ' active' : ''}`}
+            style={{ ...rowBtn, fontWeight: onSocial ? 600 : 500 }}
+            onClick={() => { if (!onSocial) vtNavigate(navigate, '/social'); if (isMobile) setNavOpen(false); }}
+          >
+            <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>📱</span>
+            <span style={ellip}>Social</span>
           </button>
           </>
           )}
@@ -381,6 +440,7 @@ export default function ClientLayout() {
     <ProfileFooter
       user={user}
       isAdmin={isAdmin}
+      activeEntityId={activeEntityId}
       brand={brand}
       onNavigate={(path) => { navigate(path); if (isMobile) setNavOpen(false); }}
     />
@@ -458,6 +518,36 @@ export default function ClientLayout() {
               {(
                 <>
                   <div style={{ borderTop: '1px solid var(--hairline)', margin: '10px 4px' }} />
+                  {(visibleSuites.length > 0 || isAdmin) && (
+                  <button
+                    className={`nav-row${onGoals ? ' active' : ''}`}
+                    style={{ ...mRowSuite, fontWeight: onGoals ? 700 : 500 }}
+                    onClick={() => { if (!onGoals) vtNavigate(navigate, '/goals'); setNavOpen(false); }}
+                  >
+                    <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>🎯</span>
+                    <span style={ellip}>Goals</span>
+                  </button>
+                  )}
+                  {(visibleSuites.length > 0 || isAdmin) && (
+                  <button
+                    className={`nav-row${onAlerts ? ' active' : ''}`}
+                    style={{ ...mRowSuite, fontWeight: onAlerts ? 700 : 500 }}
+                    onClick={() => { if (!onAlerts) vtNavigate(navigate, '/alerts'); setNavOpen(false); }}
+                  >
+                    <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>🔔</span>
+                    <span style={ellip}>Alerts</span>
+                  </button>
+                  )}
+                  {can(PERMS.DIGESTS_MANAGE) && (
+                  <button
+                    className={`nav-row${onDigests ? ' active' : ''}`}
+                    style={{ ...mRowSuite, fontWeight: onDigests ? 700 : 500 }}
+                    onClick={() => { if (!onDigests) vtNavigate(navigate, '/digests'); setNavOpen(false); }}
+                  >
+                    <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>🗓</span>
+                    <span style={ellip}>Digests</span>
+                  </button>
+                  )}
                   {can(PERMS.SETTLEMENTS_VIEW) && (visibleSettlements.length > 0 || isAdmin) && (
                   <button
                     className={`nav-row${onSettlements ? ' active' : ''}`}
@@ -480,24 +570,6 @@ export default function ClientLayout() {
                       {inbox.unread > 0 && <span style={{ ...countChip, background: 'var(--brand)', color: '#fff' }}>{inbox.unread}</span>}
                     </button>
                   )}
-                  <button
-                    className={`nav-row${onAsk ? ' active' : ''}`}
-                    style={{ ...mRowSuite, fontWeight: onAsk ? 700 : 500 }}
-                    onClick={() => { if (!onAsk) vtNavigate(navigate, '/ask'); setNavOpen(false); }}
-                  >
-                    <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>✨</span>
-                    <span style={ellip}>Ask</span>
-                  </button>
-                  {can(PERMS.DIGESTS_MANAGE) && (
-                  <button
-                    className={`nav-row${onDigests ? ' active' : ''}`}
-                    style={{ ...mRowSuite, fontWeight: onDigests ? 700 : 500 }}
-                    onClick={() => { if (!onDigests) vtNavigate(navigate, '/digests'); setNavOpen(false); }}
-                  >
-                    <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>🗓</span>
-                    <span style={ellip}>Digests</span>
-                  </button>
-                  )}
                   {can(PERMS.CAMPAIGNS_VIEW) && (
                   <>
                   <div style={{ padding: '8px 8px 6px 14px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)' }}>Engage</div>
@@ -514,7 +586,7 @@ export default function ClientLayout() {
                     style={{ ...mRowSuite, fontWeight: onSegments ? 700 : 500 }}
                     onClick={() => { if (!onSegments) vtNavigate(navigate, '/engage/segments'); setNavOpen(false); }}
                   >
-                    <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>🎯</span>
+                    <span style={{ fontSize: 16, lineHeight: 1, flexShrink: 0 }}>🥧</span>
                     <span style={ellip}>Segments</span>
                   </button>
                   </>
@@ -525,6 +597,7 @@ export default function ClientLayout() {
             <ProfileFooter
               user={user}
               isAdmin={isAdmin}
+              activeEntityId={activeEntityId}
               brand={brand}
               onNavigate={(path) => { navigate(path); setNavOpen(false); }}
             />
@@ -532,6 +605,9 @@ export default function ClientLayout() {
         </div>
       )}
       <main style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'auto' }}>
+        {/* Platform status notices — active incidents (and recently-resolved ones)
+            affecting this client. Self-contained: polls /api/my/notices. */}
+        <StatusNoticeBanner />
         {/* Must-acknowledge banner — Howler messages that need a response,
             persistent until acknowledged. Tapping opens the inbox. */}
         {!onInbox && inbox.pending.length > 0 && (
@@ -576,17 +652,30 @@ export default function ClientLayout() {
             </div>
           );
         })}
-        {previewMode && (
+        {/* Admin previewing/acting-as a client — show on EVERY device (the
+            "Preview" buttons put you in client mode, which previewMode alone
+            misses) with a one-tap exit back to the console. Compact on mobile so
+            the Exit button always fits. */}
+        {isAdmin && !!activeEntityId && (
           <div style={previewBar}>
-            <span style={{ fontWeight: 700 }}>👁 Client preview{activeEntityId && (() => { const n = suites.find((s) => s.entityId === activeEntityId)?.entityName; return n ? ` — ${n}` : ''; })()}</span>
-            <span style={{ opacity: 0.85 }}>You're viewing this exactly as the client would, scoped to their data.</span>
+            <span style={{ fontWeight: 700 }}>👁 Client preview{(() => { const n = suites.find((s) => s.entityId === activeEntityId)?.entityName || active?.name; return n ? ` — ${n}` : ''; })()}</span>
+            {!isMobile && <span style={{ opacity: 0.85 }}>You're viewing this exactly as the client would, scoped to their data.</span>}
             <div style={{ flex: 1 }} />
-            <button style={exitPreviewBtn} onClick={() => navigate('/admin')}>Exit preview</button>
+            <button style={exitPreviewBtn} onClick={() => { enterConsole(); navigate('/admin'); }}>Exit preview</button>
           </div>
         )}
         {(isMobile || collapsed) && (
           <div style={menuBar}>
             <button style={menuBtn} onClick={() => (isMobile ? setNavOpen(true) : toggleCollapsed())} title="Menu" aria-label="Open menu">☰</button>
+            {/* No back button on the client home screen — it's the root, so back
+                would have nowhere meaningful to go (Home already covers it). */}
+            {!(location.pathname === '/' || location.pathname === '/preview') && (
+              <button style={menuBtn} onClick={() => (location.key !== 'default' ? navigate(-1) : navigate(previewMode ? '/preview' : '/'))} title="Back" aria-label="Back">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M15 18l-6-6 6-6" />
+                </svg>
+              </button>
+            )}
             <button style={menuBtn} onClick={() => vtNavigate(navigate, previewMode ? '/preview' : '/')} title="Home" aria-label="Home">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <path d="M3 10.5 12 3l9 7.5" />
@@ -600,6 +689,21 @@ export default function ClientLayout() {
         )}
         <Outlet context={{ previewEntityId: activeEntityId, actionsSlot }} />
       </main>
+      {FEATURES.ask && !askOpen && (
+        // Floating owl — quick launcher for the analyst drawer (bottom-right).
+        // Hover/focus pre-warms the analyst so the first open is instant.
+        <button
+          onClick={() => openAsk()}
+          onMouseEnter={() => setPrewarmAsk(true)}
+          onFocus={() => setPrewarmAsk(true)}
+          title="Ask your AI analyst"
+          aria-label="Ask your AI analyst"
+          style={{ position: 'fixed', bottom: 20, right: isMobile ? 16 : 24, zIndex: 55, width: 54, height: 54, borderRadius: '50%', border: '1px solid var(--hairline)', background: 'var(--card)', boxShadow: '0 6px 22px rgba(0,0,0,0.3)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        >
+          <AiMark size={28} sparkle={false} />
+        </button>
+      )}
+      <AnalystDrawer open={askOpen} prewarm={prewarmAsk} onClose={() => setAskOpen(false)} previewEntityId={activeEntityId} />
     </div>
   );
 }
@@ -611,20 +715,34 @@ function readJson(key) {
 // Bottom-left profile: avatar + identity, opening a menu with Integrations
 // (clients), the theme toggle and Log out — everything that used to crowd the
 // top header.
-function ProfileFooter({ user, isAdmin, brand, onNavigate }) {
+function ProfileFooter({ user, isAdmin, activeEntityId, brand, onNavigate }) {
   const { theme, toggle } = useTheme();
   const { logout } = useAuth();
+  const brandLogoUrl = useBrandLogo(theme); // the active client's resolved branding logo (dark-mode variant when set)
   const [open, setOpen] = useState(false);
   const entity = user?.entities?.[0];
   const name = isAdmin ? 'Howler · Admin' : (brand?.entityName || entity?.name || (user?.email || '').split('@')[0]);
-  const logo = brand?.entityLogo || entity?.logo || '';
+  // The footer identifies the LOGIN, not the active client (the top-left switcher
+  // shows the client). For an admin that's "Howler · Admin" — never a client's
+  // logo. Without this gate the logo falls back to user.entities[0].logo (the
+  // admin's FIRST linked client, e.g. Kappa), which bleeds the wrong brand in
+  // next to "Howler · Admin".
+  // Prefer the client's resolved BRANDING logo (what they set under Branding,
+  // falling back to their entity logo) so a branding change shows here live.
+  const logo = isAdmin ? '' : (brandLogoUrl || brand?.entityLogo || entity?.logo || '');
   const initial = (name || '?').trim().charAt(0).toUpperCase();
   return (
     <div style={{ position: 'relative', borderTop: '1px solid var(--hairline)', padding: 8, flexShrink: 0 }}>
       {open && <div style={{ position: 'fixed', inset: 0, zIndex: 70 }} onClick={() => setOpen(false)} />}
       {open && (
         <div className="modal-in" style={profileMenu}>
-          {!isAdmin && (
+          {/* Settings is a client self-service page scoped to the active entity.
+              Show it whenever a client profile is in context — for pure clients
+              always, and for an admin acting as / previewing a client (so an
+              admin who's also an owner of the account can manage it). Admins in
+              the bare console (no client in context) don't see it — they use the
+              Admin console. */}
+          {activeEntityId && (
             <>
               <button className="nav-row" style={menuItem} onClick={() => { setOpen(false); onNavigate('/settings'); }}>
                 <span style={menuIco}>⚙</span> Settings

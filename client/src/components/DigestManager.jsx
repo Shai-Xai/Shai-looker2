@@ -23,6 +23,8 @@ export default function DigestManager({ entityId, scope = 'admin', logins = [] }
     testSend: (b) => (isAdmin ? api.testSendDigest({ ...b, entityId }) : api.testSendMyDigest(entityId, b)),
     testSendSms: (b) => (isAdmin ? api.testSendDigestSms({ ...b, entityId }) : api.testSendMyDigestSms(entityId, b)),
     tiles: () => (isAdmin ? api.getDigestTiles(entityId) : api.getMyDigestTiles(entityId)),
+    followed: () => (isAdmin ? api.getFollowedTiles(entityId) : api.getMyFollowedTiles(entityId)),
+    events: () => (isAdmin ? api.getDigestEvents(entityId) : api.getMyDigestEvents(entityId)),
   };
   const [data, setData] = useState(null);
   const [editing, setEditing] = useState(null); // job object or 'new'
@@ -61,6 +63,13 @@ export default function DigestManager({ entityId, scope = 'admin', logins = [] }
             {j.lastStatus && <div style={{ fontSize: 11, color: j.lastStatus.startsWith('ok') ? 'var(--success,#10b981)' : 'var(--muted)', marginTop: 2 }}>Last: {j.lastStatus}{j.lastRunAt ? ` (${fmt(j.lastRunAt)})` : ''}</div>}
           </div>
           <div style={{ display: 'flex', gap: 6, flexShrink: 0, flexWrap: 'wrap', ...(isMobile ? { borderTop: '1px solid var(--hairline)', paddingTop: 10 } : null) }}>
+            {(j.status === 'active' || j.status === 'paused') && (
+              <button
+                style={j.status === 'active' ? mini : { ...mini, color: 'var(--success,#10b981)' }}
+                title={j.status === 'active' ? 'Pause — stop sending until resumed' : 'Resume sending on schedule'}
+                onClick={() => A.update(j.id, { ...j, status: j.status === 'active' ? 'paused' : 'active' }).then(load).catch((e) => alert(e.message))}
+              >{j.status === 'active' ? '⏸ Pause' : '▶ Resume'}</button>
+            )}
             <button style={mini} onClick={() => A.test(j.id).then((r) => alert(r.to ? `Test sent to ${r.to}` : 'Sent')).catch((e) => alert(e.message))}>Test</button>
             <button style={mini} onClick={() => setEditing(j)}>Edit</button>
             <button style={mini} title="Duplicate as a new digest" onClick={() => setEditing({ ...j, id: undefined, status: 'paused', title: `${j.title || `${roleLabel(j.role)} digest`} (copy)` })}>Duplicate</button>
@@ -81,9 +90,21 @@ function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }
     runAt: job?.runAt || '', recipients: (job?.recipients || []).join(', '), status: job?.status || 'active',
     contentMode: job?.contentMode || 'ai', tiles: job?.tiles || [],
     channel: job?.channel || 'email', smsRecipients: (job?.smsRecipients || []).join(', '),
-    alignDaysBefore: job?.alignDaysBefore || false,
+    alignDaysBefore: job ? !!job.alignDaysBefore : true, // new digests align comparisons like the home briefing; existing keep their saved choice
     priorityDashboards: job?.priorityDashboards || [],
+    includeFollowed: job?.includeFollowed || false,
+    followedVisual: job?.followedVisual || false,
+    followedTiles: job?.followedTiles || [], // chosen subset; [] = all followed tiles
+    includeGoals: job?.includeGoals || false,
+    suiteIds: job?.suiteIds || [], // events this digest covers ([] = all)
   }));
+  // The client's followed tiles available to pick from (loaded when the option
+  // is switched on). [] selection = include them all.
+  const [followedList, setFollowedList] = useState(null);
+  // The client's events (suites) — for the per-event scope picker (multi-event
+  // clients only). [] selection = all events.
+  const [eventList, setEventList] = useState(null);
+  useEffect(() => { A.events().then((r) => setEventList(r.events || [])).catch(() => setEventList([])); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [preview, setPreview] = useState({ html: '', sample: false });
   const [previewBusy, setPreviewBusy] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -99,6 +120,8 @@ function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }
     contentMode: f.contentMode, tiles: f.tiles, recipients: f.recipients.split(',').map((s) => s.trim()).filter(Boolean),
     channel: f.channel, smsRecipients: f.smsRecipients.split(/[\s,;]+/).map((s) => s.trim()).filter(Boolean),
     alignDaysBefore: f.alignDaysBefore, priorityDashboards: f.priorityDashboards,
+    includeFollowed: f.includeFollowed, followedVisual: f.followedVisual, includeGoals: f.includeGoals,
+    suiteIds: f.suiteIds,
   });
 
   // Two preview paths: the debounced auto-preview renders the SAMPLE layout
@@ -118,7 +141,26 @@ function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }
     clearTimeout(debounce.current);
     debounce.current = setTimeout(() => refreshPreview(false), 350);
     return () => clearTimeout(debounce.current);
-  }, [f.role, f.roleFocus, f.focusMode, f.customMessage, f.contentMode, JSON.stringify(f.tiles)]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [f.role, f.roleFocus, f.focusMode, f.customMessage, f.contentMode, JSON.stringify(f.tiles), f.includeFollowed, f.followedVisual, JSON.stringify(f.followedTiles), f.includeGoals, JSON.stringify(f.suiteIds)]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Load the client's followed tiles once the option is switched on.
+  useEffect(() => {
+    if (!f.includeFollowed || followedList) return;
+    A.followed().then((r) => setFollowedList(r.tiles || [])).catch(() => setFollowedList([]));
+  }, [f.includeFollowed]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Per-tile selection. [] = all selected (the default). Toggling collapses back
+  // to [] when every tile ends up selected, so "all" stays the simple default.
+  const sameTile = (a, b) => a.dashboardId === b.dashboardId && a.tileId === b.tileId;
+  const tileSelected = (t) => f.followedTiles.length === 0 || f.followedTiles.some((x) => sameTile(x, t));
+  const toggleFollowedTile = (t) => {
+    const all = (followedList || []).map((x) => ({ dashboardId: x.dashboardId, tileId: x.tileId }));
+    const cur = f.followedTiles.length === 0 ? all : f.followedTiles;
+    const has = cur.some((x) => sameTile(x, t));
+    let next = has ? cur.filter((x) => !sameTile(x, t)) : [...cur, { dashboardId: t.dashboardId, tileId: t.tileId }];
+    if (next.length === 0 || next.length === all.length) next = []; // all selected (or none) → "all"
+    set('followedTiles', next);
+  };
 
   async function save() {
     setBusy(true);
@@ -155,6 +197,39 @@ function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }
             <div style={hintS}>Sent verbatim above the AI summary. Supports **bold** and line breaks.</div>
           </Field>
 
+          {/* Events to include — multi-event clients only. The digest leads with a
+              portfolio summary, then a clearly-separated section per chosen event. */}
+          {(eventList || []).length > 1 && (() => {
+            const allIds = eventList.map((e) => e.id);
+            const selected = f.suiteIds.length ? f.suiteIds : allIds;
+            const selSet = new Set(selected);
+            const toggle = (id) => {
+              const cur = new Set(selected);
+              if (cur.has(id)) cur.delete(id); else cur.add(id);
+              let next = allIds.filter((x) => cur.has(x));
+              if (!next.length) next = [id]; // never zero events
+              set('suiteIds', next.length === allIds.length ? [] : next);
+            };
+            return (
+              <Field label="Events">
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {eventList.map((ev) => {
+                    const on = selSet.has(ev.id);
+                    return (
+                      <button key={ev.id} type="button" onClick={() => toggle(ev.id)}
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minHeight: 34, padding: '5px 12px', borderRadius: 980, cursor: 'pointer',
+                          border: `1px solid ${on ? 'var(--brand)' : 'var(--hairline)'}`, background: on ? 'rgba(var(--brand-rgb,255,56,92),0.10)' : 'transparent',
+                          color: on ? 'var(--brand)' : 'var(--muted)', fontSize: 12.5, fontWeight: 700 }}>
+                        {on ? '✓ ' : ''}{ev.name}{!ev.active && <span style={{ fontSize: 10, fontWeight: 600, opacity: 0.7 }}>· past</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div style={hintS}>{f.suiteIds.length ? `${selected.length} of ${eventList.length} events` : `All ${eventList.length} events`} · the email leads with a portfolio summary, then one clearly-separated section per event.</div>
+              </Field>
+            );
+          })()}
+
           <Field label="Content">
             <div style={{ display: 'flex', gap: 8 }}>
               <Toggle on={f.contentMode === 'ai'} onClick={() => set('contentMode', 'ai')}>AI-led</Toggle>
@@ -173,13 +248,58 @@ function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }
                 </div>
               </details>
             )}
+            {/* Followed tiles — works alongside both modes. Pulls in the tiles
+                this client follows ("always read this"), and can render them as
+                charts/metrics in the email. */}
+            <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--hairline)' }}>
+              <Toggle on={f.includeFollowed} onClick={() => set('includeFollowed', !f.includeFollowed)}>
+                📌 {f.includeFollowed ? 'Including saved tiles' : 'Include saved tiles'}
+              </Toggle>
+              <div style={hintS}>Adds the tiles this client has saved — 📌 pinned (on home) or ⭐ followed — to the digest{f.contentMode === 'curated' ? ' — on top of the curated picks above.' : ' — guaranteed into the analyst’s facts.'}</div>
+              {f.includeFollowed && (
+                <div style={{ marginTop: 8 }}>
+                  {/* Pick which followed tiles to include — there may be several. */}
+                  {followedList == null ? (
+                    <div style={{ ...hintS, marginTop: 0 }}>Loading followed tiles…</div>
+                  ) : followedList.length === 0 ? (
+                    <div style={{ ...hintS, marginTop: 0 }}>This client hasn’t saved any tiles yet. Open a dashboard tile’s ⋯ menu and choose “📌 Pin” or “⭐ Follow” to make it available here.</div>
+                  ) : (
+                    <div style={{ border: '1px solid var(--hairline)', borderRadius: 8, padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>{f.followedTiles.length === 0 ? `All ${followedList.length} saved tile${followedList.length === 1 ? '' : 's'} included` : `${f.followedTiles.length} of ${followedList.length} selected`}</div>
+                      {followedList.map((t) => (
+                        <label key={`${t.dashboardId}|${t.tileId}`} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 2px', cursor: 'pointer', fontSize: 13 }}>
+                          <input type="checkbox" checked={tileSelected(t)} onChange={() => toggleFollowedTile(t)} />
+                          <span style={{ flex: 1, minWidth: 0 }}>
+                            <span style={{ marginRight: 5 }}>{(t.kinds || []).includes('pin') ? '📌' : ''}{(t.kinds || []).includes('follow') ? '⭐' : ''}</span>
+                            <span style={{ fontWeight: 600 }}>{t.title}</span>
+                            <span style={{ color: 'var(--muted)', fontSize: 11.5 }}> · {t.setName ? `${t.setName} → ` : ''}{t.dashTitle}</span>
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  <div style={{ marginTop: 8 }}>
+                    <Toggle on={f.followedVisual} onClick={() => set('followedVisual', !f.followedVisual)}>
+                      📊 {f.followedVisual ? 'Showing as charts & metrics' : 'Show as charts & metrics'}
+                    </Toggle>
+                    <div style={hintS}>When on, each followed tile is rendered into the email — chart tiles as a graph image, single-value tiles as a metric chip.</div>
+                  </div>
+                </div>
+              )}
+              <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--hairline)' }}>
+                <Toggle on={f.includeGoals} onClick={() => set('includeGoals', !f.includeGoals)}>
+                  🎯 {f.includeGoals ? 'Including a goals summary' : 'Include a goals summary'}
+                </Toggle>
+                <div style={hintS}>Adds a goals paragraph to the digest — the event’s targets with live progress, pace, vs last time and the projected finish (leads with the North Star).</div>
+              </div>
+            </div>
           </Field>
 
           <Field label="Event-aligned comparisons">
             <Toggle on={f.alignDaysBefore} onClick={() => set('alignDaysBefore', !f.alignDaysBefore)}>
               ⏳ {f.alignDaysBefore ? 'Aligning to days-to-go' : 'Off — use each tile’s own dates'}
             </Toggle>
-            <div style={hintS}>When on, dashboards with a days-to-go countdown compare like-for-like to the same point in last year’s cycle (e.g. “42 days out”) — matching what you see on the dashboard. Tiles without a countdown are unaffected.</div>
+            <div style={hintS}>On by default. Dashboards with a days-to-go countdown compare like-for-like to the same point in last year’s cycle (e.g. “42 days out”) — matching what you see on the dashboard, not last year’s full-event total. Turn off only to compare against each tile’s own raw dates. Tiles without a countdown are unaffected.</div>
           </Field>
 
           <Field label="Schedule">
@@ -261,7 +381,7 @@ function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }
               </button>
             </div>
             {preview.sample
-              ? <span style={{ fontSize: 11, color: '#b45309', fontWeight: 600 }}>Sample layout — press refresh for live data</span>
+              ? <span style={{ fontSize: 11, color: '#b45309', fontWeight: 600 }}>Sample layout — press refresh for live data{f.includeFollowed ? ' (your saved tiles only show here)' : ''}</span>
               : preview.generatedAt && <span style={{ fontSize: 11, color: 'var(--success,#10b981)', fontWeight: 600 }}>✓ Live data · {new Date(preview.generatedAt).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}</span>}
           </div>
           {preview.sample && preview.reason && (
@@ -309,6 +429,22 @@ function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }
                     </div>
                   );
                 })}
+              </div>
+            </details>
+          )}
+          {/* Tiles that were EXCLUDED and why — so a missing source (e.g. GA4) is
+              diagnosable: "scope blocked" = config/connector; "no rows" = the
+              query returned nothing (often GA4's daily processing lag early in
+              the day). */}
+          {!preview.sample && (preview.dropped?.length > 0) && (
+            <details style={{ marginTop: 8, border: '1px solid #f0c674', borderRadius: 10, background: 'rgba(245,158,11,0.06)' }}>
+              <summary style={{ cursor: 'pointer', padding: '8px 12px', fontSize: 12, fontWeight: 700, color: '#b45309' }}>
+                ⚠ {preview.dropped.length} tile{preview.dropped.length === 1 ? '' : 's'} excluded (no data / scope)
+              </summary>
+              <div style={{ padding: '4px 12px 10px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {preview.dropped.map((d, i) => (
+                  <div key={i} style={{ fontSize: 11.5, color: 'var(--muted-2,#555)' }}>{d}</div>
+                ))}
               </div>
             </details>
           )}

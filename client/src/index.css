@@ -80,6 +80,11 @@
 }
 html { transition: background .3s ease; }
 
+/* Owl dashboard summary docks as a full-height right column on desktop: shift the
+   whole app left by the panel width so nothing is ever overlaid. */
+#root { transition: padding-right .22s ease; }
+body.owl-docked #root { padding-right: var(--owl-width, 420px); }
+
 html, body {
   font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
   background: var(--bg);
@@ -167,12 +172,14 @@ input::placeholder, textarea::placeholder { color: #b0b0b6; }
 @keyframes overlay-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes panel-in-right { from { transform: translateX(26px); opacity: 0; } to { transform: none; opacity: 1; } }
 @keyframes sheet-up { from { transform: translateY(100%); } to { transform: none; } }
+@keyframes drawer-in-right { from { transform: translateX(100%); } to { transform: none; } }
 @keyframes msg-in { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: none; } }
 @keyframes modal-in { from { opacity: 0; transform: scale(0.96) translateY(8px); } to { opacity: 1; transform: none; } }
 
 .ai-overlay { animation: overlay-in .2s ease both; backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); }
 .ai-panel { animation: panel-in-right .36s var(--ease-spring) both; }
 .ai-sheet { animation: sheet-up .36s var(--ease-spring) both; }
+.analyst-drawer { animation: drawer-in-right .26s var(--ease-spring) both; }
 .modal-in { animation: modal-in .26s var(--ease-spring) both; }
 .msg-in { animation: msg-in .3s var(--ease-out) both; }
 
@@ -286,6 +293,13 @@ input::placeholder, textarea::placeholder { color: #b0b0b6; }
   scrollbar-width: none;
 }
 .subtabs::-webkit-scrollbar { display: none; }
+/* Generic: hide the scrollbar on a swipeable tab/chip row (keeps swipe + wheel). */
+.no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+/* Carousel tile track — hide the horizontal scrollbar (the ‹ › arrows + swipe
+   handle scrolling); keeps the band clean. */
+.howler-carousel-track { scrollbar-width: none; -ms-overflow-style: none; }
+.howler-carousel-track::-webkit-scrollbar { display: none; }
 .subtab {
   flex-shrink: 0; border: none; background: transparent; cursor: pointer;
   padding: 10px 14px 12px; font-size: 13.5px; font-weight: 600; font-family: inherit;

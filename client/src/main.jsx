@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import App from './App.jsx';
 import './index.css';
 import { registerServiceWorker } from './lib/push.js';
+import './lib/pwa.js'; // capture the install prompt as early as possible
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>

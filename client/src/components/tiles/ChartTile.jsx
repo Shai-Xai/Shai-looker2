@@ -72,8 +72,13 @@ export default function ChartTile({ data, visConfig = {} }) {
     window.addEventListener('brand-changed', f);
     return () => window.removeEventListener('brand-changed', f);
   }, []);
+  // rows/dimensions/measures/pivots all derive from `data`, and a rendered
+  // tile's `visConfig` is stable (visType/stacked already cover what changes at
+  // runtime). Keying on the `visConfig` object would rebuild the chart every
+  // render, since it defaults to a fresh {} — so depend on the source instead.
   const { option, seriesMeta } = useMemo(
     () => buildOption({ rows, dimensions, measures, pivots, visType, stacked, visConfig, boxH }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [data, visType, stacked, boxH, theme, brandV]
   );
 

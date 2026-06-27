@@ -1,8 +1,10 @@
 // ─── White-label brand engine ──────────────────────────────────────────────────
-// One source of truth for the brand pair (primary + secondary). Howler's look
-// is the default; a client's pair swaps in via the SAME mechanics — CSS
-// variables for the UI, and a generated 10-colour chart palette that replicates
-// how Howler's own palette relates to its brand pair.
+// One source of truth for the brand pair (primary + secondary) AND the brand
+// logo. Howler's look is the default; a client's pair + logo swap in via the SAME
+// mechanics — CSS variables for the UI, a generated 10-colour chart palette, and
+// the resolved logo shown across the app shell (sidebar + identity).
+
+import { useState, useEffect } from 'react';
 
 const HOWLER_PRIMARY = '#FF385C';
 const HOWLER_SECONDARY = '#FF6B35';
@@ -11,7 +13,10 @@ const HOWLER_PALETTE = ['#FF385C', '#FF6B35', '#FFB020', '#06B6D4', '#7C3AED', '
 // The fixed tail (series 6-10) for the Howler default.
 const HOWLER_TAIL = ['#10B981', '#EC4899', '#3B82F6', '#F97316', '#14B8A6'];
 
-let current = { primary: HOWLER_PRIMARY, secondary: HOWLER_SECONDARY, chart3: '', chart4: '', chart5: '' };
+let current = { primary: HOWLER_PRIMARY, secondary: HOWLER_SECONDARY, chart3: '', chart4: '', chart5: '', logo: '', logoDark: '', metricScale: 1 };
+
+// Clamp a metric-size multiplier to a sane range; blank/garbage → 1 (default).
+function cleanScale(v) { const n = Number(v); return Number.isFinite(n) && n > 0 ? Math.max(0.6, Math.min(1.6, n)) : 1; }
 
 // ── colour maths ──
 function hexToRgb(hex) {
@@ -90,8 +95,8 @@ export function chartPalette() {
 export const brandPrimary = () => current.primary;
 
 // ── CSS variable application ──
-export function applyBrand({ primary, secondary, chart3, chart4, chart5 } = {}) {
-  current = { primary: primary || HOWLER_PRIMARY, secondary: secondary || HOWLER_SECONDARY, chart3: chart3 || '', chart4: chart4 || '', chart5: chart5 || '' };
+export function applyBrand({ primary, secondary, chart3, chart4, chart5, logo, logoDark, metricScale } = {}) {
+  current = { primary: primary || HOWLER_PRIMARY, secondary: secondary || HOWLER_SECONDARY, chart3: chart3 || '', chart4: chart4 || '', chart5: chart5 || '', logo: logo || '', logoDark: logoDark || '', metricScale: cleanScale(metricScale) };
   const root = document.documentElement;
   root.style.setProperty('--brand', current.primary);
   root.style.setProperty('--brand-2', current.secondary);
@@ -100,8 +105,50 @@ export function applyBrand({ primary, secondary, chart3, chart4, chart5 } = {}) 
   window.dispatchEvent(new Event('brand-changed'));
 }
 export function resetBrand() {
-  current = { primary: HOWLER_PRIMARY, secondary: HOWLER_SECONDARY, chart3: '', chart4: '', chart5: '' };
+  current = { primary: HOWLER_PRIMARY, secondary: HOWLER_SECONDARY, chart3: '', chart4: '', chart5: '', logo: '', logoDark: '', metricScale: 1 };
   const root = document.documentElement;
   for (const v of ['--brand', '--brand-2', '--brand-dark', '--brand-rgb']) root.style.removeProperty(v);
   window.dispatchEvent(new Event('brand-changed'));
+}
+// The active brand's KPI number-size multiplier (1 = default). Subscribe a
+// component to it; re-renders when branding changes.
+export const metricScale = () => current.metricScale;
+export function useMetricScale() {
+  const [v, setV] = useState(current.metricScale);
+  useEffect(() => {
+    const on = () => setV(current.metricScale);
+    window.addEventListener('brand-changed', on);
+    return () => window.removeEventListener('brand-changed', on);
+  }, []);
+  return v;
+}
+
+// The active client's resolved brand logo (their branding logo, falling back to
+// their entity logo) — shown across the app shell. '' = Howler default (no logo).
+export const brandLogo = () => current.logo;
+// The active client's optional DARK-MODE logo ('' = none → fall back to `logo`).
+export const brandLogoDark = () => current.logoDark;
+// Subscribe a component to the current brand logo, resolved for the active theme:
+// in dark mode the dark-specific logo wins when set, else the normal logo (which
+// the shell puts on a light chip so it stays legible). Pass the theme string;
+// omit it to always get the light logo. Re-renders when branding changes.
+export function useBrandLogo(theme) {
+  const [v, setV] = useState({ logo: current.logo, logoDark: current.logoDark });
+  useEffect(() => {
+    const on = () => setV({ logo: current.logo, logoDark: current.logoDark });
+    window.addEventListener('brand-changed', on);
+    return () => window.removeEventListener('brand-changed', on);
+  }, []);
+  return theme === 'dark' && v.logoDark ? v.logoDark : v.logo;
+}
+// Whether the active brand has a dedicated dark-mode logo — lets the shell skip
+// the legibility chip when the client has supplied a proper dark variant.
+export function useBrandHasDarkLogo() {
+  const [v, setV] = useState(!!current.logoDark);
+  useEffect(() => {
+    const on = () => setV(!!current.logoDark);
+    window.addEventListener('brand-changed', on);
+    return () => window.removeEventListener('brand-changed', on);
+  }, []);
+  return v;
 }
