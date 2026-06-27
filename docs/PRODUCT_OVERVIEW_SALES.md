@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-06-25 · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-06-27 · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -240,6 +240,9 @@ in one place that updates itself."
 ## 6. White-label branding & integrations  ✅ / 🟡
 - **Per-client branding** ✅ — logo, colours, email sender display name and
   wording. Emails look like the client, sent from Howler's verified domain.
+  Every logo/icon/image upload now shows **clear spec guidance** (format, size,
+  transparency) right under the picker, on both the admin and client surfaces —
+  so the assets we get back are the right shape first time.
 - **Integrations** (dual-surface: Howler-managed *and* client self-service):
   - **Looker** / **Anthropic (AI)** keys ✅ (fall back to Howler defaults)
   - **Email (Resend)** ✅, **SMS (Clickatell)** ✅
@@ -416,6 +419,10 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-27** — **Image upload specs** ✅: every logo / icon / banner upload now shows
+  short spec guidance (format · size · transparency · how small it renders) right under the
+  picker — consistent across the admin console and client self-service, so we get correctly
+  sized assets the first time.
 - **2026-06-25** — **Share an insight or a tile** ✅: a **Share** button now sits on every
   (titled) tile and on the Owl's per-tile insight and whole-dashboard summary panels. One tap
   hands the finding off to **email, WhatsApp or Slack** — the reader can add a personal note,
