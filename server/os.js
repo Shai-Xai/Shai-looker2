@@ -240,7 +240,12 @@ function mount(app, { db, auth, mailer, push, slack, onInbound }) {
   function slackEntity(entityId, t, body) {
     if (!slack?.isConfigured?.(entityId)) return;
     const link = mailer?.baseUrl?.() ? `${mailer.baseUrl()}/inbox?thread=${t.id}` : '';
-    slack.notify({ entityId, title: t.title || 'New message in Pulse', body: String(body || '').slice(0, 2500), url: link, kind: 'notification' }).catch(() => {});
+    // Brand the Slack post with the client's sender name + logo (webhooks honour a
+    // per-message name/avatar). Only pass an https logo — Slack can't fetch a
+    // data: URL, and a bot token ignores these anyway (handled in slack.send).
+    const brand = mailer?.resolveBranding?.(entityId) || {};
+    const iconUrl = brand.logo && /^https?:\/\//.test(brand.logo) ? brand.logo : undefined;
+    slack.notify({ entityId, title: t.title || 'New message in Pulse', body: String(body || '').slice(0, 2500), url: link, username: brand.senderName || undefined, iconUrl, kind: 'notification' }).catch(() => {});
   }
   function notifyEntity(entityId, t, body, channels) {
     const ch = cleanChannels(channels);

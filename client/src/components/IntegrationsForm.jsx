@@ -4,7 +4,7 @@ import { useState } from 'react';
 // write-only: the form only knows whether a value is set (value.*.keySet /
 // clientSecretSet); typing a new value changes it, blank leaves it unchanged.
 // `onSave(payload)` receives only the fields that changed.
-export default function IntegrationsForm({ value, onSave, showLooker = true, lookerActive = true, showResend = false, showInventive = false, inventiveWorkspace = null, showMeta = false, showTikTok = false, showSlack = false, clients = [], onTestEmail, collapsible = false, canManageLock = false, locks = {}, onToggleLock, lockableKeys = [] }) {
+export default function IntegrationsForm({ value, onSave, showLooker = true, lookerActive = true, showResend = false, showInventive = false, inventiveWorkspace = null, showMeta = false, showTikTok = false, showSlack = false, clients = [], onTestEmail, onTestSlack, collapsible = false, canManageLock = false, locks = {}, onToggleLock, lockableKeys = [] }) {
   // Each integration is FROZEN by default — fields are read-only until an
   // admin/Owner (canManageLock) explicitly unlocks it, then re-locks. A guard
   // against accidental changes to a working connection. A section reads as locked
@@ -45,6 +45,7 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
   const [clearSlackBot, setClearSlackBot] = useState(false);
   const [slackChannel, setSlackChannel] = useState(value?.slack?.channel || '');
   const [testState, setTestState] = useState('');
+  const [slackTestState, setSlackTestState] = useState('');
   const [busyKey, setBusyKey] = useState('');
   const [savedKey, setSavedKey] = useState('');
 
@@ -266,6 +267,21 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
           <Lbl>Channel <span style={{ textTransform: 'none', fontWeight: 400 }}>· required with a bot token</span></Lbl>
           <input value={slackChannel} onChange={(e) => setSlackChannel(e.target.value)} placeholder="#client-updates or C0123456789" style={input} autoComplete="off" />
           {value?.slack?.configured && <div style={{ ...note, color: 'var(--success, #10b981)', marginTop: 8 }}>✓ Connected — Howler messages will also post to Slack.</div>}
+          {onTestSlack && value?.slack?.configured && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12 }}>
+              <button
+                type="button"
+                style={{ ...saveBtn, background: 'rgba(128,128,128,0.14)', color: 'var(--text)' }}
+                disabled={slackTestState === 'sending'}
+                onClick={async () => {
+                  setSlackTestState('sending');
+                  try { const r = await onTestSlack(); setSlackTestState(r?.ok ? '✓ Sent — check your Slack channel' : `✗ ${r?.error || 'Failed'}`); }
+                  catch (e) { setSlackTestState(`✗ ${e.message}`); }
+                }}
+              >{slackTestState === 'sending' ? 'Sending…' : 'Send a test to Slack'}</button>
+              {slackTestState && slackTestState !== 'sending' && <span style={{ fontSize: 12.5, color: slackTestState.startsWith('✓') ? 'var(--success, #10b981)' : 'var(--error, #ef4444)' }}>{slackTestState}</span>}
+            </div>
+          )}
           <SaveRow k="slack" />
         </Section>
       )}

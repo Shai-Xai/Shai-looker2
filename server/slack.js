@@ -63,12 +63,14 @@ function log(entityId, st, detail, kind) {
 
 // Low-level post. Prefers a bot token (richer, lets us target a named channel);
 // falls back to the incoming webhook. Best-effort — returns a result, never throws.
-async function send({ entityId, text, blocks, kind = 'other' }) {
+async function send({ entityId, text, blocks, username, iconUrl, kind = 'other' }) {
   const c = connection(entityId);
   if (!isConfigured(entityId)) { log(entityId, 'skipped', 'not configured', kind); return { skipped: true, reason: 'not_configured' }; }
   const useBot = !!(c.botToken && c.channel);
   try {
     if (useBot) {
+      // username/icon_url need the chat:write.customize scope, so we don't set
+      // them here — a bot posts under the app's own name/icon (set in Slack).
       const res = await fetch('https://slack.com/api/chat.postMessage', {
         method: 'POST',
         headers: { Authorization: `Bearer ${c.botToken}`, 'Content-Type': 'application/json; charset=utf-8' },
@@ -78,10 +80,15 @@ async function send({ entityId, text, blocks, kind = 'other' }) {
       const data = await res.json().catch(() => ({}));
       if (!data.ok) throw new Error(data.error || `Slack HTTP ${res.status}`);
     } else {
+      // Incoming webhooks DO honour a per-message name + avatar, so we brand them
+      // with the client's sender name + logo when we have a public (https) logo.
+      const payload = { text, blocks };
+      if (username) payload.username = username;
+      if (iconUrl) payload.icon_url = iconUrl;
       const res = await fetch(c.webhookUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, blocks }),
+        body: JSON.stringify(payload),
         signal: AbortSignal.timeout(15000),
       });
       if (!res.ok) throw new Error(`Webhook HTTP ${res.status}`);
@@ -96,12 +103,28 @@ async function send({ entityId, text, blocks, kind = 'other' }) {
 
 // Higher-level: a titled notification with an optional "Open in Pulse" button.
 // Builds Block Kit but always carries a plain-text fallback for notifications.
-async function notify({ entityId, title, body, url, kind = 'notification' }) {
+async function notify({ entityId, title, body, url, username, iconUrl, kind = 'notification' }) {
   const heading = String(title || 'New message in Pulse').trim();
-  const text = `${heading}${body ? `\n${body}` : ''}`;
-  const blocks = [{ type: 'section', text: { type: 'mrkdwn', text: `*${heading}*${body ? `\n${body}` : ''}` } }];
-  if (url) blocks.push({ type: 'actions', elements: [{ type: 'button', text: { type: 'plain_text', text: 'Open in Pulse' }, url }] });
-  return send({ entityId, text, blocks, kind });
+  // A mrkdwn LINK, not a Block Kit button — buttons are interactive and need an
+  // app with an interactivity URL (webhooks can't post them; Slack warns). A link
+  // opens Pulse with no interaction payload, so it works on every connection type.
+  const link = url ? `\n<${url}|Open in Pulse →>` : '';
+  const text = `${heading}${body ? `\n${body}` : ''}${url ? `\nOpen in Pulse: ${url}` : ''}`;
+  const blocks = [{ type: 'section', text: { type: 'mrkdwn', text: `*${heading}*${body ? `\n${body}` : ''}${link}` } }];
+  return send({ entityId, text, blocks, username, iconUrl, kind });
+}
+
+// Post a friendly test message — lets staff/clients confirm the wiring without
+// sending a real inbox message. Best-effort; never throws.
+async function sendTest(entityId) {
+  if (!isConfigured(entityId)) return { ok: false, error: 'Slack isn’t connected for this client yet — add a webhook or bot token first.' };
+  const r = await notify({
+    entityId,
+    title: '✅ Pulse is connected to Slack',
+    body: 'This is a test from Howler Pulse. If you can see this, your Slack notifications are working — Howler messages will land here.',
+    kind: 'test',
+  });
+  return r.ok ? { ok: true, ...status(entityId) } : { ok: false, error: r.error || 'Slack did not accept the message.' };
 }
 
 // Live connection check (real API call for bot tokens). Best-effort; never throws.
@@ -145,4 +168,22 @@ function view(i) {
   };
 }
 
-module.exports = { init, isConfigured, status, connection, send, notify, verify, applyPatch, view };
+// Mount = init + own the test-send routes (keeps the composition root thin —
+// index.js doesn't grow a route cluster for this). Dual-surface: admin sends a
+// test for any client; a client can send one for their own entity. Returns the
+// module so the caller keeps `const slack = require('./slack').mount(...)`.
+function mount(app, deps) {
+  const { auth } = deps;
+  const { asyncHandler } = require('./http');
+  init(deps);
+  app.post('/api/admin/entities/:id/slack/test', auth.requireAdmin, asyncHandler(async (req, res) => {
+    res.json(await sendTest(req.params.id));
+  }));
+  app.post('/api/my/slack/:entityId/test', auth.requireAuth, auth.requirePermission('integrations.manage'), asyncHandler(async (req, res) => {
+    if (!(req.user.entityIds || []).includes(req.params.entityId)) return res.status(403).json({ error: 'Not allowed' });
+    res.json(await sendTest(req.params.entityId));
+  }));
+  return module.exports;
+}
+
+module.exports = { init, mount, isConfigured, status, connection, send, notify, sendTest, verify, applyPatch, view };

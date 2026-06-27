@@ -109,6 +109,7 @@ export default function ClientIntegrationsPage() {
                 canManageLock={isAdmin || role === 'owner'}
                 lockableKeys={['looker', 'anthropic', 'meta', 'tiktok', 'slack']}
                 locks={activeItem.locks || {}}
+                onTestSlack={() => api.testMySlack(activeItem.entityId)}
                 onToggleLock={async (key, locked) => {
                   const v = await api.setMyIntegrationLock(activeItem.entityId, key, locked);
                   setItems((arr) => arr.map((x) => (x.entityId === activeItem.entityId ? { ...x, ...v } : x)));
