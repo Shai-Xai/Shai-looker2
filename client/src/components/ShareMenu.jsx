@@ -3,8 +3,9 @@ import { createPortal } from 'react-dom';
 
 // Reusable "Share" affordance — a one-tap hand-off to the reader's OWN email,
 // WhatsApp or Slack. No backend: email opens a mailto: link, WhatsApp a
-// wa.me/?text= link, and Slack copies a ready-to-paste message (Slack has no
-// public "share text" URL). The reader can add a custom note; we attach the
+// wa.me/?text= link, and Slack copies a ready-to-paste message then opens Slack
+// (the native app via slack://, falling back to the web client) — Slack has no
+// public "share text" URL. The reader can add a custom note; we attach the
 // heading, the insight/value text and a link back to this view.
 //
 // Trigger is rendered here so we can anchor the popover to it. Callers pass a
@@ -76,10 +77,20 @@ export default function ShareMenu({
   async function shareSlack() {
     try { await navigator.clipboard.writeText(blob); } catch { /* clipboard blocked — fall back to manual copy */ }
     setSlackDone(true);
-    // No public "share text to Slack" URL exists, so we copy the message and
-    // open Slack for them to paste into any channel/DM.
-    window.open('https://app.slack.com/client', '_blank', 'noopener');
-    setTimeout(close, 1500);
+    // No public "share text to Slack" URL exists, so we copy the message, then try
+    // to open the NATIVE Slack app (slack://) for them to paste into a channel —
+    // falling back to Slack on the web only if the app isn't installed. (Slack
+    // can't be deep-linked to a specific channel without team/channel ids, so this
+    // lands them in Slack to pick one.)
+    let done = false;
+    const onBlur = () => { done = true; window.removeEventListener('blur', onBlur); }; // app grabbed focus → don't also open web
+    window.addEventListener('blur', onBlur);
+    setTimeout(() => {
+      window.removeEventListener('blur', onBlur);
+      if (!done) window.open('https://app.slack.com/client', '_blank', 'noopener');
+    }, 1200);
+    window.location.href = 'slack://open';
+    setTimeout(close, 1800);
   }
 
   const panelStyle = isMobile
@@ -134,14 +145,14 @@ export default function ShareMenu({
               <ChannelRow
                 icon="#"
                 label="Slack"
-                sub={slackDone ? '✓ Copied — paste into Slack' : 'Copies a ready-to-paste message'}
+                sub={slackDone ? '✓ Copied — opening Slack to paste' : 'Copies the message & opens Slack'}
                 accent="#611f69"
                 onClick={shareSlack}
               />
             </div>
 
             <div style={{ fontSize: 10.5, color: 'var(--muted)', padding: '8px 4px 2px', lineHeight: 1.45 }}>
-              We attach a link back to this view. Slack has no direct share link, so we copy a ready-to-paste message.
+              We attach a link back to this view. Slack has no direct share link, so we copy a ready-to-paste message and open Slack (the app if it's installed, otherwise the web) for you to paste.
             </div>
           </div>
         </>,
