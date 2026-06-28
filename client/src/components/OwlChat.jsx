@@ -187,6 +187,15 @@ function fmtVal(v) {
   return Number.isFinite(n) && String(v).trim() !== '' ? n.toLocaleString() : String(v);
 }
 
+// Format a result-table cell: numbers get thousands separators; dates/strings pass
+// through (a YYYY-MM-DD has inner dashes so it won't be mistaken for a number).
+function fmtCell(v) {
+  if (v == null || v === '') return '—';
+  if (typeof v === 'number') return v.toLocaleString();
+  const s = String(v);
+  return /^-?\d+(\.\d+)?$/.test(s) ? Number(s).toLocaleString() : s;
+}
+
 // Citation chips — the grounding made visible. One "source" per live askData call
 // in an answer: a green dot (= real query, not invented), the measure + value, the
 // filters/scope, and a tap-to-expand card with the exact query.
@@ -214,12 +223,28 @@ function CitationChips({ sources }) {
             ))}
           </div>
           {open === i && (
-            <div style={{ marginTop: 6, border: '1px solid var(--hairline)', borderRadius: 12, background: 'var(--bg, #fafafe)', padding: '9px 11px', fontSize: 11.5, display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '4px 12px' }}>
-              <span style={muted}>Measure</span><span>{s.measure}</span>
-              {s.dimensions && s.dimensions.length > 0 && (<><span style={muted}>Group by</span><span>{s.dimensions.join(', ')}</span></>)}
-              {s.filters && s.filters.length > 0 && (<><span style={muted}>Filters</span><span>{s.filters.map((f) => `${f.label} = ${f.value}`).join('  ·  ')}</span></>)}
-              {s.explore && (<><span style={muted}>Explore</span><span>{s.explore} · live</span></>)}
-              <span style={muted}>Rows</span><span style={{ fontVariantNumeric: 'tabular-nums' }}>{s.count}</span>
+            <div style={{ marginTop: 6, border: '1px solid var(--hairline)', borderRadius: 12, background: 'var(--bg, #fafafe)', overflow: 'hidden' }}>
+              <div style={{ padding: '9px 11px', fontSize: 11.5, display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '4px 12px', borderBottom: (s.rows && s.rows.length) ? '1px solid var(--hairline)' : 'none' }}>
+                <span style={muted}>Measure</span><span>{s.measure}</span>
+                {s.dimensions && s.dimensions.length > 0 && (<><span style={muted}>Group by</span><span>{s.dimensions.join(', ')}</span></>)}
+                {s.filters && s.filters.length > 0 && (<><span style={muted}>Filters</span><span>{s.filters.map((f) => `${f.label} = ${f.value}`).join('  ·  ')}</span></>)}
+                {s.explore && (<><span style={muted}>Explore</span><span>{s.explore} · live</span></>)}
+              </div>
+              {s.columns && s.rows && s.rows.length > 0 && (
+                <div style={{ overflow: 'auto', maxHeight: 240 }}>
+                  <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 11.5 }}>
+                    <thead>
+                      <tr>{s.columns.map((c, k) => <th key={k} style={{ textAlign: 'left', padding: '6px 10px', position: 'sticky', top: 0, background: 'var(--elevated, #f1f1f5)', color: 'var(--muted)', fontWeight: 600, whiteSpace: 'nowrap', borderBottom: '1px solid var(--hairline)' }}>{c.label}</th>)}</tr>
+                    </thead>
+                    <tbody>
+                      {s.rows.map((r, ri) => (
+                        <tr key={ri}>{s.columns.map((c, k) => <td key={k} style={{ padding: '5px 10px', whiteSpace: 'nowrap', borderBottom: '1px solid var(--hairline)', fontVariantNumeric: 'tabular-nums', color: 'var(--text)' }}>{fmtCell(r[c.field])}</td>)}</tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {s.count > s.rows.length && <div style={{ padding: '6px 10px', fontSize: 10.5, color: 'var(--muted)' }}>Showing {s.rows.length} of {s.count.toLocaleString()} rows.</div>}
+                </div>
+              )}
             </div>
           )}
         </div>

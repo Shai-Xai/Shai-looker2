@@ -141,6 +141,9 @@ function mount(app, { db, auth, insights, owlTools, anthropicKeyForSuite, anthro
         // Single scalar answer (one row, no group-by) → surface the value on the chip.
         let value = null;
         if (rows.length === 1 && !dims.length && rows[0][m] != null) value = rows[0][m];
+        // The actual result table behind the answer (columns + capped rows), so the
+        // citation can show the data — not just the query — like a spreadsheet.
+        const fields = qb.fields || [...dims, m];
         return {
           measure: measLabel.get(m) || m,
           value,
@@ -148,6 +151,8 @@ function mount(app, { db, auth, insights, owlTools, anthropicKeyForSuite, anthro
           dimensions: dims.map((d) => dimLabel.get(d) || d),
           filters: Object.entries(qb.filters || {}).map(([f, v]) => ({ label: fieldLabel(f), value: String(v) })),
           explore: cat.label || qb.view || '',
+          columns: fields.map((f) => ({ field: f, label: measLabel.get(f) || dimLabel.get(f) || fieldLabel(f) })),
+          rows: rows.slice(0, 50),
         };
       });
   }
