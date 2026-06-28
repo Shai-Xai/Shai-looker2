@@ -128,6 +128,7 @@ function mount(app, { db, auth, insights, owlTools, anthropicKeyForSuite, anthro
   const cat = owlTools.catalogue || {};
   const measLabel = new Map((cat.measures || []).map((m) => [m.name, m.label]));
   const dimLabel = new Map((cat.dimensions || []).map((d) => [d.name, d.label]));
+  const dimType = new Map((cat.dimensions || []).map((d) => [d.name, d.type]));
   const SCOPE_LABEL = { 'core_organisers.name': 'organiser', 'core_events.name': 'event' };
   const fieldLabel = (f) => SCOPE_LABEL[f] || dimLabel.get(f) || String(f).split('.').pop().replace(/_/g, ' ');
   function sourcesFromTrail(trail) {
@@ -151,8 +152,11 @@ function mount(app, { db, auth, insights, owlTools, anthropicKeyForSuite, anthro
           dimensions: dims.map((d) => dimLabel.get(d) || d),
           filters: Object.entries(qb.filters || {}).map(([f, v]) => ({ label: fieldLabel(f), value: String(v) })),
           explore: cat.label || qb.view || '',
-          columns: fields.map((f) => ({ field: f, label: measLabel.get(f) || dimLabel.get(f) || fieldLabel(f) })),
+          columns: fields.map((f) => ({ field: f, label: measLabel.get(f) || dimLabel.get(f) || fieldLabel(f), kind: measLabel.has(f) ? 'measure' : 'dimension' })),
           rows: rows.slice(0, 50),
+          // Auto-chart hint: a breakdown (>=1 dimension, >1 row) charts; a date
+          // dimension → line, otherwise → bar. A single scalar stays text.
+          chartType: (dims.length >= 1 && rows.length > 1) ? (dimType.get(dims[0]) === 'date' ? 'line' : 'bar') : null,
         };
       });
   }

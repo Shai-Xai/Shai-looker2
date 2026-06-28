@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { api } from '../lib/api.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
+import ChartTile from './tiles/ChartTile.jsx';
 
 // The native, Claude-powered agentic Owl — the conversational "pull" door onto the
 // askData tool (server/owlChat.js). Drops into the same drawer slot as the Inventive
@@ -196,6 +197,25 @@ function fmtCell(v) {
   return /^-?\d+(\.\d+)?$/.test(s) ? Number(s).toLocaleString() : s;
 }
 
+// Map an Owl citation source into the Looker-shaped data ChartTile renders. Bars
+// show the biggest first (rows arrive measure-desc); line charts re-sort by the
+// date dimension so time runs left→right.
+const VIS = { line: 'looker_line', bar: 'looker_column' };
+function chartDataFromSource(s) {
+  const dims = s.columns.filter((c) => c.kind === 'dimension');
+  const meas = s.columns.filter((c) => c.kind === 'measure');
+  let rows = s.rows || [];
+  if (s.chartType === 'line' && dims[0]) rows = [...rows].sort((a, b) => String(a[dims[0].field]).localeCompare(String(b[dims[0].field])));
+  else rows = rows.slice(0, 15); // top 15 categories keeps bars readable
+  return {
+    fields: {
+      dimensions: dims.map((c) => ({ name: c.field, label: c.label, label_short: c.label })),
+      measures: meas.map((c) => ({ name: c.field, label: c.label, label_short: c.label })),
+    },
+    data: rows.map((r) => { const o = {}; for (const c of s.columns) o[c.field] = { value: r[c.field] }; return o; }),
+  };
+}
+
 // Citation chips — the grounding made visible. One "source" per live askData call
 // in an answer: a green dot (= real query, not invented), the measure + value, the
 // filters/scope, and a tap-to-expand card with the exact query.
@@ -209,6 +229,11 @@ function CitationChips({ sources }) {
       <div style={{ fontSize: 10, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--muted)', margin: '0 0 6px 2px' }}>Sources</div>
       {sources.map((s, i) => (
         <div key={i} style={{ marginBottom: 6 }}>
+          {s.chartType && s.rows && s.rows.length > 1 && (
+            <div style={{ height: 200, margin: '2px 0 8px', border: '1px solid var(--hairline)', borderRadius: 12, overflow: 'hidden', background: 'var(--card)' }}>
+              <ChartTile data={chartDataFromSource(s)} visConfig={{ type: VIS[s.chartType] || 'looker_column' }} />
+            </div>
+          )}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
             <button onClick={() => setOpen(open === i ? -1 : i)} style={{ ...chip, cursor: 'pointer' }} aria-expanded={open === i}>
               <span style={dot} />
