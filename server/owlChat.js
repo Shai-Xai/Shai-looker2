@@ -168,6 +168,7 @@ function mount(app, { db, auth, insights, owlTools, anthropicKeyForSuite, anthro
           explore: cat.label || qb.view || '',
           columns: fields.map((f) => ({ field: f, label: measLabel.get(f) || dimLabel.get(f) || fieldLabel(f), kind: measLabel.has(f) ? 'measure' : 'dimension' })),
           rows: rows.slice(0, 50),
+          queryBody: qb, // the live Looker query — used when pinning the chart to a dashboard
           // Auto-chart hint: a breakdown (>=1 dimension, >1 row) charts; a date
           // dimension → line, otherwise → bar. A single scalar stays text.
           chartType: (dims.length >= 1 && rows.length > 1) ? (dimType.get(dims[0]) === 'date' ? 'line' : 'bar') : null,
@@ -281,6 +282,9 @@ function mount(app, { db, auth, insights, owlTools, anthropicKeyForSuite, anthro
     });
   });
 
+  // Pin-to-dashboard lives in its own disposable module; mount it here so index.js
+  // stays at budget. Shares the Owl allowlist gate.
+  require('./owlPin').mount(app, { db, auth });
   console.log('[owlChat] agentic Owl chat module mounted');
 }
 

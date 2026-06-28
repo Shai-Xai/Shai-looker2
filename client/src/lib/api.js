@@ -129,6 +129,8 @@ export const api = {
     return { threadId: tid, sources, followups };
   },
   owlThreads: () => fetch('/api/owl/threads').then(json),
+  owlPinTargets: (entityId) => fetch(`/api/owl/pin-targets?entityId=${encodeURIComponent(entityId || '')}`).then(json),
+  owlPin: (body) => fetch('/api/owl/pin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
   owlThreadMessages: (id) => fetch(`/api/owl/threads/${id}/messages`).then(json),
   login: (email, password) =>
     fetch('/api/auth/login', {

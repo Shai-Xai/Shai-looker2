@@ -178,7 +178,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, clients = []
         {messages.map((m, i) => (
           <div key={i}>
             {bubble(m, i)}
-            {m.role === 'owl' && m.sources && m.sources.length > 0 && <CitationChips sources={m.sources} />}
+            {m.role === 'owl' && m.sources && m.sources.length > 0 && <CitationChips sources={m.sources} entityId={selEntity} suiteId={selSuite} canPin={isAdmin} />}
           </div>
         ))}
       </div>
@@ -257,10 +257,11 @@ function chartDataFromSource(s) {
   };
 }
 
-// An auto-chart with a type toggle (bar / line / pie / metric). The data is already
-// here, so switching is instant + client-side — no re-query.
-function OwlChart({ source }) {
+// An auto-chart with a type toggle (bar / line / pie / metric) + a 📌 pin button.
+// Switching type is instant + client-side; pinning saves the live query as a tile.
+function OwlChart({ source, entityId, suiteId, canPin }) {
   const [type, setType] = useState(source.chartType || 'bar');
+  const [pinOpen, setPinOpen] = useState(false);
   const meas = source.columns.find((c) => c.kind === 'measure');
   const dims = source.columns.filter((c) => c.kind === 'dimension');
   const rowCount = (source.rows || []).length;
@@ -268,11 +269,16 @@ function OwlChart({ source }) {
   const opts = [{ k: 'bar', label: 'Bar' }, { k: 'line', label: 'Line' }, ...(canPie ? [{ k: 'pie', label: 'Pie' }] : []), { k: 'metric', label: 'Metric' }];
   const seg = (active) => ({ padding: '3px 9px', fontSize: 11, fontWeight: 600, border: 'none', borderRadius: 980, cursor: 'pointer', background: active ? 'var(--brand)' : 'transparent', color: active ? '#fff' : 'var(--text)' });
   const total = (source.rows || []).reduce((a, r) => a + (Number(r[meas?.field]) || 0), 0);
+  const showPin = canPin && source.queryBody && entityId;
   return (
     <div style={{ margin: '2px 0 8px' }}>
-      <div style={{ display: 'inline-flex', gap: 2, padding: 2, background: 'var(--elevated, rgba(128,128,128,0.12))', borderRadius: 980, marginBottom: 6 }}>
-        {opts.map((o) => <button key={o.k} onClick={() => setType(o.k)} style={seg(type === o.k)}>{o.label}</button>)}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+        <div style={{ display: 'inline-flex', gap: 2, padding: 2, background: 'var(--elevated, rgba(128,128,128,0.12))', borderRadius: 980 }}>
+          {opts.map((o) => <button key={o.k} onClick={() => setType(o.k)} style={seg(type === o.k)}>{o.label}</button>)}
+        </div>
+        {showPin && <button onClick={() => setPinOpen((o) => !o)} title="Pin to a dashboard or home" style={{ border: '1px solid var(--hairline)', background: pinOpen ? 'var(--elevated, rgba(128,128,128,0.12))' : 'var(--card)', borderRadius: 980, padding: '3px 10px', fontSize: 11.5, cursor: 'pointer', color: 'var(--text)' }}>📌 Pin</button>}
       </div>
+      {showPin && pinOpen && <PinMenu source={source} entityId={entityId} suiteId={suiteId} chartType={type} onDone={() => setPinOpen(false)} />}
       {type === 'metric'
         ? (
           <div style={{ border: '1px solid var(--hairline)', borderRadius: 12, background: 'var(--card)', padding: '18px 14px', textAlign: 'center' }}>
@@ -289,10 +295,45 @@ function OwlChart({ source }) {
   );
 }
 
+// The pin dialog: name it, choose Home or a dashboard, save it as a live tile.
+function PinMenu({ source, entityId, suiteId, chartType, onDone }) {
+  const defaultTitle = `${source.measure}${source.dimensions && source.dimensions.length ? ' by ' + source.dimensions.join(', ') : ''}`;
+  const [title, setTitle] = useState(defaultTitle);
+  const [target, setTarget] = useState('home');
+  const [dashboards, setDashboards] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(null);
+  useEffect(() => { let on = true; api.owlPinTargets(entityId).then((r) => { if (on) setDashboards(r.dashboards || []); }).catch(() => {}); return () => { on = false; }; }, [entityId]);
+  async function pin() {
+    setBusy(true);
+    try {
+      const r = await api.owlPin({ entityId, suiteId: suiteId || undefined, target, title, queryBody: source.queryBody, chartType });
+      setDone(`Pinned to ${target === 'home' ? 'Home' : (r.dashboardTitle || 'the dashboard')} ✓`);
+    } catch (e) { setDone(`⚠ ${(e && e.message) || 'Could not pin.'}`); }
+    setBusy(false);
+  }
+  const fld = { width: '100%', padding: '7px 10px', borderRadius: 8, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', fontSize: 13, marginTop: 6 };
+  if (done) return <div style={{ border: '1px solid var(--hairline)', borderRadius: 12, background: 'var(--bg, #fafafe)', padding: '10px 12px', fontSize: 13, marginBottom: 8, display: 'flex', gap: 8, alignItems: 'center' }}><span>{done}</span><button onClick={onDone} style={{ marginLeft: 'auto', border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer' }}>✕</button></div>;
+  return (
+    <div style={{ border: '1px solid var(--hairline)', borderRadius: 12, background: 'var(--bg, #fafafe)', padding: '10px 12px', marginBottom: 8 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', color: 'var(--muted)' }}>📌 Pin chart</div>
+      <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title" style={fld} />
+      <select value={target} onChange={(e) => setTarget(e.target.value)} style={fld}>
+        <option value="home">🏠 Home page</option>
+        {dashboards.map((d) => <option key={d.id} value={d.id}>{d.title}</option>)}
+      </select>
+      <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+        <button onClick={pin} disabled={busy || !title.trim()} style={{ border: 'none', borderRadius: 8, padding: '7px 14px', fontWeight: 700, fontSize: 13, cursor: busy ? 'default' : 'pointer', background: 'var(--brand)', color: '#fff' }}>{busy ? 'Pinning…' : 'Pin'}</button>
+        <button onClick={onDone} style={{ border: '1px solid var(--hairline)', borderRadius: 8, padding: '7px 14px', fontSize: 13, cursor: 'pointer', background: 'var(--card)', color: 'var(--text)' }}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
 // Citation chips — the grounding made visible. One "source" per live askData call
 // in an answer: a green dot (= real query, not invented), the measure + value, the
 // filters/scope, and a tap-to-expand card with the exact query.
-function CitationChips({ sources }) {
+function CitationChips({ sources, entityId, suiteId, canPin }) {
   const [open, setOpen] = useState(-1);
   const chip = { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 9px', borderRadius: 980, background: 'var(--card)', border: '1px solid var(--hairline)', fontSize: 11.5, color: '#3a3a3c', cursor: 'default' };
   const dot = { width: 7, height: 7, borderRadius: '50%', background: '#34c759', flex: 'none' };
@@ -302,7 +343,7 @@ function CitationChips({ sources }) {
       <div style={{ fontSize: 10, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--muted)', margin: '0 0 6px 2px' }}>Sources</div>
       {sources.map((s, i) => (
         <div key={i} style={{ marginBottom: 6 }}>
-          {s.chartType && s.rows && s.rows.length > 1 && <OwlChart source={s} />}
+          {s.chartType && s.rows && s.rows.length > 1 && <OwlChart source={s} entityId={entityId} suiteId={suiteId} canPin={canPin} />}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
             <button onClick={() => setOpen(open === i ? -1 : i)} style={{ ...chip, cursor: 'pointer' }} aria-expanded={open === i}>
               <span style={dot} />
