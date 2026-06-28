@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { api } from '../lib/api.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import ChartTile from './tiles/ChartTile.jsx';
+import ShareMenu from './ShareMenu.jsx';
 
 // The native, Claude-powered agentic Owl — the conversational "pull" door onto the
 // askData tool (server/owlChat.js). Drops into the same drawer slot as the Inventive
@@ -117,6 +118,13 @@ export default function OwlChat({ open, onClose, suiteId, entityId, clients = []
         <strong style={{ fontSize: 14.5, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Ask the Owl</strong>
         <button onClick={newChat} title="New chat" aria-label="New chat" style={{ ...hdrBtn, fontSize: 15, padding: '2px 5px' }}>✎</button>
         <button onClick={openHistory} title="Past chats" aria-label="Past chats" style={{ ...hdrBtn, fontSize: 15, padding: '2px 5px' }}>🕘</button>
+        {messages.some((m) => m.text) && (
+          <ShareMenu
+            heading={`Owl chat${messages.find((m) => m.role === 'user' && m.text) ? ' — ' + messages.find((m) => m.role === 'user' && m.text).text.slice(0, 60) : ''}`}
+            text={messages.filter((m) => m.text).map((m) => `${m.role === 'user' ? 'Q' : 'Owl'}: ${m.text}`).join('\n\n')}
+            isMobile={isMobile} variant="tile" title="Share this chat"
+          />
+        )}
         <span style={{ flex: 1 }} />
         <div style={{ display: 'inline-flex', gap: 2, marginRight: 2 }} title="Text size">
           <button onClick={() => bumpZoom(-0.1)} aria-label="Smaller" style={{ ...hdrBtn, fontSize: 11.5, fontWeight: 700, padding: '4px 6px' }}>A−</button>
