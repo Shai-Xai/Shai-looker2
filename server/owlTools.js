@@ -30,6 +30,25 @@ module.exports = function createOwlTools({ query, auth, catalogue = defaultCatal
   // can phrase "I can't answer that from your data" instead of erroring out.
   const refuse = (reason, message) => ({ ok: false, reason, message });
 
+  // Apply the EVENT scope a suite pins (its locked filters). applyScope only forces
+  // the ORGANISER (the security boundary); the suite's event lock is what makes a
+  // selected event like "KFF 26" actually mean that event, not all the organiser's
+  // events. We only apply locks valid in THIS explore (core_events.* or a curated
+  // dimension) so we never inject a field Looker would reject, and never touch the
+  // organiser field (left to applyScope). ANY_VALUE / blank locks are skipped.
+  function applySuiteEventLocks(filters, suiteId) {
+    if (!suiteId || !auth || !auth.lockedFiltersForSuite) return;
+    let locks; try { locks = auth.lockedFiltersForSuite(suiteId) || {}; } catch { return; }
+    for (const [key, val] of Object.entries(locks)) {
+      if (val == null || val === '' || val === ' __ANY_VALUE__') continue;
+      const field = key.includes('.') ? key : (auth.filterNameToField ? auth.filterNameToField(key) : null);
+      if (!field || field === ORG) continue; // organiser handled by applyScope
+      if ((/^core_events\./.test(field) || dimByName.has(field)) && filters[field] == null) {
+        filters[field] = String(val);
+      }
+    }
+  }
+
   // ── askData ──────────────────────────────────────────────────────────────
   // args: { measure, dimensions?: string[], filters?: {field: value},
   //         dateRange?: <Looker date expr>, limit?: number }
@@ -68,7 +87,11 @@ module.exports = function createOwlTools({ query, auth, catalogue = defaultCatal
       limit: Math.min(Math.max(Number(args.limit) || 500, 1), 5000),
     };
 
-    // 3) THE SCOPE GATE — bind to the organiser(s) this user can ACCESS; never run
+    // 3) Apply the suite's EVENT lock (the event the user picked in the Owl) — the
+    //    organiser scope below is forced separately.
+    applySuiteEventLocks(body.filters, suiteId);
+
+    // 4) THE SCOPE GATE — bind to the organiser(s) this user can ACCESS; never run
     //    platform-wide. Event context (suiteId) narrows to that event's organiser
     //    (same boundary as every tile, ceiling not override). If applyScope leaves
     //    it unscoped (an admin with no event context), bind to the user's accessible
@@ -87,7 +110,7 @@ module.exports = function createOwlTools({ query, auth, catalogue = defaultCatal
       }
     }
 
-    // 4) Run + return the grounding trail. /queries/run/json → array of row objects.
+    // 5) Run + return the grounding trail. /queries/run/json → array of row objects.
     const rows = await query.runLookerQuery('/queries/run/json', body);
     return {
       ok: true,

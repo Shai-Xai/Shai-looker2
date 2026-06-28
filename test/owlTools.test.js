@@ -107,6 +107,16 @@ test('an admin IS scoped when given an accessible client (entityId)', async () =
   assert.equal(res.queryBody.filters[h.ORG_FIELD], 'Big-Promoter-Org'); // bound to that organiser
 });
 
+test('selecting an event applies the suite event lock (not just the organiser)', async () => {
+  const ent = h.makeEntity('Ultra SA', 'Ultra South Africa');
+  const suite = h.db.createSuite({ entityId: ent.id, name: 'KFF 26', lockedFilters: { 'core_events.name': 'Kappa FuturFestival 2026' } });
+  const user = h.makeClient('owl-evt@client.test', [ent.id]);
+  const res = await tools().askData.run({ measure: M0 }, ctx(user, suite.id));
+  assert.equal(res.ok, true);
+  assert.equal(res.queryBody.filters['core_events.name'], 'Kappa FuturFestival 2026'); // event lock applied
+  assert.equal(res.queryBody.filters[h.ORG_FIELD], 'Ultra South Africa'); // organiser still forced
+});
+
 test('off-catalogue measure is refused before Looker is touched', async () => {
   const user = h.makeClient('owl-f@client.test', [h.makeEntity('A', 'A-org').id]);
   const res = await tools().askData.run({ measure: 'core_users.email' }, ctx(user));
