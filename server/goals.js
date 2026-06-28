@@ -203,6 +203,9 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
   // last-year KPI), remembered so reopening restores it and the card re-reads it live.
   // { dashboardId, tileId }. Distinct from baseline_event_id (a past event) / a typed value.
   try { sql.exec("ALTER TABLE goals ADD COLUMN baseline_ref TEXT NOT NULL DEFAULT '{}'"); } catch { /* column already present */ }
+  // Tag: an operational area for the goal (Ticketing, Cashless, Access control…), so the
+  // Goals page can group goals into one row per tag. Blank = untagged.
+  try { sql.exec("ALTER TABLE goals ADD COLUMN tag TEXT NOT NULL DEFAULT ''"); } catch { /* column already present */ }
 
   const parseJson = (s, fb) => { try { return JSON.parse(s); } catch { return fb; } };
   function rowToGoal(r) {
@@ -212,7 +215,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
       name: r.name, metricKey: r.metric_key, source: r.source, metricRef: parseJson(r.metric_ref, {}),
       targetValue: r.target_value, targetMax: r.target_max == null ? null : r.target_max, unit: r.unit, direction: r.direction, display: r.display || 'bar', byDate: r.by_date,
       isNorthStar: !!r.is_north_star, position: r.position, milestones: parseJson(r.milestones, []),
-      parts: parseJson(r.parts, []),
+      parts: parseJson(r.parts, []), tag: r.tag || '',
       curveRef: parseJson(r.curve_ref, null), startDate: r.start_date || '',
       baselineEventId: r.baseline_event_id, baselineValue: r.baseline_value, baselineSource: r.baseline_source,
       baselineRef: parseJson(r.baseline_ref, null),
@@ -261,6 +264,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
         ...(p.lastRef && p.lastRef.tileId ? { lastRef: { dashboardId: String(p.lastRef.dashboardId || '').slice(0, 64), tileId: String(p.lastRef.tileId || '').slice(0, 64), dashboardName: String(p.lastRef.dashboardName || '').slice(0, 120), tileName: String(p.lastRef.tileName || '').slice(0, 120) } } : {}),
       })).filter((p) => p.label).slice(0, 12) : [],
       unit: String(b.unit || '').slice(0, 16),
+      tag: String(b.tag || '').trim().slice(0, 40),
       direction: DIRECTIONS.includes(b.direction) ? b.direction : 'at_least',
       display: ['bar', 'dial', 'ring'].includes(b.display) ? b.display : 'bar',
       byDate: String(b.byDate || '').slice(0, 32),
@@ -695,11 +699,11 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
     const ownerRef = personal ? req.user.email : req.params.suiteId;
     const existing = sql.prepare("SELECT COUNT(*) n FROM goals WHERE suite_id=? AND scope='event' AND status='active'").get(req.params.suiteId).n;
     sql.prepare(`INSERT INTO goals (id, suite_id, entity_id, scope, owner_ref, name, metric_key, source, metric_ref,
-        target_value, target_max, parts, unit, direction, display, by_date, start_date, is_north_star, position, baseline_event_id, baseline_value, baseline_source, baseline_ref,
+        target_value, target_max, parts, unit, tag, direction, display, by_date, start_date, is_north_star, position, baseline_event_id, baseline_value, baseline_source, baseline_ref,
         milestones, curve_ref, visibility, rolls_up_to, status, created_by, created_at, updated_by, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
       id, req.params.suiteId, su.entityId, c.scope, ownerRef, c.name, c.metricKey, c.source, JSON.stringify(c.metricRef),
-      c.targetValue, c.targetMax, JSON.stringify(c.parts), c.unit, c.direction, c.display, c.byDate, c.startDate, 0, c.position, c.baselineEventId, c.baselineValue, c.baselineSource, JSON.stringify(c.baselineRef),
+      c.targetValue, c.targetMax, JSON.stringify(c.parts), c.unit, c.tag, c.direction, c.display, c.byDate, c.startDate, 0, c.position, c.baselineEventId, c.baselineValue, c.baselineSource, JSON.stringify(c.baselineRef),
       JSON.stringify(c.milestones), JSON.stringify(c.curveRef), personal ? c.visibility : 'team', personal ? c.rollsUpTo : '', 'active', req.user.email, ts, req.user.email, ts);
     // Only EVENT goals get a North Star; the first becomes it, or honour a request.
     if (!personal && (existing === 0 || req.body?.isNorthStar)) setNorthStar(req.params.suiteId, id);
@@ -717,9 +721,9 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
     for (const [field, oldV, newV] of [['name', g.name, c.name], ['target_value', g.targetValue, c.targetValue], ['by_date', g.byDate, c.byDate], ['direction', g.direction, c.direction]]) {
       if (String(oldV) !== String(newV)) audit(g.id, field, oldV, newV, req.user.email);
     }
-    sql.prepare(`UPDATE goals SET name=?, metric_key=?, source=?, metric_ref=?, target_value=?, target_max=?, parts=?, unit=?, direction=?,
+    sql.prepare(`UPDATE goals SET name=?, metric_key=?, source=?, metric_ref=?, target_value=?, target_max=?, parts=?, unit=?, tag=?, direction=?,
         display=?, by_date=?, start_date=?, position=?, baseline_event_id=?, baseline_value=?, baseline_source=?, baseline_ref=?, milestones=?, curve_ref=?, visibility=?, rolls_up_to=?, updated_by=?, updated_at=? WHERE id=?`).run(
-      c.name, c.metricKey, c.source, JSON.stringify(c.metricRef), c.targetValue, c.targetMax, JSON.stringify(c.parts), c.unit, c.direction,
+      c.name, c.metricKey, c.source, JSON.stringify(c.metricRef), c.targetValue, c.targetMax, JSON.stringify(c.parts), c.unit, c.tag, c.direction,
       c.display, c.byDate, c.startDate, c.position, c.baselineEventId, c.baselineValue, c.baselineSource, JSON.stringify(c.baselineRef), JSON.stringify(c.milestones),
       JSON.stringify(c.curveRef), personal ? c.visibility : 'team', personal ? c.rollsUpTo : '', req.user.email, now(), g.id);
     if (req.body?.isNorthStar && !g.isNorthStar) { setNorthStar(g.suiteId, g.id); audit(g.id, 'is_north_star', false, true, req.user.email); }
