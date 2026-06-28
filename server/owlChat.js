@@ -191,6 +191,12 @@ function mount(app, { db, auth, insights, owlTools, anthropicKeyForSuite, anthro
       `Today's date is ${today}. For "upcoming"/"future"/"past"/"this year" questions, compare against today — e.g. filter Event Date (core_events.start_date) with a Looker date expression such as "after ${today}" for future events or "before ${today}" for past ones. (Event Date is the date of the event; Purchased Date is when a ticket was bought.)`,
     ];
     if (scopeLabel) parts.push(`All data in this conversation is scoped to: ${scopeLabel}. Make clear in your answer which client/event the numbers are for — lead your answer with "For ${scopeLabel}:" (or naturally name it). Never imply the figures cover other clients or events.`);
+    // Surface the curated catalogue's field meanings + rules to the model — it only
+    // sees raw field names in the tool enum otherwise, so labels/synonyms/notes
+    // (e.g. the add-on split rule) must be passed in here.
+    const gloss = [...(cat.measures || []), ...(cat.dimensions || [])].map((f) => `${f.name} = ${f.label}`).join('; ');
+    if (gloss) parts.push(`Field guide (name = meaning): ${gloss}.`);
+    if ((cat.notes || []).length) parts.push(`Rules:\n- ${cat.notes.join('\n- ')}`);
     const instructions = parts.join('\n\n');
 
     // Load or create the thread (must belong to this user).

@@ -61,6 +61,9 @@ module.exports = {
     { name: 'core_ticket_types.reporting_category',label: 'Reporting Category', group: 'Ticket', type: 'string', filter: true },
     { name: 'core_tickets.status',                 label: 'Ticket Status',  group: 'Ticket', type: 'string', filter: true, aka: ['status', 'valid', 'refunded'] },
     { name: 'core_tickets.is_complimentary',       label: 'Is Complimentary', group: 'Ticket', type: 'yesno', filter: true, aka: ['comp', 'free'] },
+    // Add-on flag: "Yes" = an extra product (drink pack, locker, shuttle, WC…), "No"
+    // = a genuine entry ticket. The reliable ticket-vs-addon split (matches add_on_type).
+    { name: 'core_ticket_types.is_addonable',      label: 'Is Add-on (Yes = extra/add-on)', group: 'Ticket', type: 'yesno', filter: true, aka: ['add-on', 'addon', 'extra', 'is add-on', 'drink pack', 'locker'] },
 
     // Purchase timing (relative — sell curves + "N days before event")
     { name: 'core_tickets.purchased_date',         label: 'Purchased Date', group: 'Timing', type: 'date',   filter: true, aka: ['purchase date', 'when bought', 'sale date'] },
@@ -78,6 +81,7 @@ module.exports = {
   // ── Grounding notes for the prompt ──────────────────────────────────────────
   notes: [
     '"Tickets sold" = core_tickets.count (distinct active/purchased ticket records — the realistic sold number). core_tickets.sold_tickets EXCLUDES complimentary tickets; use only when asked for paid/net sold.',
+    'IMPORTANT — core_tickets.count and revenue INCLUDE add-on products (drink packs, lockers, shuttles, WC, etc.). When asked for tickets sold or revenue, ALWAYS split genuine entry tickets from add-ons: group by or filter core_ticket_types.is_addonable ("No" = entry ticket, "Yes" = add-on) and report them as SEPARATE lines (e.g. "48,615 tickets sold, plus 7,728 add-ons"). Treat the headline "tickets sold" as entry tickets (is_addonable = No) unless the user explicitly asks for the combined total.',
     '"Revenue" = core_tickets.sum_revenue_decimal (ZAR, gross). Fees and cost are separate measures.',
     'This explore is ACTIVE/PURCHASED tickets — refunded/cancelled tickets are excluded, and fully sponsored/free events read 0. Say so if a total looks unexpectedly low for a free event.',
     '"City" is ambiguous — default to Event City (core_sa_city_location.city_name); use Buyer City only when the question is about where customers are from.',
