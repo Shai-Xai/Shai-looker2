@@ -16,6 +16,7 @@ const looker = require('../server/looker');
 const queryEngine = require('../server/query')({ looker, auth: h.auth });
 const createOwlTools = require('../server/owlTools');
 const catalogue = require('../server/owlCatalogueSeed');
+const M0 = catalogue.measures[0].name; // default 'tickets sold' measure
 const { runOwlLoop, owlAllowed } = require('../server/owlChat');
 
 before(() => { h.seedOrganiserDashboard({ model: catalogue.model, explore: catalogue.explore }); });
@@ -24,7 +25,7 @@ let lookerCalls = 0;
 const origRequest = looker.lookerRequest;
 beforeEach(() => {
   lookerCalls = 0;
-  looker.lookerRequest = async () => { lookerCalls++; return [{ 'all_tickets.sold_tickets': 42 }]; };
+  looker.lookerRequest = async () => { lookerCalls++; return [{ value: 42 }]; };
 });
 afterEach(() => { looker.lookerRequest = origRequest; });
 
@@ -50,7 +51,7 @@ test('a tool_use runs under scope, then the model answers from the result', asyn
   const ent = h.makeEntity('Ultra SA', 'Ultra South Africa');
   const user = h.makeClient('chat-a@client.test', [ent.id]);
   const { llmTurn } = fakeLlm([
-    { content: [{ type: 'tool_use', id: 'tu1', name: 'askData', input: { measure: 'all_tickets.sold_tickets' } }] },
+    { content: [{ type: 'tool_use', id: 'tu1', name: 'askData', input: { measure: M0 } }] },
     { content: [{ type: 'text', text: 'You sold 42 tickets.' }] },
   ]);
   let streamed = '';
@@ -74,7 +75,7 @@ test('a scope failure reaches the model as ok:false (no fabricated number)', asy
   const user = h.makeClient('chat-b@client.test', [ent.id]);
   let toolResultSeen = null;
   const responses = [
-    { content: [{ type: 'tool_use', id: 'tu1', name: 'askData', input: { measure: 'all_tickets.sold_tickets' } }] },
+    { content: [{ type: 'tool_use', id: 'tu1', name: 'askData', input: { measure: M0 } }] },
     { content: [{ type: 'text', text: "I can't answer that — no data scope is set." }] },
   ];
   // Spy on what the model is fed after the tool runs (the 2nd turn's last message).

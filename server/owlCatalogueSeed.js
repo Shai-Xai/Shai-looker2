@@ -1,51 +1,50 @@
-// ─── Owl data catalogue — curated DEFAULT seed for the "All Tickets" explore ───
-// The agentic Owl's `askData` tool must NOT see the raw explore: combined/all_tickets
-// exposes ~692 visible dimensions + 63 measures (plus 371 hidden) — far too many to
-// ground an accurate answer. This seed is the hand-curated, high-value slice the Owl
-// is allowed to query, derived from the live Looker metadata (platform45,
-// model `combined`, explore `all_tickets`) on 2026-06-28.
+// ─── Owl data catalogue — curated DEFAULT seed for ticket sales ────────────────
+// The agentic Owl's `askData` tool queries a CURATED slice of one explore (never
+// the raw firehose). Source: platform45, model `combined`, explore
+// `tickets_purchased` ("Active Tickets"), verified live 2026-06-28.
 //
-// Shape is consumed by server/dataCatalogue.js (M1) and stored in owl_catalogue as
-// the `global` default; a Howler admin can widen/narrow per client. Curation quality
-// IS the accuracy ceiling (see docs/specs/AGENTIC_OWL_P1_PLAN.md §6, §11.2).
+// WHY tickets_purchased / core_tickets (not all_tickets): the `all_tickets` explore
+// counts EVERY ticket state (refunded, cancelled, transferred, historical timeline
+// rows) and massively over-counts — e.g. Kappa FuturFestival 2026 reads 202,684
+// there vs 56,221 active/purchased tickets here. `core_tickets.*` is the realistic
+// "sold" grain. Caveat: this explore is PURCHASED/active tickets, so fully
+// sponsored/free events read 0 (they were never "purchased").
 //
-// DELIBERATELY EXCLUDED: per-person PII/contact fields (email, cellphone, id_number,
+// Shape is consumed by server/dataCatalogue.js + server/owlTools.js and stored in
+// owl_catalogue as the `global` default; an admin can widen/narrow per client.
+// Curation quality IS the accuracy ceiling (docs/specs/AGENTIC_OWL_P1_PLAN.md).
+//
+// DELIBERATELY EXCLUDED: per-person PII/contact fields (email, cellphone, id,
 // passport, street, date_of_birth, sign-in timestamps). askData answers AGGREGATE
-// questions; it never needs to read a buyer's contact row. Audience-building from
-// contact data stays in the governed segment resolver, not here.
+// questions; audience-building from contact data stays in the segment resolver.
 
 module.exports = {
   model: 'combined',
-  explore: 'all_tickets',
-  label: 'All Tickets',
+  explore: 'tickets_purchased',
+  label: 'Active Tickets',
 
-  // The default date grain for "last week / this month / since launch" questions:
-  // when the ticket was BOUGHT (the sell timeline). Event date is separate.
-  dateDimension: 'all_tickets.purchased_date',
+  // Default date grain for "last week / this month / since launch": when the ticket
+  // was BOUGHT (the sell timeline). Event date is separate.
+  dateDimension: 'core_tickets.purchased_date',
   eventDateDimension: 'core_events.start_date',
 
-  // ── Measures (the numbers the Owl can compute) ──────────────────────────────
-  // `default: true` = headline metrics offered first. `aka` = natural-language
-  // synonyms the Owl maps a question onto.
+  // ── Measures ────────────────────────────────────────────────────────────────
+  // "Tickets sold" = core_tickets.count (distinct active ticket records). NB the
+  // explore's base ticket view is `core_tickets`, so this is THE ticket count.
   measures: [
-    // "Tickets sold" = the distinct ticket-record count. NB: this explore aliases
-    // the core tickets table as `all_tickets`, so all_tickets.count IS the core
-    // tickets count (there is no separate core_tickets.count field here).
-    { name: 'all_tickets.count',                 label: 'Tickets Sold',         type: 'count_distinct', default: true,  aka: ['tickets sold', 'sold', 'sales volume', 'how many tickets', 'number of tickets', 'ticket count'] },
-    { name: 'all_tickets.sum_revenue_decimal',   label: 'Total Revenue',        type: 'sum_distinct',   default: true,  unit: 'ZAR', aka: ['revenue', 'sales', 'gross', 'money', 'turnover'] },
-    { name: 'all_tickets.Average_ticket_price',  label: 'Average Ticket Price', type: 'average',        default: true,  unit: 'ZAR', aka: ['average price', 'avg ticket price', 'price per ticket'] },
-    { name: 'all_tickets.sold_tickets',          label: 'Tickets Sold (excl. comps)', type: 'sum',      default: false, aka: ['net sold', 'paid tickets', 'sold excluding complimentary'] },
-    { name: 'all_tickets.issued_tickets',        label: 'Issued Tickets',       type: 'count_distinct', default: false, aka: ['issued'] },
-    { name: 'all_tickets.complimentary_tickets', label: 'Complimentary Tickets',type: 'sum',            default: false, aka: ['comps', 'complimentary', 'free tickets'] },
-    { name: 'all_tickets.sum_fee_decimal',       label: 'Total Ticket Fee',     type: 'sum_distinct',   default: false, unit: 'ZAR', aka: ['fees', 'booking fees'] },
-    { name: 'all_tickets.sum_cost_decimal',      label: 'Ticket Cost Sum',      type: 'sum_distinct',   default: false, unit: 'ZAR', aka: ['cost', 'face value'] },
+    { name: 'core_tickets.count',                label: 'Tickets Sold',         type: 'count_distinct', default: true,  aka: ['tickets sold', 'sold', 'sales volume', 'how many tickets', 'number of tickets', 'ticket count'] },
+    { name: 'core_tickets.sum_revenue_decimal',  label: 'Total Revenue',        type: 'sum_distinct',   default: true,  unit: 'ZAR', aka: ['revenue', 'sales', 'gross', 'money', 'turnover'] },
+    { name: 'core_tickets.Average_ticket_price', label: 'Average Ticket Price', type: 'average_distinct', default: true, unit: 'ZAR', aka: ['average price', 'avg ticket price', 'price per ticket'] },
+    { name: 'core_tickets.sold_tickets',         label: 'Tickets Sold (excl. comps)', type: 'sum_distinct', default: false, aka: ['net sold', 'paid tickets', 'sold excluding complimentary'] },
+    { name: 'core_tickets.issued_tickets',       label: 'Issued Tickets',       type: 'count_distinct', default: false, aka: ['issued'] },
+    { name: 'core_tickets.complimentary_tickets',label: 'Complimentary Tickets',type: 'sum_distinct',   default: false, aka: ['comps', 'complimentary', 'free tickets'] },
+    { name: 'core_tickets.sum_fee_decimal',      label: 'Total Ticket Fee',     type: 'sum_distinct',   default: false, unit: 'ZAR', aka: ['fees', 'booking fees'] },
+    { name: 'core_tickets.sum_cost_decimal',     label: 'Ticket Cost Sum',      type: 'sum_distinct',   default: false, unit: 'ZAR', aka: ['cost', 'face value'] },
     { name: 'core_ticket_transactions_combined.sold',      label: 'Sold (inventory)', type: 'sum',     default: false, aka: ['sold against allocation'] },
     { name: 'core_ticket_transactions_combined.remaining', label: 'Remaining',        type: 'sum',     default: false, aka: ['remaining', 'left', 'inventory left', 'still available', 'unsold'] },
   ],
 
-  // ── Dimensions (how the Owl can slice + filter) ─────────────────────────────
-  // `filter: true` = safe to filter on (and to offer values for). `group` organises
-  // the catalogue for the curation UI + the prompt.
+  // ── Dimensions (slice + filter) ─────────────────────────────────────────────
   dimensions: [
     // Event
     { name: 'core_events.name',                    label: 'Event Name',     group: 'Event',  type: 'string', filter: true, aka: ['event', 'which event'] },
@@ -60,13 +59,13 @@ module.exports = {
     { name: 'core_ticket_types.name',              label: 'Ticket Type',    group: 'Ticket', type: 'string', filter: true, aka: ['ticket type', 'vip', 'ga', 'general admission', 'tier'] },
     { name: 'core_ticket_categories.name',         label: 'Ticket Category',group: 'Ticket', type: 'string', filter: true, aka: ['category'] },
     { name: 'core_ticket_types.reporting_category',label: 'Reporting Category', group: 'Ticket', type: 'string', filter: true },
-    { name: 'all_tickets.status',                  label: 'Ticket Status',  group: 'Ticket', type: 'string', filter: true, aka: ['status', 'valid', 'refunded'] },
-    { name: 'all_tickets.is_complimentary',        label: 'Is Complimentary', group: 'Ticket', type: 'yesno', filter: true, aka: ['comp', 'free'] },
+    { name: 'core_tickets.status',                 label: 'Ticket Status',  group: 'Ticket', type: 'string', filter: true, aka: ['status', 'valid', 'refunded'] },
+    { name: 'core_tickets.is_complimentary',       label: 'Is Complimentary', group: 'Ticket', type: 'yesno', filter: true, aka: ['comp', 'free'] },
 
-    // Purchase timing (relative — for sell curves + "N days before event")
-    { name: 'all_tickets.purchased_date',          label: 'Purchased Date', group: 'Timing', type: 'date',   filter: true, aka: ['purchase date', 'when bought', 'sale date'] },
-    { name: 'all_tickets.days_before_event',       label: 'Days Before Event', group: 'Timing', type: 'number', filter: true, aka: ['days before event', 'days out', 'lead time'] },
-    { name: 'all_tickets.weeks_before_event',      label: 'Weeks Before Event', group: 'Timing', type: 'number', filter: true },
+    // Purchase timing (relative — sell curves + "N days before event")
+    { name: 'core_tickets.purchased_date',         label: 'Purchased Date', group: 'Timing', type: 'date',   filter: true, aka: ['purchase date', 'when bought', 'sale date'] },
+    { name: 'core_tickets.days_before_event',      label: 'Days Before Event', group: 'Timing', type: 'number', filter: true, aka: ['days before event', 'days out', 'lead time'] },
+    { name: 'core_tickets.weeks_before_event',     label: 'Weeks Before Event', group: 'Timing', type: 'number', filter: true },
 
     // Buyer (aggregate demographics only — NO contact PII)
     { name: 'core_purchasers.city',                label: 'Buyer City',     group: 'Buyer',  type: 'string', filter: true, aka: ['buyer city', 'customer city'] },
@@ -76,14 +75,13 @@ module.exports = {
     { name: 'core_purchasers.country',             label: 'Buyer Country',  group: 'Buyer',  type: 'string', filter: true },
   ],
 
-  // ── Synonym shortcuts (word → field) for the prompt's grounding ─────────────
-  // Disambiguation the Owl should respect (e.g. "city" is ambiguous: event vs buyer).
+  // ── Grounding notes for the prompt ──────────────────────────────────────────
   notes: [
-    '"Tickets sold" = all_tickets.count (distinct ticket records — the core tickets count; this explore aliases core_tickets as all_tickets). all_tickets.sold_tickets EXCLUDES complimentary tickets — use it only when explicitly asked for paid/net sold.',
-    '"Revenue" = all_tickets.sum_revenue_decimal (ZAR, gross). Fees and cost are separate measures.',
+    '"Tickets sold" = core_tickets.count (distinct active/purchased ticket records — the realistic sold number). core_tickets.sold_tickets EXCLUDES complimentary tickets; use only when asked for paid/net sold.',
+    '"Revenue" = core_tickets.sum_revenue_decimal (ZAR, gross). Fees and cost are separate measures.',
+    'This explore is ACTIVE/PURCHASED tickets — refunded/cancelled tickets are excluded, and fully sponsored/free events read 0. Say so if a total looks unexpectedly low for a free event.',
     '"City" is ambiguous — default to Event City (core_sa_city_location.city_name); use Buyer City only when the question is about where customers are from.',
-    '"Remaining"/"sold out" use core_ticket_transactions_combined.remaining.',
-    'All amounts are South African Rand (ZAR).',
+    '"Remaining"/"sold out" use core_ticket_transactions_combined.remaining. All amounts are South African Rand (ZAR).',
   ],
 
   // What is intentionally NOT queryable here (privacy + noise control).

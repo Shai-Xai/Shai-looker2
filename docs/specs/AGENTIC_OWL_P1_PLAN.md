@@ -181,8 +181,14 @@ POST /api/owl/chat  (auth.requireAuth, entity-scoped)
   is M1's pre-seed. Remaining M1 work: `dataCatalogue.js` loads the seed into
   `owl_catalogue` as the `global` default + the admin surface to widen/narrow it,
   and a runtime path that can re-pull `getExploreFields('combined','all_tickets')`
-  (`looker.js:228`) to refresh candidates. Demo: a curated "All Tickets" field list
-  an admin can edit.
+  (`looker.js:228`) to refresh candidates. Demo: a curated field list an admin can edit.
+  **Correction (2026-06-28, after live dogfood):** re-pointed the catalogue from
+  `all_tickets` to the **`tickets_purchased` ("Active Tickets") explore** using
+  `core_tickets.*`. The `all_tickets` explore counts every ticket state (refunded/
+  cancelled/transferred/historical) and over-counts ~3.6× (Kappa FuturFestival
+  2026: 202,684 vs **56,221** active). `core_tickets.count` is the realistic "sold"
+  grain. Caveat: this explore is purchased/active tickets, so fully sponsored/free
+  events read 0 — captured in the catalogue's grounding notes.
 - **M2 — `askData` (1a) + scope gate + tests. ✅ core built (2026-06-28).**
   `server/owlTools.js` — the `askData` tool factory: validates against the curated
   catalogue → builds the Looker query body → **`applyScope` gate (fails closed)** →

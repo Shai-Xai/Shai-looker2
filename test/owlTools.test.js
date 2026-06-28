@@ -17,6 +17,7 @@ const looker = require('../server/looker');
 const queryEngine = require('../server/query')({ looker, auth: h.auth });
 const createOwlTools = require('../server/owlTools');
 const catalogue = require('../server/owlCatalogueSeed');
+const M0 = catalogue.measures[0].name; // the default "tickets sold" measure
 
 // The Owl catalogue queries combined/all_tickets; seed a shared org-scoped
 // dashboard on that explore so scopeForQuery can resolve the organiser field
@@ -40,7 +41,7 @@ const ctx = (user, suiteId) => ({ user, suiteId });
 test('askData forces the client\'s organiser scope onto the query', async () => {
   const ent = h.makeEntity('Ultra SA', 'Ultra South Africa');
   const user = h.makeClient('owl-a@client.test', [ent.id]);
-  const res = await tools().askData.run({ measure: 'all_tickets.sold_tickets' }, ctx(user));
+  const res = await tools().askData.run({ measure: M0 }, ctx(user));
   assert.equal(res.ok, true);
   assert.equal(res.queryBody.filters[h.ORG_FIELD], 'Ultra South Africa');
 });
@@ -52,7 +53,7 @@ test('a client cannot widen scope via a filter on the organiser field', async ()
   // applyScope is a CEILING: a value outside the client's allowed organiser is
   // clamped back to their own. They can never widen to another organiser.
   const res = await tools().askData.run(
-    { measure: 'all_tickets.sold_tickets', filters: { [h.ORG_FIELD]: 'Rocking the Daisies' } },
+    { measure: M0, filters: { [h.ORG_FIELD]: 'Rocking the Daisies' } },
     ctx(user),
   );
   assert.equal(res.ok, true);
@@ -63,7 +64,7 @@ test('a client cannot widen scope via a filter on the organiser field', async ()
 test('askData FAILS CLOSED when the client has no organiser configured', async () => {
   const ent = h.makeEntity('Misconfigured Co', null); // no organiser lock
   const user = h.makeClient('owl-c@client.test', [ent.id]);
-  const res = await tools().askData.run({ measure: 'all_tickets.sold_tickets' }, ctx(user));
+  const res = await tools().askData.run({ measure: M0 }, ctx(user));
   assert.equal(res.ok, false);
   assert.equal(res.reason, 'no_scope');
   assert.equal(lookerCalls, 0); // refused BEFORE any query ran
@@ -72,8 +73,8 @@ test('askData FAILS CLOSED when the client has no organiser configured', async (
 test('two clients resolve to different forced scopes', async () => {
   const a = h.makeClient('owl-d1@client.test', [h.makeEntity('A', 'A-org').id]);
   const b = h.makeClient('owl-d2@client.test', [h.makeEntity('B', 'B-org').id]);
-  const bodyA = (await tools().askData.run({ measure: 'all_tickets.sold_tickets' }, ctx(a))).queryBody;
-  const bodyB = (await tools().askData.run({ measure: 'all_tickets.sold_tickets' }, ctx(b))).queryBody;
+  const bodyA = (await tools().askData.run({ measure: M0 }, ctx(a))).queryBody;
+  const bodyB = (await tools().askData.run({ measure: M0 }, ctx(b))).queryBody;
   assert.equal(bodyA.filters[h.ORG_FIELD], 'A-org');
   assert.equal(bodyB.filters[h.ORG_FIELD], 'B-org');
   assert.notEqual(bodyA.filters[h.ORG_FIELD], bodyB.filters[h.ORG_FIELD]);
@@ -84,7 +85,7 @@ test('a client cannot view through another client\'s suite (fails closed)', asyn
   const entB = h.makeEntity('B', 'B-org');
   const suiteB = h.db.createSuite({ entityId: entB.id, name: 'B Suite' });
   const userA = h.makeClient('owl-e@client.test', [entA.id]);
-  const res = await tools().askData.run({ measure: 'all_tickets.sold_tickets' }, ctx(userA, suiteB.id));
+  const res = await tools().askData.run({ measure: M0 }, ctx(userA, suiteB.id));
   assert.equal(res.ok, false);
   assert.equal(res.reason, 'no_scope');
   assert.equal(lookerCalls, 0);
@@ -102,12 +103,12 @@ test('a valid filter on a curated dimension is passed through under scope', asyn
   const ent = h.makeEntity('Ultra SA', 'Ultra South Africa');
   const user = h.makeClient('owl-g@client.test', [ent.id]);
   const res = await tools().askData.run(
-    { measure: 'all_tickets.sold_tickets', dimensions: ['core_ticket_types.name'], filters: { 'core_ticket_types.name': 'VIP' }, dateRange: 'last 7 days' },
+    { measure: M0, dimensions: ['core_ticket_types.name'], filters: { 'core_ticket_types.name': 'VIP' }, dateRange: 'last 7 days' },
     ctx(user),
   );
   assert.equal(res.ok, true);
   assert.equal(res.queryBody.filters['core_ticket_types.name'], 'VIP');
   assert.equal(res.queryBody.filters[catalogue.dateDimension], 'last 7 days');
   assert.equal(res.queryBody.filters[h.ORG_FIELD], 'Ultra South Africa'); // scope still applied
-  assert.deepEqual(res.queryBody.fields, ['core_ticket_types.name', 'all_tickets.sold_tickets']);
+  assert.deepEqual(res.queryBody.fields, ['core_ticket_types.name', M0]);
 });
