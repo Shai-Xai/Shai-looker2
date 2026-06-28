@@ -461,6 +461,10 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-28** — **Mobile dashboard polish** ✅: removed the left/right **swipe-between-tabs**
+  gesture (it fought with scrolling wide tables and the page) — switch tabs by tapping the tab bar.
+  **Tables** now scroll far more smoothly on mobile (momentum scrolling, the table owns its own
+  pan, and a scroll stays inside the table instead of dragging the page), with more height to read.
 - **2026-06-28** — **Reporting currency** ✅: a per-client display currency (ZAR default), **set by
   Howler** in **Admin → the client → Settings** (and surfaced in the setup wizard's *Client* step) —
   not client self-service. It flows across every Pulse-written surface: AI insights, the home

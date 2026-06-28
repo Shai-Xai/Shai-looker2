@@ -149,7 +149,18 @@ export default function TableTile({ data, visConfig = {} }) {
 }
 
 function Scroll({ children }) {
-  return <div style={{ width: '100%', height: '100%', overflow: 'auto' }}>{children}</div>;
+  // Own the touch gesture so scrolling a wide/tall table works cleanly on mobile:
+  // momentum scrolling, the table handles its own pan (touch-action), and
+  // overscroll-contain stops a scroll at the table's edge from also dragging the
+  // page underneath it.
+  return (
+    <div style={{
+      width: '100%', height: '100%', overflow: 'auto',
+      WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y', overscrollBehavior: 'contain',
+    }}>
+      {children}
+    </div>
+  );
 }
 
 const tableStyle = { borderCollapse: 'collapse', width: '100%', fontSize: 12 };

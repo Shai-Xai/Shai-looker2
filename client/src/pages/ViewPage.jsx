@@ -206,21 +206,9 @@ export default function ViewPage() {
     swipeDir = curIdx > lastIdxRef.current ? 1 : -1;
   }
   useEffect(() => { lastIdxRef.current = curIdx; }, [curIdx]);
-  const touch = useRef(null);
-  const goToTab = (delta) => {
-    if (!family || curIdx < 0) return;
-    const next = family[curIdx + delta];
-    if (next) navigate(`/suite/${suiteId}/d/${next.id}`);
-  };
-  // Touch swipe: a predominantly-horizontal flick moves to the adjacent tab.
-  const onTouchStart = (e) => { if (family && e.touches.length === 1) { const t = e.touches[0]; touch.current = { x: t.clientX, y: t.clientY, at: Date.now() }; } };
-  const onTouchEnd = (e) => {
-    if (!touch.current) return;
-    const t = e.changedTouches[0];
-    const dx = t.clientX - touch.current.x, dy = t.clientY - touch.current.y, dt = Date.now() - touch.current.at;
-    touch.current = null;
-    if (dt < 600 && Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.8) goToTab(dx < 0 ? 1 : -1);
-  };
+  // Tabs switch by tapping the tab bar (no left/right swipe gesture — it fought
+  // with scrolling wide tables and the page on mobile). The slide animation below
+  // still plays on a tab change, in the direction of travel.
   const swapClass = swipeDir > 0 ? 'tab-swap tab-swap-next' : swipeDir < 0 ? 'tab-swap tab-swap-prev' : 'tab-swap';
 
   // Full-page loader only on the very first load. When switching between
@@ -413,8 +401,6 @@ export default function ViewPage() {
             // The Owl summary docks by shifting the WHOLE app left (body.owl-docked
             // → #root padding-right), so the tiles area needs no extra padding here.
           }}
-          onTouchStart={family ? onTouchStart : undefined}
-          onTouchEnd={family ? onTouchEnd : undefined}
         >
           {/* Keyed by dashboard id so the grid animates in on each tab switch
               (sliding in the swipe/click direction); dimmed while the next

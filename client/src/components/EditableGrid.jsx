@@ -116,8 +116,11 @@ function mobileTileHeight(tile) {
   if (isMetricTile(tile)) return 120;
   if (vt.includes('bar_gauge')) return 104; // full-width, slim
   if (/looker_(column|bar|line|area|scatter|pie|donut)/.test(vt)) return 200;
-  // tables and anything else: scale loosely with the configured rows, capped.
-  return Math.min(320, Math.max(150, (tile.layout?.h ?? 6) * 20));
+  // Tables (and anything else): scale loosely with the configured rows, capped.
+  // Give tables more height on mobile so there's room to read + a bigger target
+  // to scroll within (less fighting with the page scroll).
+  const isTable = tile.type === 'table' || vt === 'looker_grid' || vt.includes('table');
+  return Math.min(isTable ? 440 : 320, Math.max(isTable ? 220 : 150, (tile.layout?.h ?? 6) * 20));
 }
 
 
