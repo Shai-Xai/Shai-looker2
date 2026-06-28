@@ -122,6 +122,7 @@ export const api = {
     else if (buf.length > emitted) onText?.(buf.slice(emitted));
     return { threadId: tid, sources };
   },
+  owlThreads: () => fetch('/api/owl/threads').then(json),
   owlThreadMessages: (id) => fetch(`/api/owl/threads/${id}/messages`).then(json),
   login: (email, password) =>
     fetch('/api/auth/login', {

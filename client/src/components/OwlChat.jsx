@@ -21,6 +21,8 @@ export default function OwlChat({ open, onClose, suiteId, entityId, clients = []
   // Scope the Owl answers for — pick a client (organiser) and optionally an event.
   const [selEntity, setSelEntity] = useState(entityId || '');
   const [selSuite, setSelSuite] = useState(suiteId || '');
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [threads, setThreads] = useState([]);
   const scrollRef = useRef(null);
   const pickDock = (m) => { localStorage.setItem('howler_owl_dock', m); setDock(m); };
   const bumpZoom = (d) => setZoom((z) => { const n = Math.min(1.3, Math.max(0.8, Math.round((z + d) * 100) / 100)); localStorage.setItem('howler_owl_zoom', String(n)); return n; });
@@ -30,6 +32,20 @@ export default function OwlChat({ open, onClose, suiteId, entityId, clients = []
   useEffect(() => { setSelSuite(suiteId || ''); }, [suiteId]);
   // Changing scope starts a fresh conversation (don't mix clients' data in a thread).
   const resetThread = () => { setMessages([]); setThreadId(null); };
+  const newChat = () => { resetThread(); setInput(''); setHistoryOpen(false); };
+  async function openHistory() {
+    if (!historyOpen) { try { const r = await api.owlThreads(); setThreads(r.threads || []); } catch { setThreads([]); } }
+    setHistoryOpen((o) => !o);
+  }
+  async function loadThread(t) {
+    try {
+      const r = await api.owlThreadMessages(t.id);
+      setMessages((r.messages || []).map((m) => ({ role: m.role === 'user' ? 'user' : 'owl', text: m.body, sources: m.sources })));
+      setThreadId(t.id);
+      setSelEntity(t.entityId || ''); setSelSuite(t.suiteId || '');
+    } catch { /* ignore */ }
+    setHistoryOpen(false);
+  }
 
   const clientEvents = events.filter((e) => e.entityId === selEntity);
   const showPicker = isAdmin || clients.length > 1;
@@ -96,6 +112,8 @@ export default function OwlChat({ open, onClose, suiteId, entityId, clients = []
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 10px 11px 14px', borderBottom: '1px solid var(--hairline)', flexShrink: 0 }}>
         <span style={{ fontSize: 16 }}>🦉</span>
         <strong style={{ fontSize: 14.5, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Ask the Owl</strong>
+        <button onClick={newChat} title="New chat" aria-label="New chat" style={{ ...hdrBtn, fontSize: 15, padding: '2px 5px' }}>✎</button>
+        <button onClick={openHistory} title="Past chats" aria-label="Past chats" style={{ ...hdrBtn, fontSize: 15, padding: '2px 5px' }}>🕘</button>
         <span style={{ flex: 1 }} />
         <div style={{ display: 'inline-flex', gap: 2, marginRight: 2 }} title="Text size">
           <button onClick={() => bumpZoom(-0.1)} aria-label="Smaller" style={{ ...hdrBtn, fontSize: 11.5, fontWeight: 700, padding: '4px 6px' }}>A−</button>
@@ -109,6 +127,19 @@ export default function OwlChat({ open, onClose, suiteId, entityId, clients = []
         )}
         <button onClick={onClose} title="Close" aria-label="Close the Owl" style={{ ...hdrBtn, fontSize: 20, padding: '2px 6px' }}>✕</button>
       </div>
+
+      {historyOpen && (
+        <div style={{ borderBottom: '1px solid var(--hairline)', maxHeight: 240, overflowY: 'auto', background: 'var(--card)', flexShrink: 0 }}>
+          <div style={{ padding: '8px 12px 4px', fontSize: 10, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--muted)' }}>Past chats</div>
+          {threads.length === 0 && <div style={{ padding: '4px 12px 10px', fontSize: 13, color: 'var(--muted)' }}>No saved chats yet.</div>}
+          {threads.map((t) => (
+            <button key={t.id} onClick={() => loadThread(t)} style={{ display: 'block', width: '100%', textAlign: 'left', border: 'none', background: t.id === threadId ? 'var(--elevated, rgba(128,128,128,0.12))' : 'transparent', cursor: 'pointer', padding: '8px 12px', fontSize: 13.5, color: 'var(--text)', borderTop: '1px solid var(--hairline)' }}>
+              <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.title || 'Chat'}</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 1 }}>{new Date(t.at).toLocaleString()}</div>
+            </button>
+          ))}
+        </div>
+      )}
 
       {showPicker && (
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', padding: '8px 12px', borderBottom: '1px solid var(--hairline)', flexShrink: 0, flexWrap: 'wrap' }}>

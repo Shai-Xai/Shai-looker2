@@ -121,6 +121,11 @@ function mount(app, { db, auth, insights, owlTools, anthropicKeyForSuite, anthro
   const getThread = sql.prepare('SELECT * FROM owl_threads WHERE id = ?');
   const insMsg = sql.prepare('INSERT INTO owl_messages (id,thread_id,role,body,tool_calls,created_at) VALUES (?,?,?,?,?,?)');
   const listMsgs = sql.prepare('SELECT * FROM owl_messages WHERE thread_id = ? ORDER BY created_at ASC');
+  // A user's recent chats, newest activity first (for the history list).
+  const listThreadsStmt = sql.prepare(
+    `SELECT t.*, (SELECT MAX(created_at) FROM owl_messages WHERE thread_id = t.id) AS last_at
+     FROM owl_threads t WHERE t.user_id = ? ORDER BY COALESCE(last_at, t.created_at) DESC LIMIT 50`,
+  );
 
   // Build the tool registry once: name → tool, plus the schemas for the model.
   const toolEntries = Object.values(owlTools).filter((t) => t && t.schema && t.run);
@@ -244,6 +249,15 @@ function mount(app, { db, auth, insights, owlTools, anthropicKeyForSuite, anthro
       if (!res.headersSent) res.status(500).json({ error: 'The Owl hit a problem answering that.' });
       else { res.write(`\n\n[error: the Owl hit a problem answering that.]`); res.end(); }
     }
+  });
+
+  // GET /api/owl/threads — the user's recent chats (for the history list).
+  app.get('/api/owl/threads', auth.requireAuth, (req, res) => {
+    if (!owlAllowed(req.user)) return res.status(403).json({ error: 'The native Owl isn\'t enabled for your account yet.' });
+    const rows = listThreadsStmt.all(req.user.id).map((t) => ({
+      id: t.id, title: t.title || 'Chat', suiteId: t.suite_id || '', entityId: t.entity_id || '', at: t.last_at || t.created_at,
+    }));
+    res.json({ threads: rows });
   });
 
   // GET /api/owl/threads/:id/messages — reload a conversation (own threads only).
