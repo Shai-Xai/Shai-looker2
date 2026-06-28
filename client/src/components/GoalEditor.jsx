@@ -35,6 +35,7 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
   const [compMode, setCompMode] = useState(goal?.parts?.some((p) => p && p.ref && p.ref.tileId) ? 'tiles' : 'breakdown'); // breakdown tile | a tile per slice
   const [unit, setUnit] = useState(goal?.unit || 'tickets');
   const [tag, setTag] = useState(goal?.tag || ''); // operational area — groups goals into rows on the Goals page
+  const [customCats, setCustomCats] = useState([]); // the client's own categories (shared with alerts)
   const [direction, setDirection] = useState(goal?.direction || 'at_least');
   const isComp = direction === 'composition';
   const [byDate, setByDate] = useState(goal?.byDate ? goal.byDate.slice(0, 10) : '');
@@ -102,6 +103,14 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
 
   // Reusable goal templates for this client.
   useEffect(() => { if (entityId) api.goalTemplates(entityId).then((r) => setTemplates(r.templates || [])).catch(() => {}); }, [entityId]);
+  // The client's own categories (shared with alerts) — merged with the presets below.
+  useEffect(() => { if (entityId) api.categories(entityId).then((r) => setCustomCats(r.categories || [])).catch(() => {}); }, [entityId]);
+  const allTags = [...new Set([...GOAL_TAGS, ...customCats])];
+  const tagIsNew = !!tag.trim() && !allTags.some((c) => c.toLowerCase() === tag.trim().toLowerCase());
+  const saveCategory = async () => {
+    const name = tag.trim(); if (!name || !entityId) return;
+    try { const r = await api.addCategory(entityId, name); setCustomCats(r.categories || []); } catch { /* ignore */ }
+  };
 
   // A tile ref carries the dashboard NAME + tile title (the key components) so a
   // template — especially a global one — re-resolves to THIS client's matching
@@ -394,11 +403,14 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Sell-through, Bar revenue, Sponsorship secured" style={inp} autoFocus />
         </Field>
 
-        <Field label="Tag (optional)" hint="Group this goal by operational area — the Goals page shows one row per tag. Pick one or type your own.">
+        <Field label="Category (optional)" hint="Group this goal by operational area — the Goals page shows one row per category. Pick one or create your own (shared with alerts).">
           <input value={tag} onChange={(e) => setTag(e.target.value)} list="goal-tag-presets" placeholder="e.g. Ticketing, Cashless, Access control" style={inp} />
           <datalist id="goal-tag-presets">
-            {GOAL_TAGS.map((t) => <option key={t} value={t} />)}
+            {allTags.map((t) => <option key={t} value={t} />)}
           </datalist>
+          {tagIsNew && (
+            <button type="button" onClick={saveCategory} style={addCatBtn}>＋ Save “{tag.trim()}” as a category</button>
+          )}
         </Field>
 
         {suites.length > 1 && (
@@ -866,6 +878,7 @@ const northRow = { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wra
 const suggestBtn = { border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--brand)', borderRadius: 980, fontSize: 11.5, fontWeight: 700, padding: '3px 10px', cursor: 'pointer' };
 const msX = { border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--muted)', borderRadius: 9, fontSize: 13, cursor: 'pointer', flexShrink: 0, width: 38 };
 const addMsBtn = { border: '1px dashed var(--hairline)', background: 'transparent', color: 'var(--brand)', borderRadius: 9, fontSize: 12.5, fontWeight: 700, padding: '7px 11px', cursor: 'pointer', width: '100%' };
+const addCatBtn = { marginTop: 7, border: '1px dashed var(--hairline)', background: 'transparent', color: 'var(--brand)', borderRadius: 9, fontSize: 12, fontWeight: 700, padding: '6px 11px', cursor: 'pointer' };
 const curveToggle = { border: 'none', background: 'transparent', color: 'var(--brand)', fontSize: 12, fontWeight: 700, padding: '8px 2px 2px', cursor: 'pointer', fontFamily: 'inherit' };
 const curveBox = { marginTop: 4, padding: '11px 12px', background: 'rgba(128,128,128,0.06)', border: '1px solid var(--hairline)', borderRadius: 10 };
 const hintRow = { marginTop: 8, fontSize: 12, color: 'var(--muted)', lineHeight: 1.4 };

@@ -454,6 +454,11 @@ export const api = {
   getMyDigestTiles: (entityId) => fetch(`/api/my/digest-tiles/${entityId}`).then(json),
   getMyDigestEvents: (entityId) => fetch(`/api/my/digest-events/${entityId}`).then(json),
 
+  // Custom categories (tags) for goals & alerts — a per-client list shared by both.
+  categories: (entityId) => fetch(`/api/my/categories/${entityId}`).then(json),
+  addCategory: (entityId, name) => fetch(`/api/my/categories/${entityId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }).then(json),
+  deleteCategory: (entityId, name) => fetch(`/api/my/categories/${entityId}/${encodeURIComponent(name)}`, { method: 'DELETE' }).then(json),
+
   // Backup / restore
   exportData: () => fetch('/api/admin/export').then((r) => r.json()),
   importData: (data) => fetch('/api/admin/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(json),

@@ -2633,7 +2633,7 @@ app.get('/api/my/digest-events/:entityId', auth.requireAuth, (req, res) => {
   if (req.user.role !== 'admin' && !(req.user.entityIds || []).includes(req.params.entityId)) return res.status(403).json({ error: 'Not allowed' });
   res.json(digestEventList(req.params.entityId));
 });
-
+require('./categories').mount(app, { db, auth }); // custom categories (tags) shared by goals + alerts
 // The SAVED tiles for a viewer — the ones marked as mattering, whether 📌 pinned
 // (shown on home) or ⭐ followed (always read by the briefing). `userId` returns
 // that viewer's own ('user') marks PLUS the client's ('entity') marks — exactly

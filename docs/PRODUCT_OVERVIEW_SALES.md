@@ -347,6 +347,8 @@ a pace read** — *ahead / on track / behind* — not just "are we there yet."
 - **Tag goals by area** — tag a goal with an operational area (**Ticketing, Cashless,
   Access control, Audience, Marketing…** or your own), and the Goals page groups them into
   **one row per tag** so a busy event reads as tidy sections instead of one long grid.
+  **Create your own categories** too — type a new one and save it; it's remembered and
+  reusable across **both goals and alerts** for that client.
 - **Drag to reorder** — arrange goal tiles on the Goals page; the order carries to the
   home dashboard.
 - **Dual-surface** — clients set their own goals; Howler can set them on a client's
@@ -387,7 +389,8 @@ client's* numbers.
   exactly what will land.
 - **Tag alerts by area** 🆕 — tag an alert with an operational area (**Ticketing, Cashless,
   Access control, Audience…** or your own); the Alerts page groups them into **one row per
-  tag**, so a long watch-list reads as tidy sections.
+  tag**, so a long watch-list reads as tidy sections. **Custom categories you create are
+  shared with goals** — make one once, use it in both.
 - **Dual-surface** — clients set their own alerts; Howler can set them on a client's
   behalf during onboarding so the first week already feels proactive.
 - **Live Pulse strip** 🧪 — a glanceable, colour-coded **beat in the top header**
@@ -467,6 +470,10 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-28** — **Custom categories** ✅: clients (and Howler on their behalf) can now
+  **create their own categories** in the goal/alert editor — type a new one, save it, and
+  it's remembered and offered thereafter. The list is **shared across goals and alerts** per
+  client, so a category created once works in both.
 - **2026-06-28** — **Alert tags** ✅: tag an alert with an operational area (Ticketing,
   Cashless, Access control, …, or a custom one); the Alerts page now groups alerts into
   **one row per tag**, mirroring the goal tags.
