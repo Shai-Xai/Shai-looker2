@@ -200,7 +200,7 @@ function fmtCell(v) {
 // Map an Owl citation source into the Looker-shaped data ChartTile renders. Bars
 // show the biggest first (rows arrive measure-desc); line charts re-sort by the
 // date dimension so time runs left→right.
-const VIS = { line: 'looker_line', bar: 'looker_column' };
+const VIS = { line: 'looker_line', bar: 'looker_column', pie: 'looker_pie' };
 function chartDataFromSource(s) {
   const dims = s.columns.filter((c) => c.kind === 'dimension');
   const meas = s.columns.filter((c) => c.kind === 'measure');
@@ -216,6 +216,38 @@ function chartDataFromSource(s) {
   };
 }
 
+// An auto-chart with a type toggle (bar / line / pie / metric). The data is already
+// here, so switching is instant + client-side — no re-query.
+function OwlChart({ source }) {
+  const [type, setType] = useState(source.chartType || 'bar');
+  const meas = source.columns.find((c) => c.kind === 'measure');
+  const dims = source.columns.filter((c) => c.kind === 'dimension');
+  const rowCount = (source.rows || []).length;
+  const canPie = dims.length === 1 && rowCount >= 2 && rowCount <= 12;
+  const opts = [{ k: 'bar', label: 'Bar' }, { k: 'line', label: 'Line' }, ...(canPie ? [{ k: 'pie', label: 'Pie' }] : []), { k: 'metric', label: 'Metric' }];
+  const seg = (active) => ({ padding: '3px 9px', fontSize: 11, fontWeight: 600, border: 'none', borderRadius: 980, cursor: 'pointer', background: active ? 'var(--brand)' : 'transparent', color: active ? '#fff' : 'var(--text)' });
+  const total = (source.rows || []).reduce((a, r) => a + (Number(r[meas?.field]) || 0), 0);
+  return (
+    <div style={{ margin: '2px 0 8px' }}>
+      <div style={{ display: 'inline-flex', gap: 2, padding: 2, background: 'var(--elevated, rgba(128,128,128,0.12))', borderRadius: 980, marginBottom: 6 }}>
+        {opts.map((o) => <button key={o.k} onClick={() => setType(o.k)} style={seg(type === o.k)}>{o.label}</button>)}
+      </div>
+      {type === 'metric'
+        ? (
+          <div style={{ border: '1px solid var(--hairline)', borderRadius: 12, background: 'var(--card)', padding: '18px 14px', textAlign: 'center' }}>
+            <div style={{ fontSize: 30, fontWeight: 800, color: 'var(--text)', fontVariantNumeric: 'tabular-nums', lineHeight: 1.1 }}>{fmtVal(total)}</div>
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>{meas?.label} · total</div>
+          </div>
+        )
+        : (
+          <div style={{ height: 200, border: '1px solid var(--hairline)', borderRadius: 12, overflow: 'hidden', background: 'var(--card)' }}>
+            <ChartTile data={chartDataFromSource({ ...source, chartType: type })} visConfig={{ type: VIS[type] || 'looker_column' }} />
+          </div>
+        )}
+    </div>
+  );
+}
+
 // Citation chips — the grounding made visible. One "source" per live askData call
 // in an answer: a green dot (= real query, not invented), the measure + value, the
 // filters/scope, and a tap-to-expand card with the exact query.
@@ -229,11 +261,7 @@ function CitationChips({ sources }) {
       <div style={{ fontSize: 10, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--muted)', margin: '0 0 6px 2px' }}>Sources</div>
       {sources.map((s, i) => (
         <div key={i} style={{ marginBottom: 6 }}>
-          {s.chartType && s.rows && s.rows.length > 1 && (
-            <div style={{ height: 200, margin: '2px 0 8px', border: '1px solid var(--hairline)', borderRadius: 12, overflow: 'hidden', background: 'var(--card)' }}>
-              <ChartTile data={chartDataFromSource(s)} visConfig={{ type: VIS[s.chartType] || 'looker_column' }} />
-            </div>
-          )}
+          {s.chartType && s.rows && s.rows.length > 1 && <OwlChart source={s} />}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
             <button onClick={() => setOpen(open === i ? -1 : i)} style={{ ...chip, cursor: 'pointer' }} aria-expanded={open === i}>
               <span style={dot} />
