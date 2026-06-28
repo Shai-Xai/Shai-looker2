@@ -183,9 +183,17 @@ POST /api/owl/chat  (auth.requireAuth, entity-scoped)
   and a runtime path that can re-pull `getExploreFields('combined','all_tickets')`
   (`looker.js:228`) to refresh candidates. Demo: a curated "All Tickets" field list
   an admin can edit.
-- **M2 — `askData` (1a) + scope gate + tests.** The tool callable in isolation
-  (a temporary debug route). Demo: bounded re-run returning scoped rows; scope
-  tests green. **This is the foundation — get it bullet-proof before the UI.**
+- **M2 — `askData` (1a) + scope gate + tests. ✅ core built (2026-06-28).**
+  `server/owlTools.js` — the `askData` tool factory: validates against the curated
+  catalogue → builds the Looker query body → **`applyScope` gate (fails closed)** →
+  `runLookerQuery` → returns grounded rows + the `queryBody` trail. Bounded to the
+  catalogue via enum'd tool schema. `test/owlTools.test.js` (7 tests, green) pins
+  the boundary against the REAL scope engine with Looker stubbed: forces the org
+  lock, clamps a widen-attempt to the ceiling, fails closed on no-scope and on
+  cross-suite access, refuses off-catalogue fields before touching Looker. Full
+  suite 172/172. **Remaining:** mount a thin authenticated route
+  (`POST /api/owl/ask` or fold into the chat loop) so it's callable end-to-end.
+  **This is the foundation — kept bullet-proof before the UI.**
 - **M3 — Chat loop + `OwlChat.jsx` behind the flag.** Wire the loop, stream to a
   native panel. Demo: ask a question in-app, get a grounded answer with citations.
 - **M4 — 1b structured query** over the catalogue (grouped/breakdown questions) +
