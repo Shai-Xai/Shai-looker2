@@ -194,8 +194,19 @@ POST /api/owl/chat  (auth.requireAuth, entity-scoped)
   suite 172/172. **Remaining:** mount a thin authenticated route
   (`POST /api/owl/ask` or fold into the chat loop) so it's callable end-to-end.
   **This is the foundation — kept bullet-proof before the UI.**
-- **M3 — Chat loop + `OwlChat.jsx` behind the flag.** Wire the loop, stream to a
-  native panel. Demo: ask a question in-app, get a grounded answer with citations.
+- **M3 — Chat loop + `OwlChat.jsx` behind the flag. 🏗️ server done (2026-06-28).**
+  `server/owlChat.js` (disposable module): `owl_threads` + `owl_messages` tables,
+  the Claude **tool-use loop** (`runOwlLoop` — pure + injectable), the streaming
+  `POST /api/owl/chat` route, and the per-turn **audit trail** stored on the owl
+  message. The `OWL_CHAT_SYSTEM` prompt lives here (self-contained module) and is
+  registered in `insights.promptRegistry()` via a lazy reference so the AI audit
+  stays complete without bloating `insights.js`. `test/owlChat.test.js` (4 tests):
+  a tool_use runs under scope then the model answers from the result; a scope
+  failure reaches the model as `ok:false` (no fabricated number); a no-tool turn
+  returns immediately; an unknown tool is handled not thrown. Full suite 176/176,
+  budgets green (prompt relocated, not bumped). **Remaining:** `OwlChat.jsx` native
+  panel + the `owlNativeChat` flag + the `ClientLayout` swap. Demo target: ask a
+  question in-app, get a grounded answer with citations.
 - **M4 — 1b structured query** over the catalogue (grouped/breakdown questions) +
   parity check vs Inventive; pick first client to A/B.
 - **M5 — Cutover loop.** Migrate clients as parity holds; once all are over, the
