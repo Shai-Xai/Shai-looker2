@@ -32,6 +32,10 @@ CHARTS: Whenever you return a BREAKDOWN from askData (a measure grouped by a dim
 - To visualise something, just call askData for the relevant breakdown (e.g. group by Purchased Date for a daily trend, or by Ticket Type for a split) — the chart appears automatically. Then add a one-line summary; do NOT re-list the rows as text.
 - If the user asks for a different chart type (bar/line/pie/metric), tell them they can tap the chart-type toggle on the chart — no need to regenerate.
 
+INSIGHT: When you present data, add a short one-line takeaway — what stands out or why it matters — not just the bare number.
+
+FOLLOW-UPS: At the very END of your reply, on its own final line, output the marker <<<FOLLOWUPS>>> immediately followed by a JSON array of 2-3 SHORT (≤6 words) follow-up questions the user is likely to ask next, specific to what you just answered (e.g. ["Compare to last year","Break down by city","Add-ons only"]). The app turns these into tappable chips and hides this line — never mention it, and always put it last.
+
 STYLE: concise, plain English, lead with the answer/number, ZAR for money. If a question is genuinely ambiguous (e.g. which event, for a multi-event client), ask one short clarifying question instead of guessing.`;
 
 // One streamed assistant turn via Claude (uses insights' shared client + model +
@@ -240,7 +244,9 @@ function mount(app, { db, auth, insights, owlTools, anthropicKeyForSuite, anthro
         ctx: { user: req.user, suiteId, entityId },
         onText: (t) => res.write(t),
       });
-      insMsg.run(crypto.randomUUID(), thread.id, 'owl', text || '', JSON.stringify(trail), now());
+      // Persist the answer WITHOUT the follow-ups marker (the client strips it live).
+      const cleanText = String(text || '').split('<<<FOLLOWUPS>>>')[0].replace(/\s+$/, '');
+      insMsg.run(crypto.randomUUID(), thread.id, 'owl', cleanText, JSON.stringify(trail), now());
       // Citation chips: stream the sources as a trailing record the client splits off.
       res.write(SOURCES_MARK + JSON.stringify(sourcesFromTrail(trail)));
       res.end();

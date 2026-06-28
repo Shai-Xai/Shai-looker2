@@ -23,6 +23,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, clients = []
   const [selSuite, setSelSuite] = useState(suiteId || '');
   const [historyOpen, setHistoryOpen] = useState(false);
   const [threads, setThreads] = useState([]);
+  const [followups, setFollowups] = useState([]); // suggested next questions for the latest answer
   const scrollRef = useRef(null);
   const pickDock = (m) => { localStorage.setItem('howler_owl_dock', m); setDock(m); };
   const bumpZoom = (d) => setZoom((z) => { const n = Math.min(1.3, Math.max(0.8, Math.round((z + d) * 100) / 100)); localStorage.setItem('howler_owl_zoom', String(n)); return n; });
@@ -62,11 +63,12 @@ export default function OwlChat({ open, onClose, suiteId, entityId, clients = []
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose]);
 
-  async function send() {
-    const q = input.trim();
+  async function send(text) {
+    const q = String(text ?? input).trim();
     if (!q || busy) return;
     if (!canAsk) { setMessages((m) => [...m, { role: 'owl', text: 'Pick a client (or open an event) above, then ask me — I scope to that organiser.' }]); return; }
-    setInput('');
+    if (text == null) setInput('');
+    setFollowups([]);
     // Append the question + an empty Owl bubble we stream into.
     setMessages((m) => [...m, { role: 'user', text: q }, { role: 'owl', text: '' }]);
     setBusy(true);
@@ -76,13 +78,14 @@ export default function OwlChat({ open, onClose, suiteId, entityId, clients = []
       return next;
     });
     try {
-      const { threadId: tid, sources } = await api.owlChat({ suiteId: selSuite || undefined, entityId: selEntity || undefined, message: q, threadId }, appendToOwl);
+      const { threadId: tid, sources, followups: fu } = await api.owlChat({ suiteId: selSuite || undefined, entityId: selEntity || undefined, message: q, threadId }, appendToOwl);
       if (tid) setThreadId(tid);
       if (sources && sources.length) setMessages((m) => {
         const next = m.slice();
         for (let i = next.length - 1; i >= 0; i--) { if (next[i].role === 'owl') { next[i] = { ...next[i], sources }; break; } }
         return next;
       });
+      if (fu && fu.length) setFollowups(fu);
     } catch (e) {
       appendToOwl((e && e.message) ? `⚠ ${e.message}` : '⚠ Sorry — I hit a problem answering that.');
     } finally {
@@ -180,6 +183,13 @@ export default function OwlChat({ open, onClose, suiteId, entityId, clients = []
         ))}
       </div>
 
+      {followups.length > 0 && !busy && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, padding: '8px 12px 0', flexShrink: 0 }}>
+          {followups.slice(0, 3).map((q, i) => (
+            <button key={i} onClick={() => send(q)} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 980, padding: '5px 11px', fontSize: 12.5, cursor: 'pointer' }}>{q}</button>
+          ))}
+        </div>
+      )}
       <div style={{ borderTop: '1px solid var(--hairline)', padding: 10, flexShrink: 0, display: 'flex', gap: 8, alignItems: 'flex-end' }}>
         <textarea
           value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={onKeyDown}
@@ -187,7 +197,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, clients = []
           rows={1} disabled={!canAsk}
           style={{ flex: 1, resize: 'none', maxHeight: 120, padding: '9px 12px', borderRadius: 12, border: '1px solid var(--hairline)', background: 'var(--bg, var(--card))', color: 'var(--text)', fontSize: 14, fontFamily: 'inherit', lineHeight: 1.4 }}
         />
-        <button onClick={send} disabled={busy || !input.trim() || !canAsk} aria-label="Send"
+        <button onClick={() => send()} disabled={busy || !input.trim() || !canAsk} aria-label="Send"
           style={{ border: 'none', borderRadius: 12, padding: '10px 14px', fontSize: 14, fontWeight: 700, cursor: busy || !input.trim() ? 'default' : 'pointer', background: busy || !input.trim() || !canAsk ? 'var(--elevated, rgba(128,128,128,0.18))' : 'var(--brand)', color: busy || !input.trim() || !canAsk ? 'var(--muted)' : '#fff' }}>
           {busy ? '…' : 'Send'}
         </button>
