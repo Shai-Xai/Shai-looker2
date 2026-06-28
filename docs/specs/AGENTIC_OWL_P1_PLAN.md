@@ -238,3 +238,29 @@ POST /api/owl/chat  (auth.requireAuth, entity-scoped)
 
 *Next step after sign-off: confirm the first one or two explores to curate (M1
 input), then build M1→M2 and get the scope tests green before any UI.*
+
+---
+
+## Owl backlog — captured from live dogfood (2026-06-28)
+
+Ideas raised while testing the native Owl, grouped with how each fits. (Not yet
+built unless marked ✅.)
+
+### Conversation management (threads already persist — owl_threads/owl_messages)
+- **Start a new chat** — a "New chat" button that clears the thread + starts fresh. Trivial (the reset-on-scope-change logic already exists).
+- **Save a chat** — essentially already saved server-side; needs a thread-list / history UI + "load a past chat" (the GET /api/owl/threads/:id/messages endpoint already returns messages + citation sources). Add a list-threads endpoint.
+- **Share a chat** — a read-only shareable view of a thread. CARE: it can contain scoped data (and a customer-lookup answer). Use a share token, scope it to what the creator could see, consider expiry; never widen scope. Most involved of the three.
+
+### Richer answers
+- **Insights on results** — auto-append a short AI interpretation ("what this means / worth noting") to an answer or chart, or an "explain further" affordance. Reuse insights.js (the per-tile/dashboard insight machinery).
+- **Follow-on questions** — after each answer, suggest 2-3 next questions as tappable chips (the model proposes them; tapping sends it). Great for discoverability; moderate effort (model returns suggestions + a chip row).
+
+### Breadth — one scoped read-tool per Pulse domain (grow the registry)
+- **getDashboard** (the dashboard you're viewing / a named one), **getGoals**, **getAlerts**, **getCampaigns** — so the Owl answers about goals/alerts/campaigns/the current dashboard, not just ticket data. Each reuses an existing scoped module API; read-only first.
+
+### Act layer
+- **Pin chart to Home / a specific dashboard** (NEXT BUILD) — live tile via createDashboard/updateDashboard + the marks/pin system; Home pins host on an auto-created "Saved from Owl" dashboard. 📌-button first, conversational "pin that to home" later.
+- Later: **create a segment from a cohort → draft a campaign** (the flagship insight→act; never exposes PII, always via consent + approval).
+
+### ✅ Shipped this session
+Native chat on Claude tool-use; `askData` (curated catalogue, scoped, fails-closed); allowlist gating (shai.evian); scope bound to the organisers a user can access (never platform-wide); client/event picker + the Owl states its scope; suite event-lock applied; re-pointed to the `tickets_purchased`/`core_tickets` explore (realistic counts); tickets-vs-add-ons split; customer lookup by email/phone/name (filter-only, no enumeration); citation chips + underlying data table; today's-date awareness; auto-charts via Pulse's `ChartTile` + a bar/line/pie/metric type toggle.
