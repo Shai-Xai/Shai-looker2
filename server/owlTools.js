@@ -15,7 +15,7 @@
 
 const defaultCatalogue = require('./owlCatalogueSeed');
 
-module.exports = function createOwlTools({ query, auth, catalogue = defaultCatalogue }) {
+module.exports = function createOwlTools({ query, auth, getGoalsApi, catalogue = defaultCatalogue }) {
   if (!query || !query.applyScope || !query.runLookerQuery) {
     throw new Error('owlTools requires the query engine (applyScope + runLookerQuery).');
   }
@@ -149,8 +149,36 @@ module.exports = function createOwlTools({ query, auth, catalogue = defaultCatal
     },
   };
 
+  // ── getGoals ───────────────────────────────────────────────────────────────
+  // Reads this EVENT's goals + how they're tracking (target, pace, forecast, vs
+  // last time) from the goals module — no Looker query. Read-only, fail-safe. The
+  // suiteId is access-checked by the chat route before we run.
+  function slimGoal(g) { const out = { ...(g || {}) }; for (const k of ['series', 'curve', 'sparkline', 'history', 'checkpointsSeries']) delete out[k]; return out; }
+  async function runGetGoals(_args = {}, ctx = {}) {
+    const { user, suiteId } = ctx;
+    if (!user) return refuse('no_user', 'No authenticated user.');
+    if (!suiteId) return refuse('no_event', 'Goals are per event — open or pick a specific event first.');
+    if (user.role !== 'admin' && auth && auth.canAccessSuite && !auth.canAccessSuite(user, suiteId)) return refuse('no_access', 'No access to that event.');
+    const goalsApi = typeof getGoalsApi === 'function' ? getGoalsApi() : null;
+    if (!goalsApi || !goalsApi.listGoals) return refuse('unavailable', 'Goals aren\'t available right now.');
+    try {
+      const goals = goalsApi.listGoals(suiteId);
+      if (!goals.length) return { ok: true, goals: [], note: 'No goals set for this event yet.' };
+      const caches = goalsApi.makeGoalCaches ? goalsApi.makeGoalCaches() : null;
+      const out = [];
+      for (const g of goals) { try { out.push(await goalsApi.attachProgress(g, user, caches)); } catch { out.push(g); } }
+      return { ok: true, goals: out.map(slimGoal) };
+    } catch { return refuse('error', 'Couldn\'t read the goals for this event.'); }
+  }
+  const getGoalsSchema = {
+    name: 'getGoals',
+    description: 'Get THIS event\'s goals and how they are tracking — target, current value, pace (ahead/on-track/behind), forecast landing, and vs last time, leading with the North Star. Use for any question about goals, targets, the North Star, or "are we on track". Read-only; amounts are ZAR.',
+    input_schema: { type: 'object', properties: {} },
+  };
+
   return {
     catalogue,
     askData: { schema: askDataSchema, run: runAskData },
+    getGoals: { schema: getGoalsSchema, run: runGetGoals },
   };
 };

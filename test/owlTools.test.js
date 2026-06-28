@@ -135,6 +135,23 @@ test('customer lookup: listing/grouping by email is REFUSED (no enumeration)', a
   assert.equal(lookerCalls, 0);
 });
 
+test('getGoals refuses without an event, and reads goals when scoped', async () => {
+  const admin = h.makeAdmin('owl-goals@howler.test');
+  const refused = await createOwlTools({ query: queryEngine, auth: h.auth, getGoalsApi: () => ({ listGoals: () => [] }) })
+    .getGoals.run({}, { user: admin }); // no suiteId
+  assert.equal(refused.ok, false);
+  assert.equal(refused.reason, 'no_event');
+
+  const suite = h.db.createSuite({ entityId: h.makeEntity('E', 'E-org').id, name: 'E' });
+  const fakeApi = { listGoals: () => [{ id: 'g1', title: 'North Star', target: 1000, series: [1, 2, 3] }], attachProgress: async (g) => ({ ...g, percent: 42 }) };
+  const res = await createOwlTools({ query: queryEngine, auth: h.auth, getGoalsApi: () => fakeApi })
+    .getGoals.run({}, { user: admin, suiteId: suite.id });
+  assert.equal(res.ok, true);
+  assert.equal(res.goals.length, 1);
+  assert.equal(res.goals[0].percent, 42);          // progress attached
+  assert.equal(res.goals[0].series, undefined);    // bulky field stripped
+});
+
 test('off-catalogue measure is refused before Looker is touched', async () => {
   const user = h.makeClient('owl-f@client.test', [h.makeEntity('A', 'A-org').id]);
   const res = await tools().askData.run({ measure: 'core_users.email' }, ctx(user));
