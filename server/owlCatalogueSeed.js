@@ -76,6 +76,15 @@ module.exports = {
     { name: 'core_purchasers.gender',              label: 'Buyer Gender',   group: 'Buyer',  type: 'string', filter: true, aka: ['gender'] },
     { name: 'core_purchasers.age',                 label: 'Buyer Age',      group: 'Buyer',  type: 'number', filter: true, aka: ['age'] },
     { name: 'core_purchasers.country',             label: 'Buyer Country',  group: 'Buyer',  type: 'string', filter: true },
+
+    // Customer lookup ONLY (PII): filter to a KNOWN email/mobile to find that one
+    // customer's tickets. `filterOnly` = usable as a FILTER but NEVER listed, grouped
+    // or returned — so the Owl can answer "what did john@x.com buy?" but can't
+    // enumerate or dump customers' contact details.
+    { name: 'core_purchasers.email',            label: 'Customer Email',   group: 'Customer lookup', type: 'string', filterOnly: true, aka: ['email', 'customer email', 'find customer', 'search by email', 'look up'] },
+    { name: 'core_purchasers.cellphone_number', label: 'Customer Mobile',  group: 'Customer lookup', type: 'string', filterOnly: true, aka: ['mobile', 'phone', 'cellphone', 'search by phone'] },
+    { name: 'core_purchasers.first_name',       label: 'Customer First Name', group: 'Customer lookup', type: 'string', filterOnly: true, aka: ['first name', 'name', 'search by name'] },
+    { name: 'core_purchasers.last_name',        label: 'Customer Surname', group: 'Customer lookup', type: 'string', filterOnly: true, aka: ['surname', 'last name', 'search by surname'] },
   ],
 
   // ── Grounding notes for the prompt ──────────────────────────────────────────
@@ -86,6 +95,7 @@ module.exports = {
     'This explore is ACTIVE/PURCHASED tickets — refunded/cancelled tickets are excluded, and fully sponsored/free events read 0. Say so if a total looks unexpectedly low for a free event.',
     '"City" is ambiguous — default to Event City (core_sa_city_location.city_name); use Buyer City only when the question is about where customers are from.',
     '"Remaining"/"sold out" use core_ticket_transactions_combined.remaining. All amounts are South African Rand (ZAR).',
+    'CUSTOMER LOOKUP: to find one customer, FILTER core_purchasers.email / cellphone_number / first_name / last_name to the specific known value the user gives — then report that person\'s tickets (type, status, date, count). You CANNOT list, group by, or output customers\' emails/phones/names (no enumeration / no dumping contact lists) — those fields are filter-only. If asked to list everyone\'s contacts, decline and explain that contact lists come from the governed segment/Engage tools with consent.',
   ],
 
   // What is intentionally NOT queryable here (privacy + noise control).

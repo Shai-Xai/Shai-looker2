@@ -24,7 +24,11 @@ module.exports = function createOwlTools({ query, auth, catalogue = defaultCatal
   // Index the curated catalogue once: name → spec, plus filterable set.
   const measureByName = new Map(catalogue.measures.map((m) => [m.name, m]));
   const dimByName = new Map(catalogue.dimensions.map((d) => [d.name, d]));
-  const filterableDims = new Set(catalogue.dimensions.filter((d) => d.filter).map((d) => d.name));
+  // Groupable = can be listed / grouped / returned. Filterable = can be a filter.
+  // filterOnly dims (e.g. customer email) are filterable but NOT groupable — so you
+  // can look a customer up by a known email, but can never enumerate/dump emails.
+  const groupableDims = new Set(catalogue.dimensions.filter((d) => !d.filterOnly).map((d) => d.name));
+  const filterableDims = new Set(catalogue.dimensions.filter((d) => d.filter || d.filterOnly).map((d) => d.name));
 
   // A structured, bounded refusal — never throws into the chat loop, so the Owl
   // can phrase "I can't answer that from your data" instead of erroring out.
@@ -64,7 +68,11 @@ module.exports = function createOwlTools({ query, auth, catalogue = defaultCatal
     }
     const dimensions = Array.isArray(args.dimensions) ? args.dimensions : [];
     for (const d of dimensions) {
-      if (!dimByName.has(d)) return refuse('unknown_dimension', `"${d}" is not a dimension I can group by.`);
+      if (!groupableDims.has(d)) {
+        return refuse('unknown_dimension', dimByName.has(d)
+          ? `"${d}" can only be used to look up a specific customer (a filter), never listed or grouped.`
+          : `"${d}" is not a dimension I can group by.`);
+      }
     }
     const filters = {};
     for (const [field, val] of Object.entries(args.filters || {})) {
@@ -132,8 +140,8 @@ module.exports = function createOwlTools({ query, auth, catalogue = defaultCatal
       type: 'object',
       properties: {
         measure: { type: 'string', enum: catalogue.measures.map((m) => m.name), description: 'The number to compute.' },
-        dimensions: { type: 'array', items: { type: 'string', enum: catalogue.dimensions.map((d) => d.name) }, description: 'Optional fields to break the measure down by.' },
-        filters: { type: 'object', description: 'Optional {field: value} filters; field must be a filterable catalogue dimension.' },
+        dimensions: { type: 'array', items: { type: 'string', enum: catalogue.dimensions.filter((d) => !d.filterOnly).map((d) => d.name) }, description: 'Optional fields to break the measure down by (group-by). Customer email/phone are NOT here — they are filter-only.' },
+        filters: { type: 'object', description: 'Optional {field: value} filters. Includes filter-only lookup fields like core_purchasers.email — set it to a specific known address to look up one customer\'s tickets. Never used to list/dump contacts.' },
         dateRange: { type: 'string', description: 'Optional Looker date expression on the purchase date, e.g. "last 7 days", "this month", "2026-01-01 to 2026-02-01".' },
         limit: { type: 'number', description: 'Max rows (default 500).' },
       },

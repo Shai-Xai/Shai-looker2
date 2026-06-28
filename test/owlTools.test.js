@@ -117,6 +117,24 @@ test('selecting an event applies the suite event lock (not just the organiser)',
   assert.equal(res.queryBody.filters[h.ORG_FIELD], 'Ultra South Africa'); // organiser still forced
 });
 
+test('customer lookup: filtering by a known email is allowed (scoped)', async () => {
+  const ent = h.makeEntity('Ultra SA', 'Ultra South Africa');
+  const user = h.makeClient('owl-lk@client.test', [ent.id]);
+  const res = await tools().askData.run({ measure: M0, filters: { 'core_purchasers.email': 'john@example.com' } }, ctx(user));
+  assert.equal(res.ok, true);
+  assert.equal(res.queryBody.filters['core_purchasers.email'], 'john@example.com'); // lookup filter applied
+  assert.equal(res.queryBody.filters[h.ORG_FIELD], 'Ultra South Africa'); // still scoped
+});
+
+test('customer lookup: listing/grouping by email is REFUSED (no enumeration)', async () => {
+  const ent = h.makeEntity('Ultra SA', 'Ultra South Africa');
+  const user = h.makeClient('owl-lk2@client.test', [ent.id]);
+  const res = await tools().askData.run({ measure: M0, dimensions: ['core_purchasers.email'] }, ctx(user));
+  assert.equal(res.ok, false);
+  assert.equal(res.reason, 'unknown_dimension'); // filter-only field can't be grouped/returned
+  assert.equal(lookerCalls, 0);
+});
+
 test('off-catalogue measure is refused before Looker is touched', async () => {
   const user = h.makeClient('owl-f@client.test', [h.makeEntity('A', 'A-org').id]);
   const res = await tools().askData.run({ measure: 'core_users.email' }, ctx(user));
