@@ -705,7 +705,7 @@ export default function ClientLayout() {
         </button>
       )}
       {owlNativeChatEnabled(user)
-        ? <OwlChat open={askOpen} onClose={() => setAskOpen(false)} suiteId={suiteId || (visibleSuites[0] && visibleSuites[0].id)} />
+        ? <OwlChat open={askOpen} onClose={() => setAskOpen(false)} suiteId={suiteId} entityId={activeEntityId} />
         : <AnalystDrawer open={askOpen} prewarm={prewarmAsk} onClose={() => setAskOpen(false)} previewEntityId={activeEntityId} />}
     </div>
   );

@@ -126,7 +126,7 @@ let osApi;
 const os = require('./os').mount(app, { db, auth, mailer, push, slack,
   onInbound: (p) => owlIngest.handle({ ...p, getAttachmentBuffer: osApi.getAttachmentBuffer }) });
 osApi = os;
-require('./owlChat').mount(app, { db, auth, insights, owlTools: require('./owlTools')({ query }), anthropicKeyForSuite }); // agentic Owl (disposable; askData rides the scope gate)
+require('./owlChat').mount(app, { db, auth, insights, owlTools: require('./owlTools')({ query, auth }), anthropicKeyForSuite }); // agentic Owl (disposable; askData rides the scope gate)
 // ─── Health ───────────────────────────────────────────────────────────────────
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 

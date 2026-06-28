@@ -9,7 +9,7 @@ import { useIsMobile } from '../lib/useIsMobile.js';
 // is fetched + scoped server-side, so nothing here can reach another client's data.
 //
 // Mobile-first: single column, full-width panel on phones.
-export default function OwlChat({ open, onClose, suiteId }) {
+export default function OwlChat({ open, onClose, suiteId, entityId }) {
   const isMobile = useIsMobile();
   const [messages, setMessages] = useState([]); // [{ role:'user'|'owl', text }]
   const [input, setInput] = useState('');
@@ -31,10 +31,11 @@ export default function OwlChat({ open, onClose, suiteId }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose]);
 
+  const canAsk = !!(suiteId || entityId);
   async function send() {
     const q = input.trim();
     if (!q || busy) return;
-    if (!suiteId) { setMessages((m) => [...m, { role: 'owl', text: 'Open an event first, then ask me about it.' }]); return; }
+    if (!canAsk) { setMessages((m) => [...m, { role: 'owl', text: 'Open a client or an event first, then ask me — I scope to that organiser.' }]); return; }
     setInput('');
     // Append the question + an empty Owl bubble we stream into.
     setMessages((m) => [...m, { role: 'user', text: q }, { role: 'owl', text: '' }]);
@@ -45,7 +46,7 @@ export default function OwlChat({ open, onClose, suiteId }) {
       return next;
     });
     try {
-      const { threadId: tid } = await api.owlChat({ suiteId, message: q, threadId }, appendToOwl);
+      const { threadId: tid } = await api.owlChat({ suiteId, entityId, message: q, threadId }, appendToOwl);
       if (tid) setThreadId(tid);
     } catch (e) {
       appendToOwl((e && e.message) ? `⚠ ${e.message}` : '⚠ Sorry — I hit a problem answering that.');
@@ -106,12 +107,12 @@ export default function OwlChat({ open, onClose, suiteId }) {
       <div style={{ borderTop: '1px solid var(--hairline)', padding: 10, flexShrink: 0, display: 'flex', gap: 8, alignItems: 'flex-end' }}>
         <textarea
           value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={onKeyDown}
-          placeholder={suiteId ? 'Ask the Owl…' : 'Open an event to ask about it'}
-          rows={1} disabled={!suiteId}
+          placeholder={canAsk ? 'Ask the Owl…' : 'Open a client or event to ask'}
+          rows={1} disabled={!canAsk}
           style={{ flex: 1, resize: 'none', maxHeight: 120, padding: '9px 12px', borderRadius: 12, border: '1px solid var(--hairline)', background: 'var(--bg, var(--card))', color: 'var(--text)', fontSize: 14, fontFamily: 'inherit', lineHeight: 1.4 }}
         />
-        <button onClick={send} disabled={busy || !input.trim() || !suiteId} aria-label="Send"
-          style={{ border: 'none', borderRadius: 12, padding: '10px 14px', fontSize: 14, fontWeight: 700, cursor: busy || !input.trim() ? 'default' : 'pointer', background: busy || !input.trim() || !suiteId ? 'var(--elevated, rgba(128,128,128,0.18))' : 'var(--brand)', color: busy || !input.trim() || !suiteId ? 'var(--muted)' : '#fff' }}>
+        <button onClick={send} disabled={busy || !input.trim() || !canAsk} aria-label="Send"
+          style={{ border: 'none', borderRadius: 12, padding: '10px 14px', fontSize: 14, fontWeight: 700, cursor: busy || !input.trim() ? 'default' : 'pointer', background: busy || !input.trim() || !canAsk ? 'var(--elevated, rgba(128,128,128,0.18))' : 'var(--brand)', color: busy || !input.trim() || !canAsk ? 'var(--muted)' : '#fff' }}>
           {busy ? '…' : 'Send'}
         </button>
       </div>

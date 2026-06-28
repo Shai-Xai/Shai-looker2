@@ -15,10 +15,11 @@
 
 const defaultCatalogue = require('./owlCatalogueSeed');
 
-module.exports = function createOwlTools({ query, catalogue = defaultCatalogue }) {
+module.exports = function createOwlTools({ query, auth, catalogue = defaultCatalogue }) {
   if (!query || !query.applyScope || !query.runLookerQuery) {
     throw new Error('owlTools requires the query engine (applyScope + runLookerQuery).');
   }
+  const ORG = 'core_organisers.name'; // the canonical organiser lock field
 
   // Index the curated catalogue once: name → spec, plus filterable set.
   const measureByName = new Map(catalogue.measures.map((m) => [m.name, m]));
@@ -34,7 +35,7 @@ module.exports = function createOwlTools({ query, catalogue = defaultCatalogue }
   //         dateRange?: <Looker date expr>, limit?: number }
   // ctx:  { user, suiteId? }  (resolved server-side — the browser never supplies scope)
   async function runAskData(args = {}, ctx = {}) {
-    const { user, suiteId } = ctx;
+    const { user, suiteId, entityId } = ctx;
     if (!user) return refuse('no_user', 'No authenticated user in context.');
 
     // 1) Validate against the curated whitelist BEFORE touching Looker.
@@ -67,12 +68,23 @@ module.exports = function createOwlTools({ query, catalogue = defaultCatalogue }
       limit: Math.min(Math.max(Number(args.limit) || 500, 1), 5000),
     };
 
-    // 3) THE SCOPE GATE — force the client's organiser/event lock; fail CLOSED.
-    //    Same boundary as every tile. A filter on the org field can only narrow
-    //    within the allowed set (ceiling), never widen past it.
+    // 3) THE SCOPE GATE — bind to the organiser(s) this user can ACCESS; never run
+    //    platform-wide. Event context (suiteId) narrows to that event's organiser
+    //    (same boundary as every tile, ceiling not override). If applyScope leaves
+    //    it unscoped (an admin with no event context), bind to the user's accessible
+    //    organisers (their entities / the previewed client). If neither yields a
+    //    bound, refuse — fail closed, so the Owl can never aggregate across clients.
     const allowed = await query.applyScope(body, user, suiteId);
     if (allowed === false) {
-      return refuse('no_scope', 'No data scope is configured for this client, so I can\'t safely run that. (Fails closed by design.)');
+      return refuse('no_scope', 'I can\'t tell which client\'s data to use here — open a client or an event first.');
+    }
+    if (!body.filters[ORG]) {
+      const locks = auth && auth.accessibleOrgFilters ? auth.accessibleOrgFilters(user, entityId) : null;
+      if (locks && locks[ORG]) {
+        body.filters = { ...body.filters, ...locks };
+      } else {
+        return refuse('no_scope', 'I can\'t tell which client\'s data to answer for — open a client or an event first, and I\'ll scope to that organiser.');
+      }
     }
 
     // 4) Run + return the grounding trail. /queries/run/json → array of row objects.

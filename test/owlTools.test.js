@@ -35,7 +35,7 @@ beforeEach(() => {
 });
 afterEach(() => { looker.lookerRequest = origRequest; });
 
-const tools = () => createOwlTools({ query: queryEngine });
+const tools = () => createOwlTools({ query: queryEngine, auth: h.auth });
 const ctx = (user, suiteId) => ({ user, suiteId });
 
 test('askData forces the client\'s organiser scope onto the query', async () => {
@@ -89,6 +89,22 @@ test('a client cannot view through another client\'s suite (fails closed)', asyn
   assert.equal(res.ok, false);
   assert.equal(res.reason, 'no_scope');
   assert.equal(lookerCalls, 0);
+});
+
+test('an admin with NO client/event context is refused, not run platform-wide', async () => {
+  const admin = h.makeAdmin('owl-admin@howler.test'); // global admin, no memberships
+  const res = await tools().askData.run({ measure: M0 }, ctx(admin)); // no suiteId, no entityId
+  assert.equal(res.ok, false);
+  assert.equal(res.reason, 'no_scope');
+  assert.equal(lookerCalls, 0); // never ran across all organisers
+});
+
+test('an admin IS scoped when given an accessible client (entityId)', async () => {
+  const ent = h.makeEntity('Big Promoter', 'Big-Promoter-Org');
+  const admin = h.makeAdmin('owl-admin2@howler.test');
+  const res = await tools().askData.run({ measure: M0 }, { user: admin, entityId: ent.id });
+  assert.equal(res.ok, true);
+  assert.equal(res.queryBody.filters[h.ORG_FIELD], 'Big-Promoter-Org'); // bound to that organiser
 });
 
 test('off-catalogue measure is refused before Looker is touched', async () => {

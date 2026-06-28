@@ -41,7 +41,7 @@ function fakeLlm(responses) {
   return { llmTurn, calls };
 }
 
-const owlTools = () => createOwlTools({ query: queryEngine });
+const owlTools = () => createOwlTools({ query: queryEngine, auth: h.auth });
 const toolBits = () => {
   const t = owlTools();
   return { toolMap: { askData: t.askData }, tools: [t.askData.schema] };

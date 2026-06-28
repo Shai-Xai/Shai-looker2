@@ -130,7 +130,7 @@ function mount(app, { db, auth, insights, owlTools, anthropicKeyForSuite }) {
   // POST /api/owl/chat — ask the Owl. Streams the grounded answer as plain text.
   app.post('/api/owl/chat', auth.requireAuth, async (req, res) => {
     if (!owlAllowed(req.user)) return res.status(403).json({ error: 'The native Owl isn\'t enabled for your account yet.' });
-    const { suiteId, message } = req.body || {};
+    const { suiteId, message, entityId } = req.body || {};
     let { threadId } = req.body || {};
     if (!message || !String(message).trim()) return res.status(400).json({ error: 'Empty message.' });
     if (!suiteId) return res.status(400).json({ error: 'An event (suiteId) is required.' });
@@ -165,7 +165,7 @@ function mount(app, { db, auth, insights, owlTools, anthropicKeyForSuite }) {
         toolMap,
         tools: toolSchemas,
         messages,
-        ctx: { user: req.user, suiteId },
+        ctx: { user: req.user, suiteId, entityId },
         onText: (t) => res.write(t),
       });
       insMsg.run(crypto.randomUUID(), thread.id, 'owl', text || '', JSON.stringify(trail), now());
