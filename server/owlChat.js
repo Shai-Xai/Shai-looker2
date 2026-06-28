@@ -85,6 +85,18 @@ function textOf(blocks) {
   return (blocks || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
 }
 
+// Per-user gate while the native Owl is in development: only allowlisted accounts
+// can use it (mirrors the client's owlNativeChatEnabled). Configure with the
+// OWL_CHAT_ALLOW env (comma-separated emails, or "all" to open it); defaults to the
+// single dogfooding account. The real data boundary is still applyScope — this just
+// limits who can reach the endpoint at all.
+const OWL_ALLOW = String(process.env.OWL_CHAT_ALLOW || 'shai.evian@howler.co.za').toLowerCase();
+function owlAllowed(user) {
+  if (OWL_ALLOW === 'all') return true;
+  const email = String(user?.email || '').trim().toLowerCase();
+  return !!email && OWL_ALLOW.split(',').map((s) => s.trim()).filter(Boolean).includes(email);
+}
+
 function mount(app, { db, auth, insights, owlTools, anthropicKeyForSuite }) {
   const sql = db.db;
   sql.exec(`
@@ -117,6 +129,7 @@ function mount(app, { db, auth, insights, owlTools, anthropicKeyForSuite }) {
 
   // POST /api/owl/chat — ask the Owl. Streams the grounded answer as plain text.
   app.post('/api/owl/chat', auth.requireAuth, async (req, res) => {
+    if (!owlAllowed(req.user)) return res.status(403).json({ error: 'The native Owl isn\'t enabled for your account yet.' });
     const { suiteId, message } = req.body || {};
     let { threadId } = req.body || {};
     if (!message || !String(message).trim()) return res.status(400).json({ error: 'Empty message.' });
@@ -166,6 +179,7 @@ function mount(app, { db, auth, insights, owlTools, anthropicKeyForSuite }) {
 
   // GET /api/owl/threads/:id/messages — reload a conversation (own threads only).
   app.get('/api/owl/threads/:id/messages', auth.requireAuth, (req, res) => {
+    if (!owlAllowed(req.user)) return res.status(403).json({ error: 'The native Owl isn\'t enabled for your account yet.' });
     const thread = getThread.get(req.params.id);
     if (!thread) return res.status(404).json({ error: 'Not found.' });
     if (thread.user_id !== req.user.id && req.user.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
@@ -178,4 +192,4 @@ function mount(app, { db, auth, insights, owlTools, anthropicKeyForSuite }) {
   console.log('[owlChat] agentic Owl chat module mounted');
 }
 
-module.exports = { mount, runOwlLoop, textOf, OWL_CHAT_SYSTEM };
+module.exports = { mount, runOwlLoop, textOf, OWL_CHAT_SYSTEM, owlAllowed };

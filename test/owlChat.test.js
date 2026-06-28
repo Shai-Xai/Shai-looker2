@@ -16,7 +16,7 @@ const looker = require('../server/looker');
 const queryEngine = require('../server/query')({ looker, auth: h.auth });
 const createOwlTools = require('../server/owlTools');
 const catalogue = require('../server/owlCatalogueSeed');
-const { runOwlLoop } = require('../server/owlChat');
+const { runOwlLoop, owlAllowed } = require('../server/owlChat');
 
 before(() => { h.seedOrganiserDashboard({ model: catalogue.model, explore: catalogue.explore }); });
 
@@ -109,6 +109,14 @@ test('a no-tool turn returns immediately', async () => {
   assert.equal(trail.length, 0);
   assert.equal(rounds, 1);
   assert.equal(lookerCalls, 0);
+});
+
+test('owlAllowed gates to the allowlist (default = the dogfood account, case-insensitive)', () => {
+  assert.equal(owlAllowed({ email: 'shai.evian@howler.co.za' }), true);
+  assert.equal(owlAllowed({ email: 'SHAI.EVIAN@howler.co.za' }), true);
+  assert.equal(owlAllowed({ email: 'someone@else.com' }), false);
+  assert.equal(owlAllowed({}), false);
+  assert.equal(owlAllowed(null), false);
 });
 
 test('an unknown tool is handled, not thrown', async () => {
