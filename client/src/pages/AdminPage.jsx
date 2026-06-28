@@ -16,6 +16,7 @@ import RateCard from '../components/RateCard.jsx';
 import { BriefingConfigForm } from '../components/BriefingTuneModal.jsx';
 import StatusNoticesAdmin from '../components/StatusNoticesAdmin.jsx';
 import UploadHint from '../components/UploadHint.jsx';
+import { currencyList } from '../lib/currency.js';
 import { GUIDES } from '../lib/guides.js';
 
 // Icon control: an emoji, or an uploaded image (downscaled to a small data-URL).
@@ -1143,6 +1144,9 @@ function SetupWizard({ fields }) {
               <L>Client logo · optional</L>
               <div style={{ marginTop: 6 }}><LogoPicker value={logo} onChange={setLogo} /></div>
             </div>
+            {entity
+              ? <CurrencyField entityId={entity.id} />
+              : <div data-tour="client-currency" style={{ marginTop: 12, fontSize: 12.5, color: 'var(--muted)' }}>💱 <b>Reporting currency</b> (ZAR by default) can be set here once the client is created — it controls how money shows across their insights, briefings, goals and alerts.</div>}
             <Footer primary={saveClient} primaryLabel={entityId ? 'Save & continue' : 'Create client & continue'} />
           </>
         )}
@@ -1257,6 +1261,7 @@ const badgeBase = { display: 'inline-flex', alignItems: 'center', gap: 6, fontSi
 const CLIENT_TOUR = [
   { tour: 'client-name', icon: '🏢', title: 'Name the client', body: 'Type the organiser or brand you’re onboarding — this is what everything else hangs off. It’s the only thing you must fill in here.' },
   { tour: 'client-logo', icon: '🖼️', title: 'Add their logo (optional)', body: 'Upload a logo if you have one — it shows as the client’s brand across the app. You can always add or change it later.' },
+  { tour: 'client-currency', icon: '💱', title: 'Set their reporting currency', body: 'Pick the currency this client reports in (ZAR by default). It controls how money shows and how the Owl writes amounts — across insights, briefings, goals, alerts and digests. Available once the client is created; clients can’t change it themselves.' },
 ];
 const SCOPE_TOUR = [
   { tour: 'scope-org', icon: '🔒', title: 'Pick their organiser', body: 'Choose the organiser(s) this client owns. Every dashboard is then force-filtered to only their data on the server — this is what keeps clients apart.' },
@@ -1536,6 +1541,7 @@ function StepPreviewModal({ steps, index, onClose }) {
       case 'client': return (<>
         {sec('client-name', <>{lbl('Client name · required')}<div style={{ ...fauxInput, maxWidth: 320 }}>e.g. MTN Bushfire</div></>)}
         {sec('client-logo', <>{lbl('Client logo · optional')}<div style={{ width: 120, height: 44, border: '1px dashed var(--hairline)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12 }}>logo</div></>)}
+        {sec('client-currency', <>{lbl('Reporting currency')}<div style={{ ...fauxInput, maxWidth: 320 }}>Platform default (ZAR)</div></>)}
       </>);
       case 'scope': return (<>
         {sec('scope-all', <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', border: '1px solid var(--hairline)', borderRadius: 10 }}>
@@ -2602,6 +2608,40 @@ function AdminProfileFooter() {
 }
 const adminMenuItem = { display: 'flex', alignItems: 'center', gap: 9, width: '100%', border: 'none', background: 'transparent', cursor: 'pointer', padding: '9px 10px', borderRadius: 8, fontSize: 13, fontWeight: 600, color: 'var(--text)', textAlign: 'left' };
 
+// Reporting currency (admin-only). How Pulse shows money and the Owl writes
+// amounts across insights, briefings, goals, alerts and digests. Stored in the
+// client's branding blob (so it resolves + rides to the app like the rest of the
+// brand); edited here, NOT in the client's own self-service. Autosaves on change
+// and re-themes the shell live. Blank = the platform default (ZAR).
+function CurrencyField({ entityId }) {
+  const [cur, setCur] = useState(null);   // explicit code, or '' = inherit default
+  const [saved, setSaved] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    api.getEntityMailTemplate(entityId).then((d) => { if (alive) setCur(d.branding?.currency || ''); }).catch(() => { if (alive) setCur(''); });
+    return () => { alive = false; };
+  }, [entityId]);
+  if (cur === null) return null;
+  const onPick = async (v) => {
+    setCur(v);
+    try { await api.saveEntityMailTemplate(entityId, { currency: v }); flash(setSaved); window.dispatchEvent(new CustomEvent('pulse-branding-saved', { detail: { entityId } })); }
+    catch (e) { alert('Save failed: ' + e.message); }
+  };
+  return (
+    <div data-tour="client-currency" style={{ marginTop: 12 }}>
+      <L>Reporting currency</L>
+      <div style={{ fontSize: 12, color: 'var(--muted)', margin: '4px 0 6px' }}>How Pulse shows money and the Owl writes amounts — across insights, briefings, goals, alerts and digests. Dashboard tile values keep the format from their data source.</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <select value={cur} onChange={(e) => onPick(e.target.value)} style={{ ...input, maxWidth: 340, cursor: 'pointer' }}>
+          <option value="">Platform default (ZAR)</option>
+          {currencyList().map((c) => <option key={c.code} value={c.code}>{`${c.code} — ${c.name} (${c.symbol})`}</option>)}
+        </select>
+        {saved && <span style={{ color: 'var(--success,#10b981)', fontSize: 12.5, fontWeight: 600 }}>✓ Saved</span>}
+      </div>
+    </div>
+  );
+}
+
 // Client settings: name, organiser locks, preview, delete.
 function ClientSettings({ entity, suites, fields, onChange, onBack }) {
   const navigate = useNavigate();
@@ -2665,6 +2705,7 @@ function ClientSettings({ entity, suites, fields, onChange, onBack }) {
           style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 13, outline: 'none', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }}
         />
       </div>
+      <CurrencyField entityId={entity.id} />
       <SaveRow onSave={save} saved={saved} id={entity.id} />
     </div>
   );

@@ -243,12 +243,12 @@ in one place that updates itself."
   Every logo/icon/image upload now shows **clear spec guidance** (format, size,
   transparency) right under the picker, on both the admin and client surfaces —
   so the assets we get back are the right shape first time.
-- **Reporting currency** ✅ (dual-surface) — set the currency a client reports in
-  (ZAR by default), with an optional per-event override that inherits the client's.
-  It flows to every Pulse-written touch point: AI **insights**, the home **briefing**,
-  **goals**, **alerts** and **digests** all show and talk about money in that currency.
-  *(Dashboard tile values keep the format that comes from their data source; this is
-  not the messaging-cost/billing currency, which stays separate.)*
+- **Reporting currency** ✅ — Howler sets the currency a client reports in (ZAR by
+  default), in **Admin → the client → Settings**. It flows to every Pulse-written
+  touch point: AI **insights**, the home **briefing**, **goals**, **alerts** and
+  **digests** all show and talk about money in that currency. *(Set by Howler, not the
+  client; dashboard tile values keep the format from their data source; this is not the
+  messaging-cost/billing currency, which stays separate.)*
 - **Dark-mode logo** ✅ (dual-surface) — an optional second logo for dark mode.
   If a client's logo is a dark/black mark it can vanish on the dark header, so
   they (or we) can upload a light version that's used automatically in dark mode.
@@ -461,12 +461,12 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
-- **2026-06-27** — **Reporting currency** ✅ (dual-surface): a per-client display currency (ZAR
-  default) with an optional per-event override that inherits the client's. It flows across every
-  Pulse-written surface — AI insights, the home briefing, goals, alerts and digests all present and
-  describe money in the client's currency. Set in **Branding → Reporting currency** (admin + client
-  self-service). Not a data filter and not the messaging-cost/billing currency (those stay separate);
-  dashboard tile values keep the formatting from their data source.
+- **2026-06-28** — **Reporting currency** ✅: a per-client display currency (ZAR default), **set by
+  Howler** in **Admin → the client → Settings** (and surfaced in the setup wizard's *Client* step) —
+  not client self-service. It flows across every Pulse-written surface: AI insights, the home
+  briefing, goals, alerts and digests all present and describe money in the client's currency. Not a
+  data filter and not the messaging-cost/billing currency (those stay separate); dashboard tile
+  values keep the formatting from their data source.
 - **2026-06-27** — **Slack for alerts & goals** 🟡: **Alerts** now have a **# Slack**
   channel (next to Push/Email/SMS) — tick it to route that alert to the client's
   connected Slack (enabled only when Slack is connected). The **goals** Owl brief
