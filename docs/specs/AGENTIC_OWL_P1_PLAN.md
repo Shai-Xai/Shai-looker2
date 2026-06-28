@@ -172,7 +172,14 @@ POST /api/owl/chat  (auth.requireAuth, entity-scoped)
 
 ## 11. Sequencing (each milestone ships something demoable)
 - **M1 — Catalogue.** `dataCatalogue.js` + admin curation surface over one or two
-  clean explores. Demo: a curated field list an admin can edit.
+  clean explores. **First explore = "all tickets"** (the richest, most-queried —
+  decided 2026-06-28). First concrete action: run the existing
+  `getExploreFields(model, 'all_tickets')` (`looker.js:228`) against the live
+  Looker connection to produce the raw candidate field list, then curate it down
+  (whitelist, synonyms, canonical date dim, default measures). *Confirm the exact
+  model + explore identifier from Looker — the repo only carries test placeholders
+  (`ticketing`/`core`); real dashboard definitions live in the data store, not
+  source.* Demo: a curated "all tickets" field list an admin can edit.
 - **M2 — `askData` (1a) + scope gate + tests.** The tool callable in isolation
   (a temporary debug route). Demo: bounded re-run returning scoped rows; scope
   tests green. **This is the foundation — get it bullet-proof before the UI.**
