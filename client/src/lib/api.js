@@ -105,8 +105,22 @@ export const api = {
     const tid = res.headers.get('X-Owl-Thread') || threadId || null;
     const reader = res.body.getReader();
     const dec = new TextDecoder();
-    for (;;) { const { done, value } = await reader.read(); if (done) break; if (value) onText?.(dec.decode(value, { stream: true })); }
-    return { threadId: tid };
+    // The answer text streams first; a trailing "\n<<<OWL_SOURCES>>>{json}" record
+    // carries the citation chips. Emit text up to the marker (holding back a possible
+    // partial-marker tail), then parse the sources JSON.
+    const MARK = '\n<<<OWL_SOURCES>>>';
+    let buf = '', emitted = 0, sources = [];
+    for (;;) {
+      const { done, value } = await reader.read(); if (done) break;
+      if (value) buf += dec.decode(value, { stream: true });
+      const mi = buf.indexOf(MARK);
+      if (mi >= 0) { if (mi > emitted) { onText?.(buf.slice(emitted, mi)); emitted = mi; } }
+      else { const safe = buf.length - (MARK.length - 1); if (safe > emitted) { onText?.(buf.slice(emitted, safe)); emitted = safe; } }
+    }
+    const mi = buf.indexOf(MARK);
+    if (mi >= 0) { try { sources = JSON.parse(buf.slice(mi + MARK.length)); } catch { sources = []; } }
+    else if (buf.length > emitted) onText?.(buf.slice(emitted));
+    return { threadId: tid, sources };
   },
   owlThreadMessages: (id) => fetch(`/api/owl/threads/${id}/messages`).then(json),
   login: (email, password) =>

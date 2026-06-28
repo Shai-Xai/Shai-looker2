@@ -122,6 +122,38 @@ function mount(app, { db, auth, insights, owlTools, anthropicKeyForSuite, anthro
   const toolMap = Object.fromEntries(toolEntries.map((t) => [t.schema.name, t]));
   const toolSchemas = toolEntries.map((t) => t.schema);
 
+  // ── Citation chips: turn an answer's tool TRAIL into human-readable "sources" the
+  // client renders under the bubble (the grounding made visible). Reuses the curated
+  // catalogue's labels. Streamed after the answer text behind SOURCES_MARK.
+  const cat = owlTools.catalogue || {};
+  const measLabel = new Map((cat.measures || []).map((m) => [m.name, m.label]));
+  const dimLabel = new Map((cat.dimensions || []).map((d) => [d.name, d.label]));
+  const SCOPE_LABEL = { 'core_organisers.name': 'organiser', 'core_events.name': 'event' };
+  const fieldLabel = (f) => SCOPE_LABEL[f] || dimLabel.get(f) || String(f).split('.').pop().replace(/_/g, ' ');
+  function sourcesFromTrail(trail) {
+    return (trail || [])
+      .filter((t) => t.name === 'askData' && t.result && t.result.ok)
+      .map((t) => {
+        const qb = t.result.queryBody || {};
+        const m = t.input.measure;
+        const dims = t.input.dimensions || [];
+        const rows = t.result.rows || [];
+        // Single scalar answer (one row, no group-by) → surface the value on the chip.
+        let value = null;
+        if (rows.length === 1 && !dims.length && rows[0][m] != null) value = rows[0][m];
+        return {
+          measure: measLabel.get(m) || m,
+          value,
+          count: t.result.count,
+          dimensions: dims.map((d) => dimLabel.get(d) || d),
+          filters: Object.entries(qb.filters || {}).map(([f, v]) => ({ label: fieldLabel(f), value: String(v) })),
+          explore: cat.label || qb.view || '',
+        };
+      });
+  }
+  const SOURCES_MARK = '\n<<<OWL_SOURCES>>>';
+  const J = (s) => { try { return JSON.parse(s || '[]'); } catch { return []; } };
+
   // Prior turns → Anthropic messages (text only; intra-turn tool rounds are ephemeral).
   const historyFor = (threadId) => listMsgs.all(threadId)
     .filter((m) => m.role === 'user' || m.role === 'owl')
@@ -149,9 +181,12 @@ function mount(app, { db, auth, insights, owlTools, anthropicKeyForSuite, anthro
     // Human-readable scope label so the Owl can STATE whose data it's answering for.
     const scopeEnt = scopeEntityId ? db.getEntity(scopeEntityId) : null;
     const scopeLabel = [scopeEnt && scopeEnt.name, su && su.name].filter(Boolean).join(' · ');
-    const instructions = scopeLabel
-      ? `All data in this conversation is scoped to: ${scopeLabel}. Make clear in your answer which client/event the numbers are for — lead your answer with "For ${scopeLabel}:" (or naturally name it). Never imply the figures cover other clients or events.`
-      : '';
+    const today = new Date().toISOString().slice(0, 10);
+    const parts = [
+      `Today's date is ${today}. For "upcoming"/"future"/"past"/"this year" questions, compare against today — e.g. filter Event Date (core_events.start_date) with a Looker date expression such as "after ${today}" for future events or "before ${today}" for past ones. (Event Date is the date of the event; Purchased Date is when a ticket was bought.)`,
+    ];
+    if (scopeLabel) parts.push(`All data in this conversation is scoped to: ${scopeLabel}. Make clear in your answer which client/event the numbers are for — lead your answer with "For ${scopeLabel}:" (or naturally name it). Never imply the figures cover other clients or events.`);
+    const instructions = parts.join('\n\n');
 
     // Load or create the thread (must belong to this user).
     let thread = threadId ? getThread.get(threadId) : null;
@@ -181,6 +216,8 @@ function mount(app, { db, auth, insights, owlTools, anthropicKeyForSuite, anthro
         onText: (t) => res.write(t),
       });
       insMsg.run(crypto.randomUUID(), thread.id, 'owl', text || '', JSON.stringify(trail), now());
+      // Citation chips: stream the sources as a trailing record the client splits off.
+      res.write(SOURCES_MARK + JSON.stringify(sourcesFromTrail(trail)));
       res.end();
     } catch (err) {
       console.error('[POST /api/owl/chat]', err.message);
@@ -197,7 +234,10 @@ function mount(app, { db, auth, insights, owlTools, anthropicKeyForSuite, anthro
     if (thread.user_id !== req.user.id && req.user.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
     res.json({
       thread: { id: thread.id, suiteId: thread.suite_id, title: thread.title },
-      messages: listMsgs.all(thread.id).map((m) => ({ role: m.role, body: m.body, at: m.created_at })),
+      messages: listMsgs.all(thread.id).map((m) => ({
+        role: m.role, body: m.body, at: m.created_at,
+        sources: m.role === 'owl' ? sourcesFromTrail(J(m.tool_calls)) : undefined,
+      })),
     });
   });
 

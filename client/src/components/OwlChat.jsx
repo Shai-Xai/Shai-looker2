@@ -59,8 +59,13 @@ export default function OwlChat({ open, onClose, suiteId, entityId, clients = []
       return next;
     });
     try {
-      const { threadId: tid } = await api.owlChat({ suiteId: selSuite || undefined, entityId: selEntity || undefined, message: q, threadId }, appendToOwl);
+      const { threadId: tid, sources } = await api.owlChat({ suiteId: selSuite || undefined, entityId: selEntity || undefined, message: q, threadId }, appendToOwl);
       if (tid) setThreadId(tid);
+      if (sources && sources.length) setMessages((m) => {
+        const next = m.slice();
+        for (let i = next.length - 1; i >= 0; i--) { if (next[i].role === 'owl') { next[i] = { ...next[i], sources }; break; } }
+        return next;
+      });
     } catch (e) {
       appendToOwl((e && e.message) ? `⚠ ${e.message}` : '⚠ Sorry — I hit a problem answering that.');
     } finally {
@@ -135,7 +140,12 @@ export default function OwlChat({ open, onClose, suiteId, entityId, clients = []
             </ul>
           </div>
         )}
-        {messages.map(bubble)}
+        {messages.map((m, i) => (
+          <div key={i}>
+            {bubble(m, i)}
+            {m.role === 'owl' && m.sources && m.sources.length > 0 && <CitationChips sources={m.sources} />}
+          </div>
+        ))}
       </div>
 
       <div style={{ borderTop: '1px solid var(--hairline)', padding: 10, flexShrink: 0, display: 'flex', gap: 8, alignItems: 'flex-end' }}>
@@ -167,6 +177,53 @@ export default function OwlChat({ open, onClose, suiteId, entityId, clients = []
     <div style={{ position: 'fixed', inset: 0, zIndex: 80, pointerEvents: open ? 'auto' : 'none' }} aria-hidden={!open}>
       <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.42)', opacity: open ? 1 : 0, transition: 'opacity .26s ease', backdropFilter: open ? 'blur(2px)' : 'none', WebkitBackdropFilter: open ? 'blur(2px)' : 'none' }} />
       <div style={{ position: 'absolute', top: 0, right: 0, height: '100%', width: w, boxShadow: '-10px 0 30px rgba(0,0,0,0.28)', transform: open ? 'translateX(0)' : 'translateX(100%)', transition: 'transform .26s var(--ease-spring, ease)' }}>{panel}</div>
+    </div>
+  );
+}
+
+// Format a measure value with thousands separators (numbers) or pass strings through.
+function fmtVal(v) {
+  const n = typeof v === 'number' ? v : Number(String(v).replace(/,/g, ''));
+  return Number.isFinite(n) && String(v).trim() !== '' ? n.toLocaleString() : String(v);
+}
+
+// Citation chips — the grounding made visible. One "source" per live askData call
+// in an answer: a green dot (= real query, not invented), the measure + value, the
+// filters/scope, and a tap-to-expand card with the exact query.
+function CitationChips({ sources }) {
+  const [open, setOpen] = useState(-1);
+  const chip = { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 9px', borderRadius: 980, background: 'var(--card)', border: '1px solid var(--hairline)', fontSize: 11.5, color: '#3a3a3c', cursor: 'default' };
+  const dot = { width: 7, height: 7, borderRadius: '50%', background: '#34c759', flex: 'none' };
+  const muted = { color: 'var(--muted)' };
+  return (
+    <div style={{ margin: '-4px 0 12px 2px' }}>
+      <div style={{ fontSize: 10, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--muted)', margin: '0 0 6px 2px' }}>Sources</div>
+      {sources.map((s, i) => (
+        <div key={i} style={{ marginBottom: 6 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+            <button onClick={() => setOpen(open === i ? -1 : i)} style={{ ...chip, cursor: 'pointer' }} aria-expanded={open === i}>
+              <span style={dot} />
+              <b style={{ fontWeight: 650, color: 'var(--text)' }}>{s.measure}</b>
+              {s.value != null
+                ? <span style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmtVal(s.value)}</span>
+                : <span style={muted}>{s.count} rows</span>}
+              <span style={{ ...muted, fontSize: 10 }}>{open === i ? '▴' : '▾'}</span>
+            </button>
+            {(s.filters || []).map((f, j) => (
+              <span key={j} style={chip}><span style={muted}>{f.label}</span> {f.value}</span>
+            ))}
+          </div>
+          {open === i && (
+            <div style={{ marginTop: 6, border: '1px solid var(--hairline)', borderRadius: 12, background: 'var(--bg, #fafafe)', padding: '9px 11px', fontSize: 11.5, display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '4px 12px' }}>
+              <span style={muted}>Measure</span><span>{s.measure}</span>
+              {s.dimensions && s.dimensions.length > 0 && (<><span style={muted}>Group by</span><span>{s.dimensions.join(', ')}</span></>)}
+              {s.filters && s.filters.length > 0 && (<><span style={muted}>Filters</span><span>{s.filters.map((f) => `${f.label} = ${f.value}`).join('  ·  ')}</span></>)}
+              {s.explore && (<><span style={muted}>Explore</span><span>{s.explore} · live</span></>)}
+              <span style={muted}>Rows</span><span style={{ fontVariantNumeric: 'tabular-nums' }}>{s.count}</span>
+            </div>
+          )}
+        </div>
+      ))}
     </div>
   );
 }
