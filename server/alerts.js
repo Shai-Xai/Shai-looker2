@@ -56,6 +56,7 @@ function mount(app, { db, auth, resolveTileValue, resolveCustomMetric, metricCat
       operator      TEXT NOT NULL DEFAULT 'gte',         -- gte | lte | gt | lt
       threshold     REAL NOT NULL DEFAULT 0,
       unit          TEXT NOT NULL DEFAULT '',
+      tag           TEXT NOT NULL DEFAULT '',            -- operational area (Ticketing, Cashless…); groups the list one row per tag
       channels      TEXT NOT NULL DEFAULT '["push"]',    -- subset of push|email|sms
       sms_recipients TEXT NOT NULL DEFAULT '[]',          -- phone numbers (E.164-ish) for the sms channel
       priority      TEXT NOT NULL DEFAULT 'normal',       -- normal | important (important breaks quiet hours)
@@ -117,6 +118,7 @@ function mount(app, { db, auth, resolveTileValue, resolveCustomMetric, metricCat
     add('measure_label', "measure_label TEXT NOT NULL DEFAULT ''");
     add('metric_filters', "metric_filters TEXT NOT NULL DEFAULT '{}'");
     add('metric_label', "metric_label TEXT NOT NULL DEFAULT ''");
+    add('tag', "tag TEXT NOT NULL DEFAULT ''");
   } catch (e) { console.error('[alerts] column migration skipped:', e.message); }
 
   const parseJson = (s, fb) => { try { const v = JSON.parse(s); return v == null ? fb : v; } catch { return fb; } };
@@ -130,7 +132,7 @@ function mount(app, { db, auth, resolveTileValue, resolveCustomMetric, metricCat
       dashboardId: r.dashboard_id, tileId: r.tile_id, dashboardName: r.dashboard_name, tileName: r.tile_name,
       model: r.model || '', view: r.view || '', measure: r.measure || '', measureLabel: r.measure_label || '',
       metricFilters: parseJson(r.metric_filters, {}), metricLabel: r.metric_label || '',
-      operator: r.operator, threshold: r.threshold, unit: r.unit,
+      operator: r.operator, threshold: r.threshold, unit: r.unit, tag: r.tag || '',
       channels: parseJson(r.channels, ['push']), smsRecipients: parseJson(r.sms_recipients, []),
       priority: r.priority, frequency: r.frequency, cooldownMin: r.cooldown_min,
       quietStart: r.quiet_start, quietEnd: r.quiet_end, timezone: r.timezone,
@@ -179,6 +181,7 @@ function mount(app, { db, auth, resolveTileValue, resolveCustomMetric, metricCat
       metricLabel: String(b.metricLabel || '').slice(0, 240),
       operator, threshold,
       unit: String(b.unit || '').slice(0, 16),
+      tag: String(b.tag || '').trim().slice(0, 40),
       channels: channels.length ? channels : ['push'],
       smsRecipients: Array.isArray(b.smsRecipients)
         ? [...new Set(b.smsRecipients.map((p) => String(p).replace(/[^\d+]/g, '')).filter((p) => p.replace(/\D/g, '').length >= 7))].slice(0, 25) : [],
@@ -199,23 +202,23 @@ function mount(app, { db, auth, resolveTileValue, resolveCustomMetric, metricCat
     if (id) {
       sql.prepare(`UPDATE alerts SET name=?, rule_type=?, source=?, dashboard_id=?, tile_id=?, dashboard_name=?, tile_name=?,
         model=?, view=?, measure=?, measure_label=?, metric_filters=?, metric_label=?,
-        operator=?, threshold=?, unit=?, channels=?, sms_recipients=?, priority=?, frequency=?, cooldown_min=?,
+        operator=?, threshold=?, unit=?, tag=?, channels=?, sms_recipients=?, priority=?, frequency=?, cooldown_min=?,
         quiet_start=?, quiet_end=?, timezone=?, status=?, state='armed', updated_by=?, updated_at=? WHERE id=?`)
         .run(c.name, c.ruleType, c.source, c.dashboardId, c.tileId, c.dashboardName, c.tileName,
           c.model, c.view, c.measure, c.measureLabel, JSON.stringify(c.metricFilters), c.metricLabel,
-          c.operator, c.threshold, c.unit, JSON.stringify(c.channels), JSON.stringify(c.smsRecipients), c.priority, c.frequency, c.cooldownMin,
+          c.operator, c.threshold, c.unit, c.tag, JSON.stringify(c.channels), JSON.stringify(c.smsRecipients), c.priority, c.frequency, c.cooldownMin,
           c.quietStart, c.quietEnd, c.timezone, c.status, who || '', ts, id);
       return alertById(id);
     }
     const nid = uuid();
     sql.prepare(`INSERT INTO alerts (id, entity_id, suite_id, name, rule_type, source, dashboard_id, tile_id, dashboard_name, tile_name,
       model, view, measure, measure_label, metric_filters, metric_label,
-      operator, threshold, unit, channels, sms_recipients, priority, frequency, cooldown_min, quiet_start, quiet_end, timezone,
+      operator, threshold, unit, tag, channels, sms_recipients, priority, frequency, cooldown_min, quiet_start, quiet_end, timezone,
       status, state, created_by, created_at, updated_by, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'armed',?,?,?,?)`)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'armed',?,?,?,?)`)
       .run(nid, c.entityId, c.suiteId, c.name, c.ruleType, c.source, c.dashboardId, c.tileId, c.dashboardName, c.tileName,
         c.model, c.view, c.measure, c.measureLabel, JSON.stringify(c.metricFilters), c.metricLabel,
-        c.operator, c.threshold, c.unit, JSON.stringify(c.channels), JSON.stringify(c.smsRecipients), c.priority, c.frequency,
+        c.operator, c.threshold, c.unit, c.tag, JSON.stringify(c.channels), JSON.stringify(c.smsRecipients), c.priority, c.frequency,
         c.cooldownMin, c.quietStart, c.quietEnd, c.timezone, c.status, who || '', ts, who || '', ts);
     return alertById(nid);
   }
@@ -550,7 +553,7 @@ function mount(app, { db, auth, resolveTileValue, resolveCustomMetric, metricCat
         ? { dashboardId: a.dashboardId, tileId: a.tileId, dashboardName: a.dashboardName, tileName: a.tileName } : null,
       metricRef: a.source === 'metric' && a.measure
         ? { model: a.model, view: a.view, measure: a.measure, measureLabel: a.measureLabel, metricFilters: a.metricFilters, metricLabel: a.metricLabel } : null,
-      operator: a.operator, threshold: a.threshold, unit: a.unit,
+      operator: a.operator, threshold: a.threshold, unit: a.unit, tag: a.tag,
       channels: a.channels, priority: a.priority, frequency: a.frequency, cooldownMin: a.cooldownMin,
       quietStart: a.quietStart, quietEnd: a.quietEnd,
     };

@@ -24,6 +24,10 @@ const TEMPLATES = [
   { key: 'category', emoji: '🏷', label: 'Ticket category', hint: 'Filter to a category', metric: true, filterHint: 'category', ruleType: 'threshold', operator: 'gte', unit: 'tickets', name: 'Category alert' },
 ];
 
+// Suggested operational areas for the alert tag (free text still allowed). Drives the
+// one-row-per-tag grouping on the Alerts page. Mirrors the goal tags.
+const ALERT_TAGS = ['Ticketing', 'Cashless', 'Access control', 'Audience', 'Marketing', 'Revenue', 'F&B / Bar', 'Sponsorship', 'Operations'];
+
 export default function AlertEditor({ entityId, suiteId, suiteName, alert, smsAvailable = false, slackAvailable = false, initialTemplate = null, onClose, onSaved }) {
   const isMobile = useIsMobile();
   const { isAdmin } = useAuth();
@@ -36,6 +40,7 @@ export default function AlertEditor({ entityId, suiteId, suiteName, alert, smsAv
   const [operator, setOperator] = useState(alert?.operator || 'gte');
   const [threshold, setThreshold] = useState(alert ? String(alert.threshold ?? '') : '');
   const [unit, setUnit] = useState(alert?.unit || 'tickets');
+  const [tag, setTag] = useState(alert?.tag || ''); // operational area — groups the Alerts list one row per tag
   const [channels, setChannels] = useState(alert?.channels || ['push']);
   const [smsRecipients, setSmsRecipients] = useState((alert?.smsRecipients || []).join(', '));
   const [priority, setPriority] = useState(alert?.priority || 'normal');
@@ -177,6 +182,7 @@ export default function AlertEditor({ entityId, suiteId, suiteName, alert, smsAv
     if (p.ruleType) setRuleType(p.ruleType);
     if (p.operator) setOperator(p.operator);
     if (p.unit) setUnit(p.unit);
+    if (p.tag) setTag(p.tag);
     if (p.threshold != null) setThreshold(String(p.threshold));
     if (Array.isArray(p.channels)) setChannels(p.channels);
     if (p.priority) setPriority(p.priority);
@@ -202,7 +208,7 @@ export default function AlertEditor({ entityId, suiteId, suiteName, alert, smsAv
     metricRef: source === 'metric' && curExplore && measure ? { model: curExplore.model, view: curExplore.view, measure, measureLabel: measureObj()?.label || '', metricFilters: metricFiltersObj(), metricLabel: metricLabelStr() } : null,
     operator: ruleType === 'depletion' || ruleType === 'sold_out' ? 'lte' : operator,
     threshold: ruleType === 'sold_out' ? 0 : (threshold === '' ? 0 : Number(threshold)),
-    unit, channels, priority, frequency, cooldownMin: Number(cooldownMin) || 60, quietStart, quietEnd,
+    unit, tag, channels, priority, frequency, cooldownMin: Number(cooldownMin) || 60, quietStart, quietEnd,
   });
 
   const saveAsTemplate = async () => {
@@ -250,7 +256,7 @@ export default function AlertEditor({ entityId, suiteId, suiteName, alert, smsAv
       name: name.trim(), ruleType, source,
       operator: ruleType === 'depletion' || ruleType === 'sold_out' ? 'lte' : operator,
       threshold: ruleType === 'sold_out' ? 0 : Number(threshold),
-      unit, channels,
+      unit, tag: tag.trim(), channels,
       smsRecipients: channels.includes('sms') ? smsRecipients.split(',').map((s) => s.trim()).filter(Boolean) : [],
       priority, frequency,
       cooldownMin: Number(cooldownMin) || 60,
@@ -325,6 +331,13 @@ export default function AlertEditor({ entityId, suiteId, suiteName, alert, smsAv
 
         <Field label="Name">
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. VIP nearly gone, R1m revenue" style={inp} autoFocus />
+        </Field>
+
+        <Field label="Tag (optional)" hint="Group this alert by operational area — the Alerts page shows one row per tag. Pick one or type your own.">
+          <input value={tag} onChange={(e) => setTag(e.target.value)} list="alert-tag-presets" placeholder="e.g. Ticketing, Cashless, Access control" style={inp} />
+          <datalist id="alert-tag-presets">
+            {ALERT_TAGS.map((t) => <option key={t} value={t} />)}
+          </datalist>
         </Field>
 
         <Field label="What should we watch?">

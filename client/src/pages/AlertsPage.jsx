@@ -108,13 +108,31 @@ export default function AlertsPage() {
               )}
             </div>
             {!loaded && <Skel w="100%" h={68} r={12} />}
-            {loaded && (alerts.length ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {alerts.map((a) => (
-                  <AlertRow key={a.id} alert={a} canManage={canManage} onEdit={() => setEditor({ suiteId: suite.id, alert: a })} onToggle={() => toggleStatus(a)} />
-                ))}
-              </div>
-            ) : (
+            {loaded && (alerts.length ? (() => {
+              const renderRow = (a) => (
+                <AlertRow key={a.id} alert={a} canManage={canManage} onEdit={() => setEditor({ suiteId: suite.id, alert: a })} onToggle={() => toggleStatus(a)} />
+              );
+              const tagged = alerts.some((a) => (a.tag || '').trim());
+              if (!tagged) return <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{alerts.map(renderRow)}</div>;
+              // One section per tag (insertion order); untagged alerts under "Other".
+              const groups = [];
+              alerts.forEach((a) => {
+                const key = (a.tag || '').trim();
+                let grp = groups.find((x) => x.key === key);
+                if (!grp) { grp = { key, alerts: [] }; groups.push(grp); }
+                grp.alerts.push(a);
+              });
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  {groups.map((grp) => (
+                    <div key={grp.key || '_other'}>
+                      <div style={tagHead}>{grp.key || 'Other'}</div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{grp.alerts.map(renderRow)}</div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })() : (
               <div style={{ fontSize: 13, color: 'var(--muted)' }}>No alerts yet — set one and we’ll watch the number for you.</div>
             ))}
           </section>
@@ -248,6 +266,7 @@ function TemplatesView({ templates, canUse, onUse, onDelete }) {
 }
 
 const eventName = { fontSize: 12, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)' };
+const tagHead = { fontSize: 11.5, fontWeight: 700, color: 'var(--muted)', marginBottom: 8, display: 'inline-flex', alignItems: 'center', gap: 6, border: '1px solid var(--hairline)', borderRadius: 980, padding: '3px 11px' };
 const addBtn = { border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--brand)', borderRadius: 9, fontSize: 12.5, fontWeight: 700, padding: '6px 11px', cursor: 'pointer', flexShrink: 0 };
 const card = { display: 'flex', alignItems: 'center', gap: 12, border: '1px solid var(--hairline)', borderRadius: 12, background: 'var(--card)', padding: '12px 14px' };
 const iconBtn = { border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 9, width: 38, height: 34, fontSize: 13, cursor: 'pointer', flexShrink: 0 };

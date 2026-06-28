@@ -385,6 +385,9 @@ client's* numbers.
 - **Plain-English** — every rule reads back as a sentence ("When VIP remaining drops
   below 100, notify me via inbox, push and SMS — once"), and a **Test** button shows
   exactly what will land.
+- **Tag alerts by area** 🆕 — tag an alert with an operational area (**Ticketing, Cashless,
+  Access control, Audience…** or your own); the Alerts page groups them into **one row per
+  tag**, so a long watch-list reads as tidy sections.
 - **Dual-surface** — clients set their own alerts; Howler can set them on a client's
   behalf during onboarding so the first week already feels proactive.
 - **Live Pulse strip** 🧪 — a glanceable, colour-coded **beat in the top header**
@@ -464,6 +467,9 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-28** — **Alert tags** ✅: tag an alert with an operational area (Ticketing,
+  Cashless, Access control, …, or a custom one); the Alerts page now groups alerts into
+  **one row per tag**, mirroring the goal tags.
 - **2026-06-28** — **Mobile dashboard polish** ✅: removed the left/right **swipe-between-tabs**
   gesture (it fought with scrolling wide tables and the page) — switch tabs by tapping the tab bar.
   **Tables** now scroll far more smoothly on mobile (momentum scrolling, the table owns its own
