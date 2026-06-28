@@ -204,9 +204,17 @@ POST /api/owl/chat  (auth.requireAuth, entity-scoped)
   a tool_use runs under scope then the model answers from the result; a scope
   failure reaches the model as `ok:false` (no fabricated number); a no-tool turn
   returns immediately; an unknown tool is handled not thrown. Full suite 176/176,
-  budgets green (prompt relocated, not bumped). **Remaining:** `OwlChat.jsx` native
-  panel + the `owlNativeChat` flag + the `ClientLayout` swap. Demo target: ask a
-  question in-app, get a grounded answer with citations.
+  budgets green (prompt relocated, not bumped). **✅ Client done (2026-06-28):**
+  `client/src/components/OwlChat.jsx` — a native, mobile-first chat panel that
+  mirrors the Inventive drawer's docked/overlay shell, streams the answer in as
+  plain text (`api.owlChat` reads the stream + `X-Owl-Thread`), and has an
+  empty-state with example questions. Gated by `FEATURES.owlNativeChat` (default
+  OFF); `ClientLayout` swaps `OwlChat` in for `AnalystDrawer` behind the flag,
+  reusing the same floating-owl launcher, and passes the current event
+  (`suiteId`, falling back to the client's first event). Client build green.
+  **Remaining for a live demo:** flip the flag on in an environment with the
+  Looker + Anthropic keys set and ask a real question. **Next:** citation chips
+  (surface which figures came from a query) + M1's admin curation UI.
 - **M4 — 1b structured query** over the catalogue (grouped/breakdown questions) +
   parity check vs Inventive; pick first client to A/B.
 - **M5 — Cutover loop.** Migrate clients as parity holds; once all are over, the

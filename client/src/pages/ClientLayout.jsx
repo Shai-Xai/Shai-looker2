@@ -11,6 +11,7 @@ import { applyBrand, resetBrand, useBrandLogo } from '../lib/brand.js';
 import { useAccess, PERMS } from '../lib/access.js';
 import { FEATURES } from '../lib/features.js';
 import AnalystDrawer from '../components/AnalystDrawer.jsx';
+import OwlChat from '../components/OwlChat.jsx';
 import StatusNoticeBanner from '../components/StatusNoticeBanner.jsx';
 import AiMark from '../components/AiMark.jsx';
 
@@ -689,7 +690,7 @@ export default function ClientLayout() {
         )}
         <Outlet context={{ previewEntityId: activeEntityId, actionsSlot }} />
       </main>
-      {FEATURES.ask && !askOpen && (
+      {(FEATURES.ask || FEATURES.owlNativeChat) && !askOpen && (
         // Floating owl — quick launcher for the analyst drawer (bottom-right).
         // Hover/focus pre-warms the analyst so the first open is instant.
         <button
@@ -703,7 +704,9 @@ export default function ClientLayout() {
           <AiMark size={28} sparkle={false} />
         </button>
       )}
-      <AnalystDrawer open={askOpen} prewarm={prewarmAsk} onClose={() => setAskOpen(false)} previewEntityId={activeEntityId} />
+      {FEATURES.owlNativeChat
+        ? <OwlChat open={askOpen} onClose={() => setAskOpen(false)} suiteId={suiteId || (visibleSuites[0] && visibleSuites[0].id)} />
+        : <AnalystDrawer open={askOpen} prewarm={prewarmAsk} onClose={() => setAskOpen(false)} previewEntityId={activeEntityId} />}
     </div>
   );
 }

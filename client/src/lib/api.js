@@ -95,6 +95,20 @@ async function extractStream(url, body, onProgress) {
 export const api = {
   // Auth
   me: () => fetch('/api/auth/me').then(json),
+
+  // Agentic Owl chat: POST a question, stream the grounded answer as plain text
+  // (onText per delta), resolve with { threadId } (read from the X-Owl-Thread header
+  // so a new conversation can be continued).
+  owlChat: async ({ suiteId, message, threadId }, onText) => {
+    const res = await fetch('/api/owl/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ suiteId, message, threadId }) });
+    if (!res.ok) return json(res); // pre-stream rejection (no scope / no API key) → throws
+    const tid = res.headers.get('X-Owl-Thread') || threadId || null;
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    for (;;) { const { done, value } = await reader.read(); if (done) break; if (value) onText?.(dec.decode(value, { stream: true })); }
+    return { threadId: tid };
+  },
+  owlThreadMessages: (id) => fetch(`/api/owl/threads/${id}/messages`).then(json),
   login: (email, password) =>
     fetch('/api/auth/login', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
