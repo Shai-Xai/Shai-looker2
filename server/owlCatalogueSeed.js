@@ -28,10 +28,13 @@ module.exports = {
   // `default: true` = headline metrics offered first. `aka` = natural-language
   // synonyms the Owl maps a question onto.
   measures: [
-    { name: 'all_tickets.sold_tickets',          label: 'Total Sold',           type: 'sum',            default: true,  aka: ['tickets sold', 'sold', 'sales volume', 'how many tickets'] },
+    // "Tickets sold" = the distinct ticket-record count. NB: this explore aliases
+    // the core tickets table as `all_tickets`, so all_tickets.count IS the core
+    // tickets count (there is no separate core_tickets.count field here).
+    { name: 'all_tickets.count',                 label: 'Tickets Sold',         type: 'count_distinct', default: true,  aka: ['tickets sold', 'sold', 'sales volume', 'how many tickets', 'number of tickets', 'ticket count'] },
     { name: 'all_tickets.sum_revenue_decimal',   label: 'Total Revenue',        type: 'sum_distinct',   default: true,  unit: 'ZAR', aka: ['revenue', 'sales', 'gross', 'money', 'turnover'] },
     { name: 'all_tickets.Average_ticket_price',  label: 'Average Ticket Price', type: 'average',        default: true,  unit: 'ZAR', aka: ['average price', 'avg ticket price', 'price per ticket'] },
-    { name: 'all_tickets.count',                 label: 'Ticket Count',         type: 'count_distinct', default: false, aka: ['number of tickets', 'distinct tickets'] },
+    { name: 'all_tickets.sold_tickets',          label: 'Tickets Sold (excl. comps)', type: 'sum',      default: false, aka: ['net sold', 'paid tickets', 'sold excluding complimentary'] },
     { name: 'all_tickets.issued_tickets',        label: 'Issued Tickets',       type: 'count_distinct', default: false, aka: ['issued'] },
     { name: 'all_tickets.complimentary_tickets', label: 'Complimentary Tickets',type: 'sum',            default: false, aka: ['comps', 'complimentary', 'free tickets'] },
     { name: 'all_tickets.sum_fee_decimal',       label: 'Total Ticket Fee',     type: 'sum_distinct',   default: false, unit: 'ZAR', aka: ['fees', 'booking fees'] },
@@ -76,7 +79,7 @@ module.exports = {
   // ── Synonym shortcuts (word → field) for the prompt's grounding ─────────────
   // Disambiguation the Owl should respect (e.g. "city" is ambiguous: event vs buyer).
   notes: [
-    '"Tickets sold" defaults to all_tickets.sold_tickets; use all_tickets.count only when asked for distinct ticket records.',
+    '"Tickets sold" = all_tickets.count (distinct ticket records — the core tickets count; this explore aliases core_tickets as all_tickets). all_tickets.sold_tickets EXCLUDES complimentary tickets — use it only when explicitly asked for paid/net sold.',
     '"Revenue" = all_tickets.sum_revenue_decimal (ZAR, gross). Fees and cost are separate measures.',
     '"City" is ambiguous — default to Event City (core_sa_city_location.city_name); use Buyer City only when the question is about where customers are from.',
     '"Remaining"/"sold out" use core_ticket_transactions_combined.remaining.',
