@@ -264,3 +264,21 @@ built unless marked ✅.)
 
 ### ✅ Shipped this session
 Native chat on Claude tool-use; `askData` (curated catalogue, scoped, fails-closed); allowlist gating (shai.evian); scope bound to the organisers a user can access (never platform-wide); client/event picker + the Owl states its scope; suite event-lock applied; re-pointed to the `tickets_purchased`/`core_tickets` explore (realistic counts); tickets-vs-add-ons split; customer lookup by email/phone/name (filter-only, no enumeration); citation chips + underlying data table; today's-date awareness; auto-charts via Pulse's `ChartTile` + a bar/line/pie/metric type toggle.
+
+---
+
+## Night session 2026-06-28/29 — shipped + what's next
+
+**Shipped this session (all tested, build green, pushed to branch + main + ecstatic-thompson):**
+- **New chat + chat history** — header ✎ (new) and 🕘 (past chats); `GET /api/owl/threads`; load a past chat (messages + citations + scope restored).
+- **Insight takeaways + follow-on questions** — the Owl adds a one-line takeaway and ends with a hidden `<<<FOLLOWUPS>>>` marker → tappable suggested-question chips.
+- **Pin to Home / a dashboard** — `server/owlPin.js`: a chart's live query becomes a tile (organiser scope stripped → live). Home uses a per-client "Saved from Owl" dashboard + a pin mark. 📌 button + dialog. Admin-gated.
+- **Share a chat** — reuses the existing `ShareMenu` (email/WhatsApp/Slack) with the transcript. No new infra.
+- **getGoals tool** — first registry-growth beyond askData; reads an event's goals + progress (fail-safe).
+
+**Remaining multi-domain tools (need a small read-API per module before they're safe to build — do with live testing):**
+- **getAlerts** — `alerts.js` exposes `{evaluate, tick, recentBeats}` but no clean `listAlerts(entityId)`; add one (active alerts + recent fires) then a tool mirroring getGoals' shape.
+- **getCampaigns** — `db.listActionsForUser` exists but is per-user; add a per-entity campaign list (with opens/clicks/conversions) then the tool.
+- **getDashboard** — resolving a whole dashboard means iterating its tiles through `resolveTileValue`/`resolveTileSeries` (in index.js). Expose a small `gatherDashboard(dashboardId, user, suiteId)` helper (cap/cache — N tile queries) then the tool. Pass the current `dashboardId` as chat context (like suiteId/entityId).
+
+All three follow the **same registry pattern**: inject the module's scoped read-API into `createOwlTools`, add a `{schema, run}` entry, the model routes to it. Read-only first; acting (create goal/alert/campaign) is the later act-layer.
