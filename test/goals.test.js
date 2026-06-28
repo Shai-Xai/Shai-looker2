@@ -101,6 +101,18 @@ test('a range goal: in-band reads on-target, above the band is flagged (not "rea
   assert.ok(P(idOver).pct > 100, 'over-band pct exceeds 100');
 });
 
+test('a goal persists its tag (operational area) and returns it on read', async () => {
+  const sid = h.db.createSuite({ entityId, name: 'Tag test' }).id;
+  const g = (await app.req('POST', `/api/goals/suites/${sid}`, { as: owner, body: {
+    name: 'VIP sell-through', source: 'manual', targetValue: 100, unit: 'tickets', tag: '  Ticketing  ',
+  } })).body.goal;
+  assert.equal(g.tag, 'Ticketing', 'tag is trimmed and stored');
+  // Survives an edit that doesn't touch the tag.
+  await app.req('PUT', `/api/goals/${g.id}`, { as: owner, body: { name: 'VIP sell-through v2' } });
+  const row = (await app.req('GET', `/api/goals/suites/${sid}`, { as: owner })).body.goals.find((x) => x.id === g.id);
+  assert.equal(row.tag, 'Ticketing', 'tag persists across an unrelated edit');
+});
+
 test('a composition goal reads the breakdown as shares and flags a slice out of band', async () => {
   const sid = h.db.createSuite({ entityId, name: 'Composition test' }).id;
   tileSeries = [{ t: 'New', v: 30 }, { t: 'Returning', v: 70 }]; // 30% / 70% of total

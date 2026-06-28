@@ -263,6 +263,9 @@ a pace read** — *ahead / on track / behind* — not just "are we there yet."
   **dashboard name + tile** (the key components). **Howler can also publish 🌐 global
   templates** to **every client** — they re-link to each client's matching dashboard/tile
   **by name**, so standardised dashboards wire up automatically.
+- **Tag goals by area** — tag a goal with an operational area (**Ticketing, Cashless,
+  Access control, Audience, Marketing…** or your own), and the Goals page groups them into
+  **one row per tag** so a busy event reads as tidy sections instead of one long grid.
 - **Drag to reorder** — arrange goal tiles on the Goals page; the order carries to the
   home dashboard.
 - **Dual-surface** — clients set their own goals; Howler can set them on a client's
@@ -345,6 +348,10 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-22** — **Goal tags** ✅: tag a goal with an operational area (Ticketing,
+  Cashless, Access control, …, or a custom one); the Goals page now groups goals into
+  **one row per tag**. Mix/split goals also gained an **Owl commentary** line in their
+  detail view, and now appear in the **rings summary** (represented by their focus slice).
 - **2026-06-22** — **Alerts: templates + Ticket Type/Category starters** 🧪: alerts can now be
   **saved as reusable templates** — a client's own, or (admins) **🌐 global** templates pushed to
   every client (they re-link to each client's matching data by name). A **Templates** tab on the
