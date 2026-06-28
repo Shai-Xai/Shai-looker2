@@ -12,6 +12,50 @@
 > back-end (Skills) are **two doors into the same loop**; this spec defines the
 > shared brain and tool layer.
 
+## 0. In plain English (read this first)
+
+Pulse already has an "Owl" — a smart assistant that reads your dashboards and
+explains what's happening. But today it can only talk about **what's already on
+the screen.** Ask it something that isn't on an existing chart — *"how did VIP
+tickets sell in Cape Town last week?"* — and it's stuck.
+
+**What we're building:** an Owl you can *ask anything*, and that can eventually
+*do things for you* (with your approval), not just talk.
+
+Picture it as a **chief of staff**:
+- For a quick request, the chief of staff just **does it** using their **tools** —
+  the single moves it can make (look up a number, draft a campaign, set an alert).
+  You ask, it picks the right tool, you get the answer.
+- For ongoing work, the chief of staff has a **team of specialists** — what we
+  call **Skills** (a *Ticketing Manager*, a *Marketing analyst*). Each watches its
+  own corner, can **run on its own schedule** in the background, and can also be
+  tapped on demand.
+
+The elegant part: **it's all one brain.** A Skill isn't a separate intelligence —
+it's the same Owl given a focused job, a limited toolbox and a schedule. So
+whether *you* start the conversation (chat) or *the clock* starts it (a Skill
+running in the background), it's the same reasoning, the same data, the same
+safety rules, the same voice. We call this **one loop, two doors** — the chat door
+and the autonomous-skill door both lead to the same brain and the same tools.
+
+**The foundation is "ask your data."** Everything above stands on one new ability:
+letting the Owl *fetch the answer to any question from the data itself*, instead
+of only reading charts someone already built. Build that first (we call it
+`askData`) and the Owl crosses from *"reads the dashboard"* to *"reasons about the
+data."*
+
+**The key choice:** today's "ask anything" assistant clients see (Inventive) is
+*rented* — a placeholder that can chat but can't *do* anything in Pulse, and runs
+on a separate brain. We're **building our own** so clients get **one** Owl, with
+one voice, that can actually act — because you don't rent your foundation.
+
+**The one rule that never bends:** every client only ever sees **their own data**,
+locked at the deepest level — so even when the Owl goes fetching answers, it
+physically cannot cross into another client's data. This matters most precisely
+*because* we're making it more powerful.
+
+---
+
 ## 1. Problem & goal
 
 Today Pulse has **two Owls on two brains**:
@@ -258,8 +302,7 @@ are the only net-new storage.
 
 ---
 
-*Next step: pick P1 scope (the curated catalogue + `askData` bounded re-run + the
-native chat shell behind a flag) and turn it into an implementation plan — the
-catalogue admin surface, the `askData` tool + scope gate, the registered prompt,
-the chat thread storage + audit ledger, and the acceptance/scope tests — then slot
-it under the Experience OS build order ahead of the Skills runtime.*
+*Next step: **P1 is now planned** — see `docs/specs/AGENTIC_OWL_P1_PLAN.md` (the
+curated catalogue + `askData` + native chat shell behind a flag, with the scope
+gate, registered prompt, audit ledger, tests, and milestones M1→M5). Slot it under
+the Experience OS build order ahead of the Skills runtime.*
