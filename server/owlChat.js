@@ -97,7 +97,7 @@ function owlAllowed(user) {
   return !!email && OWL_ALLOW.split(',').map((s) => s.trim()).filter(Boolean).includes(email);
 }
 
-function mount(app, { db, auth, insights, owlTools, anthropicKeyForSuite }) {
+function mount(app, { db, auth, insights, owlTools, anthropicKeyForSuite, anthropicKeyForEntity }) {
   const sql = db.db;
   sql.exec(`
     CREATE TABLE IF NOT EXISTS owl_threads (
@@ -133,19 +133,32 @@ function mount(app, { db, auth, insights, owlTools, anthropicKeyForSuite }) {
     const { suiteId, message, entityId } = req.body || {};
     let { threadId } = req.body || {};
     if (!message || !String(message).trim()) return res.status(400).json({ error: 'Empty message.' });
-    if (!suiteId) return res.status(400).json({ error: 'An event (suiteId) is required.' });
-    const su = db.getSuite(suiteId);
-    if (!su) return res.status(404).json({ error: 'Event not found.' });
-    if (req.user.role !== 'admin' && !auth.canAccessSuite(req.user, suiteId)) return res.status(403).json({ error: 'Not allowed.' });
-    const apiKey = anthropicKeyForSuite(suiteId);
+    // Scope context is an EVENT (suiteId) and/or a CLIENT (entityId). Clients are
+    // auto-scoped server-side even with neither; admins need at least one (askData
+    // refuses otherwise). Validate access to whatever was supplied.
+    const su = suiteId ? db.getSuite(suiteId) : null;
+    if (suiteId && !su) return res.status(404).json({ error: 'Event not found.' });
+    const scopeEntityId = entityId || (su && su.entityId) || '';
+    if (req.user.role !== 'admin') {
+      if (suiteId && !auth.canAccessSuite(req.user, suiteId)) return res.status(403).json({ error: 'Not allowed.' });
+      if (scopeEntityId && !(req.user.entityIds || []).includes(scopeEntityId)) return res.status(403).json({ error: 'Not allowed.' });
+    }
+    const apiKey = su ? anthropicKeyForSuite(suiteId) : anthropicKeyForEntity(scopeEntityId || undefined);
     if (!insights.isConfigured(apiKey)) return res.status(400).json({ error: 'AI is not configured. Set an Anthropic API key in Admin → Integrations (or .env).' });
+
+    // Human-readable scope label so the Owl can STATE whose data it's answering for.
+    const scopeEnt = scopeEntityId ? db.getEntity(scopeEntityId) : null;
+    const scopeLabel = [scopeEnt && scopeEnt.name, su && su.name].filter(Boolean).join(' · ');
+    const instructions = scopeLabel
+      ? `All data in this conversation is scoped to: ${scopeLabel}. Make clear in your answer which client/event the numbers are for — lead your answer with "For ${scopeLabel}:" (or naturally name it). Never imply the figures cover other clients or events.`
+      : '';
 
     // Load or create the thread (must belong to this user).
     let thread = threadId ? getThread.get(threadId) : null;
     if (thread && thread.user_id !== req.user.id) return res.status(403).json({ error: 'Not your thread.' });
     if (!thread) {
       threadId = crypto.randomUUID();
-      insThread.run(threadId, su.entityId || '', req.user.id, suiteId, String(message).slice(0, 80), now());
+      insThread.run(threadId, scopeEntityId, req.user.id, suiteId || null, String(message).slice(0, 80), now());
       thread = getThread.get(threadId);
     }
 
@@ -159,7 +172,6 @@ function mount(app, { db, auth, insights, owlTools, anthropicKeyForSuite }) {
     res.setHeader('X-Owl-Thread', thread.id);
     res.flushHeaders?.();
     try {
-      const instructions = ''; // standing per-client AI instructions can layer in here later
       const { text, trail } = await runOwlLoop({
         llmTurn: ({ messages: m, tools, onText }) => owlTurn(insights, { messages: m, tools, instructions, apiKey, onText }),
         toolMap,

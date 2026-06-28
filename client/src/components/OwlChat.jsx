@@ -9,7 +9,7 @@ import { useIsMobile } from '../lib/useIsMobile.js';
 // is fetched + scoped server-side, so nothing here can reach another client's data.
 //
 // Mobile-first: single column, full-width panel on phones.
-export default function OwlChat({ open, onClose, suiteId, entityId }) {
+export default function OwlChat({ open, onClose, suiteId, entityId, clients = [], events = [], isAdmin = false }) {
   const isMobile = useIsMobile();
   const [messages, setMessages] = useState([]); // [{ role:'user'|'owl', text }]
   const [input, setInput] = useState('');
@@ -17,9 +17,23 @@ export default function OwlChat({ open, onClose, suiteId, entityId }) {
   const [threadId, setThreadId] = useState(null);
   const [dock, setDock] = useState(() => localStorage.getItem('howler_owl_dock') || 'docked');
   const [zoom, setZoom] = useState(() => parseFloat(localStorage.getItem('howler_owl_zoom')) || 1);
+  // Scope the Owl answers for — pick a client (organiser) and optionally an event.
+  const [selEntity, setSelEntity] = useState(entityId || '');
+  const [selSuite, setSelSuite] = useState(suiteId || '');
   const scrollRef = useRef(null);
   const pickDock = (m) => { localStorage.setItem('howler_owl_dock', m); setDock(m); };
   const bumpZoom = (d) => setZoom((z) => { const n = Math.min(1.3, Math.max(0.8, Math.round((z + d) * 100) / 100)); localStorage.setItem('howler_owl_zoom', String(n)); return n; });
+
+  // Follow the page context if it changes while open.
+  useEffect(() => { setSelEntity(entityId || ''); }, [entityId]);
+  useEffect(() => { setSelSuite(suiteId || ''); }, [suiteId]);
+  // Changing scope starts a fresh conversation (don't mix clients' data in a thread).
+  const resetThread = () => { setMessages([]); setThreadId(null); };
+
+  const clientEvents = events.filter((e) => e.entityId === selEntity);
+  const showPicker = isAdmin || clients.length > 1;
+  // Clients are auto-scoped server-side; admins need a client or event chosen.
+  const canAsk = isAdmin ? !!(selEntity || selSuite) : true;
 
   // Keep the latest message in view as it streams.
   useEffect(() => { const el = scrollRef.current; if (el) el.scrollTop = el.scrollHeight; }, [messages]);
@@ -31,11 +45,10 @@ export default function OwlChat({ open, onClose, suiteId, entityId }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose]);
 
-  const canAsk = !!(suiteId || entityId);
   async function send() {
     const q = input.trim();
     if (!q || busy) return;
-    if (!canAsk) { setMessages((m) => [...m, { role: 'owl', text: 'Open a client or an event first, then ask me — I scope to that organiser.' }]); return; }
+    if (!canAsk) { setMessages((m) => [...m, { role: 'owl', text: 'Pick a client (or open an event) above, then ask me — I scope to that organiser.' }]); return; }
     setInput('');
     // Append the question + an empty Owl bubble we stream into.
     setMessages((m) => [...m, { role: 'user', text: q }, { role: 'owl', text: '' }]);
@@ -46,7 +59,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId }) {
       return next;
     });
     try {
-      const { threadId: tid } = await api.owlChat({ suiteId, entityId, message: q, threadId }, appendToOwl);
+      const { threadId: tid } = await api.owlChat({ suiteId: selSuite || undefined, entityId: selEntity || undefined, message: q, threadId }, appendToOwl);
       if (tid) setThreadId(tid);
     } catch (e) {
       appendToOwl((e && e.message) ? `⚠ ${e.message}` : '⚠ Sorry — I hit a problem answering that.');
@@ -59,6 +72,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId }) {
   const docked = dock === 'docked' && !isMobile;
   const hdrBtn = { border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' };
   const segBtn = (active) => ({ padding: '4px 10px', fontSize: 11.5, fontWeight: 600, border: 'none', borderRadius: 980, cursor: 'pointer', background: active ? 'var(--brand)' : 'transparent', color: active ? '#fff' : 'var(--text)' });
+  const selStyle = { padding: '4px 8px', borderRadius: 8, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', fontSize: 12.5, maxWidth: 200 };
 
   const bubble = (m, i) => (
     <div key={i} style={{ display: 'flex', justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start', marginBottom: 10 }}>
@@ -89,6 +103,26 @@ export default function OwlChat({ open, onClose, suiteId, entityId }) {
         )}
         <button onClick={onClose} title="Close" aria-label="Close the Owl" style={{ ...hdrBtn, fontSize: 20, padding: '2px 6px' }}>✕</button>
       </div>
+
+      {showPicker && (
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', padding: '8px 12px', borderBottom: '1px solid var(--hairline)', flexShrink: 0, flexWrap: 'wrap' }}>
+          <span style={{ color: 'var(--muted)', fontSize: 12.5 }}>Scope:</span>
+          {clients.length > 1 ? (
+            <select value={selEntity} onChange={(e) => { setSelEntity(e.target.value); setSelSuite(''); resetThread(); }} style={selStyle} aria-label="Client">
+              <option value="">Pick a client…</option>
+              {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          ) : (
+            <strong style={{ fontSize: 12.5 }}>{(clients[0] && clients[0].name) || 'Your data'}</strong>
+          )}
+          {selEntity && clientEvents.length > 0 && (
+            <select value={selSuite} onChange={(e) => { setSelSuite(e.target.value); resetThread(); }} style={selStyle} aria-label="Event">
+              <option value="">All events</option>
+              {clientEvents.map((ev) => <option key={ev.id} value={ev.id}>{ev.name}</option>)}
+            </select>
+          )}
+        </div>
+      )}
 
       <div ref={scrollRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 14, fontSize: `${zoom}em` }}>
         {messages.length === 0 && (

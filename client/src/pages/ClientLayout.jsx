@@ -183,6 +183,15 @@ export default function ClientLayout() {
     : profileEntityId;
   const visibleSuites = activeEntityId ? suites.filter((s) => s.entityId === activeEntityId) : suites;
   const visibleSettlements = activeEntityId ? settlements.filter((s) => s.entityId === activeEntityId) : settlements;
+  // Scope options for the Owl picker: the clients (organisers) + events this user
+  // can pick. Admins get all; a client gets their own entity/events.
+  const owlClients = (() => {
+    const m = new Map();
+    for (const s of suites) if (s.entityId) m.set(s.entityId, s.entityName || s.entityId);
+    for (const e of (user?.entities || [])) m.set(e.id, e.name || e.id);
+    return [...m.entries()].map(([id, name]) => ({ id, name }));
+  })();
+  const owlEvents = suites.map((s) => ({ id: s.id, name: s.name, entityId: s.entityId }));
 
   // Experience OS inbox badge/banner — scoped to the ACTIVE profile so a
   // multi-profile login only sees the current client's messages (re-polls when
@@ -705,7 +714,7 @@ export default function ClientLayout() {
         </button>
       )}
       {owlNativeChatEnabled(user)
-        ? <OwlChat open={askOpen} onClose={() => setAskOpen(false)} suiteId={suiteId} entityId={activeEntityId} />
+        ? <OwlChat open={askOpen} onClose={() => setAskOpen(false)} suiteId={suiteId} entityId={activeEntityId} clients={owlClients} events={owlEvents} isAdmin={isAdmin} />
         : <AnalystDrawer open={askOpen} prewarm={prewarmAsk} onClose={() => setAskOpen(false)} previewEntityId={activeEntityId} />}
     </div>
   );
