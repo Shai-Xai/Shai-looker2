@@ -19,7 +19,7 @@ const chartImg = require('./owlChartImg');
 const WA_OVERRIDE = [
   'OVERRIDE — this conversation is over WhatsApp: reply in SHORT, plain text. No markdown tables. Use *single asterisks* for light emphasis. Lead with the answer in words. Express monetary amounts in the organiser\'s reporting currency (a Currency line below states it when it isn\'t South African Rand).',
   'There is NO screen, panel, toggle, button or chart-type switcher here. NEVER tell the user to tap, switch or toggle anything, and never refer to something "below" or "on screen" — they are on WhatsApp.',
-  'Do NOT announce or point at a chart (no "here\'s a chart", no 👇 arrow). If a visual helps, one is attached automatically — just give the figures in words.',
+  'Say NOTHING about chart delivery: never announce, point at, apologise for, or promise a chart/image — no "here\'s a chart", no 👇/👆, no "a fresh chart is on its way", no "re-sent". A chart link/image is attached automatically when useful; just answer with the figures in words.',
   'When the user wants to SEE data as a chart / line graph / bar chart / trend — EVEN data you just gave them — you MUST re-run it as ONE grouped askData query (a dimension such as day/month/event plus the measure) so a fresh chart image can be attached. Never reply "it\'s the same data" or refuse to re-pull, and never split a trend into many separate per-day lookups.',
   'End your reply with the <<<FOLLOWUPS>>> marker + a JSON array of 2-3 SHORT (≤6 words) next questions, exactly as instructed; the app turns them into tappable buttons.',
 ].join('\n');
@@ -154,35 +154,31 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
 
   // Render the answer's data to a chart PNG and send it (upload → image message).
   // Best-effort: any failure is logged and the text answer still stands.
+  // Inline native images need Clickatell's media upload (POST /v1/media), which 404s
+  // until they enable it on the integration. So default to the hosted link, and only
+  // attempt the native upload when an admin flips this on (after Clickatell enables it).
+  const mediaEnabled = () => db.getSetting('whatsapp_media_enabled', '') === '1';
   async function maybeSendChart(msisdn, trail) {
     try {
       const spec = chartImg.chartFromTrail(trail, labelMaps());
       if (!spec) { logEvent(msisdn, 'image-skip', 'nothing chartable in this answer'); return; }
       const png = chartImg.renderPng(spec);
       if (!png) { logEvent(msisdn, 'image-failed', 'render produced no PNG'); return; }
-      const base = publicBase();
-      const id = storeImg(png, spec.title);
-      const pngUrl = base ? `${base}/api/whatsapp/img/${id}.png` : '';
-      // 1) Inline image by public URL (no upload endpoint needed) — best UX, and dodges
-      //    the un-provisioned /v1/media endpoint entirely.
-      if (pngUrl) {
-        const byUrl = await messaging.sendWhatsappImageByUrl({ to: msisdn, url: pngUrl, caption: spec.title });
-        if (byUrl.ok) { logEvent(msisdn, 'image-sent', `${spec.title} (by url)`); return; }
-        // 2) Inline image by upload+fileId — works on accounts where media IS provisioned.
+      // Native inline image (only when enabled) — best UX once Clickatell provisions media.
+      if (mediaEnabled()) {
         const up = await messaging.uploadWhatsappMedia(png, 'image/png');
         if (up.ok) {
           const im = await messaging.sendWhatsappImage({ to: msisdn, fileId: up.fileId, caption: spec.title });
           if (im.ok) { logEvent(msisdn, 'image-sent', spec.title); return; }
         }
-        // 3) Link to a preview page (OpenGraph card → thumbnail in WhatsApp).
-        const r = await messaging.sendWhatsapp({ to: msisdn, text: `📈 ${spec.title}\n${base}/api/whatsapp/chart/${id}` });
-        if (r && r.ok) { logEvent(msisdn, 'image-link', `inline unavailable (url:${byUrl.error || byUrl.reason || '?'}) — sent preview link`); return; }
-        logEvent(msisdn, 'image-failed', `byUrl: ${byUrl.error || byUrl.reason || 'error'}`); return;
+        logEvent(msisdn, 'image-failed', `native: ${up.error || up.reason || 'send error'} — falling back to link`);
       }
-      // No public base URL configured → can't host; try upload as a last resort.
-      const up = await messaging.uploadWhatsappMedia(png, 'image/png');
-      if (up.ok) { const im = await messaging.sendWhatsappImage({ to: msisdn, fileId: up.fileId, caption: spec.title }); if (im.ok) { logEvent(msisdn, 'image-sent', spec.title); return; } }
-      logEvent(msisdn, 'image-failed', 'no public base URL to host the chart, and media upload unavailable');
+      // Fallback (the default): a link to the hosted OpenGraph chart page.
+      const base = publicBase();
+      if (!base) { logEvent(msisdn, 'image-failed', 'no public base URL to host the chart'); return; }
+      const url = `${base}/api/whatsapp/chart/${storeImg(png, spec.title)}`;
+      const r = await messaging.sendWhatsapp({ to: msisdn, text: `📈 View chart — ${spec.title}:\n${url}` });
+      logEvent(msisdn, r && r.ok ? 'image-link' : 'image-failed', r && r.ok ? spec.title : (r && r.error) || 'link send error');
     } catch (e) { logEvent(msisdn, 'image-failed', (e && e.message) || 'chart error'); }
   }
 
@@ -317,6 +313,7 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
       // When a secret is set, the callback URL must carry it — so hand back the exact
       // URL (key embedded) to paste into Clickatell. Admin-only screen.
       webhookPath: sec ? `/api/whatsapp/inbound?key=${encodeURIComponent(sec)}` : '/api/whatsapp/inbound',
+      mediaEnabled: db.getSetting('whatsapp_media_enabled', '') === '1',
       numbers: Object.entries(allowlist()).map(([msisdn, v]) => ({ msisdn, email: v.email || '', entityId: v.entityId || '' })),
     });
   });
@@ -325,6 +322,7 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
     if (b.from !== undefined) db.setSetting('whatsapp_from', String(b.from || '').trim());
     if (b.apiKey) db.setSetting('whatsapp_api_key', String(b.apiKey).trim()); // write-only; reuses SMS key if blank
     if (b.secret !== undefined) db.setSetting('whatsapp_webhook_secret', String(b.secret || '').trim());
+    if (b.mediaEnabled !== undefined) db.setSetting('whatsapp_media_enabled', b.mediaEnabled ? '1' : '');
     if (Array.isArray(b.numbers)) {
       const map = {};
       for (const n of b.numbers) { const m = norm(n.msisdn); if (m && n.email) map[m] = { email: String(n.email).trim(), entityId: String(n.entityId || '').trim() }; }
