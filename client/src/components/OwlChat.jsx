@@ -340,13 +340,14 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
           </div>
         )}
         {messages.map((m, i) => (
-          <div key={i}>
+          <div key={i} data-owl-msg>
             {bubble(m, i)}
             {m.role === 'owl' && m.sources && m.sources.length > 0 && <CitationChips sources={m.sources} entityId={selEntity} suiteId={selSuite} canPin={isAdmin} />}
             {m.role === 'owl' && m.text && !busy && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 2 }}>
                 <CopyBtn text={m.text} />
                 <ShareMenu heading={[...messages.slice(0, i)].reverse().find((x) => x.role === 'user')?.text || 'Owl answer'} text={m.text} isMobile={isMobile} variant="tile" title="Share this answer" />
+                <DataActions source={(m.sources || []).filter((s) => s.kind !== 'dashboard').find((s) => s.rows && s.rows.length)} />
                 <ReportToClaude
                   question={[...messages.slice(0, i)].reverse().find((x) => x.role === 'user')?.text || ''}
                   answer={m.text}
@@ -537,6 +538,14 @@ function downloadText(filename, text, mime = 'text/csv;charset=utf-8') {
 }
 const csvName = (source) => `${[source.measure, ...(source.dimensions || [])].filter(Boolean).join(' by ') || 'owl-data'}`
   .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) + '.csv';
+// ECharts paints to a transparent canvas → flatten onto white before JPEG (else black).
+function downloadCanvasJpg(canvas, filename) {
+  try {
+    const tmp = document.createElement('canvas'); tmp.width = canvas.width; tmp.height = canvas.height;
+    const ctx = tmp.getContext('2d'); ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, tmp.width, tmp.height); ctx.drawImage(canvas, 0, 0);
+    const a = document.createElement('a'); a.href = tmp.toDataURL('image/jpeg', 0.92); a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+  } catch { /* tainted */ }
+}
 
 // The result rows as a data table (columns + values). Reused by the chart's "Table"
 // view; measure columns are right-aligned.
@@ -629,6 +638,20 @@ function CopyBtn({ text }) {
   );
 }
 
+// CSV + chart-image downloads for an answer, sitting inline with the other message
+// actions. The image grabs the answer's rendered chart canvas (found via the message
+// wrapper's data attribute), so no ref-threading into the chart is needed.
+function DataActions({ source }) {
+  if (!source || !(source.rows && source.rows.length)) return null;
+  const hasChart = !!source.chartType;
+  return (
+    <>
+      <button onClick={() => downloadText(csvName(source), toCSV(source.columns, source.rows))} title="Download the data as CSV (opens in Excel/Sheets)" style={msgActionStyle}>⬇ CSV</button>
+      {hasChart && <button onClick={(e) => { const c = e.currentTarget.closest('[data-owl-msg]') && e.currentTarget.closest('[data-owl-msg]').querySelector('canvas'); if (c) downloadCanvasJpg(c, csvName(source).replace(/\.csv$/, '.jpg')); }} title="Download the chart as an image (JPEG)" style={msgActionStyle}>⬇ Image</button>}
+    </>
+  );
+}
+
 // One-tap "Report to Claude": copies the fix brief to the clipboard (falls back to the
 // share sheet on devices without clipboard access) so it can be pasted straight to Claude.
 function ReportToClaude({ question, answer, sources, scopeLabel, dashboardId }) {
@@ -660,19 +683,6 @@ function OwlChart({ source, entityId, suiteId, canPin }) {
   const [type, setType] = useState(source.chartType || 'bar');
   const [pinOpen, setPinOpen] = useState(false);
   const [stacked, setStacked] = useState(false);
-  const chartBoxRef = useRef(null);
-  // Download the rendered chart as a JPEG. ECharts paints to a transparent canvas, so
-  // flatten onto a white background first (JPEG has no transparency → would go black).
-  const downloadJpg = () => {
-    const c = chartBoxRef.current && chartBoxRef.current.querySelector('canvas');
-    if (!c) return;
-    try {
-      const tmp = document.createElement('canvas'); tmp.width = c.width; tmp.height = c.height;
-      const ctx = tmp.getContext('2d'); ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, tmp.width, tmp.height); ctx.drawImage(c, 0, 0);
-      const a = document.createElement('a'); a.href = tmp.toDataURL('image/jpeg', 0.92); a.download = csvName(source).replace(/\.csv$/, '.jpg'); document.body.appendChild(a); a.click(); a.remove();
-    } catch { /* tainted */ }
-  };
-  const isChart = type === 'bar' || type === 'line' || type === 'pie';
   const [followMsg, setFollowMsg] = useState('');
   // Follow this chart in the briefing: materialise it as a tile (on the home "Saved
   // from Owl" board) and add a 'follow' mark so the home briefing always addresses it.
@@ -702,8 +712,6 @@ function OwlChart({ source, entityId, suiteId, canPin }) {
           {opts.map((o) => <button key={o.k} onClick={() => setType(o.k)} style={seg(type === o.k)}>{o.label}</button>)}
         </div>
         {canStack && <button onClick={() => setStacked((s) => !s)} title="Stack the series" style={{ border: '1px solid var(--hairline)', background: stacked ? 'var(--brand)' : 'var(--card)', color: stacked ? '#fff' : 'var(--text)', borderRadius: 980, padding: '3px 10px', fontSize: 11.5, cursor: 'pointer' }}>{stacked ? 'Stacked' : 'Stack'}</button>}
-        {(source.rows || []).length > 0 && <button onClick={() => downloadText(csvName(source), toCSV(source.columns, source.rows))} title="Download as CSV (opens in Excel/Sheets)" style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 980, padding: '3px 10px', fontSize: 11.5, cursor: 'pointer' }}>⬇ CSV</button>}
-        {isChart && <button onClick={downloadJpg} title="Download chart as image (JPEG)" style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 980, padding: '3px 10px', fontSize: 11.5, cursor: 'pointer' }}>⬇ JPG</button>}
         {showPin && <button onClick={() => setPinOpen((o) => !o)} title="Pin to a dashboard or home" style={{ border: '1px solid var(--hairline)', background: pinOpen ? 'var(--elevated, rgba(128,128,128,0.12))' : 'var(--card)', borderRadius: 980, padding: '3px 10px', fontSize: 11.5, cursor: 'pointer', color: 'var(--text)' }}>📌 Pin</button>}
         {showPin && <button onClick={doFollow} title="Follow in your briefing — the home briefing will always read & address this" style={{ border: '1px solid var(--hairline)', background: 'var(--card)', borderRadius: 980, padding: '3px 10px', fontSize: 11.5, cursor: 'pointer', color: 'var(--text)' }}>👁 Follow</button>}
         {followMsg && <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>{followMsg}</span>}
@@ -719,7 +727,7 @@ function OwlChart({ source, entityId, suiteId, canPin }) {
         : type === 'table'
           ? <SourceTable source={source} />
           : (
-          <div ref={chartBoxRef} style={{ height: 200, border: '1px solid var(--hairline)', borderRadius: 12, overflow: 'hidden', background: 'var(--card)' }}>
+          <div style={{ height: 200, border: '1px solid var(--hairline)', borderRadius: 12, overflow: 'hidden', background: 'var(--card)' }}>
             <ChartTile data={chartDataFromSource({ ...source, chartType: type })} visConfig={{ type: VIS[type] || 'looker_column', stacking: (canStack && stacked) ? 'normal' : undefined }} />
           </div>
         )}
