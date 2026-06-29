@@ -16,16 +16,25 @@ const num = (v) => {
 };
 
 // Does the customer's question ask for a visual? Charts on WhatsApp are opt-in (we
-// keep replies lean), so only render when they clearly want to see one.
+// keep replies lean), so only render when they clearly want to see one. Comparisons
+// ("X vs Y", "compare …") are inherently visual, so they count too.
 function wantsChart(q) {
-  return /\b(chart|graph|plot|trend|trends|visual|visualise|visualize|histogram|pie|bar ?chart|line ?chart|break ?down|over time|by (day|week|month|year|event|city|type|category))\b/i.test(String(q || ''));
+  return /\b(chart|graph|plot|trend|trends|visual|visualise|visualize|histogram|pie|bar ?chart|line ?chart|break ?down|over time|compare|comparison|versus|vs\.?|by (day|week|month|year|event|city|type|category))\b/i.test(String(q || ''));
 }
 
-// Pick the richest chartable source from a runOwlLoop trail and normalise it to
-// { title, cats, data, type }. Returns null if nothing in the answer is chartable
-// (single scalar, no breakdown, or one row). opts.label/opts.dimType resolve friendly
-// names + a date dimension (→ line). Rows are flat { field: rawValue } objects.
+const labelOf = (opts, f) => (opts.label && opts.label(f)) || String(f).split('.').pop().replace(/_/g, ' ');
+
+// Pick the richest chartable result from a runOwlLoop trail and normalise it to
+// { title, cats, data, type }. Tries a single GROUPED query first (one dimension,
+// many rows); failing that, synthesises a COMPARISON from several single-value
+// queries of the same measure (e.g. "May vs June" run as two scalar lookups).
+// Returns null if neither applies. Rows are flat { field: rawValue } objects.
 function chartFromTrail(trail, opts = {}) {
+  return groupedFromTrail(trail, opts) || comparisonFromTrail(trail, opts);
+}
+
+// One askData/queryDashboard call with a category dimension + >1 row → a bar/line.
+function groupedFromTrail(trail, opts) {
   const cands = (trail || [])
     .filter((t) => (t.name === 'askData' || t.name === 'queryDashboard') && t.result && t.result.ok)
     .map((t) => ({ dims: t.input.dimensions || [], rows: t.result.rows || [], m: t.input.measure }))
@@ -34,14 +43,42 @@ function chartFromTrail(trail, opts = {}) {
   cands.sort((a, b) => b.rows.length - a.rows.length); // richest breakdown wins
   const { dims, rows, m } = cands[0];
   const dim = dims[0];
-  const label = (f) => (opts.label && opts.label(f)) || String(f).split('.').pop().replace(/_/g, ' ');
   const isDate = /date|time|day|week|month|year/i.test((opts.dimType && opts.dimType(dim)) || dim);
   const type = isDate ? 'line' : 'bar';
   const used = rows.slice(0, type === 'line' ? 400 : 24);
   const cats = used.map((r) => String(r[dim] != null ? r[dim] : '—'));
   const data = used.map((r) => num(r[m]));
   if (!data.some((v) => v != null)) return null;
-  return { title: `${label(m)} by ${label(dim)}`, cats, data, type };
+  return { title: `${labelOf(opts, m)} by ${labelOf(opts, dim)}`, cats, data, type };
+}
+
+// Several single-value askData calls of the SAME measure, distinguished by a filter
+// that differs between them (a date range, an event, …) → one bar per call. This is
+// how the Owl answers "compare X vs Y" when it runs a separate lookup per side.
+function comparisonFromTrail(trail, opts) {
+  const scalars = (trail || [])
+    .filter((t) => t.name === 'askData' && t.result && t.result.ok && (t.input.dimensions || []).length === 0)
+    .map((t) => {
+      const m = t.input.measure;
+      const rows = t.result.rows || [];
+      const filters = { ...(t.input.filters || {}) };
+      if (t.input.dateRange) filters[opts.dateDim || '__date'] = String(t.input.dateRange);
+      return { m, val: rows.length ? num(rows[0][m]) : null, filters };
+    })
+    .filter((s) => s.m && s.val != null);
+  if (scalars.length < 2) return null;
+  const m0 = scalars[0].m;
+  const same = scalars.filter((s) => s.m === m0); // only compare like-for-like
+  if (same.length < 2) return null;
+  // The bar labels are the value of the one filter that varies across the calls
+  // (org/scope locks are identical everywhere, so they're never picked).
+  const keys = new Set(); same.forEach((s) => Object.keys(s.filters).forEach((k) => keys.add(k)));
+  let labelKey = null;
+  for (const k of keys) { if (new Set(same.map((s) => String(s.filters[k] ?? ''))).size === same.length) { labelKey = k; break; } }
+  if (!labelKey) for (const k of keys) { if (new Set(same.map((s) => String(s.filters[k] ?? ''))).size > 1) { labelKey = k; break; } }
+  const cats = same.map((s, i) => (labelKey ? String(s.filters[labelKey]) : `#${i + 1}`));
+  const data = same.map((s) => s.val);
+  return { title: `${labelOf(opts, m0)}${labelKey ? ` by ${labelOf(opts, labelKey)}` : ''}`, cats, data, type: 'bar' };
 }
 
 // Rasterise a normalised chart to a PNG Buffer (2× for a crisp phone display).

@@ -23,8 +23,30 @@ test('chartFromTrail picks the richest breakdown and normalises rows', () => {
   assert.equal(spec.type, 'bar');
 });
 
-test('chartFromTrail returns null when nothing is chartable (scalar answer)', () => {
+test('chartFromTrail returns null when only ONE scalar (no comparison)', () => {
   const trail = [{ name: 'askData', result: { ok: true, rows: [{ m: 5 }] }, input: { measure: 'm', dimensions: [] } }];
+  assert.equal(ci.chartFromTrail(trail), null);
+});
+
+test('chartFromTrail builds a comparison from several single-value queries (May vs June)', () => {
+  // The "compare two months" case: two scalar revenue lookups distinguished by dateRange.
+  const trail = [
+    { name: 'askData', result: { ok: true, rows: [{ 'rev.total': 1066650 }] }, input: { measure: 'rev.total', dimensions: [], filters: { 'org': 'Movement' }, dateRange: 'May 2026' } },
+    { name: 'askData', result: { ok: true, rows: [{ 'rev.total': 1705000 }] }, input: { measure: 'rev.total', dimensions: [], filters: { 'org': 'Movement' }, dateRange: 'June 2026' } },
+  ];
+  const spec = ci.chartFromTrail(trail, { label: (f) => ({ 'rev.total': 'Revenue', '__date': 'Month' }[f]), dateDim: '__date' });
+  assert.ok(spec, 'should produce a comparison chart');
+  assert.deepEqual(spec.cats, ['May 2026', 'June 2026']); // labelled by the differing filter (date), not the identical org lock
+  assert.deepEqual(spec.data, [1066650, 1705000]);
+  assert.equal(spec.title, 'Revenue by Month');
+});
+
+test('comparison ignores measures that differ (no apples-to-oranges bars)', () => {
+  const trail = [
+    { name: 'askData', result: { ok: true, rows: [{ 'rev.total': 100 }] }, input: { measure: 'rev.total', dimensions: [], dateRange: 'May' } },
+    { name: 'askData', result: { ok: true, rows: [{ 'tix.count': 50 }] }, input: { measure: 'tix.count', dimensions: [], dateRange: 'June' } },
+  ];
+  // Only one call per measure → no like-for-like pair → null.
   assert.equal(ci.chartFromTrail(trail), null);
 });
 

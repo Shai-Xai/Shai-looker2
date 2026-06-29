@@ -16,7 +16,7 @@ const { runOwlLoop, owlTurn } = require('./owlChat'); // owlTurn already layers 
 const { resolveGuidance } = require('./owlGuidance');
 const chartImg = require('./owlChartImg');
 
-const WA_OVERRIDE = 'OVERRIDE — this conversation is over WhatsApp: reply in SHORT, plain text. No markdown tables. Use *single asterisks* for light emphasis. Lead with the answer. Money in ZAR. If the user asks to see a chart/graph/trend, still answer the key numbers in words — a chart image is attached automatically, so never say you can\'t show visuals. End your reply with the <<<FOLLOWUPS>>> marker + a JSON array of 2-3 SHORT (≤6 words) next questions, exactly as instructed; the app turns them into tappable buttons.';
+const WA_OVERRIDE = 'OVERRIDE — this conversation is over WhatsApp: reply in SHORT, plain text. No markdown tables. Use *single asterisks* for light emphasis. Lead with the answer in words. Money in ZAR. Do NOT announce or point at a chart (no "here\'s a chart", no 👇 arrow) — if a visual helps, one is attached automatically; just give the figures. For a comparison or trend, prefer ONE grouped askData query (a dimension like month/event plus the measure) so the numbers line up and can be charted, rather than several separate lookups. End your reply with the <<<FOLLOWUPS>>> marker + a JSON array of 2-3 SHORT (≤6 words) next questions, exactly as instructed; the app turns them into tappable buttons.';
 
 const FU_MARK = '<<<FOLLOWUPS>>>';
 // Parse the trailing "<<<FOLLOWUPS>>>[...]" JSON array the model emits (mirrors the
@@ -116,7 +116,7 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
     for (const d of (cat.dimensions || [])) label.set(d.name, d.label);
     try { for (const f of (owlFields.list() || [])) if (f.label) label.set(f.name, f.label); } catch { /* ignore */ }
     const dimType = new Map((cat.dimensions || []).map((d) => [d.name, d.type]));
-    return { label: (f) => label.get(f), dimType: (f) => dimType.get(f) || '' };
+    return { label: (f) => label.get(f), dimType: (f) => dimType.get(f) || '', dateDim: cat.dateDimension };
   }
 
   // Render the answer's data to a chart PNG and send it (upload → image message).
