@@ -478,9 +478,11 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
   const acc = (key) => ({ open: openSection === key, onToggle: () => setOpenSection((s) => (s === key ? null : key)) });
   const isPending = action?.status === 'pending';
   const isScheduled = action?.status === 'scheduled';
-  // For Email+SMS campaigns, the two content sub-sections collapse (default closed).
-  const [emailOpen, setEmailOpen] = useState(false);
-  const [smsOpen, setSmsOpen] = useState(false);
+  // For Email+SMS campaigns, the two content sub-sections are collapsible — but
+  // default OPEN so the separate SMS editor is obviously available (it was easy
+  // to miss when collapsed behind a banner).
+  const [emailOpen, setEmailOpen] = useState(true);
+  const [smsOpen, setSmsOpen] = useState(true);
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectNote, setRejectNote] = useState('');
   // datetime-local value (local time) — prefill from an existing schedule.
@@ -549,6 +551,21 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
           content: s.utm.content || d.utm?.content || '',
         },
       }));
+    } catch (e) { alert('AI draft failed: ' + e.message); }
+    finally { setDrafting(false); }
+  };
+
+  // AI-draft a single sequence step (sequences have no top-level copy — each
+  // step is written independently). SMS steps only need the body.
+  const draftStep = async (i) => {
+    setDrafting(true);
+    try {
+      const d = await api.actionDraftCopy(entityId, { goal: f.goal, audienceCount: aud?.count || 0 });
+      setStep(i, {
+        subject: d.subject || f.steps[i]?.subject || '',
+        body: d.body || f.steps[i]?.body || '',
+        ctaText: d.ctaText || f.steps[i]?.ctaText || '',
+      });
     } catch (e) { alert('AI draft failed: ' + e.message); }
     finally { setDrafting(false); }
   };
@@ -923,7 +940,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
 
           {isSequence && (
             <Field label={smsOnly ? 'Texts in the sequence' : 'Emails in the sequence'}>
-              <SequenceSteps steps={f.steps} setStep={setStep} addStep={addStep} removeStep={removeStep} activeStep={activeStep} onActive={setActiveStep} sms={smsOnly} anchorLabel={f.dripStart === 'send' ? 'from start of campaign' : 'after abandonment'} />
+              <SequenceSteps steps={f.steps} setStep={setStep} addStep={addStep} removeStep={removeStep} activeStep={activeStep} onActive={setActiveStep} sms={smsOnly} onDraft={draftStep} drafting={drafting} anchorLabel={f.dripStart === 'send' ? 'from start of campaign' : 'after abandonment'} />
             </Field>
           )}
 
@@ -1567,14 +1584,32 @@ function ReportSection({ title, meta, children, defaultOpen = false }) {
 // Overflow menu for a campaign row — keeps the row to one primary button + ⋯.
 function RowMenu({ items }) {
   const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState(null); // fixed-position coords, computed on open
+  const btnRef = useRef(null);
   if (!items || !items.length) return null;
+  const toggle = () => {
+    if (open) { setOpen(false); return; }
+    // Anchor a fixed-position menu to the button and flip it UP when there isn't
+    // room below — so a row near the bottom of the page doesn't open off-screen.
+    const r = btnRef.current?.getBoundingClientRect();
+    if (r) {
+      const estHeight = Math.min(items.length * 38 + 8, window.innerHeight * 0.7);
+      const spaceBelow = window.innerHeight - r.bottom;
+      const openUp = spaceBelow < estHeight + 8 && r.top > spaceBelow;
+      setPos({
+        right: Math.max(8, window.innerWidth - r.right),
+        ...(openUp ? { bottom: window.innerHeight - r.top + 4 } : { top: r.bottom + 4 }),
+      });
+    }
+    setOpen(true);
+  };
   return (
     <div style={{ position: 'relative' }}>
-      <button style={{ ...mini, padding: '7px 11px', fontWeight: 700 }} onClick={() => setOpen((o) => !o)} aria-label="More actions" title="More">⋯</button>
+      <button ref={btnRef} style={{ ...mini, padding: '7px 11px', fontWeight: 700 }} onClick={toggle} aria-label="More actions" title="More">⋯</button>
       {open && (
         <>
           <div style={{ position: 'fixed', inset: 0, zIndex: 40 }} onClick={() => setOpen(false)} />
-          <div className="modal-in" style={{ position: 'absolute', right: 0, top: 'calc(100% + 4px)', zIndex: 41, background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 10, boxShadow: 'var(--shadow-pop, 0 8px 40px rgba(0,0,0,0.16))', minWidth: 150, padding: 4, display: 'flex', flexDirection: 'column' }}>
+          <div className="modal-in" style={{ position: 'fixed', ...pos, zIndex: 41, background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 10, boxShadow: 'var(--shadow-pop, 0 8px 40px rgba(0,0,0,0.16))', minWidth: 150, maxHeight: '70vh', overflowY: 'auto', padding: 4, display: 'flex', flexDirection: 'column' }}>
             {items.map((it, i) => (
               <button key={i} className="nav-row" style={{ display: 'flex', width: '100%', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer', padding: '8px 10px', borderRadius: 7, fontSize: 13, fontWeight: 600, color: it.danger ? 'var(--error,#ef4444)' : 'var(--text)' }} onClick={() => { setOpen(false); it.onClick(); }}>{it.label}</button>
             ))}
@@ -1790,7 +1825,7 @@ function FilterRow({ entityId, fields, filter, onChange, onRemove, eventSuiteId 
 }
 
 // The drip timeline: each step has a delay (number + hours/days) and its own copy.
-function SequenceSteps({ steps, setStep, addStep, removeStep, activeStep = 0, onActive, sms = false, anchorLabel = 'after abandonment' }) {
+function SequenceSteps({ steps, setStep, addStep, removeStep, activeStep = 0, onActive, sms = false, onDraft, drafting = false, anchorLabel = 'after abandonment' }) {
   const unitOf = (h) => (h % 24 === 0 && h >= 24 ? 'days' : 'hours');
   const valOf = (h) => (unitOf(h) === 'days' ? h / 24 : h);
   const setDelay = (i, val, unit) => setStep(i, { delayHours: Math.max(0, (Number(val) || 0) * (unit === 'days' ? 24 : 1)) });
@@ -1816,6 +1851,7 @@ function SequenceSteps({ steps, setStep, addStep, removeStep, activeStep = 0, on
             </div>
             {sms ? (
               <>
+                {onDraft && <button type="button" style={{ ...mini, marginBottom: 6 }} onClick={(e) => { e.stopPropagation(); focus(i)(); onDraft(i); }} disabled={drafting}>{drafting ? 'Writing…' : '✨ Draft copy with AI'}</button>}
                 <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit', marginBottom: 6 }} rows={4} value={st.body} onFocus={focus(i)} onChange={(e) => setStep(i, { body: e.target.value })} placeholder={'Hi {{name}}, your {{ticketType}} tickets are waiting…'} />
                 <SmsMeter body={st.body} />
               </>
@@ -1825,6 +1861,7 @@ function SequenceSteps({ steps, setStep, addStep, removeStep, activeStep = 0, on
                   <Toggle on={(st.contentMode || 'template') === 'template'} onClick={() => { focus(i)(); setStep(i, { contentMode: 'template' }); }}>Built template</Toggle>
                   <Toggle on={st.contentMode === 'html'} onClick={() => { focus(i)(); setStep(i, { contentMode: 'html' }); }}>Custom HTML</Toggle>
                 </div>
+                {onDraft && (st.contentMode || 'template') === 'template' && <button type="button" style={{ ...mini, marginBottom: 6 }} onClick={(e) => { e.stopPropagation(); focus(i)(); onDraft(i); }} disabled={drafting}>{drafting ? 'Writing…' : '✨ Draft copy with AI'}</button>}
                 <input style={{ ...input, fontWeight: 700, marginBottom: 6 }} value={st.subject} onFocus={focus(i)} onChange={(e) => setStep(i, { subject: e.target.value })} placeholder={`Step ${i + 1} subject`} />
                 {(st.contentMode || 'template') === 'template' ? (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>

@@ -185,6 +185,16 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     );
     CREATE INDEX IF NOT EXISTS idx_action_opens ON action_opens(action_id, email);
 
+    -- Short links for SMS. A tracked /c/ click URL (or the /u/ opt-out) carries
+    -- the recipient's signed token (~80 chars) and would blow an SMS past one
+    -- segment. We map the long URL to a tiny /k/<code> redirect. The code is
+    -- derived from the target, so identical links (re-sends) reuse one row.
+    CREATE TABLE IF NOT EXISTS action_short_links (
+      code   TEXT PRIMARY KEY,
+      target TEXT NOT NULL,
+      at     TEXT NOT NULL
+    );
+
     -- Memory for recurring automations: who a campaign family has already
     -- emailed, so the daily check only queues NEW people.
     CREATE TABLE IF NOT EXISTS action_sent (
@@ -318,6 +328,25 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     const payload = Buffer.from(JSON.stringify({ e: email, n: entityId })).toString('base64url');
     const sig = crypto.createHmac('sha256', unsubSecret()).update(payload).digest('base64url').slice(0, 16);
     return `${payload}.${sig}`;
+  };
+  // Store a URL and return a tiny deterministic code for it (HMAC-derived, so
+  // identical URLs — re-sends, previews — collapse to one row). Powers both the
+  // SMS /k/<code> short links and the per-link /c/?k=<code> tracking of custom
+  // HTML. Returns '' if the store is unavailable, so callers keep the raw URL.
+  const registerTarget = (url) => {
+    if (!url) return '';
+    try {
+      const code = crypto.createHmac('sha256', unsubSecret()).update(url).digest('base64url').slice(0, 8);
+      sql.prepare('INSERT OR IGNORE INTO action_short_links (code, target, at) VALUES (?,?,?)').run(code, url, now());
+      return code;
+    } catch { return ''; }
+  };
+  // Shorten a long absolute URL (tracked click / opt-out) to a /k/<code>
+  // redirect so SMS bodies stay within a segment.
+  const shortLink = (targetUrl) => {
+    if (!targetUrl) return targetUrl;
+    const code = registerTarget(targetUrl);
+    return code ? `${mailer.baseUrl()}/k/${code}` : targetUrl;
   };
   const parseUnsubToken = (token) => {
     const [payload, sig] = String(token || '').split('.');
@@ -500,14 +529,21 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
   // For 'both', the SMS uses smsBody (falls back to body), so body+subject suffice.
   function contentError(cfg) {
     const needsSubject = cfg.channel !== 'sms';
+    // Custom-HTML emails keep their content in customHtml, not body — count
+    // either as "a message" so an uploaded/pasted HTML email can send.
+    const emailContent = (c) => (c?.contentMode === 'html' ? (c?.customHtml || '').trim() : (c?.body || '').trim());
     if (cfg.campaignMode === 'sequence') {
       const s0 = (cfg.steps || [])[0];
-      if (!s0 || !s0.body) return 'Add at least one step with a message';
+      if (!s0 || !emailContent(s0)) return 'Add at least one step with a message';
       if (needsSubject && !s0.subject) return 'Add a subject to step 1';
       return null;
     }
-    if (!cfg.body) return 'A message is required';
+    // SMS-only edits the plain-text body directly.
+    if (cfg.channel === 'sms') return cfg.body ? null : 'A message is required';
+    if (!emailContent(cfg)) return 'A message is required';
     if (needsSubject && !cfg.subject) return 'A subject is required';
+    // Both channels: the SMS uses smsBody (falling back to body) — require one.
+    if (cfg.channel === 'both' && !((cfg.smsBody || '').trim() || (cfg.body || '').trim())) return 'An SMS message is required';
     return null;
   }
 
@@ -762,6 +798,21 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
 
     if (useContentMode === 'html' && useHtml.trim()) {
       let html = tok(useHtml);
+      // Track + tag EVERY external link in custom HTML so a multi-link email is
+      // fully attributed. Each external <a href> is routed through the /c/ click
+      // redirect with the original URL stored server-side (?k=code — looked up,
+      // never a user-suppliable open redirect); the /c/ handler then appends the
+      // campaign's UTM params to the destination. Our own links (unsubscribe,
+      // already-tracked /c//k/) and non-http links (mailto/tel/#) are left alone.
+      if (cfg.clickToken) {
+        const ownBase = mailer.baseUrl();
+        html = html.replace(/(<a\b[^>]*?\shref=)(["'])(https?:\/\/[^"'\s]+)\2/gi, (m, pre, q, url) => {
+          if (url.startsWith(ownBase)) return m; // our own links — don't re-track
+          const code = registerTarget(url);
+          if (!code) return m; // store unavailable → keep the original link
+          return `${pre}${q}${ownBase}/c/${cfg.clickToken}/${rtok}/e/${stepIndex}?k=${code}${q}`;
+        });
+      }
       // Guarantee an unsubscribe link (compliance) if the author didn't include one.
       if (!/unsubscrib/i.test(html)) {
         const footer = `<div style="font-size:11px;color:#888;text-align:center;padding:18px;font-family:-apple-system,Segoe UI,Roboto,sans-serif;">Sent via Howler : Pulse · <a href="${unsubUrl}" style="color:#888;">Unsubscribe</a></div>`;
@@ -799,7 +850,9 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     const promo = promoForRecipient(action, recipient.email || '');
     const appendPromo = promo && promo.type === 'promo' && promo.appendToLink && promo.code;
     const base = cfg.ctaUrl ? `${mailer.baseUrl()}/c/${cfg.clickToken}/${rtok}/s/${stepIndex}` : ''; // /s = sms channel, then step index
-    const link = base && appendPromo ? `${base}${base.includes('?') ? '&' : '?'}promo=${encodeURIComponent(promo.code)}` : base;
+    const fullLink = base && appendPromo ? `${base}${base.includes('?') ? '&' : '?'}promo=${encodeURIComponent(promo.code)}` : base;
+    // SMS only: replace the long tracked URL with a tiny /k/ redirect.
+    const link = shortLink(fullLink);
     const tok = (s) => fillAttrs(String(s || '')
       .replace(/\{\{\s*name\s*\}\}/gi, firstName || 'there')
       .replace(/\{\{\s*(ticket_?type|ticket)\s*\}\}/gi, recipient.ticket || 'your tickets')
@@ -809,7 +862,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     let text = tok(useBody);
     if (promo && !/\{\{\s*promo/i.test(useBody)) text += `\nCode: ${promo.code}${promo.type === 'discount' ? ' (enter at checkout)' : ''}`;
     if (link && !/\{\{\s*cta/i.test(useBody)) text += `\n${link}`;
-    text += `\nOpt out: ${mailer.baseUrl()}/u/${rtok}`;
+    text += `\nOpt out: ${shortLink(`${mailer.baseUrl()}/u/${rtok}`)}`;
     return text;
   }
 
@@ -1798,7 +1851,12 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     if (channel === 'email') results.emailClicks = (a.results.emailClicks || 0) + 1;
     else if (channel === 'sms') results.smsClicks = (a.results.smsClicks || 0) + 1;
     saveResults(a.id, results);
+    // Per-link tracking (custom HTML): ?k=<code> names this specific link's
+    // destination (stored server-side). Falls back to the campaign's buy link.
     let dest = a.config.ctaUrl || '/';
+    if (req.query.k) {
+      try { const row = sql.prepare('SELECT target FROM action_short_links WHERE code=?').get(String(req.query.k)); if (row?.target) dest = row.target; } catch { /* fall back to ctaUrl */ }
+    }
     const promo = req.query.promo ? String(req.query.promo) : ''; // promo code rides the tracked link → forward to the destination
     try {
       const u = new URL(dest);
@@ -1814,6 +1872,15 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
       if (promo && !/[?&]promo=/.test(dest)) dest += (dest.includes('?') ? '&' : '?') + 'promo=' + encodeURIComponent(promo);
     }
     res.redirect(dest);
+  });
+  // Short-link redirect (SMS) → the real tracked /c/ or opt-out /u/ URL, which
+  // then records the click / unsubscribes and redirects onward.
+  app.get('/k/:code', (req, res) => {
+    try {
+      const row = sql.prepare('SELECT target FROM action_short_links WHERE code=?').get(req.params.code);
+      if (row?.target) return res.redirect(row.target);
+    } catch { /* fall through to home */ }
+    res.redirect('/');
   });
   // Unsubscribe → suppression list + tiny confirmation page.
   app.get('/u/:token', (req, res) => {
