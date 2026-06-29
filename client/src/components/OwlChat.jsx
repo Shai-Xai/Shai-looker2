@@ -300,6 +300,22 @@ function fmtCell(v) {
   return /^-?\d+(\.\d+)?$/.test(s) ? Number(s).toLocaleString() : s;
 }
 
+// The result rows as a data table (columns + values). Reused by the chart's "Table"
+// view; measure columns are right-aligned.
+function SourceTable({ source }) {
+  const cols = source.columns || [];
+  const rows = source.rows || [];
+  return (
+    <div style={{ overflow: 'auto', maxHeight: 260, border: '1px solid var(--hairline)', borderRadius: 12, background: 'var(--card)' }}>
+      <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 11.5 }}>
+        <thead><tr>{cols.map((c, k) => <th key={k} style={{ textAlign: c.kind === 'measure' ? 'right' : 'left', padding: '6px 10px', position: 'sticky', top: 0, background: 'var(--elevated, #f1f1f5)', color: 'var(--muted)', fontWeight: 600, whiteSpace: 'nowrap', borderBottom: '1px solid var(--hairline)' }}>{c.label}</th>)}</tr></thead>
+        <tbody>{rows.map((r, ri) => <tr key={ri}>{cols.map((c, k) => <td key={k} style={{ padding: '5px 10px', whiteSpace: 'nowrap', borderBottom: '1px solid var(--hairline)', fontVariantNumeric: 'tabular-nums', textAlign: c.kind === 'measure' ? 'right' : 'left', color: 'var(--text)' }}>{fmtCell(r[c.field])}</td>)}</tr>)}</tbody>
+      </table>
+      {source.count > rows.length && <div style={{ padding: '6px 10px', fontSize: 10.5, color: 'var(--muted)' }}>Showing {rows.length} of {source.count.toLocaleString()} rows.</div>}
+    </div>
+  );
+}
+
 // Map an Owl citation source into the Looker-shaped data ChartTile renders. Bars
 // show the biggest first (rows arrive measure-desc); line charts re-sort by the
 // date dimension so time runs left→right.
@@ -331,11 +347,11 @@ function OwlChart({ source, entityId, suiteId, canPin }) {
   const dims = source.columns.filter((c) => c.kind === 'dimension');
   const rowCount = (source.rows || []).length;
   const canPie = !multiMeasure && dims.length === 1 && rowCount >= 2 && rowCount <= 12;
-  const opts = [{ k: 'bar', label: 'Bar' }, { k: 'line', label: 'Line' }, ...(canPie ? [{ k: 'pie', label: 'Pie' }] : []), { k: 'metric', label: 'Metric' }];
+  const opts = [{ k: 'bar', label: 'Bar' }, { k: 'line', label: 'Line' }, ...(canPie ? [{ k: 'pie', label: 'Pie' }] : []), { k: 'metric', label: 'Metric' }, { k: 'table', label: 'Table' }];
   const seg = (active) => ({ padding: '3px 9px', fontSize: 11, fontWeight: 600, border: 'none', borderRadius: 980, cursor: 'pointer', background: active ? 'var(--brand)' : 'transparent', color: active ? '#fff' : 'var(--text)' });
   const total = (source.rows || []).reduce((a, r) => a + (Number(r[meas?.field]) || 0), 0);
   const showPin = canPin && source.queryBody && entityId;
-  const canStack = multiMeasure && type !== 'metric' && type !== 'pie';
+  const canStack = multiMeasure && (type === 'bar' || type === 'line');
   return (
     <div style={{ margin: '2px 0 8px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
@@ -353,7 +369,9 @@ function OwlChart({ source, entityId, suiteId, canPin }) {
             <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>{meas?.label} · total</div>
           </div>
         )
-        : (
+        : type === 'table'
+          ? <SourceTable source={source} />
+          : (
           <div style={{ height: 200, border: '1px solid var(--hairline)', borderRadius: 12, overflow: 'hidden', background: 'var(--card)' }}>
             <ChartTile data={chartDataFromSource({ ...source, chartType: type })} visConfig={{ type: VIS[type] || 'looker_column', stacking: (canStack && stacked) ? 'normal' : undefined }} />
           </div>
