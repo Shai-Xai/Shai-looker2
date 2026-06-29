@@ -57,6 +57,20 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
   const histStmt = sql.prepare('SELECT role, body FROM owl_wa_msgs WHERE msisdn=? ORDER BY created_at DESC LIMIT 12');
   const J = (s, d) => { try { return JSON.parse(s); } catch { return d; } };
 
+  // Chart-image fallback hosting: when Clickatell's native media send isn't available,
+  // we serve the rendered PNG from our own public URL and text the customer a link.
+  // Kept in-memory with a short TTL (charts are ephemeral; a restart just drops them).
+  const imgStore = new Map(); // id -> { png, exp }
+  const IMG_TTL = 2 * 60 * 60 * 1000; // 2 hours
+  let seenBase = ''; // the public host Clickatell hits us on (captured from the webhook)
+  const publicBase = () => (process.env.PUBLIC_BASE_URL || process.env.RENDER_EXTERNAL_URL || seenBase || '').replace(/\/$/, '');
+  const storeImg = (png) => { const id = crypto.randomUUID(); imgStore.set(id, { png, exp: Date.now() + IMG_TTL }); return id; };
+  app.get('/api/whatsapp/img/:id', (req, res) => {
+    const it = imgStore.get(String(req.params.id || '').replace(/\.png$/, ''));
+    if (!it || it.exp < Date.now()) { imgStore.delete(req.params.id); return res.status(404).end(); }
+    res.set('Content-Type', 'image/png').set('Cache-Control', 'public, max-age=7200').send(it.png);
+  });
+
   // Lightweight observability: record every meaningful step a webhook hit goes through,
   // so the admin panel can SHOW whether Clickatell is delivering + where the flow stops.
   const insEvent = sql.prepare('INSERT INTO owl_wa_events (id,msisdn,stage,detail,created_at) VALUES (?,?,?,?,?)');
@@ -133,11 +147,28 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
       if (!spec) { logEvent(msisdn, 'image-skip', 'nothing chartable in this answer'); return; }
       const png = chartImg.renderPng(spec);
       if (!png) { logEvent(msisdn, 'image-failed', 'render produced no PNG'); return; }
+      // Best UX: Clickatell native inline image (upload → image message).
       const up = await messaging.uploadWhatsappMedia(png, 'image/png');
-      if (!up.ok) { logEvent(msisdn, 'image-failed', `upload: ${up.error || up.reason || 'error'}`); return; }
-      const im = await messaging.sendWhatsappImage({ to: msisdn, fileId: up.fileId, caption: spec.title });
-      logEvent(msisdn, im.ok ? 'image-sent' : 'image-failed', im.ok ? spec.title : `send: ${im.error || 'error'}`);
+      if (up.ok) {
+        const im = await messaging.sendWhatsappImage({ to: msisdn, fileId: up.fileId, caption: spec.title });
+        if (im.ok) { logEvent(msisdn, 'image-sent', spec.title); return; }
+        if (await sendChartLink(msisdn, png, spec)) { logEvent(msisdn, 'image-link', `native send failed (${im.error || 'error'}) — sent link`); return; }
+        logEvent(msisdn, 'image-failed', `send: ${im.error || 'error'}`); return;
+      }
+      // Fallback: host the PNG ourselves and text a tappable link to it.
+      if (await sendChartLink(msisdn, png, spec)) { logEvent(msisdn, 'image-link', `native upload failed (${up.error || up.reason || 'error'}) — sent link`); return; }
+      logEvent(msisdn, 'image-failed', `upload: ${up.error || up.reason || 'error'}`);
     } catch (e) { logEvent(msisdn, 'image-failed', (e && e.message) || 'chart error'); }
+  }
+
+  // Host the chart PNG on our public URL and text the customer a link to view it.
+  // Returns true if the link was sent (needs a known public base URL).
+  async function sendChartLink(msisdn, png, spec) {
+    const base = publicBase();
+    if (!base) return false;
+    const url = `${base}/api/whatsapp/img/${storeImg(png)}.png`;
+    const r = await messaging.sendWhatsapp({ to: msisdn, text: `📈 ${spec.title}\n${url}` });
+    return !!(r && r.ok);
   }
 
   // Offer follow-ups as native WhatsApp reply buttons; if Clickatell rejects them
@@ -244,6 +275,7 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
       return res.status(401).json({ error: 'bad secret' });
     }
     res.json({ ok: true });
+    if (!seenBase && req.get('host')) seenBase = `https://${req.get('host')}`; // public URL for hosted chart images
     try {
       const { from, text } = parseInbound(req.body || {});
       const msisdn = norm(from);
