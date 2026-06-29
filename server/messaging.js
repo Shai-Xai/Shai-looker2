@@ -139,6 +139,20 @@ async function sendWhatsappImage({ to, fileId, caption = '', contentType = 'imag
   return waSend(m, key);
 }
 
+// Send a WhatsApp image by public URL (no upload step) — works when the media
+// endpoint isn't provisioned, as long as Clickatell accepts a media URL. We cover
+// a couple of likely field names (url / mediaUrl) since it's lightly documented.
+async function sendWhatsappImageByUrl({ to, url, caption = '', contentType = 'image/png' }) {
+  const key = waApiKey();
+  if (!key) return { ok: false, reason: 'not_configured' };
+  const msisdn = normaliseMsisdn(to);
+  if (!msisdn) return { ok: false, error: 'invalid number' };
+  const cap = String(caption || '').slice(0, 1024);
+  const m = { channel: 'whatsapp', to: msisdn, media: { contentType, url, mediaUrl: url, caption: cap } };
+  if (waFrom()) m.from = waFrom();
+  return waSend(m, key);
+}
+
 // Send an interactive reply-button message (max 3). buttons: [{title, postbackData}].
 async function sendWhatsappButtons({ to, body, buttons }) {
   const key = waApiKey();
@@ -159,4 +173,4 @@ async function send({ channel, to, text }) {
   return { ok: false, error: `Unsupported channel: ${channel}` };
 }
 
-module.exports = { init, isConfigured, status, sendSms, sendWhatsapp, send, normaliseMsisdn, waFrom, waConfigured, uploadWhatsappMedia, sendWhatsappImage, sendWhatsappButtons };
+module.exports = { init, isConfigured, status, sendSms, sendWhatsapp, send, normaliseMsisdn, waFrom, waConfigured, uploadWhatsappMedia, sendWhatsappImage, sendWhatsappImageByUrl, sendWhatsappButtons };

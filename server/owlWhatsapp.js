@@ -17,7 +17,7 @@ const { resolveGuidance } = require('./owlGuidance');
 const chartImg = require('./owlChartImg');
 
 const WA_OVERRIDE = [
-  'OVERRIDE — this conversation is over WhatsApp: reply in SHORT, plain text. No markdown tables. Use *single asterisks* for light emphasis. Lead with the answer in words. Money in ZAR.',
+  'OVERRIDE — this conversation is over WhatsApp: reply in SHORT, plain text. No markdown tables. Use *single asterisks* for light emphasis. Lead with the answer in words. Express monetary amounts in the organiser\'s reporting currency (a Currency line below states it when it isn\'t South African Rand).',
   'There is NO screen, panel, toggle, button or chart-type switcher here. NEVER tell the user to tap, switch or toggle anything, and never refer to something "below" or "on screen" — they are on WhatsApp.',
   'Do NOT announce or point at a chart (no "here\'s a chart", no 👇 arrow). If a visual helps, one is attached automatically — just give the figures in words.',
   'When the user wants to SEE data as a chart / line graph / bar chart / trend — EVEN data you just gave them — you MUST re-run it as ONE grouped askData query (a dimension such as day/month/event plus the measure) so a fresh chart image can be attached. Never reply "it\'s the same data" or refuse to re-pull, and never split a trend into many separate per-day lookups.',
@@ -35,7 +35,7 @@ function parseFollowups(out) {
   try { const a = JSON.parse(m[0]); return Array.isArray(a) ? a.filter((x) => typeof x === 'string' && x.trim()).slice(0, 3) : []; } catch { return []; }
 }
 
-function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthropicKeyForEntity }) {
+function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthropicKeyForEntity, currencyNote }) {
   const sql = db.db;
   sql.exec(`
     CREATE TABLE IF NOT EXISTS owl_wa_msgs (
@@ -60,15 +60,26 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
   // Chart-image fallback hosting: when Clickatell's native media send isn't available,
   // we serve the rendered PNG from our own public URL and text the customer a link.
   // Kept in-memory with a short TTL (charts are ephemeral; a restart just drops them).
-  const imgStore = new Map(); // id -> { png, exp }
+  const imgStore = new Map(); // id -> { png, title, exp }
   const IMG_TTL = 2 * 60 * 60 * 1000; // 2 hours
   let seenBase = ''; // the public host Clickatell hits us on (captured from the webhook)
   const publicBase = () => (process.env.PUBLIC_BASE_URL || process.env.RENDER_EXTERNAL_URL || seenBase || '').replace(/\/$/, '');
-  const storeImg = (png) => { const id = crypto.randomUUID(); imgStore.set(id, { png, exp: Date.now() + IMG_TTL }); return id; };
+  const storeImg = (png, title = 'Chart') => { const id = crypto.randomUUID(); imgStore.set(id, { png, title, exp: Date.now() + IMG_TTL }); return id; };
+  const getImg = (raw) => { const it = imgStore.get(String(raw || '').replace(/\.png$/, '')); return it && it.exp >= Date.now() ? it : null; };
   app.get('/api/whatsapp/img/:id', (req, res) => {
-    const it = imgStore.get(String(req.params.id || '').replace(/\.png$/, ''));
-    if (!it || it.exp < Date.now()) { imgStore.delete(req.params.id); return res.status(404).end(); }
+    const it = getImg(req.params.id);
+    if (!it) return res.status(404).end();
     res.set('Content-Type', 'image/png').set('Cache-Control', 'public, max-age=7200').send(it.png);
+  });
+  // A tiny OpenGraph page so the WhatsApp link shows a chart-thumbnail preview card,
+  // and tapping it opens the chart full-bleed in the browser.
+  app.get('/api/whatsapp/chart/:id', (req, res) => {
+    const it = getImg(req.params.id);
+    if (!it) return res.status(404).send('This chart has expired.');
+    const base = publicBase();
+    const img = `${base}/api/whatsapp/img/${req.params.id}.png`;
+    const t = String(it.title).replace(/[<>&"]/g, '');
+    res.set('Content-Type', 'text/html').send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${t}</title><meta property="og:type" content="website"><meta property="og:title" content="${t}"><meta property="og:image" content="${img}"><meta property="og:image:width" content="1320"><meta property="og:image:height" content="760"><meta name="twitter:card" content="summary_large_image"><meta name="twitter:image" content="${img}"></head><body style="margin:0;background:#fff;display:flex;align-items:center;justify-content:center;min-height:100vh"><img src="${img}" alt="${t}" style="max-width:100%;height:auto"></body></html>`);
   });
 
   // Lightweight observability: record every meaningful step a webhook hit goes through,
@@ -123,6 +134,8 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
     const cat = owlTools.catalogue || {};
     if ((cat.notes || []).length) parts.push(`Rules:\n- ${cat.notes.join('\n- ')}`);
     try { const g = resolveGuidance(db, entityId); if (g) parts.push(g); } catch { /* ignore */ }
+    // Reporting currency for this organiser (blank for ZAR — the default).
+    try { const cn = currencyNote && currencyNote(entityId || undefined); if (cn) parts.push(cn); } catch { /* ignore */ }
     parts.push(WA_OVERRIDE);
     return parts.join('\n\n');
   }
@@ -147,28 +160,30 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
       if (!spec) { logEvent(msisdn, 'image-skip', 'nothing chartable in this answer'); return; }
       const png = chartImg.renderPng(spec);
       if (!png) { logEvent(msisdn, 'image-failed', 'render produced no PNG'); return; }
-      // Best UX: Clickatell native inline image (upload → image message).
-      const up = await messaging.uploadWhatsappMedia(png, 'image/png');
-      if (up.ok) {
-        const im = await messaging.sendWhatsappImage({ to: msisdn, fileId: up.fileId, caption: spec.title });
-        if (im.ok) { logEvent(msisdn, 'image-sent', spec.title); return; }
-        if (await sendChartLink(msisdn, png, spec)) { logEvent(msisdn, 'image-link', `native send failed (${im.error || 'error'}) — sent link`); return; }
-        logEvent(msisdn, 'image-failed', `send: ${im.error || 'error'}`); return;
+      const base = publicBase();
+      const id = storeImg(png, spec.title);
+      const pngUrl = base ? `${base}/api/whatsapp/img/${id}.png` : '';
+      // 1) Inline image by public URL (no upload endpoint needed) — best UX, and dodges
+      //    the un-provisioned /v1/media endpoint entirely.
+      if (pngUrl) {
+        const byUrl = await messaging.sendWhatsappImageByUrl({ to: msisdn, url: pngUrl, caption: spec.title });
+        if (byUrl.ok) { logEvent(msisdn, 'image-sent', `${spec.title} (by url)`); return; }
+        // 2) Inline image by upload+fileId — works on accounts where media IS provisioned.
+        const up = await messaging.uploadWhatsappMedia(png, 'image/png');
+        if (up.ok) {
+          const im = await messaging.sendWhatsappImage({ to: msisdn, fileId: up.fileId, caption: spec.title });
+          if (im.ok) { logEvent(msisdn, 'image-sent', spec.title); return; }
+        }
+        // 3) Link to a preview page (OpenGraph card → thumbnail in WhatsApp).
+        const r = await messaging.sendWhatsapp({ to: msisdn, text: `📈 ${spec.title}\n${base}/api/whatsapp/chart/${id}` });
+        if (r && r.ok) { logEvent(msisdn, 'image-link', `inline unavailable (url:${byUrl.error || byUrl.reason || '?'}) — sent preview link`); return; }
+        logEvent(msisdn, 'image-failed', `byUrl: ${byUrl.error || byUrl.reason || 'error'}`); return;
       }
-      // Fallback: host the PNG ourselves and text a tappable link to it.
-      if (await sendChartLink(msisdn, png, spec)) { logEvent(msisdn, 'image-link', `native upload failed (${up.error || up.reason || 'error'}) — sent link`); return; }
-      logEvent(msisdn, 'image-failed', `upload: ${up.error || up.reason || 'error'}`);
+      // No public base URL configured → can't host; try upload as a last resort.
+      const up = await messaging.uploadWhatsappMedia(png, 'image/png');
+      if (up.ok) { const im = await messaging.sendWhatsappImage({ to: msisdn, fileId: up.fileId, caption: spec.title }); if (im.ok) { logEvent(msisdn, 'image-sent', spec.title); return; } }
+      logEvent(msisdn, 'image-failed', 'no public base URL to host the chart, and media upload unavailable');
     } catch (e) { logEvent(msisdn, 'image-failed', (e && e.message) || 'chart error'); }
-  }
-
-  // Host the chart PNG on our public URL and text the customer a link to view it.
-  // Returns true if the link was sent (needs a known public base URL).
-  async function sendChartLink(msisdn, png, spec) {
-    const base = publicBase();
-    if (!base) return false;
-    const url = `${base}/api/whatsapp/img/${storeImg(png)}.png`;
-    const r = await messaging.sendWhatsapp({ to: msisdn, text: `📈 ${spec.title}\n${url}` });
-    return !!(r && r.ok);
   }
 
   // Offer follow-ups as native WhatsApp reply buttons; if Clickatell rejects them
