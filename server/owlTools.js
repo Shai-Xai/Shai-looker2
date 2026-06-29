@@ -62,10 +62,13 @@ module.exports = function createOwlTools({ query, auth, getGoalsApi, catalogue =
     if (!user) return refuse('no_user', 'No authenticated user in context.');
 
     // 1) Validate against the curated whitelist BEFORE touching Looker.
-    const measure = args.measure;
-    if (!measure || !measureByName.has(measure)) {
-      return refuse('unknown_measure', `"${measure}" is not a measure I can read. Pick one of the curated measures.`);
-    }
+    // One or more measures (2+ → shown as separate coloured series on the chart).
+    const measureList = [];
+    if (args.measure) measureList.push(args.measure);
+    for (const mm of (Array.isArray(args.measures) ? args.measures : [])) if (!measureList.includes(mm)) measureList.push(mm);
+    if (!measureList.length) return refuse('unknown_measure', 'No measure specified.');
+    for (const mm of measureList) if (!measureByName.has(mm)) return refuse('unknown_measure', `"${mm}" is not a measure I can read. Pick one of the curated measures.`);
+    const measure = measureList[0];
     const dimensions = Array.isArray(args.dimensions) ? args.dimensions : [];
     for (const d of dimensions) {
       if (!groupableDims.has(d)) {
@@ -89,7 +92,7 @@ module.exports = function createOwlTools({ query, auth, getGoalsApi, catalogue =
     const body = {
       model: catalogue.model,
       view: catalogue.explore,
-      fields: [...dimensions, measure],
+      fields: [...dimensions, ...measureList],
       filters,
       sorts: [`${measure} desc`],
       limit: Math.min(Math.max(Number(args.limit) || 500, 1), 5000),
@@ -140,6 +143,7 @@ module.exports = function createOwlTools({ query, auth, getGoalsApi, catalogue =
       type: 'object',
       properties: {
         measure: { type: 'string', enum: catalogue.measures.map((m) => m.name), description: 'The number to compute.' },
+        measures: { type: 'array', items: { type: 'string', enum: catalogue.measures.map((m) => m.name) }, description: 'Optional: list 2+ measures to compare side by side (e.g. revenue AND tickets sold) — they render as separate coloured series.' },
         dimensions: { type: 'array', items: { type: 'string', enum: catalogue.dimensions.filter((d) => !d.filterOnly).map((d) => d.name) }, description: 'Optional fields to break the measure down by (group-by). Customer email/phone are NOT here — they are filter-only.' },
         filters: { type: 'object', description: 'Optional {field: value} filters. Includes filter-only lookup fields like core_purchasers.email — set it to a specific known address to look up one customer\'s tickets. Never used to list/dump contacts.' },
         dateRange: { type: 'string', description: 'Optional Looker date expression on the purchase date, e.g. "last 7 days", "this month", "2026-01-01 to 2026-02-01".' },

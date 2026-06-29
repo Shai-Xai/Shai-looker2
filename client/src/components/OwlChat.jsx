@@ -103,11 +103,11 @@ export default function OwlChat({ open, onClose, suiteId, entityId, clients = []
   const bubble = (m, i) => (
     <div key={i} style={{ display: 'flex', justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start', marginBottom: 10 }}>
       <div style={{
-        maxWidth: '85%', padding: '8px 12px', borderRadius: 14, fontSize: 14, lineHeight: 1.45, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+        maxWidth: '85%', padding: '8px 12px', borderRadius: 14, fontSize: 14, lineHeight: 1.45, whiteSpace: m.role === 'user' ? 'pre-wrap' : 'normal', wordBreak: 'break-word',
         background: m.role === 'user' ? 'var(--brand)' : 'var(--elevated, rgba(128,128,128,0.12))',
         color: m.role === 'user' ? '#fff' : 'var(--text)',
         borderTopRightRadius: m.role === 'user' ? 4 : 14, borderTopLeftRadius: m.role === 'user' ? 14 : 4,
-      }}>{m.text || (busy ? '…' : '')}</div>
+      }}>{m.role === 'owl' ? (m.text ? <OwlMd text={m.text} /> : (busy ? '…' : '')) : m.text}</div>
     </div>
   );
 
@@ -231,6 +231,60 @@ export default function OwlChat({ open, onClose, suiteId, entityId, clients = []
   );
 }
 
+// ── Lightweight markdown for Owl answers: GFM pipe tables, bold/italic/code, and
+// bullet lists. (No dep — Pulse has no markdown lib; this covers what the Owl emits.)
+function mdInline(text) {
+  const out = []; const re = /\*\*([^*]+)\*\*|\*([^*]+)\*|`([^`]+)`/g;
+  let last = 0, m, key = 0;
+  const s = String(text);
+  while ((m = re.exec(s))) {
+    if (m.index > last) out.push(s.slice(last, m.index));
+    if (m[1] != null) out.push(<strong key={key++}>{m[1]}</strong>);
+    else if (m[2] != null) out.push(<em key={key++}>{m[2]}</em>);
+    else out.push(<code key={key++} style={{ background: 'rgba(128,128,128,0.15)', borderRadius: 4, padding: '0 4px', fontSize: '0.92em' }}>{m[3]}</code>);
+    last = re.lastIndex;
+  }
+  if (last < s.length) out.push(s.slice(last));
+  return out;
+}
+function splitRow(line) { let s = line.trim(); if (s.startsWith('|')) s = s.slice(1); if (s.endsWith('|')) s = s.slice(0, -1); return s.split('|').map((c) => c.trim()); }
+const looksNumeric = (s) => /^[R$€£]?\s?-?[\d,.]+%?$/.test(String(s).trim());
+function OwlMd({ text }) {
+  const lines = String(text || '').split('\n');
+  const blocks = []; let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (line.includes('|') && i + 1 < lines.length && /-/.test(lines[i + 1]) && /^\s*\|?[\s:|-]+\|?\s*$/.test(lines[i + 1])) {
+      const header = splitRow(line); i += 2; const rows = [];
+      while (i < lines.length && lines[i].includes('|') && lines[i].trim()) { rows.push(splitRow(lines[i])); i++; }
+      blocks.push({ t: 'table', header, rows }); continue;
+    }
+    if (/^\s*[-*]\s+/.test(line)) { const items = []; while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) { items.push(lines[i].replace(/^\s*[-*]\s+/, '')); i++; } blocks.push({ t: 'ul', items }); continue; }
+    if (!line.trim()) { i++; continue; }
+    const para = [line]; i++;
+    while (i < lines.length && lines[i].trim() && !lines[i].includes('|') && !/^\s*[-*]\s+/.test(lines[i])) { para.push(lines[i]); i++; }
+    blocks.push({ t: 'p', text: para.join('\n') });
+  }
+  const th = { textAlign: 'left', padding: '5px 9px', borderBottom: '1px solid var(--hairline)', color: 'var(--muted)', fontWeight: 600, whiteSpace: 'nowrap' };
+  const td = (n) => ({ padding: '5px 9px', borderBottom: '1px solid var(--hairline)', textAlign: n ? 'right' : 'left', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' });
+  return (
+    <div>
+      {blocks.map((b, k) => {
+        if (b.t === 'table') return (
+          <div key={k} style={{ overflowX: 'auto', margin: '6px 0' }}>
+            <table style={{ borderCollapse: 'collapse', fontSize: '0.92em', width: '100%' }}>
+              <thead><tr>{b.header.map((h, j) => <th key={j} style={th}>{mdInline(h)}</th>)}</tr></thead>
+              <tbody>{b.rows.map((r, ri) => <tr key={ri}>{r.map((c, ci) => <td key={ci} style={td(ci > 0 && looksNumeric(c))}>{mdInline(c)}</td>)}</tr>)}</tbody>
+            </table>
+          </div>
+        );
+        if (b.t === 'ul') return <ul key={k} style={{ margin: '4px 0', paddingLeft: 18 }}>{b.items.map((it, j) => <li key={j} style={{ margin: '1px 0' }}>{mdInline(it)}</li>)}</ul>;
+        return <p key={k} style={{ margin: '4px 0', whiteSpace: 'pre-wrap' }}>{mdInline(b.text)}</p>;
+      })}
+    </div>
+  );
+}
+
 // Format a measure value with thousands separators (numbers) or pass strings through.
 function fmtVal(v) {
   const n = typeof v === 'number' ? v : Number(String(v).replace(/,/g, ''));
@@ -270,20 +324,25 @@ function chartDataFromSource(s) {
 function OwlChart({ source, entityId, suiteId, canPin }) {
   const [type, setType] = useState(source.chartType || 'bar');
   const [pinOpen, setPinOpen] = useState(false);
-  const meas = source.columns.find((c) => c.kind === 'measure');
+  const [stacked, setStacked] = useState(false);
+  const measCols = source.columns.filter((c) => c.kind === 'measure');
+  const meas = measCols[0];
+  const multiMeasure = measCols.length >= 2;
   const dims = source.columns.filter((c) => c.kind === 'dimension');
   const rowCount = (source.rows || []).length;
-  const canPie = dims.length === 1 && rowCount >= 2 && rowCount <= 12;
+  const canPie = !multiMeasure && dims.length === 1 && rowCount >= 2 && rowCount <= 12;
   const opts = [{ k: 'bar', label: 'Bar' }, { k: 'line', label: 'Line' }, ...(canPie ? [{ k: 'pie', label: 'Pie' }] : []), { k: 'metric', label: 'Metric' }];
   const seg = (active) => ({ padding: '3px 9px', fontSize: 11, fontWeight: 600, border: 'none', borderRadius: 980, cursor: 'pointer', background: active ? 'var(--brand)' : 'transparent', color: active ? '#fff' : 'var(--text)' });
   const total = (source.rows || []).reduce((a, r) => a + (Number(r[meas?.field]) || 0), 0);
   const showPin = canPin && source.queryBody && entityId;
+  const canStack = multiMeasure && type !== 'metric' && type !== 'pie';
   return (
     <div style={{ margin: '2px 0 8px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
         <div style={{ display: 'inline-flex', gap: 2, padding: 2, background: 'var(--elevated, rgba(128,128,128,0.12))', borderRadius: 980 }}>
           {opts.map((o) => <button key={o.k} onClick={() => setType(o.k)} style={seg(type === o.k)}>{o.label}</button>)}
         </div>
+        {canStack && <button onClick={() => setStacked((s) => !s)} title="Stack the series" style={{ border: '1px solid var(--hairline)', background: stacked ? 'var(--brand)' : 'var(--card)', color: stacked ? '#fff' : 'var(--text)', borderRadius: 980, padding: '3px 10px', fontSize: 11.5, cursor: 'pointer' }}>{stacked ? 'Stacked' : 'Stack'}</button>}
         {showPin && <button onClick={() => setPinOpen((o) => !o)} title="Pin to a dashboard or home" style={{ border: '1px solid var(--hairline)', background: pinOpen ? 'var(--elevated, rgba(128,128,128,0.12))' : 'var(--card)', borderRadius: 980, padding: '3px 10px', fontSize: 11.5, cursor: 'pointer', color: 'var(--text)' }}>📌 Pin</button>}
       </div>
       {showPin && pinOpen && <PinMenu source={source} entityId={entityId} suiteId={suiteId} chartType={type} onDone={() => setPinOpen(false)} />}
@@ -296,7 +355,7 @@ function OwlChart({ source, entityId, suiteId, canPin }) {
         )
         : (
           <div style={{ height: 200, border: '1px solid var(--hairline)', borderRadius: 12, overflow: 'hidden', background: 'var(--card)' }}>
-            <ChartTile data={chartDataFromSource({ ...source, chartType: type })} visConfig={{ type: VIS[type] || 'looker_column' }} />
+            <ChartTile data={chartDataFromSource({ ...source, chartType: type })} visConfig={{ type: VIS[type] || 'looker_column', stacking: (canStack && stacked) ? 'normal' : undefined }} />
           </div>
         )}
     </div>
