@@ -142,6 +142,9 @@ function mount(app, { db, auth, insights, owlTools, anthropicKeyForSuite, anthro
   const now = () => new Date().toISOString();
   const insThread = sql.prepare('INSERT INTO owl_threads (id,entity_id,user_id,suite_id,title,created_at) VALUES (?,?,?,?,?,?)');
   const getThread = sql.prepare('SELECT * FROM owl_threads WHERE id = ?');
+  const renameThread = sql.prepare('UPDATE owl_threads SET title = ? WHERE id = ?');
+  const delThread = sql.prepare('DELETE FROM owl_threads WHERE id = ?');
+  const delThreadMsgs = sql.prepare('DELETE FROM owl_messages WHERE thread_id = ?');
   const insMsg = sql.prepare('INSERT INTO owl_messages (id,thread_id,role,body,tool_calls,created_at) VALUES (?,?,?,?,?,?)');
   const listMsgs = sql.prepare('SELECT * FROM owl_messages WHERE thread_id = ? ORDER BY created_at ASC');
   // A user's recent chats, newest activity first (for the history list).
@@ -302,6 +305,29 @@ function mount(app, { db, auth, insights, owlTools, anthropicKeyForSuite, anthro
       id: t.id, title: t.title || 'Chat', suiteId: t.suite_id || '', entityId: t.entity_id || '', at: t.last_at || t.created_at,
     }));
     res.json({ threads: rows });
+  });
+
+  // PATCH /api/owl/threads/:id — rename a chat (own threads only).
+  app.patch('/api/owl/threads/:id', auth.requireAuth, (req, res) => {
+    if (!owlAllowed(req.user)) return res.status(403).json({ error: 'The native Owl isn\'t enabled for your account yet.' });
+    const thread = getThread.get(req.params.id);
+    if (!thread) return res.status(404).json({ error: 'Not found.' });
+    if (thread.user_id !== req.user.id && req.user.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
+    const title = String((req.body || {}).title || '').trim().slice(0, 120);
+    if (!title) return res.status(400).json({ error: 'A title is required.' });
+    renameThread.run(title, req.params.id);
+    res.json({ ok: true, id: req.params.id, title });
+  });
+
+  // DELETE /api/owl/threads/:id — delete a chat and its messages (own threads only).
+  app.delete('/api/owl/threads/:id', auth.requireAuth, (req, res) => {
+    if (!owlAllowed(req.user)) return res.status(403).json({ error: 'The native Owl isn\'t enabled for your account yet.' });
+    const thread = getThread.get(req.params.id);
+    if (!thread) return res.status(404).json({ error: 'Not found.' });
+    if (thread.user_id !== req.user.id && req.user.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
+    delThreadMsgs.run(req.params.id);
+    delThread.run(req.params.id);
+    res.json({ ok: true });
   });
 
   // GET /api/owl/threads/:id/messages — reload a conversation (own threads only).

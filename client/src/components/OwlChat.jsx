@@ -22,8 +22,10 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
   // Scope the Owl answers for — pick a client (organiser) and optionally an event.
   const [selEntity, setSelEntity] = useState(entityId || '');
   const [selSuite, setSelSuite] = useState(suiteId || '');
-  const [historyOpen, setHistoryOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false); // chat list: persistent on desktop, slide-over on mobile
   const [threads, setThreads] = useState([]);
+  const [editingId, setEditingId] = useState(null); // thread being renamed inline
+  const [editText, setEditText] = useState('');
   const [followups, setFollowups] = useState([]); // suggested next questions for the latest answer
   const [chatCopied, setChatCopied] = useState(false);
   const scrollRef = useRef(null);
@@ -56,11 +58,8 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
   }, [events, selEntity, selSuite, suiteId, isAdmin, clients.length]);
   // Changing scope starts a fresh conversation (don't mix clients' data in a thread).
   const resetThread = () => { setMessages([]); setThreadId(null); };
-  const newChat = () => { resetThread(); setInput(''); setHistoryOpen(false); };
-  async function openHistory() {
-    if (!historyOpen) { try { const r = await api.owlThreads(); setThreads(r.threads || []); } catch { setThreads([]); } }
-    setHistoryOpen((o) => !o);
-  }
+  const refreshThreads = async () => { try { const r = await api.owlThreads(); setThreads(r.threads || []); } catch { /* ignore */ } };
+  const newChat = () => { resetThread(); setInput(''); setEditingId(null); if (isMobile) setSidebarOpen(false); };
   async function loadThread(t) {
     try {
       const r = await api.owlThreadMessages(t.id);
@@ -68,8 +67,22 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
       setThreadId(t.id);
       setSelEntity(t.entityId || ''); setSelSuite(t.suiteId || '');
     } catch { /* ignore */ }
-    setHistoryOpen(false);
+    setEditingId(null);
+    if (isMobile) setSidebarOpen(false);
   }
+  const startRename = (t) => { setEditingId(t.id); setEditText(t.title || ''); };
+  const commitRename = async (id) => {
+    const title = editText.trim(); setEditingId(null);
+    if (!title) return;
+    setThreads((ts) => ts.map((t) => (t.id === id ? { ...t, title } : t)));
+    try { await api.owlRenameThread(id, title); } catch { /* ignore */ } refreshThreads();
+  };
+  const deleteThread = async (t) => {
+    if (!window.confirm(`Delete "${t.title || 'this chat'}"? This can't be undone.`)) return;
+    setThreads((ts) => ts.filter((x) => x.id !== t.id));
+    if (t.id === threadId) newChat();
+    try { await api.owlDeleteThread(t.id); } catch { /* ignore */ } refreshThreads();
+  };
 
   const clientEvents = events.filter((e) => e.entityId === selEntity);
   const showPicker = isAdmin || clients.length > 1;
@@ -78,6 +91,9 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
 
   // Keep the latest message in view as it streams.
   useEffect(() => { const el = scrollRef.current; if (el) el.scrollTop = el.scrollHeight; }, [messages]);
+  // Load the saved-chats list when the panel opens; show the sidebar by default on
+  // desktop (a persistent column) and hidden on mobile (a slide-over toggled by ☰).
+  useEffect(() => { if (open) { refreshThreads(); setSidebarOpen(!isMobile); } }, [open, isMobile]);
   // Esc closes (only while open).
   useEffect(() => {
     if (!open) return;
@@ -102,7 +118,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
     });
     try {
       const { threadId: tid, sources, followups: fu } = await api.owlChat({ suiteId: selSuite || undefined, entityId: selEntity || undefined, dashboardId: dashboardId || undefined, message: q, threadId }, appendToOwl);
-      if (tid) setThreadId(tid);
+      if (tid) { const isNew = tid !== threadId; setThreadId(tid); if (isNew) refreshThreads(); }
       if (sources && sources.length) setMessages((m) => {
         const next = m.slice();
         for (let i = next.length - 1; i >= 0; i--) { if (next[i].role === 'owl') { next[i] = { ...next[i], sources }; break; } }
@@ -133,13 +149,56 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
     </div>
   );
 
+  // Chat list (saved conversations) — a persistent left column on desktop, a slide-over
+  // on mobile. Each row loads on tap; inline rename (✎) and delete (🗑) per chat.
+  const sidebarInner = (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: isMobile ? '78vw' : 212, maxWidth: isMobile ? 320 : 212, background: 'var(--bg, var(--card))', borderRight: '1px solid var(--hairline)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 10px 9px 12px', borderBottom: '1px solid var(--hairline)', flexShrink: 0 }}>
+        <strong style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.05em', flex: 1 }}>Chats</strong>
+        <button onClick={newChat} title="New chat" style={{ border: 'none', background: 'var(--brand)', color: '#fff', borderRadius: 8, padding: '4px 10px', fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>＋ New</button>
+      </div>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+        {threads.length === 0 && <div style={{ padding: '12px', fontSize: 12.5, color: 'var(--muted)' }}>No saved chats yet.</div>}
+        {threads.map((t) => {
+          const active = t.id === threadId;
+          if (editingId === t.id) return (
+            <input key={t.id} autoFocus value={editText} onChange={(e) => setEditText(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') commitRename(t.id); if (e.key === 'Escape') setEditingId(null); }}
+              onBlur={() => commitRename(t.id)}
+              style={{ width: '100%', boxSizing: 'border-box', padding: '8px 12px', border: 'none', borderLeft: '2px solid var(--brand)', background: 'var(--card)', color: 'var(--text)', fontSize: 13, fontFamily: 'inherit', outline: 'none' }} />
+          );
+          return (
+            <div key={t.id} style={{ display: 'flex', alignItems: 'center', borderBottom: '1px solid var(--hairline)', background: active ? 'var(--elevated, rgba(128,128,128,0.12))' : 'transparent' }}>
+              <button onClick={() => loadThread(t)} style={{ flex: 1, minWidth: 0, textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer', padding: '8px 2px 8px 12px', color: 'var(--text)' }}>
+                <div style={{ fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.title || 'Chat'}</div>
+                <div style={{ fontSize: 10.5, color: 'var(--muted)', marginTop: 1 }}>{new Date(t.at).toLocaleDateString()}</div>
+              </button>
+              <button onClick={() => startRename(t)} title="Rename" aria-label="Rename chat" style={{ border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 12, padding: '4px 3px' }}>✎</button>
+              <button onClick={() => deleteThread(t)} title="Delete" aria-label="Delete chat" style={{ border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 12, padding: '4px 9px 4px 3px' }}>🗑</button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+  const sidebar = sidebarOpen && (isMobile
+    ? (
+      <div style={{ position: 'absolute', inset: 0, zIndex: 6, display: 'flex' }}>
+        <div style={{ boxShadow: '4px 0 20px rgba(0,0,0,0.25)' }}>{sidebarInner}</div>
+        <div onClick={() => setSidebarOpen(false)} style={{ flex: 1, background: 'rgba(0,0,0,0.35)' }} />
+      </div>
+    )
+    : <div style={{ flexShrink: 0 }}>{sidebarInner}</div>);
+
   const panel = (
-    <div className="ai-glow" style={{ height: '100%', width: '100%', background: 'var(--card)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <div className="ai-glow" style={{ height: '100%', width: '100%', background: 'var(--card)', display: 'flex', flexDirection: 'row', overflow: 'hidden', position: 'relative' }}>
+      {!isMobile && sidebar}
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 10px 11px 14px', borderBottom: '1px solid var(--hairline)', flexShrink: 0 }}>
         <span style={{ fontSize: 16 }}>🦉</span>
         <strong style={{ fontSize: 14.5, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Ask the Owl</strong>
+        <button onClick={() => setSidebarOpen((o) => !o)} title="Chats" aria-label="Show chats" style={{ ...hdrBtn, fontSize: 16, padding: '2px 5px' }}>☰</button>
         <button onClick={newChat} title="New chat" aria-label="New chat" style={{ ...hdrBtn, fontSize: 15, padding: '2px 5px' }}>✎</button>
-        <button onClick={openHistory} title="Past chats" aria-label="Past chats" style={{ ...hdrBtn, fontSize: 15, padding: '2px 5px' }}>🕘</button>
         {messages.some((m) => m.text) && (
           <>
             <button onClick={copyChat} title="Copy the chat" aria-label="Copy the chat" style={{ ...hdrBtn, fontSize: 14, padding: '2px 5px' }}>{chatCopied ? '✓' : '📋'}</button>
@@ -163,19 +222,6 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
         )}
         <button onClick={onClose} title="Close" aria-label="Close the Owl" style={{ ...hdrBtn, fontSize: 20, padding: '2px 6px' }}>✕</button>
       </div>
-
-      {historyOpen && (
-        <div style={{ borderBottom: '1px solid var(--hairline)', maxHeight: 240, overflowY: 'auto', background: 'var(--card)', flexShrink: 0 }}>
-          <div style={{ padding: '8px 12px 4px', fontSize: 10, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--muted)' }}>Past chats</div>
-          {threads.length === 0 && <div style={{ padding: '4px 12px 10px', fontSize: 13, color: 'var(--muted)' }}>No saved chats yet.</div>}
-          {threads.map((t) => (
-            <button key={t.id} onClick={() => loadThread(t)} style={{ display: 'block', width: '100%', textAlign: 'left', border: 'none', background: t.id === threadId ? 'var(--elevated, rgba(128,128,128,0.12))' : 'transparent', cursor: 'pointer', padding: '8px 12px', fontSize: 13.5, color: 'var(--text)', borderTop: '1px solid var(--hairline)' }}>
-              <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.title || 'Chat'}</div>
-              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 1 }}>{new Date(t.at).toLocaleString()}</div>
-            </button>
-          ))}
-        </div>
-      )}
 
       {showPicker && (
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', padding: '8px 12px', borderBottom: '1px solid var(--hairline)', flexShrink: 0, flexWrap: 'wrap' }}>
@@ -244,11 +290,13 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
           {busy ? '…' : 'Send'}
         </button>
       </div>
+      </div>
+      {isMobile && sidebar}
     </div>
   );
 
   if (docked) {
-    const w = 'min(560px, 44vw)';
+    const w = sidebarOpen && !isMobile ? 'min(800px, 58vw)' : 'min(560px, 44vw)';
     return (
       <div style={{ position: 'relative', flexShrink: 0, height: '100%', width: open ? w : 0, transition: 'width .28s var(--ease-spring, ease)', overflow: 'hidden' }} aria-hidden={!open}>
         <div style={{ position: 'absolute', top: 0, right: 0, height: '100%', width: w }}>{panel}</div>
@@ -256,7 +304,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
     );
   }
 
-  const w = isMobile ? '100%' : 'min(560px, 94vw)';
+  const w = isMobile ? '100%' : (sidebarOpen ? 'min(800px, 96vw)' : 'min(560px, 94vw)');
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 80, pointerEvents: open ? 'auto' : 'none' }} aria-hidden={!open}>
       <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.42)', opacity: open ? 1 : 0, transition: 'opacity .26s ease', backdropFilter: open ? 'blur(2px)' : 'none', WebkitBackdropFilter: open ? 'blur(2px)' : 'none' }} />

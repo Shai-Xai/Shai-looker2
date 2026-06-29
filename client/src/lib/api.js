@@ -132,6 +132,8 @@ export const api = {
   owlPinTargets: (entityId) => fetch(`/api/owl/pin-targets?entityId=${encodeURIComponent(entityId || '')}`).then(json),
   owlPin: (body) => fetch('/api/owl/pin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
   owlThreadMessages: (id) => fetch(`/api/owl/threads/${id}/messages`).then(json),
+  owlRenameThread: (id, title) => fetch(`/api/owl/threads/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title }) }).then(json),
+  owlDeleteThread: (id) => fetch(`/api/owl/threads/${id}`, { method: 'DELETE' }).then(json),
   login: (email, password) =>
     fetch('/api/auth/login', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
