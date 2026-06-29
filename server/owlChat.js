@@ -126,7 +126,7 @@ function owlAllowed(user) {
   return !!email && OWL_ALLOW.split(',').map((s) => s.trim()).filter(Boolean).includes(email);
 }
 
-function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, anthropicKeyForSuite, anthropicKeyForEntity }) {
+function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, messaging, anthropicKeyForSuite, anthropicKeyForEntity }) {
   const sql = db.db;
   sql.exec(`
     CREATE TABLE IF NOT EXISTS owl_threads (
@@ -373,7 +373,8 @@ function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, a
   require('./owlPin').mount(app, { db, auth });
   require('./owlGuidance').mount(app, { db, auth }); // resolveGuidance is required at top
   const owlFields = require('./owlFields').mount(app, { db, auth, getExploreFields }); // no-code field labels/synonyms/questions
+  require('./owlWhatsapp').mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthropicKeyForEntity }); // WhatsApp door onto the Owl (Clickatell)
   console.log('[owlChat] agentic Owl chat module mounted');
 }
 
-module.exports = { mount, runOwlLoop, textOf, OWL_CHAT_SYSTEM, owlAllowed };
+module.exports = { mount, runOwlLoop, owlTurn, textOf, OWL_CHAT_SYSTEM, owlAllowed };

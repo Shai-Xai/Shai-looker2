@@ -30,19 +30,26 @@ function normaliseMsisdn(raw, defaultCc = '27') {
   return /^\d{8,15}$/.test(s) ? s : '';
 }
 
-// Send one SMS. Best-effort: returns { ok, error }. Never throws.
-async function sendSms({ to, text }) {
+// The WhatsApp sender — the Business number registered with Clickatell. SMS uses an
+// alphanumeric sender ID; WhatsApp must send FROM the WA number.
+function waFrom() { return (db?.getSetting('whatsapp_from') || process.env.WHATSAPP_FROM || '').trim(); }
+
+// Send one message on a Clickatell One API channel ('sms' | 'whatsapp'). Best-effort:
+// returns { ok, error }. Never throws. WhatsApp free-form replies are allowed inside the
+// 24h customer-service window (i.e. when replying to a customer's inbound message).
+async function sendOne(channel, { to, text }) {
   if (!isConfigured()) return { ok: false, reason: 'not_configured' };
   const msisdn = normaliseMsisdn(to);
   if (!msisdn) return { ok: false, error: 'invalid number' };
-  const body = { messages: [{ channel: 'sms', to: msisdn, content: String(text || '').slice(0, 1600) }] };
-  if (sender()) body.messages[0].from = sender();
+  const from = channel === 'whatsapp' ? waFrom() : sender();
+  const body = { messages: [{ channel, to: msisdn, content: String(text || '').slice(0, channel === 'whatsapp' ? 4096 : 1600) }] };
+  if (from) body.messages[0].from = from;
   try {
     const res = await fetch(endpoint(), {
       method: 'POST',
       headers: { Authorization: apiKey(), 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(20000), // fail a stuck SMS send instead of hanging forever
+      signal: AbortSignal.timeout(20000), // fail a stuck send instead of hanging forever
     });
     const data = await res.json().catch(() => ({}));
     // Clickatell returns per-message accepted/error; treat HTTP 2xx + no error as ok.
@@ -51,11 +58,14 @@ async function sendSms({ to, text }) {
     return { ok: false, error: msg?.error?.description || data.error || `HTTP ${res.status}` };
   } catch (e) { return { ok: false, error: e.message }; }
 }
+async function sendSms({ to, text }) { return sendOne('sms', { to, text }); }
+async function sendWhatsapp({ to, text }) { return sendOne('whatsapp', { to, text }); }
 
-// Channel dispatcher (email stays in mailer; this owns sms now, whatsapp later).
+// Channel dispatcher (email stays in mailer; this owns sms + whatsapp).
 async function send({ channel, to, text }) {
   if (channel === 'sms') return sendSms({ to, text });
+  if (channel === 'whatsapp') return sendWhatsapp({ to, text });
   return { ok: false, error: `Unsupported channel: ${channel}` };
 }
 
-module.exports = { init, isConfigured, status, sendSms, send, normaliseMsisdn };
+module.exports = { init, isConfigured, status, sendSms, sendWhatsapp, send, normaliseMsisdn, waFrom };
