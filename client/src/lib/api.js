@@ -109,10 +109,10 @@ export const api = {
     // "<<<FOLLOWUPS>>>[...]" (suggested next questions) and the server's
     // "<<<OWL_SOURCES>>>{...}" (citation chips). Emit only the text before the first
     // marker (holding back a possible partial-marker tail), then parse both records.
-    const FU = '<<<FOLLOWUPS>>>', SRC = '<<<OWL_SOURCES>>>';
-    const HOLD = Math.max(FU.length, SRC.length);
-    const firstMarker = () => { const a = buf.indexOf(FU), b = buf.indexOf(SRC); const xs = [a, b].filter((i) => i >= 0); return xs.length ? Math.min(...xs) : -1; };
-    let buf = '', emitted = 0, sources = [], followups = [];
+    const FU = '<<<FOLLOWUPS>>>', SRC = '<<<OWL_SOURCES>>>', ACT = '<<<OWL_ACTIONS>>>';
+    const HOLD = Math.max(FU.length, SRC.length, ACT.length);
+    const firstMarker = () => { const xs = [buf.indexOf(FU), buf.indexOf(SRC), buf.indexOf(ACT)].filter((i) => i >= 0); return xs.length ? Math.min(...xs) : -1; };
+    let buf = '', emitted = 0, sources = [], followups = [], actions = [];
     for (;;) {
       const { done, value } = await reader.read(); if (done) break;
       if (value) buf += dec.decode(value, { stream: true });
@@ -125,9 +125,13 @@ export const api = {
     const fa = buf.indexOf(FU);
     if (fa >= 0) { const after = buf.slice(fa + FU.length); const end = after.indexOf(SRC); const blob = (end >= 0 ? after.slice(0, end) : after); const m = blob.match(/\[[\s\S]*\]/); if (m) { try { followups = JSON.parse(m[0]); } catch { followups = []; } } }
     const sa = buf.indexOf(SRC);
-    if (sa >= 0) { try { sources = JSON.parse(buf.slice(sa + SRC.length)); } catch { sources = []; } }
-    return { threadId: tid, sources, followups };
+    if (sa >= 0) { const after = buf.slice(sa + SRC.length); const end = after.indexOf(ACT); const blob = end >= 0 ? after.slice(0, end) : after; try { sources = JSON.parse(blob); } catch { sources = []; } }
+    const aa = buf.indexOf(ACT);
+    if (aa >= 0) { try { actions = JSON.parse(buf.slice(aa + ACT.length)); } catch { actions = []; } }
+    return { threadId: tid, sources, followups, actions };
   },
+  // Act layer: commit a drafted action the Owl proposed (the "Create alert" tap).
+  owlCreateAlert: (body) => fetch('/api/owl/act/create-alert', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
   owlThreads: () => fetch('/api/owl/threads').then(json),
   owlPinTargets: (entityId) => fetch(`/api/owl/pin-targets?entityId=${encodeURIComponent(entityId || '')}`).then(json),
   owlPin: (body) => fetch('/api/owl/pin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),

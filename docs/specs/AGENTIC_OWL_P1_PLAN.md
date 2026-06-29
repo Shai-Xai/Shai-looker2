@@ -259,8 +259,25 @@ built unless marked ✅.)
 - **getDashboard** (the dashboard you're viewing / a named one), **getGoals**, **getAlerts**, **getCampaigns** — so the Owl answers about goals/alerts/campaigns/the current dashboard, not just ticket data. Each reuses an existing scoped module API; read-only first.
 
 ### Act layer
+- **✅ createAlert — the first act-tool (the draft→confirm warm-up).** The Owl can now
+  DRAFT a metric alert from chat ("tell me when tickets hit 1000") and the user taps
+  **Create alert** to switch it on — nothing is created silently. Chosen as the first
+  act because it's the **lowest blast radius**: self-affecting (notifies the client's
+  own team), no buyer messaging, no spend, no PII. It establishes the reusable act
+  pattern the riskier tools inherit: an act-tool returns `{ ok, confirm:true, action }`
+  (a DRAFT, never a write); the loop surfaces it under a new `<<<OWL_ACTIONS>>>` stream
+  marker; the client renders a confirm **action card**; a commit route
+  (`POST /api/owl/act/create-alert`) does the write, re-checking permission both in the
+  route and inside `alerts.createAlert` (canManage / `alerts.manage`) — so the Owl can
+  never create an alert the user couldn't make by hand. Files: `owlTools.js` (tool, draft
+  only, catalogue-bounded), `alerts.js` (`createAlert` programmatic API reusing
+  clean+upsert), `owlChat.js` (action stream + commit route + prompt routing),
+  `OwlChat.jsx` (`ActionCard`), `lib/api.js` (`owlCreateAlert` + actions marker parse).
+  Tests: 6 added in `test/owlTools.test.js` (drafts bound to the curated explore;
+  refuses no-event / off-catalogue measure / PII filter; never touches Looker). Full
+  suite green.
 - **Pin chart to Home / a specific dashboard** (NEXT BUILD) — live tile via createDashboard/updateDashboard + the marks/pin system; Home pins host on an auto-created "Saved from Owl" dashboard. 📌-button first, conversational "pin that to home" later.
-- Later: **create a segment from a cohort → draft a campaign** (the flagship insight→act; never exposes PII, always via consent + approval).
+- Later: **create a segment from a cohort → draft a campaign** (the flagship insight→act; never exposes PII, always via consent + approval). Now rides the act-card spine `createAlert` established (draft → confirm), with the campaign-approval workflow as the heavier confirm step.
 
 ### ✅ Shipped this session
 Native chat on Claude tool-use; `askData` (curated catalogue, scoped, fails-closed); allowlist gating (shai.evian); scope bound to the organisers a user can access (never platform-wide); client/event picker + the Owl states its scope; suite event-lock applied; re-pointed to the `tickets_purchased`/`core_tickets` explore (realistic counts); tickets-vs-add-ons split; customer lookup by email/phone/name (filter-only, no enumeration); citation chips + underlying data table; today's-date awareness; auto-charts via Pulse's `ChartTile` + a bar/line/pie/metric type toggle.

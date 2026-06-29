@@ -183,11 +183,11 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
       return next;
     });
     try {
-      const { threadId: tid, sources, followups: fu } = await api.owlChat({ suiteId: selSuite || undefined, entityId: selEntity || undefined, dashboardId: dashboardId || undefined, message: q, threadId }, appendToOwl);
+      const { threadId: tid, sources, followups: fu, actions } = await api.owlChat({ suiteId: selSuite || undefined, entityId: selEntity || undefined, dashboardId: dashboardId || undefined, message: q, threadId }, appendToOwl);
       if (tid) { const isNew = tid !== threadId; setThreadId(tid); if (isNew) refreshThreads(); }
-      if (sources && sources.length) setMessages((m) => {
+      if ((sources && sources.length) || (actions && actions.length)) setMessages((m) => {
         const next = m.slice();
-        for (let i = next.length - 1; i >= 0; i--) { if (next[i].role === 'owl') { next[i] = { ...next[i], sources }; break; } }
+        for (let i = next.length - 1; i >= 0; i--) { if (next[i].role === 'owl') { next[i] = { ...next[i], sources: (sources && sources.length) ? sources : next[i].sources, actions }; break; } }
         return next;
       });
       if (fu && fu.length) setFollowups(fu);
@@ -358,6 +358,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
           <div key={i} data-owl-msg>
             {bubble(m, i)}
             {m.role === 'owl' && m.sources && m.sources.length > 0 && <CitationChips sources={m.sources} entityId={selEntity} suiteId={selSuite} canPin={isAdmin} />}
+            {m.role === 'owl' && m.actions && m.actions.length > 0 && m.actions.map((a, ai) => <ActionCard key={ai} action={a} />)}
             {m.role === 'owl' && m.text && !busy && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 2 }}>
                 <CopyBtn text={m.text} />
@@ -651,6 +652,48 @@ function DataActions({ source }) {
       <button onClick={() => downloadText(csvName(source), toCSV(source.columns, source.rows))} title="Download the data as CSV (opens in Excel/Sheets)" style={msgActionStyle}>⬇ CSV</button>
       {hasChart && <button onClick={(e) => { const c = e.currentTarget.closest('[data-owl-msg]') && e.currentTarget.closest('[data-owl-msg]').querySelector('canvas'); if (c) downloadCanvasJpg(c, csvName(source).replace(/\.csv$/, '.jpg')); }} title="Download the chart as an image (JPEG)" style={msgActionStyle}>⬇ Image</button>}
     </>
+  );
+}
+
+// ── Action card: the act-layer's confirm step ──────────────────────────────────
+// An act-tool (createAlert) DRAFTS something; nothing is created until the user taps
+// here. This is the safe draft→confirm pattern the riskier act-tools will reuse. The
+// commit re-checks permission server-side (alerts.manage), so this button can never
+// create something the user couldn't make by hand.
+const OP_TEXT = { gte: 'reaches', lte: 'drops to', gt: 'goes above', lt: 'drops below' };
+function ActionCard({ action }) {
+  const [state, setState] = useState(''); // '' | 'busy' | 'done' | 'error'
+  const [err, setErr] = useState('');
+  if (!action || action.kind !== 'createAlert') return null;
+  const d = action.draft || {};
+  const cond = `${d.metricLabel || d.measureLabel || 'this metric'} ${OP_TEXT[d.operator] || 'reaches'} ${fmtVal(d.threshold)}${d.unit === '%' ? '%' : ''}`;
+  const create = async () => {
+    setState('busy'); setErr('');
+    try {
+      await api.owlCreateAlert({ suiteId: action.suiteId, draft: d });
+      setState('done');
+    } catch (e) { setState('error'); setErr((e && e.message) || 'Could not create the alert.'); }
+  };
+  return (
+    <div style={{ margin: '2px 0 10px', border: '1px solid var(--hairline)', borderRadius: 12, background: 'var(--card)', padding: '10px 12px', maxWidth: '85%' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 6 }}>
+        <span style={{ fontSize: 15 }}>🔔</span>
+        <strong style={{ fontSize: 12.5 }}>Alert</strong>
+        <span style={{ fontSize: 11, color: 'var(--muted)', border: '1px solid var(--hairline)', borderRadius: 980, padding: '1px 7px' }}>Draft</span>
+      </div>
+      <div style={{ fontSize: 13, color: 'var(--text)', marginBottom: 8 }}>Notify me when <strong>{cond}</strong>.</div>
+      {state === 'done' ? (
+        <div style={{ fontSize: 12.5, color: 'var(--brand)', fontWeight: 600 }}>✓ Alert created — you'll be notified when it triggers.</div>
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <button onClick={create} disabled={state === 'busy'}
+            style={{ border: 'none', borderRadius: 980, padding: '6px 16px', fontSize: 12.5, fontWeight: 700, cursor: state === 'busy' ? 'default' : 'pointer', background: state === 'busy' ? 'var(--elevated, rgba(128,128,128,0.18))' : 'var(--brand)', color: state === 'busy' ? 'var(--muted)' : '#fff' }}>
+            {state === 'busy' ? 'Creating…' : 'Create alert'}
+          </button>
+          {state === 'error' && <span style={{ fontSize: 12, color: '#e0414a' }}>{err}</span>}
+        </div>
+      )}
+    </div>
   );
 }
 

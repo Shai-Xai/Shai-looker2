@@ -625,8 +625,24 @@ function mount(app, { db, auth, resolveTileValue, resolveCustomMetric, metricCat
   // Status (client uses it to decide whether to show the feature).
   app.get('/api/alerts/status', auth.requireAuth, (req, res) => res.json({ enabled: enabled() }));
 
+  // ── Programmatic create (the Owl's createAlert act-tool commit path) ──────────
+  // Runs the SAME clean + permission (canManage) + upsert the POST route uses, so an
+  // alert the Owl proposes-then-confirms is identical to a hand-made one and obeys
+  // alerts.manage (the Owl can never create an alert the user couldn't make by hand).
+  // Returns { ok, alert } or { ok:false, error }. No throwing — the caller is a route.
+  function createAlertFor({ suiteId, draft, user }) {
+    if (!enabled()) return { ok: false, error: 'Alerts are disabled' };
+    const su = db.getSuite(suiteId);
+    if (!su) return { ok: false, error: 'Event not found' };
+    if (!canManage(user, suiteId)) return { ok: false, error: 'You don\'t have permission to create alerts for this event.' };
+    const c = clean({ ...(draft || {}), source: 'metric' }, su.entityId, su.id);
+    if (!c.name) return { ok: false, error: 'Give the alert a name.' };
+    if (!c.model || !c.view || !c.measure) return { ok: false, error: 'Pick the metric to watch.' };
+    return { ok: true, alert: upsert(null, c, (user && user.email) || 'owl') };
+  }
+
   console.log('[alerts] mounted', enabled() ? '(enabled)' : '(disabled — set alerts_enabled=1)');
-  return { evaluate, tick, recentBeats, listForSuite, alertById, eventsFor };
+  return { evaluate, tick, recentBeats, listForSuite, alertById, eventsFor, createAlert: createAlertFor };
 }
 
 module.exports = { mount };
