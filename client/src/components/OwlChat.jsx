@@ -203,6 +203,15 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
           <div key={i}>
             {bubble(m, i)}
             {m.role === 'owl' && m.sources && m.sources.length > 0 && <CitationChips sources={m.sources} entityId={selEntity} suiteId={selSuite} canPin={isAdmin} />}
+            {m.role === 'owl' && m.text && !busy && (
+              <ReportToClaude
+                question={[...messages.slice(0, i)].reverse().find((x) => x.role === 'user')?.text || ''}
+                answer={m.text}
+                sources={m.sources}
+                scopeLabel={[clients.find((c) => c.id === selEntity)?.name, events.find((e) => e.id === selSuite)?.name].filter(Boolean).join(' · ')}
+                dashboardId={dashboardId}
+              />
+            )}
           </div>
         ))}
       </div>
@@ -349,6 +358,65 @@ function chartDataFromSource(s) {
     },
     data: rows.map((r) => { const o = {}; for (const c of s.columns) o[c.field] = { value: r[c.field] }; return o; }),
   };
+}
+
+// Compile a structured "fix brief" from an Owl answer — the question, the answer, and
+// the EXACT query behind it (measures, group-bys, filters, scope, dashboard) — so the
+// user can hand it to Claude verbatim instead of writing one by hand or screenshotting.
+function buildFixBrief({ question, answer, sources, scopeLabel, dashboardId }) {
+  const lines = [];
+  lines.push('FIX BRIEF — Owl answer');
+  if (scopeLabel) lines.push(`Scope: ${scopeLabel}`);
+  if (dashboardId) lines.push(`Dashboard: ${dashboardId}`);
+  lines.push('');
+  lines.push(`Question: ${question || '(unknown)'}`);
+  lines.push('');
+  lines.push('Owl answered:');
+  lines.push(String(answer || '').trim() || '(no text)');
+  if (sources && sources.length) {
+    lines.push('');
+    lines.push('Underlying query the Owl ran:');
+    sources.forEach((s, n) => {
+      const qb = s.queryBody || {};
+      const measures = (qb.fields || []).filter((f) => (s.columns || []).some((c) => c.field === f && c.kind === 'measure'));
+      const groupBy = (s.dimensions || []);
+      const filters = (s.filters || []).map((f) => `${f.label}=${f.value}`).join(', ');
+      lines.push(`${sources.length > 1 ? `[${n + 1}] ` : ''}explore=${qb.model || ''}/${qb.view || s.explore || ''}`);
+      lines.push(`  measures: ${measures.join(', ') || s.measure || '(none)'}`);
+      lines.push(`  group by: ${groupBy.join(', ') || '(none)'}`);
+      lines.push(`  filters: ${filters || '(scope only)'}`);
+      lines.push(`  rows: ${s.count != null ? s.count : (s.rows || []).length}`);
+      lines.push(`  query: ${JSON.stringify(qb)}`);
+    });
+  }
+  lines.push('');
+  lines.push("What's wrong / what it should be: (describe here)");
+  return lines.join('\n');
+}
+
+// One-tap "Report to Claude": copies the fix brief to the clipboard (falls back to the
+// share sheet on devices without clipboard access) so it can be pasted straight to Claude.
+function ReportToClaude({ question, answer, sources, scopeLabel, dashboardId }) {
+  const [state, setState] = useState(''); // '' | 'copied' | 'failed'
+  const brief = () => buildFixBrief({ question, answer, sources, scopeLabel, dashboardId });
+  const onClick = async () => {
+    const text = brief();
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) { await navigator.clipboard.writeText(text); setState('copied'); }
+      else if (navigator.share) { await navigator.share({ title: 'Owl fix brief', text }); setState('copied'); }
+      else throw new Error('no clipboard');
+    } catch { setState('failed'); }
+    setTimeout(() => setState(''), 2500);
+  };
+  return (
+    <button
+      onClick={onClick}
+      title="Copy a fix brief (question + answer + the exact query behind it) to paste to Claude"
+      style={{ marginTop: 4, border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 11.5, padding: '2px 4px', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+    >
+      🛠 {state === 'copied' ? 'Copied — paste to Claude' : state === 'failed' ? 'Copy failed — long-press to select' : 'Report to Claude'}
+    </button>
+  );
 }
 
 // An auto-chart with a type toggle (bar / line / pie / metric) + a 📌 pin button.
