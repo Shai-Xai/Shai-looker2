@@ -190,6 +190,11 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
     logEvent(msisdn, 'identified', `${id.user.email || '?'} → ${id.entityId || '(no client)'}`);
     const apiKey = anthropicKeyForEntity ? anthropicKeyForEntity(id.entityId || undefined) : undefined;
     if (!insights.isConfigured(apiKey)) { logEvent(msisdn, 'no-ai-key', 'Anthropic key not configured'); await messaging.sendWhatsapp({ to: msisdn, text: 'The Owl isn\'t available right now — please try again shortly.' }); return; }
+    // Immediate "the Owl is on it" acknowledgement so the customer isn't left staring at
+    // a silent chat while the model + Looker run (a real WhatsApp "typing…" bubble needs
+    // Clickatell to expose Meta's typing API). Fire-and-forget so it never delays the
+    // actual answer; it lands first because it's sent seconds before the reply.
+    messaging.sendWhatsapp({ to: msisdn, text: '🦉💭 One sec — looking into that…' }).catch(() => {});
     // A bare "1"/"2"/"3" reply selects a prior follow-up (the numbered fallback); a tapped
     // button already arrives as the full question text via postbackData.
     const text = resolveSelection(msisdn, rawText) || rawText;
