@@ -134,7 +134,7 @@ function Frame({ children, bg, poweredBy }) {
             page. The default Howler login carries its own identity, so skips it. */}
         {poweredBy && (
           <div style={{ marginTop: 18, paddingTop: 14, borderTop: '1px solid var(--hairline)', textAlign: 'center', fontSize: 11.5, color: 'var(--muted)' }}>
-            Powered by <strong style={{ fontWeight: 700 }}>Howler : Pulse</strong>
+            Powered by <strong style={{ fontWeight: 700 }}>Howler : Pulse</strong> · Intelligent OS
           </div>
         )}
       </div>
