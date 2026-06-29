@@ -126,7 +126,7 @@ function owlAllowed(user) {
   return !!email && OWL_ALLOW.split(',').map((s) => s.trim()).filter(Boolean).includes(email);
 }
 
-function mount(app, { db, auth, insights, owlTools, uploads, anthropicKeyForSuite, anthropicKeyForEntity }) {
+function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, anthropicKeyForSuite, anthropicKeyForEntity }) {
   const sql = db.db;
   sql.exec(`
     CREATE TABLE IF NOT EXISTS owl_threads (
@@ -372,7 +372,7 @@ function mount(app, { db, auth, insights, owlTools, uploads, anthropicKeyForSuit
   // stays at budget. Shares the Owl allowlist gate.
   require('./owlPin').mount(app, { db, auth });
   require('./owlGuidance').mount(app, { db, auth }); // resolveGuidance is required at top
-  const owlFields = require('./owlFields').mount(app, { db, auth }); // no-code field labels/synonyms/questions
+  const owlFields = require('./owlFields').mount(app, { db, auth, getExploreFields }); // no-code field labels/synonyms/questions
   console.log('[owlChat] agentic Owl chat module mounted');
 }
 

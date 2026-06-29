@@ -9,6 +9,11 @@ export default function OwlFieldDictionary() {
   const [rows, setRows] = useState(null);
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [sync, setSync] = useState(null); // null | 'loading' | result object
+  const checkLooker = async () => {
+    setSync('loading');
+    try { setSync(await api.owlFieldsLookerSync()); } catch (e) { setSync({ error: (e && e.message) || 'Could not check Looker.' }); }
+  };
 
   const hydrate = (fields) => (fields || []).map((f) => ({ ...f, akaStr: (f.aka || []).join(', '), qStr: (f.questions || []).join('\n') }));
   useEffect(() => { api.owlFieldDict().then((r) => setRows(hydrate(r.fields))).catch(() => setRows([])); }, []);
@@ -54,6 +59,38 @@ export default function OwlFieldDictionary() {
   return (
     <div>
       <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: '0 0 8px' }}>Rename any field, add the phrasings people use for it (synonyms), and example questions. The Owl uses these live to understand questions and label answers — no deploy needed.</p>
+      <div style={{ border: '1px solid var(--hairline)', borderRadius: 10, padding: '10px 12px', margin: '0 0 10px', background: 'var(--bg, #fafafe)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <strong style={{ fontSize: 12.5 }}>New fields in Looker?</strong>
+          <span style={{ fontSize: 12, color: 'var(--muted)', flex: 1 }}>Check what your Looker explore has that the Owl isn’t using yet.</span>
+          <button onClick={checkLooker} disabled={sync === 'loading'} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, padding: '5px 12px', fontSize: 12.5, cursor: 'pointer' }}>{sync === 'loading' ? 'Checking…' : 'Check Looker'}</button>
+        </div>
+        {sync && sync !== 'loading' && (sync.error
+          ? <div style={{ fontSize: 12.5, color: 'var(--warn, #b45309)', marginTop: 8 }}>{sync.error}</div>
+          : sync.supported === false
+            ? <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 8 }}>Looker field metadata isn’t available right now.</div>
+            : (
+              <div style={{ marginTop: 8, fontSize: 12.5 }}>
+                <div style={{ color: 'var(--muted)', marginBottom: 6 }}>{sync.curatedCount} curated · {sync.lookerCount} in Looker ({sync.explore})</div>
+                <div style={{ fontWeight: 700, marginBottom: 4 }}>New in Looker, not in the Owl ({(sync.newInLooker || []).length})</div>
+                {(sync.newInLooker || []).length === 0 && <div style={{ color: 'var(--muted)' }}>Nothing new — the Owl already covers everything curated. ✓</div>}
+                {(sync.newInLooker || []).slice(0, 80).map((f) => (
+                  <div key={f.name} style={{ display: 'flex', gap: 8, padding: '2px 0' }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: f.kind === 'measure' ? 'var(--brand)' : 'var(--muted)', width: 28 }}>{f.kind === 'measure' ? 'M' : 'D'}</span>
+                    <span style={{ flex: 1, color: 'var(--text)' }}>{f.label} <code style={{ color: 'var(--muted)', fontSize: 11 }}>{f.name}</code></span>
+                  </div>
+                ))}
+                {(sync.newInLooker || []).length > 80 && <div style={{ color: 'var(--muted)', marginTop: 4 }}>…and {sync.newInLooker.length - 80} more.</div>}
+                {(sync.missingFromLooker || []).length > 0 && (
+                  <div style={{ marginTop: 8 }}>
+                    <div style={{ fontWeight: 700, marginBottom: 4, color: 'var(--warn, #b45309)' }}>In the Owl but no longer in Looker ({sync.missingFromLooker.length})</div>
+                    {sync.missingFromLooker.map((n) => <div key={n} style={{ color: 'var(--muted)' }}><code style={{ fontSize: 11 }}>{n}</code></div>)}
+                  </div>
+                )}
+                <div style={{ color: 'var(--muted)', marginTop: 8, fontStyle: 'italic' }}>To add a new field to the Owl, send the field name to Claude/your dev — no-code adding is the next step.</div>
+              </div>
+            ))}
+      </div>
       {saveBar}
       <div style={head}>Measures ({measures.length})</div>
       {measures.map(card)}

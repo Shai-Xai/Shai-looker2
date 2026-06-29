@@ -51,13 +51,35 @@ function build(db) {
   return { list, save, read };
 }
 
-function mount(app, { db, auth }) {
+function mount(app, { db, auth, getExploreFields }) {
   const api = build(db);
   app.get('/api/admin/owl-fields', auth.requireAdmin, (_req, res) => res.json({ fields: api.list() }));
   app.put('/api/admin/owl-fields', auth.requireAdmin, (req, res) => {
     api.save((req.body || {}).fields || []);
     res.json({ ok: true, fields: api.list() });
   });
+
+  // Sync check: what does Looker's ticketing explore have that the curated catalogue
+  // doesn't (new fields to consider adding), and what's in the catalogue but gone from
+  // Looker (stale)? Read-only — surfaces the diff so an admin knows what's available.
+  app.get('/api/admin/owl-fields/looker-sync', auth.requireAdmin, async (_req, res) => {
+    if (typeof getExploreFields !== 'function') return res.json({ supported: false });
+    let f; try { f = await getExploreFields(seed.model, seed.explore); } catch { return res.status(502).json({ error: 'Could not reach Looker.' }); }
+    if (!f) return res.json({ supported: false });
+    const have = new Set([...seed.measures, ...seed.dimensions].map((x) => x.name));
+    const lk = [
+      ...(f.measures || []).map((m) => ({ name: m.name, label: m.label || m.name, kind: 'measure' })),
+      ...(f.dimensions || []).map((d) => ({ name: d.name, label: d.label || d.name, kind: 'dimension' })),
+    ];
+    const lkNames = new Set(lk.map((x) => x.name));
+    res.json({
+      supported: true, explore: `${seed.model}/${seed.explore}`,
+      newInLooker: lk.filter((x) => !have.has(x.name)),
+      missingFromLooker: [...have].filter((n) => !lkNames.has(n)),
+      lookerCount: lk.length, curatedCount: have.size,
+    });
+  });
+
   console.log('[owlFields] field dictionary module mounted');
   return api;
 }

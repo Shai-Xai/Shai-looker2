@@ -161,6 +161,7 @@ export const api = {
   adminUpdateEntity: (id, e) => fetch(`/api/admin/entities/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(e) }).then(json),
   adminDeleteEntity: (id) => fetch(`/api/admin/entities/${id}`, { method: 'DELETE' }),
   owlFieldDict: () => fetch('/api/admin/owl-fields').then(json),
+  owlFieldsLookerSync: () => fetch('/api/admin/owl-fields/looker-sync').then(json),
   saveOwlFieldDict: (fields) => fetch('/api/admin/owl-fields', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fields }) }).then(json),
   owlGuidanceGlobal: () => fetch('/api/admin/owl-guidance').then(json),
   setOwlGuidanceGlobal: (guidance) => fetch('/api/admin/owl-guidance', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ guidance }) }).then(json),
