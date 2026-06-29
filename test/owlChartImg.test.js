@@ -39,6 +39,17 @@ test('chartFromTrail builds a comparison from several single-value queries (May 
   assert.deepEqual(spec.cats, ['May 2026', 'June 2026']); // labelled by the differing filter (date), not the identical org lock
   assert.deepEqual(spec.data, [1066650, 1705000]);
   assert.equal(spec.title, 'Revenue by Month');
+  assert.equal(spec.type, 'line'); // a per-date comparison is a time series → line
+});
+
+test('per-day scalar lookups become a line chart (the "daily revenue last 7 days" case)', () => {
+  const days = ['2026-06-27', '2026-06-28', '2026-06-29'];
+  const vals = [61082, 58849, 78108];
+  const trail = days.map((d, i) => ({ name: 'askData', result: { ok: true, rows: [{ 'rev.total': vals[i] }] }, input: { measure: 'rev.total', dimensions: [], filters: { 'd.date': d } } }));
+  const spec = ci.chartFromTrail(trail, { label: (f) => 'Revenue', dateDim: 'd.date' });
+  assert.equal(spec.type, 'line');
+  assert.deepEqual(spec.cats, days);
+  assert.deepEqual(spec.data, vals);
 });
 
 test('comparison ignores measures that differ (no apples-to-oranges bars)', () => {

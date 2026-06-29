@@ -78,7 +78,9 @@ function comparisonFromTrail(trail, opts) {
   if (!labelKey) for (const k of keys) { if (new Set(same.map((s) => String(s.filters[k] ?? ''))).size > 1) { labelKey = k; break; } }
   const cats = same.map((s, i) => (labelKey ? String(s.filters[labelKey]) : `#${i + 1}`));
   const data = same.map((s) => s.val);
-  return { title: `${labelOf(opts, m0)}${labelKey ? ` by ${labelOf(opts, labelKey)}` : ''}`, cats, data, type: 'bar' };
+  // A per-day/-month comparison is a time series → line; anything else → bars.
+  const isTime = labelKey && (labelKey === opts.dateDim || /date|day|week|month|year|__date/i.test(labelKey) || cats.every((c) => /^\d{4}-\d\d(-\d\d)?$/.test(c)));
+  return { title: `${labelOf(opts, m0)}${labelKey ? ` by ${labelOf(opts, labelKey)}` : ''}`, cats, data, type: isTime ? 'line' : 'bar' };
 }
 
 // Rasterise a normalised chart to a PNG Buffer (2× for a crisp phone display).

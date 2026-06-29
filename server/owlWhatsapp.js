@@ -16,7 +16,13 @@ const { runOwlLoop, owlTurn } = require('./owlChat'); // owlTurn already layers 
 const { resolveGuidance } = require('./owlGuidance');
 const chartImg = require('./owlChartImg');
 
-const WA_OVERRIDE = 'OVERRIDE — this conversation is over WhatsApp: reply in SHORT, plain text. No markdown tables. Use *single asterisks* for light emphasis. Lead with the answer in words. Money in ZAR. Do NOT announce or point at a chart (no "here\'s a chart", no 👇 arrow) — if a visual helps, one is attached automatically; just give the figures. For a comparison or trend, prefer ONE grouped askData query (a dimension like month/event plus the measure) so the numbers line up and can be charted, rather than several separate lookups. End your reply with the <<<FOLLOWUPS>>> marker + a JSON array of 2-3 SHORT (≤6 words) next questions, exactly as instructed; the app turns them into tappable buttons.';
+const WA_OVERRIDE = [
+  'OVERRIDE — this conversation is over WhatsApp: reply in SHORT, plain text. No markdown tables. Use *single asterisks* for light emphasis. Lead with the answer in words. Money in ZAR.',
+  'There is NO screen, panel, toggle, button or chart-type switcher here. NEVER tell the user to tap, switch or toggle anything, and never refer to something "below" or "on screen" — they are on WhatsApp.',
+  'Do NOT announce or point at a chart (no "here\'s a chart", no 👇 arrow). If a visual helps, one is attached automatically — just give the figures in words.',
+  'When the user wants to SEE data as a chart / line graph / bar chart / trend — EVEN data you just gave them — you MUST re-run it as ONE grouped askData query (a dimension such as day/month/event plus the measure) so a fresh chart image can be attached. Never reply "it\'s the same data" or refuse to re-pull, and never split a trend into many separate per-day lookups.',
+  'End your reply with the <<<FOLLOWUPS>>> marker + a JSON array of 2-3 SHORT (≤6 words) next questions, exactly as instructed; the app turns them into tappable buttons.',
+].join('\n');
 
 const FU_MARK = '<<<FOLLOWUPS>>>';
 // Parse the trailing "<<<FOLLOWUPS>>>[...]" JSON array the model emits (mirrors the
