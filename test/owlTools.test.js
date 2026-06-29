@@ -247,6 +247,13 @@ test('createAlert schema tracks the alerts module\'s option lists', () => {
   assert.deepEqual(props.priority.enum, alertsMod.PRIORITIES);
 });
 
+test('the "/" slash palette is sourced from the read tools (createAlert excluded)', () => {
+  const t = tools();
+  const cmds = Object.values(t).filter((v) => v && v.menu).map((v) => v.menu.cmd);
+  for (const c of ['data', 'goals', 'alerts', 'campaigns', 'dashboard', 'uploads']) assert.ok(cmds.includes(c), `missing /${c}`);
+  assert.equal(t.createAlert.menu, undefined); // the act tool has no slash command yet
+});
+
 test('createAlert accepts any operator the alerts module defines', async () => {
   const ent = h.makeEntity('Ultra SA', 'Ultra South Africa');
   const suite = h.db.createSuite({ entityId: ent.id, name: 'KFF 26' });

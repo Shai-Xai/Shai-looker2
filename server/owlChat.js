@@ -367,6 +367,15 @@ function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, m
     }
   });
 
+  // GET /api/owl/capabilities — the slash-command palette, derived from the tool
+  // registry (each read tool's `menu`). Sourced here so it can never drift from what
+  // the Owl can actually do; the client renders it as the "/" menu in the composer.
+  const owlCommands = Object.values(owlTools).filter((t) => t && t.menu).map((t) => t.menu);
+  app.get('/api/owl/capabilities', auth.requireAuth, (req, res) => {
+    if (!owlAllowed(req.user)) return res.status(403).json({ error: 'The native Owl isn\'t enabled for your account yet.' });
+    res.json({ commands: owlCommands });
+  });
+
   // GET /api/owl/threads — the user's recent chats (for the history list).
   app.get('/api/owl/threads', auth.requireAuth, (req, res) => {
     if (!owlAllowed(req.user)) return res.status(403).json({ error: 'The native Owl isn\'t enabled for your account yet.' });

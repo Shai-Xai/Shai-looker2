@@ -49,6 +49,9 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
   };
   const [followups, setFollowups] = useState([]); // suggested next questions for the latest answer
   const [status, setStatus] = useState(''); // live "thinking" label streamed while the Owl works
+  const [commands, setCommands] = useState([]); // "/" slash-command palette (from the tool registry)
+  const [slashIdx, setSlashIdx] = useState(0);   // highlighted command in the palette
+  const taRef = useRef(null);                     // the composer textarea (for focus after picking)
   const [chatCopied, setChatCopied] = useState(false);
   const scrollRef = useRef(null);
   // Copy the whole conversation as plain text (Q/Owl transcript) to the clipboard.
@@ -163,6 +166,8 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
   // Load the saved-chats list when the panel opens; show the sidebar by default on
   // desktop (a persistent column) and hidden on mobile (a slide-over toggled by ☰).
   useEffect(() => { if (open) { refreshThreads(); setSidebarOpen(false); } }, [open, isMobile]); // chats list collapsed by default; toggle with ☰
+  // The "/" command palette, sourced from the Owl's tool registry (loads once).
+  useEffect(() => { if (open && !commands.length) api.owlCapabilities().then((r) => setCommands(r.commands || [])).catch(() => {}); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
   // Load the client's attached data sources (for the 📎 panel + so the Owl can query them).
   useEffect(() => { if (!open || !attachEntity) { setUploads([]); return; } api.owlUploads(attachEntity).then((r) => setUploads(r.uploads || [])).catch(() => {}); }, [open, attachEntity]);
   // Esc closes (only while open).
@@ -205,7 +210,25 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
       setStatus('');
     }
   }
-  const onKeyDown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } };
+  // "/" command palette: open while the input is just "/word" (no space yet), so it
+  // never triggers mid-sentence or on a date like "1/2". Picking a command drops its
+  // example question into the box (editable), per the chosen behaviour.
+  const slashMatch = /^\/(\w*)$/.exec(input);
+  const slashOpen = !!slashMatch && commands.length > 0;
+  const slashQuery = slashMatch ? slashMatch[1].toLowerCase() : '';
+  const slashMatches = slashOpen ? commands.filter((c) => c.cmd.toLowerCase().includes(slashQuery) || c.label.toLowerCase().includes(slashQuery)) : [];
+  const slashSel = slashMatches.length ? Math.min(slashIdx, slashMatches.length - 1) : 0;
+  const pickCommand = (c) => { if (!c) return; setInput(c.example); setSlashIdx(0); setTimeout(() => taRef.current && taRef.current.focus(), 0); };
+  const openSlash = () => { setInput('/'); setSlashIdx(0); setTimeout(() => taRef.current && taRef.current.focus(), 0); };
+  const onKeyDown = (e) => {
+    if (slashOpen && slashMatches.length) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); setSlashIdx((i) => Math.min(i + 1, slashMatches.length - 1)); return; }
+      if (e.key === 'ArrowUp') { e.preventDefault(); setSlashIdx((i) => Math.max(i - 1, 0)); return; }
+      if (e.key === 'Enter') { e.preventDefault(); pickCommand(slashMatches[slashSel]); return; }
+      if (e.key === 'Escape') { e.preventDefault(); setInput(''); return; }
+    }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+  };
 
   const docked = dock === 'docked' && !isMobile;
   const hdrBtn = { border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' };
@@ -417,14 +440,31 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
       {/* Composer, Claude-style: a big text box on top, with attach / mic on the
           left and Send on the right of a row beneath it. */}
       <div style={{ borderTop: '1px solid var(--hairline)', padding: 10, flexShrink: 0 }}>
+        {/* "/" command palette — a quick menu of what the Owl can answer. */}
+        {slashOpen && slashMatches.length > 0 && (
+          <div style={{ marginBottom: 6, border: '1px solid var(--hairline)', borderRadius: 12, background: 'var(--card)', overflow: 'hidden', boxShadow: '0 6px 22px rgba(0,0,0,0.14)' }}>
+            {slashMatches.map((c, i) => (
+              <button key={c.cmd} type="button" onMouseEnter={() => setSlashIdx(i)} onClick={() => pickCommand(c)}
+                style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', border: 'none', borderBottom: i < slashMatches.length - 1 ? '1px solid var(--hairline)' : 'none', background: i === slashSel ? 'var(--elevated, rgba(128,128,128,0.12))' : 'transparent', cursor: 'pointer', padding: '8px 12px', color: 'var(--text)' }}>
+                <span style={{ fontSize: 16, flexShrink: 0 }}>{c.icon}</span>
+                <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                  <span style={{ fontSize: 13, fontWeight: 600 }}>/{c.cmd} · {c.label}</span>
+                  <span style={{ fontSize: 11.5, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.example}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
         <div style={{ border: '1px solid var(--hairline)', borderRadius: 16, background: 'var(--bg, var(--card))', padding: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
           <textarea
-            value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={onKeyDown}
-            placeholder={canAsk ? 'Ask the Owl…' : 'Open a client or event to ask'}
+            ref={taRef}
+            value={input} onChange={(e) => { setInput(e.target.value); setSlashIdx(0); }} onKeyDown={onKeyDown}
+            placeholder={canAsk ? 'Ask the Owl…  (type / for commands)' : 'Open a client or event to ask'}
             rows={4} disabled={!canAsk}
             style={{ width: '100%', boxSizing: 'border-box', resize: 'none', minHeight: 108, maxHeight: 260, padding: '8px 10px', border: 'none', outline: 'none', background: 'transparent', color: 'var(--text)', fontSize: 14.5, fontFamily: 'inherit', lineHeight: 1.5 }}
           />
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button onClick={openSlash} title="Commands" aria-label="Slash commands" style={{ border: '1px solid var(--hairline)', background: slashOpen ? 'var(--elevated, rgba(128,128,128,0.12))' : 'var(--card)', color: 'var(--text)', borderRadius: 980, width: 38, height: 38, fontSize: 17, fontWeight: 700, cursor: 'pointer', lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>/</button>
             <button onClick={() => setAttachOpen((o) => !o)} title="Attach data (CSV or Google Sheet)" aria-label="Attach data" style={{ border: '1px solid var(--hairline)', background: attachOpen || uploads.length ? 'var(--elevated, rgba(128,128,128,0.12))' : 'var(--card)', color: 'var(--text)', borderRadius: 980, minWidth: 38, height: 38, padding: '0 11px', fontSize: 16, cursor: 'pointer', lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>📎{uploads.length ? <span style={{ fontSize: 11, fontWeight: 700, marginLeft: 3 }}>{uploads.length}</span> : ''}</button>
             {SR && <button onClick={toggleMic} title={listening ? 'Stop dictation' : 'Dictate your question'} aria-label="Dictate" style={{ border: '1px solid var(--hairline)', background: listening ? '#e0414a' : 'var(--card)', color: listening ? '#fff' : 'var(--text)', borderRadius: 980, width: 38, height: 38, fontSize: 16, cursor: 'pointer', lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>🎤</button>}
             <span style={{ flex: 1 }} />

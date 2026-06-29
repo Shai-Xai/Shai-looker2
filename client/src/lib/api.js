@@ -149,6 +149,8 @@ export const api = {
   },
   // Act layer: commit a drafted action the Owl proposed (the "Create alert" tap).
   owlCreateAlert: (body) => fetch('/api/owl/act/create-alert', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
+  // The "/" slash-command palette (derived from the Owl's tool registry).
+  owlCapabilities: () => fetch('/api/owl/capabilities').then(json),
   owlThreads: () => fetch('/api/owl/threads').then(json),
   owlPinTargets: (entityId) => fetch(`/api/owl/pin-targets?entityId=${encodeURIComponent(entityId || '')}`).then(json),
   owlPin: (body) => fetch('/api/owl/pin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
