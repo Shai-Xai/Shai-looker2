@@ -62,7 +62,11 @@ async function sendOne(channel, { to, text }) {
     // Clickatell returns per-message accepted/error; treat HTTP 2xx + no error as ok.
     const msg = Array.isArray(data.messages) ? data.messages[0] : null;
     if (res.ok && (!msg || msg.accepted !== false)) return { ok: true, id: msg?.apiMessageId || msg?.messageId };
-    return { ok: false, error: msg?.error?.description || data.error || `HTTP ${res.status}` };
+    // Coerce whatever error shape Clickatell sent into a readable string (code + text).
+    const e = msg?.error || data.error || data;
+    const errStr = typeof e === 'string' ? e
+      : [e?.code, e?.description || e?.message].filter(Boolean).join(' ') || JSON.stringify(e || {}).slice(0, 300) || `HTTP ${res.status}`;
+    return { ok: false, error: errStr, status: res.status };
   } catch (e) { return { ok: false, error: e.message }; }
 }
 async function sendSms({ to, text }) { return sendOne('sms', { to, text }); }

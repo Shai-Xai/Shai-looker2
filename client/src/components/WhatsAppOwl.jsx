@@ -16,7 +16,12 @@ export default function WhatsAppOwl() {
   const [testMsg, setTestMsg] = useState('');
   const test = async () => {
     setTestMsg('Sending…');
-    try { const r = await api.testOwlWhatsapp(testTo); setTestMsg(r.ok ? '✓ Sent — check WhatsApp on that number.' : `⚠ ${r.error || r.reason || 'failed'}`); } catch (e) { setTestMsg(`⚠ ${(e && e.message) || 'failed'}`); }
+    try {
+      const r = await api.testOwlWhatsapp(testTo);
+      if (r.ok) { setTestMsg('✓ Sent — check WhatsApp on that number.'); return; }
+      const e = r.error ?? r.reason;
+      setTestMsg(`⚠ ${typeof e === 'string' ? e : JSON.stringify(e ?? r)}`);
+    } catch (e) { setTestMsg(`⚠ ${(e && e.message) || 'failed'}`); }
   };
 
   useEffect(() => {
