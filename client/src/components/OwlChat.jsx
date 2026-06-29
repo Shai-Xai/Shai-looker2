@@ -453,6 +453,23 @@ function fmtCell(v) {
   return /^-?\d+(\.\d+)?$/.test(s) ? Number(s).toLocaleString() : s;
 }
 
+// ── CSV export ────────────────────────────────────────────────────────────────
+// A source carries the result table (columns + rows) — export exactly what's shown.
+function csvEscape(v) { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }
+function toCSV(columns, rows) {
+  const head = (columns || []).map((c) => csvEscape(c.label)).join(',');
+  const body = (rows || []).map((r) => (columns || []).map((c) => csvEscape(r[c.field])).join(',')).join('\n');
+  return `${head}\n${body}`;
+}
+function downloadText(filename, text, mime = 'text/csv;charset=utf-8') {
+  const blob = new Blob([text], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+const csvName = (source) => `${[source.measure, ...(source.dimensions || [])].filter(Boolean).join(' by ') || 'owl-data'}`
+  .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) + '.csv';
+
 // The result rows as a data table (columns + values). Reused by the chart's "Table"
 // view; measure columns are right-aligned.
 function SourceTable({ source }) {
@@ -582,6 +599,7 @@ function OwlChart({ source, entityId, suiteId, canPin }) {
           {opts.map((o) => <button key={o.k} onClick={() => setType(o.k)} style={seg(type === o.k)}>{o.label}</button>)}
         </div>
         {canStack && <button onClick={() => setStacked((s) => !s)} title="Stack the series" style={{ border: '1px solid var(--hairline)', background: stacked ? 'var(--brand)' : 'var(--card)', color: stacked ? '#fff' : 'var(--text)', borderRadius: 980, padding: '3px 10px', fontSize: 11.5, cursor: 'pointer' }}>{stacked ? 'Stacked' : 'Stack'}</button>}
+        {(source.rows || []).length > 0 && <button onClick={() => downloadText(csvName(source), toCSV(source.columns, source.rows))} title="Download as CSV (opens in Excel/Sheets)" style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 980, padding: '3px 10px', fontSize: 11.5, cursor: 'pointer' }}>⬇ CSV</button>}
         {showPin && <button onClick={() => setPinOpen((o) => !o)} title="Pin to a dashboard or home" style={{ border: '1px solid var(--hairline)', background: pinOpen ? 'var(--elevated, rgba(128,128,128,0.12))' : 'var(--card)', borderRadius: 980, padding: '3px 10px', fontSize: 11.5, cursor: 'pointer', color: 'var(--text)' }}>📌 Pin</button>}
       </div>
       {showPin && pinOpen && <PinMenu source={source} entityId={entityId} suiteId={suiteId} chartType={type} onDone={() => setPinOpen(false)} />}
@@ -696,7 +714,10 @@ function CitationChips({ sources, entityId, suiteId, canPin }) {
                       ))}
                     </tbody>
                   </table>
-                  {s.count > s.rows.length && <div style={{ padding: '6px 10px', fontSize: 10.5, color: 'var(--muted)' }}>Showing {s.rows.length} of {s.count.toLocaleString()} rows.</div>}
+                  <div style={{ display: 'flex', alignItems: 'center', padding: '6px 10px', fontSize: 10.5, color: 'var(--muted)' }}>
+                    {s.count > s.rows.length ? `Showing ${s.rows.length} of ${s.count.toLocaleString()} rows.` : ''}
+                    <button onClick={() => downloadText(csvName(s), toCSV(s.columns, s.rows))} title="Download as CSV" style={{ marginLeft: 'auto', border: 'none', background: 'transparent', color: 'var(--brand)', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>⬇ CSV</button>
+                  </div>
                 </div>
               )}
             </div>
