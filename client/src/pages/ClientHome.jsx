@@ -600,15 +600,32 @@ function YourActions({ entityId, isMobile, onOpen }) {
     api.getActionsSummary(entityId).then((r) => setActions(r.actions || [])).catch(() => {});
   }, [entityId]);
   if (!actions.length) return null;
-  const chip = (s) => s === 'done' ? { t: 'Sent', c: '#2da44e', bg: 'rgba(52,199,89,0.15)' }
-    : s === 'running' ? { t: 'Sending…', c: '#0a66c2', bg: 'rgba(10,132,255,0.13)' }
-    : { t: 'Failed', c: '#dc2626', bg: 'rgba(239,68,68,0.12)' };
+  // Honest label per campaign status — don't paint every non-sent state red
+  // "Failed". Scheduled/awaiting-approval/automated/paused are normal; only a
+  // genuine failure is red, and a send that partly failed reads "Sent with errors".
+  const chip = (a) => {
+    const green = { c: '#2da44e', bg: 'rgba(52,199,89,0.15)' };
+    const blue = { c: '#0a66c2', bg: 'rgba(10,132,255,0.13)' };
+    const amber = { c: '#b45309', bg: 'rgba(245,158,11,0.16)' };
+    const grey = { c: 'var(--muted)', bg: 'rgba(128,128,128,0.14)' };
+    const red = { c: '#dc2626', bg: 'rgba(239,68,68,0.12)' };
+    switch (a.status) {
+      case 'done': return a.failed > 0 ? { t: 'Sent with errors', ...amber } : { t: 'Sent', ...green };
+      case 'running': return { t: 'Sending…', ...blue };
+      case 'scheduled': return { t: 'Scheduled', ...blue };
+      case 'pending': return { t: 'Awaiting approval', ...amber };
+      case 'auto': return { t: 'Automated', ...blue };
+      case 'paused': return { t: 'Paused', ...grey };
+      case 'failed': return { t: 'Failed', ...red };
+      default: return { t: a.status ? a.status[0].toUpperCase() + a.status.slice(1) : 'Draft', ...grey };
+    }
+  };
   return (
     <>
       <SectionHead icon="📣">Your campaigns <Faint>campaigns you've sent and how they're performing</Faint></SectionHead>
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : `repeat(${Math.min(actions.length, 3)}, 1fr)`, gap: 12 }}>
         {actions.slice(0, 3).map((a) => {
-          const c = chip(a.status);
+          const c = chip(a);
           return (
             <button key={a.id} className="lift" style={cardBtn} onClick={onOpen}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>

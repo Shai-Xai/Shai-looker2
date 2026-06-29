@@ -51,7 +51,7 @@ export default function LoginPage({ slug = '' }) {
   // confirmation (the server never reveals whether the email has a login).
   if (sent) {
     return (
-      <Frame bg={brand?.loginBackground}>
+      <Frame bg={brand?.loginBackground} poweredBy={!!brand}>
         <div style={{ textAlign: 'center' }}>
           <div style={{ fontSize: 34, marginBottom: 8 }}>📧</div>
           <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>Check your email</div>
@@ -69,7 +69,7 @@ export default function LoginPage({ slug = '' }) {
   const cta = busy ? 'Sending…' : mode === 'forgot' ? 'Send reset link' : mode === 'magic' ? 'Send sign-in link' : (busy ? 'Signing in…' : 'Sign in');
 
   return (
-    <Frame bg={brand?.loginBackground}>
+    <Frame bg={brand?.loginBackground} poweredBy={!!brand}>
       <form onSubmit={submit}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 22 }}>
           {brand?.logo
@@ -77,7 +77,9 @@ export default function LoginPage({ slug = '' }) {
             : <Logo size={40} radius={11} />}
           <div>
             <div style={{ fontSize: 18, fontWeight: 700, letterSpacing: '-0.3px' }}>{brand?.name || 'Howler : Pulse'}</div>
-            <div style={{ fontSize: 12, color: 'var(--muted)' }}>{brand ? 'Powered by Howler : Pulse' : 'Intelligent OS'}</div>
+            {/* Branded pages keep the top clean — the Howler attribution moves to a
+                subtle footer at the bottom of the card (see Frame). */}
+            {!brand && <div style={{ fontSize: 12, color: 'var(--muted)' }}>Intelligent OS</div>}
           </div>
         </div>
 
@@ -118,7 +120,7 @@ export default function LoginPage({ slug = '' }) {
   );
 }
 
-function Frame({ children, bg }) {
+function Frame({ children, bg, poweredBy }) {
   // A vanity client's background image fills the page (with a soft scrim so the
   // card stays legible on any photo); otherwise the plain app background.
   const outer = bg
@@ -126,7 +128,16 @@ function Frame({ children, bg }) {
     : { background: 'var(--bg)' };
   return (
     <div style={{ minHeight: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, boxSizing: 'border-box', ...outer }}>
-      <div style={card}>{children}</div>
+      <div style={card}>
+        {children}
+        {/* White-label attribution: a subtle, centred footer on a client's vanity
+            page. The default Howler login carries its own identity, so skips it. */}
+        {poweredBy && (
+          <div style={{ marginTop: 18, paddingTop: 14, borderTop: '1px solid var(--hairline)', textAlign: 'center', fontSize: 11.5, color: 'var(--muted)' }}>
+            Powered by <strong style={{ fontWeight: 700 }}>Howler : Pulse</strong> · Intelligent OS
+          </div>
+        )}
+      </div>
     </div>
   );
 }
