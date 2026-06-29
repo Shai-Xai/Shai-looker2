@@ -118,11 +118,13 @@ export default function WhatsAppOwl() {
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {log.map((e, i) => (
-              <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'baseline', fontSize: 12, padding: '4px 6px', borderRadius: 6, background: 'var(--card)', border: '1px solid var(--hairline)' }}>
-                <span style={{ ...stageBadge(e.stage) }}>{e.stage}</span>
-                <span style={{ color: 'var(--muted)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{(e.created_at || '').slice(5, 16).replace('T', ' ')}</span>
-                {e.msisdn && <span style={{ color: 'var(--text)', whiteSpace: 'nowrap' }}>{e.msisdn}</span>}
-                <span style={{ color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.detail}</span>
+              <div key={i} style={{ fontSize: 12, padding: '5px 7px', borderRadius: 6, background: 'var(--card)', border: '1px solid var(--hairline)' }}>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap' }}>
+                  <span style={{ ...stageBadge(e.stage) }}>{e.stage}</span>
+                  <span style={{ color: 'var(--muted)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{(e.created_at || '').slice(5, 16).replace('T', ' ')}</span>
+                  {e.msisdn && <span style={{ color: 'var(--text)', whiteSpace: 'nowrap' }}>{e.msisdn}</span>}
+                </div>
+                {e.detail && <div style={{ color: 'var(--muted)', marginTop: 3, wordBreak: 'break-word', fontFamily: e.stage === 'unparsed' ? 'ui-monospace, monospace' : 'inherit', fontSize: e.stage === 'unparsed' ? 11 : 12 }}>{e.detail}</div>}
               </div>
             ))}
           </div>

@@ -39,7 +39,7 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
   // Lightweight observability: record every meaningful step a webhook hit goes through,
   // so the admin panel can SHOW whether Clickatell is delivering + where the flow stops.
   const insEvent = sql.prepare('INSERT INTO owl_wa_events (id,msisdn,stage,detail,created_at) VALUES (?,?,?,?,?)');
-  const logEvent = (msisdn, stage, detail) => { try { insEvent.run(crypto.randomUUID(), msisdn || '', stage, String(detail || '').slice(0, 300), now()); } catch { /* ignore */ } };
+  const logEvent = (msisdn, stage, detail) => { try { insEvent.run(crypto.randomUUID(), msisdn || '', stage, String(detail || '').slice(0, 800), now()); } catch { /* ignore */ } };
 
   const toolEntries = Object.values(owlTools).filter((t) => t && t.schema && t.run);
   const toolMap = Object.fromEntries(toolEntries.map((t) => [t.schema.name, t]));
@@ -107,15 +107,44 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
   }
 
   // Pull the sender + text out of Clickatell's inbound (MO) payload, defensively.
+  // First the known flat/nested shapes; if those miss, fall back to a generic scan that
+  // walks the whole object for a phone-like sender + a message body — so we cope with
+  // whatever field names Clickatell's WhatsApp MO actually uses.
   function parseInbound(body) {
     const m = (body && Array.isArray(body.messages) ? body.messages[0] : body) || {};
-    const from = m.from || m.fromNumber || m.sender || (body && body.from) || '';
+    let from = m.from || m.fromNumber || m.sender || m.source || m.msisdn || (body && body.from) || '';
     let text = '';
     if (typeof m.content === 'string') text = m.content;
     else if (m.text) text = typeof m.text === 'string' ? m.text : (m.text.body || '');
-    else if (m.message) text = typeof m.message === 'string' ? m.message : (m.message.text || m.message.body || '');
+    else if (m.message) text = typeof m.message === 'string' ? m.message : (m.message.text || m.message.body || m.message.content || '');
     else if (typeof body.text === 'string') text = body.text;
+    if (!from || !text) { const g = scanInbound(body); from = from || g.from; text = text || g.text; }
     return { from: String(from || ''), text: String(text || '').trim() };
+  }
+
+  // Generic, shape-agnostic extractor. Recursively walks the payload collecting any
+  // sender-named key holding a phone-like value, and any text-named key holding a
+  // human message — deliberately ignoring destination/id/number-name keys.
+  function scanInbound(root) {
+    const isPhone = (v) => typeof v === 'string' && /^\+?\d[\d ()-]{7,16}$/.test(v.trim());
+    const FROM_KEY = /^(from|fromnumber|sender|source|msisdn|author|wa_id|waid)$/i;
+    const TEXT_KEY = /^(content|text|body|message|caption)$/i;
+    const SKIP_KEY = /(^to$|tonumber|destination|recipient|messageid|apimessageid|integrationid|accountid|^id$)/i;
+    let from = ''; let text = '';
+    const seen = new Set();
+    const walk = (node) => {
+      if (!node || typeof node !== 'object' || seen.has(node)) return;
+      seen.add(node);
+      for (const [k, v] of Object.entries(node)) {
+        if (v && typeof v === 'object') { walk(v); continue; }
+        if (SKIP_KEY.test(k)) continue;
+        if (!from && FROM_KEY.test(k) && isPhone(v)) from = v;
+        if (!from && isPhone(v) && /from|sender|source|origin/i.test(k)) from = v;
+        if (!text && TEXT_KEY.test(k) && typeof v === 'string' && v.trim() && !isPhone(v)) text = v;
+      }
+    };
+    try { walk(root); } catch { /* ignore */ }
+    return { from, text };
   }
 
   // Clickatell webhook. Ack immediately (200), process in the background so a slow LLM
@@ -132,7 +161,7 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
       const msisdn = norm(from);
       // Temporary aid for the first live test: confirm we parse Clickatell's reply shape.
       console.log(`[owlWhatsapp] inbound from=${msisdn || '∅'} text="${(text || '').slice(0, 60)}"${msisdn && text ? '' : ` (unparsed raw: ${JSON.stringify(req.body).slice(0, 400)})`}`);
-      if (!msisdn || !text) { logEvent(msisdn, 'unparsed', `couldn't read sender/text from payload: ${JSON.stringify(req.body).slice(0, 200)}`); return; }
+      if (!msisdn || !text) { logEvent(msisdn, 'unparsed', `couldn't read sender/text from payload: ${JSON.stringify(req.body).slice(0, 700)}`); return; }
       logEvent(msisdn, 'received', text.slice(0, 120));
       handleInbound(msisdn, text).catch((e) => { logEvent(msisdn, 'error', (e && e.message) || 'handler error'); console.error('[owlWhatsapp] handle failed', e && e.message); });
     } catch (e) { logEvent('', 'error', (e && e.message) || 'parse error'); console.error('[owlWhatsapp] inbound parse failed', e && e.message); }
