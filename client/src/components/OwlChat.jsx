@@ -32,6 +32,20 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
   const [attachOpen, setAttachOpen] = useState(false);
   const [attachBusy, setAttachBusy] = useState(false);
   const fileRef = useRef(null);
+  const [listening, setListening] = useState(false); // voice dictation
+  const recogRef = useRef(null);
+  const SR = typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition);
+  const toggleMic = () => {
+    if (listening) { try { recogRef.current && recogRef.current.stop(); } catch { /* ignore */ } return; }
+    if (!SR) return;
+    const r = new SR(); recogRef.current = r;
+    r.lang = 'en-ZA'; r.interimResults = true; r.continuous = true;
+    const base = input ? `${input} ` : '';
+    r.onresult = (e) => { let t = ''; for (let i = 0; i < e.results.length; i++) t += e.results[i][0].transcript; setInput(base + t); };
+    r.onerror = () => setListening(false);
+    r.onend = () => setListening(false);
+    try { r.start(); setListening(true); } catch { setListening(false); }
+  };
   const [followups, setFollowups] = useState([]); // suggested next questions for the latest answer
   const [chatCopied, setChatCopied] = useState(false);
   const scrollRef = useRef(null);
@@ -156,6 +170,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
   async function send(text) {
     const q = String(text ?? input).trim();
     if (!q || busy) return;
+    if (listening) { try { recogRef.current && recogRef.current.stop(); } catch { /* ignore */ } setListening(false); }
     if (!canAsk) { setMessages((m) => [...m, { role: 'owl', text: 'Pick a client (or open an event) above, then ask me — I scope to that organiser.' }]); return; }
     if (text == null) setInput('');
     setFollowups([]);
@@ -390,6 +405,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
       )}
       <div style={{ borderTop: '1px solid var(--hairline)', padding: 10, flexShrink: 0, display: 'flex', gap: 8, alignItems: 'flex-end' }}>
         <button onClick={() => setAttachOpen((o) => !o)} title="Attach data (CSV or Google Sheet)" aria-label="Attach data" style={{ border: '1px solid var(--hairline)', background: attachOpen || uploads.length ? 'var(--elevated, rgba(128,128,128,0.12))' : 'var(--card)', color: 'var(--text)', borderRadius: 12, padding: '9px 11px', fontSize: 15, cursor: 'pointer', lineHeight: 1 }}>📎{uploads.length ? <span style={{ fontSize: 11, fontWeight: 700, marginLeft: 3 }}>{uploads.length}</span> : ''}</button>
+        {SR && <button onClick={toggleMic} title={listening ? 'Stop dictation' : 'Dictate your question'} aria-label="Dictate" style={{ border: '1px solid var(--hairline)', background: listening ? '#e0414a' : 'var(--card)', color: listening ? '#fff' : 'var(--text)', borderRadius: 12, padding: '9px 11px', fontSize: 15, cursor: 'pointer', lineHeight: 1 }}>🎤</button>}
         <textarea
           value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={onKeyDown}
           placeholder={canAsk ? 'Ask the Owl…' : 'Open a client or event to ask'}
