@@ -24,6 +24,10 @@ const TEMPLATES = [
   { key: 'category', emoji: '🏷', label: 'Ticket category', hint: 'Filter to a category', metric: true, filterHint: 'category', ruleType: 'threshold', operator: 'gte', unit: 'tickets', name: 'Category alert' },
 ];
 
+// Suggested operational areas for the alert tag (free text still allowed). Drives the
+// one-row-per-tag grouping on the Alerts page. Mirrors the goal tags.
+const ALERT_TAGS = ['Ticketing', 'Cashless', 'Access control', 'Audience', 'Marketing', 'Revenue', 'F&B / Bar', 'Sponsorship', 'Operations'];
+
 export default function AlertEditor({ entityId, suiteId, suiteName, alert, smsAvailable = false, slackAvailable = false, initialTemplate = null, onClose, onSaved }) {
   const isMobile = useIsMobile();
   const { isAdmin } = useAuth();
@@ -36,6 +40,8 @@ export default function AlertEditor({ entityId, suiteId, suiteName, alert, smsAv
   const [operator, setOperator] = useState(alert?.operator || 'gte');
   const [threshold, setThreshold] = useState(alert ? String(alert.threshold ?? '') : '');
   const [unit, setUnit] = useState(alert?.unit || 'tickets');
+  const [tag, setTag] = useState(alert?.tag || ''); // operational area — groups the Alerts list one row per tag
+  const [customCats, setCustomCats] = useState([]); // the client's own categories (shared with goals)
   const [channels, setChannels] = useState(alert?.channels || ['push']);
   const [smsRecipients, setSmsRecipients] = useState((alert?.smsRecipients || []).join(', '));
   const [priority, setPriority] = useState(alert?.priority || 'normal');
@@ -115,6 +121,14 @@ export default function AlertEditor({ entityId, suiteId, suiteName, alert, smsAv
 
   // Reusable templates for this client (their own + global).
   useEffect(() => { if (entityId) api.alertTemplates(entityId).then((r) => setTemplates(r.templates || [])).catch(() => {}); }, [entityId]);
+  // The client's own categories (shared with goals) — merged with the presets below.
+  useEffect(() => { if (entityId) api.categories(entityId).then((r) => setCustomCats(r.categories || [])).catch(() => {}); }, [entityId]);
+  const allTags = [...new Set([...ALERT_TAGS, ...customCats])];
+  const tagIsNew = !!tag.trim() && !allTags.some((c) => c.toLowerCase() === tag.trim().toLowerCase());
+  const saveCategory = async () => {
+    const name = tag.trim(); if (!name || !entityId) return;
+    try { const r = await api.addCategory(entityId, name); setCustomCats(r.categories || []); } catch { /* ignore */ }
+  };
 
   // A starter card asked for a Ticket Type / Category filter: pick the explore that
   // has that dimension (if we can), then pre-add the matching filter row.
@@ -177,6 +191,7 @@ export default function AlertEditor({ entityId, suiteId, suiteName, alert, smsAv
     if (p.ruleType) setRuleType(p.ruleType);
     if (p.operator) setOperator(p.operator);
     if (p.unit) setUnit(p.unit);
+    if (p.tag) setTag(p.tag);
     if (p.threshold != null) setThreshold(String(p.threshold));
     if (Array.isArray(p.channels)) setChannels(p.channels);
     if (p.priority) setPriority(p.priority);
@@ -202,7 +217,7 @@ export default function AlertEditor({ entityId, suiteId, suiteName, alert, smsAv
     metricRef: source === 'metric' && curExplore && measure ? { model: curExplore.model, view: curExplore.view, measure, measureLabel: measureObj()?.label || '', metricFilters: metricFiltersObj(), metricLabel: metricLabelStr() } : null,
     operator: ruleType === 'depletion' || ruleType === 'sold_out' ? 'lte' : operator,
     threshold: ruleType === 'sold_out' ? 0 : (threshold === '' ? 0 : Number(threshold)),
-    unit, channels, priority, frequency, cooldownMin: Number(cooldownMin) || 60, quietStart, quietEnd,
+    unit, tag, channels, priority, frequency, cooldownMin: Number(cooldownMin) || 60, quietStart, quietEnd,
   });
 
   const saveAsTemplate = async () => {
@@ -250,7 +265,7 @@ export default function AlertEditor({ entityId, suiteId, suiteName, alert, smsAv
       name: name.trim(), ruleType, source,
       operator: ruleType === 'depletion' || ruleType === 'sold_out' ? 'lte' : operator,
       threshold: ruleType === 'sold_out' ? 0 : Number(threshold),
-      unit, channels,
+      unit, tag: tag.trim(), channels,
       smsRecipients: channels.includes('sms') ? smsRecipients.split(',').map((s) => s.trim()).filter(Boolean) : [],
       priority, frequency,
       cooldownMin: Number(cooldownMin) || 60,
@@ -325,6 +340,16 @@ export default function AlertEditor({ entityId, suiteId, suiteName, alert, smsAv
 
         <Field label="Name">
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. VIP nearly gone, R1m revenue" style={inp} autoFocus />
+        </Field>
+
+        <Field label="Category (optional)" hint="Group this alert by operational area — the Alerts page shows one row per category. Pick one or create your own (shared with goals).">
+          <input value={tag} onChange={(e) => setTag(e.target.value)} list="alert-tag-presets" placeholder="e.g. Ticketing, Cashless, Access control" style={inp} />
+          <datalist id="alert-tag-presets">
+            {allTags.map((t) => <option key={t} value={t} />)}
+          </datalist>
+          {tagIsNew && (
+            <button type="button" onClick={saveCategory} style={addCatBtn}>＋ Save “{tag.trim()}” as a category</button>
+          )}
         </Field>
 
         <Field label="What should we watch?">
@@ -577,6 +602,7 @@ const xBtn = { border: 'none', background: 'rgba(128,128,128,0.12)', color: 'var
 const readsBox = { marginTop: 9, padding: '8px 11px', background: 'rgba(128,128,128,0.07)', borderRadius: 9, fontSize: 13, display: 'flex', alignItems: 'center', gap: 7 };
 const msX = { border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--muted)', borderRadius: 9, fontSize: 13, cursor: 'pointer', flexShrink: 0, width: 38 };
 const addFilterBtn = { border: '1px dashed var(--hairline)', background: 'transparent', color: 'var(--brand)', borderRadius: 9, fontSize: 12, fontWeight: 700, padding: '7px 11px', cursor: 'pointer', width: '100%' };
+const addCatBtn = { marginTop: 7, border: '1px dashed var(--hairline)', background: 'transparent', color: 'var(--brand)', borderRadius: 9, fontSize: 12, fontWeight: 700, padding: '6px 11px', cursor: 'pointer' };
 const subLabel = { fontSize: 11, fontWeight: 700, color: 'var(--muted)', marginBottom: 5 };
 const tmplChip = { display: 'inline-flex', alignItems: 'center', gap: 2, border: '1px solid var(--hairline)', borderRadius: 980, background: 'var(--card)', overflow: 'hidden' };
 const tmplChipBtn = { border: 'none', background: 'transparent', color: 'var(--brand)', fontWeight: 700, fontSize: 12, cursor: 'pointer', padding: '6px 4px 6px 11px', fontFamily: 'inherit' };

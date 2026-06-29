@@ -37,6 +37,13 @@ Effort: XL. The flagship of insight → action.
 **Status:** 🏗️ — the analyst drawer (`AnalystDrawer.jsx`, `OwlAddressCard.jsx`,
 `RefineButton.jsx`) + `insights.js`/`actions.js` deliver **answer/analyse**
 today; the full **agentic "act"** layer and the autonomous skills below remain.
+**Spec:** `docs/specs/AGENTIC_OWL_SPEC.md` — the *native* Claude tool-use loop
+with `askData` (text-to-query) as the foundation, the own-vs-rent decision
+(build native; Inventive/Looker CA only as flagged fallbacks), the autonomy
+ladder, and the Inventive migration. Note: today's Owl only reads **resolved
+tiles**; `askData` is the net-new that lets clients *ask questions of the data*.
+**P1 build plan:** `docs/specs/AGENTIC_OWL_P1_PLAN.md` (curated catalogue +
+`askData` + native chat behind a flag; milestones M1→M5; scope-gate-first).
 
 > The **autonomous half** of 1.1 — self-running skills/agents (a ticketing
 > manager, a digital-marketing analyst) that watch a slice of the data on a

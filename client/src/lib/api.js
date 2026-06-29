@@ -95,6 +95,51 @@ async function extractStream(url, body, onProgress) {
 export const api = {
   // Auth
   me: () => fetch('/api/auth/me').then(json),
+
+  // Agentic Owl chat: POST a question, stream the grounded answer as plain text
+  // (onText per delta), resolve with { threadId } (read from the X-Owl-Thread header
+  // so a new conversation can be continued).
+  owlChat: async ({ suiteId, entityId, dashboardId, message, threadId }, onText) => {
+    const res = await fetch('/api/owl/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ suiteId, entityId, dashboardId, message, threadId }) });
+    if (!res.ok) return json(res); // pre-stream rejection (no scope / no API key) → throws
+    const tid = res.headers.get('X-Owl-Thread') || threadId || null;
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    // The answer text streams first, then two trailing records: the model's
+    // "<<<FOLLOWUPS>>>[...]" (suggested next questions) and the server's
+    // "<<<OWL_SOURCES>>>{...}" (citation chips). Emit only the text before the first
+    // marker (holding back a possible partial-marker tail), then parse both records.
+    const FU = '<<<FOLLOWUPS>>>', SRC = '<<<OWL_SOURCES>>>';
+    const HOLD = Math.max(FU.length, SRC.length);
+    const firstMarker = () => { const a = buf.indexOf(FU), b = buf.indexOf(SRC); const xs = [a, b].filter((i) => i >= 0); return xs.length ? Math.min(...xs) : -1; };
+    let buf = '', emitted = 0, sources = [], followups = [];
+    for (;;) {
+      const { done, value } = await reader.read(); if (done) break;
+      if (value) buf += dec.decode(value, { stream: true });
+      const mi = firstMarker();
+      if (mi >= 0) { if (mi > emitted) { onText?.(buf.slice(emitted, mi)); emitted = mi; } }
+      else { const safe = buf.length - HOLD; if (safe > emitted) { onText?.(buf.slice(emitted, safe)); emitted = safe; } }
+    }
+    const mi = firstMarker();
+    if (mi < 0 && buf.length > emitted) onText?.(buf.slice(emitted));
+    const fa = buf.indexOf(FU);
+    if (fa >= 0) { const after = buf.slice(fa + FU.length); const end = after.indexOf(SRC); const blob = (end >= 0 ? after.slice(0, end) : after); const m = blob.match(/\[[\s\S]*\]/); if (m) { try { followups = JSON.parse(m[0]); } catch { followups = []; } } }
+    const sa = buf.indexOf(SRC);
+    if (sa >= 0) { try { sources = JSON.parse(buf.slice(sa + SRC.length)); } catch { sources = []; } }
+    return { threadId: tid, sources, followups };
+  },
+  owlThreads: () => fetch('/api/owl/threads').then(json),
+  owlPinTargets: (entityId) => fetch(`/api/owl/pin-targets?entityId=${encodeURIComponent(entityId || '')}`).then(json),
+  owlPin: (body) => fetch('/api/owl/pin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
+  owlThreadMessages: (id) => fetch(`/api/owl/threads/${id}/messages`).then(json),
+  owlRenameThread: (id, title) => fetch(`/api/owl/threads/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title }) }).then(json),
+  owlSetThreadFolder: (id, folder) => fetch(`/api/owl/threads/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folder }) }).then(json),
+  owlUploads: (entityId) => fetch(`/api/owl/uploads?entityId=${encodeURIComponent(entityId || '')}`).then(json),
+  owlUploadCsv: (entityId, name, csv) => fetch('/api/owl/uploads', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entityId, name, csv }) }).then(json),
+  owlUploadSheet: (entityId, name, sheetUrl) => fetch('/api/owl/uploads', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entityId, name, sheetUrl }) }).then(json),
+  owlRefreshUpload: (id) => fetch(`/api/owl/uploads/${id}/refresh`, { method: 'POST' }).then(json),
+  owlDeleteUpload: (id) => fetch(`/api/owl/uploads/${id}`, { method: 'DELETE' }).then(json),
+  owlDeleteThread: (id) => fetch(`/api/owl/threads/${id}`, { method: 'DELETE' }).then(json),
   login: (email, password) =>
     fetch('/api/auth/login', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -115,6 +160,14 @@ export const api = {
   adminCreateEntity: (e) => fetch('/api/admin/entities', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(e) }).then(json),
   adminUpdateEntity: (id, e) => fetch(`/api/admin/entities/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(e) }).then(json),
   adminDeleteEntity: (id) => fetch(`/api/admin/entities/${id}`, { method: 'DELETE' }),
+  owlFieldDict: () => fetch('/api/admin/owl-fields').then(json),
+  saveOwlFieldDict: (fields) => fetch('/api/admin/owl-fields', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fields }) }).then(json),
+  owlGuidanceGlobal: () => fetch('/api/admin/owl-guidance').then(json),
+  setOwlGuidanceGlobal: (guidance) => fetch('/api/admin/owl-guidance', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ guidance }) }).then(json),
+  owlGuidanceEntity: (id) => fetch(`/api/admin/entities/${id}/owl-guidance`).then(json),
+  setOwlGuidanceEntity: (id, guidance) => fetch(`/api/admin/entities/${id}/owl-guidance`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ guidance }) }).then(json),
+  myOwlGuidance: () => fetch('/api/my/owl-guidance').then(json),
+  setMyOwlGuidance: (guidance) => fetch('/api/my/owl-guidance', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ guidance }) }).then(json),
   adminListSets: () => fetch('/api/admin/sets').then(json),
   adminCreateSet: (s) => fetch('/api/admin/sets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(s) }).then(json),
   adminUpdateSet: (id, s) => fetch(`/api/admin/sets/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(s) }).then(json),
@@ -457,6 +510,11 @@ export const api = {
   dismissThread: (threadId) => fetch('/api/my/dismiss-thread', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ threadId }) }).then(json),
   getMyDigestTiles: (entityId) => fetch(`/api/my/digest-tiles/${entityId}`).then(json),
   getMyDigestEvents: (entityId) => fetch(`/api/my/digest-events/${entityId}`).then(json),
+
+  // Custom categories (tags) for goals & alerts — a per-client list shared by both.
+  categories: (entityId) => fetch(`/api/my/categories/${entityId}`).then(json),
+  addCategory: (entityId, name) => fetch(`/api/my/categories/${entityId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }).then(json),
+  deleteCategory: (entityId, name) => fetch(`/api/my/categories/${entityId}/${encodeURIComponent(name)}`, { method: 'DELETE' }).then(json),
 
   // Backup / restore
   exportData: () => fetch('/api/admin/export').then((r) => r.json()),

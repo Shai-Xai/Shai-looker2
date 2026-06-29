@@ -204,6 +204,29 @@ function scopeFiltersForUser(user) {
   return fieldLocksFromEntities(user.entityIds) || { __block: true };
 }
 
+// The organiser field-lock for the organisers a user can ACCESS — used to bind the
+// agentic Owl so it never runs platform-wide. Unlike scopeFiltersForUser (admins →
+// null = unscoped), this restricts EVERY user, including admins, to the organisers
+// of the entities they belong to. `preferEntityId` (e.g. the previewed client) wins
+// when the user can access it, so an admin's Owl scopes to the client they're in.
+// Returns { 'core_organisers.name': 'a,b' } or null when no bounded scope exists
+// (a global admin with no memberships / an "all organisers" internal entity) — the
+// caller then refuses rather than leaking across clients.
+function accessibleOrgFilters(user, preferEntityId) {
+  if (!user) return null;
+  if (preferEntityId) {
+    const e = db.getEntity(preferEntityId);
+    const canAccess = user.role === 'admin' || (user.entityIds || []).includes(preferEntityId);
+    if (e && canAccess && !e.allOrganisers) {
+      const locks = fieldLocksFromEntities([preferEntityId]);
+      if (locks) return locks;
+    }
+  }
+  const ids = user.entityIds || [];
+  if (ids.length && ids.every((eid) => db.getEntity(eid)?.allOrganisers)) return null; // intentionally unscoped
+  return fieldLocksFromEntities(ids);
+}
+
 // Can this user open this dashboard? Admin: any. Client: the dashboard must be
 // in a set bundled into one of their entities' suites.
 function canAccessDashboard(user, dashboard) {
@@ -434,7 +457,7 @@ module.exports = {
   // session
   issueCookie, clearCookie, attachUser, requireAuth, requireAdmin,
   // scoping
-  scopeFiltersForUser, canAccessDashboard,
+  scopeFiltersForUser, accessibleOrgFilters, canAccessDashboard,
   // suites / navigation
   suitesForUser, canAccessSuite, lockedFiltersForSuite, forcedScopeForSuite, scopeForQuery, resolveScope,
   filterNameToField,

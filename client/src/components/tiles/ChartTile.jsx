@@ -181,8 +181,17 @@ function buildOption({ rows, dimensions, measures, pivots, visType, stacked, vis
   const orientationOf = (m) => yMap[m.name] || 'left';
   const hasRight = !isBar && measures.some((m) => orientationOf(m) === 'right');
   const hasLeft = measures.some((m) => orientationOf(m) !== 'right');
-  const dual = hasRight && hasLeft;
-  const yIndexOf = (m) => (dual && orientationOf(m) === 'right' ? 1 : 0);
+  // Auto dual-axis: with exactly two measures and NO explicit Looker y_axes config
+  // (e.g. the Owl's two-measure charts), give the 2nd measure its own right axis so a
+  // small-scale series (tickets) isn't flattened next to a large one (revenue). Skip
+  // when stacked (one axis is intended), horizontal bars, pie or scatter.
+  const autoDual = !(visConfig.y_axes || []).length && measures.length === 2 && !stacked && !isBar && !isScatter;
+  const dual = (hasRight && hasLeft) || autoDual;
+  const yIndexOf = (m) => {
+    if (hasRight && hasLeft) return orientationOf(m) === 'right' ? 1 : 0;
+    if (autoDual) return measures.indexOf(m) === 1 ? 1 : 0;
+    return 0;
+  };
   const hp = visConfig.hidden_pivots || {};
   // Looker "Values" data labels printed on each point/bar.
   const showLabels = visConfig.show_value_labels === true;
@@ -260,10 +269,29 @@ function buildOption({ rows, dimensions, measures, pivots, visType, stacked, vis
     splitLine: { lineStyle: { color: splitC } },
     axisLine: { show: false }, axisTick: { show: false },
   });
+  // Category labels (e.g. full event names) can be long and often share a prefix
+  // ("Kappa FuturFestival 2025…" / "…2026"). A blind end-truncation makes them look
+  // identical — fatal in a downloaded image where there's no tooltip. So: strip the
+  // shared prefix (the distinguishing part is usually the tail), then truncate to a
+  // length that scales with how many labels there are (fewer bars → more room). The
+  // tooltip still shows the full raw value.
+  const commonPrefix = (() => {
+    const xs = labels.filter((s) => s != null && s !== '');
+    if (xs.length < 2) return '';
+    let p = String(xs[0]);
+    for (const s of xs) { while (p && !String(s).startsWith(p)) p = p.slice(0, -1); if (!p) break; }
+    return p.length >= 8 ? p : ''; // only strip a substantial shared prefix
+  })();
+  const catMax = labels.length <= 3 ? 30 : labels.length <= 6 ? 22 : 16;
+  const catLabel = (v) => {
+    let s = String(v ?? '');
+    if (commonPrefix && s.startsWith(commonPrefix) && s.length > commonPrefix.length) s = `…${s.slice(commonPrefix.length).replace(/^[\s\-–—:]+/, '')}`;
+    return s.length > catMax ? `${s.slice(0, catMax - 1).trimEnd()}…` : s;
+  };
   const catAxis = {
     type: 'category', data: labels, boundaryGap: true,
     name: isBar ? '' : xName, nameLocation: 'middle', nameGap: 28, nameTextStyle: nameStyle,
-    axisLabel: { fontSize: 10, color: axisC, hideOverlap: true, rotate: labels.length > 8 && !isBar ? 35 : 0 },
+    axisLabel: { fontSize: 10, color: axisC, hideOverlap: true, rotate: labels.length > 8 && !isBar ? 35 : 0, formatter: catLabel },
     axisLine: { lineStyle: { color: axisLineC } }, axisTick: { show: false },
   };
 
@@ -290,7 +318,7 @@ function buildOption({ rows, dimensions, measures, pivots, visType, stacked, vis
         axisPointer: { type: isBar ? 'line' : 'shadow', shadowStyle: { color: hexToRgba(brandPrimary(), 0.06) } },
         formatter: (params) => {
           const arr = Array.isArray(params) ? params : [params];
-          const title = arr[0]?.axisValueLabel ?? arr[0]?.name ?? '';
+          const title = arr[0]?.name || arr[0]?.axisValueLabel || ''; // raw category (full), not the truncated axis label
           let s = `<div style="font-weight:700;margin-bottom:4px">${title}</div>`;
           for (const p of arr) {
             const fmt = seriesMeta[p.seriesIndex]?.fmt;

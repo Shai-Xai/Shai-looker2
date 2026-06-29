@@ -15,6 +15,8 @@ import SegmentManager from '../components/SegmentManager.jsx';
 import RateCard from '../components/RateCard.jsx';
 import { BriefingConfigForm } from '../components/BriefingTuneModal.jsx';
 import StatusNoticesAdmin from '../components/StatusNoticesAdmin.jsx';
+import OwlGuidanceEditor from '../components/OwlGuidanceEditor.jsx';
+import OwlFieldDictionary from '../components/OwlFieldDictionary.jsx';
 import UploadHint from '../components/UploadHint.jsx';
 import { currencyList } from '../lib/currency.js';
 import { GUIDES } from '../lib/guides.js';
@@ -2774,6 +2776,7 @@ function ClientSettings({ entity, suites, fields, onChange, onBack }) {
           style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 13, outline: 'none', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }}
         />
       </div>
+      <OwlGuidanceEditor scope="admin-client" entityId={entity.id} />
       <CurrencyField entityId={entity.id} />
       <SlugField entityId={entity.id} />
       <LoginBackgroundField entityId={entity.id} />
@@ -3965,6 +3968,13 @@ function AISettings() {
           <span style={{ fontSize: 12, color: 'var(--muted)', marginLeft: 'auto' }}>{text.length} characters</span>
         </div>
       </Section>
+      <Section title="Owl guidance (chat assistant)">
+        <p style={hint}>Steers the agentic Owl (the data chat assistant) — how it should read your data: which measure to use, how to split add-ons, what “revenue”/“today” mean. Separate from the instructions above (which drive tile insights & briefings). Takes effect immediately.</p>
+        <OwlGuidanceEditor scope="global" />
+      </Section>
+      <Section title="Owl field dictionary">
+        <OwlFieldDictionary />
+      </Section>
       <Section title="Home briefing"><BriefingSettings /></Section>
       <Section title="Reader feedback"><BriefingFeedback /></Section>
       <Section title="Everything the AI is told (audit)"><AIOverview /></Section>
@@ -4022,15 +4032,17 @@ function AIOverview() {
       <Sec title="Global instructions (Admin → AI)">
         <Item title="Global AI instructions" scope="appended to every AI prompt" text={d.global.aiInstructions} />
         <Item title="Global briefing rules" scope="home briefing & digests" text={d.global.briefingInstructions} />
+        {d.owlGuidanceGlobal && <Item title="Owl guidance — house rules" scope="agentic Owl (data chat)" text={d.owlGuidanceGlobal} />}
       </Sec>
 
       <Sec title="Per-client (Admin → Clients → [client])" count={d.clients.length}>
         {d.clients.map((c) => {
-          const has = c.aiContext || c.events.length || c.digests.length || c.readerTunes.length;
+          const has = c.aiContext || c.owlGuidance || c.events.length || c.digests.length || c.readerTunes.length;
           return (
             <details key={c.id} style={grp}>
               <summary style={sum}>{c.name}{!has ? <span style={{ ...meta, fontWeight: 400 }}> — no custom AI instructions</span> : null}</summary>
               {c.aiContext && (<><div style={lbl}>Client AI context</div><pre style={pre}>{c.aiContext}</pre></>)}
+              {c.owlGuidance && (<><div style={lbl}>Owl guidance (data chat)</div><pre style={pre}>{c.owlGuidance}</pre></>)}
               {c.events.map((e, i) => (
                 <div key={i}>
                   <div style={lbl}>Event: {e.suiteName}{e.phase ? ` — phase: ${e.phase}` : ''}{e.eventStart ? ` (${e.eventStart}${e.eventEnd ? `–${e.eventEnd}` : ''})` : ''}</div>

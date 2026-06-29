@@ -122,10 +122,10 @@ const owlIngest = require('./owlIngest').mount({ db, insights, anthropicKeyForEn
 // Experience OS comms spine — self-contained module (own tables + routes under
 // /api/os). Remove this line + server/os.js to fully uninstall the feature.
 let osApi;
-const os = require('./os').mount(app, { db, auth, mailer, push, slack,
-  onInbound: (p) => owlIngest.handle({ ...p, getAttachmentBuffer: osApi.getAttachmentBuffer }) });
+const os = require('./os').mount(app, { db, auth, mailer, push, slack, onInbound: (p) => owlIngest.handle({ ...p, getAttachmentBuffer: osApi.getAttachmentBuffer }) });
 osApi = os;
-
+const owlUploads = require('./owlUploads').mount(app, { db, auth }); // external data (CSV/Sheet) the Owl can query alongside ticketing
+require('./owlChat').mount(app, { db, auth, insights, uploads: owlUploads, owlTools: require('./owlTools')({ query, auth, db, getGoalsApi: () => goalsApi, getAlertsApi: () => alerts, getCampaignsApi: () => actionsApi, getUploadsApi: () => owlUploads, resolveTileValue, getExploreFields: (m, v) => getExploreFieldsCached(m, v), getFieldOverrides: () => require('./owlFields').build(db).read() }), anthropicKeyForSuite, anthropicKeyForEntity }); // agentic Owl (disposable; askData rides the scope gate)
 // ─── Health ───────────────────────────────────────────────────────────────────
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
@@ -548,7 +548,7 @@ require('./releaseNotes').mount(app, { db, auth, insights, adminAnthropicKey });
 // ─── Client content model & navigation → server/clientModel.js ─────────────────
 // Disposable module: suite/set/dashboard model, /api/my/suites navigation, saved
 // filter views + lock overrides. Remove this line + server/clientModel.js.
-require('./clientModel').mount(app, { db, auth, store, looker, fetchDashboard, convertDashboard, expandLockMap, cleanFilterMap });
+require('./clientModel').mount(app, { db, auth, store, looker, fetchDashboard, convertDashboard, expandLockMap, cleanFilterMap, resolvePhase, suiteHasGoals: (sid) => { try { return (goalsApi.listGoals(sid) || []).length > 0; } catch { return false; } } });
 
 // ─── Dashboards → server/dashboards.js ─────────────────────────────────────────
 // Extracted: dashboard CRUD, Looker import, folders, run-query and drill. The
@@ -1265,7 +1265,7 @@ app.get('/api/admin/ai-overview', auth.requireAdmin, (req, res) => {
       .filter((u) => (u.entityIds || []).includes(ent.id))
       .map((u) => ({ email: u.email, tune: (db.getUserPref(u.id, `briefing_tune:${ent.id}`) || '').trim() }))
       .filter((t) => t.tune);
-    return { id: ent.id, name: ent.name, aiContext: (ent.aiContext || '').trim(), events, digests: jobsByEntity[ent.id] || [], readerTunes: tunes };
+    return { id: ent.id, name: ent.name, aiContext: (ent.aiContext || '').trim(), owlGuidance: (db.getSetting(`owl_guidance:${ent.id}`, '') || '').trim(), events, digests: jobsByEntity[ent.id] || [], readerTunes: tunes };
   });
 
   // Tiles & dashboards with custom AI context (count + list, capped).
@@ -1277,7 +1277,7 @@ app.get('/api/admin/ai-overview', auth.requireAdmin, (req, res) => {
     for (const t of tiles) if ((t.aiContext || '').trim()) tileContexts.push({ dashTitle: def.title || d.title, tileTitle: t.title || '(untitled)', context: t.aiContext.trim() });
   }
 
-  res.json({ builtins, global, clients, dashContexts, tileContexts });
+  res.json({ builtins, global, clients, dashContexts, tileContexts, owlGuidanceGlobal: (db.getSetting('owl_guidance', '') || '').trim() });
 });
 
 // The literal system prompt sent for one feature, with the configured layers
@@ -2633,7 +2633,7 @@ app.get('/api/my/digest-events/:entityId', auth.requireAuth, (req, res) => {
   if (req.user.role !== 'admin' && !(req.user.entityIds || []).includes(req.params.entityId)) return res.status(403).json({ error: 'Not allowed' });
   res.json(digestEventList(req.params.entityId));
 });
-
+require('./categories').mount(app, { db, auth }); // custom categories (tags) shared by goals + alerts
 // The SAVED tiles for a viewer — the ones marked as mattering, whether 📌 pinned
 // (shown on home) or ⭐ followed (always read by the briefing). `userId` returns
 // that viewer's own ('user') marks PLUS the client's ('entity') marks — exactly

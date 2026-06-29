@@ -233,19 +233,39 @@ export default function GoalsPage() {
                   onPick={(g) => setDetail({ suiteId: suite.id, goalId: g.id })} />
               </div>
             )}
-            {loaded && (goals.length ? (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
-                {goals.map((g, i) => (
-                  <GoalCard key={g.id} goal={g} index={i} colorIndex={i} grid
-                    draggable={canManage && goals.length > 1}
-                    onDragStartCard={() => { dragId.current = g.id; }}
-                    onDropCard={() => reorder(suite.id, dragId.current, g.id)}
-                    onMoveUp={canManage && goals.length > 1 && i > 0 ? () => move(suite.id, i, -1) : undefined}
-                    onMoveDown={canManage && goals.length > 1 && i < goals.length - 1 ? () => move(suite.id, i, 1) : undefined}
-                    onClick={() => setDetail({ suiteId: suite.id, goalId: g.id })} />
-                ))}
-              </div>
-            ) : (
+            {loaded && (goals.length ? (() => {
+              // Each card keeps its GLOBAL index (stable colour + working reorder),
+              // even when goals are grouped into one row per tag.
+              const renderCard = (g) => { const i = goals.indexOf(g); return (
+                <GoalCard key={g.id} goal={g} index={i} colorIndex={i} grid
+                  draggable={canManage && goals.length > 1}
+                  onDragStartCard={() => { dragId.current = g.id; }}
+                  onDropCard={() => reorder(suite.id, dragId.current, g.id)}
+                  onMoveUp={canManage && goals.length > 1 && i > 0 ? () => move(suite.id, i, -1) : undefined}
+                  onMoveDown={canManage && goals.length > 1 && i < goals.length - 1 ? () => move(suite.id, i, 1) : undefined}
+                  onClick={() => setDetail({ suiteId: suite.id, goalId: g.id })} />
+              ); };
+              const tagged = goals.some((g) => (g.tag || '').trim());
+              if (!tagged) return <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>{goals.map(renderCard)}</div>;
+              // One row per tag (insertion order), untagged goals collected under "Other".
+              const groups = [];
+              goals.forEach((g) => {
+                const key = (g.tag || '').trim();
+                let grp = groups.find((x) => x.key === key);
+                if (!grp) { grp = { key, goals: [] }; groups.push(grp); }
+                grp.goals.push(g);
+              });
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  {groups.map((grp) => (
+                    <div key={grp.key || '_other'}>
+                      <div style={tagHead}>{grp.key || 'Other'}</div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>{grp.goals.map(renderCard)}</div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })() : (
               <div style={{ fontSize: 13, color: 'var(--muted)' }}>No event goals yet.</div>
             ))}
 
@@ -419,6 +439,7 @@ function TemplatesView({ templates, canManage, isAdmin, onUse, onDelete }) {
 }
 
 const eventName = { fontSize: 12, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)' };
+const tagHead = { fontSize: 11.5, fontWeight: 700, color: 'var(--muted)', marginBottom: 8, display: 'inline-flex', alignItems: 'center', gap: 6, border: '1px solid var(--hairline)', borderRadius: 980, padding: '3px 11px' };
 const subHead = { fontSize: 12, fontWeight: 700, color: 'var(--muted)' };
 const addBtn = { border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--brand)', borderRadius: 9, fontSize: 12.5, fontWeight: 700, padding: '6px 11px', cursor: 'pointer', flexShrink: 0 };
 const owlBtn = { border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 9, fontSize: 12.5, fontWeight: 700, padding: '6px 11px', cursor: 'pointer', flexShrink: 0 };

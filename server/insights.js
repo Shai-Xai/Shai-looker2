@@ -1133,11 +1133,12 @@ function promptRegistry() {
     { key: 'classify', label: 'Document classification', scope: 'Owl email ingest: settlement vs invoice vs other', text: CLASSIFY_SYSTEM },
     { key: 'goals', label: 'Goals summary', scope: 'Owl summary of an event\'s goals on the Goals page', text: GOALS_SYSTEM },
     { key: 'goalGap', label: 'Goal gap plan', scope: 'Marketing/insights plan to close a behind-pace goal (→ targeted campaign)', text: GOAL_GAP_SYSTEM },
+    { key: 'owlChat', label: 'Owl chat (agentic)', scope: 'The conversational Owl: tool-using analyst that answers questions by calling askData (grounded, scoped)', text: require('./owlChat').OWL_CHAT_SYSTEM },
     { key: 'jsonRepair', label: 'JSON repair', scope: 'Last-resort model repair of malformed AI JSON before parsing', text: JSON_REPAIR_SYSTEM },
   ];
 }
 
-module.exports = { generateInsight, streamInsight, streamDashboardInsight, streamGoalsBrief, describeTile, opportunityLine, nudgeCopy, extractSettlement, extractInvoice, classifyDocument, briefHome, briefHomeOverall, briefHomeEvents, digestBrief, digestBriefMulti, draftCampaign, goalGapPlan, refineText, distilPreferences, summariseReleaseNotes, promptRegistry, systemWith, isConfigured: (apiKey) => !!(apiKey || process.env.ANTHROPIC_API_KEY),
+module.exports = { generateInsight, streamInsight, streamDashboardInsight, streamGoalsBrief, describeTile, opportunityLine, nudgeCopy, extractSettlement, extractInvoice, classifyDocument, briefHome, briefHomeOverall, briefHomeEvents, digestBrief, digestBriefMulti, draftCampaign, goalGapPlan, refineText, distilPreferences, summariseReleaseNotes, promptRegistry, systemWith, requireClient, MODEL, isConfigured: (apiKey) => !!(apiKey || process.env.ANTHROPIC_API_KEY),
   // Exposed for tests: the deterministic JSON-salvage layer that guards every
   // model→JSON path (no network — pure parsing + repair).
   parseModelJson, parseModelJsonResilient };

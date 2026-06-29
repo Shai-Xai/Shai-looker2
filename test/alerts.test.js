@@ -5,7 +5,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const crypto = require('crypto');
-const { db, auth, makeEntity } = require('./helpers');
+const { db, auth, makeEntity } = require('./helpers'); // makeEntity used by the tag round-trip test
 
 // A fake express app that just records the routes (we exercise the engine via the
 // returned `evaluate`, not HTTP).
@@ -193,4 +193,29 @@ test('SMS fans out to configured numbers when the sms channel is on', async () =
   assert.equal(h.sms.length, 1);
   assert.equal(h.sms[0].to, '+27821234567');
   assert.match(h.sms[0].text, /pulse\.test/); // carries the deep link
+});
+
+test('an alert persists its tag (operational area) across create + an unrelated edit', async () => {
+  // Mount capturing the route handlers so we exercise clean()/upsert() end to end.
+  const routes = {};
+  const reg = (m) => (p, ...hs) => { routes[m + ' ' + p] = hs[hs.length - 1]; };
+  require('../server/alerts').mount({ get: reg('GET'), post: reg('POST'), put: reg('PUT'), delete: reg('DELETE') }, {
+    db, auth,
+    resolveTileValue: async () => 5, resolveCustomMetric: async () => 5,
+    metricCatalog: async () => ({ explores: [] }), metricFilterValues: async () => [],
+    os: { announce: () => ({ id: 't' }) }, mailer: { baseUrl: () => '' },
+    push: {}, messaging: { status: () => ({ configured: false }) }, slack: {},
+  });
+  const ent = makeEntity('TagCo');
+  const suite = db.createSuite({ entityId: ent.id, name: 'Tag event' });
+  const adminUser = { id: 'a', email: 'a@test', role: 'admin', entityIds: [] };
+  const res = () => { const o = {}; o.status = (c) => { o.code = c; return o; }; o.json = (b) => { o.body = b; return o; }; o.end = () => o; return o; };
+
+  let r = res();
+  await routes['POST /api/alerts/suites/:suiteId']({ params: { suiteId: suite.id }, user: adminUser, body: { name: 'VIP low', dashboardId: 'd', tileId: 't', threshold: 10, unit: 'tickets', tag: '  Ticketing  ' } }, r);
+  assert.equal(r.body.alert.tag, 'Ticketing', 'tag is trimmed and stored');
+
+  let r2 = res();
+  await routes['PUT /api/alerts/:id']({ params: { id: r.body.alert.id }, user: adminUser, body: { name: 'VIP low v2' } }, r2);
+  assert.equal(r2.body.alert.tag, 'Ticketing', 'tag survives an unrelated edit');
 });

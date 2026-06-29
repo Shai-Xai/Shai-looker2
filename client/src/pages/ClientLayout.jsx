@@ -9,8 +9,9 @@ import { vtNavigate } from '../lib/viewTransition.js';
 import { useSheetDrag } from '../lib/useSheetDrag.js';
 import { applyBrand, resetBrand, useBrandLogo } from '../lib/brand.js';
 import { useAccess, PERMS } from '../lib/access.js';
-import { FEATURES } from '../lib/features.js';
+import { FEATURES, owlNativeChatEnabled } from '../lib/features.js';
 import AnalystDrawer from '../components/AnalystDrawer.jsx';
+import OwlChat from '../components/OwlChat.jsx';
 import StatusNoticeBanner from '../components/StatusNoticeBanner.jsx';
 import AiMark from '../components/AiMark.jsx';
 
@@ -182,6 +183,15 @@ export default function ClientLayout() {
     : profileEntityId;
   const visibleSuites = activeEntityId ? suites.filter((s) => s.entityId === activeEntityId) : suites;
   const visibleSettlements = activeEntityId ? settlements.filter((s) => s.entityId === activeEntityId) : settlements;
+  // Scope options for the Owl picker: the clients (organisers) + events this user
+  // can pick. Admins get all; a client gets their own entity/events.
+  const owlClients = (() => {
+    const m = new Map();
+    for (const s of suites) if (s.entityId) m.set(s.entityId, s.entityName || s.entityId);
+    for (const e of (user?.entities || [])) m.set(e.id, e.name || e.id);
+    return [...m.entries()].map(([id, name]) => ({ id, name }));
+  })();
+  const owlEvents = suites.map((s) => ({ id: s.id, name: s.name, entityId: s.entityId, onSale: !!s.onSale, hasGoals: !!s.hasGoals }));
 
   // Experience OS inbox badge/banner — scoped to the ACTIVE profile so a
   // multi-profile login only sees the current client's messages (re-polls when
@@ -689,7 +699,7 @@ export default function ClientLayout() {
         )}
         <Outlet context={{ previewEntityId: activeEntityId, actionsSlot }} />
       </main>
-      {FEATURES.ask && !askOpen && (
+      {(FEATURES.ask || owlNativeChatEnabled(user)) && !askOpen && (
         // Floating owl — quick launcher for the analyst drawer (bottom-right).
         // Hover/focus pre-warms the analyst so the first open is instant.
         <button
@@ -703,7 +713,9 @@ export default function ClientLayout() {
           <AiMark size={28} sparkle={false} />
         </button>
       )}
-      <AnalystDrawer open={askOpen} prewarm={prewarmAsk} onClose={() => setAskOpen(false)} previewEntityId={activeEntityId} />
+      {owlNativeChatEnabled(user)
+        ? <OwlChat open={askOpen} onClose={() => setAskOpen(false)} suiteId={suiteId} entityId={activeEntityId} dashboardId={id} clients={owlClients} events={owlEvents} isAdmin={isAdmin} />
+        : <AnalystDrawer open={askOpen} prewarm={prewarmAsk} onClose={() => setAskOpen(false)} previewEntityId={activeEntityId} />}
     </div>
   );
 }

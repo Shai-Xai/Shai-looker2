@@ -349,6 +349,11 @@ a pace read** — *ahead / on track / behind* — not just "are we there yet."
   **dashboard name + tile** (the key components). **Howler can also publish 🌐 global
   templates** to **every client** — they re-link to each client's matching dashboard/tile
   **by name**, so standardised dashboards wire up automatically.
+- **Tag goals by area** — tag a goal with an operational area (**Ticketing, Cashless,
+  Access control, Audience, Marketing…** or your own), and the Goals page groups them into
+  **one row per tag** so a busy event reads as tidy sections instead of one long grid.
+  **Create your own categories** too — type a new one and save it; it's remembered and
+  reusable across **both goals and alerts** for that client.
 - **Drag to reorder** — arrange goal tiles on the Goals page; the order carries to the
   home dashboard.
 - **Dual-surface** — clients set their own goals; Howler can set them on a client's
@@ -387,6 +392,10 @@ client's* numbers.
 - **Plain-English** — every rule reads back as a sentence ("When VIP remaining drops
   below 100, notify me via inbox, push and SMS — once"), and a **Test** button shows
   exactly what will land.
+- **Tag alerts by area** 🆕 — tag an alert with an operational area (**Ticketing, Cashless,
+  Access control, Audience…** or your own); the Alerts page groups them into **one row per
+  tag**, so a long watch-list reads as tidy sections. **Custom categories you create are
+  shared with goals** — make one once, use it in both.
 - **Dual-surface** — clients set their own alerts; Howler can set them on a client's
   behalf during onboarding so the first week already feels proactive.
 - **Live Pulse strip** 🧪 — a glanceable, colour-coded **beat in the top header**
@@ -471,6 +480,13 @@ Use these to set direction, **not** to promise dates.
   feels like their own product. Howler sets the slug + background in **Admin → the client →
   Settings** (and the setup wizard's *Client* step); an unknown URL falls back to the standard login.
   A public endpoint serves **only non-secret branding** for the pre-login page.
+- **2026-06-28** — **Custom categories** ✅: clients (and Howler on their behalf) can now
+  **create their own categories** in the goal/alert editor — type a new one, save it, and
+  it's remembered and offered thereafter. The list is **shared across goals and alerts** per
+  client, so a category created once works in both.
+- **2026-06-28** — **Alert tags** ✅: tag an alert with an operational area (Ticketing,
+  Cashless, Access control, …, or a custom one); the Alerts page now groups alerts into
+  **one row per tag**, mirroring the goal tags.
 - **2026-06-28** — **Mobile dashboard polish** ✅: removed the left/right **swipe-between-tabs**
   gesture (it fought with scrolling wide tables and the page) — switch tabs by tapping the tab bar.
   **Tables** now scroll far more smoothly on mobile (momentum scrolling, the table owns its own
@@ -587,6 +603,10 @@ Use these to set direction, **not** to promise dates.
   Across the app, **back buttons** now appear on the dashboard view, the editor, folders and
   the mobile menu bar; the in-dashboard **carousels** resize to fit a smaller desktop window,
   and swiping a carousel on a phone no longer jumps to the next dashboard.
+- **2026-06-22** — **Goal tags** ✅: tag a goal with an operational area (Ticketing,
+  Cashless, Access control, …, or a custom one); the Goals page now groups goals into
+  **one row per tag**. Mix/split goals also gained an **Owl commentary** line in their
+  detail view, and now appear in the **rings summary** (represented by their focus slice).
 - **2026-06-22** — **Alerts: templates + Ticket Type/Category starters** 🧪: alerts can now be
   **saved as reusable templates** — a client's own, or (admins) **🌐 global** templates pushed to
   every client (they re-link to each client's matching data by name). A **Templates** tab on the
