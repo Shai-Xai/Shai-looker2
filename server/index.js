@@ -549,7 +549,7 @@ require('./releaseNotes').mount(app, { db, auth, insights, adminAnthropicKey });
 // ─── Client content model & navigation → server/clientModel.js ─────────────────
 // Disposable module: suite/set/dashboard model, /api/my/suites navigation, saved
 // filter views + lock overrides. Remove this line + server/clientModel.js.
-require('./clientModel').mount(app, { db, auth, store, looker, fetchDashboard, convertDashboard, expandLockMap, cleanFilterMap });
+require('./clientModel').mount(app, { db, auth, store, looker, fetchDashboard, convertDashboard, expandLockMap, cleanFilterMap, resolvePhase, suiteHasGoals: (sid) => { try { return (goalsApi.listGoals(sid) || []).length > 0; } catch { return false; } } });
 
 // ─── Dashboards → server/dashboards.js ─────────────────────────────────────────
 // Extracted: dashboard CRUD, Looker import, folders, run-query and drill. The

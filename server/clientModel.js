@@ -9,7 +9,11 @@
 // Remove the mount() line in index.js + this file to uninstall. Lifted VERBATIM
 // out of index.js — its collaborators arrive as injected deps.
 
-module.exports.mount = function mountClientModel(app, { db, auth, store, looker, fetchDashboard, convertDashboard, expandLockMap, cleanFilterMap }) {
+module.exports.mount = function mountClientModel(app, { db, auth, store, looker, fetchDashboard, convertDashboard, expandLockMap, cleanFilterMap, resolvePhase, suiteHasGoals }) {
+  // Phases in which tickets are actively selling (used to flag the "current event
+  // on sale" — pre_launch hasn't opened, day_after/post_event are over).
+  const ON_SALE_PHASES = new Set(['launch', 'artist_drops', 'mid_campaign', 'build_up', 'event_day']);
+  const suiteOnSale = (su) => { try { return resolvePhase ? ON_SALE_PHASES.has(resolvePhase(su.briefing || {}).key) : false; } catch { return false; } };
   // A client's custom sets + the dashboard pool available to build them with
   // (shared dashboards + this client's own bespoke dashboards).
   app.get('/api/admin/entities/:id/sets', auth.requireAdmin, (req, res) => {
@@ -120,6 +124,7 @@ module.exports.mount = function mountClientModel(app, { db, auth, store, looker,
         id: su.id, name: su.name, icon: su.icon || '', entityId: su.entityId,
         entityName: ent?.name || '', entityLogo: ent?.logo || '',
         setCount: su.setIds.length, dashboardCount: db.dashboardsInSuite(su.id).length,
+        onSale: suiteOnSale(su), hasGoals: suiteHasGoals ? suiteHasGoals(su.id) : false,
       };
     }));
   });

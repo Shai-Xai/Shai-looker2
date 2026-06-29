@@ -32,6 +32,22 @@ export default function OwlChat({ open, onClose, suiteId, entityId, clients = []
   // Follow the page context if it changes while open.
   useEffect(() => { setSelEntity(entityId || ''); }, [entityId]);
   useEffect(() => { setSelSuite(suiteId || ''); }, [suiteId]);
+  // Auto-default the event: the first time the picker has data and nothing is in
+  // scope, select the client's CURRENT on-sale event that has goals (falling back to
+  // any event with goals). Runs once so it never fights a manual change. Only when
+  // the picker is visible, so the chosen event is always shown and changeable.
+  const autoPicked = useRef(false);
+  useEffect(() => {
+    if (autoPicked.current || suiteId || selSuite || !events.length) return;
+    if (!(isAdmin || clients.length > 1)) return;
+    const scope = selEntity ? events.filter((e) => e.entityId === selEntity) : events;
+    const withGoals = scope.filter((e) => e.hasGoals);
+    const choice = withGoals.find((e) => e.onSale) || withGoals[0];
+    if (!choice) return;
+    autoPicked.current = true;
+    if (!selEntity) setSelEntity(choice.entityId);
+    setSelSuite(choice.id);
+  }, [events, selEntity, selSuite, suiteId, isAdmin, clients.length]);
   // Changing scope starts a fresh conversation (don't mix clients' data in a thread).
   const resetThread = () => { setMessages([]); setThreadId(null); };
   const newChat = () => { resetThread(); setInput(''); setHistoryOpen(false); };

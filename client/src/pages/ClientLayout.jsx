@@ -191,7 +191,7 @@ export default function ClientLayout() {
     for (const e of (user?.entities || [])) m.set(e.id, e.name || e.id);
     return [...m.entries()].map(([id, name]) => ({ id, name }));
   })();
-  const owlEvents = suites.map((s) => ({ id: s.id, name: s.name, entityId: s.entityId }));
+  const owlEvents = suites.map((s) => ({ id: s.id, name: s.name, entityId: s.entityId, onSale: !!s.onSale, hasGoals: !!s.hasGoals }));
 
   // Experience OS inbox badge/banner — scoped to the ACTIVE profile so a
   // multi-profile login only sees the current client's messages (re-polls when
