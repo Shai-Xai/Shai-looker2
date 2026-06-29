@@ -173,3 +173,65 @@ test('a valid filter on a curated dimension is passed through under scope', asyn
   assert.equal(res.queryBody.filters[h.ORG_FIELD], 'Ultra South Africa'); // scope still applied
   assert.deepEqual(res.queryBody.fields, ['core_ticket_types.name', M0]);
 });
+
+// ── createAlert (the first act-tool): DRAFTS only — never writes, never queries ──
+
+test('createAlert drafts a metric alert bound to the curated explore', async () => {
+  const ent = h.makeEntity('Ultra SA', 'Ultra South Africa');
+  const suite = h.db.createSuite({ entityId: ent.id, name: 'KFF 26' });
+  const user = h.makeClient('owl-ca1@client.test', [ent.id]);
+  const res = await tools().createAlert.run({ measure: M0, operator: 'gte', threshold: 1000 }, ctx(user, suite.id));
+  assert.equal(res.ok, true);
+  assert.equal(res.confirm, true);            // surfaces a confirm card, doesn't create
+  assert.equal(res.action.kind, 'createAlert');
+  assert.equal(res.action.suiteId, suite.id);
+  assert.equal(res.action.draft.source, 'metric');
+  assert.equal(res.action.draft.model, catalogue.model);
+  assert.equal(res.action.draft.view, catalogue.explore);
+  assert.equal(res.action.draft.measure, M0);
+  assert.equal(res.action.draft.operator, 'gte');
+  assert.equal(res.action.draft.threshold, 1000);
+  assert.ok(res.action.draft.name);           // a name is generated from the condition
+  assert.equal(lookerCalls, 0);               // act-tool drafts; it never queries Looker
+});
+
+test('createAlert refuses when no event is selected', async () => {
+  const user = h.makeClient('owl-ca2@client.test', [h.makeEntity('A', 'A-org').id]);
+  const res = await tools().createAlert.run({ measure: M0, operator: 'gte', threshold: 50 }, ctx(user)); // no suiteId
+  assert.equal(res.ok, false);
+  assert.equal(res.reason, 'no_event');
+});
+
+test('createAlert refuses an off-catalogue measure', async () => {
+  const ent = h.makeEntity('Ultra SA', 'Ultra South Africa');
+  const suite = h.db.createSuite({ entityId: ent.id, name: 'KFF 26' });
+  const user = h.makeClient('owl-ca3@client.test', [ent.id]);
+  const res = await tools().createAlert.run({ measure: 'core_users.email', operator: 'gte', threshold: 1 }, ctx(user, suite.id));
+  assert.equal(res.ok, false);
+  assert.equal(res.reason, 'unknown_measure');
+});
+
+test('createAlert rejects a PII filter-only field as an alert filter', async () => {
+  const ent = h.makeEntity('Ultra SA', 'Ultra South Africa');
+  const suite = h.db.createSuite({ entityId: ent.id, name: 'KFF 26' });
+  const user = h.makeClient('owl-ca4@client.test', [ent.id]);
+  const res = await tools().createAlert.run(
+    { measure: M0, operator: 'gte', threshold: 1, filters: { 'core_purchasers.email': 'john@example.com' } },
+    ctx(user, suite.id),
+  );
+  assert.equal(res.ok, false);
+  assert.equal(res.reason, 'unfilterable');
+});
+
+test('createAlert builds a metric label + filter for a curated dimension', async () => {
+  const ent = h.makeEntity('Ultra SA', 'Ultra South Africa');
+  const suite = h.db.createSuite({ entityId: ent.id, name: 'KFF 26' });
+  const user = h.makeClient('owl-ca5@client.test', [ent.id]);
+  const res = await tools().createAlert.run(
+    { measure: M0, operator: 'gte', threshold: 500, filters: { 'core_ticket_types.name': 'VIP' } },
+    ctx(user, suite.id),
+  );
+  assert.equal(res.ok, true);
+  assert.equal(res.action.draft.metricFilters['core_ticket_types.name'], 'VIP');
+  assert.match(res.action.draft.metricLabel, /VIP/);
+});

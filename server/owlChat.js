@@ -36,6 +36,12 @@ WHICH TOOL TO USE (route every question to the right one — do not answer goal 
 - getAlerts → questions about ALERTS / alarms / thresholds / notifications: "what alerts are set", "has anything triggered", "what am I being notified about". Returns each alert's condition, whether it's active/paused and armed/triggered, its last value and last fire. Read-only.
 - getCampaigns → questions about email/SMS CAMPAIGNS / marketing sends: "what have we sent", "campaign performance", "open/click rates", "any campaigns running". Returns each campaign's status, channel, recipient count and results (sent/opens/clicks/conversions) — never individual contacts. Read-only.
 - askUpload → questions about a file or Google Sheet the user ATTACHED (listed under "Attached data sources" when present) — query/aggregate that table. To answer a question that spans the attachment AND the ticketing data (e.g. "uploaded target vs actual sold by event"), call BOTH askUpload and askData, then combine the figures in one answer/table. If no sources are attached, say so and point them to the 📎 attach button.
+- createAlert → when the user wants to be NOTIFIED / ALERTED / TOLD / REMINDED when a number reaches a level ("let me know when tickets hit 1000", "alert me if VIP sells out", "tell me when revenue passes R1m"). It DRAFTS the alert and the user confirms with a button — see ACTING below.
+
+ACTING (tools that DO something, not just read):
+- Some tools DRAFT an action for the user to confirm instead of just reading data. createAlert is one. You NEVER create/change anything silently: the tool returns a proposed action and the user taps a button to confirm it.
+- After calling createAlert, do NOT say the alert is on or active. Say you've DRAFTED it, state plainly what it will watch and the exact condition (e.g. "I've drafted an alert for when Tickets Sold reaches 1,000 on this event"), and tell them to tap "Create alert" below to switch it on. If it returns ok:false (e.g. no event selected), relay why and what to do.
+- An alert needs a measure, an operator (at/above, at/below, above, below) and a threshold. If the user's wish is missing one (e.g. they didn't give a number), ask one short clarifying question before drafting.
 
 CHARTS: Whenever you return a BREAKDOWN from askData (a measure grouped by a dimension), the app AUTOMATICALLY renders it as a real interactive chart below your reply, and the user can switch it between bar / line / pie / metric with a toggle on the chart. So:
 - You CAN show charts. NEVER say you can't generate a chart/image, and NEVER draw ASCII or text bar graphs.
@@ -126,7 +132,7 @@ function owlAllowed(user) {
   return !!email && OWL_ALLOW.split(',').map((s) => s.trim()).filter(Boolean).includes(email);
 }
 
-function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, messaging, anthropicKeyForSuite, anthropicKeyForEntity }) {
+function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, messaging, getAlertsApi, anthropicKeyForSuite, anthropicKeyForEntity }) {
   const sql = db.db;
   sql.exec(`
     CREATE TABLE IF NOT EXISTS owl_threads (
@@ -219,6 +225,16 @@ function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, m
     return [...data, ...dash];
   }
   const SOURCES_MARK = '\n<<<OWL_SOURCES>>>';
+  // ── Proposed actions: act-tools (createAlert…) return a draft + confirm:true that
+  // the loop captures in the trail. We surface those as "actions" the client renders
+  // as a confirm card (the act-layer's equivalent of a citation chip). Streamed after
+  // the sources behind ACTIONS_MARK; the user taps the card to actually commit.
+  const ACTIONS_MARK = '\n<<<OWL_ACTIONS>>>';
+  function actionsFromTrail(trail) {
+    return (trail || [])
+      .filter((t) => t.result && t.result.ok && t.result.confirm && t.result.action)
+      .map((t) => t.result.action);
+  }
   const J = (s) => { try { return JSON.parse(s || '[]'); } catch { return []; } };
 
   // Prior turns → Anthropic messages (text only; intra-turn tool rounds are ephemeral).
@@ -308,6 +324,9 @@ function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, m
       insMsg.run(crypto.randomUUID(), thread.id, 'owl', cleanText, JSON.stringify(trail), now());
       // Citation chips: stream the sources as a trailing record the client splits off.
       res.write(SOURCES_MARK + JSON.stringify(sourcesFromTrail(trail)));
+      // Proposed actions (e.g. a drafted alert) — the confirm card; live response only.
+      const actions = actionsFromTrail(trail);
+      if (actions.length) res.write(ACTIONS_MARK + JSON.stringify(actions));
       res.end();
     } catch (err) {
       console.error('[POST /api/owl/chat]', err.message);
@@ -366,6 +385,25 @@ function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, m
         sources: m.role === 'owl' ? sourcesFromTrail(J(m.tool_calls)) : undefined,
       })),
     });
+  });
+
+  // ── Act layer: commit a drafted action the Owl proposed ──────────────────────
+  // POST /api/owl/act/create-alert — the user tapping "Create alert" on the card the
+  // createAlert tool produced. The tool only DRAFTS; this is the confirm step. Scope
+  // is re-checked here AND inside alerts.createAlert (canManage / alerts.manage), so
+  // the Owl can never create an alert the user couldn't make by hand.
+  app.post('/api/owl/act/create-alert', auth.requireAuth, (req, res) => {
+    if (!owlAllowed(req.user)) return res.status(403).json({ error: 'The native Owl isn\'t enabled for your account yet.' });
+    const { suiteId, draft } = req.body || {};
+    if (!suiteId || !draft || typeof draft !== 'object') return res.status(400).json({ error: 'suiteId and draft are required.' });
+    const su = db.getSuite(suiteId);
+    if (!su) return res.status(404).json({ error: 'Event not found.' });
+    if (req.user.role !== 'admin' && !auth.canAccessSuite(req.user, suiteId)) return res.status(403).json({ error: 'Not allowed.' });
+    const alertsApi = typeof getAlertsApi === 'function' ? getAlertsApi() : null;
+    if (!alertsApi || !alertsApi.createAlert) return res.status(503).json({ error: 'Alerts aren\'t available right now.' });
+    const r = alertsApi.createAlert({ suiteId, draft, user: req.user });
+    if (!r.ok) return res.status(400).json({ error: r.error || 'Could not create the alert.' });
+    res.status(201).json({ ok: true, alert: { id: r.alert.id, name: r.alert.name } });
   });
 
   // Pin-to-dashboard lives in its own disposable module; mount it here so index.js

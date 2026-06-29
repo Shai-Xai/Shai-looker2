@@ -576,6 +576,72 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     },
   };
 
+  // ── createAlert (ACT) ─────────────────────────────────────────────────────────
+  // The FIRST act-tool. It DRAFTS a metric alert for the user to confirm — it does
+  // NOT create anything (no DB write here). Self-affecting only: an alert notifies the
+  // client's OWN team when a number crosses a threshold; it never messages ticket
+  // buyers, never spends, never touches PII. That low blast radius makes it the safe
+  // place to prove the draft→confirm pattern the riskier act-tools (campaigns) reuse.
+  // The draft is committed only when the user taps "Create alert"
+  // (POST /api/owl/act/create-alert), which runs the real alerts permission + create
+  // path. Bounded to the curated catalogue exactly like askData (enum'd measures).
+  const OP_LABEL = { gte: '≥', lte: '≤', gt: '>', lt: '<' };
+  function runCreateAlert(args = {}, ctx = {}) {
+    const { user, suiteId } = ctx;
+    if (!user) return refuse('no_user', 'No authenticated user in context.');
+    if (!suiteId) return refuse('no_event', 'Pick an event first — an alert watches one event\'s numbers.');
+    const m = measureByName.get(args.measure);
+    if (!m) return refuse('unknown_measure', `"${args.measure}" isn't a measure I can watch. Pick a curated measure.`);
+    const operator = ['gte', 'lte', 'gt', 'lt'].includes(args.operator) ? args.operator : 'gte';
+    const threshold = Number(args.threshold);
+    if (!Number.isFinite(threshold)) return refuse('bad_threshold', 'Give a numeric threshold to watch for.');
+    // Optional filters — curated FILTERABLE dims only (e.g. ticket type = VIP). PII
+    // filter-only fields are rejected: an alert watches an aggregate, never a person.
+    const metricFilters = {};
+    const filterDesc = [];
+    for (const [field, val] of Object.entries(args.filters || {})) {
+      const d = dimByName.get(field);
+      if (!d || d.filterOnly || !filterableDims.has(field)) return refuse('unfilterable', `I can't use "${field}" as an alert filter.`);
+      if (val == null || String(val).trim() === '') continue;
+      metricFilters[field] = String(val);
+      filterDesc.push(`${d.label} = ${val}`);
+    }
+    const metricLabel = [m.label, ...filterDesc].join(' · ');
+    const name = String(args.name || '').trim().slice(0, 120) || `${metricLabel} ${OP_LABEL[operator]} ${threshold}`;
+    // The metric-source alert draft (the Owl's catalogue IS a single curated explore).
+    const draft = {
+      name, ruleType: 'threshold', source: 'metric',
+      model: catalogue.model, view: catalogue.explore,
+      measure: m.name, measureLabel: m.label,
+      metricFilters, metricLabel,
+      operator, threshold, unit: m.unit || '',
+    };
+    return {
+      ok: true,
+      confirm: true, // tells the loop to surface an action card; nothing is created yet
+      action: {
+        kind: 'createAlert', suiteId, draft,
+        summary: `Notify when ${metricLabel} ${OP_LABEL[operator]} ${threshold}`,
+      },
+    };
+  }
+  const createAlertSchema = {
+    name: 'createAlert',
+    description:
+      'DRAFT a metric alert for the user to confirm — you do NOT create it; they tap "Create alert" to switch it on. An alert watches ONE event\'s ticketing number and notifies the client\'s own team when it crosses a threshold (e.g. tickets sold ≥ 1000, revenue ≥ 500000, remaining ≤ 50). Use when the user asks to be told / notified / alerted / reminded when a number reaches a level. Self-affecting only: it never messages ticket buyers and never spends. After calling it, tell the user what it will watch + the exact condition and that they can tap the button to switch it on. Requires an event to be selected (ok:false otherwise — ask them to pick one).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        measure: { type: 'string', enum: catalogue.measures.map((mm) => mm.name), description: 'Which curated number to watch.' },
+        operator: { type: 'string', enum: ['gte', 'lte', 'gt', 'lt'], description: 'gte = at or above, lte = at or below, gt = above, lt = below.' },
+        threshold: { type: 'number', description: 'The level to watch for.' },
+        filters: { type: 'object', description: 'Optional catalogue dimension filters to narrow what is watched, e.g. {"core_ticket_types.name":"VIP"}. Contact/PII fields are not allowed.' },
+        name: { type: 'string', description: 'Optional short name; one is generated from the condition if omitted.' },
+      },
+      required: ['measure', 'operator', 'threshold'],
+    },
+  };
+
   return {
     catalogue,
     askData: { schema: askDataSchema, run: runAskData },
@@ -585,5 +651,6 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     getAlerts: { schema: getAlertsSchema, run: runGetAlerts },
     getCampaigns: { schema: getCampaignsSchema, run: runGetCampaigns },
     askUpload: { schema: askUploadSchema, run: runAskUpload },
+    createAlert: { schema: createAlertSchema, run: runCreateAlert },
   };
 };
