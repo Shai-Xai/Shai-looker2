@@ -260,10 +260,14 @@ function buildOption({ rows, dimensions, measures, pivots, visType, stacked, vis
     splitLine: { lineStyle: { color: splitC } },
     axisLine: { show: false }, axisTick: { show: false },
   });
+  // Truncate long category labels (e.g. full event names) so they don't overlap
+  // into an unreadable mess — the full value stays in the tooltip (which reads the
+  // raw category name, not this formatted label).
+  const catLabel = (v) => { const s = String(v ?? ''); return s.length > 18 ? s.slice(0, 17).trimEnd() + '…' : s; };
   const catAxis = {
     type: 'category', data: labels, boundaryGap: true,
     name: isBar ? '' : xName, nameLocation: 'middle', nameGap: 28, nameTextStyle: nameStyle,
-    axisLabel: { fontSize: 10, color: axisC, hideOverlap: true, rotate: labels.length > 8 && !isBar ? 35 : 0 },
+    axisLabel: { fontSize: 10, color: axisC, hideOverlap: true, rotate: labels.length > 8 && !isBar ? 35 : 0, formatter: catLabel },
     axisLine: { lineStyle: { color: axisLineC } }, axisTick: { show: false },
   };
 
@@ -290,7 +294,7 @@ function buildOption({ rows, dimensions, measures, pivots, visType, stacked, vis
         axisPointer: { type: isBar ? 'line' : 'shadow', shadowStyle: { color: hexToRgba(brandPrimary(), 0.06) } },
         formatter: (params) => {
           const arr = Array.isArray(params) ? params : [params];
-          const title = arr[0]?.axisValueLabel ?? arr[0]?.name ?? '';
+          const title = arr[0]?.name || arr[0]?.axisValueLabel || ''; // raw category (full), not the truncated axis label
           let s = `<div style="font-weight:700;margin-bottom:4px">${title}</div>`;
           for (const p of arr) {
             const fmt = seriesMeta[p.seriesIndex]?.fmt;
