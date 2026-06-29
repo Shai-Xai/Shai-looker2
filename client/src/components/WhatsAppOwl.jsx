@@ -32,7 +32,7 @@ export default function WhatsAppOwl() {
   };
 
   useEffect(() => {
-    api.owlWhatsapp().then((r) => { setCfg({ from: r.from || '', webhookPath: r.webhookPath, hasSecret: r.hasSecret, hasApiKey: r.hasApiKey, numbers: r.numbers || [] }); }).catch(() => setCfg({ numbers: [] }));
+    api.owlWhatsapp().then((r) => { setCfg({ from: r.from || '', webhookPath: r.webhookPath, hasSecret: r.hasSecret, hasApiKey: r.hasApiKey, mediaEnabled: !!r.mediaEnabled, numbers: r.numbers || [] }); }).catch(() => setCfg({ numbers: [] }));
     api.adminListEntities().then((r) => setEnts(Array.isArray(r) ? r : (r.entities || []))).catch(() => setEnts([]));
     loadLog();
   }, []);
@@ -43,7 +43,7 @@ export default function WhatsAppOwl() {
   const delNum = (i) => setCfg((c) => ({ ...c, numbers: c.numbers.filter((_, j) => j !== i) }));
   const save = async () => {
     setBusy(true);
-    try { await api.saveOwlWhatsapp({ from: cfg.from, numbers: cfg.numbers.filter((n) => n.msisdn && n.email), ...(secret.trim() ? { secret: secret.trim() } : {}), ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}) }); setSaved(true); setSecret(''); setApiKey(''); setTimeout(() => setSaved(false), 1800); } catch { /* ignore */ }
+    try { await api.saveOwlWhatsapp({ from: cfg.from, mediaEnabled: !!cfg.mediaEnabled, numbers: cfg.numbers.filter((n) => n.msisdn && n.email), ...(secret.trim() ? { secret: secret.trim() } : {}), ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}) }); setSaved(true); setSecret(''); setApiKey(''); setTimeout(() => setSaved(false), 1800); } catch { /* ignore */ }
     setBusy(false);
   };
 
@@ -89,6 +89,12 @@ export default function WhatsAppOwl() {
         </div>
       ))}
       <button onClick={addNum} style={{ ...fld, cursor: 'pointer', marginTop: 2 }}>＋ Add number</button>
+
+      <span style={lbl}>6 · Chart images</span>
+      <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 13, cursor: 'pointer' }}>
+        <input type="checkbox" checked={!!cfg.mediaEnabled} onChange={(e) => setCfg((c) => ({ ...c, mediaEnabled: e.target.checked }))} style={{ marginTop: 2 }} />
+        <span>Send charts as <strong>inline images</strong> (instead of a link). Only turn this on <strong>after Clickatell enables media upload</strong> on this WhatsApp integration — otherwise it 404s and falls back to a link anyway. Default off = customers get a tappable chart link.</span>
+      </label>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12 }}>
         <button onClick={save} disabled={busy} style={{ border: 'none', background: 'var(--brand)', color: '#fff', borderRadius: 8, padding: '7px 16px', fontSize: 13, fontWeight: 600, cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.6 : 1 }}>{busy ? 'Saving…' : 'Save WhatsApp setup'}</button>
