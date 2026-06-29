@@ -14,8 +14,20 @@
 const crypto = require('crypto');
 const { runOwlLoop, owlTurn } = require('./owlChat'); // owlTurn already layers OWL_CHAT_SYSTEM
 const { resolveGuidance } = require('./owlGuidance');
+const chartImg = require('./owlChartImg');
 
-const WA_OVERRIDE = 'OVERRIDE — this conversation is over WhatsApp: reply in SHORT, plain text. No markdown tables, no chart/toggle talk, and never output a <<<FOLLOWUPS>>> marker. Use *single asterisks* for light emphasis. Lead with the answer. Money in ZAR.';
+const WA_OVERRIDE = 'OVERRIDE — this conversation is over WhatsApp: reply in SHORT, plain text. No markdown tables. Use *single asterisks* for light emphasis. Lead with the answer. Money in ZAR. If the user asks to see a chart/graph/trend, still answer the key numbers in words — a chart image is attached automatically, so never say you can\'t show visuals. End your reply with the <<<FOLLOWUPS>>> marker + a JSON array of 2-3 SHORT (≤6 words) next questions, exactly as instructed; the app turns them into tappable buttons.';
+
+const FU_MARK = '<<<FOLLOWUPS>>>';
+// Parse the trailing "<<<FOLLOWUPS>>>[...]" JSON array the model emits (mirrors the
+// web client). Returns up to 3 short next-question strings, or [].
+function parseFollowups(out) {
+  const i = String(out || '').indexOf(FU_MARK);
+  if (i < 0) return [];
+  const m = out.slice(i + FU_MARK.length).match(/\[[\s\S]*\]/);
+  if (!m) return [];
+  try { const a = JSON.parse(m[0]); return Array.isArray(a) ? a.filter((x) => typeof x === 'string' && x.trim()).slice(0, 3) : []; } catch { return []; }
+}
 
 function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthropicKeyForEntity }) {
   const sql = db.db;
@@ -30,6 +42,9 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
       detail TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_owl_wa_events ON owl_wa_events(created_at);
+    CREATE TABLE IF NOT EXISTS owl_wa_suggest (
+      msisdn TEXT PRIMARY KEY, items TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL
+    );
   `);
   const now = () => new Date().toISOString();
   const insMsg = sql.prepare('INSERT INTO owl_wa_msgs (id,msisdn,role,body,created_at) VALUES (?,?,?,?,?)');
@@ -40,6 +55,17 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
   // so the admin panel can SHOW whether Clickatell is delivering + where the flow stops.
   const insEvent = sql.prepare('INSERT INTO owl_wa_events (id,msisdn,stage,detail,created_at) VALUES (?,?,?,?,?)');
   const logEvent = (msisdn, stage, detail) => { try { insEvent.run(crypto.randomUUID(), msisdn || '', stage, String(detail || '').slice(0, 800), now()); } catch { /* ignore */ } };
+
+  // Last follow-up suggestions per number, so a bare "1"/"2"/"3" reply (the numbered
+  // fallback when interactive buttons aren't available) maps back to its question.
+  const upSuggest = sql.prepare('INSERT INTO owl_wa_suggest (msisdn,items,created_at) VALUES (?,?,?) ON CONFLICT(msisdn) DO UPDATE SET items=excluded.items, created_at=excluded.created_at');
+  const getSuggest = sql.prepare('SELECT items FROM owl_wa_suggest WHERE msisdn=?');
+  const saveSuggest = (msisdn, items) => { try { upSuggest.run(msisdn, JSON.stringify(items), now()); } catch { /* ignore */ } };
+  const resolveSelection = (msisdn, text) => {
+    const m = String(text || '').trim().match(/^([1-3])[.)]?$/);
+    if (!m) return null;
+    try { return JSON.parse(getSuggest.get(msisdn)?.items || '[]')[Number(m[1]) - 1] || null; } catch { return null; }
+  };
 
   const toolEntries = Object.values(owlTools).filter((t) => t && t.schema && t.run);
   const toolMap = Object.fromEntries(toolEntries.map((t) => [t.schema.name, t]));
@@ -81,29 +107,75 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
     return parts.join('\n\n');
   }
 
-  async function handleInbound(msisdn, text) {
+  // Friendly-label + dimension-type resolvers for chart axes, rebuilt per turn so admin
+  // field renames apply without a restart (mirrors the web citation labels).
+  function labelMaps() {
+    const cat = owlTools.catalogue || {};
+    const label = new Map();
+    for (const m of (cat.measures || [])) label.set(m.name, m.label);
+    for (const d of (cat.dimensions || [])) label.set(d.name, d.label);
+    try { for (const f of (owlFields.list() || [])) if (f.label) label.set(f.name, f.label); } catch { /* ignore */ }
+    const dimType = new Map((cat.dimensions || []).map((d) => [d.name, d.type]));
+    return { label: (f) => label.get(f), dimType: (f) => dimType.get(f) || '' };
+  }
+
+  // Render the answer's data to a chart PNG and send it (upload → image message).
+  // Best-effort: any failure is logged and the text answer still stands.
+  async function maybeSendChart(msisdn, trail) {
+    try {
+      const spec = chartImg.chartFromTrail(trail, labelMaps());
+      if (!spec) { logEvent(msisdn, 'image-skip', 'nothing chartable in this answer'); return; }
+      const png = chartImg.renderPng(spec);
+      if (!png) { logEvent(msisdn, 'image-failed', 'render produced no PNG'); return; }
+      const up = await messaging.uploadWhatsappMedia(png, 'image/png');
+      if (!up.ok) { logEvent(msisdn, 'image-failed', `upload: ${up.error || up.reason || 'error'}`); return; }
+      const im = await messaging.sendWhatsappImage({ to: msisdn, fileId: up.fileId, caption: spec.title });
+      logEvent(msisdn, im.ok ? 'image-sent' : 'image-failed', im.ok ? spec.title : `send: ${im.error || 'error'}`);
+    } catch (e) { logEvent(msisdn, 'image-failed', (e && e.message) || 'chart error'); }
+  }
+
+  // Offer follow-ups as native WhatsApp reply buttons; if Clickatell rejects them
+  // (interactive not enabled on this number), fall back to a numbered text list.
+  async function sendFollowups(msisdn, followups) {
+    const items = followups.slice(0, 3);
+    if (!items.length) return;
+    saveSuggest(msisdn, items);
+    const btn = await messaging.sendWhatsappButtons({ to: msisdn, body: 'Want to dig deeper?', buttons: items.map((q) => ({ title: q, postbackData: q })) });
+    if (btn.ok) { logEvent(msisdn, 'followups-buttons', items.join(' | ')); return; }
+    const numbered = `Want to dig deeper? Reply with a number:\n${items.map((q, i) => `${i + 1}. ${q}`).join('\n')}`;
+    await messaging.sendWhatsapp({ to: msisdn, text: numbered });
+    logEvent(msisdn, 'followups-text', `buttons unavailable (${btn.error || btn.reason || '?'}) — sent numbered`);
+  }
+
+  async function handleInbound(msisdn, rawText) {
     const id = identify(msisdn);
     if (!id) { logEvent(msisdn, 'no-account', 'number not linked to any Pulse user'); await messaging.sendWhatsapp({ to: msisdn, text: 'Hi! This number isn\'t linked to a Howler account yet. Ask your Howler contact to connect it, then I can answer questions about your event data.' }); return; }
     logEvent(msisdn, 'identified', `${id.user.email || '?'} → ${id.entityId || '(no client)'}`);
     const apiKey = anthropicKeyForEntity ? anthropicKeyForEntity(id.entityId || undefined) : undefined;
     if (!insights.isConfigured(apiKey)) { logEvent(msisdn, 'no-ai-key', 'Anthropic key not configured'); await messaging.sendWhatsapp({ to: msisdn, text: 'The Owl isn\'t available right now — please try again shortly.' }); return; }
+    // A bare "1"/"2"/"3" reply selects a prior follow-up (the numbered fallback); a tapped
+    // button already arrives as the full question text via postbackData.
+    const text = resolveSelection(msisdn, rawText) || rawText;
     insMsg.run(crypto.randomUUID(), msisdn, 'user', text, now());
     const history = histStmt.all(msisdn).reverse().map((m) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.body }));
     // histStmt already includes the just-inserted user message at the end.
     const instructions = instructionsFor(id.entityId);
-    let answer = '';
+    let out = ''; let trail = [];
     try {
-      const { text: out } = await runOwlLoop({
+      const r = await runOwlLoop({
         llmTurn: ({ messages: m, tools, onText }) => owlTurn(insights, { messages: m, tools, instructions, apiKey, onText }),
         toolMap, tools: toolSchemas, messages: history,
         ctx: { user: id.user, entityId: id.entityId },
       });
-      answer = String(out || '').split('<<<FOLLOWUPS>>>')[0].replace(/\s+$/, '').trim();
-    } catch { answer = ''; }
-    if (!answer) answer = 'Sorry — I couldn\'t answer that just now. Try rephrasing?';
+      out = r.text; trail = r.trail || [];
+    } catch { out = ''; }
+    const answer = String(out || '').split(FU_MARK)[0].replace(/\s+$/, '').trim() || 'Sorry — I couldn\'t answer that just now. Try rephrasing?';
+    const followups = parseFollowups(out);
     insMsg.run(crypto.randomUUID(), msisdn, 'owl', answer, now());
     const sent = await messaging.sendWhatsapp({ to: msisdn, text: answer });
     logEvent(msisdn, sent && sent.ok ? 'replied' : 'send-failed', sent && sent.ok ? answer.slice(0, 120) : (sent && sent.error) || 'send error');
+    if (chartImg.wantsChart(text)) await maybeSendChart(msisdn, trail);
+    await sendFollowups(msisdn, followups);
   }
 
   // Pull the sender + text out of Clickatell's inbound (MO) payload, defensively.
@@ -111,10 +183,20 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
   // walks the whole object for a phone-like sender + a message body — so we cope with
   // whatever field names Clickatell's WhatsApp MO actually uses.
   function parseInbound(body) {
-    const m = (body && Array.isArray(body.messages) ? body.messages[0] : body) || {};
-    let from = m.from || m.fromNumber || m.sender || m.source || m.msisdn || (body && body.from) || '';
+    body = body || {};
+    const ev = body.event || body;
+    const m = (Array.isArray(body.messages) ? body.messages[0] : (Array.isArray(ev.messages) ? ev.messages[0] : ev)) || {};
+    let from = m.from || m.fromNumber || m.sender || m.source || m.msisdn || body.from || '';
     let text = '';
-    if (typeof m.content === 'string') text = m.content;
+    // A tapped reply button: the postbackData we set = the follow-up question itself.
+    const btn = ev.moButtonResponse || body.moButtonResponse || m.moButtonResponse;
+    if (Array.isArray(btn) && btn[0]) {
+      const b = btn[0];
+      text = b.postbackData || b.selectedItem?.postbackData || b.title || b.selectedItem?.title || '';
+      from = from || b.from || b.fromNumber || b.mobileNumber || b.msisdn || '';
+    }
+    if (text) { /* button reply resolved above */ }
+    else if (typeof m.content === 'string') text = m.content;
     else if (m.text) text = typeof m.text === 'string' ? m.text : (m.text.body || '');
     else if (m.message) text = typeof m.message === 'string' ? m.message : (m.message.text || m.message.body || m.message.content || '');
     else if (typeof body.text === 'string') text = body.text;

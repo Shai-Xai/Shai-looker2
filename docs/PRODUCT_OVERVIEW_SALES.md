@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-06-27 · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-06-29 · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -101,6 +101,20 @@ this compare to last year?") and get answers scoped to the client's own data.
   Inventive's side (cookie/storage handling); we've optimised everything on ours.
 
 **Pitch:** "Ask your data anything, in plain language — your own analyst, in-app."
+
+### The Owl on WhatsApp  🧪
+The same Owl, reachable from a customer's own **WhatsApp**. They message Howler's
+WhatsApp number and chat to the Owl in plain language; it recognises the phone
+number → its client and answers **only that client's data** (the same scope gate as
+in-app). Replies are free-form (inside WhatsApp's 24-hour window) — no template
+approval needed.
+- **Charts as images** — ask to "show the trend" or "break it down by ticket type"
+  and the Owl renders the chart and sends it as an **image** in the chat.
+- **Tappable follow-ups** — each answer offers 2–3 suggested next questions as
+  **reply buttons** (or a numbered list to reply to), so customers can drill in
+  without typing.
+- **Status 🧪:** pilot. Howler links each phone number to its client in **Admin →
+  WhatsApp Owl**, where a live activity log shows inbound messages end-to-end.
 
 ## 2. Scheduled digests  ✅
 - Automated **email digests** (e.g. morning briefing) written for a **named role**
@@ -475,6 +489,11 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-29** — **WhatsApp Owl: charts + tappable follow-ups** 🧪: the WhatsApp Owl now
+  renders a **chart image** when a customer asks to see a trend/breakdown, and offers
+  **2–3 follow-up questions** as native WhatsApp reply buttons (falling back to a numbered
+  list where buttons aren't available). A new **Recent inbound** log in **Admin → WhatsApp
+  Owl** shows messages flowing through end-to-end for easy diagnosis.
 - **2026-06-28** — **Vanity login page** ✅: each client can have a white-labelled sign-in URL at
   `…/<slug>` (e.g. `/kunye`) — their logo, colours and a full-screen background image, so logging in
   feels like their own product. Howler sets the slug + background in **Admin → the client →
