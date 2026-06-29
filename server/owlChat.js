@@ -30,7 +30,8 @@ HOW YOU KNOW THINGS (non-negotiable):
 WHICH TOOL TO USE (route every question to the right one — do not answer goal questions with askData):
 - askData → any raw figure from the ticketing data: tickets sold, revenue, breakdowns by ticket type / date / city, customer lookups, trends. It is the only way to learn a raw number.
 - getGoals → ANY question about GOALS, TARGETS, the North Star, pace, forecast, or "are we on track / how are we tracking / how are the goals doing". It returns the event's configured goals with their target, current value, pace (ahead/on-track/behind) and forecast landing. askData has NO concept of a target, so NEVER use it for goal questions — always call getGoals. If getGoals returns goals, report them (lead with the North Star). If it returns an empty list with a note, relay that note honestly — don't claim there are no goals if the note says otherwise.
-- getDashboard → ANY question about the dashboard the user is currently viewing: "this dashboard", "what is this telling me", "summarise what's on screen", "which tile/number is highest". It returns the open dashboard's tiles and each tile's current value (scoped to the selected event). Use it instead of askData when the user refers to the dashboard/screen they're looking at. If it returns ok:false because no dashboard is open, tell them to open a dashboard first.
+- getDashboard → questions about the dashboard the user is currently viewing: "this dashboard", "what is this telling me", "summarise what's on screen", "which tile/number is highest". It returns the open dashboard's tiles + each tile's current value AND the dashboard's queryable fields. If it returns ok:false because no dashboard is open, tell them to open a dashboard first.
+- queryDashboard → when the user wants to DIG DEEPER into the data behind the dashboard they're viewing — re-group it, break it down, trend it, filter it (anything beyond the headline tile values). ALWAYS call getDashboard first to read the available field names ("fields"), then call queryDashboard passing measure/dimensions/filters using those EXACT field names. It runs a fresh scoped query over the dashboard's own data and returns rows (which auto-chart, like askData). Use this — not askData — for deeper questions about the current dashboard, because askData only knows the ticketing catalogue while queryDashboard speaks the dashboard's own dataset.
 
 CHARTS: Whenever you return a BREAKDOWN from askData (a measure grouped by a dimension), the app AUTOMATICALLY renders it as a real interactive chart below your reply, and the user can switch it between bar / line / pie / metric with a toggle on the chart. So:
 - You CAN show charts. NEVER say you can't generate a chart/image, and NEVER draw ASCII or text bar graphs.
@@ -162,7 +163,7 @@ function mount(app, { db, auth, insights, owlTools, anthropicKeyForSuite, anthro
   const fieldLabel = (f) => SCOPE_LABEL[f] || dimLabel.get(f) || String(f).split('.').pop().replace(/_/g, ' ');
   function sourcesFromTrail(trail) {
     return (trail || [])
-      .filter((t) => t.name === 'askData' && t.result && t.result.ok)
+      .filter((t) => (t.name === 'askData' || t.name === 'queryDashboard') && t.result && t.result.ok)
       .map((t) => {
         const qb = t.result.queryBody || {};
         const m = t.input.measure;

@@ -15,7 +15,7 @@
 
 const defaultCatalogue = require('./owlCatalogueSeed');
 
-module.exports = function createOwlTools({ query, auth, db, getGoalsApi, resolveTileValue, catalogue = defaultCatalogue }) {
+module.exports = function createOwlTools({ query, auth, db, getGoalsApi, resolveTileValue, getExploreFields, catalogue = defaultCatalogue }) {
   if (!query || !query.applyScope || !query.runLookerQuery) {
     throw new Error('owlTools requires the query engine (applyScope + runLookerQuery).');
   }
@@ -50,6 +50,73 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, resolve
       if ((/^core_events\./.test(field) || dimByName.has(field)) && filters[field] == null) {
         filters[field] = String(val);
       }
+    }
+  }
+
+  // Contact / PII patterns kept OUT of group-by (mirrors the curated catalogue's
+  // exclusions) — for dynamic dashboard explores we can't hand-curate each field, so
+  // anything that looks like contact data is filter-only (lookup), never enumerable.
+  const PII_PATTERNS = (catalogue.excluded && catalogue.excluded.patterns) || ['email', 'cellphone', 'phone', 'mobile', 'id_number', 'first_name', 'last_name', 'full_name', 'address'];
+  const isPII = (name) => PII_PATTERNS.some((p) => String(name).toLowerCase().includes(String(p).toLowerCase()));
+
+  // Load + access-check the dashboard in ctx (shared by getDashboard + queryDashboard).
+  function loadDashboardForCtx(ctx) {
+    const { user, suiteId, dashboardId } = ctx;
+    if (!dashboardId) return { error: refuse('no_dashboard', 'Open a dashboard first, then ask me about it.') };
+    if (!db || !db.getDashboard) return { error: refuse('unavailable', 'I can\'t read dashboards right now.') };
+    const def = db.getDashboard(dashboardId);
+    if (!def) return { error: refuse('not_found', 'I can\'t find that dashboard.') };
+    if (user.role !== 'admin') {
+      if (def.ownerEntityId && !(user.entityIds || []).includes(def.ownerEntityId)) return { error: refuse('no_access', 'No access to that dashboard.') };
+      if (suiteId && auth && auth.canAccessSuite && !auth.canAccessSuite(user, suiteId)) return { error: refuse('no_access', 'No access to that event.') };
+    }
+    return { def };
+  }
+  const flatTiles = (def) => [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))];
+  // The distinct (model, explore) a dashboard's data tiles use, most-used first.
+  function dashboardExplores(def) {
+    const counts = new Map();
+    for (const t of flatTiles(def)) {
+      const q = t && t.query;
+      if (q && q.model && q.view && Array.isArray(q.fields) && q.fields.length) {
+        const k = `${q.model}::${q.view}`;
+        const e = counts.get(k) || { model: q.model, view: q.view, count: 0 };
+        e.count += 1; counts.set(k, e);
+      }
+    }
+    return [...counts.values()].sort((a, b) => b.count - a.count);
+  }
+  // Field names a dashboard's tiles actually reference (the "vetted, relevant" subset).
+  function dashboardFieldNames(def) {
+    const out = new Set();
+    for (const t of flatTiles(def)) {
+      const q = t && t.query; if (!q) continue;
+      for (const f of (q.fields || [])) out.add(f);
+      for (const k of Object.keys(q.filters || {})) out.add(k);
+    }
+    return out;
+  }
+  // Fetch an explore's measures/dimensions (cached upstream); PII dims are filterOnly.
+  async function exploreSurface(model, view) {
+    if (typeof getExploreFields !== 'function') return null;
+    let f; try { f = await getExploreFields(model, view); } catch { return null; }
+    if (!f) return null;
+    return {
+      model, view,
+      measures: (f.measures || []).map((m) => ({ name: m.name, label: m.label || m.name, type: m.type, group: m.group_label || m.group || '' })),
+      dimensions: (f.dimensions || []).map((d) => ({ name: d.name, label: d.label || d.name, type: d.type, group: d.group_label || d.group || '', filterOnly: isPII(d.name) })),
+    };
+  }
+  // Apply the suite's event lock, but ONLY for fields that exist in the target explore
+  // (so we never inject a filter Looker would reject on a non-ticketing explore).
+  function applyExploreEventLocks(filters, suiteId, validField) {
+    if (!suiteId || !auth || !auth.lockedFiltersForSuite) return;
+    let locks; try { locks = auth.lockedFiltersForSuite(suiteId) || {}; } catch { return; }
+    for (const [key, val] of Object.entries(locks)) {
+      if (val == null || val === '' || val === ' __ANY_VALUE__') continue;
+      const field = key.includes('.') ? key : (auth.filterNameToField ? auth.filterNameToField(key) : null);
+      if (!field || field === ORG) continue;
+      if (validField.has(field) && filters[field] == null) filters[field] = String(val);
     }
   }
 
@@ -213,19 +280,12 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, resolve
   async function runGetDashboard(_args = {}, ctx = {}) {
     const { user, suiteId, dashboardId } = ctx;
     if (!user) return refuse('no_user', 'No authenticated user.');
-    if (!dashboardId) return refuse('no_dashboard', 'Open a dashboard first, then ask me about it.');
-    if (typeof resolveTileValue !== 'function' || !db || !db.getDashboard) return refuse('unavailable', 'I can\'t read dashboards right now.');
-    const def = db.getDashboard(dashboardId);
-    if (!def) return refuse('not_found', 'I can\'t find that dashboard.');
-    // Access: admins anything; otherwise the dashboard must be shared ('' owner) or
-    // owned by one of the user's entities, and any event in scope must be accessible.
-    if (user.role !== 'admin') {
-      if (def.ownerEntityId && !(user.entityIds || []).includes(def.ownerEntityId)) return refuse('no_access', 'No access to that dashboard.');
-      if (suiteId && auth && auth.canAccessSuite && !auth.canAccessSuite(user, suiteId)) return refuse('no_access', 'No access to that event.');
-    }
-    // Flatten tiles (top-level + carousels); keep data tiles (a Looker query) in order.
-    const allTiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))];
-    const dataTiles = allTiles.filter((t) => t && t.type !== 'text' && t.query && Array.isArray(t.query.fields) && t.query.fields.length);
+    const loaded = loadDashboardForCtx(ctx);
+    if (loaded.error) return loaded.error;
+    const def = loaded.def;
+    if (typeof resolveTileValue !== 'function') return refuse('unavailable', 'I can\'t read dashboards right now.');
+    // 1) Tile overview — each data tile's current headline value, scoped to the event.
+    const dataTiles = flatTiles(def).filter((t) => t && t.type !== 'text' && t.query && Array.isArray(t.query.fields) && t.query.fields.length);
     const CAP = 16;
     const tiles = [];
     for (const t of dataTiles.slice(0, CAP)) {
@@ -233,20 +293,132 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, resolve
       try { value = await resolveTileValue({ dashboardId, tileId: t.id, user, suiteId }); } catch { value = null; }
       tiles.push({ title: t.title || '(untitled)', value, visType: (t.vis && t.vis.type) || '', context: t.aiContext || '' });
     }
-    const text = allTiles.filter((t) => t && t.type === 'text' && t.body_text)
+    const text = flatTiles(def).filter((t) => t && t.type === 'text' && t.body_text)
       .slice(0, 4).map((t) => ({ title: t.title || '', body: String(t.body_text).slice(0, 400) }));
+    // 2) The queryable surface — the dashboard's primary explore + the measures and
+    //    dimensions ITS TILES use (so the model can ask deeper questions via
+    //    queryDashboard). Compact: only the fields this dashboard actually exposes.
+    const explores = dashboardExplores(def);
+    let fields = null;
+    if (explores[0]) {
+      const surf = await exploreSurface(explores[0].model, explores[0].view);
+      if (surf) {
+        // Expose the FULL explore surface so the user can ask anything the dataset
+        // supports (not just what's already on a tile) — PII dims are lookup-only, and
+        // we mark which fields the dashboard's own tiles use so the model can lead with
+        // those. Capped to keep the model's context manageable.
+        const used = dashboardFieldNames(def);
+        const MCAP = 40; const DCAP = 60;
+        fields = {
+          explore: surf.view, model: surf.model,
+          measures: surf.measures.slice(0, MCAP).map((m) => ({ name: m.name, label: m.label, onDashboard: used.has(m.name) || undefined })),
+          dimensions: surf.dimensions.filter((d) => !d.filterOnly).slice(0, DCAP).map((d) => ({ name: d.name, label: d.label, group: d.group, onDashboard: used.has(d.name) || undefined })),
+          lookupOnly: surf.dimensions.filter((d) => d.filterOnly).map((d) => d.name).slice(0, 20),
+          truncated: (surf.measures.length > MCAP || surf.dimensions.length > DCAP) || undefined,
+        };
+      }
+    }
     return {
       ok: true,
-      dashboard: { id: dashboardId, title: def.title || 'Dashboard' },
-      tiles,
-      text,
+      dashboard: { id: dashboardId, title: def.title || 'Dashboard', explores: explores.map((e) => e.view) },
+      tiles, text, fields,
       note: dataTiles.length > CAP ? `Showing the first ${CAP} of ${dataTiles.length} data tiles.` : undefined,
     };
   }
   const getDashboardSchema = {
     name: 'getDashboard',
-    description: 'Read the dashboard the user is currently viewing — its tiles and each tile\'s current headline value, scoped to the selected event. Use for any question about "this dashboard", "what is this telling me", "which number/tile is highest/lowest", or to explain/summarise what is on screen. Read-only; amounts are ZAR. Returns ok:false if no dashboard is open.',
+    description: 'Read the dashboard the user is currently viewing: its tiles + each tile\'s current headline value, AND its queryable data surface (the measures/dimensions its data exposes, in "fields"). Use for "this dashboard / what is this telling me / which number is highest", and ALWAYS call it first when the user wants to dig into the dashboard\'s data so you can then call queryDashboard with valid field names. Read-only; ZAR. ok:false if no dashboard is open.',
     input_schema: { type: 'object', properties: {} },
+  };
+
+  // ── queryDashboard ───────────────────────────────────────────────────────────
+  // Run a fresh, bounded, scoped query against the CURRENT dashboard's own explore —
+  // so the user can ask deeper questions than the tiles show (re-group, break down,
+  // trend, filter), over whatever dataset the dashboard is built on. Field names come
+  // from getDashboard's "fields". Scope is enforced the same way tiles are (applyScope,
+  // fail-closed) plus the suite's event lock (only for fields the explore has).
+  async function runQueryDashboard(args = {}, ctx = {}) {
+    const { user, suiteId, entityId } = ctx;
+    if (!user) return refuse('no_user', 'No authenticated user.');
+    const loaded = loadDashboardForCtx(ctx);
+    if (loaded.error) return loaded.error;
+    const def = loaded.def;
+    const explores = dashboardExplores(def);
+    if (!explores.length) return refuse('no_data', 'This dashboard has no queryable data tiles.');
+    // Pick the explore (default = the dashboard's primary; the model may name another).
+    let target = explores[0];
+    if (args.explore) {
+      const t = explores.find((e) => e.view === args.explore || `${e.model}::${e.view}` === args.explore);
+      if (!t) return refuse('unknown_explore', `This dashboard doesn't use "${args.explore}". It uses: ${explores.map((e) => e.view).join(', ')}.`);
+      target = t;
+    }
+    const surf = await exploreSurface(target.model, target.view);
+    if (!surf) return refuse('unavailable', 'I couldn\'t read that dashboard\'s fields.');
+    const measureByName = new Map(surf.measures.map((m) => [m.name, m]));
+    const dimByName = new Map(surf.dimensions.map((d) => [d.name, d]));
+    const validField = new Set([...measureByName.keys(), ...dimByName.keys()]);
+    const someMeasures = () => surf.measures.slice(0, 30).map((m) => m.name).join(', ');
+    // Validate measures, dimensions and filters against the explore's real fields.
+    const measureList = [];
+    if (args.measure) measureList.push(args.measure);
+    for (const mm of (Array.isArray(args.measures) ? args.measures : [])) if (!measureList.includes(mm)) measureList.push(mm);
+    if (!measureList.length) return refuse('unknown_measure', `Pick a measure from this dashboard's data. Available: ${someMeasures()}.`);
+    for (const mm of measureList) if (!measureByName.has(mm)) return refuse('unknown_measure', `"${mm}" isn't a measure on this dashboard's data. Available: ${someMeasures()}.`);
+    const measure = measureList[0];
+    const dimensions = Array.isArray(args.dimensions) ? args.dimensions : [];
+    for (const d of dimensions) {
+      if (!dimByName.has(d)) return refuse('unknown_dimension', `"${d}" isn't a dimension on this dashboard's data.`);
+      if (dimByName.get(d).filterOnly) return refuse('unknown_dimension', `"${d}" is contact/PII — it can only filter a lookup, never be grouped or listed.`);
+    }
+    const filters = {};
+    for (const [field, val] of Object.entries(args.filters || {})) {
+      if (!validField.has(field)) return refuse('unfilterable', `I can't filter on "${field}" on this dashboard's data.`);
+      if (val == null || String(val).trim() === '') continue;
+      filters[field] = String(val);
+    }
+    if (args.dateRange && String(args.dateRange).trim()) {
+      const dateDim = (args.dateField && validField.has(args.dateField)) ? args.dateField
+        : (surf.dimensions.find((d) => /date|time/i.test(String(d.type || ''))) || {}).name;
+      if (dateDim) filters[dateDim] = String(args.dateRange).trim();
+    }
+    const body = {
+      model: target.model, view: target.view,
+      fields: [...dimensions, ...measureList], filters,
+      sorts: [`${measure} desc`], limit: Math.min(Math.max(Number(args.limit) || 500, 1), 5000),
+    };
+    // Event lock (only fields this explore has), then the hard organiser scope.
+    applyExploreEventLocks(body.filters, suiteId, validField);
+    const before = new Set(Object.keys(body.filters));
+    const allowed = await query.applyScope(body, user, suiteId);
+    if (allowed === false) return refuse('no_scope', 'I can\'t tell which client\'s data to use here — open the dashboard under a client or event first.');
+    const addedScope = Object.keys(body.filters).some((k) => !before.has(k));
+    if (!addedScope && !body.filters[ORG]) {
+      // applyScope imposed no restriction (a broad admin with no event) — bind to the
+      // user's accessible organisers if this explore exposes the organiser field, else refuse.
+      const locks = auth && auth.accessibleOrgFilters ? auth.accessibleOrgFilters(user, entityId) : null;
+      if (locks && locks[ORG] && validField.has(ORG)) body.filters = { ...body.filters, ...locks };
+      else return refuse('no_scope', 'Open this dashboard under a specific client or event so I can scope its data safely.');
+    }
+    const rows = await query.runLookerQuery('/queries/run/json', body);
+    return { ok: true, rows: Array.isArray(rows) ? rows : [], count: Array.isArray(rows) ? rows.length : 0, measure, dimensions, explore: target.view, queryBody: body };
+  }
+  const queryDashboardSchema = {
+    name: 'queryDashboard',
+    description: 'Run a fresh, bounded query against the CURRENT dashboard\'s own data to answer a deeper question than the tiles show — re-group, break down, trend or filter it. Call getDashboard FIRST to get the valid field names ("fields"), then pass measure/dimensions/filters using those exact names. Scoped to the selected event; read-only; amounts ZAR. Returns rows you then phrase + cite (a breakdown auto-charts, like askData).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        measure: { type: 'string', description: 'Measure field name from getDashboard.fields.measures (e.g. core_tickets.count).' },
+        measures: { type: 'array', items: { type: 'string' }, description: 'Optional 2+ measures to compare side by side (separate coloured series).' },
+        dimensions: { type: 'array', items: { type: 'string' }, description: 'Optional dimension field names to break the measure down by (group-by). Contact/PII fields can\'t be grouped.' },
+        filters: { type: 'object', description: 'Optional {field: value} filters using this dashboard\'s field names.' },
+        dateRange: { type: 'string', description: 'Optional Looker date expression (e.g. "last 7 days"), applied to the data\'s date dimension.' },
+        dateField: { type: 'string', description: 'Optional explicit date dimension for dateRange.' },
+        explore: { type: 'string', description: 'Optional: which of the dashboard\'s explores to query (default = its primary).' },
+        limit: { type: 'number', description: 'Max rows (default 500).' },
+      },
+      required: ['measure'],
+    },
   };
 
   return {
@@ -254,5 +426,6 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, resolve
     askData: { schema: askDataSchema, run: runAskData },
     getGoals: { schema: getGoalsSchema, run: runGetGoals },
     getDashboard: { schema: getDashboardSchema, run: runGetDashboard },
+    queryDashboard: { schema: queryDashboardSchema, run: runQueryDashboard },
   };
 };
