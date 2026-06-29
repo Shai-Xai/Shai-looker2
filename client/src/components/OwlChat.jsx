@@ -673,6 +673,17 @@ function OwlChart({ source, entityId, suiteId, canPin }) {
     } catch { /* tainted */ }
   };
   const isChart = type === 'bar' || type === 'line' || type === 'pie';
+  const [followMsg, setFollowMsg] = useState('');
+  // Follow this chart in the briefing: materialise it as a tile (on the home "Saved
+  // from Owl" board) and add a 'follow' mark so the home briefing always addresses it.
+  const doFollow = async () => {
+    setFollowMsg('…');
+    try {
+      await api.owlPin({ entityId, suiteId: suiteId || undefined, target: 'home', follow: true, title: `${source.measure}${source.dimensions && source.dimensions.length ? ` by ${source.dimensions.join(', ')}` : ''}`, queryBody: source.queryBody, chartType: type });
+      setFollowMsg('👁 Following — your briefing will cover this');
+    } catch (e) { setFollowMsg(`⚠ ${(e && e.message) || 'Could not follow.'}`); }
+    setTimeout(() => setFollowMsg(''), 2800);
+  };
   const measCols = source.columns.filter((c) => c.kind === 'measure');
   const meas = measCols[0];
   const multiMeasure = measCols.length >= 2;
@@ -694,6 +705,8 @@ function OwlChart({ source, entityId, suiteId, canPin }) {
         {(source.rows || []).length > 0 && <button onClick={() => downloadText(csvName(source), toCSV(source.columns, source.rows))} title="Download as CSV (opens in Excel/Sheets)" style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 980, padding: '3px 10px', fontSize: 11.5, cursor: 'pointer' }}>⬇ CSV</button>}
         {isChart && <button onClick={downloadJpg} title="Download chart as image (JPEG)" style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 980, padding: '3px 10px', fontSize: 11.5, cursor: 'pointer' }}>⬇ JPG</button>}
         {showPin && <button onClick={() => setPinOpen((o) => !o)} title="Pin to a dashboard or home" style={{ border: '1px solid var(--hairline)', background: pinOpen ? 'var(--elevated, rgba(128,128,128,0.12))' : 'var(--card)', borderRadius: 980, padding: '3px 10px', fontSize: 11.5, cursor: 'pointer', color: 'var(--text)' }}>📌 Pin</button>}
+        {showPin && <button onClick={doFollow} title="Follow in your briefing — the home briefing will always read & address this" style={{ border: '1px solid var(--hairline)', background: 'var(--card)', borderRadius: 980, padding: '3px 10px', fontSize: 11.5, cursor: 'pointer', color: 'var(--text)' }}>👁 Follow</button>}
+        {followMsg && <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>{followMsg}</span>}
       </div>
       {showPin && pinOpen && <PinMenu source={source} entityId={entityId} suiteId={suiteId} chartType={type} onDone={() => setPinOpen(false)} />}
       {type === 'metric'
@@ -722,12 +735,13 @@ function PinMenu({ source, entityId, suiteId, chartType, onDone }) {
   const [dashboards, setDashboards] = useState([]);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(null);
+  const [follow, setFollow] = useState(false);
   useEffect(() => { let on = true; api.owlPinTargets(entityId).then((r) => { if (on) setDashboards(r.dashboards || []); }).catch(() => {}); return () => { on = false; }; }, [entityId]);
   async function pin() {
     setBusy(true);
     try {
-      const r = await api.owlPin({ entityId, suiteId: suiteId || undefined, target, title, queryBody: source.queryBody, chartType });
-      setDone(`Pinned to ${target === 'home' ? 'Home' : (r.dashboardTitle || 'the dashboard')} ✓`);
+      const r = await api.owlPin({ entityId, suiteId: suiteId || undefined, target, title, queryBody: source.queryBody, chartType, follow });
+      setDone(`Pinned to ${target === 'home' ? 'Home' : (r.dashboardTitle || 'the dashboard')}${follow ? ' · 👁 following in your briefing' : ''} ✓`);
     } catch (e) { setDone(`⚠ ${(e && e.message) || 'Could not pin.'}`); }
     setBusy(false);
   }
@@ -748,6 +762,10 @@ function PinMenu({ source, entityId, suiteId, chartType, onDone }) {
             : <optgroup key={f} label={f}>{groups[f].map((d) => <option key={d.id} value={d.id}>{d.title}</option>)}</optgroup>));
         })()}
       </select>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 9, fontSize: 12.5, color: 'var(--text)', cursor: 'pointer' }}>
+        <input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} />
+        <span>👁 Follow in my briefing <span style={{ color: 'var(--muted)' }}>— the home briefing will read &amp; address it</span></span>
+      </label>
       <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
         <button onClick={pin} disabled={busy || !title.trim()} style={{ border: 'none', borderRadius: 8, padding: '7px 14px', fontWeight: 700, fontSize: 13, cursor: busy ? 'default' : 'pointer', background: 'var(--brand)', color: '#fff' }}>{busy ? 'Pinning…' : 'Pin'}</button>
         <button onClick={onDone} style={{ border: '1px solid var(--hairline)', borderRadius: 8, padding: '7px 14px', fontSize: 13, cursor: 'pointer', background: 'var(--card)', color: 'var(--text)' }}>Cancel</button>

@@ -63,17 +63,21 @@ function mount(app, { db, auth }) {
     res.json({ dashboards });
   });
 
-  // Pin a chart. body: { entityId, suiteId?, target:'home'|<dashboardId>, title, queryBody, chartType }
+  // Pin a chart. body: { entityId, suiteId?, target:'home'|<dashboardId>, title, queryBody, chartType, follow? }
+  // `follow` also adds a 'follow' mark so the home briefing always reads + addresses the
+  // tile (the ⭐ "follow" the rest of Pulse uses). A followed tile still lives on a
+  // dashboard, so following implies materialising it (defaults the target to home).
   app.post('/api/owl/pin', auth.requireAuth, (req, res) => {
     if (!allowed(req.user)) return res.status(403).json({ error: 'The Owl pin isn\'t enabled for your account yet.' });
-    const { entityId, suiteId, target, title, queryBody, chartType } = req.body || {};
+    const { entityId, suiteId, target, title, queryBody, chartType, follow } = req.body || {};
     if (!entityId) return res.status(400).json({ error: 'Pick a client first.' });
     if (!queryBody || !queryBody.model || !queryBody.view) return res.status(400).json({ error: 'This answer has no chart to pin.' });
 
+    const tgt = target || (follow ? 'home' : '');
     let dash; let pinnedToHome = false;
-    if (target === 'home') { dash = ensureOwlDashboard(db, entityId, suiteId); pinnedToHome = true; }
+    if (tgt === 'home') { dash = ensureOwlDashboard(db, entityId, suiteId); pinnedToHome = true; }
     else {
-      dash = db.getDashboard(target);
+      dash = db.getDashboard(tgt);
       if (!dash) return res.status(404).json({ error: 'Dashboard not found.' });
       if (dash.ownerEntityId && dash.ownerEntityId !== entityId) return res.status(403).json({ error: 'Not allowed for this client.' });
     }
@@ -81,7 +85,8 @@ function mount(app, { db, auth }) {
     tile.layout.y = nextY([...(dash.tiles || []), ...((dash.carousels || []).flatMap((c) => c.tiles || []))]);
     db.updateDashboard(dash.id, { tiles: [...(dash.tiles || []), tile] });
     if (pinnedToHome) db.setMark('user', req.user.id, dash.id, tile.id, 'pin', true);
-    res.json({ ok: true, dashboardId: dash.id, dashboardTitle: dash.title, pinnedToHome });
+    if (follow) db.setMark('user', req.user.id, dash.id, tile.id, 'follow', true);
+    res.json({ ok: true, dashboardId: dash.id, dashboardTitle: dash.title, pinnedToHome, followed: !!follow });
   });
 
   console.log('[owlPin] pin-to-dashboard module mounted');
