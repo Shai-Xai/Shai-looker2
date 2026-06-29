@@ -14,6 +14,13 @@ export default function WhatsAppOwl() {
   const [busy, setBusy] = useState(false);
   const [testTo, setTestTo] = useState('');
   const [testMsg, setTestMsg] = useState('');
+  const [log, setLog] = useState(null);
+  const [logBusy, setLogBusy] = useState(false);
+  const loadLog = async () => {
+    setLogBusy(true);
+    try { const r = await api.owlWhatsappLog(); setLog(r.events || []); } catch { setLog([]); }
+    setLogBusy(false);
+  };
   const test = async () => {
     setTestMsg('Sending…');
     try {
@@ -27,6 +34,7 @@ export default function WhatsAppOwl() {
   useEffect(() => {
     api.owlWhatsapp().then((r) => { setCfg({ from: r.from || '', webhookPath: r.webhookPath, hasSecret: r.hasSecret, hasApiKey: r.hasApiKey, numbers: r.numbers || [] }); }).catch(() => setCfg({ numbers: [] }));
     api.adminListEntities().then((r) => setEnts(Array.isArray(r) ? r : (r.entities || []))).catch(() => setEnts([]));
+    loadLog();
   }, []);
   if (!cfg) return <p style={{ color: 'var(--muted)', fontSize: 13 }}>Loading…</p>;
 
@@ -96,6 +104,39 @@ export default function WhatsAppOwl() {
         </div>
         <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 4 }}>Note: WhatsApp only allows a business-initiated message like this if that number has messaged you in the last 24h (or via an approved template). If it fails with a window/template error, that’s expected — the real flow is the customer messaging first.</div>
       </div>
+
+      <div style={{ borderTop: '1px solid var(--hairline)', marginTop: 14, paddingTop: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ ...lbl, margin: 0 }}>Recent inbound (last 40 webhook hits)</span>
+          <button onClick={loadLog} disabled={logBusy} style={{ ...fld, cursor: logBusy ? 'default' : 'pointer', padding: '3px 9px', fontSize: 12 }}>{logBusy ? '…' : '↻ Refresh'}</button>
+        </div>
+        <div style={{ fontSize: 11.5, color: 'var(--muted)', margin: '4px 0 8px' }}>If your real WhatsApp messages don’t appear here at all, Clickatell isn’t delivering them — re-check the <strong>Reply Callbacks</strong> URL (step 1) is saved. If they appear but stop at <em>unparsed</em>, <em>no-account</em> or <em>rejected</em>, that tells us exactly what to fix.</div>
+        {log === null ? (
+          <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>Loading…</div>
+        ) : log.length === 0 ? (
+          <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>No webhook activity recorded yet. Send a WhatsApp to the number, then hit Refresh.</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {log.map((e, i) => (
+              <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'baseline', fontSize: 12, padding: '4px 6px', borderRadius: 6, background: 'var(--card)', border: '1px solid var(--hairline)' }}>
+                <span style={{ ...stageBadge(e.stage) }}>{e.stage}</span>
+                <span style={{ color: 'var(--muted)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{(e.created_at || '').slice(5, 16).replace('T', ' ')}</span>
+                {e.msisdn && <span style={{ color: 'var(--text)', whiteSpace: 'nowrap' }}>{e.msisdn}</span>}
+                <span style={{ color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.detail}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
+}
+
+// Colour the stage chip so the happy path (received → identified → replied) reads green
+// and the stop-points (rejected / unparsed / no-account / send-failed) read amber/red.
+function stageBadge(stage) {
+  const ok = stage === 'received' || stage === 'identified' || stage === 'replied';
+  const bad = stage === 'rejected' || stage === 'send-failed' || stage === 'error' || stage === 'no-ai-key';
+  const c = ok ? '#34c759' : bad ? '#ef4444' : '#b45309';
+  return { fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.03em', color: c, background: `${c}1a`, padding: '2px 6px', borderRadius: 5, whiteSpace: 'nowrap', minWidth: 64, textAlign: 'center' };
 }

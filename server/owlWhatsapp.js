@@ -25,11 +25,21 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
       body TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_owl_wa_msisdn ON owl_wa_msgs(msisdn, created_at);
+    CREATE TABLE IF NOT EXISTS owl_wa_events (
+      id TEXT PRIMARY KEY, msisdn TEXT NOT NULL DEFAULT '', stage TEXT NOT NULL,
+      detail TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_owl_wa_events ON owl_wa_events(created_at);
   `);
   const now = () => new Date().toISOString();
   const insMsg = sql.prepare('INSERT INTO owl_wa_msgs (id,msisdn,role,body,created_at) VALUES (?,?,?,?,?)');
   const histStmt = sql.prepare('SELECT role, body FROM owl_wa_msgs WHERE msisdn=? ORDER BY created_at DESC LIMIT 12');
   const J = (s, d) => { try { return JSON.parse(s); } catch { return d; } };
+
+  // Lightweight observability: record every meaningful step a webhook hit goes through,
+  // so the admin panel can SHOW whether Clickatell is delivering + where the flow stops.
+  const insEvent = sql.prepare('INSERT INTO owl_wa_events (id,msisdn,stage,detail,created_at) VALUES (?,?,?,?,?)');
+  const logEvent = (msisdn, stage, detail) => { try { insEvent.run(crypto.randomUUID(), msisdn || '', stage, String(detail || '').slice(0, 300), now()); } catch { /* ignore */ } };
 
   const toolEntries = Object.values(owlTools).filter((t) => t && t.schema && t.run);
   const toolMap = Object.fromEntries(toolEntries.map((t) => [t.schema.name, t]));
@@ -73,9 +83,10 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
 
   async function handleInbound(msisdn, text) {
     const id = identify(msisdn);
-    if (!id) { await messaging.sendWhatsapp({ to: msisdn, text: 'Hi! This number isn\'t linked to a Howler account yet. Ask your Howler contact to connect it, then I can answer questions about your event data.' }); return; }
+    if (!id) { logEvent(msisdn, 'no-account', 'number not linked to any Pulse user'); await messaging.sendWhatsapp({ to: msisdn, text: 'Hi! This number isn\'t linked to a Howler account yet. Ask your Howler contact to connect it, then I can answer questions about your event data.' }); return; }
+    logEvent(msisdn, 'identified', `${id.user.email || '?'} → ${id.entityId || '(no client)'}`);
     const apiKey = anthropicKeyForEntity ? anthropicKeyForEntity(id.entityId || undefined) : undefined;
-    if (!insights.isConfigured(apiKey)) { await messaging.sendWhatsapp({ to: msisdn, text: 'The Owl isn\'t available right now — please try again shortly.' }); return; }
+    if (!insights.isConfigured(apiKey)) { logEvent(msisdn, 'no-ai-key', 'Anthropic key not configured'); await messaging.sendWhatsapp({ to: msisdn, text: 'The Owl isn\'t available right now — please try again shortly.' }); return; }
     insMsg.run(crypto.randomUUID(), msisdn, 'user', text, now());
     const history = histStmt.all(msisdn).reverse().map((m) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.body }));
     // histStmt already includes the just-inserted user message at the end.
@@ -91,7 +102,8 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
     } catch { answer = ''; }
     if (!answer) answer = 'Sorry — I couldn\'t answer that just now. Try rephrasing?';
     insMsg.run(crypto.randomUUID(), msisdn, 'owl', answer, now());
-    await messaging.sendWhatsapp({ to: msisdn, text: answer });
+    const sent = await messaging.sendWhatsapp({ to: msisdn, text: answer });
+    logEvent(msisdn, sent && sent.ok ? 'replied' : 'send-failed', sent && sent.ok ? answer.slice(0, 120) : (sent && sent.error) || 'send error');
   }
 
   // Pull the sender + text out of Clickatell's inbound (MO) payload, defensively.
@@ -110,16 +122,20 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
   // turn never times the webhook out. Optional shared secret (?key= or x-webhook-secret).
   app.post('/api/whatsapp/inbound', (req, res) => {
     const secret = (db.getSetting('whatsapp_webhook_secret', '') || '').trim();
-    if (secret && req.query.key !== secret && req.get('x-webhook-secret') !== secret) return res.status(401).json({ error: 'bad secret' });
+    if (secret && req.query.key !== secret && req.get('x-webhook-secret') !== secret) {
+      logEvent('', 'rejected', 'bad/missing webhook secret — Clickatell URL is missing ?key=');
+      return res.status(401).json({ error: 'bad secret' });
+    }
     res.json({ ok: true });
     try {
       const { from, text } = parseInbound(req.body || {});
       const msisdn = norm(from);
       // Temporary aid for the first live test: confirm we parse Clickatell's reply shape.
       console.log(`[owlWhatsapp] inbound from=${msisdn || '∅'} text="${(text || '').slice(0, 60)}"${msisdn && text ? '' : ` (unparsed raw: ${JSON.stringify(req.body).slice(0, 400)})`}`);
-      if (!msisdn || !text) return;
-      handleInbound(msisdn, text).catch((e) => console.error('[owlWhatsapp] handle failed', e && e.message));
-    } catch (e) { console.error('[owlWhatsapp] inbound parse failed', e && e.message); }
+      if (!msisdn || !text) { logEvent(msisdn, 'unparsed', `couldn't read sender/text from payload: ${JSON.stringify(req.body).slice(0, 200)}`); return; }
+      logEvent(msisdn, 'received', text.slice(0, 120));
+      handleInbound(msisdn, text).catch((e) => { logEvent(msisdn, 'error', (e && e.message) || 'handler error'); console.error('[owlWhatsapp] handle failed', e && e.message); });
+    } catch (e) { logEvent('', 'error', (e && e.message) || 'parse error'); console.error('[owlWhatsapp] inbound parse failed', e && e.message); }
   });
 
   // Admin: manage the number→client allowlist + the WhatsApp 'from' number + secret.
@@ -146,6 +162,13 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
       db.setSetting('owl_whatsapp_numbers', JSON.stringify(map));
     }
     res.json({ ok: true });
+  });
+
+  // Admin: the recent webhook activity — so you can SEE whether Clickatell is delivering
+  // your real inbound messages, and exactly where the flow stops if it does arrive.
+  const recentStmt = sql.prepare('SELECT msisdn, stage, detail, created_at FROM owl_wa_events ORDER BY created_at DESC LIMIT 40');
+  app.get('/api/admin/owl-whatsapp/inbound-log', auth.requireAdmin, (_req, res) => {
+    res.json({ events: recentStmt.all() });
   });
 
   // Admin: send a test WhatsApp to confirm OUTBOUND works (before wiring the callback).
