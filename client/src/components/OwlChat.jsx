@@ -26,6 +26,8 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
   const [threads, setThreads] = useState([]);
   const [editingId, setEditingId] = useState(null); // thread being renamed inline
   const [editText, setEditText] = useState('');
+  const [movingId, setMovingId] = useState(null); // thread whose folder is being changed
+  const [collapsedFolders, setCollapsedFolders] = useState({});
   const [followups, setFollowups] = useState([]); // suggested next questions for the latest answer
   const [chatCopied, setChatCopied] = useState(false);
   const scrollRef = useRef(null);
@@ -82,6 +84,13 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
     setThreads((ts) => ts.filter((x) => x.id !== t.id));
     if (t.id === threadId) newChat();
     try { await api.owlDeleteThread(t.id); } catch { /* ignore */ } refreshThreads();
+  };
+  const startMove = (t) => { setEditingId(null); setMovingId(t.id); };
+  const setFolder = async (id, folder) => {
+    setMovingId(null);
+    const f = String(folder || '').trim();
+    setThreads((ts) => ts.map((t) => (t.id === id ? { ...t, folder: f } : t)));
+    try { await api.owlSetThreadFolder(id, f); } catch { /* ignore */ } refreshThreads();
   };
 
   const clientEvents = events.filter((e) => e.entityId === selEntity);
@@ -151,6 +160,42 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
 
   // Chat list (saved conversations) — a persistent left column on desktop, a slide-over
   // on mobile. Each row loads on tap; inline rename (✎) and delete (🗑) per chat.
+  const folders = [...new Set(threads.map((t) => t.folder).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  // Event names offered as ready-made folders (link a chat to an event by name).
+  const eventNames = [...new Set((selEntity ? clientEvents : events).map((e) => e.name).filter(Boolean))].filter((n) => !folders.includes(n)).slice(0, 40);
+  const rowBtn = { border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 12, padding: '4px 3px' };
+  const inlineFld = { width: '100%', boxSizing: 'border-box', padding: '8px 12px', border: 'none', borderLeft: '2px solid var(--brand)', background: 'var(--card)', color: 'var(--text)', fontSize: 13, fontFamily: 'inherit', outline: 'none' };
+  const renderRow = (t) => {
+    const active = t.id === threadId;
+    if (editingId === t.id) return (
+      <input key={t.id} autoFocus value={editText} onChange={(e) => setEditText(e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Enter') commitRename(t.id); if (e.key === 'Escape') setEditingId(null); }}
+        onBlur={() => commitRename(t.id)} style={inlineFld} />
+    );
+    if (movingId === t.id) return (
+      <select key={t.id} autoFocus defaultValue={t.folder || ''} style={inlineFld}
+        onChange={(e) => { const v = e.target.value; if (v === '__new__') { const name = window.prompt('New folder name'); if (name && name.trim()) setFolder(t.id, name.trim()); else setMovingId(null); } else setFolder(t.id, v); }}
+        onBlur={() => setMovingId(null)}>
+        <option value="">Unfiled</option>
+        {folders.length > 0 && <optgroup label="Folders">{folders.map((f) => <option key={f} value={f}>{f}</option>)}</optgroup>}
+        {eventNames.length > 0 && <optgroup label="Events">{eventNames.map((n) => <option key={n} value={n}>{n}</option>)}</optgroup>}
+        <option value="__new__">＋ New folder…</option>
+      </select>
+    );
+    return (
+      <div key={t.id} style={{ display: 'flex', alignItems: 'center', borderBottom: '1px solid var(--hairline)', background: active ? 'var(--elevated, rgba(128,128,128,0.12))' : 'transparent' }}>
+        <button onClick={() => loadThread(t)} style={{ flex: 1, minWidth: 0, textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer', padding: '8px 2px 8px 12px', color: 'var(--text)' }}>
+          <div style={{ fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.title || 'Chat'}</div>
+          <div style={{ fontSize: 10.5, color: 'var(--muted)', marginTop: 1 }}>{new Date(t.at).toLocaleDateString()}</div>
+        </button>
+        <button onClick={() => startMove(t)} title="Move to folder" aria-label="Move to folder" style={rowBtn}>📁</button>
+        <button onClick={() => startRename(t)} title="Rename" aria-label="Rename chat" style={rowBtn}>✎</button>
+        <button onClick={() => deleteThread(t)} title="Delete" aria-label="Delete chat" style={{ ...rowBtn, paddingRight: 9 }}>🗑</button>
+      </div>
+    );
+  };
+  const folderHdr = { display: 'flex', alignItems: 'center', gap: 6, width: '100%', textAlign: 'left', border: 'none', background: 'var(--elevated, rgba(128,128,128,0.06))', cursor: 'pointer', padding: '6px 12px', fontSize: 11.5, fontWeight: 700, color: 'var(--text)', borderBottom: '1px solid var(--hairline)' };
+  const unfiled = threads.filter((t) => !t.folder);
   const sidebarInner = (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: isMobile ? '78vw' : 212, maxWidth: isMobile ? 320 : 212, background: 'var(--bg, var(--card))', borderRight: '1px solid var(--hairline)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 10px 9px 12px', borderBottom: '1px solid var(--hairline)', flexShrink: 0 }}>
@@ -159,25 +204,22 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
       </div>
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
         {threads.length === 0 && <div style={{ padding: '12px', fontSize: 12.5, color: 'var(--muted)' }}>No saved chats yet.</div>}
-        {threads.map((t) => {
-          const active = t.id === threadId;
-          if (editingId === t.id) return (
-            <input key={t.id} autoFocus value={editText} onChange={(e) => setEditText(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') commitRename(t.id); if (e.key === 'Escape') setEditingId(null); }}
-              onBlur={() => commitRename(t.id)}
-              style={{ width: '100%', boxSizing: 'border-box', padding: '8px 12px', border: 'none', borderLeft: '2px solid var(--brand)', background: 'var(--card)', color: 'var(--text)', fontSize: 13, fontFamily: 'inherit', outline: 'none' }} />
-          );
+        {folders.map((f) => {
+          const items = threads.filter((t) => t.folder === f);
+          const collapsed = !!collapsedFolders[f];
           return (
-            <div key={t.id} style={{ display: 'flex', alignItems: 'center', borderBottom: '1px solid var(--hairline)', background: active ? 'var(--elevated, rgba(128,128,128,0.12))' : 'transparent' }}>
-              <button onClick={() => loadThread(t)} style={{ flex: 1, minWidth: 0, textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer', padding: '8px 2px 8px 12px', color: 'var(--text)' }}>
-                <div style={{ fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.title || 'Chat'}</div>
-                <div style={{ fontSize: 10.5, color: 'var(--muted)', marginTop: 1 }}>{new Date(t.at).toLocaleDateString()}</div>
+            <div key={f}>
+              <button onClick={() => setCollapsedFolders((c) => ({ ...c, [f]: !c[f] }))} style={folderHdr}>
+                <span style={{ fontSize: 9 }}>{collapsed ? '▶' : '▼'}</span>
+                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>📁 {f}</span>
+                <span style={{ color: 'var(--muted)', fontWeight: 500 }}>{items.length}</span>
               </button>
-              <button onClick={() => startRename(t)} title="Rename" aria-label="Rename chat" style={{ border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 12, padding: '4px 3px' }}>✎</button>
-              <button onClick={() => deleteThread(t)} title="Delete" aria-label="Delete chat" style={{ border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 12, padding: '4px 9px 4px 3px' }}>🗑</button>
+              {!collapsed && items.map(renderRow)}
             </div>
           );
         })}
+        {folders.length > 0 && unfiled.length > 0 && <div style={{ ...folderHdr, cursor: 'default', background: 'transparent', color: 'var(--muted)', fontWeight: 600 }}>Unfiled</div>}
+        {unfiled.map(renderRow)}
       </div>
     </div>
   );
