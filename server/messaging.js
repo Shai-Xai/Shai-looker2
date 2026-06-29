@@ -72,6 +72,86 @@ async function sendOne(channel, { to, text }) {
 async function sendSms({ to, text }) { return sendOne('sms', { to, text }); }
 async function sendWhatsapp({ to, text }) { return sendOne('whatsapp', { to, text }); }
 
+// Coerce Clickatell's varied error shapes into one readable string (shared by the
+// media/button sends below, which don't go through sendOne).
+function waErr(data, msg, status) {
+  const e = (msg && msg.error) || data.error || data;
+  return typeof e === 'string' ? e
+    : [e?.code, e?.description || e?.message].filter(Boolean).join(' ') || JSON.stringify(e || {}).slice(0, 300) || `HTTP ${status}`;
+}
+
+// POST a single pre-built WhatsApp message object to the One API. Shared by the
+// image + button sends (sendOne handles the plain-text channel path).
+async function waSend(message, key) {
+  try {
+    const res = await fetch(waEndpoint(), {
+      method: 'POST',
+      headers: { Authorization: key, 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ messages: [message] }), signal: AbortSignal.timeout(20000),
+    });
+    const data = await res.json().catch(() => ({}));
+    const msg = Array.isArray(data.messages) ? data.messages[0] : null;
+    if (res.ok && (!msg || msg.accepted !== false)) return { ok: true, id: msg?.apiMessageId || msg?.messageId };
+    return { ok: false, error: waErr(data, msg, res.status), status: res.status };
+  } catch (e) { return { ok: false, error: e.message }; }
+}
+
+// The media-upload URL. Derive it from the message endpoint's ORIGIN + the documented
+// /v1/media path, so a configured endpoint with an odd path/trailing slash/query can't
+// produce a malformed URL (a likely cause of the 404 we saw).
+function waMediaUrl() {
+  const ep = waEndpoint();
+  try { return `${new URL(ep).origin}/v1/media`; } catch { return ep.replace(/\/message\/?$/, '/media'); }
+}
+
+// Upload binary media (a chart PNG) to Clickatell and get back a fileId to reference
+// in a WhatsApp image message. One API requires upload-first (no direct URL). On
+// failure the error carries the exact URL + status + a snippet of the raw response,
+// so the admin activity log pinpoints the cause without server access.
+async function uploadWhatsappMedia(buffer, contentType = 'image/png') {
+  const key = waApiKey();
+  if (!key) return { ok: false, reason: 'not_configured' };
+  const mediaUrl = waMediaUrl();
+  try {
+    const res = await fetch(mediaUrl, {
+      method: 'POST',
+      headers: { Authorization: key, 'Content-Type': contentType, Accept: 'application/json' },
+      body: buffer, signal: AbortSignal.timeout(20000),
+    });
+    const raw = await res.text();
+    let data = {}; try { data = JSON.parse(raw); } catch { /* non-JSON (e.g. an HTML 404 page) */ }
+    const fileId = data.fileId || data.id || (Array.isArray(data.media) ? data.media[0]?.fileId : null);
+    if (res.ok && fileId) return { ok: true, fileId };
+    const parsed = waErr(data, null, res.status);
+    const why = (parsed && parsed !== '{}' ? parsed : '') || raw.slice(0, 160) || `HTTP ${res.status}`;
+    return { ok: false, error: `${why} [${res.status} @ ${mediaUrl}]`, status: res.status };
+  } catch (e) { return { ok: false, error: `${e.message} [@ ${mediaUrl}]` }; }
+}
+
+// Send a WhatsApp image (by uploaded fileId) with an optional caption.
+async function sendWhatsappImage({ to, fileId, caption = '', contentType = 'image/png' }) {
+  const key = waApiKey();
+  if (!key) return { ok: false, reason: 'not_configured' };
+  const msisdn = normaliseMsisdn(to);
+  if (!msisdn) return { ok: false, error: 'invalid number' };
+  const m = { channel: 'whatsapp', to: msisdn, media: { contentType, fileId, caption: String(caption || '').slice(0, 1024) } };
+  if (waFrom()) m.from = waFrom();
+  return waSend(m, key);
+}
+
+// Send an interactive reply-button message (max 3). buttons: [{title, postbackData}].
+async function sendWhatsappButtons({ to, body, buttons }) {
+  const key = waApiKey();
+  if (!key) return { ok: false, reason: 'not_configured' };
+  const msisdn = normaliseMsisdn(to);
+  if (!msisdn) return { ok: false, error: 'invalid number' };
+  const items = (buttons || []).slice(0, 3).map((b) => ({ type: 'reply', title: String(b.title || '').slice(0, 20), postbackData: String(b.postbackData || b.title || '').slice(0, 256) }));
+  if (!items.length) return { ok: false, error: 'no buttons' };
+  const m = { channel: 'whatsapp', to: msisdn, button: { body: String(body || '').slice(0, 1024), items } };
+  if (waFrom()) m.from = waFrom();
+  return waSend(m, key);
+}
+
 // Channel dispatcher (email stays in mailer; this owns sms + whatsapp).
 async function send({ channel, to, text }) {
   if (channel === 'sms') return sendSms({ to, text });
@@ -79,4 +159,4 @@ async function send({ channel, to, text }) {
   return { ok: false, error: `Unsupported channel: ${channel}` };
 }
 
-module.exports = { init, isConfigured, status, sendSms, sendWhatsapp, send, normaliseMsisdn, waFrom, waConfigured };
+module.exports = { init, isConfigured, status, sendSms, sendWhatsapp, send, normaliseMsisdn, waFrom, waConfigured, uploadWhatsappMedia, sendWhatsappImage, sendWhatsappButtons };
