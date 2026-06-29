@@ -1024,7 +1024,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
 
   console.log('[goals] Results pillar mounted');
   // Exposed so the briefing/digest can lead with the North Star (resolved values).
-  return { resolveMetric, computeProgress, listGoals, goalById, attachProgress, makeGoalCaches };
+  return { resolveMetric, computeProgress, listGoals, listPersonalGoals, goalById, attachProgress, makeGoalCaches };
 }
 
 module.exports = { mount };

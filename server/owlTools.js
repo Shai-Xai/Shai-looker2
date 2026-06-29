@@ -15,7 +15,7 @@
 
 const defaultCatalogue = require('./owlCatalogueSeed');
 
-module.exports = function createOwlTools({ query, auth, getGoalsApi, catalogue = defaultCatalogue }) {
+module.exports = function createOwlTools({ query, auth, db, getGoalsApi, catalogue = defaultCatalogue }) {
   if (!query || !query.applyScope || !query.runLookerQuery) {
     throw new Error('owlTools requires the query engine (applyScope + runLookerQuery).');
   }
@@ -159,19 +159,41 @@ module.exports = function createOwlTools({ query, auth, getGoalsApi, catalogue =
   // suiteId is access-checked by the chat route before we run.
   function slimGoal(g) { const out = { ...(g || {}) }; for (const k of ['series', 'curve', 'sparkline', 'history', 'checkpointsSeries']) delete out[k]; return out; }
   async function runGetGoals(_args = {}, ctx = {}) {
-    const { user, suiteId } = ctx;
+    const { user, suiteId, entityId } = ctx;
     if (!user) return refuse('no_user', 'No authenticated user.');
-    if (!suiteId) return refuse('no_event', 'Goals are per event — open or pick a specific event first.');
-    if (user.role !== 'admin' && auth && auth.canAccessSuite && !auth.canAccessSuite(user, suiteId)) return refuse('no_access', 'No access to that event.');
+    if (!suiteId && !entityId) return refuse('no_event', 'Open or pick an event (or client) first.');
+    if (suiteId && user.role !== 'admin' && auth && auth.canAccessSuite && !auth.canAccessSuite(user, suiteId)) return refuse('no_access', 'No access to that event.');
     const goalsApi = typeof getGoalsApi === 'function' ? getGoalsApi() : null;
     if (!goalsApi || !goalsApi.listGoals) return refuse('unavailable', 'Goals aren\'t available right now.');
+    const caches = goalsApi.makeGoalCaches ? goalsApi.makeGoalCaches() : null;
+    const attach = async (g, eventName) => { try { const p = await goalsApi.attachProgress(g, user, caches); return eventName ? { ...p, eventName } : p; } catch { return g; } };
     try {
-      const goals = goalsApi.listGoals(suiteId);
-      if (!goals.length) return { ok: true, goals: [], note: 'No goals set for this event yet.' };
-      const caches = goalsApi.makeGoalCaches ? goalsApi.makeGoalCaches() : null;
-      const out = [];
-      for (const g of goals) { try { out.push(await goalsApi.attachProgress(g, user, caches)); } catch { out.push(g); } }
-      return { ok: true, goals: out.map(slimGoal) };
+      // 1) Goals on the selected event — event-scoped AND the user's personal goals.
+      let goals = [];
+      if (suiteId) {
+        goals = goalsApi.listGoals(suiteId) || [];
+        if (goalsApi.listPersonalGoals) { try { goals = goals.concat(goalsApi.listPersonalGoals(suiteId, user) || []); } catch { /* ignore */ } }
+      }
+      if (goals.length) {
+        const out = []; for (const g of goals.slice(0, 12)) out.push(slimGoal(await attach(g)));
+        return { ok: true, goals: out };
+      }
+      // 2) Fallback: the goal may live on a different event/suite for this client —
+      // scan the client's events so a "KFF 26" goal still surfaces (tagged by event).
+      const eid = entityId || (suiteId && db && db.getSuite ? (db.getSuite(suiteId) || {}).entityId : null);
+      if (eid && db && db.listSuitesForEntity) {
+        const gathered = [];
+        for (const s of (db.listSuitesForEntity(eid) || [])) {
+          if (s.id === suiteId) continue;
+          for (const g of (goalsApi.listGoals(s.id) || [])) gathered.push({ g, name: s.name });
+          if (gathered.length >= 12) break;
+        }
+        if (gathered.length) {
+          const out = []; for (const { g, name } of gathered.slice(0, 12)) out.push(slimGoal(await attach(g, name)));
+          return { ok: true, goals: out, note: 'No goals are set on the selected event; these are goals on the client\'s other events (each tagged with its event).' };
+        }
+      }
+      return { ok: true, goals: [], note: 'No goals set for this event yet.' };
     } catch { return refuse('error', 'Couldn\'t read the goals for this event.'); }
   }
   const getGoalsSchema = {
