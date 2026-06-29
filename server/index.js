@@ -2882,12 +2882,12 @@ const actionsApi = require('./actions').mount(app, {
   },
   // The client's events (suites) — for optionally linking a campaign to one.
   listEvents: (entityId) => db.listSuitesForEntity(entityId).map((s) => ({ id: s.id, name: s.name, url: s.eventUrl || '' })),
-  // AI-draft campaign copy, grounded in the client's context.
-  draftCopy: async ({ entityId, goal, audienceCount }) => {
+  // AI-draft campaign copy, grounded in the client's context AND the event it's for (name + briefing + event-resolved currency) so the copy is on-event.
+  draftCopy: async ({ entityId, goal, audienceCount, eventSuiteId }) => {
     const apiKey = anthropicKeyForEntity(entityId);
     if (!insights.isConfigured(apiKey)) throw new Error('AI is not configured for this client');
-    const ent = db.getEntity(entityId);
-    return insights.draftCampaign({ goal, clientName: ent?.name, clientContext: ent?.aiContext || '', audienceCount, instructions: aiInstructionsFor(null, entityId), apiKey });
+    const ent = db.getEntity(entityId); const su = eventSuiteId ? db.getSuite(eventSuiteId) : null;
+    return insights.draftCampaign({ goal, clientName: ent?.name, clientContext: ent?.aiContext || '', audienceCount, apiKey, instructions: [aiInstructionsFor(eventSuiteId || null, entityId), su ? `This campaign is for the event "${su.name}"${su.briefing?.instructions ? ` — ${String(su.briefing.instructions).trim()}` : ''}. Write for THIS event specifically.` : ''].filter(Boolean).join('\n\n') });
   },
 });
 

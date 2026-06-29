@@ -1087,7 +1087,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
   app.post('/api/actions/:entityId/draft-copy', auth.requireAuth, auth.requirePermission('campaigns.approve'), async (req, res) => {
     if (!guard(req, res, req.params.entityId)) return;
     try {
-      const out = await draftCopy({ entityId: req.params.entityId, goal: String((req.body || {}).goal || '').slice(0, 1000), audienceCount: Number((req.body || {}).audienceCount) || 0 });
+      const out = await draftCopy({ entityId: req.params.entityId, goal: String((req.body || {}).goal || '').slice(0, 1000), audienceCount: Number((req.body || {}).audienceCount) || 0, eventSuiteId: String((req.body || {}).eventSuiteId || '') });
       res.json(out);
     } catch (e) { res.status(400).json({ error: e.message }); }
   });
