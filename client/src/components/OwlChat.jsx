@@ -248,7 +248,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
       <div key={t.id} style={{ display: 'flex', alignItems: 'center', borderBottom: '1px solid var(--hairline)', background: active ? 'var(--elevated, rgba(128,128,128,0.12))' : 'transparent' }}>
         <button onClick={() => loadThread(t)} style={{ flex: 1, minWidth: 0, textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer', padding: '8px 2px 8px 12px', color: 'var(--text)' }}>
           <div style={{ fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.title || 'Chat'}</div>
-          <div style={{ fontSize: 10.5, color: 'var(--muted)', marginTop: 1 }}>{new Date(t.at).toLocaleDateString()}</div>
+          <div style={{ fontSize: 10.5, color: 'var(--muted)', marginTop: 1 }}>{new Date(t.at).toLocaleString([], { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
         </button>
         <button onClick={() => startMove(t)} title="Move to folder" aria-label="Move to folder" style={rowBtn}>📁</button>
         <button onClick={() => startRename(t)} title="Rename" aria-label="Rename chat" style={rowBtn}>✎</button>
