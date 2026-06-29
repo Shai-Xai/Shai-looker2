@@ -168,46 +168,36 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, catalog
     const caches = goalsApi.makeGoalCaches ? goalsApi.makeGoalCaches() : null;
     const attach = async (g, eventName) => { try { const p = await goalsApi.attachProgress(g, user, caches); return eventName ? { ...p, eventName } : p; } catch { return g; } };
     try {
-      // 1) Goals on the selected event — event-scoped AND the user's personal goals.
-      let goals = [];
+      // 1) An event is selected → that event's goals (event-scoped AND the user's personal).
       if (suiteId) {
-        goals = goalsApi.listGoals(suiteId) || [];
+        let goals = goalsApi.listGoals(suiteId) || [];
         if (goalsApi.listPersonalGoals) { try { goals = goals.concat(goalsApi.listPersonalGoals(suiteId, user) || []); } catch { /* ignore */ } }
+        if (goals.length) {
+          const out = []; for (const g of goals.slice(0, 12)) out.push(slimGoal(await attach(g)));
+          return { ok: true, goals: out };
+        }
       }
-      // Diagnostic (temporary): the Owl reports "no goals" while the Goals tab shows
-      // them, so log exactly what scope arrived and what listGoals returns per suite.
-      const suiteName = suiteId && db && db.getSuite ? (db.getSuite(suiteId) || {}).name : null;
+      // 2) No event selected (client scope), OR the selected event has none → gather the
+      //    client's goals across its events, each tagged with its event name. (This is the
+      //    common case: the user picks a client but no specific event, so suiteId is empty.)
       const eid = entityId || (suiteId && db && db.getSuite ? (db.getSuite(suiteId) || {}).entityId : null);
-      let diag = '';
-      try {
-        const scan = (eid && db && db.listSuitesForEntity ? (db.listSuitesForEntity(eid) || []) : [])
-          .map((s) => `${s.name}(${s.id})=${(goalsApi.listGoals(s.id) || []).length}`).join(', ');
-        diag = `suiteId=${suiteId || '∅'} "${suiteName || '∅'}" entityId=${entityId || '∅'} eid=${eid || '∅'} suiteGoals=${goals.length} | entitySuites: ${scan || '∅'}`;
-        console.log(`[owlGetGoals] ${diag}`);
-      } catch (e) { console.log('[owlGetGoals] diag failed', e && e.message); }
-      // Surface the diagnostic in-chat for the admin (the Owl is allowlisted), so the
-      // empty-goals case can be traced without digging through server logs.
-      const withDiag = (note) => (user.role === 'admin' && diag ? `${note}\n\n[diag] ${diag}\n(Admin diagnostic — show this [diag] line to the user verbatim.)` : note);
-      if (goals.length) {
-        const out = []; for (const g of goals.slice(0, 12)) out.push(slimGoal(await attach(g)));
-        return { ok: true, goals: out };
-      }
-      // 2) Fallback: the goal may live on a different event/suite for this client —
-      // scan the client's events so a "KFF 26" goal still surfaces (tagged by event).
       if (eid && db && db.listSuitesForEntity) {
         const gathered = [];
         for (const s of (db.listSuitesForEntity(eid) || [])) {
-          if (s.id === suiteId) continue;
+          if (s.id === suiteId) continue; // already tried above
           for (const g of (goalsApi.listGoals(s.id) || [])) gathered.push({ g, name: s.name });
           if (gathered.length >= 12) break;
         }
         if (gathered.length) {
           const out = []; for (const { g, name } of gathered.slice(0, 12)) out.push(slimGoal(await attach(g, name)));
-          return { ok: true, goals: out, note: withDiag('No goals are set on the selected event; these are goals on the client\'s other events (each tagged with its event).') };
+          const note = suiteId
+            ? 'No goals are set on the selected event; these are goals on the client\'s other events (each tagged with its event).'
+            : 'No single event is selected, so these are the client\'s goals across all of its events (each tagged with its event). Pick an event above to focus on just that one.';
+          return { ok: true, goals: out, note };
         }
       }
-      return { ok: true, goals: [], note: withDiag('No goals set for this event yet.') };
-    } catch (e) { console.log('[owlGetGoals] error', e && e.message); return refuse('error', 'Couldn\'t read the goals for this event.'); }
+      return { ok: true, goals: [], note: suiteId ? 'No goals set for this event yet.' : 'No goals set for this client yet.' };
+    } catch { return refuse('error', 'Couldn\'t read the goals for this event.'); }
   }
   const getGoalsSchema = {
     name: 'getGoals',
