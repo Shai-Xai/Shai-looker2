@@ -167,6 +167,7 @@ export const api = {
   owlWhatsapp: () => fetch('/api/admin/owl-whatsapp').then(json),
   saveOwlWhatsapp: (body) => fetch('/api/admin/owl-whatsapp', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
   testOwlWhatsapp: (to) => fetch('/api/admin/owl-whatsapp/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to }) }).then(json),
+  owlWhatsappLog: () => fetch('/api/admin/owl-whatsapp/inbound-log').then(json),
   owlFieldDict: () => fetch('/api/admin/owl-fields').then(json),
   owlFieldsLookerSync: () => fetch('/api/admin/owl-fields/looker-sync').then(json),
   saveOwlFieldDict: (fields) => fetch('/api/admin/owl-fields', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fields }) }).then(json),
