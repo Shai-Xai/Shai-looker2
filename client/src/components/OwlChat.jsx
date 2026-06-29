@@ -284,6 +284,7 @@ function mdInline(text) {
 function splitRow(line) { let s = line.trim(); if (s.startsWith('|')) s = s.slice(1); if (s.endsWith('|')) s = s.slice(0, -1); return s.split('|').map((c) => c.trim()); }
 const looksNumeric = (s) => /^[R$€£]?\s?-?[\d,.]+%?$/.test(String(s).trim());
 function OwlMd({ text }) {
+  const isMobile = useIsMobile();
   const lines = String(text || '').split('\n');
   const blocks = []; let i = 0;
   while (i < lines.length) {
@@ -304,14 +305,42 @@ function OwlMd({ text }) {
   return (
     <div>
       {blocks.map((b, k) => {
-        if (b.t === 'table') return (
-          <div key={k} style={{ overflowX: 'auto', margin: '6px 0' }}>
-            <table style={{ borderCollapse: 'collapse', fontSize: '0.92em', width: '100%' }}>
-              <thead><tr>{b.header.map((h, j) => <th key={j} style={th}>{mdInline(h)}</th>)}</tr></thead>
-              <tbody>{b.rows.map((r, ri) => <tr key={ri}>{r.map((c, ci) => <td key={ci} style={td(ci > 0 && looksNumeric(c))}>{mdInline(c)}</td>)}</tr>)}</tbody>
-            </table>
-          </div>
-        );
+        if (b.t === 'table') {
+          // On a phone a 3+ column table overflows and clips columns. Render each row as
+          // a stacked card instead (first cell = title, the rest as Label: value lines) so
+          // nothing is cut off and there's no sideways scroll. Narrow tables stay tabular.
+          if (isMobile && b.header.length >= 3) return (
+            <div key={k} style={{ margin: '8px 0', display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {b.rows.map((r, ri) => {
+                const title = (r[0] || '').trim();
+                return (
+                  <div key={ri} style={{ border: '1px solid var(--hairline)', borderRadius: 10, padding: '8px 11px', background: 'var(--card)' }}>
+                    {title && <div style={{ fontWeight: 650, marginBottom: 4, color: 'var(--text)' }}>{mdInline(title)}</div>}
+                    {r.map((c, ci) => {
+                      if (ci === 0 && title) return null;
+                      const val = (c || '').trim();
+                      if (!val) return null;
+                      return (
+                        <div key={ci} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '2px 0', fontSize: '0.95em' }}>
+                          <span style={{ color: 'var(--muted)' }}>{mdInline(b.header[ci] || '')}</span>
+                          <span style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{mdInline(val)}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </div>
+          );
+          return (
+            <div key={k} style={{ overflowX: 'auto', margin: '6px 0' }}>
+              <table style={{ borderCollapse: 'collapse', fontSize: '0.92em', width: '100%' }}>
+                <thead><tr>{b.header.map((h, j) => <th key={j} style={th}>{mdInline(h)}</th>)}</tr></thead>
+                <tbody>{b.rows.map((r, ri) => <tr key={ri}>{r.map((c, ci) => <td key={ci} style={td(ci > 0 && looksNumeric(c))}>{mdInline(c)}</td>)}</tr>)}</tbody>
+              </table>
+            </div>
+          );
+        }
         if (b.t === 'ul') return <ul key={k} style={{ margin: '4px 0', paddingLeft: 18 }}>{b.items.map((it, j) => <li key={j} style={{ margin: '1px 0' }}>{mdInline(it)}</li>)}</ul>;
         return <p key={k} style={{ margin: '4px 0', whiteSpace: 'pre-wrap' }}>{mdInline(b.text)}</p>;
       })}
