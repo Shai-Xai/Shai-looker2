@@ -318,13 +318,17 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
             {bubble(m, i)}
             {m.role === 'owl' && m.sources && m.sources.length > 0 && <CitationChips sources={m.sources} entityId={selEntity} suiteId={selSuite} canPin={isAdmin} />}
             {m.role === 'owl' && m.text && !busy && (
-              <ReportToClaude
-                question={[...messages.slice(0, i)].reverse().find((x) => x.role === 'user')?.text || ''}
-                answer={m.text}
-                sources={m.sources}
-                scopeLabel={[clients.find((c) => c.id === selEntity)?.name, events.find((e) => e.id === selSuite)?.name].filter(Boolean).join(' · ')}
-                dashboardId={dashboardId}
-              />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 2 }}>
+                <CopyBtn text={m.text} />
+                <ShareMenu heading={[...messages.slice(0, i)].reverse().find((x) => x.role === 'user')?.text || 'Owl answer'} text={m.text} isMobile={isMobile} variant="tile" title="Share this answer" />
+                <ReportToClaude
+                  question={[...messages.slice(0, i)].reverse().find((x) => x.role === 'user')?.text || ''}
+                  answer={m.text}
+                  sources={m.sources}
+                  scopeLabel={[clients.find((c) => c.id === selEntity)?.name, events.find((e) => e.id === selSuite)?.name].filter(Boolean).join(' · ')}
+                  dashboardId={dashboardId}
+                />
+              </div>
             )}
           </div>
         ))}
@@ -567,6 +571,17 @@ function buildFixBrief({ question, answer, sources, scopeLabel, dashboardId }) {
   return lines.join('\n');
 }
 
+// Small text-action button styling shared by the per-message actions.
+const msgActionStyle = { border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 11.5, padding: '2px 4px', display: 'inline-flex', alignItems: 'center', gap: 4 };
+// Copy a single message's text to the clipboard.
+function CopyBtn({ text }) {
+  const [done, setDone] = useState(false);
+  return (
+    <button onClick={async () => { try { await navigator.clipboard.writeText(String(text || '')); setDone(true); setTimeout(() => setDone(false), 1500); } catch { /* ignore */ } }}
+      title="Copy this answer" style={msgActionStyle}>{done ? '✓ Copied' : '📋 Copy'}</button>
+  );
+}
+
 // One-tap "Report to Claude": copies the fix brief to the clipboard (falls back to the
 // share sheet on devices without clipboard access) so it can be pasted straight to Claude.
 function ReportToClaude({ question, answer, sources, scopeLabel, dashboardId }) {
@@ -599,11 +614,16 @@ function OwlChart({ source, entityId, suiteId, canPin }) {
   const [pinOpen, setPinOpen] = useState(false);
   const [stacked, setStacked] = useState(false);
   const chartBoxRef = useRef(null);
-  // Download the rendered chart as a PNG (ECharts paints to a canvas).
-  const downloadPng = () => {
+  // Download the rendered chart as a JPEG. ECharts paints to a transparent canvas, so
+  // flatten onto a white background first (JPEG has no transparency → would go black).
+  const downloadJpg = () => {
     const c = chartBoxRef.current && chartBoxRef.current.querySelector('canvas');
     if (!c) return;
-    try { const a = document.createElement('a'); a.href = c.toDataURL('image/png'); a.download = csvName(source).replace(/\.csv$/, '.png'); document.body.appendChild(a); a.click(); a.remove(); } catch { /* tainted */ }
+    try {
+      const tmp = document.createElement('canvas'); tmp.width = c.width; tmp.height = c.height;
+      const ctx = tmp.getContext('2d'); ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, tmp.width, tmp.height); ctx.drawImage(c, 0, 0);
+      const a = document.createElement('a'); a.href = tmp.toDataURL('image/jpeg', 0.92); a.download = csvName(source).replace(/\.csv$/, '.jpg'); document.body.appendChild(a); a.click(); a.remove();
+    } catch { /* tainted */ }
   };
   const isChart = type === 'bar' || type === 'line' || type === 'pie';
   const measCols = source.columns.filter((c) => c.kind === 'measure');
@@ -625,7 +645,7 @@ function OwlChart({ source, entityId, suiteId, canPin }) {
         </div>
         {canStack && <button onClick={() => setStacked((s) => !s)} title="Stack the series" style={{ border: '1px solid var(--hairline)', background: stacked ? 'var(--brand)' : 'var(--card)', color: stacked ? '#fff' : 'var(--text)', borderRadius: 980, padding: '3px 10px', fontSize: 11.5, cursor: 'pointer' }}>{stacked ? 'Stacked' : 'Stack'}</button>}
         {(source.rows || []).length > 0 && <button onClick={() => downloadText(csvName(source), toCSV(source.columns, source.rows))} title="Download as CSV (opens in Excel/Sheets)" style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 980, padding: '3px 10px', fontSize: 11.5, cursor: 'pointer' }}>⬇ CSV</button>}
-        {isChart && <button onClick={downloadPng} title="Download chart as image (PNG)" style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 980, padding: '3px 10px', fontSize: 11.5, cursor: 'pointer' }}>⬇ PNG</button>}
+        {isChart && <button onClick={downloadJpg} title="Download chart as image (JPEG)" style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 980, padding: '3px 10px', fontSize: 11.5, cursor: 'pointer' }}>⬇ JPG</button>}
         {showPin && <button onClick={() => setPinOpen((o) => !o)} title="Pin to a dashboard or home" style={{ border: '1px solid var(--hairline)', background: pinOpen ? 'var(--elevated, rgba(128,128,128,0.12))' : 'var(--card)', borderRadius: 980, padding: '3px 10px', fontSize: 11.5, cursor: 'pointer', color: 'var(--text)' }}>📌 Pin</button>}
       </div>
       {showPin && pinOpen && <PinMenu source={source} entityId={entityId} suiteId={suiteId} chartType={type} onDone={() => setPinOpen(false)} />}
