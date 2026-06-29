@@ -658,15 +658,18 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     },
   };
 
+  // `menu` = the slash-command palette entry for a tool (client /api/owl/capabilities).
+  // Defining it HERE keeps the palette sourced from the registry, so adding a tool with
+  // a menu automatically adds its slash command — one source of truth, no drift.
   return {
     catalogue,
-    askData: { schema: askDataSchema, run: runAskData },
-    getGoals: { schema: getGoalsSchema, run: runGetGoals },
-    getDashboard: { schema: getDashboardSchema, run: runGetDashboard },
+    askData: { schema: askDataSchema, run: runAskData, menu: { cmd: 'data', label: 'Ticket data', icon: '📊', example: 'How many tickets have I sold?' } },
+    getGoals: { schema: getGoalsSchema, run: runGetGoals, menu: { cmd: 'goals', label: 'Goals', icon: '🎯', example: 'How are my goals tracking?' } },
+    getDashboard: { schema: getDashboardSchema, run: runGetDashboard, menu: { cmd: 'dashboard', label: 'This dashboard', icon: '📋', example: 'Summarise what this dashboard is telling me.' } },
     queryDashboard: { schema: queryDashboardSchema, run: runQueryDashboard },
-    getAlerts: { schema: getAlertsSchema, run: runGetAlerts },
-    getCampaigns: { schema: getCampaignsSchema, run: runGetCampaigns },
-    askUpload: { schema: askUploadSchema, run: runAskUpload },
+    getAlerts: { schema: getAlertsSchema, run: runGetAlerts, menu: { cmd: 'alerts', label: 'Alerts', icon: '🔔', example: 'What alerts are set, and has anything triggered?' } },
+    getCampaigns: { schema: getCampaignsSchema, run: runGetCampaigns, menu: { cmd: 'campaigns', label: 'Campaigns', icon: '📣', example: 'How did my recent campaigns perform?' } },
+    askUpload: { schema: askUploadSchema, run: runAskUpload, menu: { cmd: 'uploads', label: 'Attached files', icon: '📎', example: "What's in my attached data?" } },
     createAlert: { schema: createAlertSchema, run: runCreateAlert },
   };
 };
