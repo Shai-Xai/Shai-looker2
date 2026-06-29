@@ -235,3 +235,42 @@ test('createAlert builds a metric label + filter for a curated dimension', async
   assert.equal(res.action.draft.metricFilters['core_ticket_types.name'], 'VIP');
   assert.match(res.action.draft.metricLabel, /VIP/);
 });
+
+// Single source of truth: the tool schema is built FROM alerts.js's option lists, so
+// adding an operator/channel/priority there automatically reaches the Owl. This guards
+// against the two lists drifting apart.
+const alertsMod = require('../server/alerts');
+test('createAlert schema tracks the alerts module\'s option lists', () => {
+  const props = tools().createAlert.schema.input_schema.properties;
+  assert.deepEqual(props.operator.enum, alertsMod.OPERATORS);
+  assert.deepEqual(props.channels.items.enum, alertsMod.CHANNELS);
+  assert.deepEqual(props.priority.enum, alertsMod.PRIORITIES);
+});
+
+test('createAlert accepts any operator the alerts module defines', async () => {
+  const ent = h.makeEntity('Ultra SA', 'Ultra South Africa');
+  const suite = h.db.createSuite({ entityId: ent.id, name: 'KFF 26' });
+  const user = h.makeClient('owl-ca6@client.test', [ent.id]);
+  for (const op of alertsMod.OPERATORS) {
+    const res = await tools().createAlert.run({ measure: M0, operator: op, threshold: 10 }, ctx(user, suite.id));
+    assert.equal(res.ok, true);
+    assert.equal(res.action.draft.operator, op);
+  }
+});
+
+test('createAlert carries channel + priority into the draft, defaulting sensibly', async () => {
+  const ent = h.makeEntity('Ultra SA', 'Ultra South Africa');
+  const suite = h.db.createSuite({ entityId: ent.id, name: 'KFF 26' });
+  const user = h.makeClient('owl-ca7@client.test', [ent.id]);
+  // Defaults: push channel, normal priority.
+  const def = await tools().createAlert.run({ measure: M0, operator: 'gte', threshold: 1 }, ctx(user, suite.id));
+  assert.deepEqual(def.action.draft.channels, ['push']);
+  assert.equal(def.action.draft.priority, 'normal');
+  // Explicit: a valid channel + priority pass through; an invalid channel is dropped.
+  const set = await tools().createAlert.run(
+    { measure: M0, operator: 'gte', threshold: 1, channels: ['email', 'carrier-pigeon'], priority: 'important' },
+    ctx(user, suite.id),
+  );
+  assert.deepEqual(set.action.draft.channels, ['email']);
+  assert.equal(set.action.draft.priority, 'important');
+});

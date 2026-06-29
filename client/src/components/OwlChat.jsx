@@ -27,6 +27,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
   const [editingId, setEditingId] = useState(null); // thread being renamed inline
   const [editText, setEditText] = useState('');
   const [movingId, setMovingId] = useState(null); // thread whose folder is being changed
+  const [confirmDelId, setConfirmDelId] = useState(null); // thread pending a 2nd-tap delete confirm
   const [collapsedFolders, setCollapsedFolders] = useState({});
   const [uploads, setUploads] = useState([]); // attached external data (CSV files / Google Sheets)
   const [attachOpen, setAttachOpen] = useState(false);
@@ -113,11 +114,15 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
     setThreads((ts) => ts.map((t) => (t.id === id ? { ...t, title } : t)));
     try { await api.owlRenameThread(id, title); } catch { /* ignore */ } refreshThreads();
   };
+  // Delete is a reliable in-app two-tap (🗑 → red "Delete?") — no native
+  // window.confirm, which can be suppressed in the overlay/PWA and made the
+  // trash silently do nothing. Optimistic remove, then reconcile with the server.
   const deleteThread = async (t) => {
-    if (!window.confirm(`Delete "${t.title || 'this chat'}"? This can't be undone.`)) return;
+    setConfirmDelId(null);
     setThreads((ts) => ts.filter((x) => x.id !== t.id));
     if (t.id === threadId) newChat();
-    try { await api.owlDeleteThread(t.id); } catch { /* ignore */ } refreshThreads();
+    try { await api.owlDeleteThread(t.id); } catch (e) { window.alert((e && e.message) || 'Could not delete the chat.'); }
+    refreshThreads();
   };
   const startMove = (t) => { setEditingId(null); setMovingId(t.id); };
   const setFolder = async (id, folder) => {
@@ -156,7 +161,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
   useEffect(() => { const el = scrollRef.current; if (el) el.scrollTop = el.scrollHeight; }, [messages]);
   // Load the saved-chats list when the panel opens; show the sidebar by default on
   // desktop (a persistent column) and hidden on mobile (a slide-over toggled by ☰).
-  useEffect(() => { if (open) { refreshThreads(); setSidebarOpen(!isMobile); } }, [open, isMobile]);
+  useEffect(() => { if (open) { refreshThreads(); setSidebarOpen(false); } }, [open, isMobile]); // chats list collapsed by default; toggle with ☰
   // Load the client's attached data sources (for the 📎 panel + so the Owl can query them).
   useEffect(() => { if (!open || !attachEntity) { setUploads([]); return; } api.owlUploads(attachEntity).then((r) => setUploads(r.uploads || [])).catch(() => {}); }, [open, attachEntity]);
   // Esc closes (only while open).
@@ -247,7 +252,9 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
         </button>
         <button onClick={() => startMove(t)} title="Move to folder" aria-label="Move to folder" style={rowBtn}>📁</button>
         <button onClick={() => startRename(t)} title="Rename" aria-label="Rename chat" style={rowBtn}>✎</button>
-        <button onClick={() => deleteThread(t)} title="Delete" aria-label="Delete chat" style={{ ...rowBtn, paddingRight: 9 }}>🗑</button>
+        {confirmDelId === t.id
+          ? <button onClick={() => deleteThread(t)} title="Tap again to delete" aria-label="Confirm delete" style={{ ...rowBtn, color: 'var(--error, #dc2626)', fontWeight: 800, paddingRight: 9 }}>Delete?</button>
+          : <button onClick={() => { setConfirmDelId(t.id); setTimeout(() => setConfirmDelId((c) => (c === t.id ? null : c)), 3000); }} title="Delete" aria-label="Delete chat" style={{ ...rowBtn, paddingRight: 9 }}>🗑</button>}
       </div>
     );
   };
@@ -667,6 +674,9 @@ function ActionCard({ action }) {
   if (!action || action.kind !== 'createAlert') return null;
   const d = action.draft || {};
   const cond = `${d.metricLabel || d.measureLabel || 'this metric'} ${OP_TEXT[d.operator] || 'reaches'} ${fmtVal(d.threshold)}${d.unit === '%' ? '%' : ''}`;
+  const CHAN_LABEL = { push: 'push', email: 'email', sms: 'SMS', slack: 'Slack' };
+  const chans = (d.channels || []).map((c) => CHAN_LABEL[c] || c);
+  const delivery = `via ${['in-app', ...chans].join(', ')}${d.priority === 'important' ? ' · important' : ''}`;
   const create = async () => {
     setState('busy'); setErr('');
     try {
@@ -681,7 +691,8 @@ function ActionCard({ action }) {
         <strong style={{ fontSize: 12.5 }}>Alert</strong>
         <span style={{ fontSize: 11, color: 'var(--muted)', border: '1px solid var(--hairline)', borderRadius: 980, padding: '1px 7px' }}>Draft</span>
       </div>
-      <div style={{ fontSize: 13, color: 'var(--text)', marginBottom: 8 }}>Notify me when <strong>{cond}</strong>.</div>
+      <div style={{ fontSize: 13, color: 'var(--text)', marginBottom: 4 }}>Notify me when <strong>{cond}</strong>.</div>
+      <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 8 }}>{delivery}</div>
       {state === 'done' ? (
         <div style={{ fontSize: 12.5, color: 'var(--brand)', fontWeight: 600 }}>✓ Alert created — you'll be notified when it triggers.</div>
       ) : (

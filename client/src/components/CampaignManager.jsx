@@ -536,7 +536,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
   const draft = async () => {
     setDrafting(true);
     try {
-      const d = await api.actionDraftCopy(entityId, { goal: f.goal, audienceCount: aud?.count || 0 });
+      const d = await api.actionDraftCopy(entityId, { goal: f.goal, audienceCount: aud?.count || 0, eventSuiteId: f.eventSuiteId || '' });
       setF((s) => ({
         ...s,
         subject: d.subject || s.subject, body: d.body || s.body, ctaText: d.ctaText || s.ctaText,

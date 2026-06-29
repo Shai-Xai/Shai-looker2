@@ -844,10 +844,10 @@ function representativeTileForExplore(entityId, model, view) {
 // run through tileQueryBody (which applies the event/organiser locks via that wiring
 // + effectiveFilterValues, then forces the organiser scope). `extraOverrides` are the
 // user's metric filters (queryField -> value). Returns a body or null (fail closed).
-async function scopedMetricBody({ model, view, fields, sorts, limit, extraOverrides, user, suiteId }) {
+async function scopedMetricBody({ model, view, fields, sorts, limit, extraOverrides, user, suiteId, entityScope }) {
   const su = db.getSuite(suiteId); if (!su) return null;
   const rep = representativeTileForExplore(su.entityId, model, view);
-  const lockMap = expandLockMap(db.lockedFiltersForSuite(suiteId));
+  const lockMap = expandLockMap(entityScope ? (db.getEntity(su.entityId)?.lockedFilters || {}) : db.lockedFiltersForSuite(suiteId)); // entityScope = client-wide (drop suite event locks; organiser ceiling still forced below)
   if (rep) {
     const synthetic = { ...rep.tile, id: 'metric', type: 'vis', vis: {}, query: { model, view, fields, ...(sorts ? { sorts } : {}), ...(limit ? { limit } : {}) } };
     return tileQueryBody(synthetic, rep.def, user, suiteId, lockMap, extraOverrides || {});
@@ -896,8 +896,8 @@ async function resolveCustomMetric({ model, view, measure, filters, user, suiteI
 
 // Distinct values of a dimension under this event's scope — the choices for a filter
 // (e.g. the Ticket Type values that exist for this event).
-async function metricFilterValues({ model, view, field, user, suiteId }) {
-  const body = await scopedMetricBody({ model, view, fields: [field], sorts: [field], limit: 500, extraOverrides: {}, user, suiteId });
+async function metricFilterValues({ model, view, field, user, suiteId, entityScope }) {
+  const body = await scopedMetricBody({ model, view, fields: [field], sorts: [field], limit: 500, extraOverrides: {}, user, suiteId, entityScope });
   if (!body) return [];
   const data = await runLookerQuery('/queries/run/json_detail', body);
   const out = [];
@@ -2882,12 +2882,12 @@ const actionsApi = require('./actions').mount(app, {
   },
   // The client's events (suites) — for optionally linking a campaign to one.
   listEvents: (entityId) => db.listSuitesForEntity(entityId).map((s) => ({ id: s.id, name: s.name, url: s.eventUrl || '' })),
-  // AI-draft campaign copy, grounded in the client's context.
-  draftCopy: async ({ entityId, goal, audienceCount }) => {
+  // AI-draft campaign copy, grounded in the client's context AND the event it's for (name + briefing + event-resolved currency) so the copy is on-event.
+  draftCopy: async ({ entityId, goal, audienceCount, eventSuiteId }) => {
     const apiKey = anthropicKeyForEntity(entityId);
     if (!insights.isConfigured(apiKey)) throw new Error('AI is not configured for this client');
-    const ent = db.getEntity(entityId);
-    return insights.draftCampaign({ goal, clientName: ent?.name, clientContext: ent?.aiContext || '', audienceCount, instructions: aiInstructionsFor(null, entityId), apiKey });
+    const ent = db.getEntity(entityId); const su = eventSuiteId ? db.getSuite(eventSuiteId) : null;
+    return insights.draftCampaign({ goal, clientName: ent?.name, clientContext: ent?.aiContext || '', audienceCount, apiKey, instructions: [aiInstructionsFor(eventSuiteId || null, entityId), su ? `This campaign is for the event "${su.name}"${su.briefing?.instructions ? ` — ${String(su.briefing.instructions).trim()}` : ''}. Write for THIS event specifically.` : ''].filter(Boolean).join('\n\n') });
   },
 });
 

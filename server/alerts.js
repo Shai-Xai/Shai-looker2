@@ -536,7 +536,7 @@ function mount(app, { db, auth, resolveTileValue, resolveCustomMetric, metricCat
     const { model, view, field } = req.body || {};
     if (!model || !view || !field) return res.status(400).json({ error: 'model, view and field required' });
     if (typeof metricFilterValues !== 'function') return res.json({ values: [] });
-    try { res.json({ values: await metricFilterValues({ model, view, field, user: req.user, suiteId: req.params.suiteId }) }); }
+    try { res.json({ values: await metricFilterValues({ model, view, field, user: req.user, suiteId: req.params.suiteId, entityScope: !!(req.body && req.body.allEvents) }) }); }
     catch (e) { res.status(500).json({ error: e.message }); }
   });
 
@@ -645,4 +645,7 @@ function mount(app, { db, auth, resolveTileValue, resolveCustomMetric, metricCat
   return { evaluate, tick, recentBeats, listForSuite, alertById, eventsFor, createAlert: createAlertFor };
 }
 
-module.exports = { mount };
+// Export the option lists so other modules (e.g. the Owl's createAlert act-tool)
+// build their schema + validation FROM these — one source of truth, so adding an
+// operator/channel/priority here automatically widens what the Owl can set + ask for.
+module.exports = { mount, RULE_TYPES, OPERATORS, CHANNELS, PRIORITIES, FREQUENCIES };
