@@ -25,7 +25,13 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
   const [historyOpen, setHistoryOpen] = useState(false);
   const [threads, setThreads] = useState([]);
   const [followups, setFollowups] = useState([]); // suggested next questions for the latest answer
+  const [chatCopied, setChatCopied] = useState(false);
   const scrollRef = useRef(null);
+  // Copy the whole conversation as plain text (Q/Owl transcript) to the clipboard.
+  const copyChat = async () => {
+    const text = messages.filter((m) => m.text).map((m) => `${m.role === 'user' ? 'Q' : 'Owl'}: ${m.text}`).join('\n\n');
+    try { await navigator.clipboard.writeText(text); setChatCopied(true); setTimeout(() => setChatCopied(false), 2000); } catch { /* ignore */ }
+  };
   const pickDock = (m) => { localStorage.setItem('howler_owl_dock', m); setDock(m); };
   const bumpZoom = (d) => setZoom((z) => { const n = Math.min(1.3, Math.max(0.8, Math.round((z + d) * 100) / 100)); localStorage.setItem('howler_owl_zoom', String(n)); return n; });
 
@@ -135,11 +141,14 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
         <button onClick={newChat} title="New chat" aria-label="New chat" style={{ ...hdrBtn, fontSize: 15, padding: '2px 5px' }}>✎</button>
         <button onClick={openHistory} title="Past chats" aria-label="Past chats" style={{ ...hdrBtn, fontSize: 15, padding: '2px 5px' }}>🕘</button>
         {messages.some((m) => m.text) && (
-          <ShareMenu
-            heading={`Owl chat${messages.find((m) => m.role === 'user' && m.text) ? ' — ' + messages.find((m) => m.role === 'user' && m.text).text.slice(0, 60) : ''}`}
-            text={messages.filter((m) => m.text).map((m) => `${m.role === 'user' ? 'Q' : 'Owl'}: ${m.text}`).join('\n\n')}
-            isMobile={isMobile} variant="tile" title="Share this chat"
-          />
+          <>
+            <button onClick={copyChat} title="Copy the chat" aria-label="Copy the chat" style={{ ...hdrBtn, fontSize: 14, padding: '2px 5px' }}>{chatCopied ? '✓' : '📋'}</button>
+            <ShareMenu
+              heading={`Owl chat${messages.find((m) => m.role === 'user' && m.text) ? ' — ' + messages.find((m) => m.role === 'user' && m.text).text.slice(0, 60) : ''}`}
+              text={messages.filter((m) => m.text).map((m) => `${m.role === 'user' ? 'Q' : 'Owl'}: ${m.text}`).join('\n\n')}
+              isMobile={isMobile} variant="tile" title="Share this chat"
+            />
+          </>
         )}
         <span style={{ flex: 1 }} />
         <div style={{ display: 'inline-flex', gap: 2, marginRight: 2 }} title="Text size">
