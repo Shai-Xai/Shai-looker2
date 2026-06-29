@@ -60,9 +60,11 @@ WHICH TOOL TO USE (route every question to the right one — do not answer goal 
 - getCampaigns → questions about email/SMS CAMPAIGNS / marketing sends: "what have we sent", "campaign performance", "open/click rates", "any campaigns running". Returns each campaign's status, channel, recipient count and results (sent/opens/clicks/conversions) — never individual contacts. Read-only.
 - askUpload → questions about a file or Google Sheet the user ATTACHED (listed under "Attached data sources" when present) — query/aggregate that table. To answer a question that spans the attachment AND the ticketing data (e.g. "uploaded target vs actual sold by event"), call BOTH askUpload and askData, then combine the figures in one answer/table. If no sources are attached, say so and point them to the 📎 attach button.
 - createAlert → when the user wants to be NOTIFIED / ALERTED / TOLD / REMINDED when a number reaches a level ("let me know when tickets hit 1000", "alert me if VIP sells out", "tell me when revenue passes R1m"). It DRAFTS the alert and the user confirms with a button — see ACTING below.
+- createSegment → when the user wants to BUILD or SAVE an AUDIENCE / cohort of people for later marketing ("make a segment of VIP buyers in Cape Town", "save these people as an audience", "build a guest list segment", "audience of 18-25 year olds"). The cohort is defined by curated dimensions (age, gender, buyer city/country, ticket type, ticket category, complimentary = guest list). It DRAFTS the segment + previews the size and reach; the user confirms with a button — see ACTING below. NEVER list or name individual people; only the count + reach. Contact fields (email/phone) cannot define a segment.
 
 ACTING (tools that DO something, not just read):
-- Some tools DRAFT an action for the user to confirm instead of just reading data. createAlert is one. You NEVER create/change anything silently: the tool returns a proposed action and the user taps a button to confirm it.
+- Some tools DRAFT an action for the user to confirm instead of just reading data (createAlert, createSegment). You NEVER create/change anything silently: the tool returns a proposed action and the user taps a button to confirm it.
+- After calling createSegment, do NOT say it's saved. Say you've DRAFTED it, state the cohort and the previewed size + reach (e.g. "a segment of VIP buyers in Cape Town — about 1,240 people, 1,180 emailable"), and tell them to tap "Create segment" to save it. Never list individuals. If it returns ok:false, relay why (e.g. pick a client, or contact fields can't define a segment).
 - After calling createAlert, do NOT say the alert is on or active. Say you've DRAFTED it, state plainly what it will watch and the exact condition (e.g. "I've drafted an alert for when Tickets Sold reaches 1,000 on this event"), and tell them to tap "Create alert" below to switch it on. If it returns ok:false (e.g. no event selected), relay why and what to do.
 - An alert needs a measure, an operator (at/above, at/below, above, below) and a threshold. If the user's wish is missing one (e.g. they didn't give a number), ask one short clarifying question before drafting.
 - Delivery defaults to an in-app/push notification at normal priority (inbox is always on). Only set the channels or priority if the user actually says how they want to be told (e.g. "email me", "text me", "make it important") — otherwise leave the defaults and don't ask. Mention how they'll be notified when you confirm the draft.
@@ -160,7 +162,7 @@ function owlAllowed(user) {
   return !!email && OWL_ALLOW.split(',').map((s) => s.trim()).filter(Boolean).includes(email);
 }
 
-function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, messaging, getAlertsApi, anthropicKeyForSuite, anthropicKeyForEntity, currencyNote }) {
+function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, messaging, getAlertsApi, getSegmentsApi, anthropicKeyForSuite, anthropicKeyForEntity, currencyNote }) {
   const sql = db.db;
   sql.exec(`
     CREATE TABLE IF NOT EXISTS owl_threads (
@@ -445,6 +447,29 @@ function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, m
     const r = alertsApi.createAlert({ suiteId, draft, user: req.user });
     if (!r.ok) return res.status(400).json({ error: r.error || 'Could not create the alert.' });
     res.status(201).json({ ok: true, alert: { id: r.alert.id, name: r.alert.name } });
+  });
+
+  // POST /api/owl/act/create-segment — the user tapping "Create segment" on the card
+  // the createSegment tool produced. Commits via the segment module's create path,
+  // which re-checks entity ownership + campaigns.approve (the Owl can never create a
+  // segment the user couldn't make by hand). Never receives or returns any PII.
+  app.post('/api/owl/act/create-segment', auth.requireAuth, (req, res) => {
+    if (!owlAllowed(req.user)) return res.status(403).json({ error: 'The native Owl isn\'t enabled for your account yet.' });
+    const { entityId, name, draft } = req.body || {};
+    if (!entityId || !draft || typeof draft !== 'object') return res.status(400).json({ error: 'entityId and draft are required.' });
+    // A query-segment can only be built from the ticket-data catalogue (not a dashboard's
+    // own explore, which the people-resolver can't scope) — reject clearly otherwise.
+    if (draft.mode === 'query') {
+      const cat = owlTools && owlTools.catalogue;
+      if (cat && (draft.model !== cat.model || draft.view !== cat.explore)) {
+        return res.status(400).json({ error: "I can only save a segment from your ticket data, not this dashboard's own data." });
+      }
+    }
+    const segmentsApi = typeof getSegmentsApi === 'function' ? getSegmentsApi() : null;
+    if (!segmentsApi || !segmentsApi.createSegment) return res.status(503).json({ error: 'Segments aren\'t available right now.' });
+    const r = segmentsApi.createSegment({ entityId, name, definition: draft, user: req.user });
+    if (!r.ok) return res.status(r.error === 'Not allowed' ? 403 : 400).json({ error: r.error || 'Could not create the segment.' });
+    res.status(201).json({ ok: true, segment: { id: r.segment.id, name: r.segment.name } });
   });
 
   // Pin-to-dashboard lives in its own disposable module; mount it here so index.js

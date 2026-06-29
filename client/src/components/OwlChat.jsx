@@ -397,6 +397,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
                 <CopyBtn text={m.text} />
                 <ShareMenu heading={[...messages.slice(0, i)].reverse().find((x) => x.role === 'user')?.text || 'Owl answer'} text={m.text} isMobile={isMobile} variant="tile" title="Share this answer" />
                 <DataActions source={(m.sources || []).filter((s) => s.kind !== 'dashboard').find((s) => s.rows && s.rows.length)} />
+                {isAdmin && selEntity && <SaveSegmentButton source={(m.sources || []).filter((s) => s.kind !== 'dashboard').find((s) => s.queryBody && s.queryBody.model)} entityId={selEntity} />}
                 <ReportToClaude
                   question={[...messages.slice(0, i)].reverse().find((x) => x.role === 'user')?.text || ''}
                   answer={m.text}
@@ -697,6 +698,29 @@ function buildFixBrief({ question, answer, sources, scopeLabel, dashboardId }) {
 
 // Small text-action button styling shared by the per-message actions.
 const msgActionStyle = { border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 11.5, padding: '2px 4px', display: 'inline-flex', alignItems: 'center', gap: 4 };
+// 🎯 "Save as segment" — turn ANY chat answer's cohort into a reusable audience
+// ("from any point of a chat"). Reuses the answer's live query (its filters define the
+// cohort); the server re-applies scope + only saves from the ticket-data explore. No PII.
+function SaveSegmentButton({ source, entityId }) {
+  const [state, setState] = useState(''); // '' | 'busy' | 'done'
+  if (!source || !source.queryBody || !source.queryBody.model) return null;
+  const save = async () => {
+    const suggested = [source.measure, ...(source.dimensions || [])].filter(Boolean).join(' by ').slice(0, 60) || 'Owl segment';
+    const name = window.prompt('Name this segment (a reusable audience of these people):', `${suggested} audience`.slice(0, 80));
+    if (name == null) return;
+    setState('busy');
+    const qb = source.queryBody;
+    try {
+      await api.owlCreateSegment({ entityId, name: name.trim(), draft: { mode: 'query', model: qb.model, view: qb.view, queryFilters: qb.filters || {} } });
+      setState('done'); setTimeout(() => setState(''), 2500);
+    } catch (e) { setState(''); window.alert((e && e.message) || 'Could not save the segment.'); }
+  };
+  return (
+    <button onClick={save} disabled={state === 'busy'} title="Save these people as a reusable audience (Engage → Segments)" style={msgActionStyle}>
+      {state === 'done' ? '✓ Saved' : (state === 'busy' ? '🎯 Saving…' : '🎯 Save as segment')}
+    </button>
+  );
+}
 // Copy a single message's text to the clipboard.
 function CopyBtn({ text }) {
   const [done, setDone] = useState(false);
@@ -726,10 +750,16 @@ function DataActions({ source }) {
 // commit re-checks permission server-side (alerts.manage), so this button can never
 // create something the user couldn't make by hand.
 const OP_TEXT = { gte: 'reaches', lte: 'drops to', gt: 'goes above', lt: 'drops below' };
+// Dispatch to the right confirm card by action kind (act-tools share the pattern).
 function ActionCard({ action }) {
+  if (!action) return null;
+  if (action.kind === 'createAlert') return <AlertActionCard action={action} />;
+  if (action.kind === 'createSegment') return <SegmentActionCard action={action} />;
+  return null;
+}
+function AlertActionCard({ action }) {
   const [state, setState] = useState(''); // '' | 'busy' | 'done' | 'error'
   const [err, setErr] = useState('');
-  if (!action || action.kind !== 'createAlert') return null;
   const d = action.draft || {};
   const cond = `${d.metricLabel || d.measureLabel || 'this metric'} ${OP_TEXT[d.operator] || 'reaches'} ${fmtVal(d.threshold)}${d.unit === '%' ? '%' : ''}`;
   const CHAN_LABEL = { push: 'push', email: 'email', sms: 'SMS', slack: 'Slack' };
@@ -758,6 +788,44 @@ function ActionCard({ action }) {
           <button onClick={create} disabled={state === 'busy'}
             style={{ border: 'none', borderRadius: 980, padding: '6px 16px', fontSize: 12.5, fontWeight: 700, cursor: state === 'busy' ? 'default' : 'pointer', background: state === 'busy' ? 'var(--elevated, rgba(128,128,128,0.18))' : 'var(--brand)', color: state === 'busy' ? 'var(--muted)' : '#fff' }}>
             {state === 'busy' ? 'Creating…' : 'Create alert'}
+          </button>
+          {state === 'error' && <span style={{ fontSize: 12, color: '#e0414a' }}>{err}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Segment confirm card — saves a reusable audience from a chat cohort. PII-safe: shows
+// only the count + per-channel reach, never people. Commit re-checks campaigns.approve.
+function SegmentActionCard({ action }) {
+  const [state, setState] = useState('');
+  const [err, setErr] = useState('');
+  const reach = action.reach || null;
+  const reachLine = reach
+    ? `${fmtVal(reach.total)} people${reach.email != null ? ` · ${fmtVal(reach.email)} emailable` : ''}${reach.sms ? ` · ${fmtVal(reach.sms)} SMS` : ''}`
+    : null;
+  const create = async () => {
+    setState('busy'); setErr('');
+    try { await api.owlCreateSegment({ entityId: action.entityId, name: action.name, draft: action.draft }); setState('done'); }
+    catch (e) { setState('error'); setErr((e && e.message) || 'Could not create the segment.'); }
+  };
+  return (
+    <div style={{ margin: '2px 0 10px', border: '1px solid var(--hairline)', borderRadius: 12, background: 'var(--card)', padding: '10px 12px', maxWidth: '85%' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 6 }}>
+        <span style={{ fontSize: 15 }}>🎯</span>
+        <strong style={{ fontSize: 12.5 }}>Segment</strong>
+        <span style={{ fontSize: 11, color: 'var(--muted)', border: '1px solid var(--hairline)', borderRadius: 980, padding: '1px 7px' }}>Draft</span>
+      </div>
+      <div style={{ fontSize: 13, color: 'var(--text)', marginBottom: reachLine ? 4 : 8 }}>Save <strong>{action.summary || action.name}</strong> as a reusable audience.</div>
+      {reachLine && <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 8 }}>{reachLine}</div>}
+      {state === 'done' ? (
+        <div style={{ fontSize: 12.5, color: 'var(--brand)', fontWeight: 600 }}>✓ Segment saved — find it in Engage → Segments.</div>
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <button onClick={create} disabled={state === 'busy'}
+            style={{ border: 'none', borderRadius: 980, padding: '6px 16px', fontSize: 12.5, fontWeight: 700, cursor: state === 'busy' ? 'default' : 'pointer', background: state === 'busy' ? 'var(--elevated, rgba(128,128,128,0.18))' : 'var(--brand)', color: state === 'busy' ? 'var(--muted)' : '#fff' }}>
+            {state === 'busy' ? 'Saving…' : 'Create segment'}
           </button>
           {state === 'error' && <span style={{ fontSize: 12, color: '#e0414a' }}>{err}</span>}
         </div>

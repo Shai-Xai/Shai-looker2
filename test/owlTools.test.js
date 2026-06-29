@@ -247,11 +247,57 @@ test('createAlert schema tracks the alerts module\'s option lists', () => {
   assert.deepEqual(props.priority.enum, alertsMod.PRIORITIES);
 });
 
-test('the "/" slash palette is sourced from the read tools (createAlert excluded)', () => {
+test('the "/" slash palette is sourced from the read tools (act tools excluded)', () => {
   const t = tools();
   const cmds = Object.values(t).filter((v) => v && v.menu).map((v) => v.menu.cmd);
   for (const c of ['data', 'goals', 'alerts', 'campaigns', 'dashboard', 'uploads']) assert.ok(cmds.includes(c), `missing /${c}`);
-  assert.equal(t.createAlert.menu, undefined); // the act tool has no slash command yet
+  assert.equal(t.createAlert.menu, undefined);   // act tools have no slash command
+  assert.equal(t.createSegment.menu, undefined);
+});
+
+// ── createSegment (the audience act-tool): DRAFTS a query-segment from a cohort ──
+
+test('createSegment drafts a query segment from a cohort of curated dimensions', async () => {
+  const ent = h.makeEntity('Ultra SA', 'Ultra South Africa');
+  const user = h.makeClient('seg1@client.test', [ent.id]);
+  const res = await tools().createSegment.run({ name: 'VIP Cape Town', filters: { 'core_ticket_types.name': 'VIP', 'core_purchasers.city': 'Cape Town' } }, { user, entityId: ent.id });
+  assert.equal(res.ok, true);
+  assert.equal(res.confirm, true);
+  assert.equal(res.action.kind, 'createSegment');
+  assert.equal(res.action.entityId, ent.id);
+  assert.equal(res.action.draft.mode, 'query');
+  assert.equal(res.action.draft.model, catalogue.model);
+  assert.equal(res.action.draft.view, catalogue.explore);
+  assert.equal(res.action.draft.queryFilters['core_ticket_types.name'], 'VIP');
+  assert.equal(res.action.draft.queryFilters['core_purchasers.city'], 'Cape Town');
+});
+
+test('createSegment supports guest list via the complimentary flag', async () => {
+  const ent = h.makeEntity('Ultra SA', 'Ultra South Africa');
+  const user = h.makeClient('seg-gl@client.test', [ent.id]);
+  const res = await tools().createSegment.run({ filters: { 'core_tickets.is_complimentary': 'Yes' } }, { user, entityId: ent.id });
+  assert.equal(res.ok, true);
+  assert.equal(res.action.draft.queryFilters['core_tickets.is_complimentary'], 'Yes');
+});
+
+test('createSegment rejects a PII/contact field as a cohort driver', async () => {
+  const ent = h.makeEntity('Ultra SA', 'Ultra South Africa');
+  const user = h.makeClient('seg2@client.test', [ent.id]);
+  const res = await tools().createSegment.run({ filters: { 'core_purchasers.email': 'x@y.com' } }, { user, entityId: ent.id });
+  assert.equal(res.ok, false);
+  assert.equal(res.reason, 'pii_filter');
+});
+
+test('createSegment refuses without a client in scope, and without a cohort', async () => {
+  const admin = h.makeAdmin('seg-admin@howler.test');
+  const noClient = await tools().createSegment.run({ filters: { 'core_ticket_types.name': 'VIP' } }, { user: admin });
+  assert.equal(noClient.ok, false);
+  assert.equal(noClient.reason, 'no_client');
+  const ent = h.makeEntity('Ultra SA', 'Ultra South Africa');
+  const user = h.makeClient('seg3@client.test', [ent.id]);
+  const noCohort = await tools().createSegment.run({ filters: {} }, { user, entityId: ent.id });
+  assert.equal(noCohort.ok, false);
+  assert.equal(noCohort.reason, 'no_cohort');
 });
 
 test('createAlert accepts any operator the alerts module defines', async () => {

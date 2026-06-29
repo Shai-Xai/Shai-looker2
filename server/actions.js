@@ -319,6 +319,10 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
   }
 
   const suppressed = (entityId) => new Set(sql.prepare('SELECT email FROM action_suppressions WHERE entity_id=?').all(entityId).map((r) => r.email));
+  // Resolver for `query`-source segments (cohorts the Owl builds in chat) — scoped
+  // people-query over the curated catalogue. Shares audienceMap shaping; we apply our
+  // own suppression below, exactly like the tile/paste paths.
+  const { resolveQueryAudience } = require('./audienceQuery')({ auth, db });
   const unsubSecret = () => {
     let s = db.getSetting('unsub_secret', '');
     if (!s) { s = crypto.randomBytes(18).toString('base64url'); db.setSetting('unsub_secret', s); }
@@ -589,6 +593,14 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     // Multi-source: combine several blocks (Union / Intersect / Exclude).
     if (cfg.audience && Array.isArray(cfg.audience.sources) && cfg.audience.sources.length) {
       return combineSources(entityId, cfg, user, depth);
+    }
+    // `query` source: a cohort the Owl built in chat (catalogue dims) → scoped people
+    // query. The resolver shapes rows under the SAME scope gate; we apply suppression
+    // + reach here (shared finalizeAudience), exactly like tile/paste.
+    if (cfg.audience && cfg.audience.mode === 'query') {
+      const { raw } = await resolveQueryAudience({ entityId, definition: cfg.audience, user, suiteId: cfg.eventSuiteId || '' });
+      const { list, excluded, noConsent, reach } = finalizeAudience(raw, suppressed(entityId));
+      return { list, fields: [], filterFields: [], columns: [], excluded, noConsent, filteredOut: 0, reach };
     }
     let raw = [];
     let fields = [];
