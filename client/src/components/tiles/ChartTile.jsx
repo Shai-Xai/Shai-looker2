@@ -181,8 +181,17 @@ function buildOption({ rows, dimensions, measures, pivots, visType, stacked, vis
   const orientationOf = (m) => yMap[m.name] || 'left';
   const hasRight = !isBar && measures.some((m) => orientationOf(m) === 'right');
   const hasLeft = measures.some((m) => orientationOf(m) !== 'right');
-  const dual = hasRight && hasLeft;
-  const yIndexOf = (m) => (dual && orientationOf(m) === 'right' ? 1 : 0);
+  // Auto dual-axis: with exactly two measures and NO explicit Looker y_axes config
+  // (e.g. the Owl's two-measure charts), give the 2nd measure its own right axis so a
+  // small-scale series (tickets) isn't flattened next to a large one (revenue). Skip
+  // when stacked (one axis is intended), horizontal bars, pie or scatter.
+  const autoDual = !(visConfig.y_axes || []).length && measures.length === 2 && !stacked && !isBar && !isScatter;
+  const dual = (hasRight && hasLeft) || autoDual;
+  const yIndexOf = (m) => {
+    if (hasRight && hasLeft) return orientationOf(m) === 'right' ? 1 : 0;
+    if (autoDual) return measures.indexOf(m) === 1 ? 1 : 0;
+    return 0;
+  };
   const hp = visConfig.hidden_pivots || {};
   // Looker "Values" data labels printed on each point/bar.
   const showLabels = visConfig.show_value_labels === true;
