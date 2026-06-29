@@ -99,29 +99,46 @@ export const api = {
   // Agentic Owl chat: POST a question, stream the grounded answer as plain text
   // (onText per delta), resolve with { threadId } (read from the X-Owl-Thread header
   // so a new conversation can be continued).
-  owlChat: async ({ suiteId, entityId, dashboardId, message, threadId }, onText) => {
+  owlChat: async ({ suiteId, entityId, dashboardId, message, threadId }, onText, onStatus) => {
     const res = await fetch('/api/owl/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ suiteId, entityId, dashboardId, message, threadId }) });
     if (!res.ok) return json(res); // pre-stream rejection (no scope / no API key) → throws
     const tid = res.headers.get('X-Owl-Thread') || threadId || null;
     const reader = res.body.getReader();
     const dec = new TextDecoder();
-    // The answer text streams first, then two trailing records: the model's
-    // "<<<FOLLOWUPS>>>[...]" (suggested next questions) and the server's
-    // "<<<OWL_SOURCES>>>{...}" (citation chips). Emit only the text before the first
-    // marker (holding back a possible partial-marker tail), then parse both records.
+    // The answer text streams first, then trailing records: the model's
+    // "<<<FOLLOWUPS>>>[...]" (suggested questions), then the server's
+    // "<<<OWL_SOURCES>>>{...}" (citations) + "<<<OWL_ACTIONS>>>[...]" (action cards).
+    // Mid-stream the server also pings "<<<OWL_STATUS>>>label<<</OWL_STATUS>>>" — what
+    // the Owl is doing — which we strip out live and surface via onStatus, never as text.
+    // We consume buf from the front as we emit, so status spans can be spliced cleanly.
     const FU = '<<<FOLLOWUPS>>>', SRC = '<<<OWL_SOURCES>>>', ACT = '<<<OWL_ACTIONS>>>';
-    const HOLD = Math.max(FU.length, SRC.length, ACT.length);
-    const firstMarker = () => { const xs = [buf.indexOf(FU), buf.indexOf(SRC), buf.indexOf(ACT)].filter((i) => i >= 0); return xs.length ? Math.min(...xs) : -1; };
-    let buf = '', emitted = 0, sources = [], followups = [], actions = [];
+    const SO = '<<<OWL_STATUS>>>', SE = '<<</OWL_STATUS>>>';
+    const HOLD = Math.max(FU.length, SRC.length, ACT.length, SO.length);
+    let buf = '', sources = [], followups = [], actions = [];
+    // Pull every COMPLETE status span out of buf (anywhere), firing onStatus for each.
+    const drainStatus = () => {
+      for (;;) {
+        const a = buf.indexOf(SO); if (a < 0) break;
+        const b = buf.indexOf(SE, a + SO.length); if (b < 0) break; // wait for the close
+        const label = buf.slice(a + SO.length, b);
+        buf = buf.slice(0, a) + buf.slice(b + SE.length);
+        if (label) onStatus?.(label);
+      }
+    };
+    // Earliest start of any marker — so we never emit marker bytes as answer text.
+    const nextMarker = () => { const xs = [buf.indexOf(FU), buf.indexOf(SRC), buf.indexOf(ACT), buf.indexOf(SO)].filter((i) => i >= 0); return xs.length ? Math.min(...xs) : -1; };
     for (;;) {
       const { done, value } = await reader.read(); if (done) break;
       if (value) buf += dec.decode(value, { stream: true });
-      const mi = firstMarker();
-      if (mi >= 0) { if (mi > emitted) { onText?.(buf.slice(emitted, mi)); emitted = mi; } }
-      else { const safe = buf.length - HOLD; if (safe > emitted) { onText?.(buf.slice(emitted, safe)); emitted = safe; } }
+      drainStatus();
+      const mi = nextMarker();
+      if (mi >= 0) { if (mi > 0) { onText?.(buf.slice(0, mi)); buf = buf.slice(mi); } } // stop at the marker; keep it buffered
+      else { const safe = buf.length - HOLD; if (safe > 0) { onText?.(buf.slice(0, safe)); buf = buf.slice(safe); } }
     }
-    const mi = firstMarker();
-    if (mi < 0 && buf.length > emitted) onText?.(buf.slice(emitted));
+    drainStatus();
+    // Anything left before the first END marker is trailing answer text.
+    const endXs = [buf.indexOf(FU), buf.indexOf(SRC), buf.indexOf(ACT)].filter((i) => i >= 0);
+    if (!endXs.length && buf) onText?.(buf);
     const fa = buf.indexOf(FU);
     if (fa >= 0) { const after = buf.slice(fa + FU.length); const end = after.indexOf(SRC); const blob = (end >= 0 ? after.slice(0, end) : after); const m = blob.match(/\[[\s\S]*\]/); if (m) { try { followups = JSON.parse(m[0]); } catch { followups = []; } } }
     const sa = buf.indexOf(SRC);

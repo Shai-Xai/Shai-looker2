@@ -48,6 +48,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
     try { r.start(); setListening(true); } catch { setListening(false); }
   };
   const [followups, setFollowups] = useState([]); // suggested next questions for the latest answer
+  const [status, setStatus] = useState(''); // live "thinking" label streamed while the Owl works
   const [chatCopied, setChatCopied] = useState(false);
   const scrollRef = useRef(null);
   // Copy the whole conversation as plain text (Q/Owl transcript) to the clipboard.
@@ -179,6 +180,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
     if (!canAsk) { setMessages((m) => [...m, { role: 'owl', text: 'Pick a client (or open an event) above, then ask me — I scope to that organiser.' }]); return; }
     if (text == null) setInput('');
     setFollowups([]);
+    setStatus('Thinking…'); // show an immediate indicator before the first token
     // Append the question + an empty Owl bubble we stream into.
     setMessages((m) => [...m, { role: 'user', text: q }, { role: 'owl', text: '' }]);
     setBusy(true);
@@ -188,7 +190,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
       return next;
     });
     try {
-      const { threadId: tid, sources, followups: fu, actions } = await api.owlChat({ suiteId: selSuite || undefined, entityId: selEntity || undefined, dashboardId: dashboardId || undefined, message: q, threadId }, appendToOwl);
+      const { threadId: tid, sources, followups: fu, actions } = await api.owlChat({ suiteId: selSuite || undefined, entityId: selEntity || undefined, dashboardId: dashboardId || undefined, message: q, threadId }, appendToOwl, setStatus);
       if (tid) { const isNew = tid !== threadId; setThreadId(tid); if (isNew) refreshThreads(); }
       if ((sources && sources.length) || (actions && actions.length)) setMessages((m) => {
         const next = m.slice();
@@ -200,6 +202,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
       appendToOwl((e && e.message) ? `⚠ ${e.message}` : '⚠ Sorry — I hit a problem answering that.');
     } finally {
       setBusy(false);
+      setStatus('');
     }
   }
   const onKeyDown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } };
@@ -216,7 +219,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
         background: m.role === 'user' ? 'var(--brand)' : 'var(--elevated, rgba(128,128,128,0.12))',
         color: m.role === 'user' ? '#fff' : 'var(--text)',
         borderTopRightRadius: m.role === 'user' ? 4 : 14, borderTopLeftRadius: m.role === 'user' ? 14 : 4,
-      }}>{m.role === 'owl' ? (m.text ? <OwlMd text={m.text} /> : (busy ? '…' : '')) : m.text}</div>
+      }}>{m.role === 'owl' ? (m.text ? <OwlMd text={m.text} /> : (busy ? <ThinkingDots label={status} /> : '')) : m.text}</div>
     </div>
   );
 
@@ -248,7 +251,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
       <div key={t.id} style={{ display: 'flex', alignItems: 'center', borderBottom: '1px solid var(--hairline)', background: active ? 'var(--elevated, rgba(128,128,128,0.12))' : 'transparent' }}>
         <button onClick={() => loadThread(t)} style={{ flex: 1, minWidth: 0, textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer', padding: '8px 2px 8px 12px', color: 'var(--text)' }}>
           <div style={{ fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.title || 'Chat'}</div>
-          <div style={{ fontSize: 10.5, color: 'var(--muted)', marginTop: 1 }}>{new Date(t.at).toLocaleDateString()}</div>
+          <div style={{ fontSize: 10.5, color: 'var(--muted)', marginTop: 1 }}>{new Date(t.at).toLocaleString([], { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
         </button>
         <button onClick={() => startMove(t)} title="Move to folder" aria-label="Move to folder" style={rowBtn}>📁</button>
         <button onClick={() => startRename(t)} title="Rename" aria-label="Rename chat" style={rowBtn}>✎</button>
@@ -452,6 +455,21 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
       <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.42)', opacity: open ? 1 : 0, transition: 'opacity .26s ease', backdropFilter: open ? 'blur(2px)' : 'none', WebkitBackdropFilter: open ? 'blur(2px)' : 'none' }} />
       <div style={{ position: 'absolute', top: 0, right: 0, height: '100%', width: w, boxShadow: '-10px 0 30px rgba(0,0,0,0.28)', transform: open ? 'translateX(0)' : 'translateX(100%)', transition: 'transform .26s var(--ease-spring, ease)' }}>{panel}</div>
     </div>
+  );
+}
+
+// The "thinking" indicator: three bouncing dots + the live status label streamed from
+// the server (e.g. "Reading your ticket data…"), so a multi-second tool call never looks
+// frozen. Shown in the empty Owl bubble until the first answer token arrives.
+function ThinkingDots({ label }) {
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, color: 'var(--muted)' }}>
+      <style>{'@keyframes owl-bd{0%,80%,100%{transform:translateY(0);opacity:.35}40%{transform:translateY(-3px);opacity:1}}'}</style>
+      <span style={{ display: 'inline-flex', gap: 3 }} aria-hidden="true">
+        {[0, 1, 2].map((i) => <span key={i} style={{ width: 6, height: 6, borderRadius: '50%', background: 'currentColor', display: 'inline-block', animation: 'owl-bd 1.2s ease-in-out infinite', animationDelay: `${i * 0.16}s` }} />)}
+      </span>
+      <span style={{ fontSize: 13 }}>{label || 'Thinking…'}</span>
+    </span>
   );
 }
 

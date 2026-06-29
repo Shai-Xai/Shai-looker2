@@ -85,11 +85,16 @@ export default function AlertEditor({ entityId, suiteId, suiteName, alert, smsAv
   const dimLabel = (name) => dimsFor().find((d) => d.name === name)?.label || name;
   const metricFiltersObj = () => { const o = {}; for (const f of mFilters) if (f.field && f.value) o[f.field] = f.value; return o; };
   // The event-name dimension for this explore — so the alert can be pinned to ONE
-  // event and its number can never span others. Prefer an explicit "Event" /
-  // "Event Name" dimension (not "Event Date"/"Event Type").
-  const eventDim = dimsFor().find((d) => /^(current )?event( name)?$/i.test(String(d.label).trim()))
-    || dimsFor().find((d) => /event/i.test(d.label) && /name/i.test(d.label))
-    || dimsFor().find((d) => /event/i.test(d.name) && /name/i.test(d.name)) || null;
+  // event and its number can never span others. Prefer the CANONICAL core_events.name;
+  // then an explicit "Event"/"Event Name" label — but never a cashless / comparison /
+  // past-event variant (e.g. "Cashless Events Name"), which filters the wrong join and
+  // reads 0. (Also not "Event Date"/"Event Type".)
+  const notEventName = (s) => /cashless|comparison|compare|past|previous|prior|transaction/i.test(String(s || ''));
+  const eventDim = dimsFor().find((d) => d.name === 'core_events.name')
+    || dimsFor().find((d) => /^(current )?event( name)?$/i.test(String(d.label).trim()) && !notEventName(d.label) && !notEventName(d.name))
+    || dimsFor().find((d) => /\bevent\b/i.test(d.label) && /name/i.test(d.label) && !notEventName(d.label) && !notEventName(d.name))
+    || dimsFor().find((d) => /(^|[._])events?[._]name$/i.test(d.name) && !notEventName(d.name))
+    || null;
   const eventField = eventDim?.name || '';
   const eventValue = eventField ? (mFilters.find((f) => f.field === eventField)?.value || '') : '';
   const setEventValue = (v) => setMFilters((fs) => { const others = fs.filter((f) => f.field !== eventField); return v ? [{ field: eventField, value: v }, ...others] : others; });
