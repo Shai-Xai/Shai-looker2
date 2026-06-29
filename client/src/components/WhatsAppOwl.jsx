@@ -11,6 +11,12 @@ export default function WhatsAppOwl() {
   const [secret, setSecret] = useState('');
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [testTo, setTestTo] = useState('');
+  const [testMsg, setTestMsg] = useState('');
+  const test = async () => {
+    setTestMsg('Sending…');
+    try { const r = await api.testOwlWhatsapp(testTo); setTestMsg(r.ok ? '✓ Sent — check WhatsApp on that number.' : `⚠ ${r.error || r.reason || 'failed'}`); } catch (e) { setTestMsg(`⚠ ${(e && e.message) || 'failed'}`); }
+  };
 
   useEffect(() => {
     api.owlWhatsapp().then((r) => { setCfg({ from: r.from || '', webhookPath: r.webhookPath, hasSecret: r.hasSecret, numbers: r.numbers || [] }); }).catch(() => setCfg({ numbers: [] }));
@@ -65,6 +71,16 @@ export default function WhatsAppOwl() {
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12 }}>
         <button onClick={save} disabled={busy} style={{ border: 'none', background: 'var(--brand)', color: '#fff', borderRadius: 8, padding: '7px 16px', fontSize: 13, fontWeight: 600, cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.6 : 1 }}>{busy ? 'Saving…' : 'Save WhatsApp setup'}</button>
         {saved && <span style={{ fontSize: 12.5, color: '#34c759', fontWeight: 600 }}>Saved ✓</span>}
+      </div>
+
+      <div style={{ borderTop: '1px solid var(--hairline)', marginTop: 14, paddingTop: 12 }}>
+        <span style={lbl}>Test connection (sends a WhatsApp now — confirms outbound before you wire the callback)</span>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <input value={testTo} onChange={(e) => setTestTo(e.target.value)} placeholder="your number, e.g. 27XXXXXXXXX" style={{ ...fld, width: 230 }} />
+          <button onClick={test} disabled={!testTo.trim()} style={{ ...fld, cursor: testTo.trim() ? 'pointer' : 'default' }}>Send test</button>
+          {testMsg && <span style={{ fontSize: 12.5, color: testMsg.startsWith('✓') ? '#34c759' : 'var(--muted)' }}>{testMsg}</span>}
+        </div>
+        <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 4 }}>Note: WhatsApp only allows a business-initiated message like this if that number has messaged you in the last 24h (or via an approved template). If it fails with a window/template error, that’s expected — the real flow is the customer messaging first.</div>
       </div>
     </div>
   );

@@ -162,6 +162,7 @@ export const api = {
   adminDeleteEntity: (id) => fetch(`/api/admin/entities/${id}`, { method: 'DELETE' }),
   owlWhatsapp: () => fetch('/api/admin/owl-whatsapp').then(json),
   saveOwlWhatsapp: (body) => fetch('/api/admin/owl-whatsapp', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
+  testOwlWhatsapp: (to) => fetch('/api/admin/owl-whatsapp/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to }) }).then(json),
   owlFieldDict: () => fetch('/api/admin/owl-fields').then(json),
   owlFieldsLookerSync: () => fetch('/api/admin/owl-fields/looker-sync').then(json),
   saveOwlFieldDict: (fields) => fetch('/api/admin/owl-fields', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fields }) }).then(json),

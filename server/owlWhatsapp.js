@@ -115,6 +115,8 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
     try {
       const { from, text } = parseInbound(req.body || {});
       const msisdn = norm(from);
+      // Temporary aid for the first live test: confirm we parse Clickatell's reply shape.
+      console.log(`[owlWhatsapp] inbound from=${msisdn || '∅'} text="${(text || '').slice(0, 60)}"${msisdn && text ? '' : ` (unparsed raw: ${JSON.stringify(req.body).slice(0, 400)})`}`);
       if (!msisdn || !text) return;
       handleInbound(msisdn, text).catch((e) => console.error('[owlWhatsapp] handle failed', e && e.message));
     } catch (e) { console.error('[owlWhatsapp] inbound parse failed', e && e.message); }
@@ -139,6 +141,14 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
       db.setSetting('owl_whatsapp_numbers', JSON.stringify(map));
     }
     res.json({ ok: true });
+  });
+
+  // Admin: send a test WhatsApp to confirm OUTBOUND works (before wiring the callback).
+  app.post('/api/admin/owl-whatsapp/test', auth.requireAdmin, async (req, res) => {
+    const to = norm(String((req.body || {}).to || ''));
+    if (!to) return res.status(400).json({ error: 'Enter a valid number (e.g. 27XXXXXXXXX).' });
+    const r = await messaging.sendWhatsapp({ to, text: String((req.body || {}).text || '').trim() || 'Hello from the Howler Owl 🦉 — your WhatsApp connection is working.' });
+    res.json(r);
   });
 
   console.log('[owlWhatsapp] WhatsApp door mounted (POST /api/whatsapp/inbound)');
