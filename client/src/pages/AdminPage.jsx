@@ -2352,8 +2352,8 @@ const AM_TASKS = [
 // Per-event tasks — repeated for EACH event (suite). `auto` reads the suite's own
 // data; the rest are manual ticks scoped to that suite.
 const EVENT_TASKS = [
-  { key: 'goals', icon: '⭐', title: 'Set event goals', desc: 'A live target for this event — preview the suite to add one.', section: 'suites', auto: (sd) => sd.goals > 0 },
-  { key: 'alerts', icon: '🔔', title: 'Set up alerts', desc: 'Metric watchers for this event — preview the suite to add one.', section: 'suites', auto: (sd) => sd.alerts > 0 },
+  { key: 'goals', icon: '⭐', title: 'Set event goals', desc: 'A live target for this event — opens the client view to add one.', section: 'suites', live: '/goals', auto: (sd) => sd.goals > 0 },
+  { key: 'alerts', icon: '🔔', title: 'Set up alerts', desc: 'Metric watchers for this event — opens the client view to add one.', section: 'suites', live: '/alerts', auto: (sd) => sd.alerts > 0 },
   { key: 'branding', icon: '🎨', title: 'Custom event branding', desc: 'Override the look for this event — logo, colours, sender.', section: 'suites', auto: (sd) => sd.brandingSet },
   { key: 'emailtmpl', icon: '✉️', title: 'Email template added', desc: 'Tailor this event’s email header, intro and footer.', section: 'suites', auto: (sd) => sd.templateSet },
   { key: 'briefing', icon: '📝', title: 'Tune the briefing', desc: 'Key dates, phase and instructions so the Owl reads this event right.', section: 'briefing' },
@@ -2361,7 +2361,7 @@ const EVENT_TASKS = [
   { key: 'segment', icon: '🎯', title: 'Build the audience', desc: 'e.g. everyone who abandoned a cart for this event.', section: 'segments' },
   { key: 'cart', icon: '🛒', title: 'Abandoned-cart campaign', desc: 'Win back checkouts that didn’t finish for this event.', section: 'campaigns' },
 ];
-function ClientSetupChecklist({ entity, suites, users, allUsers = [], go }) {
+function ClientSetupChecklist({ entity, suites, users, allUsers = [], go, preview }) {
   const [aux, setAux] = useState(null);
   const [open, setOpen] = useState({}); // section key → expanded? (collapsed by default)
   const toggle = (k) => setOpen((o) => ({ ...o, [k]: !o[k] }));
@@ -2449,6 +2449,8 @@ function ClientSetupChecklist({ entity, suites, users, allUsers = [], go }) {
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 8, flexWrap: 'wrap' }}>
           <span style={{ fontSize: 16, fontWeight: 800 }}>Setting up {entity.name}</span>
           <span style={{ fontSize: 13, color: 'var(--muted)', fontWeight: 600 }}>{doneCount} of {total} done{aux ? '' : ' · checking…'}</span>
+          <span style={{ flex: 1 }} />
+          {preview && <button style={previewBtn} onClick={() => preview('/')} title="Open this client's account as they see it">👁 Preview account</button>}
         </div>
         <div style={{ height: 8, borderRadius: 999, background: 'rgba(128,128,128,0.15)', overflow: 'hidden' }}>
           <div style={{ height: '100%', width: `${pct}%`, background: 'var(--brand)', borderRadius: 999, transition: 'width .3s' }} />
@@ -2498,7 +2500,7 @@ function ClientSetupChecklist({ entity, suites, users, allUsers = [], go }) {
                 {bar(su.id, title, null, sDone, EVENT_TASKS.length, true)}
                 {open[su.id] && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
-                    {EVENT_TASKS.map((t) => taskRow(`${su.id}_${t.key}`, t.icon, t.title, t.desc, evDone(su, t), () => go(t.section), evAuto(su, t) ? null : () => setTick(`amchk_${su.id}_${t.key}`, !evManual(su, t))))}
+                    {EVENT_TASKS.map((t) => taskRow(`${su.id}_${t.key}`, t.icon, t.title, t.desc, evDone(su, t), t.live && preview ? () => preview(t.live) : () => go(t.section), evAuto(su, t) ? null : () => setTick(`amchk_${su.id}_${t.key}`, !evManual(su, t))))}
                   </div>
                 )}
               </div>
@@ -2513,6 +2515,14 @@ const chkTick = { padding: '6px 10px', borderRadius: 8, border: '1.5px solid var
 
 function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites, users, allUsers, onChange, onBack }) {
   const [section, setSection] = useState('checklist');
+  const navigate = useNavigate();
+  const { setProfile } = useProfile();
+  // Switch the detail panel AND scroll to the top, so a "Go →" jump is obvious.
+  const goSection = (s) => { setSection(s); try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch { /* ignore */ } };
+  // Enter THIS client's live experience (scoped to them), landing on `path` — used
+  // by the "Preview account" button and the goals/alerts tasks, which are set up
+  // inside the client experience, not the admin panels.
+  const previewAccount = (path = '/') => { setProfile(entity.id, { name: entity.name, logo: entity.logo }); navigate(path); };
   const nav = [['checklist', '✅ Setup checklist'], ['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['sets', 'Custom sets'], ['briefing', 'Briefing'], ['messages', 'Messages'], ['digests', 'Digests'], ['campaigns', 'Campaigns'], ['segments', 'Segments'], ['fees', 'Fees'], ['settlements', 'Settlements'], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations'], ['email', 'Branding']];
   return (
     <div>
@@ -2525,7 +2535,7 @@ function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites,
           ))}
         </nav>
         <div style={{ flex: 1, minWidth: 280 }}>
-          {section === 'checklist' && <ClientSetupChecklist entity={entity} suites={suites} users={users} allUsers={allUsers} go={setSection} />}
+          {section === 'checklist' && <ClientSetupChecklist entity={entity} suites={suites} users={users} allUsers={allUsers} go={goSection} preview={previewAccount} />}
           {section === 'settings' && <ClientSettings entity={entity} suites={suites} fields={fields} onChange={onChange} onBack={onBack} />}
           {section === 'suites' && <ClientSuites entity={entity} suites={suites} allEntities={allEntities} allSets={allSets} dashTitle={dashTitle} fields={fields} onChange={onChange} />}
           {section === 'sets' && <CustomSets entity={entity} />}
