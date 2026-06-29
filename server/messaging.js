@@ -96,23 +96,36 @@ async function waSend(message, key) {
   } catch (e) { return { ok: false, error: e.message }; }
 }
 
+// The media-upload URL. Derive it from the message endpoint's ORIGIN + the documented
+// /v1/media path, so a configured endpoint with an odd path/trailing slash/query can't
+// produce a malformed URL (a likely cause of the 404 we saw).
+function waMediaUrl() {
+  const ep = waEndpoint();
+  try { return `${new URL(ep).origin}/v1/media`; } catch { return ep.replace(/\/message\/?$/, '/media'); }
+}
+
 // Upload binary media (a chart PNG) to Clickatell and get back a fileId to reference
-// in a WhatsApp image message. One API requires upload-first (no direct URL).
+// in a WhatsApp image message. One API requires upload-first (no direct URL). On
+// failure the error carries the exact URL + status + a snippet of the raw response,
+// so the admin activity log pinpoints the cause without server access.
 async function uploadWhatsappMedia(buffer, contentType = 'image/png') {
   const key = waApiKey();
   if (!key) return { ok: false, reason: 'not_configured' };
-  const mediaUrl = waEndpoint().replace(/\/message\/?$/, '/media');
+  const mediaUrl = waMediaUrl();
   try {
     const res = await fetch(mediaUrl, {
       method: 'POST',
       headers: { Authorization: key, 'Content-Type': contentType, Accept: 'application/json' },
       body: buffer, signal: AbortSignal.timeout(20000),
     });
-    const data = await res.json().catch(() => ({}));
+    const raw = await res.text();
+    let data = {}; try { data = JSON.parse(raw); } catch { /* non-JSON (e.g. an HTML 404 page) */ }
     const fileId = data.fileId || data.id || (Array.isArray(data.media) ? data.media[0]?.fileId : null);
     if (res.ok && fileId) return { ok: true, fileId };
-    return { ok: false, error: waErr(data, null, res.status), status: res.status };
-  } catch (e) { return { ok: false, error: e.message }; }
+    const parsed = waErr(data, null, res.status);
+    const why = (parsed && parsed !== '{}' ? parsed : '') || raw.slice(0, 160) || `HTTP ${res.status}`;
+    return { ok: false, error: `${why} [${res.status} @ ${mediaUrl}]`, status: res.status };
+  } catch (e) { return { ok: false, error: `${e.message} [@ ${mediaUrl}]` }; }
 }
 
 // Send a WhatsApp image (by uploaded fileId) with an optional caption.
