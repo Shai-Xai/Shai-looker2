@@ -124,11 +124,14 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
 
   // Admin: manage the number→client allowlist + the WhatsApp 'from' number + secret.
   app.get('/api/admin/owl-whatsapp', auth.requireAdmin, (_req, res) => {
+    const sec = (db.getSetting('whatsapp_webhook_secret', '') || '').trim();
     res.json({
       from: messaging.waFrom ? messaging.waFrom() : '',
-      hasSecret: !!(db.getSetting('whatsapp_webhook_secret', '') || '').trim(),
+      hasSecret: !!sec,
       hasApiKey: !!(messaging.waConfigured && messaging.waConfigured()),
-      webhookPath: '/api/whatsapp/inbound',
+      // When a secret is set, the callback URL must carry it — so hand back the exact
+      // URL (key embedded) to paste into Clickatell. Admin-only screen.
+      webhookPath: sec ? `/api/whatsapp/inbound?key=${encodeURIComponent(sec)}` : '/api/whatsapp/inbound',
       numbers: Object.entries(allowlist()).map(([msisdn, v]) => ({ msisdn, email: v.email || '', entityId: v.entityId || '' })),
     });
   });
