@@ -846,16 +846,16 @@ function representativeTileForExplore(entityId, model, view) {
 // user's metric filters (queryField -> value). Returns a body or null (fail closed).
 async function scopedMetricBody({ model, view, fields, sorts, limit, extraOverrides, user, suiteId, entityScope }) {
   const su = db.getSuite(suiteId); if (!su) return null;
+  const orgOnly = async () => { const body = { model, view, fields, filters: { ...(extraOverrides || {}) }, ...(sorts ? { sorts } : {}), ...(limit ? { limit } : {}) }; return (await applyScope(body, user, suiteId)) ? body : null; };
+  // entityScope = client-wide: the Event picker lists EVERY event, so query organiser-only.
+  // Borrowing a tile here would re-pin to a dashboard filter's default event (emptying the
+  // list, since effectiveFilterValues falls back to it). It's also the no-tile fallback.
+  if (entityScope) return orgOnly();
   const rep = representativeTileForExplore(su.entityId, model, view);
-  const lockMap = expandLockMap(entityScope ? (db.getEntity(su.entityId)?.lockedFilters || {}) : db.lockedFiltersForSuite(suiteId)); // entityScope = client-wide (drop suite event locks; organiser ceiling still forced below)
-  if (rep) {
-    const synthetic = { ...rep.tile, id: 'metric', type: 'vis', vis: {}, query: { model, view, fields, ...(sorts ? { sorts } : {}), ...(limit ? { limit } : {}) } };
-    return tileQueryBody(synthetic, rep.def, user, suiteId, lockMap, extraOverrides || {});
-  }
-  // No tile on this explore (shouldn't happen for catalogue explores): organiser scope only.
-  const body = { model, view, fields, filters: { ...(extraOverrides || {}) }, ...(sorts ? { sorts } : {}), ...(limit ? { limit } : {}) };
-  if (!(await applyScope(body, user, suiteId))) return null;
-  return body;
+  if (!rep) return orgOnly();
+  const lockMap = expandLockMap(db.lockedFiltersForSuite(suiteId));
+  const synthetic = { ...rep.tile, id: 'metric', type: 'vis', vis: {}, query: { model, view, fields, ...(sorts ? { sorts } : {}), ...(limit ? { limit } : {}) } };
+  return tileQueryBody(synthetic, rep.def, user, suiteId, lockMap, extraOverrides || {});
 }
 
 // The catalogue of explores a client can build a metric from — derived from the
