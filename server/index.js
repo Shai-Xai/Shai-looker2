@@ -844,10 +844,10 @@ function representativeTileForExplore(entityId, model, view) {
 // run through tileQueryBody (which applies the event/organiser locks via that wiring
 // + effectiveFilterValues, then forces the organiser scope). `extraOverrides` are the
 // user's metric filters (queryField -> value). Returns a body or null (fail closed).
-async function scopedMetricBody({ model, view, fields, sorts, limit, extraOverrides, user, suiteId }) {
+async function scopedMetricBody({ model, view, fields, sorts, limit, extraOverrides, user, suiteId, entityScope }) {
   const su = db.getSuite(suiteId); if (!su) return null;
   const rep = representativeTileForExplore(su.entityId, model, view);
-  const lockMap = expandLockMap(db.lockedFiltersForSuite(suiteId));
+  const lockMap = expandLockMap(entityScope ? (db.getEntity(su.entityId)?.lockedFilters || {}) : db.lockedFiltersForSuite(suiteId)); // entityScope = client-wide (drop suite event locks; organiser ceiling still forced below)
   if (rep) {
     const synthetic = { ...rep.tile, id: 'metric', type: 'vis', vis: {}, query: { model, view, fields, ...(sorts ? { sorts } : {}), ...(limit ? { limit } : {}) } };
     return tileQueryBody(synthetic, rep.def, user, suiteId, lockMap, extraOverrides || {});
@@ -896,8 +896,8 @@ async function resolveCustomMetric({ model, view, measure, filters, user, suiteI
 
 // Distinct values of a dimension under this event's scope — the choices for a filter
 // (e.g. the Ticket Type values that exist for this event).
-async function metricFilterValues({ model, view, field, user, suiteId }) {
-  const body = await scopedMetricBody({ model, view, fields: [field], sorts: [field], limit: 500, extraOverrides: {}, user, suiteId });
+async function metricFilterValues({ model, view, field, user, suiteId, entityScope }) {
+  const body = await scopedMetricBody({ model, view, fields: [field], sorts: [field], limit: 500, extraOverrides: {}, user, suiteId, entityScope });
   if (!body) return [];
   const data = await runLookerQuery('/queries/run/json_detail', body);
   const out = [];

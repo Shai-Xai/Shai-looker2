@@ -106,10 +106,12 @@ export default function AlertEditor({ entityId, suiteId, suiteName, alert, smsAv
     return fs.length ? `${ml} · ${fs.join(', ')}` : ml;
   };
   // Lazily fetch the distinct values for a filter dimension (scoped to this event).
-  const loadFilterVals = (field) => {
+  const loadFilterVals = (field, opts = {}) => {
     if (!field || filterVals[field] || !curExplore) return;
     setFilterVals((m) => ({ ...m, [field]: 'loading' }));
-    api.alertMetricFilterValues(suiteId, { model: curExplore.model, view: curExplore.view, field })
+    // allEvents: the Event picker lists EVERY event of this client (organiser scope),
+    // not just the one this suite is pinned to — so you can pin the alert to any event.
+    api.alertMetricFilterValues(suiteId, { model: curExplore.model, view: curExplore.view, field, ...(opts.allEvents ? { allEvents: true } : {}) })
       .then((r) => setFilterVals((m) => ({ ...m, [field]: r.values || [] })))
       .catch(() => setFilterVals((m) => ({ ...m, [field]: [] })));
   };
@@ -166,7 +168,7 @@ export default function AlertEditor({ entityId, suiteId, suiteName, alert, smsAv
   // Load the event list for the picker, and default-pin to THIS event (the suite the
   // alert belongs to) when its name is among the values — so a new alert is correctly
   // scoped out of the box, while staying changeable.
-  useEffect(() => { if (source === 'metric' && curExplore && eventField) loadFilterVals(eventField); }, [source, exKey, eventField]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (source === 'metric' && curExplore && eventField) loadFilterVals(eventField, { allEvents: true }); }, [source, exKey, eventField]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (source !== 'metric' || !eventField || eventValue) return;
     const vals = filterVals[eventField];
