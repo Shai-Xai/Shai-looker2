@@ -118,8 +118,9 @@ async function fetchGoogleSheetCsv(url) {
   return text;
 }
 
-const MAX_AUDIENCE = 2000;       // v1 safety cap per campaign
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// Audience person-mapping (dedupe + per-channel consent + reach) lives in a shared
+// module so chat-created "query" segments reuse the SAME logic — see audienceMap.js.
+const { MAX_AUDIENCE, EMAIL_RE, cellVal, isYes, buildRows, finalizeAudience } = require('./audienceMap');
 
 function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAudience, draftCopy, listEvents }) {
   const sql = db.db;
@@ -482,8 +483,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
 
   // Resolve the audience for a config: tile query (scoped) or pasted emails,
   // minus this client's suppression list. Returns { list, fields?, excluded }.
-  const cellVal = (cell) => String((cell && (cell.value ?? cell)) || '').trim();
-  const isYes = (v) => ['yes', 'y', 'true', '1', 'consented', 'opted in', 'opt in'].includes(String(v).trim().toLowerCase());
+  // cellVal / isYes / buildRows / finalizeAudience come from ./audienceMap (shared).
 
   // Distinct values of an attribute across parsed members (capped) — powers the
   // "is one of" multi-select for pasted/Sheet lists without a tile to query.
@@ -599,7 +599,6 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     let fields = [];
     let filterFields = [];
     let columns = []; // header columns of a delimited list (paste/gsheet) — for column-mapping
-    let noConsent = 0;
     let filteredOut = 0;
     if (cfg.audience.mode === 'paste' || cfg.audience.mode === 'gsheet') {
       // Pasted text / uploaded CSV-Excel (parsed to text client-side), or a linked
@@ -659,48 +658,13 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
         ...attrFields.map((f) => ({ name: f.name, label: `${f.label} (attributes)`, dashboardId: cfg.audience.attrDashboardId, tileId: cfg.audience.attrTileId })),
       ];
       if (emailField) {
-        for (const row of res.rows) {
-          const email = cellVal(row[emailField]).toLowerCase();
-          if (!EMAIL_RE.test(email)) continue;
-          // Merge the attributes row (if any) so filters can read its columns.
-          const merged = attrMap ? { ...row, ...(attrMap.get(email) || {}) } : row;
-          // Targeting filters (city/age/ticket category/lifetime spend/…).
-          if (filters.length && !rowPassesFilters(merged, filters)) { filteredOut += 1; continue; }
-          // Per-channel consent: don't drop — tag each channel so reach can be
-          // shown and consent enforced per channel at send (email-consented but
-          // not SMS-consented → email only). ignoreConsent bypasses (transactional).
-          const phone = phoneField ? cellVal(row[phoneField]) : '';
-          const emailOk = ignoreConsent || !emailConsentField || isYes(cellVal(row[emailConsentField]));
-          const smsOk = ignoreConsent || !smsConsentField || isYes(cellVal(row[smsConsentField]));
-          // Every column as a merge-field attribute (by field label AND name) so
-          // copy can use {{Ticket Type}}, {{City}}, etc.
-          const attributes = {};
-          for (const fl of [...res.fields, ...attrFields]) { const v = cellVal(merged[fl.name]); attributes[fl.name] = v; if (fl.label) attributes[fl.label] = v; }
-          raw.push({ email, name: nameField ? cellVal(row[nameField]) : '', ticket: ticketField ? cellVal(row[ticketField]) : '', phone, anchorRaw: anchorField ? cellVal(row[anchorField]) : '', emailOk, smsOk, attributes });
-        }
+        // Shape rows → recipients (consent-tagged) via the shared mapper.
+        const built = buildRows(res.rows, { emailField, nameField, phoneField, ticketField, anchorField, emailConsentField, smsConsentField, ignoreConsent, fields: res.fields, attrFields, attrMap, rowPassesFilters, filters });
+        raw = built.raw; filteredOut += built.filteredOut;
       }
     }
-    // Dedupe + suppression.
-    const sup = suppressed(entityId);
-    const seen = new Set();
-    const list = [];
-    let excluded = 0;
-    for (const r of raw) {
-      const key = r.email || r.phone; // phone-only recipients have no email
-      if (!key || seen.has(key)) continue;
-      seen.add(key);
-      if (r.email && sup.has(r.email)) { excluded += 1; continue; }
-      list.push(r);
-      if (list.length >= MAX_AUDIENCE) break;
-    }
-    // Per-channel reach (consent-aware) — surfaced at preview, enforced at send.
-    const reach = {
-      total: list.length,
-      email: list.filter((r) => r.email && r.emailOk).length,
-      sms: list.filter((r) => r.phone && r.smsOk).length,
-    };
-    // noConsent = contactable but reachable on no channel (consent says no everywhere).
-    noConsent = list.filter((r) => !(r.email && r.emailOk) && !(r.phone && r.smsOk)).length;
+    // Dedupe + suppression + per-channel reach (shared with Owl segments).
+    const { list, excluded, noConsent, reach } = finalizeAudience(raw, suppressed(entityId));
     return { list, fields, filterFields, columns, excluded, noConsent, filteredOut, reach };
   }
 
