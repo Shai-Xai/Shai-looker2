@@ -9,6 +9,7 @@ export default function WhatsAppOwl() {
   const [cfg, setCfg] = useState(null);
   const [ents, setEnts] = useState([]);
   const [secret, setSecret] = useState('');
+  const [apiKey, setApiKey] = useState('');
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
   const [testTo, setTestTo] = useState('');
@@ -19,7 +20,7 @@ export default function WhatsAppOwl() {
   };
 
   useEffect(() => {
-    api.owlWhatsapp().then((r) => { setCfg({ from: r.from || '', webhookPath: r.webhookPath, hasSecret: r.hasSecret, numbers: r.numbers || [] }); }).catch(() => setCfg({ numbers: [] }));
+    api.owlWhatsapp().then((r) => { setCfg({ from: r.from || '', webhookPath: r.webhookPath, hasSecret: r.hasSecret, hasApiKey: r.hasApiKey, numbers: r.numbers || [] }); }).catch(() => setCfg({ numbers: [] }));
     api.adminListEntities().then((r) => setEnts(Array.isArray(r) ? r : (r.entities || []))).catch(() => setEnts([]));
   }, []);
   if (!cfg) return <p style={{ color: 'var(--muted)', fontSize: 13 }}>Loading…</p>;
@@ -29,7 +30,7 @@ export default function WhatsAppOwl() {
   const delNum = (i) => setCfg((c) => ({ ...c, numbers: c.numbers.filter((_, j) => j !== i) }));
   const save = async () => {
     setBusy(true);
-    try { await api.saveOwlWhatsapp({ from: cfg.from, numbers: cfg.numbers.filter((n) => n.msisdn && n.email), ...(secret.trim() ? { secret: secret.trim() } : {}) }); setSaved(true); setSecret(''); setTimeout(() => setSaved(false), 1800); } catch { /* ignore */ }
+    try { await api.saveOwlWhatsapp({ from: cfg.from, numbers: cfg.numbers.filter((n) => n.msisdn && n.email), ...(secret.trim() ? { secret: secret.trim() } : {}), ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}) }); setSaved(true); setSecret(''); setApiKey(''); setTimeout(() => setSaved(false), 1800); } catch { /* ignore */ }
     setBusy(false);
   };
 
@@ -47,13 +48,17 @@ export default function WhatsAppOwl() {
         <button onClick={() => navigator.clipboard && navigator.clipboard.writeText(webhookUrl)} style={{ ...fld, cursor: 'pointer' }}>Copy</button>
       </div>
 
-      <span style={lbl}>2 · WhatsApp ‘from’ number (your Clickatell WhatsApp number, digits only)</span>
-      <input value={cfg.from} onChange={(e) => setCfg((c) => ({ ...c, from: e.target.value }))} placeholder="e.g. 27XXXXXXXXX" style={{ ...fld, width: 220 }} />
+      <span style={lbl}>2 · WhatsApp API key {cfg.hasApiKey ? '(set — leave blank to keep)' : '(the Authorization value from this Clickatell integration)'}</span>
+      <input value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={cfg.hasApiKey ? '•••••• (unchanged)' : 'paste the Authorization key'} style={{ ...fld, width: 320 }} />
+      <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 2 }}>WhatsApp can use a different Clickatell integration than SMS — set its key here. If left blank, it falls back to the SMS Clickatell key.</div>
 
-      <span style={lbl}>3 · Optional webhook secret {cfg.hasSecret ? '(set — leave blank to keep)' : ''}</span>
+      <span style={lbl}>3 · WhatsApp ‘from’ number (optional — One API usually infers it; digits only)</span>
+      <input value={cfg.from} onChange={(e) => setCfg((c) => ({ ...c, from: e.target.value }))} placeholder="e.g. 27XXXXXXXXX (or leave blank)" style={{ ...fld, width: 220 }} />
+
+      <span style={lbl}>4 · Optional webhook secret {cfg.hasSecret ? '(set — leave blank to keep)' : ''}</span>
       <input value={secret} onChange={(e) => setSecret(e.target.value)} placeholder={cfg.hasSecret ? '•••••• (unchanged)' : 'add ?key=… to the webhook URL'} style={{ ...fld, width: 260 }} />
 
-      <span style={lbl}>4 · Linked numbers (which phone → which client)</span>
+      <span style={lbl}>5 · Linked numbers (which phone → which client)</span>
       {cfg.numbers.length === 0 && <div style={{ fontSize: 12.5, color: 'var(--muted)', margin: '2px 0' }}>No numbers linked yet — add one below.</div>}
       {cfg.numbers.map((n, i) => (
         <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6, flexWrap: 'wrap' }}>

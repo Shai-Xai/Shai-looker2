@@ -33,21 +33,28 @@ function normaliseMsisdn(raw, defaultCc = '27') {
 // The WhatsApp sender — the Business number registered with Clickatell. SMS uses an
 // alphanumeric sender ID; WhatsApp must send FROM the WA number.
 function waFrom() { return (db?.getSetting('whatsapp_from') || process.env.WHATSAPP_FROM || '').trim(); }
+// WhatsApp can run through a SEPARATE Clickatell integration from SMS, so it has its own
+// key/endpoint — falling back to the SMS ones when not separately configured.
+function waApiKey() { return (db?.getSetting('whatsapp_api_key') || process.env.WHATSAPP_API_KEY || apiKey()).trim(); }
+function waEndpoint() { return (db?.getSetting('whatsapp_endpoint') || process.env.WHATSAPP_ENDPOINT || endpoint()).trim(); }
+function waConfigured() { return !!waApiKey(); }
 
 // Send one message on a Clickatell One API channel ('sms' | 'whatsapp'). Best-effort:
 // returns { ok, error }. Never throws. WhatsApp free-form replies are allowed inside the
 // 24h customer-service window (i.e. when replying to a customer's inbound message).
 async function sendOne(channel, { to, text }) {
-  if (!isConfigured()) return { ok: false, reason: 'not_configured' };
+  const isWa = channel === 'whatsapp';
+  const key = isWa ? waApiKey() : apiKey();
+  if (!key) return { ok: false, reason: 'not_configured' };
   const msisdn = normaliseMsisdn(to);
   if (!msisdn) return { ok: false, error: 'invalid number' };
-  const from = channel === 'whatsapp' ? waFrom() : sender();
-  const body = { messages: [{ channel, to: msisdn, content: String(text || '').slice(0, channel === 'whatsapp' ? 4096 : 1600) }] };
+  const from = isWa ? waFrom() : sender();
+  const body = { messages: [{ channel, to: msisdn, content: String(text || '').slice(0, isWa ? 4096 : 1600) }] };
   if (from) body.messages[0].from = from;
   try {
-    const res = await fetch(endpoint(), {
+    const res = await fetch(isWa ? waEndpoint() : endpoint(), {
       method: 'POST',
-      headers: { Authorization: apiKey(), 'Content-Type': 'application/json', Accept: 'application/json' },
+      headers: { Authorization: key, 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(20000), // fail a stuck send instead of hanging forever
     });
@@ -68,4 +75,4 @@ async function send({ channel, to, text }) {
   return { ok: false, error: `Unsupported channel: ${channel}` };
 }
 
-module.exports = { init, isConfigured, status, sendSms, sendWhatsapp, send, normaliseMsisdn, waFrom };
+module.exports = { init, isConfigured, status, sendSms, sendWhatsapp, send, normaliseMsisdn, waFrom, waConfigured };

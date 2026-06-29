@@ -127,6 +127,7 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
     res.json({
       from: messaging.waFrom ? messaging.waFrom() : '',
       hasSecret: !!(db.getSetting('whatsapp_webhook_secret', '') || '').trim(),
+      hasApiKey: !!(messaging.waConfigured && messaging.waConfigured()),
       webhookPath: '/api/whatsapp/inbound',
       numbers: Object.entries(allowlist()).map(([msisdn, v]) => ({ msisdn, email: v.email || '', entityId: v.entityId || '' })),
     });
@@ -134,6 +135,7 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
   app.put('/api/admin/owl-whatsapp', auth.requireAdmin, (req, res) => {
     const b = req.body || {};
     if (b.from !== undefined) db.setSetting('whatsapp_from', String(b.from || '').trim());
+    if (b.apiKey) db.setSetting('whatsapp_api_key', String(b.apiKey).trim()); // write-only; reuses SMS key if blank
     if (b.secret !== undefined) db.setSetting('whatsapp_webhook_secret', String(b.secret || '').trim());
     if (Array.isArray(b.numbers)) {
       const map = {};
