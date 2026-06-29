@@ -269,10 +269,25 @@ function buildOption({ rows, dimensions, measures, pivots, visType, stacked, vis
     splitLine: { lineStyle: { color: splitC } },
     axisLine: { show: false }, axisTick: { show: false },
   });
-  // Truncate long category labels (e.g. full event names) so they don't overlap
-  // into an unreadable mess — the full value stays in the tooltip (which reads the
-  // raw category name, not this formatted label).
-  const catLabel = (v) => { const s = String(v ?? ''); return s.length > 18 ? s.slice(0, 17).trimEnd() + '…' : s; };
+  // Category labels (e.g. full event names) can be long and often share a prefix
+  // ("Kappa FuturFestival 2025…" / "…2026"). A blind end-truncation makes them look
+  // identical — fatal in a downloaded image where there's no tooltip. So: strip the
+  // shared prefix (the distinguishing part is usually the tail), then truncate to a
+  // length that scales with how many labels there are (fewer bars → more room). The
+  // tooltip still shows the full raw value.
+  const commonPrefix = (() => {
+    const xs = labels.filter((s) => s != null && s !== '');
+    if (xs.length < 2) return '';
+    let p = String(xs[0]);
+    for (const s of xs) { while (p && !String(s).startsWith(p)) p = p.slice(0, -1); if (!p) break; }
+    return p.length >= 8 ? p : ''; // only strip a substantial shared prefix
+  })();
+  const catMax = labels.length <= 3 ? 30 : labels.length <= 6 ? 22 : 16;
+  const catLabel = (v) => {
+    let s = String(v ?? '');
+    if (commonPrefix && s.startsWith(commonPrefix) && s.length > commonPrefix.length) s = `…${s.slice(commonPrefix.length).replace(/^[\s\-–—:]+/, '')}`;
+    return s.length > catMax ? `${s.slice(0, catMax - 1).trimEnd()}…` : s;
+  };
   const catAxis = {
     type: 'category', data: labels, boundaryGap: true,
     name: isBar ? '' : xName, nameLocation: 'middle', nameGap: 28, nameTextStyle: nameStyle,
