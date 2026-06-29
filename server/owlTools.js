@@ -15,7 +15,7 @@
 
 const defaultCatalogue = require('./owlCatalogueSeed');
 
-module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAlertsApi, getCampaignsApi, getUploadsApi, resolveTileValue, getExploreFields, catalogue = defaultCatalogue }) {
+module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAlertsApi, getCampaignsApi, getUploadsApi, resolveTileValue, getExploreFields, getFieldOverrides, catalogue = defaultCatalogue }) {
   if (!query || !query.applyScope || !query.runLookerQuery) {
     throw new Error('owlTools requires the query engine (applyScope + runLookerQuery).');
   }
@@ -97,14 +97,21 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     return out;
   }
   // Fetch an explore's measures/dimensions (cached upstream); PII dims are filterOnly.
+  // The single field overlay (server/owlFields.js), keyed by field name. Looker labels
+  // are the base; this overlays an admin's label rename + synonyms + typical questions,
+  // applied EVERYWHERE a field appears (askData via owlChat, and dashboard explores here)
+  // so the same field reads the same way across the Owl.
+  const fieldOverlay = () => { try { return (typeof getFieldOverrides === 'function' && getFieldOverrides()) || {}; } catch { return {}; } };
+  const withOverlay = (f, ov) => { const o = ov[f.name]; return o ? { ...f, label: (o.label && o.label.trim()) || f.label, aka: o.aka || [], questions: o.questions || [] } : f; };
   async function exploreSurface(model, view) {
     if (typeof getExploreFields !== 'function') return null;
     let f; try { f = await getExploreFields(model, view); } catch { return null; }
     if (!f) return null;
+    const ov = fieldOverlay();
     return {
       model, view,
-      measures: (f.measures || []).map((m) => ({ name: m.name, label: m.label || m.name, type: m.type, group: m.group_label || m.group || '' })),
-      dimensions: (f.dimensions || []).map((d) => ({ name: d.name, label: d.label || d.name, type: d.type, group: d.group_label || d.group || '', filterOnly: isPII(d.name) })),
+      measures: (f.measures || []).map((m) => withOverlay({ name: m.name, label: m.label || m.name, type: m.type, group: m.group_label || m.group || '' }, ov)),
+      dimensions: (f.dimensions || []).map((d) => withOverlay({ name: d.name, label: d.label || d.name, type: d.type, group: d.group_label || d.group || '', filterOnly: isPII(d.name) }, ov)),
     };
   }
   // Apply the suite's event lock, but ONLY for fields that exist in the target explore
@@ -320,8 +327,8 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
         const MCAP = 40; const DCAP = 60;
         fields = {
           explore: surf.view, model: surf.model,
-          measures: surf.measures.slice(0, MCAP).map((m) => ({ name: m.name, label: m.label, onDashboard: used.has(m.name) || undefined })),
-          dimensions: surf.dimensions.filter((d) => !d.filterOnly).slice(0, DCAP).map((d) => ({ name: d.name, label: d.label, group: d.group, onDashboard: used.has(d.name) || undefined })),
+          measures: surf.measures.slice(0, MCAP).map((m) => ({ name: m.name, label: m.label, aka: (m.aka || []).length ? m.aka : undefined, questions: (m.questions || []).length ? m.questions : undefined, onDashboard: used.has(m.name) || undefined })),
+          dimensions: surf.dimensions.filter((d) => !d.filterOnly).slice(0, DCAP).map((d) => ({ name: d.name, label: d.label, group: d.group, aka: (d.aka || []).length ? d.aka : undefined, onDashboard: used.has(d.name) || undefined })),
           lookupOnly: surf.dimensions.filter((d) => d.filterOnly).map((d) => d.name).slice(0, 20),
           truncated: (surf.measures.length > MCAP || surf.dimensions.length > DCAP) || undefined,
         };
