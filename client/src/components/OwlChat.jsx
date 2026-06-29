@@ -387,7 +387,14 @@ function PinMenu({ source, entityId, suiteId, chartType, onDone }) {
       <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title" style={fld} />
       <select value={target} onChange={(e) => setTarget(e.target.value)} style={fld}>
         <option value="home">🏠 Home page</option>
-        {dashboards.map((d) => <option key={d.id} value={d.id}>{d.title}</option>)}
+        {(() => {
+          const groups = {};
+          for (const d of dashboards) { const f = d.folder || ''; (groups[f] = groups[f] || []).push(d); }
+          const folders = Object.keys(groups).sort((a, b) => (a === '' ? 1 : b === '' ? -1 : a.localeCompare(b)));
+          return folders.map((f) => (f === ''
+            ? groups[f].map((d) => <option key={d.id} value={d.id}>{d.title}</option>)
+            : <optgroup key={f} label={f}>{groups[f].map((d) => <option key={d.id} value={d.id}>{d.title}</option>)}</optgroup>));
+        })()}
       </select>
       <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
         <button onClick={pin} disabled={busy || !title.trim()} style={{ border: 'none', borderRadius: 8, padding: '7px 14px', fontWeight: 700, fontSize: 13, cursor: busy ? 'default' : 'pointer', background: 'var(--brand)', color: '#fff' }}>{busy ? 'Pinning…' : 'Pin'}</button>

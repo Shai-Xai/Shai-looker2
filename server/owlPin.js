@@ -59,7 +59,7 @@ function mount(app, { db, auth }) {
     if (!allowed(req.user)) return res.status(403).json({ error: 'Not allowed.' });
     const entityId = String(req.query.entityId || '');
     if (!entityId) return res.json({ dashboards: [] });
-    const dashboards = db.dashboardPoolFor(entityId).filter((d) => d.source !== 'owl-saved').map((d) => ({ id: d.id, title: d.title }));
+    const dashboards = db.dashboardPoolFor(entityId).filter((d) => d.source !== 'owl-saved').map((d) => ({ id: d.id, title: d.title, folder: d.folder || '' }));
     res.json({ dashboards });
   });
 
