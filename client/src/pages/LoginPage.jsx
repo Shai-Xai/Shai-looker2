@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '../lib/auth.jsx';
 import { api } from '../lib/api.js';
+import { applyBrand } from '../lib/brand.js';
 import Logo from '../components/Logo.jsx';
 
-export default function LoginPage() {
+export default function LoginPage({ slug = '' }) {
   const { login } = useAuth();
   const [mode, setMode] = useState('password'); // 'password' | 'forgot' | 'magic'
   const [email, setEmail] = useState('');
@@ -11,6 +12,17 @@ export default function LoginPage() {
   const [error, setError] = useState(null);
   const [sent, setSent] = useState(false);
   const [busy, setBusy] = useState(false);
+  // Vanity login: a /<slug> URL paints the client's brand (logo, colours,
+  // background) before sign-in. Unknown slug → the standard Howler login.
+  const [brand, setBrand] = useState(null);
+  useEffect(() => {
+    if (!slug) return;
+    let alive = true;
+    api.getBrandingBySlug(slug)
+      .then((b) => { if (!alive) return; setBrand(b); applyBrand({ primary: b.primary, secondary: b.secondary, logo: b.logo }); })
+      .catch(() => {}); // unknown/typo slug → leave the default Howler branding
+    return () => { alive = false; };
+  }, [slug]);
 
   async function submit(e) {
     e.preventDefault();
@@ -39,7 +51,7 @@ export default function LoginPage() {
   // confirmation (the server never reveals whether the email has a login).
   if (sent) {
     return (
-      <Frame>
+      <Frame bg={brand?.loginBackground}>
         <div style={{ textAlign: 'center' }}>
           <div style={{ fontSize: 34, marginBottom: 8 }}>📧</div>
           <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>Check your email</div>
@@ -57,13 +69,15 @@ export default function LoginPage() {
   const cta = busy ? 'Sending…' : mode === 'forgot' ? 'Send reset link' : mode === 'magic' ? 'Send sign-in link' : (busy ? 'Signing in…' : 'Sign in');
 
   return (
-    <Frame>
+    <Frame bg={brand?.loginBackground}>
       <form onSubmit={submit}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 22 }}>
-          <Logo size={40} radius={11} />
+          {brand?.logo
+            ? <img src={brand.logo} alt="" style={{ height: 40, maxWidth: 160, objectFit: 'contain', borderRadius: 8 }} />
+            : <Logo size={40} radius={11} />}
           <div>
-            <div style={{ fontSize: 18, fontWeight: 700, letterSpacing: '-0.3px' }}>Howler : Pulse</div>
-            <div style={{ fontSize: 12, color: 'var(--muted)' }}>Intelligent OS</div>
+            <div style={{ fontSize: 18, fontWeight: 700, letterSpacing: '-0.3px' }}>{brand?.name || 'Howler : Pulse'}</div>
+            <div style={{ fontSize: 12, color: 'var(--muted)' }}>{brand ? 'Powered by Howler : Pulse' : 'Intelligent OS'}</div>
           </div>
         </div>
 
@@ -104,9 +118,14 @@ export default function LoginPage() {
   );
 }
 
-function Frame({ children }) {
+function Frame({ children, bg }) {
+  // A vanity client's background image fills the page (with a soft scrim so the
+  // card stays legible on any photo); otherwise the plain app background.
+  const outer = bg
+    ? { backgroundImage: `linear-gradient(rgba(0,0,0,0.32), rgba(0,0,0,0.46)), url(${JSON.stringify(bg)})`, backgroundSize: 'cover', backgroundPosition: 'center' }
+    : { background: 'var(--bg)' };
   return (
-    <div style={{ minHeight: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)', padding: 16, boxSizing: 'border-box' }}>
+    <div style={{ minHeight: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, boxSizing: 'border-box', ...outer }}>
       <div style={card}>{children}</div>
     </div>
   );

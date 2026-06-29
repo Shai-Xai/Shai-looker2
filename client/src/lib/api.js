@@ -349,6 +349,10 @@ export const api = {
   saveMailTemplate: (p) => fetch('/api/admin/mail-template', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),
   getEntityMailTemplate: (id) => fetch(`/api/admin/entities/${id}/mail-template`).then(json),
   saveEntityMailTemplate: (id, p) => fetch(`/api/admin/entities/${id}/mail-template`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),
+  // Vanity login slug (admin) + the PUBLIC branding lookup used by the /<slug> login.
+  getClientSlug: (id) => fetch(`/api/admin/entities/${id}/slug`).then(json),
+  saveClientSlug: (id, slug) => fetch(`/api/admin/entities/${id}/slug`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slug }) }).then(json),
+  getBrandingBySlug: (slug) => fetch(`/api/branding/${encodeURIComponent(slug)}`).then(json),
   getMyMailTemplate: (entityId) => fetch(`/api/my/mail-template/${entityId}`).then(json),
   saveMyMailTemplate: (entityId, p) => fetch(`/api/my/mail-template/${entityId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),
   previewMail: (edits, entityId, suiteId) => fetch('/api/mail/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ edits, entityId, suiteId }) }).then(json),
