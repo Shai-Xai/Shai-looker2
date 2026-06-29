@@ -166,8 +166,10 @@ function mount(app, { db, auth, insights, owlTools, uploads, anthropicKeyForSuit
   // client renders under the bubble (the grounding made visible). Reuses the curated
   // catalogue's labels. Streamed after the answer text behind SOURCES_MARK.
   const cat = owlTools.catalogue || {};
-  const measLabel = new Map((cat.measures || []).map((m) => [m.name, m.label]));
-  const dimLabel = new Map((cat.dimensions || []).map((d) => [d.name, d.label]));
+  // Live label maps — refreshed per request from the field dictionary (owlFields) so
+  // admin renames show up in citations without a restart.
+  let measLabel = new Map((cat.measures || []).map((m) => [m.name, m.label]));
+  let dimLabel = new Map((cat.dimensions || []).map((d) => [d.name, d.label]));
   const dimType = new Map((cat.dimensions || []).map((d) => [d.name, d.type]));
   const SCOPE_LABEL = { 'core_organisers.name': 'organiser', 'core_events.name': 'event' };
   const fieldLabel = (f) => SCOPE_LABEL[f] || dimLabel.get(f) || String(f).split('.').pop().replace(/_/g, ' ');
@@ -254,8 +256,15 @@ function mount(app, { db, auth, insights, owlTools, uploads, anthropicKeyForSuit
     // Surface the curated catalogue's field meanings + rules to the model — it only
     // sees raw field names in the tool enum otherwise, so labels/synonyms/notes
     // (e.g. the add-on split rule) must be passed in here.
-    const gloss = [...(cat.measures || []), ...(cat.dimensions || [])].map((f) => `${f.name} = ${f.label}`).join('; ');
+    // Field guide from the live dictionary (admin-editable labels/synonyms/questions).
+    // Also refresh the citation label maps so renames show there too.
+    const fmeta = owlFields.list();
+    measLabel = new Map(fmeta.filter((f) => f.kind === 'measure').map((f) => [f.name, f.label]));
+    dimLabel = new Map(fmeta.filter((f) => f.kind === 'dimension').map((f) => [f.name, f.label]));
+    const gloss = fmeta.map((f) => `${f.name} = ${f.label}${(f.aka || []).length ? ` (aka: ${f.aka.join(', ')})` : ''}`).join('; ');
     if (gloss) parts.push(`Field guide (name = meaning): ${gloss}.`);
+    const qs = fmeta.filter((f) => (f.questions || []).length).map((f) => `${f.label} → ${f.questions.join(' / ')}`);
+    if (qs.length) parts.push(`Typical questions by field: ${qs.join(' | ')}.`);
     if ((cat.notes || []).length) parts.push(`Rules:\n- ${cat.notes.join('\n- ')}`);
     // Tell the model what external data is attached (so it knows it can use askUpload).
     try {
@@ -363,6 +372,7 @@ function mount(app, { db, auth, insights, owlTools, uploads, anthropicKeyForSuit
   // stays at budget. Shares the Owl allowlist gate.
   require('./owlPin').mount(app, { db, auth });
   require('./owlGuidance').mount(app, { db, auth }); // resolveGuidance is required at top
+  const owlFields = require('./owlFields').mount(app, { db, auth }); // no-code field labels/synonyms/questions
   console.log('[owlChat] agentic Owl chat module mounted');
 }
 

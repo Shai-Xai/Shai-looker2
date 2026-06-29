@@ -16,6 +16,7 @@ import RateCard from '../components/RateCard.jsx';
 import { BriefingConfigForm } from '../components/BriefingTuneModal.jsx';
 import StatusNoticesAdmin from '../components/StatusNoticesAdmin.jsx';
 import OwlGuidanceEditor from '../components/OwlGuidanceEditor.jsx';
+import OwlFieldDictionary from '../components/OwlFieldDictionary.jsx';
 import UploadHint from '../components/UploadHint.jsx';
 import { currencyList } from '../lib/currency.js';
 import { GUIDES } from '../lib/guides.js';
@@ -3899,6 +3900,9 @@ function AISettings() {
       <Section title="Owl guidance (chat assistant)">
         <p style={hint}>Steers the agentic Owl (the data chat assistant) — how it should read your data: which measure to use, how to split add-ons, what “revenue”/“today” mean. Separate from the instructions above (which drive tile insights & briefings). Takes effect immediately.</p>
         <OwlGuidanceEditor scope="global" />
+      </Section>
+      <Section title="Owl field dictionary">
+        <OwlFieldDictionary />
       </Section>
       <Section title="Home briefing"><BriefingSettings /></Section>
       <Section title="Reader feedback"><BriefingFeedback /></Section>
