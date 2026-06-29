@@ -11,7 +11,7 @@ import ShareMenu from './ShareMenu.jsx';
 // is fetched + scoped server-side, so nothing here can reach another client's data.
 //
 // Mobile-first: single column, full-width panel on phones.
-export default function OwlChat({ open, onClose, suiteId, entityId, clients = [], events = [], isAdmin = false }) {
+export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId, clients = [], events = [], isAdmin = false }) {
   const isMobile = useIsMobile();
   const [messages, setMessages] = useState([]); // [{ role:'user'|'owl', text }]
   const [input, setInput] = useState('');
@@ -95,7 +95,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, clients = []
       return next;
     });
     try {
-      const { threadId: tid, sources, followups: fu } = await api.owlChat({ suiteId: selSuite || undefined, entityId: selEntity || undefined, message: q, threadId }, appendToOwl);
+      const { threadId: tid, sources, followups: fu } = await api.owlChat({ suiteId: selSuite || undefined, entityId: selEntity || undefined, dashboardId: dashboardId || undefined, message: q, threadId }, appendToOwl);
       if (tid) setThreadId(tid);
       if (sources && sources.length) setMessages((m) => {
         const next = m.slice();

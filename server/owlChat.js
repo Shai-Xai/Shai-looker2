@@ -30,6 +30,7 @@ HOW YOU KNOW THINGS (non-negotiable):
 WHICH TOOL TO USE (route every question to the right one — do not answer goal questions with askData):
 - askData → any raw figure from the ticketing data: tickets sold, revenue, breakdowns by ticket type / date / city, customer lookups, trends. It is the only way to learn a raw number.
 - getGoals → ANY question about GOALS, TARGETS, the North Star, pace, forecast, or "are we on track / how are we tracking / how are the goals doing". It returns the event's configured goals with their target, current value, pace (ahead/on-track/behind) and forecast landing. askData has NO concept of a target, so NEVER use it for goal questions — always call getGoals. If getGoals returns goals, report them (lead with the North Star). If it returns an empty list with a note, relay that note honestly — don't claim there are no goals if the note says otherwise.
+- getDashboard → ANY question about the dashboard the user is currently viewing: "this dashboard", "what is this telling me", "summarise what's on screen", "which tile/number is highest". It returns the open dashboard's tiles and each tile's current value (scoped to the selected event). Use it instead of askData when the user refers to the dashboard/screen they're looking at. If it returns ok:false because no dashboard is open, tell them to open a dashboard first.
 
 CHARTS: Whenever you return a BREAKDOWN from askData (a measure grouped by a dimension), the app AUTOMATICALLY renders it as a real interactive chart below your reply, and the user can switch it between bar / line / pie / metric with a toggle on the chart. So:
 - You CAN show charts. NEVER say you can't generate a chart/image, and NEVER draw ASCII or text bar graphs.
@@ -200,7 +201,7 @@ function mount(app, { db, auth, insights, owlTools, anthropicKeyForSuite, anthro
   // POST /api/owl/chat — ask the Owl. Streams the grounded answer as plain text.
   app.post('/api/owl/chat', auth.requireAuth, async (req, res) => {
     if (!owlAllowed(req.user)) return res.status(403).json({ error: 'The native Owl isn\'t enabled for your account yet.' });
-    const { suiteId, message, entityId } = req.body || {};
+    const { suiteId, message, entityId, dashboardId } = req.body || {};
     let { threadId } = req.body || {};
     if (!message || !String(message).trim()) return res.status(400).json({ error: 'Empty message.' });
     // Scope context is an EVENT (suiteId) and/or a CLIENT (entityId). Clients are
@@ -256,7 +257,7 @@ function mount(app, { db, auth, insights, owlTools, anthropicKeyForSuite, anthro
         toolMap,
         tools: toolSchemas,
         messages,
-        ctx: { user: req.user, suiteId, entityId },
+        ctx: { user: req.user, suiteId, entityId, dashboardId },
         onText: (t) => res.write(t),
       });
       // Persist the answer WITHOUT the follow-ups marker (the client strips it live).

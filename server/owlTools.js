@@ -15,7 +15,7 @@
 
 const defaultCatalogue = require('./owlCatalogueSeed');
 
-module.exports = function createOwlTools({ query, auth, db, getGoalsApi, catalogue = defaultCatalogue }) {
+module.exports = function createOwlTools({ query, auth, db, getGoalsApi, resolveTileValue, catalogue = defaultCatalogue }) {
   if (!query || !query.applyScope || !query.runLookerQuery) {
     throw new Error('owlTools requires the query engine (applyScope + runLookerQuery).');
   }
@@ -205,9 +205,54 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, catalog
     input_schema: { type: 'object', properties: {} },
   };
 
+  // ── getDashboard ─────────────────────────────────────────────────────────────
+  // Reads the dashboard the user is currently viewing — each data tile's current
+  // headline value, scoped to the selected event (same scope path as the tile uses
+  // on screen). Read-only, fail-safe. The dashboardId rides in ctx (set by the chat
+  // route from the page the user is on); no Looker field is exposed to the model.
+  async function runGetDashboard(_args = {}, ctx = {}) {
+    const { user, suiteId, dashboardId } = ctx;
+    if (!user) return refuse('no_user', 'No authenticated user.');
+    if (!dashboardId) return refuse('no_dashboard', 'Open a dashboard first, then ask me about it.');
+    if (typeof resolveTileValue !== 'function' || !db || !db.getDashboard) return refuse('unavailable', 'I can\'t read dashboards right now.');
+    const def = db.getDashboard(dashboardId);
+    if (!def) return refuse('not_found', 'I can\'t find that dashboard.');
+    // Access: admins anything; otherwise the dashboard must be shared ('' owner) or
+    // owned by one of the user's entities, and any event in scope must be accessible.
+    if (user.role !== 'admin') {
+      if (def.ownerEntityId && !(user.entityIds || []).includes(def.ownerEntityId)) return refuse('no_access', 'No access to that dashboard.');
+      if (suiteId && auth && auth.canAccessSuite && !auth.canAccessSuite(user, suiteId)) return refuse('no_access', 'No access to that event.');
+    }
+    // Flatten tiles (top-level + carousels); keep data tiles (a Looker query) in order.
+    const allTiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))];
+    const dataTiles = allTiles.filter((t) => t && t.type !== 'text' && t.query && Array.isArray(t.query.fields) && t.query.fields.length);
+    const CAP = 16;
+    const tiles = [];
+    for (const t of dataTiles.slice(0, CAP)) {
+      let value = null;
+      try { value = await resolveTileValue({ dashboardId, tileId: t.id, user, suiteId }); } catch { value = null; }
+      tiles.push({ title: t.title || '(untitled)', value, visType: (t.vis && t.vis.type) || '', context: t.aiContext || '' });
+    }
+    const text = allTiles.filter((t) => t && t.type === 'text' && t.body_text)
+      .slice(0, 4).map((t) => ({ title: t.title || '', body: String(t.body_text).slice(0, 400) }));
+    return {
+      ok: true,
+      dashboard: { id: dashboardId, title: def.title || 'Dashboard' },
+      tiles,
+      text,
+      note: dataTiles.length > CAP ? `Showing the first ${CAP} of ${dataTiles.length} data tiles.` : undefined,
+    };
+  }
+  const getDashboardSchema = {
+    name: 'getDashboard',
+    description: 'Read the dashboard the user is currently viewing — its tiles and each tile\'s current headline value, scoped to the selected event. Use for any question about "this dashboard", "what is this telling me", "which number/tile is highest/lowest", or to explain/summarise what is on screen. Read-only; amounts are ZAR. Returns ok:false if no dashboard is open.',
+    input_schema: { type: 'object', properties: {} },
+  };
+
   return {
     catalogue,
     askData: { schema: askDataSchema, run: runAskData },
     getGoals: { schema: getGoalsSchema, run: runGetGoals },
+    getDashboard: { schema: getDashboardSchema, run: runGetDashboard },
   };
 };
