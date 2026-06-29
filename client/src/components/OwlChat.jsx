@@ -36,6 +36,22 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
     const text = messages.filter((m) => m.text).map((m) => `${m.role === 'user' ? 'Q' : 'Owl'}: ${m.text}`).join('\n\n');
     try { await navigator.clipboard.writeText(text); setChatCopied(true); setTimeout(() => setChatCopied(false), 2000); } catch { /* ignore */ }
   };
+  // Save the conversation as a PDF: clone the rendered messages into a print window
+  // (charts→PNG, tables/text preserved), seed the app's CSS vars with light values so
+  // colours resolve, then trigger the browser's print → "Save as PDF". No dependency.
+  const printChat = () => {
+    const node = scrollRef.current; if (!node) return;
+    const clone = node.cloneNode(true);
+    const srcCanvas = node.querySelectorAll('canvas'); const cloneCanvas = clone.querySelectorAll('canvas');
+    cloneCanvas.forEach((c, i) => { try { const img = document.createElement('img'); img.src = srcCanvas[i].toDataURL('image/png'); img.style.maxWidth = '100%'; c.replaceWith(img); } catch { /* tainted/none */ } });
+    clone.querySelectorAll('button').forEach((b) => b.remove()); // drop interactive controls
+    const title = (messages.find((m) => m.role === 'user' && m.text)?.text || 'Owl chat').slice(0, 70);
+    const scope = [clients.find((c) => c.id === selEntity)?.name, events.find((e) => e.id === selSuite)?.name].filter(Boolean).join(' · ');
+    const w = window.open('', '_blank'); if (!w) return;
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${title}</title><style>:root{--text:#1a1a1a;--muted:#6b7280;--brand:#3b5bfd;--card:#fff;--bg:#fafafe;--hairline:#e2e2e8;--elevated:#f1f1f5}body{font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#1a1a1a;padding:28px;max-width:780px;margin:0 auto;line-height:1.5}h1{font-size:17px;margin:0 0 2px}.sub{color:#6b7280;font-size:12px;margin:0 0 16px}table{border-collapse:collapse;width:100%;margin:8px 0}th,td{border:1px solid #e2e2e8;padding:5px 9px;text-align:left;font-size:12.5px}img{max-width:100%}</style></head><body><h1>🦉 ${title}</h1>${scope ? `<p class="sub">${scope}</p>` : ''}${clone.innerHTML}</body></html>`);
+    w.document.close();
+    setTimeout(() => { w.focus(); w.print(); }, 350);
+  };
   const pickDock = (m) => { localStorage.setItem('howler_owl_dock', m); setDock(m); };
   const bumpZoom = (d) => setZoom((z) => { const n = Math.min(1.3, Math.max(0.8, Math.round((z + d) * 100) / 100)); localStorage.setItem('howler_owl_zoom', String(n)); return n; });
 
@@ -244,6 +260,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
         {messages.some((m) => m.text) && (
           <>
             <button onClick={copyChat} title="Copy the chat" aria-label="Copy the chat" style={{ ...hdrBtn, fontSize: 14, padding: '2px 5px' }}>{chatCopied ? '✓' : '📋'}</button>
+            <button onClick={printChat} title="Save as PDF" aria-label="Save as PDF" style={{ ...hdrBtn, fontSize: 11.5, fontWeight: 700, padding: '2px 5px' }}>PDF</button>
             <ShareMenu
               heading={`Owl chat${messages.find((m) => m.role === 'user' && m.text) ? ' — ' + messages.find((m) => m.role === 'user' && m.text).text.slice(0, 60) : ''}`}
               text={messages.filter((m) => m.text).map((m) => `${m.role === 'user' ? 'Q' : 'Owl'}: ${m.text}`).join('\n\n')}
@@ -581,6 +598,14 @@ function OwlChart({ source, entityId, suiteId, canPin }) {
   const [type, setType] = useState(source.chartType || 'bar');
   const [pinOpen, setPinOpen] = useState(false);
   const [stacked, setStacked] = useState(false);
+  const chartBoxRef = useRef(null);
+  // Download the rendered chart as a PNG (ECharts paints to a canvas).
+  const downloadPng = () => {
+    const c = chartBoxRef.current && chartBoxRef.current.querySelector('canvas');
+    if (!c) return;
+    try { const a = document.createElement('a'); a.href = c.toDataURL('image/png'); a.download = csvName(source).replace(/\.csv$/, '.png'); document.body.appendChild(a); a.click(); a.remove(); } catch { /* tainted */ }
+  };
+  const isChart = type === 'bar' || type === 'line' || type === 'pie';
   const measCols = source.columns.filter((c) => c.kind === 'measure');
   const meas = measCols[0];
   const multiMeasure = measCols.length >= 2;
@@ -600,6 +625,7 @@ function OwlChart({ source, entityId, suiteId, canPin }) {
         </div>
         {canStack && <button onClick={() => setStacked((s) => !s)} title="Stack the series" style={{ border: '1px solid var(--hairline)', background: stacked ? 'var(--brand)' : 'var(--card)', color: stacked ? '#fff' : 'var(--text)', borderRadius: 980, padding: '3px 10px', fontSize: 11.5, cursor: 'pointer' }}>{stacked ? 'Stacked' : 'Stack'}</button>}
         {(source.rows || []).length > 0 && <button onClick={() => downloadText(csvName(source), toCSV(source.columns, source.rows))} title="Download as CSV (opens in Excel/Sheets)" style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 980, padding: '3px 10px', fontSize: 11.5, cursor: 'pointer' }}>⬇ CSV</button>}
+        {isChart && <button onClick={downloadPng} title="Download chart as image (PNG)" style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 980, padding: '3px 10px', fontSize: 11.5, cursor: 'pointer' }}>⬇ PNG</button>}
         {showPin && <button onClick={() => setPinOpen((o) => !o)} title="Pin to a dashboard or home" style={{ border: '1px solid var(--hairline)', background: pinOpen ? 'var(--elevated, rgba(128,128,128,0.12))' : 'var(--card)', borderRadius: 980, padding: '3px 10px', fontSize: 11.5, cursor: 'pointer', color: 'var(--text)' }}>📌 Pin</button>}
       </div>
       {showPin && pinOpen && <PinMenu source={source} entityId={entityId} suiteId={suiteId} chartType={type} onDone={() => setPinOpen(false)} />}
@@ -613,7 +639,7 @@ function OwlChart({ source, entityId, suiteId, canPin }) {
         : type === 'table'
           ? <SourceTable source={source} />
           : (
-          <div style={{ height: 200, border: '1px solid var(--hairline)', borderRadius: 12, overflow: 'hidden', background: 'var(--card)' }}>
+          <div ref={chartBoxRef} style={{ height: 200, border: '1px solid var(--hairline)', borderRadius: 12, overflow: 'hidden', background: 'var(--card)' }}>
             <ChartTile data={chartDataFromSource({ ...source, chartType: type })} visConfig={{ type: VIS[type] || 'looker_column', stacking: (canStack && stacked) ? 'normal' : undefined }} />
           </div>
         )}
