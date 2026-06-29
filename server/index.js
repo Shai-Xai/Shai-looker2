@@ -1265,7 +1265,7 @@ app.get('/api/admin/ai-overview', auth.requireAdmin, (req, res) => {
       .filter((u) => (u.entityIds || []).includes(ent.id))
       .map((u) => ({ email: u.email, tune: (db.getUserPref(u.id, `briefing_tune:${ent.id}`) || '').trim() }))
       .filter((t) => t.tune);
-    return { id: ent.id, name: ent.name, aiContext: (ent.aiContext || '').trim(), events, digests: jobsByEntity[ent.id] || [], readerTunes: tunes };
+    return { id: ent.id, name: ent.name, aiContext: (ent.aiContext || '').trim(), owlGuidance: (db.getSetting(`owl_guidance:${ent.id}`, '') || '').trim(), events, digests: jobsByEntity[ent.id] || [], readerTunes: tunes };
   });
 
   // Tiles & dashboards with custom AI context (count + list, capped).
@@ -1277,7 +1277,7 @@ app.get('/api/admin/ai-overview', auth.requireAdmin, (req, res) => {
     for (const t of tiles) if ((t.aiContext || '').trim()) tileContexts.push({ dashTitle: def.title || d.title, tileTitle: t.title || '(untitled)', context: t.aiContext.trim() });
   }
 
-  res.json({ builtins, global, clients, dashContexts, tileContexts });
+  res.json({ builtins, global, clients, dashContexts, tileContexts, owlGuidanceGlobal: (db.getSetting('owl_guidance', '') || '').trim() });
 });
 
 // The literal system prompt sent for one feature, with the configured layers

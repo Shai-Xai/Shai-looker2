@@ -291,7 +291,16 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, resolve
     for (const t of dataTiles.slice(0, CAP)) {
       let value = null;
       try { value = await resolveTileValue({ dashboardId, tileId: t.id, user, suiteId }); } catch { value = null; }
-      tiles.push({ title: t.title || '(untitled)', value, visType: (t.vis && t.vis.type) || '', context: t.aiContext || '' });
+      const q = t.query || {};
+      tiles.push({
+        title: t.title || '(untitled)', value,
+        visType: (t.vis && t.vis.type) || '', context: t.aiContext || '',
+        // The tile's query surface — so the model can explain what each tile measures
+        // and a fix-brief can show the explore/fields/filters behind a number.
+        explore: [q.model, q.view].filter(Boolean).join('/'),
+        fields: Array.isArray(q.fields) ? q.fields : [],
+        filters: q.filters && typeof q.filters === 'object' ? q.filters : {},
+      });
     }
     const text = flatTiles(def).filter((t) => t && t.type === 'text' && t.body_text)
       .slice(0, 4).map((t) => ({ title: t.title || '', body: String(t.body_text).slice(0, 400) }));

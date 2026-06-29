@@ -13,6 +13,7 @@
 // Spec: docs/specs/AGENTIC_OWL_SPEC.md (§4 one loop/two doors). Plan: §5.
 
 const crypto = require('crypto');
+const { resolveGuidance: guidance } = require('./owlGuidance');
 
 // The chat Owl's system prompt. Unlike every other Owl surface (handed already-
 // resolved numbers), the chat Owl FETCHES its own answers via the askData tool and
@@ -162,7 +163,7 @@ function mount(app, { db, auth, insights, owlTools, anthropicKeyForSuite, anthro
   const SCOPE_LABEL = { 'core_organisers.name': 'organiser', 'core_events.name': 'event' };
   const fieldLabel = (f) => SCOPE_LABEL[f] || dimLabel.get(f) || String(f).split('.').pop().replace(/_/g, ' ');
   function sourcesFromTrail(trail) {
-    return (trail || [])
+    const data = (trail || [])
       .filter((t) => (t.name === 'askData' || t.name === 'queryDashboard') && t.result && t.result.ok)
       .map((t) => {
         const qb = t.result.queryBody || {};
@@ -190,6 +191,21 @@ function mount(app, { db, auth, insights, owlTools, anthropicKeyForSuite, anthro
           chartType: (dims.length >= 1 && rows.length > 1) ? (dimType.get(dims[0]) === 'date' ? 'line' : 'bar') : null,
         };
       });
+    // getDashboard answers carry no Looker query of their own, but the model read the
+    // dashboard's tiles — surface that (each tile's explore/fields/filters/value) as a
+    // `kind:'dashboard'` source so a fix-brief shows what's behind a dashboard answer.
+    const dash = (trail || [])
+      .filter((t) => t.name === 'getDashboard' && t.result && t.result.ok)
+      .map((t) => ({
+        kind: 'dashboard',
+        dashboard: t.result.dashboard || {},
+        tiles: (t.result.tiles || []).map((ti) => ({
+          title: ti.title, value: ti.value, visType: ti.visType,
+          explore: ti.explore || '', fields: ti.fields || [],
+          filters: Object.entries(ti.filters || {}).map(([f, v]) => ({ label: fieldLabel(f), value: String(v) })),
+        })),
+      }));
+    return [...data, ...dash];
   }
   const SOURCES_MARK = '\n<<<OWL_SOURCES>>>';
   const J = (s) => { try { return JSON.parse(s || '[]'); } catch { return []; } };
@@ -232,6 +248,9 @@ function mount(app, { db, auth, insights, owlTools, anthropicKeyForSuite, anthro
     const gloss = [...(cat.measures || []), ...(cat.dimensions || [])].map((f) => `${f.name} = ${f.label}`).join('; ');
     if (gloss) parts.push(`Field guide (name = meaning): ${gloss}.`);
     if ((cat.notes || []).length) parts.push(`Rules:\n- ${cat.notes.join('\n- ')}`);
+    // No-code steering layer: admin/client guidance (server/owlGuidance.js), injected
+    // last so it can override the catalogue's defaults without a deploy.
+    try { const g = guidance(db, scopeEntityId); if (g) parts.push(g); } catch { /* ignore */ }
     const instructions = parts.join('\n\n');
 
     // Load or create the thread (must belong to this user).
@@ -301,6 +320,7 @@ function mount(app, { db, auth, insights, owlTools, anthropicKeyForSuite, anthro
   // Pin-to-dashboard lives in its own disposable module; mount it here so index.js
   // stays at budget. Shares the Owl allowlist gate.
   require('./owlPin').mount(app, { db, auth });
+  require('./owlGuidance').mount(app, { db, auth }); // resolveGuidance is required at top
   console.log('[owlChat] agentic Owl chat module mounted');
 }
 

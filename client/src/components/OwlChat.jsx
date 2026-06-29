@@ -382,15 +382,17 @@ function buildFixBrief({ question, answer, sources, scopeLabel, dashboardId }) {
   lines.push('');
   lines.push('Owl answered:');
   lines.push(String(answer || '').trim() || '(no text)');
-  if (sources && sources.length) {
+  const dataSrc = (sources || []).filter((s) => s.kind !== 'dashboard');
+  const dashSrc = (sources || []).filter((s) => s.kind === 'dashboard');
+  if (dataSrc.length) {
     lines.push('');
     lines.push('Underlying query the Owl ran:');
-    sources.forEach((s, n) => {
+    dataSrc.forEach((s, n) => {
       const qb = s.queryBody || {};
       const measures = (qb.fields || []).filter((f) => (s.columns || []).some((c) => c.field === f && c.kind === 'measure'));
       const groupBy = (s.dimensions || []);
       const filters = (s.filters || []).map((f) => `${f.label}=${f.value}`).join(', ');
-      lines.push(`${sources.length > 1 ? `[${n + 1}] ` : ''}explore=${qb.model || ''}/${qb.view || s.explore || ''}`);
+      lines.push(`${dataSrc.length > 1 ? `[${n + 1}] ` : ''}explore=${qb.model || ''}/${qb.view || s.explore || ''}`);
       lines.push(`  measures: ${measures.join(', ') || s.measure || '(none)'}`);
       lines.push(`  group by: ${groupBy.join(', ') || '(none)'}`);
       lines.push(`  filters: ${filters || '(scope only)'}`);
@@ -398,6 +400,15 @@ function buildFixBrief({ question, answer, sources, scopeLabel, dashboardId }) {
       lines.push(`  query: ${JSON.stringify(qb)}`);
     });
   }
+  // getDashboard answers: list each tile the Owl read + the explore/fields/filters behind it.
+  dashSrc.forEach((s) => {
+    lines.push('');
+    lines.push(`Dashboard read: ${s.dashboard?.title || ''} (${s.dashboard?.id || ''})`);
+    (s.tiles || []).forEach((ti) => {
+      const filters = (ti.filters || []).map((f) => `${f.label}=${f.value}`).join(', ');
+      lines.push(`- ${ti.title}: value=${ti.value != null ? ti.value : '(none)'} | explore=${ti.explore || '(?)'} | fields=[${(ti.fields || []).join(', ')}]${filters ? ` | filters=${filters}` : ''}`);
+    });
+  });
   lines.push('');
   lines.push("What's wrong / what it should be: (describe here)");
   return lines.join('\n');
@@ -520,13 +531,17 @@ function PinMenu({ source, entityId, suiteId, chartType, onDone }) {
 // filters/scope, and a tap-to-expand card with the exact query.
 function CitationChips({ sources, entityId, suiteId, canPin }) {
   const [open, setOpen] = useState(-1);
+  // Only data sources (askData/queryDashboard) render as chips/charts; dashboard-read
+  // sources carry query detail for the fix-brief but have no chart/table to show here.
+  const dataSources = (sources || []).filter((s) => s.kind !== 'dashboard');
   const chip = { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 9px', borderRadius: 980, background: 'var(--card)', border: '1px solid var(--hairline)', fontSize: 11.5, color: '#3a3a3c', cursor: 'default' };
   const dot = { width: 7, height: 7, borderRadius: '50%', background: '#34c759', flex: 'none' };
   const muted = { color: 'var(--muted)' };
+  if (!dataSources.length) return null;
   return (
     <div style={{ margin: '-4px 0 12px 2px' }}>
       <div style={{ fontSize: 10, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--muted)', margin: '0 0 6px 2px' }}>Sources</div>
-      {sources.map((s, i) => (
+      {dataSources.map((s, i) => (
         <div key={i} style={{ marginBottom: 6 }}>
           {s.chartType && s.rows && s.rows.length > 1 && <OwlChart source={s} entityId={entityId} suiteId={suiteId} canPin={canPin} />}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
