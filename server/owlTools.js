@@ -15,7 +15,7 @@
 
 const defaultCatalogue = require('./owlCatalogueSeed');
 
-module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAlertsApi, getCampaignsApi, resolveTileValue, getExploreFields, catalogue = defaultCatalogue }) {
+module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAlertsApi, getCampaignsApi, getUploadsApi, resolveTileValue, getExploreFields, catalogue = defaultCatalogue }) {
   if (!query || !query.applyScope || !query.runLookerQuery) {
     throw new Error('owlTools requires the query engine (applyScope + runLookerQuery).');
   }
@@ -507,6 +507,68 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     input_schema: { type: 'object', properties: {} },
   };
 
+  // ── askUpload ────────────────────────────────────────────────────────────────
+  // Query an ATTACHED external table (a CSV file or live Google Sheet the user added),
+  // computed in-memory (no Looker). Filter / group-by / aggregate, returning rows the
+  // model phrases — and can set side-by-side with askData to answer across sources.
+  async function runAskUpload(args = {}, ctx = {}) {
+    const { user, suiteId, entityId } = ctx;
+    if (!user) return refuse('no_user', 'No authenticated user.');
+    const eid = entityId || (suiteId && db && db.getSuite ? (db.getSuite(suiteId) || {}).entityId : null);
+    if (!eid) return refuse('no_client', 'Open or pick a client first.');
+    const api = typeof getUploadsApi === 'function' ? getUploadsApi() : null;
+    if (!api || !api.listUploads) return refuse('unavailable', 'Attachments aren\'t available right now.');
+    const list = api.listUploads(eid);
+    if (!list.length) return { ok: true, rows: [], note: 'No files or sheets are attached for this client yet — use the 📎 attach button to add a CSV or a Google Sheet.' };
+    // Resolve which attached source: explicit id, fuzzy name match, or the only one.
+    let pick = null;
+    if (args.uploadId) pick = list.find((u) => u.id === args.uploadId);
+    else if (args.name) pick = list.find((u) => u.name.toLowerCase().includes(String(args.name).toLowerCase()));
+    else if (list.length === 1) pick = list[0];
+    if (!pick) return { ok: false, reason: 'which_source', message: `Which attached source? ${list.map((u) => `"${u.name}"`).join(', ')}`, sources: list.map((u) => ({ name: u.name, columns: u.columns.map((c) => c.name) })) };
+    const up = api.getUpload(pick.id);
+    if (!up) return refuse('not_found', 'That attachment is gone.');
+    const colByName = new Map(up.columns.map((c) => [c.name, c]));
+    const dims = (Array.isArray(args.dimensions) ? args.dimensions : []).filter((d) => colByName.has(d));
+    const measure = args.measure && colByName.has(args.measure) ? args.measure : null;
+    const agg = ['sum', 'avg', 'count', 'min', 'max'].includes(args.agg) ? args.agg : 'sum';
+    const num = api.toNum || ((v) => Number(v));
+    let rows = up.rows;
+    for (const [f, v] of Object.entries(args.filters || {})) { if (colByName.has(f) && v != null && String(v).trim() !== '') rows = rows.filter((r) => String(r[f]).toLowerCase() === String(v).toLowerCase()); }
+    let columns; let outRows;
+    if (!dims.length && !measure) { // no aggregation → raw rows for the columns
+      columns = up.columns.map((c) => ({ field: c.name, label: c.label, kind: c.type === 'number' ? 'measure' : 'dimension' }));
+      outRows = rows.slice(0, 200);
+    } else {
+      const groups = new Map();
+      for (const r of rows) { const key = dims.map((d) => r[d]).join(''); if (!groups.has(key)) groups.set(key, { vals: dims.map((d) => r[d]), items: [] }); groups.get(key).items.push(r); }
+      const mLabel = measure ? `${agg} of ${colByName.get(measure).label}` : 'Count';
+      columns = [...dims.map((d) => ({ field: d, label: colByName.get(d).label, kind: 'dimension' })), { field: '__m', label: mLabel, kind: 'measure' }];
+      outRows = [...groups.values()].map((g) => {
+        const o = {}; dims.forEach((d, i) => { o[d] = g.vals[i]; });
+        if (!measure) o.__m = g.items.length;
+        else { const ns = g.items.map((r) => num(r[measure])).filter(Number.isFinite); o.__m = agg === 'count' ? ns.length : agg === 'avg' ? (ns.reduce((a, b) => a + b, 0) / (ns.length || 1)) : agg === 'min' ? Math.min(...ns) : agg === 'max' ? Math.max(...ns) : ns.reduce((a, b) => a + b, 0); }
+        return o;
+      }).sort((a, b) => (Number(b.__m) || 0) - (Number(a.__m) || 0)).slice(0, Math.min(Math.max(Number(args.limit) || 500, 1), 2000));
+    }
+    return { ok: true, source: up.name, columns, rows: outRows, count: outRows.length, measure: measure || '__m', dimensions: dims };
+  }
+  const askUploadSchema = {
+    name: 'askUpload',
+    description: 'Query data the user ATTACHED (a CSV file or a live Google Sheet) — not the ticketing data. Filter, group-by and aggregate it. To answer across BOTH sources (e.g. uploaded budget vs actual revenue), call askData AND askUpload, then combine in your answer. Call with no measure/dimensions to see the raw rows + column names first. Read-only.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Which attached source to query (fuzzy name match). Omit if there is only one.' },
+        measure: { type: 'string', description: 'A numeric column to aggregate.' },
+        agg: { type: 'string', enum: ['sum', 'avg', 'count', 'min', 'max'], description: 'How to aggregate the measure (default sum).' },
+        dimensions: { type: 'array', items: { type: 'string' }, description: 'Column(s) to group by.' },
+        filters: { type: 'object', description: 'Optional {column: value} exact-match filters.' },
+        limit: { type: 'number' },
+      },
+    },
+  };
+
   return {
     catalogue,
     askData: { schema: askDataSchema, run: runAskData },
@@ -515,5 +577,6 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     queryDashboard: { schema: queryDashboardSchema, run: runQueryDashboard },
     getAlerts: { schema: getAlertsSchema, run: runGetAlerts },
     getCampaigns: { schema: getCampaignsSchema, run: runGetCampaigns },
+    askUpload: { schema: askUploadSchema, run: runAskUpload },
   };
 };

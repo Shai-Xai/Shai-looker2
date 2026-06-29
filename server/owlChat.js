@@ -35,6 +35,7 @@ WHICH TOOL TO USE (route every question to the right one — do not answer goal 
 - queryDashboard → when the user wants to DIG DEEPER into the data behind the dashboard they're viewing — re-group it, break it down, trend it, filter it (anything beyond the headline tile values). ALWAYS call getDashboard first to read the available field names ("fields"), then call queryDashboard passing measure/dimensions/filters using those EXACT field names. It runs a fresh scoped query over the dashboard's own data and returns rows (which auto-chart, like askData). Use this — not askData — for deeper questions about the current dashboard, because askData only knows the ticketing catalogue while queryDashboard speaks the dashboard's own dataset.
 - getAlerts → questions about ALERTS / alarms / thresholds / notifications: "what alerts are set", "has anything triggered", "what am I being notified about". Returns each alert's condition, whether it's active/paused and armed/triggered, its last value and last fire. Read-only.
 - getCampaigns → questions about email/SMS CAMPAIGNS / marketing sends: "what have we sent", "campaign performance", "open/click rates", "any campaigns running". Returns each campaign's status, channel, recipient count and results (sent/opens/clicks/conversions) — never individual contacts. Read-only.
+- askUpload → questions about a file or Google Sheet the user ATTACHED (listed under "Attached data sources" when present) — query/aggregate that table. To answer a question that spans the attachment AND the ticketing data (e.g. "uploaded target vs actual sold by event"), call BOTH askUpload and askData, then combine the figures in one answer/table. If no sources are attached, say so and point them to the 📎 attach button.
 
 CHARTS: Whenever you return a BREAKDOWN from askData (a measure grouped by a dimension), the app AUTOMATICALLY renders it as a real interactive chart below your reply, and the user can switch it between bar / line / pie / metric with a toggle on the chart. So:
 - You CAN show charts. NEVER say you can't generate a chart/image, and NEVER draw ASCII or text bar graphs.
@@ -125,7 +126,7 @@ function owlAllowed(user) {
   return !!email && OWL_ALLOW.split(',').map((s) => s.trim()).filter(Boolean).includes(email);
 }
 
-function mount(app, { db, auth, insights, owlTools, anthropicKeyForSuite, anthropicKeyForEntity }) {
+function mount(app, { db, auth, insights, owlTools, uploads, anthropicKeyForSuite, anthropicKeyForEntity }) {
   const sql = db.db;
   sql.exec(`
     CREATE TABLE IF NOT EXISTS owl_threads (
@@ -256,6 +257,11 @@ function mount(app, { db, auth, insights, owlTools, anthropicKeyForSuite, anthro
     const gloss = [...(cat.measures || []), ...(cat.dimensions || [])].map((f) => `${f.name} = ${f.label}`).join('; ');
     if (gloss) parts.push(`Field guide (name = meaning): ${gloss}.`);
     if ((cat.notes || []).length) parts.push(`Rules:\n- ${cat.notes.join('\n- ')}`);
+    // Tell the model what external data is attached (so it knows it can use askUpload).
+    try {
+      const ups = uploads && uploads.listUploads && scopeEntityId ? uploads.listUploads(scopeEntityId) : [];
+      if (ups.length) parts.push(`Attached data sources (query with askUpload; combine with askData to answer across sources): ${ups.map((u) => `"${u.name}" [${u.source}] columns: ${(u.columns || []).map((c) => `${c.name}(${c.type})`).join(', ')}`).join(' | ')}.`);
+    } catch { /* ignore */ }
     // No-code steering layer: admin/client guidance (server/owlGuidance.js), injected
     // last so it can override the catalogue's defaults without a deploy.
     try { const g = guidance(db, scopeEntityId); if (g) parts.push(g); } catch { /* ignore */ }

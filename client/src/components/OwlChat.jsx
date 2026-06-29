@@ -28,6 +28,10 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
   const [editText, setEditText] = useState('');
   const [movingId, setMovingId] = useState(null); // thread whose folder is being changed
   const [collapsedFolders, setCollapsedFolders] = useState({});
+  const [uploads, setUploads] = useState([]); // attached external data (CSV files / Google Sheets)
+  const [attachOpen, setAttachOpen] = useState(false);
+  const [attachBusy, setAttachBusy] = useState(false);
+  const fileRef = useRef(null);
   const [followups, setFollowups] = useState([]); // suggested next questions for the latest answer
   const [chatCopied, setChatCopied] = useState(false);
   const scrollRef = useRef(null);
@@ -108,6 +112,26 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
     setThreads((ts) => ts.map((t) => (t.id === id ? { ...t, folder: f } : t)));
     try { await api.owlSetThreadFolder(id, f); } catch { /* ignore */ } refreshThreads();
   };
+  // Attached external data (CSV files / live Google Sheets) the Owl can query.
+  const attachEntity = selEntity || entityId || '';
+  const refreshUploads = () => { if (!attachEntity) { setUploads([]); return; } api.owlUploads(attachEntity).then((r) => setUploads(r.uploads || [])).catch(() => {}); };
+  const onPickFile = async (e) => {
+    const f = e.target.files && e.target.files[0]; if (e.target) e.target.value = '';
+    if (!f || !attachEntity) return;
+    setAttachBusy(true);
+    try { await api.owlUploadCsv(attachEntity, f.name.replace(/\.[^.]+$/, ''), await f.text()); refreshUploads(); } catch (err) { window.alert((err && err.message) || 'Upload failed.'); }
+    setAttachBusy(false);
+  };
+  const addSheet = async () => {
+    if (!attachEntity) return;
+    const url = window.prompt('Paste a Google Sheet link (it must be shared "anyone with the link", or published to the web).'); if (!url || !url.trim()) return;
+    const name = (window.prompt('Name this source', 'Google Sheet') || 'Google Sheet').trim();
+    setAttachBusy(true);
+    try { await api.owlUploadSheet(attachEntity, name, url.trim()); refreshUploads(); } catch (err) { window.alert((err && err.message) || 'Could not import the sheet.'); }
+    setAttachBusy(false);
+  };
+  const refreshSheet = async (u) => { setAttachBusy(true); try { await api.owlRefreshUpload(u.id); refreshUploads(); } catch (err) { window.alert((err && err.message) || 'Refresh failed.'); } setAttachBusy(false); };
+  const removeUpload = async (u) => { if (!window.confirm(`Remove "${u.name}"?`)) return; setUploads((x) => x.filter((z) => z.id !== u.id)); try { await api.owlDeleteUpload(u.id); } catch { /* ignore */ } refreshUploads(); };
 
   const clientEvents = events.filter((e) => e.entityId === selEntity);
   const showPicker = isAdmin || clients.length > 1;
@@ -119,6 +143,8 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
   // Load the saved-chats list when the panel opens; show the sidebar by default on
   // desktop (a persistent column) and hidden on mobile (a slide-over toggled by ☰).
   useEffect(() => { if (open) { refreshThreads(); setSidebarOpen(!isMobile); } }, [open, isMobile]);
+  // Load the client's attached data sources (for the 📎 panel + so the Owl can query them).
+  useEffect(() => { if (!open || !attachEntity) { setUploads([]); return; } api.owlUploads(attachEntity).then((r) => setUploads(r.uploads || [])).catch(() => {}); }, [open, attachEntity]);
   // Esc closes (only while open).
   useEffect(() => {
     if (!open) return;
@@ -341,7 +367,28 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
           ))}
         </div>
       )}
+      {attachOpen && (
+        <div style={{ borderTop: '1px solid var(--hairline)', padding: '8px 12px', flexShrink: 0, background: 'var(--bg, #fafafe)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: uploads.length ? 6 : 0 }}>
+            <strong style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.04em', flex: 1 }}>Attached data</strong>
+            <button onClick={() => fileRef.current && fileRef.current.click()} disabled={!attachEntity || attachBusy} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, padding: '4px 9px', fontSize: 12, cursor: attachEntity ? 'pointer' : 'default' }}>⬆ CSV</button>
+            <button onClick={addSheet} disabled={!attachEntity || attachBusy} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, padding: '4px 9px', fontSize: 12, cursor: attachEntity ? 'pointer' : 'default' }}>＋ Google Sheet</button>
+          </div>
+          {!attachEntity && <div style={{ fontSize: 12, color: 'var(--muted)' }}>Pick a client first to attach data.</div>}
+          {uploads.map((u) => (
+            <div key={u.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0', fontSize: 12.5 }}>
+              <span title={u.source === 'sheet' ? 'Live Google Sheet' : 'Uploaded file'}>{u.source === 'sheet' ? '🔗' : '📄'}</span>
+              <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text)' }}>{u.name} <span style={{ color: 'var(--muted)' }}>· {u.rowCount} rows</span></span>
+              {u.source === 'sheet' && <button onClick={() => refreshSheet(u)} disabled={attachBusy} title="Refresh from the sheet" style={{ border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 12 }}>↻</button>}
+              <button onClick={() => removeUpload(u)} title="Remove" style={{ border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 12 }}>🗑</button>
+            </div>
+          ))}
+          {attachEntity && uploads.length === 0 && <div style={{ fontSize: 12, color: 'var(--muted)' }}>No data attached yet. Add a CSV or a Google Sheet, then ask me about it.</div>}
+          <input ref={fileRef} type="file" accept=".csv,text/csv" onChange={onPickFile} style={{ display: 'none' }} />
+        </div>
+      )}
       <div style={{ borderTop: '1px solid var(--hairline)', padding: 10, flexShrink: 0, display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+        <button onClick={() => setAttachOpen((o) => !o)} title="Attach data (CSV or Google Sheet)" aria-label="Attach data" style={{ border: '1px solid var(--hairline)', background: attachOpen || uploads.length ? 'var(--elevated, rgba(128,128,128,0.12))' : 'var(--card)', color: 'var(--text)', borderRadius: 12, padding: '9px 11px', fontSize: 15, cursor: 'pointer', lineHeight: 1 }}>📎{uploads.length ? <span style={{ fontSize: 11, fontWeight: 700, marginLeft: 3 }}>{uploads.length}</span> : ''}</button>
         <textarea
           value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={onKeyDown}
           placeholder={canAsk ? 'Ask the Owl…' : 'Open a client or event to ask'}

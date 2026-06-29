@@ -123,10 +123,10 @@ const owlIngest = require('./owlIngest').mount({ db, insights, anthropicKeyForEn
 // Experience OS comms spine — self-contained module (own tables + routes under
 // /api/os). Remove this line + server/os.js to fully uninstall the feature.
 let osApi;
-const os = require('./os').mount(app, { db, auth, mailer, push, slack,
-  onInbound: (p) => owlIngest.handle({ ...p, getAttachmentBuffer: osApi.getAttachmentBuffer }) });
+const os = require('./os').mount(app, { db, auth, mailer, push, slack, onInbound: (p) => owlIngest.handle({ ...p, getAttachmentBuffer: osApi.getAttachmentBuffer }) });
 osApi = os;
-require('./owlChat').mount(app, { db, auth, insights, owlTools: require('./owlTools')({ query, auth, db, getGoalsApi: () => goalsApi, getAlertsApi: () => alerts, getCampaignsApi: () => actionsApi, resolveTileValue, getExploreFields: (m, v) => getExploreFieldsCached(m, v) }), anthropicKeyForSuite, anthropicKeyForEntity }); // agentic Owl (disposable; askData rides the scope gate)
+const owlUploads = require('./owlUploads').mount(app, { db, auth }); // external data (CSV/Sheet) the Owl can query alongside ticketing
+require('./owlChat').mount(app, { db, auth, insights, uploads: owlUploads, owlTools: require('./owlTools')({ query, auth, db, getGoalsApi: () => goalsApi, getAlertsApi: () => alerts, getCampaignsApi: () => actionsApi, getUploadsApi: () => owlUploads, resolveTileValue, getExploreFields: (m, v) => getExploreFieldsCached(m, v) }), anthropicKeyForSuite, anthropicKeyForEntity }); // agentic Owl (disposable; askData rides the scope gate)
 // ─── Health ───────────────────────────────────────────────────────────────────
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 

@@ -134,6 +134,11 @@ export const api = {
   owlThreadMessages: (id) => fetch(`/api/owl/threads/${id}/messages`).then(json),
   owlRenameThread: (id, title) => fetch(`/api/owl/threads/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title }) }).then(json),
   owlSetThreadFolder: (id, folder) => fetch(`/api/owl/threads/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folder }) }).then(json),
+  owlUploads: (entityId) => fetch(`/api/owl/uploads?entityId=${encodeURIComponent(entityId || '')}`).then(json),
+  owlUploadCsv: (entityId, name, csv) => fetch('/api/owl/uploads', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entityId, name, csv }) }).then(json),
+  owlUploadSheet: (entityId, name, sheetUrl) => fetch('/api/owl/uploads', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entityId, name, sheetUrl }) }).then(json),
+  owlRefreshUpload: (id) => fetch(`/api/owl/uploads/${id}/refresh`, { method: 'POST' }).then(json),
+  owlDeleteUpload: (id) => fetch(`/api/owl/uploads/${id}`, { method: 'DELETE' }).then(json),
   owlDeleteThread: (id) => fetch(`/api/owl/threads/${id}`, { method: 'DELETE' }).then(json),
   login: (email, password) =>
     fetch('/api/auth/login', {
