@@ -174,13 +174,21 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, catalog
         goals = goalsApi.listGoals(suiteId) || [];
         if (goalsApi.listPersonalGoals) { try { goals = goals.concat(goalsApi.listPersonalGoals(suiteId, user) || []); } catch { /* ignore */ } }
       }
+      // Diagnostic (temporary): the Owl reports "no goals" while the Goals tab shows
+      // them, so log exactly what scope arrived and what listGoals returns per suite.
+      const suiteName = suiteId && db && db.getSuite ? (db.getSuite(suiteId) || {}).name : null;
+      const eid = entityId || (suiteId && db && db.getSuite ? (db.getSuite(suiteId) || {}).entityId : null);
+      try {
+        const scan = (eid && db && db.listSuitesForEntity ? (db.listSuitesForEntity(eid) || []) : [])
+          .map((s) => `${s.name}(${s.id})=${(goalsApi.listGoals(s.id) || []).length}`).join(', ');
+        console.log(`[owlGetGoals] suiteId=${suiteId || '∅'} "${suiteName || '∅'}" entityId=${entityId || '∅'} eid=${eid || '∅'} suiteGoals=${goals.length} | entitySuites: ${scan || '∅'}`);
+      } catch (e) { console.log('[owlGetGoals] diag failed', e && e.message); }
       if (goals.length) {
         const out = []; for (const g of goals.slice(0, 12)) out.push(slimGoal(await attach(g)));
         return { ok: true, goals: out };
       }
       // 2) Fallback: the goal may live on a different event/suite for this client —
       // scan the client's events so a "KFF 26" goal still surfaces (tagged by event).
-      const eid = entityId || (suiteId && db && db.getSuite ? (db.getSuite(suiteId) || {}).entityId : null);
       if (eid && db && db.listSuitesForEntity) {
         const gathered = [];
         for (const s of (db.listSuitesForEntity(eid) || [])) {
@@ -194,7 +202,7 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, catalog
         }
       }
       return { ok: true, goals: [], note: 'No goals set for this event yet.' };
-    } catch { return refuse('error', 'Couldn\'t read the goals for this event.'); }
+    } catch (e) { console.log('[owlGetGoals] error', e && e.message); return refuse('error', 'Couldn\'t read the goals for this event.'); }
   }
   const getGoalsSchema = {
     name: 'getGoals',
