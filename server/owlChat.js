@@ -15,6 +15,29 @@
 const crypto = require('crypto');
 const { resolveGuidance: guidance } = require('./owlGuidance');
 
+// ── Live "thinking" status ───────────────────────────────────────────────────
+// The Owl can pause for seconds while it reasons or runs a Looker query, so we
+// stream short status pings between turns ("Reading your ticket data…") that the
+// client shows as an animated indicator. Each ping is a self-delimited span the
+// client strips out of the answer text (see client/src/lib/api.js owlChat).
+const STATUS_OPEN = '<<<OWL_STATUS>>>';
+const STATUS_CLOSE = '<<</OWL_STATUS>>>';
+const TOOL_STATUS = {
+  askData: 'Reading your ticket data…',
+  queryDashboard: 'Digging into the data…',
+  getDashboard: 'Reading the dashboard…',
+  getGoals: 'Checking your goals…',
+  getAlerts: 'Checking your alerts…',
+  getCampaigns: 'Checking your campaigns…',
+  askUpload: 'Reading your attached data…',
+  createAlert: 'Setting up that alert…',
+};
+function statusForTools(toolUses) {
+  const names = [...new Set((toolUses || []).map((t) => t.name))];
+  if (names.length === 1) return TOOL_STATUS[names[0]] || 'Working on it…';
+  return 'Gathering your data…';
+}
+
 // The chat Owl's system prompt. Unlike every other Owl surface (handed already-
 // resolved numbers), the chat Owl FETCHES its own answers via the askData tool and
 // must never state a figure it didn't get from a tool result. Registered for the
@@ -81,11 +104,13 @@ async function owlTurn(insights, { messages, tools, instructions, apiKey, onText
 // llmTurn({ messages, tools, onText }) → final Message (content blocks, maybe tool_use)
 // toolMap: { [toolName]: { run(input, ctx) } }
 // Returns { text, trail, rounds }. `trail` is the audit ledger for this turn.
-async function runOwlLoop({ llmTurn, toolMap, tools, messages, ctx, onText, maxRounds = 5 }) {
+async function runOwlLoop({ llmTurn, toolMap, tools, messages, ctx, onText, onStatus, maxRounds = 5 }) {
   const convo = [...messages];
   const trail = [];
   let rounds = 0;
   for (; rounds < maxRounds; rounds++) {
+    // Tell the user we're working before each model turn (the silent pre-text gap).
+    if (onStatus) onStatus(rounds === 0 ? 'Thinking…' : 'Working through it…');
     const final = await llmTurn({ messages: convo, tools, onText });
     const blocks = final.content || [];
     convo.push({ role: 'assistant', content: blocks });
@@ -93,6 +118,8 @@ async function runOwlLoop({ llmTurn, toolMap, tools, messages, ctx, onText, maxR
     if (!toolUses.length) {
       return { text: textOf(blocks), trail, rounds: rounds + 1 };
     }
+    // About to run tool(s) — say which kind of thing we're fetching.
+    if (onStatus) onStatus(statusForTools(toolUses));
     const results = [];
     for (const tu of toolUses) {
       const tool = toolMap[tu.name];
@@ -319,6 +346,8 @@ function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, m
         messages,
         ctx: { user: req.user, suiteId, entityId, dashboardId },
         onText: (t) => res.write(t),
+        // Stream a status ping between turns; the client renders it as the thinking line.
+        onStatus: (label) => { try { res.write(STATUS_OPEN + String(label).replace(/[<>]/g, '') + STATUS_CLOSE); } catch { /* socket gone */ } },
       });
       // Persist the answer WITHOUT the follow-ups marker (the client strips it live).
       const cleanText = String(text || '').split('<<<FOLLOWUPS>>>')[0].replace(/\s+$/, '');
