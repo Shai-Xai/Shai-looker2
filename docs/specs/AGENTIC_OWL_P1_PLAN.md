@@ -276,6 +276,16 @@ built unless marked ✅.)
   Tests: 6 added in `test/owlTools.test.js` (drafts bound to the curated explore;
   refuses no-event / off-catalogue measure / PII filter; never touches Looker). Full
   suite green.
+  **Single source of truth (2026-06-29):** `alerts.js` now exports its option lists
+  (`OPERATORS`, `CHANNELS`, `PRIORITIES`, …) and `createAlert`'s tool schema + validation
+  are built FROM them — so adding an operator/channel/priority in the alerts module
+  automatically widens what the Owl can set and ask for (no second list to sync). The
+  measures/filter fields already track the shared curated catalogue the same way. The
+  Owl can now also set **channel** (push/email/sms/slack — inbox always on) and
+  **priority** (normal/important), defaulting to push+normal and only asking when the
+  user says how they want to be told; the confirm card shows the delivery line. A
+  regression test asserts the schema enums equal the alerts constants so the two can't
+  drift. (3 more tests; suite green.)
 - **Pin chart to Home / a specific dashboard** (NEXT BUILD) — live tile via createDashboard/updateDashboard + the marks/pin system; Home pins host on an auto-created "Saved from Owl" dashboard. 📌-button first, conversational "pin that to home" later.
 - Later: **create a segment from a cohort → draft a campaign** (the flagship insight→act; never exposes PII, always via consent + approval). Now rides the act-card spine `createAlert` established (draft → confirm), with the campaign-approval workflow as the heavier confirm step.
 

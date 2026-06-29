@@ -667,6 +667,9 @@ function ActionCard({ action }) {
   if (!action || action.kind !== 'createAlert') return null;
   const d = action.draft || {};
   const cond = `${d.metricLabel || d.measureLabel || 'this metric'} ${OP_TEXT[d.operator] || 'reaches'} ${fmtVal(d.threshold)}${d.unit === '%' ? '%' : ''}`;
+  const CHAN_LABEL = { push: 'push', email: 'email', sms: 'SMS', slack: 'Slack' };
+  const chans = (d.channels || []).map((c) => CHAN_LABEL[c] || c);
+  const delivery = `via ${['in-app', ...chans].join(', ')}${d.priority === 'important' ? ' · important' : ''}`;
   const create = async () => {
     setState('busy'); setErr('');
     try {
@@ -681,7 +684,8 @@ function ActionCard({ action }) {
         <strong style={{ fontSize: 12.5 }}>Alert</strong>
         <span style={{ fontSize: 11, color: 'var(--muted)', border: '1px solid var(--hairline)', borderRadius: 980, padding: '1px 7px' }}>Draft</span>
       </div>
-      <div style={{ fontSize: 13, color: 'var(--text)', marginBottom: 8 }}>Notify me when <strong>{cond}</strong>.</div>
+      <div style={{ fontSize: 13, color: 'var(--text)', marginBottom: 4 }}>Notify me when <strong>{cond}</strong>.</div>
+      <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 8 }}>{delivery}</div>
       {state === 'done' ? (
         <div style={{ fontSize: 12.5, color: 'var(--brand)', fontWeight: 600 }}>✓ Alert created — you'll be notified when it triggers.</div>
       ) : (

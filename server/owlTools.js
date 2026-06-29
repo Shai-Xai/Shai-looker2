@@ -14,6 +14,10 @@
 // docs/specs/AGENTIC_OWL_P1_PLAN.md (§4).
 
 const defaultCatalogue = require('./owlCatalogueSeed');
+// The alert option lists live in server/alerts.js — import them so createAlert's tool
+// schema + validation track that module automatically (add an operator/channel/priority
+// there and the Owl can immediately set + ask for it; no second list to keep in sync).
+const { OPERATORS: ALERT_OPERATORS, CHANNELS: ALERT_CHANNELS, PRIORITIES: ALERT_PRIORITIES } = require('./alerts');
 
 module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAlertsApi, getCampaignsApi, getUploadsApi, resolveTileValue, getExploreFields, getFieldOverrides, catalogue = defaultCatalogue }) {
   if (!query || !query.applyScope || !query.runLookerQuery) {
@@ -586,13 +590,15 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
   // (POST /api/owl/act/create-alert), which runs the real alerts permission + create
   // path. Bounded to the curated catalogue exactly like askData (enum'd measures).
   const OP_LABEL = { gte: '≥', lte: '≤', gt: '>', lt: '<' };
+  const DEFAULT_CHANNEL = ALERT_CHANNELS.includes('push') ? 'push' : ALERT_CHANNELS[0];
+  const DEFAULT_PRIORITY = ALERT_PRIORITIES.includes('normal') ? 'normal' : ALERT_PRIORITIES[0];
   function runCreateAlert(args = {}, ctx = {}) {
     const { user, suiteId } = ctx;
     if (!user) return refuse('no_user', 'No authenticated user in context.');
     if (!suiteId) return refuse('no_event', 'Pick an event first — an alert watches one event\'s numbers.');
     const m = measureByName.get(args.measure);
     if (!m) return refuse('unknown_measure', `"${args.measure}" isn't a measure I can watch. Pick a curated measure.`);
-    const operator = ['gte', 'lte', 'gt', 'lt'].includes(args.operator) ? args.operator : 'gte';
+    const operator = ALERT_OPERATORS.includes(args.operator) ? args.operator : 'gte';
     const threshold = Number(args.threshold);
     if (!Number.isFinite(threshold)) return refuse('bad_threshold', 'Give a numeric threshold to watch for.');
     // Optional filters — curated FILTERABLE dims only (e.g. ticket type = VIP). PII
@@ -606,15 +612,23 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
       metricFilters[field] = String(val);
       filterDesc.push(`${d.label} = ${val}`);
     }
+    // Delivery — channel(s) + priority, validated against the alerts module's own lists.
+    // Both default sensibly (inbox is always-on regardless); alerts.clean re-validates.
+    const channels = (Array.isArray(args.channels) ? args.channels : [])
+      .filter((c) => ALERT_CHANNELS.includes(c));
+    const priority = ALERT_PRIORITIES.includes(args.priority) ? args.priority : DEFAULT_PRIORITY;
     const metricLabel = [m.label, ...filterDesc].join(' · ');
     const name = String(args.name || '').trim().slice(0, 120) || `${metricLabel} ${OP_LABEL[operator]} ${threshold}`;
     // The metric-source alert draft (the Owl's catalogue IS a single curated explore).
+    // The draft is FULLY resolved (incl. channels + priority) so the confirm card shows
+    // exactly what will be created and the commit is explicit, not default-filled.
     const draft = {
       name, ruleType: 'threshold', source: 'metric',
       model: catalogue.model, view: catalogue.explore,
       measure: m.name, measureLabel: m.label,
       metricFilters, metricLabel,
       operator, threshold, unit: m.unit || '',
+      channels: channels.length ? channels : [DEFAULT_CHANNEL], priority,
     };
     return {
       ok: true,
@@ -628,14 +642,16 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
   const createAlertSchema = {
     name: 'createAlert',
     description:
-      'DRAFT a metric alert for the user to confirm — you do NOT create it; they tap "Create alert" to switch it on. An alert watches ONE event\'s ticketing number and notifies the client\'s own team when it crosses a threshold (e.g. tickets sold ≥ 1000, revenue ≥ 500000, remaining ≤ 50). Use when the user asks to be told / notified / alerted / reminded when a number reaches a level. Self-affecting only: it never messages ticket buyers and never spends. After calling it, tell the user what it will watch + the exact condition and that they can tap the button to switch it on. Requires an event to be selected (ok:false otherwise — ask them to pick one).',
+      'DRAFT a metric alert for the user to confirm — you do NOT create it; they tap "Create alert" to switch it on. An alert watches ONE event\'s ticketing number and notifies the client\'s own team when it crosses a threshold (e.g. tickets sold ≥ 1000, revenue ≥ 500000, remaining ≤ 50). Use when the user asks to be told / notified / alerted / reminded when a number reaches a level. Self-affecting only: it never messages ticket buyers and never spends. Delivery defaults to an in-app/push notification at normal priority — only set channels/priority if the user asks (e.g. "email me", "make it important"); inbox is always on. After calling it, tell the user what it will watch + the exact condition + how they\'ll be notified, and that they can tap the button to switch it on. Requires an event to be selected (ok:false otherwise — ask them to pick one).',
     input_schema: {
       type: 'object',
       properties: {
         measure: { type: 'string', enum: catalogue.measures.map((mm) => mm.name), description: 'Which curated number to watch.' },
-        operator: { type: 'string', enum: ['gte', 'lte', 'gt', 'lt'], description: 'gte = at or above, lte = at or below, gt = above, lt = below.' },
+        operator: { type: 'string', enum: ALERT_OPERATORS, description: 'gte = at or above, lte = at or below, gt = above, lt = below.' },
         threshold: { type: 'number', description: 'The level to watch for.' },
         filters: { type: 'object', description: 'Optional catalogue dimension filters to narrow what is watched, e.g. {"core_ticket_types.name":"VIP"}. Contact/PII fields are not allowed.' },
+        channels: { type: 'array', items: { type: 'string', enum: ALERT_CHANNELS }, description: `Optional notify channels (default ${DEFAULT_CHANNEL}; inbox is always on). Only set if the user asks how to be notified.` },
+        priority: { type: 'string', enum: ALERT_PRIORITIES, description: `Optional priority (default ${DEFAULT_PRIORITY}); "important" breaks through quiet hours. Only set if the user asks.` },
         name: { type: 'string', description: 'Optional short name; one is generated from the condition if omitted.' },
       },
       required: ['measure', 'operator', 'threshold'],

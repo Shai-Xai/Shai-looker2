@@ -645,4 +645,7 @@ function mount(app, { db, auth, resolveTileValue, resolveCustomMetric, metricCat
   return { evaluate, tick, recentBeats, listForSuite, alertById, eventsFor, createAlert: createAlertFor };
 }
 
-module.exports = { mount };
+// Export the option lists so other modules (e.g. the Owl's createAlert act-tool)
+// build their schema + validation FROM these — one source of truth, so adding an
+// operator/channel/priority here automatically widens what the Owl can set + ask for.
+module.exports = { mount, RULE_TYPES, OPERATORS, CHANNELS, PRIORITIES, FREQUENCIES };
