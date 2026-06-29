@@ -166,6 +166,7 @@ const DEFAULTS = {
   footer: "You're receiving this because you have a Howler : Pulse login. Reply inside Pulse so it's tracked.",
   metricScale: '',                           // presentation-only: KPI number size multiplier (blank = 1.0). Rides to the browser via /api/theme.
   currency: '',                              // reporting/display currency (ISO code, blank → platform default ZAR). How money is shown + how the Owl writes amounts. NOT the billing currency.
+  loginBackground: '',                       // image URL/data-URL for the white-label vanity login page (/<slug>); app-only, never used in emails.
 };
 
 // Merge only the keys a tier actually sets (ignore '' / null / undefined).

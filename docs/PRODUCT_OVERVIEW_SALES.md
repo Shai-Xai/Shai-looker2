@@ -243,6 +243,11 @@ in one place that updates itself."
   Every logo/icon/image upload now shows **clear spec guidance** (format, size,
   transparency) right under the picker, on both the admin and client surfaces —
   so the assets we get back are the right shape first time.
+- **Vanity login page** ✅ — give a client their own white-labelled sign-in URL
+  (e.g. `…/kunye`) with their logo, colours and a full-screen background image, so
+  signing in feels like *their* product. Set by Howler in **Admin → the client →
+  Settings** (a unique slug + background); an unknown URL just shows the standard
+  login. Only non-secret branding is exposed publicly.
 - **Reporting currency** ✅ — Howler sets the currency a client reports in (ZAR by
   default), in **Admin → the client → Settings**. It flows to every Pulse-written
   touch point: AI **insights**, the home **briefing**, **goals**, **alerts** and
@@ -470,6 +475,11 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-28** — **Vanity login page** ✅: each client can have a white-labelled sign-in URL at
+  `…/<slug>` (e.g. `/kunye`) — their logo, colours and a full-screen background image, so logging in
+  feels like their own product. Howler sets the slug + background in **Admin → the client →
+  Settings** (and the setup wizard's *Client* step); an unknown URL falls back to the standard login.
+  A public endpoint serves **only non-secret branding** for the pre-login page.
 - **2026-06-28** — **Custom categories** ✅: clients (and Howler on their behalf) can now
   **create their own categories** in the goal/alert editor — type a new one, save it, and
   it's remembered and offered thereafter. The list is **shared across goals and alerts** per

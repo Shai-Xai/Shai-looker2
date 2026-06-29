@@ -233,7 +233,10 @@ function Shell() {
     const path = window.location.pathname;
     if (path === '/reset') return <ResetPasswordPage />;
     if (path === '/magic') return <MagicLinkPage />;
-    return <LoginPage />;
+    // A bare /<slug> is treated as a client's vanity login — LoginPage paints
+    // their brand if the slug resolves, else falls back to the standard login.
+    const slug = path.replace(/^\/+/, '').split('/')[0];
+    return <LoginPage slug={slug} />;
   }
 
   // An admin who has switched into one of their client accounts gets the real

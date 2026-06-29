@@ -15,8 +15,7 @@ const { convertDashboard } = require('./convert');
 const { recreateDashboard, fetchDashboard } = require('./recreate');
 const { parseDrillUrl } = require('./drill');
 const insights = require('./insights');
-const { asyncHandler, errorMiddleware } = require('./http');
-const mailer = require('./mailer');
+const { asyncHandler, errorMiddleware } = require('./http'); const mailer = require('./mailer');
 const currency = require('./currency'); const messaging = require('./messaging');
 const rateLimit = require('./ratelimit');
 // Query & scope engine (shared library): the single place Looker queries run and
@@ -917,6 +916,7 @@ const alerts = require('./alerts').mount(app, { db, auth, resolveTileValue, reso
 // Howler staff post a platform issue (global or per-client), update it, resolve it.
 // Distinct from alerts above (which watch data); this is a status-page timeline.
 require('./notices').mount(app, { db, auth, os, mailer, messaging });
+require('./vanity').mount(app, { db, auth, mailer }); // white-labelled /<slug> login per client → server/vanity.js
 
 // ── Pulse: the header "heartbeat" strip's merged feed → server/pulse.js ──────────
 // Merges alert fires (alerts.recentBeats) with live tile momentum (sampled here).
@@ -1505,7 +1505,7 @@ const MAIL_FIELDS = Object.keys(mailer.DEFAULTS);
 const cleanBrandingPatch = (body) => {
   const out = {};
   // Logo can be an uploaded data-URL (resized client-side, but still big).
-  for (const k of MAIL_FIELDS) if (body && k in body) out[k] = String(body[k] ?? '').slice(0, (k === 'logo' || k === 'logoDark') ? 800000 : 4000);
+  for (const k of MAIL_FIELDS) if (body && k in body) out[k] = String(body[k] ?? '').slice(0, (k === 'logo' || k === 'logoDark' || k === 'loginBackground') ? 1500000 : 4000);
   return out;
 };
 

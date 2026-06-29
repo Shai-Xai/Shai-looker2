@@ -1147,8 +1147,8 @@ function SetupWizard({ fields }) {
               <div style={{ marginTop: 6 }}><LogoPicker value={logo} onChange={setLogo} /></div>
             </div>
             {entity
-              ? <CurrencyField entityId={entity.id} />
-              : <div data-tour="client-currency" style={{ marginTop: 12, fontSize: 12.5, color: 'var(--muted)' }}>💱 <b>Reporting currency</b> (ZAR by default) can be set here once the client is created — it controls how money shows across their insights, briefings, goals and alerts.</div>}
+              ? <><CurrencyField entityId={entity.id} /><SlugField entityId={entity.id} /><LoginBackgroundField entityId={entity.id} /></>
+              : <div data-tour="client-currency" style={{ marginTop: 12, fontSize: 12.5, color: 'var(--muted)' }}>💱 <b>Reporting currency</b>, a <b>vanity login URL</b> and a <b>login background</b> can be set here once the client is created.</div>}
             <Footer primary={saveClient} primaryLabel={entityId ? 'Save & continue' : 'Create client & continue'} />
           </>
         )}
@@ -1264,6 +1264,8 @@ const CLIENT_TOUR = [
   { tour: 'client-name', icon: '🏢', title: 'Name the client', body: 'Type the organiser or brand you’re onboarding — this is what everything else hangs off. It’s the only thing you must fill in here.' },
   { tour: 'client-logo', icon: '🖼️', title: 'Add their logo (optional)', body: 'Upload a logo if you have one — it shows as the client’s brand across the app. You can always add or change it later.' },
   { tour: 'client-currency', icon: '💱', title: 'Set their reporting currency', body: 'Pick the currency this client reports in (ZAR by default). It controls how money shows and how the Owl writes amounts — across insights, briefings, goals, alerts and digests. Available once the client is created; clients can’t change it themselves.' },
+  { tour: 'client-slug', icon: '🔗', title: 'Give them a vanity login URL', body: 'Optionally give the client their own white-labelled sign-in page at /<slug> (e.g. /kunye) — their logo, colours and background, so it feels like their own product. Leave blank for the standard login.' },
+  { tour: 'client-loginbg', icon: '🖼️', title: 'Login background image', body: 'Upload a full-screen background for that vanity login page. A dark scrim is added automatically so the sign-in card stays readable.' },
 ];
 const SCOPE_TOUR = [
   { tour: 'scope-org', icon: '🔒', title: 'Pick their organiser', body: 'Choose the organiser(s) this client owns. Every dashboard is then force-filtered to only their data on the server — this is what keeps clients apart.' },
@@ -1544,6 +1546,8 @@ function StepPreviewModal({ steps, index, onClose }) {
         {sec('client-name', <>{lbl('Client name · required')}<div style={{ ...fauxInput, maxWidth: 320 }}>e.g. MTN Bushfire</div></>)}
         {sec('client-logo', <>{lbl('Client logo · optional')}<div style={{ width: 120, height: 44, border: '1px dashed var(--hairline)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12 }}>logo</div></>)}
         {sec('client-currency', <>{lbl('Reporting currency')}<div style={{ ...fauxInput, maxWidth: 320 }}>Platform default (ZAR)</div></>)}
+        {sec('client-slug', <>{lbl('Vanity login URL')}<div style={{ ...fauxInput, maxWidth: 320 }}>{window.location.host}/kunye</div></>)}
+        {sec('client-loginbg', <>{lbl('Login background image')}<div style={{ width: 160, height: 90, border: '1px dashed var(--hairline)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12 }}>background</div></>)}
       </>);
       case 'scope': return (<>
         {sec('scope-all', <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', border: '1px solid var(--hairline)', borderRadius: 10 }}>
@@ -2644,6 +2648,71 @@ function CurrencyField({ entityId }) {
   );
 }
 
+// White-label vanity login (admin-only). A per-client URL slug → a sign-in page
+// at /<slug> painted with their brand. The slug lives in its own table
+// (server/vanity.js); validation (format / reserved / uniqueness) is server-side.
+function SlugField({ entityId }) {
+  const [slug, setSlug] = useState(null);
+  const [saved, setSaved] = useState(false);
+  const [err, setErr] = useState('');
+  useEffect(() => { let alive = true; api.getClientSlug(entityId).then((d) => { if (alive) setSlug(d.slug || ''); }).catch(() => { if (alive) setSlug(''); }); return () => { alive = false; }; }, [entityId]);
+  if (slug === null) return null;
+  const save = async () => {
+    setErr('');
+    try { const d = await api.saveClientSlug(entityId, slug); setSlug(d.slug); flash(setSaved); }
+    catch (e) { setErr(e.message || 'Could not save'); }
+  };
+  return (
+    <div data-tour="client-slug" style={{ marginTop: 12 }}>
+      <L>Vanity login URL</L>
+      <div style={{ fontSize: 12, color: 'var(--muted)', margin: '4px 0 6px' }}>Gives this client a white-labelled sign-in page at the address below — their logo, colours and background image. Leave blank for the standard login. Set by Howler.</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 13, color: 'var(--muted)' }}>{window.location.host}/</span>
+        <input value={slug} onChange={(e) => setSlug(e.target.value)} onBlur={save} placeholder="e.g. kunye" style={{ ...input, maxWidth: 220 }} />
+        {saved && <span style={{ color: 'var(--success,#10b981)', fontSize: 12.5, fontWeight: 600 }}>✓ Saved</span>}
+        {slug && <a href={`${window.location.origin}/${slug}`} target="_blank" rel="noreferrer" style={{ fontSize: 12.5, color: 'var(--brand)', fontWeight: 600 }}>↗ Open</a>}
+      </div>
+      {err && <div style={{ color: 'var(--error)', fontSize: 12.5, marginTop: 5 }}>{err}</div>}
+    </div>
+  );
+}
+
+// Login background image for the vanity page — stored in the branding blob and
+// served (with the logo + colours) by the public /api/branding/:slug endpoint.
+function LoginBackgroundField({ entityId }) {
+  const [bg, setBg] = useState(null);
+  const [saved, setSaved] = useState(false);
+  const fileRef = useRef(null);
+  useEffect(() => { let alive = true; api.getEntityMailTemplate(entityId).then((d) => { if (alive) setBg(d.branding?.loginBackground || ''); }).catch(() => { if (alive) setBg(''); }); return () => { alive = false; }; }, [entityId]);
+  if (bg === null) return null;
+  const persist = async (v) => { setBg(v); try { await api.saveEntityMailTemplate(entityId, { loginBackground: v }); flash(setSaved); } catch (e) { alert('Save failed: ' + e.message); } };
+  const onFile = (e) => {
+    const f = e.target.files?.[0]; if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => { const img = new Image(); img.onload = () => {
+      const max = 1600, scale = Math.min(1, max / img.width);
+      const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+      const c = document.createElement('canvas'); c.width = w; c.height = h;
+      c.getContext('2d').drawImage(img, 0, 0, w, h);
+      persist(c.toDataURL('image/jpeg', 0.82));
+    }; img.src = reader.result; };
+    reader.readAsDataURL(f); e.target.value = '';
+  };
+  return (
+    <div data-tour="client-loginbg" style={{ marginTop: 12 }}>
+      <L>Login background image</L>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 6 }}>
+        <div style={{ width: 160, height: 90, borderRadius: 8, border: '1px solid var(--hairline)', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 11, background: bg ? `center/cover no-repeat url(${JSON.stringify(bg)})` : 'var(--elevated)' }}>{!bg && 'No image'}</div>
+        <button style={miniBtn} onClick={() => fileRef.current?.click()}>Upload image</button>
+        <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={onFile} />
+        {bg && <button style={delBtn} onClick={() => persist('')}>Remove</button>}
+        {saved && <span style={{ color: 'var(--success,#10b981)', fontSize: 12.5, fontWeight: 600 }}>✓ Saved</span>}
+      </div>
+      <UploadHint kind="banner" text="JPG or PNG, landscape — a full-screen background for the vanity login page. About 1600px wide or larger, under 2MB. A dark scrim is added automatically so the sign-in card stays readable." />
+    </div>
+  );
+}
+
 // Client settings: name, organiser locks, preview, delete.
 function ClientSettings({ entity, suites, fields, onChange, onBack }) {
   const navigate = useNavigate();
@@ -2709,6 +2778,8 @@ function ClientSettings({ entity, suites, fields, onChange, onBack }) {
       </div>
       <OwlGuidanceEditor scope="admin-client" entityId={entity.id} />
       <CurrencyField entityId={entity.id} />
+      <SlugField entityId={entity.id} />
+      <LoginBackgroundField entityId={entity.id} />
       <SaveRow onSave={save} saved={saved} id={entity.id} />
     </div>
   );
