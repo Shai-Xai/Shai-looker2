@@ -15,7 +15,7 @@
 
 const defaultCatalogue = require('./owlCatalogueSeed');
 
-module.exports = function createOwlTools({ query, auth, db, getGoalsApi, resolveTileValue, getExploreFields, catalogue = defaultCatalogue }) {
+module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAlertsApi, getCampaignsApi, resolveTileValue, getExploreFields, catalogue = defaultCatalogue }) {
   if (!query || !query.applyScope || !query.runLookerQuery) {
     throw new Error('owlTools requires the query engine (applyScope + runLookerQuery).');
   }
@@ -430,11 +430,90 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, resolve
     },
   };
 
+  // ── getAlerts ────────────────────────────────────────────────────────────────
+  // This event's metric alerts (threshold watchers) + their current state. Read-only.
+  // Per-suite; if only a client is in scope, gather across the client's events. Strips
+  // delivery internals (no SMS recipient numbers / channels).
+  function slimAlert(a, eventName) {
+    if (!a) return null;
+    const metric = a.source === 'tile' ? (a.tileName || a.dashboardName || a.name) : (a.metricLabel || a.measureLabel || a.measure || a.name);
+    const OP = { gte: '≥', lte: '≤', gt: '>', lt: '<' };
+    return {
+      name: a.name, watching: metric, condition: `${OP[a.operator] || a.operator} ${a.threshold}${a.unit ? ' ' + a.unit : ''}`,
+      status: a.status, state: a.state, // active|paused, armed|triggered
+      lastValue: a.lastValue, lastFiredAt: a.lastFiredAt || '', fireCount: a.fireCount || 0,
+      priority: a.priority, frequency: a.frequency,
+      ...(eventName ? { eventName } : {}),
+    };
+  }
+  async function runGetAlerts(_args = {}, ctx = {}) {
+    const { user, suiteId, entityId } = ctx;
+    if (!user) return refuse('no_user', 'No authenticated user.');
+    if (!suiteId && !entityId) return refuse('no_event', 'Open or pick an event (or client) first.');
+    if (suiteId && user.role !== 'admin' && auth && auth.canAccessSuite && !auth.canAccessSuite(user, suiteId)) return refuse('no_access', 'No access to that event.');
+    const alertsApi = typeof getAlertsApi === 'function' ? getAlertsApi() : null;
+    if (!alertsApi || !alertsApi.listForSuite) return refuse('unavailable', 'Alerts aren\'t available right now.');
+    try {
+      if (suiteId) {
+        const list = (alertsApi.listForSuite(suiteId) || []).slice(0, 40).map((a) => slimAlert(a));
+        return { ok: true, alerts: list, note: list.length ? undefined : 'No alerts set on this event yet.' };
+      }
+      const eid = entityId || (db && db.getSuite && suiteId ? (db.getSuite(suiteId) || {}).entityId : null);
+      const gathered = [];
+      if (eid && db && db.listSuitesForEntity) {
+        for (const s of (db.listSuitesForEntity(eid) || [])) {
+          for (const a of (alertsApi.listForSuite(s.id) || [])) gathered.push(slimAlert(a, s.name));
+          if (gathered.length >= 40) break;
+        }
+      }
+      return { ok: true, alerts: gathered.slice(0, 40), note: gathered.length ? 'Alerts across the client\'s events (each tagged with its event).' : 'No alerts set for this client yet.' };
+    } catch { return refuse('error', 'Couldn\'t read the alerts.'); }
+  }
+  const getAlertsSchema = {
+    name: 'getAlerts',
+    description: 'Get this event\'s metric ALERTS (threshold watchers) and their current state — what each is watching, its condition, whether it is active/paused and armed/triggered, its last value and when it last fired. Use for questions about alerts, alarms, thresholds, "what am I being notified about", or "has anything triggered". Read-only.',
+    input_schema: { type: 'object', properties: {} },
+  };
+
+  // ── getCampaigns ─────────────────────────────────────────────────────────────
+  // The client's email/SMS campaigns + their results. Read-only, per-CLIENT (campaigns
+  // can span events). Never returns the audience list (PII) — only a recipient count.
+  function slimCampaign(a) {
+    const c = a.config || {}; const r = a.results || {};
+    return {
+      title: a.title || '(untitled)', status: a.status, // draft|scheduled|running|done|failed|pending
+      channel: c.channel || 'email', mode: c.campaignMode || 'once',
+      recipients: a.audienceCount != null ? a.audienceCount : undefined,
+      sent: r.sent || 0, opens: r.opens || 0, clicks: r.clicks || 0, converted: r.converted || 0, failed: r.failed || 0,
+      startedAt: r.startedAt || '', finishedAt: r.finishedAt || '', createdAt: a.createdAt || '',
+    };
+  }
+  async function runGetCampaigns(_args = {}, ctx = {}) {
+    const { user, suiteId, entityId } = ctx;
+    if (!user) return refuse('no_user', 'No authenticated user.');
+    const eid = entityId || (suiteId && db && db.getSuite ? (db.getSuite(suiteId) || {}).entityId : null);
+    if (!eid) return refuse('no_client', 'Open or pick a client first.');
+    if (user.role !== 'admin' && !(user.entityIds || []).includes(eid)) return refuse('no_access', 'No access to that client.');
+    const campaignsApi = typeof getCampaignsApi === 'function' ? getCampaignsApi() : null;
+    if (!campaignsApi || !campaignsApi.listForEntity) return refuse('unavailable', 'Campaigns aren\'t available right now.');
+    try {
+      const list = (campaignsApi.listForEntity(eid) || []).slice(0, 25).map(slimCampaign);
+      return { ok: true, campaigns: list, note: list.length ? undefined : 'No campaigns for this client yet.' };
+    } catch { return refuse('error', 'Couldn\'t read the campaigns.'); }
+  }
+  const getCampaignsSchema = {
+    name: 'getCampaigns',
+    description: 'Get the client\'s email/SMS CAMPAIGNS and how they performed — title, status (draft/scheduled/running/done), channel, recipient count, and results (sent, opens, clicks, conversions). Use for questions about campaigns, sends, marketing, "what have we sent", open/click rates. Read-only; never lists individual contacts.',
+    input_schema: { type: 'object', properties: {} },
+  };
+
   return {
     catalogue,
     askData: { schema: askDataSchema, run: runAskData },
     getGoals: { schema: getGoalsSchema, run: runGetGoals },
     getDashboard: { schema: getDashboardSchema, run: runGetDashboard },
     queryDashboard: { schema: queryDashboardSchema, run: runQueryDashboard },
+    getAlerts: { schema: getAlertsSchema, run: runGetAlerts },
+    getCampaigns: { schema: getCampaignsSchema, run: runGetCampaigns },
   };
 };

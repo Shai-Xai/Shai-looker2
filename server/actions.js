@@ -1831,7 +1831,10 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
   });
 
   console.log('[actions] action engine mounted', enabled() ? '(enabled)' : '(disabled — set actions_enabled=1)');
-  return { awaitingApprovalFor, unseenOutcomesFor, audienceFor };
+  // Campaigns for a client, newest first, WITHOUT the (PII-heavy) audience snapshot —
+  // used by the Owl's getCampaigns tool. publicAction hides the audience + adds a count.
+  const listForEntity = (entityId) => sql.prepare('SELECT * FROM actions WHERE entity_id=? ORDER BY created_at DESC LIMIT 100').all(entityId).map((r) => publicAction(rowToAction(r)));
+  return { awaitingApprovalFor, unseenOutcomesFor, audienceFor, listForEntity };
 }
 
 // Pure helpers exported for unit testing (list parsing + Google Sheet URL).

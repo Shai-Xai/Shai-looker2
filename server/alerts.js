@@ -626,7 +626,7 @@ function mount(app, { db, auth, resolveTileValue, resolveCustomMetric, metricCat
   app.get('/api/alerts/status', auth.requireAuth, (req, res) => res.json({ enabled: enabled() }));
 
   console.log('[alerts] mounted', enabled() ? '(enabled)' : '(disabled — set alerts_enabled=1)');
-  return { evaluate, tick, recentBeats };
+  return { evaluate, tick, recentBeats, listForSuite, alertById, eventsFor };
 }
 
 module.exports = { mount };
