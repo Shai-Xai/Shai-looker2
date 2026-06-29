@@ -403,19 +403,26 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
           <input ref={fileRef} type="file" accept=".csv,text/csv" onChange={onPickFile} style={{ display: 'none' }} />
         </div>
       )}
-      <div style={{ borderTop: '1px solid var(--hairline)', padding: 10, flexShrink: 0, display: 'flex', gap: 8, alignItems: 'flex-end' }}>
-        <button onClick={() => setAttachOpen((o) => !o)} title="Attach data (CSV or Google Sheet)" aria-label="Attach data" style={{ border: '1px solid var(--hairline)', background: attachOpen || uploads.length ? 'var(--elevated, rgba(128,128,128,0.12))' : 'var(--card)', color: 'var(--text)', borderRadius: 12, padding: '9px 11px', fontSize: 15, cursor: 'pointer', lineHeight: 1 }}>📎{uploads.length ? <span style={{ fontSize: 11, fontWeight: 700, marginLeft: 3 }}>{uploads.length}</span> : ''}</button>
-        {SR && <button onClick={toggleMic} title={listening ? 'Stop dictation' : 'Dictate your question'} aria-label="Dictate" style={{ border: '1px solid var(--hairline)', background: listening ? '#e0414a' : 'var(--card)', color: listening ? '#fff' : 'var(--text)', borderRadius: 12, padding: '9px 11px', fontSize: 15, cursor: 'pointer', lineHeight: 1 }}>🎤</button>}
-        <textarea
-          value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={onKeyDown}
-          placeholder={canAsk ? 'Ask the Owl…' : 'Open a client or event to ask'}
-          rows={1} disabled={!canAsk}
-          style={{ flex: 1, resize: 'none', maxHeight: 120, padding: '9px 12px', borderRadius: 12, border: '1px solid var(--hairline)', background: 'var(--bg, var(--card))', color: 'var(--text)', fontSize: 14, fontFamily: 'inherit', lineHeight: 1.4 }}
-        />
-        <button onClick={() => send()} disabled={busy || !input.trim() || !canAsk} aria-label="Send"
-          style={{ border: 'none', borderRadius: 12, padding: '10px 14px', fontSize: 14, fontWeight: 700, cursor: busy || !input.trim() ? 'default' : 'pointer', background: busy || !input.trim() || !canAsk ? 'var(--elevated, rgba(128,128,128,0.18))' : 'var(--brand)', color: busy || !input.trim() || !canAsk ? 'var(--muted)' : '#fff' }}>
-          {busy ? '…' : 'Send'}
-        </button>
+      {/* Composer, Claude-style: a big text box on top, with attach / mic on the
+          left and Send on the right of a row beneath it. */}
+      <div style={{ borderTop: '1px solid var(--hairline)', padding: 10, flexShrink: 0 }}>
+        <div style={{ border: '1px solid var(--hairline)', borderRadius: 16, background: 'var(--bg, var(--card))', padding: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <textarea
+            value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={onKeyDown}
+            placeholder={canAsk ? 'Ask the Owl…' : 'Open a client or event to ask'}
+            rows={4} disabled={!canAsk}
+            style={{ width: '100%', boxSizing: 'border-box', resize: 'none', minHeight: 108, maxHeight: 260, padding: '8px 10px', border: 'none', outline: 'none', background: 'transparent', color: 'var(--text)', fontSize: 14.5, fontFamily: 'inherit', lineHeight: 1.5 }}
+          />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button onClick={() => setAttachOpen((o) => !o)} title="Attach data (CSV or Google Sheet)" aria-label="Attach data" style={{ border: '1px solid var(--hairline)', background: attachOpen || uploads.length ? 'var(--elevated, rgba(128,128,128,0.12))' : 'var(--card)', color: 'var(--text)', borderRadius: 980, minWidth: 38, height: 38, padding: '0 11px', fontSize: 16, cursor: 'pointer', lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>📎{uploads.length ? <span style={{ fontSize: 11, fontWeight: 700, marginLeft: 3 }}>{uploads.length}</span> : ''}</button>
+            {SR && <button onClick={toggleMic} title={listening ? 'Stop dictation' : 'Dictate your question'} aria-label="Dictate" style={{ border: '1px solid var(--hairline)', background: listening ? '#e0414a' : 'var(--card)', color: listening ? '#fff' : 'var(--text)', borderRadius: 980, width: 38, height: 38, fontSize: 16, cursor: 'pointer', lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>🎤</button>}
+            <span style={{ flex: 1 }} />
+            <button onClick={() => send()} disabled={busy || !input.trim() || !canAsk} aria-label="Send"
+              style={{ border: 'none', borderRadius: 980, padding: '0 20px', height: 38, fontSize: 14, fontWeight: 700, cursor: busy || !input.trim() || !canAsk ? 'default' : 'pointer', background: busy || !input.trim() || !canAsk ? 'var(--elevated, rgba(128,128,128,0.18))' : 'var(--brand)', color: busy || !input.trim() || !canAsk ? 'var(--muted)' : '#fff' }}>
+              {busy ? '…' : 'Send ↑'}
+            </button>
+          </div>
+        </div>
       </div>
       </div>
       {isMobile && sidebar}
@@ -481,37 +488,16 @@ function OwlMd({ text }) {
     <div>
       {blocks.map((b, k) => {
         if (b.t === 'table') {
-          // On a phone a 3+ column table overflows and clips columns. Render each row as
-          // a stacked card instead (first cell = title, the rest as Label: value lines) so
-          // nothing is cut off and there's no sideways scroll. Narrow tables stay tabular.
-          if (isMobile && b.header.length >= 3) return (
-            <div key={k} style={{ margin: '8px 0', display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {b.rows.map((r, ri) => {
-                const title = (r[0] || '').trim();
-                return (
-                  <div key={ri} style={{ border: '1px solid var(--hairline)', borderRadius: 10, padding: '8px 11px', background: 'var(--card)' }}>
-                    {title && <div style={{ fontWeight: 650, marginBottom: 4, color: 'var(--text)' }}>{mdInline(title)}</div>}
-                    {r.map((c, ci) => {
-                      if (ci === 0 && title) return null;
-                      const val = (c || '').trim();
-                      if (!val) return null;
-                      return (
-                        <div key={ci} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '2px 0', fontSize: '0.95em' }}>
-                          <span style={{ color: 'var(--muted)' }}>{mdInline(b.header[ci] || '')}</span>
-                          <span style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{mdInline(val)}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                );
-              })}
-            </div>
-          );
+          // Keep it tabular on EVERY screen. On a phone the table scrolls sideways
+          // inside its own container with the first column pinned — instead of
+          // exploding each row into a tall stacked card. Momentum + overscroll-contain
+          // keep the scroll inside the table rather than dragging the page/chat.
+          const stickyL = { position: 'sticky', left: 0, zIndex: 1, borderRight: '1px solid var(--hairline)' };
           return (
-            <div key={k} style={{ overflowX: 'auto', margin: '6px 0' }}>
-              <table style={{ borderCollapse: 'collapse', fontSize: '0.92em', width: '100%' }}>
-                <thead><tr>{b.header.map((h, j) => <th key={j} style={th}>{mdInline(h)}</th>)}</tr></thead>
-                <tbody>{b.rows.map((r, ri) => <tr key={ri}>{r.map((c, ci) => <td key={ci} style={td(ci > 0 && looksNumeric(c))}>{mdInline(c)}</td>)}</tr>)}</tbody>
+            <div key={k} style={{ margin: '6px 0', overflowX: 'auto', WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y', overscrollBehavior: 'contain', border: '1px solid var(--hairline)', borderRadius: 10 }}>
+              <table style={{ borderCollapse: 'collapse', fontSize: isMobile ? '0.85em' : '0.92em', width: '100%', minWidth: isMobile ? 'max-content' : undefined }}>
+                <thead><tr>{b.header.map((h, j) => <th key={j} style={j === 0 ? { ...th, ...stickyL, zIndex: 2, background: 'var(--elevated, #f1f1f5)' } : th}>{mdInline(h)}</th>)}</tr></thead>
+                <tbody>{b.rows.map((r, ri) => <tr key={ri}>{r.map((c, ci) => <td key={ci} style={ci === 0 ? { ...td(false), ...stickyL, background: 'var(--card)', fontWeight: 600 } : td(ci > 0 && looksNumeric(c))}>{mdInline(c)}</td>)}</tr>)}</tbody>
               </table>
             </div>
           );
