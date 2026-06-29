@@ -760,7 +760,7 @@ function PinMenu({ source, entityId, suiteId, chartType, onDone }) {
 // in an answer: a green dot (= real query, not invented), the measure + value, the
 // filters/scope, and a tap-to-expand card with the exact query.
 function CitationChips({ sources, entityId, suiteId, canPin }) {
-  const [open, setOpen] = useState(-1);
+  const [open, setOpen] = useState(false);
   // Only data sources (askData/queryDashboard) render as chips/charts; dashboard-read
   // sources carry query detail for the fix-brief but have no chart/table to show here.
   const dataSources = (sources || []).filter((s) => s.kind !== 'dashboard');
@@ -770,49 +770,41 @@ function CitationChips({ sources, entityId, suiteId, canPin }) {
   if (!dataSources.length) return null;
   return (
     <div style={{ margin: '-4px 0 12px 2px' }}>
-      <div style={{ fontSize: 10, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--muted)', margin: '0 0 6px 2px' }}>Sources</div>
-      {dataSources.map((s, i) => (
-        <div key={i} style={{ marginBottom: 6 }}>
-          {s.chartType && s.rows && s.rows.length > 1 && <OwlChart source={s} entityId={entityId} suiteId={suiteId} canPin={canPin} />}
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
-            <button onClick={() => setOpen(open === i ? -1 : i)} style={{ ...chip, cursor: 'pointer' }} aria-expanded={open === i}>
-              <span style={dot} />
+      {/* Charts stay visible; the query/source detail tucks into one "Beneath the hood" dropdown. */}
+      {dataSources.map((s, i) => (s.chartType && s.rows && s.rows.length > 1
+        ? <OwlChart key={i} source={s} entityId={entityId} suiteId={suiteId} canPin={canPin} /> : null))}
+      <button onClick={() => setOpen((o) => !o)} aria-expanded={open}
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 6, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--muted)', borderRadius: 980, padding: '4px 11px', fontSize: 11.5, cursor: 'pointer', marginTop: 2 }}>
+        <span style={dot} /> Beneath the hood <span style={{ fontSize: 10 }}>{open ? '▴' : '▾'}</span>
+      </button>
+      {open && dataSources.map((s, i) => (
+        <div key={i} style={{ marginTop: 8, border: '1px solid var(--hairline)', borderRadius: 12, background: 'var(--bg, #fafafe)', overflow: 'hidden' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', padding: '9px 11px' }}>
+            <span style={{ ...chip, cursor: 'default' }}>
               <b style={{ fontWeight: 650, color: 'var(--text)' }}>{s.measure}</b>
               {s.value != null
                 ? <span style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmtVal(s.value)}</span>
                 : <span style={muted}>{s.count} rows</span>}
-              <span style={{ ...muted, fontSize: 10 }}>{open === i ? '▴' : '▾'}</span>
-            </button>
-            {(s.filters || []).map((f, j) => (
-              <span key={j} style={chip}><span style={muted}>{f.label}</span> {f.value}</span>
-            ))}
+            </span>
+            {(s.filters || []).map((f, j) => (<span key={j} style={chip}><span style={muted}>{f.label}</span> {f.value}</span>))}
+            {s.explore && <span style={chip}><span style={muted}>explore</span> {s.explore} · live</span>}
           </div>
-          {open === i && (
-            <div style={{ marginTop: 6, border: '1px solid var(--hairline)', borderRadius: 12, background: 'var(--bg, #fafafe)', overflow: 'hidden' }}>
-              <div style={{ padding: '9px 11px', fontSize: 11.5, display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '4px 12px', borderBottom: (s.rows && s.rows.length) ? '1px solid var(--hairline)' : 'none' }}>
-                <span style={muted}>Measure</span><span>{s.measure}</span>
-                {s.dimensions && s.dimensions.length > 0 && (<><span style={muted}>Group by</span><span>{s.dimensions.join(', ')}</span></>)}
-                {s.filters && s.filters.length > 0 && (<><span style={muted}>Filters</span><span>{s.filters.map((f) => `${f.label} = ${f.value}`).join('  ·  ')}</span></>)}
-                {s.explore && (<><span style={muted}>Explore</span><span>{s.explore} · live</span></>)}
+          {s.columns && s.rows && s.rows.length > 0 && (
+            <div style={{ overflow: 'auto', maxHeight: 240, borderTop: '1px solid var(--hairline)' }}>
+              <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 11.5 }}>
+                <thead>
+                  <tr>{s.columns.map((c, k) => <th key={k} style={{ textAlign: 'left', padding: '6px 10px', position: 'sticky', top: 0, background: 'var(--elevated, #f1f1f5)', color: 'var(--muted)', fontWeight: 600, whiteSpace: 'nowrap', borderBottom: '1px solid var(--hairline)' }}>{c.label}</th>)}</tr>
+                </thead>
+                <tbody>
+                  {s.rows.map((r, ri) => (
+                    <tr key={ri}>{s.columns.map((c, k) => <td key={k} style={{ padding: '5px 10px', whiteSpace: 'nowrap', borderBottom: '1px solid var(--hairline)', fontVariantNumeric: 'tabular-nums', color: 'var(--text)' }}>{fmtCell(r[c.field])}</td>)}</tr>
+                  ))}
+                </tbody>
+              </table>
+              <div style={{ display: 'flex', alignItems: 'center', padding: '6px 10px', fontSize: 10.5, color: 'var(--muted)' }}>
+                {s.count > s.rows.length ? `Showing ${s.rows.length} of ${s.count.toLocaleString()} rows.` : ''}
+                <button onClick={() => downloadText(csvName(s), toCSV(s.columns, s.rows))} title="Download as CSV" style={{ marginLeft: 'auto', border: 'none', background: 'transparent', color: 'var(--brand)', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>⬇ CSV</button>
               </div>
-              {s.columns && s.rows && s.rows.length > 0 && (
-                <div style={{ overflow: 'auto', maxHeight: 240 }}>
-                  <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 11.5 }}>
-                    <thead>
-                      <tr>{s.columns.map((c, k) => <th key={k} style={{ textAlign: 'left', padding: '6px 10px', position: 'sticky', top: 0, background: 'var(--elevated, #f1f1f5)', color: 'var(--muted)', fontWeight: 600, whiteSpace: 'nowrap', borderBottom: '1px solid var(--hairline)' }}>{c.label}</th>)}</tr>
-                    </thead>
-                    <tbody>
-                      {s.rows.map((r, ri) => (
-                        <tr key={ri}>{s.columns.map((c, k) => <td key={k} style={{ padding: '5px 10px', whiteSpace: 'nowrap', borderBottom: '1px solid var(--hairline)', fontVariantNumeric: 'tabular-nums', color: 'var(--text)' }}>{fmtCell(r[c.field])}</td>)}</tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  <div style={{ display: 'flex', alignItems: 'center', padding: '6px 10px', fontSize: 10.5, color: 'var(--muted)' }}>
-                    {s.count > s.rows.length ? `Showing ${s.rows.length} of ${s.count.toLocaleString()} rows.` : ''}
-                    <button onClick={() => downloadText(csvName(s), toCSV(s.columns, s.rows))} title="Download as CSV" style={{ marginLeft: 'auto', border: 'none', background: 'transparent', color: 'var(--brand)', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>⬇ CSV</button>
-                  </div>
-                </div>
-              )}
             </div>
           )}
         </div>
