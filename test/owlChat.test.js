@@ -120,6 +120,38 @@ test('owlAllowed gates to the allowlist (default = the dogfood account, case-ins
   assert.equal(owlAllowed(null), false);
 });
 
+test('a non-askData tool result (e.g. getGoals goals[]) reaches the model intact', async () => {
+  // Regression: the loop used to reshape every result into an askData envelope
+  // ({ok,count,rows,measure,dimensions}), silently dropping getGoals' `goals` array
+  // so the model always saw "no rows" and answered "no goals". The envelope must now
+  // pass through whatever the tool returned (minus the bulky queryBody).
+  const user = h.makeClient('chat-goals@client.test', [h.makeEntity('G', 'G-org').id]);
+  const fakeGoals = { schema: { name: 'getGoals' }, run: async () => ({ ok: true, goals: [{ name: 'Tickets', target: 55000, value: 48410 }], note: 'live' }) };
+  let toolResultSeen = null;
+  const responses = [
+    { content: [{ type: 'tool_use', id: 'tu1', name: 'getGoals', input: {} }] },
+    { content: [{ type: 'text', text: 'Your Tickets goal is at 48,410 of 55,000.' }] },
+  ];
+  const llmTurn = async ({ messages, onText }) => {
+    const last = messages[messages.length - 1];
+    if (last.role === 'user' && Array.isArray(last.content)) toolResultSeen = last.content[0];
+    const r = responses.shift();
+    for (const b of r.content) if (b.type === 'text' && onText) onText(b.text);
+    return r;
+  };
+  const { trail } = await runOwlLoop({
+    llmTurn, toolMap: { getGoals: fakeGoals }, tools: [fakeGoals.schema],
+    messages: [{ role: 'user', content: 'How are goals tracking?' }],
+    ctx: { user },
+  });
+  assert.equal(trail[0].result.goals.length, 1);
+  const fed = JSON.parse(toolResultSeen.content);
+  assert.equal(fed.ok, true);
+  assert.ok(Array.isArray(fed.goals), 'goals array must survive into the model payload');
+  assert.equal(fed.goals[0].name, 'Tickets');
+  assert.equal(fed.note, 'live');
+});
+
 test('an unknown tool is handled, not thrown', async () => {
   const user = h.makeClient('chat-d@client.test', [h.makeEntity('A', 'A-org').id]);
   const { llmTurn } = fakeLlm([

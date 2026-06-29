@@ -85,10 +85,17 @@ async function runOwlLoop({ llmTurn, toolMap, tools, messages, ctx, onText, maxR
       const tool = toolMap[tu.name];
       const result = tool ? await tool.run(tu.input || {}, ctx) : { ok: false, reason: 'unknown_tool', message: `No such tool: ${tu.name}` };
       trail.push({ name: tu.name, input: tu.input || {}, result });
-      // Feed the model a compact result (drop the bulky queryBody; cap rows).
-      const forModel = result.ok
-        ? { ok: true, count: result.count, rows: (result.rows || []).slice(0, 100), measure: result.measure, dimensions: result.dimensions }
-        : { ok: false, reason: result.reason, message: result.message };
+      // Feed the model a compact result. Pass through whatever the tool returned
+      // (askData → rows/count, getGoals → goals/note, …) so no tool's payload is
+      // silently dropped; just strip the bulky queryBody and cap any rows array.
+      let forModel;
+      if (result.ok) {
+        const { queryBody, ...rest } = result; // eslint-disable-line no-unused-vars
+        if (Array.isArray(rest.rows)) rest.rows = rest.rows.slice(0, 100);
+        forModel = rest;
+      } else {
+        forModel = { ok: false, reason: result.reason, message: result.message };
+      }
       results.push({ type: 'tool_result', tool_use_id: tu.id, content: JSON.stringify(forModel) });
     }
     convo.push({ role: 'user', content: results });
