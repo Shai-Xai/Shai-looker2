@@ -84,6 +84,22 @@ export default function AlertEditor({ entityId, suiteId, suiteName, alert, smsAv
   const measureObj = () => measuresFor().find((m) => m.name === measure) || null;
   const dimLabel = (name) => dimsFor().find((d) => d.name === name)?.label || name;
   const metricFiltersObj = () => { const o = {}; for (const f of mFilters) if (f.field && f.value) o[f.field] = f.value; return o; };
+  // The event-name dimension for this explore — so the alert can be pinned to ONE
+  // event and its number can never span others. Prefer an explicit "Event" /
+  // "Event Name" dimension (not "Event Date"/"Event Type").
+  const eventDim = dimsFor().find((d) => /^(current )?event( name)?$/i.test(String(d.label).trim()))
+    || dimsFor().find((d) => /event/i.test(d.label) && /name/i.test(d.label))
+    || dimsFor().find((d) => /event/i.test(d.name) && /name/i.test(d.name)) || null;
+  const eventField = eventDim?.name || '';
+  const eventValue = eventField ? (mFilters.find((f) => f.field === eventField)?.value || '') : '';
+  const setEventValue = (v) => setMFilters((fs) => { const others = fs.filter((f) => f.field !== eventField); return v ? [{ field: eventField, value: v }, ...others] : others; });
+  // The scope the chosen target is counted under — shown next to "This reads" so the
+  // number is never ambiguous. The event leads; explicit metric filters follow.
+  const scopeLabel = () => {
+    const ev = eventValue || suiteName || 'this event';
+    const fs = mFilters.filter((f) => f.field && f.value && f.field !== eventField).map((f) => `${dimLabel(f.field)} = ${f.value}`);
+    return fs.length ? `${ev} · ${fs.join(' · ')}` : ev;
+  };
   const metricLabelStr = () => {
     const ml = measureObj()?.label || '';
     const fs = mFilters.filter((f) => f.field && f.value).map((f) => `${dimLabel(f.field)} = ${f.value}`);
@@ -146,6 +162,19 @@ export default function AlertEditor({ entityId, suiteId, suiteName, alert, smsAv
     if (dim) { setMFilters((fs) => (fs.some((f) => f.field === dim.name) ? fs : [...fs, { field: dim.name, value: '' }])); loadFilterVals(dim.name); }
     setFilterHint('');
   }, [source, filterHint, curExplore]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Load the event list for the picker, and default-pin to THIS event (the suite the
+  // alert belongs to) when its name is among the values — so a new alert is correctly
+  // scoped out of the box, while staying changeable.
+  useEffect(() => { if (source === 'metric' && curExplore && eventField) loadFilterVals(eventField); }, [source, exKey, eventField]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (source !== 'metric' || !eventField || eventValue) return;
+    const vals = filterVals[eventField];
+    if (!Array.isArray(vals) || !vals.length) return;
+    const norm = (s) => String(s).trim().toLowerCase();
+    const match = suiteName && vals.find((v) => norm(v) === norm(suiteName) || norm(v).includes(norm(suiteName)) || norm(suiteName).includes(norm(v)));
+    if (match) setEventValue(match);
+  }, [filterVals, eventField, eventValue, suiteName, source]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Resolve a template's tile ref against this client's catalogue (by id, else by name).
   useEffect(() => {
@@ -388,15 +417,28 @@ export default function AlertEditor({ entityId, suiteId, suiteName, alert, smsAv
                 No data sources available yet (these come from your existing dashboards). Use “A dashboard tile” instead.
               </div>
             )}
-            {/* 2 — the filter(s) FIRST (Ticket Type / Category …) */}
+            {/* Event — pin the alert to ONE event so the number can never span others. */}
+            {curExplore && eventField && (
+              <div style={{ marginTop: 10 }}>
+                <div style={subLabel}>Event</div>
+                {Array.isArray(filterVals[eventField]) ? (
+                  <select value={eventValue} onChange={(e) => setEventValue(e.target.value)} style={inp}>
+                    <option value="">All events in scope</option>
+                    {filterVals[eventField].map((v) => <option key={v} value={v}>{v}</option>)}
+                  </select>
+                ) : <div style={{ fontSize: 12, color: 'var(--muted)' }}>Loading events…</div>}
+                <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>Pins this alert to one event, so its number can’t include other events. Defaults to {suiteName ? <b>{suiteName}</b> : 'this event'}.</div>
+              </div>
+            )}
+            {/* 2 — the filter(s) (Ticket Type / Category …) */}
             {curExplore && (
               <div style={{ marginTop: 10 }}>
                 <div style={subLabel}>Filter (optional)</div>
-                {mFilters.map((f, i) => (
+                {mFilters.filter((f) => f.field !== eventField).map((f, i) => (
                   <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
                     <select value={f.field} onChange={(e) => { setFilter(i, { field: e.target.value, value: '' }); loadFilterVals(e.target.value); }} style={{ ...inp, flex: 1 }}>
                       <option value="">Filter by…</option>
-                      {dimsFor().map((d) => <option key={d.name} value={d.name}>{d.label}</option>)}
+                      {dimsFor().filter((d) => d.name !== eventField).map((d) => <option key={d.name} value={d.name}>{d.label}</option>)}
                     </select>
                     {f.field && (
                       Array.isArray(filterVals[f.field]) && filterVals[f.field].length
@@ -436,6 +478,11 @@ export default function AlertEditor({ entityId, suiteId, suiteName, alert, smsAv
             {preview && preview.value != null && threshold === '' && ruleType !== 'sold_out' && (
               <button type="button" onClick={() => setThreshold(String(Math.round(Number(preview.value))))} style={miniBtn}>Use as start</button>
             )}
+          </div>
+        )}
+        {((source === 'tile' && tileId) || (source === 'metric' && measure)) && (
+          <div style={{ fontSize: 11.5, color: 'var(--muted)', margin: '5px 2px 0', lineHeight: 1.4 }}>
+            📍 Scoped to <b style={{ color: 'var(--text)' }}>{scopeLabel()}</b> — plus this client's own data only.
           </div>
         )}
 
