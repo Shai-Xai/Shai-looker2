@@ -726,4 +726,8 @@ export const api = {
   eventopsIssues: (suiteId, status = 'open') => fetch(`/api/eventops/suites/${suiteId}/issues?status=${status}`).then(json),
   eventopsLogIssue: (suiteId, b) => fetch(`/api/eventops/suites/${suiteId}/issues`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   eventopsResolveIssue: (suiteId, id, b) => fetch(`/api/eventops/suites/${suiteId}/issues/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b || {}) }).then(json),
+  eventopsStaff: (suiteId) => fetch(`/api/eventops/suites/${suiteId}/staff`).then(json),
+  eventopsCreateStaff: (suiteId, b) => fetch(`/api/eventops/suites/${suiteId}/staff`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  eventopsUpdateStaff: (suiteId, id, b) => fetch(`/api/eventops/suites/${suiteId}/staff/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  eventopsDeleteStaff: (suiteId, id) => fetch(`/api/eventops/suites/${suiteId}/staff/${id}`, { method: 'DELETE' }).then((r) => r.ok),
 };

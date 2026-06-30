@@ -179,6 +179,38 @@ test('liaison logs an issue on a device, then resolves it', () => {
   assert.equal(call(r['GET /api/eventops/suites/:suiteId/overview'], { user: owner, params: P }).body.totals.openIssues, 0);
 });
 
+test('staff: create + attribute a move and an issue to a staff member', () => {
+  const r = mount();
+  const { entity, suite, owner, admin } = seedEvent();
+  call(r['PUT /api/eventops/entities/:entityId/enabled'], { user: admin, params: { entityId: entity.id }, body: { enabled: true } });
+  const P = { suiteId: suite.id };
+
+  const station = call(r['POST /api/eventops/suites/:suiteId/stations'], { user: owner, params: P, body: { name: 'Gate', kind: 'gate' } }).body.station;
+  const staff = call(r['POST /api/eventops/suites/:suiteId/staff'], { user: owner, params: P, body: { name: 'Jane', number: '101', stationId: station.id } }).body.staff;
+  assert.equal(staff.number, '101');
+  assert.equal(staff.stationName, 'Gate'); // optional posting resolved
+
+  const dev = call(r['POST /api/eventops/suites/:suiteId/devices'], { user: owner, params: P, body: { label: 'D1', qrCode: 'D1' } }).body.device;
+
+  // Move attributed to staff → the audit event carries the denormalised staff label.
+  call(r['POST /api/eventops/suites/:suiteId/move'], { user: owner, params: P, body: { deviceId: dev.id, stationId: station.id, staffId: staff.id } });
+  const detail = call(r['GET /api/eventops/suites/:suiteId/devices/:id'], { user: owner, params: { ...P, id: dev.id } });
+  assert.ok(detail.body.events.some((e) => e.staffLabel === '#101 Jane'), 'move event attributed to #101 Jane');
+
+  // Issue attributed to staff → the issue row carries the label too.
+  const issue = call(r['POST /api/eventops/suites/:suiteId/issues'], { user: owner, params: P, body: { deviceId: dev.id, category: 'battery', staffId: staff.id } }).body.issue;
+  assert.equal(issue.staffLabel, '#101 Jane');
+
+  // Attribution is optional — a move with no staffId still works (blank label).
+  const moved = call(r['POST /api/eventops/suites/:suiteId/move'], { user: owner, params: P, body: { deviceId: dev.id, stationId: 'hive' } });
+  assert.equal(moved.body.device.state, 'in_stock');
+
+  // Deleting the staff member keeps the historical label on the issue (denormalised).
+  call(r['DELETE /api/eventops/suites/:suiteId/staff/:id'], { user: owner, params: { ...P, id: staff.id } });
+  assert.equal(call(r['GET /api/eventops/suites/:suiteId/staff'], { user: owner, params: P }).body.staff.length, 0);
+  assert.equal(call(r['GET /api/eventops/suites/:suiteId/issues'], { user: owner, params: P, query: { status: 'all' } }).body.issues[0].staffLabel, '#101 Jane');
+});
+
 test('deleting a station sends its deployed devices back to the Hive', () => {
   const r = mount();
   const { entity, suite, owner, admin } = seedEvent();

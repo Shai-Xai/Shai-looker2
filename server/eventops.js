@@ -120,7 +120,28 @@ function mount(app, { db, auth }) {
       enabled     INTEGER NOT NULL DEFAULT 0,
       updated_at  TEXT NOT NULL
     );
+
+    -- Staff working the event. 'number' is a badge/staff ID you assign; station_id is an
+    -- optional posting. When scanning, you can tag a move/issue with who did it.
+    CREATE TABLE IF NOT EXISTS eventops_staff (
+      id          TEXT PRIMARY KEY,
+      entity_id   TEXT NOT NULL,
+      suite_id    TEXT NOT NULL,
+      name        TEXT NOT NULL DEFAULT '',
+      number      TEXT NOT NULL DEFAULT '',
+      role        TEXT NOT NULL DEFAULT '',
+      station_id  TEXT NOT NULL DEFAULT '',
+      created_at  TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_eventops_staff_suite ON eventops_staff(suite_id);
   `);
+
+  // Additive migrations for already-deployed DBs: attribute moves/issues to a staff member.
+  // staff_label is denormalised (e.g. "#101 Jane") so history survives a staff delete.
+  for (const [t, col] of [
+    ['eventops_device_events', 'staff_id'], ['eventops_device_events', 'staff_label'],
+    ['eventops_issues', 'staff_id'], ['eventops_issues', 'staff_label'],
+  ]) { try { sql.exec(`ALTER TABLE ${t} ADD COLUMN ${col} TEXT NOT NULL DEFAULT ''`); } catch { /* already there */ } }
 
   // ── per-client toggle ──────────────────────────────────────────────────────────
   const entityEnabled = (entityId) => {
@@ -177,22 +198,35 @@ function mount(app, { db, auth }) {
   const eventRow = (e) => ({
     id: e.id, deviceId: e.device_id, kind: e.kind, fromState: e.from_state, toState: e.to_state,
     fromStation: stationName(e.from_station_id), toStation: stationName(e.to_station_id),
-    actor: e.actor, note: e.note, unusual: !!e.unusual, at: e.at,
+    actor: e.actor, staffLabel: e.staff_label || '', note: e.note, unusual: !!e.unusual, at: e.at,
   });
   const issueRow = (i) => ({
     id: i.id, deviceId: i.device_id, category: i.category, note: i.note, status: i.status,
     resolution: i.resolution, reportedBy: i.reported_by, reportedAt: i.reported_at,
-    resolvedBy: i.resolved_by, resolvedAt: i.resolved_at,
+    resolvedBy: i.resolved_by, resolvedAt: i.resolved_at, staffLabel: i.staff_label || '',
+  });
+  const staffRow = (s) => s && ({
+    id: s.id, entityId: s.entity_id, suiteId: s.suite_id, name: s.name, number: s.number,
+    role: s.role, stationId: s.station_id || null, stationName: stationName(s.station_id), createdAt: s.created_at,
   });
   const getDevice = (id) => sql.prepare('SELECT * FROM eventops_devices WHERE id=?').get(id);
+  // Resolve a staffId (within the suite) → { id, label } for attribution. Label is denormalised
+  // onto the event/issue so the trail survives a later staff delete. Returns null if not found.
+  function resolveStaff(suiteId, staffId) {
+    if (!staffId) return null;
+    const s = sql.prepare('SELECT * FROM eventops_staff WHERE id=? AND suite_id=?').get(staffId, suiteId);
+    if (!s) return null;
+    const label = [s.number ? `#${s.number}` : '', s.name].filter(Boolean).join(' ').trim() || s.number || s.name;
+    return { id: s.id, label };
+  }
 
-  function logEvent(d, { kind, toState, toStation, note, actor, unusual }) {
+  function logEvent(d, { kind, toState, toStation, note, actor, unusual, staff }) {
     sql.prepare(`INSERT INTO eventops_device_events
-      (id, device_id, entity_id, suite_id, kind, from_state, to_state, from_station_id, to_station_id, actor, note, unusual, at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      (id, device_id, entity_id, suite_id, kind, from_state, to_state, from_station_id, to_station_id, actor, note, unusual, at, staff_id, staff_label)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
       .run(uuid(), d.id, d.entity_id, d.suite_id, kind, d.state, toState ?? d.state,
         d.station_id || '', toStation ?? (d.station_id || ''), actor || '', String(note || '').slice(0, 2000),
-        unusual ? 1 : 0, now());
+        unusual ? 1 : 0, now(), staff?.id || '', staff?.label || '');
   }
   const str = (v, max = 200) => String(v == null ? '' : v).slice(0, max);
 
@@ -427,7 +461,7 @@ function mount(app, { db, auth }) {
       }
     }
     const unusual = isUnusual(d.state, toState);
-    logEvent(d, { kind: b.state ? 'status' : 'move', toState, toStation, actor: req.user.email, note: b.note, unusual });
+    logEvent(d, { kind: b.state ? 'status' : 'move', toState, toStation, actor: req.user.email, note: b.note, unusual, staff: resolveStaff(su.id, b.staffId) });
     sql.prepare('UPDATE eventops_devices SET state=?, station_id=?, updated_at=? WHERE id=?').run(toState, toStation, now(), d.id);
     res.json({ device: deviceRow(getDevice(d.id)), unusual });
   });
@@ -454,13 +488,14 @@ function mount(app, { db, auth }) {
     const note = str(b.note, 2000).trim();
     const resolution = str(b.resolution, 2000).trim();
     const resolvedNow = !!b.resolved || !!resolution;
+    const staff = resolveStaff(su.id, b.staffId);
     const id = uuid(); const ts = now();
     sql.prepare(`INSERT INTO eventops_issues
-      (id, device_id, entity_id, suite_id, category, note, status, resolution, reported_by, reported_at, resolved_by, resolved_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+      (id, device_id, entity_id, suite_id, category, note, status, resolution, reported_by, reported_at, resolved_by, resolved_at, staff_id, staff_label)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
       .run(id, d.id, su.entityId, su.id, category, note, resolvedNow ? 'resolved' : 'open', resolution,
-        req.user.email, ts, resolvedNow ? req.user.email : '', resolvedNow ? ts : '');
-    logEvent(d, { kind: 'check', actor: req.user.email, note: `Issue: ${category}${note ? ' — ' + note : ''}` });
+        req.user.email, ts, resolvedNow ? req.user.email : '', resolvedNow ? ts : '', staff?.id || '', staff?.label || '');
+    logEvent(d, { kind: 'check', actor: req.user.email, note: `Issue: ${category}${note ? ' — ' + note : ''}`, staff });
     res.status(201).json({ issue: issueRow(sql.prepare('SELECT * FROM eventops_issues WHERE id=?').get(id)) });
   });
 
@@ -478,6 +513,45 @@ function mount(app, { db, auth }) {
         .run(resolution, req.user.email, now(), i.id);
     }
     res.json({ issue: issueRow(sql.prepare('SELECT * FROM eventops_issues WHERE id=?').get(i.id)) });
+  });
+
+  // ════════════════════════════ staff ══════════════════════════════════════════════
+  app.get('/api/eventops/suites/:suiteId/staff', auth.requireAuth, (req, res) => {
+    const su = gateSuite(req, res); if (!su) return;
+    const rows = sql.prepare('SELECT * FROM eventops_staff WHERE suite_id=? ORDER BY number, name').all(su.id);
+    res.json({ staff: rows.map(staffRow), canManage: canManage(req.user, su.id) });
+  });
+
+  function cleanStaff(b, su) {
+    const stationId = b.stationId && sql.prepare('SELECT id FROM eventops_stations WHERE id=? AND suite_id=?').get(b.stationId, su.id) ? b.stationId : '';
+    return { name: str(b.name, 120).trim(), number: str(b.number, 40).trim(), role: str(b.role, 60).trim(), stationId };
+  }
+
+  app.post('/api/eventops/suites/:suiteId/staff', auth.requireAuth, (req, res) => {
+    const su = gateSuite(req, res, { manage: true }); if (!su) return;
+    const c = cleanStaff(req.body || {}, su);
+    if (!c.name && !c.number) return res.status(400).json({ error: 'Give the staff member a name or number.' });
+    const id = uuid();
+    sql.prepare('INSERT INTO eventops_staff (id, entity_id, suite_id, name, number, role, station_id, created_at) VALUES (?,?,?,?,?,?,?,?)')
+      .run(id, su.entityId, su.id, c.name, c.number, c.role, c.stationId, now());
+    res.status(201).json({ staff: staffRow(sql.prepare('SELECT * FROM eventops_staff WHERE id=?').get(id)) });
+  });
+
+  app.put('/api/eventops/suites/:suiteId/staff/:id', auth.requireAuth, (req, res) => {
+    const su = gateSuite(req, res, { manage: true }); if (!su) return;
+    const s = sql.prepare('SELECT * FROM eventops_staff WHERE id=?').get(req.params.id);
+    if (!s || s.suite_id !== su.id) return res.status(404).json({ error: 'Staff member not found' });
+    const c = cleanStaff({ name: req.body?.name ?? s.name, number: req.body?.number ?? s.number, role: req.body?.role ?? s.role, stationId: req.body?.stationId ?? s.station_id }, su);
+    sql.prepare('UPDATE eventops_staff SET name=?, number=?, role=?, station_id=? WHERE id=?').run(c.name, c.number, c.role, c.stationId, s.id);
+    res.json({ staff: staffRow(sql.prepare('SELECT * FROM eventops_staff WHERE id=?').get(s.id)) });
+  });
+
+  app.delete('/api/eventops/suites/:suiteId/staff/:id', auth.requireAuth, (req, res) => {
+    const su = gateSuite(req, res, { manage: true }); if (!su) return;
+    const s = sql.prepare('SELECT * FROM eventops_staff WHERE id=?').get(req.params.id);
+    if (!s || s.suite_id !== su.id) return res.status(404).json({ error: 'Staff member not found' });
+    sql.prepare('DELETE FROM eventops_staff WHERE id=?').run(s.id); // history keeps the denormalised label
+    res.status(204).end();
   });
 
   console.log('[eventops] mounted', enabled() ? '(enabled)' : '(disabled — set eventops_enabled=1)');
