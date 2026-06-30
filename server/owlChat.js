@@ -440,6 +440,52 @@ function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, m
     res.json({ commands: owlCommands });
   });
 
+  // GET /api/owl/starters — "prompt starter" pills for the empty chat: the user's OWN
+  // most-asked questions first (personalised quick pills), topped up with curated
+  // defaults. Concrete prompts (tapping asks straight away), not tool names.
+  const STARTER_DEFAULTS = [
+    { label: "Today's sales", icon: '📊', prompt: 'How are ticket sales going today?' },
+    { label: 'Sales overview', icon: '📈', prompt: 'Give me a sales overview' },
+    { label: 'Last 7 days', icon: '📅', prompt: 'How have sales gone over the last 7 days?' },
+    { label: 'Top ticket types', icon: '🏆', prompt: 'What are my top-selling ticket types?' },
+    { label: 'Goal tracking', icon: '🎯', prompt: 'How are my goals tracking?' },
+    { label: 'Sales by hour', icon: '⏰', prompt: 'Show me ticket sales by hour today' },
+  ];
+  // A user's most-repeated short questions (asked 2+ times → genuinely "common"), most
+  // recent breaking ties. Scoped to the chosen client when given, else across all theirs.
+  const histStartersAll = sql.prepare(
+    `SELECT m.body AS body, COUNT(*) AS c, MAX(m.created_at) AS last
+       FROM owl_messages m JOIN owl_threads t ON t.id = m.thread_id
+      WHERE t.user_id = ? AND m.role = 'user' AND length(trim(m.body)) BETWEEN 6 AND 90
+      GROUP BY lower(trim(m.body)) ORDER BY c DESC, last DESC LIMIT 8`);
+  const histStartersEnt = sql.prepare(
+    `SELECT m.body AS body, COUNT(*) AS c, MAX(m.created_at) AS last
+       FROM owl_messages m JOIN owl_threads t ON t.id = m.thread_id
+      WHERE t.user_id = ? AND t.entity_id = ? AND m.role = 'user' AND length(trim(m.body)) BETWEEN 6 AND 90
+      GROUP BY lower(trim(m.body)) ORDER BY c DESC, last DESC LIMIT 8`);
+  app.get('/api/owl/starters', auth.requireAuth, (req, res) => {
+    if (!owlAllowed(req.user)) return res.status(403).json({ error: 'The native Owl isn\'t enabled for your account yet.' });
+    const entityId = String(req.query.entityId || '').trim();
+    let rows = [];
+    try { rows = entityId ? histStartersEnt.all(req.user.id, entityId) : histStartersAll.all(req.user.id); } catch { rows = []; }
+    const norm = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+    const seen = new Set(); const starters = [];
+    for (const r of rows) { // personalised: the user's repeated asks, up to 4
+      const body = String(r.body || '').trim();
+      if (!body || r.c < 2 || seen.has(norm(body))) continue;
+      seen.add(norm(body));
+      starters.push({ label: body.length > 34 ? `${body.slice(0, 33)}…` : body, prompt: body, icon: '🕘', from: 'history' });
+      if (starters.length >= 4) break;
+    }
+    for (const d of STARTER_DEFAULTS) { // top up with curated defaults, no duplicates
+      if (starters.length >= 6) break;
+      if (seen.has(norm(d.prompt))) continue;
+      seen.add(norm(d.prompt));
+      starters.push({ ...d, from: 'default' });
+    }
+    res.json({ starters });
+  });
+
   // GET /api/owl/threads — the user's recent chats (for the history list).
   app.get('/api/owl/threads', auth.requireAuth, (req, res) => {
     if (!owlAllowed(req.user)) return res.status(403).json({ error: 'The native Owl isn\'t enabled for your account yet.' });

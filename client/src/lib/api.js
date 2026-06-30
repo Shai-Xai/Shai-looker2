@@ -166,6 +166,7 @@ export const api = {
   saveMyOwlUserMemory: (items) => fetch('/api/my/owl-user-memory', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }) }).then(json),
   // The "/" slash-command palette (derived from the Owl's tool registry).
   owlCapabilities: () => fetch('/api/owl/capabilities').then(json),
+  owlStarters: (entityId) => fetch(`/api/owl/starters${entityId ? `?entityId=${encodeURIComponent(entityId)}` : ''}`).then(json),
   // Act layer: commit a drafted segment the Owl proposed (the "Create segment" tap),
   // or "Save as segment" from a chat answer's cohort. Never carries PII.
   owlCreateSegment: (body) => fetch('/api/owl/act/create-segment', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),

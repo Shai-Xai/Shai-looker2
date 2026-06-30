@@ -558,10 +558,11 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
-- **2026-06-30** — **Owl opens with topic pills** 🧪: the web Owl chat now greets an empty
-  conversation with **tappable topic pills** (Ticket data · Goals · This dashboard · Alerts ·
-  Campaigns · Attached files · Build an audience) — tap one to ask straight away. Same domains
-  as the "/" menu (from the tool registry), so they never drift from what the Owl can do.
+- **2026-06-30** — **Owl opens with quick prompt-starters** 🧪: the web Owl chat now greets an
+  empty conversation with **tappable starter pills** — concrete prompts like *Today's sales ·
+  Sales overview · Last 7 days · Goal tracking · Sales by hour* — and leads with **the user's
+  own most-asked questions** (personalised quick pills from their history), topped up with the
+  curated starters. Tap one to ask straight away.
 - **2026-06-30** — **Owl "/" menu now includes actions** 🧪: the slash-command palette in the
   web Owl chat covers the **actions** too — **/alerts** (check *or* set one up), **/campaigns**
   (review *or* draft one) and **/segment** (build an audience) — so creating things is one tap

@@ -4,13 +4,14 @@ import { useIsMobile } from '../lib/useIsMobile.js';
 import ChartTile from './tiles/ChartTile.jsx';
 import ShareMenu from './ShareMenu.jsx';
 
-// Topic pills shown on the empty state before the registry (/api/owl/capabilities)
-// loads — a tiny mirror so the chat never opens blank. The live list replaces these.
-const FALLBACK_TOPICS = [
-  { cmd: 'data', label: 'Ticket data', icon: '📊', example: 'How many tickets have I sold?' },
-  { cmd: 'goals', label: 'Goals', icon: '🎯', example: 'How are my goals tracking?' },
-  { cmd: 'alerts', label: 'Alerts', icon: '🔔', example: 'What alerts are set — or set up a new one?' },
-  { cmd: 'campaigns', label: 'Campaigns', icon: '📣', example: 'How did recent campaigns do — or draft a new one?' },
+// Prompt-starter pills shown on the empty state before /api/owl/starters loads (which
+// also returns the user's own most-asked questions). A small mirror so it never opens
+// blank; the live list — personalised first — replaces these.
+const FALLBACK_STARTERS = [
+  { label: "Today's sales", icon: '📊', prompt: 'How are ticket sales going today?' },
+  { label: 'Sales overview', icon: '📈', prompt: 'Give me a sales overview' },
+  { label: 'Last 7 days', icon: '📅', prompt: 'How have sales gone over the last 7 days?' },
+  { label: 'Goal tracking', icon: '🎯', prompt: 'How are my goals tracking?' },
 ];
 
 // The native, Claude-powered agentic Owl — the conversational "pull" door onto the
@@ -60,6 +61,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
   const [persona, setPersona] = useState('quick'); // depth mode: 'quick' (fast) | 'analyst' (deep)
   const [status, setStatus] = useState(''); // live "thinking" label streamed while the Owl works
   const [commands, setCommands] = useState([]); // "/" slash-command palette (from the tool registry)
+  const [starters, setStarters] = useState([]); // empty-state prompt-starter pills (personalised + defaults)
   const [slashIdx, setSlashIdx] = useState(0);   // highlighted command in the palette
   const taRef = useRef(null);                     // the composer textarea (for focus after picking)
   const [chatCopied, setChatCopied] = useState(false);
@@ -193,6 +195,9 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
   useEffect(() => { if (open) { refreshThreads(); setSidebarOpen(false); } }, [open, isMobile]); // chats list collapsed by default; toggle with ☰
   // The "/" command palette, sourced from the Owl's tool registry (loads once).
   useEffect(() => { if (open && !commands.length) api.owlCapabilities().then((r) => setCommands(r.commands || [])).catch(() => {}); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Prompt-starter pills for the empty state — personalised (the user's most-asked
+  // questions for this client) + curated defaults. Re-fetch per client so they're relevant.
+  useEffect(() => { if (open) api.owlStarters(selEntity || '').then((r) => setStarters(r.starters || [])).catch(() => {}); }, [open, selEntity]);
   // Load the client's attached data sources (for the 📎 panel + so the Owl can query them).
   useEffect(() => { if (!open || !attachEntity) { setUploads([]); return; } api.owlUploads(attachEntity).then((r) => setUploads(r.uploads || [])).catch(() => {}); }, [open, attachEntity]);
   // Esc closes (only while open).
@@ -405,15 +410,15 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
       <div ref={scrollRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 14, fontSize: `${zoom}em` }}>
         {messages.length === 0 && (
           <div style={{ color: 'var(--muted)', fontSize: 14, lineHeight: 1.5 }}>
-            <p style={{ margin: '4px 0 10px' }}>Ask about your ticket sales in plain English — I pull the answer live from your own data. Tap a topic to start:</p>
-            {/* Topic pills — the same domains as the "/" menu (from the tool registry), so
-                they can't drift from what the Owl can do. Tapping one asks it straight away. */}
+            <p style={{ margin: '4px 0 10px' }}>Ask about your ticket sales in plain English — I pull the answer live from your own data. Tap a quick start, or ask anything:</p>
+            {/* Prompt-starter pills — the user's most-asked questions first (personalised),
+                then curated starters. Tapping one asks it straight away. */}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, margin: '2px 0 4px' }}>
-              {(commands.length ? commands : FALLBACK_TOPICS).map((c) => (
-                <button key={c.cmd} type="button" onClick={() => send(c.example)} disabled={busy || !canAsk}
-                  title={c.example}
+              {(starters.length ? starters : FALLBACK_STARTERS).map((s) => (
+                <button key={s.prompt} type="button" onClick={() => send(s.prompt)} disabled={busy || !canAsk}
+                  title={s.prompt}
                   style={{ display: 'inline-flex', alignItems: 'center', gap: 6, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 980, padding: '7px 13px', fontSize: 13, fontWeight: 600, cursor: (busy || !canAsk) ? 'default' : 'pointer', opacity: (busy || !canAsk) ? 0.6 : 1 }}>
-                  <span style={{ fontSize: 14 }}>{c.icon}</span>{c.label}
+                  <span style={{ fontSize: 14 }}>{s.icon}</span>{s.label}
                 </button>
               ))}
             </div>
