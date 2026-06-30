@@ -12,7 +12,24 @@
 // usual gate, so a WhatsApp user can only ever reach their own client's data.
 
 const crypto = require('crypto');
-const { runOwlLoop, owlTurn } = require('./owlChat'); // owlTurn already layers OWL_CHAT_SYSTEM
+const { runOwlLoop, owlTurn, personaOf } = require('./owlChat'); // owlTurn already layers OWL_CHAT_SYSTEM
+
+// WhatsApp-tuned depth layers (the web Analyst/Operator briefs mention Markdown tables,
+// which we forbid on WhatsApp — so these say the same thing in chat-friendly terms).
+const WA_DEEP_LAYER = 'DEEPER READ: pull a couple of supporting cuts (the trend, a key breakdown, a comparison to a prior period or event), then give the answer + what\'s driving it + one recommended next step. Stay plain WhatsApp text — a few short lines, no tables, no walls of text.';
+const WA_OPERATOR_LAYER = `${WA_DEEP_LAYER}\nTHEN be proactive: draft the single most valuable next action it implies (an alert, a segment, or a campaign) for the user to confirm — say why in one line, then draft it. Nothing is created until they tap Confirm; you never send to customers.`;
+// Map a persona key → the WhatsApp depth layer to append (Quick adds nothing).
+const WA_LAYER = { analyst: WA_DEEP_LAYER, operator: WA_OPERATOR_LAYER };
+
+// Detect a depth/action escalation from the customer's message → persona key (or 'quick').
+// "go deeper" works even on its own because the conversation history already holds the
+// prior question, so the layer re-analyses that topic.
+function detectWaPersona(text) {
+  const t = String(text || '').trim().toLowerCase();
+  if (/\b(what should i do|what'?s? the (best )?move|what next|recommend|best action|take action|suggest (an )?action)\b/.test(t)) return 'operator';
+  if (/\b(go deeper|dig deeper|deeper|deep dive|more detail|full analysis|analyse|analyze|break this down)\b/.test(t)) return 'analyst';
+  return 'quick';
+}
 const { resolveGuidance } = require('./owlGuidance');
 const { actionViewUrl } = require('./owlActionLinks'); // deep-link a created action
 const chartImg = require('./owlChartImg');
@@ -399,13 +416,19 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
     insMsg.run(crypto.randomUUID(), msisdn, 'user', text, eid, now());
     const history = histStmt.all(msisdn, eid).reverse().map((m) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.body }));
     // histStmt already includes the just-inserted user message at the end.
-    const instructions = instructionsFor(id.entityId);
+    // Depth/action mode: "go deeper" → Analyst, "what should I do" → Operator (default Quick).
+    const pkey = detectWaPersona(text);
+    const persona = personaOf(pkey);
+    const waLayer = WA_LAYER[pkey];
+    if (pkey !== 'quick') logEvent(msisdn, 'mode', pkey);
+    const instructions = waLayer ? `${instructionsFor(id.entityId)}\n\n${waLayer}` : instructionsFor(id.entityId);
     let out = ''; let trail = [];
     try {
       const r = await runOwlLoop({
-        llmTurn: ({ messages: m, tools, onText }) => owlTurn(insights, { messages: m, tools, instructions, apiKey, onText }),
+        llmTurn: ({ messages: m, tools, onText }) => owlTurn(insights, { messages: m, tools, instructions, apiKey, onText, effort: persona.effort, maxTokens: persona.maxTokens }),
         toolMap, tools: toolSchemas, messages: history,
         ctx: { user: id.user, entityId: id.entityId },
+        maxRounds: persona.maxRounds,
       });
       out = r.text; trail = r.trail || [];
     } catch { out = ''; }

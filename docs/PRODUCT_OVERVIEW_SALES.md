@@ -523,6 +523,11 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-30** — **Owl modes on WhatsApp** 🧪: the depth/action modes now reach WhatsApp via
+  natural language — a customer can say **"go deeper"** for a fuller analysis or **"what should
+  I do"** to have the Owl propose + draft the best next action (alert / segment / campaign,
+  confirmed with a button). Default stays the quick, snappy reply; the deeper modes use more
+  reasoning + more data cuts, kept chat-friendly (no tables).
 - **2026-06-30** — **Owl modes: Quick / Analyst / Operator** 🧪: the Owl chat has a mode
   toggle — **⚡ Quick** (fast, grounded, default), **🔬 Analyst** (deeper: more reasoning,
   multiple data cuts, the "so what" + a recommendation, sharper follow-ups), and **🧭 Operator**

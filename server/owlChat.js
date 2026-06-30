@@ -570,4 +570,4 @@ function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, m
   console.log('[owlChat] agentic Owl chat module mounted');
 }
 
-module.exports = { mount, runOwlLoop, owlTurn, textOf, OWL_CHAT_SYSTEM, OWL_ANALYST_LAYER, OWL_OPERATOR_LAYER, owlAllowed };
+module.exports = { mount, runOwlLoop, owlTurn, textOf, OWL_CHAT_SYSTEM, OWL_ANALYST_LAYER, OWL_OPERATOR_LAYER, personaOf, owlAllowed };
