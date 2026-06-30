@@ -375,6 +375,13 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
       benefit: cfg.promo?.benefit || '',
       appendToLink: cfg.promo?.appendToLink !== false,
     },
+    // Conversion tracking: 'dropout' (left the audience) or 'list' (appears in a
+    // separate attendance/orders source). The source reuses the audience picker.
+    conversionMode: cfg.conversion?.mode || 'dropout',
+    convSourceMode: cfg.conversion?.source?.mode === 'segment' ? 'segment' : 'tile',
+    convSegmentId: cfg.conversion?.source?.segmentId || '',
+    convDashboardId: cfg.conversion?.source?.dashboardId || '',
+    convTileId: cfg.conversion?.source?.tileId || '',
   }));
   // Uploaded unique codes (textarea). Existing pool stats come from the action.
   const [promoCodesText, setPromoCodesText] = useState('');
@@ -451,6 +458,14 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
     promo: f.promo,
     promoCodes: promoCodesText.split(/[\s,;]+/).map((c) => c.trim()).filter(Boolean),
     audience: { mode: f.audienceMode, segmentId: f.segmentId, dashboardId: f.dashboardId, tileId: f.tileId, emailField: f.emailField, nameField: f.nameField, consentField: f.consentField, emailConsentField: f.emailConsentField, smsConsentField: f.smsConsentField, ticketField: f.ticketField, phoneField: f.phoneField, anchorField: f.anchorField, filters: f.filters, attrDashboardId: f.attrDashboardId, attrTileId: f.attrTileId, pasted: f.pasted },
+    conversion: {
+      mode: f.conversionMode,
+      source: f.conversionMode === 'list'
+        ? (f.convSourceMode === 'segment'
+          ? { mode: 'segment', segmentId: f.convSegmentId }
+          : { mode: 'tile', dashboardId: f.convDashboardId, tileId: f.convTileId })
+        : {},
+    },
   });
   // Targeting filter helpers.
   const addFilter = () => setF((s) => ({ ...s, filters: [...s.filters, { field: '', op: 'in', values: [], min: '', max: '' }] }));
@@ -698,6 +713,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
   }
 
   const dash = tiles?.dashboards?.find((d) => d.dashboardId === f.dashboardId);
+  const convDash = tiles?.dashboards?.find((d) => d.dashboardId === f.convDashboardId);
 
   return (
     <div>
@@ -757,7 +773,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
               <Toggle on={hasEmail} onClick={() => toggleChannel('email')}>✉️ Email</Toggle>
               <Toggle on={hasSms} onClick={() => toggleChannel('sms')}>💬 SMS</Toggle>
             </div>
-            {hasSms && <div style={hintS}>SMS is plain text — no subject; the tracked link + an opt-out link are added automatically. Tokens {'{{name}}'}, {'{{ticketType}}'}, {'{{promo}}'} work.{f.channel === 'both' ? ' Each recipient gets an email AND an SMS — the SMS uses the body text.' : ''}</div>}
+            {hasSms && <div style={hintS}>SMS is plain text — no subject; the tracked link + an opt-out link are added automatically. Tokens {'{{name}}'}, {'{{ticketType}}'}, {'{{promo}}'} work.{f.channel === 'both' ? ' Each recipient gets an email AND an SMS — you can write the SMS separately in the Content section.' : ''}</div>}
           </Field>
 
           <Field label="Campaign type">
@@ -905,6 +921,47 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
           </Field>
           </Accordion>
 
+          <Accordion title="Conversion tracking" {...acc('conversion')}>
+          <Field label="How do we know someone converted?">
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <Toggle on={f.conversionMode !== 'list'} onClick={() => set('conversionMode', 'dropout')}>They leave the source list</Toggle>
+              <Toggle on={f.conversionMode === 'list'} onClick={() => set('conversionMode', 'list')}>They appear in another list</Toggle>
+            </div>
+            <div style={hintS}>{f.conversionMode === 'list'
+              ? 'Converted = the person shows up in a separate list you pick below (e.g. an attendance or completed-orders list), matched by email. Confirms real conversions instead of inferring them.'
+              : `Converted = the person is no longer in the audience above (e.g. they left the abandoned-cart tile because they bought).${isSequence ? ' They drop out of the sequence automatically.' : ''} Works when the audience tile keeps itself up to date.`}</div>
+          </Field>
+          {f.conversionMode === 'list' && (
+            <Field label="Conversion source — the attendance / orders list">
+              <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                <Toggle on={f.convSourceMode === 'segment'} onClick={() => set('convSourceMode', 'segment')}>🎯 Segment</Toggle>
+                <Toggle on={f.convSourceMode !== 'segment'} onClick={() => set('convSourceMode', 'tile')}>Dashboard tile</Toggle>
+              </div>
+              {f.convSourceMode === 'segment' ? (
+                <select style={input} value={f.convSegmentId} onChange={(e) => set('convSegmentId', e.target.value)}>
+                  <option value="">Pick a saved segment…</option>
+                  {f.convSegmentId && !segments.some((sg) => sg.id === f.convSegmentId) && <option value={f.convSegmentId}>⚠ Deleted segment</option>}
+                  {segments.map((sg) => <option key={sg.id} value={sg.id}>{sg.name}{sg.count >= 0 ? ` (${sg.count})` : ''}</option>)}
+                </select>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <select style={input} value={f.convDashboardId} onChange={(e) => { set('convDashboardId', e.target.value); set('convTileId', ''); }}>
+                    <option value="">Pick a dashboard…</option>
+                    {(tiles?.dashboards || []).map((d) => <option key={d.dashboardId} value={d.dashboardId}>{d.title} — {d.setName}</option>)}
+                  </select>
+                  {convDash && (
+                    <select style={input} value={f.convTileId} onChange={(e) => set('convTileId', e.target.value)}>
+                      <option value="">Pick the tile listing who converted…</option>
+                      {convDash.tiles.map((t) => <option key={t.tileId} value={t.tileId}>{t.title}</option>)}
+                    </select>
+                  )}
+                </div>
+              )}
+              <div style={hintS}>Matched by email address (the email column is auto-detected). Anyone in this list who's also in your audience counts as converted{isSequence ? ' and stops getting the drip' : ''}. The list is re-read automatically as it fills up.</div>
+            </Field>
+          )}
+          </Accordion>
+
           <Accordion title={smsOnly ? 'Message & offer' : 'Content & offer'} {...acc('content')}>
           {/* Merge fields available from the audience — personalise the copy. */}
           {(anchorOptions.length > 0) && (
@@ -964,7 +1021,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
           {/* Once-off email (or email+SMS) — built template or custom HTML. */}
           {!isSequence && hasEmail && (f.channel !== 'both' || emailOpen) && (
           <Field label="Content">
-            {f.channel === 'both' && <div style={{ ...hintS, marginTop: 0, marginBottom: 6 }}>This is the email. The SMS will use the body text below (plus the link &amp; opt-out).</div>}
+            {f.channel === 'both' && <div style={{ ...hintS, marginTop: 0, marginBottom: 6 }}>This is the email. Edit the SMS separately in the “💬 SMS content” section below (it falls back to this body if you leave it blank).</div>}
             {/* Templates: start from a saved one, or save the current content. */}
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
               {templates.length > 0 && (
