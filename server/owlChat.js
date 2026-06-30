@@ -66,6 +66,8 @@ WHICH TOOL TO USE (route every question to the right one — do not answer goal 
 ACTING (tools that DO something, not just read):
 - Some tools DRAFT an action for the user to confirm instead of just reading data (createAlert, createSegment). You NEVER create/change anything silently: the tool returns a proposed action and the user taps a button to confirm it.
 - After calling createSegment, do NOT say it's saved. Say you've DRAFTED it, state the cohort and the previewed size + reach (e.g. "a segment of VIP buyers in Cape Town — about 1,240 people, 1,180 emailable"), and tell them to tap "Create segment" to save it. Never list individuals. If it returns ok:false, relay why (e.g. pick a client, or contact fields can't define a segment).
+- Work like a campaign manager: BEFORE calling draftCampaign, if the brief is thin, ask 1-3 SHORT setup questions to nail the essentials that are missing — the angle/offer (the hook), the channel (email / SMS / both), any promo or incentive, the destination link for the button, and which event it's for. Ask only what's missing and material; don't interrogate. Then call draftCampaign with a rich goal (fold in the offer/angle and any promo) and pass ctaUrl if they gave a link.
+- The audience can be an existing saved segment (pass segmentName) or a new cohort (pass filters). When you draft from a NEW cohort, that cohort is automatically SAVED as a reusable segment and the campaign is pointed at it — so tell the user the segment was saved too.
 - After calling draftCampaign, do NOT say it's sent or scheduled. Say you've DRAFTED the campaign, give the audience (size + reach) and the subject line, and tell them to tap "Create draft campaign" then review, approve and send it in Engage — you never send anything to customers. If it returns ok:false, relay why.
 - After calling createAlert, do NOT say the alert is on or active. Say you've DRAFTED it, state plainly what it will watch and the exact condition (e.g. "I've drafted an alert for when Tickets Sold reaches 1,000"), and tell them to tap "Create alert" below to switch it on. If no event is selected, the card has an event picker on it — tell them to pick the event there; NEVER tell them to go elsewhere to select an event first. If it returns ok:false, relay why and what to do.
 - An alert needs a measure, an operator (at/above, at/below, above, below) and a threshold. If the user's wish is missing one (e.g. they didn't give a number), ask one short clarifying question before drafting.
@@ -480,21 +482,35 @@ function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, m
   // ownership + campaigns.approve inside createDraftCampaign.
   app.post('/api/owl/act/draft-campaign', auth.requireAuth, (req, res) => {
     if (!owlAllowed(req.user)) return res.status(403).json({ error: 'The native Owl isn\'t enabled for your account yet.' });
-    const { entityId, name, channel, goal, audience, subject, body, ctaText, suiteId } = req.body || {};
+    const { entityId, name, channel, goal, subject, body, ctaText, ctaUrl, suiteId, audienceName, customHtml } = req.body || {};
+    let { audience } = req.body || {};
     if (!entityId || !audience || typeof audience !== 'object') return res.status(400).json({ error: 'entityId and audience are required.' });
-    // A query-cohort audience can only be the curated ticket-data explore (same guard as segments).
+    const actionsApi = typeof getActionsApi === 'function' ? getActionsApi() : null;
+    if (!actionsApi || !actionsApi.createDraftCampaign) return res.status(503).json({ error: 'Campaigns aren\'t available right now.' });
+    // A custom (chat) cohort: SAVE it as a reusable segment, then point the campaign at
+    // that segment — so the audience is reusable and visibly the same one in Engage. The
+    // curated-explore guard applies before we persist it (same as create-segment).
     if (audience.mode === 'query') {
       const cat = owlTools && owlTools.catalogue;
       if (cat && (audience.model !== cat.model || audience.view !== cat.explore)) {
         return res.status(400).json({ error: "I can only build an audience from your ticket data, not this dashboard's own data." });
       }
+      const segmentsApi = typeof getSegmentsApi === 'function' ? getSegmentsApi() : null;
+      if (segmentsApi && segmentsApi.createSegment) {
+        const segName = String(audienceName || name || 'Campaign audience').slice(0, 120);
+        const sr = segmentsApi.createSegment({ entityId, name: segName, definition: audience, user: req.user });
+        if (sr.ok) audience = { mode: 'segment', segmentId: sr.segment.id }; // reference the saved segment
+        // (if the segment couldn't be saved, fall back to the inline query audience — the campaign still resolves)
+      }
     }
-    const actionsApi = typeof getActionsApi === 'function' ? getActionsApi() : null;
-    if (!actionsApi || !actionsApi.createDraftCampaign) return res.status(503).json({ error: 'Campaigns aren\'t available right now.' });
+    const html = String(customHtml || '').slice(0, 500000);
     const config = {
       channel: ['email', 'sms', 'both'].includes(channel) ? channel : 'email',
       audience, subject: String(subject || ''), body: String(body || ''), ctaText: String(ctaText || ''),
-      goal: String(goal || ''), eventSuiteId: String(suiteId || ''), contentMode: 'template', campaignMode: 'once',
+      ctaUrl: String(ctaUrl || ''),
+      goal: String(goal || ''), eventSuiteId: String(suiteId || ''), campaignMode: 'once',
+      // Custom HTML body when the user uploaded one; otherwise the rendered template.
+      contentMode: html ? 'html' : 'template', customHtml: html,
     };
     const r = actionsApi.createDraftCampaign({ entityId, title: name, config, user: req.user });
     if (!r.ok) return res.status(r.error === 'Not allowed' ? 403 : 400).json({ error: r.error || 'Could not create the campaign.' });
