@@ -185,6 +185,9 @@ with approvals and full tracking.
   uploaded 'already called' list"). Each source keeps its own filters.
 - **Always-live** — segments re-resolve at use/send time, so a linked Sheet stays
   current; counts and email/SMS reach show up front.
+- **Organise** ✅ — **link a segment to an event** and/or **file it in a folder**,
+  then filter the list by either. Keeps a long list tidy as it grows (e.g. all the
+  audiences for one festival together).
 
 **Pitch:** "Build the exact audience from your own data or a spreadsheet — combine
 lists, subtract a suppression list, and it stays live."
@@ -504,6 +507,10 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-30** — **Organise segments by event & folder** ✅: link any segment to an
+  **event** and/or file it in a free-text **folder**, then **filter the list** by either —
+  right on each segment card. Keeps a growing audience list tidy (all of one festival's
+  segments together). The Owl auto-links a segment to the event it drafted a campaign for.
 - **2026-06-30** — **WhatsApp Owl: take action by reply button** 🧪: the Owl can now set
   up an **alert** or save a **segment** from WhatsApp — it drafts it and sends a ✅ Confirm
   button (event-choice buttons when an alert could watch several events), committing through
