@@ -37,8 +37,7 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
   const [metaConnected, setMetaConnected] = useState(false);
   const [tiktokConnected, setTiktokConnected] = useState(false);
   const [connectors, setConnectors] = useState({});
-  const [filterFolder, setFilterFolder] = useState(''); // organise: filter the list by folder
-  const [filterEvent, setFilterEvent] = useState('');   // …and/or by linked event
+  const [filterEvent, setFilterEvent] = useState('');   // filter the list by linked event (folders are group headers)
 
   const load = () => api.listSegments(entityId).then((r) => { setSegments(r.segments || []); setMetaConnected(!!r.metaConnected); setTiktokConnected(!!r.tiktokConnected); setConnectors(r.connectors || {}); }).catch(() => setSegments([]));
   // Materialise a built-in recipe (e.g. abandoned cart) as a real, live segment.
@@ -122,8 +121,85 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
   const folderOpts = [...new Set(segments.map((s) => s.folder).filter(Boolean))].sort((a, b) => a.localeCompare(b));
   const setSegFolder = (s, folder) => api.updateSegment(entityId, s.id, { folder }).then(load).catch(() => {});
   const setSegEvent = (s, suiteId) => api.updateSegment(entityId, s.id, { suiteId }).then(load).catch(() => {});
-  const shown = segments.filter((s) => (!filterFolder || s.folder === filterFolder) && (!filterEvent || s.suiteId === filterEvent));
+  const shown = segments.filter((s) => !filterEvent || s.suiteId === filterEvent);
   const orgSel = { padding: '4px 7px', borderRadius: 8, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', fontSize: 12 };
+
+  // Landing page is grouped by FOLDER: named folders A→Z, then everything
+  // un-filed in one "Unfiled" group at the bottom. Only group when folders are
+  // actually in use — otherwise a single "Unfiled" header is just noise.
+  const grouped = folderOpts.length > 0;
+  const folderGroups = (() => {
+    const m = new Map();
+    for (const s of shown) { const k = s.folder || ''; if (!m.has(k)) m.set(k, []); m.get(k).push(s); }
+    const named = [...m.keys()].filter(Boolean).sort((a, b) => a.localeCompare(b));
+    const order = m.has('') ? [...named, ''] : named; // unfiled last
+    return order.map((k) => ({ folder: k, items: m.get(k) }));
+  })();
+  const groupHead = { display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 700, color: 'var(--text)', padding: '2px 2px 0' };
+
+  // One segment card (shared by the flat list and the per-folder groups).
+  const renderCard = (s) => {
+    const lbl = sourceLabel(s);
+    return (
+      <div key={s.id} style={{ border: '1px solid var(--hairline)', borderRadius: 14, padding: isMobile ? '16px' : '14px 16px', display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'stretch' : 'center', flexWrap: isMobile ? 'nowrap' : 'wrap', gap: isMobile ? 12 : 14, background: 'var(--card)' }}>
+        <div style={{ flex: isMobile ? undefined : '1 1 240px', minWidth: isMobile ? 0 : 220 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span style={{ fontWeight: 700, fontSize: isMobile ? 17 : 15 }}>{s.name}</span>
+            <span style={{ fontSize: 10.5, fontWeight: 700, borderRadius: 980, padding: '2px 9px', background: 'rgba(128,128,128,0.14)', color: 'var(--muted)' }}>{s.source === 'mix' ? 'Combined' : s.source === 'paste' ? 'Uploaded / pasted' : s.source === 'gsheet' ? 'Google Sheet' : 'Dashboard tile'}</span>
+          </div>
+          {lbl.event && <div style={{ fontSize: 12.5, color: 'var(--text)', marginTop: 5, fontWeight: 600 }}>🗓 {lbl.event}</div>}
+          {lbl.detail && <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lbl.detail}</div>}
+          <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 6 }}>
+            {busyId === s.id
+              ? <div style={{ maxWidth: 240 }}><div style={{ marginBottom: 4 }}>⏳ Counting the audience…</div><div className="indet-track" /></div>
+              : s.count >= 0
+                ? <span><b style={{ color: 'var(--brand)' }}>{s.count}</b> {s.count === 1 ? 'person' : 'people'}{s.lastResolvedAt ? ` · as of ${new Date(s.lastResolvedAt).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}</span>
+                : <span>Not counted yet — tap refresh</span>}
+          </div>
+          {s.count >= 0 && s.reach && (s.reach.email >= 0 || s.reach.sms >= 0) && (
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 3, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+              {s.reach.email >= 0 && <span>✉️ {s.reach.email} with email</span>}
+              {s.reach.sms >= 0 && <span>💬 {s.reach.sms} with mobile</span>}
+            </div>
+          )}
+          {/* Organise: link this segment to an event and/or file it in a folder.
+              Both patch immediately; folder is free-text (existing folders
+              suggested via datalist) so you can group however you like. */}
+          <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            {eventOpts.length > 0 && (
+              <select value={s.suiteId || ''} onChange={(e) => setSegEvent(s, e.target.value)} style={orgSel} aria-label="Link to event" title="Link this segment to an event">
+                <option value="">🗓 No event</option>
+                {eventOpts.map((ev) => <option key={ev.id} value={ev.id}>🗓 {ev.name}</option>)}
+              </select>
+            )}
+            <input list={`seg-folders-${s.id}`} value={s.folder || ''} placeholder="📁 Folder…"
+              onChange={(e) => setSegments((arr) => arr.map((x) => (x.id === s.id ? { ...x, folder: e.target.value } : x)))}
+              onBlur={(e) => { const v = e.target.value.trim(); if (v !== (s.folder || '')) setSegFolder(s, v); }}
+              style={{ ...orgSel, width: 130 }} aria-label="Folder" title="File this segment in a folder" />
+            <datalist id={`seg-folders-${s.id}`}>{folderOpts.map((f) => <option key={f} value={f} />)}</datalist>
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexShrink: 0, flexWrap: 'wrap' }}>
+          <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding }} onClick={() => viewPeople(s)}>👥 List</button>
+          <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding }} onClick={() => refresh(s)} disabled={busyId === s.id}>{busyId === s.id ? '…' : '↻ Refresh'}</button>
+          {metaConnected && <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding }} onClick={() => syncMeta(s)} disabled={busyId === s.id} title="Mirror this audience to a Meta Custom Audience (hashed match)"><PlatformIcon channel="meta" size={13} /> Sync to Meta</button>}
+          {metaConnected && <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding, ...(s.metaAuto ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }} onClick={() => api.setSegmentAuto(entityId, s.id, 'meta', !s.metaAuto).then(load)} title="Keep the Meta audience mirrored automatically (~daily)"><PlatformIcon channel="meta" size={13} /> {s.metaAuto ? 'Auto: on' : 'Auto: off'}</button>}
+          {tiktokConnected && <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding }} onClick={() => syncTikTok(s)} disabled={busyId === s.id} title="Mirror this audience to a TikTok Custom Audience (hashed match)"><PlatformIcon channel="tiktok" size={13} /> Sync to TikTok</button>}
+          {tiktokConnected && <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding, ...(s.tiktokAuto ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }} onClick={() => api.setSegmentAuto(entityId, s.id, 'tiktok', !s.tiktokAuto).then(load)} title="Keep the TikTok audience mirrored automatically (~daily)"><PlatformIcon channel="tiktok" size={13} /> {s.tiktokAuto ? 'Auto: on' : 'Auto: off'}</button>}
+          <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding }} onClick={() => setEditing(s)}>Edit</button>
+          <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding, color: 'var(--error,#ef4444)' }} onClick={() => del(s)}>Delete</button>
+        </div>
+        {syncMsg[s.id]
+          ? <div style={{ fontSize: 11.5, color: syncMsg[s.id].startsWith('✗') ? 'var(--error,#ef4444)' : 'var(--muted)', flexBasis: '100%', marginTop: isMobile ? 0 : 4 }}>{syncMsg[s.id]}</div>
+          : (connectors.meta?.connected || connectors.tiktok?.connected || s.metaSync || s.tiktokSync) && (
+            <div style={{ flexBasis: '100%', marginTop: isMobile ? 0 : 4, display: 'flex', flexDirection: 'column', gap: 2 }}>
+              {(connectors.meta?.connected || s.metaSync) && connLine(<PlatformIcon channel="meta" size={12} />, 'Meta', s.metaSync, connectors.meta?.audiencesUrl)}
+              {(connectors.tiktok?.connected || s.tiktokSync) && connLine(<PlatformIcon channel="tiktok" size={12} />, 'TikTok', s.tiktokSync, connectors.tiktok?.audiencesUrl)}
+            </div>
+          )}
+      </div>
+    );
+  };
 
   return (
     <div>
@@ -136,87 +212,30 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
         <p style={{ color: 'var(--muted)', fontSize: 13, padding: '20px 0' }}>No segments yet. Create one from a dashboard tile or a pasted list.</p>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {(folderOpts.length > 0 || eventOpts.length > 0) && (
+          {/* Folders are now group headers below, so the only filter left is event
+              (segments are grouped by folder regardless). */}
+          {eventOpts.length > 0 && (
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 2 }}>
               <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>Filter:</span>
-              {folderOpts.length > 0 && (
-                <select value={filterFolder} onChange={(e) => setFilterFolder(e.target.value)} style={orgSel} aria-label="Filter by folder">
-                  <option value="">All folders</option>
-                  {folderOpts.map((f) => <option key={f} value={f}>📁 {f}</option>)}
-                </select>
-              )}
-              {eventOpts.length > 0 && (
-                <select value={filterEvent} onChange={(e) => setFilterEvent(e.target.value)} style={orgSel} aria-label="Filter by event">
-                  <option value="">All events</option>
-                  {eventOpts.map((ev) => <option key={ev.id} value={ev.id}>🗓 {ev.name}</option>)}
-                </select>
-              )}
-              {(filterFolder || filterEvent) && <button style={{ ...orgSel, cursor: 'pointer' }} onClick={() => { setFilterFolder(''); setFilterEvent(''); }}>Clear</button>}
+              <select value={filterEvent} onChange={(e) => setFilterEvent(e.target.value)} style={orgSel} aria-label="Filter by event">
+                <option value="">All events</option>
+                {eventOpts.map((ev) => <option key={ev.id} value={ev.id}>🗓 {ev.name}</option>)}
+              </select>
+              {filterEvent && <button style={{ ...orgSel, cursor: 'pointer' }} onClick={() => setFilterEvent('')}>Clear</button>}
               <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>{shown.length} of {segments.length}</span>
             </div>
           )}
-          {shown.map((s) => {
-            const lbl = sourceLabel(s);
-            return (
-              <div key={s.id} style={{ border: '1px solid var(--hairline)', borderRadius: 14, padding: isMobile ? '16px' : '14px 16px', display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'stretch' : 'center', flexWrap: isMobile ? 'nowrap' : 'wrap', gap: isMobile ? 12 : 14, background: 'var(--card)' }}>
-                <div style={{ flex: isMobile ? undefined : '1 1 240px', minWidth: isMobile ? 0 : 220 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                    <span style={{ fontWeight: 700, fontSize: isMobile ? 17 : 15 }}>{s.name}</span>
-                    <span style={{ fontSize: 10.5, fontWeight: 700, borderRadius: 980, padding: '2px 9px', background: 'rgba(128,128,128,0.14)', color: 'var(--muted)' }}>{s.source === 'mix' ? 'Combined' : s.source === 'paste' ? 'Uploaded / pasted' : s.source === 'gsheet' ? 'Google Sheet' : 'Dashboard tile'}</span>
-                  </div>
-                  {lbl.event && <div style={{ fontSize: 12.5, color: 'var(--text)', marginTop: 5, fontWeight: 600 }}>🗓 {lbl.event}</div>}
-                  {lbl.detail && <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lbl.detail}</div>}
-                  <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 6 }}>
-                    {busyId === s.id
-                      ? <div style={{ maxWidth: 240 }}><div style={{ marginBottom: 4 }}>⏳ Counting the audience…</div><div className="indet-track" /></div>
-                      : s.count >= 0
-                        ? <span><b style={{ color: 'var(--brand)' }}>{s.count}</b> {s.count === 1 ? 'person' : 'people'}{s.lastResolvedAt ? ` · as of ${new Date(s.lastResolvedAt).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}</span>
-                        : <span>Not counted yet — tap refresh</span>}
-                  </div>
-                  {s.count >= 0 && s.reach && (s.reach.email >= 0 || s.reach.sms >= 0) && (
-                    <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 3, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-                      {s.reach.email >= 0 && <span>✉️ {s.reach.email} with email</span>}
-                      {s.reach.sms >= 0 && <span>💬 {s.reach.sms} with mobile</span>}
-                    </div>
-                  )}
-                  {/* Organise: link this segment to an event and/or file it in a folder.
-                      Both patch immediately; folder is free-text (existing folders
-                      suggested via datalist) so you can group however you like. */}
-                  <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                    {eventOpts.length > 0 && (
-                      <select value={s.suiteId || ''} onChange={(e) => setSegEvent(s, e.target.value)} style={orgSel} aria-label="Link to event" title="Link this segment to an event">
-                        <option value="">🗓 No event</option>
-                        {eventOpts.map((ev) => <option key={ev.id} value={ev.id}>🗓 {ev.name}</option>)}
-                      </select>
-                    )}
-                    <input list={`seg-folders-${s.id}`} value={s.folder || ''} placeholder="📁 Folder…"
-                      onChange={(e) => setSegments((arr) => arr.map((x) => (x.id === s.id ? { ...x, folder: e.target.value } : x)))}
-                      onBlur={(e) => { const v = e.target.value.trim(); if (v !== (s.folder || '')) setSegFolder(s, v); }}
-                      style={{ ...orgSel, width: 130 }} aria-label="Folder" title="File this segment in a folder" />
-                    <datalist id={`seg-folders-${s.id}`}>{folderOpts.map((f) => <option key={f} value={f} />)}</datalist>
-                  </div>
+          {grouped
+            ? folderGroups.map((g) => (
+              <div key={g.folder || '__unfiled'} style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 4 }}>
+                <div style={groupHead}>
+                  <span>{g.folder ? `📁 ${g.folder}` : '🗂 Unfiled'}</span>
+                  <span style={{ color: 'var(--muted)', fontWeight: 600 }}>· {g.items.length}</span>
                 </div>
-                <div style={{ display: 'flex', gap: 8, flexShrink: 0, flexWrap: 'wrap' }}>
-                  <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding }} onClick={() => viewPeople(s)}>👥 List</button>
-                  <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding }} onClick={() => refresh(s)} disabled={busyId === s.id}>{busyId === s.id ? '…' : '↻ Refresh'}</button>
-                  {metaConnected && <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding }} onClick={() => syncMeta(s)} disabled={busyId === s.id} title="Mirror this audience to a Meta Custom Audience (hashed match)"><PlatformIcon channel="meta" size={13} /> Sync to Meta</button>}
-                  {metaConnected && <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding, ...(s.metaAuto ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }} onClick={() => api.setSegmentAuto(entityId, s.id, 'meta', !s.metaAuto).then(load)} title="Keep the Meta audience mirrored automatically (~daily)"><PlatformIcon channel="meta" size={13} /> {s.metaAuto ? 'Auto: on' : 'Auto: off'}</button>}
-                  {tiktokConnected && <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding }} onClick={() => syncTikTok(s)} disabled={busyId === s.id} title="Mirror this audience to a TikTok Custom Audience (hashed match)"><PlatformIcon channel="tiktok" size={13} /> Sync to TikTok</button>}
-                  {tiktokConnected && <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding, ...(s.tiktokAuto ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }} onClick={() => api.setSegmentAuto(entityId, s.id, 'tiktok', !s.tiktokAuto).then(load)} title="Keep the TikTok audience mirrored automatically (~daily)"><PlatformIcon channel="tiktok" size={13} /> {s.tiktokAuto ? 'Auto: on' : 'Auto: off'}</button>}
-                  <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding }} onClick={() => setEditing(s)}>Edit</button>
-                  <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding, color: 'var(--error,#ef4444)' }} onClick={() => del(s)}>Delete</button>
-                </div>
-                {syncMsg[s.id]
-                  ? <div style={{ fontSize: 11.5, color: syncMsg[s.id].startsWith('✗') ? 'var(--error,#ef4444)' : 'var(--muted)', flexBasis: '100%', marginTop: isMobile ? 0 : 4 }}>{syncMsg[s.id]}</div>
-                  : (connectors.meta?.connected || connectors.tiktok?.connected || s.metaSync || s.tiktokSync) && (
-                    <div style={{ flexBasis: '100%', marginTop: isMobile ? 0 : 4, display: 'flex', flexDirection: 'column', gap: 2 }}>
-                      {(connectors.meta?.connected || s.metaSync) && connLine(<PlatformIcon channel="meta" size={12} />, 'Meta', s.metaSync, connectors.meta?.audiencesUrl)}
-                      {(connectors.tiktok?.connected || s.tiktokSync) && connLine(<PlatformIcon channel="tiktok" size={12} />, 'TikTok', s.tiktokSync, connectors.tiktok?.audiencesUrl)}
-                    </div>
-                  )}
+                {g.items.map(renderCard)}
               </div>
-            );
-          })}
+            ))
+            : shown.map(renderCard)}
         </div>
       )}
 
