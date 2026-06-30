@@ -219,7 +219,7 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
   const askDataSchema = {
     name: 'askData',
     description:
-      'Answer a question from the client\'s own ticketing data by running a bounded, scoped query over the curated "All Tickets" catalogue. Read-only. Returns rows; you then phrase the answer and cite the figures. Amounts are ZAR.',
+      'Answer a question from the client\'s own ticketing data by running a bounded, scoped query over the curated "All Tickets" catalogue. Read-only. Returns rows; you then phrase the answer and cite the figures. Money is in the client\'s reporting currency (see the Currency note; default ZAR).',
     input_schema: {
       type: 'object',
       properties: {
