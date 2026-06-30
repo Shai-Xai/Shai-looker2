@@ -14,6 +14,7 @@
 const crypto = require('crypto');
 const { runOwlLoop, owlTurn } = require('./owlChat'); // owlTurn already layers OWL_CHAT_SYSTEM
 const { resolveGuidance } = require('./owlGuidance');
+const { actionViewUrl } = require('./owlActionLinks'); // deep-link a created action
 const chartImg = require('./owlChartImg');
 
 const WA_OVERRIDE = [
@@ -36,7 +37,7 @@ function parseFollowups(out) {
   try { const a = JSON.parse(m[0]); return Array.isArray(a) ? a.filter((x) => typeof x === 'string' && x.trim()).slice(0, 3) : []; } catch { return []; }
 }
 
-function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthropicKeyForEntity, currencyNote, whatsappDigestFor, getAlertsApi, getSegmentsApi, getActionsApi }) {
+function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthropicKeyForEntity, currencyNote, languageNote, whatsappDigestFor, getAlertsApi, getSegmentsApi, getActionsApi }) {
   const sql = db.db;
   sql.exec(`
     CREATE TABLE IF NOT EXISTS owl_wa_msgs (
@@ -105,10 +106,37 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
   const getSuggest = sql.prepare('SELECT items FROM owl_wa_suggest WHERE msisdn=?');
   const saveSuggest = (msisdn, items) => { try { upSuggest.run(msisdn, JSON.stringify(items), now()); } catch { /* ignore */ } };
   const resolveSelection = (msisdn, text) => {
-    const m = String(text || '').trim().match(/^([1-3])[.)]?$/);
+    const m = String(text || '').trim().match(/^([1-9])[.)]?$/);
     if (!m) return null;
     try { return JSON.parse(getSuggest.get(msisdn)?.items || '[]')[Number(m[1]) - 1] || null; } catch { return null; }
   };
+
+  // ── Prompt starters (the WhatsApp take on Meta AI's suggestion chips) ─────────
+  // WhatsApp can't show Meta AI's pre-chat suggestion chips (Meta-proprietary), so
+  // the equivalent is a friendly WELCOME the Owl sends on a greeting / "menu" /
+  // "help": a short intro + tappable starter buttons (WhatsApp caps buttons at 3 ×
+  // 20 chars) plus a numbered menu in the body for the rest. Each starter's FULL
+  // question rides the button's postbackData (a tap sends it) and is saved so a
+  // typed number works too. Admin-overridable via the owl_whatsapp_starters setting.
+  const DEFAULT_STARTERS = [
+    { label: 'Sales today',      prompt: 'How are ticket sales going today?' },
+    { label: 'Sales by hour',    prompt: 'Show me ticket sales by hour today' },
+    { label: 'Goal tracking',    prompt: 'How are my goals tracking?' },
+    { label: 'Top ticket types', prompt: 'What are my top-selling ticket types?' },
+    { label: 'Set an alert',     prompt: 'Alert me when ticket sales reach a milestone' },
+    { label: 'Draft a campaign', prompt: 'Draft a campaign to a customer segment' },
+  ];
+  const starters = () => {
+    try {
+      const j = JSON.parse(db.getSetting('owl_whatsapp_starters', '') || '[]');
+      if (Array.isArray(j) && j.length) return j.filter((s) => s && s.prompt).map((s) => ({ label: String(s.label || s.prompt).slice(0, 20), prompt: String(s.prompt).slice(0, 256) })).slice(0, 9);
+    } catch { /* fall through to defaults */ }
+    return DEFAULT_STARTERS;
+  };
+  // Bare greeting / menu / help (full-string match on the de-punctuated text), so
+  // "help" opens the menu but "help me draft a campaign" still reaches the Owl.
+  const GREETING_RE = /^(hi+|hello+|hey+|heya|hiya|yo|howzit|sawubona|menu|help|start|options|commands|hi there|good (morning|afternoon|evening|day)|morning|afternoon|evening|get started|start over|what can (you|u) do)$/;
+  const isGreeting = (t) => { const s = String(t || '').replace(/[^a-z ]/gi, ' ').replace(/\s+/g, ' ').trim().toLowerCase(); return !!s && GREETING_RE.test(s); };
 
   // ── Pending action confirmation ─────────────────────────────────────────────
   // An act-tool (createAlert/createSegment) only DRAFTS; we stash the draft here, send
@@ -161,9 +189,11 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
   // Build the per-turn instructions (scope, date, the live field dictionary, guidance,
   // and the WhatsApp plain-text override). Mirrors the web route, trimmed for WhatsApp.
   function instructionsFor(entityId) {
-    const today = now().slice(0, 10);
+    const nowSa = new Date(Date.now() + 2 * 60 * 60 * 1000); // SAST (UTC+2) — Howler's local day/hour
+    const today = nowSa.toISOString().slice(0, 10);
+    const hourSa = nowSa.getUTCHours();
     const ent = entityId && db.getEntity ? db.getEntity(entityId) : null;
-    const parts = [`Today's date is ${today}.`];
+    const parts = [`Today's date is ${today} and the current time is about ${String(hourSa).padStart(2, '0')}:00 (SAST, UTC+2). For a "today so far vs yesterday (to the same time)" comparison, use ${hourSa} as the cut-off hour (filter Purchased Hour of Day to "0 to ${hourSa}") so both days are trimmed to the same window.`];
     if (ent) parts.push(`All data in this conversation is scoped to: ${ent.name}. The ONLY client here is "${ent.name}" — when naming the client/entity, always say "${ent.name}" and NEVER any other client name, even if a different name appears earlier in this chat (that was a previous scope). Lead your answer with "For ${ent.name}:" and never imply the figures cover other clients.`);
     let fmeta = []; try { fmeta = owlFields.list(); } catch { /* ignore */ }
     if (fmeta.length) {
@@ -176,6 +206,8 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
     try { const g = resolveGuidance(db, entityId); if (g) parts.push(g); } catch { /* ignore */ }
     // Reporting currency for this organiser (blank for ZAR — the default).
     try { const cn = currencyNote && currencyNote(entityId || undefined); if (cn) parts.push(cn); } catch { /* ignore */ }
+    // AI content language for this organiser (blank for English — the default).
+    try { const ln = languageNote && languageNote(entityId || undefined); if (ln) parts.push(ln); } catch { /* ignore */ }
     parts.push(WA_OVERRIDE);
     return parts.join('\n\n');
   }
@@ -235,6 +267,21 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
     logEvent(msisdn, 'followups-text', `buttons unavailable (${btn.error || btn.reason || '?'}) — sent numbered`);
   }
 
+  // Greeting/menu → a welcome with starter prompts. Sends the top 3 as tappable
+  // buttons (WhatsApp's cap) with the full set as a numbered menu in the body, and
+  // saves them so a typed number resolves to its question (the no-buttons fallback).
+  async function sendWelcome(msisdn, id) {
+    const ent = id.entityId && db.getEntity ? db.getEntity(id.entityId) : null;
+    const who = ent && ent.name ? ` for *${ent.name}*` : '';
+    const list = starters();
+    const menu = list.map((s, i) => `${i + 1}. ${s.prompt}`).join('\n');
+    const body = `🦉 Hi! I'm the Howler Owl — your data assistant${who}. Ask me about your ticket sales, goals, alerts and campaigns. Try one of these:\n\n${menu}\n\nOr just type your question — e.g. "revenue this week vs last".`;
+    saveSuggest(msisdn, list.map((s) => s.prompt)); // typed-number fallback maps to the question
+    const r = await messaging.sendWhatsappButtons({ to: msisdn, body, buttons: list.slice(0, 3).map((s) => ({ title: s.label, postbackData: s.prompt })) });
+    if (!r.ok) await messaging.sendWhatsapp({ to: msisdn, text: body });
+    logEvent(msisdn, 'welcome', r.ok ? 'buttons + menu' : 'menu (buttons unavailable)');
+  }
+
   // ── Action confirmation (alerts + segments over WhatsApp) ────────────────────
   // The first drafted action in the loop's trail (an act-tool returns confirm+action).
   const actionFromTrail = (trail) => ((trail || []).map((t) => t && t.result).find((r) => r && r.confirm && r.action) || {}).action || null;
@@ -287,12 +334,12 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
         if (user.role !== 'admin' && auth.canAccessSuite && !auth.canAccessSuite(user, suiteId)) { logEvent(msisdn, 'action-failed', 'no event access'); await messaging.sendWhatsapp({ to: msisdn, text: "You don't have access to that event." }); return; }
         const api = getAlertsApi && getAlertsApi();
         const r = api && api.createAlert ? api.createAlert({ suiteId, draft: pend.draft, user }) : { ok: false, error: 'Alerts unavailable' };
-        if (r.ok) { logEvent(msisdn, 'action-done', `alert ${r.alert.name}`); await messaging.sendWhatsapp({ to: msisdn, text: `✅ Done — alert *${r.alert.name}* is on. I'll let you know when it triggers.` }); }
+        if (r.ok) { logEvent(msisdn, 'action-done', `alert ${r.alert.name}`); const link = actionViewUrl(publicBase(), 'createAlert'); await messaging.sendWhatsapp({ to: msisdn, text: `✅ Done — alert *${r.alert.name}* is on. I'll let you know when it triggers.${link ? `\nView it: ${link}` : ''}` }); }
         else { logEvent(msisdn, 'action-failed', r.error || 'error'); await messaging.sendWhatsapp({ to: msisdn, text: `I couldn't switch that alert on: ${r.error || 'something went wrong'}.` }); }
       } else if (pend.kind === 'createSegment') {
         const api = getSegmentsApi && getSegmentsApi();
         const r = api && api.createSegment ? api.createSegment({ entityId: pend.entityId, name: pend.name, definition: pend.draft, user }) : { ok: false, error: 'Segments unavailable' };
-        if (r.ok) { logEvent(msisdn, 'action-done', `segment ${r.segment.name}`); await messaging.sendWhatsapp({ to: msisdn, text: `✅ Saved the segment *${r.segment.name}*. You can use it for a campaign in the Pulse app.` }); }
+        if (r.ok) { logEvent(msisdn, 'action-done', `segment ${r.segment.name}`); const link = actionViewUrl(publicBase(), 'createSegment'); await messaging.sendWhatsapp({ to: msisdn, text: `✅ Saved the segment *${r.segment.name}*. You can use it for a campaign in the Pulse app.${link ? `\nView it: ${link}` : ''}` }); }
         else { logEvent(msisdn, 'action-failed', r.error || 'error'); await messaging.sendWhatsapp({ to: msisdn, text: `I couldn't save that segment: ${r.error || 'something went wrong'}.` }); }
       } else if (pend.kind === 'draftCampaign') {
         // Mirror the web commit (/api/owl/act/draft-campaign): persist a chat cohort as a
@@ -312,11 +359,12 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
           audience, subject: String(pend.subject || ''), body: String(pend.body || ''),
           ctaText: String(pend.ctaText || ''), ctaUrl: String(pend.ctaUrl || ''),
           goal: String(pend.goal || ''), eventSuiteId: String(pend.suiteId || ''), campaignMode: 'once',
+          language: String(pend.language || '').slice(0, 5).toLowerCase(), // per-campaign AI language (blank → client default)
           contentMode: 'template', customHtml: '', source: 'owl-whatsapp', // tag where it was drafted (for the Engage badge)
         };
         const api = getActionsApi && getActionsApi();
         const r = api && api.createDraftCampaign ? api.createDraftCampaign({ entityId: pend.entityId, title: pend.name, config, user }) : { ok: false, error: 'Campaigns unavailable' };
-        if (r.ok) { logEvent(msisdn, 'action-done', `campaign draft ${r.action.title}`); await messaging.sendWhatsapp({ to: msisdn, text: `✅ Drafted the campaign *${r.action.title}*. It's a DRAFT — review, approve and send it in the Pulse app (Engage). I never send anything to customers.` }); }
+        if (r.ok) { logEvent(msisdn, 'action-done', `campaign draft ${r.action.title}`); const link = actionViewUrl(publicBase(), 'draftCampaign'); await messaging.sendWhatsapp({ to: msisdn, text: `✅ Drafted the campaign *${r.action.title}*. It's a DRAFT — review, approve and send it in the Pulse app (Engage). I never send anything to customers.${link ? `\nReview it: ${link}` : ''}` }); }
         else { logEvent(msisdn, 'action-failed', r.error || 'error'); await messaging.sendWhatsapp({ to: msisdn, text: `I couldn't create that draft: ${r.error || 'something went wrong'}.` }); }
       } else { await messaging.sendWhatsapp({ to: msisdn, text: 'That action can only be completed in the Pulse app.' }); }
     } catch (e) { logEvent(msisdn, 'action-failed', (e && e.message) || 'commit error'); await messaging.sendWhatsapp({ to: msisdn, text: 'Something went wrong completing that — please try again.' }); }
@@ -329,6 +377,14 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
     // A tap on a Confirm / Cancel / event button (or a yes/no/number reply to a pending
     // action) commits or cancels the drafted alert/segment — handle it before the Owl runs.
     if (isActionReply(rawText, msisdn)) { await handleActionReply(msisdn, rawText, id.user); return; }
+    // A bare greeting / "menu" / "help" opens the welcome + starter prompts (the
+    // WhatsApp take on Meta AI's suggestion chips) — no model call needed.
+    if (isGreeting(rawText)) {
+      insMsg.run(crypto.randomUUID(), msisdn, 'user', rawText, id.entityId || '', now()); // keep the 24h window open + history
+      await sendWelcome(msisdn, id);
+      logEvent(msisdn, 'replied', 'welcome / starter prompts');
+      return;
+    }
     const apiKey = anthropicKeyForEntity ? anthropicKeyForEntity(id.entityId || undefined) : undefined;
     if (!insights.isConfigured(apiKey)) { logEvent(msisdn, 'no-ai-key', 'Anthropic key not configured'); await messaging.sendWhatsapp({ to: msisdn, text: 'The Owl isn\'t available right now — please try again shortly.' }); return; }
     // Immediate "the Owl is on it" acknowledgement so the customer isn't left staring at
@@ -433,6 +489,45 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
     return { from, text };
   }
 
+  // Detect a NON-TEXT inbound (voice note, image, video, document, sticker) so we can
+  // reply helpfully instead of dropping it silently. Walks the payload defensively for
+  // a media TYPE value, a media MIME type, or a media-named object — Clickatell MO
+  // shapes vary, so we don't rely on one field. Returns a kind string or ''.
+  function detectMedia(root) {
+    const KINDS = ['voice', 'audio', 'image', 'video', 'document', 'sticker'];
+    const TYPE_KEY = /^(type|messagetype|message_type|contenttype|content_type)$/i;
+    const MIME_KEY = /^(mime|mimetype|mime_type)$/i;
+    let found = '';
+    const seen = new Set();
+    const walk = (node) => {
+      if (found || !node || typeof node !== 'object' || seen.has(node)) return;
+      seen.add(node);
+      for (const [k, v] of Object.entries(node)) {
+        if (found) return;
+        if (KINDS.includes(k.toLowerCase()) && v && typeof v === 'object') { found = k.toLowerCase(); return; }
+        if (typeof v === 'string') {
+          const vl = v.toLowerCase();
+          if (TYPE_KEY.test(k) && KINDS.includes(vl)) { found = vl; return; }
+          if (MIME_KEY.test(k)) { const hit = KINDS.find((x) => vl.startsWith(`${x}/`)); if (hit) { found = hit; return; } if (vl.startsWith('audio/')) { found = 'voice'; return; } }
+        } else if (v && typeof v === 'object') { walk(v); }
+      }
+    };
+    try { walk(root); } catch { /* ignore */ }
+    return found === 'audio' ? 'voice' : found; // WhatsApp voice notes are PTT audio
+  }
+
+  // A non-text message arrived — the Owl can't process media yet (voice→text needs a
+  // transcription provider + Clickatell inbound-media access). Reply so the customer
+  // isn't ghosted, and keep the 24h window open. NB: silently dropping was the old bug.
+  async function handleMedia(msisdn, kind) {
+    const id = identify(msisdn);
+    if (!id) { logEvent(msisdn, 'no-account', `media (${kind}) from unlinked number`); await messaging.sendWhatsapp({ to: msisdn, text: 'Hi! This number isn\'t linked to a Howler account yet. Ask your Howler contact to connect it, then I can answer questions about your event data.' }); return; }
+    insMsg.run(crypto.randomUUID(), msisdn, 'user', `[${kind}]`, id.entityId || '', now()); // keep the 24h window open
+    const what = kind === 'voice' ? 'listen to voice notes' : kind === 'image' ? 'read images' : kind === 'video' ? 'watch videos' : kind === 'document' ? 'open documents' : `handle ${kind}s`;
+    await messaging.sendWhatsapp({ to: msisdn, text: `🦉 I can't ${what} yet — please *type* your question instead (or send *menu* to see what I can do).` });
+    logEvent(msisdn, 'replied', `media fallback (${kind})`);
+  }
+
   // Clickatell webhook. Ack immediately (200), process in the background so a slow LLM
   // turn never times the webhook out. Optional shared secret (?key= or x-webhook-secret).
   app.post('/api/whatsapp/inbound', (req, res) => {
@@ -448,7 +543,12 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
       const msisdn = norm(from);
       // Temporary aid for the first live test: confirm we parse Clickatell's reply shape.
       console.log(`[owlWhatsapp] inbound from=${msisdn || '∅'} text="${(text || '').slice(0, 60)}"${msisdn && text ? '' : ` (unparsed raw: ${JSON.stringify(req.body).slice(0, 400)})`}`);
-      if (!msisdn || !text) { logEvent(msisdn, 'unparsed', `couldn't read sender/text from payload: ${JSON.stringify(req.body).slice(0, 700)}`); return; }
+      if (!msisdn || !text) {
+        // A voice note / image / file (no text) — reply helpfully instead of dropping it.
+        const media = msisdn ? detectMedia(req.body || {}) : '';
+        if (media) { logEvent(msisdn, 'received', `[${media}] (no text)`); handleMedia(msisdn, media).catch((e) => { logEvent(msisdn, 'error', (e && e.message) || 'media handler error'); }); return; }
+        logEvent(msisdn, 'unparsed', `couldn't read sender/text from payload: ${JSON.stringify(req.body).slice(0, 700)}`); return;
+      }
       logEvent(msisdn, 'received', text.slice(0, 120));
       handleInbound(msisdn, text).catch((e) => { logEvent(msisdn, 'error', (e && e.message) || 'handler error'); console.error('[owlWhatsapp] handle failed', e && e.message); });
     } catch (e) { logEvent('', 'error', (e && e.message) || 'parse error'); console.error('[owlWhatsapp] inbound parse failed', e && e.message); }

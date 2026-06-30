@@ -14,6 +14,7 @@
 
 const crypto = require('crypto');
 const { resolveGuidance: guidance } = require('./owlGuidance');
+const { actionViewPath } = require('./owlActionLinks'); // where a created action is viewed
 
 // ── Live "thinking" status ───────────────────────────────────────────────────
 // The Owl can pause for seconds while it reasons or runs a Looker query, so we
@@ -187,7 +188,7 @@ function owlAllowed(user) {
   return !!email && OWL_ALLOW.split(',').map((s) => s.trim()).filter(Boolean).includes(email);
 }
 
-function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, messaging, getAlertsApi, getSegmentsApi, getActionsApi, anthropicKeyForSuite, anthropicKeyForEntity, currencyNote, whatsappDigestFor }) {
+function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, messaging, getAlertsApi, getSegmentsApi, getActionsApi, anthropicKeyForSuite, anthropicKeyForEntity, currencyNote, languageNote, whatsappDigestFor }) {
   const sql = db.db;
   sql.exec(`
     CREATE TABLE IF NOT EXISTS owl_threads (
@@ -322,9 +323,11 @@ function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, m
     // Human-readable scope label so the Owl can STATE whose data it's answering for.
     const scopeEnt = scopeEntityId ? db.getEntity(scopeEntityId) : null;
     const scopeLabel = [scopeEnt && scopeEnt.name, su && su.name].filter(Boolean).join(' · ');
-    const today = new Date().toISOString().slice(0, 10);
+    const nowSa = new Date(Date.now() + 2 * 60 * 60 * 1000); // SAST (UTC+2) — Howler's local day/hour
+    const today = nowSa.toISOString().slice(0, 10);
+    const hourSa = nowSa.getUTCHours();
     const parts = [
-      `Today's date is ${today}. For "upcoming"/"future"/"past"/"this year" questions, compare against today — e.g. filter Event Date (core_events.start_date) with a Looker date expression such as "after ${today}" for future events or "before ${today}" for past ones. (Event Date is the date of the event; Purchased Date is when a ticket was bought.)`,
+      `Today's date is ${today} and the current time is about ${String(hourSa).padStart(2, '0')}:00 (SAST, UTC+2). For "upcoming"/"future"/"past"/"this year" questions, compare against today — e.g. filter Event Date (core_events.start_date) with a Looker date expression such as "after ${today}" for future events or "before ${today}" for past ones. (Event Date is the date of the event; Purchased Date is when a ticket was bought.) For a "today so far vs yesterday (to the same time)" comparison, use ${hourSa} as the cut-off hour (filter Purchased Hour of Day to "0 to ${hourSa}") so both days are trimmed to the same window.`,
     ];
     if (scopeLabel) parts.push(`All data in this conversation is scoped to: ${scopeLabel}. Make clear in your answer which client/event the numbers are for — lead your answer with "For ${scopeLabel}:" (or naturally name it). Never imply the figures cover other clients or events.`);
     // Surface the curated catalogue's field meanings + rules to the model — it only
@@ -342,6 +345,8 @@ function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, m
     if ((cat.notes || []).length) parts.push(`Rules:\n- ${cat.notes.join('\n- ')}`);
     // Reporting currency: write money in the organiser's currency (blank for ZAR).
     try { const cn = currencyNote && currencyNote(scopeEntityId || undefined, suiteId || undefined); if (cn) parts.push(cn); } catch { /* ignore */ }
+    // AI content language: write generated prose in the organiser's language (blank for English).
+    try { const ln = languageNote && languageNote(scopeEntityId || undefined, suiteId || undefined); if (ln) parts.push(ln); } catch { /* ignore */ }
     // Tell the model what external data is attached (so it knows it can use askUpload).
     try {
       const ups = uploads && uploads.listUploads && scopeEntityId ? uploads.listUploads(scopeEntityId) : [];
@@ -482,7 +487,7 @@ function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, m
     if (!alertsApi || !alertsApi.createAlert) return res.status(503).json({ error: 'Alerts aren\'t available right now.' });
     const r = alertsApi.createAlert({ suiteId, draft, user: req.user });
     if (!r.ok) return res.status(400).json({ error: r.error || 'Could not create the alert.' });
-    res.status(201).json({ ok: true, alert: { id: r.alert.id, name: r.alert.name } });
+    res.status(201).json({ ok: true, alert: { id: r.alert.id, name: r.alert.name }, url: actionViewPath('createAlert') });
   });
 
   // POST /api/owl/act/create-segment — the user tapping "Create segment" on the card
@@ -505,7 +510,7 @@ function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, m
     if (!segmentsApi || !segmentsApi.createSegment) return res.status(503).json({ error: 'Segments aren\'t available right now.' });
     const r = segmentsApi.createSegment({ entityId, name, definition: draft, user: req.user });
     if (!r.ok) return res.status(r.error === 'Not allowed' ? 403 : 400).json({ error: r.error || 'Could not create the segment.' });
-    res.status(201).json({ ok: true, segment: { id: r.segment.id, name: r.segment.name } });
+    res.status(201).json({ ok: true, segment: { id: r.segment.id, name: r.segment.name }, url: actionViewPath('createSegment') });
   });
 
   // POST /api/owl/act/draft-campaign — the user tapping "Create draft campaign" on the
@@ -514,7 +519,7 @@ function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, m
   // ownership + campaigns.approve inside createDraftCampaign.
   app.post('/api/owl/act/draft-campaign', auth.requireAuth, (req, res) => {
     if (!owlAllowed(req.user)) return res.status(403).json({ error: 'The native Owl isn\'t enabled for your account yet.' });
-    const { entityId, name, channel, goal, subject, body, ctaText, ctaUrl, suiteId, audienceName, customHtml } = req.body || {};
+    const { entityId, name, channel, goal, subject, body, ctaText, ctaUrl, suiteId, audienceName, customHtml, language: lang } = req.body || {};
     let { audience } = req.body || {};
     if (!entityId || !audience || typeof audience !== 'object') return res.status(400).json({ error: 'entityId and audience are required.' });
     const actionsApi = typeof getActionsApi === 'function' ? getActionsApi() : null;
@@ -541,12 +546,13 @@ function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, m
       audience, subject: String(subject || ''), body: String(body || ''), ctaText: String(ctaText || ''),
       ctaUrl: String(ctaUrl || ''),
       goal: String(goal || ''), eventSuiteId: String(suiteId || ''), campaignMode: 'once',
+      language: String(lang || '').slice(0, 5).toLowerCase(), // per-campaign AI language (blank → client default)
       // Custom HTML body when the user uploaded one; otherwise the rendered template.
       contentMode: html ? 'html' : 'template', customHtml: html,
     };
     const r = actionsApi.createDraftCampaign({ entityId, title: name, config, user: req.user });
     if (!r.ok) return res.status(r.error === 'Not allowed' ? 403 : 400).json({ error: r.error || 'Could not create the campaign.' });
-    res.status(201).json({ ok: true, campaign: { id: r.action.id, title: r.action.title } });
+    res.status(201).json({ ok: true, campaign: { id: r.action.id, title: r.action.title }, url: actionViewPath('draftCampaign') });
   });
 
   // Pin-to-dashboard lives in its own disposable module; mount it here so index.js
@@ -554,7 +560,7 @@ function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, m
   require('./owlPin').mount(app, { db, auth });
   require('./owlGuidance').mount(app, { db, auth }); // resolveGuidance is required at top
   const owlFields = require('./owlFields').mount(app, { db, auth, getExploreFields }); // no-code field labels/synonyms/questions
-  require('./owlWhatsapp').mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthropicKeyForEntity, currencyNote, whatsappDigestFor, getAlertsApi, getSegmentsApi, getActionsApi }); // WhatsApp door onto the Owl (Clickatell)
+  require('./owlWhatsapp').mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthropicKeyForEntity, currencyNote, languageNote, whatsappDigestFor, getAlertsApi, getSegmentsApi, getActionsApi }); // WhatsApp door onto the Owl (Clickatell)
   console.log('[owlChat] agentic Owl chat module mounted');
 }
 

@@ -16,7 +16,7 @@ const { recreateDashboard, fetchDashboard } = require('./recreate');
 const { parseDrillUrl } = require('./drill');
 const insights = require('./insights');
 const { asyncHandler, errorMiddleware } = require('./http'); const mailer = require('./mailer');
-const currency = require('./currency'); const messaging = require('./messaging');
+const currency = require('./currency'); const language = require('./language'); const messaging = require('./messaging');
 const rateLimit = require('./ratelimit');
 // Query & scope engine (shared library): the single place Looker queries run and
 // the per-client organiser scope is enforced. Lifted out of this file; behaviour
@@ -125,7 +125,7 @@ let osApi, waDigestFor; // waDigestFor set when digests mount (used lazily by th
 const os = require('./os').mount(app, { db, auth, mailer, push, slack, onInbound: (p) => owlIngest.handle({ ...p, getAttachmentBuffer: osApi.getAttachmentBuffer }) });
 osApi = os;
 const owlUploads = require('./owlUploads').mount(app, { db, auth }); // external data (CSV/Sheet) the Owl can query alongside ticketing
-require('./owlChat').mount(app, { db, auth, insights, uploads: owlUploads, messaging, getAlertsApi: () => alerts, getSegmentsApi: () => segmentsApi, getActionsApi: () => actionsApi, getExploreFields: (m, v) => getExploreFieldsCached(m, v), owlTools: require('./owlTools')({ query, auth, db, getGoalsApi: () => goalsApi, getAlertsApi: () => alerts, getCampaignsApi: () => actionsApi, getUploadsApi: () => owlUploads, resolveTileValue, getExploreFields: (m, v) => getExploreFieldsCached(m, v), getFieldOverrides: () => require('./owlFields').build(db).read(), draftCampaignCopy: (a) => actionsApi.draftCopy(a), getSegmentsApi: () => segmentsApi }), anthropicKeyForSuite, anthropicKeyForEntity, currencyNote: (entityId, suiteId) => currency.aiNote(mailer.resolveBranding(entityId, suiteId).currency), whatsappDigestFor: (eid, em) => (waDigestFor ? waDigestFor(eid, em) : Promise.resolve(null)) }); // agentic Owl (disposable; askData rides the scope gate)
+require('./owlChat').mount(app, { db, auth, insights, uploads: owlUploads, messaging, getAlertsApi: () => alerts, getSegmentsApi: () => segmentsApi, getActionsApi: () => actionsApi, getExploreFields: (m, v) => getExploreFieldsCached(m, v), owlTools: require('./owlTools')({ query, auth, db, getGoalsApi: () => goalsApi, getAlertsApi: () => alerts, getCampaignsApi: () => actionsApi, getUploadsApi: () => owlUploads, resolveTileValue, getExploreFields: (m, v) => getExploreFieldsCached(m, v), getFieldOverrides: () => require('./owlFields').build(db).read(), draftCampaignCopy: (a) => actionsApi.draftCopy(a), getSegmentsApi: () => segmentsApi }), anthropicKeyForSuite, anthropicKeyForEntity, currencyNote: (entityId, suiteId) => currency.aiNote(mailer.resolveBranding(entityId, suiteId).currency), languageNote: (entityId, suiteId) => language.aiNote(mailer.resolveBranding(entityId, suiteId).aiLanguage), whatsappDigestFor: (eid, em) => (waDigestFor ? waDigestFor(eid, em) : Promise.resolve(null)) }); // agentic Owl (disposable; askData rides the scope gate)
 // ─── Health ───────────────────────────────────────────────────────────────────
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
@@ -1199,7 +1199,7 @@ const maskSecret = (v) => (v && v.length ? `••••••${String(v).slice(
 
 // Combined AI instructions: the global standing instructions, plus the
 // per-client context when the request is in a suite (client) context.
-function aiInstructionsFor(suiteId, entityId) {
+function aiInstructionsFor(suiteId, entityId, langOverride) {
   const parts = [];
   const global = db.getSetting('ai_instructions');
   if (global && global.trim()) parts.push(global.trim());
@@ -1207,7 +1207,7 @@ function aiInstructionsFor(suiteId, entityId) {
   const eid = entityId || su?.entityId;
   const ent = eid && db.getEntity(eid);
   if (su && ent?.aiContext && ent.aiContext.trim()) parts.push(`Context for the client "${ent.name}":\n${ent.aiContext.trim()}`);
-  if (eid) parts.push(currency.aiNote(mailer.resolveBranding(eid, suiteId).currency)); // reporting-currency note (blank for ZAR)
+  if (eid) { const br = mailer.resolveBranding(eid, suiteId); parts.push(currency.aiNote(br.currency)); parts.push(language.aiNote(langOverride && String(langOverride).trim() ? langOverride : br.aiLanguage)); } // langOverride (per-campaign language) wins over the client default
   return parts.filter(Boolean).join('\n\n');
 }
 
@@ -2883,11 +2883,11 @@ const actionsApi = require('./actions').mount(app, {
   // The client's events (suites) — for optionally linking a campaign to one.
   listEvents: (entityId) => db.listSuitesForEntity(entityId).map((s) => ({ id: s.id, name: s.name, url: s.eventUrl || '' })),
   // AI-draft campaign copy, grounded in the client's context AND the event it's for (name + briefing + event-resolved currency) so the copy is on-event.
-  draftCopy: async ({ entityId, goal, audienceCount, eventSuiteId }) => {
+  draftCopy: async ({ entityId, goal, audienceCount, eventSuiteId, language: langOverride }) => {
     const apiKey = anthropicKeyForEntity(entityId);
     if (!insights.isConfigured(apiKey)) throw new Error('AI is not configured for this client');
     const ent = db.getEntity(entityId); const su = eventSuiteId ? db.getSuite(eventSuiteId) : null;
-    return insights.draftCampaign({ goal, clientName: ent?.name, clientContext: ent?.aiContext || '', audienceCount, apiKey, instructions: [aiInstructionsFor(eventSuiteId || null, entityId), su ? `This campaign is for the event "${su.name}"${su.briefing?.instructions ? ` — ${String(su.briefing.instructions).trim()}` : ''}. Write for THIS event specifically.` : ''].filter(Boolean).join('\n\n') });
+    return insights.draftCampaign({ goal, clientName: ent?.name, clientContext: ent?.aiContext || '', audienceCount, apiKey, instructions: [aiInstructionsFor(eventSuiteId || null, entityId, langOverride), su ? `This campaign is for the event "${su.name}"${su.briefing?.instructions ? ` — ${String(su.briefing.instructions).trim()}` : ''}. Write for THIS event specifically.` : ''].filter(Boolean).join('\n\n') });
   },
 });
 

@@ -67,6 +67,13 @@ module.exports = {
 
     // Purchase timing (relative — sell curves + "N days before event")
     { name: 'core_tickets.purchased_date',         label: 'Purchased Date', group: 'Timing', type: 'date',   filter: true, aka: ['purchase date', 'when bought', 'sale date'] },
+    // Intraday grain. Hour of day (0–23) is the workhorse: group by it for the busiest
+    // sell hour / an intraday pattern, OR filter it to "0 to <current hour>" (with a
+    // 2-day range, grouped by Purchased Date) for a like-for-like "today so far vs
+    // yesterday to the same time" cut. Purchased Hour is an hourly datetime bucket for
+    // an hour-by-hour trend within a day. The hour is the FINEST grain — no minute field.
+    { name: 'core_tickets.purchased_hour_of_day',  label: 'Purchased Hour of Day', group: 'Timing', type: 'number', filter: true, aka: ['hour', 'hour of day', 'time of day', 'per hour', 'hourly', 'by hour', 'busiest hour', 'sales by hour', 'what hour', 'peak hour'] },
+    { name: 'core_tickets.purchased_hour',         label: 'Purchased Hour', group: 'Timing', type: 'date', filter: true, aka: ['hourly trend', 'hour bucket', 'hour by hour', 'sales each hour'] },
     { name: 'core_tickets.days_before_event',      label: 'Days Before Event', group: 'Timing', type: 'number', filter: true, aka: ['days before event', 'days out', 'lead time'] },
     { name: 'core_tickets.weeks_before_event',     label: 'Weeks Before Event', group: 'Timing', type: 'number', filter: true },
 
@@ -96,6 +103,8 @@ module.exports = {
     '"City" is ambiguous — default to Event City (core_sa_city_location.city_name); use Buyer City only when the question is about where customers are from.',
     '"Remaining"/"sold out" use core_ticket_transactions_combined.remaining. Monetary amounts are in the client\'s reporting currency (stated in the Currency note when it is not Rand) — never relabel them.',
     'CUSTOMER LOOKUP: to find one customer, FILTER core_purchasers.email / cellphone_number / first_name / last_name to the specific known value the user gives — then report that person\'s tickets (type, status, date, count). You CANNOT list, group by, or output customers\' emails/phones/names (no enumeration / no dumping contact lists) — those fields are filter-only. If asked to list everyone\'s contacts, decline and explain that contact lists come from the governed segment/Engage tools with consent.',
+    'INTRADAY (per hour): you CAN break sales down by time of day. For "busiest sales hour", an hourly pattern, or "sales per hour", group by core_tickets.purchased_hour_of_day (0–23); for an hour-by-hour trend within a day, group by core_tickets.purchased_hour. The finest grain is the HOUR — there is no minute-level field, so don\'t promise per-minute breakdowns.',
+    'SAME-TIME COMPARISON ("today so far vs yesterday"): today is naturally partial (midnight→now) while a plain "yesterday" filter is the FULL 24h, so never compare today against yesterday\'s full-day total — it isn\'t like-for-like. Instead make a clean cut: filter core_tickets.purchased_hour_of_day to "0 to <the current hour>" AND set dateRange to span both days (e.g. "2 days"), then group by core_tickets.purchased_date — so each day is trimmed to the SAME window and the comparison is fair. State the cut-off hour you used.',
   ],
 
   // What is intentionally NOT queryable here (privacy + noise control).

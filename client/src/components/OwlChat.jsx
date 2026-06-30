@@ -767,6 +767,12 @@ function DataActions({ source }) {
 // commit re-checks permission server-side (alerts.manage), so this button can never
 // create something the user couldn't make by hand.
 const OP_TEXT = { gte: 'reaches', lte: 'drops to', gt: 'goes above', lt: 'drops below' };
+// "View it" deep-link shown after an action is created — takes the user to the page
+// where the new alert / segment / campaign lives (the commit route returns the path).
+function ViewLink({ url, label = 'View it →' }) {
+  if (!url) return null;
+  return <a href={url} style={{ fontSize: 12.5, color: 'var(--brand)', fontWeight: 700, textDecoration: 'none', marginLeft: 8 }}>{label}</a>;
+}
 // Dispatch to the right confirm card by action kind (act-tools share the pattern).
 function ActionCard({ action, suiteId }) {
   if (!action) return null;
@@ -779,6 +785,7 @@ function AlertActionCard({ action }) {
   const [state, setState] = useState(''); // '' | 'busy' | 'done' | 'error'
   const [err, setErr] = useState('');
   const [suiteId, setSuiteId] = useState(action.suiteId || ''); // chosen event (when none was selected)
+  const [url, setUrl] = useState(''); // where to view it once created
   const d = action.draft || {};
   const cond = `${d.metricLabel || d.measureLabel || 'this metric'} ${OP_TEXT[d.operator] || 'reaches'} ${fmtVal(d.threshold)}${d.unit === '%' ? '%' : ''}`;
   const CHAN_LABEL = { push: 'push', email: 'email', sms: 'SMS', slack: 'Slack' };
@@ -789,7 +796,8 @@ function AlertActionCard({ action }) {
     if (!suiteId) return; // need an event first
     setState('busy'); setErr('');
     try {
-      await api.owlCreateAlert({ suiteId, draft: d });
+      const r = await api.owlCreateAlert({ suiteId, draft: d });
+      setUrl((r && r.url) || '');
       setState('done');
     } catch (e) { setState('error'); setErr((e && e.message) || 'Could not create the alert.'); }
   };
@@ -813,7 +821,7 @@ function AlertActionCard({ action }) {
         </div>
       )}
       {state === 'done' ? (
-        <div style={{ fontSize: 12.5, color: 'var(--brand)', fontWeight: 600 }}>✓ Alert created — you'll be notified when it triggers.</div>
+        <div style={{ fontSize: 12.5, color: 'var(--brand)', fontWeight: 600 }}>✓ Alert created — you'll be notified when it triggers.<ViewLink url={url} label="View alerts →" /></div>
       ) : (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <button onClick={create} disabled={state === 'busy' || !suiteId}
@@ -833,13 +841,14 @@ function AlertActionCard({ action }) {
 function SegmentActionCard({ action }) {
   const [state, setState] = useState('');
   const [err, setErr] = useState('');
+  const [url, setUrl] = useState('');
   const reach = action.reach || null;
   const reachLine = reach
     ? `${fmtVal(reach.total)} people${reach.email != null ? ` · ${fmtVal(reach.email)} emailable` : ''}${reach.sms ? ` · ${fmtVal(reach.sms)} SMS` : ''}`
     : null;
   const create = async () => {
     setState('busy'); setErr('');
-    try { await api.owlCreateSegment({ entityId: action.entityId, name: action.name, draft: action.draft }); setState('done'); }
+    try { const r = await api.owlCreateSegment({ entityId: action.entityId, name: action.name, draft: action.draft }); setUrl((r && r.url) || ''); setState('done'); }
     catch (e) { setState('error'); setErr((e && e.message) || 'Could not create the segment.'); }
   };
   return (
@@ -852,7 +861,7 @@ function SegmentActionCard({ action }) {
       <div style={{ fontSize: 13, color: 'var(--text)', marginBottom: reachLine ? 4 : 8 }}>Save <strong>{action.summary || action.name}</strong> as a reusable audience.</div>
       {reachLine && <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 8 }}>{reachLine}</div>}
       {state === 'done' ? (
-        <div style={{ fontSize: 12.5, color: 'var(--brand)', fontWeight: 600 }}>✓ Segment saved — find it in Engage → Segments.</div>
+        <div style={{ fontSize: 12.5, color: 'var(--brand)', fontWeight: 600 }}>✓ Segment saved — find it in Engage → Segments.<ViewLink url={url} label="View segments →" /></div>
       ) : (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <button onClick={create} disabled={state === 'busy'}
@@ -875,6 +884,7 @@ function CampaignActionCard({ action, suiteId }) {
   const [err, setErr] = useState('');
   const [html, setHtml] = useState(''); // optional uploaded custom HTML body
   const [htmlName, setHtmlName] = useState('');
+  const [url, setUrl] = useState('');
   const htmlRef = useRef(null);
   const reach = action.reach || null;
   const reachLine = reach ? `${fmtVal(reach.total)} people${reach.email != null ? ` · ${fmtVal(reach.email)} emailable` : ''}${reach.sms ? ` · ${fmtVal(reach.sms)} SMS` : ''}` : null;
@@ -886,7 +896,8 @@ function CampaignActionCard({ action, suiteId }) {
   const create = async () => {
     setState('busy'); setErr('');
     try {
-      await api.owlDraftCampaign({ entityId: action.entityId, name: action.name, channel: action.channel, goal: action.goal, audience: action.audience, audienceName: action.summary, subject: action.subject, body: action.body, ctaText: action.ctaText, ctaUrl: action.ctaUrl, customHtml: html || undefined, suiteId: suiteId || undefined });
+      const r = await api.owlDraftCampaign({ entityId: action.entityId, name: action.name, channel: action.channel, goal: action.goal, audience: action.audience, audienceName: action.summary, subject: action.subject, body: action.body, ctaText: action.ctaText, ctaUrl: action.ctaUrl, customHtml: html || undefined, suiteId: suiteId || undefined });
+      setUrl((r && r.url) || '');
       setState('done');
     } catch (e) { setState('error'); setErr((e && e.message) || 'Could not create the campaign.'); }
   };
@@ -912,7 +923,7 @@ function CampaignActionCard({ action, suiteId }) {
         </div>
       )}
       {state === 'done' ? (
-        <div style={{ fontSize: 12.5, color: 'var(--brand)', fontWeight: 600 }}>✓ Draft created — review, approve &amp; send it in Engage → Campaigns. Nothing has been sent.</div>
+        <div style={{ fontSize: 12.5, color: 'var(--brand)', fontWeight: 600 }}>✓ Draft created — review, approve &amp; send it in Engage → Campaigns. Nothing has been sent.<ViewLink url={url} label="View campaigns →" /></div>
       ) : (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <button onClick={create} disabled={state === 'busy'}

@@ -291,6 +291,17 @@ in one place that updates itself."
   **digests** all show and talk about money in that currency. *(Set by Howler, not the
   client; dashboard tile values keep the format from their data source; this is not the
   messaging-cost/billing currency, which stays separate.)*
+- **AI copy language** ✅ — Howler sets the language the **AI writes in** for a
+  client (English by default), in **Admin → the client → Settings**. Every
+  Pulse-written touch point then speaks it: AI **insights**, the home **briefing**,
+  **goals** & **alert** reads, **digests**, **campaign copy**, and the **Owl** (in-app
+  + WhatsApp). Pick from English, Afrikaans, the SA official languages, and the common
+  international ones. **Per-campaign override:** any single email/SMS campaign (and the
+  Owl when it drafts one) can pick its **own** language, overriding the client default —
+  so a multi-language client can send one audience in French and another in English from
+  the same client. *(Steers AI-generated wording only — the app's own buttons and labels
+  stay in English; a full UI translation is a separate, larger project. Set by Howler,
+  not the client.)*
 - **Dark-mode logo** ✅ (dual-surface) — an optional second logo for dark mode.
   If a client's logo is a dark/black mark it can vanish on the dark header, so
   they (or we) can upload a light version that's used automatically in dark mode.
@@ -518,6 +529,38 @@ Use these to set direction, **not** to promise dates.
   toggle is remembered per conversation, and any quick answer has a **🔬 Dig deeper** one-tap
   to re-run just that question deep. Same grounded brain — different brief + reasoning budget,
   not a different model.
+- **2026-06-30** — **WhatsApp Owl: friendly reply to voice notes / media** 🧪: a voice note,
+  image or file used to be **silently dropped** (the customer got nothing back). The Owl now
+  recognises it and replies "I can't listen to voice notes yet — please type your question"
+  (or send "menu"). Full voice→text transcription is a later step (needs a speech provider +
+  Clickatell inbound-media access).
+- **2026-06-30** — **WhatsApp Owl: starter prompts** 🧪: say "hi" / "menu" / "help" to the
+  WhatsApp Owl and it now replies with a **welcome + suggested starter prompts** (the
+  WhatsApp take on Meta AI's suggestion chips) — the top few as **tappable buttons** plus a
+  numbered menu (tap or reply with a number). Steers customers to what it can do (sales,
+  goals, alerts, campaigns). The starter list is overridable per platform.
+- **2026-06-30** — **Owl can read sales by the hour** ✅: the Owl's data now includes an
+  **hour-of-day grain**, so it can answer "what's our busiest sales hour?", show an
+  intraday sell curve, and — importantly — make a **fair "today so far vs yesterday to
+  the same time"** comparison (it trims both days to the current hour instead of
+  comparing a part-day against a full day). The hour is the finest grain (no per-minute).
+- **2026-06-30** — **Owl actions always link to where you can see them** ✅: whenever the
+  Owl creates something — an **alert**, a **segment** or a **draft campaign** — the
+  confirmation now includes a **"View it →" link** straight to the right page (Alerts /
+  Engage → Segments / Engage → Campaigns). Works the same on **web chat and WhatsApp**.
+- **2026-06-30** — **Per-campaign language override** ✅: any single email/SMS campaign
+  can now pick its **own** AI copy language (in the campaign builder, next to the goal),
+  overriding the client default — so a multi-language client can send one audience in
+  French and another in English. The Owl can draft in a named language too. Re-draft
+  after changing it; the saved copy is what sends.
+- **2026-06-30** — **Per-client AI copy language** ✅: Howler can set the language the
+  **AI writes in** for a client (English default) in **Admin → the client → Settings**
+  (and the setup wizard). Every Pulse-written touch point then speaks it — insights, the
+  home briefing, goals & alert reads, digests, campaign copy, and the Owl (in-app +
+  WhatsApp). English + Afrikaans + the SA official languages + common international ones.
+  Steers AI wording only; the app's own UI chrome stays English (full UI translation is a
+  separate, larger project). Resolved through the branding chain, so it inherits like the
+  rest of the brand.
 - **2026-06-30** — **Per-client SMS sub-cap** ✅: campaigns now honour a separate,
   tighter SMS ceiling (default 5,000/campaign) on top of the audience cap, so a big
   email send can't accidentally trigger an equally-big SMS blast. Set it to 0 to

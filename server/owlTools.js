@@ -212,7 +212,14 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     }
 
     // 5) Run + return the grounding trail. /queries/run/json → array of row objects.
-    const rows = await query.runLookerQuery('/queries/run/json', body);
+    //    A Looker error (e.g. a field that isn't in this explore) becomes a structured
+    //    refusal so the Owl can say "I couldn't run that" instead of crashing the turn.
+    let rows;
+    try {
+      rows = await query.runLookerQuery('/queries/run/json', body);
+    } catch (e) {
+      return refuse('query_failed', `I couldn't run that query over your data${e && e.message ? ` (${String(e.message).slice(0, 140)})` : ''}. Try rephrasing or a different breakdown.`);
+    }
     return {
       ok: true,
       rows: Array.isArray(rows) ? rows : [],
@@ -749,6 +756,8 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     const goal = String(args.goal || '').trim();
     if (!goal) return refuse('no_goal', 'Tell me the goal — who to reach and what to get them to do (e.g. "win back last year\'s VIP buyers who haven\'t rebooked").');
     const channel = ['email', 'sms', 'both'].includes(args.channel) ? args.channel : 'email';
+    // Optional per-campaign language override for the drafted copy (blank → client default).
+    const lang = String(args.language || '').slice(0, 5).toLowerCase();
     // Audience: EITHER a saved segment (by name) OR a custom cohort built from the chat.
     let audience; let summary = ''; let reach = null;
     const segName = String(args.segmentName || '').trim();
@@ -791,14 +800,14 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     }
     // Draft the copy with the existing campaign copywriter (subject/body/cta).
     let copy = {};
-    try { if (typeof draftCampaignCopy === 'function') copy = (await draftCampaignCopy({ entityId, goal, audienceCount: (reach && reach.total) || 0, eventSuiteId: suiteId || '' })) || {}; } catch { copy = {}; }
+    try { if (typeof draftCampaignCopy === 'function') copy = (await draftCampaignCopy({ entityId, goal, audienceCount: (reach && reach.total) || 0, eventSuiteId: suiteId || '', language: lang })) || {}; } catch { copy = {}; }
     if (!copy.subject && !copy.body) return refuse('draft_failed', 'I couldn\'t draft the copy just now — try again in a moment, or build it in Engage.');
     const name = String(args.name || '').trim().slice(0, 120) || (copy.subject ? String(copy.subject).slice(0, 80) : (summary || 'Campaign'));
     return {
       ok: true,
       confirm: true,
       action: {
-        kind: 'draftCampaign', entityId, name, channel, goal,
+        kind: 'draftCampaign', entityId, name, channel, goal, language: lang,
         audience, summary, reach,
         subject: copy.subject || '', body: copy.body || '', ctaText: copy.ctaText || '',
         ctaUrl: String(args.ctaUrl || '').slice(0, 500),
@@ -816,6 +825,7 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
         segmentName: { type: 'string', description: 'Target an EXISTING saved segment by name (the user named an audience/segment, or you just created one). The name is matched against the client\'s saved segments.' },
         filters: { type: 'object', description: 'OR build a new cohort as {dimension: value}, e.g. {"core_ticket_types.name":"VIP","core_purchasers.city":"Cape Town"}. Use this when no saved segment is named. Contact/PII fields are NOT allowed.' },
         channel: { type: 'string', enum: ['email', 'sms', 'both'], description: 'Delivery channel (default email).' },
+        language: { type: 'string', description: 'OPTIONAL ISO language code (e.g. "fr", "af", "pt") to write THIS campaign\'s copy in, overriding the client\'s default language. Use only when the user asks for a specific language for this send (e.g. "draft it in French for the Cape Town crowd"). Omit to use the client default.' },
         ctaUrl: { type: 'string', description: 'Optional destination link for the call-to-action button (e.g. the event buy page) if the user gave one.' },
         name: { type: 'string', description: 'Optional campaign name (defaults to the subject line).' },
       },
