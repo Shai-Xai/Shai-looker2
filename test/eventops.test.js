@@ -126,6 +126,22 @@ test('full workflow: add devices → station → scan → move hive↔station �
   assert.ok(kinds.includes('create') && kinds.filter((k) => k === 'move').length === 2);
 });
 
+test('scan resolves by label and is case-insensitive (code entered in the label field still scans)', () => {
+  const r = mount();
+  const { entity, suite, owner, admin } = seedEvent();
+  call(r['PUT /api/eventops/entities/:entityId/enabled'], { user: admin, params: { entityId: entity.id }, body: { enabled: true } });
+  const P = { suiteId: suite.id };
+  // Device added with the code ONLY in the label (qrCode/serial left blank) — the common
+  // data-entry case that used to read as "no match" on scan.
+  call(r['POST /api/eventops/suites/:suiteId/devices'], { user: owner, params: P, body: { label: 'SL002' } });
+  assert.equal(call(r['POST /api/eventops/suites/:suiteId/scan'], { user: owner, params: P, body: { code: 'SL002' } }).body.device.label, 'SL002');
+  // ...and case-insensitively.
+  assert.equal(call(r['POST /api/eventops/suites/:suiteId/scan'], { user: owner, params: P, body: { code: 'sl002' } }).body.device.label, 'SL002');
+  // A real QR/serial match still wins and is case-insensitive too.
+  call(r['POST /api/eventops/suites/:suiteId/devices'], { user: owner, params: P, body: { label: 'Handheld 7', qrCode: 'QR-7' } });
+  assert.equal(call(r['POST /api/eventops/suites/:suiteId/scan'], { user: owner, params: P, body: { code: 'qr-7' } }).body.device.qrCode, 'QR-7');
+});
+
 test('a lost device scanned back into deployment is flagged unusual in the trail', () => {
   const r = mount();
   const { entity, suite, owner, admin } = seedEvent();

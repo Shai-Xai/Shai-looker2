@@ -389,7 +389,11 @@ function mount(app, { db, auth }) {
     const su = gateSuite(req, res); if (!su) return;
     const code = str(req.body?.code, 120).trim();
     if (!code) return res.status(400).json({ error: 'No code scanned.' });
-    const d = sql.prepare('SELECT * FROM eventops_devices WHERE suite_id=? AND (qr_code=? OR serial_number=?)').get(su.id, code, code);
+    // Match case-insensitively. Prefer a real QR/serial match, then fall back to the LABEL —
+    // people often enter the device's code in the label field, so a unit that's clearly in the
+    // list would otherwise read as "no match". COLLATE NOCASE so SL002 == sl002.
+    const d = sql.prepare('SELECT * FROM eventops_devices WHERE suite_id=? AND (qr_code=? COLLATE NOCASE OR serial_number=? COLLATE NOCASE)').get(su.id, code, code)
+      || sql.prepare('SELECT * FROM eventops_devices WHERE suite_id=? AND label=? COLLATE NOCASE').get(su.id, code);
     if (!d) return res.status(404).json({ error: `No device matches “${code}” at this event.`, code });
     const events = sql.prepare('SELECT * FROM eventops_device_events WHERE device_id=? ORDER BY at DESC LIMIT 8').all(d.id).map(eventRow);
     const openIssues = sql.prepare("SELECT COUNT(*) c FROM eventops_issues WHERE device_id=? AND status='open'").get(d.id).c;
