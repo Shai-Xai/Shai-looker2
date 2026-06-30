@@ -856,12 +856,20 @@ const CHAN_TEXT = { email: 'Email', sms: 'SMS', both: 'Email + SMS' };
 function CampaignActionCard({ action, suiteId }) {
   const [state, setState] = useState('');
   const [err, setErr] = useState('');
+  const [html, setHtml] = useState(''); // optional uploaded custom HTML body
+  const [htmlName, setHtmlName] = useState('');
+  const htmlRef = useRef(null);
   const reach = action.reach || null;
   const reachLine = reach ? `${fmtVal(reach.total)} people${reach.email != null ? ` · ${fmtVal(reach.email)} emailable` : ''}${reach.sms ? ` · ${fmtVal(reach.sms)} SMS` : ''}` : null;
+  const onPickHtml = async (e) => {
+    const f = e.target.files && e.target.files[0]; if (e.target) e.target.value = '';
+    if (!f) return;
+    try { const t = await f.text(); setHtml(t.slice(0, 500000)); setHtmlName(f.name); } catch { /* ignore */ }
+  };
   const create = async () => {
     setState('busy'); setErr('');
     try {
-      await api.owlDraftCampaign({ entityId: action.entityId, name: action.name, channel: action.channel, goal: action.goal, audience: action.audience, subject: action.subject, body: action.body, ctaText: action.ctaText, suiteId: suiteId || undefined });
+      await api.owlDraftCampaign({ entityId: action.entityId, name: action.name, channel: action.channel, goal: action.goal, audience: action.audience, audienceName: action.summary, subject: action.subject, body: action.body, ctaText: action.ctaText, ctaUrl: action.ctaUrl, customHtml: html || undefined, suiteId: suiteId || undefined });
       setState('done');
     } catch (e) { setState('error'); setErr((e && e.message) || 'Could not create the campaign.'); }
   };
@@ -876,6 +884,16 @@ function CampaignActionCard({ action, suiteId }) {
       <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 6 }}>To <strong style={{ color: 'var(--text)' }}>{action.summary || 'the cohort'}</strong>{reachLine ? ` · ${reachLine}` : ''}.</div>
       {action.subject && <div style={{ fontSize: 13, color: 'var(--text)', marginBottom: 3 }}><span style={{ color: 'var(--muted)' }}>Subject:</span> <strong>{action.subject}</strong></div>}
       {action.body && <div style={{ fontSize: 12.5, color: 'var(--text)', whiteSpace: 'pre-wrap', maxHeight: 150, overflow: 'auto', border: '1px solid var(--hairline)', borderRadius: 8, padding: '6px 8px', margin: '4px 0 8px', background: 'var(--bg, var(--card))' }}>{action.body}</div>}
+      {state !== 'done' && (
+        <div style={{ marginBottom: 8 }}>
+          {!html ? (
+            <button onClick={() => htmlRef.current && htmlRef.current.click()} style={{ ...msgActionStyle, fontSize: 12 }}>⬆ Upload custom HTML (optional)</button>
+          ) : (
+            <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>📄 {htmlName} attached — used instead of the templated body. <button onClick={() => { setHtml(''); setHtmlName(''); }} style={{ ...msgActionStyle, fontSize: 11.5, color: 'var(--brand)' }}>remove</button></span>
+          )}
+          <input ref={htmlRef} type="file" accept=".html,.htm,text/html" onChange={onPickHtml} style={{ display: 'none' }} />
+        </div>
+      )}
       {state === 'done' ? (
         <div style={{ fontSize: 12.5, color: 'var(--brand)', fontWeight: 600 }}>✓ Draft created — review, approve &amp; send it in Engage → Campaigns. Nothing has been sent.</div>
       ) : (

@@ -791,6 +791,7 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
         kind: 'draftCampaign', entityId, name, channel, goal,
         audience, summary, reach,
         subject: copy.subject || '', body: copy.body || '', ctaText: copy.ctaText || '',
+        ctaUrl: String(args.ctaUrl || '').slice(0, 500),
       },
     };
   }
@@ -805,6 +806,7 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
         segmentName: { type: 'string', description: 'Target an EXISTING saved segment by name (the user named an audience/segment, or you just created one). The name is matched against the client\'s saved segments.' },
         filters: { type: 'object', description: 'OR build a new cohort as {dimension: value}, e.g. {"core_ticket_types.name":"VIP","core_purchasers.city":"Cape Town"}. Use this when no saved segment is named. Contact/PII fields are NOT allowed.' },
         channel: { type: 'string', enum: ['email', 'sms', 'both'], description: 'Delivery channel (default email).' },
+        ctaUrl: { type: 'string', description: 'Optional destination link for the call-to-action button (e.g. the event buy page) if the user gave one.' },
         name: { type: 'string', description: 'Optional campaign name (defaults to the subject line).' },
       },
       required: ['goal'],
