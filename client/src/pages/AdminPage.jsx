@@ -20,6 +20,7 @@ import OwlFieldDictionary from '../components/OwlFieldDictionary.jsx';
 import WhatsAppOwl from '../components/WhatsAppOwl.jsx';
 import UploadHint from '../components/UploadHint.jsx';
 import { currencyList } from '../lib/currency.js';
+import { languageList } from '../lib/language.js';
 import { GUIDES } from '../lib/guides.js';
 
 // Icon control: an emoji, or an uploaded image (downscaled to a small data-URL).
@@ -1148,8 +1149,8 @@ function SetupWizard({ fields }) {
               <div style={{ marginTop: 6 }}><LogoPicker value={logo} onChange={setLogo} /></div>
             </div>
             {entity
-              ? <><CurrencyField entityId={entity.id} /><SlugField entityId={entity.id} /><LoginBackgroundField entityId={entity.id} /></>
-              : <div data-tour="client-currency" style={{ marginTop: 12, fontSize: 12.5, color: 'var(--muted)' }}>💱 <b>Reporting currency</b>, a <b>vanity login URL</b> and a <b>login background</b> can be set here once the client is created.</div>}
+              ? <><CurrencyField entityId={entity.id} /><LanguageField entityId={entity.id} /><SlugField entityId={entity.id} /><LoginBackgroundField entityId={entity.id} /></>
+              : <div data-tour="client-currency" style={{ marginTop: 12, fontSize: 12.5, color: 'var(--muted)' }}>💱 <b>Reporting currency</b>, 🗣 <b>AI copy language</b>, a <b>vanity login URL</b> and a <b>login background</b> can be set here once the client is created.</div>}
             <Footer primary={saveClient} primaryLabel={entityId ? 'Save & continue' : 'Create client & continue'} />
           </>
         )}
@@ -1265,6 +1266,7 @@ const CLIENT_TOUR = [
   { tour: 'client-name', icon: '🏢', title: 'Name the client', body: 'Type the organiser or brand you’re onboarding — this is what everything else hangs off. It’s the only thing you must fill in here.' },
   { tour: 'client-logo', icon: '🖼️', title: 'Add their logo (optional)', body: 'Upload a logo if you have one — it shows as the client’s brand across the app. You can always add or change it later.' },
   { tour: 'client-currency', icon: '💱', title: 'Set their reporting currency', body: 'Pick the currency this client reports in (ZAR by default). It controls how money shows and how the Owl writes amounts — across insights, briefings, goals, alerts and digests. Available once the client is created; clients can’t change it themselves.' },
+  { tour: 'client-language', icon: '🗣', title: 'Set their AI copy language', body: 'Pick the language the AI writes in (English by default) — briefings, digests, insights, goal & alert reads, campaign copy and the Owl all speak it. It steers AI wording only; the app’s own buttons and labels stay in English. Available once the client is created; clients can’t change it themselves.' },
   { tour: 'client-slug', icon: '🔗', title: 'Give them a vanity login URL', body: 'Optionally give the client their own white-labelled sign-in page at /<slug> (e.g. /kunye) — their logo, colours and background, so it feels like their own product. Leave blank for the standard login.' },
   { tour: 'client-loginbg', icon: '🖼️', title: 'Login background image', body: 'Upload a full-screen background for that vanity login page. A dark scrim is added automatically so the sign-in card stays readable.' },
 ];
@@ -1547,6 +1549,7 @@ function StepPreviewModal({ steps, index, onClose }) {
         {sec('client-name', <>{lbl('Client name · required')}<div style={{ ...fauxInput, maxWidth: 320 }}>e.g. MTN Bushfire</div></>)}
         {sec('client-logo', <>{lbl('Client logo · optional')}<div style={{ width: 120, height: 44, border: '1px dashed var(--hairline)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12 }}>logo</div></>)}
         {sec('client-currency', <>{lbl('Reporting currency')}<div style={{ ...fauxInput, maxWidth: 320 }}>Platform default (ZAR)</div></>)}
+        {sec('client-language', <>{lbl('AI copy language')}<div style={{ ...fauxInput, maxWidth: 320 }}>Platform default (English)</div></>)}
         {sec('client-slug', <>{lbl('Vanity login URL')}<div style={{ ...fauxInput, maxWidth: 320 }}>{window.location.host}/kunye</div></>)}
         {sec('client-loginbg', <>{lbl('Login background image')}<div style={{ width: 160, height: 90, border: '1px dashed var(--hairline)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12 }}>background</div></>)}
       </>);
@@ -2659,6 +2662,41 @@ function CurrencyField({ entityId }) {
   );
 }
 
+// AI content language (admin-only). The language Pulse's AI WRITES generated copy
+// in — briefings, digests, per-tile insights, goal reads, alert notes and campaign
+// copy, plus the Owl. It steers AI prose only; it does NOT translate the app's own
+// buttons/labels (that's a separate, larger i18n job). Stored in the client's
+// branding blob (so it resolves + inherits like the rest of the brand); autosaves.
+// Blank = the platform default (English).
+function LanguageField({ entityId }) {
+  const [lang, setLang] = useState(null);   // explicit code, or '' = inherit default (English)
+  const [saved, setSaved] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    api.getEntityMailTemplate(entityId).then((d) => { if (alive) setLang(d.branding?.aiLanguage || ''); }).catch(() => { if (alive) setLang(''); });
+    return () => { alive = false; };
+  }, [entityId]);
+  if (lang === null) return null;
+  const onPick = async (v) => {
+    setLang(v);
+    try { await api.saveEntityMailTemplate(entityId, { aiLanguage: v }); flash(setSaved); }
+    catch (e) { alert('Save failed: ' + e.message); }
+  };
+  return (
+    <div data-tour="client-language" style={{ marginTop: 12 }}>
+      <L>AI copy language</L>
+      <div style={{ fontSize: 12, color: 'var(--muted)', margin: '4px 0 6px' }}>The language the AI writes in — briefings, digests, insights, goal &amp; alert reads, campaign copy and the Owl. Steers AI-written wording only; the app's own buttons and labels stay in English (full UI translation is separate).</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <select value={lang} onChange={(e) => onPick(e.target.value)} style={{ ...input, maxWidth: 340, cursor: 'pointer' }}>
+          <option value="">Platform default (English)</option>
+          {languageList().filter((l) => l.code !== 'en').map((l) => <option key={l.code} value={l.code}>{l.native === l.name ? l.name : `${l.name} — ${l.native}`}</option>)}
+        </select>
+        {saved && <span style={{ color: 'var(--success,#10b981)', fontSize: 12.5, fontWeight: 600 }}>✓ Saved</span>}
+      </div>
+    </div>
+  );
+}
+
 // White-label vanity login (admin-only). A per-client URL slug → a sign-in page
 // at /<slug> painted with their brand. The slug lives in its own table
 // (server/vanity.js); validation (format / reserved / uniqueness) is server-side.
@@ -2819,6 +2857,7 @@ function ClientSettings({ entity, suites, fields, onChange, onBack }) {
       </div>
       <OwlGuidanceEditor scope="admin-client" entityId={entity.id} />
       <CurrencyField entityId={entity.id} />
+      <LanguageField entityId={entity.id} />
       <AudienceCapField entityId={entity.id} />
       <SlugField entityId={entity.id} />
       <LoginBackgroundField entityId={entity.id} />

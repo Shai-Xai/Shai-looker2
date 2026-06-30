@@ -36,7 +36,7 @@ function parseFollowups(out) {
   try { const a = JSON.parse(m[0]); return Array.isArray(a) ? a.filter((x) => typeof x === 'string' && x.trim()).slice(0, 3) : []; } catch { return []; }
 }
 
-function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthropicKeyForEntity, currencyNote, whatsappDigestFor, getAlertsApi, getSegmentsApi, getActionsApi }) {
+function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthropicKeyForEntity, currencyNote, languageNote, whatsappDigestFor, getAlertsApi, getSegmentsApi, getActionsApi }) {
   const sql = db.db;
   sql.exec(`
     CREATE TABLE IF NOT EXISTS owl_wa_msgs (
@@ -176,6 +176,8 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
     try { const g = resolveGuidance(db, entityId); if (g) parts.push(g); } catch { /* ignore */ }
     // Reporting currency for this organiser (blank for ZAR — the default).
     try { const cn = currencyNote && currencyNote(entityId || undefined); if (cn) parts.push(cn); } catch { /* ignore */ }
+    // AI content language for this organiser (blank for English — the default).
+    try { const ln = languageNote && languageNote(entityId || undefined); if (ln) parts.push(ln); } catch { /* ignore */ }
     parts.push(WA_OVERRIDE);
     return parts.join('\n\n');
   }

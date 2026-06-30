@@ -166,7 +166,7 @@ function owlAllowed(user) {
   return !!email && OWL_ALLOW.split(',').map((s) => s.trim()).filter(Boolean).includes(email);
 }
 
-function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, messaging, getAlertsApi, getSegmentsApi, getActionsApi, anthropicKeyForSuite, anthropicKeyForEntity, currencyNote, whatsappDigestFor }) {
+function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, messaging, getAlertsApi, getSegmentsApi, getActionsApi, anthropicKeyForSuite, anthropicKeyForEntity, currencyNote, languageNote, whatsappDigestFor }) {
   const sql = db.db;
   sql.exec(`
     CREATE TABLE IF NOT EXISTS owl_threads (
@@ -318,6 +318,8 @@ function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, m
     if ((cat.notes || []).length) parts.push(`Rules:\n- ${cat.notes.join('\n- ')}`);
     // Reporting currency: write money in the organiser's currency (blank for ZAR).
     try { const cn = currencyNote && currencyNote(scopeEntityId || undefined, suiteId || undefined); if (cn) parts.push(cn); } catch { /* ignore */ }
+    // AI content language: write generated prose in the organiser's language (blank for English).
+    try { const ln = languageNote && languageNote(scopeEntityId || undefined, suiteId || undefined); if (ln) parts.push(ln); } catch { /* ignore */ }
     // Tell the model what external data is attached (so it knows it can use askUpload).
     try {
       const ups = uploads && uploads.listUploads && scopeEntityId ? uploads.listUploads(scopeEntityId) : [];
@@ -522,7 +524,7 @@ function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, m
   require('./owlPin').mount(app, { db, auth });
   require('./owlGuidance').mount(app, { db, auth }); // resolveGuidance is required at top
   const owlFields = require('./owlFields').mount(app, { db, auth, getExploreFields }); // no-code field labels/synonyms/questions
-  require('./owlWhatsapp').mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthropicKeyForEntity, currencyNote, whatsappDigestFor, getAlertsApi, getSegmentsApi, getActionsApi }); // WhatsApp door onto the Owl (Clickatell)
+  require('./owlWhatsapp').mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthropicKeyForEntity, currencyNote, languageNote, whatsappDigestFor, getAlertsApi, getSegmentsApi, getActionsApi }); // WhatsApp door onto the Owl (Clickatell)
   console.log('[owlChat] agentic Owl chat module mounted');
 }
 

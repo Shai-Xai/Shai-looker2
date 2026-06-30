@@ -291,6 +291,14 @@ in one place that updates itself."
   **digests** all show and talk about money in that currency. *(Set by Howler, not the
   client; dashboard tile values keep the format from their data source; this is not the
   messaging-cost/billing currency, which stays separate.)*
+- **AI copy language** ✅ — Howler sets the language the **AI writes in** for a
+  client (English by default), in **Admin → the client → Settings**. Every
+  Pulse-written touch point then speaks it: AI **insights**, the home **briefing**,
+  **goals** & **alert** reads, **digests**, **campaign copy**, and the **Owl** (in-app
+  + WhatsApp). Pick from English, Afrikaans, the SA official languages, and the common
+  international ones. *(Steers AI-generated wording only — the app's own buttons and
+  labels stay in English; a full UI translation is a separate, larger project. Set by
+  Howler, not the client.)*
 - **Dark-mode logo** ✅ (dual-surface) — an optional second logo for dark mode.
   If a client's logo is a dark/black mark it can vanish on the dark header, so
   they (or we) can upload a light version that's used automatically in dark mode.
@@ -512,6 +520,14 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-30** — **Per-client AI copy language** ✅: Howler can set the language the
+  **AI writes in** for a client (English default) in **Admin → the client → Settings**
+  (and the setup wizard). Every Pulse-written touch point then speaks it — insights, the
+  home briefing, goals & alert reads, digests, campaign copy, and the Owl (in-app +
+  WhatsApp). English + Afrikaans + the SA official languages + common international ones.
+  Steers AI wording only; the app's own UI chrome stays English (full UI translation is a
+  separate, larger project). Resolved through the branding chain, so it inherits like the
+  rest of the brand.
 - **2026-06-30** — **Per-client SMS sub-cap** ✅: campaigns now honour a separate,
   tighter SMS ceiling (default 5,000/campaign) on top of the audience cap, so a big
   email send can't accidentally trigger an equally-big SMS blast. Set it to 0 to
