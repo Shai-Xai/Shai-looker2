@@ -1199,7 +1199,7 @@ const maskSecret = (v) => (v && v.length ? `••••••${String(v).slice(
 
 // Combined AI instructions: the global standing instructions, plus the
 // per-client context when the request is in a suite (client) context.
-function aiInstructionsFor(suiteId, entityId) {
+function aiInstructionsFor(suiteId, entityId, langOverride) {
   const parts = [];
   const global = db.getSetting('ai_instructions');
   if (global && global.trim()) parts.push(global.trim());
@@ -1207,7 +1207,7 @@ function aiInstructionsFor(suiteId, entityId) {
   const eid = entityId || su?.entityId;
   const ent = eid && db.getEntity(eid);
   if (su && ent?.aiContext && ent.aiContext.trim()) parts.push(`Context for the client "${ent.name}":\n${ent.aiContext.trim()}`);
-  if (eid) { const br = mailer.resolveBranding(eid, suiteId); parts.push(currency.aiNote(br.currency)); parts.push(language.aiNote(br.aiLanguage)); } // reporting-currency + AI-language notes (blank for ZAR / English)
+  if (eid) { const br = mailer.resolveBranding(eid, suiteId); parts.push(currency.aiNote(br.currency)); parts.push(language.aiNote(langOverride && String(langOverride).trim() ? langOverride : br.aiLanguage)); } // langOverride (per-campaign language) wins over the client default
   return parts.filter(Boolean).join('\n\n');
 }
 
@@ -2883,11 +2883,11 @@ const actionsApi = require('./actions').mount(app, {
   // The client's events (suites) — for optionally linking a campaign to one.
   listEvents: (entityId) => db.listSuitesForEntity(entityId).map((s) => ({ id: s.id, name: s.name, url: s.eventUrl || '' })),
   // AI-draft campaign copy, grounded in the client's context AND the event it's for (name + briefing + event-resolved currency) so the copy is on-event.
-  draftCopy: async ({ entityId, goal, audienceCount, eventSuiteId }) => {
+  draftCopy: async ({ entityId, goal, audienceCount, eventSuiteId, language: langOverride }) => {
     const apiKey = anthropicKeyForEntity(entityId);
     if (!insights.isConfigured(apiKey)) throw new Error('AI is not configured for this client');
     const ent = db.getEntity(entityId); const su = eventSuiteId ? db.getSuite(eventSuiteId) : null;
-    return insights.draftCampaign({ goal, clientName: ent?.name, clientContext: ent?.aiContext || '', audienceCount, apiKey, instructions: [aiInstructionsFor(eventSuiteId || null, entityId), su ? `This campaign is for the event "${su.name}"${su.briefing?.instructions ? ` — ${String(su.briefing.instructions).trim()}` : ''}. Write for THIS event specifically.` : ''].filter(Boolean).join('\n\n') });
+    return insights.draftCampaign({ goal, clientName: ent?.name, clientContext: ent?.aiContext || '', audienceCount, apiKey, instructions: [aiInstructionsFor(eventSuiteId || null, entityId, langOverride), su ? `This campaign is for the event "${su.name}"${su.briefing?.instructions ? ` — ${String(su.briefing.instructions).trim()}` : ''}. Write for THIS event specifically.` : ''].filter(Boolean).join('\n\n') });
   },
 });
 

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { api } from '../lib/api.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import UploadHint from './UploadHint.jsx';
+import { languageList } from '../lib/language.js';
 
 // Format a money amount in the campaign's currency (ZAR → "R1,234.00").
 const money = (cur, n) => `${cur === 'ZAR' || !cur ? 'R' : `${cur} `}${Number(n || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -344,6 +345,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
     attrDashboardId: cfg.audience?.attrDashboardId || '', // optional 2nd source for targeting fields
     attrTileId: cfg.audience?.attrTileId || '',
     eventSuiteId: cfg.eventSuiteId || ta.eventSuiteId || '',
+    language: cfg.language || '', // per-campaign AI copy language ('' = client default)
     contentMode: cfg.contentMode || 'template',
     heroImage: cfg.heroImage || '',
     customHtml: cfg.customHtml || '',
@@ -449,7 +451,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
     smsBody: f.smsBody,
     ctaText: f.campaignMode === 'sequence' ? (f.steps[0]?.ctaText || '') : f.ctaText,
     ctaUrl: f.ctaUrl, utm: f.utm, recurring: f.recurring,
-    eventSuiteId: f.eventSuiteId, contentMode: f.contentMode, heroImage: f.heroImage, customHtml: f.customHtml,
+    eventSuiteId: f.eventSuiteId, language: f.language, contentMode: f.contentMode, heroImage: f.heroImage, customHtml: f.customHtml,
     templateKey: f.templateKey, category: f.category, master: f.master, approvers: f.approvers,
     channel: f.channel,
     campaignMode: f.campaignMode, steps: f.steps,
@@ -554,7 +556,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
   const draft = async () => {
     setDrafting(true);
     try {
-      const d = await api.actionDraftCopy(entityId, { goal: f.goal, audienceCount: aud?.count || 0, eventSuiteId: f.eventSuiteId || '' });
+      const d = await api.actionDraftCopy(entityId, { goal: f.goal, audienceCount: aud?.count || 0, eventSuiteId: f.eventSuiteId || '', language: f.language || '' });
       setF((s) => ({
         ...s,
         subject: d.subject || s.subject, body: d.body || s.body, ctaText: d.ctaText || s.ctaText,
@@ -576,7 +578,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
   const draftStep = async (i) => {
     setDrafting(true);
     try {
-      const d = await api.actionDraftCopy(entityId, { goal: f.goal, audienceCount: aud?.count || 0 });
+      const d = await api.actionDraftCopy(entityId, { goal: f.goal, audienceCount: aud?.count || 0, language: f.language || '' });
       setStep(i, {
         subject: d.subject || f.steps[i]?.subject || '',
         body: d.body || f.steps[i]?.body || '',
@@ -765,6 +767,15 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
 
           <Field label="Goal (steers the AI copy)">
             <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit' }} rows={2} value={f.goal} onChange={(e) => set('goal', e.target.value)} />
+          </Field>
+
+          <Field label="AI copy language (optional)">
+            <select style={input} value={f.language} onChange={(e) => set('language', e.target.value)}>
+              <option value="">Client default</option>
+              {languageList().filter((l) => l.code !== 'en').map((l) => <option key={l.code} value={l.code}>{l.native === l.name ? l.name : `${l.name} — ${l.native}`}</option>)}
+              <option value="en">English</option>
+            </select>
+            <div style={hintS}>Overrides this client's default language for THIS campaign's AI-drafted copy — handy when one audience needs a different language. Re-draft (or draft a step) after changing it. The saved copy is what sends.</div>
           </Field>
           </Accordion>
 

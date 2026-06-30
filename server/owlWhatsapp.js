@@ -314,6 +314,7 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
           audience, subject: String(pend.subject || ''), body: String(pend.body || ''),
           ctaText: String(pend.ctaText || ''), ctaUrl: String(pend.ctaUrl || ''),
           goal: String(pend.goal || ''), eventSuiteId: String(pend.suiteId || ''), campaignMode: 'once',
+          language: String(pend.language || '').slice(0, 5).toLowerCase(), // per-campaign AI language (blank → client default)
           contentMode: 'template', customHtml: '', source: 'owl-whatsapp', // tag where it was drafted (for the Engage badge)
         };
         const api = getActionsApi && getActionsApi();

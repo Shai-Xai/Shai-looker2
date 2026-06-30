@@ -296,9 +296,12 @@ in one place that updates itself."
   Pulse-written touch point then speaks it: AI **insights**, the home **briefing**,
   **goals** & **alert** reads, **digests**, **campaign copy**, and the **Owl** (in-app
   + WhatsApp). Pick from English, Afrikaans, the SA official languages, and the common
-  international ones. *(Steers AI-generated wording only — the app's own buttons and
-  labels stay in English; a full UI translation is a separate, larger project. Set by
-  Howler, not the client.)*
+  international ones. **Per-campaign override:** any single email/SMS campaign (and the
+  Owl when it drafts one) can pick its **own** language, overriding the client default —
+  so a multi-language client can send one audience in French and another in English from
+  the same client. *(Steers AI-generated wording only — the app's own buttons and labels
+  stay in English; a full UI translation is a separate, larger project. Set by Howler,
+  not the client.)*
 - **Dark-mode logo** ✅ (dual-surface) — an optional second logo for dark mode.
   If a client's logo is a dark/black mark it can vanish on the dark header, so
   they (or we) can upload a light version that's used automatically in dark mode.
@@ -520,6 +523,11 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-30** — **Per-campaign language override** ✅: any single email/SMS campaign
+  can now pick its **own** AI copy language (in the campaign builder, next to the goal),
+  overriding the client default — so a multi-language client can send one audience in
+  French and another in English. The Owl can draft in a named language too. Re-draft
+  after changing it; the saved copy is what sends.
 - **2026-06-30** — **Per-client AI copy language** ✅: Howler can set the language the
   **AI writes in** for a client (English default) in **Admin → the client → Settings**
   (and the setup wizard). Every Pulse-written touch point then speaks it — insights, the

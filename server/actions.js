@@ -360,6 +360,11 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
       },
       contentMode: body.contentMode === 'html' ? 'html' : 'template',
       eventSuiteId: String(body.eventSuiteId || ''),
+      // AI copy language for THIS campaign: overrides the client default when set
+      // (so a multi-language client can draft one audience in French, another in
+      // English). Blank = inherit the client's default language. Steers the AI
+      // draft only; the saved copy is what sends.
+      language: String(body.language || '').slice(0, 5).toLowerCase(),
       heroImage: String(body.heroImage || '').slice(0, 2000000),  // hero image data-URL/URL
       customHtml: String(body.customHtml || '').slice(0, 500000), // custom-HTML mode body
       subject: String(body.subject || '').slice(0, 200),
@@ -1042,7 +1047,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
   app.post('/api/actions/:entityId/draft-copy', auth.requireAuth, auth.requirePermission('campaigns.approve'), async (req, res) => {
     if (!guard(req, res, req.params.entityId)) return;
     try {
-      const out = await draftCopy({ entityId: req.params.entityId, goal: String((req.body || {}).goal || '').slice(0, 1000), audienceCount: Number((req.body || {}).audienceCount) || 0, eventSuiteId: String((req.body || {}).eventSuiteId || '') });
+      const out = await draftCopy({ entityId: req.params.entityId, goal: String((req.body || {}).goal || '').slice(0, 1000), audienceCount: Number((req.body || {}).audienceCount) || 0, eventSuiteId: String((req.body || {}).eventSuiteId || ''), language: String((req.body || {}).language || '').slice(0, 5).toLowerCase() });
       res.json(out);
     } catch (e) { res.status(400).json({ error: e.message }); }
   });
