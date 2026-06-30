@@ -498,7 +498,7 @@ function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, m
       const segmentsApi = typeof getSegmentsApi === 'function' ? getSegmentsApi() : null;
       if (segmentsApi && segmentsApi.createSegment) {
         const segName = String(audienceName || name || 'Campaign audience').slice(0, 120);
-        const sr = segmentsApi.createSegment({ entityId, name: segName, definition: audience, user: req.user });
+        const sr = segmentsApi.createSegment({ entityId, name: segName, definition: audience, user: req.user, suiteId: suiteId || '' });
         if (sr.ok) audience = { mode: 'segment', segmentId: sr.segment.id }; // reference the saved segment
         // (if the segment couldn't be saved, fall back to the inline query audience — the campaign still resolves)
       }

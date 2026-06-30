@@ -40,6 +40,11 @@ function mount(app, { db, auth, resolveAudience, resolveRecipe, meta, tiktok }) 
   // Opt-in: keep this segment's Meta / TikTok Custom Audience mirrored automatically (~daily).
   try { sql.exec('ALTER TABLE segments ADD COLUMN meta_auto INTEGER NOT NULL DEFAULT 0'); } catch { /* exists */ }
   try { sql.exec('ALTER TABLE segments ADD COLUMN tiktok_auto INTEGER NOT NULL DEFAULT 0'); } catch { /* exists */ }
+  // Organisation: optionally link a segment to an EVENT (suite) and/or a custom FOLDER
+  // so the Segments list can be grouped/filtered. Both optional, organisational only —
+  // they never affect resolution or scope (the segment stays entity-scoped).
+  try { sql.exec("ALTER TABLE segments ADD COLUMN suite_id TEXT NOT NULL DEFAULT ''"); } catch { /* exists */ }
+  try { sql.exec("ALTER TABLE segments ADD COLUMN folder TEXT NOT NULL DEFAULT ''"); } catch { /* exists */ }
 
   // Scope: admins see all; clients only their own entities (same boundary as
   // campaigns). Enforced server-side, so a segment can't reach another client.
@@ -107,6 +112,7 @@ function mount(app, { db, auth, resolveAudience, resolveRecipe, meta, tiktok }) 
     definition: JSON.parse(r.definition || '{}'),
     count: r.last_count, lastResolvedAt: r.last_resolved_at,
     reach: { email: r.last_email, sms: r.last_sms }, // contactable-by-identifier per channel
+    suiteId: r.suite_id || '', folder: r.folder || '', // organisation: event link + custom folder
     metaAuto: !!r.meta_auto,
     tiktokAuto: !!r.tiktok_auto,
     createdBy: r.created_by, createdAt: r.created_at, updatedAt: r.updated_at,
@@ -136,14 +142,21 @@ function mount(app, { db, auth, resolveAudience, resolveRecipe, meta, tiktok }) 
     });
   });
 
+  // Organisation fields (optional). An event link is only accepted if that event
+  // belongs to this client (never widens scope); a folder is a free-text label.
+  const cleanSuite = (entityId, suiteId) => { const s = String(suiteId || '').slice(0, 64); if (!s) return ''; const su = db.getSuite ? db.getSuite(s) : null; return su && su.entityId === entityId ? s : ''; };
+  const cleanFolder = (f) => String(f || '').trim().slice(0, 80);
+
   app.post('/api/segments/:entityId', auth.requireAuth, auth.requirePermission('campaigns.approve'), (req, res) => {
     if (!guard(req, res, req.params.entityId)) return;
     const name = String(req.body?.name || '').trim().slice(0, 120) || 'Untitled segment';
     const definition = cleanDef(req.body?.definition || {});
     const source = definition.sources && definition.sources.length ? 'mix' : (['paste', 'gsheet', 'query'].includes(definition.mode) ? definition.mode : 'tile');
+    const suiteId = cleanSuite(req.params.entityId, req.body?.suiteId);
+    const folder = cleanFolder(req.body?.folder);
     const id = uuid(); const ts = now();
-    sql.prepare('INSERT INTO segments (id, entity_id, name, source, definition, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)')
-      .run(id, req.params.entityId, name, source, JSON.stringify(definition), req.user.email, ts, ts);
+    sql.prepare('INSERT INTO segments (id, entity_id, name, source, definition, suite_id, folder, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
+      .run(id, req.params.entityId, name, source, JSON.stringify(definition), suiteId, folder, req.user.email, ts, ts);
     res.status(201).json({ segment: rowToSeg(getSeg(id)) });
   });
 
@@ -171,10 +184,13 @@ function mount(app, { db, auth, resolveAudience, resolveRecipe, meta, tiktok }) 
     const name = req.body?.name !== undefined ? String(req.body.name).trim().slice(0, 120) || seg.name : seg.name;
     const definition = req.body?.definition !== undefined ? cleanDef(req.body.definition) : JSON.parse(seg.definition || '{}');
     const source = definition.sources && definition.sources.length ? 'mix' : (['paste', 'gsheet', 'query'].includes(definition.mode) ? definition.mode : 'tile');
+    // Event link + folder — only touched when supplied (so a content-only edit keeps them).
+    const suiteId = req.body?.suiteId !== undefined ? cleanSuite(req.params.entityId, req.body.suiteId) : (seg.suite_id || '');
+    const folder = req.body?.folder !== undefined ? cleanFolder(req.body.folder) : (seg.folder || '');
     // A changed definition invalidates the cached count.
     const changed = JSON.stringify(definition) !== seg.definition;
-    sql.prepare('UPDATE segments SET name=?, source=?, definition=?, updated_at=?' + (changed ? ', last_count=-1, last_resolved_at=\'\'' : '') + ' WHERE id=?')
-      .run(name, source, JSON.stringify(definition), now(), req.params.id);
+    sql.prepare('UPDATE segments SET name=?, source=?, definition=?, suite_id=?, folder=?, updated_at=?' + (changed ? ', last_count=-1, last_resolved_at=\'\'' : '') + ' WHERE id=?')
+      .run(name, source, JSON.stringify(definition), suiteId, folder, now(), req.params.id);
     res.json({ segment: rowToSeg(getSeg(req.params.id)) });
   });
 
@@ -307,7 +323,7 @@ function mount(app, { db, auth, resolveAudience, resolveRecipe, meta, tiktok }) 
   // Programmatic create (the Owl's createSegment act-tool commit path). Runs the SAME
   // cleanDef + entity-ownership + campaigns.approve check the POST route uses, so an
   // Owl-made segment is identical to a hand-made one and obeys the permission model.
-  function createSegmentFor({ entityId, name, definition, user }) {
+  function createSegmentFor({ entityId, name, definition, user, suiteId, folder }) {
     if (!user || !entityId) return { ok: false, error: 'Missing user or client' };
     const isAdmin = user.role === 'admin';
     if (!(isAdmin || (user.entityIds || []).includes(entityId))) return { ok: false, error: 'Not allowed' };
@@ -317,9 +333,11 @@ function mount(app, { db, auth, resolveAudience, resolveRecipe, meta, tiktok }) 
     const def = cleanDef(definition || {});
     const nm = String(name || '').trim().slice(0, 120) || 'Untitled segment';
     const source = def.sources && def.sources.length ? 'mix' : (['paste', 'gsheet', 'query'].includes(def.mode) ? def.mode : 'tile');
+    const sid = cleanSuite(entityId, suiteId);
+    const fld = cleanFolder(folder);
     const id = uuid(); const ts = now();
-    sql.prepare('INSERT INTO segments (id, entity_id, name, source, definition, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)')
-      .run(id, entityId, nm, source, JSON.stringify(def), (user.email || 'owl'), ts, ts);
+    sql.prepare('INSERT INTO segments (id, entity_id, name, source, definition, suite_id, folder, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
+      .run(id, entityId, nm, source, JSON.stringify(def), sid, fld, (user.email || 'owl'), ts, ts);
     return { ok: true, segment: rowToSeg(getSeg(id)) };
   }
   // The client's saved segments (id + name) — so the Owl can target one by name.
