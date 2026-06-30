@@ -113,6 +113,11 @@ approval needed.
 - **Tappable follow-ups** — each answer offers 2–3 suggested next questions as
   **reply buttons** (or a numbered list to reply to), so customers can drill in
   without typing.
+- **Scheduled updates (digest / goals / alerts)** — a customer can be subscribed
+  to a daily WhatsApp update. To respect WhatsApp’s rules, it’s sent free-form only
+  while the customer is inside their **24-hour window** (i.e. they messaged the Owl
+  in the last day); reaching everyone on a fixed schedule regardless will use an
+  approved WhatsApp template (next step).
 - **Status 🧪:** pilot. Howler links each phone number to its client in **Admin →
   WhatsApp Owl**, where a live activity log shows inbound messages end-to-end.
 
@@ -489,6 +494,12 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-30** — **WhatsApp Owl: scheduled in-window updates** 🧪: a customer can be
+  subscribed (per number, in **Admin → WhatsApp Owl**) to a daily **digest / goals /
+  alerts** update on WhatsApp. Sent free-form only while they’re inside their 24-hour
+  window (messaged in the last day); a master switch + per-number topic & time controls.
+  Reaching everyone on a fixed schedule regardless of the window will use an approved
+  WhatsApp template (next step).
 - **2026-06-29** — **WhatsApp Owl: charts + tappable follow-ups** 🧪: the WhatsApp Owl now
   renders a **chart image** when a customer asks to see a trend/breakdown, and offers
   **2–3 follow-up questions** as native WhatsApp reply buttons (falling back to a numbered

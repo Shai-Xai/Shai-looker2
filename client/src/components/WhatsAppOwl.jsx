@@ -32,7 +32,7 @@ export default function WhatsAppOwl() {
   };
 
   useEffect(() => {
-    api.owlWhatsapp().then((r) => { setCfg({ from: r.from || '', webhookPath: r.webhookPath, hasSecret: r.hasSecret, hasApiKey: r.hasApiKey, mediaEnabled: !!r.mediaEnabled, numbers: r.numbers || [] }); }).catch(() => setCfg({ numbers: [] }));
+    api.owlWhatsapp().then((r) => { setCfg({ from: r.from || '', webhookPath: r.webhookPath, hasSecret: r.hasSecret, hasApiKey: r.hasApiKey, mediaEnabled: !!r.mediaEnabled, pushEnabled: !!r.pushEnabled, numbers: r.numbers || [] }); }).catch(() => setCfg({ numbers: [] }));
     api.adminListEntities().then((r) => setEnts(Array.isArray(r) ? r : (r.entities || []))).catch(() => setEnts([]));
     loadLog();
   }, []);
@@ -43,7 +43,7 @@ export default function WhatsAppOwl() {
   const delNum = (i) => setCfg((c) => ({ ...c, numbers: c.numbers.filter((_, j) => j !== i) }));
   const save = async () => {
     setBusy(true);
-    try { await api.saveOwlWhatsapp({ from: cfg.from, mediaEnabled: !!cfg.mediaEnabled, numbers: cfg.numbers.filter((n) => n.msisdn && n.email), ...(secret.trim() ? { secret: secret.trim() } : {}), ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}) }); setSaved(true); setSecret(''); setApiKey(''); setTimeout(() => setSaved(false), 1800); } catch { /* ignore */ }
+    try { await api.saveOwlWhatsapp({ from: cfg.from, mediaEnabled: !!cfg.mediaEnabled, pushEnabled: !!cfg.pushEnabled, numbers: cfg.numbers.filter((n) => n.msisdn && n.email), ...(secret.trim() ? { secret: secret.trim() } : {}), ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}) }); setSaved(true); setSecret(''); setApiKey(''); setTimeout(() => setSaved(false), 1800); } catch { /* ignore */ }
     setBusy(false);
   };
 
@@ -78,7 +78,7 @@ export default function WhatsAppOwl() {
       <span style={lbl}>5 · Linked numbers (which phone → which client)</span>
       {cfg.numbers.length === 0 && <div style={{ fontSize: 12.5, color: 'var(--muted)', margin: '2px 0' }}>No numbers linked yet — add one below.</div>}
       {cfg.numbers.map((n, i) => (
-        <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6, flexWrap: 'wrap' }}>
+        <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4, flexWrap: 'wrap' }}>
           <input value={n.msisdn} onChange={(e) => setNum(i, { msisdn: e.target.value })} placeholder="phone (27…)" style={{ ...fld, width: 130 }} />
           <input value={n.email} onChange={(e) => setNum(i, { email: e.target.value })} placeholder="Pulse user email" style={{ ...fld, width: 190 }} />
           <select value={n.entityId} onChange={(e) => setNum(i, { entityId: e.target.value })} style={{ ...fld, width: 190 }}>
@@ -86,9 +86,30 @@ export default function WhatsAppOwl() {
             {ents.map((en) => <option key={en.id} value={en.id}>{en.name}</option>)}
           </select>
           <button onClick={() => delNum(i)} title="Remove" style={{ border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 13 }}>🗑</button>
+          {/* Scheduled updates this number is subscribed to (only sent inside their 24h window). */}
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexBasis: '100%', paddingLeft: 4, marginTop: 1, marginBottom: 4 }}>
+            <span style={{ fontSize: 11, color: 'var(--muted)' }}>scheduled:</span>
+            {['digest', 'goals', 'alerts'].map((t) => (
+              <label key={t} style={{ display: 'inline-flex', gap: 3, alignItems: 'center', fontSize: 12, cursor: 'pointer' }}>
+                <input type="checkbox" checked={(n.subs || []).includes(t)} onChange={(e) => setNum(i, { subs: e.target.checked ? [...new Set([...(n.subs || []), t])] : (n.subs || []).filter((x) => x !== t) })} />
+                {t}
+              </label>
+            ))}
+            <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 4 }}>at</span>
+            <select value={Number.isInteger(n.hour) ? n.hour : 8} onChange={(e) => setNum(i, { hour: Number(e.target.value) })} style={{ ...fld, padding: '3px 6px', fontSize: 12 }}>
+              {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{String(h).padStart(2, '0')}:00</option>)}
+            </select>
+            <span style={{ fontSize: 11, color: 'var(--muted)' }}>SAST</span>
+          </div>
         </div>
       ))}
       <button onClick={addNum} style={{ ...fld, cursor: 'pointer', marginTop: 2 }}>＋ Add number</button>
+
+      <span style={lbl}>7 · Scheduled updates (digest / goals / alerts)</span>
+      <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 13, cursor: 'pointer' }}>
+        <input type="checkbox" checked={!!cfg.pushEnabled} onChange={(e) => setCfg((c) => ({ ...c, pushEnabled: e.target.checked }))} style={{ marginTop: 2 }} />
+        <span>Send the scheduled updates ticked per number above. To stay within WhatsApp’s rules, an update is only sent if that customer messaged the Owl in the <strong>last 24 hours</strong> (their free-form window). Numbers outside the window are skipped that day — reaching everyone on a fixed schedule needs an approved WhatsApp template.</span>
+      </label>
 
       <span style={lbl}>6 · Chart images</span>
       <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 13, cursor: 'pointer' }}>
@@ -143,8 +164,8 @@ export default function WhatsAppOwl() {
 // Colour the stage chip so the happy path (received → identified → replied) reads green
 // and the stop-points (rejected / unparsed / no-account / send-failed) read amber/red.
 function stageBadge(stage) {
-  const ok = stage === 'received' || stage === 'identified' || stage === 'replied' || stage === 'image-sent' || stage === 'image-link' || stage === 'followups-buttons';
-  const bad = stage === 'rejected' || stage === 'send-failed' || stage === 'error' || stage === 'no-ai-key' || stage === 'image-failed';
+  const ok = stage === 'received' || stage === 'identified' || stage === 'replied' || stage === 'image-sent' || stage === 'image-link' || stage === 'followups-buttons' || stage === 'push-sent';
+  const bad = stage === 'rejected' || stage === 'send-failed' || stage === 'error' || stage === 'no-ai-key' || stage === 'image-failed' || stage === 'push-failed';
   const c = ok ? '#34c759' : bad ? '#ef4444' : '#b45309';
   return { fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.03em', color: c, background: `${c}1a`, padding: '2px 6px', borderRadius: 5, whiteSpace: 'nowrap', minWidth: 64, textAlign: 'center' };
 }
