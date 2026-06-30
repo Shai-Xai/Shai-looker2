@@ -459,6 +459,7 @@ function DeviceActionSheet({ suiteId, device, onClose, onDone }) {
   const [staffId, setStaffId] = useState(''); // optional attribution — who's doing this
   const [view, setView] = useState('move'); // move | issue
   const [issue, setIssue] = useState({ category: 'damaged', note: '', resolution: '' });
+  const [statusForm, setStatusForm] = useState(null); // { state, comment } when marking lost/damaged
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -503,18 +504,33 @@ function DeviceActionSheet({ suiteId, device, onClose, onDone }) {
             </button>
           ))}
           {stations.length === 0 && <Empty>No stations — add one first to deploy devices.</Empty>}
-          <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-            <button disabled={busy} onClick={() => move({ state: 'lost' }, 'Lost')} style={dangerBtn}>Mark lost</button>
-            <button disabled={busy} onClick={() => move({ state: 'damaged' }, 'Damaged')} style={dangerBtn}>Mark damaged</button>
-          </div>
+          {!statusForm ? (
+            <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+              <button disabled={busy} onClick={() => setStatusForm({ state: 'lost', comment: '' })} style={dangerBtn}>Mark lost</button>
+              <button disabled={busy} onClick={() => setStatusForm({ state: 'damaged', comment: '' })} style={dangerBtn}>Mark damaged</button>
+            </div>
+          ) : (
+            <div style={{ ...card, marginTop: 6, display: 'flex', flexDirection: 'column', gap: 8, borderColor: 'rgba(220,60,60,0.4)' }}>
+              <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--error)' }}>Mark {statusForm.state} — add a comment</div>
+              <textarea style={{ ...input, minHeight: 60 }} autoFocus placeholder="What happened? (e.g. dropped at Gate 2, screen cracked)"
+                value={statusForm.comment} onChange={(e) => setStatusForm({ ...statusForm, comment: e.target.value })} />
+              <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                <button onClick={() => setStatusForm(null)} style={ghostBtn}>Cancel</button>
+                <button disabled={busy} onClick={() => move({ state: statusForm.state, note: statusForm.comment }, statusForm.state === 'lost' ? 'Lost' : 'Damaged')} style={primaryBtn}>{busy ? 'Saving…' : `Confirm ${statusForm.state}`}</button>
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         <div style={fieldCol}>
-          <Field label="Issue">
-            <select style={input} value={issue.category} onChange={(e) => setIssue({ ...issue, category: e.target.value })}>
-              {ISSUE_CATEGORIES.map((c) => <option key={c} value={c}>{CAT_LABEL[c]}</option>)}
-            </select>
-          </Field>
+          <div>
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>Issue</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {ISSUE_CATEGORIES.map((c) => (
+                <Chip key={c} on={issue.category === c} onClick={() => setIssue({ ...issue, category: c })}>{CAT_LABEL[c]}</Chip>
+              ))}
+            </div>
+          </div>
           <Field label="What's wrong?"><textarea style={{ ...input, minHeight: 60 }} value={issue.note} onChange={(e) => setIssue({ ...issue, note: e.target.value })} /></Field>
           <Field label="Resolution (optional — fill in if fixed now)"><input style={input} value={issue.resolution} onChange={(e) => setIssue({ ...issue, resolution: e.target.value })} placeholder="Leave blank to keep it open" /></Field>
           <div style={modalActions}>
@@ -639,6 +655,7 @@ function MapTab({ suiteId, canManage, isMobile, reloadKey, onStation }) {
 function StaffTab({ suiteId, canManage, flash, reloadKey }) {
   const [staff, setStaff] = useState(null);
   const [stations, setStations] = useState([]);
+  const [stationFilter, setStationFilter] = useState('all'); // all | unassigned | stationId
   const [form, setForm] = useState(null); // null | { id?, name, number, role, stationIds:[] }
   const load = () => api.eventopsStaff(suiteId).then((r) => setStaff(r.staff || [])).catch(() => setStaff([]));
   useEffect(() => { setStaff(null); load(); api.eventopsStations(suiteId).then((r) => setStations(r.stations || [])).catch(() => {}); }, [suiteId, reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -657,14 +674,35 @@ function StaffTab({ suiteId, canManage, flash, reloadKey }) {
   }
   const toggleStation = (id) => setForm((f) => ({ ...f, stationIds: f.stationIds.includes(id) ? f.stationIds.filter((x) => x !== id) : [...f.stationIds, id] }));
 
+  const counts = useMemo(() => {
+    const c = { all: staff?.length || 0, unassigned: 0 }; const byStation = {};
+    for (const s of staff || []) {
+      if (!s.stationIds?.length) c.unassigned++;
+      for (const id of s.stationIds || []) byStation[id] = (byStation[id] || 0) + 1;
+    }
+    return { ...c, byStation };
+  }, [staff]);
+  const shownStaff = (staff || []).filter((s) =>
+    stationFilter === 'all' ? true : stationFilter === 'unassigned' ? !s.stationIds?.length : (s.stationIds || []).includes(stationFilter));
+
   if (staff === null) return <Loading />;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       {canManage && <StaffPortalCard suiteId={suiteId} flash={flash} />}
       {canManage && <button onClick={() => setForm({ name: '', number: '', role: '', stationIds: [] })} style={primaryBtn}>＋ Add staff</button>}
+      {/* Filter staff by the station they're posted to. */}
+      {stations.length > 0 && staff.length > 0 && (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <Chip on={stationFilter === 'all'} onClick={() => setStationFilter('all')}>All {counts.all}</Chip>
+          {stations.filter((s) => counts.byStation[s.id]).map((s) => (
+            <Chip key={s.id} on={stationFilter === s.id} onClick={() => setStationFilter(s.id)}>{KIND_ICON[s.kind] || '📍'} {s.name} {counts.byStation[s.id]}</Chip>
+          ))}
+          {counts.unassigned > 0 && <Chip on={stationFilter === 'unassigned'} onClick={() => setStationFilter('unassigned')}>Unassigned {counts.unassigned}</Chip>}
+        </div>
+      )}
       {staff.length === 0 ? <Empty>No staff yet. Add the people working this event so you can tag who moves devices and logs issues.</Empty> : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {staff.map((s) => (
+          {shownStaff.map((s) => (
             <div key={s.id} style={{ ...deviceRow(false), cursor: 'default' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
                 <span style={staffBadge}>{s.number || '—'}</span>

@@ -9,7 +9,7 @@ import EventOpsConsole from '../components/EventOpsConsole.jsx';
 export default function EventOpsPage() {
   const { activeEntityId, active } = useProfile();
   return (
-    <div style={{ maxWidth: 1600, margin: '0 auto', padding: '4px 16px 40px' }}>
+    <div style={{ width: '100%', padding: '4px 20px 40px', boxSizing: 'border-box' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '6px 0 14px' }}>
         <HomeButton />
         <div>
