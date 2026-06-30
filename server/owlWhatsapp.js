@@ -35,7 +35,7 @@ function parseFollowups(out) {
   try { const a = JSON.parse(m[0]); return Array.isArray(a) ? a.filter((x) => typeof x === 'string' && x.trim()).slice(0, 3) : []; } catch { return []; }
 }
 
-function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthropicKeyForEntity, currencyNote }) {
+function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthropicKeyForEntity, currencyNote, whatsappDigestFor }) {
   const sql = db.db;
   sql.exec(`
     CREATE TABLE IF NOT EXISTS owl_wa_msgs (
@@ -50,6 +50,9 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
     CREATE INDEX IF NOT EXISTS idx_owl_wa_events ON owl_wa_events(created_at);
     CREATE TABLE IF NOT EXISTS owl_wa_suggest (
       msisdn TEXT PRIMARY KEY, items TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS owl_wa_sent (
+      msisdn TEXT NOT NULL, day TEXT NOT NULL, at TEXT NOT NULL, PRIMARY KEY (msisdn, day)
     );
   `);
   const now = () => new Date().toISOString();
@@ -104,6 +107,16 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
   const norm = (n) => messaging.normaliseMsisdn(n);
 
   const allowlist = () => J(db.getSetting('owl_whatsapp_numbers', '') || '{}', {});
+
+  // ── Scheduled "in-window" updates ───────────────────────────────────────────
+  // WhatsApp lets us send FREE-FORM (no template) only inside the 24h window that
+  // opens when the customer last messaged us. So a scheduled digest/goals/alerts
+  // push only goes out to numbers whose last inbound is < 24h old. We already log
+  // every inbound, so the window is just the latest 'user' row's age.
+  const lastInStmt = sql.prepare("SELECT MAX(created_at) AS c FROM owl_wa_msgs WHERE msisdn=? AND role='user'");
+  const inWindow = (msisdn) => { const c = lastInStmt.get(msisdn)?.c; return !!c && (Date.now() - Date.parse(c)) < 24 * 60 * 60 * 1000; };
+  const sentGet = sql.prepare('SELECT 1 FROM owl_wa_sent WHERE msisdn=? AND day=?');
+  const sentMark = sql.prepare('INSERT OR IGNORE INTO owl_wa_sent (msisdn, day, at) VALUES (?,?,?)');
 
   // Phone number → { user, entityId }. Allowlist first (can pin an org), else a user
   // whose own mobile matches. Returns null if the number isn't linked.
@@ -257,6 +270,22 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
     return { from: String(from || ''), text: String(text || '').trim() };
   }
 
+  // Pull the recipient + delivery status + failure reason out of a Clickatell status
+  // (delivery notification) payload, defensively across its shapes.
+  function parseStatus(body) {
+    body = body || {};
+    const ev = body.event || body;
+    const m = (Array.isArray(body.statuses) ? body.statuses[0]
+      : Array.isArray(ev.moStatus) ? ev.moStatus[0]
+      : Array.isArray(ev.statuses) ? ev.statuses[0]
+      : Array.isArray(body.messages) ? body.messages[0] : ev) || {};
+    const to = m.to || m.toNumber || m.msisdn || m.destination || m.recipient || ev.to || '';
+    const status = m.status || m.messageStatus || m.statusDescription || m.deliveryStatus || ev.status || '';
+    const e = m.error || m.errorDescription || m.statusReason || m.reason || m.errorCode || '';
+    const err = typeof e === 'string' ? e : [e && e.code, e && (e.description || e.message)].filter(Boolean).join(' ');
+    return { to: String(to || ''), status: String(status || ''), err: String(err || '') };
+  }
+
   // Generic, shape-agnostic extractor. Recursively walks the payload collecting any
   // sender-named key holding a phone-like value, and any text-named key holding a
   // human message — deliberately ignoring destination/id/number-name keys.
@@ -303,6 +332,21 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
     } catch (e) { logEvent('', 'error', (e && e.message) || 'parse error'); console.error('[owlWhatsapp] inbound parse failed', e && e.message); }
   });
 
+  // Clickatell DELIVERY NOTIFICATIONS (status callback). Tells us whether a message we
+  // sent actually reached the handset — so 'replied' (Clickatell accepted) is no longer
+  // the end of the story. Logs delivered / undelivered (+ the reason Clickatell gives).
+  app.post('/api/whatsapp/status', (req, res) => {
+    res.json({ ok: true });
+    try {
+      const { to, status, err } = parseStatus(req.body || {});
+      const msisdn = norm(to);
+      const s = String(status || '').toUpperCase();
+      const stage = /FAIL|UNDELIV|REJECT|EXPIRE|ERROR|BLOCK/.test(s) ? 'undelivered' : (/DELIVER|READ|SENT_TO/.test(s) ? 'delivered' : 'status');
+      const detail = `${status || '?'}${err ? ` — ${err}` : ''}`.trim() || JSON.stringify(req.body).slice(0, 300);
+      logEvent(msisdn, stage, detail.slice(0, 300));
+    } catch (e) { console.error('[owlWhatsapp] status parse failed', e && e.message); }
+  });
+
   // Admin: manage the number→client allowlist + the WhatsApp 'from' number + secret.
   app.get('/api/admin/owl-whatsapp', auth.requireAdmin, (_req, res) => {
     const sec = (db.getSetting('whatsapp_webhook_secret', '') || '').trim();
@@ -313,19 +357,30 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
       // When a secret is set, the callback URL must carry it — so hand back the exact
       // URL (key embedded) to paste into Clickatell. Admin-only screen.
       webhookPath: sec ? `/api/whatsapp/inbound?key=${encodeURIComponent(sec)}` : '/api/whatsapp/inbound',
+      statusPath: '/api/whatsapp/status',
       mediaEnabled: db.getSetting('whatsapp_media_enabled', '') === '1',
-      numbers: Object.entries(allowlist()).map(([msisdn, v]) => ({ msisdn, email: v.email || '', entityId: v.entityId || '' })),
+      pushEnabled: db.getSetting('whatsapp_push_enabled', '') === '1',
+      testMessage: db.getSetting('whatsapp_test_message', '') || '',
+      numbers: Object.entries(allowlist()).map(([msisdn, v]) => ({ msisdn, email: v.email || '', entityId: v.entityId || '', subs: Array.isArray(v.subs) ? v.subs : [], hour: Number.isInteger(v.hour) ? v.hour : 8 })),
     });
   });
   app.put('/api/admin/owl-whatsapp', auth.requireAdmin, (req, res) => {
     const b = req.body || {};
+    const TOPICS = ['digest', 'goals', 'alerts'];
     if (b.from !== undefined) db.setSetting('whatsapp_from', String(b.from || '').trim());
     if (b.apiKey) db.setSetting('whatsapp_api_key', String(b.apiKey).trim()); // write-only; reuses SMS key if blank
     if (b.secret !== undefined) db.setSetting('whatsapp_webhook_secret', String(b.secret || '').trim());
     if (b.mediaEnabled !== undefined) db.setSetting('whatsapp_media_enabled', b.mediaEnabled ? '1' : '');
+    if (b.pushEnabled !== undefined) db.setSetting('whatsapp_push_enabled', b.pushEnabled ? '1' : '');
+    if (b.testMessage !== undefined) db.setSetting('whatsapp_test_message', String(b.testMessage || '').slice(0, 1000));
     if (Array.isArray(b.numbers)) {
       const map = {};
-      for (const n of b.numbers) { const m = norm(n.msisdn); if (m && n.email) map[m] = { email: String(n.email).trim(), entityId: String(n.entityId || '').trim() }; }
+      for (const n of b.numbers) {
+        const m = norm(n.msisdn); if (!m || !n.email) continue;
+        const subs = Array.isArray(n.subs) ? n.subs.filter((t) => TOPICS.includes(t)) : [];
+        const hour = Number.isInteger(n.hour) ? Math.min(23, Math.max(0, n.hour)) : 8;
+        map[m] = { email: String(n.email).trim(), entityId: String(n.entityId || '').trim(), subs, hour };
+      }
       db.setSetting('owl_whatsapp_numbers', JSON.stringify(map));
     }
     res.json({ ok: true });
@@ -345,6 +400,78 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
     const r = await messaging.sendWhatsapp({ to, text: String((req.body || {}).text || '').trim() || 'Hello from the Howler Owl 🦉 — your WhatsApp connection is working.' });
     res.json(r);
   });
+
+  // What each subscribable topic asks the Owl to include in the scheduled update.
+  const TOPIC_ASK = {
+    digest: 'a quick sales pulse — tickets sold and revenue so far today, and how that compares to yesterday',
+    goals: 'the headline goal — lead with the North Star: its target, current value, and whether it is on pace or behind',
+    alerts: 'any alerts that have triggered in the last 24 hours (if none, say all clear in a few words)',
+  };
+  const SCHED_NOTE = 'This is an automated SCHEDULED WhatsApp update the customer subscribed to (they are inside their 24h window). Open with a short friendly greeting line, then the update. Keep the whole thing tight — a few short lines. Do NOT append a <<<FOLLOWUPS>>> marker for this scheduled message.';
+  const SCHED_NOTE_ADD = 'This is a short ADDENDUM beneath a scheduled update already shown above — do NOT greet again; just give these item(s) in a line or two. No <<<FOLLOWUPS>>> marker.';
+
+  // Compose the scheduled update by running the SAME Owl loop (scoped to this user),
+  // so the figures are live + grounded and honour the field guide + currency.
+  async function buildScheduled(id, topics, greeting = true) {
+    const apiKey = anthropicKeyForEntity ? anthropicKeyForEntity(id.entityId || undefined) : undefined;
+    if (!insights.isConfigured(apiKey)) return '';
+    const wants = topics.map((t) => TOPIC_ASK[t]).filter(Boolean);
+    if (!wants.length) return '';
+    const ask = `Please give me my scheduled update covering: ${wants.join('; ')}.`;
+    const instructions = `${instructionsFor(id.entityId)}\n\n${greeting ? SCHED_NOTE : SCHED_NOTE_ADD}`;
+    try {
+      const { text } = await runOwlLoop({
+        llmTurn: ({ messages: m, tools, onText }) => owlTurn(insights, { messages: m, tools, instructions, apiKey, onText }),
+        toolMap, tools: toolSchemas, messages: [{ role: 'user', content: ask }],
+        ctx: { user: id.user, entityId: id.entityId },
+      });
+      return String(text || '').split(FU_MARK)[0].replace(/\s+$/, '').trim();
+    } catch { return ''; }
+  }
+
+  // The full message: use the customer's REAL configured digest for the 'digest' topic
+  // when they have one (same source as their email digest), plus a lightweight Owl
+  // summary for the rest — and for 'digest' itself when no digest is set up ("keep both").
+  async function buildScheduledMessage(id, topics) {
+    const parts = [];
+    let owlTopics = topics;
+    if (topics.includes('digest') && whatsappDigestFor) {
+      let real = null;
+      try { real = await whatsappDigestFor(id.entityId, id.user && id.user.email); } catch { real = null; }
+      if (real) { parts.push(real); owlTopics = topics.filter((t) => t !== 'digest'); }
+    }
+    if (owlTopics.length) { const s = await buildScheduled(id, owlTopics, parts.length === 0); if (s) parts.push(s); }
+    return parts.join('\n\n');
+  }
+
+  // Hourly tick: at/after each subscriber's send hour (SAST), once a day, if they're
+  // inside their 24h window, send the update they chose. Master switch is off by default.
+  let scheduling = false;
+  async function schedTick() {
+    if (db.getSetting('whatsapp_push_enabled', '') !== '1' || scheduling) return;
+    scheduling = true;
+    try {
+      const sa = new Date(Date.now() + 2 * 60 * 60 * 1000); // SAST (UTC+2) — Howler's local day/hour
+      const hour = sa.getUTCHours(); const day = sa.toISOString().slice(0, 10);
+      for (const [msisdn, entry] of Object.entries(allowlist())) {
+        const topics = Array.isArray(entry.subs) ? entry.subs.filter((t) => TOPIC_ASK[t]) : [];
+        if (!topics.length) continue;
+        if (hour < (Number.isInteger(entry.hour) ? entry.hour : 8)) continue; // not yet their hour today
+        if (sentGet.get(msisdn, day)) continue; // already handled today
+        sentMark.run(msisdn, day, now()); // evaluate once per day, in or out of window
+        if (!inWindow(msisdn)) { logEvent(msisdn, 'push-skip', 'outside 24h window (needs a template) — no send'); continue; }
+        const id = identify(msisdn); if (!id) continue;
+        const msg = await buildScheduledMessage(id, topics);
+        if (!msg) { logEvent(msisdn, 'push-failed', 'no content generated'); continue; }
+        insMsg.run(crypto.randomUUID(), msisdn, 'owl', msg, now());
+        const r = await messaging.sendWhatsapp({ to: msisdn, text: msg });
+        logEvent(msisdn, r && r.ok ? 'push-sent' : 'push-failed', r && r.ok ? topics.join(', ') : (r && r.error) || 'send error');
+      }
+    } catch (e) { console.error('[owlWhatsapp] sched tick failed', e && e.message); } finally { scheduling = false; }
+  }
+  const schedTimer = setInterval(() => schedTick().catch(() => {}), 30 * 60 * 1000); // every 30 min
+  if (schedTimer.unref) schedTimer.unref();
+  setTimeout(() => schedTick().catch(() => {}), 20000); // shortly after boot
 
   console.log('[owlWhatsapp] WhatsApp door mounted (POST /api/whatsapp/inbound)');
 }

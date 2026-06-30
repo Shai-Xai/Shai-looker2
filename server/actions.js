@@ -431,6 +431,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
         delayHours: Math.max(0, Number(s.delayHours) || 0),
         subject: String(s.subject || '').slice(0, 200),
         body: String(s.body || '').slice(0, 8000),
+        smsBody: String(s.smsBody || '').slice(0, 2000), // separate SMS copy per step when channel = 'both'
         ctaText: String(s.ctaText || '').slice(0, 60),
         // Per-step content parity with once-off: template vs custom HTML + hero image.
         contentMode: s.contentMode === 'html' ? 'html' : 'template',
@@ -478,6 +479,16 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
       // it (e.g. 'Abandoned carts'), and helps the automation later.
       templateKey: String(body.templateKey || '').slice(0, 60),
       category: String(body.category || '').slice(0, 80),
+      // Conversion tracking: how we decide someone "converted" (drops out of a
+      // drip / counts as converted on a once-off).
+      //   'dropout' = they left the audience/abandoned list (original behaviour).
+      //   'list'    = they appear in a SEPARATE source (an attendance / completed-
+      //               orders list), matched by email — confirm conversions against
+      //               real sales instead of inferring them from list removal.
+      conversion: {
+        mode: (body.conversion || {}).mode === 'list' ? 'list' : 'dropout',
+        source: shapeAudience((body.conversion || {}).source || {}),
+      },
       clickToken: body.clickToken || crypto.randomBytes(6).toString('base64url'),
     };
   }
@@ -811,9 +822,10 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
   // opt-out (alphanumeric sender IDs can't receive STOP replies).
   function renderSmsFor(action, recipient, step, stepIndex = 0) {
     const cfg = action.config;
-    // 'both'-channel campaigns have a separate SMS copy; fall back to body for
-    // SMS-only campaigns (which edit body directly).
-    const useBody = step ? (step.body || cfg.smsBody || cfg.body) : (cfg.smsBody || cfg.body);
+    // 'both'-channel campaigns have a separate SMS copy. In a sequence each step
+    // carries its own smsBody (falling back to the step's email body, then the
+    // campaign-level copy); SMS-only campaigns edit body directly.
+    const useBody = step ? (step.smsBody || step.body || cfg.smsBody || cfg.body) : (cfg.smsBody || cfg.body);
     const firstName = (recipient.name || '').split(/\s+/)[0] || '';
     const rtok = unsubToken(action.entityId, recipient.email || recipient.phone || '');
     const promo = promoForRecipient(action, recipient.email || '');
@@ -1646,6 +1658,22 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
 
   // ── Drip sequences: enrollment + the per-recipient send tick ─────────────────
   const sysUser = { id: 'auto-check', email: 'auto@pulse', role: 'admin', entityIds: [] };
+  // When conversion tracking is set to 'list', resolve the SEPARATE conversion
+  // source (an attendance / completed-orders list) and return the lowercased set
+  // of emails in it — anyone in this set has converted. Returns null when the
+  // campaign uses the default 'dropout' model (left-the-audience = converted), so
+  // callers keep their existing behaviour. Consent is ignored (we only need the
+  // emails that appear) and failures fall back to null so a broken source can't
+  // wrongly flag everyone as converted.
+  async function convertedEmails(action) {
+    const conv = action.config && action.config.conversion;
+    if (!conv || conv.mode !== 'list' || !conv.source) return null;
+    try {
+      const subCfg = { ...action.config, audience: conv.source, ignoreConsent: true, channel: 'email' };
+      const { list } = await audienceFor(action.entityId, subCfg, sysUser);
+      return new Set(list.map((r) => String(r.email || '').toLowerCase()).filter(Boolean));
+    } catch (e) { console.error('[actions] conversion source failed', action.id, e.message); return null; }
+  }
   const parseAnchor = (raw) => { const t = raw ? Date.parse(String(raw)) : NaN; return Number.isFinite(t) ? new Date(t) : null; };
   const stepDue = (anchorMs, delayHours) => new Date(anchorMs + (delayHours || 0) * 3600e3).toISOString();
 
@@ -1709,6 +1737,9 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
       let reachable = new Map(); // email -> { emailOk, smsOk } (re-evaluated live, so consent changes apply mid-journey)
       try { const { list } = await audienceFor(a.entityId, a.config, sysUser); for (const r of list) reachable.set(r.email, r); }
       catch (e) { console.error('[actions] sequence audience re-check failed', a.id, e.message); continue; }
+      // 'list' conversion mode: confirm conversions against a separate attendance/
+      // orders source (null = the default 'left the audience' model).
+      const convSet = await convertedEmails(a);
       const sup = suppressed(a.entityId);
       const due = sql.prepare("SELECT * FROM action_enrollments WHERE action_id=? AND status='active' AND next_at <= ?").all(a.id, now());
       let sent = 0; let converted = 0; let emailSent = 0; let smsSent = 0;
@@ -1718,10 +1749,17 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
         // (re-checked every 20) rather than draining the whole due list.
         if (n2 > 0 && n2 % 20 === 0 && getAction(a.id)?.status !== 'auto') break;
         n2 += 1;
-        // Conversion / suppression: gone from the abandoned list = bought (or
-        // expired); unsubscribed = removed. Either way, stop the journey.
-        if (!reachable.has(e.email)) { sql.prepare("UPDATE action_enrollments SET status='converted', updated_at=? WHERE action_id=? AND email=?").run(now(), a.id, e.email); converted += 1; continue; }
         if (sup.has(e.email)) { sql.prepare("UPDATE action_enrollments SET status='unsubscribed', updated_at=? WHERE action_id=? AND email=?").run(now(), a.id, e.email); continue; }
+        // Conversion / drop-out. 'list' mode: converted = present in the separate
+        // conversion source. Default mode: converted = gone from the abandoned
+        // audience (bought or expired). In 'list' mode someone who's left the
+        // audience but ISN'T in the conversion list just ends their journey
+        // ('done') — we can't confirm a conversion, but we also stop emailing a
+        // non-abandoner.
+        if (convSet) {
+          if (convSet.has(String(e.email || '').toLowerCase())) { sql.prepare("UPDATE action_enrollments SET status='converted', updated_at=? WHERE action_id=? AND email=?").run(now(), a.id, e.email); converted += 1; continue; }
+          if (!reachable.has(e.email)) { sql.prepare("UPDATE action_enrollments SET status='done', updated_at=? WHERE action_id=? AND email=?").run(now(), a.id, e.email); continue; }
+        } else if (!reachable.has(e.email)) { sql.prepare("UPDATE action_enrollments SET status='converted', updated_at=? WHERE action_id=? AND email=?").run(now(), a.id, e.email); converted += 1; continue; }
         const step = steps[e.step_index];
         if (!step) { sql.prepare("UPDATE action_enrollments SET status='done', updated_at=? WHERE action_id=? AND email=?").run(now(), a.id, e.email); continue; }
         try {
@@ -1766,12 +1804,23 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     const due = sql.prepare("SELECT id FROM actions WHERE status='done' AND approved_at > ? AND (last_check='' OR last_check < ?)").all(cutoff, recheck);
     for (const { id } of due) {
       const a = getAction(id);
-      if (!a || a.config.campaignMode === 'sequence' || a.config.audience?.mode !== 'tile') continue;
+      if (!a || a.config.campaignMode === 'sequence') continue;
+      const listMode = a.config.conversion?.mode === 'list' && a.config.conversion?.source;
+      // Dropout mode needs a re-runnable tile audience; list mode matches the
+      // snapshot against a separate source, so any audience type works.
+      if (!listMode && a.config.audience?.mode !== 'tile') continue;
       sql.prepare('UPDATE actions SET last_check=? WHERE id=?').run(now(), a.id);
       try {
-        const { list } = await audienceFor(a.entityId, a.config, sysUser);
-        const stillAbandoning = new Set(list.map((r) => r.email));
-        const converted = (a.audience || []).filter((r) => !stillAbandoning.has(r.email)).length;
+        let converted;
+        if (listMode) {
+          const conv = await convertedEmails(a);
+          if (!conv) continue; // source failed — leave the count as-is
+          converted = (a.audience || []).filter((r) => conv.has(String(r.email || '').toLowerCase())).length;
+        } else {
+          const { list } = await audienceFor(a.entityId, a.config, sysUser);
+          const stillAbandoning = new Set(list.map((r) => r.email));
+          converted = (a.audience || []).filter((r) => !stillAbandoning.has(r.email)).length;
+        }
         if (converted !== (a.results.converted || 0)) saveResults(a.id, { ...a.results, converted });
       } catch (e) { console.error('[actions] conversion check failed', a.id, e.message); }
     }
