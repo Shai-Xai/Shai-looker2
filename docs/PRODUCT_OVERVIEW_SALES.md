@@ -558,6 +558,11 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-30** — **Owl "/" menu now includes actions** 🧪: the slash-command palette in the
+  web Owl chat lists the **actions** alongside the read tools — **/alert** (set up an alert),
+  **/segment** (build an audience) and **/campaign** (draft a campaign) — so creating things is
+  one tap from the composer, not just asking questions. Sourced from the tool registry, so it
+  can't drift from what the Owl can actually do.
 - **2026-06-30** — **WhatsApp Owl: team broadcast lists** 🧪: subscribe a **list of team
   numbers** to one client’s daily update (no Pulse account needed for recipients). WhatsApp
   groups aren’t available via the API, so the Owl fans the same update out 1-to-1 to the whole

@@ -278,13 +278,14 @@ test('createAlert schema tracks the alerts module\'s option lists', () => {
   assert.deepEqual(props.priority.enum, alertsMod.PRIORITIES);
 });
 
-test('the "/" slash palette is sourced from the read tools (act tools excluded)', () => {
+test('the "/" slash palette is sourced from the tool registry (reads + act tools)', () => {
   const t = tools();
   const cmds = Object.values(t).filter((v) => v && v.menu).map((v) => v.menu.cmd);
   for (const c of ['data', 'goals', 'alerts', 'campaigns', 'dashboard', 'uploads']) assert.ok(cmds.includes(c), `missing /${c}`);
-  assert.equal(t.createAlert.menu, undefined);   // act tools have no slash command
-  assert.equal(t.createSegment.menu, undefined);
-  assert.equal(t.draftCampaign.menu, undefined);
+  // The act-tools we can now trigger from the palette too (createAlert/Segment/draftCampaign).
+  for (const c of ['alert', 'segment', 'campaign']) assert.ok(cmds.includes(c), `missing action /${c}`);
+  // queryDashboard stays out of the palette (it's an internal follow-on to getDashboard).
+  assert.equal(t.queryDashboard.menu, undefined);
 });
 
 // ── draftCampaign (the flagship act-tool): DRAFTS a campaign to a cohort ─────────

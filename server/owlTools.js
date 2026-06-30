@@ -842,8 +842,8 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     getAlerts: { schema: getAlertsSchema, run: runGetAlerts, menu: { cmd: 'alerts', label: 'Alerts', icon: '🔔', example: 'What alerts are set, and has anything triggered?' } },
     getCampaigns: { schema: getCampaignsSchema, run: runGetCampaigns, menu: { cmd: 'campaigns', label: 'Campaigns', icon: '📣', example: 'How did my recent campaigns perform?' } },
     askUpload: { schema: askUploadSchema, run: runAskUpload, menu: { cmd: 'uploads', label: 'Attached files', icon: '📎', example: "What's in my attached data?" } },
-    createAlert: { schema: createAlertSchema, run: runCreateAlert },
-    createSegment: { schema: createSegmentSchema, run: runCreateSegment },
-    draftCampaign: { schema: draftCampaignSchema, run: runDraftCampaign },
+    createAlert: { schema: createAlertSchema, run: runCreateAlert, menu: { cmd: 'alert', label: 'Set up an alert', icon: '⏰', example: 'Alert me when ticket sales reach a milestone' } },
+    createSegment: { schema: createSegmentSchema, run: runCreateSegment, menu: { cmd: 'segment', label: 'Build an audience', icon: '👥', example: 'Build a segment of my top customers' } },
+    draftCampaign: { schema: draftCampaignSchema, run: runDraftCampaign, menu: { cmd: 'campaign', label: 'Draft a campaign', icon: '✍️', example: 'Draft a campaign to a customer segment' } },
   };
 };
