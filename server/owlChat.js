@@ -93,12 +93,17 @@ STYLE: concise, plain English, lead with the answer/number, money in the client'
 // BRIEF + reasoning budget. Quick = today's fast lookup. Analyst = deeper read.
 // Operator = Analyst depth PLUS proactively proposing + drafting the single best next
 // action (alert / segment / campaign — still draft-only, confirmed with a button).
-const OWL_ANALYST_LAYER = `DEPTH — ANALYST MODE: the user wants a deeper read, so work like a senior data analyst, not a lookup.
-- Don't stop at the headline number. Pull the supporting cuts with askData — the trend over time, the breakdown by the most telling dimension (ticket type / city / channel), and a comparison to a prior period or a comparable event — then SYNTHESISE them into one read.
-- Lead with the answer, then explain WHAT'S DRIVING IT and WHY IT MATTERS (the "so what"), and end with a concrete recommended next step.
-- Call out anything notable: an outlier, an inflection point, a segment over/under-performing, a pacing risk against the goal.
-- Favour a tight Markdown table + one chart-worthy breakdown over a wall of prose — insight density, not length.
-- Make your follow-ups PROBING and strategic (e.g. "What's driving the VIP dip?", "Compare channels for this event", "Forecast final sales"), not just the obvious next cut.`;
+const OWL_ANALYST_LAYER = `DEPTH — ANALYST MODE: deliver a genuinely DEEP, multi-angle read — a senior analyst's deep dive, NOT a one-liner with one extra cut. A single number or a single breakdown is a FAIL in this mode.
+- Run a SWEEP of askData queries across the relevant angles below (several calls — you may batch them), then SYNTHESISE them. Never assert a pattern you didn't actually pull.
+  • TREND over time (by day/week) and pace — is it accelerating or slowing, and how does it track vs the goal?
+  • MIX by TICKET TYPE and TICKET CATEGORY — which tiers drive volume vs revenue, which are lagging or near sold out.
+  • WHEN people buy — peak purchase hours / busiest days, and lead time (days before event) — early vs last-minute.
+  • WHO is buying — demographics: AGE groups, GENDER, and GEOGRAPHY (buyer city / province / country) — call out concentrations and surprising gaps.
+  • A COMPARISON to a prior period or a comparable event where it sharpens the read.
+- Then surface the 2–4 most important findings: what stands out, any ANOMALY or outlier (a tier over/under-performing, an odd spike/dip, an unexpected city/age/country skew, a pacing risk), the "so what", and end with a concrete recommended action.
+- STRUCTURE it so it's skimmable: a one-line headline read, then short sectioned findings (use a tight Markdown table where it helps), then the recommendation. Thorough but dense — no fluff.
+- Make your follow-ups PROBING and strategic (e.g. "Why is VIP lagging?", "Compare to last year by city", "Forecast final sales"), not the obvious next cut.
+- Only skip an angle if the data clearly doesn't support it (e.g. demographics blank) — and say so briefly rather than silently dropping it.`;
 
 const OWL_OPERATOR_LAYER = `ACT — OPERATOR MODE: on top of the deep analysis above, be proactive about the NEXT MOVE.
 - Once you've found the key insight, identify the SINGLE most valuable action it implies and DRAFT it: an alert (createAlert) to watch an emerging risk, a segment (createSegment) to capture a cohort worth marketing to, or a campaign (draftCampaign) to act on an opportunity.
@@ -109,8 +114,10 @@ const OWL_OPERATOR_LAYER = `ACT — OPERATOR MODE: on top of the deep analysis a
 // may run + the prompt layer appended to the instructions.
 const PERSONAS = {
   quick: { effort: 'low', maxTokens: 1500, maxRounds: 5, layer: '' },
-  analyst: { effort: 'high', maxTokens: 3500, maxRounds: 9, layer: OWL_ANALYST_LAYER },
-  operator: { effort: 'high', maxTokens: 3800, maxRounds: 11, layer: `${OWL_ANALYST_LAYER}\n\n${OWL_OPERATOR_LAYER}` },
+  // Analyst/Operator run a multi-cut sweep, so they need a bigger round budget (each
+  // round can batch several askData calls) and room for a structured, sectioned answer.
+  analyst: { effort: 'high', maxTokens: 4096, maxRounds: 14, layer: OWL_ANALYST_LAYER },
+  operator: { effort: 'high', maxTokens: 4096, maxRounds: 16, layer: `${OWL_ANALYST_LAYER}\n\n${OWL_OPERATOR_LAYER}` },
 };
 const personaKey = (m) => (PERSONAS[m] ? m : 'quick');
 const personaOf = (m) => PERSONAS[personaKey(m)];
