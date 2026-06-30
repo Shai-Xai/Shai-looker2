@@ -496,6 +496,12 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-30** — **Filters: a hand-added filter now actually filters the report** ✅: a
+  dashboard filter added in the editor (not imported from Looker, so never wired into a
+  tile's `listenTo`) now applies to every tile whose own query uses that filter's field —
+  the same field-match the lock picker uses. Set the filter's **field** (e.g.
+  *core_ticket_categories.name*) and lock/pick a value, and the matching tiles scope to it.
+  Looker-imported filters keep their explicit wiring, so nothing over-filters.
 - **2026-06-30** — **Filters: find a ticket category/type by id** ✅: in the lock / value
   pickers you can type a category's **id** (e.g. *16244*) to find it; the suggestion shown
   and the value stored are still the **name** (Looker matches ticket categories on the exact
