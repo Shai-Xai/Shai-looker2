@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-06-29 · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-06-30 · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -496,6 +496,10 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-30** — **Filters: find a ticket category/type by id** ✅: in the lock / value
+  pickers you can type a category's **id** (e.g. *16244*) to find it; the suggestion shown
+  and the value stored are still the **name** (Looker matches ticket categories on the exact
+  name, so the filter never holds a raw id).
 - **2026-06-30** — **WhatsApp Owl: scheduled in-window updates** 🧪: a customer can be
   subscribed (per number, in **Admin → WhatsApp Owl**) to a daily **digest / goals /
   alerts** update on WhatsApp. Sent free-form only while they’re inside their 24-hour
