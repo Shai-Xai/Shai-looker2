@@ -42,7 +42,7 @@ function statusForTools(toolUses) {
 // resolved numbers), the chat Owl FETCHES its own answers via the askData tool and
 // must never state a figure it didn't get from a tool result. Registered for the
 // AI audit via insights.promptRegistry() (lazy require there → no load cycle).
-const OWL_CHAT_SYSTEM = `You are the Owl — Howler Pulse's data analyst — answering an event organiser's questions about THEIR OWN ticketing data, in a chat. Amounts are South African Rand (ZAR).
+const OWL_CHAT_SYSTEM = `You are the Owl — Howler Pulse's data analyst — answering an event organiser's questions about THEIR OWN ticketing data, in a chat. Write money in THIS client's reporting currency: if a "Currency:" note appears in your instructions, follow it exactly (symbol + code) and never relabel amounts as Rand; only if there is no such note, default to South African Rand (R).
 
 HOW YOU KNOW THINGS (non-negotiable):
 - You do NOT know any numbers on your own. The ONLY way to learn a raw data figure is to call the askData tool, which runs a query over this client's data and returns rows.
@@ -61,11 +61,15 @@ WHICH TOOL TO USE (route every question to the right one — do not answer goal 
 - askUpload → questions about a file or Google Sheet the user ATTACHED (listed under "Attached data sources" when present) — query/aggregate that table. To answer a question that spans the attachment AND the ticketing data (e.g. "uploaded target vs actual sold by event"), call BOTH askUpload and askData, then combine the figures in one answer/table. If no sources are attached, say so and point them to the 📎 attach button.
 - createAlert → when the user wants to be NOTIFIED / ALERTED / TOLD / REMINDED when a number reaches a level ("let me know when tickets hit 1000", "alert me if VIP sells out", "tell me when revenue passes R1m"). It DRAFTS the alert and the user confirms with a button — see ACTING below.
 - createSegment → when the user wants to BUILD or SAVE an AUDIENCE / cohort of people for later marketing ("make a segment of VIP buyers in Cape Town", "save these people as an audience", "build a guest list segment", "audience of 18-25 year olds"). The cohort is defined by curated dimensions (age, gender, buyer city/country, ticket type, ticket category, complimentary = guest list). It DRAFTS the segment + previews the size and reach; the user confirms with a button — see ACTING below. NEVER list or name individual people; only the count + reach. Contact fields (email/phone) cannot define a segment.
+- draftCampaign → when the user wants to MESSAGE or MARKET to a cohort ("draft a win-back email to lapsed VIP buyers", "send an offer to Cape Town 18-25s", "email my guest-list segment"). Give it the goal plus an audience that is EITHER a saved segment (pass segmentName when the user names one, or one was just created) OR a new cohort (pass filters). It drafts the email/SMS copy and previews the reach. It creates a DRAFT only — a human reviews, approves and SENDS it in Engage. You never send. See ACTING below.
 
 ACTING (tools that DO something, not just read):
 - Some tools DRAFT an action for the user to confirm instead of just reading data (createAlert, createSegment). You NEVER create/change anything silently: the tool returns a proposed action and the user taps a button to confirm it.
 - After calling createSegment, do NOT say it's saved. Say you've DRAFTED it, state the cohort and the previewed size + reach (e.g. "a segment of VIP buyers in Cape Town — about 1,240 people, 1,180 emailable"), and tell them to tap "Create segment" to save it. Never list individuals. If it returns ok:false, relay why (e.g. pick a client, or contact fields can't define a segment).
-- After calling createAlert, do NOT say the alert is on or active. Say you've DRAFTED it, state plainly what it will watch and the exact condition (e.g. "I've drafted an alert for when Tickets Sold reaches 1,000 on this event"), and tell them to tap "Create alert" below to switch it on. If it returns ok:false (e.g. no event selected), relay why and what to do.
+- Work like a campaign manager: BEFORE calling draftCampaign, if the brief is thin, ask 1-3 SHORT setup questions to nail the essentials that are missing — the angle/offer (the hook), the channel (email / SMS / both), any promo or incentive, the destination link for the button, and which event it's for. Ask only what's missing and material; don't interrogate. Then call draftCampaign with a rich goal (fold in the offer/angle and any promo) and pass ctaUrl if they gave a link.
+- The audience can be an existing saved segment (pass segmentName) or a new cohort (pass filters). When you draft from a NEW cohort, that cohort is automatically SAVED as a reusable segment and the campaign is pointed at it — so tell the user the segment was saved too.
+- After calling draftCampaign, do NOT say it's sent or scheduled. Say you've DRAFTED the campaign, give the audience (size + reach) and the subject line, and tell them to tap "Create draft campaign" then review, approve and send it in Engage — you never send anything to customers. If it returns ok:false, relay why.
+- After calling createAlert, do NOT say the alert is on or active. Say you've DRAFTED it, state plainly what it will watch and the exact condition (e.g. "I've drafted an alert for when Tickets Sold reaches 1,000"), and tell them to tap "Create alert" below to switch it on. If no event is selected, the card has an event picker on it — tell them to pick the event there; NEVER tell them to go elsewhere to select an event first. If it returns ok:false, relay why and what to do.
 - An alert needs a measure, an operator (at/above, at/below, above, below) and a threshold. If the user's wish is missing one (e.g. they didn't give a number), ask one short clarifying question before drafting.
 - Delivery defaults to an in-app/push notification at normal priority (inbox is always on). Only set the channels or priority if the user actually says how they want to be told (e.g. "email me", "text me", "make it important") — otherwise leave the defaults and don't ask. Mention how they'll be notified when you confirm the draft.
 
@@ -81,7 +85,7 @@ INSIGHT: When you present data, add a short one-line takeaway — what stands ou
 
 FOLLOW-UPS: At the very END of your reply, on its own final line, output the marker <<<FOLLOWUPS>>> immediately followed by a JSON array of 2-3 SHORT (≤6 words) follow-up questions the user is likely to ask next, specific to what you just answered (e.g. ["Compare to last year","Break down by city","Add-ons only"]). The app turns these into tappable chips and hides this line — never mention it, and always put it last.
 
-STYLE: concise, plain English, lead with the answer/number, ZAR for money. If a question is genuinely ambiguous (e.g. which event, for a multi-event client), ask one short clarifying question instead of guessing.`;
+STYLE: concise, plain English, lead with the answer/number, money in the client's reporting currency (see the Currency note; default ZAR only if none). If a question is genuinely ambiguous (e.g. which event, for a multi-event client), ask one short clarifying question instead of guessing.`;
 
 // One streamed assistant turn via Claude (uses insights' shared client + model +
 // instruction layering). Returns the final Message; its content blocks may include
@@ -162,7 +166,7 @@ function owlAllowed(user) {
   return !!email && OWL_ALLOW.split(',').map((s) => s.trim()).filter(Boolean).includes(email);
 }
 
-function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, messaging, getAlertsApi, getSegmentsApi, anthropicKeyForSuite, anthropicKeyForEntity, currencyNote, whatsappDigestFor }) {
+function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, messaging, getAlertsApi, getSegmentsApi, getActionsApi, anthropicKeyForSuite, anthropicKeyForEntity, currencyNote, whatsappDigestFor }) {
   const sql = db.db;
   sql.exec(`
     CREATE TABLE IF NOT EXISTS owl_threads (
@@ -470,6 +474,47 @@ function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, m
     const r = segmentsApi.createSegment({ entityId, name, definition: draft, user: req.user });
     if (!r.ok) return res.status(r.error === 'Not allowed' ? 403 : 400).json({ error: r.error || 'Could not create the segment.' });
     res.status(201).json({ ok: true, segment: { id: r.segment.id, name: r.segment.name } });
+  });
+
+  // POST /api/owl/act/draft-campaign — the user tapping "Create draft campaign" on the
+  // card the draftCampaign tool produced. Creates a DRAFT campaign only (status 'draft',
+  // never sends); a human reviews, approves and sends it in Engage. Re-checks entity
+  // ownership + campaigns.approve inside createDraftCampaign.
+  app.post('/api/owl/act/draft-campaign', auth.requireAuth, (req, res) => {
+    if (!owlAllowed(req.user)) return res.status(403).json({ error: 'The native Owl isn\'t enabled for your account yet.' });
+    const { entityId, name, channel, goal, subject, body, ctaText, ctaUrl, suiteId, audienceName, customHtml } = req.body || {};
+    let { audience } = req.body || {};
+    if (!entityId || !audience || typeof audience !== 'object') return res.status(400).json({ error: 'entityId and audience are required.' });
+    const actionsApi = typeof getActionsApi === 'function' ? getActionsApi() : null;
+    if (!actionsApi || !actionsApi.createDraftCampaign) return res.status(503).json({ error: 'Campaigns aren\'t available right now.' });
+    // A custom (chat) cohort: SAVE it as a reusable segment, then point the campaign at
+    // that segment — so the audience is reusable and visibly the same one in Engage. The
+    // curated-explore guard applies before we persist it (same as create-segment).
+    if (audience.mode === 'query') {
+      const cat = owlTools && owlTools.catalogue;
+      if (cat && (audience.model !== cat.model || audience.view !== cat.explore)) {
+        return res.status(400).json({ error: "I can only build an audience from your ticket data, not this dashboard's own data." });
+      }
+      const segmentsApi = typeof getSegmentsApi === 'function' ? getSegmentsApi() : null;
+      if (segmentsApi && segmentsApi.createSegment) {
+        const segName = String(audienceName || name || 'Campaign audience').slice(0, 120);
+        const sr = segmentsApi.createSegment({ entityId, name: segName, definition: audience, user: req.user });
+        if (sr.ok) audience = { mode: 'segment', segmentId: sr.segment.id }; // reference the saved segment
+        // (if the segment couldn't be saved, fall back to the inline query audience — the campaign still resolves)
+      }
+    }
+    const html = String(customHtml || '').slice(0, 500000);
+    const config = {
+      channel: ['email', 'sms', 'both'].includes(channel) ? channel : 'email',
+      audience, subject: String(subject || ''), body: String(body || ''), ctaText: String(ctaText || ''),
+      ctaUrl: String(ctaUrl || ''),
+      goal: String(goal || ''), eventSuiteId: String(suiteId || ''), campaignMode: 'once',
+      // Custom HTML body when the user uploaded one; otherwise the rendered template.
+      contentMode: html ? 'html' : 'template', customHtml: html,
+    };
+    const r = actionsApi.createDraftCampaign({ entityId, title: name, config, user: req.user });
+    if (!r.ok) return res.status(r.error === 'Not allowed' ? 403 : 400).json({ error: r.error || 'Could not create the campaign.' });
+    res.status(201).json({ ok: true, campaign: { id: r.action.id, title: r.action.title } });
   });
 
   // Pin-to-dashboard lives in its own disposable module; mount it here so index.js

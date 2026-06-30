@@ -125,7 +125,7 @@ let osApi, waDigestFor; // waDigestFor set when digests mount (used lazily by th
 const os = require('./os').mount(app, { db, auth, mailer, push, slack, onInbound: (p) => owlIngest.handle({ ...p, getAttachmentBuffer: osApi.getAttachmentBuffer }) });
 osApi = os;
 const owlUploads = require('./owlUploads').mount(app, { db, auth }); // external data (CSV/Sheet) the Owl can query alongside ticketing
-require('./owlChat').mount(app, { db, auth, insights, uploads: owlUploads, messaging, getAlertsApi: () => alerts, getSegmentsApi: () => segmentsApi, getExploreFields: (m, v) => getExploreFieldsCached(m, v), owlTools: require('./owlTools')({ query, auth, db, getGoalsApi: () => goalsApi, getAlertsApi: () => alerts, getCampaignsApi: () => actionsApi, getUploadsApi: () => owlUploads, resolveTileValue, getExploreFields: (m, v) => getExploreFieldsCached(m, v), getFieldOverrides: () => require('./owlFields').build(db).read() }), anthropicKeyForSuite, anthropicKeyForEntity, currencyNote: (entityId, suiteId) => currency.aiNote(mailer.resolveBranding(entityId, suiteId).currency), whatsappDigestFor: (eid, em) => (waDigestFor ? waDigestFor(eid, em) : Promise.resolve(null)) }); // agentic Owl (disposable; askData rides the scope gate)
+require('./owlChat').mount(app, { db, auth, insights, uploads: owlUploads, messaging, getAlertsApi: () => alerts, getSegmentsApi: () => segmentsApi, getActionsApi: () => actionsApi, getExploreFields: (m, v) => getExploreFieldsCached(m, v), owlTools: require('./owlTools')({ query, auth, db, getGoalsApi: () => goalsApi, getAlertsApi: () => alerts, getCampaignsApi: () => actionsApi, getUploadsApi: () => owlUploads, resolveTileValue, getExploreFields: (m, v) => getExploreFieldsCached(m, v), getFieldOverrides: () => require('./owlFields').build(db).read(), draftCampaignCopy: (a) => actionsApi.draftCopy(a), getSegmentsApi: () => segmentsApi }), anthropicKeyForSuite, anthropicKeyForEntity, currencyNote: (entityId, suiteId) => currency.aiNote(mailer.resolveBranding(entityId, suiteId).currency), whatsappDigestFor: (eid, em) => (waDigestFor ? waDigestFor(eid, em) : Promise.resolve(null)) }); // agentic Owl (disposable; askData rides the scope gate)
 // ─── Health ───────────────────────────────────────────────────────────────────
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
@@ -1123,7 +1123,7 @@ app.post('/api/filter-suggest', auth.requireAuth, async (req, res) => {
     const t = (term || '').trim();
     if (t) {
       if (/^\d+$/.test(t)) {
-        q.filters = { [field]: t };
+        q.filters = { [/^core_ticket_(categories|types)\.name$/.test(field) ? field.replace(/\.name$/, '.id') : field]: t }; // a number finds a ticket by id; the shown/stored value stays the name
       } else {
         // Looker's `%x%` LIKE can be case-sensitive (depends on the dialect),
         // so OR a few case variants to make search effectively case-insensitive.
@@ -2875,7 +2875,7 @@ const actionsApi = require('./actions').mount(app, {
     const lockMap = expandLockMap(db.lockedFiltersForSuite(meta.suiteId));
     const qBody = await tileQueryBody(tile, def, user, meta.suiteId, lockMap, filterOverrides);
     if (!qBody) throw new Error('No data access for that tile');
-    const data = await runLookerQuery('/queries/run/json_detail', { ...qBody, limit: '5000' }, undefined, true);
+    const data = await runLookerQuery('/queries/run/json_detail', { ...qBody, limit: '50000' }, undefined, true);
     const fields = [...(data.fields?.dimensions || []), ...(data.fields?.measures || []), ...(data.fields?.table_calculations || [])]
       .map((f) => ({ name: f.name, label: f.label_short || f.label }));
     return { rows: data.data || [], fields };

@@ -391,7 +391,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
           <div key={i} data-owl-msg>
             {bubble(m, i)}
             {m.role === 'owl' && m.sources && m.sources.length > 0 && <CitationChips sources={m.sources} entityId={selEntity} suiteId={selSuite} canPin={isAdmin} />}
-            {m.role === 'owl' && m.actions && m.actions.length > 0 && m.actions.map((a, ai) => <ActionCard key={ai} action={a} />)}
+            {m.role === 'owl' && m.actions && m.actions.length > 0 && m.actions.map((a, ai) => <ActionCard key={ai} action={a} suiteId={selSuite} />)}
             {m.role === 'owl' && m.text && !busy && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 2 }}>
                 <CopyBtn text={m.text} />
@@ -751,24 +751,28 @@ function DataActions({ source }) {
 // create something the user couldn't make by hand.
 const OP_TEXT = { gte: 'reaches', lte: 'drops to', gt: 'goes above', lt: 'drops below' };
 // Dispatch to the right confirm card by action kind (act-tools share the pattern).
-function ActionCard({ action }) {
+function ActionCard({ action, suiteId }) {
   if (!action) return null;
   if (action.kind === 'createAlert') return <AlertActionCard action={action} />;
   if (action.kind === 'createSegment') return <SegmentActionCard action={action} />;
+  if (action.kind === 'draftCampaign') return <CampaignActionCard action={action} suiteId={suiteId} />;
   return null;
 }
 function AlertActionCard({ action }) {
   const [state, setState] = useState(''); // '' | 'busy' | 'done' | 'error'
   const [err, setErr] = useState('');
+  const [suiteId, setSuiteId] = useState(action.suiteId || ''); // chosen event (when none was selected)
   const d = action.draft || {};
   const cond = `${d.metricLabel || d.measureLabel || 'this metric'} ${OP_TEXT[d.operator] || 'reaches'} ${fmtVal(d.threshold)}${d.unit === '%' ? '%' : ''}`;
   const CHAN_LABEL = { push: 'push', email: 'email', sms: 'SMS', slack: 'Slack' };
   const chans = (d.channels || []).map((c) => CHAN_LABEL[c] || c);
   const delivery = `via ${['in-app', ...chans].join(', ')}${d.priority === 'important' ? ' · important' : ''}`;
+  const events = action.events || [];
   const create = async () => {
+    if (!suiteId) return; // need an event first
     setState('busy'); setErr('');
     try {
-      await api.owlCreateAlert({ suiteId: action.suiteId, draft: d });
+      await api.owlCreateAlert({ suiteId, draft: d });
       setState('done');
     } catch (e) { setState('error'); setErr((e && e.message) || 'Could not create the alert.'); }
   };
@@ -781,14 +785,25 @@ function AlertActionCard({ action }) {
       </div>
       <div style={{ fontSize: 13, color: 'var(--text)', marginBottom: 4 }}>Notify me when <strong>{cond}</strong>.</div>
       <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 8 }}>{delivery}</div>
+      {action.needsEvent && state !== 'done' && (
+        <div style={{ marginBottom: 8 }}>
+          <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 3 }}>Which event should this watch?</div>
+          <select value={suiteId} onChange={(e) => setSuiteId(e.target.value)}
+            style={{ width: '100%', boxSizing: 'border-box', padding: '6px 8px', borderRadius: 8, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', fontSize: 13 }}>
+            <option value="">Pick an event…</option>
+            {events.map((ev) => <option key={ev.id} value={ev.id}>{ev.name}</option>)}
+          </select>
+        </div>
+      )}
       {state === 'done' ? (
         <div style={{ fontSize: 12.5, color: 'var(--brand)', fontWeight: 600 }}>✓ Alert created — you'll be notified when it triggers.</div>
       ) : (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <button onClick={create} disabled={state === 'busy'}
-            style={{ border: 'none', borderRadius: 980, padding: '6px 16px', fontSize: 12.5, fontWeight: 700, cursor: state === 'busy' ? 'default' : 'pointer', background: state === 'busy' ? 'var(--elevated, rgba(128,128,128,0.18))' : 'var(--brand)', color: state === 'busy' ? 'var(--muted)' : '#fff' }}>
+          <button onClick={create} disabled={state === 'busy' || !suiteId}
+            style={{ border: 'none', borderRadius: 980, padding: '6px 16px', fontSize: 12.5, fontWeight: 700, cursor: (state === 'busy' || !suiteId) ? 'default' : 'pointer', background: (state === 'busy' || !suiteId) ? 'var(--elevated, rgba(128,128,128,0.18))' : 'var(--brand)', color: (state === 'busy' || !suiteId) ? 'var(--muted)' : '#fff' }}>
             {state === 'busy' ? 'Creating…' : 'Create alert'}
           </button>
+          {action.needsEvent && !suiteId && <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>Pick an event above</span>}
           {state === 'error' && <span style={{ fontSize: 12, color: '#e0414a' }}>{err}</span>}
         </div>
       )}
@@ -827,6 +842,67 @@ function SegmentActionCard({ action }) {
             style={{ border: 'none', borderRadius: 980, padding: '6px 16px', fontSize: 12.5, fontWeight: 700, cursor: state === 'busy' ? 'default' : 'pointer', background: state === 'busy' ? 'var(--elevated, rgba(128,128,128,0.18))' : 'var(--brand)', color: state === 'busy' ? 'var(--muted)' : '#fff' }}>
             {state === 'busy' ? 'Saving…' : 'Create segment'}
           </button>
+          {state === 'error' && <span style={{ fontSize: 12, color: '#e0414a' }}>{err}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Campaign confirm card — drafts an email/SMS campaign to a cohort. Creates a DRAFT
+// only; the human approves + SENDS in Engage. Shows the audience reach + the drafted
+// copy for review. PII-safe (count + reach only, never people).
+const CHAN_TEXT = { email: 'Email', sms: 'SMS', both: 'Email + SMS' };
+function CampaignActionCard({ action, suiteId }) {
+  const [state, setState] = useState('');
+  const [err, setErr] = useState('');
+  const [html, setHtml] = useState(''); // optional uploaded custom HTML body
+  const [htmlName, setHtmlName] = useState('');
+  const htmlRef = useRef(null);
+  const reach = action.reach || null;
+  const reachLine = reach ? `${fmtVal(reach.total)} people${reach.email != null ? ` · ${fmtVal(reach.email)} emailable` : ''}${reach.sms ? ` · ${fmtVal(reach.sms)} SMS` : ''}` : null;
+  const onPickHtml = async (e) => {
+    const f = e.target.files && e.target.files[0]; if (e.target) e.target.value = '';
+    if (!f) return;
+    try { const t = await f.text(); setHtml(t.slice(0, 500000)); setHtmlName(f.name); } catch { /* ignore */ }
+  };
+  const create = async () => {
+    setState('busy'); setErr('');
+    try {
+      await api.owlDraftCampaign({ entityId: action.entityId, name: action.name, channel: action.channel, goal: action.goal, audience: action.audience, audienceName: action.summary, subject: action.subject, body: action.body, ctaText: action.ctaText, ctaUrl: action.ctaUrl, customHtml: html || undefined, suiteId: suiteId || undefined });
+      setState('done');
+    } catch (e) { setState('error'); setErr((e && e.message) || 'Could not create the campaign.'); }
+  };
+  return (
+    <div style={{ margin: '2px 0 10px', border: '1px solid var(--hairline)', borderRadius: 12, background: 'var(--card)', padding: '10px 12px', maxWidth: '85%' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 6 }}>
+        <span style={{ fontSize: 15 }}>📣</span>
+        <strong style={{ fontSize: 12.5 }}>Campaign</strong>
+        <span style={{ fontSize: 11, color: 'var(--muted)', border: '1px solid var(--hairline)', borderRadius: 980, padding: '1px 7px' }}>Draft</span>
+        <span style={{ fontSize: 11, color: 'var(--muted)' }}>{CHAN_TEXT[action.channel] || 'Email'}</span>
+      </div>
+      <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 6 }}>To <strong style={{ color: 'var(--text)' }}>{action.summary || 'the cohort'}</strong>{reachLine ? ` · ${reachLine}` : ''}.</div>
+      {action.subject && <div style={{ fontSize: 13, color: 'var(--text)', marginBottom: 3 }}><span style={{ color: 'var(--muted)' }}>Subject:</span> <strong>{action.subject}</strong></div>}
+      {action.body && <div style={{ fontSize: 12.5, color: 'var(--text)', whiteSpace: 'pre-wrap', maxHeight: 150, overflow: 'auto', border: '1px solid var(--hairline)', borderRadius: 8, padding: '6px 8px', margin: '4px 0 8px', background: 'var(--bg, var(--card))' }}>{action.body}</div>}
+      {state !== 'done' && (
+        <div style={{ marginBottom: 8 }}>
+          {!html ? (
+            <button onClick={() => htmlRef.current && htmlRef.current.click()} style={{ ...msgActionStyle, fontSize: 12 }}>⬆ Upload custom HTML (optional)</button>
+          ) : (
+            <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>📄 {htmlName} attached — used instead of the templated body. <button onClick={() => { setHtml(''); setHtmlName(''); }} style={{ ...msgActionStyle, fontSize: 11.5, color: 'var(--brand)' }}>remove</button></span>
+          )}
+          <input ref={htmlRef} type="file" accept=".html,.htm,text/html" onChange={onPickHtml} style={{ display: 'none' }} />
+        </div>
+      )}
+      {state === 'done' ? (
+        <div style={{ fontSize: 12.5, color: 'var(--brand)', fontWeight: 600 }}>✓ Draft created — review, approve &amp; send it in Engage → Campaigns. Nothing has been sent.</div>
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <button onClick={create} disabled={state === 'busy'}
+            style={{ border: 'none', borderRadius: 980, padding: '6px 16px', fontSize: 12.5, fontWeight: 700, cursor: state === 'busy' ? 'default' : 'pointer', background: state === 'busy' ? 'var(--elevated, rgba(128,128,128,0.18))' : 'var(--brand)', color: state === 'busy' ? 'var(--muted)' : '#fff' }}>
+            {state === 'busy' ? 'Creating…' : 'Create draft campaign'}
+          </button>
+          <span style={{ fontSize: 11, color: 'var(--muted)' }}>You approve &amp; send in Engage</span>
           {state === 'error' && <span style={{ fontSize: 12, color: '#e0414a' }}>{err}</span>}
         </div>
       )}

@@ -8,7 +8,7 @@
 // cellVal copes with both. `member` shape: { email, name, ticket, phone, anchorRaw,
 // emailOk, smsOk, attributes }.
 
-const MAX_AUDIENCE = 2000;       // v1 safety cap per campaign
+const MAX_AUDIENCE = 25000;      // safety cap per campaign (raised from 2000; Looker source limit in index.js lifted to match)
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const cellVal = (cell) => String((cell && (cell.value ?? cell)) || '').trim();
 const isYes = (v) => ['yes', 'y', 'true', '1', 'consented', 'opted in', 'opt in'].includes(String(v).trim().toLowerCase());

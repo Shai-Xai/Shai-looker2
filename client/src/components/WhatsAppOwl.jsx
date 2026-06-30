@@ -11,6 +11,7 @@ export default function WhatsAppOwl() {
   const [secret, setSecret] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [saved, setSaved] = useState(false);
+  const [saveErr, setSaveErr] = useState('');
   const [busy, setBusy] = useState(false);
   const [testTo, setTestTo] = useState('');
   const [testText, setTestText] = useState('');
@@ -47,8 +48,18 @@ export default function WhatsAppOwl() {
   const addNum = () => setCfg((c) => ({ ...c, numbers: [...c.numbers, { msisdn: '', email: '', entityId: '' }] }));
   const delNum = (i) => setCfg((c) => ({ ...c, numbers: c.numbers.filter((_, j) => j !== i) }));
   const save = async () => {
-    setBusy(true);
-    try { await api.saveOwlWhatsapp({ from: cfg.from, mediaEnabled: !!cfg.mediaEnabled, pushEnabled: !!cfg.pushEnabled, testMessage: testText, numbers: cfg.numbers.filter((n) => n.msisdn && n.email), ...(secret.trim() ? { secret: secret.trim() } : {}), ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}) }); setSaved(true); setSecret(''); setApiKey(''); setTimeout(() => setSaved(false), 1800); } catch { /* ignore */ }
+    setBusy(true); setSaveErr(''); setSaved(false);
+    try {
+      const r = await api.saveOwlWhatsapp({ from: cfg.from, mediaEnabled: !!cfg.mediaEnabled, pushEnabled: !!cfg.pushEnabled, testMessage: testText, numbers: cfg.numbers.filter((n) => n.msisdn && n.email), ...(secret.trim() ? { secret: secret.trim() } : {}), ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}) });
+      if (r && r.error) throw new Error(typeof r.error === 'string' ? r.error : 'Save rejected');
+      // Re-load from the server so the form shows the TRUE saved state — if a change
+      // didn't persist (e.g. a number's linked client), the dropdown snaps back here,
+      // making a non-saving issue impossible to miss.
+      const fresh = await api.owlWhatsapp();
+      setCfg((c) => ({ ...c, from: fresh.from || '', hasSecret: fresh.hasSecret, hasApiKey: fresh.hasApiKey, mediaEnabled: !!fresh.mediaEnabled, pushEnabled: !!fresh.pushEnabled, webhookPath: fresh.webhookPath, statusPath: fresh.statusPath, numbers: fresh.numbers || c.numbers }));
+      setSecret(''); setApiKey('');
+      setSaved(true); setTimeout(() => setSaved(false), 2500);
+    } catch (e) { setSaveErr((e && e.message) || 'Save failed — your changes were NOT saved. Check your connection and try again.'); }
     setBusy(false);
   };
 
@@ -133,7 +144,8 @@ export default function WhatsAppOwl() {
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12 }}>
         <button onClick={save} disabled={busy} style={{ border: 'none', background: 'var(--brand)', color: '#fff', borderRadius: 8, padding: '7px 16px', fontSize: 13, fontWeight: 600, cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.6 : 1 }}>{busy ? 'Saving…' : 'Save WhatsApp setup'}</button>
-        {saved && <span style={{ fontSize: 12.5, color: '#34c759', fontWeight: 600 }}>Saved ✓</span>}
+        {saved && <span style={{ fontSize: 12.5, color: '#34c759', fontWeight: 600 }}>Saved ✓ (re-loaded from server)</span>}
+        {saveErr && <span style={{ fontSize: 12.5, color: '#e0414a', fontWeight: 600 }}>⚠ {saveErr}</span>}
       </div>
 
       <div style={{ borderTop: '1px solid var(--hairline)', marginTop: 14, paddingTop: 12 }}>

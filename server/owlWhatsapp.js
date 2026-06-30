@@ -41,7 +41,7 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
   sql.exec(`
     CREATE TABLE IF NOT EXISTS owl_wa_msgs (
       id TEXT PRIMARY KEY, msisdn TEXT NOT NULL, role TEXT NOT NULL,
-      body TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
+      body TEXT NOT NULL DEFAULT '', entity_id TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_owl_wa_msisdn ON owl_wa_msgs(msisdn, created_at);
     CREATE TABLE IF NOT EXISTS owl_wa_events (
@@ -56,9 +56,14 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
       msisdn TEXT NOT NULL, day TEXT NOT NULL, at TEXT NOT NULL, PRIMARY KEY (msisdn, day)
     );
   `);
+  // Migration for DBs created before history was segmented by client (entity_id).
+  try { sql.exec("ALTER TABLE owl_wa_msgs ADD COLUMN entity_id TEXT NOT NULL DEFAULT ''"); } catch { /* already present */ }
   const now = () => new Date().toISOString();
-  const insMsg = sql.prepare('INSERT INTO owl_wa_msgs (id,msisdn,role,body,created_at) VALUES (?,?,?,?,?)');
-  const histStmt = sql.prepare('SELECT role, body FROM owl_wa_msgs WHERE msisdn=? ORDER BY created_at DESC LIMIT 12');
+  const insMsg = sql.prepare('INSERT INTO owl_wa_msgs (id,msisdn,role,body,entity_id,created_at) VALUES (?,?,?,?,?,?)');
+  // History is scoped to the CURRENT linked client: if a number's client changes, the
+  // previous client's messages aren't replayed — so the Owl can't echo the old client's
+  // name (the data was already correctly scoped; this stops the stale label bleeding in).
+  const histStmt = sql.prepare('SELECT role, body FROM owl_wa_msgs WHERE msisdn=? AND entity_id=? ORDER BY created_at DESC LIMIT 12');
   const J = (s, d) => { try { return JSON.parse(s); } catch { return d; } };
 
   // Chart-image fallback hosting: when Clickatell's native media send isn't available,
@@ -143,7 +148,7 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
     const today = now().slice(0, 10);
     const ent = entityId && db.getEntity ? db.getEntity(entityId) : null;
     const parts = [`Today's date is ${today}.`];
-    if (ent) parts.push(`All data in this conversation is scoped to: ${ent.name}. Lead your answer with "For ${ent.name}:" and never imply the figures cover other clients.`);
+    if (ent) parts.push(`All data in this conversation is scoped to: ${ent.name}. The ONLY client here is "${ent.name}" — when naming the client/entity, always say "${ent.name}" and NEVER any other client name, even if a different name appears earlier in this chat (that was a previous scope). Lead your answer with "For ${ent.name}:" and never imply the figures cover other clients.`);
     let fmeta = []; try { fmeta = owlFields.list(); } catch { /* ignore */ }
     if (fmeta.length) {
       parts.push(`Field guide (name = meaning): ${fmeta.map((f) => `${f.name} = ${f.label}${(f.aka || []).length ? ` (aka: ${f.aka.join(', ')})` : ''}`).join('; ')}.`);
@@ -228,8 +233,9 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
     // A bare "1"/"2"/"3" reply selects a prior follow-up (the numbered fallback); a tapped
     // button already arrives as the full question text via postbackData.
     const text = resolveSelection(msisdn, rawText) || rawText;
-    insMsg.run(crypto.randomUUID(), msisdn, 'user', text, now());
-    const history = histStmt.all(msisdn).reverse().map((m) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.body }));
+    const eid = id.entityId || '';
+    insMsg.run(crypto.randomUUID(), msisdn, 'user', text, eid, now());
+    const history = histStmt.all(msisdn, eid).reverse().map((m) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.body }));
     // histStmt already includes the just-inserted user message at the end.
     const instructions = instructionsFor(id.entityId);
     let out = ''; let trail = [];
@@ -243,7 +249,7 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
     } catch { out = ''; }
     const answer = String(out || '').split(FU_MARK)[0].replace(/\s+$/, '').trim() || 'Sorry — I couldn\'t answer that just now. Try rephrasing?';
     const followups = parseFollowups(out);
-    insMsg.run(crypto.randomUUID(), msisdn, 'owl', answer, now());
+    insMsg.run(crypto.randomUUID(), msisdn, 'owl', answer, eid, now());
     const sent = await messaging.sendWhatsapp({ to: msisdn, text: answer });
     logEvent(msisdn, sent && sent.ok ? 'replied' : 'send-failed', sent && sent.ok ? answer.slice(0, 120) : (sent && sent.error) || 'send error');
     if (chartImg.wantsChart(text)) await maybeSendChart(msisdn, trail);
@@ -469,7 +475,7 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
         const id = identify(msisdn); if (!id) continue;
         const msg = await buildScheduledMessage(id, topics);
         if (!msg) { logEvent(msisdn, 'push-failed', 'no content generated'); continue; }
-        insMsg.run(crypto.randomUUID(), msisdn, 'owl', msg, now());
+        insMsg.run(crypto.randomUUID(), msisdn, 'owl', msg, id.entityId || '', now());
         const r = await messaging.sendWhatsapp({ to: msisdn, text: msg });
         logEvent(msisdn, r && r.ok ? 'push-sent' : 'push-failed', r && r.ok ? topics.join(', ') : (r && r.error) || 'send error');
       }

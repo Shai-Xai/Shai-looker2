@@ -13,110 +13,9 @@
 
 const crypto = require('crypto');
 
-// Parse a free-text contact list — ONE PERSON PER LINE. Within a line we pull out
-// an email + a mobile + a name, so "John Smith, john@x.com, 083…" is one contact.
-// A header row (no email/phone) is naturally skipped. Deduped by email-or-phone.
-// Shared by the pasted-list, uploaded-file (CSV/Excel) and Google-Sheet sources.
-function parseContactLines(text) {
-  const seen = new Set();
-  const out = [];
-  for (const line of String(text || '').split(/\r?\n/)) {
-    const t = line.trim();
-    if (!t) continue;
-    const em = t.match(/[^\s,;|<>]+@[^\s,;|<>]+\.[^\s,;|<>]+/);
-    const email = em ? em[0].toLowerCase().replace(/[.,;]+$/, '') : '';
-    let rest = em ? t.replace(em[0], ' ') : t;
-    const ph = rest.match(/\+?\d[\d\s().-]{6,}\d/);
-    let phone = '';
-    if (ph && ph[0].replace(/\D/g, '').length >= 7) { phone = ph[0].replace(/[^\d+]/g, ''); rest = rest.replace(ph[0], ' '); }
-    const name = rest.replace(/[,;:|]+/g, ' ').replace(/\s+/g, ' ').trim();
-    if (!email && !phone) continue; // a line with no contactable identifier (e.g. a header)
-    const key = email || phone;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    // Uploaded/pasted/sheet lists carry no consent columns — reachable on whatever
-    // identifier was provided (the uploader asserts they may contact them).
-    out.push({ email, phone, name, emailOk: !!email, smsOk: !!phone });
-  }
-  return out;
-}
-
-// Minimal CSV parser — handles quoted fields (commas/quotes/newlines inside "…").
-function parseCsv(text) {
-  const rows = []; let row = []; let field = ''; let inQ = false;
-  const s = String(text || '');
-  for (let i = 0; i < s.length; i++) {
-    const ch = s[i];
-    if (inQ) {
-      if (ch === '"') { if (s[i + 1] === '"') { field += '"'; i += 1; } else inQ = false; }
-      else field += ch;
-    } else if (ch === '"') inQ = true;
-    else if (ch === ',') { row.push(field); field = ''; }
-    else if (ch === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
-    else if (ch !== '\r') field += ch;
-  }
-  if (field.length || row.length) { row.push(field); rows.push(row); }
-  return rows;
-}
-// The header (column names) of a delimited list — powers the column-mapping UI.
-function csvHeader(text) {
-  const rows = parseCsv(text);
-  return rows.length ? rows[0].map((h) => h.trim()).filter(Boolean) : [];
-}
-// Parse a delimited list BY MAPPED COLUMN (header names) rather than the per-line
-// heuristic. Returns null when there's no usable mapping (caller then falls back
-// to parseContactLines). Lets a user pin which column is email/name/mobile when
-// auto-detect would otherwise grab the wrong one (an order id read as a phone, …).
-function parseContactTable(text, { emailField, nameField, phoneField } = {}) {
-  if (!emailField && !phoneField) return null;
-  const rows = parseCsv(text);
-  if (rows.length < 2) return null;
-  const rawHeader = rows[0].map((h) => h.trim());
-  const header = rawHeader.map((h) => h.toLowerCase());
-  const col = (n) => (n ? header.indexOf(String(n).trim().toLowerCase()) : -1);
-  const ei = col(emailField); const pi = col(phoneField); const ni = col(nameField);
-  if (ei < 0 && pi < 0) return null; // mapped column(s) not in the header → fall back
-  const seen = new Set();
-  const out = [];
-  for (let r = 1; r < rows.length; r++) {
-    const cells = rows[r];
-    const rawEmail = ei >= 0 ? String(cells[ei] || '').trim().toLowerCase() : '';
-    const email = EMAIL_RE.test(rawEmail) ? rawEmail : '';
-    let phone = '';
-    if (pi >= 0) { const d = String(cells[pi] || '').replace(/[^\d+]/g, ''); if (d.replace(/\D/g, '').length >= 7) phone = d; }
-    const name = ni >= 0 ? String(cells[ni] || '').trim() : '';
-    if (!email && !phone) continue;
-    const key = email || phone;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    // Keep EVERY column as an attribute (ticket type, city, age, gender…) so the
-    // list can be targeted/filtered on them, keyed by the original header name.
-    const attributes = {};
-    for (let c = 0; c < rawHeader.length; c++) if (rawHeader[c]) attributes[rawHeader[c]] = String(cells[c] || '').trim();
-    out.push({ email, phone, name, emailOk: !!email, smsOk: !!phone, attributes });
-  }
-  return out;
-}
-
-// A Google Sheets link → its CSV export URL (works when the sheet is shared
-// "anyone with the link" or published to web — no OAuth needed).
-function googleSheetCsvUrl(url) {
-  const m = String(url || '').match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
-  if (!m) return '';
-  const g = String(url).match(/[#&?]gid=(\d+)/);
-  return `https://docs.google.com/spreadsheets/d/${m[1]}/export?format=csv&gid=${g ? g[1] : '0'}`;
-}
-async function fetchGoogleSheetCsv(url) {
-  const csvUrl = googleSheetCsvUrl(url);
-  if (!csvUrl) throw new Error('That doesn’t look like a Google Sheets link.');
-  const res = await fetch(csvUrl, { redirect: 'follow', signal: AbortSignal.timeout(20000) });
-  const text = res.ok ? await res.text() : '';
-  // A non-public sheet returns 401/403 or an HTML sign-in page rather than CSV.
-  if (!res.ok || /^\s*<(!doctype|html)/i.test(text)) {
-    throw new Error('Couldn’t read that sheet — set its sharing to “anyone with the link” (or publish it to the web).');
-  }
-  return text;
-}
+// Contact-list parsing (pasted text / uploaded CSV / Google Sheet) lives in a shared
+// module to keep this file under budget — see audienceParse.js.
+const { parseContactLines, csvHeader, parseContactTable, fetchGoogleSheetCsv, googleSheetCsvUrl } = require('./audienceParse');
 
 // Audience person-mapping (dedupe + per-channel consent + reach) lives in a shared
 // module so chat-created "query" segments reuse the SAME logic — see audienceMap.js.
@@ -358,9 +257,16 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
   // multi-source `sources`/`combine` (each block shaped recursively, one level deep).
   function shapeAudience(aud = {}, depth = 0) {
     const out = {
-      mode: ['paste', 'gsheet', 'snapshot', 'segment'].includes(aud.mode) ? aud.mode : 'tile',
+      mode: ['paste', 'gsheet', 'snapshot', 'segment', 'query'].includes(aud.mode) ? aud.mode : 'tile',
       gsheetUrl: String(aud.gsheetUrl || '').slice(0, 1000), // when mode = 'gsheet' (linked Google Sheet, read live)
       segmentId: String(aud.segmentId || ''), // when mode = 'segment' (reference, resolved live)
+      // when mode = 'query' (a cohort the Owl built in chat) — curated explore + dim filters;
+      // resolved by audienceFor's query branch (identity columns fixed server-side).
+      model: String(aud.model || ''),
+      view: String(aud.view || ''),
+      queryFilters: (aud.queryFilters && typeof aud.queryFilters === 'object' && !Array.isArray(aud.queryFilters))
+        ? Object.fromEntries(Object.entries(aud.queryFilters).slice(0, 50).map(([k, v]) => [String(k), String(v)]))
+        : {},
       phoneField: String(aud.phoneField || ''), // mobile column (for SMS)
       dashboardId: String(aud.dashboardId || ''),
       tileId: String(aud.tileId || ''),
@@ -1891,7 +1797,24 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
   // Campaigns for a client, newest first, WITHOUT the (PII-heavy) audience snapshot —
   // used by the Owl's getCampaigns tool. publicAction hides the audience + adds a count.
   const listForEntity = (entityId) => sql.prepare('SELECT * FROM actions WHERE entity_id=? ORDER BY created_at DESC LIMIT 100').all(entityId).map((r) => publicAction(rowToAction(r)));
-  return { awaitingApprovalFor, unseenOutcomesFor, audienceFor, listForEntity };
+  // Programmatic create of a DRAFT campaign (the Owl's draftCampaign act-tool commit).
+  // ALWAYS status 'draft' — it never sends; a human reviews, approves and sends it in
+  // Engage. Runs the same entity-ownership + campaigns.approve check + cleanConfig the
+  // POST route uses, so an Owl-drafted campaign is identical to a hand-made draft.
+  function createDraftCampaign({ entityId, title, config, user }) {
+    if (!user || !entityId) return { ok: false, error: 'Missing user or client' };
+    const isAdmin = user.role === 'admin';
+    if (!(isAdmin || (user.entityIds || []).includes(entityId))) return { ok: false, error: 'Not allowed' };
+    if (!isAdmin && auth.hasPermission && !auth.hasPermission(user, entityId, 'campaigns.approve')) {
+      return { ok: false, error: "You don't have permission to create campaigns for this client." };
+    }
+    const id = uuid();
+    const cfg = cleanConfig(config || {});
+    sql.prepare('INSERT INTO actions (id, entity_id, type, status, title, config, recurring, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
+      .run(id, entityId, 'email_campaign', 'draft', String(title || '').slice(0, 120), JSON.stringify(cfg), 0, (user.email || 'owl'), now(), now());
+    return { ok: true, action: publicAction(getAction(id)) };
+  }
+  return { awaitingApprovalFor, unseenOutcomesFor, audienceFor, listForEntity, draftCopy, createDraftCampaign };
 }
 
 // Pure helpers exported for unit testing (list parsing + Google Sheet URL).
