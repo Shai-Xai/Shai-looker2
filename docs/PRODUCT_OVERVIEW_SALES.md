@@ -523,12 +523,14 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
-- **2026-06-30** — **Owl depth modes (Quick / Analyst)** 🧪: the Owl chat now has a depth
-  toggle — **⚡ Quick** (fast, grounded answers, default) and **🔬 Analyst** (deeper: more
-  reasoning, multiple data cuts, the "so what" + a recommendation, sharper follow-ups). The
-  toggle is remembered per conversation, and any quick answer has a **🔬 Dig deeper** one-tap
-  to re-run just that question deep. Same grounded brain — different brief + reasoning budget,
-  not a different model.
+- **2026-06-30** — **Owl modes: Quick / Analyst / Operator** 🧪: the Owl chat has a mode
+  toggle — **⚡ Quick** (fast, grounded, default), **🔬 Analyst** (deeper: more reasoning,
+  multiple data cuts, the "so what" + a recommendation, sharper follow-ups), and **🧭 Operator**
+  (Analyst depth AND proactively drafts the single best next action — an alert, segment or
+  campaign — for you to confirm; still draft-only, nothing sends without a tap). The mode is
+  remembered per conversation, and any Quick answer has a **🔬 Dig deeper** one-tap to re-run
+  that question deep. Same grounded brain — different brief + reasoning budget, not a
+  different model.
 - **2026-06-30** — **WhatsApp Owl: friendly reply to voice notes / media** 🧪: a voice note,
   image or file used to be **silently dropped** (the customer got nothing back). The Owl now
   recognises it and replies "I can't listen to voice notes yet — please type your question"

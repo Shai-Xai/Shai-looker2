@@ -108,7 +108,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
       setMessages((r.messages || []).map((m) => ({ role: m.role === 'user' ? 'user' : 'owl', text: m.body, sources: m.sources })));
       setThreadId(t.id);
       setSelEntity(t.entityId || ''); setSelSuite(t.suiteId || '');
-      setPersona(t.persona === 'analyst' ? 'analyst' : 'quick'); // reflect the chat's saved depth
+      setPersona(['analyst', 'operator'].includes(t.persona) ? t.persona : 'quick'); // reflect the chat's saved depth
     } catch { /* ignore */ }
     setEditingId(null);
     if (isMobile) setSidebarOpen(false);
@@ -188,7 +188,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
     if (text == null) setInput('');
     setFollowups([]);
     const useMode = opts.mode || persona; // a one-off "dig deeper" overrides the toggle for this turn
-    setStatus(useMode === 'analyst' ? 'Digging in…' : 'Thinking…'); // show an immediate indicator before the first token
+    setStatus(useMode === 'operator' ? 'Working out the best move…' : useMode === 'analyst' ? 'Digging in…' : 'Thinking…'); // show an immediate indicator before the first token
     // Append the question + an empty Owl bubble we stream into (tagged with the depth used).
     setMessages((m) => [...m, { role: 'user', text: q }, { role: 'owl', text: '', mode: useMode }]);
     setBusy(true);
@@ -409,7 +409,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
                   dashboardId={dashboardId}
                 />
                 {/* Re-ask this question at Analyst depth (a one-off; doesn't change the toggle). */}
-                {m.mode !== 'analyst' && (
+                {(!m.mode || m.mode === 'quick') && (
                   <button onClick={() => { const q = [...messages.slice(0, i)].reverse().find((x) => x.role === 'user')?.text; if (q) send(q, { mode: 'analyst' }); }} title="Re-answer this with deeper analysis" style={msgActionStyle}>🔬 Dig deeper</button>
                 )}
               </div>
@@ -452,11 +452,12 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
             recommendation, a little slower). Sets this chat's default; the per-answer
             "🔬 Dig deeper" re-asks one question deep without changing this. */}
         <div style={{ display: 'flex', gap: 4, alignItems: 'center', marginBottom: 8 }}>
-          {[['quick', '⚡ Quick'], ['analyst', '🔬 Analyst']].map(([k, lbl]) => (
-            <button key={k} type="button" onClick={() => setPersona(k)} title={k === 'analyst' ? 'Deeper analysis: multiple cuts, the “so what”, and strategic follow-ups (a little slower)' : 'Fast, grounded answers'}
+          {[['quick', '⚡ Quick', 'Fast, grounded answers'], ['analyst', '🔬 Analyst', 'Deeper analysis: multiple cuts, the “so what”, and strategic follow-ups (a little slower)'], ['operator', '🧭 Operator', 'Deep analysis AND proactively drafts the best next action (alert / segment / campaign) for you to confirm']].map(([k, lbl, tip]) => (
+            <button key={k} type="button" onClick={() => setPersona(k)} title={tip}
               style={{ border: '1px solid var(--hairline)', background: persona === k ? 'var(--brand)' : 'var(--card)', color: persona === k ? '#fff' : 'var(--muted)', borderRadius: 980, padding: '3px 11px', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>{lbl}</button>
           ))}
           {persona === 'analyst' && <span style={{ fontSize: 11, color: 'var(--muted)' }}>deeper · a little slower</span>}
+          {persona === 'operator' && <span style={{ fontSize: 11, color: 'var(--muted)' }}>deep + proposes an action</span>}
         </div>
         {/* "/" command palette — a quick menu of what the Owl can answer. */}
         {slashOpen && slashMatches.length > 0 && (

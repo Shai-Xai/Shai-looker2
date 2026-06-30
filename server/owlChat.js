@@ -90,9 +90,9 @@ STYLE: concise, plain English, lead with the answer/number, money in the client'
 
 // ── Personas (depth modes the user toggles) ───────────────────────────────────
 // Not different models or temperatures — the same grounded brain with a different
-// BRIEF + reasoning budget. Quick = today's fast lookup. Analyst = deeper: more
-// reasoning effort, more query rounds, multi-cut analysis + a recommendation, sharper
-// follow-ups. (Operator — proactively proposes + drafts actions — is the next phase.)
+// BRIEF + reasoning budget. Quick = today's fast lookup. Analyst = deeper read.
+// Operator = Analyst depth PLUS proactively proposing + drafting the single best next
+// action (alert / segment / campaign — still draft-only, confirmed with a button).
 const OWL_ANALYST_LAYER = `DEPTH — ANALYST MODE: the user wants a deeper read, so work like a senior data analyst, not a lookup.
 - Don't stop at the headline number. Pull the supporting cuts with askData — the trend over time, the breakdown by the most telling dimension (ticket type / city / channel), and a comparison to a prior period or a comparable event — then SYNTHESISE them into one read.
 - Lead with the answer, then explain WHAT'S DRIVING IT and WHY IT MATTERS (the "so what"), and end with a concrete recommended next step.
@@ -100,11 +100,17 @@ const OWL_ANALYST_LAYER = `DEPTH — ANALYST MODE: the user wants a deeper read,
 - Favour a tight Markdown table + one chart-worthy breakdown over a wall of prose — insight density, not length.
 - Make your follow-ups PROBING and strategic (e.g. "What's driving the VIP dip?", "Compare channels for this event", "Forecast final sales"), not just the obvious next cut.`;
 
+const OWL_OPERATOR_LAYER = `ACT — OPERATOR MODE: on top of the deep analysis above, be proactive about the NEXT MOVE.
+- Once you've found the key insight, identify the SINGLE most valuable action it implies and DRAFT it: an alert (createAlert) to watch an emerging risk, a segment (createSegment) to capture a cohort worth marketing to, or a campaign (draftCampaign) to act on an opportunity.
+- Pick the ONE action that best follows from what the data actually showed — don't draft several, and don't force one. If nothing is genuinely warranted, say so and just give the recommendation in words.
+- Briefly say WHY it's the right move, then draft it. Nothing is created until the user confirms with the button — you never send anything to customers; campaigns are draft-only for review in Engage.`;
+
 // Each persona is a bundle: reasoning effort + output budget + how many tool rounds it
 // may run + the prompt layer appended to the instructions.
 const PERSONAS = {
   quick: { effort: 'low', maxTokens: 1500, maxRounds: 5, layer: '' },
   analyst: { effort: 'high', maxTokens: 3500, maxRounds: 9, layer: OWL_ANALYST_LAYER },
+  operator: { effort: 'high', maxTokens: 3800, maxRounds: 11, layer: `${OWL_ANALYST_LAYER}\n\n${OWL_OPERATOR_LAYER}` },
 };
 const personaKey = (m) => (PERSONAS[m] ? m : 'quick');
 const personaOf = (m) => PERSONAS[personaKey(m)];
@@ -564,4 +570,4 @@ function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, m
   console.log('[owlChat] agentic Owl chat module mounted');
 }
 
-module.exports = { mount, runOwlLoop, owlTurn, textOf, OWL_CHAT_SYSTEM, OWL_ANALYST_LAYER, owlAllowed };
+module.exports = { mount, runOwlLoop, owlTurn, textOf, OWL_CHAT_SYSTEM, OWL_ANALYST_LAYER, OWL_OPERATOR_LAYER, owlAllowed };
