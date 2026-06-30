@@ -156,6 +156,9 @@ function mount(app, { db, auth }) {
   // Staff can be posted to MULTIPLE stations — JSON array. (station_id stays as the legacy
   // single, kept in sync to the first for back-compat; station_ids is authoritative.)
   try { sql.exec("ALTER TABLE eventops_staff ADD COLUMN station_ids TEXT NOT NULL DEFAULT '[]'"); } catch { /* already there */ }
+  // Map markers can be resized + rotated (scale 1 = default, rotation in degrees).
+  try { sql.exec('ALTER TABLE eventops_stations ADD COLUMN scale REAL NOT NULL DEFAULT 1'); } catch { /* already there */ }
+  try { sql.exec('ALTER TABLE eventops_stations ADD COLUMN rotation REAL NOT NULL DEFAULT 0'); } catch { /* already there */ }
 
   // ── per-client toggle ──────────────────────────────────────────────────────────
   const entityEnabled = (entityId) => {
@@ -206,8 +209,10 @@ function mount(app, { db, auth }) {
   });
   const stationRow = (s) => s && ({
     id: s.id, entityId: s.entity_id, suiteId: s.suite_id, name: s.name, kind: s.kind,
-    x: s.x, y: s.y, position: s.position, createdAt: s.created_at,
+    x: s.x, y: s.y, scale: s.scale == null ? 1 : s.scale, rotation: s.rotation || 0, position: s.position, createdAt: s.created_at,
     deviceCount: sql.prepare("SELECT COUNT(*) c FROM eventops_devices WHERE station_id=? AND state='deployed'").get(s.id).c,
+    openIssues: sql.prepare(`SELECT COUNT(*) c FROM eventops_issues i JOIN eventops_devices d ON d.id=i.device_id
+      WHERE i.status='open' AND d.station_id=?`).get(s.id).c,
   });
   const eventRow = (e) => ({
     id: e.id, deviceId: e.device_id, kind: e.kind, fromState: e.from_state, toState: e.to_state,
@@ -466,7 +471,10 @@ function mount(app, { db, auth }) {
     const kind = STATION_KINDS.includes(req.body?.kind) ? req.body.kind : s.kind;
     const x = req.body?.x != null ? Number(req.body.x) || 0 : s.x;
     const y = req.body?.y != null ? Number(req.body.y) || 0 : s.y;
-    sql.prepare('UPDATE eventops_stations SET name=?, kind=?, x=?, y=? WHERE id=?').run(name, kind, x, y, s.id);
+    const clamp = (v, lo, hi, dflt) => (v == null ? dflt : Math.min(hi, Math.max(lo, Number(v) || dflt)));
+    const scale = clamp(req.body?.scale, 0.4, 3, s.scale == null ? 1 : s.scale);
+    const rotation = req.body?.rotation == null ? (s.rotation || 0) : (((Number(req.body.rotation) || 0) % 360) + 360) % 360;
+    sql.prepare('UPDATE eventops_stations SET name=?, kind=?, x=?, y=?, scale=?, rotation=? WHERE id=?').run(name, kind, x, y, scale, rotation, s.id);
     res.json({ station: stationRow(sql.prepare('SELECT * FROM eventops_stations WHERE id=?').get(s.id)) });
   });
 

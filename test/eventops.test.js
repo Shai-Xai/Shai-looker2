@@ -253,6 +253,26 @@ test('staff portal: token gates access; staff log in by number, then move + log 
   assert.equal(call(r['POST /api/eventops/portal/:suiteId/:token/login'], { params: KP, body: { number: '7' } }).code, 403);
 });
 
+test('map: stations carry scale/rotation + an open-issue marker count', () => {
+  const r = mount();
+  const { entity, suite, owner, admin } = seedEvent();
+  call(r['PUT /api/eventops/entities/:entityId/enabled'], { user: admin, params: { entityId: entity.id }, body: { enabled: true } });
+  const P = { suiteId: suite.id };
+  const station = call(r['POST /api/eventops/suites/:suiteId/stations'], { user: owner, params: P, body: { name: 'Bar', kind: 'bar' } }).body.station;
+  assert.equal(station.scale, 1); assert.equal(station.rotation, 0); assert.equal(station.openIssues, 0);
+
+  // Resize + rotate persist (rotation normalises into 0..360).
+  const up = call(r['PUT /api/eventops/suites/:suiteId/stations/:id'], { user: owner, params: { ...P, id: station.id }, body: { scale: 1.6, rotation: 375 } }).body.station;
+  assert.equal(up.scale, 1.6); assert.equal(up.rotation, 15);
+
+  // Deploy a device there and open an issue → the station shows an open-issue marker.
+  const dev = call(r['POST /api/eventops/suites/:suiteId/devices'], { user: owner, params: P, body: { label: 'M1', qrCode: 'M1' } }).body.device;
+  call(r['POST /api/eventops/suites/:suiteId/move'], { user: owner, params: P, body: { deviceId: dev.id, stationId: station.id } });
+  call(r['POST /api/eventops/suites/:suiteId/issues'], { user: owner, params: P, body: { deviceId: dev.id, category: 'battery' } });
+  const stations = call(r['GET /api/eventops/suites/:suiteId/stations'], { user: owner, params: P }).body.stations;
+  assert.equal(stations.find((s) => s.id === station.id).openIssues, 1);
+});
+
 test('deleting a station sends its deployed devices back to the Hive', () => {
   const r = mount();
   const { entity, suite, owner, admin } = seedEvent();

@@ -533,11 +533,12 @@ function DeviceActionSheet({ suiteId, device, onClose, onDone }) {
 // the station PUT); tap a pin to drill into its devices + issues.
 function MapTab({ suiteId, canManage, isMobile, reloadKey, onStation }) {
   const [stations, setStations] = useState(null);
-  const [drag, setDrag] = useState(null); // { id, x, y } live position mid-drag
+  const [drag, setDrag] = useState(null);      // { id, x, y } live position mid-drag
+  const [selected, setSelected] = useState(null); // selected station id (manage mode)
   const canvasRef = useRef(null);
 
   useEffect(() => {
-    setStations(null);
+    setStations(null); setSelected(null);
     api.eventopsStations(suiteId).then((r) => setStations(r.stations || [])).catch(() => setStations([]));
   }, [suiteId, reloadKey]);
 
@@ -554,6 +555,12 @@ function MapTab({ suiteId, canManage, isMobile, reloadKey, onStation }) {
     });
   }, [stations]);
 
+  // Optimistic local update + persist (used by drag, resize, rotate).
+  function patch(id, fields) {
+    setStations((prev) => prev.map((st) => (st.id === id ? { ...st, ...fields } : st)));
+    api.eventopsUpdateStation(suiteId, id, fields).catch(() => {});
+  }
+
   function startDrag(e, s) {
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
@@ -568,10 +575,9 @@ function MapTab({ suiteId, canManage, isMobile, reloadKey, onStation }) {
       document.removeEventListener('pointermove', move);
       document.removeEventListener('pointerup', up);
       setDrag(null);
-      if (moved) {
-        setStations((prev) => prev.map((st) => (st.id === s.id ? { ...st, x: last.x, y: last.y } : st)));
-        api.eventopsUpdateStation(suiteId, s.id, { x: last.x, y: last.y }).catch(() => {});
-      } else { onStation?.(s); } // a tap (no drag) = drill in
+      if (moved) patch(s.id, { x: last.x, y: last.y });
+      else if (canManage) setSelected(s.id); // tap (no drag) selects → resize/rotate/open
+      else onStation?.(s);
     };
     document.addEventListener('pointermove', move);
     document.addEventListener('pointerup', up);
@@ -579,22 +585,45 @@ function MapTab({ suiteId, canManage, isMobile, reloadKey, onStation }) {
 
   if (stations === null) return <Loading />;
   if (!stations.length) return <Empty>No stations yet — add stations first, then drag them onto the map.</Empty>;
+  const sel = (stations || []).find((s) => s.id === selected);
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>
-        {canManage ? 'Drag stations to lay out your venue. ' : ''}Tap a station to see its devices &amp; issues.
+        {canManage ? 'Drag to move. Tap a station to select it, then resize · rotate · open. ' : 'Tap a station to see its devices & issues.'}
       </div>
-      <div ref={canvasRef} style={{ ...mapCanvas, height: isMobile ? 440 : 600 }}>
+      {canManage && sel && (
+        <div style={mapToolbar}>
+          <span style={{ fontWeight: 700, fontSize: 13 }}>{sel.name}</span>
+          <button onClick={() => onStation?.(sel)} style={ghostBtn}>Open</button>
+          <span style={tbGroup}>
+            <button onClick={() => patch(sel.id, { scale: Math.max(0.4, +(sel.scale || 1) - 0.15) })} style={iconBtn}>－</button>
+            <span style={{ fontSize: 12, color: 'var(--muted)', minWidth: 36, textAlign: 'center' }}>{Math.round((sel.scale || 1) * 100)}%</span>
+            <button onClick={() => patch(sel.id, { scale: Math.min(3, +(sel.scale || 1) + 0.15) })} style={iconBtn}>＋</button>
+          </span>
+          <span style={tbGroup}>
+            <button onClick={() => patch(sel.id, { rotation: (((sel.rotation || 0) - 15) % 360 + 360) % 360 })} style={iconBtn}>↺</button>
+            <button onClick={() => patch(sel.id, { rotation: ((sel.rotation || 0) + 15) % 360 })} style={iconBtn}>↻</button>
+          </span>
+          <button onClick={() => setSelected(null)} style={ghostBtn}>Done</button>
+        </div>
+      )}
+      <div ref={canvasRef} style={{ ...mapCanvas, height: isMobile ? 440 : 600 }} onPointerDown={(e) => { if (e.target === e.currentTarget) setSelected(null); }}>
         {placed.map((s) => {
           const live = drag && drag.id === s.id ? drag : { x: s._x, y: s._y };
+          const isSel = selected === s.id;
+          const border = isSel ? 'var(--brand)' : s.openIssues ? 'var(--error)' : s.deviceCount ? 'var(--brand)' : 'var(--border)';
           return (
             <button
               key={s.id}
               onPointerDown={canManage ? (e) => { e.preventDefault(); startDrag(e, s); } : undefined}
               onClick={canManage ? undefined : () => onStation?.(s)}
-              style={{ ...mapPin, left: `${live.x * 100}%`, top: `${live.y * 100}%`, cursor: canManage ? 'grab' : 'pointer', borderColor: s.deviceCount ? 'var(--brand)' : 'var(--border)' }}
+              style={{ ...mapPin, left: `${live.x * 100}%`, top: `${live.y * 100}%`,
+                transform: `translate(-50%, -50%) rotate(${s.rotation || 0}deg) scale(${s.scale || 1})`,
+                cursor: canManage ? 'grab' : 'pointer', borderColor: border,
+                boxShadow: isSel ? '0 0 0 3px rgba(var(--brand-rgb),0.35)' : 'var(--shadow-sm)' }}
               title={s.name}
             >
+              {s.openIssues > 0 && <span style={mapPinIssue}>⚠ {s.openIssues}</span>}
               <span style={{ fontSize: 18, lineHeight: 1 }}>{KIND_ICON[s.kind] || '📍'}</span>
               <span style={{ fontSize: 12, fontWeight: 700, marginTop: 2, maxWidth: 90, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</span>
               <span style={mapPinCount}>{s.deviceCount}</span>
@@ -833,6 +862,9 @@ const fab = (isMobile) => ({ position: 'fixed', right: isMobile ? 16 : 32, botto
 const mapCanvas = { position: 'relative', width: '100%', borderRadius: 14, border: '1px solid var(--hairline)', background: 'repeating-linear-gradient(0deg, var(--card), var(--card) 23px, var(--hairline) 24px), repeating-linear-gradient(90deg, var(--card), var(--card) 23px, var(--hairline) 24px)', overflow: 'hidden', touchAction: 'none' };
 const mapPin = { position: 'absolute', transform: 'translate(-50%, -50%)', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '8px 10px', borderRadius: 12, border: '2px solid var(--border)', background: 'var(--card)', color: 'var(--text)', boxShadow: 'var(--shadow-sm)', userSelect: 'none', touchAction: 'none' };
 const mapPinCount = { marginTop: 3, minWidth: 22, padding: '1px 7px', borderRadius: 10, background: 'var(--brand)', color: '#fff', fontSize: 12, fontWeight: 800 };
+const mapPinIssue = { position: 'absolute', top: -9, right: -9, padding: '1px 6px', borderRadius: 10, background: 'var(--error)', color: '#fff', fontSize: 11, fontWeight: 800, boxShadow: 'var(--shadow-sm)' };
+const mapToolbar = { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '8px 10px', borderRadius: 10, border: '1px solid var(--hairline)', background: 'var(--card)' };
+const tbGroup = { display: 'flex', alignItems: 'center', gap: 2, padding: 2, borderRadius: 8, border: '1px solid var(--border)' };
 const overlay = { position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 };
 const modalSheet = { width: '100%', maxWidth: 460, maxHeight: '88vh', overflowY: 'auto', background: 'var(--card)', borderRadius: 18, padding: 18, boxShadow: 'var(--shadow-pop)' };
 const modalActions = { display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 };
