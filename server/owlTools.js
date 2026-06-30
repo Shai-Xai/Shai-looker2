@@ -185,21 +185,26 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
 
     // 4) THE SCOPE GATE — bind to the organiser(s) this user can ACCESS; never run
     //    platform-wide. Event context (suiteId) narrows to that event's organiser
-    //    (same boundary as every tile, ceiling not override). If applyScope leaves
-    //    it unscoped (an admin with no event context), bind to the user's accessible
-    //    organisers (their entities / the previewed client). If neither yields a
+    //    (same boundary as every tile, ceiling not override). If neither yields a
     //    bound, refuse — fail closed, so the Owl can never aggregate across clients.
     const allowed = await query.applyScope(body, user, suiteId);
     if (allowed === false) {
       return refuse('no_scope', 'I can\'t tell which client\'s data to use here — open a client or an event first.');
     }
-    if (!body.filters[ORG]) {
+    // 4b) Bind to the SINGLE client in context (entityId). Critical: with no event,
+    //     applyScope scopes a MULTI-ENTITY user to the UNION of their organisers — so
+    //     without this, a chat with only a client in scope (e.g. the WhatsApp door,
+    //     which passes entityId and no suiteId) would aggregate across that user's
+    //     other clients. Narrowing to entityId is a tightening within the user's own
+    //     organisers (never a widening); fail closed if it can't be bound.
+    if (entityId && auth && auth.accessibleOrgFilters) {
+      const locks = auth.accessibleOrgFilters(user, entityId);
+      if (locks && locks[ORG]) body.filters = { ...body.filters, ...locks };
+      else if (!body.filters[ORG]) return refuse('no_scope', 'I can\'t tell which client\'s data to answer for — open a client or an event first.');
+    } else if (!body.filters[ORG]) {
       const locks = auth && auth.accessibleOrgFilters ? auth.accessibleOrgFilters(user, entityId) : null;
-      if (locks && locks[ORG]) {
-        body.filters = { ...body.filters, ...locks };
-      } else {
-        return refuse('no_scope', 'I can\'t tell which client\'s data to answer for — open a client or an event first, and I\'ll scope to that organiser.');
-      }
+      if (locks && locks[ORG]) body.filters = { ...body.filters, ...locks };
+      else return refuse('no_scope', 'I can\'t tell which client\'s data to answer for — open a client or an event first, and I\'ll scope to that organiser.');
     }
 
     // 5) Run + return the grounding trail. /queries/run/json → array of row objects.

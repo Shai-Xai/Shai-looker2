@@ -80,6 +80,21 @@ test('two clients resolve to different forced scopes', async () => {
   assert.notEqual(bodyA.filters[h.ORG_FIELD], bodyB.filters[h.ORG_FIELD]);
 });
 
+test('askData binds to the SINGLE client in context, not the union of a multi-entity user', async () => {
+  // The WhatsApp door passes only entityId (no suiteId). A user who belongs to two
+  // clients must NOT have their organisers unioned — that was a cross-entity leak.
+  const entA = h.makeEntity('Client A', 'A-org');
+  const entB = h.makeEntity('Client B', 'B-org');
+  const user = h.makeClient('multi@client.test', [entA.id, entB.id]);
+  const res = await tools().askData.run({ measure: M0 }, { user, entityId: entA.id }); // no suiteId
+  assert.equal(res.ok, true);
+  assert.equal(res.queryBody.filters[h.ORG_FIELD], 'A-org');              // bound to the one client
+  assert.ok(!String(res.queryBody.filters[h.ORG_FIELD]).includes('B-org')); // never the other
+  // And the other way round → the other client only.
+  const resB = await tools().askData.run({ measure: M0 }, { user, entityId: entB.id });
+  assert.equal(resB.queryBody.filters[h.ORG_FIELD], 'B-org');
+});
+
 test('a client cannot view through another client\'s suite (fails closed)', async () => {
   const entA = h.makeEntity('A', 'A-org');
   const entB = h.makeEntity('B', 'B-org');

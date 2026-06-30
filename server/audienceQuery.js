@@ -73,7 +73,14 @@ module.exports = function createAudienceQuery({ auth, db, catalogue = require('.
     applySuiteEventLocks(body.filters, suiteId);
     const allowed = await query.applyScope(body, user, suiteId);
     if (allowed === false) return empty('no_scope');
-    if (!body.filters[ORG]) {
+    // Bind to the SINGLE client (entityId). applyScope with no event scopes a
+    // multi-entity user to the UNION of their organisers — narrow so a segment never
+    // resolves people across the user's OTHER clients. Tightening, never widening.
+    if (entityId && auth.accessibleOrgFilters) {
+      const locks = auth.accessibleOrgFilters(user, entityId);
+      if (locks && locks[ORG]) body.filters = { ...body.filters, ...locks };
+      else if (!body.filters[ORG]) return empty('no_scope');
+    } else if (!body.filters[ORG]) {
       const locks = auth.accessibleOrgFilters ? auth.accessibleOrgFilters(user, entityId) : null;
       if (locks && locks[ORG]) body.filters = { ...body.filters, ...locks };
       else return empty('no_scope'); // fail closed — never resolve people across clients
