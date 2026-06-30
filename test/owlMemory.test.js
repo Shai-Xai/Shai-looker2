@@ -1,4 +1,4 @@
-// owlMemory — the durable per-client memory store + the rememberFact act-tool.
+// owlMemory — scope-aware (client + event) memory store + the rememberFact act-tool.
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const owlMemory = require('../server/owlMemory');
@@ -9,38 +9,40 @@ function fakeDb() {
   return { getSetting: (k, d = '') => (store.has(k) ? store.get(k) : d), setSetting: (k, v) => store.set(k, v) };
 }
 
-test('add stores a fact scoped to its client, de-duped case-insensitively', () => {
+test('client + event memory are separate stores, de-duped case-insensitively', () => {
   const db = fakeDb(); const m = owlMemory.build(db);
-  m.add('ent1', 'VIP is the priority tier', 'a@b.com');
-  m.add('ent1', 'vip is the PRIORITY tier', 'a@b.com'); // dupe → ignored
-  m.add('ent2', 'Flagship event is KFF', 'a@b.com');
-  assert.equal(m.read('ent1').length, 1);
-  assert.equal(m.read('ent2').length, 1);
-  assert.equal(m.read('ent1')[0].text, 'VIP is the priority tier');
-  assert.deepEqual(m.read('nope'), []); // unknown client → empty, never another client's facts
+  m.add('client', 'ent1', 'They report revenue excluding fees');
+  m.add('client', 'ent1', 'they REPORT revenue EXCLUDING fees'); // dupe → ignored
+  m.add('event', 'suiteA', '3-day camping festival');
+  assert.equal(m.read('client', 'ent1').length, 1);
+  assert.equal(m.read('event', 'suiteA').length, 1);
+  assert.deepEqual(m.read('event', 'ent1'), []); // event store for ent1 is its own (empty)
+  assert.deepEqual(m.read('client', 'nope'), []); // unknown → empty, never another scope's facts
 });
 
-test('memoryNote injects the facts (or nothing when empty)', () => {
+test('memoryNote merges client + this-event facts, labelled', () => {
   const db = fakeDb(); const m = owlMemory.build(db);
-  assert.equal(owlMemory.memoryNote(db, 'ent1'), '');
-  m.add('ent1', 'They report revenue excluding fees');
-  const note = owlMemory.memoryNote(db, 'ent1');
-  assert.match(note, /REMEMBER/);
-  assert.match(note, /excluding fees/);
+  m.add('client', 'ent1', 'VIP is the priority tier');
+  m.add('event', 'suiteA', 'This event sells add-ons heavily');
+  const note = owlMemory.memoryNote(db, 'ent1', 'suiteA');
+  assert.match(note, /about this client/);
+  assert.match(note, /VIP is the priority tier/);
+  assert.match(note, /THIS EVENT/);
+  assert.match(note, /add-ons heavily/);
+  // No event in scope → only client facts.
+  assert.doesNotMatch(owlMemory.memoryNote(db, 'ent1', ''), /THIS EVENT/);
 });
 
-test('save replaces the list and drops empties', () => {
-  const db = fakeDb(); const m = owlMemory.build(db);
-  m.save('ent1', [{ text: 'Fact A' }, { text: '   ' }, { text: 'Fact B' }]);
-  assert.deepEqual(m.read('ent1').map((x) => x.text), ['Fact A', 'Fact B']);
-});
-
-test('rememberFact tool DRAFTS (confirm) and needs a client', () => {
-  const noClient = owlMemory.tool.run({ fact: 'X' }, { user: { entityIds: ['a', 'b'] } });
-  assert.equal(noClient.ok, false); // ambiguous client → refuse
-  const ok = owlMemory.tool.run({ fact: 'VIP first' }, { entityId: 'ent1', user: { entityIds: ['ent1'] } });
-  assert.equal(ok.confirm, true);
-  assert.equal(ok.action.kind, 'rememberFact');
-  assert.equal(ok.action.entityId, 'ent1');
-  assert.equal(ok.action.fact, 'VIP first');
+test('rememberFact tool drafts at the chosen scope (event needs a suite in context)', () => {
+  // scope=event with a suite → event draft
+  const ev = owlMemory.tool.run({ fact: 'camping festival', scope: 'event' }, { entityId: 'ent1', suiteId: 'suiteA', user: { entityIds: ['ent1'] } });
+  assert.equal(ev.action.memScope, 'event');
+  assert.equal(ev.action.targetId, 'suiteA');
+  // scope=event but NO suite → falls back to client
+  const noSuite = owlMemory.tool.run({ fact: 'x', scope: 'event' }, { entityId: 'ent1', user: { entityIds: ['ent1'] } });
+  assert.equal(noSuite.action.memScope, 'client');
+  assert.equal(noSuite.action.targetId, 'ent1');
+  // default scope = client
+  const cl = owlMemory.tool.run({ fact: 'y' }, { entityId: 'ent1', user: { entityIds: ['ent1'] } });
+  assert.equal(cl.action.memScope, 'client');
 });

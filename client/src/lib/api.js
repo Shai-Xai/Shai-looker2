@@ -154,6 +154,8 @@ export const api = {
   // Client memory (durable per-client facts the Owl carries across chats).
   owlMemory: (entityId) => fetch(`/api/admin/entities/${entityId}/owl-memory`).then(json),
   saveOwlMemory: (entityId, items) => fetch(`/api/admin/entities/${entityId}/owl-memory`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }) }).then(json),
+  owlEventMemory: (suiteId) => fetch(`/api/admin/suites/${suiteId}/owl-memory`).then(json),
+  saveOwlEventMemory: (suiteId, items) => fetch(`/api/admin/suites/${suiteId}/owl-memory`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }) }).then(json),
   myOwlMemory: () => fetch('/api/my/owl-memory').then(json),
   saveMyOwlMemory: (items) => fetch('/api/my/owl-memory', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }) }).then(json),
   // The "/" slash-command palette (derived from the Owl's tool registry).

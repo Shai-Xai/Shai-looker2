@@ -1265,7 +1265,7 @@ app.get('/api/admin/ai-overview', auth.requireAdmin, (req, res) => {
       .filter((u) => (u.entityIds || []).includes(ent.id))
       .map((u) => ({ email: u.email, tune: (db.getUserPref(u.id, `briefing_tune:${ent.id}`) || '').trim() }))
       .filter((t) => t.tune);
-    return { id: ent.id, name: ent.name, aiContext: (ent.aiContext || '').trim(), owlGuidance: (db.getSetting(`owl_guidance:${ent.id}`, '') || '').trim(), owlMemory: require('./owlMemory').build(db).read(ent.id).map((m) => m.text), events, digests: jobsByEntity[ent.id] || [], readerTunes: tunes };
+    return { id: ent.id, name: ent.name, aiContext: (ent.aiContext || '').trim(), owlGuidance: (db.getSetting(`owl_guidance:${ent.id}`, '') || '').trim(), owlMemory: require('./owlMemory').build(db).read('client', ent.id).map((m) => m.text), events, digests: jobsByEntity[ent.id] || [], readerTunes: tunes };
   });
 
   // Tiles & dashboards with custom AI context (count + list, capped).

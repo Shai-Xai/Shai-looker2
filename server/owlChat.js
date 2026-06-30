@@ -374,8 +374,8 @@ function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, m
     // No-code steering layer: admin/client guidance (server/owlGuidance.js), injected
     // last so it can override the catalogue's defaults without a deploy.
     try { const g = guidance(db, scopeEntityId); if (g) parts.push(g); } catch { /* ignore */ }
-    // Durable client memory (facts confirmed over time) — injected like guidance.
-    try { const mem = owlMemory.memoryNote(db, scopeEntityId); if (mem) parts.push(mem); } catch { /* ignore */ }
+    // Durable memory — client facts + this event's facts (when an event is in scope).
+    try { const mem = owlMemory.memoryNote(db, scopeEntityId, suiteId); if (mem) parts.push(mem); } catch { /* ignore */ }
 
     // Load or create the thread (must belong to this user).
     let thread = threadId ? getThread.get(threadId) : null;
@@ -586,10 +586,16 @@ function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, m
   // re-checked here — the Owl can only write memory for a client the user can access.
   app.post('/api/owl/act/remember', auth.requireAuth, (req, res) => {
     if (!owlAllowed(req.user)) return res.status(403).json({ error: 'The native Owl isn\'t enabled for your account yet.' });
-    const { entityId, fact } = req.body || {};
-    if (!entityId || !String(fact || '').trim()) return res.status(400).json({ error: 'entityId and fact are required.' });
-    if (req.user.role !== 'admin' && !(req.user.entityIds || []).includes(entityId)) return res.status(403).json({ error: 'Not allowed.' });
-    const item = memoryApi.add(entityId, fact, req.user.email);
+    const { entityId, suiteId, fact, scope } = req.body || {};
+    if (!String(fact || '').trim()) return res.status(400).json({ error: 'A fact is required.' });
+    const memScope = scope === 'event' ? 'event' : 'client';
+    const targetId = memScope === 'event' ? suiteId : entityId;
+    if (!targetId) return res.status(400).json({ error: `${memScope === 'event' ? 'suiteId' : 'entityId'} is required.` });
+    // Re-check access at the right scope — the Owl can only write memory the user could.
+    const admin = req.user.role === 'admin';
+    if (memScope === 'event') { if (!admin && !auth.canAccessSuite(req.user, suiteId)) return res.status(403).json({ error: 'Not allowed.' }); }
+    else if (!admin && !(req.user.entityIds || []).includes(entityId)) return res.status(403).json({ error: 'Not allowed.' });
+    const item = memoryApi.add(memScope, targetId, fact, req.user.email);
     if (!item) return res.status(400).json({ error: 'Could not save that.' });
     res.status(201).json({ ok: true, item });
   });

@@ -523,13 +523,14 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
-- **2026-06-30** — **Owl memory (per client)** 🧪: the Owl now remembers durable facts about a
-  client across chats — its priority tier, how it defines revenue, naming conventions, what it
-  focuses on. It offers to remember things in conversation ("🧠 Remember it" — you confirm,
-  nothing's stored silently), and Howler/clients can review & edit the list in **Admin → Owl
-  memory** (and the AI audit). Remembered facts feed **every** answer for that client, on web
-  and WhatsApp — so it stops re-asking what it already knows. Scoped per client; never stores
-  personal/contact data.
+- **2026-06-30** — **Owl memory (client + event)** 🧪: the Owl now remembers durable facts across
+  chats — at **client** scope (every chat for that client) *and* **event** scope (only that
+  event's context, so two festivals can hold different facts without bleeding into each other).
+  It offers to remember things in conversation ("🧠 Remember it" — you confirm, nothing's stored
+  silently, and it picks client vs event scope), and Howler/clients can review & edit both in
+  **Admin → Owl memory** (and the AI audit). Remembered facts feed **every** answer for that
+  client/event, on web and WhatsApp — so it stops re-asking what it knows. Scoped + fail-closed;
+  never stores personal/contact data. (User-level memory is the next layer.)
 - **2026-06-30** — **Owl modes on WhatsApp** 🧪: the depth/action modes now reach WhatsApp via
   natural language — a customer can say **"go deeper"** for a fuller analysis or **"what should
   I do"** to have the Owl propose + draft the best next action (alert / segment / campaign,

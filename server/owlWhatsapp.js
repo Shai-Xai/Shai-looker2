@@ -387,7 +387,7 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
         if (r.ok) { logEvent(msisdn, 'action-done', `campaign draft ${r.action.title}`); const link = actionViewUrl(publicBase(), 'draftCampaign'); await messaging.sendWhatsapp({ to: msisdn, text: `✅ Drafted the campaign *${r.action.title}*. It's a DRAFT — review, approve and send it in the Pulse app (Engage). I never send anything to customers.${link ? `\nReview it: ${link}` : ''}` }); }
         else { logEvent(msisdn, 'action-failed', r.error || 'error'); await messaging.sendWhatsapp({ to: msisdn, text: `I couldn't create that draft: ${r.error || 'something went wrong'}.` }); }
       } else if (pend.kind === 'rememberFact') {
-        const item = memoryApi && memoryApi.add ? memoryApi.add(pend.entityId, pend.fact, user.email) : null;
+        const item = memoryApi && memoryApi.add ? memoryApi.add(pend.memScope || 'client', pend.targetId || pend.entityId, pend.fact, user.email) : null;
         if (item) { logEvent(msisdn, 'action-done', `remember: ${String(pend.fact).slice(0, 80)}`); await messaging.sendWhatsapp({ to: msisdn, text: '✅ Got it — I\'ll remember that for next time.' }); }
         else { logEvent(msisdn, 'action-failed', 'memory save failed'); await messaging.sendWhatsapp({ to: msisdn, text: 'I couldn\'t save that to memory just now.' }); }
       } else { await messaging.sendWhatsapp({ to: msisdn, text: 'That action can only be completed in the Pulse app.' }); }
