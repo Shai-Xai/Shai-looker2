@@ -1123,7 +1123,7 @@ app.post('/api/filter-suggest', auth.requireAuth, async (req, res) => {
     const t = (term || '').trim();
     if (t) {
       if (/^\d+$/.test(t)) {
-        q.filters = { [field]: t };
+        q.filters = { [/^core_ticket_(categories|types)\.name$/.test(field) ? field.replace(/\.name$/, '.id') : field]: t }; // a number finds a ticket by id; the shown/stored value stays the name
       } else {
         // Looker's `%x%` LIKE can be case-sensitive (depends on the dialect),
         // so OR a few case variants to make search effectively case-insensitive.
