@@ -760,15 +760,18 @@ function ActionCard({ action }) {
 function AlertActionCard({ action }) {
   const [state, setState] = useState(''); // '' | 'busy' | 'done' | 'error'
   const [err, setErr] = useState('');
+  const [suiteId, setSuiteId] = useState(action.suiteId || ''); // chosen event (when none was selected)
   const d = action.draft || {};
   const cond = `${d.metricLabel || d.measureLabel || 'this metric'} ${OP_TEXT[d.operator] || 'reaches'} ${fmtVal(d.threshold)}${d.unit === '%' ? '%' : ''}`;
   const CHAN_LABEL = { push: 'push', email: 'email', sms: 'SMS', slack: 'Slack' };
   const chans = (d.channels || []).map((c) => CHAN_LABEL[c] || c);
   const delivery = `via ${['in-app', ...chans].join(', ')}${d.priority === 'important' ? ' · important' : ''}`;
+  const events = action.events || [];
   const create = async () => {
+    if (!suiteId) return; // need an event first
     setState('busy'); setErr('');
     try {
-      await api.owlCreateAlert({ suiteId: action.suiteId, draft: d });
+      await api.owlCreateAlert({ suiteId, draft: d });
       setState('done');
     } catch (e) { setState('error'); setErr((e && e.message) || 'Could not create the alert.'); }
   };
@@ -781,14 +784,25 @@ function AlertActionCard({ action }) {
       </div>
       <div style={{ fontSize: 13, color: 'var(--text)', marginBottom: 4 }}>Notify me when <strong>{cond}</strong>.</div>
       <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 8 }}>{delivery}</div>
+      {action.needsEvent && state !== 'done' && (
+        <div style={{ marginBottom: 8 }}>
+          <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 3 }}>Which event should this watch?</div>
+          <select value={suiteId} onChange={(e) => setSuiteId(e.target.value)}
+            style={{ width: '100%', boxSizing: 'border-box', padding: '6px 8px', borderRadius: 8, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', fontSize: 13 }}>
+            <option value="">Pick an event…</option>
+            {events.map((ev) => <option key={ev.id} value={ev.id}>{ev.name}</option>)}
+          </select>
+        </div>
+      )}
       {state === 'done' ? (
         <div style={{ fontSize: 12.5, color: 'var(--brand)', fontWeight: 600 }}>✓ Alert created — you'll be notified when it triggers.</div>
       ) : (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <button onClick={create} disabled={state === 'busy'}
-            style={{ border: 'none', borderRadius: 980, padding: '6px 16px', fontSize: 12.5, fontWeight: 700, cursor: state === 'busy' ? 'default' : 'pointer', background: state === 'busy' ? 'var(--elevated, rgba(128,128,128,0.18))' : 'var(--brand)', color: state === 'busy' ? 'var(--muted)' : '#fff' }}>
+          <button onClick={create} disabled={state === 'busy' || !suiteId}
+            style={{ border: 'none', borderRadius: 980, padding: '6px 16px', fontSize: 12.5, fontWeight: 700, cursor: (state === 'busy' || !suiteId) ? 'default' : 'pointer', background: (state === 'busy' || !suiteId) ? 'var(--elevated, rgba(128,128,128,0.18))' : 'var(--brand)', color: (state === 'busy' || !suiteId) ? 'var(--muted)' : '#fff' }}>
             {state === 'busy' ? 'Creating…' : 'Create alert'}
           </button>
+          {action.needsEvent && !suiteId && <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>Pick an event above</span>}
           {state === 'error' && <span style={{ fontSize: 12, color: '#e0414a' }}>{err}</span>}
         </div>
       )}

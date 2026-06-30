@@ -35,7 +35,7 @@ beforeEach(() => {
 });
 afterEach(() => { looker.lookerRequest = origRequest; });
 
-const tools = () => createOwlTools({ query: queryEngine, auth: h.auth });
+const tools = () => createOwlTools({ query: queryEngine, auth: h.auth, db: h.db });
 const ctx = (user, suiteId) => ({ user, suiteId });
 
 test('askData forces the client\'s organiser scope onto the query', async () => {
@@ -195,11 +195,27 @@ test('createAlert drafts a metric alert bound to the curated explore', async () 
   assert.equal(lookerCalls, 0);               // act-tool drafts; it never queries Looker
 });
 
-test('createAlert refuses when no event is selected', async () => {
-  const user = h.makeClient('owl-ca2@client.test', [h.makeEntity('A', 'A-org').id]);
+test('createAlert with no event auto-picks the client\'s only event', async () => {
+  const ent = h.makeEntity('Solo Co', 'Solo-org');
+  const suite = h.db.createSuite({ entityId: ent.id, name: 'Only Event' });
+  const user = h.makeClient('owl-ca2@client.test', [ent.id]);
   const res = await tools().createAlert.run({ measure: M0, operator: 'gte', threshold: 50 }, ctx(user)); // no suiteId
-  assert.equal(res.ok, false);
-  assert.equal(res.reason, 'no_event');
+  assert.equal(res.ok, true);
+  assert.equal(res.action.suiteId, suite.id); // resolved to the only event
+  assert.equal(res.action.needsEvent, false);
+});
+
+test('createAlert with no event + several events offers an in-chat picker (no dead end)', async () => {
+  const ent = h.makeEntity('Multi Co', 'Multi-org');
+  const s1 = h.db.createSuite({ entityId: ent.id, name: 'Event One' });
+  const s2 = h.db.createSuite({ entityId: ent.id, name: 'Event Two' });
+  const user = h.makeClient('owl-ca2b@client.test', [ent.id]);
+  const res = await tools().createAlert.run({ measure: M0, operator: 'gte', threshold: 50 }, ctx(user)); // no suiteId
+  assert.equal(res.ok, true);          // drafts anyway — never dead-ends asking to go pick
+  assert.equal(res.action.needsEvent, true);
+  assert.equal(res.action.suiteId, '');
+  const ids = (res.action.events || []).map((e) => e.id);
+  assert.ok(ids.includes(s1.id) && ids.includes(s2.id)); // both offered as choices
 });
 
 test('createAlert refuses an off-catalogue measure', async () => {

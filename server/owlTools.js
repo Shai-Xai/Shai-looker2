@@ -598,7 +598,6 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
   function runCreateAlert(args = {}, ctx = {}) {
     const { user, suiteId } = ctx;
     if (!user) return refuse('no_user', 'No authenticated user in context.');
-    if (!suiteId) return refuse('no_event', 'Pick an event first — an alert watches one event\'s numbers.');
     const m = measureByName.get(args.measure);
     if (!m) return refuse('unknown_measure', `"${args.measure}" isn't a measure I can watch. Pick a curated measure.`);
     const operator = ALERT_OPERATORS.includes(args.operator) ? args.operator : 'gte';
@@ -633,11 +632,25 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
       operator, threshold, unit: m.unit || '',
       channels: channels.length ? channels : [DEFAULT_CHANNEL], priority,
     };
+    // Resolve which EVENT the alert watches. If one is already selected, use it. If not,
+    // don't dead-end the chat asking the user to go pick one — draft it anyway and let
+    // the confirm card offer an event picker (auto-pick when the client has only one).
+    let resolvedSuite = suiteId || '';
+    let events;
+    if (!resolvedSuite) {
+      const entityId = ctx.entityId
+        || ((user.entityIds || []).length === 1 ? user.entityIds[0] : null);
+      if (!entityId) return refuse('no_client', 'Open a client (or an event) first, then I can set up the alert.');
+      const list = (db && db.listSuitesForEntity ? db.listSuitesForEntity(entityId) : []).map((s) => ({ id: s.id, name: s.name }));
+      if (list.length === 1) resolvedSuite = list[0].id; // only one event → no need to ask
+      else if (!list.length) return refuse('no_events', 'This client has no events yet to attach an alert to.');
+      else events = list; // several → the card lets them choose
+    }
     return {
       ok: true,
       confirm: true, // tells the loop to surface an action card; nothing is created yet
       action: {
-        kind: 'createAlert', suiteId, draft,
+        kind: 'createAlert', suiteId: resolvedSuite, needsEvent: !resolvedSuite, events, draft,
         summary: `Notify when ${metricLabel} ${OP_LABEL[operator]} ${threshold}`,
       },
     };
@@ -645,7 +658,7 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
   const createAlertSchema = {
     name: 'createAlert',
     description:
-      'DRAFT a metric alert for the user to confirm — you do NOT create it; they tap "Create alert" to switch it on. An alert watches ONE event\'s ticketing number and notifies the client\'s own team when it crosses a threshold (e.g. tickets sold ≥ 1000, revenue ≥ 500000, remaining ≤ 50). Use when the user asks to be told / notified / alerted / reminded when a number reaches a level. Self-affecting only: it never messages ticket buyers and never spends. Delivery defaults to an in-app/push notification at normal priority — only set channels/priority if the user asks (e.g. "email me", "make it important"); inbox is always on. After calling it, tell the user what it will watch + the exact condition + how they\'ll be notified, and that they can tap the button to switch it on. Requires an event to be selected (ok:false otherwise — ask them to pick one).',
+      'DRAFT a metric alert for the user to confirm — you do NOT create it; they tap "Create alert" to switch it on. An alert watches ONE event\'s ticketing number and notifies the client\'s own team when it crosses a threshold (e.g. tickets sold ≥ 1000, revenue ≥ 500000, remaining ≤ 50). Use when the user asks to be told / notified / alerted / reminded when a number reaches a level. Self-affecting only: it never messages ticket buyers and never spends. Delivery defaults to an in-app/push notification at normal priority — only set channels/priority if the user asks (e.g. "email me", "make it important"); inbox is always on. You do NOT need an event to be selected: if none is, the confirm card lets the user pick which event (or auto-uses the only one) — so never ask them to go and select an event. After calling it, tell the user what it will watch + the exact condition + how they\'ll be notified, and that they can tap the button to switch it on (choosing the event there if asked).',
     input_schema: {
       type: 'object',
       properties: {
