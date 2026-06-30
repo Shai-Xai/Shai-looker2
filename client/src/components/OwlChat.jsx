@@ -48,6 +48,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
     try { r.start(); setListening(true); } catch { setListening(false); }
   };
   const [followups, setFollowups] = useState([]); // suggested next questions for the latest answer
+  const [persona, setPersona] = useState('quick'); // depth mode: 'quick' (fast) | 'analyst' (deep)
   const [status, setStatus] = useState(''); // live "thinking" label streamed while the Owl works
   const [commands, setCommands] = useState([]); // "/" slash-command palette (from the tool registry)
   const [slashIdx, setSlashIdx] = useState(0);   // highlighted command in the palette
@@ -107,6 +108,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
       setMessages((r.messages || []).map((m) => ({ role: m.role === 'user' ? 'user' : 'owl', text: m.body, sources: m.sources })));
       setThreadId(t.id);
       setSelEntity(t.entityId || ''); setSelSuite(t.suiteId || '');
+      setPersona(t.persona === 'analyst' ? 'analyst' : 'quick'); // reflect the chat's saved depth
     } catch { /* ignore */ }
     setEditingId(null);
     if (isMobile) setSidebarOpen(false);
@@ -178,16 +180,17 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose]);
 
-  async function send(text) {
+  async function send(text, opts = {}) {
     const q = String(text ?? input).trim();
     if (!q || busy) return;
     if (listening) { try { recogRef.current && recogRef.current.stop(); } catch { /* ignore */ } setListening(false); }
     if (!canAsk) { setMessages((m) => [...m, { role: 'owl', text: 'Pick a client (or open an event) above, then ask me — I scope to that organiser.' }]); return; }
     if (text == null) setInput('');
     setFollowups([]);
-    setStatus('Thinking…'); // show an immediate indicator before the first token
-    // Append the question + an empty Owl bubble we stream into.
-    setMessages((m) => [...m, { role: 'user', text: q }, { role: 'owl', text: '' }]);
+    const useMode = opts.mode || persona; // a one-off "dig deeper" overrides the toggle for this turn
+    setStatus(useMode === 'analyst' ? 'Digging in…' : 'Thinking…'); // show an immediate indicator before the first token
+    // Append the question + an empty Owl bubble we stream into (tagged with the depth used).
+    setMessages((m) => [...m, { role: 'user', text: q }, { role: 'owl', text: '', mode: useMode }]);
     setBusy(true);
     const appendToOwl = (delta) => setMessages((m) => {
       const next = m.slice();
@@ -195,7 +198,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
       return next;
     });
     try {
-      const { threadId: tid, sources, followups: fu, actions } = await api.owlChat({ suiteId: selSuite || undefined, entityId: selEntity || undefined, dashboardId: dashboardId || undefined, message: q, threadId }, appendToOwl, setStatus);
+      const { threadId: tid, sources, followups: fu, actions } = await api.owlChat({ suiteId: selSuite || undefined, entityId: selEntity || undefined, dashboardId: dashboardId || undefined, message: q, threadId, mode: useMode }, appendToOwl, setStatus);
       if (tid) { const isNew = tid !== threadId; setThreadId(tid); if (isNew) refreshThreads(); }
       if ((sources && sources.length) || (actions && actions.length)) setMessages((m) => {
         const next = m.slice();
@@ -405,6 +408,10 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
                   scopeLabel={[clients.find((c) => c.id === selEntity)?.name, events.find((e) => e.id === selSuite)?.name].filter(Boolean).join(' · ')}
                   dashboardId={dashboardId}
                 />
+                {/* Re-ask this question at Analyst depth (a one-off; doesn't change the toggle). */}
+                {m.mode !== 'analyst' && (
+                  <button onClick={() => { const q = [...messages.slice(0, i)].reverse().find((x) => x.role === 'user')?.text; if (q) send(q, { mode: 'analyst' }); }} title="Re-answer this with deeper analysis" style={msgActionStyle}>🔬 Dig deeper</button>
+                )}
               </div>
             )}
           </div>
@@ -441,6 +448,16 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
       {/* Composer, Claude-style: a big text box on top, with attach / mic on the
           left and Send on the right of a row beneath it. */}
       <div style={{ borderTop: '1px solid var(--hairline)', padding: 10, flexShrink: 0 }}>
+        {/* Depth toggle: Quick (fast lookups) vs Analyst (deep — multi-cut analysis + a
+            recommendation, a little slower). Sets this chat's default; the per-answer
+            "🔬 Dig deeper" re-asks one question deep without changing this. */}
+        <div style={{ display: 'flex', gap: 4, alignItems: 'center', marginBottom: 8 }}>
+          {[['quick', '⚡ Quick'], ['analyst', '🔬 Analyst']].map(([k, lbl]) => (
+            <button key={k} type="button" onClick={() => setPersona(k)} title={k === 'analyst' ? 'Deeper analysis: multiple cuts, the “so what”, and strategic follow-ups (a little slower)' : 'Fast, grounded answers'}
+              style={{ border: '1px solid var(--hairline)', background: persona === k ? 'var(--brand)' : 'var(--card)', color: persona === k ? '#fff' : 'var(--muted)', borderRadius: 980, padding: '3px 11px', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>{lbl}</button>
+          ))}
+          {persona === 'analyst' && <span style={{ fontSize: 11, color: 'var(--muted)' }}>deeper · a little slower</span>}
+        </div>
         {/* "/" command palette — a quick menu of what the Owl can answer. */}
         {slashOpen && slashMatches.length > 0 && (
           <div style={{ marginBottom: 6, border: '1px solid var(--hairline)', borderRadius: 12, background: 'var(--card)', overflow: 'hidden', boxShadow: '0 6px 22px rgba(0,0,0,0.14)' }}>

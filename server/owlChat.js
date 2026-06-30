@@ -87,17 +87,38 @@ FOLLOW-UPS: At the very END of your reply, on its own final line, output the mar
 
 STYLE: concise, plain English, lead with the answer/number, money in the client's reporting currency (see the Currency note; default ZAR only if none). If a question is genuinely ambiguous (e.g. which event, for a multi-event client), ask one short clarifying question instead of guessing.`;
 
+// ── Personas (depth modes the user toggles) ───────────────────────────────────
+// Not different models or temperatures — the same grounded brain with a different
+// BRIEF + reasoning budget. Quick = today's fast lookup. Analyst = deeper: more
+// reasoning effort, more query rounds, multi-cut analysis + a recommendation, sharper
+// follow-ups. (Operator — proactively proposes + drafts actions — is the next phase.)
+const OWL_ANALYST_LAYER = `DEPTH — ANALYST MODE: the user wants a deeper read, so work like a senior data analyst, not a lookup.
+- Don't stop at the headline number. Pull the supporting cuts with askData — the trend over time, the breakdown by the most telling dimension (ticket type / city / channel), and a comparison to a prior period or a comparable event — then SYNTHESISE them into one read.
+- Lead with the answer, then explain WHAT'S DRIVING IT and WHY IT MATTERS (the "so what"), and end with a concrete recommended next step.
+- Call out anything notable: an outlier, an inflection point, a segment over/under-performing, a pacing risk against the goal.
+- Favour a tight Markdown table + one chart-worthy breakdown over a wall of prose — insight density, not length.
+- Make your follow-ups PROBING and strategic (e.g. "What's driving the VIP dip?", "Compare channels for this event", "Forecast final sales"), not just the obvious next cut.`;
+
+// Each persona is a bundle: reasoning effort + output budget + how many tool rounds it
+// may run + the prompt layer appended to the instructions.
+const PERSONAS = {
+  quick: { effort: 'low', maxTokens: 1500, maxRounds: 5, layer: '' },
+  analyst: { effort: 'high', maxTokens: 3500, maxRounds: 9, layer: OWL_ANALYST_LAYER },
+};
+const personaKey = (m) => (PERSONAS[m] ? m : 'quick');
+const personaOf = (m) => PERSONAS[personaKey(m)];
+
 // One streamed assistant turn via Claude (uses insights' shared client + model +
 // instruction layering). Returns the final Message; its content blocks may include
 // tool_use the loop must run. Kept here so insights.js stays a prompt/AI library
 // and this disposable module owns its own conversational turn.
-async function owlTurn(insights, { messages, tools, instructions, apiKey, onText }) {
+async function owlTurn(insights, { messages, tools, instructions, apiKey, onText, effort = 'low', maxTokens = 1500 }) {
   const c = insights.requireClient(apiKey);
   const stream = c.messages.stream({
     model: insights.MODEL,
-    max_tokens: 1500,
+    max_tokens: maxTokens,
     thinking: { type: 'adaptive' },
-    output_config: { effort: 'low' },
+    output_config: { effort },
     system: insights.systemWith(OWL_CHAT_SYSTEM, instructions),
     tools: tools || [],
     messages: messages || [],
@@ -182,11 +203,14 @@ function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, m
   `);
   // Migration: chats can belong to a folder (added after launch).
   try { sql.exec("ALTER TABLE owl_threads ADD COLUMN folder TEXT NOT NULL DEFAULT ''"); } catch { /* already present */ }
+  // Migration: a chat remembers its depth persona (quick | analyst) as its default.
+  try { sql.exec("ALTER TABLE owl_threads ADD COLUMN persona TEXT NOT NULL DEFAULT 'quick'"); } catch { /* already present */ }
   const now = () => new Date().toISOString();
-  const insThread = sql.prepare('INSERT INTO owl_threads (id,entity_id,user_id,suite_id,title,created_at) VALUES (?,?,?,?,?,?)');
+  const insThread = sql.prepare('INSERT INTO owl_threads (id,entity_id,user_id,suite_id,title,persona,created_at) VALUES (?,?,?,?,?,?,?)');
   const getThread = sql.prepare('SELECT * FROM owl_threads WHERE id = ?');
   const renameThread = sql.prepare('UPDATE owl_threads SET title = ? WHERE id = ?');
   const setThreadFolder = sql.prepare('UPDATE owl_threads SET folder = ? WHERE id = ?');
+  const setThreadPersona = sql.prepare('UPDATE owl_threads SET persona = ? WHERE id = ?');
   const delThread = sql.prepare('DELETE FROM owl_threads WHERE id = ?');
   const delThreadMsgs = sql.prepare('DELETE FROM owl_messages WHERE thread_id = ?');
   const insMsg = sql.prepare('INSERT INTO owl_messages (id,thread_id,role,body,tool_calls,created_at) VALUES (?,?,?,?,?,?)');
@@ -279,7 +303,7 @@ function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, m
   // POST /api/owl/chat — ask the Owl. Streams the grounded answer as plain text.
   app.post('/api/owl/chat', auth.requireAuth, async (req, res) => {
     if (!owlAllowed(req.user)) return res.status(403).json({ error: 'The native Owl isn\'t enabled for your account yet.' });
-    const { suiteId, message, entityId, dashboardId } = req.body || {};
+    const { suiteId, message, entityId, dashboardId, mode } = req.body || {};
     let { threadId } = req.body || {};
     if (!message || !String(message).trim()) return res.status(400).json({ error: 'Empty message.' });
     // Scope context is an EVENT (suiteId) and/or a CLIENT (entityId). Clients are
@@ -326,16 +350,22 @@ function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, m
     // No-code steering layer: admin/client guidance (server/owlGuidance.js), injected
     // last so it can override the catalogue's defaults without a deploy.
     try { const g = guidance(db, scopeEntityId); if (g) parts.push(g); } catch { /* ignore */ }
-    const instructions = parts.join('\n\n');
 
     // Load or create the thread (must belong to this user).
     let thread = threadId ? getThread.get(threadId) : null;
     if (thread && thread.user_id !== req.user.id) return res.status(403).json({ error: 'Not your thread.' });
+    // Depth persona: this message's explicit `mode` wins; else the chat's saved default.
+    const pKey = personaKey(mode || (thread && thread.persona) || 'quick');
+    const persona = PERSONAS[pKey];
     if (!thread) {
       threadId = crypto.randomUUID();
-      insThread.run(threadId, scopeEntityId, req.user.id, suiteId || null, String(message).slice(0, 80), now());
+      insThread.run(threadId, scopeEntityId, req.user.id, suiteId || null, String(message).slice(0, 80), pKey, now());
       thread = getThread.get(threadId);
+    } else if (mode && thread.persona !== pKey) {
+      setThreadPersona.run(pKey, thread.id); // an explicit toggle becomes the chat's default
     }
+    // Persona layer is appended last so its deeper brief sits over the base instructions.
+    const instructions = [...parts, persona.layer].filter(Boolean).join('\n\n');
 
     const history = historyFor(thread.id);
     insMsg.run(crypto.randomUUID(), thread.id, 'user', String(message), '[]', now());
@@ -345,14 +375,16 @@ function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, m
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('X-Accel-Buffering', 'no');
     res.setHeader('X-Owl-Thread', thread.id);
+    res.setHeader('X-Owl-Persona', pKey);
     res.flushHeaders?.();
     try {
       const { text, trail } = await runOwlLoop({
-        llmTurn: ({ messages: m, tools, onText }) => owlTurn(insights, { messages: m, tools, instructions, apiKey, onText }),
+        llmTurn: ({ messages: m, tools, onText }) => owlTurn(insights, { messages: m, tools, instructions, apiKey, onText, effort: persona.effort, maxTokens: persona.maxTokens }),
         toolMap,
         tools: toolSchemas,
         messages,
         ctx: { user: req.user, suiteId, entityId, dashboardId },
+        maxRounds: persona.maxRounds,
         onText: (t) => res.write(t),
         // Stream a status ping between turns; the client renders it as the thinking line.
         onStatus: (label) => { try { res.write(STATUS_OPEN + String(label).replace(/[<>]/g, '') + STATUS_CLOSE); } catch { /* socket gone */ } },
@@ -526,4 +558,4 @@ function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, m
   console.log('[owlChat] agentic Owl chat module mounted');
 }
 
-module.exports = { mount, runOwlLoop, owlTurn, textOf, OWL_CHAT_SYSTEM, owlAllowed };
+module.exports = { mount, runOwlLoop, owlTurn, textOf, OWL_CHAT_SYSTEM, OWL_ANALYST_LAYER, owlAllowed };

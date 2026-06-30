@@ -1134,6 +1134,7 @@ function promptRegistry() {
     { key: 'goals', label: 'Goals summary', scope: 'Owl summary of an event\'s goals on the Goals page', text: GOALS_SYSTEM },
     { key: 'goalGap', label: 'Goal gap plan', scope: 'Marketing/insights plan to close a behind-pace goal (→ targeted campaign)', text: GOAL_GAP_SYSTEM },
     { key: 'owlChat', label: 'Owl chat (agentic)', scope: 'The conversational Owl: tool-using analyst that answers questions by calling askData (grounded, scoped)', text: require('./owlChat').OWL_CHAT_SYSTEM },
+    { key: 'owlChatAnalyst', label: 'Owl chat — Analyst depth', scope: 'Extra brief layered on the Owl chat when the user picks Analyst (deep) mode — multi-cut analysis + recommendation', text: require('./owlChat').OWL_ANALYST_LAYER },
     { key: 'jsonRepair', label: 'JSON repair', scope: 'Last-resort model repair of malformed AI JSON before parsing', text: JSON_REPAIR_SYSTEM },
   ];
 }

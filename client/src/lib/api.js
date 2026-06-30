@@ -99,10 +99,11 @@ export const api = {
   // Agentic Owl chat: POST a question, stream the grounded answer as plain text
   // (onText per delta), resolve with { threadId } (read from the X-Owl-Thread header
   // so a new conversation can be continued).
-  owlChat: async ({ suiteId, entityId, dashboardId, message, threadId }, onText, onStatus) => {
-    const res = await fetch('/api/owl/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ suiteId, entityId, dashboardId, message, threadId }) });
+  owlChat: async ({ suiteId, entityId, dashboardId, message, threadId, mode }, onText, onStatus) => {
+    const res = await fetch('/api/owl/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ suiteId, entityId, dashboardId, message, threadId, mode }) });
     if (!res.ok) return json(res); // pre-stream rejection (no scope / no API key) → throws
     const tid = res.headers.get('X-Owl-Thread') || threadId || null;
+    const persona = res.headers.get('X-Owl-Persona') || mode || 'quick';
     const reader = res.body.getReader();
     const dec = new TextDecoder();
     // The answer text streams first, then trailing records: the model's
@@ -145,7 +146,7 @@ export const api = {
     if (sa >= 0) { const after = buf.slice(sa + SRC.length); const end = after.indexOf(ACT); const blob = end >= 0 ? after.slice(0, end) : after; try { sources = JSON.parse(blob); } catch { sources = []; } }
     const aa = buf.indexOf(ACT);
     if (aa >= 0) { try { actions = JSON.parse(buf.slice(aa + ACT.length)); } catch { actions = []; } }
-    return { threadId: tid, sources, followups, actions };
+    return { threadId: tid, sources, followups, actions, persona };
   },
   // Act layer: commit a drafted action the Owl proposed (the "Create alert" tap).
   owlCreateAlert: (body) => fetch('/api/owl/act/create-alert', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),

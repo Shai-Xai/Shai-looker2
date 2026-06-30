@@ -512,6 +512,12 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-30** — **Owl depth modes (Quick / Analyst)** 🧪: the Owl chat now has a depth
+  toggle — **⚡ Quick** (fast, grounded answers, default) and **🔬 Analyst** (deeper: more
+  reasoning, multiple data cuts, the "so what" + a recommendation, sharper follow-ups). The
+  toggle is remembered per conversation, and any quick answer has a **🔬 Dig deeper** one-tap
+  to re-run just that question deep. Same grounded brain — different brief + reasoning budget,
+  not a different model.
 - **2026-06-30** — **Per-client SMS sub-cap** ✅: campaigns now honour a separate,
   tighter SMS ceiling (default 5,000/campaign) on top of the audience cap, so a big
   email send can't accidentally trigger an equally-big SMS blast. Set it to 0 to
