@@ -1114,17 +1114,16 @@ app.post('/api/filter-suggest', auth.requireAuth, async (req, res) => {
     const COMPANION = {
       'core_organisers.name': 'core_organisers.id', 'core_organisers.id': 'core_organisers.name',
       'core_events.name': 'core_events.id', 'core_events.id': 'core_events.name',
-      'core_ticket_categories.name': 'core_ticket_categories.id', 'core_ticket_categories.id': 'core_ticket_categories.name', 'core_ticket_types.name': 'core_ticket_types.id', 'core_ticket_types.id': 'core_ticket_types.name',
     };
-    let comp = (pair || /^core_ticket_(categories|types)\.(name|id)$/.test(field)) ? COMPANION[field] : null; // ticket names collide → always show id (and name when filtering by id)
+    const comp = pair ? COMPANION[field] : null;
     // Event names also show the event's start date in the dropdown, e.g.
     // "Ultra South Africa  —  29 May 2026", pulled from the same explore.
-    let dateField = field === 'core_events.name' ? 'core_events.start_date' : null;
+    const dateField = field === 'core_events.name' ? 'core_events.start_date' : null;
     const q = { model, view: explore, fields: [field, comp, dateField].filter(Boolean), sorts: [field], limit: 100 };
     const t = (term || '').trim();
     if (t) {
       if (/^\d+$/.test(t)) {
-        q.filters = { [field]: t };
+        q.filters = { [/^core_ticket_(categories|types)\.name$/.test(field) ? field.replace(/\.name$/, '.id') : field]: t }; // a number finds a ticket by id; the shown/stored value stays the name
       } else {
         // Looker's `%x%` LIKE can be case-sensitive (depends on the dialect),
         // so OR a few case variants to make search effectively case-insensitive.
@@ -1141,12 +1140,14 @@ app.post('/api/filter-suggest', auth.requireAuth, async (req, res) => {
     }
     if (!(await applyScope(q, req.user, suiteId))) return res.json({ suggestions: [] });
     let rows;
-    try { rows = await runLookerQuery('/queries/run/json', q); }
-    catch (err) {
-      // Some explores don't expose the companion id or the start date — drop the
-      // extras and retry on the bare dimension so suggestions still work everywhere.
-      if (!comp && !dateField) throw err;
-      comp = dateField = null; q.fields = [field]; rows = await runLookerQuery('/queries/run/json', q);
+    try {
+      rows = await runLookerQuery('/queries/run/json', q);
+    } catch (err) {
+      // Some explores expose the event name but not core_events.start_date —
+      // drop the date field and retry so suggestions still work everywhere.
+      if (!dateField) throw err;
+      q.fields = q.fields.filter((f) => f !== dateField);
+      rows = await runLookerQuery('/queries/run/json', q);
     }
     const seen = new Set();
     const suggestions = [];
@@ -1155,9 +1156,8 @@ app.post('/api/filter-suggest', auth.requireAuth, async (req, res) => {
       const v = r[field];
       if (v == null || v === '') continue;
       const s = String(v);
-      const dedup = comp && r[comp] != null ? `${s} ${String(r[comp])}` : s; // keep same-named ids distinct
-      if (seen.has(dedup)) continue;
-      seen.add(dedup);
+      if (seen.has(s)) continue;
+      seen.add(s);
       const date = dateField && r[dateField] != null && r[dateField] !== '' ? fmtEventDate(r[dateField]) : '';
       if (comp) {
         const other = r[comp] == null ? '' : String(r[comp]);

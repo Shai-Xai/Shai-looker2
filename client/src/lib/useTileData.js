@@ -41,6 +41,19 @@ export function useTileData(tile, filterValues) {
     if (val === ANY_VALUE) overrides[queryField] = ANY_VALUE;
     else if (val && String(val).trim()) overrides[queryField] = String(val).trim();
   }
+  // A hand-added dashboard filter (no Looker model/explore, so it was never wired
+  // into any tile's `listenTo`) still has to filter the report. Apply its value to
+  // any tile whose own query already uses that field's view — the same field-match
+  // the lock picker uses. Looker-imported filters carry model/explore and keep
+  // their explicit listenTo wiring only, so nothing over-filters.
+  for (const f of lockFilters || []) {
+    if (f.model || f.explore) continue;                     // Looker-wired → listenTo only (above)
+    if (tile.listenTo && f.name in tile.listenTo) continue; // already handled in Loop 1
+    const val = filterValues?.[f.name];
+    if (!val || val === ANY_VALUE || !String(val).trim()) continue;
+    const queryField = lockFieldFor(tile, f.name, lockFilters);
+    if (queryField) overrides[queryField] = String(val).trim();
+  }
   // Per-tile locks on filters the tile ISN'T wired to via listenTo — resolve the
   // filter to a query field the tile's own query already uses, and apply it.
   for (const [filterName, locked] of Object.entries(myLocks)) {
