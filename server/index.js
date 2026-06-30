@@ -23,7 +23,7 @@ const rateLimit = require('./ratelimit');
 // unchanged. See server/query.js.
 const query = require('./query')({ looker, auth });
 const {
-  runLookerQuery, applyScope, stripAnyValue, routeTicketIdFilters, ANY_VALUE, currentFirstEventSort,
+  runLookerQuery, applyScope, stripAnyValue, ANY_VALUE, currentFirstEventSort,
   cleanFilterMap, expandLockMap, effectiveFilterValues, tileQueryBody, daysBeforeOverlayFor,
   primaryTileValue,
 } = query;
@@ -557,7 +557,7 @@ require('./clientModel').mount(app, { db, auth, store, looker, fetchDashboard, c
 require('./dashboards').mount(app, {
   store, db, auth, looker,
   convertDashboard, fetchDashboard, parseDrillUrl,
-  runLookerQuery, applyScope, stripAnyValue, currentFirstEventSort, routeTicketIdFilters,
+  runLookerQuery, applyScope, stripAnyValue, currentFirstEventSort,
 });
 
 // ─── Goals (the Results pillar) → server/goals.js ──────────────────────────────
@@ -1114,17 +1114,16 @@ app.post('/api/filter-suggest', auth.requireAuth, async (req, res) => {
     const COMPANION = {
       'core_organisers.name': 'core_organisers.id', 'core_organisers.id': 'core_organisers.name',
       'core_events.name': 'core_events.id', 'core_events.id': 'core_events.name',
-      'core_ticket_categories.name': 'core_ticket_categories.id', 'core_ticket_categories.id': 'core_ticket_categories.name', 'core_ticket_types.name': 'core_ticket_types.id', 'core_ticket_types.id': 'core_ticket_types.name',
     };
-    let comp = (pair || /^core_ticket_(categories|types)\.(name|id)$/.test(field)) ? COMPANION[field] : null; // ticket names collide → always show id (and name when filtering by id)
+    const comp = pair ? COMPANION[field] : null;
     // Event names also show the event's start date in the dropdown, e.g.
     // "Ultra South Africa  —  29 May 2026", pulled from the same explore.
-    let dateField = field === 'core_events.name' ? 'core_events.start_date' : null;
+    const dateField = field === 'core_events.name' ? 'core_events.start_date' : null;
     const q = { model, view: explore, fields: [field, comp, dateField].filter(Boolean), sorts: [field], limit: 100 };
     const t = (term || '').trim();
     if (t) {
       if (/^\d+$/.test(t)) {
-        q.filters = { [comp && comp.endsWith('.id') ? comp : field]: t }; // a numeric term matches the id (search by id or name)
+        q.filters = { [field]: t };
       } else {
         // Looker's `%x%` LIKE can be case-sensitive (depends on the dialect),
         // so OR a few case variants to make search effectively case-insensitive.
@@ -1141,12 +1140,14 @@ app.post('/api/filter-suggest', auth.requireAuth, async (req, res) => {
     }
     if (!(await applyScope(q, req.user, suiteId))) return res.json({ suggestions: [] });
     let rows;
-    try { rows = await runLookerQuery('/queries/run/json', q); }
-    catch (err) {
-      // Some explores don't expose the companion id or the start date — drop the
-      // extras and retry on the bare dimension so suggestions still work everywhere.
-      if (!comp && !dateField) throw err;
-      comp = dateField = null; q.fields = [field]; rows = await runLookerQuery('/queries/run/json', q);
+    try {
+      rows = await runLookerQuery('/queries/run/json', q);
+    } catch (err) {
+      // Some explores expose the event name but not core_events.start_date —
+      // drop the date field and retry so suggestions still work everywhere.
+      if (!dateField) throw err;
+      q.fields = q.fields.filter((f) => f !== dateField);
+      rows = await runLookerQuery('/queries/run/json', q);
     }
     const seen = new Set();
     const suggestions = [];
@@ -1155,15 +1156,14 @@ app.post('/api/filter-suggest', auth.requireAuth, async (req, res) => {
       const v = r[field];
       if (v == null || v === '') continue;
       const s = String(v);
-      const dedup = comp && r[comp] != null ? `${s} ${String(r[comp])}` : s; // keep same-named ids distinct
-      if (seen.has(dedup)) continue;
-      seen.add(dedup);
+      if (seen.has(s)) continue;
+      seen.add(s);
       const date = dateField && r[dateField] != null && r[dateField] !== '' ? fmtEventDate(r[dateField]) : '';
       if (comp) {
         const other = r[comp] == null ? '' : String(r[comp]);
         let label = isId ? `${s} — ${other}` : `${s}  (id: ${other})`;
         if (date) label += `  ·  ${date}`;
-        suggestions.push({ value: (/^core_ticket_(categories|types)\.name$/.test(field) && /^\d+$/.test(t)) ? other : s, label }); // numeric search → select the unique id
+        suggestions.push({ value: s, label });
       } else if (date) {
         suggestions.push({ value: s, label: `${s}  —  ${date}` });
       } else {
