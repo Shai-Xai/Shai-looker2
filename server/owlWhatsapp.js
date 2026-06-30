@@ -39,7 +39,7 @@ const WA_OVERRIDE = [
   'There is no dashboard screen or chart-type toggle here — never tell the user to switch chart types or refer to on-screen panels (they are on WhatsApp). (Action confirmations are the one exception: those DO send a tappable button — see below.)',
   'Say NOTHING about chart delivery: never announce, point at, apologise for, or promise a chart/image — no "here\'s a chart", no 👇/👆, no "a fresh chart is on its way", no "re-sent". A chart link/image is attached automatically when useful; just answer with the figures in words.',
   'When the user wants to SEE data as a chart / line graph / bar chart / trend — EVEN data you just gave them — you MUST re-run it as ONE grouped askData query (a dimension such as day/month/event plus the measure) so a fresh chart image can be attached. Never reply "it\'s the same data" or refuse to re-pull, and never split a trend into many separate per-day lookups.',
-  'You CAN set up an alert (createAlert), save a segment (createSegment), or draft an email/SMS campaign (draftCampaign) over WhatsApp. When you draft one, briefly state what it will do — for a campaign give the audience size/reach + the subject line — then STOP. A Confirm button is attached automatically for the user to tap (and for an alert with several possible events, event-choice buttons). Do NOT invent your own button text, numbered steps, or say "tap … below"; just describe the draft. A drafted campaign is a DRAFT only — never sent from here; the user reviews, approves and sends it in the Pulse app (Engage). Never say anything is sent or scheduled.',
+  'You CAN set up an alert (createAlert), save a segment (createSegment), draft an email/SMS campaign (draftCampaign), or remember a durable client fact (rememberFact) over WhatsApp. When you draft one, briefly state what it will do — for a campaign give the audience size/reach + the subject line — then STOP. A Confirm button is attached automatically for the user to tap (and for an alert with several possible events, event-choice buttons). Do NOT invent your own button text, numbered steps, or say "tap … below"; just describe the draft. A drafted campaign is a DRAFT only — never sent from here; the user reviews, approves and sends it in the Pulse app (Engage). Never say anything is sent or scheduled.',
   'End your reply with the <<<FOLLOWUPS>>> marker + a JSON array of 2-3 SHORT (≤6 words) next questions, exactly as instructed; the app turns them into tappable buttons.',
 ].join('\n');
 
@@ -54,7 +54,8 @@ function parseFollowups(out) {
   try { const a = JSON.parse(m[0]); return Array.isArray(a) ? a.filter((x) => typeof x === 'string' && x.trim()).slice(0, 3) : []; } catch { return []; }
 }
 
-function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthropicKeyForEntity, currencyNote, languageNote, whatsappDigestFor, getAlertsApi, getSegmentsApi, getActionsApi }) {
+function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthropicKeyForEntity, currencyNote, languageNote, whatsappDigestFor, getAlertsApi, getSegmentsApi, getActionsApi, memoryApi }) {
+  const owlMemory = require('./owlMemory'); // memoryNote + rememberFact tool (durable client memory)
   const sql = db.db;
   sql.exec(`
     CREATE TABLE IF NOT EXISTS owl_wa_msgs (
@@ -173,7 +174,7 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
   // All act-tools (createAlert, createSegment, draftCampaign) are confirmed over WhatsApp
   // with a reply button (see the action flow below). draftCampaign only creates a DRAFT —
   // it never sends — so confirming it on WhatsApp is safe (a human still sends in Engage).
-  const toolEntries = Object.values(owlTools).filter((t) => t && t.schema && t.run);
+  const toolEntries = [...Object.values(owlTools).filter((t) => t && t.schema && t.run), owlMemory.tool];
   const toolMap = Object.fromEntries(toolEntries.map((t) => [t.schema.name, t]));
   const toolSchemas = toolEntries.map((t) => t.schema);
   const norm = (n) => messaging.normaliseMsisdn(n);
@@ -221,6 +222,8 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
     const cat = owlTools.catalogue || {};
     if ((cat.notes || []).length) parts.push(`Rules:\n- ${cat.notes.join('\n- ')}`);
     try { const g = resolveGuidance(db, entityId); if (g) parts.push(g); } catch { /* ignore */ }
+    // Durable client memory (facts confirmed over time) — same source as the web Owl.
+    try { const mem = owlMemory.memoryNote(db, entityId); if (mem) parts.push(mem); } catch { /* ignore */ }
     // Reporting currency for this organiser (blank for ZAR — the default).
     try { const cn = currencyNote && currencyNote(entityId || undefined); if (cn) parts.push(cn); } catch { /* ignore */ }
     // AI content language for this organiser (blank for English — the default).
@@ -383,6 +386,10 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
         const r = api && api.createDraftCampaign ? api.createDraftCampaign({ entityId: pend.entityId, title: pend.name, config, user }) : { ok: false, error: 'Campaigns unavailable' };
         if (r.ok) { logEvent(msisdn, 'action-done', `campaign draft ${r.action.title}`); const link = actionViewUrl(publicBase(), 'draftCampaign'); await messaging.sendWhatsapp({ to: msisdn, text: `✅ Drafted the campaign *${r.action.title}*. It's a DRAFT — review, approve and send it in the Pulse app (Engage). I never send anything to customers.${link ? `\nReview it: ${link}` : ''}` }); }
         else { logEvent(msisdn, 'action-failed', r.error || 'error'); await messaging.sendWhatsapp({ to: msisdn, text: `I couldn't create that draft: ${r.error || 'something went wrong'}.` }); }
+      } else if (pend.kind === 'rememberFact') {
+        const item = memoryApi && memoryApi.add ? memoryApi.add(pend.entityId, pend.fact, user.email) : null;
+        if (item) { logEvent(msisdn, 'action-done', `remember: ${String(pend.fact).slice(0, 80)}`); await messaging.sendWhatsapp({ to: msisdn, text: '✅ Got it — I\'ll remember that for next time.' }); }
+        else { logEvent(msisdn, 'action-failed', 'memory save failed'); await messaging.sendWhatsapp({ to: msisdn, text: 'I couldn\'t save that to memory just now.' }); }
       } else { await messaging.sendWhatsapp({ to: msisdn, text: 'That action can only be completed in the Pulse app.' }); }
     } catch (e) { logEvent(msisdn, 'action-failed', (e && e.message) || 'commit error'); await messaging.sendWhatsapp({ to: msisdn, text: 'Something went wrong completing that — please try again.' }); }
   }

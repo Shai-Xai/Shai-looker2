@@ -17,6 +17,7 @@ import { BriefingConfigForm } from '../components/BriefingTuneModal.jsx';
 import StatusNoticesAdmin from '../components/StatusNoticesAdmin.jsx';
 import OwlGuidanceEditor from '../components/OwlGuidanceEditor.jsx';
 import OwlFieldDictionary from '../components/OwlFieldDictionary.jsx';
+import OwlMemoryEditor from '../components/OwlMemoryEditor.jsx';
 import WhatsAppOwl from '../components/WhatsAppOwl.jsx';
 import UploadHint from '../components/UploadHint.jsx';
 import { currencyList } from '../lib/currency.js';
@@ -4055,6 +4056,9 @@ function AISettings() {
       </Section>
       <Section title="Owl field dictionary">
         <OwlFieldDictionary />
+      </Section>
+      <Section title="Owl memory (per client)">
+        <OwlMemoryEditor />
       </Section>
       <Section title="WhatsApp Owl (beta)">
         <WhatsAppOwl />

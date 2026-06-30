@@ -794,7 +794,36 @@ function ActionCard({ action, suiteId }) {
   if (action.kind === 'createAlert') return <AlertActionCard action={action} />;
   if (action.kind === 'createSegment') return <SegmentActionCard action={action} />;
   if (action.kind === 'draftCampaign') return <CampaignActionCard action={action} suiteId={suiteId} />;
+  if (action.kind === 'rememberFact') return <MemoryActionCard action={action} />;
   return null;
+}
+// "Remember this?" — the Owl proposes a durable client fact; tapping saves it to memory.
+function MemoryActionCard({ action }) {
+  const [state, setState] = useState(''); // '' | 'busy' | 'done' | 'error'
+  const [err, setErr] = useState('');
+  const save = async () => {
+    setState('busy'); setErr('');
+    try { await api.owlRemember({ entityId: action.entityId, fact: action.fact }); setState('done'); }
+    catch (e) { setState('error'); setErr((e && e.message) || 'Could not save that.'); }
+  };
+  return (
+    <div style={{ margin: '2px 0 10px', border: '1px solid var(--hairline)', borderRadius: 12, background: 'var(--card)', padding: '10px 12px', maxWidth: '85%' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 6 }}>
+        <span style={{ fontSize: 15 }}>🧠</span>
+        <strong style={{ fontSize: 12.5 }}>Remember</strong>
+        <span style={{ fontSize: 11, color: 'var(--muted)', border: '1px solid var(--hairline)', borderRadius: 980, padding: '1px 7px' }}>Draft</span>
+      </div>
+      <div style={{ fontSize: 13, color: 'var(--text)', marginBottom: 8 }}>“{action.fact}”</div>
+      {state === 'done' ? (
+        <div style={{ fontSize: 12.5, color: 'var(--brand)', fontWeight: 600 }}>✓ Saved — I’ll remember that for this client.</div>
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <button onClick={save} disabled={state === 'busy'} style={{ border: 'none', borderRadius: 980, padding: '6px 16px', fontSize: 12.5, fontWeight: 700, cursor: state === 'busy' ? 'default' : 'pointer', background: state === 'busy' ? 'var(--elevated, rgba(128,128,128,0.18))' : 'var(--brand)', color: state === 'busy' ? 'var(--muted)' : '#fff' }}>{state === 'busy' ? 'Saving…' : '🧠 Remember it'}</button>
+          {state === 'error' && <span style={{ fontSize: 12, color: '#e0414a' }}>{err}</span>}
+        </div>
+      )}
+    </div>
+  );
 }
 function AlertActionCard({ action }) {
   const [state, setState] = useState(''); // '' | 'busy' | 'done' | 'error'

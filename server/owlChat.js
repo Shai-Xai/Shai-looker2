@@ -14,6 +14,7 @@
 
 const crypto = require('crypto');
 const { resolveGuidance: guidance } = require('./owlGuidance');
+const owlMemory = require('./owlMemory'); // durable per-client facts (memoryNote + rememberFact tool)
 const { actionViewPath } = require('./owlActionLinks'); // where a created action is viewed
 
 // ── Live "thinking" status ───────────────────────────────────────────────────
@@ -64,8 +65,11 @@ WHICH TOOL TO USE (route every question to the right one — do not answer goal 
 - createSegment → when the user wants to BUILD or SAVE an AUDIENCE / cohort of people for later marketing ("make a segment of VIP buyers in Cape Town", "save these people as an audience", "build a guest list segment", "audience of 18-25 year olds"). The cohort is defined by curated dimensions (age, gender, buyer city/country, ticket type, ticket category, complimentary = guest list). It DRAFTS the segment + previews the size and reach; the user confirms with a button — see ACTING below. NEVER list or name individual people; only the count + reach. Contact fields (email/phone) cannot define a segment.
 - draftCampaign → when the user wants to MESSAGE or MARKET to a cohort ("draft a win-back email to lapsed VIP buyers", "send an offer to Cape Town 18-25s", "email my guest-list segment"). Give it the goal plus an audience that is EITHER a saved segment (pass segmentName when the user names one, or one was just created) OR a new cohort (pass filters). It drafts the email/SMS copy and previews the reach. It creates a DRAFT only — a human reviews, approves and SENDS it in Engage. You never send. See ACTING below.
 
+- rememberFact → when the user tells you a DURABLE fact or preference about their business worth carrying into future chats (their priority tier, how they define revenue, naming conventions, what they focus on, their flagship event), OR you learn one. It DRAFTS a memory item the user confirms to save. Use it sparingly and naturally — offer to remember the things that would make every future answer better; never store one-off question details, transient numbers, or any personal/contact data. Memory you already hold for this client appears under "What you REMEMBER about this client" — don't re-offer to remember what's already there.
+
 ACTING (tools that DO something, not just read):
-- Some tools DRAFT an action for the user to confirm instead of just reading data (createAlert, createSegment). You NEVER create/change anything silently: the tool returns a proposed action and the user taps a button to confirm it.
+- Some tools DRAFT an action for the user to confirm instead of just reading data (createAlert, createSegment, rememberFact). You NEVER create/change anything silently: the tool returns a proposed action and the user taps a button to confirm it.
+- After calling rememberFact, do NOT say it's saved. Say you've noted it and they can tap "Remember it" to save it to this client's memory. If it returns ok:false, relay why (e.g. open a client first).
 - After calling createSegment, do NOT say it's saved. Say you've DRAFTED it, state the cohort and the previewed size + reach (e.g. "a segment of VIP buyers in Cape Town — about 1,240 people, 1,180 emailable"), and tell them to tap "Create segment" to save it. Never list individuals. If it returns ok:false, relay why (e.g. pick a client, or contact fields can't define a segment).
 - Work like a campaign manager: BEFORE calling draftCampaign, if the brief is thin, ask 1-3 SHORT setup questions to nail the essentials that are missing — the angle/offer (the hook), the channel (email / SMS / both), any promo or incentive, the destination link for the button, and which event it's for. Ask only what's missing and material; don't interrogate. Then call draftCampaign with a rich goal (fold in the offer/angle and any promo) and pass ctaUrl if they gave a link.
 - The audience can be an existing saved segment (pass segmentName) or a new cohort (pass filters). When you draft from a NEW cohort, that cohort is automatically SAVED as a reusable segment and the campaign is pointed at it — so tell the user the segment was saved too.
@@ -235,8 +239,10 @@ function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, m
      FROM owl_threads t WHERE t.user_id = ? ORDER BY COALESCE(last_at, t.created_at) DESC LIMIT 50`,
   );
 
-  // Build the tool registry once: name → tool, plus the schemas for the model.
-  const toolEntries = Object.values(owlTools).filter((t) => t && t.schema && t.run);
+  // Build the tool registry once: name → tool, plus the schemas for the model. The
+  // rememberFact act-tool is added here (not in the shared owlTools factory) so memory
+  // stays a self-contained, removable module.
+  const toolEntries = [...Object.values(owlTools).filter((t) => t && t.schema && t.run), owlMemory.tool];
   const toolMap = Object.fromEntries(toolEntries.map((t) => [t.schema.name, t]));
   const toolSchemas = toolEntries.map((t) => t.schema);
 
@@ -368,6 +374,8 @@ function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, m
     // No-code steering layer: admin/client guidance (server/owlGuidance.js), injected
     // last so it can override the catalogue's defaults without a deploy.
     try { const g = guidance(db, scopeEntityId); if (g) parts.push(g); } catch { /* ignore */ }
+    // Durable client memory (facts confirmed over time) — injected like guidance.
+    try { const mem = owlMemory.memoryNote(db, scopeEntityId); if (mem) parts.push(mem); } catch { /* ignore */ }
 
     // Load or create the thread (must belong to this user).
     let thread = threadId ? getThread.get(threadId) : null;
@@ -573,7 +581,19 @@ function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, m
   require('./owlPin').mount(app, { db, auth });
   require('./owlGuidance').mount(app, { db, auth }); // resolveGuidance is required at top
   const owlFields = require('./owlFields').mount(app, { db, auth, getExploreFields }); // no-code field labels/synonyms/questions
-  require('./owlWhatsapp').mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthropicKeyForEntity, currencyNote, languageNote, whatsappDigestFor, getAlertsApi, getSegmentsApi, getActionsApi }); // WhatsApp door onto the Owl (Clickatell)
+  const memoryApi = owlMemory.mount(app, { db, auth }); // durable per-client memory (read into every turn)
+  // Commit a rememberFact draft (the user tapped "Remember it" on the card). Scope is
+  // re-checked here — the Owl can only write memory for a client the user can access.
+  app.post('/api/owl/act/remember', auth.requireAuth, (req, res) => {
+    if (!owlAllowed(req.user)) return res.status(403).json({ error: 'The native Owl isn\'t enabled for your account yet.' });
+    const { entityId, fact } = req.body || {};
+    if (!entityId || !String(fact || '').trim()) return res.status(400).json({ error: 'entityId and fact are required.' });
+    if (req.user.role !== 'admin' && !(req.user.entityIds || []).includes(entityId)) return res.status(403).json({ error: 'Not allowed.' });
+    const item = memoryApi.add(entityId, fact, req.user.email);
+    if (!item) return res.status(400).json({ error: 'Could not save that.' });
+    res.status(201).json({ ok: true, item });
+  });
+  require('./owlWhatsapp').mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthropicKeyForEntity, currencyNote, languageNote, whatsappDigestFor, getAlertsApi, getSegmentsApi, getActionsApi, memoryApi }); // WhatsApp door onto the Owl (Clickatell)
   console.log('[owlChat] agentic Owl chat module mounted');
 }
 

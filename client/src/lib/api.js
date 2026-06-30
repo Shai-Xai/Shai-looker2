@@ -150,6 +150,12 @@ export const api = {
   },
   // Act layer: commit a drafted action the Owl proposed (the "Create alert" tap).
   owlCreateAlert: (body) => fetch('/api/owl/act/create-alert', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
+  owlRemember: (body) => fetch('/api/owl/act/remember', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
+  // Client memory (durable per-client facts the Owl carries across chats).
+  owlMemory: (entityId) => fetch(`/api/admin/entities/${entityId}/owl-memory`).then(json),
+  saveOwlMemory: (entityId, items) => fetch(`/api/admin/entities/${entityId}/owl-memory`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }) }).then(json),
+  myOwlMemory: () => fetch('/api/my/owl-memory').then(json),
+  saveMyOwlMemory: (items) => fetch('/api/my/owl-memory', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }) }).then(json),
   // The "/" slash-command palette (derived from the Owl's tool registry).
   owlCapabilities: () => fetch('/api/owl/capabilities').then(json),
   // Act layer: commit a drafted segment the Owl proposed (the "Create segment" tap),
