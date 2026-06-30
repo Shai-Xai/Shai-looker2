@@ -503,6 +503,8 @@ export const api = {
   getMasters: (entityId) => fetch(`/api/actions/${entityId}/masters`).then(json),
   saveMaster: (entityId, b) => fetch(`/api/actions/${entityId}/masters`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   deleteMaster: (entityId, name) => fetch(`/api/actions/${entityId}/masters/${encodeURIComponent(name)}`, { method: 'DELETE' }).then((r) => (r.ok ? {} : Promise.reject(new Error('Failed')))),
+  getAudienceCap: (entityId) => fetch(`/api/admin/entities/${entityId}/audience-cap`).then(json),
+  saveAudienceCap: (entityId, cap) => fetch(`/api/admin/entities/${entityId}/audience-cap`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cap }) }).then(json),
   listActions: (entityId) => fetch(`/api/actions/${entityId}`).then(json),
   duplicateAction: (entityId, id) => fetch(`/api/actions/${entityId}/${id}/duplicate`, { method: 'POST' }).then(json),
   scheduleAction: (entityId, id, at) => fetch(`/api/actions/${entityId}/${id}/schedule`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ at }) }).then(json),

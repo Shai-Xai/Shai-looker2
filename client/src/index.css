@@ -162,6 +162,12 @@ input::placeholder, textarea::placeholder { color: #b0b0b6; }
 @keyframes pop { 0% { transform: scale(.4); opacity: 0; } 60% { transform: scale(1.14); } 100% { transform: scale(1); opacity: 1; } }
 .pop { animation: pop .34s var(--ease-spring) both; }
 
+/* Indeterminate progress bar (e.g. resolving a segment's live count — Looker
+   returns the result in one shot, so this signals "working", not a real %). */
+@keyframes indet-slide { 0% { left: -45%; } 100% { left: 100%; } }
+.indet-track { position: relative; height: 4px; border-radius: 999px; background: rgba(128,128,128,0.18); overflow: hidden; }
+.indet-track::after { content: ''; position: absolute; top: 0; bottom: 0; width: 45%; left: -45%; border-radius: 999px; background: var(--brand); animation: indet-slide 1.05s var(--ease-out, ease) infinite; }
+
 /* Save → animated check that draws on. */
 @keyframes draw-check { to { stroke-dashoffset: 0; } }
 @keyframes fade-up { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }

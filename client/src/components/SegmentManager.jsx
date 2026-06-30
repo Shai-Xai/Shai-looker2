@@ -136,9 +136,11 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
                   {lbl.event && <div style={{ fontSize: 12.5, color: 'var(--text)', marginTop: 5, fontWeight: 600 }}>🗓 {lbl.event}</div>}
                   {lbl.detail && <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lbl.detail}</div>}
                   <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 6 }}>
-                    {s.count >= 0
-                      ? <span><b style={{ color: 'var(--brand)' }}>{s.count}</b> {s.count === 1 ? 'person' : 'people'}{s.lastResolvedAt ? ` · as of ${new Date(s.lastResolvedAt).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}</span>
-                      : <span>Not counted yet — tap refresh</span>}
+                    {busyId === s.id
+                      ? <div style={{ maxWidth: 240 }}><div style={{ marginBottom: 4 }}>⏳ Counting the audience…</div><div className="indet-track" /></div>
+                      : s.count >= 0
+                        ? <span><b style={{ color: 'var(--brand)' }}>{s.count}</b> {s.count === 1 ? 'person' : 'people'}{s.lastResolvedAt ? ` · as of ${new Date(s.lastResolvedAt).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}</span>
+                        : <span>Not counted yet — tap refresh</span>}
                   </div>
                   {s.count >= 0 && s.reach && (s.reach.email >= 0 || s.reach.sms >= 0) && (
                     <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 3, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
@@ -219,7 +221,7 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
               <button style={mini} onClick={() => setViewing(null)}>Close</button>
             </div>
             <div style={{ overflowY: 'auto', padding: '4px 0' }}>
-              {!viewing.data ? <p style={{ color: 'var(--muted)', fontSize: 13, padding: 16 }}>Loading…</p>
+              {!viewing.data ? <div style={{ padding: 16 }}><div style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 6 }}>⏳ Resolving the live audience…</div><div className="indet-track" /></div>
                 : viewing.data.error ? <p style={{ color: 'var(--error,#ef4444)', fontSize: 13, padding: 16 }}>{viewing.data.error}</p>
                 : viewing.data.members.length === 0 ? <p style={{ color: 'var(--muted)', fontSize: 13, padding: 16 }}>No people match right now.</p>
                 : (
@@ -299,6 +301,7 @@ function SegmentBuilder({ entityId, tiles, segment, onClose, onSaved }) {
     .filter((d) => !suiteSel || d.suiteId === suiteSel)
     .filter((d) => dashHasContact(d) || d.dashboardId === f.dashboardId);
   const [aud, setAud] = useState(null);
+  const [audBusy, setAudBusy] = useState(false); // resolving the live count → show a progress bar
   const [busy, setBusy] = useState(false);
   const debounce = useRef();
 
@@ -339,7 +342,8 @@ function SegmentBuilder({ entityId, tiles, segment, onClose, onSaved }) {
   const refreshAud = () => {
     if (f.mode === 'tile' && (!f.dashboardId || !f.tileId)) { setAud(null); return; }
     if (f.mode === 'gsheet' && !f.gsheetUrl.trim()) { setAud(null); return; }
-    api.actionAudiencePreview(entityId, { audience: definition() }).then(setAud).catch((e) => setAud({ error: e.message }));
+    setAudBusy(true);
+    api.actionAudiencePreview(entityId, { audience: definition() }).then(setAud).catch((e) => setAud({ error: e.message })).finally(() => setAudBusy(false));
   };
   useEffect(() => { clearTimeout(debounce.current); debounce.current = setTimeout(refreshAud, 350); return () => clearTimeout(debounce.current); },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -507,15 +511,22 @@ function SegmentBuilder({ entityId, tiles, segment, onClose, onSaved }) {
           </div>
         </Field>
 
-        <div style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          {aud?.error ? <span style={{ color: 'var(--error,#ef4444)' }}>✗ {aud.error}</span>
-            : aud ? <span><b style={{ color: 'var(--brand)' }}>{aud.count}</b> {aud.count === 1 ? 'person' : 'people'} match{aud.reach ? ` · ${aud.reach.email} emailable · ${aud.reach.sms} SMS` : ''}{aud.filteredOut > 0 ? ` · ${aud.filteredOut} filtered out` : ''}</span>
-              : <span style={{ color: 'var(--muted)' }}>Pick a source to see the live count.</span>}
-          {/* Re-read the live source now (e.g. a linked Google Sheet edited since). */}
-          {aud && !aud.error && (
-            <button type="button" style={{ ...mini, padding: '3px 9px' }} onClick={refreshAud} title="Re-read the live source (e.g. a linked Google Sheet) and recount now">↻ Refresh</button>
-          )}
-        </div>
+        {audBusy ? (
+          <div style={{ fontSize: 13 }}>
+            <div style={{ color: 'var(--muted)', marginBottom: 5 }}>⏳ Resolving the live audience…</div>
+            <div className="indet-track" />
+          </div>
+        ) : (
+          <div style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            {aud?.error ? <span style={{ color: 'var(--error,#ef4444)' }}>✗ {aud.error}</span>
+              : aud ? <span><b style={{ color: 'var(--brand)' }}>{aud.count}</b> {aud.count === 1 ? 'person' : 'people'} match{aud.reach ? ` · ${aud.reach.email} emailable · ${aud.reach.sms} SMS` : ''}{aud.filteredOut > 0 ? ` · ${aud.filteredOut} filtered out` : ''}</span>
+                : <span style={{ color: 'var(--muted)' }}>Pick a source to see the live count.</span>}
+            {/* Re-read the live source now (e.g. a linked Google Sheet edited since). */}
+            {aud && !aud.error && (
+              <button type="button" style={{ ...mini, padding: '3px 9px' }} onClick={refreshAud} title="Re-read the live source (e.g. a linked Google Sheet) and recount now">↻ Refresh</button>
+            )}
+          </div>
+        )}
 
         <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
           <button style={primary} onClick={save} disabled={busy}>{busy ? 'Saving…' : segment ? 'Save changes' : 'Create segment'}</button>
