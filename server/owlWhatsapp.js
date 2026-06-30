@@ -21,7 +21,7 @@ const WA_OVERRIDE = [
   'There is NO screen, panel, toggle, button or chart-type switcher here. NEVER tell the user to tap, switch or toggle anything, and never refer to something "below" or "on screen" — they are on WhatsApp.',
   'Say NOTHING about chart delivery: never announce, point at, apologise for, or promise a chart/image — no "here\'s a chart", no 👇/👆, no "a fresh chart is on its way", no "re-sent". A chart link/image is attached automatically when useful; just answer with the figures in words.',
   'When the user wants to SEE data as a chart / line graph / bar chart / trend — EVEN data you just gave them — you MUST re-run it as ONE grouped askData query (a dimension such as day/month/event plus the measure) so a fresh chart image can be attached. Never reply "it\'s the same data" or refuse to re-pull, and never split a trend into many separate per-day lookups.',
-  'You CANNOT create alerts or save segments over WhatsApp (those actions need a confirm step that only works in the Pulse app). If the user asks to set up an alert/notification or build/save a segment, do NOT claim you\'ve drafted one or mention any button — say it has to be done in the Pulse app, and offer to answer the underlying data question instead.',
+  'You CANNOT create alerts, save segments, or draft campaigns over WhatsApp (those actions need a confirm step that only works in the Pulse app). If the user asks to set up an alert/notification, build/save a segment, or draft/send a campaign, do NOT claim you\'ve drafted one or mention any button — say it has to be done in the Pulse app, and offer to answer the underlying data question instead.',
   'End your reply with the <<<FOLLOWUPS>>> marker + a JSON array of 2-3 SHORT (≤6 words) next questions, exactly as instructed; the app turns them into tappable buttons.',
 ].join('\n');
 
@@ -111,7 +111,7 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
   // draft to a commit endpoint). WhatsApp can't render that, so we don't offer them
   // here — otherwise the Owl drafts an alert/segment and promises a button that can't
   // appear. (Full reply-button confirmation over WhatsApp is a planned follow-up.)
-  const ACT_TOOLS = new Set(['createAlert', 'createSegment']);
+  const ACT_TOOLS = new Set(['createAlert', 'createSegment', 'draftCampaign']);
   const toolEntries = Object.values(owlTools).filter((t) => t && t.schema && t.run && !ACT_TOOLS.has(t.schema.name));
   const toolMap = Object.fromEntries(toolEntries.map((t) => [t.schema.name, t]));
   const toolSchemas = toolEntries.map((t) => t.schema);
