@@ -278,13 +278,17 @@ test('createAlert schema tracks the alerts module\'s option lists', () => {
   assert.deepEqual(props.priority.enum, alertsMod.PRIORITIES);
 });
 
-test('the "/" slash palette is sourced from the tool registry (reads + act tools)', () => {
+test('the "/" slash palette has one entry per domain (no duplicate alert/campaign rows)', () => {
   const t = tools();
   const cmds = Object.values(t).filter((v) => v && v.menu).map((v) => v.menu.cmd);
-  for (const c of ['data', 'goals', 'alerts', 'campaigns', 'dashboard', 'uploads']) assert.ok(cmds.includes(c), `missing /${c}`);
-  // The act-tools we can now trigger from the palette too (createAlert/Segment/draftCampaign).
-  for (const c of ['alert', 'segment', 'campaign']) assert.ok(cmds.includes(c), `missing action /${c}`);
-  // queryDashboard stays out of the palette (it's an internal follow-on to getDashboard).
+  for (const c of ['data', 'goals', 'alerts', 'campaigns', 'dashboard', 'uploads', 'segment']) assert.ok(cmds.includes(c), `missing /${c}`);
+  // No duplicate singular rows — alerts/campaigns each cover both reading and the act-tool.
+  assert.ok(!cmds.includes('alert'), 'should not have a duplicate /alert row');
+  assert.ok(!cmds.includes('campaign'), 'should not have a duplicate /campaign row');
+  assert.equal(new Set(cmds).size, cmds.length, 'palette commands must be unique');
+  // createAlert/draftCampaign fold into /alerts and /campaigns; queryDashboard stays internal.
+  assert.equal(t.createAlert.menu, undefined);
+  assert.equal(t.draftCampaign.menu, undefined);
   assert.equal(t.queryDashboard.menu, undefined);
 });
 

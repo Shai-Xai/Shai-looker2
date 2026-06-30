@@ -839,11 +839,15 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     getGoals: { schema: getGoalsSchema, run: runGetGoals, menu: { cmd: 'goals', label: 'Goals', icon: '🎯', example: 'How are my goals tracking?' } },
     getDashboard: { schema: getDashboardSchema, run: runGetDashboard, menu: { cmd: 'dashboard', label: 'This dashboard', icon: '📋', example: 'Summarise what this dashboard is telling me.' } },
     queryDashboard: { schema: queryDashboardSchema, run: runQueryDashboard },
-    getAlerts: { schema: getAlertsSchema, run: runGetAlerts, menu: { cmd: 'alerts', label: 'Alerts', icon: '🔔', example: 'What alerts are set, and has anything triggered?' } },
-    getCampaigns: { schema: getCampaignsSchema, run: runGetCampaigns, menu: { cmd: 'campaigns', label: 'Campaigns', icon: '📣', example: 'How did my recent campaigns perform?' } },
+    // One palette entry per domain. Alerts & campaigns each cover BOTH reading and the
+    // act-tool (set up / draft), so we don't add duplicate singular rows — the example
+    // hints at both and the Owl routes by intent. Segments has no read tool, so its only
+    // entry is the act-tool's.
+    getAlerts: { schema: getAlertsSchema, run: runGetAlerts, menu: { cmd: 'alerts', label: 'Alerts', icon: '🔔', example: 'What alerts are set — or set up a new one?' } },
+    getCampaigns: { schema: getCampaignsSchema, run: runGetCampaigns, menu: { cmd: 'campaigns', label: 'Campaigns', icon: '📣', example: 'How did recent campaigns do — or draft a new one?' } },
     askUpload: { schema: askUploadSchema, run: runAskUpload, menu: { cmd: 'uploads', label: 'Attached files', icon: '📎', example: "What's in my attached data?" } },
-    createAlert: { schema: createAlertSchema, run: runCreateAlert, menu: { cmd: 'alert', label: 'Set up an alert', icon: '⏰', example: 'Alert me when ticket sales reach a milestone' } },
+    createAlert: { schema: createAlertSchema, run: runCreateAlert },
     createSegment: { schema: createSegmentSchema, run: runCreateSegment, menu: { cmd: 'segment', label: 'Build an audience', icon: '👥', example: 'Build a segment of my top customers' } },
-    draftCampaign: { schema: draftCampaignSchema, run: runDraftCampaign, menu: { cmd: 'campaign', label: 'Draft a campaign', icon: '✍️', example: 'Draft a campaign to a customer segment' } },
+    draftCampaign: { schema: draftCampaignSchema, run: runDraftCampaign },
   };
 };
