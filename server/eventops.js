@@ -143,6 +143,34 @@ function mount(app, { db, auth }) {
       enabled     INTEGER NOT NULL DEFAULT 1,
       updated_at  TEXT NOT NULL
     );
+
+    -- Checkpoint DEFINITIONS (named checks set up in advance, e.g. "Opening", "Closing").
+    CREATE TABLE IF NOT EXISTS eventops_checkpoints (
+      id          TEXT PRIMARY KEY,
+      entity_id   TEXT NOT NULL,
+      suite_id    TEXT NOT NULL,
+      name        TEXT NOT NULL DEFAULT '',
+      position    INTEGER NOT NULL DEFAULT 0,
+      created_at  TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_eventops_checkpoints_suite ON eventops_checkpoints(suite_id);
+
+    -- Checkpoint SUBMISSIONS — a staff member completing a check at a station (with a photo).
+    CREATE TABLE IF NOT EXISTS eventops_checkpoint_logs (
+      id              TEXT PRIMARY KEY,
+      entity_id       TEXT NOT NULL,
+      suite_id        TEXT NOT NULL,
+      station_id      TEXT NOT NULL DEFAULT '',
+      station_label   TEXT NOT NULL DEFAULT '',
+      checkpoint_id   TEXT NOT NULL DEFAULT '',
+      checkpoint_name TEXT NOT NULL DEFAULT '',
+      staff_id        TEXT NOT NULL DEFAULT '',
+      staff_label     TEXT NOT NULL DEFAULT '',
+      comment         TEXT NOT NULL DEFAULT '',
+      photo           TEXT NOT NULL DEFAULT '',
+      at              TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_eventops_cplogs_suite ON eventops_checkpoint_logs(suite_id, at);
   `);
 
   // Additive migrations for already-deployed DBs: attribute moves/issues to a staff member.
@@ -354,6 +382,15 @@ function mount(app, { db, auth }) {
       byState, stations, recent,
       canManage: canManage(req.user, su.id),
     });
+  });
+
+  // Full activity log (the recent-activity feed gets its own tab).
+  app.get('/api/eventops/suites/:suiteId/activity', auth.requireAuth, (req, res) => {
+    const su = gateSuite(req, res); if (!su) return;
+    const limit = Math.min(300, Math.max(1, parseInt(req.query.limit, 10) || 100));
+    const rows = sql.prepare('SELECT * FROM eventops_device_events WHERE suite_id=? ORDER BY at DESC LIMIT ?').all(su.id, limit)
+      .map((e) => ({ ...eventRow(e), device: deviceRow(getDevice(e.device_id)) }));
+    res.json({ activity: rows });
   });
 
   // ════════════════════════════ devices ════════════════════════════════════════════
@@ -651,7 +688,7 @@ function mount(app, { db, auth }) {
   // Event basics (name + stations) so the portal can show context before login.
   app.get('/api/eventops/portal/:suiteId/:token', (req, res) => {
     const su = portalSuite(req, res); if (!su) return;
-    res.json({ suite: { id: su.id, name: su.name }, stations: sql.prepare('SELECT * FROM eventops_stations WHERE suite_id=? ORDER BY position, name').all(su.id).map(stationRow) });
+    res.json({ suite: { id: su.id, name: su.name }, stations: sql.prepare('SELECT * FROM eventops_stations WHERE suite_id=? ORDER BY position, name').all(su.id).map(stationRow), checkpoints: listCheckpoints(su.id) });
   });
 
   // Log in by staff number → the staff record (used to attribute their actions).
@@ -717,6 +754,101 @@ function mount(app, { db, auth }) {
     const d = getDevice(b.deviceId);
     if (!d || d.suite_id !== su.id) return res.status(404).json({ error: 'Device not found' });
     res.status(201).json({ issue: applyIssue(su, d, { category: b.category, note: b.note, resolution: b.resolution, resolved: b.resolved, staffId: s.id, actor: `portal:${s.number || s.name}` }) });
+  });
+
+  // PUBLIC: all issues for the event (staff can browse + filter open/resolved).
+  app.get('/api/eventops/portal/:suiteId/:token/issues', (req, res) => {
+    const su = portalSuite(req, res); if (!su) return;
+    const status = req.query.status === 'resolved' ? 'resolved' : req.query.status === 'all' ? null : 'open';
+    const rows = status
+      ? sql.prepare('SELECT * FROM eventops_issues WHERE suite_id=? AND status=? ORDER BY reported_at DESC').all(su.id, status)
+      : sql.prepare('SELECT * FROM eventops_issues WHERE suite_id=? ORDER BY reported_at DESC').all(su.id);
+    res.json({ issues: rows.map((i) => ({ ...issueRow(i), device: deviceRow(getDevice(i.device_id)) })) });
+  });
+
+  // PUBLIC: a staff member resolves an open issue.
+  app.patch('/api/eventops/portal/:suiteId/:token/issues/:id', (req, res) => {
+    const su = portalSuite(req, res); if (!su) return;
+    const s = findStaff(su.id, (req.body || {}).staffId);
+    if (!s) return res.status(403).json({ error: 'Log in with your staff number first.' });
+    const i = sql.prepare('SELECT * FROM eventops_issues WHERE id=?').get(req.params.id);
+    if (!i || i.suite_id !== su.id) return res.status(404).json({ error: 'Issue not found' });
+    const resolution = str(req.body?.resolution ?? i.resolution, 2000).trim();
+    sql.prepare("UPDATE eventops_issues SET status='resolved', resolution=?, resolved_by=?, resolved_at=? WHERE id=?")
+      .run(resolution, `portal:${s.number || s.name}`, now(), i.id);
+    res.json({ issue: issueRow(sql.prepare('SELECT * FROM eventops_issues WHERE id=?').get(i.id)) });
+  });
+
+  // ════════════════════════════ checkpoints (station inspections) ═══════════════════
+  const checkpointRow = (c) => ({ id: c.id, suiteId: c.suite_id, name: c.name, position: c.position });
+  const cpLogRow = (l) => ({ id: l.id, stationId: l.station_id || null, stationLabel: l.station_label,
+    checkpointId: l.checkpoint_id || null, checkpointName: l.checkpoint_name, staffLabel: l.staff_label,
+    comment: l.comment, photo: l.photo, at: l.at });
+  const listCheckpoints = (suiteId) => sql.prepare('SELECT * FROM eventops_checkpoints WHERE suite_id=? ORDER BY position, created_at').all(suiteId).map(checkpointRow);
+  const PHOTO_MAX = 3_000_000; // ~3MB data-URL cap (client downscales before sending)
+
+  function recordCheckpoint(su, { stationId, checkpointId, comment, photo, staffId }) {
+    const st = stationId ? sql.prepare('SELECT * FROM eventops_stations WHERE id=? AND suite_id=?').get(stationId, su.id) : null;
+    const cp = checkpointId ? sql.prepare('SELECT * FROM eventops_checkpoints WHERE id=? AND suite_id=?').get(checkpointId, su.id) : null;
+    const staff = resolveStaff(su.id, staffId);
+    const id = uuid();
+    sql.prepare(`INSERT INTO eventops_checkpoint_logs
+      (id, entity_id, suite_id, station_id, station_label, checkpoint_id, checkpoint_name, staff_id, staff_label, comment, photo, at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(id, su.entityId, su.id, st?.id || '', st?.name || '', cp?.id || '', cp?.name || '', staff?.id || '', staff?.label || '',
+        str(comment, 2000), String(photo || ''), now());
+    return cpLogRow(sql.prepare('SELECT * FROM eventops_checkpoint_logs WHERE id=?').get(id));
+  }
+
+  // Definitions (setup): create the named checkpoints.
+  app.get('/api/eventops/suites/:suiteId/checkpoints', auth.requireAuth, (req, res) => {
+    const su = gateSuite(req, res); if (!su) return;
+    res.json({ checkpoints: listCheckpoints(su.id), canManage: canManage(req.user, su.id) });
+  });
+  app.post('/api/eventops/suites/:suiteId/checkpoints', auth.requireAuth, (req, res) => {
+    const su = gateSuite(req, res, { manage: true }); if (!su) return;
+    const name = str(req.body?.name, 80).trim();
+    if (!name) return res.status(400).json({ error: 'Give the checkpoint a name.' });
+    const max = sql.prepare('SELECT MAX(position) m FROM eventops_checkpoints WHERE suite_id=?').get(su.id).m || 0;
+    const id = uuid();
+    sql.prepare('INSERT INTO eventops_checkpoints (id, entity_id, suite_id, name, position, created_at) VALUES (?,?,?,?,?,?)').run(id, su.entityId, su.id, name, max + 1, now());
+    res.status(201).json({ checkpoint: checkpointRow(sql.prepare('SELECT * FROM eventops_checkpoints WHERE id=?').get(id)) });
+  });
+  app.put('/api/eventops/suites/:suiteId/checkpoints/:id', auth.requireAuth, (req, res) => {
+    const su = gateSuite(req, res, { manage: true }); if (!su) return;
+    const c = sql.prepare('SELECT * FROM eventops_checkpoints WHERE id=?').get(req.params.id);
+    if (!c || c.suite_id !== su.id) return res.status(404).json({ error: 'Checkpoint not found' });
+    const name = str(req.body?.name ?? c.name, 80).trim() || c.name;
+    sql.prepare('UPDATE eventops_checkpoints SET name=? WHERE id=?').run(name, c.id);
+    res.json({ checkpoint: checkpointRow(sql.prepare('SELECT * FROM eventops_checkpoints WHERE id=?').get(c.id)) });
+  });
+  app.delete('/api/eventops/suites/:suiteId/checkpoints/:id', auth.requireAuth, (req, res) => {
+    const su = gateSuite(req, res, { manage: true }); if (!su) return;
+    const c = sql.prepare('SELECT * FROM eventops_checkpoints WHERE id=?').get(req.params.id);
+    if (!c || c.suite_id !== su.id) return res.status(404).json({ error: 'Checkpoint not found' });
+    sql.prepare('DELETE FROM eventops_checkpoints WHERE id=?').run(c.id); // logs keep the denormalised name
+    res.status(204).end();
+  });
+
+  // Submitted checkpoint logs (newest first; optional ?stationId filter).
+  app.get('/api/eventops/suites/:suiteId/checkpoint-logs', auth.requireAuth, (req, res) => {
+    const su = gateSuite(req, res); if (!su) return;
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 60));
+    const rows = req.query.stationId
+      ? sql.prepare('SELECT * FROM eventops_checkpoint_logs WHERE suite_id=? AND station_id=? ORDER BY at DESC LIMIT ?').all(su.id, req.query.stationId, limit)
+      : sql.prepare('SELECT * FROM eventops_checkpoint_logs WHERE suite_id=? ORDER BY at DESC LIMIT ?').all(su.id, limit);
+    res.json({ logs: rows.map(cpLogRow), canManage: canManage(req.user, su.id) });
+  });
+
+  // PUBLIC: a staff member submits a checkpoint from the portal (with an optional photo).
+  app.post('/api/eventops/portal/:suiteId/:token/checkpoint', (req, res) => {
+    const su = portalSuite(req, res); if (!su) return;
+    const b = req.body || {};
+    const s = findStaff(su.id, b.staffId);
+    if (!s) return res.status(403).json({ error: 'Log in with your staff number first.' });
+    if (b.photo && String(b.photo).length > PHOTO_MAX) return res.status(413).json({ error: 'Photo too large — please retake it.' });
+    if (!b.stationId && !b.checkpointId && !str(b.comment, 2000).trim() && !b.photo) return res.status(400).json({ error: 'Pick a station and checkpoint.' });
+    res.status(201).json({ checkpoint: recordCheckpoint(su, { stationId: b.stationId, checkpointId: b.checkpointId, comment: b.comment, photo: b.photo, staffId: s.id }) });
   });
 
   console.log('[eventops] mounted', enabled() ? '(enabled)' : '(disabled — set eventops_enabled=1)');

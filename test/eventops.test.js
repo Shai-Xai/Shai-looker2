@@ -273,6 +273,49 @@ test('map: stations carry scale/rotation + an open-issue marker count', () => {
   assert.equal(stations.find((s) => s.id === station.id).openIssues, 1);
 });
 
+test('checkpoints: define a type, submit one from the portal, and read it back in the log', () => {
+  const r = mount();
+  const { entity, suite, owner, admin } = seedEvent();
+  call(r['PUT /api/eventops/entities/:entityId/enabled'], { user: admin, params: { entityId: entity.id }, body: { enabled: true } });
+  const P = { suiteId: suite.id };
+  const station = call(r['POST /api/eventops/suites/:suiteId/stations'], { user: owner, params: P, body: { name: 'Bar', kind: 'bar' } }).body.station;
+  const staff = call(r['POST /api/eventops/suites/:suiteId/staff'], { user: owner, params: P, body: { name: 'Sam', number: '5' } }).body.staff;
+  const cp = call(r['POST /api/eventops/suites/:suiteId/checkpoints'], { user: owner, params: P, body: { name: 'Opening check' } }).body.checkpoint;
+  assert.equal(cp.name, 'Opening check');
+
+  const kiosk = call(r['GET /api/eventops/suites/:suiteId/kiosk'], { user: owner, params: P }).body;
+  const KP = { suiteId: suite.id, token: kiosk.token };
+  // Portal info exposes the checkpoint types for the staff picker.
+  assert.equal(call(r['GET /api/eventops/portal/:suiteId/:token'], { params: KP }).body.checkpoints[0].name, 'Opening check');
+
+  // Staff submits the checkpoint with a comment.
+  call(r['POST /api/eventops/portal/:suiteId/:token/checkpoint'], { params: KP, body: { stationId: station.id, checkpointId: cp.id, comment: 'All good', staffId: staff.id } });
+  const logs = call(r['GET /api/eventops/suites/:suiteId/checkpoint-logs'], { user: owner, params: P }).body.logs;
+  assert.equal(logs.length, 1);
+  assert.equal(logs[0].checkpointName, 'Opening check');
+  assert.equal(logs[0].stationLabel, 'Bar');
+  assert.equal(logs[0].staffLabel, '#5 Sam');
+  assert.equal(logs[0].comment, 'All good');
+});
+
+test('portal: staff can list + resolve issues', () => {
+  const r = mount();
+  const { entity, suite, owner, admin } = seedEvent();
+  call(r['PUT /api/eventops/entities/:entityId/enabled'], { user: admin, params: { entityId: entity.id }, body: { enabled: true } });
+  const P = { suiteId: suite.id };
+  const staff = call(r['POST /api/eventops/suites/:suiteId/staff'], { user: owner, params: P, body: { name: 'Sam', number: '5' } }).body.staff;
+  const dev = call(r['POST /api/eventops/suites/:suiteId/devices'], { user: owner, params: P, body: { label: 'X1', qrCode: 'X1' } }).body.device;
+  const issue = call(r['POST /api/eventops/suites/:suiteId/issues'], { user: owner, params: P, body: { deviceId: dev.id, category: 'battery' } }).body.issue;
+  const kiosk = call(r['GET /api/eventops/suites/:suiteId/kiosk'], { user: owner, params: P }).body;
+  const KP = { suiteId: suite.id, token: kiosk.token };
+
+  assert.equal(call(r['GET /api/eventops/portal/:suiteId/:token/issues'], { params: KP, query: { status: 'open' } }).body.issues.length, 1);
+  call(r['PATCH /api/eventops/portal/:suiteId/:token/issues/:id'], { params: { ...KP, id: issue.id }, body: { staffId: staff.id, resolution: 'Swapped device' } });
+  assert.equal(call(r['GET /api/eventops/portal/:suiteId/:token/issues'], { params: KP, query: { status: 'open' } }).body.issues.length, 0);
+  const resolved = call(r['GET /api/eventops/portal/:suiteId/:token/issues'], { params: KP, query: { status: 'resolved' } }).body.issues;
+  assert.equal(resolved[0].resolution, 'Swapped device');
+});
+
 test('deleting a station sends its deployed devices back to the Hive', () => {
   const r = mount();
   const { entity, suite, owner, admin } = seedEvent();

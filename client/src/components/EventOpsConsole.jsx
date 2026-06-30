@@ -16,7 +16,9 @@ const STATION_KINDS = ['bar', 'gate', 'booth', 'topup', 'vendor', 'other'];
 const KIND_ICON = { bar: '🍺', gate: '🛂', booth: '🏪', topup: '💳', vendor: '🍔', other: '📍' };
 const ISSUE_CATEGORIES = ['damaged', 'battery', 'connectivity', 'missing_parts', 'frozen', 'wrong_config', 'other'];
 const CAT_LABEL = { damaged: 'Damaged', battery: 'Battery', connectivity: 'Connectivity', missing_parts: 'Missing parts', frozen: 'Frozen', wrong_config: 'Wrong config', other: 'Other' };
-const TABS = [['live', '📡', 'Live'], ['devices', '📟', 'Devices'], ['stations', '📍', 'Stations'], ['map', '🗺️', 'Map'], ['staff', '🧑‍🔧', 'Staff'], ['issues', '⚠️', 'Issues']];
+const TABS = [['live', '📡', 'Live'], ['devices', '📟', 'Devices'], ['stations', '📍', 'Stations'], ['map', '🗺️', 'Map'], ['staff', '🧑‍🔧', 'Staff'], ['checks', '✅', 'Checks'], ['issues', '⚠️', 'Issues'], ['activity', '🧾', 'Activity']];
+// Quick-pick resolutions (staff can also type a custom comment).
+const RESOLUTIONS = ['Swapped device', 'Rebooted', 'Battery replaced', 'Reconnected', 'Replaced part', 'Reconfigured', 'Cleared error', 'False alarm'];
 
 export default function EventOpsConsole({ entityId, scope = 'admin' }) {
   const isMobile = useIsMobile();
@@ -78,14 +80,21 @@ export default function EventOpsConsole({ entityId, scope = 'admin' }) {
         </select>
       </div>
 
-      {/* Desktop: left nav rail + full-width content. Mobile: top pills + stacked content. */}
+      {/* Desktop: left nav rail (with Scan under it) + full-width content. Mobile: top pills. */}
       <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: isMobile ? 12 : 24, alignItems: 'flex-start' }}>
-        <div style={isMobile ? mobileTabs : leftNav}>
-          {TABS.map(([t, icon, label]) => (
-            <button key={t} onClick={() => setTab(t)} style={isMobile ? tabBtn(tab === t) : navItem(tab === t)}>
-              <span style={{ fontSize: 15 }}>{icon}</span> {label}
+        <div style={isMobile ? { display: 'flex', flexDirection: 'column', gap: 10, width: '100%' } : { display: 'flex', flexDirection: 'column', gap: 8, position: 'sticky', top: 8, width: 170, flexShrink: 0 }}>
+          <div style={isMobile ? mobileTabs : leftNav}>
+            {TABS.map(([t, icon, label]) => (
+              <button key={t} onClick={() => setTab(t)} style={isMobile ? tabBtn(tab === t) : navItem(tab === t)}>
+                <span style={{ fontSize: 15 }}>{icon}</span> {label}
+              </button>
+            ))}
+          </div>
+          {canManage && suiteId && (
+            <button onClick={() => setScan({ for: 'move' })} style={navScan} aria-label="Scan a device">
+              <span style={{ fontSize: 18 }}>📷</span> Scan
             </button>
-          ))}
+          )}
         </div>
         <div style={{ flex: 1, minWidth: 0, width: '100%' }}>
           {suiteId && tab === 'live' && <LiveTab suiteId={suiteId} isMobile={isMobile} reloadKey={reloadKey} onStation={setStationView} />}
@@ -93,16 +102,11 @@ export default function EventOpsConsole({ entityId, scope = 'admin' }) {
           {suiteId && tab === 'stations' && <StationsTab suiteId={suiteId} canManage={canManage} flash={flash} reloadKey={reloadKey} onRefresh={refresh} />}
           {suiteId && tab === 'map' && <MapTab suiteId={suiteId} canManage={canManage} isMobile={isMobile} reloadKey={reloadKey} onStation={setStationView} />}
           {suiteId && tab === 'staff' && <StaffTab suiteId={suiteId} canManage={canManage} flash={flash} reloadKey={reloadKey} />}
+          {suiteId && tab === 'checks' && <ChecksTab suiteId={suiteId} canManage={canManage} flash={flash} reloadKey={reloadKey} />}
           {suiteId && tab === 'issues' && <IssuesTab suiteId={suiteId} canManage={canManage} flash={flash} reloadKey={reloadKey} />}
+          {suiteId && tab === 'activity' && <ActivityTab suiteId={suiteId} reloadKey={reloadKey} />}
         </div>
       </div>
-
-      {/* Persistent Scan button (the on-the-floor primary action) */}
-      {canManage && suiteId && (
-        <button onClick={() => setScan({ for: 'move' })} style={fab(isMobile)} aria-label="Scan a device">
-          <span style={{ fontSize: 20 }}>📷</span> Scan
-        </button>
-      )}
 
       {scan && (
         <ScannerBoundary onError={() => { setScan(null); flash('Scanner had a hiccup — tap a device to move/log it, or try Scan again.'); }}>
@@ -167,19 +171,6 @@ function LiveTab({ suiteId, isMobile, reloadKey, onStation }) {
                 <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--brand)' }}>{s.deviceCount}</div>
                 <div style={{ fontSize: 11, color: 'var(--muted)' }}>device{s.deviceCount === 1 ? '' : 's'} ›</div>
               </button>
-            ))}
-          </div>
-        )}
-      </Section>
-
-      <Section title="Recent activity">
-        {data.recent.length === 0 ? <Empty>Nothing logged yet.</Empty> : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            {data.recent.map((e) => (
-              <div key={e.id} style={feedRow}>
-                <span style={{ fontSize: 13 }}>{feedText(e)}</span>
-                <span style={{ fontSize: 11, color: 'var(--muted)', whiteSpace: 'nowrap' }}>{timeAgo(e.at)}</span>
-              </div>
             ))}
           </div>
         )}
@@ -406,13 +397,12 @@ function StationsTab({ suiteId, canManage, flash, reloadKey, onRefresh }) {
 function IssuesTab({ suiteId, canManage, flash, reloadKey }) {
   const [status, setStatus] = useState('open');
   const [issues, setIssues] = useState(null);
+  const [resolving, setResolving] = useState(null); // the issue being resolved
   const load = () => api.eventopsIssues(suiteId, status).then((r) => setIssues(r.issues || [])).catch(() => setIssues([]));
   useEffect(() => { setIssues(null); load(); }, [suiteId, status, reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function resolve(i) {
-    const resolution = prompt('How was it resolved?', i.resolution || '');
-    if (resolution === null) return;
-    try { await api.eventopsResolveIssue(suiteId, i.id, { resolution }); load(); flash('Issue resolved'); } catch (e) { alert(e.message); }
+  async function doResolve(resolution) {
+    try { await api.eventopsResolveIssue(suiteId, resolving.id, { resolution }); setResolving(null); load(); flash('Issue resolved'); } catch (e) { alert(e.message); }
   }
 
   if (issues === null) return <Loading />;
@@ -442,13 +432,42 @@ function IssuesTab({ suiteId, canManage, flash, reloadKey }) {
                   </div>
                   {i.status === 'resolved' && i.resolution && <div style={{ fontSize: 12, color: 'var(--success)', marginTop: 4 }}>✓ {i.resolution}</div>}
                 </div>
-                {canManage && i.status === 'open' && <button onClick={() => resolve(i)} style={ghostBtn}>Resolve</button>}
+                {canManage && i.status === 'open' && <button onClick={() => setResolving(i)} style={ghostBtn}>Resolve</button>}
               </div>
             </div>
           ))}
         </div>
       )}
+      {resolving && <ResolveModal issue={resolving} onClose={() => setResolving(null)} onResolve={doResolve} />}
     </div>
+  );
+}
+
+// Resolve an issue: pick a quick-pick tile and/or type a comment.
+function ResolveModal({ issue, onClose, onResolve }) {
+  const [picked, setPicked] = useState('');
+  const [comment, setComment] = useState('');
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    const resolution = [picked, comment.trim()].filter(Boolean).join(' — ');
+    setBusy(true); await onResolve(resolution || 'Resolved'); setBusy(false);
+  };
+  return (
+    <Modal title="Resolve issue" subtitle={`${issue.device?.label || issue.device?.qrCode || 'Device'} · ${CAT_LABEL[issue.category] || issue.category}`} onClose={onClose}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div>
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>How was it resolved?</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {RESOLUTIONS.map((r) => <Chip key={r} on={picked === r} onClick={() => setPicked(picked === r ? '' : r)}>{r}</Chip>)}
+          </div>
+        </div>
+        <Field label="Add a comment (optional)"><textarea style={{ ...input, minHeight: 56 }} value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Any extra detail" /></Field>
+        <div style={modalActions}>
+          <button onClick={onClose} style={ghostBtn}>Cancel</button>
+          <button onClick={submit} disabled={busy || (!picked && !comment.trim())} style={primaryBtn}>{busy ? 'Saving…' : 'Mark resolved'}</button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
@@ -782,16 +801,21 @@ function StaffPortalCard({ suiteId, flash }) {
   );
 }
 
-// Drill-down: the devices currently AT a station (tap one to move/log it).
+// Drill-down: a right-hand drawer with the devices currently AT a station + its open issues.
 function StationDevicesModal({ suiteId, station, reloadKey, onClose, onDevice }) {
   const [devices, setDevices] = useState(null);
+  const [issues, setIssues] = useState(null);
   useEffect(() => {
     api.eventopsDevices(suiteId)
       .then((r) => setDevices((r.devices || []).filter((d) => d.stationId === station.id)))
       .catch(() => setDevices([]));
+    api.eventopsIssues(suiteId, 'open')
+      .then((r) => setIssues((r.issues || []).filter((i) => i.device?.stationId === station.id)))
+      .catch(() => setIssues([]));
   }, [suiteId, station.id, reloadKey]);
   return (
-    <Modal title={station.name} subtitle={`${KIND_ICON[station.kind] || '📍'} ${station.kind} · devices here now`} onClose={onClose}>
+    <Drawer title={station.name} subtitle={`${KIND_ICON[station.kind] || '📍'} ${station.kind}`} onClose={onClose}>
+      <div style={sectionLabel}>Devices here ({devices?.length ?? '…'})</div>
       {devices === null ? <Loading /> : devices.length === 0 ? <Empty>No devices at this station right now.</Empty> : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {devices.map((d) => (
@@ -805,7 +829,118 @@ function StationDevicesModal({ suiteId, station, reloadKey, onClose, onDevice })
           ))}
         </div>
       )}
-    </Modal>
+      <div style={{ ...sectionLabel, marginTop: 18 }}>Open issues ({issues?.length ?? '…'})</div>
+      {issues === null ? <Loading /> : issues.length === 0 ? <Empty>No open issues here.</Empty> : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {issues.map((i) => (
+            <div key={i.id} style={card}>
+              <div style={{ fontWeight: 650, fontSize: 14 }}>{i.device?.label || i.device?.qrCode || 'Device'} · <span style={{ color: 'var(--error)' }}>{CAT_LABEL[i.category] || i.category}</span></div>
+              {i.note && <div style={{ fontSize: 13, marginTop: 2 }}>{i.note}</div>}
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>{i.staffLabel ? `${i.staffLabel} · ` : ''}⏱ {dur(i.reportedAt)}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Drawer>
+  );
+}
+
+// A right-hand slide-over drawer (full-height) — used for the station drill-down.
+function Drawer({ title, subtitle, onClose, children }) {
+  return (
+    <div style={drawerOverlay} onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div style={drawerPanel}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 14 }}>
+          <div>
+            <strong style={{ fontSize: 17 }}>{title}</strong>
+            {subtitle && <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 2 }}>{subtitle}</div>}
+          </div>
+          <button onClick={onClose} style={iconBtn} aria-label="Close">✕</button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────── Activity tab ────────────────────────────────
+function ActivityTab({ suiteId, reloadKey }) {
+  const [acts, setActs] = useState(null);
+  useEffect(() => { setActs(null); api.eventopsActivity(suiteId, 150).then((r) => setActs(r.activity || [])).catch(() => setActs([])); }, [suiteId, reloadKey]);
+  if (acts === null) return <Loading />;
+  if (!acts.length) return <Empty>Nothing logged yet.</Empty>;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      {acts.map((e) => (
+        <div key={e.id} style={feedRow}>
+          <span style={{ fontSize: 13 }}>{e.device ? `${e.device.label || e.device.qrCode} · ` : ''}{feedText(e)}</span>
+          <span style={{ fontSize: 11, color: 'var(--muted)', whiteSpace: 'nowrap' }}>{timeAgo(e.at)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ──────────────────────────────── Checks tab ──────────────────────────────────
+// Setup the named checkpoints + view the submissions (with photos) staff send from the portal.
+function ChecksTab({ suiteId, canManage, flash, reloadKey }) {
+  const [checkpoints, setCheckpoints] = useState(null);
+  const [logs, setLogs] = useState(null);
+  const [newName, setNewName] = useState('');
+  const [photo, setPhoto] = useState(null);
+  const load = () => {
+    api.eventopsCheckpoints(suiteId).then((r) => setCheckpoints(r.checkpoints || [])).catch(() => setCheckpoints([]));
+    api.eventopsCheckpointLogs(suiteId).then((r) => setLogs(r.logs || [])).catch(() => setLogs([]));
+  };
+  useEffect(() => { setCheckpoints(null); setLogs(null); load(); }, [suiteId, reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function add() { const name = newName.trim(); if (!name) return; try { await api.eventopsCreateCheckpoint(suiteId, name); setNewName(''); load(); flash('Checkpoint added'); } catch (e) { alert(e.message); } }
+  async function rename(c) { const name = prompt('Rename checkpoint', c.name); if (name == null) return; try { await api.eventopsUpdateCheckpoint(suiteId, c.id, name); load(); } catch (e) { alert(e.message); } }
+  async function del(c) { if (!confirm(`Delete “${c.name}”? Past submissions keep the name.`)) return; try { await api.eventopsDeleteCheckpoint(suiteId, c.id); load(); } catch (e) { alert(e.message); } }
+
+  if (checkpoints === null || logs === null) return <Loading />;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {canManage && (
+        <div style={card}>
+          <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 6 }}>Checkpoint types</div>
+          <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 10 }}>Named checks staff complete at a station from the scan portal (e.g. Opening, Mid-shift, Closing).</div>
+          <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+            <input style={input} value={newName} placeholder="e.g. Opening check" onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()} />
+            <button onClick={add} style={primaryBtn}>Add</button>
+          </div>
+          {checkpoints.length === 0 ? <Empty>No checkpoint types yet.</Empty> : (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {checkpoints.map((c) => (
+                <span key={c.id} style={chipStatic}>✅ {c.name}
+                  <button onClick={() => rename(c)} style={miniIcon}>✏️</button>
+                  <button onClick={() => del(c)} style={miniIcon}>🗑️</button>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      <Section title="Checkpoint log">
+        {logs.length === 0 ? <Empty>No checkpoints submitted yet — staff complete these from the scan portal.</Empty> : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {logs.map((l) => (
+              <div key={l.id} style={card}>
+                <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                  {l.photo && <img src={l.photo} alt="" onClick={() => setPhoto(l.photo)} style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 8, cursor: 'pointer', flexShrink: 0 }} />}
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontWeight: 650, fontSize: 14 }}>{l.checkpointName || 'Checkpoint'}{l.stationLabel ? ` · 📍 ${l.stationLabel}` : ''}</div>
+                    {l.comment && <div style={{ fontSize: 13, marginTop: 2 }}>{l.comment}</div>}
+                    <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>{l.staffLabel ? `${l.staffLabel} · ` : ''}{timeAgo(l.at)}</div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Section>
+      {photo && <div style={overlay} onClick={() => setPhoto(null)}><img src={photo} alt="" style={{ maxWidth: '92vw', maxHeight: '88vh', borderRadius: 12 }} /></div>}
+    </div>
   );
 }
 
@@ -885,7 +1020,8 @@ const input = { width: '100%', boxSizing: 'border-box', padding: '11px 12px', fo
 const fieldCol = { display: 'flex', flexDirection: 'column', gap: 10 };
 const tabBtn = (on) => ({ padding: '9px 14px', borderRadius: 10, border: 'none', cursor: 'pointer', fontSize: 14, fontWeight: on ? 700 : 500, background: on ? 'var(--brand)' : 'var(--card)', color: on ? '#fff' : 'var(--text)', whiteSpace: 'nowrap' });
 const mobileTabs = { display: 'flex', gap: 6, flexWrap: 'wrap' };
-const leftNav = { position: 'sticky', top: 8, display: 'flex', flexDirection: 'column', gap: 3, width: 170, flexShrink: 0, padding: 6, borderRadius: 14, border: '1px solid var(--hairline)', background: 'var(--card)' };
+const leftNav = { display: 'flex', flexDirection: 'column', gap: 3, padding: 6, borderRadius: 14, border: '1px solid var(--hairline)', background: 'var(--card)' };
+const navScan = { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '13px', borderRadius: 12, border: 'none', cursor: 'pointer', fontSize: 16, fontWeight: 800, background: 'var(--brand)', color: '#fff', boxShadow: 'var(--shadow-sm)' };
 const navItem = (on) => ({ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', padding: '10px 12px', borderRadius: 9, border: 'none', cursor: 'pointer', fontSize: 14, fontWeight: on ? 700 : 500, background: on ? 'var(--brand)' : 'transparent', color: on ? '#fff' : 'var(--text)' });
 const primaryBtn = { padding: '11px 16px', borderRadius: 10, border: 'none', background: 'var(--brand)', color: '#fff', fontWeight: 700, fontSize: 14, cursor: 'pointer' };
 const ghostBtn = { padding: '9px 14px', borderRadius: 10, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', fontWeight: 600, fontSize: 13, cursor: 'pointer' };
@@ -896,13 +1032,17 @@ const deviceRow = (clickable) => ({ display: 'flex', alignItems: 'center', justi
 const badge = { padding: '5px 10px', borderRadius: 8, fontSize: 12, fontWeight: 700 };
 const staffBadge = { minWidth: 34, height: 34, padding: '0 8px', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(var(--brand-rgb),0.12)', color: 'var(--brand)', fontWeight: 800, fontSize: 13, flexShrink: 0 };
 const feedRow = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '8px 4px', borderBottom: '1px solid var(--hairline)' };
-const fab = (isMobile) => ({ position: 'fixed', right: isMobile ? 16 : 32, bottom: isMobile ? 16 : 24, zIndex: 60, display: 'flex', alignItems: 'center', gap: 8, padding: '14px 22px', borderRadius: 30, border: 'none', background: 'var(--brand)', color: '#fff', fontWeight: 700, fontSize: 16, cursor: 'pointer', boxShadow: 'var(--shadow-pop)' });
 const mapCanvas = { position: 'relative', width: '100%', borderRadius: 14, border: '1px solid var(--hairline)', background: 'repeating-linear-gradient(0deg, var(--card), var(--card) 23px, var(--hairline) 24px), repeating-linear-gradient(90deg, var(--card), var(--card) 23px, var(--hairline) 24px)', overflow: 'hidden', touchAction: 'none' };
 const mapPin = { position: 'absolute', transform: 'translate(-50%, -50%)', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '8px 10px', borderRadius: 12, border: '2px solid var(--border)', background: 'var(--card)', color: 'var(--text)', boxShadow: 'var(--shadow-sm)', userSelect: 'none', touchAction: 'none' };
 const mapPinCount = { marginTop: 3, minWidth: 22, padding: '1px 7px', borderRadius: 10, background: 'var(--brand)', color: '#fff', fontSize: 12, fontWeight: 800 };
 const mapPinIssue = { position: 'absolute', top: -9, right: -9, padding: '1px 6px', borderRadius: 10, background: 'var(--error)', color: '#fff', fontSize: 11, fontWeight: 800, boxShadow: 'var(--shadow-sm)' };
 const mapToolbar = { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '8px 10px', borderRadius: 10, border: '1px solid var(--hairline)', background: 'var(--card)' };
+const chipStatic = { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderRadius: 20, border: '1px solid var(--border)', background: 'var(--card)', fontSize: 13, fontWeight: 600 };
+const miniIcon = { border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 12, padding: 0, lineHeight: 1 };
 const tbGroup = { display: 'flex', alignItems: 'center', gap: 2, padding: 2, borderRadius: 8, border: '1px solid var(--border)' };
+const sectionLabel = { fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.4, color: 'var(--muted)', margin: '0 0 8px' };
+const drawerOverlay = { position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'flex-end' };
+const drawerPanel = { width: 'min(440px, 92vw)', height: '100%', overflowY: 'auto', background: 'var(--card)', padding: 18, boxShadow: 'var(--shadow-pop)' };
 const overlay = { position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 };
 const modalSheet = { width: '100%', maxWidth: 460, maxHeight: '88vh', overflowY: 'auto', background: 'var(--card)', borderRadius: 18, padding: 18, boxShadow: 'var(--shadow-pop)' };
 const modalActions = { display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 };
