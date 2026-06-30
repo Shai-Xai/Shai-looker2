@@ -120,6 +120,10 @@ approval needed.
   To respect WhatsApp’s rules, it’s sent free-form only while the customer is inside
   their **24-hour window** (they messaged the Owl in the last day); reaching everyone
   on a fixed schedule regardless will use an approved WhatsApp template (next step).
+- **Team broadcast lists** — subscribe a **list of team numbers** to one client’s daily
+  update (the numbers don’t need Pulse accounts). WhatsApp groups aren’t possible via the
+  API, so this fans the same update out 1-to-1 to everyone on the list — same 24-hour-window
+  rule per number. Managed in Admin → WhatsApp Owl.
 - **Take action by reply button** — the Owl can **set up an alert** ("tell me when
   tickets hit 1000"), **save a segment**, or **draft an email/SMS campaign** straight
   from WhatsApp. It works like a campaign manager (asks the few setup questions it needs,
@@ -554,6 +558,10 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-30** — **WhatsApp Owl: team broadcast lists** 🧪: subscribe a **list of team
+  numbers** to one client’s daily update (no Pulse account needed for recipients). WhatsApp
+  groups aren’t available via the API, so the Owl fans the same update out 1-to-1 to the whole
+  list — built once per client, sent to each in-window number. Managed in Admin → WhatsApp Owl.
 - **2026-06-30** — **Event Ops (pilot)** 🧪 — new §12: a phone-first console to track
   **devices & stations live at an event**. Add inventory (single or bulk auto-numbered),
   set up stations, **scan to move** devices between the Hive and stations (append-only

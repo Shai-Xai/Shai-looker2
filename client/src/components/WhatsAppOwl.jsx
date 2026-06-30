@@ -38,7 +38,7 @@ export default function WhatsAppOwl() {
   const test = () => sendTest(testTo);
 
   useEffect(() => {
-    api.owlWhatsapp().then((r) => { setCfg({ from: r.from || '', webhookPath: r.webhookPath, statusPath: r.statusPath, hasSecret: r.hasSecret, hasApiKey: r.hasApiKey, mediaEnabled: !!r.mediaEnabled, pushEnabled: !!r.pushEnabled, numbers: r.numbers || [] }); if (r.testMessage) setTestText(r.testMessage); }).catch(() => setCfg({ numbers: [] }));
+    api.owlWhatsapp().then((r) => { setCfg({ from: r.from || '', webhookPath: r.webhookPath, statusPath: r.statusPath, hasSecret: r.hasSecret, hasApiKey: r.hasApiKey, mediaEnabled: !!r.mediaEnabled, pushEnabled: !!r.pushEnabled, numbers: r.numbers || [], broadcasts: bcastToRows(r.broadcasts) }); if (r.testMessage) setTestText(r.testMessage); }).catch(() => setCfg({ numbers: [], broadcasts: [] }));
     api.adminListEntities().then((r) => setEnts(Array.isArray(r) ? r : (r.entities || []))).catch(() => setEnts([]));
     loadLog();
   }, []);
@@ -47,16 +47,21 @@ export default function WhatsAppOwl() {
   const setNum = (i, patch) => setCfg((c) => ({ ...c, numbers: c.numbers.map((n, j) => (j === i ? { ...n, ...patch } : n)) }));
   const addNum = () => setCfg((c) => ({ ...c, numbers: [...c.numbers, { msisdn: '', email: '', entityId: '' }] }));
   const delNum = (i) => setCfg((c) => ({ ...c, numbers: c.numbers.filter((_, j) => j !== i) }));
+  // Broadcast lists (a client → a team of plain numbers that all get the daily update).
+  const setBcast = (i, patch) => setCfg((c) => ({ ...c, broadcasts: (c.broadcasts || []).map((b, j) => (j === i ? { ...b, ...patch } : b)) }));
+  const addBcast = () => setCfg((c) => ({ ...c, broadcasts: [...(c.broadcasts || []), { entityId: '', hour: 8, subs: ['digest'], numbersText: '' }] }));
+  const delBcast = (i) => setCfg((c) => ({ ...c, broadcasts: (c.broadcasts || []).filter((_, j) => j !== i) }));
+  const bcastCount = (t) => String(t || '').split(/[\s,;]+/).map((s) => s.trim()).filter(Boolean).length;
   const save = async () => {
     setBusy(true); setSaveErr(''); setSaved(false);
     try {
-      const r = await api.saveOwlWhatsapp({ from: cfg.from, mediaEnabled: !!cfg.mediaEnabled, pushEnabled: !!cfg.pushEnabled, testMessage: testText, numbers: cfg.numbers.filter((n) => n.msisdn && n.email), ...(secret.trim() ? { secret: secret.trim() } : {}), ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}) });
+      const r = await api.saveOwlWhatsapp({ from: cfg.from, mediaEnabled: !!cfg.mediaEnabled, pushEnabled: !!cfg.pushEnabled, testMessage: testText, numbers: cfg.numbers.filter((n) => n.msisdn && n.email), broadcasts: bcastToMap(cfg.broadcasts), ...(secret.trim() ? { secret: secret.trim() } : {}), ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}) });
       if (r && r.error) throw new Error(typeof r.error === 'string' ? r.error : 'Save rejected');
       // Re-load from the server so the form shows the TRUE saved state — if a change
       // didn't persist (e.g. a number's linked client), the dropdown snaps back here,
       // making a non-saving issue impossible to miss.
       const fresh = await api.owlWhatsapp();
-      setCfg((c) => ({ ...c, from: fresh.from || '', hasSecret: fresh.hasSecret, hasApiKey: fresh.hasApiKey, mediaEnabled: !!fresh.mediaEnabled, pushEnabled: !!fresh.pushEnabled, webhookPath: fresh.webhookPath, statusPath: fresh.statusPath, numbers: fresh.numbers || c.numbers }));
+      setCfg((c) => ({ ...c, from: fresh.from || '', hasSecret: fresh.hasSecret, hasApiKey: fresh.hasApiKey, mediaEnabled: !!fresh.mediaEnabled, pushEnabled: !!fresh.pushEnabled, webhookPath: fresh.webhookPath, statusPath: fresh.statusPath, numbers: fresh.numbers || c.numbers, broadcasts: bcastToRows(fresh.broadcasts) }));
       setSecret(''); setApiKey('');
       setSaved(true); setTimeout(() => setSaved(false), 2500);
     } catch (e) { setSaveErr((e && e.message) || 'Save failed — your changes were NOT saved. Check your connection and try again.'); }
@@ -136,6 +141,36 @@ export default function WhatsAppOwl() {
         <span>Send the scheduled updates ticked per number above. To stay within WhatsApp’s rules, an update is only sent if that customer messaged the Owl in the <strong>last 24 hours</strong> (their free-form window). Numbers outside the window are skipped that day — reaching everyone on a fixed schedule needs an approved WhatsApp template.</span>
       </label>
 
+      <span style={lbl}>7b · Team broadcast lists (one client → many numbers)</span>
+      <div style={{ fontSize: 11.5, color: 'var(--muted)', margin: '0 0 6px' }}>Subscribe a <strong>list of team numbers</strong> to one client’s daily update. The numbers <strong>don’t need Pulse accounts</strong> — the update is built once for that client and sent to everyone on the list. (WhatsApp groups aren’t possible via the API, so this fans the same message out 1-to-1.) Same 24-hour-window rule applies per number; tip: a recipient stays in-window by messaging the Owl (e.g. tapping a starter), so they’ll receive it on the next half-hourly tick once they do.</div>
+      {(cfg.broadcasts || []).length === 0 && <div style={{ fontSize: 12.5, color: 'var(--muted)', margin: '2px 0' }}>No broadcast lists yet — add one below.</div>}
+      {(cfg.broadcasts || []).map((b, i) => (
+        <div key={i} style={{ border: '1px solid var(--hairline)', borderRadius: 8, padding: 8, marginBottom: 6, background: 'var(--card)' }}>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+            <select value={b.entityId} onChange={(e) => setBcast(i, { entityId: e.target.value })} style={{ ...fld, width: 200 }}>
+              <option value="">Pick a client…</option>
+              {ents.map((en) => <option key={en.id} value={en.id}>{en.name}</option>)}
+            </select>
+            <span style={{ fontSize: 11, color: 'var(--muted)' }}>send:</span>
+            {['digest', 'goals', 'alerts'].map((t) => (
+              <label key={t} style={{ display: 'inline-flex', gap: 3, alignItems: 'center', fontSize: 12, cursor: 'pointer' }}>
+                <input type="checkbox" checked={(b.subs || []).includes(t)} onChange={(e) => setBcast(i, { subs: e.target.checked ? [...new Set([...(b.subs || []), t])] : (b.subs || []).filter((x) => x !== t) })} />
+                {t}
+              </label>
+            ))}
+            <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 4 }}>at</span>
+            <select value={Number.isInteger(b.hour) ? b.hour : 8} onChange={(e) => setBcast(i, { hour: Number(e.target.value) })} style={{ ...fld, padding: '3px 6px', fontSize: 12 }}>
+              {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{String(h).padStart(2, '0')}:00</option>)}
+            </select>
+            <span style={{ fontSize: 11, color: 'var(--muted)' }}>SAST</span>
+            <button onClick={() => delBcast(i)} title="Remove list" style={{ border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 13, marginLeft: 'auto' }}>🗑</button>
+          </div>
+          <textarea value={b.numbersText} onChange={(e) => setBcast(i, { numbersText: e.target.value })} placeholder="Team numbers — one per line or comma-separated, e.g. 27821234567" rows={2} style={{ ...fld, width: '100%', marginTop: 6, resize: 'vertical', fontFamily: 'inherit' }} />
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{bcastCount(b.numbersText)} number{bcastCount(b.numbersText) === 1 ? '' : 's'} on this list.</div>
+        </div>
+      ))}
+      <button onClick={addBcast} style={{ ...fld, cursor: 'pointer', marginTop: 2 }}>＋ Add broadcast list</button>
+
       <span style={lbl}>6 · Chart images</span>
       <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 13, cursor: 'pointer' }}>
         <input type="checkbox" checked={!!cfg.mediaEnabled} onChange={(e) => setCfg((c) => ({ ...c, mediaEnabled: e.target.checked }))} style={{ marginTop: 2 }} />
@@ -186,6 +221,20 @@ export default function WhatsAppOwl() {
       </div>
     </div>
   );
+}
+
+// Broadcast lists travel as { entityId: { hour, subs[], numbers[] } } but edit more
+// easily as rows with the numbers as free text (one per line / comma-separated).
+function bcastToRows(map) {
+  return Object.entries(map || {}).map(([entityId, c]) => ({ entityId, hour: Number.isInteger(c && c.hour) ? c.hour : 8, subs: Array.isArray(c && c.subs) ? c.subs : [], numbersText: (Array.isArray(c && c.numbers) ? c.numbers : []).join('\n') }));
+}
+function bcastToMap(rows) {
+  const out = {};
+  for (const b of (rows || [])) {
+    if (!b || !b.entityId) continue;
+    out[b.entityId] = { hour: Number.isInteger(b.hour) ? b.hour : 8, subs: Array.isArray(b.subs) ? b.subs : [], numbers: String(b.numbersText || '').split(/[\s,;]+/).map((s) => s.trim()).filter(Boolean) };
+  }
+  return out;
 }
 
 // Colour the stage chip so the happy path (received → identified → replied) reads green

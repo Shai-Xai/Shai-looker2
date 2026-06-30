@@ -204,6 +204,17 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
     return { user, entityId };
   }
 
+  // An authorised "author" to GENERATE a client's broadcast update under — broadcast
+  // recipients needn't be Pulse users, but the scoped Owl loop still needs a user whose
+  // access includes this client. Prefer an actual member of the entity, else any admin.
+  // (The content is built once under this identity, then mirrored to the list — like an
+  // email digest whose recipients don't each need an account.)
+  function userForEntity(entityId) {
+    if (!entityId) return null;
+    const users = db.listUsers ? (db.listUsers() || []) : [];
+    return users.find((u) => (u.entityIds || []).includes(entityId)) || users.find((u) => u.role === 'admin') || null;
+  }
+
   // Build the per-turn instructions (scope, date, the live field dictionary, guidance,
   // and the WhatsApp plain-text override). Mirrors the web route, trimmed for WhatsApp.
   function instructionsFor(entityId, userId) {
@@ -617,6 +628,9 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
       pushEnabled: db.getSetting('whatsapp_push_enabled', '') === '1',
       testMessage: db.getSetting('whatsapp_test_message', '') || '',
       numbers: Object.entries(allowlist()).map(([msisdn, v]) => ({ msisdn, email: v.email || '', entityId: v.entityId || '', subs: Array.isArray(v.subs) ? v.subs : [], hour: Number.isInteger(v.hour) ? v.hour : 8 })),
+      // Per-client broadcast lists: { entityId: { hour, subs[], numbers[] } } — a team of
+      // plain numbers (no Pulse account needed) that all get the same daily update.
+      broadcasts: J(db.getSetting('owl_whatsapp_broadcasts', '') || '{}', {}),
     });
   });
   app.put('/api/admin/owl-whatsapp', auth.requireAdmin, (req, res) => {
@@ -637,6 +651,19 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
         map[m] = { email: String(n.email).trim(), entityId: String(n.entityId || '').trim(), subs, hour };
       }
       db.setSetting('owl_whatsapp_numbers', JSON.stringify(map));
+    }
+    // Per-client broadcast lists: validate hour, topics and numbers; drop empty lists.
+    if (b.broadcasts && typeof b.broadcasts === 'object') {
+      const out = {};
+      for (const [entityId, cfg] of Object.entries(b.broadcasts)) {
+        const eid = String(entityId || '').trim(); if (!eid || !cfg || typeof cfg !== 'object') continue;
+        const subs = Array.isArray(cfg.subs) ? cfg.subs.filter((t) => TOPICS.includes(t)) : [];
+        const hour = Number.isInteger(cfg.hour) ? Math.min(23, Math.max(0, cfg.hour)) : 8;
+        const numbers = [...new Set((Array.isArray(cfg.numbers) ? cfg.numbers : []).map((x) => norm(x)).filter(Boolean))].slice(0, 100);
+        if (!numbers.length && !subs.length) continue; // an empty list isn't worth storing
+        out[eid] = { hour, subs, numbers };
+      }
+      db.setSetting('owl_whatsapp_broadcasts', JSON.stringify(out));
     }
     res.json({ ok: true });
   });
@@ -722,7 +749,41 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
         const r = await messaging.sendWhatsapp({ to: msisdn, text: msg });
         logEvent(msisdn, r && r.ok ? 'push-sent' : 'push-failed', r && r.ok ? topics.join(', ') : (r && r.error) || 'send error');
       }
+      await broadcastTick(hour, day);
     } catch (e) { console.error('[owlWhatsapp] sched tick failed', e && e.message); } finally { scheduling = false; }
+  }
+
+  // Broadcast lists: a per-client set of plain numbers (recipients needn't be Pulse
+  // users) that all receive the SAME daily update. The message is built ONCE per client
+  // per day (cached), then mirrored to each number that still needs it AND is inside its
+  // 24h window — the same WhatsApp free-form rule the per-user push obeys. Numbers out of
+  // window are left unsent so a later tick catches them once they message the Owl.
+  const bcastCache = new Map(); // entityId -> { day, msg }
+  async function broadcastTick(hour, day) {
+    const all = J(db.getSetting('owl_whatsapp_broadcasts', '') || '{}', {});
+    for (const [entityId, cfg] of Object.entries(all)) {
+      const topics = Array.isArray(cfg.subs) ? cfg.subs.filter((t) => TOPIC_ASK[t]) : [];
+      const numbers = [...new Set((Array.isArray(cfg.numbers) ? cfg.numbers : []).map(norm).filter(Boolean))];
+      if (!topics.length || !numbers.length) continue;
+      if (hour < (Number.isInteger(cfg.hour) ? cfg.hour : 8)) continue; // not yet this list's hour
+      // Only recipients who still need today's update AND can be messaged free-form.
+      const due = numbers.filter((m) => !sentGet.get(m, day) && inWindow(m));
+      if (!due.length) continue;
+      let cached = bcastCache.get(entityId);
+      if (!cached || cached.day !== day) {
+        const user = userForEntity(entityId);
+        if (!user) { logEvent('', 'bcast-skip', `no author user with access to ${entityId}`); continue; }
+        const msg = await buildScheduledMessage({ user, entityId }, topics);
+        if (!msg) { logEvent('', 'bcast-failed', `no content generated for ${entityId}`); continue; }
+        cached = { day, msg }; bcastCache.set(entityId, cached);
+      }
+      for (const m of due) {
+        sentMark.run(m, day, now());
+        insMsg.run(crypto.randomUUID(), m, 'owl', cached.msg, entityId, now());
+        const r = await messaging.sendWhatsapp({ to: m, text: cached.msg });
+        logEvent(m, r && r.ok ? 'push-sent' : 'push-failed', r && r.ok ? `broadcast: ${topics.join(', ')}` : (r && r.error) || 'send error');
+      }
+    }
   }
   const schedTimer = setInterval(() => schedTick().catch(() => {}), 30 * 60 * 1000); // every 30 min
   if (schedTimer.unref) schedTimer.unref();
