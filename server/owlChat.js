@@ -299,9 +299,11 @@ function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, m
     // Human-readable scope label so the Owl can STATE whose data it's answering for.
     const scopeEnt = scopeEntityId ? db.getEntity(scopeEntityId) : null;
     const scopeLabel = [scopeEnt && scopeEnt.name, su && su.name].filter(Boolean).join(' · ');
-    const today = new Date().toISOString().slice(0, 10);
+    const nowSa = new Date(Date.now() + 2 * 60 * 60 * 1000); // SAST (UTC+2) — Howler's local day/hour
+    const today = nowSa.toISOString().slice(0, 10);
+    const hourSa = nowSa.getUTCHours();
     const parts = [
-      `Today's date is ${today}. For "upcoming"/"future"/"past"/"this year" questions, compare against today — e.g. filter Event Date (core_events.start_date) with a Looker date expression such as "after ${today}" for future events or "before ${today}" for past ones. (Event Date is the date of the event; Purchased Date is when a ticket was bought.)`,
+      `Today's date is ${today} and the current time is about ${String(hourSa).padStart(2, '0')}:00 (SAST, UTC+2). For "upcoming"/"future"/"past"/"this year" questions, compare against today — e.g. filter Event Date (core_events.start_date) with a Looker date expression such as "after ${today}" for future events or "before ${today}" for past ones. (Event Date is the date of the event; Purchased Date is when a ticket was bought.) For a "today so far vs yesterday (to the same time)" comparison, use ${hourSa} as the cut-off hour (filter Purchased Hour of Day to "0 to ${hourSa}") so both days are trimmed to the same window.`,
     ];
     if (scopeLabel) parts.push(`All data in this conversation is scoped to: ${scopeLabel}. Make clear in your answer which client/event the numbers are for — lead your answer with "For ${scopeLabel}:" (or naturally name it). Never imply the figures cover other clients or events.`);
     // Surface the curated catalogue's field meanings + rules to the model — it only

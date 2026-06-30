@@ -162,9 +162,11 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
   // Build the per-turn instructions (scope, date, the live field dictionary, guidance,
   // and the WhatsApp plain-text override). Mirrors the web route, trimmed for WhatsApp.
   function instructionsFor(entityId) {
-    const today = now().slice(0, 10);
+    const nowSa = new Date(Date.now() + 2 * 60 * 60 * 1000); // SAST (UTC+2) — Howler's local day/hour
+    const today = nowSa.toISOString().slice(0, 10);
+    const hourSa = nowSa.getUTCHours();
     const ent = entityId && db.getEntity ? db.getEntity(entityId) : null;
-    const parts = [`Today's date is ${today}.`];
+    const parts = [`Today's date is ${today} and the current time is about ${String(hourSa).padStart(2, '0')}:00 (SAST, UTC+2). For a "today so far vs yesterday (to the same time)" comparison, use ${hourSa} as the cut-off hour (filter Purchased Hour of Day to "0 to ${hourSa}") so both days are trimmed to the same window.`];
     if (ent) parts.push(`All data in this conversation is scoped to: ${ent.name}. The ONLY client here is "${ent.name}" — when naming the client/entity, always say "${ent.name}" and NEVER any other client name, even if a different name appears earlier in this chat (that was a previous scope). Lead your answer with "For ${ent.name}:" and never imply the figures cover other clients.`);
     let fmeta = []; try { fmeta = owlFields.list(); } catch { /* ignore */ }
     if (fmeta.length) {

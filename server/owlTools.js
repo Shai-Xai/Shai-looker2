@@ -212,7 +212,14 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     }
 
     // 5) Run + return the grounding trail. /queries/run/json → array of row objects.
-    const rows = await query.runLookerQuery('/queries/run/json', body);
+    //    A Looker error (e.g. a field that isn't in this explore) becomes a structured
+    //    refusal so the Owl can say "I couldn't run that" instead of crashing the turn.
+    let rows;
+    try {
+      rows = await query.runLookerQuery('/queries/run/json', body);
+    } catch (e) {
+      return refuse('query_failed', `I couldn't run that query over your data${e && e.message ? ` (${String(e.message).slice(0, 140)})` : ''}. Try rephrasing or a different breakdown.`);
+    }
     return {
       ok: true,
       rows: Array.isArray(rows) ? rows : [],

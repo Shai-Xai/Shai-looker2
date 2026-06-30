@@ -523,6 +523,11 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-30** — **Owl can read sales by the hour** ✅: the Owl's data now includes an
+  **hour-of-day grain**, so it can answer "what's our busiest sales hour?", show an
+  intraday sell curve, and — importantly — make a **fair "today so far vs yesterday to
+  the same time"** comparison (it trims both days to the current hour instead of
+  comparing a part-day against a full day). The hour is the finest grain (no per-minute).
 - **2026-06-30** — **Owl actions always link to where you can see them** ✅: whenever the
   Owl creates something — an **alert**, a **segment** or a **draft campaign** — the
   confirmation now includes a **"View it →" link** straight to the right page (Alerts /
