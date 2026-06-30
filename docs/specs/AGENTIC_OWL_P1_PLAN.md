@@ -311,6 +311,18 @@ built unless marked ✅.)
   returning (a returning flag), reps (a rep/promoter dimension) — each becomes a driver
   once curated in. **Next:** draft a campaign FROM a segment (the full insight→act chain),
   per-channel consent columns on the purchaser explore.
+- **✅ draftCampaign — the flagship insight→action (2026-06-30).** The Owl drafts an
+  email/SMS CAMPAIGN to a cohort: writes the copy (existing CAMPAIGN_SYSTEM copywriter),
+  previews the audience reach, and on confirm creates a **DRAFT** in Engage. It NEVER
+  sends — a human reviews, approves and sends via the existing approval workflow (L2).
+  Audience is the same `query` cohort segments use (self-contained). Shipped: `actions.js`
+  (shapeAudience preserves `query` mode; programmatic `createDraftCampaign` reusing
+  cleanConfig + campaigns.approve, always status 'draft'), `owlTools.draftCampaign`
+  (validates cohort, rejects PII, drafts copy via injected `draftCampaignCopy`, previews
+  reach), `POST /api/owl/act/draft-campaign` (curated-explore guard + permission re-check),
+  `CampaignActionCard` (reach + subject + body preview + "Create draft campaign"). Tests:
+  drafts copy + query audience, rejects PII, requires goal + cohort. **Next:** target a
+  saved segment by name; propose the cohort from a goal gap; A/B copy variants.
 
 ### ✅ Shipped this session
 Native chat on Claude tool-use; `askData` (curated catalogue, scoped, fails-closed); allowlist gating (shai.evian); scope bound to the organisers a user can access (never platform-wide); client/event picker + the Owl states its scope; suite event-lock applied; re-pointed to the `tickets_purchased`/`core_tickets` explore (realistic counts); tickets-vs-add-ons split; customer lookup by email/phone/name (filter-only, no enumeration); citation chips + underlying data table; today's-date awareness; auto-charts via Pulse's `ChartTile` + a bar/line/pie/metric type toggle.

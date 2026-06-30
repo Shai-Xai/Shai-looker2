@@ -257,9 +257,16 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
   // multi-source `sources`/`combine` (each block shaped recursively, one level deep).
   function shapeAudience(aud = {}, depth = 0) {
     const out = {
-      mode: ['paste', 'gsheet', 'snapshot', 'segment'].includes(aud.mode) ? aud.mode : 'tile',
+      mode: ['paste', 'gsheet', 'snapshot', 'segment', 'query'].includes(aud.mode) ? aud.mode : 'tile',
       gsheetUrl: String(aud.gsheetUrl || '').slice(0, 1000), // when mode = 'gsheet' (linked Google Sheet, read live)
       segmentId: String(aud.segmentId || ''), // when mode = 'segment' (reference, resolved live)
+      // when mode = 'query' (a cohort the Owl built in chat) — curated explore + dim filters;
+      // resolved by audienceFor's query branch (identity columns fixed server-side).
+      model: String(aud.model || ''),
+      view: String(aud.view || ''),
+      queryFilters: (aud.queryFilters && typeof aud.queryFilters === 'object' && !Array.isArray(aud.queryFilters))
+        ? Object.fromEntries(Object.entries(aud.queryFilters).slice(0, 50).map(([k, v]) => [String(k), String(v)]))
+        : {},
       phoneField: String(aud.phoneField || ''), // mobile column (for SMS)
       dashboardId: String(aud.dashboardId || ''),
       tileId: String(aud.tileId || ''),
@@ -1790,7 +1797,24 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
   // Campaigns for a client, newest first, WITHOUT the (PII-heavy) audience snapshot —
   // used by the Owl's getCampaigns tool. publicAction hides the audience + adds a count.
   const listForEntity = (entityId) => sql.prepare('SELECT * FROM actions WHERE entity_id=? ORDER BY created_at DESC LIMIT 100').all(entityId).map((r) => publicAction(rowToAction(r)));
-  return { awaitingApprovalFor, unseenOutcomesFor, audienceFor, listForEntity };
+  // Programmatic create of a DRAFT campaign (the Owl's draftCampaign act-tool commit).
+  // ALWAYS status 'draft' — it never sends; a human reviews, approves and sends it in
+  // Engage. Runs the same entity-ownership + campaigns.approve check + cleanConfig the
+  // POST route uses, so an Owl-drafted campaign is identical to a hand-made draft.
+  function createDraftCampaign({ entityId, title, config, user }) {
+    if (!user || !entityId) return { ok: false, error: 'Missing user or client' };
+    const isAdmin = user.role === 'admin';
+    if (!(isAdmin || (user.entityIds || []).includes(entityId))) return { ok: false, error: 'Not allowed' };
+    if (!isAdmin && auth.hasPermission && !auth.hasPermission(user, entityId, 'campaigns.approve')) {
+      return { ok: false, error: "You don't have permission to create campaigns for this client." };
+    }
+    const id = uuid();
+    const cfg = cleanConfig(config || {});
+    sql.prepare('INSERT INTO actions (id, entity_id, type, status, title, config, recurring, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
+      .run(id, entityId, 'email_campaign', 'draft', String(title || '').slice(0, 120), JSON.stringify(cfg), 0, (user.email || 'owl'), now(), now());
+    return { ok: true, action: publicAction(getAction(id)) };
+  }
+  return { awaitingApprovalFor, unseenOutcomesFor, audienceFor, listForEntity, draftCopy, createDraftCampaign };
 }
 
 // Pure helpers exported for unit testing (list parsing + Google Sheet URL).

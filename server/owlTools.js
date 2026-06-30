@@ -19,7 +19,7 @@ const defaultCatalogue = require('./owlCatalogueSeed');
 // there and the Owl can immediately set + ask for it; no second list to keep in sync).
 const { OPERATORS: ALERT_OPERATORS, CHANNELS: ALERT_CHANNELS, PRIORITIES: ALERT_PRIORITIES } = require('./alerts');
 
-module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAlertsApi, getCampaignsApi, getUploadsApi, resolveTileValue, getExploreFields, getFieldOverrides, catalogue = defaultCatalogue }) {
+module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAlertsApi, getCampaignsApi, getUploadsApi, resolveTileValue, getExploreFields, getFieldOverrides, draftCampaignCopy, catalogue = defaultCatalogue }) {
   if (!query || !query.applyScope || !query.runLookerQuery) {
     throw new Error('owlTools requires the query engine (applyScope + runLookerQuery).');
   }
@@ -732,6 +732,66 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     },
   };
 
+  // ── draftCampaign (ACT) ───────────────────────────────────────────────────────
+  // The flagship insight→action: DRAFT an email/SMS campaign to a cohort. It creates a
+  // DRAFT in Engage that a human reviews, approves and sends — the Owl NEVER sends.
+  // PII-safe: only a count + reach reach the chat. The audience is the same query-cohort
+  // segments use; the copy is written by the existing campaign copywriter (draftCopy).
+  async function runDraftCampaign(args = {}, ctx = {}) {
+    const { user, suiteId } = ctx;
+    if (!user) return refuse('no_user', 'No authenticated user in context.');
+    const entityId = ctx.entityId || (suiteId && db && db.getSuite ? (db.getSuite(suiteId) || {}).entityId : null);
+    if (!entityId) return refuse('no_client', 'Open or pick a client first — a campaign belongs to a client.');
+    const goal = String(args.goal || '').trim();
+    if (!goal) return refuse('no_goal', 'Tell me the goal — who to reach and what to get them to do (e.g. "win back last year\'s VIP buyers who haven\'t rebooked").');
+    // Cohort (audience) — same validation + shape as createSegment; PII fields rejected.
+    const filters = {};
+    const desc = [];
+    for (const [field, val] of Object.entries(args.filters || {})) {
+      const d = dimByName.get(field);
+      if (!d) return refuse('unknown_filter', `"${field}" isn't a field I can target by.`);
+      if (d.filterOnly || !filterableDims.has(field)) return refuse('pii_filter', `"${field}" is contact data — it can't define an audience.`);
+      if (val == null || String(val).trim() === '') continue;
+      filters[field] = String(val);
+      desc.push(`${d.label} = ${val}`);
+    }
+    if (!Object.keys(filters).length) return refuse('no_cohort', 'Who should this go to? Give a cohort — e.g. ticket type VIP, city Cape Town, age 18 to 25.');
+    const audience = { mode: 'query', model: catalogue.model, view: catalogue.explore, queryFilters: filters };
+    const channel = ['email', 'sms', 'both'].includes(args.channel) ? args.channel : 'email';
+    // Audience reach (count + per-channel), server-side; never returns people to chat.
+    let reach = null;
+    try { const r = await resolveQueryAudience({ entityId, definition: audience, user, suiteId }); if (r && !r.error) reach = r.reach; } catch { /* best-effort preview */ }
+    // Draft the copy with the existing campaign copywriter (subject/body/cta).
+    let copy = {};
+    try { if (typeof draftCampaignCopy === 'function') copy = (await draftCampaignCopy({ entityId, goal, audienceCount: (reach && reach.total) || 0, eventSuiteId: suiteId || '' })) || {}; } catch { copy = {}; }
+    if (!copy.subject && !copy.body) return refuse('draft_failed', 'I couldn\'t draft the copy just now — try again in a moment, or build it in Engage.');
+    const name = String(args.name || '').trim().slice(0, 120) || (copy.subject ? String(copy.subject).slice(0, 80) : (desc.join(' · ') || 'Campaign'));
+    return {
+      ok: true,
+      confirm: true,
+      action: {
+        kind: 'draftCampaign', entityId, name, channel, goal,
+        audience, summary: desc.join(' · '), reach,
+        subject: copy.subject || '', body: copy.body || '', ctaText: copy.ctaText || '',
+      },
+    };
+  }
+  const draftCampaignSchema = {
+    name: 'draftCampaign',
+    description:
+      'DRAFT an email/SMS marketing CAMPAIGN to a cohort, for the user to confirm — you do NOT send it. It creates a DRAFT in Engage that a human reviews, approves and sends; nothing reaches customers from here. Use when the user wants to market to / message a group ("draft a win-back email to lapsed VIP buyers", "send an offer to Cape Town 18-25s"). The cohort is curated dimensions (age, gender, buyer city/country, ticket type, category, complimentary = guest list). You provide the goal; the copy (subject + body) is drafted for you and shown for review. NEVER lists or names individual people — only a count + reach. Contact fields (email/phone) cannot define the audience. Requires a client in scope. After calling it, give the audience + the subject line and tell the user to tap "Create draft campaign", then review & send it in Engage.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        goal: { type: 'string', description: 'What the campaign should achieve — who to reach and what action to drive (e.g. "win back last year\'s VIP buyers who haven\'t rebooked; drive early-bird sales").' },
+        filters: { type: 'object', description: 'The audience cohort as {dimension: value}, e.g. {"core_ticket_types.name":"VIP","core_purchasers.city":"Cape Town"}. Contact/PII fields are NOT allowed.' },
+        channel: { type: 'string', enum: ['email', 'sms', 'both'], description: 'Delivery channel (default email).' },
+        name: { type: 'string', description: 'Optional campaign name (defaults to the subject line).' },
+      },
+      required: ['goal', 'filters'],
+    },
+  };
+
   return {
     catalogue,
     askData: { schema: askDataSchema, run: runAskData, menu: { cmd: 'data', label: 'Ticket data', icon: '📊', example: 'How many tickets have I sold?' } },
@@ -743,5 +803,6 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     askUpload: { schema: askUploadSchema, run: runAskUpload, menu: { cmd: 'uploads', label: 'Attached files', icon: '📎', example: "What's in my attached data?" } },
     createAlert: { schema: createAlertSchema, run: runCreateAlert },
     createSegment: { schema: createSegmentSchema, run: runCreateSegment },
+    draftCampaign: { schema: draftCampaignSchema, run: runDraftCampaign },
   };
 };

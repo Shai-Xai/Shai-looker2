@@ -284,6 +284,35 @@ test('the "/" slash palette is sourced from the read tools (act tools excluded)'
   for (const c of ['data', 'goals', 'alerts', 'campaigns', 'dashboard', 'uploads']) assert.ok(cmds.includes(c), `missing /${c}`);
   assert.equal(t.createAlert.menu, undefined);   // act tools have no slash command
   assert.equal(t.createSegment.menu, undefined);
+  assert.equal(t.draftCampaign.menu, undefined);
+});
+
+// ── draftCampaign (the flagship act-tool): DRAFTS a campaign to a cohort ─────────
+const campaignTools = () => createOwlTools({ query: queryEngine, auth: h.auth, db: h.db, draftCampaignCopy: async () => ({ subject: 'Come back, VIP', body: 'We miss you — grab your spot.', ctaText: 'Buy now' }) });
+
+test('draftCampaign drafts copy + a query-cohort audience (PII rejected, never sends)', async () => {
+  const ent = h.makeEntity('Ultra SA', 'Ultra South Africa');
+  const user = h.makeClient('camp1@client.test', [ent.id]);
+  const res = await campaignTools().draftCampaign.run({ goal: 'Win back lapsed VIP buyers', filters: { 'core_ticket_types.name': 'VIP' }, channel: 'email' }, { user, entityId: ent.id });
+  assert.equal(res.ok, true);
+  assert.equal(res.confirm, true);
+  assert.equal(res.action.kind, 'draftCampaign');
+  assert.equal(res.action.channel, 'email');
+  assert.equal(res.action.audience.mode, 'query');
+  assert.equal(res.action.audience.queryFilters['core_ticket_types.name'], 'VIP');
+  assert.equal(res.action.subject, 'Come back, VIP');     // copy drafted
+  assert.ok(res.action.body);
+});
+
+test('draftCampaign rejects a PII field as the audience, and requires goal + cohort', async () => {
+  const ent = h.makeEntity('Ultra SA', 'Ultra South Africa');
+  const user = h.makeClient('camp2@client.test', [ent.id]);
+  const pii = await campaignTools().draftCampaign.run({ goal: 'x', filters: { 'core_purchasers.email': 'a@b.com' } }, { user, entityId: ent.id });
+  assert.equal(pii.ok, false); assert.equal(pii.reason, 'pii_filter');
+  const noGoal = await campaignTools().draftCampaign.run({ filters: { 'core_ticket_types.name': 'VIP' } }, { user, entityId: ent.id });
+  assert.equal(noGoal.ok, false); assert.equal(noGoal.reason, 'no_goal');
+  const noCohort = await campaignTools().draftCampaign.run({ goal: 'x', filters: {} }, { user, entityId: ent.id });
+  assert.equal(noCohort.ok, false); assert.equal(noCohort.reason, 'no_cohort');
 });
 
 // ── createSegment (the audience act-tool): DRAFTS a query-segment from a cohort ──

@@ -391,7 +391,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
           <div key={i} data-owl-msg>
             {bubble(m, i)}
             {m.role === 'owl' && m.sources && m.sources.length > 0 && <CitationChips sources={m.sources} entityId={selEntity} suiteId={selSuite} canPin={isAdmin} />}
-            {m.role === 'owl' && m.actions && m.actions.length > 0 && m.actions.map((a, ai) => <ActionCard key={ai} action={a} />)}
+            {m.role === 'owl' && m.actions && m.actions.length > 0 && m.actions.map((a, ai) => <ActionCard key={ai} action={a} suiteId={selSuite} />)}
             {m.role === 'owl' && m.text && !busy && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 2 }}>
                 <CopyBtn text={m.text} />
@@ -751,10 +751,11 @@ function DataActions({ source }) {
 // create something the user couldn't make by hand.
 const OP_TEXT = { gte: 'reaches', lte: 'drops to', gt: 'goes above', lt: 'drops below' };
 // Dispatch to the right confirm card by action kind (act-tools share the pattern).
-function ActionCard({ action }) {
+function ActionCard({ action, suiteId }) {
   if (!action) return null;
   if (action.kind === 'createAlert') return <AlertActionCard action={action} />;
   if (action.kind === 'createSegment') return <SegmentActionCard action={action} />;
+  if (action.kind === 'draftCampaign') return <CampaignActionCard action={action} suiteId={suiteId} />;
   return null;
 }
 function AlertActionCard({ action }) {
@@ -841,6 +842,49 @@ function SegmentActionCard({ action }) {
             style={{ border: 'none', borderRadius: 980, padding: '6px 16px', fontSize: 12.5, fontWeight: 700, cursor: state === 'busy' ? 'default' : 'pointer', background: state === 'busy' ? 'var(--elevated, rgba(128,128,128,0.18))' : 'var(--brand)', color: state === 'busy' ? 'var(--muted)' : '#fff' }}>
             {state === 'busy' ? 'Saving…' : 'Create segment'}
           </button>
+          {state === 'error' && <span style={{ fontSize: 12, color: '#e0414a' }}>{err}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Campaign confirm card — drafts an email/SMS campaign to a cohort. Creates a DRAFT
+// only; the human approves + SENDS in Engage. Shows the audience reach + the drafted
+// copy for review. PII-safe (count + reach only, never people).
+const CHAN_TEXT = { email: 'Email', sms: 'SMS', both: 'Email + SMS' };
+function CampaignActionCard({ action, suiteId }) {
+  const [state, setState] = useState('');
+  const [err, setErr] = useState('');
+  const reach = action.reach || null;
+  const reachLine = reach ? `${fmtVal(reach.total)} people${reach.email != null ? ` · ${fmtVal(reach.email)} emailable` : ''}${reach.sms ? ` · ${fmtVal(reach.sms)} SMS` : ''}` : null;
+  const create = async () => {
+    setState('busy'); setErr('');
+    try {
+      await api.owlDraftCampaign({ entityId: action.entityId, name: action.name, channel: action.channel, goal: action.goal, audience: action.audience, subject: action.subject, body: action.body, ctaText: action.ctaText, suiteId: suiteId || undefined });
+      setState('done');
+    } catch (e) { setState('error'); setErr((e && e.message) || 'Could not create the campaign.'); }
+  };
+  return (
+    <div style={{ margin: '2px 0 10px', border: '1px solid var(--hairline)', borderRadius: 12, background: 'var(--card)', padding: '10px 12px', maxWidth: '85%' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 6 }}>
+        <span style={{ fontSize: 15 }}>📣</span>
+        <strong style={{ fontSize: 12.5 }}>Campaign</strong>
+        <span style={{ fontSize: 11, color: 'var(--muted)', border: '1px solid var(--hairline)', borderRadius: 980, padding: '1px 7px' }}>Draft</span>
+        <span style={{ fontSize: 11, color: 'var(--muted)' }}>{CHAN_TEXT[action.channel] || 'Email'}</span>
+      </div>
+      <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 6 }}>To <strong style={{ color: 'var(--text)' }}>{action.summary || 'the cohort'}</strong>{reachLine ? ` · ${reachLine}` : ''}.</div>
+      {action.subject && <div style={{ fontSize: 13, color: 'var(--text)', marginBottom: 3 }}><span style={{ color: 'var(--muted)' }}>Subject:</span> <strong>{action.subject}</strong></div>}
+      {action.body && <div style={{ fontSize: 12.5, color: 'var(--text)', whiteSpace: 'pre-wrap', maxHeight: 150, overflow: 'auto', border: '1px solid var(--hairline)', borderRadius: 8, padding: '6px 8px', margin: '4px 0 8px', background: 'var(--bg, var(--card))' }}>{action.body}</div>}
+      {state === 'done' ? (
+        <div style={{ fontSize: 12.5, color: 'var(--brand)', fontWeight: 600 }}>✓ Draft created — review, approve &amp; send it in Engage → Campaigns. Nothing has been sent.</div>
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <button onClick={create} disabled={state === 'busy'}
+            style={{ border: 'none', borderRadius: 980, padding: '6px 16px', fontSize: 12.5, fontWeight: 700, cursor: state === 'busy' ? 'default' : 'pointer', background: state === 'busy' ? 'var(--elevated, rgba(128,128,128,0.18))' : 'var(--brand)', color: state === 'busy' ? 'var(--muted)' : '#fff' }}>
+            {state === 'busy' ? 'Creating…' : 'Create draft campaign'}
+          </button>
+          <span style={{ fontSize: 11, color: 'var(--muted)' }}>You approve &amp; send in Engage</span>
           {state === 'error' && <span style={{ fontSize: 12, color: '#e0414a' }}>{err}</span>}
         </div>
       )}
