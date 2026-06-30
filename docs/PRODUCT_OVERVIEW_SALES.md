@@ -523,6 +523,11 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-30** — **WhatsApp Owl: friendly reply to voice notes / media** 🧪: a voice note,
+  image or file used to be **silently dropped** (the customer got nothing back). The Owl now
+  recognises it and replies "I can't listen to voice notes yet — please type your question"
+  (or send "menu"). Full voice→text transcription is a later step (needs a speech provider +
+  Clickatell inbound-media access).
 - **2026-06-30** — **WhatsApp Owl: starter prompts** 🧪: say "hi" / "menu" / "help" to the
   WhatsApp Owl and it now replies with a **welcome + suggested starter prompts** (the
   WhatsApp take on Meta AI's suggestion chips) — the top few as **tappable buttons** plus a

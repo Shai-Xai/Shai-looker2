@@ -489,6 +489,45 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
     return { from, text };
   }
 
+  // Detect a NON-TEXT inbound (voice note, image, video, document, sticker) so we can
+  // reply helpfully instead of dropping it silently. Walks the payload defensively for
+  // a media TYPE value, a media MIME type, or a media-named object — Clickatell MO
+  // shapes vary, so we don't rely on one field. Returns a kind string or ''.
+  function detectMedia(root) {
+    const KINDS = ['voice', 'audio', 'image', 'video', 'document', 'sticker'];
+    const TYPE_KEY = /^(type|messagetype|message_type|contenttype|content_type)$/i;
+    const MIME_KEY = /^(mime|mimetype|mime_type)$/i;
+    let found = '';
+    const seen = new Set();
+    const walk = (node) => {
+      if (found || !node || typeof node !== 'object' || seen.has(node)) return;
+      seen.add(node);
+      for (const [k, v] of Object.entries(node)) {
+        if (found) return;
+        if (KINDS.includes(k.toLowerCase()) && v && typeof v === 'object') { found = k.toLowerCase(); return; }
+        if (typeof v === 'string') {
+          const vl = v.toLowerCase();
+          if (TYPE_KEY.test(k) && KINDS.includes(vl)) { found = vl; return; }
+          if (MIME_KEY.test(k)) { const hit = KINDS.find((x) => vl.startsWith(`${x}/`)); if (hit) { found = hit; return; } if (vl.startsWith('audio/')) { found = 'voice'; return; } }
+        } else if (v && typeof v === 'object') { walk(v); }
+      }
+    };
+    try { walk(root); } catch { /* ignore */ }
+    return found === 'audio' ? 'voice' : found; // WhatsApp voice notes are PTT audio
+  }
+
+  // A non-text message arrived — the Owl can't process media yet (voice→text needs a
+  // transcription provider + Clickatell inbound-media access). Reply so the customer
+  // isn't ghosted, and keep the 24h window open. NB: silently dropping was the old bug.
+  async function handleMedia(msisdn, kind) {
+    const id = identify(msisdn);
+    if (!id) { logEvent(msisdn, 'no-account', `media (${kind}) from unlinked number`); await messaging.sendWhatsapp({ to: msisdn, text: 'Hi! This number isn\'t linked to a Howler account yet. Ask your Howler contact to connect it, then I can answer questions about your event data.' }); return; }
+    insMsg.run(crypto.randomUUID(), msisdn, 'user', `[${kind}]`, id.entityId || '', now()); // keep the 24h window open
+    const what = kind === 'voice' ? 'listen to voice notes' : kind === 'image' ? 'read images' : kind === 'video' ? 'watch videos' : kind === 'document' ? 'open documents' : `handle ${kind}s`;
+    await messaging.sendWhatsapp({ to: msisdn, text: `🦉 I can't ${what} yet — please *type* your question instead (or send *menu* to see what I can do).` });
+    logEvent(msisdn, 'replied', `media fallback (${kind})`);
+  }
+
   // Clickatell webhook. Ack immediately (200), process in the background so a slow LLM
   // turn never times the webhook out. Optional shared secret (?key= or x-webhook-secret).
   app.post('/api/whatsapp/inbound', (req, res) => {
@@ -504,7 +543,12 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
       const msisdn = norm(from);
       // Temporary aid for the first live test: confirm we parse Clickatell's reply shape.
       console.log(`[owlWhatsapp] inbound from=${msisdn || '∅'} text="${(text || '').slice(0, 60)}"${msisdn && text ? '' : ` (unparsed raw: ${JSON.stringify(req.body).slice(0, 400)})`}`);
-      if (!msisdn || !text) { logEvent(msisdn, 'unparsed', `couldn't read sender/text from payload: ${JSON.stringify(req.body).slice(0, 700)}`); return; }
+      if (!msisdn || !text) {
+        // A voice note / image / file (no text) — reply helpfully instead of dropping it.
+        const media = msisdn ? detectMedia(req.body || {}) : '';
+        if (media) { logEvent(msisdn, 'received', `[${media}] (no text)`); handleMedia(msisdn, media).catch((e) => { logEvent(msisdn, 'error', (e && e.message) || 'media handler error'); }); return; }
+        logEvent(msisdn, 'unparsed', `couldn't read sender/text from payload: ${JSON.stringify(req.body).slice(0, 700)}`); return;
+      }
       logEvent(msisdn, 'received', text.slice(0, 120));
       handleInbound(msisdn, text).catch((e) => { logEvent(msisdn, 'error', (e && e.message) || 'handler error'); console.error('[owlWhatsapp] handle failed', e && e.message); });
     } catch (e) { logEvent('', 'error', (e && e.message) || 'parse error'); console.error('[owlWhatsapp] inbound parse failed', e && e.message); }
