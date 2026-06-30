@@ -496,12 +496,14 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
-- **2026-06-30** — **Filters: ticket category/type show their id** ✅: dashboard filter
-  dropdowns (and the admin lock picker) now show the id beside ticket **category** and
-  **type** names — e.g. *Loyalty Tickets (id: 16244)*. Some events reuse the same name
-  across categories, so picking by name alone could lock a report to the wrong one (data
-  silently missing); the id makes it unambiguous, and same-named entries now each appear
-  as a distinct option.
+- **2026-06-30** — **Filters: ticket category/type show their id** ✅: every filter
+  dropdown that suggests ticket **category**/**type** values — the client dashboard view,
+  the **admin dashboard view**, the editor, and the lock pickers — now shows the id beside
+  the name (e.g. *Loyalty Tickets (id: 16244)*). Some events reuse the same name across
+  categories, so picking by name alone could lock a report to the wrong one (data silently
+  missing); the id makes it unambiguous, and same-named entries now each appear as a
+  distinct option. A filter pointed at the **id** dimension renders as *16244 — Loyalty
+  Tickets* — uniquely selectable — so a report can be filtered to one exact category.
 - **2026-06-30** — **WhatsApp Owl: scheduled in-window updates** 🧪: a customer can be
   subscribed (per number, in **Admin → WhatsApp Owl**) to a daily **digest / goals /
   alerts** update on WhatsApp. Sent free-form only while they’re inside their 24-hour
