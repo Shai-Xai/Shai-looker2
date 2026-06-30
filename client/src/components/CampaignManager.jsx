@@ -473,7 +473,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
   const removeFilter = (i) => setF((s) => ({ ...s, filters: s.filters.filter((_, j) => j !== i) }));
   // Step helpers (sequence mode).
   const setStep = (i, patch) => setF((s) => ({ ...s, steps: s.steps.map((st, j) => (j === i ? { ...st, ...patch } : st)) }));
-  const addStep = (delayHours = 24) => setF((s) => ({ ...s, steps: [...s.steps, { delayHours, subject: '', body: '', ctaText: s.steps[0]?.ctaText || '', contentMode: 'template', customHtml: '', heroImage: '' }] }));
+  const addStep = (delayHours = 24) => setF((s) => ({ ...s, steps: [...s.steps, { delayHours, subject: '', body: '', smsBody: '', ctaText: s.steps[0]?.ctaText || '', contentMode: 'template', customHtml: '', heroImage: '' }] }));
   const removeStep = (i) => setF((s) => ({ ...s, steps: s.steps.filter((_, j) => j !== i) }));
   const isSequence = f.campaignMode === 'sequence';
   // Columns available to pick the abandonment-time anchor from (tile fields or a list's headers).
@@ -526,7 +526,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
     debounce.current = setTimeout(() => {
       const base = payload();
       const st = isSequence ? (f.steps[activeStep] || f.steps[0]) : null;
-      const p = st ? { ...base, subject: st.subject, body: st.body, ctaText: st.ctaText, contentMode: st.contentMode || 'template', customHtml: st.customHtml || '', heroImage: st.heroImage || '' } : base;
+      const p = st ? { ...base, subject: st.subject, body: st.body, smsBody: st.smsBody || '', ctaText: st.ctaText, contentMode: st.contentMode || 'template', customHtml: st.customHtml || '', heroImage: st.heroImage || '' } : base;
       api.actionPreviewEmail(entityId, p).then((r) => { setPreview(r.html || ''); setPreviewSms(r.sms || ''); }).catch(() => {});
     }, 350);
     return () => clearTimeout(debounce.current);
@@ -541,7 +541,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
       const out = [];
       for (let i = 0; i < f.steps.length; i++) {
         const st = f.steps[i];
-        const p = { ...base, subject: st.subject, body: st.body, ctaText: st.ctaText, contentMode: st.contentMode || 'template', customHtml: st.customHtml || '', heroImage: st.heroImage || '' };
+        const p = { ...base, subject: st.subject, body: st.body, smsBody: st.smsBody || '', ctaText: st.ctaText, contentMode: st.contentMode || 'template', customHtml: st.customHtml || '', heroImage: st.heroImage || '' };
         try { const r = await api.actionPreviewEmail(entityId, p); out.push({ label: `Step ${i + 1} · +${st.delayHours % 24 === 0 && st.delayHours >= 24 ? `${st.delayHours / 24}d` : `${st.delayHours}h`}`, html: r.html || '', sms: r.sms || '' }); }
         catch { out.push({ label: `Step ${i + 1}`, html: '', sms: '' }); }
       }
@@ -996,8 +996,8 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
           )}
 
           {isSequence && (
-            <Field label={smsOnly ? 'Texts in the sequence' : 'Emails in the sequence'}>
-              <SequenceSteps steps={f.steps} setStep={setStep} addStep={addStep} removeStep={removeStep} activeStep={activeStep} onActive={setActiveStep} sms={smsOnly} onDraft={draftStep} drafting={drafting} anchorLabel={f.dripStart === 'send' ? 'from start of campaign' : 'after abandonment'} />
+            <Field label={smsOnly ? 'Texts in the sequence' : f.channel === 'both' ? 'Emails & texts in the sequence' : 'Emails in the sequence'}>
+              <SequenceSteps steps={f.steps} setStep={setStep} addStep={addStep} removeStep={removeStep} activeStep={activeStep} onActive={setActiveStep} email={hasEmail} sms={hasSms} onDraft={draftStep} drafting={drafting} anchorLabel={f.dripStart === 'send' ? 'from start of campaign' : 'after abandonment'} />
             </Field>
           )}
 
@@ -1416,7 +1416,7 @@ function CampaignReport({ entityId, action, onClose }) {
     const steps = action.config?.steps || [];
     const unit = (h) => (h % 24 === 0 && h >= 24 ? `${h / 24}d` : `${h}h`);
     const jobs = steps.length > 0
-      ? steps.map((s, i) => ({ label: `Step ${i + 1} · +${unit(s.delayHours || 0)}`, cfg: { ...action.config, subject: s.subject || action.config.subject, body: s.body || '', smsBody: s.body || action.config.smsBody } }))
+      ? steps.map((s, i) => ({ label: `Step ${i + 1} · +${unit(s.delayHours || 0)}`, cfg: { ...action.config, subject: s.subject || action.config.subject, body: s.body || '', smsBody: s.smsBody || s.body || action.config.smsBody } }))
       : [{ label: '', cfg: action.config }];
     Promise.all(jobs.map((j) => api.actionPreviewEmail(entityId, j.cfg).then((p) => ({ label: j.label, ...p })).catch(() => ({ label: j.label }))))
       .then(setPreviews).catch(() => setPreviews([]));
@@ -1882,7 +1882,9 @@ function FilterRow({ entityId, fields, filter, onChange, onRemove, eventSuiteId 
 }
 
 // The drip timeline: each step has a delay (number + hours/days) and its own copy.
-function SequenceSteps({ steps, setStep, addStep, removeStep, activeStep = 0, onActive, sms = false, onDraft, drafting = false, anchorLabel = 'after abandonment' }) {
+function SequenceSteps({ steps, setStep, addStep, removeStep, activeStep = 0, onActive, email = true, sms = false, onDraft, drafting = false, anchorLabel = 'after abandonment' }) {
+  const both = email && sms;       // Email + SMS → each step gets BOTH editors
+  const smsOnly = sms && !email;   // SMS-only → the step's `body` IS the SMS text
   const unitOf = (h) => (h % 24 === 0 && h >= 24 ? 'days' : 'hours');
   const valOf = (h) => (unitOf(h) === 'days' ? h / 24 : h);
   const setDelay = (i, val, unit) => setStep(i, { delayHours: Math.max(0, (Number(val) || 0) * (unit === 'days' ? 24 : 1)) });
@@ -1906,14 +1908,10 @@ function SequenceSteps({ steps, setStep, addStep, removeStep, activeStep = 0, on
               <span style={{ flex: 1 }} />
               {steps.length > 1 && <button type="button" style={{ ...mini, color: 'var(--error,#ef4444)' }} onClick={() => removeStep(i)}>✕</button>}
             </div>
-            {sms ? (
+            {/* Email block — shown for email-only and Email+SMS sequences. */}
+            {email && (
               <>
-                {onDraft && <button type="button" style={{ ...mini, marginBottom: 6 }} onClick={(e) => { e.stopPropagation(); focus(i)(); onDraft(i); }} disabled={drafting}>{drafting ? 'Writing…' : '✨ Draft copy with AI'}</button>}
-                <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit', marginBottom: 6 }} rows={4} value={st.body} onFocus={focus(i)} onChange={(e) => setStep(i, { body: e.target.value })} placeholder={'Hi {{name}}, your {{ticketType}} tickets are waiting…'} />
-                <SmsMeter body={st.body} />
-              </>
-            ) : (
-              <>
+                {both && <div style={{ fontSize: 11.5, fontWeight: 700, color: '#0a66c2', marginBottom: 6 }}>✉️ Email</div>}
                 <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
                   <Toggle on={(st.contentMode || 'template') === 'template'} onClick={() => { focus(i)(); setStep(i, { contentMode: 'template' }); }}>Built template</Toggle>
                   <Toggle on={st.contentMode === 'html'} onClick={() => { focus(i)(); setStep(i, { contentMode: 'html' }); }}>Custom HTML</Toggle>
@@ -1932,6 +1930,18 @@ function SequenceSteps({ steps, setStep, addStep, removeStep, activeStep = 0, on
                     <div style={hintS}>Tokens work inside your HTML: <b>{'{{name}}'}</b>, <b>{'{{ticketType}}'}</b>, <b>{'{{cta}}'}</b> (the shared tracked buy link), <b>{'{{unsubscribe}}'}</b>. An unsubscribe link is added if you omit one.</div>
                   </div>
                 )}
+              </>
+            )}
+            {both && <div style={{ height: 1, background: 'var(--hairline)', margin: '12px 0 10px' }} />}
+            {/* SMS block — for SMS-only the step's `body` is the text; for Email+SMS
+                it's a SEPARATE per-step `smsBody`. */}
+            {sms && (
+              <>
+                {both && <div style={{ fontSize: 11.5, fontWeight: 700, color: '#15803d', marginBottom: 6 }}>💬 SMS text (separate from the email)</div>}
+                {smsOnly && onDraft && <button type="button" style={{ ...mini, marginBottom: 6 }} onClick={(e) => { e.stopPropagation(); focus(i)(); onDraft(i); }} disabled={drafting}>{drafting ? 'Writing…' : '✨ Draft copy with AI'}</button>}
+                <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit', marginBottom: 6 }} rows={4} value={smsOnly ? st.body : (st.smsBody || '')} onFocus={focus(i)} onChange={(e) => setStep(i, smsOnly ? { body: e.target.value } : { smsBody: e.target.value })} placeholder={'Hi {{name}}, your {{ticketType}} tickets are waiting…'} />
+                <SmsMeter body={smsOnly ? st.body : (st.smsBody || '')} />
+                {both && <div style={hintS}>Sent as the SMS for this step (the tracked link &amp; opt-out are appended). Tokens <b>{'{{name}}'}</b>, <b>{'{{ticketType}}'}</b>, <b>{'{{promo}}'}</b> work. Leave blank to fall back to the email body.</div>}
               </>
             )}
           </div>
