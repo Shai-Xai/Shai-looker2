@@ -118,7 +118,7 @@ async function fetchGoogleSheetCsv(url) {
   return text;
 }
 
-const MAX_AUDIENCE = 2000;       // v1 safety cap per campaign
+const MAX_AUDIENCE = 25000;      // safety cap per campaign (raised from 2000; Looker source limit in index.js is lifted to match)
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAudience, draftCopy, listEvents }) {

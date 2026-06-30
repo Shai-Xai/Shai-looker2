@@ -2875,7 +2875,7 @@ const actionsApi = require('./actions').mount(app, {
     const lockMap = expandLockMap(db.lockedFiltersForSuite(meta.suiteId));
     const qBody = await tileQueryBody(tile, def, user, meta.suiteId, lockMap, filterOverrides);
     if (!qBody) throw new Error('No data access for that tile');
-    const data = await runLookerQuery('/queries/run/json_detail', { ...qBody, limit: '5000' }, undefined, true);
+    const data = await runLookerQuery('/queries/run/json_detail', { ...qBody, limit: '50000' }, undefined, true);
     const fields = [...(data.fields?.dimensions || []), ...(data.fields?.measures || []), ...(data.fields?.table_calculations || [])]
       .map((f) => ({ name: f.name, label: f.label_short || f.label }));
     return { rows: data.data || [], fields };

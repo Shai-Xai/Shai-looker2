@@ -214,7 +214,7 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
             <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--hairline)', display: 'flex', alignItems: 'center', gap: 10 }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 700, fontSize: 15 }}>{viewing.segment.name}</div>
-                <div style={{ fontSize: 12, color: 'var(--muted)' }}>{viewing.data ? (viewing.data.error ? viewing.data.error : `${viewing.data.count} ${viewing.data.count === 1 ? 'person' : 'people'}${viewing.data.capped ? ' · showing first 2,000' : ''}`) : 'Resolving live…'}</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)' }}>{viewing.data ? (viewing.data.error ? viewing.data.error : `${viewing.data.count} ${viewing.data.count === 1 ? 'person' : 'people'}${viewing.data.capped ? ` · showing first ${(viewing.data.shown || 5000).toLocaleString()}` : ''}`) : 'Resolving live…'}</div>
               </div>
               <button style={mini} onClick={() => setViewing(null)}>Close</button>
             </div>

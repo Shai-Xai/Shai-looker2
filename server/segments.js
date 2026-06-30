@@ -204,7 +204,8 @@ function mount(app, { db, auth, resolveAudience, resolveRecipe, meta, tiktok }) 
     try {
       const r = await resolveDefinition(req.params.entityId, JSON.parse(seg.definition || '{}'), req.user);
       const list = r.list || [];
-      res.json({ name: seg.name, count: list.length, capped: list.length > 2000, members: list.slice(0, 2000).map((m) => ({ email: m.email || '', name: m.name || '', phone: m.phone || '', ticket: m.ticket || '' })) });
+      const SHOW = 5000; // members listed in the viewer; the COUNT above is the true size
+      res.json({ name: seg.name, count: list.length, capped: list.length > SHOW, shown: Math.min(list.length, SHOW), members: list.slice(0, SHOW).map((m) => ({ email: m.email || '', name: m.name || '', phone: m.phone || '', ticket: m.ticket || '' })) });
     } catch (e) { res.status(400).json({ error: e.message }); }
   });
 
