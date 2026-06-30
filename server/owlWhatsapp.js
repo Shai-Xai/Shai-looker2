@@ -270,6 +270,22 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
     return { from: String(from || ''), text: String(text || '').trim() };
   }
 
+  // Pull the recipient + delivery status + failure reason out of a Clickatell status
+  // (delivery notification) payload, defensively across its shapes.
+  function parseStatus(body) {
+    body = body || {};
+    const ev = body.event || body;
+    const m = (Array.isArray(body.statuses) ? body.statuses[0]
+      : Array.isArray(ev.moStatus) ? ev.moStatus[0]
+      : Array.isArray(ev.statuses) ? ev.statuses[0]
+      : Array.isArray(body.messages) ? body.messages[0] : ev) || {};
+    const to = m.to || m.toNumber || m.msisdn || m.destination || m.recipient || ev.to || '';
+    const status = m.status || m.messageStatus || m.statusDescription || m.deliveryStatus || ev.status || '';
+    const e = m.error || m.errorDescription || m.statusReason || m.reason || m.errorCode || '';
+    const err = typeof e === 'string' ? e : [e && e.code, e && (e.description || e.message)].filter(Boolean).join(' ');
+    return { to: String(to || ''), status: String(status || ''), err: String(err || '') };
+  }
+
   // Generic, shape-agnostic extractor. Recursively walks the payload collecting any
   // sender-named key holding a phone-like value, and any text-named key holding a
   // human message — deliberately ignoring destination/id/number-name keys.
@@ -316,6 +332,21 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
     } catch (e) { logEvent('', 'error', (e && e.message) || 'parse error'); console.error('[owlWhatsapp] inbound parse failed', e && e.message); }
   });
 
+  // Clickatell DELIVERY NOTIFICATIONS (status callback). Tells us whether a message we
+  // sent actually reached the handset — so 'replied' (Clickatell accepted) is no longer
+  // the end of the story. Logs delivered / undelivered (+ the reason Clickatell gives).
+  app.post('/api/whatsapp/status', (req, res) => {
+    res.json({ ok: true });
+    try {
+      const { to, status, err } = parseStatus(req.body || {});
+      const msisdn = norm(to);
+      const s = String(status || '').toUpperCase();
+      const stage = /FAIL|UNDELIV|REJECT|EXPIRE|ERROR|BLOCK/.test(s) ? 'undelivered' : (/DELIVER|READ|SENT_TO/.test(s) ? 'delivered' : 'status');
+      const detail = `${status || '?'}${err ? ` — ${err}` : ''}`.trim() || JSON.stringify(req.body).slice(0, 300);
+      logEvent(msisdn, stage, detail.slice(0, 300));
+    } catch (e) { console.error('[owlWhatsapp] status parse failed', e && e.message); }
+  });
+
   // Admin: manage the number→client allowlist + the WhatsApp 'from' number + secret.
   app.get('/api/admin/owl-whatsapp', auth.requireAdmin, (_req, res) => {
     const sec = (db.getSetting('whatsapp_webhook_secret', '') || '').trim();
@@ -326,6 +357,7 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
       // When a secret is set, the callback URL must carry it — so hand back the exact
       // URL (key embedded) to paste into Clickatell. Admin-only screen.
       webhookPath: sec ? `/api/whatsapp/inbound?key=${encodeURIComponent(sec)}` : '/api/whatsapp/inbound',
+      statusPath: '/api/whatsapp/status',
       mediaEnabled: db.getSetting('whatsapp_media_enabled', '') === '1',
       pushEnabled: db.getSetting('whatsapp_push_enabled', '') === '1',
       testMessage: db.getSetting('whatsapp_test_message', '') || '',

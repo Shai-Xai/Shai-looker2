@@ -37,7 +37,7 @@ export default function WhatsAppOwl() {
   const test = () => sendTest(testTo);
 
   useEffect(() => {
-    api.owlWhatsapp().then((r) => { setCfg({ from: r.from || '', webhookPath: r.webhookPath, hasSecret: r.hasSecret, hasApiKey: r.hasApiKey, mediaEnabled: !!r.mediaEnabled, pushEnabled: !!r.pushEnabled, numbers: r.numbers || [] }); if (r.testMessage) setTestText(r.testMessage); }).catch(() => setCfg({ numbers: [] }));
+    api.owlWhatsapp().then((r) => { setCfg({ from: r.from || '', webhookPath: r.webhookPath, statusPath: r.statusPath, hasSecret: r.hasSecret, hasApiKey: r.hasApiKey, mediaEnabled: !!r.mediaEnabled, pushEnabled: !!r.pushEnabled, numbers: r.numbers || [] }); if (r.testMessage) setTestText(r.testMessage); }).catch(() => setCfg({ numbers: [] }));
     api.adminListEntities().then((r) => setEnts(Array.isArray(r) ? r : (r.entities || []))).catch(() => setEnts([]));
     loadLog();
   }, []);
@@ -54,17 +54,25 @@ export default function WhatsAppOwl() {
 
   const fld = { padding: '6px 9px', borderRadius: 7, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', fontSize: 13, fontFamily: 'inherit' };
   const lbl = { display: 'block', fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', color: 'var(--muted)', margin: '8px 0 2px' };
-  const webhookUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}${cfg.webhookPath || '/api/whatsapp/inbound'}`;
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const webhookUrl = `${origin}${cfg.webhookPath || '/api/whatsapp/inbound'}`;
+  const statusUrl = `${origin}${cfg.statusPath || '/api/whatsapp/status'}`;
 
   return (
     <div>
       <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: '0 0 8px' }}>Customers message your Clickatell WhatsApp number and chat with the Owl. It recognises the phone number → its client, and answers only that client’s data. Replies are free-form (inside WhatsApp’s 24-hour window) — no template approval needed.</p>
 
-      <span style={lbl}>1 · Webhook URL (paste into Clickatell’s inbound callback)</span>
+      <span style={lbl}>1 · Webhook URL (paste into Clickatell’s inbound / Reply callback)</span>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
         <code style={{ ...fld, flex: 1, overflow: 'auto', whiteSpace: 'nowrap' }}>{webhookUrl}</code>
         <button onClick={() => navigator.clipboard && navigator.clipboard.writeText(webhookUrl)} style={{ ...fld, cursor: 'pointer' }}>Copy</button>
       </div>
+      <span style={lbl}>1b · Delivery-status URL (paste into Clickatell’s “Delivery Notifications” callback)</span>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <code style={{ ...fld, flex: 1, overflow: 'auto', whiteSpace: 'nowrap' }}>{statusUrl}</code>
+        <button onClick={() => navigator.clipboard && navigator.clipboard.writeText(statusUrl)} style={{ ...fld, cursor: 'pointer' }}>Copy</button>
+      </div>
+      <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 2 }}>Wire this so the activity log shows <strong>delivered / undelivered</strong> (and Clickatell’s reason) — not just “sent”.</div>
 
       <span style={lbl}>2 · WhatsApp API key {cfg.hasApiKey ? '(set — leave blank to keep)' : '(the Authorization value from this Clickatell integration)'}</span>
       <input value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={cfg.hasApiKey ? '•••••• (unchanged)' : 'paste the Authorization key'} style={{ ...fld, width: 320 }} />
@@ -171,8 +179,8 @@ export default function WhatsAppOwl() {
 // Colour the stage chip so the happy path (received → identified → replied) reads green
 // and the stop-points (rejected / unparsed / no-account / send-failed) read amber/red.
 function stageBadge(stage) {
-  const ok = stage === 'received' || stage === 'identified' || stage === 'replied' || stage === 'image-sent' || stage === 'image-link' || stage === 'followups-buttons' || stage === 'push-sent';
-  const bad = stage === 'rejected' || stage === 'send-failed' || stage === 'error' || stage === 'no-ai-key' || stage === 'image-failed' || stage === 'push-failed';
+  const ok = stage === 'received' || stage === 'identified' || stage === 'replied' || stage === 'image-sent' || stage === 'image-link' || stage === 'followups-buttons' || stage === 'push-sent' || stage === 'delivered';
+  const bad = stage === 'rejected' || stage === 'send-failed' || stage === 'error' || stage === 'no-ai-key' || stage === 'image-failed' || stage === 'push-failed' || stage === 'undelivered';
   const c = ok ? '#34c759' : bad ? '#ef4444' : '#b45309';
   return { fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.03em', color: c, background: `${c}1a`, padding: '2px 6px', borderRadius: 5, whiteSpace: 'nowrap', minWidth: 64, textAlign: 'center' };
 }
