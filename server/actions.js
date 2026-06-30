@@ -194,15 +194,11 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
   const saveResults = (id, results) => sql.prepare('UPDATE actions SET results=?, updated_at=? WHERE id=?').run(JSON.stringify(results), now(), id);
   const setStatus = (id, status) => sql.prepare('UPDATE actions SET status=?, updated_at=? WHERE id=?').run(status, now(), id);
 
-  // `action_clicks` is the SOURCE OF TRUTH for clicks; the `results.{clicks,
-  // emailClicks,smsClicks}` counters are a CACHE the `/c/...` route bumps for
-  // instant feedback. They can drift on a partial write (row inserted but the
-  // counter save fails, or vice versa), so reconcile the cache from the table.
-  // `byChannel` lets a caller pass an already-computed GROUP BY (avoids a query
-  // per action when reconciling a whole list). Returns the action with healed
-  // results. NB: the TOTAL counter may legitimately exceed the table (legacy
-  // clicks counted before per-recipient rows existed), so total only heals
-  // UPWARD; per-channel counts mirror the table (legacy clicks are untagged).
+  // `action_clicks` is the source of truth; `results.{clicks,emailClicks,smsClicks}`
+  // are a cache the `/c/` route bumps for instant feedback, reconciled here from the
+  // table (they drift on partial writes). `byChannel` lets a caller pass a precomputed
+  // GROUP BY. The TOTAL counter only heals UPWARD (legacy untagged clicks predate
+  // per-recipient rows); per-channel counts mirror the table.
   function reconcileClicks(action, byChannel) {
     const rows = byChannel || sql.prepare('SELECT channel, COUNT(*) n FROM action_clicks WHERE action_id=? GROUP BY channel').all(action.id);
     let total = 0, email = 0, sms = 0;
@@ -378,12 +374,9 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
       // it (e.g. 'Abandoned carts'), and helps the automation later.
       templateKey: String(body.templateKey || '').slice(0, 60),
       category: String(body.category || '').slice(0, 80),
-      // Conversion tracking: how we decide someone "converted" (drops out of a
-      // drip / counts as converted on a once-off).
-      //   'dropout' = they left the audience/abandoned list (original behaviour).
-      //   'list'    = they appear in a SEPARATE source (an attendance / completed-
-      //               orders list), matched by email — confirm conversions against
-      //               real sales instead of inferring them from list removal.
+      // Conversion tracking. 'dropout' = left the audience/abandoned list (original);
+      // 'list' = present in a SEPARATE source (attendance/completed-orders), matched by
+      // email — confirm conversions against real sales instead of inferring from removal.
       conversion: {
         mode: (body.conversion || {}).mode === 'list' ? 'list' : 'dropout',
         source: shapeAudience((body.conversion || {}).source || {}),
@@ -619,14 +612,10 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     return { code, benefit: p.benefit || '', type: p.type || 'promo', appendToLink: !!p.appendToLink };
   }
 
-  // Render one recipient's email. Tokens: {{name}}, {{ticketType}}, {{cta}},
-  // {{unsubscribe}}. Two modes: the built branded template, or the client's own
-  // uploaded HTML (we still inject tracking + a guaranteed unsubscribe link).
-  // Generic merge fields: fill any remaining {{Column}} from the recipient's
-  // attributes (case-insensitive, by header/field label or name). Applied AFTER the
-  // special tokens. A known column with an empty cell → '' ; an UNKNOWN token (typo)
-  // is left untouched so it's caught in preview. Every resolved column is present in
-  // attributes, so valid tokens never leak braces.
+  // Fill generic merge fields: any remaining {{Column}} from the recipient's attributes
+  // (case-insensitive by header/label/name), applied AFTER the special tokens ({{name}},
+  // {{ticketType}}, {{cta}}, {{unsubscribe}}). Known-but-empty → '' ; unknown token (typo)
+  // is left untouched so preview catches it; valid tokens never leak braces.
   function fillAttrs(s, recipient) {
     const attrs = (recipient && recipient.attributes) || {};
     const keys = Object.keys(attrs);
@@ -1162,12 +1151,9 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
 
   // Send a due scheduled campaign — resolves the audience live, then runs.
   async function runScheduledSend(a) {
-    // Atomically CLAIM the job before the (slow) audience resolution: flip
-    // scheduled → running only if it's still scheduled. If we didn't win the
-    // claim (changes !== 1), an overlapping tick or a concurrent manual launch
-    // already took it — bail, so the campaign can't be sent twice. (Previously
-    // the status flip happened AFTER `await audienceFor`, leaving a multi-second
-    // window where the same 'scheduled' row could be re-selected and re-sent.)
+    // Atomically CLAIM the job before the (slow) audience resolution: flip scheduled →
+    // running only if still scheduled. If we didn't win (changes !== 1), an overlapping
+    // tick or manual launch took it — bail so the campaign can't be sent twice.
     const claim = sql.prepare("UPDATE actions SET status='running', updated_at=? WHERE id=? AND status='scheduled'").run(now(), a.id);
     if (claim.changes !== 1) return;
     let list;
@@ -1557,13 +1543,10 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
 
   // ── Drip sequences: enrollment + the per-recipient send tick ─────────────────
   const sysUser = { id: 'auto-check', email: 'auto@pulse', role: 'admin', entityIds: [] };
-  // When conversion tracking is set to 'list', resolve the SEPARATE conversion
-  // source (an attendance / completed-orders list) and return the lowercased set
-  // of emails in it — anyone in this set has converted. Returns null when the
-  // campaign uses the default 'dropout' model (left-the-audience = converted), so
-  // callers keep their existing behaviour. Consent is ignored (we only need the
-  // emails that appear) and failures fall back to null so a broken source can't
-  // wrongly flag everyone as converted.
+  // In 'list' conversion mode, resolve the separate conversion source (attendance /
+  // completed-orders) → lowercased set of emails that have converted. Null for the
+  // default 'dropout' model (callers keep prior behaviour); consent ignored (we only
+  // need the emails); failures fall back to null so a broken source can't flag everyone.
   async function convertedEmails(action) {
     const conv = action.config && action.config.conversion;
     if (!conv || conv.mode !== 'list' || !conv.source) return null;
@@ -1612,15 +1595,11 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     }
   }
 
-  // Process all due steps. Once per action: re-run the audience to know who's
-  // still abandoning (anyone who dropped out has bought/expired → stop them),
-  // then send the due step to those still active and advance them.
-  //
-  // Re-entrancy guard: a large batch (~1,500 due recipients paced at 120ms) can
-  // take ~3 min — the same as the timer interval — and a slow audience re-check
-  // adds more. next_at/step_index only advance AFTER each send (below), so an
-  // overlapping run would re-select the same enrollments and send the same drip
-  // step twice. The flag makes an overlapping run a no-op until this one drains.
+  // Process all due steps: re-run the audience (droppers have bought/expired → stop),
+  // send the due step to those still active, advance them. Re-entrancy guard: a large
+  // batch (~1,500 paced at 120ms) can take ~3 min (≈ the timer interval); next_at/
+  // step_index advance only AFTER each send, so an overlapping run would re-send the
+  // same step — the flag makes it a no-op until this one drains.
   let processing = false;
   async function processSequences() {
     if (!enabled()) return;
@@ -1649,12 +1628,9 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
         if (n2 > 0 && n2 % 20 === 0 && getAction(a.id)?.status !== 'auto') break;
         n2 += 1;
         if (sup.has(e.email)) { sql.prepare("UPDATE action_enrollments SET status='unsubscribed', updated_at=? WHERE action_id=? AND email=?").run(now(), a.id, e.email); continue; }
-        // Conversion / drop-out. 'list' mode: converted = present in the separate
-        // conversion source. Default mode: converted = gone from the abandoned
-        // audience (bought or expired). In 'list' mode someone who's left the
-        // audience but ISN'T in the conversion list just ends their journey
-        // ('done') — we can't confirm a conversion, but we also stop emailing a
-        // non-abandoner.
+        // Conversion / drop-out. 'list' mode: converted = in the conversion source;
+        // left-the-audience-but-not-in-list just ends ('done'). Default mode:
+        // converted = gone from the abandoned audience (bought or expired).
         if (convSet) {
           if (convSet.has(String(e.email || '').toLowerCase())) { sql.prepare("UPDATE action_enrollments SET status='converted', updated_at=? WHERE action_id=? AND email=?").run(now(), a.id, e.email); converted += 1; continue; }
           if (!reachable.has(e.email)) { sql.prepare("UPDATE action_enrollments SET status='done', updated_at=? WHERE action_id=? AND email=?").run(now(), a.id, e.email); continue; }
@@ -1729,11 +1705,9 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
   setTimeout(() => checkConversions().catch(() => {}), 45000);
 
   // ── public routes (no auth; registered before the SPA fallback) ──
-  // Tracked CTA click → count + redirect, with the campaign's UTM parameters
-  // appended to the destination (clean URL in the email, full attribution in
-  // the client's analytics). Existing query keys on the destination win.
-  // Open-tracking pixel — records an email open (attributed when the recipient
-  // token is present), then returns a 1x1 transparent GIF. Never blocks/errors.
+  // Tracked CTA click → count + redirect, appending the campaign's UTMs to the
+  // destination (existing query keys win). Open-tracking pixel records an email open
+  // (attributed when the recipient token is present) then returns a 1x1 GIF.
   const OPEN_PIXEL = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
   app.get('/o/:token/:rtok?/:step?', (req, res) => {
     try {

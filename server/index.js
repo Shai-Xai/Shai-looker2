@@ -1114,11 +1114,12 @@ app.post('/api/filter-suggest', auth.requireAuth, async (req, res) => {
     const COMPANION = {
       'core_organisers.name': 'core_organisers.id', 'core_organisers.id': 'core_organisers.name',
       'core_events.name': 'core_events.id', 'core_events.id': 'core_events.name',
+      'core_ticket_categories.name': 'core_ticket_categories.id', 'core_ticket_types.name': 'core_ticket_types.id',
     };
-    const comp = pair ? COMPANION[field] : null;
+    let comp = (pair || /^core_ticket_(categories|types)\.name$/.test(field)) ? COMPANION[field] : null; // ticket names collide → always show id
     // Event names also show the event's start date in the dropdown, e.g.
     // "Ultra South Africa  —  29 May 2026", pulled from the same explore.
-    const dateField = field === 'core_events.name' ? 'core_events.start_date' : null;
+    let dateField = field === 'core_events.name' ? 'core_events.start_date' : null;
     const q = { model, view: explore, fields: [field, comp, dateField].filter(Boolean), sorts: [field], limit: 100 };
     const t = (term || '').trim();
     if (t) {
@@ -1140,14 +1141,12 @@ app.post('/api/filter-suggest', auth.requireAuth, async (req, res) => {
     }
     if (!(await applyScope(q, req.user, suiteId))) return res.json({ suggestions: [] });
     let rows;
-    try {
-      rows = await runLookerQuery('/queries/run/json', q);
-    } catch (err) {
-      // Some explores expose the event name but not core_events.start_date —
-      // drop the date field and retry so suggestions still work everywhere.
-      if (!dateField) throw err;
-      q.fields = q.fields.filter((f) => f !== dateField);
-      rows = await runLookerQuery('/queries/run/json', q);
+    try { rows = await runLookerQuery('/queries/run/json', q); }
+    catch (err) {
+      // Some explores don't expose the companion id or the start date — drop the
+      // extras and retry on the bare dimension so suggestions still work everywhere.
+      if (!comp && !dateField) throw err;
+      comp = dateField = null; q.fields = [field]; rows = await runLookerQuery('/queries/run/json', q);
     }
     const seen = new Set();
     const suggestions = [];
@@ -1156,8 +1155,9 @@ app.post('/api/filter-suggest', auth.requireAuth, async (req, res) => {
       const v = r[field];
       if (v == null || v === '') continue;
       const s = String(v);
-      if (seen.has(s)) continue;
-      seen.add(s);
+      const dedup = comp && r[comp] != null ? `${s} ${String(r[comp])}` : s; // keep same-named ids distinct
+      if (seen.has(dedup)) continue;
+      seen.add(dedup);
       const date = dateField && r[dateField] != null && r[dateField] !== '' ? fmtEventDate(r[dateField]) : '';
       if (comp) {
         const other = r[comp] == null ? '' : String(r[comp]);
