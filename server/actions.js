@@ -19,7 +19,7 @@ const { parseContactLines, csvHeader, parseContactTable, fetchGoogleSheetCsv, go
 
 // Audience person-mapping (dedupe + per-channel consent + reach) lives in a shared
 // module so chat-created "query" segments reuse the SAME logic — see audienceMap.js.
-const { MAX_AUDIENCE, EMAIL_RE, cellVal, isYes, buildRows, finalizeAudience } = require('./audienceMap');
+const { MAX_AUDIENCE, MAX_AUDIENCE_HARD, EMAIL_RE, cellVal, isYes, buildRows, finalizeAudience } = require('./audienceMap');
 
 function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAudience, draftCopy, listEvents }) {
   const sql = db.db;
@@ -28,6 +28,9 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
   const enabled = () => db.getSetting('actions_enabled', '1') !== '0';
   // Per-client governance: when on, campaigns must be approved before sending.
   const requireApprovalFor = (entityId) => db.getSetting(`approval_required:${entityId}`, '0') === '1';
+  // Per-client audience cap — the max recipients a single campaign can reach for
+  // this client (default MAX_AUDIENCE; admin-set per client; hard-ceilinged).
+  const capFor = (entityId) => { const v = parseInt(db.getSetting(`audience_cap:${entityId}`, ''), 10); return Number.isFinite(v) && v > 0 ? Math.min(v, MAX_AUDIENCE_HARD) : MAX_AUDIENCE; };
   const approverKey = (a) => (a.type === 'howler' ? 'howler' : `user:${a.userId}`);
   const approverLabel = (a) => (a.type === 'howler' ? 'Howler' : (a.name || a.email || 'Teammate'));
   // Approval progress for an action: each required approver + whether they've
@@ -482,7 +485,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     } else { // union
       for (const l of lists) for (const m of l) { const k = keyOf(m); if (k && !out.has(k)) out.set(k, m); }
     }
-    const list = [...out.values()].slice(0, MAX_AUDIENCE);
+    const list = [...out.values()].slice(0, capFor(entityId));
     const reach = { total: list.length, email: list.filter((r) => r.email && r.emailOk).length, sms: list.filter((r) => r.phone && r.smsOk).length };
     const noConsent = list.filter((r) => !(r.email && r.emailOk) && !(r.phone && r.smsOk)).length;
     // Surface the PRIMARY block's fields/columns so the editor keeps the primary
@@ -509,7 +512,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     // + reach here (shared finalizeAudience), exactly like tile/paste.
     if (cfg.audience && cfg.audience.mode === 'query') {
       const { raw } = await resolveQueryAudience({ entityId, definition: cfg.audience, user, suiteId: cfg.eventSuiteId || '' });
-      const { list, excluded, noConsent, reach } = finalizeAudience(raw, suppressed(entityId));
+      const { list, excluded, noConsent, reach } = finalizeAudience(raw, suppressed(entityId), capFor(entityId));
       return { list, fields: [], filterFields: [], columns: [], excluded, noConsent, filteredOut: 0, reach };
     }
     let raw = [];
@@ -581,7 +584,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
       }
     }
     // Dedupe + suppression + per-channel reach (shared with Owl segments).
-    const { list, excluded, noConsent, reach } = finalizeAudience(raw, suppressed(entityId));
+    const { list, excluded, noConsent, reach } = finalizeAudience(raw, suppressed(entityId), capFor(entityId));
     return { list, fields, filterFields, columns, excluded, noConsent, filteredOut, reach };
   }
 
@@ -914,6 +917,14 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     if (!guard(req, res, req.params.entityId)) return;
     db.setSetting(`approval_required:${req.params.entityId}`, (req.body || {}).requireApproval ? '1' : '0');
     res.json({ requireApproval: requireApprovalFor(req.params.entityId) });
+  });
+  // Per-client campaign audience cap — Howler-admin only (a client can't raise their own send limit).
+  app.get('/api/admin/entities/:entityId/audience-cap', auth.requireAdmin, (req, res) =>
+    res.json({ cap: capFor(req.params.entityId), default: MAX_AUDIENCE, max: MAX_AUDIENCE_HARD }));
+  app.put('/api/admin/entities/:entityId/audience-cap', auth.requireAdmin, (req, res) => {
+    const n = parseInt((req.body || {}).cap, 10);
+    db.setSetting(`audience_cap:${req.params.entityId}`, Number.isFinite(n) && n > 0 ? String(Math.min(n, MAX_AUDIENCE_HARD)) : '');
+    res.json({ cap: capFor(req.params.entityId), default: MAX_AUDIENCE, max: MAX_AUDIENCE_HARD });
   });
   app.post('/api/actions/:entityId', auth.requireAuth, auth.requirePermission('campaigns.approve'), (req, res) => {
     if (!guard(req, res, req.params.entityId)) return;

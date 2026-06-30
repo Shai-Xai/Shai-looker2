@@ -2724,6 +2724,27 @@ function LoginBackgroundField({ entityId }) {
   );
 }
 
+// Per-client campaign audience cap (Howler-admin only). The max recipients a
+// single campaign can reach for this client; blank = the platform default.
+function AudienceCapField({ entityId }) {
+  const [data, setData] = useState(null); // { cap, default, max }
+  const [val, setVal] = useState('');
+  const [saved, setSaved] = useState(false);
+  useEffect(() => { let alive = true; api.getAudienceCap(entityId).then((d) => { if (alive) { setData(d); setVal(d.cap === d.default ? '' : String(d.cap)); } }).catch(() => { if (alive) setData({ cap: 0, default: 0, max: 0 }); }); return () => { alive = false; }; }, [entityId]);
+  if (!data) return null;
+  const save = async () => { try { const d = await api.saveAudienceCap(entityId, parseInt(val, 10) || 0); setData(d); setVal(d.cap === d.default ? '' : String(d.cap)); flash(setSaved); } catch (e) { alert('Save failed: ' + e.message); } };
+  return (
+    <div style={{ marginTop: 12 }}>
+      <L>Campaign audience cap</L>
+      <div style={{ fontSize: 12, color: 'var(--muted)', margin: '4px 0 6px' }}>The most recipients one campaign can reach for this client. Leave blank for the platform default ({(data.default || 0).toLocaleString()}). Max {(data.max || 0).toLocaleString()}.</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <input value={val} onChange={(e) => setVal(e.target.value.replace(/[^0-9]/g, ''))} onBlur={save} placeholder={`Default (${(data.default || 0).toLocaleString()})`} inputMode="numeric" style={{ ...input, maxWidth: 200 }} />
+        {saved && <span style={{ color: 'var(--success,#10b981)', fontSize: 12.5, fontWeight: 600 }}>✓ Saved</span>}
+      </div>
+    </div>
+  );
+}
+
 // Client settings: name, organiser locks, preview, delete.
 function ClientSettings({ entity, suites, fields, onChange, onBack }) {
   const navigate = useNavigate();
@@ -2789,6 +2810,7 @@ function ClientSettings({ entity, suites, fields, onChange, onBack }) {
       </div>
       <OwlGuidanceEditor scope="admin-client" entityId={entity.id} />
       <CurrencyField entityId={entity.id} />
+      <AudienceCapField entityId={entity.id} />
       <SlugField entityId={entity.id} />
       <LoginBackgroundField entityId={entity.id} />
       <SaveRow onSave={save} saved={saved} id={entity.id} />

@@ -496,6 +496,11 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-30** — **Bigger campaign audiences + per-client cap** ✅: the per-campaign recipient
+  limit was raised from 2,000 to **25,000** (Looker source lifted to match), and Howler can now set a
+  **per-client audience cap** in **Admin → the client → Settings** (blank = the 25,000 default) — so a
+  client can be tuned up or down. Segments now show a **progress bar** while their live audience
+  resolves, and the members viewer lists up to 5,000 with the true total shown.
 - **2026-06-30** — **Filters: a hand-added filter now actually filters the report** ✅: a
   dashboard filter added in the editor (not imported from Looker, so never wired into a
   tile's `listenTo`) now applies to every tile whose own query uses that filter's field —

@@ -8,7 +8,8 @@
 // cellVal copes with both. `member` shape: { email, name, ticket, phone, anchorRaw,
 // emailOk, smsOk, attributes }.
 
-const MAX_AUDIENCE = 25000;      // safety cap per campaign (raised from 2000; Looker source limit in index.js lifted to match)
+const MAX_AUDIENCE = 25000;      // DEFAULT safety cap per campaign (per-client override via the audience_cap:<entityId> setting)
+const MAX_AUDIENCE_HARD = 50000; // absolute ceiling a per-client override can be set to (matches the Looker source limit in index.js)
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const cellVal = (cell) => String((cell && (cell.value ?? cell)) || '').trim();
 const isYes = (v) => ['yes', 'y', 'true', '1', 'consented', 'opted in', 'opt in'].includes(String(v).trim().toLowerCase());
@@ -48,8 +49,9 @@ function buildRows(rows, opts = {}) {
 
 // Dedupe (by email-or-phone) + suppression + per-channel reach. `suppressed` is a Set
 // of suppressed emails. Mirrors the shared tail of audienceFor verbatim.
-function finalizeAudience(raw, suppressed) {
+function finalizeAudience(raw, suppressed, cap = MAX_AUDIENCE) {
   const sup = suppressed || new Set();
+  const lim = Number.isFinite(cap) && cap > 0 ? Math.min(cap, MAX_AUDIENCE_HARD) : MAX_AUDIENCE;
   const seen = new Set();
   const list = [];
   let excluded = 0;
@@ -59,7 +61,7 @@ function finalizeAudience(raw, suppressed) {
     seen.add(key);
     if (r.email && sup.has(r.email)) { excluded += 1; continue; }
     list.push(r);
-    if (list.length >= MAX_AUDIENCE) break;
+    if (list.length >= lim) break;
   }
   // Per-channel reach (consent-aware) — surfaced at preview, enforced at send.
   const reach = {
@@ -72,4 +74,4 @@ function finalizeAudience(raw, suppressed) {
   return { list, excluded, noConsent, reach };
 }
 
-module.exports = { MAX_AUDIENCE, EMAIL_RE, cellVal, isYes, buildRows, finalizeAudience };
+module.exports = { MAX_AUDIENCE, MAX_AUDIENCE_HARD, EMAIL_RE, cellVal, isYes, buildRows, finalizeAudience };
