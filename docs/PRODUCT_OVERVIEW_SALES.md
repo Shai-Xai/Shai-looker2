@@ -114,10 +114,12 @@ approval needed.
   **reply buttons** (or a numbered list to reply to), so customers can drill in
   without typing.
 - **Scheduled updates (digest / goals / alerts)** — a customer can be subscribed
-  to a daily WhatsApp update. To respect WhatsApp’s rules, it’s sent free-form only
-  while the customer is inside their **24-hour window** (i.e. they messaged the Owl
-  in the last day); reaching everyone on a fixed schedule regardless will use an
-  approved WhatsApp template (next step).
+  to a daily WhatsApp update. The **digest** reuses the client’s **configured email
+  digest** (same role lens / focus / source) when one is set up, condensed for a chat
+  bubble — and falls back to a lightweight Owl summary when there’s no digest yet.
+  To respect WhatsApp’s rules, it’s sent free-form only while the customer is inside
+  their **24-hour window** (they messaged the Owl in the last day); reaching everyone
+  on a fixed schedule regardless will use an approved WhatsApp template (next step).
 - **Status 🧪:** pilot. Howler links each phone number to its client in **Admin →
   WhatsApp Owl**, where a live activity log shows inbound messages end-to-end.
 

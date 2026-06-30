@@ -35,7 +35,7 @@ function parseFollowups(out) {
   try { const a = JSON.parse(m[0]); return Array.isArray(a) ? a.filter((x) => typeof x === 'string' && x.trim()).slice(0, 3) : []; } catch { return []; }
 }
 
-function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthropicKeyForEntity, currencyNote }) {
+function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthropicKeyForEntity, currencyNote, whatsappDigestFor }) {
   const sql = db.db;
   sql.exec(`
     CREATE TABLE IF NOT EXISTS owl_wa_msgs (
@@ -374,16 +374,17 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
     alerts: 'any alerts that have triggered in the last 24 hours (if none, say all clear in a few words)',
   };
   const SCHED_NOTE = 'This is an automated SCHEDULED WhatsApp update the customer subscribed to (they are inside their 24h window). Open with a short friendly greeting line, then the update. Keep the whole thing tight — a few short lines. Do NOT append a <<<FOLLOWUPS>>> marker for this scheduled message.';
+  const SCHED_NOTE_ADD = 'This is a short ADDENDUM beneath a scheduled update already shown above — do NOT greet again; just give these item(s) in a line or two. No <<<FOLLOWUPS>>> marker.';
 
   // Compose the scheduled update by running the SAME Owl loop (scoped to this user),
   // so the figures are live + grounded and honour the field guide + currency.
-  async function buildScheduled(id, topics) {
+  async function buildScheduled(id, topics, greeting = true) {
     const apiKey = anthropicKeyForEntity ? anthropicKeyForEntity(id.entityId || undefined) : undefined;
     if (!insights.isConfigured(apiKey)) return '';
     const wants = topics.map((t) => TOPIC_ASK[t]).filter(Boolean);
     if (!wants.length) return '';
     const ask = `Please give me my scheduled update covering: ${wants.join('; ')}.`;
-    const instructions = `${instructionsFor(id.entityId)}\n\n${SCHED_NOTE}`;
+    const instructions = `${instructionsFor(id.entityId)}\n\n${greeting ? SCHED_NOTE : SCHED_NOTE_ADD}`;
     try {
       const { text } = await runOwlLoop({
         llmTurn: ({ messages: m, tools, onText }) => owlTurn(insights, { messages: m, tools, instructions, apiKey, onText }),
@@ -392,6 +393,21 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
       });
       return String(text || '').split(FU_MARK)[0].replace(/\s+$/, '').trim();
     } catch { return ''; }
+  }
+
+  // The full message: use the customer's REAL configured digest for the 'digest' topic
+  // when they have one (same source as their email digest), plus a lightweight Owl
+  // summary for the rest — and for 'digest' itself when no digest is set up ("keep both").
+  async function buildScheduledMessage(id, topics) {
+    const parts = [];
+    let owlTopics = topics;
+    if (topics.includes('digest') && whatsappDigestFor) {
+      let real = null;
+      try { real = await whatsappDigestFor(id.entityId, id.user && id.user.email); } catch { real = null; }
+      if (real) { parts.push(real); owlTopics = topics.filter((t) => t !== 'digest'); }
+    }
+    if (owlTopics.length) { const s = await buildScheduled(id, owlTopics, parts.length === 0); if (s) parts.push(s); }
+    return parts.join('\n\n');
   }
 
   // Hourly tick: at/after each subscriber's send hour (SAST), once a day, if they're
@@ -411,7 +427,7 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
         sentMark.run(msisdn, day, now()); // evaluate once per day, in or out of window
         if (!inWindow(msisdn)) { logEvent(msisdn, 'push-skip', 'outside 24h window (needs a template) — no send'); continue; }
         const id = identify(msisdn); if (!id) continue;
-        const msg = await buildScheduled(id, topics);
+        const msg = await buildScheduledMessage(id, topics);
         if (!msg) { logEvent(msisdn, 'push-failed', 'no content generated'); continue; }
         insMsg.run(crypto.randomUUID(), msisdn, 'owl', msg, now());
         const r = await messaging.sendWhatsapp({ to: msisdn, text: msg });

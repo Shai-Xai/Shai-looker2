@@ -396,7 +396,40 @@ function mount(app, { db, auth, mailer, messaging, push, generateContent, roleLe
     actions: [{ text: 'Review the Marketing dashboard for channel mix' }, { text: 'Consider a VIP flash promo this weekend' }],
   });
 
+  // ── WhatsApp digest: the SAME configured digest, condensed for a chat bubble ──
+  // Render the entity's active digest job with the real content builder, then squeeze
+  // it to a few short lines. Null when no digest is configured, so the WhatsApp
+  // scheduler falls back to its lightweight Owl summary. Best-effort; never throws.
+  async function whatsappDigestFor(entityId, recipientEmail) {
+    try {
+      const row = sql.prepare("SELECT * FROM scheduled_jobs WHERE entity_id=? AND type='digest' AND status='active' ORDER BY created_at LIMIT 1").get(entityId);
+      if (!row) return null;
+      const j = rowToJob(row);
+      const content = await generateContent({
+        entityId, role: j.role, roleFocus: j.roleFocus, focusMode: j.focusMode, contentMode: j.contentMode,
+        tiles: j.tiles, alignDaysBefore: j.alignDaysBefore, priorityDashboards: j.priorityDashboards,
+        includeFollowed: j.includeFollowed, followedVisual: false, followedTiles: j.followedTiles,
+        includeGoals: j.includeGoals, suiteIds: j.suiteIds, recipientEmail: recipientEmail || '',
+      });
+      return condenseDigest(content);
+    } catch (e) { console.error('[scheduler] whatsappDigest failed', e && e.message); return null; }
+  }
+
   console.log('[scheduler] mounted', enabled() ? '(enabled)' : '(disabled — set scheduler_enabled=1)');
+  return { whatsappDigestFor };
+}
+
+// Squeeze a (flat or multi-event) digest into a short WhatsApp message: headline,
+// up to 5 KPIs, and the lead narrative line (labels/money already formatted upstream).
+function condenseDigest(c) {
+  if (!c) return '';
+  const lines = [`*${String(c.headline || c.subject || 'Your update').replace(/[*\n]/g, ' ').trim().slice(0, 160)}*`];
+  let kpis = Array.isArray(c.kpis) ? c.kpis.slice() : [];
+  if (!kpis.length && Array.isArray(c.events)) kpis = c.events.flatMap((e) => (e.kpis || []).map((k) => ({ label: `${e.suiteName} · ${k.label}`, value: k.value })));
+  for (const k of kpis.slice(0, 5)) if (k && k.label && k.value) lines.push(`${k.label}: ${k.value}`);
+  const narr = (Array.isArray(c.narrative) && c.narrative[0]) || (Array.isArray(c.events) && c.events[0] && (c.events[0].narrative || [])[0]) || '';
+  if (narr) lines.push(`\n${String(narr).replace(/\n/g, ' ').slice(0, 320)}`);
+  return lines.join('\n').trim();
 }
 
 module.exports = { mount };
