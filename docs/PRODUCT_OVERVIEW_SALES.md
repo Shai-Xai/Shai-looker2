@@ -121,10 +121,13 @@ approval needed.
   their **24-hour window** (they messaged the Owl in the last day); reaching everyone
   on a fixed schedule regardless will use an approved WhatsApp template (next step).
 - **Take action by reply button** — the Owl can **set up an alert** ("tell me when
-  tickets hit 1000") or **save a segment** straight from WhatsApp: it drafts it and
-  sends a **✅ Confirm** button (and, for an alert that could watch several events,
-  event-choice buttons). Tapping commits it through the same permission checks as the
-  app. (Campaigns stay in the Pulse app — they message buyers.)
+  tickets hit 1000"), **save a segment**, or **draft an email/SMS campaign** straight
+  from WhatsApp. It works like a campaign manager (asks the few setup questions it needs,
+  same as in-app), drafts it, then sends a **✅ Confirm** button (event-choice buttons
+  for an alert that could watch several events). Tapping commits through the same
+  permission checks as the app. A drafted campaign is a **draft only** — the customer
+  still reviews, approves and **sends it in the Pulse app (Engage)**; the Owl never sends
+  to buyers from WhatsApp.
 - **Status 🧪:** pilot. Howler links each phone number to its client in **Admin →
   WhatsApp Owl**, where a live activity log shows inbound messages end-to-end.
 
@@ -182,6 +185,9 @@ with approvals and full tracking.
   uploaded 'already called' list"). Each source keeps its own filters.
 - **Always-live** — segments re-resolve at use/send time, so a linked Sheet stays
   current; counts and email/SMS reach show up front.
+- **Organise** ✅ — **link a segment to an event** and/or **file it in a folder**,
+  then filter the list by either. Keeps a long list tidy as it grows (e.g. all the
+  audiences for one festival together).
 
 **Pitch:** "Build the exact audience from your own data or a spreadsheet — combine
 lists, subtract a suppression list, and it stays live."
@@ -511,6 +517,10 @@ Use these to set direction, **not** to promise dates.
   email send can't accidentally trigger an equally-big SMS blast. Set it to 0 to
   block SMS for a client. Admin-only (Client → Settings); the capped number shows in
   the audience preview and is fed to the Owl when it drafts a campaign.
+- **2026-06-30** — **Organise segments by event & folder** ✅: link any segment to an
+  **event** and/or file it in a free-text **folder**, then **filter the list** by either —
+  right on each segment card. Keeps a growing audience list tidy (all of one festival's
+  segments together). The Owl auto-links a segment to the event it drafted a campaign for.
 - **2026-06-30** — **WhatsApp Owl: take action by reply button** 🧪: the Owl can now set
   up an **alert** or save a **segment** from WhatsApp — it drafts it and sends a ✅ Confirm
   button (event-choice buttons when an alert could watch several events), committing through

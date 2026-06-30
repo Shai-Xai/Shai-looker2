@@ -37,6 +37,8 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
   const [metaConnected, setMetaConnected] = useState(false);
   const [tiktokConnected, setTiktokConnected] = useState(false);
   const [connectors, setConnectors] = useState({});
+  const [filterFolder, setFilterFolder] = useState(''); // organise: filter the list by folder
+  const [filterEvent, setFilterEvent] = useState('');   // …and/or by linked event
 
   const load = () => api.listSegments(entityId).then((r) => { setSegments(r.segments || []); setMetaConnected(!!r.metaConnected); setTiktokConnected(!!r.tiktokConnected); setConnectors(r.connectors || {}); }).catch(() => setSegments([]));
   // Materialise a built-in recipe (e.g. abandoned cart) as a real, live segment.
@@ -113,10 +115,20 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
     </div>
   );
 
+  // Organise: the client's events (from the tiles catalog) for the per-segment event
+  // link, and the distinct folders in use. Both feed the inline pickers + the filters.
+  const eventOpts = (() => { const m = new Map(); for (const d of (tiles?.dashboards || [])) if (d.suiteId && !m.has(d.suiteId)) m.set(d.suiteId, d.suiteName || d.title || 'Event'); return [...m].map(([id, name]) => ({ id, name })); })();
+  const eventName = (id) => (eventOpts.find((e) => e.id === id) || {}).name || '';
+  const folderOpts = [...new Set(segments.map((s) => s.folder).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  const setSegFolder = (s, folder) => api.updateSegment(entityId, s.id, { folder }).then(load).catch(() => {});
+  const setSegEvent = (s, suiteId) => api.updateSegment(entityId, s.id, { suiteId }).then(load).catch(() => {});
+  const shown = segments.filter((s) => (!filterFolder || s.folder === filterFolder) && (!filterEvent || s.suiteId === filterEvent));
+  const orgSel = { padding: '4px 7px', borderRadius: 8, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', fontSize: 12 };
+
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 12, flexWrap: 'wrap' }}>
-        <p style={{ fontSize: 13, color: 'var(--muted)', margin: 0 }}>Reusable, always-live audiences — built from a dashboard tile (with filters) or a pasted list. Use them in campaigns; counts update each time.</p>
+        <p style={{ fontSize: 13, color: 'var(--muted)', margin: 0 }}>Reusable, always-live audiences — built from a dashboard tile (with filters) or a pasted list. Use them in campaigns; counts update each time. Link one to an event or a folder to keep them organised.</p>
         <button style={primary} onClick={() => setEditing('new')}>+ New segment</button>
       </div>
 
@@ -124,7 +136,26 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
         <p style={{ color: 'var(--muted)', fontSize: 13, padding: '20px 0' }}>No segments yet. Create one from a dashboard tile or a pasted list.</p>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {segments.map((s) => {
+          {(folderOpts.length > 0 || eventOpts.length > 0) && (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 2 }}>
+              <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>Filter:</span>
+              {folderOpts.length > 0 && (
+                <select value={filterFolder} onChange={(e) => setFilterFolder(e.target.value)} style={orgSel} aria-label="Filter by folder">
+                  <option value="">All folders</option>
+                  {folderOpts.map((f) => <option key={f} value={f}>📁 {f}</option>)}
+                </select>
+              )}
+              {eventOpts.length > 0 && (
+                <select value={filterEvent} onChange={(e) => setFilterEvent(e.target.value)} style={orgSel} aria-label="Filter by event">
+                  <option value="">All events</option>
+                  {eventOpts.map((ev) => <option key={ev.id} value={ev.id}>🗓 {ev.name}</option>)}
+                </select>
+              )}
+              {(filterFolder || filterEvent) && <button style={{ ...orgSel, cursor: 'pointer' }} onClick={() => { setFilterFolder(''); setFilterEvent(''); }}>Clear</button>}
+              <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>{shown.length} of {segments.length}</span>
+            </div>
+          )}
+          {shown.map((s) => {
             const lbl = sourceLabel(s);
             return (
               <div key={s.id} style={{ border: '1px solid var(--hairline)', borderRadius: 14, padding: isMobile ? '16px' : '14px 16px', display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'stretch' : 'center', flexWrap: isMobile ? 'nowrap' : 'wrap', gap: isMobile ? 12 : 14, background: 'var(--card)' }}>
@@ -148,6 +179,22 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
                       {s.reach.sms >= 0 && <span>💬 {s.reach.sms} with mobile</span>}
                     </div>
                   )}
+                  {/* Organise: link this segment to an event and/or file it in a folder.
+                      Both patch immediately; folder is free-text (existing folders
+                      suggested via datalist) so you can group however you like. */}
+                  <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                    {eventOpts.length > 0 && (
+                      <select value={s.suiteId || ''} onChange={(e) => setSegEvent(s, e.target.value)} style={orgSel} aria-label="Link to event" title="Link this segment to an event">
+                        <option value="">🗓 No event</option>
+                        {eventOpts.map((ev) => <option key={ev.id} value={ev.id}>🗓 {ev.name}</option>)}
+                      </select>
+                    )}
+                    <input list={`seg-folders-${s.id}`} value={s.folder || ''} placeholder="📁 Folder…"
+                      onChange={(e) => setSegments((arr) => arr.map((x) => (x.id === s.id ? { ...x, folder: e.target.value } : x)))}
+                      onBlur={(e) => { const v = e.target.value.trim(); if (v !== (s.folder || '')) setSegFolder(s, v); }}
+                      style={{ ...orgSel, width: 130 }} aria-label="Folder" title="File this segment in a folder" />
+                    <datalist id={`seg-folders-${s.id}`}>{folderOpts.map((f) => <option key={f} value={f} />)}</datalist>
+                  </div>
                 </div>
                 <div style={{ display: 'flex', gap: 8, flexShrink: 0, flexWrap: 'wrap' }}>
                   <button style={{ ...mini, flex: isMobile ? 1 : undefined, padding: isMobile ? '10px 12px' : mini.padding }} onClick={() => viewPeople(s)}>👥 List</button>

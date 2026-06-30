@@ -498,7 +498,7 @@ function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, m
       const segmentsApi = typeof getSegmentsApi === 'function' ? getSegmentsApi() : null;
       if (segmentsApi && segmentsApi.createSegment) {
         const segName = String(audienceName || name || 'Campaign audience').slice(0, 120);
-        const sr = segmentsApi.createSegment({ entityId, name: segName, definition: audience, user: req.user });
+        const sr = segmentsApi.createSegment({ entityId, name: segName, definition: audience, user: req.user, suiteId: suiteId || '' });
         if (sr.ok) audience = { mode: 'segment', segmentId: sr.segment.id }; // reference the saved segment
         // (if the segment couldn't be saved, fall back to the inline query audience — the campaign still resolves)
       }
@@ -522,7 +522,7 @@ function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, m
   require('./owlPin').mount(app, { db, auth });
   require('./owlGuidance').mount(app, { db, auth }); // resolveGuidance is required at top
   const owlFields = require('./owlFields').mount(app, { db, auth, getExploreFields }); // no-code field labels/synonyms/questions
-  require('./owlWhatsapp').mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthropicKeyForEntity, currencyNote, whatsappDigestFor, getAlertsApi, getSegmentsApi }); // WhatsApp door onto the Owl (Clickatell)
+  require('./owlWhatsapp').mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthropicKeyForEntity, currencyNote, whatsappDigestFor, getAlertsApi, getSegmentsApi, getActionsApi }); // WhatsApp door onto the Owl (Clickatell)
   console.log('[owlChat] agentic Owl chat module mounted');
 }
 
