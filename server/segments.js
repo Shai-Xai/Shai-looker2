@@ -52,11 +52,18 @@ function mount(app, { db, auth, resolveAudience, resolveRecipe, meta, tiktok }) 
   // Light shaping of a segment definition (the audience config). We don't trust
   // the client shape blindly, but we keep it source-agnostic — only known keys.
   const cleanDef = (d = {}, depth = 0) => {
-    const mode = ['paste', 'gsheet', 'segment'].includes(d.mode) ? d.mode : 'tile';
+    const mode = ['paste', 'gsheet', 'segment', 'query'].includes(d.mode) ? d.mode : 'tile';
     const out = {
       mode,
       segmentId: String(d.segmentId || ''), // when mode='segment' (a block referencing another segment)
       gsheetUrl: String(d.gsheetUrl || '').slice(0, 1000), // linked Google Sheet (shared/published)
+      // when mode='query' (a cohort the Owl built in chat) — the curated explore +
+      // dimension filters; identity columns are fixed server-side (never client-set).
+      model: String(d.model || ''),
+      view: String(d.view || ''),
+      queryFilters: (d.queryFilters && typeof d.queryFilters === 'object' && !Array.isArray(d.queryFilters))
+        ? Object.fromEntries(Object.entries(d.queryFilters).slice(0, 50).map(([k, v]) => [String(k), String(v)]))
+        : {},
       dashboardId: String(d.dashboardId || ''),
       tileId: String(d.tileId || ''),
       emailField: String(d.emailField || ''),
@@ -133,7 +140,7 @@ function mount(app, { db, auth, resolveAudience, resolveRecipe, meta, tiktok }) 
     if (!guard(req, res, req.params.entityId)) return;
     const name = String(req.body?.name || '').trim().slice(0, 120) || 'Untitled segment';
     const definition = cleanDef(req.body?.definition || {});
-    const source = definition.sources && definition.sources.length ? 'mix' : (['paste', 'gsheet'].includes(definition.mode) ? definition.mode : 'tile');
+    const source = definition.sources && definition.sources.length ? 'mix' : (['paste', 'gsheet', 'query'].includes(definition.mode) ? definition.mode : 'tile');
     const id = uuid(); const ts = now();
     sql.prepare('INSERT INTO segments (id, entity_id, name, source, definition, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)')
       .run(id, req.params.entityId, name, source, JSON.stringify(definition), req.user.email, ts, ts);
@@ -163,7 +170,7 @@ function mount(app, { db, auth, resolveAudience, resolveRecipe, meta, tiktok }) 
     if (!seg || seg.entity_id !== req.params.entityId) return res.status(404).json({ error: 'Not found' });
     const name = req.body?.name !== undefined ? String(req.body.name).trim().slice(0, 120) || seg.name : seg.name;
     const definition = req.body?.definition !== undefined ? cleanDef(req.body.definition) : JSON.parse(seg.definition || '{}');
-    const source = definition.sources && definition.sources.length ? 'mix' : (['paste', 'gsheet'].includes(definition.mode) ? definition.mode : 'tile');
+    const source = definition.sources && definition.sources.length ? 'mix' : (['paste', 'gsheet', 'query'].includes(definition.mode) ? definition.mode : 'tile');
     // A changed definition invalidates the cached count.
     const changed = JSON.stringify(definition) !== seg.definition;
     sql.prepare('UPDATE segments SET name=?, source=?, definition=?, updated_at=?' + (changed ? ', last_count=-1, last_resolved_at=\'\'' : '') + ' WHERE id=?')
@@ -297,7 +304,29 @@ function mount(app, { db, auth, resolveAudience, resolveRecipe, meta, tiktok }) 
     const seg = getSeg(segmentId);
     return seg && seg.entity_id === entityId ? JSON.parse(seg.definition || '{}') : null;
   }
-  return { resolveSegment, getSegmentDefinition };
+  // Programmatic create (the Owl's createSegment act-tool commit path). Runs the SAME
+  // cleanDef + entity-ownership + campaigns.approve check the POST route uses, so an
+  // Owl-made segment is identical to a hand-made one and obeys the permission model.
+  function createSegmentFor({ entityId, name, definition, user }) {
+    if (!user || !entityId) return { ok: false, error: 'Missing user or client' };
+    const isAdmin = user.role === 'admin';
+    if (!(isAdmin || (user.entityIds || []).includes(entityId))) return { ok: false, error: 'Not allowed' };
+    if (!isAdmin && auth.hasPermission && !auth.hasPermission(user, entityId, 'campaigns.approve')) {
+      return { ok: false, error: "You don't have permission to create segments for this client." };
+    }
+    const def = cleanDef(definition || {});
+    const nm = String(name || '').trim().slice(0, 120) || 'Untitled segment';
+    const source = def.sources && def.sources.length ? 'mix' : (['paste', 'gsheet', 'query'].includes(def.mode) ? def.mode : 'tile');
+    const id = uuid(); const ts = now();
+    sql.prepare('INSERT INTO segments (id, entity_id, name, source, definition, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)')
+      .run(id, entityId, nm, source, JSON.stringify(def), (user.email || 'owl'), ts, ts);
+    return { ok: true, segment: rowToSeg(getSeg(id)) };
+  }
+  // The client's saved segments (id + name) — so the Owl can target one by name.
+  function listSegmentsFor(entityId) {
+    return sql.prepare('SELECT id, name FROM segments WHERE entity_id=? ORDER BY updated_at DESC LIMIT 200').all(entityId).map((r) => ({ id: r.id, name: r.name }));
+  }
+  return { resolveSegment, getSegmentDefinition, createSegment: createSegmentFor, listSegments: listSegmentsFor };
 }
 
 module.exports = { mount };

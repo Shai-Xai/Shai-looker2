@@ -91,10 +91,10 @@ module.exports = {
   notes: [
     '"Tickets sold" = core_tickets.count (distinct active/purchased ticket records — the realistic sold number). core_tickets.sold_tickets EXCLUDES complimentary tickets; use only when asked for paid/net sold.',
     'IMPORTANT — core_tickets.count and revenue INCLUDE add-on products (drink packs, lockers, shuttles, WC, etc.). When asked for tickets sold or revenue, ALWAYS split genuine entry tickets from add-ons: group by or filter core_ticket_types.is_addonable ("No" = entry ticket, "Yes" = add-on) and report them as SEPARATE lines (e.g. "48,615 tickets sold, plus 7,728 add-ons"). Treat the headline "tickets sold" as entry tickets (is_addonable = No) unless the user explicitly asks for the combined total.',
-    '"Revenue" = core_tickets.sum_revenue_decimal (ZAR, gross). Fees and cost are separate measures.',
+    '"Revenue" = core_tickets.sum_revenue_decimal (gross, in the client\'s reporting currency). Fees and cost are separate measures.',
     'This explore is ACTIVE/PURCHASED tickets — refunded/cancelled tickets are excluded, and fully sponsored/free events read 0. Say so if a total looks unexpectedly low for a free event.',
     '"City" is ambiguous — default to Event City (core_sa_city_location.city_name); use Buyer City only when the question is about where customers are from.',
-    '"Remaining"/"sold out" use core_ticket_transactions_combined.remaining. All amounts are South African Rand (ZAR).',
+    '"Remaining"/"sold out" use core_ticket_transactions_combined.remaining. Monetary amounts are in the client\'s reporting currency (stated in the Currency note when it is not Rand) — never relabel them.',
     'CUSTOMER LOOKUP: to find one customer, FILTER core_purchasers.email / cellphone_number / first_name / last_name to the specific known value the user gives — then report that person\'s tickets (type, status, date, count). You CANNOT list, group by, or output customers\' emails/phones/names (no enumeration / no dumping contact lists) — those fields are filter-only. If asked to list everyone\'s contacts, decline and explain that contact lists come from the governed segment/Engage tools with consent.',
   ],
 

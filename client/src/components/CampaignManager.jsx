@@ -375,6 +375,13 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
       benefit: cfg.promo?.benefit || '',
       appendToLink: cfg.promo?.appendToLink !== false,
     },
+    // Conversion tracking: 'dropout' (left the audience) or 'list' (appears in a
+    // separate attendance/orders source). The source reuses the audience picker.
+    conversionMode: cfg.conversion?.mode || 'dropout',
+    convSourceMode: cfg.conversion?.source?.mode === 'segment' ? 'segment' : 'tile',
+    convSegmentId: cfg.conversion?.source?.segmentId || '',
+    convDashboardId: cfg.conversion?.source?.dashboardId || '',
+    convTileId: cfg.conversion?.source?.tileId || '',
   }));
   // Uploaded unique codes (textarea). Existing pool stats come from the action.
   const [promoCodesText, setPromoCodesText] = useState('');
@@ -451,6 +458,14 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
     promo: f.promo,
     promoCodes: promoCodesText.split(/[\s,;]+/).map((c) => c.trim()).filter(Boolean),
     audience: { mode: f.audienceMode, segmentId: f.segmentId, dashboardId: f.dashboardId, tileId: f.tileId, emailField: f.emailField, nameField: f.nameField, consentField: f.consentField, emailConsentField: f.emailConsentField, smsConsentField: f.smsConsentField, ticketField: f.ticketField, phoneField: f.phoneField, anchorField: f.anchorField, filters: f.filters, attrDashboardId: f.attrDashboardId, attrTileId: f.attrTileId, pasted: f.pasted },
+    conversion: {
+      mode: f.conversionMode,
+      source: f.conversionMode === 'list'
+        ? (f.convSourceMode === 'segment'
+          ? { mode: 'segment', segmentId: f.convSegmentId }
+          : { mode: 'tile', dashboardId: f.convDashboardId, tileId: f.convTileId })
+        : {},
+    },
   });
   // Targeting filter helpers.
   const addFilter = () => setF((s) => ({ ...s, filters: [...s.filters, { field: '', op: 'in', values: [], min: '', max: '' }] }));
@@ -458,7 +473,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
   const removeFilter = (i) => setF((s) => ({ ...s, filters: s.filters.filter((_, j) => j !== i) }));
   // Step helpers (sequence mode).
   const setStep = (i, patch) => setF((s) => ({ ...s, steps: s.steps.map((st, j) => (j === i ? { ...st, ...patch } : st)) }));
-  const addStep = (delayHours = 24) => setF((s) => ({ ...s, steps: [...s.steps, { delayHours, subject: '', body: '', ctaText: s.steps[0]?.ctaText || '', contentMode: 'template', customHtml: '', heroImage: '' }] }));
+  const addStep = (delayHours = 24) => setF((s) => ({ ...s, steps: [...s.steps, { delayHours, subject: '', body: '', smsBody: '', ctaText: s.steps[0]?.ctaText || '', contentMode: 'template', customHtml: '', heroImage: '' }] }));
   const removeStep = (i) => setF((s) => ({ ...s, steps: s.steps.filter((_, j) => j !== i) }));
   const isSequence = f.campaignMode === 'sequence';
   // Columns available to pick the abandonment-time anchor from (tile fields or a list's headers).
@@ -478,9 +493,11 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
   const acc = (key) => ({ open: openSection === key, onToggle: () => setOpenSection((s) => (s === key ? null : key)) });
   const isPending = action?.status === 'pending';
   const isScheduled = action?.status === 'scheduled';
-  // For Email+SMS campaigns, the two content sub-sections collapse (default closed).
-  const [emailOpen, setEmailOpen] = useState(false);
-  const [smsOpen, setSmsOpen] = useState(false);
+  // For Email+SMS campaigns, the two content sub-sections are collapsible — but
+  // default OPEN so the separate SMS editor is obviously available (it was easy
+  // to miss when collapsed behind a banner).
+  const [emailOpen, setEmailOpen] = useState(true);
+  const [smsOpen, setSmsOpen] = useState(true);
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectNote, setRejectNote] = useState('');
   // datetime-local value (local time) — prefill from an existing schedule.
@@ -509,7 +526,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
     debounce.current = setTimeout(() => {
       const base = payload();
       const st = isSequence ? (f.steps[activeStep] || f.steps[0]) : null;
-      const p = st ? { ...base, subject: st.subject, body: st.body, ctaText: st.ctaText, contentMode: st.contentMode || 'template', customHtml: st.customHtml || '', heroImage: st.heroImage || '' } : base;
+      const p = st ? { ...base, subject: st.subject, body: st.body, smsBody: st.smsBody || '', ctaText: st.ctaText, contentMode: st.contentMode || 'template', customHtml: st.customHtml || '', heroImage: st.heroImage || '' } : base;
       api.actionPreviewEmail(entityId, p).then((r) => { setPreview(r.html || ''); setPreviewSms(r.sms || ''); }).catch(() => {});
     }, 350);
     return () => clearTimeout(debounce.current);
@@ -524,7 +541,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
       const out = [];
       for (let i = 0; i < f.steps.length; i++) {
         const st = f.steps[i];
-        const p = { ...base, subject: st.subject, body: st.body, ctaText: st.ctaText, contentMode: st.contentMode || 'template', customHtml: st.customHtml || '', heroImage: st.heroImage || '' };
+        const p = { ...base, subject: st.subject, body: st.body, smsBody: st.smsBody || '', ctaText: st.ctaText, contentMode: st.contentMode || 'template', customHtml: st.customHtml || '', heroImage: st.heroImage || '' };
         try { const r = await api.actionPreviewEmail(entityId, p); out.push({ label: `Step ${i + 1} · +${st.delayHours % 24 === 0 && st.delayHours >= 24 ? `${st.delayHours / 24}d` : `${st.delayHours}h`}`, html: r.html || '', sms: r.sms || '' }); }
         catch { out.push({ label: `Step ${i + 1}`, html: '', sms: '' }); }
       }
@@ -549,6 +566,21 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
           content: s.utm.content || d.utm?.content || '',
         },
       }));
+    } catch (e) { alert('AI draft failed: ' + e.message); }
+    finally { setDrafting(false); }
+  };
+
+  // AI-draft a single sequence step (sequences have no top-level copy — each
+  // step is written independently). SMS steps only need the body.
+  const draftStep = async (i) => {
+    setDrafting(true);
+    try {
+      const d = await api.actionDraftCopy(entityId, { goal: f.goal, audienceCount: aud?.count || 0 });
+      setStep(i, {
+        subject: d.subject || f.steps[i]?.subject || '',
+        body: d.body || f.steps[i]?.body || '',
+        ctaText: d.ctaText || f.steps[i]?.ctaText || '',
+      });
     } catch (e) { alert('AI draft failed: ' + e.message); }
     finally { setDrafting(false); }
   };
@@ -681,6 +713,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
   }
 
   const dash = tiles?.dashboards?.find((d) => d.dashboardId === f.dashboardId);
+  const convDash = tiles?.dashboards?.find((d) => d.dashboardId === f.convDashboardId);
 
   return (
     <div>
@@ -740,7 +773,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
               <Toggle on={hasEmail} onClick={() => toggleChannel('email')}>✉️ Email</Toggle>
               <Toggle on={hasSms} onClick={() => toggleChannel('sms')}>💬 SMS</Toggle>
             </div>
-            {hasSms && <div style={hintS}>SMS is plain text — no subject; the tracked link + an opt-out link are added automatically. Tokens {'{{name}}'}, {'{{ticketType}}'}, {'{{promo}}'} work.{f.channel === 'both' ? ' Each recipient gets an email AND an SMS — the SMS uses the body text.' : ''}</div>}
+            {hasSms && <div style={hintS}>SMS is plain text — no subject; the tracked link + an opt-out link are added automatically. Tokens {'{{name}}'}, {'{{ticketType}}'}, {'{{promo}}'} work.{f.channel === 'both' ? ' Each recipient gets an email AND an SMS — you can write the SMS separately in the Content section.' : ''}</div>}
           </Field>
 
           <Field label="Campaign type">
@@ -888,6 +921,47 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
           </Field>
           </Accordion>
 
+          <Accordion title="Conversion tracking" {...acc('conversion')}>
+          <Field label="How do we know someone converted?">
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <Toggle on={f.conversionMode !== 'list'} onClick={() => set('conversionMode', 'dropout')}>They leave the source list</Toggle>
+              <Toggle on={f.conversionMode === 'list'} onClick={() => set('conversionMode', 'list')}>They appear in another list</Toggle>
+            </div>
+            <div style={hintS}>{f.conversionMode === 'list'
+              ? 'Converted = the person shows up in a separate list you pick below (e.g. an attendance or completed-orders list), matched by email. Confirms real conversions instead of inferring them.'
+              : `Converted = the person is no longer in the audience above (e.g. they left the abandoned-cart tile because they bought).${isSequence ? ' They drop out of the sequence automatically.' : ''} Works when the audience tile keeps itself up to date.`}</div>
+          </Field>
+          {f.conversionMode === 'list' && (
+            <Field label="Conversion source — the attendance / orders list">
+              <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                <Toggle on={f.convSourceMode === 'segment'} onClick={() => set('convSourceMode', 'segment')}>🎯 Segment</Toggle>
+                <Toggle on={f.convSourceMode !== 'segment'} onClick={() => set('convSourceMode', 'tile')}>Dashboard tile</Toggle>
+              </div>
+              {f.convSourceMode === 'segment' ? (
+                <select style={input} value={f.convSegmentId} onChange={(e) => set('convSegmentId', e.target.value)}>
+                  <option value="">Pick a saved segment…</option>
+                  {f.convSegmentId && !segments.some((sg) => sg.id === f.convSegmentId) && <option value={f.convSegmentId}>⚠ Deleted segment</option>}
+                  {segments.map((sg) => <option key={sg.id} value={sg.id}>{sg.name}{sg.count >= 0 ? ` (${sg.count})` : ''}</option>)}
+                </select>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <select style={input} value={f.convDashboardId} onChange={(e) => { set('convDashboardId', e.target.value); set('convTileId', ''); }}>
+                    <option value="">Pick a dashboard…</option>
+                    {(tiles?.dashboards || []).map((d) => <option key={d.dashboardId} value={d.dashboardId}>{d.title} — {d.setName}</option>)}
+                  </select>
+                  {convDash && (
+                    <select style={input} value={f.convTileId} onChange={(e) => set('convTileId', e.target.value)}>
+                      <option value="">Pick the tile listing who converted…</option>
+                      {convDash.tiles.map((t) => <option key={t.tileId} value={t.tileId}>{t.title}</option>)}
+                    </select>
+                  )}
+                </div>
+              )}
+              <div style={hintS}>Matched by email address (the email column is auto-detected). Anyone in this list who's also in your audience counts as converted{isSequence ? ' and stops getting the drip' : ''}. The list is re-read automatically as it fills up.</div>
+            </Field>
+          )}
+          </Accordion>
+
           <Accordion title={smsOnly ? 'Message & offer' : 'Content & offer'} {...acc('content')}>
           {/* Merge fields available from the audience — personalise the copy. */}
           {(anchorOptions.length > 0) && (
@@ -922,8 +996,8 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
           )}
 
           {isSequence && (
-            <Field label={smsOnly ? 'Texts in the sequence' : 'Emails in the sequence'}>
-              <SequenceSteps steps={f.steps} setStep={setStep} addStep={addStep} removeStep={removeStep} activeStep={activeStep} onActive={setActiveStep} sms={smsOnly} anchorLabel={f.dripStart === 'send' ? 'from start of campaign' : 'after abandonment'} />
+            <Field label={smsOnly ? 'Texts in the sequence' : f.channel === 'both' ? 'Emails & texts in the sequence' : 'Emails in the sequence'}>
+              <SequenceSteps steps={f.steps} setStep={setStep} addStep={addStep} removeStep={removeStep} activeStep={activeStep} onActive={setActiveStep} email={hasEmail} sms={hasSms} onDraft={draftStep} drafting={drafting} anchorLabel={f.dripStart === 'send' ? 'from start of campaign' : 'after abandonment'} />
             </Field>
           )}
 
@@ -947,7 +1021,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
           {/* Once-off email (or email+SMS) — built template or custom HTML. */}
           {!isSequence && hasEmail && (f.channel !== 'both' || emailOpen) && (
           <Field label="Content">
-            {f.channel === 'both' && <div style={{ ...hintS, marginTop: 0, marginBottom: 6 }}>This is the email. The SMS will use the body text below (plus the link &amp; opt-out).</div>}
+            {f.channel === 'both' && <div style={{ ...hintS, marginTop: 0, marginBottom: 6 }}>This is the email. Edit the SMS separately in the “💬 SMS content” section below (it falls back to this body if you leave it blank).</div>}
             {/* Templates: start from a saved one, or save the current content. */}
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
               {templates.length > 0 && (
@@ -1342,7 +1416,7 @@ function CampaignReport({ entityId, action, onClose }) {
     const steps = action.config?.steps || [];
     const unit = (h) => (h % 24 === 0 && h >= 24 ? `${h / 24}d` : `${h}h`);
     const jobs = steps.length > 0
-      ? steps.map((s, i) => ({ label: `Step ${i + 1} · +${unit(s.delayHours || 0)}`, cfg: { ...action.config, subject: s.subject || action.config.subject, body: s.body || '', smsBody: s.body || action.config.smsBody } }))
+      ? steps.map((s, i) => ({ label: `Step ${i + 1} · +${unit(s.delayHours || 0)}`, cfg: { ...action.config, subject: s.subject || action.config.subject, body: s.body || '', smsBody: s.smsBody || s.body || action.config.smsBody } }))
       : [{ label: '', cfg: action.config }];
     Promise.all(jobs.map((j) => api.actionPreviewEmail(entityId, j.cfg).then((p) => ({ label: j.label, ...p })).catch(() => ({ label: j.label }))))
       .then(setPreviews).catch(() => setPreviews([]));
@@ -1567,14 +1641,32 @@ function ReportSection({ title, meta, children, defaultOpen = false }) {
 // Overflow menu for a campaign row — keeps the row to one primary button + ⋯.
 function RowMenu({ items }) {
   const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState(null); // fixed-position coords, computed on open
+  const btnRef = useRef(null);
   if (!items || !items.length) return null;
+  const toggle = () => {
+    if (open) { setOpen(false); return; }
+    // Anchor a fixed-position menu to the button and flip it UP when there isn't
+    // room below — so a row near the bottom of the page doesn't open off-screen.
+    const r = btnRef.current?.getBoundingClientRect();
+    if (r) {
+      const estHeight = Math.min(items.length * 38 + 8, window.innerHeight * 0.7);
+      const spaceBelow = window.innerHeight - r.bottom;
+      const openUp = spaceBelow < estHeight + 8 && r.top > spaceBelow;
+      setPos({
+        right: Math.max(8, window.innerWidth - r.right),
+        ...(openUp ? { bottom: window.innerHeight - r.top + 4 } : { top: r.bottom + 4 }),
+      });
+    }
+    setOpen(true);
+  };
   return (
     <div style={{ position: 'relative' }}>
-      <button style={{ ...mini, padding: '7px 11px', fontWeight: 700 }} onClick={() => setOpen((o) => !o)} aria-label="More actions" title="More">⋯</button>
+      <button ref={btnRef} style={{ ...mini, padding: '7px 11px', fontWeight: 700 }} onClick={toggle} aria-label="More actions" title="More">⋯</button>
       {open && (
         <>
           <div style={{ position: 'fixed', inset: 0, zIndex: 40 }} onClick={() => setOpen(false)} />
-          <div className="modal-in" style={{ position: 'absolute', right: 0, top: 'calc(100% + 4px)', zIndex: 41, background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 10, boxShadow: 'var(--shadow-pop, 0 8px 40px rgba(0,0,0,0.16))', minWidth: 150, padding: 4, display: 'flex', flexDirection: 'column' }}>
+          <div className="modal-in" style={{ position: 'fixed', ...pos, zIndex: 41, background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 10, boxShadow: 'var(--shadow-pop, 0 8px 40px rgba(0,0,0,0.16))', minWidth: 150, maxHeight: '70vh', overflowY: 'auto', padding: 4, display: 'flex', flexDirection: 'column' }}>
             {items.map((it, i) => (
               <button key={i} className="nav-row" style={{ display: 'flex', width: '100%', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer', padding: '8px 10px', borderRadius: 7, fontSize: 13, fontWeight: 600, color: it.danger ? 'var(--error,#ef4444)' : 'var(--text)' }} onClick={() => { setOpen(false); it.onClick(); }}>{it.label}</button>
             ))}
@@ -1790,7 +1882,9 @@ function FilterRow({ entityId, fields, filter, onChange, onRemove, eventSuiteId 
 }
 
 // The drip timeline: each step has a delay (number + hours/days) and its own copy.
-function SequenceSteps({ steps, setStep, addStep, removeStep, activeStep = 0, onActive, sms = false, anchorLabel = 'after abandonment' }) {
+function SequenceSteps({ steps, setStep, addStep, removeStep, activeStep = 0, onActive, email = true, sms = false, onDraft, drafting = false, anchorLabel = 'after abandonment' }) {
+  const both = email && sms;       // Email + SMS → each step gets BOTH editors
+  const smsOnly = sms && !email;   // SMS-only → the step's `body` IS the SMS text
   const unitOf = (h) => (h % 24 === 0 && h >= 24 ? 'days' : 'hours');
   const valOf = (h) => (unitOf(h) === 'days' ? h / 24 : h);
   const setDelay = (i, val, unit) => setStep(i, { delayHours: Math.max(0, (Number(val) || 0) * (unit === 'days' ? 24 : 1)) });
@@ -1814,17 +1908,15 @@ function SequenceSteps({ steps, setStep, addStep, removeStep, activeStep = 0, on
               <span style={{ flex: 1 }} />
               {steps.length > 1 && <button type="button" style={{ ...mini, color: 'var(--error,#ef4444)' }} onClick={() => removeStep(i)}>✕</button>}
             </div>
-            {sms ? (
+            {/* Email block — shown for email-only and Email+SMS sequences. */}
+            {email && (
               <>
-                <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit', marginBottom: 6 }} rows={4} value={st.body} onFocus={focus(i)} onChange={(e) => setStep(i, { body: e.target.value })} placeholder={'Hi {{name}}, your {{ticketType}} tickets are waiting…'} />
-                <SmsMeter body={st.body} />
-              </>
-            ) : (
-              <>
+                {both && <div style={{ fontSize: 11.5, fontWeight: 700, color: '#0a66c2', marginBottom: 6 }}>✉️ Email</div>}
                 <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
                   <Toggle on={(st.contentMode || 'template') === 'template'} onClick={() => { focus(i)(); setStep(i, { contentMode: 'template' }); }}>Built template</Toggle>
                   <Toggle on={st.contentMode === 'html'} onClick={() => { focus(i)(); setStep(i, { contentMode: 'html' }); }}>Custom HTML</Toggle>
                 </div>
+                {onDraft && (st.contentMode || 'template') === 'template' && <button type="button" style={{ ...mini, marginBottom: 6 }} onClick={(e) => { e.stopPropagation(); focus(i)(); onDraft(i); }} disabled={drafting}>{drafting ? 'Writing…' : '✨ Draft copy with AI'}</button>}
                 <input style={{ ...input, fontWeight: 700, marginBottom: 6 }} value={st.subject} onFocus={focus(i)} onChange={(e) => setStep(i, { subject: e.target.value })} placeholder={`Step ${i + 1} subject`} />
                 {(st.contentMode || 'template') === 'template' ? (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -1838,6 +1930,18 @@ function SequenceSteps({ steps, setStep, addStep, removeStep, activeStep = 0, on
                     <div style={hintS}>Tokens work inside your HTML: <b>{'{{name}}'}</b>, <b>{'{{ticketType}}'}</b>, <b>{'{{cta}}'}</b> (the shared tracked buy link), <b>{'{{unsubscribe}}'}</b>. An unsubscribe link is added if you omit one.</div>
                   </div>
                 )}
+              </>
+            )}
+            {both && <div style={{ height: 1, background: 'var(--hairline)', margin: '12px 0 10px' }} />}
+            {/* SMS block — for SMS-only the step's `body` is the text; for Email+SMS
+                it's a SEPARATE per-step `smsBody`. */}
+            {sms && (
+              <>
+                {both && <div style={{ fontSize: 11.5, fontWeight: 700, color: '#15803d', marginBottom: 6 }}>💬 SMS text (separate from the email)</div>}
+                {smsOnly && onDraft && <button type="button" style={{ ...mini, marginBottom: 6 }} onClick={(e) => { e.stopPropagation(); focus(i)(); onDraft(i); }} disabled={drafting}>{drafting ? 'Writing…' : '✨ Draft copy with AI'}</button>}
+                <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit', marginBottom: 6 }} rows={4} value={smsOnly ? st.body : (st.smsBody || '')} onFocus={focus(i)} onChange={(e) => setStep(i, smsOnly ? { body: e.target.value } : { smsBody: e.target.value })} placeholder={'Hi {{name}}, your {{ticketType}} tickets are waiting…'} />
+                <SmsMeter body={smsOnly ? st.body : (st.smsBody || '')} />
+                {both && <div style={hintS}>Sent as the SMS for this step (the tracked link &amp; opt-out are appended). Tokens <b>{'{{name}}'}</b>, <b>{'{{ticketType}}'}</b>, <b>{'{{promo}}'}</b> work. Leave blank to fall back to the email body.</div>}
               </>
             )}
           </div>

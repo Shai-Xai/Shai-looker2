@@ -13,113 +13,13 @@
 
 const crypto = require('crypto');
 
-// Parse a free-text contact list — ONE PERSON PER LINE. Within a line we pull out
-// an email + a mobile + a name, so "John Smith, john@x.com, 083…" is one contact.
-// A header row (no email/phone) is naturally skipped. Deduped by email-or-phone.
-// Shared by the pasted-list, uploaded-file (CSV/Excel) and Google-Sheet sources.
-function parseContactLines(text) {
-  const seen = new Set();
-  const out = [];
-  for (const line of String(text || '').split(/\r?\n/)) {
-    const t = line.trim();
-    if (!t) continue;
-    const em = t.match(/[^\s,;|<>]+@[^\s,;|<>]+\.[^\s,;|<>]+/);
-    const email = em ? em[0].toLowerCase().replace(/[.,;]+$/, '') : '';
-    let rest = em ? t.replace(em[0], ' ') : t;
-    const ph = rest.match(/\+?\d[\d\s().-]{6,}\d/);
-    let phone = '';
-    if (ph && ph[0].replace(/\D/g, '').length >= 7) { phone = ph[0].replace(/[^\d+]/g, ''); rest = rest.replace(ph[0], ' '); }
-    const name = rest.replace(/[,;:|]+/g, ' ').replace(/\s+/g, ' ').trim();
-    if (!email && !phone) continue; // a line with no contactable identifier (e.g. a header)
-    const key = email || phone;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    // Uploaded/pasted/sheet lists carry no consent columns — reachable on whatever
-    // identifier was provided (the uploader asserts they may contact them).
-    out.push({ email, phone, name, emailOk: !!email, smsOk: !!phone });
-  }
-  return out;
-}
+// Contact-list parsing (pasted text / uploaded CSV / Google Sheet) lives in a shared
+// module to keep this file under budget — see audienceParse.js.
+const { parseContactLines, csvHeader, parseContactTable, fetchGoogleSheetCsv, googleSheetCsvUrl } = require('./audienceParse');
 
-// Minimal CSV parser — handles quoted fields (commas/quotes/newlines inside "…").
-function parseCsv(text) {
-  const rows = []; let row = []; let field = ''; let inQ = false;
-  const s = String(text || '');
-  for (let i = 0; i < s.length; i++) {
-    const ch = s[i];
-    if (inQ) {
-      if (ch === '"') { if (s[i + 1] === '"') { field += '"'; i += 1; } else inQ = false; }
-      else field += ch;
-    } else if (ch === '"') inQ = true;
-    else if (ch === ',') { row.push(field); field = ''; }
-    else if (ch === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
-    else if (ch !== '\r') field += ch;
-  }
-  if (field.length || row.length) { row.push(field); rows.push(row); }
-  return rows;
-}
-// The header (column names) of a delimited list — powers the column-mapping UI.
-function csvHeader(text) {
-  const rows = parseCsv(text);
-  return rows.length ? rows[0].map((h) => h.trim()).filter(Boolean) : [];
-}
-// Parse a delimited list BY MAPPED COLUMN (header names) rather than the per-line
-// heuristic. Returns null when there's no usable mapping (caller then falls back
-// to parseContactLines). Lets a user pin which column is email/name/mobile when
-// auto-detect would otherwise grab the wrong one (an order id read as a phone, …).
-function parseContactTable(text, { emailField, nameField, phoneField } = {}) {
-  if (!emailField && !phoneField) return null;
-  const rows = parseCsv(text);
-  if (rows.length < 2) return null;
-  const rawHeader = rows[0].map((h) => h.trim());
-  const header = rawHeader.map((h) => h.toLowerCase());
-  const col = (n) => (n ? header.indexOf(String(n).trim().toLowerCase()) : -1);
-  const ei = col(emailField); const pi = col(phoneField); const ni = col(nameField);
-  if (ei < 0 && pi < 0) return null; // mapped column(s) not in the header → fall back
-  const seen = new Set();
-  const out = [];
-  for (let r = 1; r < rows.length; r++) {
-    const cells = rows[r];
-    const rawEmail = ei >= 0 ? String(cells[ei] || '').trim().toLowerCase() : '';
-    const email = EMAIL_RE.test(rawEmail) ? rawEmail : '';
-    let phone = '';
-    if (pi >= 0) { const d = String(cells[pi] || '').replace(/[^\d+]/g, ''); if (d.replace(/\D/g, '').length >= 7) phone = d; }
-    const name = ni >= 0 ? String(cells[ni] || '').trim() : '';
-    if (!email && !phone) continue;
-    const key = email || phone;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    // Keep EVERY column as an attribute (ticket type, city, age, gender…) so the
-    // list can be targeted/filtered on them, keyed by the original header name.
-    const attributes = {};
-    for (let c = 0; c < rawHeader.length; c++) if (rawHeader[c]) attributes[rawHeader[c]] = String(cells[c] || '').trim();
-    out.push({ email, phone, name, emailOk: !!email, smsOk: !!phone, attributes });
-  }
-  return out;
-}
-
-// A Google Sheets link → its CSV export URL (works when the sheet is shared
-// "anyone with the link" or published to web — no OAuth needed).
-function googleSheetCsvUrl(url) {
-  const m = String(url || '').match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
-  if (!m) return '';
-  const g = String(url).match(/[#&?]gid=(\d+)/);
-  return `https://docs.google.com/spreadsheets/d/${m[1]}/export?format=csv&gid=${g ? g[1] : '0'}`;
-}
-async function fetchGoogleSheetCsv(url) {
-  const csvUrl = googleSheetCsvUrl(url);
-  if (!csvUrl) throw new Error('That doesn’t look like a Google Sheets link.');
-  const res = await fetch(csvUrl, { redirect: 'follow', signal: AbortSignal.timeout(20000) });
-  const text = res.ok ? await res.text() : '';
-  // A non-public sheet returns 401/403 or an HTML sign-in page rather than CSV.
-  if (!res.ok || /^\s*<(!doctype|html)/i.test(text)) {
-    throw new Error('Couldn’t read that sheet — set its sharing to “anyone with the link” (or publish it to the web).');
-  }
-  return text;
-}
-
-const MAX_AUDIENCE = 25000;      // safety cap per campaign (raised from 2000; Looker source limit in index.js is lifted to match)
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// Audience person-mapping (dedupe + per-channel consent + reach) lives in a shared
+// module so chat-created "query" segments reuse the SAME logic — see audienceMap.js.
+const { MAX_AUDIENCE, EMAIL_RE, cellVal, isYes, buildRows, finalizeAudience } = require('./audienceMap');
 
 function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAudience, draftCopy, listEvents }) {
   const sql = db.db;
@@ -184,6 +84,15 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
       at        TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_action_opens ON action_opens(action_id, email);
+
+    -- Short links for SMS: map a long tracked /c/ or /u/ URL (signed token, ~80
+    -- chars — would blow an SMS segment) to a tiny /k/<code> redirect. Code is
+    -- derived from the target, so identical links (re-sends) reuse one row.
+    CREATE TABLE IF NOT EXISTS action_short_links (
+      code   TEXT PRIMARY KEY,
+      target TEXT NOT NULL,
+      at     TEXT NOT NULL
+    );
 
     -- Memory for recurring automations: who a campaign family has already
     -- emailed, so the daily check only queues NEW people.
@@ -285,15 +194,11 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
   const saveResults = (id, results) => sql.prepare('UPDATE actions SET results=?, updated_at=? WHERE id=?').run(JSON.stringify(results), now(), id);
   const setStatus = (id, status) => sql.prepare('UPDATE actions SET status=?, updated_at=? WHERE id=?').run(status, now(), id);
 
-  // `action_clicks` is the SOURCE OF TRUTH for clicks; the `results.{clicks,
-  // emailClicks,smsClicks}` counters are a CACHE the `/c/...` route bumps for
-  // instant feedback. They can drift on a partial write (row inserted but the
-  // counter save fails, or vice versa), so reconcile the cache from the table.
-  // `byChannel` lets a caller pass an already-computed GROUP BY (avoids a query
-  // per action when reconciling a whole list). Returns the action with healed
-  // results. NB: the TOTAL counter may legitimately exceed the table (legacy
-  // clicks counted before per-recipient rows existed), so total only heals
-  // UPWARD; per-channel counts mirror the table (legacy clicks are untagged).
+  // `action_clicks` is the source of truth; `results.{clicks,emailClicks,smsClicks}`
+  // are a cache the `/c/` route bumps for instant feedback, reconciled here from the
+  // table (they drift on partial writes). `byChannel` lets a caller pass a precomputed
+  // GROUP BY. The TOTAL counter only heals UPWARD (legacy untagged clicks predate
+  // per-recipient rows); per-channel counts mirror the table.
   function reconcileClicks(action, byChannel) {
     const rows = byChannel || sql.prepare('SELECT channel, COUNT(*) n FROM action_clicks WHERE action_id=? GROUP BY channel').all(action.id);
     let total = 0, email = 0, sms = 0;
@@ -309,6 +214,10 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
   }
 
   const suppressed = (entityId) => new Set(sql.prepare('SELECT email FROM action_suppressions WHERE entity_id=?').all(entityId).map((r) => r.email));
+  // Resolver for `query`-source segments (cohorts the Owl builds in chat) — scoped
+  // people-query over the curated catalogue. Shares audienceMap shaping; we apply our
+  // own suppression below, exactly like the tile/paste paths.
+  const { resolveQueryAudience } = require('./audienceQuery')({ auth, db });
   const unsubSecret = () => {
     let s = db.getSetting('unsub_secret', '');
     if (!s) { s = crypto.randomBytes(18).toString('base64url'); db.setSetting('unsub_secret', s); }
@@ -318,6 +227,23 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     const payload = Buffer.from(JSON.stringify({ e: email, n: entityId })).toString('base64url');
     const sig = crypto.createHmac('sha256', unsubSecret()).update(payload).digest('base64url').slice(0, 16);
     return `${payload}.${sig}`;
+  };
+  // Store a URL → a tiny deterministic HMAC code (identical URLs collapse to one
+  // row). Powers the SMS /k/<code> short links and per-link /c/?k=<code> tracking
+  // of custom HTML. Returns '' if the store is unavailable (callers keep raw URL).
+  const registerTarget = (url) => {
+    if (!url) return '';
+    try {
+      const code = crypto.createHmac('sha256', unsubSecret()).update(url).digest('base64url').slice(0, 8);
+      sql.prepare('INSERT OR IGNORE INTO action_short_links (code, target, at) VALUES (?,?,?)').run(code, url, now());
+      return code;
+    } catch { return ''; }
+  };
+  // Shorten a long absolute URL to a /k/<code> redirect so SMS stays in one segment.
+  const shortLink = (targetUrl) => {
+    if (!targetUrl) return targetUrl;
+    const code = registerTarget(targetUrl);
+    return code ? `${mailer.baseUrl()}/k/${code}` : targetUrl;
   };
   const parseUnsubToken = (token) => {
     const [payload, sig] = String(token || '').split('.');
@@ -331,9 +257,16 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
   // multi-source `sources`/`combine` (each block shaped recursively, one level deep).
   function shapeAudience(aud = {}, depth = 0) {
     const out = {
-      mode: ['paste', 'gsheet', 'snapshot', 'segment'].includes(aud.mode) ? aud.mode : 'tile',
+      mode: ['paste', 'gsheet', 'snapshot', 'segment', 'query'].includes(aud.mode) ? aud.mode : 'tile',
       gsheetUrl: String(aud.gsheetUrl || '').slice(0, 1000), // when mode = 'gsheet' (linked Google Sheet, read live)
       segmentId: String(aud.segmentId || ''), // when mode = 'segment' (reference, resolved live)
+      // when mode = 'query' (a cohort the Owl built in chat) — curated explore + dim filters;
+      // resolved by audienceFor's query branch (identity columns fixed server-side).
+      model: String(aud.model || ''),
+      view: String(aud.view || ''),
+      queryFilters: (aud.queryFilters && typeof aud.queryFilters === 'object' && !Array.isArray(aud.queryFilters))
+        ? Object.fromEntries(Object.entries(aud.queryFilters).slice(0, 50).map(([k, v]) => [String(k), String(v)]))
+        : {},
       phoneField: String(aud.phoneField || ''), // mobile column (for SMS)
       dashboardId: String(aud.dashboardId || ''),
       tileId: String(aud.tileId || ''),
@@ -400,6 +333,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
         delayHours: Math.max(0, Number(s.delayHours) || 0),
         subject: String(s.subject || '').slice(0, 200),
         body: String(s.body || '').slice(0, 8000),
+        smsBody: String(s.smsBody || '').slice(0, 2000), // separate SMS copy per step when channel = 'both'
         ctaText: String(s.ctaText || '').slice(0, 60),
         // Per-step content parity with once-off: template vs custom HTML + hero image.
         contentMode: s.contentMode === 'html' ? 'html' : 'template',
@@ -447,14 +381,20 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
       // it (e.g. 'Abandoned carts'), and helps the automation later.
       templateKey: String(body.templateKey || '').slice(0, 60),
       category: String(body.category || '').slice(0, 80),
+      // Conversion tracking. 'dropout' = left the audience/abandoned list (original);
+      // 'list' = present in a SEPARATE source (attendance/completed-orders), matched by
+      // email — confirm conversions against real sales instead of inferring from removal.
+      conversion: {
+        mode: (body.conversion || {}).mode === 'list' ? 'list' : 'dropout',
+        source: shapeAudience((body.conversion || {}).source || {}),
+      },
       clickToken: body.clickToken || crypto.randomBytes(6).toString('base64url'),
     };
   }
 
   // Resolve the audience for a config: tile query (scoped) or pasted emails,
   // minus this client's suppression list. Returns { list, fields?, excluded }.
-  const cellVal = (cell) => String((cell && (cell.value ?? cell)) || '').trim();
-  const isYes = (v) => ['yes', 'y', 'true', '1', 'consented', 'opted in', 'opt in'].includes(String(v).trim().toLowerCase());
+  // cellVal / isYes / buildRows / finalizeAudience come from ./audienceMap (shared).
 
   // Distinct values of an attribute across parsed members (capped) — powers the
   // "is one of" multi-select for pasted/Sheet lists without a tile to query.
@@ -500,14 +440,19 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
   // For 'both', the SMS uses smsBody (falls back to body), so body+subject suffice.
   function contentError(cfg) {
     const needsSubject = cfg.channel !== 'sms';
+    // Custom-HTML emails keep content in customHtml, not body — count either as "a message".
+    const emailContent = (c) => (c?.contentMode === 'html' ? (c?.customHtml || '').trim() : (c?.body || '').trim());
     if (cfg.campaignMode === 'sequence') {
       const s0 = (cfg.steps || [])[0];
-      if (!s0 || !s0.body) return 'Add at least one step with a message';
+      if (!s0 || !emailContent(s0)) return 'Add at least one step with a message';
       if (needsSubject && !s0.subject) return 'Add a subject to step 1';
       return null;
     }
-    if (!cfg.body) return 'A message is required';
+    if (cfg.channel === 'sms') return cfg.body ? null : 'A message is required'; // SMS-only edits body directly
+    if (!emailContent(cfg)) return 'A message is required';
     if (needsSubject && !cfg.subject) return 'A subject is required';
+    // 'both': SMS uses smsBody (falls back to body) — require one.
+    if (cfg.channel === 'both' && !((cfg.smsBody || '').trim() || (cfg.body || '').trim())) return 'An SMS message is required';
     return null;
   }
 
@@ -559,11 +504,18 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     if (cfg.audience && Array.isArray(cfg.audience.sources) && cfg.audience.sources.length) {
       return combineSources(entityId, cfg, user, depth);
     }
+    // `query` source: a cohort the Owl built in chat (catalogue dims) → scoped people
+    // query. The resolver shapes rows under the SAME scope gate; we apply suppression
+    // + reach here (shared finalizeAudience), exactly like tile/paste.
+    if (cfg.audience && cfg.audience.mode === 'query') {
+      const { raw } = await resolveQueryAudience({ entityId, definition: cfg.audience, user, suiteId: cfg.eventSuiteId || '' });
+      const { list, excluded, noConsent, reach } = finalizeAudience(raw, suppressed(entityId));
+      return { list, fields: [], filterFields: [], columns: [], excluded, noConsent, filteredOut: 0, reach };
+    }
     let raw = [];
     let fields = [];
     let filterFields = [];
     let columns = []; // header columns of a delimited list (paste/gsheet) — for column-mapping
-    let noConsent = 0;
     let filteredOut = 0;
     if (cfg.audience.mode === 'paste' || cfg.audience.mode === 'gsheet') {
       // Pasted text / uploaded CSV-Excel (parsed to text client-side), or a linked
@@ -623,48 +575,13 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
         ...attrFields.map((f) => ({ name: f.name, label: `${f.label} (attributes)`, dashboardId: cfg.audience.attrDashboardId, tileId: cfg.audience.attrTileId })),
       ];
       if (emailField) {
-        for (const row of res.rows) {
-          const email = cellVal(row[emailField]).toLowerCase();
-          if (!EMAIL_RE.test(email)) continue;
-          // Merge the attributes row (if any) so filters can read its columns.
-          const merged = attrMap ? { ...row, ...(attrMap.get(email) || {}) } : row;
-          // Targeting filters (city/age/ticket category/lifetime spend/…).
-          if (filters.length && !rowPassesFilters(merged, filters)) { filteredOut += 1; continue; }
-          // Per-channel consent: don't drop — tag each channel so reach can be
-          // shown and consent enforced per channel at send (email-consented but
-          // not SMS-consented → email only). ignoreConsent bypasses (transactional).
-          const phone = phoneField ? cellVal(row[phoneField]) : '';
-          const emailOk = ignoreConsent || !emailConsentField || isYes(cellVal(row[emailConsentField]));
-          const smsOk = ignoreConsent || !smsConsentField || isYes(cellVal(row[smsConsentField]));
-          // Every column as a merge-field attribute (by field label AND name) so
-          // copy can use {{Ticket Type}}, {{City}}, etc.
-          const attributes = {};
-          for (const fl of [...res.fields, ...attrFields]) { const v = cellVal(merged[fl.name]); attributes[fl.name] = v; if (fl.label) attributes[fl.label] = v; }
-          raw.push({ email, name: nameField ? cellVal(row[nameField]) : '', ticket: ticketField ? cellVal(row[ticketField]) : '', phone, anchorRaw: anchorField ? cellVal(row[anchorField]) : '', emailOk, smsOk, attributes });
-        }
+        // Shape rows → recipients (consent-tagged) via the shared mapper.
+        const built = buildRows(res.rows, { emailField, nameField, phoneField, ticketField, anchorField, emailConsentField, smsConsentField, ignoreConsent, fields: res.fields, attrFields, attrMap, rowPassesFilters, filters });
+        raw = built.raw; filteredOut += built.filteredOut;
       }
     }
-    // Dedupe + suppression.
-    const sup = suppressed(entityId);
-    const seen = new Set();
-    const list = [];
-    let excluded = 0;
-    for (const r of raw) {
-      const key = r.email || r.phone; // phone-only recipients have no email
-      if (!key || seen.has(key)) continue;
-      seen.add(key);
-      if (r.email && sup.has(r.email)) { excluded += 1; continue; }
-      list.push(r);
-      if (list.length >= MAX_AUDIENCE) break;
-    }
-    // Per-channel reach (consent-aware) — surfaced at preview, enforced at send.
-    const reach = {
-      total: list.length,
-      email: list.filter((r) => r.email && r.emailOk).length,
-      sms: list.filter((r) => r.phone && r.smsOk).length,
-    };
-    // noConsent = contactable but reachable on no channel (consent says no everywhere).
-    noConsent = list.filter((r) => !(r.email && r.emailOk) && !(r.phone && r.smsOk)).length;
+    // Dedupe + suppression + per-channel reach (shared with Owl segments).
+    const { list, excluded, noConsent, reach } = finalizeAudience(raw, suppressed(entityId));
     return { list, fields, filterFields, columns, excluded, noConsent, filteredOut, reach };
   }
 
@@ -702,14 +619,10 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     return { code, benefit: p.benefit || '', type: p.type || 'promo', appendToLink: !!p.appendToLink };
   }
 
-  // Render one recipient's email. Tokens: {{name}}, {{ticketType}}, {{cta}},
-  // {{unsubscribe}}. Two modes: the built branded template, or the client's own
-  // uploaded HTML (we still inject tracking + a guaranteed unsubscribe link).
-  // Generic merge fields: fill any remaining {{Column}} from the recipient's
-  // attributes (case-insensitive, by header/field label or name). Applied AFTER the
-  // special tokens. A known column with an empty cell → '' ; an UNKNOWN token (typo)
-  // is left untouched so it's caught in preview. Every resolved column is present in
-  // attributes, so valid tokens never leak braces.
+  // Fill generic merge fields: any remaining {{Column}} from the recipient's attributes
+  // (case-insensitive by header/label/name), applied AFTER the special tokens ({{name}},
+  // {{ticketType}}, {{cta}}, {{unsubscribe}}). Known-but-empty → '' ; unknown token (typo)
+  // is left untouched so preview catches it; valid tokens never leak braces.
   function fillAttrs(s, recipient) {
     const attrs = (recipient && recipient.attributes) || {};
     const keys = Object.keys(attrs);
@@ -762,6 +675,19 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
 
     if (useContentMode === 'html' && useHtml.trim()) {
       let html = tok(useHtml);
+      // Track + tag EVERY external link in custom HTML (full multi-link attribution):
+      // route each external <a href> through the /c/ click redirect with the original
+      // URL stored server-side (?k=code — looked up, never a user-suppliable open
+      // redirect; /c/ then appends UTMs). Own links and mailto/tel/# are left alone.
+      if (cfg.clickToken) {
+        const ownBase = mailer.baseUrl();
+        html = html.replace(/(<a\b[^>]*?\shref=)(["'])(https?:\/\/[^"'\s]+)\2/gi, (m, pre, q, url) => {
+          if (url.startsWith(ownBase)) return m; // our own links — don't re-track
+          const code = registerTarget(url);
+          if (!code) return m; // store unavailable → keep the original link
+          return `${pre}${q}${ownBase}/c/${cfg.clickToken}/${rtok}/e/${stepIndex}?k=${code}${q}`;
+        });
+      }
       // Guarantee an unsubscribe link (compliance) if the author didn't include one.
       if (!/unsubscrib/i.test(html)) {
         const footer = `<div style="font-size:11px;color:#888;text-align:center;padding:18px;font-family:-apple-system,Segoe UI,Roboto,sans-serif;">Sent via Howler : Pulse · <a href="${unsubUrl}" style="color:#888;">Unsubscribe</a></div>`;
@@ -791,15 +717,17 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
   // opt-out (alphanumeric sender IDs can't receive STOP replies).
   function renderSmsFor(action, recipient, step, stepIndex = 0) {
     const cfg = action.config;
-    // 'both'-channel campaigns have a separate SMS copy; fall back to body for
-    // SMS-only campaigns (which edit body directly).
-    const useBody = step ? (step.body || cfg.smsBody || cfg.body) : (cfg.smsBody || cfg.body);
+    // 'both'-channel campaigns have a separate SMS copy. In a sequence each step
+    // carries its own smsBody (falling back to the step's email body, then the
+    // campaign-level copy); SMS-only campaigns edit body directly.
+    const useBody = step ? (step.smsBody || step.body || cfg.smsBody || cfg.body) : (cfg.smsBody || cfg.body);
     const firstName = (recipient.name || '').split(/\s+/)[0] || '';
     const rtok = unsubToken(action.entityId, recipient.email || recipient.phone || '');
     const promo = promoForRecipient(action, recipient.email || '');
     const appendPromo = promo && promo.type === 'promo' && promo.appendToLink && promo.code;
     const base = cfg.ctaUrl ? `${mailer.baseUrl()}/c/${cfg.clickToken}/${rtok}/s/${stepIndex}` : ''; // /s = sms channel, then step index
-    const link = base && appendPromo ? `${base}${base.includes('?') ? '&' : '?'}promo=${encodeURIComponent(promo.code)}` : base;
+    const fullLink = base && appendPromo ? `${base}${base.includes('?') ? '&' : '?'}promo=${encodeURIComponent(promo.code)}` : base;
+    const link = shortLink(fullLink); // SMS: long tracked URL → tiny /k/ redirect
     const tok = (s) => fillAttrs(String(s || '')
       .replace(/\{\{\s*name\s*\}\}/gi, firstName || 'there')
       .replace(/\{\{\s*(ticket_?type|ticket)\s*\}\}/gi, recipient.ticket || 'your tickets')
@@ -809,7 +737,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     let text = tok(useBody);
     if (promo && !/\{\{\s*promo/i.test(useBody)) text += `\nCode: ${promo.code}${promo.type === 'discount' ? ' (enter at checkout)' : ''}`;
     if (link && !/\{\{\s*cta/i.test(useBody)) text += `\n${link}`;
-    text += `\nOpt out: ${mailer.baseUrl()}/u/${rtok}`;
+    text += `\nOpt out: ${shortLink(`${mailer.baseUrl()}/u/${rtok}`)}`;
     return text;
   }
 
@@ -1230,12 +1158,9 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
 
   // Send a due scheduled campaign — resolves the audience live, then runs.
   async function runScheduledSend(a) {
-    // Atomically CLAIM the job before the (slow) audience resolution: flip
-    // scheduled → running only if it's still scheduled. If we didn't win the
-    // claim (changes !== 1), an overlapping tick or a concurrent manual launch
-    // already took it — bail, so the campaign can't be sent twice. (Previously
-    // the status flip happened AFTER `await audienceFor`, leaving a multi-second
-    // window where the same 'scheduled' row could be re-selected and re-sent.)
+    // Atomically CLAIM the job before the (slow) audience resolution: flip scheduled →
+    // running only if still scheduled. If we didn't win (changes !== 1), an overlapping
+    // tick or manual launch took it — bail so the campaign can't be sent twice.
     const claim = sql.prepare("UPDATE actions SET status='running', updated_at=? WHERE id=? AND status='scheduled'").run(now(), a.id);
     if (claim.changes !== 1) return;
     let list;
@@ -1625,6 +1550,19 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
 
   // ── Drip sequences: enrollment + the per-recipient send tick ─────────────────
   const sysUser = { id: 'auto-check', email: 'auto@pulse', role: 'admin', entityIds: [] };
+  // In 'list' conversion mode, resolve the separate conversion source (attendance /
+  // completed-orders) → lowercased set of emails that have converted. Null for the
+  // default 'dropout' model (callers keep prior behaviour); consent ignored (we only
+  // need the emails); failures fall back to null so a broken source can't flag everyone.
+  async function convertedEmails(action) {
+    const conv = action.config && action.config.conversion;
+    if (!conv || conv.mode !== 'list' || !conv.source) return null;
+    try {
+      const subCfg = { ...action.config, audience: conv.source, ignoreConsent: true, channel: 'email' };
+      const { list } = await audienceFor(action.entityId, subCfg, sysUser);
+      return new Set(list.map((r) => String(r.email || '').toLowerCase()).filter(Boolean));
+    } catch (e) { console.error('[actions] conversion source failed', action.id, e.message); return null; }
+  }
   const parseAnchor = (raw) => { const t = raw ? Date.parse(String(raw)) : NaN; return Number.isFinite(t) ? new Date(t) : null; };
   const stepDue = (anchorMs, delayHours) => new Date(anchorMs + (delayHours || 0) * 3600e3).toISOString();
 
@@ -1664,15 +1602,11 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     }
   }
 
-  // Process all due steps. Once per action: re-run the audience to know who's
-  // still abandoning (anyone who dropped out has bought/expired → stop them),
-  // then send the due step to those still active and advance them.
-  //
-  // Re-entrancy guard: a large batch (~1,500 due recipients paced at 120ms) can
-  // take ~3 min — the same as the timer interval — and a slow audience re-check
-  // adds more. next_at/step_index only advance AFTER each send (below), so an
-  // overlapping run would re-select the same enrollments and send the same drip
-  // step twice. The flag makes an overlapping run a no-op until this one drains.
+  // Process all due steps: re-run the audience (droppers have bought/expired → stop),
+  // send the due step to those still active, advance them. Re-entrancy guard: a large
+  // batch (~1,500 paced at 120ms) can take ~3 min (≈ the timer interval); next_at/
+  // step_index advance only AFTER each send, so an overlapping run would re-send the
+  // same step — the flag makes it a no-op until this one drains.
   let processing = false;
   async function processSequences() {
     if (!enabled()) return;
@@ -1688,6 +1622,9 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
       let reachable = new Map(); // email -> { emailOk, smsOk } (re-evaluated live, so consent changes apply mid-journey)
       try { const { list } = await audienceFor(a.entityId, a.config, sysUser); for (const r of list) reachable.set(r.email, r); }
       catch (e) { console.error('[actions] sequence audience re-check failed', a.id, e.message); continue; }
+      // 'list' conversion mode: confirm conversions against a separate attendance/
+      // orders source (null = the default 'left the audience' model).
+      const convSet = await convertedEmails(a);
       const sup = suppressed(a.entityId);
       const due = sql.prepare("SELECT * FROM action_enrollments WHERE action_id=? AND status='active' AND next_at <= ?").all(a.id, now());
       let sent = 0; let converted = 0; let emailSent = 0; let smsSent = 0;
@@ -1697,10 +1634,14 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
         // (re-checked every 20) rather than draining the whole due list.
         if (n2 > 0 && n2 % 20 === 0 && getAction(a.id)?.status !== 'auto') break;
         n2 += 1;
-        // Conversion / suppression: gone from the abandoned list = bought (or
-        // expired); unsubscribed = removed. Either way, stop the journey.
-        if (!reachable.has(e.email)) { sql.prepare("UPDATE action_enrollments SET status='converted', updated_at=? WHERE action_id=? AND email=?").run(now(), a.id, e.email); converted += 1; continue; }
         if (sup.has(e.email)) { sql.prepare("UPDATE action_enrollments SET status='unsubscribed', updated_at=? WHERE action_id=? AND email=?").run(now(), a.id, e.email); continue; }
+        // Conversion / drop-out. 'list' mode: converted = in the conversion source;
+        // left-the-audience-but-not-in-list just ends ('done'). Default mode:
+        // converted = gone from the abandoned audience (bought or expired).
+        if (convSet) {
+          if (convSet.has(String(e.email || '').toLowerCase())) { sql.prepare("UPDATE action_enrollments SET status='converted', updated_at=? WHERE action_id=? AND email=?").run(now(), a.id, e.email); converted += 1; continue; }
+          if (!reachable.has(e.email)) { sql.prepare("UPDATE action_enrollments SET status='done', updated_at=? WHERE action_id=? AND email=?").run(now(), a.id, e.email); continue; }
+        } else if (!reachable.has(e.email)) { sql.prepare("UPDATE action_enrollments SET status='converted', updated_at=? WHERE action_id=? AND email=?").run(now(), a.id, e.email); converted += 1; continue; }
         const step = steps[e.step_index];
         if (!step) { sql.prepare("UPDATE action_enrollments SET status='done', updated_at=? WHERE action_id=? AND email=?").run(now(), a.id, e.email); continue; }
         try {
@@ -1745,12 +1686,23 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     const due = sql.prepare("SELECT id FROM actions WHERE status='done' AND approved_at > ? AND (last_check='' OR last_check < ?)").all(cutoff, recheck);
     for (const { id } of due) {
       const a = getAction(id);
-      if (!a || a.config.campaignMode === 'sequence' || a.config.audience?.mode !== 'tile') continue;
+      if (!a || a.config.campaignMode === 'sequence') continue;
+      const listMode = a.config.conversion?.mode === 'list' && a.config.conversion?.source;
+      // Dropout mode needs a re-runnable tile audience; list mode matches the
+      // snapshot against a separate source, so any audience type works.
+      if (!listMode && a.config.audience?.mode !== 'tile') continue;
       sql.prepare('UPDATE actions SET last_check=? WHERE id=?').run(now(), a.id);
       try {
-        const { list } = await audienceFor(a.entityId, a.config, sysUser);
-        const stillAbandoning = new Set(list.map((r) => r.email));
-        const converted = (a.audience || []).filter((r) => !stillAbandoning.has(r.email)).length;
+        let converted;
+        if (listMode) {
+          const conv = await convertedEmails(a);
+          if (!conv) continue; // source failed — leave the count as-is
+          converted = (a.audience || []).filter((r) => conv.has(String(r.email || '').toLowerCase())).length;
+        } else {
+          const { list } = await audienceFor(a.entityId, a.config, sysUser);
+          const stillAbandoning = new Set(list.map((r) => r.email));
+          converted = (a.audience || []).filter((r) => !stillAbandoning.has(r.email)).length;
+        }
         if (converted !== (a.results.converted || 0)) saveResults(a.id, { ...a.results, converted });
       } catch (e) { console.error('[actions] conversion check failed', a.id, e.message); }
     }
@@ -1760,11 +1712,9 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
   setTimeout(() => checkConversions().catch(() => {}), 45000);
 
   // ── public routes (no auth; registered before the SPA fallback) ──
-  // Tracked CTA click → count + redirect, with the campaign's UTM parameters
-  // appended to the destination (clean URL in the email, full attribution in
-  // the client's analytics). Existing query keys on the destination win.
-  // Open-tracking pixel — records an email open (attributed when the recipient
-  // token is present), then returns a 1x1 transparent GIF. Never blocks/errors.
+  // Tracked CTA click → count + redirect, appending the campaign's UTMs to the
+  // destination (existing query keys win). Open-tracking pixel records an email open
+  // (attributed when the recipient token is present) then returns a 1x1 GIF.
   const OPEN_PIXEL = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
   app.get('/o/:token/:rtok?/:step?', (req, res) => {
     try {
@@ -1798,7 +1748,12 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     if (channel === 'email') results.emailClicks = (a.results.emailClicks || 0) + 1;
     else if (channel === 'sms') results.smsClicks = (a.results.smsClicks || 0) + 1;
     saveResults(a.id, results);
+    // Per-link tracking (custom HTML): ?k=<code> names this specific link's
+    // destination (stored server-side). Falls back to the campaign's buy link.
     let dest = a.config.ctaUrl || '/';
+    if (req.query.k) {
+      try { const row = sql.prepare('SELECT target FROM action_short_links WHERE code=?').get(String(req.query.k)); if (row?.target) dest = row.target; } catch { /* fall back to ctaUrl */ }
+    }
     const promo = req.query.promo ? String(req.query.promo) : ''; // promo code rides the tracked link → forward to the destination
     try {
       const u = new URL(dest);
@@ -1814,6 +1769,14 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
       if (promo && !/[?&]promo=/.test(dest)) dest += (dest.includes('?') ? '&' : '?') + 'promo=' + encodeURIComponent(promo);
     }
     res.redirect(dest);
+  });
+  // Short-link redirect (SMS) → the real tracked /c/ or opt-out /u/ URL (which then records/redirects).
+  app.get('/k/:code', (req, res) => {
+    try {
+      const row = sql.prepare('SELECT target FROM action_short_links WHERE code=?').get(req.params.code);
+      if (row?.target) return res.redirect(row.target);
+    } catch { /* fall through to home */ }
+    res.redirect('/');
   });
   // Unsubscribe → suppression list + tiny confirmation page.
   app.get('/u/:token', (req, res) => {
@@ -1834,7 +1797,24 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
   // Campaigns for a client, newest first, WITHOUT the (PII-heavy) audience snapshot —
   // used by the Owl's getCampaigns tool. publicAction hides the audience + adds a count.
   const listForEntity = (entityId) => sql.prepare('SELECT * FROM actions WHERE entity_id=? ORDER BY created_at DESC LIMIT 100').all(entityId).map((r) => publicAction(rowToAction(r)));
-  return { awaitingApprovalFor, unseenOutcomesFor, audienceFor, listForEntity };
+  // Programmatic create of a DRAFT campaign (the Owl's draftCampaign act-tool commit).
+  // ALWAYS status 'draft' — it never sends; a human reviews, approves and sends it in
+  // Engage. Runs the same entity-ownership + campaigns.approve check + cleanConfig the
+  // POST route uses, so an Owl-drafted campaign is identical to a hand-made draft.
+  function createDraftCampaign({ entityId, title, config, user }) {
+    if (!user || !entityId) return { ok: false, error: 'Missing user or client' };
+    const isAdmin = user.role === 'admin';
+    if (!(isAdmin || (user.entityIds || []).includes(entityId))) return { ok: false, error: 'Not allowed' };
+    if (!isAdmin && auth.hasPermission && !auth.hasPermission(user, entityId, 'campaigns.approve')) {
+      return { ok: false, error: "You don't have permission to create campaigns for this client." };
+    }
+    const id = uuid();
+    const cfg = cleanConfig(config || {});
+    sql.prepare('INSERT INTO actions (id, entity_id, type, status, title, config, recurring, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
+      .run(id, entityId, 'email_campaign', 'draft', String(title || '').slice(0, 120), JSON.stringify(cfg), 0, (user.email || 'owl'), now(), now());
+    return { ok: true, action: publicAction(getAction(id)) };
+  }
+  return { awaitingApprovalFor, unseenOutcomesFor, audienceFor, listForEntity, draftCopy, createDraftCampaign };
 }
 
 // Pure helpers exported for unit testing (list parsing + Google Sheet URL).

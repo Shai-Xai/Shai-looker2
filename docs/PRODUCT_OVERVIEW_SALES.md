@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-06-29 · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-06-30 · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -113,6 +113,13 @@ approval needed.
 - **Tappable follow-ups** — each answer offers 2–3 suggested next questions as
   **reply buttons** (or a numbered list to reply to), so customers can drill in
   without typing.
+- **Scheduled updates (digest / goals / alerts)** — a customer can be subscribed
+  to a daily WhatsApp update. The **digest** reuses the client’s **configured email
+  digest** (same role lens / focus / source) when one is set up, condensed for a chat
+  bubble — and falls back to a lightweight Owl summary when there’s no digest yet.
+  To respect WhatsApp’s rules, it’s sent free-form only while the customer is inside
+  their **24-hour window** (they messaged the Owl in the last day); reaching everyone
+  on a fixed schedule regardless will use an approved WhatsApp template (next step).
 - **Status 🧪:** pilot. Howler links each phone number to its client in **Admin →
   WhatsApp Owl**, where a live activity log shows inbound messages end-to-end.
 
@@ -489,6 +496,22 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-30** — **Filters: a hand-added filter now actually filters the report** ✅: a
+  dashboard filter added in the editor (not imported from Looker, so never wired into a
+  tile's `listenTo`) now applies to every tile whose own query uses that filter's field —
+  the same field-match the lock picker uses. Set the filter's **field** (e.g.
+  *core_ticket_categories.name*) and lock/pick a value, and the matching tiles scope to it.
+  Looker-imported filters keep their explicit wiring, so nothing over-filters.
+- **2026-06-30** — **Filters: find a ticket category/type by id** ✅: in the lock / value
+  pickers you can type a category's **id** (e.g. *16244*) to find it; the suggestion shown
+  and the value stored are still the **name** (Looker matches ticket categories on the exact
+  name, so the filter never holds a raw id).
+- **2026-06-30** — **WhatsApp Owl: scheduled in-window updates** 🧪: a customer can be
+  subscribed (per number, in **Admin → WhatsApp Owl**) to a daily **digest / goals /
+  alerts** update on WhatsApp. Sent free-form only while they’re inside their 24-hour
+  window (messaged in the last day); a master switch + per-number topic & time controls.
+  Reaching everyone on a fixed schedule regardless of the window will use an approved
+  WhatsApp template (next step).
 - **2026-06-29** — **WhatsApp Owl: charts + tappable follow-ups** 🧪: the WhatsApp Owl now
   renders a **chart image** when a customer asks to see a trend/breakdown, and offers
   **2–3 follow-up questions** as native WhatsApp reply buttons (falling back to a numbered

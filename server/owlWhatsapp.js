@@ -17,9 +17,9 @@ const { resolveGuidance } = require('./owlGuidance');
 const chartImg = require('./owlChartImg');
 
 const WA_OVERRIDE = [
-  'OVERRIDE — this conversation is over WhatsApp: reply in SHORT, plain text. No markdown tables. Use *single asterisks* for light emphasis. Lead with the answer in words. Money in ZAR.',
+  'OVERRIDE — this conversation is over WhatsApp: reply in SHORT, plain text. No markdown tables. Use *single asterisks* for light emphasis. Lead with the answer in words. Express monetary amounts in the organiser\'s reporting currency (a Currency line below states it when it isn\'t South African Rand).',
   'There is NO screen, panel, toggle, button or chart-type switcher here. NEVER tell the user to tap, switch or toggle anything, and never refer to something "below" or "on screen" — they are on WhatsApp.',
-  'Do NOT announce or point at a chart (no "here\'s a chart", no 👇 arrow). If a visual helps, one is attached automatically — just give the figures in words.',
+  'Say NOTHING about chart delivery: never announce, point at, apologise for, or promise a chart/image — no "here\'s a chart", no 👇/👆, no "a fresh chart is on its way", no "re-sent". A chart link/image is attached automatically when useful; just answer with the figures in words.',
   'When the user wants to SEE data as a chart / line graph / bar chart / trend — EVEN data you just gave them — you MUST re-run it as ONE grouped askData query (a dimension such as day/month/event plus the measure) so a fresh chart image can be attached. Never reply "it\'s the same data" or refuse to re-pull, and never split a trend into many separate per-day lookups.',
   'End your reply with the <<<FOLLOWUPS>>> marker + a JSON array of 2-3 SHORT (≤6 words) next questions, exactly as instructed; the app turns them into tappable buttons.',
 ].join('\n');
@@ -35,12 +35,12 @@ function parseFollowups(out) {
   try { const a = JSON.parse(m[0]); return Array.isArray(a) ? a.filter((x) => typeof x === 'string' && x.trim()).slice(0, 3) : []; } catch { return []; }
 }
 
-function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthropicKeyForEntity }) {
+function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthropicKeyForEntity, currencyNote, whatsappDigestFor }) {
   const sql = db.db;
   sql.exec(`
     CREATE TABLE IF NOT EXISTS owl_wa_msgs (
       id TEXT PRIMARY KEY, msisdn TEXT NOT NULL, role TEXT NOT NULL,
-      body TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
+      body TEXT NOT NULL DEFAULT '', entity_id TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_owl_wa_msisdn ON owl_wa_msgs(msisdn, created_at);
     CREATE TABLE IF NOT EXISTS owl_wa_events (
@@ -51,24 +51,43 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
     CREATE TABLE IF NOT EXISTS owl_wa_suggest (
       msisdn TEXT PRIMARY KEY, items TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS owl_wa_sent (
+      msisdn TEXT NOT NULL, day TEXT NOT NULL, at TEXT NOT NULL, PRIMARY KEY (msisdn, day)
+    );
   `);
+  // Migration for DBs created before history was segmented by client (entity_id).
+  try { sql.exec("ALTER TABLE owl_wa_msgs ADD COLUMN entity_id TEXT NOT NULL DEFAULT ''"); } catch { /* already present */ }
   const now = () => new Date().toISOString();
-  const insMsg = sql.prepare('INSERT INTO owl_wa_msgs (id,msisdn,role,body,created_at) VALUES (?,?,?,?,?)');
-  const histStmt = sql.prepare('SELECT role, body FROM owl_wa_msgs WHERE msisdn=? ORDER BY created_at DESC LIMIT 12');
+  const insMsg = sql.prepare('INSERT INTO owl_wa_msgs (id,msisdn,role,body,entity_id,created_at) VALUES (?,?,?,?,?,?)');
+  // History is scoped to the CURRENT linked client: if a number's client changes, the
+  // previous client's messages aren't replayed — so the Owl can't echo the old client's
+  // name (the data was already correctly scoped; this stops the stale label bleeding in).
+  const histStmt = sql.prepare('SELECT role, body FROM owl_wa_msgs WHERE msisdn=? AND entity_id=? ORDER BY created_at DESC LIMIT 12');
   const J = (s, d) => { try { return JSON.parse(s); } catch { return d; } };
 
   // Chart-image fallback hosting: when Clickatell's native media send isn't available,
   // we serve the rendered PNG from our own public URL and text the customer a link.
   // Kept in-memory with a short TTL (charts are ephemeral; a restart just drops them).
-  const imgStore = new Map(); // id -> { png, exp }
+  const imgStore = new Map(); // id -> { png, title, exp }
   const IMG_TTL = 2 * 60 * 60 * 1000; // 2 hours
   let seenBase = ''; // the public host Clickatell hits us on (captured from the webhook)
   const publicBase = () => (process.env.PUBLIC_BASE_URL || process.env.RENDER_EXTERNAL_URL || seenBase || '').replace(/\/$/, '');
-  const storeImg = (png) => { const id = crypto.randomUUID(); imgStore.set(id, { png, exp: Date.now() + IMG_TTL }); return id; };
+  const storeImg = (png, title = 'Chart') => { const id = crypto.randomUUID(); imgStore.set(id, { png, title, exp: Date.now() + IMG_TTL }); return id; };
+  const getImg = (raw) => { const it = imgStore.get(String(raw || '').replace(/\.png$/, '')); return it && it.exp >= Date.now() ? it : null; };
   app.get('/api/whatsapp/img/:id', (req, res) => {
-    const it = imgStore.get(String(req.params.id || '').replace(/\.png$/, ''));
-    if (!it || it.exp < Date.now()) { imgStore.delete(req.params.id); return res.status(404).end(); }
+    const it = getImg(req.params.id);
+    if (!it) return res.status(404).end();
     res.set('Content-Type', 'image/png').set('Cache-Control', 'public, max-age=7200').send(it.png);
+  });
+  // A tiny OpenGraph page so the WhatsApp link shows a chart-thumbnail preview card,
+  // and tapping it opens the chart full-bleed in the browser.
+  app.get('/api/whatsapp/chart/:id', (req, res) => {
+    const it = getImg(req.params.id);
+    if (!it) return res.status(404).send('This chart has expired.');
+    const base = publicBase();
+    const img = `${base}/api/whatsapp/img/${req.params.id}.png`;
+    const t = String(it.title).replace(/[<>&"]/g, '');
+    res.set('Content-Type', 'text/html').send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${t}</title><meta property="og:type" content="website"><meta property="og:title" content="${t}"><meta property="og:image" content="${img}"><meta property="og:image:width" content="1320"><meta property="og:image:height" content="760"><meta name="twitter:card" content="summary_large_image"><meta name="twitter:image" content="${img}"></head><body style="margin:0;background:#fff;display:flex;align-items:center;justify-content:center;min-height:100vh"><img src="${img}" alt="${t}" style="max-width:100%;height:auto"></body></html>`);
   });
 
   // Lightweight observability: record every meaningful step a webhook hit goes through,
@@ -94,6 +113,16 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
 
   const allowlist = () => J(db.getSetting('owl_whatsapp_numbers', '') || '{}', {});
 
+  // ── Scheduled "in-window" updates ───────────────────────────────────────────
+  // WhatsApp lets us send FREE-FORM (no template) only inside the 24h window that
+  // opens when the customer last messaged us. So a scheduled digest/goals/alerts
+  // push only goes out to numbers whose last inbound is < 24h old. We already log
+  // every inbound, so the window is just the latest 'user' row's age.
+  const lastInStmt = sql.prepare("SELECT MAX(created_at) AS c FROM owl_wa_msgs WHERE msisdn=? AND role='user'");
+  const inWindow = (msisdn) => { const c = lastInStmt.get(msisdn)?.c; return !!c && (Date.now() - Date.parse(c)) < 24 * 60 * 60 * 1000; };
+  const sentGet = sql.prepare('SELECT 1 FROM owl_wa_sent WHERE msisdn=? AND day=?');
+  const sentMark = sql.prepare('INSERT OR IGNORE INTO owl_wa_sent (msisdn, day, at) VALUES (?,?,?)');
+
   // Phone number → { user, entityId }. Allowlist first (can pin an org), else a user
   // whose own mobile matches. Returns null if the number isn't linked.
   function identify(msisdn) {
@@ -113,7 +142,7 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
     const today = now().slice(0, 10);
     const ent = entityId && db.getEntity ? db.getEntity(entityId) : null;
     const parts = [`Today's date is ${today}.`];
-    if (ent) parts.push(`All data in this conversation is scoped to: ${ent.name}. Lead your answer with "For ${ent.name}:" and never imply the figures cover other clients.`);
+    if (ent) parts.push(`All data in this conversation is scoped to: ${ent.name}. The ONLY client here is "${ent.name}" — when naming the client/entity, always say "${ent.name}" and NEVER any other client name, even if a different name appears earlier in this chat (that was a previous scope). Lead your answer with "For ${ent.name}:" and never imply the figures cover other clients.`);
     let fmeta = []; try { fmeta = owlFields.list(); } catch { /* ignore */ }
     if (fmeta.length) {
       parts.push(`Field guide (name = meaning): ${fmeta.map((f) => `${f.name} = ${f.label}${(f.aka || []).length ? ` (aka: ${f.aka.join(', ')})` : ''}`).join('; ')}.`);
@@ -123,6 +152,8 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
     const cat = owlTools.catalogue || {};
     if ((cat.notes || []).length) parts.push(`Rules:\n- ${cat.notes.join('\n- ')}`);
     try { const g = resolveGuidance(db, entityId); if (g) parts.push(g); } catch { /* ignore */ }
+    // Reporting currency for this organiser (blank for ZAR — the default).
+    try { const cn = currencyNote && currencyNote(entityId || undefined); if (cn) parts.push(cn); } catch { /* ignore */ }
     parts.push(WA_OVERRIDE);
     return parts.join('\n\n');
   }
@@ -141,34 +172,32 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
 
   // Render the answer's data to a chart PNG and send it (upload → image message).
   // Best-effort: any failure is logged and the text answer still stands.
+  // Inline native images need Clickatell's media upload (POST /v1/media), which 404s
+  // until they enable it on the integration. So default to the hosted link, and only
+  // attempt the native upload when an admin flips this on (after Clickatell enables it).
+  const mediaEnabled = () => db.getSetting('whatsapp_media_enabled', '') === '1';
   async function maybeSendChart(msisdn, trail) {
     try {
       const spec = chartImg.chartFromTrail(trail, labelMaps());
       if (!spec) { logEvent(msisdn, 'image-skip', 'nothing chartable in this answer'); return; }
       const png = chartImg.renderPng(spec);
       if (!png) { logEvent(msisdn, 'image-failed', 'render produced no PNG'); return; }
-      // Best UX: Clickatell native inline image (upload → image message).
-      const up = await messaging.uploadWhatsappMedia(png, 'image/png');
-      if (up.ok) {
-        const im = await messaging.sendWhatsappImage({ to: msisdn, fileId: up.fileId, caption: spec.title });
-        if (im.ok) { logEvent(msisdn, 'image-sent', spec.title); return; }
-        if (await sendChartLink(msisdn, png, spec)) { logEvent(msisdn, 'image-link', `native send failed (${im.error || 'error'}) — sent link`); return; }
-        logEvent(msisdn, 'image-failed', `send: ${im.error || 'error'}`); return;
+      // Native inline image (only when enabled) — best UX once Clickatell provisions media.
+      if (mediaEnabled()) {
+        const up = await messaging.uploadWhatsappMedia(png, 'image/png');
+        if (up.ok) {
+          const im = await messaging.sendWhatsappImage({ to: msisdn, fileId: up.fileId, caption: spec.title });
+          if (im.ok) { logEvent(msisdn, 'image-sent', spec.title); return; }
+        }
+        logEvent(msisdn, 'image-failed', `native: ${up.error || up.reason || 'send error'} — falling back to link`);
       }
-      // Fallback: host the PNG ourselves and text a tappable link to it.
-      if (await sendChartLink(msisdn, png, spec)) { logEvent(msisdn, 'image-link', `native upload failed (${up.error || up.reason || 'error'}) — sent link`); return; }
-      logEvent(msisdn, 'image-failed', `upload: ${up.error || up.reason || 'error'}`);
+      // Fallback (the default): a link to the hosted OpenGraph chart page.
+      const base = publicBase();
+      if (!base) { logEvent(msisdn, 'image-failed', 'no public base URL to host the chart'); return; }
+      const url = `${base}/api/whatsapp/chart/${storeImg(png, spec.title)}`;
+      const r = await messaging.sendWhatsapp({ to: msisdn, text: `📈 View chart — ${spec.title}:\n${url}` });
+      logEvent(msisdn, r && r.ok ? 'image-link' : 'image-failed', r && r.ok ? spec.title : (r && r.error) || 'link send error');
     } catch (e) { logEvent(msisdn, 'image-failed', (e && e.message) || 'chart error'); }
-  }
-
-  // Host the chart PNG on our public URL and text the customer a link to view it.
-  // Returns true if the link was sent (needs a known public base URL).
-  async function sendChartLink(msisdn, png, spec) {
-    const base = publicBase();
-    if (!base) return false;
-    const url = `${base}/api/whatsapp/img/${storeImg(png)}.png`;
-    const r = await messaging.sendWhatsapp({ to: msisdn, text: `📈 ${spec.title}\n${url}` });
-    return !!(r && r.ok);
   }
 
   // Offer follow-ups as native WhatsApp reply buttons; if Clickatell rejects them
@@ -198,8 +227,9 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
     // A bare "1"/"2"/"3" reply selects a prior follow-up (the numbered fallback); a tapped
     // button already arrives as the full question text via postbackData.
     const text = resolveSelection(msisdn, rawText) || rawText;
-    insMsg.run(crypto.randomUUID(), msisdn, 'user', text, now());
-    const history = histStmt.all(msisdn).reverse().map((m) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.body }));
+    const eid = id.entityId || '';
+    insMsg.run(crypto.randomUUID(), msisdn, 'user', text, eid, now());
+    const history = histStmt.all(msisdn, eid).reverse().map((m) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.body }));
     // histStmt already includes the just-inserted user message at the end.
     const instructions = instructionsFor(id.entityId);
     let out = ''; let trail = [];
@@ -213,7 +243,7 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
     } catch { out = ''; }
     const answer = String(out || '').split(FU_MARK)[0].replace(/\s+$/, '').trim() || 'Sorry — I couldn\'t answer that just now. Try rephrasing?';
     const followups = parseFollowups(out);
-    insMsg.run(crypto.randomUUID(), msisdn, 'owl', answer, now());
+    insMsg.run(crypto.randomUUID(), msisdn, 'owl', answer, eid, now());
     const sent = await messaging.sendWhatsapp({ to: msisdn, text: answer });
     logEvent(msisdn, sent && sent.ok ? 'replied' : 'send-failed', sent && sent.ok ? answer.slice(0, 120) : (sent && sent.error) || 'send error');
     if (chartImg.wantsChart(text)) await maybeSendChart(msisdn, trail);
@@ -244,6 +274,22 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
     else if (typeof body.text === 'string') text = body.text;
     if (!from || !text) { const g = scanInbound(body); from = from || g.from; text = text || g.text; }
     return { from: String(from || ''), text: String(text || '').trim() };
+  }
+
+  // Pull the recipient + delivery status + failure reason out of a Clickatell status
+  // (delivery notification) payload, defensively across its shapes.
+  function parseStatus(body) {
+    body = body || {};
+    const ev = body.event || body;
+    const m = (Array.isArray(body.statuses) ? body.statuses[0]
+      : Array.isArray(ev.moStatus) ? ev.moStatus[0]
+      : Array.isArray(ev.statuses) ? ev.statuses[0]
+      : Array.isArray(body.messages) ? body.messages[0] : ev) || {};
+    const to = m.to || m.toNumber || m.msisdn || m.destination || m.recipient || ev.to || '';
+    const status = m.status || m.messageStatus || m.statusDescription || m.deliveryStatus || ev.status || '';
+    const e = m.error || m.errorDescription || m.statusReason || m.reason || m.errorCode || '';
+    const err = typeof e === 'string' ? e : [e && e.code, e && (e.description || e.message)].filter(Boolean).join(' ');
+    return { to: String(to || ''), status: String(status || ''), err: String(err || '') };
   }
 
   // Generic, shape-agnostic extractor. Recursively walks the payload collecting any
@@ -292,6 +338,21 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
     } catch (e) { logEvent('', 'error', (e && e.message) || 'parse error'); console.error('[owlWhatsapp] inbound parse failed', e && e.message); }
   });
 
+  // Clickatell DELIVERY NOTIFICATIONS (status callback). Tells us whether a message we
+  // sent actually reached the handset — so 'replied' (Clickatell accepted) is no longer
+  // the end of the story. Logs delivered / undelivered (+ the reason Clickatell gives).
+  app.post('/api/whatsapp/status', (req, res) => {
+    res.json({ ok: true });
+    try {
+      const { to, status, err } = parseStatus(req.body || {});
+      const msisdn = norm(to);
+      const s = String(status || '').toUpperCase();
+      const stage = /FAIL|UNDELIV|REJECT|EXPIRE|ERROR|BLOCK/.test(s) ? 'undelivered' : (/DELIVER|READ|SENT_TO/.test(s) ? 'delivered' : 'status');
+      const detail = `${status || '?'}${err ? ` — ${err}` : ''}`.trim() || JSON.stringify(req.body).slice(0, 300);
+      logEvent(msisdn, stage, detail.slice(0, 300));
+    } catch (e) { console.error('[owlWhatsapp] status parse failed', e && e.message); }
+  });
+
   // Admin: manage the number→client allowlist + the WhatsApp 'from' number + secret.
   app.get('/api/admin/owl-whatsapp', auth.requireAdmin, (_req, res) => {
     const sec = (db.getSetting('whatsapp_webhook_secret', '') || '').trim();
@@ -302,17 +363,30 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
       // When a secret is set, the callback URL must carry it — so hand back the exact
       // URL (key embedded) to paste into Clickatell. Admin-only screen.
       webhookPath: sec ? `/api/whatsapp/inbound?key=${encodeURIComponent(sec)}` : '/api/whatsapp/inbound',
-      numbers: Object.entries(allowlist()).map(([msisdn, v]) => ({ msisdn, email: v.email || '', entityId: v.entityId || '' })),
+      statusPath: '/api/whatsapp/status',
+      mediaEnabled: db.getSetting('whatsapp_media_enabled', '') === '1',
+      pushEnabled: db.getSetting('whatsapp_push_enabled', '') === '1',
+      testMessage: db.getSetting('whatsapp_test_message', '') || '',
+      numbers: Object.entries(allowlist()).map(([msisdn, v]) => ({ msisdn, email: v.email || '', entityId: v.entityId || '', subs: Array.isArray(v.subs) ? v.subs : [], hour: Number.isInteger(v.hour) ? v.hour : 8 })),
     });
   });
   app.put('/api/admin/owl-whatsapp', auth.requireAdmin, (req, res) => {
     const b = req.body || {};
+    const TOPICS = ['digest', 'goals', 'alerts'];
     if (b.from !== undefined) db.setSetting('whatsapp_from', String(b.from || '').trim());
     if (b.apiKey) db.setSetting('whatsapp_api_key', String(b.apiKey).trim()); // write-only; reuses SMS key if blank
     if (b.secret !== undefined) db.setSetting('whatsapp_webhook_secret', String(b.secret || '').trim());
+    if (b.mediaEnabled !== undefined) db.setSetting('whatsapp_media_enabled', b.mediaEnabled ? '1' : '');
+    if (b.pushEnabled !== undefined) db.setSetting('whatsapp_push_enabled', b.pushEnabled ? '1' : '');
+    if (b.testMessage !== undefined) db.setSetting('whatsapp_test_message', String(b.testMessage || '').slice(0, 1000));
     if (Array.isArray(b.numbers)) {
       const map = {};
-      for (const n of b.numbers) { const m = norm(n.msisdn); if (m && n.email) map[m] = { email: String(n.email).trim(), entityId: String(n.entityId || '').trim() }; }
+      for (const n of b.numbers) {
+        const m = norm(n.msisdn); if (!m || !n.email) continue;
+        const subs = Array.isArray(n.subs) ? n.subs.filter((t) => TOPICS.includes(t)) : [];
+        const hour = Number.isInteger(n.hour) ? Math.min(23, Math.max(0, n.hour)) : 8;
+        map[m] = { email: String(n.email).trim(), entityId: String(n.entityId || '').trim(), subs, hour };
+      }
       db.setSetting('owl_whatsapp_numbers', JSON.stringify(map));
     }
     res.json({ ok: true });
@@ -332,6 +406,78 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
     const r = await messaging.sendWhatsapp({ to, text: String((req.body || {}).text || '').trim() || 'Hello from the Howler Owl 🦉 — your WhatsApp connection is working.' });
     res.json(r);
   });
+
+  // What each subscribable topic asks the Owl to include in the scheduled update.
+  const TOPIC_ASK = {
+    digest: 'a quick sales pulse — tickets sold and revenue so far today, and how that compares to yesterday',
+    goals: 'the headline goal — lead with the North Star: its target, current value, and whether it is on pace or behind',
+    alerts: 'any alerts that have triggered in the last 24 hours (if none, say all clear in a few words)',
+  };
+  const SCHED_NOTE = 'This is an automated SCHEDULED WhatsApp update the customer subscribed to (they are inside their 24h window). Open with a short friendly greeting line, then the update. Keep the whole thing tight — a few short lines. Do NOT append a <<<FOLLOWUPS>>> marker for this scheduled message.';
+  const SCHED_NOTE_ADD = 'This is a short ADDENDUM beneath a scheduled update already shown above — do NOT greet again; just give these item(s) in a line or two. No <<<FOLLOWUPS>>> marker.';
+
+  // Compose the scheduled update by running the SAME Owl loop (scoped to this user),
+  // so the figures are live + grounded and honour the field guide + currency.
+  async function buildScheduled(id, topics, greeting = true) {
+    const apiKey = anthropicKeyForEntity ? anthropicKeyForEntity(id.entityId || undefined) : undefined;
+    if (!insights.isConfigured(apiKey)) return '';
+    const wants = topics.map((t) => TOPIC_ASK[t]).filter(Boolean);
+    if (!wants.length) return '';
+    const ask = `Please give me my scheduled update covering: ${wants.join('; ')}.`;
+    const instructions = `${instructionsFor(id.entityId)}\n\n${greeting ? SCHED_NOTE : SCHED_NOTE_ADD}`;
+    try {
+      const { text } = await runOwlLoop({
+        llmTurn: ({ messages: m, tools, onText }) => owlTurn(insights, { messages: m, tools, instructions, apiKey, onText }),
+        toolMap, tools: toolSchemas, messages: [{ role: 'user', content: ask }],
+        ctx: { user: id.user, entityId: id.entityId },
+      });
+      return String(text || '').split(FU_MARK)[0].replace(/\s+$/, '').trim();
+    } catch { return ''; }
+  }
+
+  // The full message: use the customer's REAL configured digest for the 'digest' topic
+  // when they have one (same source as their email digest), plus a lightweight Owl
+  // summary for the rest — and for 'digest' itself when no digest is set up ("keep both").
+  async function buildScheduledMessage(id, topics) {
+    const parts = [];
+    let owlTopics = topics;
+    if (topics.includes('digest') && whatsappDigestFor) {
+      let real = null;
+      try { real = await whatsappDigestFor(id.entityId, id.user && id.user.email); } catch { real = null; }
+      if (real) { parts.push(real); owlTopics = topics.filter((t) => t !== 'digest'); }
+    }
+    if (owlTopics.length) { const s = await buildScheduled(id, owlTopics, parts.length === 0); if (s) parts.push(s); }
+    return parts.join('\n\n');
+  }
+
+  // Hourly tick: at/after each subscriber's send hour (SAST), once a day, if they're
+  // inside their 24h window, send the update they chose. Master switch is off by default.
+  let scheduling = false;
+  async function schedTick() {
+    if (db.getSetting('whatsapp_push_enabled', '') !== '1' || scheduling) return;
+    scheduling = true;
+    try {
+      const sa = new Date(Date.now() + 2 * 60 * 60 * 1000); // SAST (UTC+2) — Howler's local day/hour
+      const hour = sa.getUTCHours(); const day = sa.toISOString().slice(0, 10);
+      for (const [msisdn, entry] of Object.entries(allowlist())) {
+        const topics = Array.isArray(entry.subs) ? entry.subs.filter((t) => TOPIC_ASK[t]) : [];
+        if (!topics.length) continue;
+        if (hour < (Number.isInteger(entry.hour) ? entry.hour : 8)) continue; // not yet their hour today
+        if (sentGet.get(msisdn, day)) continue; // already handled today
+        sentMark.run(msisdn, day, now()); // evaluate once per day, in or out of window
+        if (!inWindow(msisdn)) { logEvent(msisdn, 'push-skip', 'outside 24h window (needs a template) — no send'); continue; }
+        const id = identify(msisdn); if (!id) continue;
+        const msg = await buildScheduledMessage(id, topics);
+        if (!msg) { logEvent(msisdn, 'push-failed', 'no content generated'); continue; }
+        insMsg.run(crypto.randomUUID(), msisdn, 'owl', msg, id.entityId || '', now());
+        const r = await messaging.sendWhatsapp({ to: msisdn, text: msg });
+        logEvent(msisdn, r && r.ok ? 'push-sent' : 'push-failed', r && r.ok ? topics.join(', ') : (r && r.error) || 'send error');
+      }
+    } catch (e) { console.error('[owlWhatsapp] sched tick failed', e && e.message); } finally { scheduling = false; }
+  }
+  const schedTimer = setInterval(() => schedTick().catch(() => {}), 30 * 60 * 1000); // every 30 min
+  if (schedTimer.unref) schedTimer.unref();
+  setTimeout(() => schedTick().catch(() => {}), 20000); // shortly after boot
 
   console.log('[owlWhatsapp] WhatsApp door mounted (POST /api/whatsapp/inbound)');
 }

@@ -121,11 +121,11 @@ push.mount(app, { db, auth });
 const owlIngest = require('./owlIngest').mount({ db, insights, anthropicKeyForEntity });
 // Experience OS comms spine — self-contained module (own tables + routes under
 // /api/os). Remove this line + server/os.js to fully uninstall the feature.
-let osApi;
+let osApi, waDigestFor; // waDigestFor set when digests mount (used lazily by the WhatsApp Owl scheduler)
 const os = require('./os').mount(app, { db, auth, mailer, push, slack, onInbound: (p) => owlIngest.handle({ ...p, getAttachmentBuffer: osApi.getAttachmentBuffer }) });
 osApi = os;
 const owlUploads = require('./owlUploads').mount(app, { db, auth }); // external data (CSV/Sheet) the Owl can query alongside ticketing
-require('./owlChat').mount(app, { db, auth, insights, uploads: owlUploads, messaging, getAlertsApi: () => alerts, getExploreFields: (m, v) => getExploreFieldsCached(m, v), owlTools: require('./owlTools')({ query, auth, db, getGoalsApi: () => goalsApi, getAlertsApi: () => alerts, getCampaignsApi: () => actionsApi, getUploadsApi: () => owlUploads, resolveTileValue, getExploreFields: (m, v) => getExploreFieldsCached(m, v), getFieldOverrides: () => require('./owlFields').build(db).read() }), anthropicKeyForSuite, anthropicKeyForEntity }); // agentic Owl (disposable; askData rides the scope gate)
+require('./owlChat').mount(app, { db, auth, insights, uploads: owlUploads, messaging, getAlertsApi: () => alerts, getSegmentsApi: () => segmentsApi, getActionsApi: () => actionsApi, getExploreFields: (m, v) => getExploreFieldsCached(m, v), owlTools: require('./owlTools')({ query, auth, db, getGoalsApi: () => goalsApi, getAlertsApi: () => alerts, getCampaignsApi: () => actionsApi, getUploadsApi: () => owlUploads, resolveTileValue, getExploreFields: (m, v) => getExploreFieldsCached(m, v), getFieldOverrides: () => require('./owlFields').build(db).read(), draftCampaignCopy: (a) => actionsApi.draftCopy(a), getSegmentsApi: () => segmentsApi }), anthropicKeyForSuite, anthropicKeyForEntity, currencyNote: (entityId, suiteId) => currency.aiNote(mailer.resolveBranding(entityId, suiteId).currency), whatsappDigestFor: (eid, em) => (waDigestFor ? waDigestFor(eid, em) : Promise.resolve(null)) }); // agentic Owl (disposable; askData rides the scope gate)
 // ─── Health ───────────────────────────────────────────────────────────────────
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
@@ -1123,7 +1123,7 @@ app.post('/api/filter-suggest', auth.requireAuth, async (req, res) => {
     const t = (term || '').trim();
     if (t) {
       if (/^\d+$/.test(t)) {
-        q.filters = { [field]: t };
+        q.filters = { [/^core_ticket_(categories|types)\.name$/.test(field) ? field.replace(/\.name$/, '.id') : field]: t }; // a number finds a ticket by id; the shown/stored value stays the name
       } else {
         // Looker's `%x%` LIKE can be case-sensitive (depends on the dialect),
         // so OR a few case variants to make search effectively case-insensitive.
@@ -2830,7 +2830,7 @@ function recentMessages(entityId, userId, limit = 6) {
 // Disposable module: /df feedback pages, in-app digest archive, the preference-
 // learning loop, and the scheduler mount (recurring digest delivery). Mounted
 // here, after its content builder (buildDigestContent) + role lenses exist.
-require('./digests').mount(app, { db, auth, mailer, messaging, push, insights, buildDigestContent, ROLE_LENSES, anthropicKeyForEntity, inboxView });
+waDigestFor = (require('./digests').mount(app, { db, auth, mailer, messaging, push, insights, buildDigestContent, ROLE_LENSES, anthropicKeyForEntity, inboxView }) || {}).whatsappDigestFor;
 
 // Onboarding checklist — light-touch "Getting started" guide (auto-detect + manual).
 require('./onboarding').mount(app, { db, auth });

@@ -48,6 +48,10 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
     try { r.start(); setListening(true); } catch { setListening(false); }
   };
   const [followups, setFollowups] = useState([]); // suggested next questions for the latest answer
+  const [status, setStatus] = useState(''); // live "thinking" label streamed while the Owl works
+  const [commands, setCommands] = useState([]); // "/" slash-command palette (from the tool registry)
+  const [slashIdx, setSlashIdx] = useState(0);   // highlighted command in the palette
+  const taRef = useRef(null);                     // the composer textarea (for focus after picking)
   const [chatCopied, setChatCopied] = useState(false);
   const scrollRef = useRef(null);
   // Copy the whole conversation as plain text (Q/Owl transcript) to the clipboard.
@@ -162,6 +166,8 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
   // Load the saved-chats list when the panel opens; show the sidebar by default on
   // desktop (a persistent column) and hidden on mobile (a slide-over toggled by ☰).
   useEffect(() => { if (open) { refreshThreads(); setSidebarOpen(false); } }, [open, isMobile]); // chats list collapsed by default; toggle with ☰
+  // The "/" command palette, sourced from the Owl's tool registry (loads once).
+  useEffect(() => { if (open && !commands.length) api.owlCapabilities().then((r) => setCommands(r.commands || [])).catch(() => {}); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
   // Load the client's attached data sources (for the 📎 panel + so the Owl can query them).
   useEffect(() => { if (!open || !attachEntity) { setUploads([]); return; } api.owlUploads(attachEntity).then((r) => setUploads(r.uploads || [])).catch(() => {}); }, [open, attachEntity]);
   // Esc closes (only while open).
@@ -179,6 +185,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
     if (!canAsk) { setMessages((m) => [...m, { role: 'owl', text: 'Pick a client (or open an event) above, then ask me — I scope to that organiser.' }]); return; }
     if (text == null) setInput('');
     setFollowups([]);
+    setStatus('Thinking…'); // show an immediate indicator before the first token
     // Append the question + an empty Owl bubble we stream into.
     setMessages((m) => [...m, { role: 'user', text: q }, { role: 'owl', text: '' }]);
     setBusy(true);
@@ -188,7 +195,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
       return next;
     });
     try {
-      const { threadId: tid, sources, followups: fu, actions } = await api.owlChat({ suiteId: selSuite || undefined, entityId: selEntity || undefined, dashboardId: dashboardId || undefined, message: q, threadId }, appendToOwl);
+      const { threadId: tid, sources, followups: fu, actions } = await api.owlChat({ suiteId: selSuite || undefined, entityId: selEntity || undefined, dashboardId: dashboardId || undefined, message: q, threadId }, appendToOwl, setStatus);
       if (tid) { const isNew = tid !== threadId; setThreadId(tid); if (isNew) refreshThreads(); }
       if ((sources && sources.length) || (actions && actions.length)) setMessages((m) => {
         const next = m.slice();
@@ -200,9 +207,28 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
       appendToOwl((e && e.message) ? `⚠ ${e.message}` : '⚠ Sorry — I hit a problem answering that.');
     } finally {
       setBusy(false);
+      setStatus('');
     }
   }
-  const onKeyDown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } };
+  // "/" command palette: open while the input is just "/word" (no space yet), so it
+  // never triggers mid-sentence or on a date like "1/2". Picking a command drops its
+  // example question into the box (editable), per the chosen behaviour.
+  const slashMatch = /^\/(\w*)$/.exec(input);
+  const slashOpen = !!slashMatch && commands.length > 0;
+  const slashQuery = slashMatch ? slashMatch[1].toLowerCase() : '';
+  const slashMatches = slashOpen ? commands.filter((c) => c.cmd.toLowerCase().includes(slashQuery) || c.label.toLowerCase().includes(slashQuery)) : [];
+  const slashSel = slashMatches.length ? Math.min(slashIdx, slashMatches.length - 1) : 0;
+  const pickCommand = (c) => { if (!c) return; setInput(c.example); setSlashIdx(0); setTimeout(() => taRef.current && taRef.current.focus(), 0); };
+  const openSlash = () => { setInput('/'); setSlashIdx(0); setTimeout(() => taRef.current && taRef.current.focus(), 0); };
+  const onKeyDown = (e) => {
+    if (slashOpen && slashMatches.length) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); setSlashIdx((i) => Math.min(i + 1, slashMatches.length - 1)); return; }
+      if (e.key === 'ArrowUp') { e.preventDefault(); setSlashIdx((i) => Math.max(i - 1, 0)); return; }
+      if (e.key === 'Enter') { e.preventDefault(); pickCommand(slashMatches[slashSel]); return; }
+      if (e.key === 'Escape') { e.preventDefault(); setInput(''); return; }
+    }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+  };
 
   const docked = dock === 'docked' && !isMobile;
   const hdrBtn = { border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' };
@@ -216,7 +242,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
         background: m.role === 'user' ? 'var(--brand)' : 'var(--elevated, rgba(128,128,128,0.12))',
         color: m.role === 'user' ? '#fff' : 'var(--text)',
         borderTopRightRadius: m.role === 'user' ? 4 : 14, borderTopLeftRadius: m.role === 'user' ? 14 : 4,
-      }}>{m.role === 'owl' ? (m.text ? <OwlMd text={m.text} /> : (busy ? '…' : '')) : m.text}</div>
+      }}>{m.role === 'owl' ? (m.text ? <OwlMd text={m.text} /> : (busy ? <ThinkingDots label={status} /> : '')) : m.text}</div>
     </div>
   );
 
@@ -365,12 +391,13 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
           <div key={i} data-owl-msg>
             {bubble(m, i)}
             {m.role === 'owl' && m.sources && m.sources.length > 0 && <CitationChips sources={m.sources} entityId={selEntity} suiteId={selSuite} canPin={isAdmin} />}
-            {m.role === 'owl' && m.actions && m.actions.length > 0 && m.actions.map((a, ai) => <ActionCard key={ai} action={a} />)}
+            {m.role === 'owl' && m.actions && m.actions.length > 0 && m.actions.map((a, ai) => <ActionCard key={ai} action={a} suiteId={selSuite} />)}
             {m.role === 'owl' && m.text && !busy && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 2 }}>
                 <CopyBtn text={m.text} />
                 <ShareMenu heading={[...messages.slice(0, i)].reverse().find((x) => x.role === 'user')?.text || 'Owl answer'} text={m.text} isMobile={isMobile} variant="tile" title="Share this answer" />
                 <DataActions source={(m.sources || []).filter((s) => s.kind !== 'dashboard').find((s) => s.rows && s.rows.length)} />
+                {isAdmin && selEntity && <SaveSegmentButton source={(m.sources || []).filter((s) => s.kind !== 'dashboard').find((s) => s.queryBody && s.queryBody.model)} entityId={selEntity} />}
                 <ReportToClaude
                   question={[...messages.slice(0, i)].reverse().find((x) => x.role === 'user')?.text || ''}
                   answer={m.text}
@@ -414,14 +441,31 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
       {/* Composer, Claude-style: a big text box on top, with attach / mic on the
           left and Send on the right of a row beneath it. */}
       <div style={{ borderTop: '1px solid var(--hairline)', padding: 10, flexShrink: 0 }}>
+        {/* "/" command palette — a quick menu of what the Owl can answer. */}
+        {slashOpen && slashMatches.length > 0 && (
+          <div style={{ marginBottom: 6, border: '1px solid var(--hairline)', borderRadius: 12, background: 'var(--card)', overflow: 'hidden', boxShadow: '0 6px 22px rgba(0,0,0,0.14)' }}>
+            {slashMatches.map((c, i) => (
+              <button key={c.cmd} type="button" onMouseEnter={() => setSlashIdx(i)} onClick={() => pickCommand(c)}
+                style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', border: 'none', borderBottom: i < slashMatches.length - 1 ? '1px solid var(--hairline)' : 'none', background: i === slashSel ? 'var(--elevated, rgba(128,128,128,0.12))' : 'transparent', cursor: 'pointer', padding: '8px 12px', color: 'var(--text)' }}>
+                <span style={{ fontSize: 16, flexShrink: 0 }}>{c.icon}</span>
+                <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                  <span style={{ fontSize: 13, fontWeight: 600 }}>/{c.cmd} · {c.label}</span>
+                  <span style={{ fontSize: 11.5, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.example}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
         <div style={{ border: '1px solid var(--hairline)', borderRadius: 16, background: 'var(--bg, var(--card))', padding: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
           <textarea
-            value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={onKeyDown}
-            placeholder={canAsk ? 'Ask the Owl…' : 'Open a client or event to ask'}
+            ref={taRef}
+            value={input} onChange={(e) => { setInput(e.target.value); setSlashIdx(0); }} onKeyDown={onKeyDown}
+            placeholder={canAsk ? 'Ask the Owl…  (type / for commands)' : 'Open a client or event to ask'}
             rows={4} disabled={!canAsk}
             style={{ width: '100%', boxSizing: 'border-box', resize: 'none', minHeight: 108, maxHeight: 260, padding: '8px 10px', border: 'none', outline: 'none', background: 'transparent', color: 'var(--text)', fontSize: 14.5, fontFamily: 'inherit', lineHeight: 1.5 }}
           />
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button onClick={openSlash} title="Commands" aria-label="Slash commands" style={{ border: '1px solid var(--hairline)', background: slashOpen ? 'var(--elevated, rgba(128,128,128,0.12))' : 'var(--card)', color: 'var(--text)', borderRadius: 980, width: 38, height: 38, fontSize: 17, fontWeight: 700, cursor: 'pointer', lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>/</button>
             <button onClick={() => setAttachOpen((o) => !o)} title="Attach data (CSV or Google Sheet)" aria-label="Attach data" style={{ border: '1px solid var(--hairline)', background: attachOpen || uploads.length ? 'var(--elevated, rgba(128,128,128,0.12))' : 'var(--card)', color: 'var(--text)', borderRadius: 980, minWidth: 38, height: 38, padding: '0 11px', fontSize: 16, cursor: 'pointer', lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>📎{uploads.length ? <span style={{ fontSize: 11, fontWeight: 700, marginLeft: 3 }}>{uploads.length}</span> : ''}</button>
             {SR && <button onClick={toggleMic} title={listening ? 'Stop dictation' : 'Dictate your question'} aria-label="Dictate" style={{ border: '1px solid var(--hairline)', background: listening ? '#e0414a' : 'var(--card)', color: listening ? '#fff' : 'var(--text)', borderRadius: 980, width: 38, height: 38, fontSize: 16, cursor: 'pointer', lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>🎤</button>}
             <span style={{ flex: 1 }} />
@@ -452,6 +496,21 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
       <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.42)', opacity: open ? 1 : 0, transition: 'opacity .26s ease', backdropFilter: open ? 'blur(2px)' : 'none', WebkitBackdropFilter: open ? 'blur(2px)' : 'none' }} />
       <div style={{ position: 'absolute', top: 0, right: 0, height: '100%', width: w, boxShadow: '-10px 0 30px rgba(0,0,0,0.28)', transform: open ? 'translateX(0)' : 'translateX(100%)', transition: 'transform .26s var(--ease-spring, ease)' }}>{panel}</div>
     </div>
+  );
+}
+
+// The "thinking" indicator: three bouncing dots + the live status label streamed from
+// the server (e.g. "Reading your ticket data…"), so a multi-second tool call never looks
+// frozen. Shown in the empty Owl bubble until the first answer token arrives.
+function ThinkingDots({ label }) {
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, color: 'var(--muted)' }}>
+      <style>{'@keyframes owl-bd{0%,80%,100%{transform:translateY(0);opacity:.35}40%{transform:translateY(-3px);opacity:1}}'}</style>
+      <span style={{ display: 'inline-flex', gap: 3 }} aria-hidden="true">
+        {[0, 1, 2].map((i) => <span key={i} style={{ width: 6, height: 6, borderRadius: '50%', background: 'currentColor', display: 'inline-block', animation: 'owl-bd 1.2s ease-in-out infinite', animationDelay: `${i * 0.16}s` }} />)}
+      </span>
+      <span style={{ fontSize: 13 }}>{label || 'Thinking…'}</span>
+    </span>
   );
 }
 
@@ -639,6 +698,29 @@ function buildFixBrief({ question, answer, sources, scopeLabel, dashboardId }) {
 
 // Small text-action button styling shared by the per-message actions.
 const msgActionStyle = { border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 11.5, padding: '2px 4px', display: 'inline-flex', alignItems: 'center', gap: 4 };
+// 🎯 "Save as segment" — turn ANY chat answer's cohort into a reusable audience
+// ("from any point of a chat"). Reuses the answer's live query (its filters define the
+// cohort); the server re-applies scope + only saves from the ticket-data explore. No PII.
+function SaveSegmentButton({ source, entityId }) {
+  const [state, setState] = useState(''); // '' | 'busy' | 'done'
+  if (!source || !source.queryBody || !source.queryBody.model) return null;
+  const save = async () => {
+    const suggested = [source.measure, ...(source.dimensions || [])].filter(Boolean).join(' by ').slice(0, 60) || 'Owl segment';
+    const name = window.prompt('Name this segment (a reusable audience of these people):', `${suggested} audience`.slice(0, 80));
+    if (name == null) return;
+    setState('busy');
+    const qb = source.queryBody;
+    try {
+      await api.owlCreateSegment({ entityId, name: name.trim(), draft: { mode: 'query', model: qb.model, view: qb.view, queryFilters: qb.filters || {} } });
+      setState('done'); setTimeout(() => setState(''), 2500);
+    } catch (e) { setState(''); window.alert((e && e.message) || 'Could not save the segment.'); }
+  };
+  return (
+    <button onClick={save} disabled={state === 'busy'} title="Save these people as a reusable audience (Engage → Segments)" style={msgActionStyle}>
+      {state === 'done' ? '✓ Saved' : (state === 'busy' ? '🎯 Saving…' : '🎯 Save as segment')}
+    </button>
+  );
+}
 // Copy a single message's text to the clipboard.
 function CopyBtn({ text }) {
   const [done, setDone] = useState(false);
@@ -668,19 +750,29 @@ function DataActions({ source }) {
 // commit re-checks permission server-side (alerts.manage), so this button can never
 // create something the user couldn't make by hand.
 const OP_TEXT = { gte: 'reaches', lte: 'drops to', gt: 'goes above', lt: 'drops below' };
-function ActionCard({ action }) {
+// Dispatch to the right confirm card by action kind (act-tools share the pattern).
+function ActionCard({ action, suiteId }) {
+  if (!action) return null;
+  if (action.kind === 'createAlert') return <AlertActionCard action={action} />;
+  if (action.kind === 'createSegment') return <SegmentActionCard action={action} />;
+  if (action.kind === 'draftCampaign') return <CampaignActionCard action={action} suiteId={suiteId} />;
+  return null;
+}
+function AlertActionCard({ action }) {
   const [state, setState] = useState(''); // '' | 'busy' | 'done' | 'error'
   const [err, setErr] = useState('');
-  if (!action || action.kind !== 'createAlert') return null;
+  const [suiteId, setSuiteId] = useState(action.suiteId || ''); // chosen event (when none was selected)
   const d = action.draft || {};
   const cond = `${d.metricLabel || d.measureLabel || 'this metric'} ${OP_TEXT[d.operator] || 'reaches'} ${fmtVal(d.threshold)}${d.unit === '%' ? '%' : ''}`;
   const CHAN_LABEL = { push: 'push', email: 'email', sms: 'SMS', slack: 'Slack' };
   const chans = (d.channels || []).map((c) => CHAN_LABEL[c] || c);
   const delivery = `via ${['in-app', ...chans].join(', ')}${d.priority === 'important' ? ' · important' : ''}`;
+  const events = action.events || [];
   const create = async () => {
+    if (!suiteId) return; // need an event first
     setState('busy'); setErr('');
     try {
-      await api.owlCreateAlert({ suiteId: action.suiteId, draft: d });
+      await api.owlCreateAlert({ suiteId, draft: d });
       setState('done');
     } catch (e) { setState('error'); setErr((e && e.message) || 'Could not create the alert.'); }
   };
@@ -693,14 +785,106 @@ function ActionCard({ action }) {
       </div>
       <div style={{ fontSize: 13, color: 'var(--text)', marginBottom: 4 }}>Notify me when <strong>{cond}</strong>.</div>
       <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 8 }}>{delivery}</div>
+      {action.needsEvent && state !== 'done' && (
+        <div style={{ marginBottom: 8 }}>
+          <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 3 }}>Which event should this watch?</div>
+          <select value={suiteId} onChange={(e) => setSuiteId(e.target.value)}
+            style={{ width: '100%', boxSizing: 'border-box', padding: '6px 8px', borderRadius: 8, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', fontSize: 13 }}>
+            <option value="">Pick an event…</option>
+            {events.map((ev) => <option key={ev.id} value={ev.id}>{ev.name}</option>)}
+          </select>
+        </div>
+      )}
       {state === 'done' ? (
         <div style={{ fontSize: 12.5, color: 'var(--brand)', fontWeight: 600 }}>✓ Alert created — you'll be notified when it triggers.</div>
       ) : (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <button onClick={create} disabled={state === 'busy'}
-            style={{ border: 'none', borderRadius: 980, padding: '6px 16px', fontSize: 12.5, fontWeight: 700, cursor: state === 'busy' ? 'default' : 'pointer', background: state === 'busy' ? 'var(--elevated, rgba(128,128,128,0.18))' : 'var(--brand)', color: state === 'busy' ? 'var(--muted)' : '#fff' }}>
+          <button onClick={create} disabled={state === 'busy' || !suiteId}
+            style={{ border: 'none', borderRadius: 980, padding: '6px 16px', fontSize: 12.5, fontWeight: 700, cursor: (state === 'busy' || !suiteId) ? 'default' : 'pointer', background: (state === 'busy' || !suiteId) ? 'var(--elevated, rgba(128,128,128,0.18))' : 'var(--brand)', color: (state === 'busy' || !suiteId) ? 'var(--muted)' : '#fff' }}>
             {state === 'busy' ? 'Creating…' : 'Create alert'}
           </button>
+          {action.needsEvent && !suiteId && <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>Pick an event above</span>}
+          {state === 'error' && <span style={{ fontSize: 12, color: '#e0414a' }}>{err}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Segment confirm card — saves a reusable audience from a chat cohort. PII-safe: shows
+// only the count + per-channel reach, never people. Commit re-checks campaigns.approve.
+function SegmentActionCard({ action }) {
+  const [state, setState] = useState('');
+  const [err, setErr] = useState('');
+  const reach = action.reach || null;
+  const reachLine = reach
+    ? `${fmtVal(reach.total)} people${reach.email != null ? ` · ${fmtVal(reach.email)} emailable` : ''}${reach.sms ? ` · ${fmtVal(reach.sms)} SMS` : ''}`
+    : null;
+  const create = async () => {
+    setState('busy'); setErr('');
+    try { await api.owlCreateSegment({ entityId: action.entityId, name: action.name, draft: action.draft }); setState('done'); }
+    catch (e) { setState('error'); setErr((e && e.message) || 'Could not create the segment.'); }
+  };
+  return (
+    <div style={{ margin: '2px 0 10px', border: '1px solid var(--hairline)', borderRadius: 12, background: 'var(--card)', padding: '10px 12px', maxWidth: '85%' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 6 }}>
+        <span style={{ fontSize: 15 }}>🎯</span>
+        <strong style={{ fontSize: 12.5 }}>Segment</strong>
+        <span style={{ fontSize: 11, color: 'var(--muted)', border: '1px solid var(--hairline)', borderRadius: 980, padding: '1px 7px' }}>Draft</span>
+      </div>
+      <div style={{ fontSize: 13, color: 'var(--text)', marginBottom: reachLine ? 4 : 8 }}>Save <strong>{action.summary || action.name}</strong> as a reusable audience.</div>
+      {reachLine && <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 8 }}>{reachLine}</div>}
+      {state === 'done' ? (
+        <div style={{ fontSize: 12.5, color: 'var(--brand)', fontWeight: 600 }}>✓ Segment saved — find it in Engage → Segments.</div>
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <button onClick={create} disabled={state === 'busy'}
+            style={{ border: 'none', borderRadius: 980, padding: '6px 16px', fontSize: 12.5, fontWeight: 700, cursor: state === 'busy' ? 'default' : 'pointer', background: state === 'busy' ? 'var(--elevated, rgba(128,128,128,0.18))' : 'var(--brand)', color: state === 'busy' ? 'var(--muted)' : '#fff' }}>
+            {state === 'busy' ? 'Saving…' : 'Create segment'}
+          </button>
+          {state === 'error' && <span style={{ fontSize: 12, color: '#e0414a' }}>{err}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Campaign confirm card — drafts an email/SMS campaign to a cohort. Creates a DRAFT
+// only; the human approves + SENDS in Engage. Shows the audience reach + the drafted
+// copy for review. PII-safe (count + reach only, never people).
+const CHAN_TEXT = { email: 'Email', sms: 'SMS', both: 'Email + SMS' };
+function CampaignActionCard({ action, suiteId }) {
+  const [state, setState] = useState('');
+  const [err, setErr] = useState('');
+  const reach = action.reach || null;
+  const reachLine = reach ? `${fmtVal(reach.total)} people${reach.email != null ? ` · ${fmtVal(reach.email)} emailable` : ''}${reach.sms ? ` · ${fmtVal(reach.sms)} SMS` : ''}` : null;
+  const create = async () => {
+    setState('busy'); setErr('');
+    try {
+      await api.owlDraftCampaign({ entityId: action.entityId, name: action.name, channel: action.channel, goal: action.goal, audience: action.audience, subject: action.subject, body: action.body, ctaText: action.ctaText, suiteId: suiteId || undefined });
+      setState('done');
+    } catch (e) { setState('error'); setErr((e && e.message) || 'Could not create the campaign.'); }
+  };
+  return (
+    <div style={{ margin: '2px 0 10px', border: '1px solid var(--hairline)', borderRadius: 12, background: 'var(--card)', padding: '10px 12px', maxWidth: '85%' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 6 }}>
+        <span style={{ fontSize: 15 }}>📣</span>
+        <strong style={{ fontSize: 12.5 }}>Campaign</strong>
+        <span style={{ fontSize: 11, color: 'var(--muted)', border: '1px solid var(--hairline)', borderRadius: 980, padding: '1px 7px' }}>Draft</span>
+        <span style={{ fontSize: 11, color: 'var(--muted)' }}>{CHAN_TEXT[action.channel] || 'Email'}</span>
+      </div>
+      <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 6 }}>To <strong style={{ color: 'var(--text)' }}>{action.summary || 'the cohort'}</strong>{reachLine ? ` · ${reachLine}` : ''}.</div>
+      {action.subject && <div style={{ fontSize: 13, color: 'var(--text)', marginBottom: 3 }}><span style={{ color: 'var(--muted)' }}>Subject:</span> <strong>{action.subject}</strong></div>}
+      {action.body && <div style={{ fontSize: 12.5, color: 'var(--text)', whiteSpace: 'pre-wrap', maxHeight: 150, overflow: 'auto', border: '1px solid var(--hairline)', borderRadius: 8, padding: '6px 8px', margin: '4px 0 8px', background: 'var(--bg, var(--card))' }}>{action.body}</div>}
+      {state === 'done' ? (
+        <div style={{ fontSize: 12.5, color: 'var(--brand)', fontWeight: 600 }}>✓ Draft created — review, approve &amp; send it in Engage → Campaigns. Nothing has been sent.</div>
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <button onClick={create} disabled={state === 'busy'}
+            style={{ border: 'none', borderRadius: 980, padding: '6px 16px', fontSize: 12.5, fontWeight: 700, cursor: state === 'busy' ? 'default' : 'pointer', background: state === 'busy' ? 'var(--elevated, rgba(128,128,128,0.18))' : 'var(--brand)', color: state === 'busy' ? 'var(--muted)' : '#fff' }}>
+            {state === 'busy' ? 'Creating…' : 'Create draft campaign'}
+          </button>
+          <span style={{ fontSize: 11, color: 'var(--muted)' }}>You approve &amp; send in Engage</span>
           {state === 'error' && <span style={{ fontSize: 12, color: '#e0414a' }}>{err}</span>}
         </div>
       )}

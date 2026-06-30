@@ -19,11 +19,14 @@ const defaultCatalogue = require('./owlCatalogueSeed');
 // there and the Owl can immediately set + ask for it; no second list to keep in sync).
 const { OPERATORS: ALERT_OPERATORS, CHANNELS: ALERT_CHANNELS, PRIORITIES: ALERT_PRIORITIES } = require('./alerts');
 
-module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAlertsApi, getCampaignsApi, getUploadsApi, resolveTileValue, getExploreFields, getFieldOverrides, catalogue = defaultCatalogue }) {
+module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAlertsApi, getCampaignsApi, getUploadsApi, resolveTileValue, getExploreFields, getFieldOverrides, draftCampaignCopy, getSegmentsApi, catalogue = defaultCatalogue }) {
   if (!query || !query.applyScope || !query.runLookerQuery) {
     throw new Error('owlTools requires the query engine (applyScope + runLookerQuery).');
   }
   const ORG = 'core_organisers.name'; // the canonical organiser lock field
+  // Resolver for the createSegment act-tool's preview (count + per-channel reach).
+  // Server-side only; never returns the people list to the chat. Same scope gate.
+  const { resolveQueryAudience } = require('./audienceQuery')({ auth, db, catalogue });
 
   // Index the curated catalogue once: name → spec, plus filterable set.
   const measureByName = new Map(catalogue.measures.map((m) => [m.name, m]));
@@ -182,21 +185,26 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
 
     // 4) THE SCOPE GATE — bind to the organiser(s) this user can ACCESS; never run
     //    platform-wide. Event context (suiteId) narrows to that event's organiser
-    //    (same boundary as every tile, ceiling not override). If applyScope leaves
-    //    it unscoped (an admin with no event context), bind to the user's accessible
-    //    organisers (their entities / the previewed client). If neither yields a
+    //    (same boundary as every tile, ceiling not override). If neither yields a
     //    bound, refuse — fail closed, so the Owl can never aggregate across clients.
     const allowed = await query.applyScope(body, user, suiteId);
     if (allowed === false) {
       return refuse('no_scope', 'I can\'t tell which client\'s data to use here — open a client or an event first.');
     }
-    if (!body.filters[ORG]) {
+    // 4b) Bind to the SINGLE client in context (entityId). Critical: with no event,
+    //     applyScope scopes a MULTI-ENTITY user to the UNION of their organisers — so
+    //     without this, a chat with only a client in scope (e.g. the WhatsApp door,
+    //     which passes entityId and no suiteId) would aggregate across that user's
+    //     other clients. Narrowing to entityId is a tightening within the user's own
+    //     organisers (never a widening); fail closed if it can't be bound.
+    if (entityId && auth && auth.accessibleOrgFilters) {
+      const locks = auth.accessibleOrgFilters(user, entityId);
+      if (locks && locks[ORG]) body.filters = { ...body.filters, ...locks };
+      else if (!body.filters[ORG]) return refuse('no_scope', 'I can\'t tell which client\'s data to answer for — open a client or an event first.');
+    } else if (!body.filters[ORG]) {
       const locks = auth && auth.accessibleOrgFilters ? auth.accessibleOrgFilters(user, entityId) : null;
-      if (locks && locks[ORG]) {
-        body.filters = { ...body.filters, ...locks };
-      } else {
-        return refuse('no_scope', 'I can\'t tell which client\'s data to answer for — open a client or an event first, and I\'ll scope to that organiser.');
-      }
+      if (locks && locks[ORG]) body.filters = { ...body.filters, ...locks };
+      else return refuse('no_scope', 'I can\'t tell which client\'s data to answer for — open a client or an event first, and I\'ll scope to that organiser.');
     }
 
     // 5) Run + return the grounding trail. /queries/run/json → array of row objects.
@@ -216,7 +224,7 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
   const askDataSchema = {
     name: 'askData',
     description:
-      'Answer a question from the client\'s own ticketing data by running a bounded, scoped query over the curated "All Tickets" catalogue. Read-only. Returns rows; you then phrase the answer and cite the figures. Amounts are ZAR.',
+      'Answer a question from the client\'s own ticketing data by running a bounded, scoped query over the curated "All Tickets" catalogue. Read-only. Returns rows; you then phrase the answer and cite the figures. Money is in the client\'s reporting currency (see the Currency note; default ZAR).',
     input_schema: {
       type: 'object',
       properties: {
@@ -595,7 +603,6 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
   function runCreateAlert(args = {}, ctx = {}) {
     const { user, suiteId } = ctx;
     if (!user) return refuse('no_user', 'No authenticated user in context.');
-    if (!suiteId) return refuse('no_event', 'Pick an event first — an alert watches one event\'s numbers.');
     const m = measureByName.get(args.measure);
     if (!m) return refuse('unknown_measure', `"${args.measure}" isn't a measure I can watch. Pick a curated measure.`);
     const operator = ALERT_OPERATORS.includes(args.operator) ? args.operator : 'gte';
@@ -630,11 +637,25 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
       operator, threshold, unit: m.unit || '',
       channels: channels.length ? channels : [DEFAULT_CHANNEL], priority,
     };
+    // Resolve which EVENT the alert watches. If one is already selected, use it. If not,
+    // don't dead-end the chat asking the user to go pick one — draft it anyway and let
+    // the confirm card offer an event picker (auto-pick when the client has only one).
+    let resolvedSuite = suiteId || '';
+    let events;
+    if (!resolvedSuite) {
+      const entityId = ctx.entityId
+        || ((user.entityIds || []).length === 1 ? user.entityIds[0] : null);
+      if (!entityId) return refuse('no_client', 'Open a client (or an event) first, then I can set up the alert.');
+      const list = (db && db.listSuitesForEntity ? db.listSuitesForEntity(entityId) : []).map((s) => ({ id: s.id, name: s.name }));
+      if (list.length === 1) resolvedSuite = list[0].id; // only one event → no need to ask
+      else if (!list.length) return refuse('no_events', 'This client has no events yet to attach an alert to.');
+      else events = list; // several → the card lets them choose
+    }
     return {
       ok: true,
       confirm: true, // tells the loop to surface an action card; nothing is created yet
       action: {
-        kind: 'createAlert', suiteId, draft,
+        kind: 'createAlert', suiteId: resolvedSuite, needsEvent: !resolvedSuite, events, draft,
         summary: `Notify when ${metricLabel} ${OP_LABEL[operator]} ${threshold}`,
       },
     };
@@ -642,7 +663,7 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
   const createAlertSchema = {
     name: 'createAlert',
     description:
-      'DRAFT a metric alert for the user to confirm — you do NOT create it; they tap "Create alert" to switch it on. An alert watches ONE event\'s ticketing number and notifies the client\'s own team when it crosses a threshold (e.g. tickets sold ≥ 1000, revenue ≥ 500000, remaining ≤ 50). Use when the user asks to be told / notified / alerted / reminded when a number reaches a level. Self-affecting only: it never messages ticket buyers and never spends. Delivery defaults to an in-app/push notification at normal priority — only set channels/priority if the user asks (e.g. "email me", "make it important"); inbox is always on. After calling it, tell the user what it will watch + the exact condition + how they\'ll be notified, and that they can tap the button to switch it on. Requires an event to be selected (ok:false otherwise — ask them to pick one).',
+      'DRAFT a metric alert for the user to confirm — you do NOT create it; they tap "Create alert" to switch it on. An alert watches ONE event\'s ticketing number and notifies the client\'s own team when it crosses a threshold (e.g. tickets sold ≥ 1000, revenue ≥ 500000, remaining ≤ 50). Use when the user asks to be told / notified / alerted / reminded when a number reaches a level. Self-affecting only: it never messages ticket buyers and never spends. Delivery defaults to an in-app/push notification at normal priority — only set channels/priority if the user asks (e.g. "email me", "make it important"); inbox is always on. You do NOT need an event to be selected: if none is, the confirm card lets the user pick which event (or auto-uses the only one) — so never ask them to go and select an event. After calling it, tell the user what it will watch + the exact condition + how they\'ll be notified, and that they can tap the button to switch it on (choosing the event there if asked).',
     input_schema: {
       type: 'object',
       properties: {
@@ -658,15 +679,149 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     },
   };
 
+  // `menu` = the slash-command palette entry for a tool (client /api/owl/capabilities).
+  // Defining it HERE keeps the palette sourced from the registry, so adding a tool with
+  // a menu automatically adds its slash command — one source of truth, no drift.
+  // ── createSegment (ACT) ───────────────────────────────────────────────────────
+  // DRAFT a reusable audience from a cohort (catalogue dimensions: age/gender/city/
+  // country/ticket type/category/guest-list…). Self-confirm pattern like createAlert.
+  // PII-safe: it resolves a count + per-channel reach server-side, but NEVER returns
+  // people to the chat; the actual list only materialises inside a governed send.
+  // Contact fields can't define a segment. Committed via POST /api/owl/act/create-segment.
+  async function runCreateSegment(args = {}, ctx = {}) {
+    const { user, suiteId } = ctx;
+    if (!user) return refuse('no_user', 'No authenticated user in context.');
+    const entityId = ctx.entityId || (suiteId && db && db.getSuite ? (db.getSuite(suiteId) || {}).entityId : null);
+    if (!entityId) return refuse('no_client', 'Open or pick a client first — a segment belongs to a client.');
+    const filters = {};
+    const desc = [];
+    for (const [field, val] of Object.entries(args.filters || {})) {
+      const d = dimByName.get(field);
+      if (!d) return refuse('unknown_filter', `"${field}" isn't a field I can segment by.`);
+      if (d.filterOnly || !filterableDims.has(field)) return refuse('pii_filter', `"${field}" is contact data — it can't define a segment (you never segment by email/phone/name).`);
+      if (val == null || String(val).trim() === '') continue;
+      filters[field] = String(val);
+      desc.push(`${d.label} = ${val}`);
+    }
+    if (!Object.keys(filters).length) return refuse('no_cohort', 'Tell me the cohort to capture — e.g. ticket type VIP, city Cape Town, age 18 to 25.');
+    const name = String(args.name || '').trim().slice(0, 120) || desc.join(' · ') || 'Segment';
+    const draft = { mode: 'query', model: catalogue.model, view: catalogue.explore, queryFilters: filters };
+    // Preview the size + reach (server-side; the list itself never enters the chat).
+    let count = null; let reach = null;
+    try { const r = await resolveQueryAudience({ entityId, definition: draft, user, suiteId }); if (r && !r.error) { count = r.count; reach = r.reach; } } catch { /* preview is best-effort */ }
+    return {
+      ok: true,
+      confirm: true,
+      action: { kind: 'createSegment', entityId, name, draft, summary: desc.join(' · '), count, reach },
+    };
+  }
+  const createSegmentSchema = {
+    name: 'createSegment',
+    description:
+      'DRAFT a reusable audience SEGMENT from a cohort, for the user to confirm — you do NOT create it; they tap "Create segment" to save it. The cohort is defined by curated dimensions (age, gender, buyer city/country, ticket type, ticket category, complimentary = guest list, etc.). A segment is a saved, live audience used later to run a campaign or sync to ad platforms; consent + unsubscribes are applied when it is actually messaged. Use when the user wants to build or save an audience ("make a segment of VIP buyers in Cape Town", "save these people as an audience", "guest list segment"). NEVER lists or names individual people — only a total count + per-channel reach. Contact fields (email/phone/name) CANNOT define a segment. Requires a client in scope. After calling it, state the cohort + the count/reach and tell the user to tap "Create segment".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Short name for the segment (one is generated from the cohort if omitted).' },
+        filters: {
+          type: 'object',
+          description: 'The cohort as {dimension: value} over curated dimensions, e.g. {"core_ticket_types.name":"VIP","core_purchasers.city":"Cape Town"}. Guest list = {"core_tickets.is_complimentary":"Yes"}. Age can be a range like "18 to 25". Contact/PII fields are NOT allowed.',
+        },
+      },
+      required: ['filters'],
+    },
+  };
+
+  // ── draftCampaign (ACT) ───────────────────────────────────────────────────────
+  // The flagship insight→action: DRAFT an email/SMS campaign to a cohort. It creates a
+  // DRAFT in Engage that a human reviews, approves and sends — the Owl NEVER sends.
+  // PII-safe: only a count + reach reach the chat. The audience is the same query-cohort
+  // segments use; the copy is written by the existing campaign copywriter (draftCopy).
+  async function runDraftCampaign(args = {}, ctx = {}) {
+    const { user, suiteId } = ctx;
+    if (!user) return refuse('no_user', 'No authenticated user in context.');
+    const entityId = ctx.entityId || (suiteId && db && db.getSuite ? (db.getSuite(suiteId) || {}).entityId : null);
+    if (!entityId) return refuse('no_client', 'Open or pick a client first — a campaign belongs to a client.');
+    const goal = String(args.goal || '').trim();
+    if (!goal) return refuse('no_goal', 'Tell me the goal — who to reach and what to get them to do (e.g. "win back last year\'s VIP buyers who haven\'t rebooked").');
+    const channel = ['email', 'sms', 'both'].includes(args.channel) ? args.channel : 'email';
+    // Audience: EITHER a saved segment (by name) OR a custom cohort built from the chat.
+    let audience; let summary = ''; let reach = null;
+    const segName = String(args.segmentName || '').trim();
+    if (segName) {
+      const segApi = typeof getSegmentsApi === 'function' ? getSegmentsApi() : null;
+      const list = segApi && segApi.listSegments ? segApi.listSegments(entityId) : [];
+      const lc = segName.toLowerCase();
+      const seg = list.find((s) => s.name.toLowerCase() === lc)
+        || list.find((s) => s.name.toLowerCase().includes(lc) || lc.includes(s.name.toLowerCase()));
+      if (!seg) {
+        return refuse('no_segment', list.length
+          ? `I couldn't find a saved segment called "${segName}". You have: ${list.map((s) => `"${s.name}"`).join(', ')}. Pick one, or describe a cohort and I'll build it.`
+          : 'There are no saved segments for this client yet — describe the cohort (e.g. ticket type VIP, city Cape Town) and I\'ll build it.');
+      }
+      audience = { mode: 'segment', segmentId: seg.id };
+      summary = seg.name;
+      try { if (segApi.resolveSegment) { const r = await segApi.resolveSegment(entityId, seg.id, user); if (r && r.reach) reach = r.reach; } } catch { /* best-effort preview */ }
+    } else {
+      // Custom cohort from the chat — same validation + shape as createSegment; PII rejected.
+      const filters = {};
+      const desc = [];
+      for (const [field, val] of Object.entries(args.filters || {})) {
+        const d = dimByName.get(field);
+        if (!d) return refuse('unknown_filter', `"${field}" isn't a field I can target by.`);
+        if (d.filterOnly || !filterableDims.has(field)) return refuse('pii_filter', `"${field}" is contact data — it can't define an audience.`);
+        if (val == null || String(val).trim() === '') continue;
+        filters[field] = String(val);
+        desc.push(`${d.label} = ${val}`);
+      }
+      if (!Object.keys(filters).length) return refuse('no_cohort', 'Who should this go to? Name a saved segment, or give a cohort — e.g. ticket type VIP, city Cape Town, age 18 to 25.');
+      audience = { mode: 'query', model: catalogue.model, view: catalogue.explore, queryFilters: filters };
+      summary = desc.join(' · ');
+      try { const r = await resolveQueryAudience({ entityId, definition: audience, user, suiteId }); if (r && !r.error) reach = r.reach; } catch { /* best-effort preview */ }
+    }
+    // Draft the copy with the existing campaign copywriter (subject/body/cta).
+    let copy = {};
+    try { if (typeof draftCampaignCopy === 'function') copy = (await draftCampaignCopy({ entityId, goal, audienceCount: (reach && reach.total) || 0, eventSuiteId: suiteId || '' })) || {}; } catch { copy = {}; }
+    if (!copy.subject && !copy.body) return refuse('draft_failed', 'I couldn\'t draft the copy just now — try again in a moment, or build it in Engage.');
+    const name = String(args.name || '').trim().slice(0, 120) || (copy.subject ? String(copy.subject).slice(0, 80) : (summary || 'Campaign'));
+    return {
+      ok: true,
+      confirm: true,
+      action: {
+        kind: 'draftCampaign', entityId, name, channel, goal,
+        audience, summary, reach,
+        subject: copy.subject || '', body: copy.body || '', ctaText: copy.ctaText || '',
+      },
+    };
+  }
+  const draftCampaignSchema = {
+    name: 'draftCampaign',
+    description:
+      'DRAFT an email/SMS marketing CAMPAIGN, for the user to confirm — you do NOT send it. It creates a DRAFT in Engage that a human reviews, approves and sends; nothing reaches customers from here. Use when the user wants to market to / message a group ("draft a win-back email to lapsed VIP buyers", "email my Cape Town segment an offer"). The audience is EITHER a saved segment (pass segmentName — use this when the user names an existing audience/segment) OR a new cohort built from curated dimensions (pass filters — age, gender, buyer city/country, ticket type, category, complimentary = guest list). Provide exactly ONE of segmentName or filters. You provide the goal; the copy (subject + body) is drafted for you and shown for review. NEVER lists or names individual people — only a count + reach. Contact fields (email/phone) cannot define the audience. Requires a client in scope. After calling it, give the audience + the subject line and tell the user to tap "Create draft campaign", then review & send it in Engage.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        goal: { type: 'string', description: 'What the campaign should achieve — who to reach and what action to drive (e.g. "win back last year\'s VIP buyers who haven\'t rebooked; drive early-bird sales").' },
+        segmentName: { type: 'string', description: 'Target an EXISTING saved segment by name (the user named an audience/segment, or you just created one). The name is matched against the client\'s saved segments.' },
+        filters: { type: 'object', description: 'OR build a new cohort as {dimension: value}, e.g. {"core_ticket_types.name":"VIP","core_purchasers.city":"Cape Town"}. Use this when no saved segment is named. Contact/PII fields are NOT allowed.' },
+        channel: { type: 'string', enum: ['email', 'sms', 'both'], description: 'Delivery channel (default email).' },
+        name: { type: 'string', description: 'Optional campaign name (defaults to the subject line).' },
+      },
+      required: ['goal'],
+    },
+  };
+
   return {
     catalogue,
-    askData: { schema: askDataSchema, run: runAskData },
-    getGoals: { schema: getGoalsSchema, run: runGetGoals },
-    getDashboard: { schema: getDashboardSchema, run: runGetDashboard },
+    askData: { schema: askDataSchema, run: runAskData, menu: { cmd: 'data', label: 'Ticket data', icon: '📊', example: 'How many tickets have I sold?' } },
+    getGoals: { schema: getGoalsSchema, run: runGetGoals, menu: { cmd: 'goals', label: 'Goals', icon: '🎯', example: 'How are my goals tracking?' } },
+    getDashboard: { schema: getDashboardSchema, run: runGetDashboard, menu: { cmd: 'dashboard', label: 'This dashboard', icon: '📋', example: 'Summarise what this dashboard is telling me.' } },
     queryDashboard: { schema: queryDashboardSchema, run: runQueryDashboard },
-    getAlerts: { schema: getAlertsSchema, run: runGetAlerts },
-    getCampaigns: { schema: getCampaignsSchema, run: runGetCampaigns },
-    askUpload: { schema: askUploadSchema, run: runAskUpload },
+    getAlerts: { schema: getAlertsSchema, run: runGetAlerts, menu: { cmd: 'alerts', label: 'Alerts', icon: '🔔', example: 'What alerts are set, and has anything triggered?' } },
+    getCampaigns: { schema: getCampaignsSchema, run: runGetCampaigns, menu: { cmd: 'campaigns', label: 'Campaigns', icon: '📣', example: 'How did my recent campaigns perform?' } },
+    askUpload: { schema: askUploadSchema, run: runAskUpload, menu: { cmd: 'uploads', label: 'Attached files', icon: '📎', example: "What's in my attached data?" } },
     createAlert: { schema: createAlertSchema, run: runCreateAlert },
+    createSegment: { schema: createSegmentSchema, run: runCreateSegment },
+    draftCampaign: { schema: draftCampaignSchema, run: runDraftCampaign },
   };
 };

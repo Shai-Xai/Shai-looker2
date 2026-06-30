@@ -132,5 +132,6 @@ module.exports.mount = function mountDigests(app, { db, auth, mailer, messaging,
     res.json({ prefs: db.getDigestPrefs(req.params.id) });
   });
 
-  require('./scheduler').mount(app, { db, auth, mailer, messaging, push, generateContent: buildDigestContent, roleLenses: ROLE_LENSES, recordDigest: recordDigestHistory, feedbackUrl: digestFeedbackUrl, replyTo: digestReplyTo });
+  const sched = require('./scheduler').mount(app, { db, auth, mailer, messaging, push, generateContent: buildDigestContent, roleLenses: ROLE_LENSES, recordDigest: recordDigestHistory, feedbackUrl: digestFeedbackUrl, replyTo: digestReplyTo });
+  return { whatsappDigestFor: sched && sched.whatsappDigestFor }; // for the WhatsApp Owl scheduler
 };

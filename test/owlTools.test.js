@@ -35,7 +35,7 @@ beforeEach(() => {
 });
 afterEach(() => { looker.lookerRequest = origRequest; });
 
-const tools = () => createOwlTools({ query: queryEngine, auth: h.auth });
+const tools = () => createOwlTools({ query: queryEngine, auth: h.auth, db: h.db });
 const ctx = (user, suiteId) => ({ user, suiteId });
 
 test('askData forces the client\'s organiser scope onto the query', async () => {
@@ -78,6 +78,21 @@ test('two clients resolve to different forced scopes', async () => {
   assert.equal(bodyA.filters[h.ORG_FIELD], 'A-org');
   assert.equal(bodyB.filters[h.ORG_FIELD], 'B-org');
   assert.notEqual(bodyA.filters[h.ORG_FIELD], bodyB.filters[h.ORG_FIELD]);
+});
+
+test('askData binds to the SINGLE client in context, not the union of a multi-entity user', async () => {
+  // The WhatsApp door passes only entityId (no suiteId). A user who belongs to two
+  // clients must NOT have their organisers unioned — that was a cross-entity leak.
+  const entA = h.makeEntity('Client A', 'A-org');
+  const entB = h.makeEntity('Client B', 'B-org');
+  const user = h.makeClient('multi@client.test', [entA.id, entB.id]);
+  const res = await tools().askData.run({ measure: M0 }, { user, entityId: entA.id }); // no suiteId
+  assert.equal(res.ok, true);
+  assert.equal(res.queryBody.filters[h.ORG_FIELD], 'A-org');              // bound to the one client
+  assert.ok(!String(res.queryBody.filters[h.ORG_FIELD]).includes('B-org')); // never the other
+  // And the other way round → the other client only.
+  const resB = await tools().askData.run({ measure: M0 }, { user, entityId: entB.id });
+  assert.equal(resB.queryBody.filters[h.ORG_FIELD], 'B-org');
 });
 
 test('a client cannot view through another client\'s suite (fails closed)', async () => {
@@ -195,11 +210,27 @@ test('createAlert drafts a metric alert bound to the curated explore', async () 
   assert.equal(lookerCalls, 0);               // act-tool drafts; it never queries Looker
 });
 
-test('createAlert refuses when no event is selected', async () => {
-  const user = h.makeClient('owl-ca2@client.test', [h.makeEntity('A', 'A-org').id]);
+test('createAlert with no event auto-picks the client\'s only event', async () => {
+  const ent = h.makeEntity('Solo Co', 'Solo-org');
+  const suite = h.db.createSuite({ entityId: ent.id, name: 'Only Event' });
+  const user = h.makeClient('owl-ca2@client.test', [ent.id]);
   const res = await tools().createAlert.run({ measure: M0, operator: 'gte', threshold: 50 }, ctx(user)); // no suiteId
-  assert.equal(res.ok, false);
-  assert.equal(res.reason, 'no_event');
+  assert.equal(res.ok, true);
+  assert.equal(res.action.suiteId, suite.id); // resolved to the only event
+  assert.equal(res.action.needsEvent, false);
+});
+
+test('createAlert with no event + several events offers an in-chat picker (no dead end)', async () => {
+  const ent = h.makeEntity('Multi Co', 'Multi-org');
+  const s1 = h.db.createSuite({ entityId: ent.id, name: 'Event One' });
+  const s2 = h.db.createSuite({ entityId: ent.id, name: 'Event Two' });
+  const user = h.makeClient('owl-ca2b@client.test', [ent.id]);
+  const res = await tools().createAlert.run({ measure: M0, operator: 'gte', threshold: 50 }, ctx(user)); // no suiteId
+  assert.equal(res.ok, true);          // drafts anyway — never dead-ends asking to go pick
+  assert.equal(res.action.needsEvent, true);
+  assert.equal(res.action.suiteId, '');
+  const ids = (res.action.events || []).map((e) => e.id);
+  assert.ok(ids.includes(s1.id) && ids.includes(s2.id)); // both offered as choices
 });
 
 test('createAlert refuses an off-catalogue measure', async () => {
@@ -245,6 +276,111 @@ test('createAlert schema tracks the alerts module\'s option lists', () => {
   assert.deepEqual(props.operator.enum, alertsMod.OPERATORS);
   assert.deepEqual(props.channels.items.enum, alertsMod.CHANNELS);
   assert.deepEqual(props.priority.enum, alertsMod.PRIORITIES);
+});
+
+test('the "/" slash palette is sourced from the read tools (act tools excluded)', () => {
+  const t = tools();
+  const cmds = Object.values(t).filter((v) => v && v.menu).map((v) => v.menu.cmd);
+  for (const c of ['data', 'goals', 'alerts', 'campaigns', 'dashboard', 'uploads']) assert.ok(cmds.includes(c), `missing /${c}`);
+  assert.equal(t.createAlert.menu, undefined);   // act tools have no slash command
+  assert.equal(t.createSegment.menu, undefined);
+  assert.equal(t.draftCampaign.menu, undefined);
+});
+
+// ── draftCampaign (the flagship act-tool): DRAFTS a campaign to a cohort ─────────
+const campaignTools = () => createOwlTools({ query: queryEngine, auth: h.auth, db: h.db, draftCampaignCopy: async () => ({ subject: 'Come back, VIP', body: 'We miss you — grab your spot.', ctaText: 'Buy now' }) });
+
+test('draftCampaign drafts copy + a query-cohort audience (PII rejected, never sends)', async () => {
+  const ent = h.makeEntity('Ultra SA', 'Ultra South Africa');
+  const user = h.makeClient('camp1@client.test', [ent.id]);
+  const res = await campaignTools().draftCampaign.run({ goal: 'Win back lapsed VIP buyers', filters: { 'core_ticket_types.name': 'VIP' }, channel: 'email' }, { user, entityId: ent.id });
+  assert.equal(res.ok, true);
+  assert.equal(res.confirm, true);
+  assert.equal(res.action.kind, 'draftCampaign');
+  assert.equal(res.action.channel, 'email');
+  assert.equal(res.action.audience.mode, 'query');
+  assert.equal(res.action.audience.queryFilters['core_ticket_types.name'], 'VIP');
+  assert.equal(res.action.subject, 'Come back, VIP');     // copy drafted
+  assert.ok(res.action.body);
+});
+
+test('draftCampaign can target a SAVED segment by name', async () => {
+  const ent = h.makeEntity('Ultra SA', 'Ultra South Africa');
+  const user = h.makeClient('camp3@client.test', [ent.id]);
+  const segApi = { listSegments: () => [{ id: 'seg-1', name: 'Lapsed VIPs' }], resolveSegment: async () => ({ reach: { total: 800, email: 760, sms: 500 } }) };
+  const t = createOwlTools({ query: queryEngine, auth: h.auth, db: h.db, draftCampaignCopy: async () => ({ subject: 'We miss you', body: 'Come back.' }), getSegmentsApi: () => segApi });
+  const res = await t.draftCampaign.run({ goal: 'Win them back', segmentName: 'lapsed vips' }, { user, entityId: ent.id });
+  assert.equal(res.ok, true);
+  assert.equal(res.action.audience.mode, 'segment');
+  assert.equal(res.action.audience.segmentId, 'seg-1');
+  assert.equal(res.action.reach.total, 800);
+});
+
+test('draftCampaign reports the available segments when the named one is not found', async () => {
+  const ent = h.makeEntity('Ultra SA', 'Ultra South Africa');
+  const user = h.makeClient('camp4@client.test', [ent.id]);
+  const segApi = { listSegments: () => [{ id: 's1', name: 'VIPs' }], resolveSegment: async () => ({}) };
+  const t = createOwlTools({ query: queryEngine, auth: h.auth, db: h.db, draftCampaignCopy: async () => ({ subject: 'x', body: 'y' }), getSegmentsApi: () => segApi });
+  const res = await t.draftCampaign.run({ goal: 'g', segmentName: 'Nonexistent' }, { user, entityId: ent.id });
+  assert.equal(res.ok, false);
+  assert.equal(res.reason, 'no_segment');
+  assert.match(res.message, /VIPs/);
+});
+
+test('draftCampaign rejects a PII field as the audience, and requires goal + cohort', async () => {
+  const ent = h.makeEntity('Ultra SA', 'Ultra South Africa');
+  const user = h.makeClient('camp2@client.test', [ent.id]);
+  const pii = await campaignTools().draftCampaign.run({ goal: 'x', filters: { 'core_purchasers.email': 'a@b.com' } }, { user, entityId: ent.id });
+  assert.equal(pii.ok, false); assert.equal(pii.reason, 'pii_filter');
+  const noGoal = await campaignTools().draftCampaign.run({ filters: { 'core_ticket_types.name': 'VIP' } }, { user, entityId: ent.id });
+  assert.equal(noGoal.ok, false); assert.equal(noGoal.reason, 'no_goal');
+  const noCohort = await campaignTools().draftCampaign.run({ goal: 'x', filters: {} }, { user, entityId: ent.id });
+  assert.equal(noCohort.ok, false); assert.equal(noCohort.reason, 'no_cohort');
+});
+
+// ── createSegment (the audience act-tool): DRAFTS a query-segment from a cohort ──
+
+test('createSegment drafts a query segment from a cohort of curated dimensions', async () => {
+  const ent = h.makeEntity('Ultra SA', 'Ultra South Africa');
+  const user = h.makeClient('seg1@client.test', [ent.id]);
+  const res = await tools().createSegment.run({ name: 'VIP Cape Town', filters: { 'core_ticket_types.name': 'VIP', 'core_purchasers.city': 'Cape Town' } }, { user, entityId: ent.id });
+  assert.equal(res.ok, true);
+  assert.equal(res.confirm, true);
+  assert.equal(res.action.kind, 'createSegment');
+  assert.equal(res.action.entityId, ent.id);
+  assert.equal(res.action.draft.mode, 'query');
+  assert.equal(res.action.draft.model, catalogue.model);
+  assert.equal(res.action.draft.view, catalogue.explore);
+  assert.equal(res.action.draft.queryFilters['core_ticket_types.name'], 'VIP');
+  assert.equal(res.action.draft.queryFilters['core_purchasers.city'], 'Cape Town');
+});
+
+test('createSegment supports guest list via the complimentary flag', async () => {
+  const ent = h.makeEntity('Ultra SA', 'Ultra South Africa');
+  const user = h.makeClient('seg-gl@client.test', [ent.id]);
+  const res = await tools().createSegment.run({ filters: { 'core_tickets.is_complimentary': 'Yes' } }, { user, entityId: ent.id });
+  assert.equal(res.ok, true);
+  assert.equal(res.action.draft.queryFilters['core_tickets.is_complimentary'], 'Yes');
+});
+
+test('createSegment rejects a PII/contact field as a cohort driver', async () => {
+  const ent = h.makeEntity('Ultra SA', 'Ultra South Africa');
+  const user = h.makeClient('seg2@client.test', [ent.id]);
+  const res = await tools().createSegment.run({ filters: { 'core_purchasers.email': 'x@y.com' } }, { user, entityId: ent.id });
+  assert.equal(res.ok, false);
+  assert.equal(res.reason, 'pii_filter');
+});
+
+test('createSegment refuses without a client in scope, and without a cohort', async () => {
+  const admin = h.makeAdmin('seg-admin@howler.test');
+  const noClient = await tools().createSegment.run({ filters: { 'core_ticket_types.name': 'VIP' } }, { user: admin });
+  assert.equal(noClient.ok, false);
+  assert.equal(noClient.reason, 'no_client');
+  const ent = h.makeEntity('Ultra SA', 'Ultra South Africa');
+  const user = h.makeClient('seg3@client.test', [ent.id]);
+  const noCohort = await tools().createSegment.run({ filters: {} }, { user, entityId: ent.id });
+  assert.equal(noCohort.ok, false);
+  assert.equal(noCohort.reason, 'no_cohort');
 });
 
 test('createAlert accepts any operator the alerts module defines', async () => {

@@ -422,7 +422,7 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
         )}
 
         {!isComp && (<>
-        <Field label="How do you want to track it?">
+        <Field label="How do you want to track it?" hint={track === 'tile' ? 'The goal reads the live number from your dashboard — it updates automatically.' : 'You\'ll type in the current value yourself — great for targets not yet on a dashboard.'}>
           <div style={{ display: 'flex', gap: 8 }}>
             <Seg active={track === 'tile'} onClick={() => setTrack('tile')}>📊 From my dashboard</Seg>
             <Seg active={track === 'manual'} onClick={() => setTrack('manual')}>✍️ I'll enter it</Seg>
