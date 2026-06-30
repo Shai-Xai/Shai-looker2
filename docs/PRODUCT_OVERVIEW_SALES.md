@@ -121,10 +121,13 @@ approval needed.
   their **24-hour window** (they messaged the Owl in the last day); reaching everyone
   on a fixed schedule regardless will use an approved WhatsApp template (next step).
 - **Take action by reply button** — the Owl can **set up an alert** ("tell me when
-  tickets hit 1000") or **save a segment** straight from WhatsApp: it drafts it and
-  sends a **✅ Confirm** button (and, for an alert that could watch several events,
-  event-choice buttons). Tapping commits it through the same permission checks as the
-  app. (Campaigns stay in the Pulse app — they message buyers.)
+  tickets hit 1000"), **save a segment**, or **draft an email/SMS campaign** straight
+  from WhatsApp. It works like a campaign manager (asks the few setup questions it needs,
+  same as in-app), drafts it, then sends a **✅ Confirm** button (event-choice buttons
+  for an alert that could watch several events). Tapping commits through the same
+  permission checks as the app. A drafted campaign is a **draft only** — the customer
+  still reviews, approves and **sends it in the Pulse app (Engage)**; the Owl never sends
+  to buyers from WhatsApp.
 - **Status 🧪:** pilot. Howler links each phone number to its client in **Admin →
   WhatsApp Owl**, where a live activity log shows inbound messages end-to-end.
 
