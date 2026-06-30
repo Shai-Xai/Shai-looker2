@@ -24,6 +24,9 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     throw new Error('owlTools requires the query engine (applyScope + runLookerQuery).');
   }
   const ORG = 'core_organisers.name'; // the canonical organiser lock field
+  // Resolver for the createSegment act-tool's preview (count + per-channel reach).
+  // Server-side only; never returns the people list to the chat. Same scope gate.
+  const { resolveQueryAudience } = require('./audienceQuery')({ auth, db, catalogue });
 
   // Index the curated catalogue once: name → spec, plus filterable set.
   const measureByName = new Map(catalogue.measures.map((m) => [m.name, m]));
@@ -661,6 +664,56 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
   // `menu` = the slash-command palette entry for a tool (client /api/owl/capabilities).
   // Defining it HERE keeps the palette sourced from the registry, so adding a tool with
   // a menu automatically adds its slash command — one source of truth, no drift.
+  // ── createSegment (ACT) ───────────────────────────────────────────────────────
+  // DRAFT a reusable audience from a cohort (catalogue dimensions: age/gender/city/
+  // country/ticket type/category/guest-list…). Self-confirm pattern like createAlert.
+  // PII-safe: it resolves a count + per-channel reach server-side, but NEVER returns
+  // people to the chat; the actual list only materialises inside a governed send.
+  // Contact fields can't define a segment. Committed via POST /api/owl/act/create-segment.
+  async function runCreateSegment(args = {}, ctx = {}) {
+    const { user, suiteId } = ctx;
+    if (!user) return refuse('no_user', 'No authenticated user in context.');
+    const entityId = ctx.entityId || (suiteId && db && db.getSuite ? (db.getSuite(suiteId) || {}).entityId : null);
+    if (!entityId) return refuse('no_client', 'Open or pick a client first — a segment belongs to a client.');
+    const filters = {};
+    const desc = [];
+    for (const [field, val] of Object.entries(args.filters || {})) {
+      const d = dimByName.get(field);
+      if (!d) return refuse('unknown_filter', `"${field}" isn't a field I can segment by.`);
+      if (d.filterOnly || !filterableDims.has(field)) return refuse('pii_filter', `"${field}" is contact data — it can't define a segment (you never segment by email/phone/name).`);
+      if (val == null || String(val).trim() === '') continue;
+      filters[field] = String(val);
+      desc.push(`${d.label} = ${val}`);
+    }
+    if (!Object.keys(filters).length) return refuse('no_cohort', 'Tell me the cohort to capture — e.g. ticket type VIP, city Cape Town, age 18 to 25.');
+    const name = String(args.name || '').trim().slice(0, 120) || desc.join(' · ') || 'Segment';
+    const draft = { mode: 'query', model: catalogue.model, view: catalogue.explore, queryFilters: filters };
+    // Preview the size + reach (server-side; the list itself never enters the chat).
+    let count = null; let reach = null;
+    try { const r = await resolveQueryAudience({ entityId, definition: draft, user, suiteId }); if (r && !r.error) { count = r.count; reach = r.reach; } } catch { /* preview is best-effort */ }
+    return {
+      ok: true,
+      confirm: true,
+      action: { kind: 'createSegment', entityId, name, draft, summary: desc.join(' · '), count, reach },
+    };
+  }
+  const createSegmentSchema = {
+    name: 'createSegment',
+    description:
+      'DRAFT a reusable audience SEGMENT from a cohort, for the user to confirm — you do NOT create it; they tap "Create segment" to save it. The cohort is defined by curated dimensions (age, gender, buyer city/country, ticket type, ticket category, complimentary = guest list, etc.). A segment is a saved, live audience used later to run a campaign or sync to ad platforms; consent + unsubscribes are applied when it is actually messaged. Use when the user wants to build or save an audience ("make a segment of VIP buyers in Cape Town", "save these people as an audience", "guest list segment"). NEVER lists or names individual people — only a total count + per-channel reach. Contact fields (email/phone/name) CANNOT define a segment. Requires a client in scope. After calling it, state the cohort + the count/reach and tell the user to tap "Create segment".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Short name for the segment (one is generated from the cohort if omitted).' },
+        filters: {
+          type: 'object',
+          description: 'The cohort as {dimension: value} over curated dimensions, e.g. {"core_ticket_types.name":"VIP","core_purchasers.city":"Cape Town"}. Guest list = {"core_tickets.is_complimentary":"Yes"}. Age can be a range like "18 to 25". Contact/PII fields are NOT allowed.',
+        },
+      },
+      required: ['filters'],
+    },
+  };
+
   return {
     catalogue,
     askData: { schema: askDataSchema, run: runAskData, menu: { cmd: 'data', label: 'Ticket data', icon: '📊', example: 'How many tickets have I sold?' } },
@@ -671,5 +724,6 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     getCampaigns: { schema: getCampaignsSchema, run: runGetCampaigns, menu: { cmd: 'campaigns', label: 'Campaigns', icon: '📣', example: 'How did my recent campaigns perform?' } },
     askUpload: { schema: askUploadSchema, run: runAskUpload, menu: { cmd: 'uploads', label: 'Attached files', icon: '📎', example: "What's in my attached data?" } },
     createAlert: { schema: createAlertSchema, run: runCreateAlert },
+    createSegment: { schema: createSegmentSchema, run: runCreateSegment },
   };
 };

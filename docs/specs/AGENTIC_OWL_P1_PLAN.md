@@ -287,7 +287,30 @@ built unless marked ✅.)
   regression test asserts the schema enums equal the alerts constants so the two can't
   drift. (3 more tests; suite green.)
 - **Pin chart to Home / a specific dashboard** (NEXT BUILD) — live tile via createDashboard/updateDashboard + the marks/pin system; Home pins host on an auto-created "Saved from Owl" dashboard. 📌-button first, conversational "pin that to home" later.
-- Later: **create a segment from a cohort → draft a campaign** (the flagship insight→act; never exposes PII, always via consent + approval). Now rides the act-card spine `createAlert` established (draft → confirm), with the campaign-approval workflow as the heavier confirm step.
+- **✅ createSegment — the audience act-tool (2026-06-29).** The Owl drafts a reusable
+  **segment** from a chat cohort (curated dimensions: age, gender, buyer city/country,
+  ticket type, ticket category, complimentary = guest list) → confirm card showing only
+  a **count + per-channel reach** (never people), committed via the existing
+  `campaigns.approve`-gated segment create. Also a 🎯 **"Save as segment"** button on any
+  data answer — "from any point of a chat" (reuses the answer's live query as the cohort).
+  Architecture: the resolver is general (filter-driven), so new segment *types* are new
+  curated dimensions, not new code. Shipped pieces:
+  - `audienceMap.js` — extracted the campaign engine's person-mapping (dedupe + per-channel
+    consent + reach) so chat-segments reuse the SAME logic (no consent duplication); also
+    got `actions.js` back under budget.
+  - `audienceQuery.js` — a `query`-source resolver: scoped people-query over the curated
+    explore reusing the `askData` scope gate (organiser forced, fails closed); identity
+    columns selected server-side only, NEVER returned to chat.
+  - `actions.js` `audienceFor` gains a `query` branch (so campaigns can use a chat-segment);
+    `segments.js` gains `query` mode in `cleanDef` + a programmatic `createSegment`.
+  - `owlTools.createSegment` (drafts + previews count/reach; rejects PII as a cohort driver),
+    `POST /api/owl/act/create-segment` (re-checks campaigns.approve; only the ticket-data
+    explore), `SegmentActionCard` + `SaveSegmentButton` client.
+  - Tests: cohort draft, guest-list flag, PII-driver rejected, no-client/no-cohort refusals.
+  **Deferred (need catalogue fields):** top spenders (per-person spend ranking), new vs
+  returning (a returning flag), reps (a rep/promoter dimension) — each becomes a driver
+  once curated in. **Next:** draft a campaign FROM a segment (the full insight→act chain),
+  per-channel consent columns on the purchaser explore.
 
 ### ✅ Shipped this session
 Native chat on Claude tool-use; `askData` (curated catalogue, scoped, fails-closed); allowlist gating (shai.evian); scope bound to the organisers a user can access (never platform-wide); client/event picker + the Owl states its scope; suite event-lock applied; re-pointed to the `tickets_purchased`/`core_tickets` explore (realistic counts); tickets-vs-add-ons split; customer lookup by email/phone/name (filter-only, no enumeration); citation chips + underlying data table; today's-date awareness; auto-charts via Pulse's `ChartTile` + a bar/line/pie/metric type toggle.
