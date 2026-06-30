@@ -19,7 +19,7 @@ const defaultCatalogue = require('./owlCatalogueSeed');
 // there and the Owl can immediately set + ask for it; no second list to keep in sync).
 const { OPERATORS: ALERT_OPERATORS, CHANNELS: ALERT_CHANNELS, PRIORITIES: ALERT_PRIORITIES } = require('./alerts');
 
-module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAlertsApi, getCampaignsApi, getUploadsApi, resolveTileValue, getExploreFields, getFieldOverrides, draftCampaignCopy, catalogue = defaultCatalogue }) {
+module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAlertsApi, getCampaignsApi, getUploadsApi, resolveTileValue, getExploreFields, getFieldOverrides, draftCampaignCopy, getSegmentsApi, catalogue = defaultCatalogue }) {
   if (!query || !query.applyScope || !query.runLookerQuery) {
     throw new Error('owlTools requires the query engine (applyScope + runLookerQuery).');
   }
@@ -744,34 +744,52 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     if (!entityId) return refuse('no_client', 'Open or pick a client first — a campaign belongs to a client.');
     const goal = String(args.goal || '').trim();
     if (!goal) return refuse('no_goal', 'Tell me the goal — who to reach and what to get them to do (e.g. "win back last year\'s VIP buyers who haven\'t rebooked").');
-    // Cohort (audience) — same validation + shape as createSegment; PII fields rejected.
-    const filters = {};
-    const desc = [];
-    for (const [field, val] of Object.entries(args.filters || {})) {
-      const d = dimByName.get(field);
-      if (!d) return refuse('unknown_filter', `"${field}" isn't a field I can target by.`);
-      if (d.filterOnly || !filterableDims.has(field)) return refuse('pii_filter', `"${field}" is contact data — it can't define an audience.`);
-      if (val == null || String(val).trim() === '') continue;
-      filters[field] = String(val);
-      desc.push(`${d.label} = ${val}`);
-    }
-    if (!Object.keys(filters).length) return refuse('no_cohort', 'Who should this go to? Give a cohort — e.g. ticket type VIP, city Cape Town, age 18 to 25.');
-    const audience = { mode: 'query', model: catalogue.model, view: catalogue.explore, queryFilters: filters };
     const channel = ['email', 'sms', 'both'].includes(args.channel) ? args.channel : 'email';
-    // Audience reach (count + per-channel), server-side; never returns people to chat.
-    let reach = null;
-    try { const r = await resolveQueryAudience({ entityId, definition: audience, user, suiteId }); if (r && !r.error) reach = r.reach; } catch { /* best-effort preview */ }
+    // Audience: EITHER a saved segment (by name) OR a custom cohort built from the chat.
+    let audience; let summary = ''; let reach = null;
+    const segName = String(args.segmentName || '').trim();
+    if (segName) {
+      const segApi = typeof getSegmentsApi === 'function' ? getSegmentsApi() : null;
+      const list = segApi && segApi.listSegments ? segApi.listSegments(entityId) : [];
+      const lc = segName.toLowerCase();
+      const seg = list.find((s) => s.name.toLowerCase() === lc)
+        || list.find((s) => s.name.toLowerCase().includes(lc) || lc.includes(s.name.toLowerCase()));
+      if (!seg) {
+        return refuse('no_segment', list.length
+          ? `I couldn't find a saved segment called "${segName}". You have: ${list.map((s) => `"${s.name}"`).join(', ')}. Pick one, or describe a cohort and I'll build it.`
+          : 'There are no saved segments for this client yet — describe the cohort (e.g. ticket type VIP, city Cape Town) and I\'ll build it.');
+      }
+      audience = { mode: 'segment', segmentId: seg.id };
+      summary = seg.name;
+      try { if (segApi.resolveSegment) { const r = await segApi.resolveSegment(entityId, seg.id, user); if (r && r.reach) reach = r.reach; } } catch { /* best-effort preview */ }
+    } else {
+      // Custom cohort from the chat — same validation + shape as createSegment; PII rejected.
+      const filters = {};
+      const desc = [];
+      for (const [field, val] of Object.entries(args.filters || {})) {
+        const d = dimByName.get(field);
+        if (!d) return refuse('unknown_filter', `"${field}" isn't a field I can target by.`);
+        if (d.filterOnly || !filterableDims.has(field)) return refuse('pii_filter', `"${field}" is contact data — it can't define an audience.`);
+        if (val == null || String(val).trim() === '') continue;
+        filters[field] = String(val);
+        desc.push(`${d.label} = ${val}`);
+      }
+      if (!Object.keys(filters).length) return refuse('no_cohort', 'Who should this go to? Name a saved segment, or give a cohort — e.g. ticket type VIP, city Cape Town, age 18 to 25.');
+      audience = { mode: 'query', model: catalogue.model, view: catalogue.explore, queryFilters: filters };
+      summary = desc.join(' · ');
+      try { const r = await resolveQueryAudience({ entityId, definition: audience, user, suiteId }); if (r && !r.error) reach = r.reach; } catch { /* best-effort preview */ }
+    }
     // Draft the copy with the existing campaign copywriter (subject/body/cta).
     let copy = {};
     try { if (typeof draftCampaignCopy === 'function') copy = (await draftCampaignCopy({ entityId, goal, audienceCount: (reach && reach.total) || 0, eventSuiteId: suiteId || '' })) || {}; } catch { copy = {}; }
     if (!copy.subject && !copy.body) return refuse('draft_failed', 'I couldn\'t draft the copy just now — try again in a moment, or build it in Engage.');
-    const name = String(args.name || '').trim().slice(0, 120) || (copy.subject ? String(copy.subject).slice(0, 80) : (desc.join(' · ') || 'Campaign'));
+    const name = String(args.name || '').trim().slice(0, 120) || (copy.subject ? String(copy.subject).slice(0, 80) : (summary || 'Campaign'));
     return {
       ok: true,
       confirm: true,
       action: {
         kind: 'draftCampaign', entityId, name, channel, goal,
-        audience, summary: desc.join(' · '), reach,
+        audience, summary, reach,
         subject: copy.subject || '', body: copy.body || '', ctaText: copy.ctaText || '',
       },
     };
@@ -779,16 +797,17 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
   const draftCampaignSchema = {
     name: 'draftCampaign',
     description:
-      'DRAFT an email/SMS marketing CAMPAIGN to a cohort, for the user to confirm — you do NOT send it. It creates a DRAFT in Engage that a human reviews, approves and sends; nothing reaches customers from here. Use when the user wants to market to / message a group ("draft a win-back email to lapsed VIP buyers", "send an offer to Cape Town 18-25s"). The cohort is curated dimensions (age, gender, buyer city/country, ticket type, category, complimentary = guest list). You provide the goal; the copy (subject + body) is drafted for you and shown for review. NEVER lists or names individual people — only a count + reach. Contact fields (email/phone) cannot define the audience. Requires a client in scope. After calling it, give the audience + the subject line and tell the user to tap "Create draft campaign", then review & send it in Engage.',
+      'DRAFT an email/SMS marketing CAMPAIGN, for the user to confirm — you do NOT send it. It creates a DRAFT in Engage that a human reviews, approves and sends; nothing reaches customers from here. Use when the user wants to market to / message a group ("draft a win-back email to lapsed VIP buyers", "email my Cape Town segment an offer"). The audience is EITHER a saved segment (pass segmentName — use this when the user names an existing audience/segment) OR a new cohort built from curated dimensions (pass filters — age, gender, buyer city/country, ticket type, category, complimentary = guest list). Provide exactly ONE of segmentName or filters. You provide the goal; the copy (subject + body) is drafted for you and shown for review. NEVER lists or names individual people — only a count + reach. Contact fields (email/phone) cannot define the audience. Requires a client in scope. After calling it, give the audience + the subject line and tell the user to tap "Create draft campaign", then review & send it in Engage.',
     input_schema: {
       type: 'object',
       properties: {
         goal: { type: 'string', description: 'What the campaign should achieve — who to reach and what action to drive (e.g. "win back last year\'s VIP buyers who haven\'t rebooked; drive early-bird sales").' },
-        filters: { type: 'object', description: 'The audience cohort as {dimension: value}, e.g. {"core_ticket_types.name":"VIP","core_purchasers.city":"Cape Town"}. Contact/PII fields are NOT allowed.' },
+        segmentName: { type: 'string', description: 'Target an EXISTING saved segment by name (the user named an audience/segment, or you just created one). The name is matched against the client\'s saved segments.' },
+        filters: { type: 'object', description: 'OR build a new cohort as {dimension: value}, e.g. {"core_ticket_types.name":"VIP","core_purchasers.city":"Cape Town"}. Use this when no saved segment is named. Contact/PII fields are NOT allowed.' },
         channel: { type: 'string', enum: ['email', 'sms', 'both'], description: 'Delivery channel (default email).' },
         name: { type: 'string', description: 'Optional campaign name (defaults to the subject line).' },
       },
-      required: ['goal', 'filters'],
+      required: ['goal'],
     },
   };
 

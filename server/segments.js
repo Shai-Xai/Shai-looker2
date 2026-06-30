@@ -321,7 +321,11 @@ function mount(app, { db, auth, resolveAudience, resolveRecipe, meta, tiktok }) 
       .run(id, entityId, nm, source, JSON.stringify(def), (user.email || 'owl'), ts, ts);
     return { ok: true, segment: rowToSeg(getSeg(id)) };
   }
-  return { resolveSegment, getSegmentDefinition, createSegment: createSegmentFor };
+  // The client's saved segments (id + name) — so the Owl can target one by name.
+  function listSegmentsFor(entityId) {
+    return sql.prepare('SELECT id, name FROM segments WHERE entity_id=? ORDER BY updated_at DESC LIMIT 200').all(entityId).map((r) => ({ id: r.id, name: r.name }));
+  }
+  return { resolveSegment, getSegmentDefinition, createSegment: createSegmentFor, listSegments: listSegmentsFor };
 }
 
 module.exports = { mount };

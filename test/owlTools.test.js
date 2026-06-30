@@ -304,6 +304,29 @@ test('draftCampaign drafts copy + a query-cohort audience (PII rejected, never s
   assert.ok(res.action.body);
 });
 
+test('draftCampaign can target a SAVED segment by name', async () => {
+  const ent = h.makeEntity('Ultra SA', 'Ultra South Africa');
+  const user = h.makeClient('camp3@client.test', [ent.id]);
+  const segApi = { listSegments: () => [{ id: 'seg-1', name: 'Lapsed VIPs' }], resolveSegment: async () => ({ reach: { total: 800, email: 760, sms: 500 } }) };
+  const t = createOwlTools({ query: queryEngine, auth: h.auth, db: h.db, draftCampaignCopy: async () => ({ subject: 'We miss you', body: 'Come back.' }), getSegmentsApi: () => segApi });
+  const res = await t.draftCampaign.run({ goal: 'Win them back', segmentName: 'lapsed vips' }, { user, entityId: ent.id });
+  assert.equal(res.ok, true);
+  assert.equal(res.action.audience.mode, 'segment');
+  assert.equal(res.action.audience.segmentId, 'seg-1');
+  assert.equal(res.action.reach.total, 800);
+});
+
+test('draftCampaign reports the available segments when the named one is not found', async () => {
+  const ent = h.makeEntity('Ultra SA', 'Ultra South Africa');
+  const user = h.makeClient('camp4@client.test', [ent.id]);
+  const segApi = { listSegments: () => [{ id: 's1', name: 'VIPs' }], resolveSegment: async () => ({}) };
+  const t = createOwlTools({ query: queryEngine, auth: h.auth, db: h.db, draftCampaignCopy: async () => ({ subject: 'x', body: 'y' }), getSegmentsApi: () => segApi });
+  const res = await t.draftCampaign.run({ goal: 'g', segmentName: 'Nonexistent' }, { user, entityId: ent.id });
+  assert.equal(res.ok, false);
+  assert.equal(res.reason, 'no_segment');
+  assert.match(res.message, /VIPs/);
+});
+
 test('draftCampaign rejects a PII field as the audience, and requires goal + cohort', async () => {
   const ent = h.makeEntity('Ultra SA', 'Ultra South Africa');
   const user = h.makeClient('camp2@client.test', [ent.id]);
