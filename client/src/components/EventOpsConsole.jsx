@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, lazy, Suspense } from 'react';
+import { useEffect, useMemo, useState, lazy, Suspense, Component } from 'react';
 import { api } from '../lib/api.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
 
@@ -95,9 +95,11 @@ export default function EventOpsConsole({ entityId, scope = 'admin' }) {
       )}
 
       {scan && (
-        <Suspense fallback={null}>
-          <EventOpsScanner onCode={onScanned} onClose={() => setScan(null)} />
-        </Suspense>
+        <ScannerBoundary onError={() => { setScan(null); flash('Scanner had a hiccup — tap a device to move/log it, or try Scan again.'); }}>
+          <Suspense fallback={null}>
+            <EventOpsScanner onCode={onScanned} onClose={() => setScan(null)} />
+          </Suspense>
+        </ScannerBoundary>
       )}
 
       {actionDevice && (
@@ -460,6 +462,16 @@ function DeviceActionSheet({ suiteId, device, onClose, onDone }) {
       )}
     </Modal>
   );
+}
+
+// Isolates the camera scanner: if html5-qrcode and React ever fight over the DOM again
+// (or the lazy chunk fails to load), this catches it and closes the scanner via onError
+// instead of letting the error bubble up and blank the whole page.
+class ScannerBoundary extends Component {
+  constructor(props) { super(props); this.state = { failed: false }; }
+  static getDerivedStateFromError() { return { failed: true }; }
+  componentDidCatch() { this.props.onError?.(); }
+  render() { return this.state.failed ? null : this.props.children; }
 }
 
 // ───────────────────────────────── UI atoms ──────────────────────────────────

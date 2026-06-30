@@ -60,7 +60,12 @@ export default function EventOpsScanner({ onCode, onClose, title = 'Scan a devic
           <button onClick={() => { stopCamera(); onClose?.(); }} style={closeBtn} aria-label="Close">✕</button>
         </div>
 
-        <div id={REGION_ID} style={region}>
+        {/* IMPORTANT: #REGION_ID is a LEAF — html5-qrcode injects its own <video>/overlay
+            nodes here and owns this subtree. React must never render children into it, or
+            unmount/update races throw "removeChild ... not a child" and crash the page. The
+            status message is a SIBLING overlay, not a child of the camera div. */}
+        <div style={regionWrap}>
+          <div id={REGION_ID} style={region} />
           {camState !== 'live' && (
             <div style={regionMsg}>
               {camState === 'starting' ? 'Starting camera…' : '📷 Camera unavailable — enter the code below.'}
@@ -88,8 +93,9 @@ const overlay = { position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0
 const sheet = { width: '100%', maxWidth: 460, background: 'var(--card)', borderTopLeftRadius: 18, borderTopRightRadius: 18, borderRadius: 18, padding: 16, margin: 8, boxShadow: 'var(--shadow-pop)' };
 const head = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 };
 const closeBtn = { width: 36, height: 36, borderRadius: 10, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', fontSize: 16, cursor: 'pointer' };
-const region = { position: 'relative', width: '100%', aspectRatio: '4 / 3', background: '#000', borderRadius: 12, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' };
-const regionMsg = { color: '#fff', fontSize: 14, textAlign: 'center', padding: 20 };
+const regionWrap = { position: 'relative', width: '100%', aspectRatio: '4 / 3', background: '#000', borderRadius: 12, overflow: 'hidden' };
+const region = { width: '100%', height: '100%' }; // html5-qrcode's container — keep it a leaf
+const regionMsg = { position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 14, textAlign: 'center', padding: 20, pointerEvents: 'none' };
 const hintStyle = { color: 'var(--muted)', fontSize: 12.5, textAlign: 'center', margin: '10px 0 0' };
 const input = { flex: 1, minWidth: 0, padding: '12px 14px', fontSize: 16, borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)' };
 const goBtn = { padding: '0 18px', borderRadius: 10, border: 'none', background: 'var(--brand)', color: '#fff', fontWeight: 700, fontSize: 15, cursor: 'pointer' };
