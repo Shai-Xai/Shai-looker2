@@ -328,6 +328,7 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
       webhookPath: sec ? `/api/whatsapp/inbound?key=${encodeURIComponent(sec)}` : '/api/whatsapp/inbound',
       mediaEnabled: db.getSetting('whatsapp_media_enabled', '') === '1',
       pushEnabled: db.getSetting('whatsapp_push_enabled', '') === '1',
+      testMessage: db.getSetting('whatsapp_test_message', '') || '',
       numbers: Object.entries(allowlist()).map(([msisdn, v]) => ({ msisdn, email: v.email || '', entityId: v.entityId || '', subs: Array.isArray(v.subs) ? v.subs : [], hour: Number.isInteger(v.hour) ? v.hour : 8 })),
     });
   });
@@ -339,6 +340,7 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
     if (b.secret !== undefined) db.setSetting('whatsapp_webhook_secret', String(b.secret || '').trim());
     if (b.mediaEnabled !== undefined) db.setSetting('whatsapp_media_enabled', b.mediaEnabled ? '1' : '');
     if (b.pushEnabled !== undefined) db.setSetting('whatsapp_push_enabled', b.pushEnabled ? '1' : '');
+    if (b.testMessage !== undefined) db.setSetting('whatsapp_test_message', String(b.testMessage || '').slice(0, 1000));
     if (Array.isArray(b.numbers)) {
       const map = {};
       for (const n of b.numbers) {

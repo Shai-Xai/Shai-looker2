@@ -37,7 +37,7 @@ export default function WhatsAppOwl() {
   const test = () => sendTest(testTo);
 
   useEffect(() => {
-    api.owlWhatsapp().then((r) => { setCfg({ from: r.from || '', webhookPath: r.webhookPath, hasSecret: r.hasSecret, hasApiKey: r.hasApiKey, mediaEnabled: !!r.mediaEnabled, pushEnabled: !!r.pushEnabled, numbers: r.numbers || [] }); }).catch(() => setCfg({ numbers: [] }));
+    api.owlWhatsapp().then((r) => { setCfg({ from: r.from || '', webhookPath: r.webhookPath, hasSecret: r.hasSecret, hasApiKey: r.hasApiKey, mediaEnabled: !!r.mediaEnabled, pushEnabled: !!r.pushEnabled, numbers: r.numbers || [] }); if (r.testMessage) setTestText(r.testMessage); }).catch(() => setCfg({ numbers: [] }));
     api.adminListEntities().then((r) => setEnts(Array.isArray(r) ? r : (r.entities || []))).catch(() => setEnts([]));
     loadLog();
   }, []);
@@ -48,7 +48,7 @@ export default function WhatsAppOwl() {
   const delNum = (i) => setCfg((c) => ({ ...c, numbers: c.numbers.filter((_, j) => j !== i) }));
   const save = async () => {
     setBusy(true);
-    try { await api.saveOwlWhatsapp({ from: cfg.from, mediaEnabled: !!cfg.mediaEnabled, pushEnabled: !!cfg.pushEnabled, numbers: cfg.numbers.filter((n) => n.msisdn && n.email), ...(secret.trim() ? { secret: secret.trim() } : {}), ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}) }); setSaved(true); setSecret(''); setApiKey(''); setTimeout(() => setSaved(false), 1800); } catch { /* ignore */ }
+    try { await api.saveOwlWhatsapp({ from: cfg.from, mediaEnabled: !!cfg.mediaEnabled, pushEnabled: !!cfg.pushEnabled, testMessage: testText, numbers: cfg.numbers.filter((n) => n.msisdn && n.email), ...(secret.trim() ? { secret: secret.trim() } : {}), ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}) }); setSaved(true); setSecret(''); setApiKey(''); setTimeout(() => setSaved(false), 1800); } catch { /* ignore */ }
     setBusy(false);
   };
 
@@ -135,7 +135,7 @@ export default function WhatsAppOwl() {
           <button onClick={test} disabled={!testTo.trim()} style={{ ...fld, cursor: testTo.trim() ? 'pointer' : 'default' }}>Send test</button>
           {testMsg && <span style={{ fontSize: 12.5, color: testMsg.startsWith('✓') ? '#34c759' : 'var(--muted)' }}>{testMsg}</span>}
         </div>
-        <input value={testText} onChange={(e) => setTestText(e.target.value)} placeholder="Optional custom message (blank = default test message). Used by Send test and the ✈ Test buttons above." style={{ ...fld, width: '100%', maxWidth: 480, marginTop: 6 }} />
+        <input value={testText} onChange={(e) => setTestText(e.target.value)} placeholder="Optional custom message — used by Send test + the ✈ Test buttons; saved with “Save WhatsApp setup”." style={{ ...fld, width: '100%', maxWidth: 480, marginTop: 6 }} />
         <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 4 }}>Note: WhatsApp only allows a business-initiated message like this if that number has messaged you in the last 24h (or via an approved template). If it fails with a window/template error, that’s expected — the real flow is the customer messaging first.</div>
       </div>
 
