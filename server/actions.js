@@ -431,6 +431,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
         delayHours: Math.max(0, Number(s.delayHours) || 0),
         subject: String(s.subject || '').slice(0, 200),
         body: String(s.body || '').slice(0, 8000),
+        smsBody: String(s.smsBody || '').slice(0, 2000), // separate SMS copy per step when channel = 'both'
         ctaText: String(s.ctaText || '').slice(0, 60),
         // Per-step content parity with once-off: template vs custom HTML + hero image.
         contentMode: s.contentMode === 'html' ? 'html' : 'template',
@@ -821,9 +822,10 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
   // opt-out (alphanumeric sender IDs can't receive STOP replies).
   function renderSmsFor(action, recipient, step, stepIndex = 0) {
     const cfg = action.config;
-    // 'both'-channel campaigns have a separate SMS copy; fall back to body for
-    // SMS-only campaigns (which edit body directly).
-    const useBody = step ? (step.body || cfg.smsBody || cfg.body) : (cfg.smsBody || cfg.body);
+    // 'both'-channel campaigns have a separate SMS copy. In a sequence each step
+    // carries its own smsBody (falling back to the step's email body, then the
+    // campaign-level copy); SMS-only campaigns edit body directly.
+    const useBody = step ? (step.smsBody || step.body || cfg.smsBody || cfg.body) : (cfg.smsBody || cfg.body);
     const firstName = (recipient.name || '').split(/\s+/)[0] || '';
     const rtok = unsubToken(action.entityId, recipient.email || recipient.phone || '');
     const promo = promoForRecipient(action, recipient.email || '');
