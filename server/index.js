@@ -1114,9 +1114,9 @@ app.post('/api/filter-suggest', auth.requireAuth, async (req, res) => {
     const COMPANION = {
       'core_organisers.name': 'core_organisers.id', 'core_organisers.id': 'core_organisers.name',
       'core_events.name': 'core_events.id', 'core_events.id': 'core_events.name',
-      'core_ticket_categories.name': 'core_ticket_categories.id', 'core_ticket_types.name': 'core_ticket_types.id',
+      'core_ticket_categories.name': 'core_ticket_categories.id', 'core_ticket_categories.id': 'core_ticket_categories.name', 'core_ticket_types.name': 'core_ticket_types.id', 'core_ticket_types.id': 'core_ticket_types.name',
     };
-    let comp = (pair || /^core_ticket_(categories|types)\.name$/.test(field)) ? COMPANION[field] : null; // ticket names collide → always show id
+    let comp = (pair || /^core_ticket_(categories|types)\.(name|id)$/.test(field)) ? COMPANION[field] : null; // ticket names collide → always show id (and name when filtering by id)
     // Event names also show the event's start date in the dropdown, e.g.
     // "Ultra South Africa  —  29 May 2026", pulled from the same explore.
     let dateField = field === 'core_events.name' ? 'core_events.start_date' : null;
