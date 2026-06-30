@@ -118,6 +118,7 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
           <span style={{ fontWeight: 700, fontSize: 14 }}>{a.title || a.config.subject || 'Untitled campaign'}</span>
           <ChannelChip channel={a.config?.channel} />
           {a.config?.category && <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 980, color: 'var(--brand)', background: 'rgba(var(--brand-rgb,255,56,92),0.10)' }}>{a.config.category}</span>}
+          {a.config?.source === 'owl-whatsapp' && <span title="Drafted by the Owl from a WhatsApp chat" style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 980, color: '#1d8a4f', background: 'rgba(37,211,102,0.14)' }}>💬 via WhatsApp</span>}
           <StatusChip status={a.status} />
         </div>
         <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 3 }}>

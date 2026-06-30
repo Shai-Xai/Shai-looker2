@@ -392,6 +392,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
         source: shapeAudience((body.conversion || {}).source || {}),
       },
       clickToken: body.clickToken || crypto.randomBytes(6).toString('base64url'),
+      source: String(body.source || '').slice(0, 40), // where it was drafted (e.g. 'owl-whatsapp')
     };
   }
 
