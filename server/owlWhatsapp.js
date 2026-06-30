@@ -206,7 +206,7 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
 
   // Build the per-turn instructions (scope, date, the live field dictionary, guidance,
   // and the WhatsApp plain-text override). Mirrors the web route, trimmed for WhatsApp.
-  function instructionsFor(entityId) {
+  function instructionsFor(entityId, userId) {
     const nowSa = new Date(Date.now() + 2 * 60 * 60 * 1000); // SAST (UTC+2) — Howler's local day/hour
     const today = nowSa.toISOString().slice(0, 10);
     const hourSa = nowSa.getUTCHours();
@@ -223,7 +223,7 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
     if ((cat.notes || []).length) parts.push(`Rules:\n- ${cat.notes.join('\n- ')}`);
     try { const g = resolveGuidance(db, entityId); if (g) parts.push(g); } catch { /* ignore */ }
     // Durable client memory (facts confirmed over time) — same source as the web Owl.
-    try { const mem = owlMemory.memoryNote(db, entityId); if (mem) parts.push(mem); } catch { /* ignore */ }
+    try { const mem = owlMemory.memoryNote(db, entityId, '', userId); if (mem) parts.push(mem); } catch { /* ignore */ }
     // Reporting currency for this organiser (blank for ZAR — the default).
     try { const cn = currencyNote && currencyNote(entityId || undefined); if (cn) parts.push(cn); } catch { /* ignore */ }
     // AI content language for this organiser (blank for English — the default).
@@ -387,7 +387,9 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
         if (r.ok) { logEvent(msisdn, 'action-done', `campaign draft ${r.action.title}`); const link = actionViewUrl(publicBase(), 'draftCampaign'); await messaging.sendWhatsapp({ to: msisdn, text: `✅ Drafted the campaign *${r.action.title}*. It's a DRAFT — review, approve and send it in the Pulse app (Engage). I never send anything to customers.${link ? `\nReview it: ${link}` : ''}` }); }
         else { logEvent(msisdn, 'action-failed', r.error || 'error'); await messaging.sendWhatsapp({ to: msisdn, text: `I couldn't create that draft: ${r.error || 'something went wrong'}.` }); }
       } else if (pend.kind === 'rememberFact') {
-        const item = memoryApi && memoryApi.add ? memoryApi.add(pend.memScope || 'client', pend.targetId || pend.entityId, pend.fact, user.email) : null;
+        // User scope is always self-scoped to the identified person; client/event use the drafted target.
+        const tgt = pend.memScope === 'user' ? user.id : (pend.targetId || pend.entityId);
+        const item = memoryApi && memoryApi.add ? memoryApi.add(pend.memScope || 'client', tgt, pend.fact, user.email) : null;
         if (item) { logEvent(msisdn, 'action-done', `remember: ${String(pend.fact).slice(0, 80)}`); await messaging.sendWhatsapp({ to: msisdn, text: '✅ Got it — I\'ll remember that for next time.' }); }
         else { logEvent(msisdn, 'action-failed', 'memory save failed'); await messaging.sendWhatsapp({ to: msisdn, text: 'I couldn\'t save that to memory just now.' }); }
       } else { await messaging.sendWhatsapp({ to: msisdn, text: 'That action can only be completed in the Pulse app.' }); }
@@ -428,7 +430,8 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
     const persona = personaOf(pkey);
     const waLayer = WA_LAYER[pkey];
     if (pkey !== 'quick') logEvent(msisdn, 'mode', pkey);
-    const instructions = waLayer ? `${instructionsFor(id.entityId)}\n\n${waLayer}` : instructionsFor(id.entityId);
+    const uid = (id.user || {}).id || '';
+    const instructions = waLayer ? `${instructionsFor(id.entityId, uid)}\n\n${waLayer}` : instructionsFor(id.entityId, uid);
     let out = ''; let trail = [];
     try {
       const r = await runOwlLoop({
@@ -670,7 +673,7 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
     const wants = topics.map((t) => TOPIC_ASK[t]).filter(Boolean);
     if (!wants.length) return '';
     const ask = `Please give me my scheduled update covering: ${wants.join('; ')}.`;
-    const instructions = `${instructionsFor(id.entityId)}\n\n${greeting ? SCHED_NOTE : SCHED_NOTE_ADD}`;
+    const instructions = `${instructionsFor(id.entityId, (id.user || {}).id || '')}\n\n${greeting ? SCHED_NOTE : SCHED_NOTE_ADD}`;
     try {
       const { text } = await runOwlLoop({
         llmTurn: ({ messages: m, tools, onText }) => owlTurn(insights, { messages: m, tools, instructions, apiKey, onText }),

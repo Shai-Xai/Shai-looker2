@@ -4,6 +4,7 @@ import { api } from '../lib/api.js';
 import HomeButton from '../components/HomeButton.jsx';
 import IntegrationsForm from '../components/IntegrationsForm.jsx';
 import MailTemplateEditor from '../components/MailTemplateEditor.jsx';
+import MyOwlMemory from '../components/MyOwlMemory.jsx';
 import OwlAddressCard from '../components/OwlAddressCard.jsx';
 import MailLogView from '../components/MailLogView.jsx';
 import NotificationPrefs from '../components/NotificationPrefs.jsx';
@@ -26,6 +27,7 @@ const SECTIONS = [
   ['fees', 'Fees & billing', '💳', PERMS.CAMPAIGNS_VIEW],
   ['sentmail', 'Sent emails', '📤', PERMS.INTEGRATIONS_MANAGE],
   ['inbox', 'CC the Owl', '📨', PERMS.INTEGRATIONS_MANAGE],
+  ['owlmemory', 'Owl memory', '🧠', null],
 ];
 
 export default function ClientIntegrationsPage() {
@@ -154,6 +156,13 @@ export default function ClientIntegrationsPage() {
             <div style={{ maxWidth: 680 }}>
               <p style={hint}>CC this address on any email and the conversation is captured in your Pulse inbox — nothing lives only in someone's mailbox.</p>
               <OwlAddressCard entityId={activeItem.entityId} />
+            </div>
+          )}
+
+          {section === 'owlmemory' && (
+            <div style={{ maxWidth: 680 }}>
+              <p style={hint}>What the Owl remembers about your account, your events and you — so it doesn't re-ask what it already knows.</p>
+              <MyOwlMemory entityId={activeItem.entityId} />
             </div>
           )}
         </div>

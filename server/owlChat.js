@@ -65,7 +65,7 @@ WHICH TOOL TO USE (route every question to the right one — do not answer goal 
 - createSegment → when the user wants to BUILD or SAVE an AUDIENCE / cohort of people for later marketing ("make a segment of VIP buyers in Cape Town", "save these people as an audience", "build a guest list segment", "audience of 18-25 year olds"). The cohort is defined by curated dimensions (age, gender, buyer city/country, ticket type, ticket category, complimentary = guest list). It DRAFTS the segment + previews the size and reach; the user confirms with a button — see ACTING below. NEVER list or name individual people; only the count + reach. Contact fields (email/phone) cannot define a segment.
 - draftCampaign → when the user wants to MESSAGE or MARKET to a cohort ("draft a win-back email to lapsed VIP buyers", "send an offer to Cape Town 18-25s", "email my guest-list segment"). Give it the goal plus an audience that is EITHER a saved segment (pass segmentName when the user names one, or one was just created) OR a new cohort (pass filters). It drafts the email/SMS copy and previews the reach. It creates a DRAFT only — a human reviews, approves and SENDS it in Engage. You never send. See ACTING below.
 
-- rememberFact → when the user tells you a DURABLE fact or preference about their business worth carrying into future chats (their priority tier, how they define revenue, naming conventions, what they focus on, their flagship event), OR you learn one. It DRAFTS a memory item the user confirms to save. Use it sparingly and naturally — offer to remember the things that would make every future answer better; never store one-off question details, transient numbers, or any personal/contact data. Memory you already hold for this client appears under "What you REMEMBER about this client" — don't re-offer to remember what's already there.
+- rememberFact → when the user tells you a DURABLE fact or preference about their business worth carrying into future chats (their priority tier, how they define revenue, naming conventions, what they focus on, their flagship event), OR you learn one. It DRAFTS a memory item the user confirms to save. Pick the scope: scope='event' for a fact true only of the CURRENT event (one festival sells add-ons heavily, another is single-day); scope='user' for THIS person's own answer-style preference ("keep it short", "always lead with revenue") — that shapes style, not data; scope='client' (default) for anything about the whole client/organiser. Use it sparingly and naturally — offer to remember the things that would make every future answer better; never store one-off question details, transient numbers, or any personal/contact data. Memory you already hold appears under "What you REMEMBER…" — don't re-offer what's already there.
 
 ACTING (tools that DO something, not just read):
 - Some tools DRAFT an action for the user to confirm instead of just reading data (createAlert, createSegment, rememberFact). You NEVER create/change anything silently: the tool returns a proposed action and the user taps a button to confirm it.
@@ -375,7 +375,7 @@ function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, m
     // last so it can override the catalogue's defaults without a deploy.
     try { const g = guidance(db, scopeEntityId); if (g) parts.push(g); } catch { /* ignore */ }
     // Durable memory — client facts + this event's facts (when an event is in scope).
-    try { const mem = owlMemory.memoryNote(db, scopeEntityId, suiteId); if (mem) parts.push(mem); } catch { /* ignore */ }
+    try { const mem = owlMemory.memoryNote(db, scopeEntityId, suiteId, req.user.id); if (mem) parts.push(mem); } catch { /* ignore */ }
 
     // Load or create the thread (must belong to this user).
     let thread = threadId ? getThread.get(threadId) : null;
@@ -588,13 +588,14 @@ function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, m
     if (!owlAllowed(req.user)) return res.status(403).json({ error: 'The native Owl isn\'t enabled for your account yet.' });
     const { entityId, suiteId, fact, scope } = req.body || {};
     if (!String(fact || '').trim()) return res.status(400).json({ error: 'A fact is required.' });
-    const memScope = scope === 'event' ? 'event' : 'client';
-    const targetId = memScope === 'event' ? suiteId : entityId;
+    const memScope = scope === 'event' ? 'event' : scope === 'user' ? 'user' : 'client';
+    // User scope is always self-scoped — force the target to the caller, never trust the body.
+    const targetId = memScope === 'event' ? suiteId : memScope === 'user' ? req.user.id : entityId;
     if (!targetId) return res.status(400).json({ error: `${memScope === 'event' ? 'suiteId' : 'entityId'} is required.` });
     // Re-check access at the right scope — the Owl can only write memory the user could.
     const admin = req.user.role === 'admin';
     if (memScope === 'event') { if (!admin && !auth.canAccessSuite(req.user, suiteId)) return res.status(403).json({ error: 'Not allowed.' }); }
-    else if (!admin && !(req.user.entityIds || []).includes(entityId)) return res.status(403).json({ error: 'Not allowed.' });
+    else if (memScope === 'client' && !admin && !(req.user.entityIds || []).includes(entityId)) return res.status(403).json({ error: 'Not allowed.' });
     const item = memoryApi.add(memScope, targetId, fact, req.user.email);
     if (!item) return res.status(400).json({ error: 'Could not save that.' });
     res.status(201).json({ ok: true, item });

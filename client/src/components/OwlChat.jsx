@@ -811,11 +811,11 @@ function MemoryActionCard({ action }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 6 }}>
         <span style={{ fontSize: 15 }}>🧠</span>
         <strong style={{ fontSize: 12.5 }}>Remember</strong>
-        <span style={{ fontSize: 11, color: 'var(--muted)', border: '1px solid var(--hairline)', borderRadius: 980, padding: '1px 7px' }}>{action.memScope === 'event' ? 'This event' : 'Client'}</span>
+        <span style={{ fontSize: 11, color: 'var(--muted)', border: '1px solid var(--hairline)', borderRadius: 980, padding: '1px 7px' }}>{action.memScope === 'event' ? 'This event' : action.memScope === 'user' ? 'Just you' : 'Client'}</span>
       </div>
       <div style={{ fontSize: 13, color: 'var(--text)', marginBottom: 8 }}>“{action.fact}”</div>
       {state === 'done' ? (
-        <div style={{ fontSize: 12.5, color: 'var(--brand)', fontWeight: 600 }}>✓ Saved — I’ll remember that {action.memScope === 'event' ? 'for this event' : 'for this client'}.</div>
+        <div style={{ fontSize: 12.5, color: 'var(--brand)', fontWeight: 600 }}>✓ Saved — I’ll remember that {action.memScope === 'event' ? 'for this event' : action.memScope === 'user' ? 'just for you' : 'for this client'}.</div>
       ) : (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <button onClick={save} disabled={state === 'busy'} style={{ border: 'none', borderRadius: 980, padding: '6px 16px', fontSize: 12.5, fontWeight: 700, cursor: state === 'busy' ? 'default' : 'pointer', background: state === 'busy' ? 'var(--elevated, rgba(128,128,128,0.18))' : 'var(--brand)', color: state === 'busy' ? 'var(--muted)' : '#fff' }}>{state === 'busy' ? 'Saving…' : '🧠 Remember it'}</button>

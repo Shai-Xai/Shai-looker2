@@ -156,8 +156,14 @@ export const api = {
   saveOwlMemory: (entityId, items) => fetch(`/api/admin/entities/${entityId}/owl-memory`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }) }).then(json),
   owlEventMemory: (suiteId) => fetch(`/api/admin/suites/${suiteId}/owl-memory`).then(json),
   saveOwlEventMemory: (suiteId, items) => fetch(`/api/admin/suites/${suiteId}/owl-memory`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }) }).then(json),
-  myOwlMemory: () => fetch('/api/my/owl-memory').then(json),
-  saveMyOwlMemory: (items) => fetch('/api/my/owl-memory', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }) }).then(json),
+  // Client self-service: own client memory (?entityId to choose which client), own
+  // event memory (an event they can access), and their own personal preferences.
+  myOwlMemory: (entityId) => fetch(`/api/my/owl-memory${entityId ? `?entityId=${encodeURIComponent(entityId)}` : ''}`).then(json),
+  saveMyOwlMemory: (items, entityId) => fetch('/api/my/owl-memory', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items, entityId }) }).then(json),
+  myOwlEventMemory: (suiteId) => fetch(`/api/my/suites/${suiteId}/owl-memory`).then(json),
+  saveMyOwlEventMemory: (suiteId, items) => fetch(`/api/my/suites/${suiteId}/owl-memory`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }) }).then(json),
+  myOwlUserMemory: () => fetch('/api/my/owl-user-memory').then(json),
+  saveMyOwlUserMemory: (items) => fetch('/api/my/owl-user-memory', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }) }).then(json),
   // The "/" slash-command palette (derived from the Owl's tool registry).
   owlCapabilities: () => fetch('/api/owl/capabilities').then(json),
   // Act layer: commit a drafted segment the Owl proposed (the "Create segment" tap),
