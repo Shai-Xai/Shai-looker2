@@ -55,6 +55,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
   const taRef = useRef(null);                     // the composer textarea (for focus after picking)
   const [chatCopied, setChatCopied] = useState(false);
   const scrollRef = useRef(null);
+  const lastUserRef = useRef(null); // the latest user message, scrolled to the top on a new turn
   // Copy the whole conversation as plain text (Q/Owl transcript) to the clipboard.
   const copyChat = async () => {
     const text = messages.filter((m) => m.text).map((m) => `${m.role === 'user' ? 'Q' : 'Owl'}: ${m.text}`).join('\n\n');
@@ -163,8 +164,21 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
   // Clients are auto-scoped server-side; admins need a client or event chosen.
   const canAsk = isAdmin ? !!(selEntity || selSuite) : true;
 
-  // Keep the latest message in view as it streams.
-  useEffect(() => { const el = scrollRef.current; if (el) el.scrollTop = el.scrollHeight; }, [messages]);
+  // On a NEW turn, bring the latest question to the TOP of the view so the answer reads
+  // top-down (instead of slamming to the very bottom, behind the composer). Keyed on the
+  // number of user turns, so streaming deltas don't keep yanking the scroll.
+  const userTurns = messages.reduce((n, m) => n + (m.role === 'user' ? 1 : 0), 0);
+  let lastUserIdx = -1; for (let i = messages.length - 1; i >= 0; i--) { if (messages[i].role === 'user') { lastUserIdx = i; break; } }
+  useEffect(() => {
+    const c = scrollRef.current; const u = lastUserRef.current;
+    if (!c) return;
+    if (u) c.scrollTop += u.getBoundingClientRect().top - c.getBoundingClientRect().top - 8;
+    else c.scrollTop = c.scrollHeight;
+  }, [userTurns]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Auto-size the composer: 1 row at rest once chatting (more room for the chat), tall on
+  // first open (an inviting empty state); grows with content up to a cap.
+  const composerFresh = messages.length === 0;
+  useEffect(() => { const el = taRef.current; if (!el) return; el.style.height = 'auto'; el.style.height = `${Math.min(200, el.scrollHeight)}px`; }, [input, composerFresh]);
   // Load the saved-chats list when the panel opens; show the sidebar by default on
   // desktop (a persistent column) and hidden on mobile (a slide-over toggled by ☰).
   useEffect(() => { if (open) { refreshThreads(); setSidebarOpen(false); } }, [open, isMobile]); // chats list collapsed by default; toggle with ☰
@@ -391,7 +405,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
           </div>
         )}
         {messages.map((m, i) => (
-          <div key={i} data-owl-msg>
+          <div key={i} data-owl-msg ref={(m.role === 'user' && i === lastUserIdx) ? lastUserRef : null}>
             {bubble(m, i)}
             {m.role === 'owl' && m.sources && m.sources.length > 0 && <CitationChips sources={m.sources} entityId={selEntity} suiteId={selSuite} canPin={isAdmin} />}
             {m.role === 'owl' && m.actions && m.actions.length > 0 && m.actions.map((a, ai) => <ActionCard key={ai} action={a} suiteId={selSuite} />)}
@@ -479,8 +493,8 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
             ref={taRef}
             value={input} onChange={(e) => { setInput(e.target.value); setSlashIdx(0); }} onKeyDown={onKeyDown}
             placeholder={canAsk ? 'Ask the Owl…  (type / for commands)' : 'Open a client or event to ask'}
-            rows={4} disabled={!canAsk}
-            style={{ width: '100%', boxSizing: 'border-box', resize: 'none', minHeight: 108, maxHeight: 260, padding: '8px 10px', border: 'none', outline: 'none', background: 'transparent', color: 'var(--text)', fontSize: 14.5, fontFamily: 'inherit', lineHeight: 1.5 }}
+            rows={1} disabled={!canAsk}
+            style={{ width: '100%', boxSizing: 'border-box', resize: 'none', minHeight: composerFresh ? 108 : 40, maxHeight: 200, overflowY: 'auto', padding: '8px 10px', border: 'none', outline: 'none', background: 'transparent', color: 'var(--text)', fontSize: 14.5, fontFamily: 'inherit', lineHeight: 1.5 }}
           />
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <button onClick={openSlash} title="Commands" aria-label="Slash commands" style={{ border: '1px solid var(--hairline)', background: slashOpen ? 'var(--elevated, rgba(128,128,128,0.12))' : 'var(--card)', color: 'var(--text)', borderRadius: 980, width: 38, height: 38, fontSize: 17, fontWeight: 700, cursor: 'pointer', lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>/</button>
