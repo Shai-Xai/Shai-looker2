@@ -2727,19 +2727,28 @@ function LoginBackgroundField({ entityId }) {
 // Per-client campaign audience cap (Howler-admin only). The max recipients a
 // single campaign can reach for this client; blank = the platform default.
 function AudienceCapField({ entityId }) {
-  const [data, setData] = useState(null); // { cap, default, max }
-  const [val, setVal] = useState('');
+  const [data, setData] = useState(null); // { cap, smsCap, default, smsDefault, max }
+  const [val, setVal] = useState('');     // audience cap (blank = default)
+  const [sms, setSms] = useState('');     // SMS sub-cap (blank = default, 0 = block)
   const [saved, setSaved] = useState(false);
-  useEffect(() => { let alive = true; api.getAudienceCap(entityId).then((d) => { if (alive) { setData(d); setVal(d.cap === d.default ? '' : String(d.cap)); } }).catch(() => { if (alive) setData({ cap: 0, default: 0, max: 0 }); }); return () => { alive = false; }; }, [entityId]);
+  const hydrate = (d) => { setData(d); setVal(d.cap === d.default ? '' : String(d.cap)); setSms(d.smsCap === d.smsDefault ? '' : String(d.smsCap)); };
+  useEffect(() => { let alive = true; api.getAudienceCap(entityId).then((d) => { if (alive) hydrate(d); }).catch(() => { if (alive) setData({ cap: 0, smsCap: 0, default: 0, smsDefault: 0, max: 0 }); }); return () => { alive = false; }; }, [entityId]);
   if (!data) return null;
-  const save = async () => { try { const d = await api.saveAudienceCap(entityId, parseInt(val, 10) || 0); setData(d); setVal(d.cap === d.default ? '' : String(d.cap)); flash(setSaved); } catch (e) { alert('Save failed: ' + e.message); } };
+  const save = async (body) => { try { const d = await api.saveAudienceCap(entityId, body); hydrate(d); flash(setSaved); } catch (e) { alert('Save failed: ' + e.message); } };
   return (
     <div style={{ marginTop: 12 }}>
       <L>Campaign audience cap</L>
       <div style={{ fontSize: 12, color: 'var(--muted)', margin: '4px 0 6px' }}>The most recipients one campaign can reach for this client. Leave blank for the platform default ({(data.default || 0).toLocaleString()}). Max {(data.max || 0).toLocaleString()}.</div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <input value={val} onChange={(e) => setVal(e.target.value.replace(/[^0-9]/g, ''))} onBlur={save} placeholder={`Default (${(data.default || 0).toLocaleString()})`} inputMode="numeric" style={{ ...input, maxWidth: 200 }} />
-        {saved && <span style={{ color: 'var(--success,#10b981)', fontSize: 12.5, fontWeight: 600 }}>✓ Saved</span>}
+        <input value={val} onChange={(e) => setVal(e.target.value.replace(/[^0-9]/g, ''))} onBlur={() => save({ cap: parseInt(val, 10) || 0 })} placeholder={`Default (${(data.default || 0).toLocaleString()})`} inputMode="numeric" style={{ ...input, maxWidth: 200 }} />
+      </div>
+      <div style={{ marginTop: 12 }}>
+        <L>SMS sub-cap</L>
+        <div style={{ fontSize: 12, color: 'var(--muted)', margin: '4px 0 6px' }}>A tighter ceiling on how many SMS one campaign can send (so a big email blast can't fire an equally-big, costly SMS blast). Email is unaffected once it's hit. Leave blank for the default ({(data.smsDefault || 0).toLocaleString()}); set <strong>0</strong> to block SMS for this client.</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <input value={sms} onChange={(e) => setSms(e.target.value.replace(/[^0-9]/g, ''))} onBlur={() => save({ smsCap: sms === '' ? '' : (parseInt(sms, 10) || 0) })} placeholder={`Default (${(data.smsDefault || 0).toLocaleString()})`} inputMode="numeric" style={{ ...input, maxWidth: 200 }} />
+          {saved && <span style={{ color: 'var(--success,#10b981)', fontSize: 12.5, fontWeight: 600 }}>✓ Saved</span>}
+        </div>
       </div>
     </div>
   );

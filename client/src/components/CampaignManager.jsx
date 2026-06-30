@@ -896,6 +896,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
                     <b style={{ color: 'var(--brand)' }}>{aud.count}</b> recipient{aud.count === 1 ? '' : 's'}
                     {aud.reach && hasEmail && <span style={{ color: 'var(--muted)' }}> · {aud.reach.email} emailable</span>}
                     {aud.reach && hasSms && <span style={{ color: 'var(--muted)' }}> · {aud.reach.sms} SMS</span>}
+                    {aud.smsCapped && hasSms && <span style={{ color: 'var(--warn,#d97706)' }} title={`SMS is capped at ${aud.smsCap?.toLocaleString?.() || aud.smsCap} per campaign for this client`}> (SMS capped at {aud.smsCap?.toLocaleString?.() || aud.smsCap})</span>}
                     {(() => {
                       // Estimated cost before send: reach on each active channel × its rate.
                       if (!rates?.rates || !aud.reach) return null;

@@ -10,6 +10,10 @@
 
 const MAX_AUDIENCE = 25000;      // DEFAULT safety cap per campaign (per-client override via the audience_cap:<entityId> setting)
 const MAX_AUDIENCE_HARD = 500000; // absolute ceiling an admin can set a per-client cap to (Looker fetch limits scale to the cap)
+const MAX_SMS_DEFAULT = 5000;    // DEFAULT per-campaign SMS sub-cap (per-client override via sms_cap:<entityId>; 0 blocks SMS)
+// Resolve a raw `sms_cap:<entityId>` setting string to an effective cap. Blank/absent →
+// default; 0 → block SMS (a deliberate setting); otherwise clamp to the hard ceiling.
+const clampSmsCap = (raw) => { if (raw === '' || raw == null) return MAX_SMS_DEFAULT; const v = parseInt(raw, 10); return Number.isFinite(v) && v >= 0 ? Math.min(v, MAX_AUDIENCE_HARD) : MAX_SMS_DEFAULT; };
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const cellVal = (cell) => String((cell && (cell.value ?? cell)) || '').trim();
 const isYes = (v) => ['yes', 'y', 'true', '1', 'consented', 'opted in', 'opt in'].includes(String(v).trim().toLowerCase());
@@ -74,4 +78,4 @@ function finalizeAudience(raw, suppressed, cap = MAX_AUDIENCE) {
   return { list, excluded, noConsent, reach };
 }
 
-module.exports = { MAX_AUDIENCE, MAX_AUDIENCE_HARD, EMAIL_RE, cellVal, isYes, buildRows, finalizeAudience };
+module.exports = { MAX_AUDIENCE, MAX_AUDIENCE_HARD, MAX_SMS_DEFAULT, clampSmsCap, EMAIL_RE, cellVal, isYes, buildRows, finalizeAudience };

@@ -27,6 +27,10 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
   // Resolver for the createSegment act-tool's preview (count + per-channel reach).
   // Server-side only; never returns the people list to the chat. Same scope gate.
   const { resolveQueryAudience } = require('./audienceQuery')({ auth, db, catalogue });
+  // Per-client SMS sub-cap (shared with the campaign engine) — so a drafted SMS/both
+  // campaign shows the honest capped SMS reach, not the full consenting count.
+  const { clampSmsCap } = require('./audienceMap');
+  const smsCapFor = (entityId) => clampSmsCap(db && db.getSetting ? db.getSetting(`sms_cap:${entityId}`, '') : '');
 
   // Index the curated catalogue once: name → spec, plus filterable set.
   const measureByName = new Map(catalogue.measures.map((m) => [m.name, m]));
@@ -778,6 +782,12 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
       audience = { mode: 'query', model: catalogue.model, view: catalogue.explore, queryFilters: filters };
       summary = desc.join(' · ');
       try { const r = await resolveQueryAudience({ entityId, definition: audience, user, suiteId }); if (r && !r.error) reach = r.reach; } catch { /* best-effort preview */ }
+    }
+    // Honest SMS reach for the chat: the send loop stops sending SMS once the sub-cap
+    // is hit, so reflect that here when this campaign would use SMS.
+    if (reach && (channel === 'sms' || channel === 'both')) {
+      const cap = smsCapFor(entityId);
+      if ((reach.sms || 0) > cap) reach = { ...reach, sms: cap, smsCapped: true, smsCap: cap };
     }
     // Draft the copy with the existing campaign copywriter (subject/body/cta).
     let copy = {};

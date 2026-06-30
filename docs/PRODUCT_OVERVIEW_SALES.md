@@ -207,6 +207,11 @@ lists, subtract a suppression list, and it stays live."
   for genuinely non-marketing messages.
 - **Approval workflow** ✅ — nothing sends without explicit approval; route to
   named or "Howler" approvers, notified via inbox/push/email.
+- **Send caps (cost safety)** ✅ — a per-client **audience cap** limits how many
+  recipients one campaign can reach, and a tighter **SMS sub-cap** stops a large
+  email send from accidentally firing an equally-large (costly) SMS blast (set it
+  to **0** to switch SMS off for a client entirely). Howler-admin only — the
+  capped SMS number is shown honestly in the audience preview and to the Owl.
 
 **Pitch:** "Personalised, on-brand email + SMS to a precise audience — with
 approval gates and real tracking, all from the same data."
@@ -507,6 +512,11 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-30** — **Per-client SMS sub-cap** ✅: campaigns now honour a separate,
+  tighter SMS ceiling (default 5,000/campaign) on top of the audience cap, so a big
+  email send can't accidentally trigger an equally-big SMS blast. Set it to 0 to
+  block SMS for a client. Admin-only (Client → Settings); the capped number shows in
+  the audience preview and is fed to the Owl when it drafts a campaign.
 - **2026-06-30** — **Organise segments by event & folder** ✅: link any segment to an
   **event** and/or file it in a free-text **folder**, then **filter the list** by either —
   right on each segment card. Keeps a growing audience list tidy (all of one festival's

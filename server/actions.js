@@ -19,7 +19,7 @@ const { parseContactLines, csvHeader, parseContactTable, fetchGoogleSheetCsv, go
 
 // Audience person-mapping (dedupe + per-channel consent + reach) lives in a shared
 // module so chat-created "query" segments reuse the SAME logic — see audienceMap.js.
-const { MAX_AUDIENCE, MAX_AUDIENCE_HARD, EMAIL_RE, cellVal, isYes, buildRows, finalizeAudience } = require('./audienceMap');
+const { MAX_AUDIENCE, MAX_AUDIENCE_HARD, MAX_SMS_DEFAULT, clampSmsCap, EMAIL_RE, cellVal, isYes, buildRows, finalizeAudience } = require('./audienceMap');
 
 function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAudience, draftCopy, listEvents }) {
   const sql = db.db;
@@ -31,6 +31,10 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
   // Per-client audience cap — the max recipients a single campaign can reach for
   // this client (default MAX_AUDIENCE; admin-set per client; hard-ceilinged).
   const capFor = (entityId) => { const v = parseInt(db.getSetting(`audience_cap:${entityId}`, ''), 10); return Number.isFinite(v) && v > 0 ? Math.min(v, MAX_AUDIENCE_HARD) : MAX_AUDIENCE; };
+  // Per-client SMS sub-cap — a tighter ceiling on how many SMS one campaign can send,
+  // so a large email cap can't trigger an equally-large (costly) SMS blast by accident.
+  // Default MAX_SMS_DEFAULT; admin-set per client; 0 blocks SMS entirely; hard-ceilinged.
+  const smsCapFor = (entityId) => clampSmsCap(db.getSetting(`sms_cap:${entityId}`, ''));
   const approverKey = (a) => (a.type === 'howler' ? 'howler' : `user:${a.userId}`);
   const approverLabel = (a) => (a.type === 'howler' ? 'Howler' : (a.name || a.email || 'Teammate'));
   // Approval progress for an action: each required approver + whether they've
@@ -753,6 +757,9 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     const branding = mailer.resolveBranding(a.entityId, a.config?.eventSuiteId || '');
     const wantsEmail = a.config.channel !== 'sms';
     const wantsSms = a.config.channel !== 'email';
+    // SMS sub-cap: a tighter ceiling than the audience cap so a big email blast can't
+    // also fire a big (costly) SMS blast. Once hit, remaining recipients still get email.
+    const smsCap = smsCapFor(a.entityId);
     const results = { sent: 0, failed: 0, clicks: a.results.clicks || 0, total: a.audience.length, startedAt: now(), emailSent: a.results.emailSent || 0, smsSent: a.results.smsSent || 0 };
     saveResults(a.id, results);
     let processed = 0;
@@ -783,7 +790,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
           const r = await mailer.send({ to: recipient.email, subject: subject || a.title || 'An update from your event', html, text, fromName: branding.senderName, kind: 'campaign', entity: a.entityId });
           if (r.ok) { ok = true; results.emailSent += 1; } else lastErr = r.error || r.reason || 'email failed';
         }
-        if (wantsSms && recipient.phone && recipient.smsOk !== false) {
+        if (wantsSms && recipient.phone && recipient.smsOk !== false && results.smsSent < smsCap) {
           attempted = true;
           const r = await messaging.sendSms({ to: recipient.phone, text: renderSmsFor(a, recipient) });
           if (r.ok) { ok = true; results.smsSent += 1; } else lastErr = r.error || r.reason || 'SMS failed';
@@ -920,12 +927,15 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     res.json({ requireApproval: requireApprovalFor(req.params.entityId) });
   });
   // Per-client campaign audience cap — Howler-admin only (a client can't raise their own send limit).
+  const capPayload = (entityId) => ({ cap: capFor(entityId), smsCap: smsCapFor(entityId), default: MAX_AUDIENCE, smsDefault: MAX_SMS_DEFAULT, max: MAX_AUDIENCE_HARD });
   app.get('/api/admin/entities/:entityId/audience-cap', auth.requireAdmin, (req, res) =>
-    res.json({ cap: capFor(req.params.entityId), default: MAX_AUDIENCE, max: MAX_AUDIENCE_HARD }));
+    res.json(capPayload(req.params.entityId)));
   app.put('/api/admin/entities/:entityId/audience-cap', auth.requireAdmin, (req, res) => {
-    const n = parseInt((req.body || {}).cap, 10);
-    db.setSetting(`audience_cap:${req.params.entityId}`, Number.isFinite(n) && n > 0 ? String(Math.min(n, MAX_AUDIENCE_HARD)) : '');
-    res.json({ cap: capFor(req.params.entityId), default: MAX_AUDIENCE, max: MAX_AUDIENCE_HARD });
+    const body = req.body || {};
+    if ('cap' in body) { const n = parseInt(body.cap, 10); db.setSetting(`audience_cap:${req.params.entityId}`, Number.isFinite(n) && n > 0 ? String(Math.min(n, MAX_AUDIENCE_HARD)) : ''); }
+    // SMS sub-cap: blank → default; 0 → block SMS entirely (a valid, deliberate setting).
+    if ('smsCap' in body) { const s = parseInt(body.smsCap, 10); db.setSetting(`sms_cap:${req.params.entityId}`, body.smsCap === '' || body.smsCap == null ? '' : (Number.isFinite(s) && s >= 0 ? String(Math.min(s, MAX_AUDIENCE_HARD)) : '')); }
+    res.json(capPayload(req.params.entityId));
   });
   app.post('/api/actions/:entityId', auth.requireAuth, auth.requirePermission('campaigns.approve'), (req, res) => {
     if (!guard(req, res, req.params.entityId)) return;
@@ -1002,7 +1012,12 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     try {
       const cfg = cleanConfig(req.body || {});
       const { list, fields, filterFields, columns, excluded, noConsent, filteredOut, segmentMissing, reach } = await audienceFor(req.params.entityId, cfg, req.user);
-      res.json({ count: list.length, excluded, noConsent, filteredOut, segmentMissing: !!segmentMissing, reach: reach || { total: list.length, email: 0, sms: 0 }, sample: list.slice(0, 8), fields: (fields || []).map((f) => ({ name: f.name, label: f.label })), filterFields: filterFields || [], columns: columns || [] });
+      // Honest SMS preview: the send loop stops sending SMS once the sub-cap is hit, so
+      // show the capped number (and flag the cap) rather than the full consenting count.
+      const smsCap = smsCapFor(req.params.entityId);
+      const baseReach = reach || { total: list.length, email: 0, sms: 0 };
+      const shownReach = { ...baseReach, sms: Math.min(baseReach.sms || 0, smsCap) };
+      res.json({ count: list.length, excluded, noConsent, filteredOut, segmentMissing: !!segmentMissing, reach: shownReach, smsCap, smsCapped: (baseReach.sms || 0) > smsCap, sample: list.slice(0, 8), fields: (fields || []).map((f) => ({ name: f.name, label: f.label })), filterFields: filterFields || [], columns: columns || [] });
     } catch (e) { res.status(400).json({ error: e.message }); }
   });
 
