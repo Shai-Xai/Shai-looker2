@@ -14,6 +14,7 @@
 const crypto = require('crypto');
 const { runOwlLoop, owlTurn } = require('./owlChat'); // owlTurn already layers OWL_CHAT_SYSTEM
 const { resolveGuidance } = require('./owlGuidance');
+const { actionViewUrl } = require('./owlActionLinks'); // deep-link a created action
 const chartImg = require('./owlChartImg');
 
 const WA_OVERRIDE = [
@@ -289,12 +290,12 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
         if (user.role !== 'admin' && auth.canAccessSuite && !auth.canAccessSuite(user, suiteId)) { logEvent(msisdn, 'action-failed', 'no event access'); await messaging.sendWhatsapp({ to: msisdn, text: "You don't have access to that event." }); return; }
         const api = getAlertsApi && getAlertsApi();
         const r = api && api.createAlert ? api.createAlert({ suiteId, draft: pend.draft, user }) : { ok: false, error: 'Alerts unavailable' };
-        if (r.ok) { logEvent(msisdn, 'action-done', `alert ${r.alert.name}`); await messaging.sendWhatsapp({ to: msisdn, text: `✅ Done — alert *${r.alert.name}* is on. I'll let you know when it triggers.` }); }
+        if (r.ok) { logEvent(msisdn, 'action-done', `alert ${r.alert.name}`); const link = actionViewUrl(publicBase(), 'createAlert'); await messaging.sendWhatsapp({ to: msisdn, text: `✅ Done — alert *${r.alert.name}* is on. I'll let you know when it triggers.${link ? `\nView it: ${link}` : ''}` }); }
         else { logEvent(msisdn, 'action-failed', r.error || 'error'); await messaging.sendWhatsapp({ to: msisdn, text: `I couldn't switch that alert on: ${r.error || 'something went wrong'}.` }); }
       } else if (pend.kind === 'createSegment') {
         const api = getSegmentsApi && getSegmentsApi();
         const r = api && api.createSegment ? api.createSegment({ entityId: pend.entityId, name: pend.name, definition: pend.draft, user }) : { ok: false, error: 'Segments unavailable' };
-        if (r.ok) { logEvent(msisdn, 'action-done', `segment ${r.segment.name}`); await messaging.sendWhatsapp({ to: msisdn, text: `✅ Saved the segment *${r.segment.name}*. You can use it for a campaign in the Pulse app.` }); }
+        if (r.ok) { logEvent(msisdn, 'action-done', `segment ${r.segment.name}`); const link = actionViewUrl(publicBase(), 'createSegment'); await messaging.sendWhatsapp({ to: msisdn, text: `✅ Saved the segment *${r.segment.name}*. You can use it for a campaign in the Pulse app.${link ? `\nView it: ${link}` : ''}` }); }
         else { logEvent(msisdn, 'action-failed', r.error || 'error'); await messaging.sendWhatsapp({ to: msisdn, text: `I couldn't save that segment: ${r.error || 'something went wrong'}.` }); }
       } else if (pend.kind === 'draftCampaign') {
         // Mirror the web commit (/api/owl/act/draft-campaign): persist a chat cohort as a
@@ -319,7 +320,7 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
         };
         const api = getActionsApi && getActionsApi();
         const r = api && api.createDraftCampaign ? api.createDraftCampaign({ entityId: pend.entityId, title: pend.name, config, user }) : { ok: false, error: 'Campaigns unavailable' };
-        if (r.ok) { logEvent(msisdn, 'action-done', `campaign draft ${r.action.title}`); await messaging.sendWhatsapp({ to: msisdn, text: `✅ Drafted the campaign *${r.action.title}*. It's a DRAFT — review, approve and send it in the Pulse app (Engage). I never send anything to customers.` }); }
+        if (r.ok) { logEvent(msisdn, 'action-done', `campaign draft ${r.action.title}`); const link = actionViewUrl(publicBase(), 'draftCampaign'); await messaging.sendWhatsapp({ to: msisdn, text: `✅ Drafted the campaign *${r.action.title}*. It's a DRAFT — review, approve and send it in the Pulse app (Engage). I never send anything to customers.${link ? `\nReview it: ${link}` : ''}` }); }
         else { logEvent(msisdn, 'action-failed', r.error || 'error'); await messaging.sendWhatsapp({ to: msisdn, text: `I couldn't create that draft: ${r.error || 'something went wrong'}.` }); }
       } else { await messaging.sendWhatsapp({ to: msisdn, text: 'That action can only be completed in the Pulse app.' }); }
     } catch (e) { logEvent(msisdn, 'action-failed', (e && e.message) || 'commit error'); await messaging.sendWhatsapp({ to: msisdn, text: 'Something went wrong completing that — please try again.' }); }

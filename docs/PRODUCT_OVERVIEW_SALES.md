@@ -523,6 +523,10 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-30** — **Owl actions always link to where you can see them** ✅: whenever the
+  Owl creates something — an **alert**, a **segment** or a **draft campaign** — the
+  confirmation now includes a **"View it →" link** straight to the right page (Alerts /
+  Engage → Segments / Engage → Campaigns). Works the same on **web chat and WhatsApp**.
 - **2026-06-30** — **Per-campaign language override** ✅: any single email/SMS campaign
   can now pick its **own** AI copy language (in the campaign builder, next to the goal),
   overriding the client default — so a multi-language client can send one audience in

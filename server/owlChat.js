@@ -14,6 +14,7 @@
 
 const crypto = require('crypto');
 const { resolveGuidance: guidance } = require('./owlGuidance');
+const { actionViewPath } = require('./owlActionLinks'); // where a created action is viewed
 
 // ── Live "thinking" status ───────────────────────────────────────────────────
 // The Owl can pause for seconds while it reasons or runs a Looker query, so we
@@ -452,7 +453,7 @@ function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, m
     if (!alertsApi || !alertsApi.createAlert) return res.status(503).json({ error: 'Alerts aren\'t available right now.' });
     const r = alertsApi.createAlert({ suiteId, draft, user: req.user });
     if (!r.ok) return res.status(400).json({ error: r.error || 'Could not create the alert.' });
-    res.status(201).json({ ok: true, alert: { id: r.alert.id, name: r.alert.name } });
+    res.status(201).json({ ok: true, alert: { id: r.alert.id, name: r.alert.name }, url: actionViewPath('createAlert') });
   });
 
   // POST /api/owl/act/create-segment — the user tapping "Create segment" on the card
@@ -475,7 +476,7 @@ function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, m
     if (!segmentsApi || !segmentsApi.createSegment) return res.status(503).json({ error: 'Segments aren\'t available right now.' });
     const r = segmentsApi.createSegment({ entityId, name, definition: draft, user: req.user });
     if (!r.ok) return res.status(r.error === 'Not allowed' ? 403 : 400).json({ error: r.error || 'Could not create the segment.' });
-    res.status(201).json({ ok: true, segment: { id: r.segment.id, name: r.segment.name } });
+    res.status(201).json({ ok: true, segment: { id: r.segment.id, name: r.segment.name }, url: actionViewPath('createSegment') });
   });
 
   // POST /api/owl/act/draft-campaign — the user tapping "Create draft campaign" on the
@@ -517,7 +518,7 @@ function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, m
     };
     const r = actionsApi.createDraftCampaign({ entityId, title: name, config, user: req.user });
     if (!r.ok) return res.status(r.error === 'Not allowed' ? 403 : 400).json({ error: r.error || 'Could not create the campaign.' });
-    res.status(201).json({ ok: true, campaign: { id: r.action.id, title: r.action.title } });
+    res.status(201).json({ ok: true, campaign: { id: r.action.id, title: r.action.title }, url: actionViewPath('draftCampaign') });
   });
 
   // Pin-to-dashboard lives in its own disposable module; mount it here so index.js
