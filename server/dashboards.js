@@ -12,7 +12,7 @@
 function mount(app, {
   store, db, auth, looker,
   convertDashboard, fetchDashboard, parseDrillUrl,
-  runLookerQuery, applyScope, stripAnyValue, currentFirstEventSort, routeTicketIdFilters,
+  runLookerQuery, applyScope, stripAnyValue, currentFirstEventSort,
 }) {
 app.get('/api/dashboards', auth.requireAuth, (req, res) => {
   res.json(store.list().filter((d) => auth.canAccessDashboard(req.user, d)));
@@ -243,7 +243,7 @@ app.post('/api/run-query', auth.requireAuth, async (req, res) => {
   try {
     const { query, filterOverrides = {}, suiteId, refresh = false } = req.body;
     if (!query) return res.status(400).json({ error: 'query is required' });
-    const queryBody = { ...query, filters: routeTicketIdFilters(stripAnyValue({ ...(query.filters || {}), ...filterOverrides })) };
+    const queryBody = { ...query, filters: stripAnyValue({ ...(query.filters || {}), ...filterOverrides }) };
     if (!(await applyScope(queryBody, req.user, suiteId))) {
       // Admins get the specific reason (which explore couldn't be scoped, or no
       // organiser configured) so a blocked dashboard is diagnosable; clients get
