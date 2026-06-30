@@ -9,7 +9,7 @@
 // emailOk, smsOk, attributes }.
 
 const MAX_AUDIENCE = 25000;      // DEFAULT safety cap per campaign (per-client override via the audience_cap:<entityId> setting)
-const MAX_AUDIENCE_HARD = 50000; // absolute ceiling a per-client override can be set to (matches the Looker source limit in index.js)
+const MAX_AUDIENCE_HARD = 500000; // absolute ceiling an admin can set a per-client cap to (Looker fetch limits scale to the cap)
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const cellVal = (cell) => String((cell && (cell.value ?? cell)) || '').trim();
 const isYes = (v) => ['yes', 'y', 'true', '1', 'consented', 'opted in', 'opt in'].includes(String(v).trim().toLowerCase());
