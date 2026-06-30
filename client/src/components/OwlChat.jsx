@@ -4,6 +4,15 @@ import { useIsMobile } from '../lib/useIsMobile.js';
 import ChartTile from './tiles/ChartTile.jsx';
 import ShareMenu from './ShareMenu.jsx';
 
+// Topic pills shown on the empty state before the registry (/api/owl/capabilities)
+// loads — a tiny mirror so the chat never opens blank. The live list replaces these.
+const FALLBACK_TOPICS = [
+  { cmd: 'data', label: 'Ticket data', icon: '📊', example: 'How many tickets have I sold?' },
+  { cmd: 'goals', label: 'Goals', icon: '🎯', example: 'How are my goals tracking?' },
+  { cmd: 'alerts', label: 'Alerts', icon: '🔔', example: 'What alerts are set — or set up a new one?' },
+  { cmd: 'campaigns', label: 'Campaigns', icon: '📣', example: 'How did recent campaigns do — or draft a new one?' },
+];
+
 // The native, Claude-powered agentic Owl — the conversational "pull" door onto the
 // askData tool (server/owlChat.js). Drops into the same drawer slot as the Inventive
 // AnalystDrawer (swapped behind FEATURES.owlNativeChat), mirroring its docked/overlay
@@ -396,12 +405,18 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
       <div ref={scrollRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 14, fontSize: `${zoom}em` }}>
         {messages.length === 0 && (
           <div style={{ color: 'var(--muted)', fontSize: 14, lineHeight: 1.5 }}>
-            <p style={{ margin: '4px 0 10px' }}>Ask about your ticket sales in plain English — I pull the answer live from your own data.</p>
-            <ul style={{ margin: 0, paddingLeft: 18 }}>
-              <li>How many tickets have I sold?</li>
-              <li>What’s my revenue by ticket type?</li>
-              <li>Sales in the last 7 days?</li>
-            </ul>
+            <p style={{ margin: '4px 0 10px' }}>Ask about your ticket sales in plain English — I pull the answer live from your own data. Tap a topic to start:</p>
+            {/* Topic pills — the same domains as the "/" menu (from the tool registry), so
+                they can't drift from what the Owl can do. Tapping one asks it straight away. */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, margin: '2px 0 4px' }}>
+              {(commands.length ? commands : FALLBACK_TOPICS).map((c) => (
+                <button key={c.cmd} type="button" onClick={() => send(c.example)} disabled={busy || !canAsk}
+                  title={c.example}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 980, padding: '7px 13px', fontSize: 13, fontWeight: 600, cursor: (busy || !canAsk) ? 'default' : 'pointer', opacity: (busy || !canAsk) ? 0.6 : 1 }}>
+                  <span style={{ fontSize: 14 }}>{c.icon}</span>{c.label}
+                </button>
+              ))}
+            </div>
           </div>
         )}
         {messages.map((m, i) => (
