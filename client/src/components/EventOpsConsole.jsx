@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, lazy, Suspense, Component } from 'react';
+import { useEffect, useMemo, useState, useRef, lazy, Suspense, Component } from 'react';
 import { api } from '../lib/api.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
 
@@ -16,6 +16,7 @@ const STATION_KINDS = ['bar', 'gate', 'booth', 'topup', 'vendor', 'other'];
 const KIND_ICON = { bar: '🍺', gate: '🛂', booth: '🏪', topup: '💳', vendor: '🍔', other: '📍' };
 const ISSUE_CATEGORIES = ['damaged', 'battery', 'connectivity', 'missing_parts', 'frozen', 'wrong_config', 'other'];
 const CAT_LABEL = { damaged: 'Damaged', battery: 'Battery', connectivity: 'Connectivity', missing_parts: 'Missing parts', frozen: 'Frozen', wrong_config: 'Wrong config', other: 'Other' };
+const TABS = [['live', '📡', 'Live'], ['devices', '📟', 'Devices'], ['stations', '📍', 'Stations'], ['map', '🗺️', 'Map'], ['staff', '🧑‍🔧', 'Staff'], ['issues', '⚠️', 'Issues']];
 
 export default function EventOpsConsole({ entityId, scope = 'admin' }) {
   const isMobile = useIsMobile();
@@ -69,25 +70,32 @@ export default function EventOpsConsole({ entityId, scope = 'admin' }) {
 
   return (
     <div style={{ position: 'relative', paddingBottom: 88 }}>
-      {/* Event picker + tabs */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', marginBottom: 14 }}>
+      {/* Event picker */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', marginBottom: 16 }}>
         <label style={{ fontSize: 13, color: 'var(--muted)' }}>Event</label>
         <select value={suiteId} onChange={(e) => setSuiteId(e.target.value)} style={select}>
           {suites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
       </div>
 
-      <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
-        {[['live', '📡 Live'], ['devices', '📟 Devices'], ['stations', '📍 Stations'], ['staff', '🧑‍🔧 Staff'], ['issues', '⚠️ Issues']].map(([t, label]) => (
-          <button key={t} onClick={() => setTab(t)} style={tabBtn(tab === t)}>{label}</button>
-        ))}
+      {/* Desktop: left nav rail + full-width content. Mobile: top pills + stacked content. */}
+      <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: isMobile ? 12 : 24, alignItems: 'flex-start' }}>
+        <div style={isMobile ? mobileTabs : leftNav}>
+          {TABS.map(([t, icon, label]) => (
+            <button key={t} onClick={() => setTab(t)} style={isMobile ? tabBtn(tab === t) : navItem(tab === t)}>
+              <span style={{ fontSize: 15 }}>{icon}</span> {label}
+            </button>
+          ))}
+        </div>
+        <div style={{ flex: 1, minWidth: 0, width: '100%' }}>
+          {suiteId && tab === 'live' && <LiveTab suiteId={suiteId} isMobile={isMobile} reloadKey={reloadKey} onStation={setStationView} />}
+          {suiteId && tab === 'devices' && <DevicesTab suiteId={suiteId} canManage={canManage} onAct={setActionDevice} flash={flash} reloadKey={reloadKey} />}
+          {suiteId && tab === 'stations' && <StationsTab suiteId={suiteId} canManage={canManage} flash={flash} reloadKey={reloadKey} onRefresh={refresh} />}
+          {suiteId && tab === 'map' && <MapTab suiteId={suiteId} canManage={canManage} isMobile={isMobile} reloadKey={reloadKey} onStation={setStationView} />}
+          {suiteId && tab === 'staff' && <StaffTab suiteId={suiteId} canManage={canManage} flash={flash} reloadKey={reloadKey} />}
+          {suiteId && tab === 'issues' && <IssuesTab suiteId={suiteId} canManage={canManage} flash={flash} reloadKey={reloadKey} />}
+        </div>
       </div>
-
-      {suiteId && tab === 'live' && <LiveTab suiteId={suiteId} isMobile={isMobile} reloadKey={reloadKey} onStation={setStationView} />}
-      {suiteId && tab === 'devices' && <DevicesTab suiteId={suiteId} canManage={canManage} onAct={setActionDevice} flash={flash} reloadKey={reloadKey} />}
-      {suiteId && tab === 'stations' && <StationsTab suiteId={suiteId} canManage={canManage} flash={flash} reloadKey={reloadKey} onRefresh={refresh} />}
-      {suiteId && tab === 'staff' && <StaffTab suiteId={suiteId} canManage={canManage} flash={flash} reloadKey={reloadKey} />}
-      {suiteId && tab === 'issues' && <IssuesTab suiteId={suiteId} canManage={canManage} flash={flash} reloadKey={reloadKey} />}
 
       {/* Persistent Scan button (the on-the-floor primary action) */}
       {canManage && suiteId && (
@@ -423,6 +431,7 @@ function IssuesTab({ suiteId, canManage, flash, reloadKey }) {
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontWeight: 650, fontSize: 14 }}>
                     {i.device?.label || i.device?.qrCode || 'Device'} · <span style={{ color: 'var(--error)' }}>{CAT_LABEL[i.category] || i.category}</span>
+                    {i.stationLabel && <span style={{ color: 'var(--muted)', fontWeight: 500 }}> · 📍 {i.stationLabel}</span>}
                   </div>
                   {i.note && <div style={{ fontSize: 13, color: 'var(--text)', marginTop: 2 }}>{i.note}</div>}
                   <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
@@ -518,17 +527,96 @@ function DeviceActionSheet({ suiteId, device, onClose, onDone }) {
   );
 }
 
+// ──────────────────────────── Map tab (venue canvas) ──────────────────────────
+// A drag-and-drop floor-plan: station pins positioned by normalised x,y (0..1 of the
+// canvas), each showing its live device count. Drag to lay out the venue (persists via
+// the station PUT); tap a pin to drill into its devices + issues.
+function MapTab({ suiteId, canManage, isMobile, reloadKey, onStation }) {
+  const [stations, setStations] = useState(null);
+  const [drag, setDrag] = useState(null); // { id, x, y } live position mid-drag
+  const canvasRef = useRef(null);
+
+  useEffect(() => {
+    setStations(null);
+    api.eventopsStations(suiteId).then((r) => setStations(r.stations || [])).catch(() => setStations([]));
+  }, [suiteId, reloadKey]);
+
+  // Stations with no saved coords get spread over a tidy default grid so they're visible.
+  const placed = useMemo(() => {
+    const list = stations || [];
+    const cols = Math.max(1, Math.ceil(Math.sqrt(list.length)));
+    const rows = Math.max(1, Math.ceil(list.length / cols));
+    return list.map((s, i) => {
+      const hasPos = s.x || s.y;
+      const x = hasPos ? s.x : (i % cols + 0.5) / cols;
+      const y = hasPos ? s.y : (Math.floor(i / cols) + 0.5) / rows;
+      return { ...s, _x: x, _y: y };
+    });
+  }, [stations]);
+
+  function startDrag(e, s) {
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    let moved = false; let last = { x: s._x, y: s._y };
+    const clamp = (v) => Math.min(1, Math.max(0, v));
+    const move = (ev) => {
+      moved = true;
+      last = { x: clamp((ev.clientX - rect.left) / rect.width), y: clamp((ev.clientY - rect.top) / rect.height) };
+      setDrag({ id: s.id, ...last });
+    };
+    const up = () => {
+      document.removeEventListener('pointermove', move);
+      document.removeEventListener('pointerup', up);
+      setDrag(null);
+      if (moved) {
+        setStations((prev) => prev.map((st) => (st.id === s.id ? { ...st, x: last.x, y: last.y } : st)));
+        api.eventopsUpdateStation(suiteId, s.id, { x: last.x, y: last.y }).catch(() => {});
+      } else { onStation?.(s); } // a tap (no drag) = drill in
+    };
+    document.addEventListener('pointermove', move);
+    document.addEventListener('pointerup', up);
+  }
+
+  if (stations === null) return <Loading />;
+  if (!stations.length) return <Empty>No stations yet — add stations first, then drag them onto the map.</Empty>;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+        {canManage ? 'Drag stations to lay out your venue. ' : ''}Tap a station to see its devices &amp; issues.
+      </div>
+      <div ref={canvasRef} style={{ ...mapCanvas, height: isMobile ? 440 : 600 }}>
+        {placed.map((s) => {
+          const live = drag && drag.id === s.id ? drag : { x: s._x, y: s._y };
+          return (
+            <button
+              key={s.id}
+              onPointerDown={canManage ? (e) => { e.preventDefault(); startDrag(e, s); } : undefined}
+              onClick={canManage ? undefined : () => onStation?.(s)}
+              style={{ ...mapPin, left: `${live.x * 100}%`, top: `${live.y * 100}%`, cursor: canManage ? 'grab' : 'pointer', borderColor: s.deviceCount ? 'var(--brand)' : 'var(--border)' }}
+              title={s.name}
+            >
+              <span style={{ fontSize: 18, lineHeight: 1 }}>{KIND_ICON[s.kind] || '📍'}</span>
+              <span style={{ fontSize: 12, fontWeight: 700, marginTop: 2, maxWidth: 90, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</span>
+              <span style={mapPinCount}>{s.deviceCount}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ───────────────────────────────── Staff tab ──────────────────────────────────
 function StaffTab({ suiteId, canManage, flash, reloadKey }) {
   const [staff, setStaff] = useState(null);
   const [stations, setStations] = useState([]);
-  const [form, setForm] = useState(null); // null | { id?, name, number, role, stationId }
+  const [form, setForm] = useState(null); // null | { id?, name, number, role, stationIds:[] }
   const load = () => api.eventopsStaff(suiteId).then((r) => setStaff(r.staff || [])).catch(() => setStaff([]));
   useEffect(() => { setStaff(null); load(); api.eventopsStations(suiteId).then((r) => setStations(r.stations || [])).catch(() => {}); }, [suiteId, reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function save() {
     try {
-      const body = { name: form.name, number: form.number, role: form.role, stationId: form.stationId || '' };
+      const body = { name: form.name, number: form.number, role: form.role, stationIds: form.stationIds || [] };
       if (form.id) await api.eventopsUpdateStaff(suiteId, form.id, body);
       else await api.eventopsCreateStaff(suiteId, body);
       setForm(null); load(); flash('Staff saved');
@@ -538,11 +626,13 @@ function StaffTab({ suiteId, canManage, flash, reloadKey }) {
     if (!confirm(`Remove ${s.name || s.number}? (Past activity keeps their name.)`)) return;
     try { await api.eventopsDeleteStaff(suiteId, s.id); load(); flash('Staff removed'); } catch (e) { alert(e.message); }
   }
+  const toggleStation = (id) => setForm((f) => ({ ...f, stationIds: f.stationIds.includes(id) ? f.stationIds.filter((x) => x !== id) : [...f.stationIds, id] }));
 
   if (staff === null) return <Loading />;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      {canManage && <button onClick={() => setForm({ name: '', number: '', role: '', stationId: '' })} style={primaryBtn}>＋ Add staff</button>}
+      {canManage && <StaffPortalCard suiteId={suiteId} flash={flash} />}
+      {canManage && <button onClick={() => setForm({ name: '', number: '', role: '', stationIds: [] })} style={primaryBtn}>＋ Add staff</button>}
       {staff.length === 0 ? <Empty>No staff yet. Add the people working this event so you can tag who moves devices and logs issues.</Empty> : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {staff.map((s) => (
@@ -551,12 +641,12 @@ function StaffTab({ suiteId, canManage, flash, reloadKey }) {
                 <span style={staffBadge}>{s.number || '—'}</span>
                 <div style={{ textAlign: 'left' }}>
                   <div style={{ fontWeight: 650, fontSize: 14 }}>{s.name || '(no name)'}</div>
-                  <div style={{ fontSize: 12, color: 'var(--muted)' }}>{[s.role, s.stationName].filter(Boolean).join(' · ') || 'Unassigned'}</div>
+                  <div style={{ fontSize: 12, color: 'var(--muted)' }}>{[s.role, s.stations.map((x) => x.name).join(', ')].filter(Boolean).join(' · ') || 'Unassigned'}</div>
                 </div>
               </div>
               {canManage && (
                 <div style={{ display: 'flex', gap: 6 }}>
-                  <button onClick={() => setForm({ id: s.id, name: s.name, number: s.number, role: s.role, stationId: s.stationId || '' })} style={iconBtn}>✏️</button>
+                  <button onClick={() => setForm({ id: s.id, name: s.name, number: s.number, role: s.role, stationIds: s.stationIds || [] })} style={iconBtn}>✏️</button>
                   <button onClick={() => remove(s)} style={iconBtn}>🗑️</button>
                 </div>
               )}
@@ -572,12 +662,16 @@ function StaffTab({ suiteId, canManage, flash, reloadKey }) {
               <Field label="Name"><input style={input} value={form.name} autoFocus onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Jane Doe" /></Field>
             </div>
             <Field label="Role (optional)"><input style={input} value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} placeholder="e.g. Liaison, Warehouse" /></Field>
-            <Field label="Assigned station (optional)">
-              <select style={input} value={form.stationId} onChange={(e) => setForm({ ...form, stationId: e.target.value })}>
-                <option value="">— none —</option>
-                {stations.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
-            </Field>
+            <div>
+              <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>Assigned stations (optional — pick any)</div>
+              {stations.length === 0 ? <div style={{ fontSize: 12, color: 'var(--muted)' }}>No stations yet.</div> : (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {stations.map((s) => (
+                    <Chip key={s.id} on={form.stationIds.includes(s.id)} onClick={() => toggleStation(s.id)}>{KIND_ICON[s.kind] || '📍'} {s.name}</Chip>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
           <div style={modalActions}>
             <button onClick={() => setForm(null)} style={ghostBtn}>Cancel</button>
@@ -585,6 +679,38 @@ function StaffTab({ suiteId, canManage, flash, reloadKey }) {
           </div>
         </Modal>
       )}
+    </div>
+  );
+}
+
+// The shareable staff-portal link (token-gated). Staff open it, log in by number, and scan.
+function StaffPortalCard({ suiteId, flash }) {
+  const [kiosk, setKiosk] = useState(null);
+  useEffect(() => { api.eventopsKiosk(suiteId).then(setKiosk).catch(() => setKiosk({ error: true })); }, [suiteId]);
+  if (!kiosk || kiosk.error) return null;
+  const url = `${window.location.origin}${kiosk.path}`;
+  const copy = () => { try { navigator.clipboard.writeText(url); flash('Portal link copied'); } catch { /* ignore */ } };
+  async function rotate() {
+    if (!confirm('Generate a new link? The current one will stop working immediately.')) return;
+    try { setKiosk(await api.eventopsRotateKiosk(suiteId)); flash('New link generated'); } catch (e) { alert(e.message); }
+  }
+  async function toggle() {
+    try { setKiosk(await api.eventopsSetKiosk(suiteId, !kiosk.enabled)); } catch (e) { alert(e.message); }
+  }
+  return (
+    <div style={{ ...card, display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+        <div style={{ fontWeight: 700, fontSize: 14 }}>🔗 Staff scan portal {kiosk.enabled ? '' : '· off'}</div>
+        <button onClick={toggle} style={ghostBtn}>{kiosk.enabled ? 'Turn off' : 'Turn on'}</button>
+      </div>
+      <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+        Share this link with on-the-ground staff — they log in with their <b>staff number</b> (no Pulse account), then scan to move devices &amp; log issues, and see their stations.
+      </div>
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+        <input readOnly value={url} style={{ ...input, flex: 1, minWidth: 180, fontSize: 12.5, opacity: kiosk.enabled ? 1 : 0.5 }} onFocus={(e) => e.target.select()} />
+        <button onClick={copy} style={primaryBtn}>Copy</button>
+        <button onClick={rotate} style={ghostBtn}>New link</button>
+      </div>
     </div>
   );
 }
@@ -690,7 +816,10 @@ const stationCard = { ...card, display: 'flex', flexDirection: 'column', alignIt
 const select = { padding: '8px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 14, maxWidth: '100%' };
 const input = { width: '100%', boxSizing: 'border-box', padding: '11px 12px', fontSize: 15, borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)' };
 const fieldCol = { display: 'flex', flexDirection: 'column', gap: 10 };
-const tabBtn = (on) => ({ padding: '9px 14px', borderRadius: 10, border: 'none', cursor: 'pointer', fontSize: 14, fontWeight: on ? 700 : 500, background: on ? 'var(--brand)' : 'var(--card)', color: on ? '#fff' : 'var(--text)' });
+const tabBtn = (on) => ({ padding: '9px 14px', borderRadius: 10, border: 'none', cursor: 'pointer', fontSize: 14, fontWeight: on ? 700 : 500, background: on ? 'var(--brand)' : 'var(--card)', color: on ? '#fff' : 'var(--text)', whiteSpace: 'nowrap' });
+const mobileTabs = { display: 'flex', gap: 6, flexWrap: 'wrap' };
+const leftNav = { position: 'sticky', top: 8, display: 'flex', flexDirection: 'column', gap: 3, width: 170, flexShrink: 0, padding: 6, borderRadius: 14, border: '1px solid var(--hairline)', background: 'var(--card)' };
+const navItem = (on) => ({ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', padding: '10px 12px', borderRadius: 9, border: 'none', cursor: 'pointer', fontSize: 14, fontWeight: on ? 700 : 500, background: on ? 'var(--brand)' : 'transparent', color: on ? '#fff' : 'var(--text)' });
 const primaryBtn = { padding: '11px 16px', borderRadius: 10, border: 'none', background: 'var(--brand)', color: '#fff', fontWeight: 700, fontSize: 14, cursor: 'pointer' };
 const ghostBtn = { padding: '9px 14px', borderRadius: 10, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', fontWeight: 600, fontSize: 13, cursor: 'pointer' };
 const dangerBtn = { flex: 1, padding: '11px', borderRadius: 10, border: '1px solid rgba(220,60,60,0.4)', background: 'transparent', color: 'var(--error)', fontWeight: 600, fontSize: 13, cursor: 'pointer' };
@@ -701,7 +830,10 @@ const badge = { padding: '5px 10px', borderRadius: 8, fontSize: 12, fontWeight: 
 const staffBadge = { minWidth: 34, height: 34, padding: '0 8px', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(var(--brand-rgb),0.12)', color: 'var(--brand)', fontWeight: 800, fontSize: 13, flexShrink: 0 };
 const feedRow = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '8px 4px', borderBottom: '1px solid var(--hairline)' };
 const fab = (isMobile) => ({ position: 'fixed', right: isMobile ? 16 : 32, bottom: isMobile ? 16 : 24, zIndex: 60, display: 'flex', alignItems: 'center', gap: 8, padding: '14px 22px', borderRadius: 30, border: 'none', background: 'var(--brand)', color: '#fff', fontWeight: 700, fontSize: 16, cursor: 'pointer', boxShadow: 'var(--shadow-pop)' });
-const overlay = { position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', padding: 8 };
+const mapCanvas = { position: 'relative', width: '100%', borderRadius: 14, border: '1px solid var(--hairline)', background: 'repeating-linear-gradient(0deg, var(--card), var(--card) 23px, var(--hairline) 24px), repeating-linear-gradient(90deg, var(--card), var(--card) 23px, var(--hairline) 24px)', overflow: 'hidden', touchAction: 'none' };
+const mapPin = { position: 'absolute', transform: 'translate(-50%, -50%)', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '8px 10px', borderRadius: 12, border: '2px solid var(--border)', background: 'var(--card)', color: 'var(--text)', boxShadow: 'var(--shadow-sm)', userSelect: 'none', touchAction: 'none' };
+const mapPinCount = { marginTop: 3, minWidth: 22, padding: '1px 7px', borderRadius: 10, background: 'var(--brand)', color: '#fff', fontSize: 12, fontWeight: 800 };
+const overlay = { position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 };
 const modalSheet = { width: '100%', maxWidth: 460, maxHeight: '88vh', overflowY: 'auto', background: 'var(--card)', borderRadius: 18, padding: 18, boxShadow: 'var(--shadow-pop)' };
 const modalActions = { display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 };
 const toastStyle = { position: 'fixed', left: '50%', bottom: 90, transform: 'translateX(-50%)', zIndex: 1100, background: 'var(--text)', color: 'var(--bg)', padding: '10px 18px', borderRadius: 24, fontSize: 14, fontWeight: 600, boxShadow: 'var(--shadow-pop)' };

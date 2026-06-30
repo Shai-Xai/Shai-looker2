@@ -28,6 +28,7 @@ const DigestsPage = lazy(() => import('./pages/DigestsPage.jsx'));
 const SocialPage = lazy(() => import('./pages/SocialPage.jsx'));
 const InventiveAskPage = lazy(() => import('./pages/InventiveAskPage.jsx'));
 const EventOpsPage = lazy(() => import('./pages/EventOpsPage.jsx'));
+const EventOpsPortalPage = lazy(() => import('./pages/EventOpsPortalPage.jsx'));
 import Logo from './components/Logo.jsx';
 import BrandLogo from './components/BrandLogo.jsx';
 import { api } from './lib/api.js';
@@ -224,6 +225,17 @@ function Shell() {
   // Tell the server when this user is running Pulse as an installed app (home
   // screen / standalone) — stamps their install + last-opened so admin can see it.
   useEffect(() => { if (user && isStandalone()) api.markInstalled(); }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // PUBLIC staff scan portal — token-gated, no Pulse login (works logged-in or out).
+  // Matched before the auth gate so staff with no account reach it directly.
+  const portal = window.location.pathname.match(/^\/eventops\/portal\/([^/]+)\/([^/]+)/);
+  if (portal) {
+    return (
+      <Suspense fallback={<div style={{ minHeight: '100dvh' }} />}>
+        <EventOpsPortalPage suiteId={decodeURIComponent(portal[1])} token={decodeURIComponent(portal[2])} />
+      </Suspense>
+    );
+  }
 
   if (loading) {
     return <div style={{ minHeight: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)' }}>Loading…</div>;

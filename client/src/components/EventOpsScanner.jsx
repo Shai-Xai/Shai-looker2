@@ -89,8 +89,8 @@ export default function EventOpsScanner({ onCode, onClose, title = 'Scan a devic
   );
 }
 
-const overlay = { position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.72)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' };
-const sheet = { width: '100%', maxWidth: 460, background: 'var(--card)', borderTopLeftRadius: 18, borderTopRightRadius: 18, borderRadius: 18, padding: 16, margin: 8, boxShadow: 'var(--shadow-pop)' };
+const overlay = { position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.72)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 };
+const sheet = { width: '100%', maxWidth: 460, maxHeight: '90vh', overflowY: 'auto', background: 'var(--card)', borderRadius: 18, padding: 16, boxShadow: 'var(--shadow-pop)' };
 const head = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 };
 const closeBtn = { width: 36, height: 36, borderRadius: 10, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', fontSize: 16, cursor: 'pointer' };
 const regionWrap = { position: 'relative', width: '100%', aspectRatio: '4 / 3', background: '#000', borderRadius: 12, overflow: 'hidden' };

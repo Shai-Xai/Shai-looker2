@@ -134,6 +134,15 @@ function mount(app, { db, auth }) {
       created_at  TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_eventops_staff_suite ON eventops_staff(suite_id);
+
+    -- Per-event kiosk token: gates the PUBLIC staff portal URL (no Pulse account needed).
+    -- Rotating the token instantly revokes every shared link. enabled=0 closes the portal.
+    CREATE TABLE IF NOT EXISTS eventops_kiosk (
+      suite_id    TEXT PRIMARY KEY,
+      token       TEXT NOT NULL DEFAULT '',
+      enabled     INTEGER NOT NULL DEFAULT 1,
+      updated_at  TEXT NOT NULL
+    );
   `);
 
   // Additive migrations for already-deployed DBs: attribute moves/issues to a staff member.
@@ -141,7 +150,12 @@ function mount(app, { db, auth }) {
   for (const [t, col] of [
     ['eventops_device_events', 'staff_id'], ['eventops_device_events', 'staff_label'],
     ['eventops_issues', 'staff_id'], ['eventops_issues', 'staff_label'],
+    // Where the device was when the issue was raised (denormalised so it survives a station delete).
+    ['eventops_issues', 'station_id'], ['eventops_issues', 'station_label'],
   ]) { try { sql.exec(`ALTER TABLE ${t} ADD COLUMN ${col} TEXT NOT NULL DEFAULT ''`); } catch { /* already there */ } }
+  // Staff can be posted to MULTIPLE stations — JSON array. (station_id stays as the legacy
+  // single, kept in sync to the first for back-compat; station_ids is authoritative.)
+  try { sql.exec("ALTER TABLE eventops_staff ADD COLUMN station_ids TEXT NOT NULL DEFAULT '[]'"); } catch { /* already there */ }
 
   // ── per-client toggle ──────────────────────────────────────────────────────────
   const entityEnabled = (entityId) => {
@@ -204,11 +218,20 @@ function mount(app, { db, auth }) {
     id: i.id, deviceId: i.device_id, category: i.category, note: i.note, status: i.status,
     resolution: i.resolution, reportedBy: i.reported_by, reportedAt: i.reported_at,
     resolvedBy: i.resolved_by, resolvedAt: i.resolved_at, staffLabel: i.staff_label || '',
+    stationId: i.station_id || null, stationLabel: i.station_label || (i.station_id ? stationName(i.station_id) : ''),
   });
-  const staffRow = (s) => s && ({
-    id: s.id, entityId: s.entity_id, suiteId: s.suite_id, name: s.name, number: s.number,
-    role: s.role, stationId: s.station_id || null, stationName: stationName(s.station_id), createdAt: s.created_at,
-  });
+  const parseIds = (json, fallback) => { try { const a = JSON.parse(json || '[]'); return Array.isArray(a) && a.length ? a : fallback; } catch { return fallback; } };
+  const staffRow = (s) => {
+    if (!s) return s;
+    const ids = parseIds(s.station_ids, s.station_id ? [s.station_id] : []); // back-compat with legacy single
+    const stations = ids.map((id) => ({ id, name: stationName(id) })).filter((x) => x.name);
+    return {
+      id: s.id, entityId: s.entity_id, suiteId: s.suite_id, name: s.name, number: s.number, role: s.role,
+      stationIds: stations.map((x) => x.id), stations,
+      stationId: stations[0]?.id || null, stationName: stations[0]?.name || '', // legacy single fields
+      createdAt: s.created_at,
+    };
+  };
   const getDevice = (id) => sql.prepare('SELECT * FROM eventops_devices WHERE id=?').get(id);
   // Resolve a staffId (within the suite) → { id, label } for attribution. Label is denormalised
   // onto the event/issue so the trail survives a later staff delete. Returns null if not found.
@@ -229,6 +252,53 @@ function mount(app, { db, auth }) {
         unusual ? 1 : 0, now(), staff?.id || '', staff?.label || '');
   }
   const str = (v, max = 200) => String(v == null ? '' : v).slice(0, max);
+
+  // ── shared engine (used by BOTH the authed console routes and the public staff portal,
+  //    so the two surfaces can never drift apart) ──────────────────────────────────────
+  // Resolve a scanned/typed code → device (prefer QR/serial, fall back to label; case-insensitive).
+  const findDeviceByCode = (suiteId, code) =>
+    sql.prepare('SELECT * FROM eventops_devices WHERE suite_id=? AND (qr_code=? COLLATE NOCASE OR serial_number=? COLLATE NOCASE)').get(suiteId, code, code)
+    || sql.prepare('SELECT * FROM eventops_devices WHERE suite_id=? AND label=? COLLATE NOCASE').get(suiteId, code);
+
+  // Apply a move/status change + write the audit row. Returns { device, unusual } or { error }.
+  function applyMove(su, d, { stationId, state, staffId, actor, note }) {
+    let toState; let toStation = '';
+    if (state && STATES.includes(state)) {
+      toState = state;
+      toStation = state === 'deployed' ? str(stationId, 60) : '';
+    } else {
+      const raw = stationId == null ? '' : String(stationId);
+      if (raw === '' || raw === 'hive') { toState = 'in_stock'; toStation = ''; }
+      else {
+        const st = sql.prepare('SELECT id FROM eventops_stations WHERE id=? AND suite_id=?').get(raw, su.id);
+        if (!st) return { error: 'Unknown station.' };
+        toState = 'deployed'; toStation = st.id;
+      }
+    }
+    const unusual = isUnusual(d.state, toState);
+    logEvent(d, { kind: state ? 'status' : 'move', toState, toStation, actor, note, unusual, staff: resolveStaff(su.id, staffId) });
+    sql.prepare('UPDATE eventops_devices SET state=?, station_id=?, updated_at=? WHERE id=?').run(toState, toStation, now(), d.id);
+    return { device: deviceRow(getDevice(d.id)), unusual };
+  }
+
+  // Log an issue / liaison check + its audit row. Returns the issue row.
+  function applyIssue(su, d, { category, note, resolution, resolved, staffId, actor }) {
+    const cat = ISSUE_CATEGORIES.includes(category) ? category : (str(category, 40).trim() || 'other');
+    const n = str(note, 2000).trim();
+    const res = str(resolution, 2000).trim();
+    const resolvedNow = !!resolved || !!res;
+    const staff = resolveStaff(su.id, staffId);
+    // Where the device is right now — captured onto the issue so you can see where it happened.
+    const stationLabel = d.station_id ? stationName(d.station_id) : 'Hive';
+    const id = uuid(); const ts = now();
+    sql.prepare(`INSERT INTO eventops_issues
+      (id, device_id, entity_id, suite_id, category, note, status, resolution, reported_by, reported_at, resolved_by, resolved_at, staff_id, staff_label, station_id, station_label)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(id, d.id, su.entityId, su.id, cat, n, resolvedNow ? 'resolved' : 'open', res,
+        actor, ts, resolvedNow ? actor : '', resolvedNow ? ts : '', staff?.id || '', staff?.label || '', d.station_id || '', stationLabel);
+    logEvent(d, { kind: 'check', actor, note: `Issue: ${cat}${n ? ' — ' + n : ''}`, staff });
+    return issueRow(sql.prepare('SELECT * FROM eventops_issues WHERE id=?').get(id));
+  }
 
   // ════════════════════════════ per-client toggle routes ═══════════════════════════
   // Which of MY entities have Event Ops switched on — the client shell calls this to decide
@@ -423,11 +493,7 @@ function mount(app, { db, auth }) {
     const su = gateSuite(req, res); if (!su) return;
     const code = str(req.body?.code, 120).trim();
     if (!code) return res.status(400).json({ error: 'No code scanned.' });
-    // Match case-insensitively. Prefer a real QR/serial match, then fall back to the LABEL —
-    // people often enter the device's code in the label field, so a unit that's clearly in the
-    // list would otherwise read as "no match". COLLATE NOCASE so SL002 == sl002.
-    const d = sql.prepare('SELECT * FROM eventops_devices WHERE suite_id=? AND (qr_code=? COLLATE NOCASE OR serial_number=? COLLATE NOCASE)').get(su.id, code, code)
-      || sql.prepare('SELECT * FROM eventops_devices WHERE suite_id=? AND label=? COLLATE NOCASE').get(su.id, code);
+    const d = findDeviceByCode(su.id, code);
     if (!d) return res.status(404).json({ error: `No device matches “${code}” at this event.`, code });
     const events = sql.prepare('SELECT * FROM eventops_device_events WHERE device_id=? ORDER BY at DESC LIMIT 8').all(d.id).map(eventRow);
     const openIssues = sql.prepare("SELECT COUNT(*) c FROM eventops_issues WHERE device_id=? AND status='open'").get(d.id).c;
@@ -444,26 +510,9 @@ function mount(app, { db, auth }) {
     const b = req.body || {};
     const d = getDevice(b.deviceId);
     if (!d || d.suite_id !== su.id) return res.status(404).json({ error: 'Device not found' });
-
-    let toState; let toStation = '';
-    if (b.state && STATES.includes(b.state)) {
-      toState = b.state;
-      // A status change to a station-bound state keeps a station only if it's "deployed".
-      toStation = b.state === 'deployed' ? str(b.stationId, 60) : '';
-    } else {
-      const raw = b.stationId == null ? '' : String(b.stationId);
-      const toHive = raw === '' || raw === 'hive';
-      if (toHive) { toState = 'in_stock'; toStation = ''; }
-      else {
-        const st = sql.prepare('SELECT id FROM eventops_stations WHERE id=? AND suite_id=?').get(raw, su.id);
-        if (!st) return res.status(400).json({ error: 'Unknown station.' });
-        toState = 'deployed'; toStation = st.id;
-      }
-    }
-    const unusual = isUnusual(d.state, toState);
-    logEvent(d, { kind: b.state ? 'status' : 'move', toState, toStation, actor: req.user.email, note: b.note, unusual, staff: resolveStaff(su.id, b.staffId) });
-    sql.prepare('UPDATE eventops_devices SET state=?, station_id=?, updated_at=? WHERE id=?').run(toState, toStation, now(), d.id);
-    res.json({ device: deviceRow(getDevice(d.id)), unusual });
+    const out = applyMove(su, d, { stationId: b.stationId, state: b.state, staffId: b.staffId, actor: req.user.email, note: b.note });
+    if (out.error) return res.status(400).json({ error: out.error });
+    res.json(out);
   });
 
   // ════════════════════════════ issues (liaison checks) ════════════════════════════
@@ -484,19 +533,7 @@ function mount(app, { db, auth }) {
     const b = req.body || {};
     const d = getDevice(b.deviceId);
     if (!d || d.suite_id !== su.id) return res.status(404).json({ error: 'Device not found' });
-    const category = ISSUE_CATEGORIES.includes(b.category) ? b.category : (str(b.category, 40).trim() || 'other');
-    const note = str(b.note, 2000).trim();
-    const resolution = str(b.resolution, 2000).trim();
-    const resolvedNow = !!b.resolved || !!resolution;
-    const staff = resolveStaff(su.id, b.staffId);
-    const id = uuid(); const ts = now();
-    sql.prepare(`INSERT INTO eventops_issues
-      (id, device_id, entity_id, suite_id, category, note, status, resolution, reported_by, reported_at, resolved_by, resolved_at, staff_id, staff_label)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-      .run(id, d.id, su.entityId, su.id, category, note, resolvedNow ? 'resolved' : 'open', resolution,
-        req.user.email, ts, resolvedNow ? req.user.email : '', resolvedNow ? ts : '', staff?.id || '', staff?.label || '');
-    logEvent(d, { kind: 'check', actor: req.user.email, note: `Issue: ${category}${note ? ' — ' + note : ''}`, staff });
-    res.status(201).json({ issue: issueRow(sql.prepare('SELECT * FROM eventops_issues WHERE id=?').get(id)) });
+    res.status(201).json({ issue: applyIssue(su, d, { category: b.category, note: b.note, resolution: b.resolution, resolved: b.resolved, staffId: b.staffId, actor: req.user.email }) });
   });
 
   // Resolve (or reopen) an issue.
@@ -523,8 +560,11 @@ function mount(app, { db, auth }) {
   });
 
   function cleanStaff(b, su) {
-    const stationId = b.stationId && sql.prepare('SELECT id FROM eventops_stations WHERE id=? AND suite_id=?').get(b.stationId, su.id) ? b.stationId : '';
-    return { name: str(b.name, 120).trim(), number: str(b.number, 40).trim(), role: str(b.role, 60).trim(), stationId };
+    // Accept stationIds[] (preferred) or a single stationId (legacy); keep only stations in this suite.
+    const raw = Array.isArray(b.stationIds) ? b.stationIds : (b.stationId ? [b.stationId] : []);
+    const valid = sql.prepare('SELECT id FROM eventops_stations WHERE suite_id=?').all(su.id).map((r) => r.id);
+    const stationIds = [...new Set(raw.map(String).filter((id) => valid.includes(id)))];
+    return { name: str(b.name, 120).trim(), number: str(b.number, 40).trim(), role: str(b.role, 60).trim(), stationIds };
   }
 
   app.post('/api/eventops/suites/:suiteId/staff', auth.requireAuth, (req, res) => {
@@ -532,8 +572,8 @@ function mount(app, { db, auth }) {
     const c = cleanStaff(req.body || {}, su);
     if (!c.name && !c.number) return res.status(400).json({ error: 'Give the staff member a name or number.' });
     const id = uuid();
-    sql.prepare('INSERT INTO eventops_staff (id, entity_id, suite_id, name, number, role, station_id, created_at) VALUES (?,?,?,?,?,?,?,?)')
-      .run(id, su.entityId, su.id, c.name, c.number, c.role, c.stationId, now());
+    sql.prepare('INSERT INTO eventops_staff (id, entity_id, suite_id, name, number, role, station_id, station_ids, created_at) VALUES (?,?,?,?,?,?,?,?,?)')
+      .run(id, su.entityId, su.id, c.name, c.number, c.role, c.stationIds[0] || '', JSON.stringify(c.stationIds), now());
     res.status(201).json({ staff: staffRow(sql.prepare('SELECT * FROM eventops_staff WHERE id=?').get(id)) });
   });
 
@@ -541,8 +581,10 @@ function mount(app, { db, auth }) {
     const su = gateSuite(req, res, { manage: true }); if (!su) return;
     const s = sql.prepare('SELECT * FROM eventops_staff WHERE id=?').get(req.params.id);
     if (!s || s.suite_id !== su.id) return res.status(404).json({ error: 'Staff member not found' });
-    const c = cleanStaff({ name: req.body?.name ?? s.name, number: req.body?.number ?? s.number, role: req.body?.role ?? s.role, stationId: req.body?.stationId ?? s.station_id }, su);
-    sql.prepare('UPDATE eventops_staff SET name=?, number=?, role=?, station_id=? WHERE id=?').run(c.name, c.number, c.role, c.stationId, s.id);
+    const cur = staffRow(s);
+    const c = cleanStaff({ name: req.body?.name ?? s.name, number: req.body?.number ?? s.number, role: req.body?.role ?? s.role, stationIds: req.body?.stationIds ?? cur.stationIds }, su);
+    sql.prepare('UPDATE eventops_staff SET name=?, number=?, role=?, station_id=?, station_ids=? WHERE id=?')
+      .run(c.name, c.number, c.role, c.stationIds[0] || '', JSON.stringify(c.stationIds), s.id);
     res.json({ staff: staffRow(sql.prepare('SELECT * FROM eventops_staff WHERE id=?').get(s.id)) });
   });
 
@@ -552,6 +594,121 @@ function mount(app, { db, auth }) {
     if (!s || s.suite_id !== su.id) return res.status(404).json({ error: 'Staff member not found' });
     sql.prepare('DELETE FROM eventops_staff WHERE id=?').run(s.id); // history keeps the denormalised label
     res.status(204).end();
+  });
+
+  // ════════════════════════════ kiosk token (authed: manage the portal link) ════════
+  const newToken = () => crypto.randomBytes(12).toString('hex');
+  function kioskFor(suiteId, { create = false } = {}) {
+    let k = sql.prepare('SELECT * FROM eventops_kiosk WHERE suite_id=?').get(suiteId);
+    if (!k && create) {
+      sql.prepare('INSERT INTO eventops_kiosk (suite_id, token, enabled, updated_at) VALUES (?,?,1,?)').run(suiteId, newToken(), now());
+      k = sql.prepare('SELECT * FROM eventops_kiosk WHERE suite_id=?').get(suiteId);
+    }
+    return k;
+  }
+  const kioskView = (suiteId, k) => ({ token: k.token, enabled: !!k.enabled, path: `/eventops/portal/${suiteId}/${k.token}` });
+
+  app.get('/api/eventops/suites/:suiteId/kiosk', auth.requireAuth, (req, res) => {
+    const su = gateSuite(req, res, { manage: true }); if (!su) return;
+    res.json(kioskView(su.id, kioskFor(su.id, { create: true })));
+  });
+  app.post('/api/eventops/suites/:suiteId/kiosk/rotate', auth.requireAuth, (req, res) => {
+    const su = gateSuite(req, res, { manage: true }); if (!su) return;
+    sql.prepare('INSERT INTO eventops_kiosk (suite_id, token, enabled, updated_at) VALUES (?,?,1,?) ON CONFLICT(suite_id) DO UPDATE SET token=excluded.token, updated_at=excluded.updated_at')
+      .run(su.id, newToken(), now());
+    res.json(kioskView(su.id, kioskFor(su.id)));
+  });
+  app.put('/api/eventops/suites/:suiteId/kiosk', auth.requireAuth, (req, res) => {
+    const su = gateSuite(req, res, { manage: true }); if (!su) return;
+    const k = kioskFor(su.id, { create: true });
+    sql.prepare('UPDATE eventops_kiosk SET enabled=?, updated_at=? WHERE suite_id=?').run((req.body || {}).enabled ? 1 : 0, now(), su.id);
+    res.json(kioskView(su.id, kioskFor(su.id) || k));
+  });
+
+  // ════════════════════════════ PUBLIC staff portal (token-gated, NO Pulse login) ═══
+  // Staff have no accounts — the unguessable per-event token gates the whole portal, then
+  // they identify by their staff number. Kiosk-grade: anyone with the link can operate, so
+  // rotating the token is the revoke. Every action is attributed to the chosen staff member.
+  function portalSuite(req, res) {
+    if (!enabled()) { off(res); return null; }
+    const su = db.getSuite(req.params.suiteId);
+    if (!su || !entityEnabled(su.entityId)) { res.status(404).json({ error: 'Portal not found' }); return null; }
+    const k = kioskFor(su.id);
+    if (!k || !k.enabled || !k.token || k.token !== req.params.token) { res.status(403).json({ error: 'This staff link is invalid or has been turned off.' }); return null; }
+    return su;
+  }
+  const portalStaffRow = (s) => { const r = staffRow(s); return { id: r.id, name: r.name, number: r.number, role: r.role, stations: r.stations }; };
+  const findStaff = (suiteId, staffId) => sql.prepare('SELECT * FROM eventops_staff WHERE id=? AND suite_id=?').get(staffId, suiteId);
+
+  // Event basics (name + stations) so the portal can show context before login.
+  app.get('/api/eventops/portal/:suiteId/:token', (req, res) => {
+    const su = portalSuite(req, res); if (!su) return;
+    res.json({ suite: { id: su.id, name: su.name }, stations: sql.prepare('SELECT * FROM eventops_stations WHERE suite_id=? ORDER BY position, name').all(su.id).map(stationRow) });
+  });
+
+  // Log in by staff number → the staff record (used to attribute their actions).
+  app.post('/api/eventops/portal/:suiteId/:token/login', (req, res) => {
+    const su = portalSuite(req, res); if (!su) return;
+    const number = str(req.body?.number, 40).trim();
+    if (!number) return res.status(400).json({ error: 'Enter your staff number.' });
+    const s = sql.prepare('SELECT * FROM eventops_staff WHERE suite_id=? AND number=? COLLATE NOCASE').get(su.id, number);
+    if (!s) return res.status(404).json({ error: 'No staff member with that number for this event.' });
+    res.json({ staff: portalStaffRow(s) });
+  });
+
+  // A staff member's view: their assigned station's devices + open issues (and event totals).
+  app.get('/api/eventops/portal/:suiteId/:token/me/:staffId', (req, res) => {
+    const su = portalSuite(req, res); if (!su) return;
+    const s = findStaff(su.id, req.params.staffId);
+    if (!s) return res.status(404).json({ error: 'Staff member not found' });
+    const me = staffRow(s);
+    const ids = me.stationIds;
+    // Each of the staff member's posted stations: its deployed devices + open issues.
+    const stations = ids.map((sid) => {
+      const st = stationRow(sql.prepare('SELECT * FROM eventops_stations WHERE id=?').get(sid));
+      const devices = sql.prepare("SELECT * FROM eventops_devices WHERE station_id=? AND state='deployed'").all(sid).map(deviceRow);
+      const issues = sql.prepare(`SELECT i.* FROM eventops_issues i JOIN eventops_devices d ON d.id=i.device_id
+          WHERE i.suite_id=? AND i.status='open' AND d.station_id=? ORDER BY i.reported_at DESC`).all(su.id, sid)
+        .map((i) => ({ ...issueRow(i), device: deviceRow(getDevice(i.device_id)) }));
+      return st ? { ...st, devices, issues } : null;
+    }).filter(Boolean);
+    const total = sql.prepare('SELECT COUNT(*) c FROM eventops_devices WHERE suite_id=?').get(su.id).c;
+    res.json({ staff: portalStaffRow(s), stations, eventTotals: { devices: total } });
+  });
+
+  // Scan a code → resolve the device (same matching as the console).
+  app.post('/api/eventops/portal/:suiteId/:token/scan', (req, res) => {
+    const su = portalSuite(req, res); if (!su) return;
+    const code = str(req.body?.code, 120).trim();
+    if (!code) return res.status(400).json({ error: 'No code scanned.' });
+    const d = findDeviceByCode(su.id, code);
+    if (!d) return res.status(404).json({ error: `No device matches “${code}” at this event.`, code });
+    const openIssues = sql.prepare("SELECT COUNT(*) c FROM eventops_issues WHERE device_id=? AND status='open'").get(d.id).c;
+    res.json({ device: deviceRow(d), openIssues });
+  });
+
+  // A staff member moves a device (attributed to them). Requires their staffId.
+  app.post('/api/eventops/portal/:suiteId/:token/move', (req, res) => {
+    const su = portalSuite(req, res); if (!su) return;
+    const b = req.body || {};
+    const s = findStaff(su.id, b.staffId);
+    if (!s) return res.status(403).json({ error: 'Log in with your staff number first.' });
+    const d = getDevice(b.deviceId);
+    if (!d || d.suite_id !== su.id) return res.status(404).json({ error: 'Device not found' });
+    const out = applyMove(su, d, { stationId: b.stationId, staffId: s.id, actor: `portal:${s.number || s.name}`, note: b.note });
+    if (out.error) return res.status(400).json({ error: out.error });
+    res.json(out);
+  });
+
+  // A staff member logs an issue (attributed to them).
+  app.post('/api/eventops/portal/:suiteId/:token/issue', (req, res) => {
+    const su = portalSuite(req, res); if (!su) return;
+    const b = req.body || {};
+    const s = findStaff(su.id, b.staffId);
+    if (!s) return res.status(403).json({ error: 'Log in with your staff number first.' });
+    const d = getDevice(b.deviceId);
+    if (!d || d.suite_id !== su.id) return res.status(404).json({ error: 'Device not found' });
+    res.status(201).json({ issue: applyIssue(su, d, { category: b.category, note: b.note, resolution: b.resolution, resolved: b.resolved, staffId: s.id, actor: `portal:${s.number || s.name}` }) });
   });
 
   console.log('[eventops] mounted', enabled() ? '(enabled)' : '(disabled — set eventops_enabled=1)');

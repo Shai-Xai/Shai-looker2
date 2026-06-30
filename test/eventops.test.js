@@ -200,6 +200,7 @@ test('staff: create + attribute a move and an issue to a staff member', () => {
   // Issue attributed to staff → the issue row carries the label too.
   const issue = call(r['POST /api/eventops/suites/:suiteId/issues'], { user: owner, params: P, body: { deviceId: dev.id, category: 'battery', staffId: staff.id } }).body.issue;
   assert.equal(issue.staffLabel, '#101 Jane');
+  assert.equal(issue.stationLabel, 'Gate'); // the device was at Gate when the issue was raised
 
   // Attribution is optional — a move with no staffId still works (blank label).
   const moved = call(r['POST /api/eventops/suites/:suiteId/move'], { user: owner, params: P, body: { deviceId: dev.id, stationId: 'hive' } });
@@ -209,6 +210,47 @@ test('staff: create + attribute a move and an issue to a staff member', () => {
   call(r['DELETE /api/eventops/suites/:suiteId/staff/:id'], { user: owner, params: { ...P, id: staff.id } });
   assert.equal(call(r['GET /api/eventops/suites/:suiteId/staff'], { user: owner, params: P }).body.staff.length, 0);
   assert.equal(call(r['GET /api/eventops/suites/:suiteId/issues'], { user: owner, params: P, query: { status: 'all' } }).body.issues[0].staffLabel, '#101 Jane');
+});
+
+test('staff portal: token gates access; staff log in by number, then move + log attributed', () => {
+  const r = mount();
+  const { entity, suite, owner, admin } = seedEvent();
+  call(r['PUT /api/eventops/entities/:entityId/enabled'], { user: admin, params: { entityId: entity.id }, body: { enabled: true } });
+  const P = { suiteId: suite.id };
+  const station = call(r['POST /api/eventops/suites/:suiteId/stations'], { user: owner, params: P, body: { name: 'Bar', kind: 'bar' } }).body.station;
+  const staff = call(r['POST /api/eventops/suites/:suiteId/staff'], { user: owner, params: P, body: { name: 'Sam', number: '7', stationId: station.id } }).body.staff;
+  const dev = call(r['POST /api/eventops/suites/:suiteId/devices'], { user: owner, params: P, body: { label: 'P1', qrCode: 'P1' } }).body.device;
+
+  // Get the kiosk token (auto-created), then exercise the PUBLIC routes (no user).
+  const kiosk = call(r['GET /api/eventops/suites/:suiteId/kiosk'], { user: owner, params: P }).body;
+  assert.ok(kiosk.token && kiosk.path.includes(kiosk.token));
+  const KP = { suiteId: suite.id, token: kiosk.token };
+
+  // Wrong token → 403.
+  assert.equal(call(r['POST /api/eventops/portal/:suiteId/:token/login'], { params: { suiteId: suite.id, token: 'nope' }, body: { number: '7' } }).code, 403);
+
+  // Login by number (public).
+  const login = call(r['POST /api/eventops/portal/:suiteId/:token/login'], { params: KP, body: { number: '7' } });
+  assert.equal(login.body.staff.name, 'Sam');
+  const staffId = login.body.staff.id;
+  assert.equal(call(r['POST /api/eventops/portal/:suiteId/:token/login'], { params: KP, body: { number: '999' } }).code, 404);
+
+  // Staff moves a device via the portal → attributed to them in the audit trail.
+  call(r['POST /api/eventops/portal/:suiteId/:token/move'], { params: KP, body: { deviceId: dev.id, stationId: station.id, staffId } });
+  const detail = call(r['GET /api/eventops/suites/:suiteId/devices/:id'], { user: owner, params: { ...P, id: dev.id } });
+  assert.ok(detail.body.events.some((e) => e.staffLabel === '#7 Sam'), 'portal move attributed to #7 Sam');
+
+  // Their "me" view shows their station's deployed device + lets them see issues.
+  call(r['POST /api/eventops/portal/:suiteId/:token/issue'], { params: KP, body: { deviceId: dev.id, category: 'battery', staffId } });
+  const me = call(r['GET /api/eventops/portal/:suiteId/:token/me/:staffId'], { params: { ...KP, staffId } });
+  assert.equal(me.body.stations.length, 1);
+  assert.equal(me.body.stations[0].name, 'Bar');
+  assert.equal(me.body.stations[0].devices.length, 1);
+  assert.equal(me.body.stations[0].issues.length, 1);
+
+  // Rotating the token revokes the old link.
+  call(r['POST /api/eventops/suites/:suiteId/kiosk/rotate'], { user: owner, params: P });
+  assert.equal(call(r['POST /api/eventops/portal/:suiteId/:token/login'], { params: KP, body: { number: '7' } }).code, 403);
 });
 
 test('deleting a station sends its deployed devices back to the Hive', () => {
