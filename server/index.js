@@ -2860,7 +2860,7 @@ const actionsApi = require('./actions').mount(app, {
   db, auth, mailer, push, messaging, os, billing,
   // Run a tile's query (scoped + suite-locked) and return its rows + fields —
   // the campaign audience source.
-  resolveAudience: async ({ entityId, dashboardId, tileId, user, filterOverrides = {}, suiteId = '' }) => {
+  resolveAudience: async ({ entityId, dashboardId, tileId, user, filterOverrides = {}, suiteId = '', limit }) => {
     const { catalogue } = clientCatalogue(entityId);
     // A dashboard shared across events appears once per event — scope to the
     // campaign's chosen event (suiteId) so its locks resolve the right cohort;
@@ -2875,7 +2875,7 @@ const actionsApi = require('./actions').mount(app, {
     const lockMap = expandLockMap(db.lockedFiltersForSuite(meta.suiteId));
     const qBody = await tileQueryBody(tile, def, user, meta.suiteId, lockMap, filterOverrides);
     if (!qBody) throw new Error('No data access for that tile');
-    const data = await runLookerQuery('/queries/run/json_detail', { ...qBody, limit: '50000' }, undefined, true);
+    const data = await runLookerQuery('/queries/run/json_detail', { ...qBody, limit: String(Math.min(Math.max(Number(limit) || 50000, 1000), 500000)) }, undefined, true);
     const fields = [...(data.fields?.dimensions || []), ...(data.fields?.measures || []), ...(data.fields?.table_calculations || [])]
       .map((f) => ({ name: f.name, label: f.label_short || f.label }));
     return { rows: data.data || [], fields };

@@ -60,14 +60,14 @@ module.exports = function createAudienceQuery({ auth, db, catalogue = require('.
   // Resolve a query-segment definition to recipients. Returns { raw, reach, count }.
   // `raw` is the shaped (pre-suppression) people list for the caller to finalize with
   // its own suppression list; reach/count are a no-suppression preview estimate.
-  async function resolveQueryAudience({ entityId, definition, user, suiteId }) {
+  async function resolveQueryAudience({ entityId, definition, user, suiteId, limit }) {
     const def = definition || {};
     if (!user) return empty('no_user');
     // Bound to the ONE curated explore — never an arbitrary model/view.
     if (def.model !== catalogue.model || def.view !== catalogue.explore) return empty('unsupported_explore');
 
     const filters = cleanCohortFilters(def.queryFilters);
-    const body = { model: catalogue.model, view: catalogue.explore, fields: [ID.email, ID.name, ID.phone], filters, limit: 5000 };
+    const body = { model: catalogue.model, view: catalogue.explore, fields: [ID.email, ID.name, ID.phone], filters, limit: Math.min(Math.max(Number(limit) || 50000, 1000), 500000) };
 
     // Event lock (the suite the segment is scoped to), then the HARD organiser gate.
     applySuiteEventLocks(body.filters, suiteId);
