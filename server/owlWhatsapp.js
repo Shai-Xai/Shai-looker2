@@ -106,10 +106,37 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
   const getSuggest = sql.prepare('SELECT items FROM owl_wa_suggest WHERE msisdn=?');
   const saveSuggest = (msisdn, items) => { try { upSuggest.run(msisdn, JSON.stringify(items), now()); } catch { /* ignore */ } };
   const resolveSelection = (msisdn, text) => {
-    const m = String(text || '').trim().match(/^([1-3])[.)]?$/);
+    const m = String(text || '').trim().match(/^([1-9])[.)]?$/);
     if (!m) return null;
     try { return JSON.parse(getSuggest.get(msisdn)?.items || '[]')[Number(m[1]) - 1] || null; } catch { return null; }
   };
+
+  // ── Prompt starters (the WhatsApp take on Meta AI's suggestion chips) ─────────
+  // WhatsApp can't show Meta AI's pre-chat suggestion chips (Meta-proprietary), so
+  // the equivalent is a friendly WELCOME the Owl sends on a greeting / "menu" /
+  // "help": a short intro + tappable starter buttons (WhatsApp caps buttons at 3 ×
+  // 20 chars) plus a numbered menu in the body for the rest. Each starter's FULL
+  // question rides the button's postbackData (a tap sends it) and is saved so a
+  // typed number works too. Admin-overridable via the owl_whatsapp_starters setting.
+  const DEFAULT_STARTERS = [
+    { label: 'Sales today',      prompt: 'How are ticket sales going today?' },
+    { label: 'Sales by hour',    prompt: 'Show me ticket sales by hour today' },
+    { label: 'Goal tracking',    prompt: 'How are my goals tracking?' },
+    { label: 'Top ticket types', prompt: 'What are my top-selling ticket types?' },
+    { label: 'Set an alert',     prompt: 'Alert me when ticket sales reach a milestone' },
+    { label: 'Draft a campaign', prompt: 'Draft a campaign to a customer segment' },
+  ];
+  const starters = () => {
+    try {
+      const j = JSON.parse(db.getSetting('owl_whatsapp_starters', '') || '[]');
+      if (Array.isArray(j) && j.length) return j.filter((s) => s && s.prompt).map((s) => ({ label: String(s.label || s.prompt).slice(0, 20), prompt: String(s.prompt).slice(0, 256) })).slice(0, 9);
+    } catch { /* fall through to defaults */ }
+    return DEFAULT_STARTERS;
+  };
+  // Bare greeting / menu / help (full-string match on the de-punctuated text), so
+  // "help" opens the menu but "help me draft a campaign" still reaches the Owl.
+  const GREETING_RE = /^(hi+|hello+|hey+|heya|hiya|yo|howzit|sawubona|menu|help|start|options|commands|hi there|good (morning|afternoon|evening|day)|morning|afternoon|evening|get started|start over|what can (you|u) do)$/;
+  const isGreeting = (t) => { const s = String(t || '').replace(/[^a-z ]/gi, ' ').replace(/\s+/g, ' ').trim().toLowerCase(); return !!s && GREETING_RE.test(s); };
 
   // ── Pending action confirmation ─────────────────────────────────────────────
   // An act-tool (createAlert/createSegment) only DRAFTS; we stash the draft here, send
@@ -240,6 +267,21 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
     logEvent(msisdn, 'followups-text', `buttons unavailable (${btn.error || btn.reason || '?'}) — sent numbered`);
   }
 
+  // Greeting/menu → a welcome with starter prompts. Sends the top 3 as tappable
+  // buttons (WhatsApp's cap) with the full set as a numbered menu in the body, and
+  // saves them so a typed number resolves to its question (the no-buttons fallback).
+  async function sendWelcome(msisdn, id) {
+    const ent = id.entityId && db.getEntity ? db.getEntity(id.entityId) : null;
+    const who = ent && ent.name ? ` for *${ent.name}*` : '';
+    const list = starters();
+    const menu = list.map((s, i) => `${i + 1}. ${s.prompt}`).join('\n');
+    const body = `🦉 Hi! I'm the Howler Owl — your data assistant${who}. Ask me about your ticket sales, goals, alerts and campaigns. Try one of these:\n\n${menu}\n\nOr just type your question — e.g. "revenue this week vs last".`;
+    saveSuggest(msisdn, list.map((s) => s.prompt)); // typed-number fallback maps to the question
+    const r = await messaging.sendWhatsappButtons({ to: msisdn, body, buttons: list.slice(0, 3).map((s) => ({ title: s.label, postbackData: s.prompt })) });
+    if (!r.ok) await messaging.sendWhatsapp({ to: msisdn, text: body });
+    logEvent(msisdn, 'welcome', r.ok ? 'buttons + menu' : 'menu (buttons unavailable)');
+  }
+
   // ── Action confirmation (alerts + segments over WhatsApp) ────────────────────
   // The first drafted action in the loop's trail (an act-tool returns confirm+action).
   const actionFromTrail = (trail) => ((trail || []).map((t) => t && t.result).find((r) => r && r.confirm && r.action) || {}).action || null;
@@ -335,6 +377,14 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
     // A tap on a Confirm / Cancel / event button (or a yes/no/number reply to a pending
     // action) commits or cancels the drafted alert/segment — handle it before the Owl runs.
     if (isActionReply(rawText, msisdn)) { await handleActionReply(msisdn, rawText, id.user); return; }
+    // A bare greeting / "menu" / "help" opens the welcome + starter prompts (the
+    // WhatsApp take on Meta AI's suggestion chips) — no model call needed.
+    if (isGreeting(rawText)) {
+      insMsg.run(crypto.randomUUID(), msisdn, 'user', rawText, id.entityId || '', now()); // keep the 24h window open + history
+      await sendWelcome(msisdn, id);
+      logEvent(msisdn, 'replied', 'welcome / starter prompts');
+      return;
+    }
     const apiKey = anthropicKeyForEntity ? anthropicKeyForEntity(id.entityId || undefined) : undefined;
     if (!insights.isConfigured(apiKey)) { logEvent(msisdn, 'no-ai-key', 'Anthropic key not configured'); await messaging.sendWhatsapp({ to: msisdn, text: 'The Owl isn\'t available right now — please try again shortly.' }); return; }
     // Immediate "the Owl is on it" acknowledgement so the customer isn't left staring at

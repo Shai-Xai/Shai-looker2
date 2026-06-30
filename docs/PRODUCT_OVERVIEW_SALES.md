@@ -523,6 +523,11 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-30** — **WhatsApp Owl: starter prompts** 🧪: say "hi" / "menu" / "help" to the
+  WhatsApp Owl and it now replies with a **welcome + suggested starter prompts** (the
+  WhatsApp take on Meta AI's suggestion chips) — the top few as **tappable buttons** plus a
+  numbered menu (tap or reply with a number). Steers customers to what it can do (sales,
+  goals, alerts, campaigns). The starter list is overridable per platform.
 - **2026-06-30** — **Owl can read sales by the hour** ✅: the Owl's data now includes an
   **hour-of-day grain**, so it can answer "what's our busiest sales hour?", show an
   intraday sell curve, and — importantly — make a **fair "today so far vs yesterday to
