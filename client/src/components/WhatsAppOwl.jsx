@@ -13,6 +13,7 @@ export default function WhatsAppOwl() {
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
   const [testTo, setTestTo] = useState('');
+  const [testText, setTestText] = useState('');
   const [testMsg, setTestMsg] = useState('');
   const [log, setLog] = useState(null);
   const [logBusy, setLogBusy] = useState(false);
@@ -21,15 +22,19 @@ export default function WhatsAppOwl() {
     try { const r = await api.owlWhatsappLog(); setLog(r.events || []); } catch { setLog([]); }
     setLogBusy(false);
   };
-  const test = async () => {
-    setTestMsg('Sending…');
+  // Send a test WhatsApp to `to` (with the optional custom message). Shared by the
+  // bottom Test-connection box and the per-number Test buttons.
+  const sendTest = async (to) => {
+    if (!to || !to.trim()) return;
+    setTestMsg(`Sending to ${to.trim()}…`);
     try {
-      const r = await api.testOwlWhatsapp(testTo);
-      if (r.ok) { setTestMsg('✓ Sent — check WhatsApp on that number.'); return; }
+      const r = await api.testOwlWhatsapp(to.trim(), testText.trim());
+      if (r.ok) { setTestMsg(`✓ Sent to ${to.trim()} — check WhatsApp.`); return; }
       const e = r.error ?? r.reason;
       setTestMsg(`⚠ ${typeof e === 'string' ? e : JSON.stringify(e ?? r)}`);
     } catch (e) { setTestMsg(`⚠ ${(e && e.message) || 'failed'}`); }
   };
+  const test = () => sendTest(testTo);
 
   useEffect(() => {
     api.owlWhatsapp().then((r) => { setCfg({ from: r.from || '', webhookPath: r.webhookPath, hasSecret: r.hasSecret, hasApiKey: r.hasApiKey, mediaEnabled: !!r.mediaEnabled, pushEnabled: !!r.pushEnabled, numbers: r.numbers || [] }); }).catch(() => setCfg({ numbers: [] }));
@@ -100,6 +105,7 @@ export default function WhatsAppOwl() {
               {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{String(h).padStart(2, '0')}:00</option>)}
             </select>
             <span style={{ fontSize: 11, color: 'var(--muted)' }}>SAST</span>
+            <button onClick={() => sendTest(n.msisdn)} disabled={!n.msisdn} title="Send a test WhatsApp to this number (uses the custom message below if set)" style={{ ...fld, padding: '3px 9px', fontSize: 12, cursor: n.msisdn ? 'pointer' : 'default', marginLeft: 'auto' }}>✈ Test</button>
           </div>
         </div>
       ))}
@@ -129,6 +135,7 @@ export default function WhatsAppOwl() {
           <button onClick={test} disabled={!testTo.trim()} style={{ ...fld, cursor: testTo.trim() ? 'pointer' : 'default' }}>Send test</button>
           {testMsg && <span style={{ fontSize: 12.5, color: testMsg.startsWith('✓') ? '#34c759' : 'var(--muted)' }}>{testMsg}</span>}
         </div>
+        <input value={testText} onChange={(e) => setTestText(e.target.value)} placeholder="Optional custom message (blank = default test message). Used by Send test and the ✈ Test buttons above." style={{ ...fld, width: '100%', maxWidth: 480, marginTop: 6 }} />
         <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 4 }}>Note: WhatsApp only allows a business-initiated message like this if that number has messaged you in the last 24h (or via an approved template). If it fails with a window/template error, that’s expected — the real flow is the customer messaging first.</div>
       </div>
 
