@@ -702,4 +702,28 @@ export const api = {
   adminResolveNotice: (id, b) => fetch(`/api/admin/notices/${id}/resolve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b || {}) }).then(json),
   adminDeleteNotice: (id) => fetch(`/api/admin/notices/${id}`, { method: 'DELETE' }).then((r) => r.ok),
   myNotices: () => fetch('/api/my/notices').then(json),
+
+  // Event Ops — live device + station logistics per event (suite). Pilot, per-client
+  // opt-in. One guarded route set serves admin + client self-service (server decides who
+  // may write). bustCache('/api/eventops') after mutations so the next read is fresh.
+  eventopsEnabled: () => fetch('/api/eventops/enabled').then(json), // which of my entities have it on
+  eventopsSetEnabled: (entityId, enabled) => fetch(`/api/eventops/entities/${entityId}/enabled`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }) }).then(json),
+  eventopsGetEnabled: (entityId) => fetch(`/api/eventops/entities/${entityId}/enabled`).then(json),
+  eventopsSuites: (entityId) => fetch(`/api/eventops/entities/${entityId}/suites`).then(json), // the event picker
+  eventopsOverview: (suiteId) => fetch(`/api/eventops/suites/${suiteId}/overview`).then(json),
+  eventopsDevices: (suiteId) => fetch(`/api/eventops/suites/${suiteId}/devices`).then(json),
+  eventopsDevice: (suiteId, id) => fetch(`/api/eventops/suites/${suiteId}/devices/${id}`).then(json),
+  eventopsCreateDevice: (suiteId, b) => fetch(`/api/eventops/suites/${suiteId}/devices`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  eventopsBulkDevices: (suiteId, b) => fetch(`/api/eventops/suites/${suiteId}/devices/bulk`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  eventopsUpdateDevice: (suiteId, id, b) => fetch(`/api/eventops/suites/${suiteId}/devices/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  eventopsDeleteDevice: (suiteId, id) => fetch(`/api/eventops/suites/${suiteId}/devices/${id}`, { method: 'DELETE' }).then((r) => r.ok),
+  eventopsStations: (suiteId) => fetch(`/api/eventops/suites/${suiteId}/stations`).then(json),
+  eventopsCreateStation: (suiteId, b) => fetch(`/api/eventops/suites/${suiteId}/stations`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  eventopsUpdateStation: (suiteId, id, b) => fetch(`/api/eventops/suites/${suiteId}/stations/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  eventopsDeleteStation: (suiteId, id) => fetch(`/api/eventops/suites/${suiteId}/stations/${id}`, { method: 'DELETE' }).then((r) => r.ok),
+  eventopsScan: (suiteId, code) => fetch(`/api/eventops/suites/${suiteId}/scan`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }) }).then(json),
+  eventopsMove: (suiteId, b) => fetch(`/api/eventops/suites/${suiteId}/move`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  eventopsIssues: (suiteId, status = 'open') => fetch(`/api/eventops/suites/${suiteId}/issues?status=${status}`).then(json),
+  eventopsLogIssue: (suiteId, b) => fetch(`/api/eventops/suites/${suiteId}/issues`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  eventopsResolveIssue: (suiteId, id, b) => fetch(`/api/eventops/suites/${suiteId}/issues/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b || {}) }).then(json),
 };

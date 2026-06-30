@@ -27,6 +27,7 @@ const DocumentViewPage = lazy(() => import('./pages/DocumentViewPage.jsx'));
 const DigestsPage = lazy(() => import('./pages/DigestsPage.jsx'));
 const SocialPage = lazy(() => import('./pages/SocialPage.jsx'));
 const InventiveAskPage = lazy(() => import('./pages/InventiveAskPage.jsx'));
+const EventOpsPage = lazy(() => import('./pages/EventOpsPage.jsx'));
 import Logo from './components/Logo.jsx';
 import BrandLogo from './components/BrandLogo.jsx';
 import { api } from './lib/api.js';
@@ -276,6 +277,7 @@ function Shell() {
                 <Route path="/digests" element={<DigestsPage />} />
                 <Route path="/engage" element={<EngagePage />} />
                 <Route path="/ask" element={<InventiveAskPage />} />
+                <Route path="/event-ops" element={<EventOpsPage />} />
                 <Route path="/engage/:tab" element={<EngagePage />} />
                 <Route path="/actions" element={<RedirectTo to="/engage/campaigns" />} />
                 <Route path="/segments" element={<RedirectTo to="/engage/segments" />} />
@@ -304,6 +306,7 @@ function Shell() {
                 <Route path="/digests" element={<DigestsPage />} />
                 <Route path="/engage" element={<EngagePage />} />
                 <Route path="/ask" element={<InventiveAskPage />} />
+                <Route path="/event-ops" element={<EventOpsPage />} />
                 <Route path="/engage/:tab" element={<EngagePage />} />
                 <Route path="/actions" element={<RedirectTo to="/engage/campaigns" />} />
                 <Route path="/segments" element={<RedirectTo to="/engage/segments" />} />

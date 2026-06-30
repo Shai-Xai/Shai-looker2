@@ -1,0 +1,180 @@
+// Event Ops (device + station logistics) — exercises the state-machine helper, the
+// per-client pilot toggle gate, hive↔station moves with the append-only audit trail,
+// the scope guards, and the issue/liaison-check flow. Routes are invoked directly via
+// captured handlers (no HTTP), mirroring test/vanity.test.js.
+
+const test = require('node:test');
+const assert = require('node:assert');
+const { db, auth, makeEntity, makeClient, makeAdmin } = require('./helpers');
+const eventops = require('../server/eventops');
+
+// Capture registered route handlers (last middleware = the handler) so we can call them.
+function mount() {
+  const routes = {};
+  const reg = (m) => (p, ...h) => { routes[`${m} ${p}`] = h[h.length - 1]; };
+  const app = { get: reg('GET'), post: reg('POST'), put: reg('PUT'), patch: reg('PATCH'), delete: reg('DELETE') };
+  eventops.mount(app, { db, auth });
+  return routes;
+}
+function call(handler, { user, params = {}, body = {}, query = {} } = {}) {
+  let code = 200, payload;
+  const res = { status(c) { code = c; return res; }, json(d) { payload = d; return res; }, end() { code = code === 200 ? 204 : code; return res; } };
+  handler({ user, params, body, query }, res);
+  return { code, body: payload };
+}
+
+// A pilot event: an entity, a suite (the event), an owner-role client user, plus an
+// outsider who belongs to a different client. Event Ops is OFF until we toggle it on.
+function seedEvent() {
+  const entity = makeEntity('Bushfire', 'bushfire');
+  const suite = db.createSuite({ entityId: entity.id, name: 'Bushfire 2026' });
+  const owner = makeClient(`owner-${entity.id}@test.local`, [entity.id], 'owner');
+  const other = makeClient(`other-${entity.id}@test.local`, [makeEntity('Rival', 'rival').id], 'owner');
+  const admin = makeAdmin(`admin-${entity.id}@test.local`);
+  return { entity, suite, owner, other, admin };
+}
+
+test('isUnusual: only re-activating a written-off device is flagged', () => {
+  assert.equal(eventops.isUnusual('in_stock', 'deployed'), false); // normal deploy
+  assert.equal(eventops.isUnusual('deployed', 'in_stock'), false); // normal return to hive
+  assert.equal(eventops.isUnusual('lost', 'deployed'), true);      // a "lost" unit reappears → flag
+  assert.equal(eventops.isUnusual('damaged', 'in_stock'), true);
+  assert.equal(eventops.isUnusual('lost', 'damaged'), false);      // terminal→terminal, not a re-activation
+});
+
+test('per-client toggle gates everything: OFF → 404, ON → works; only admins can flip it', () => {
+  const r = mount();
+  const { entity, suite, owner, admin } = seedEvent();
+
+  // OFF by default: a member still gets the disabled shape, and the nav-gate list is empty.
+  assert.equal(call(r['GET /api/eventops/suites/:suiteId/overview'], { user: owner, params: { suiteId: suite.id } }).code, 404);
+  assert.deepEqual(call(r['GET /api/eventops/enabled'], { user: owner }).body.entities, []);
+
+  // (Non-admins are blocked from flipping the pilot by the auth.requireAdmin middleware,
+  // which is the real boundary; this captured-handler harness bypasses middleware, so that
+  // guard is covered by auth's own tests, not re-asserted here.)
+
+  // Admin turns it on for this client.
+  const flip = call(r['PUT /api/eventops/entities/:entityId/enabled'], { user: admin, params: { entityId: entity.id }, body: { enabled: true } });
+  assert.equal(flip.body.enabled, true);
+
+  // Now the member sees it, and the nav gate lists their entity.
+  assert.equal(call(r['GET /api/eventops/suites/:suiteId/overview'], { user: owner, params: { suiteId: suite.id } }).code, 200);
+  assert.deepEqual(call(r['GET /api/eventops/enabled'], { user: owner }).body.entities, [entity.id]);
+});
+
+test('enabling an unknown client 404s (not a 500) — db.getEntity must not throw on a miss', () => {
+  const r = mount();
+  const { admin } = seedEvent();
+  // Regression: rowToEntity used to dereference a missing row before its null-guard, so
+  // db.getEntity('nope') threw → the route 500'd instead of returning a clean 404.
+  assert.equal(require('../server/db').getEntity('does-not-exist'), undefined);
+  const res = call(r['PUT /api/eventops/entities/:entityId/enabled'], { user: admin, params: { entityId: 'does-not-exist' }, body: { enabled: true } });
+  assert.equal(res.code, 404);
+});
+
+test('scope guard: a member of another client cannot view this event (403)', () => {
+  const r = mount();
+  const { entity, suite, other, admin } = seedEvent();
+  call(r['PUT /api/eventops/entities/:entityId/enabled'], { user: admin, params: { entityId: entity.id }, body: { enabled: true } });
+  const res = call(r['GET /api/eventops/suites/:suiteId/overview'], { user: other, params: { suiteId: suite.id } });
+  assert.equal(res.code, 403);
+});
+
+test('full workflow: add devices → station → scan → move hive↔station → audit trail', () => {
+  const r = mount();
+  const { entity, suite, owner, admin } = seedEvent();
+  call(r['PUT /api/eventops/entities/:entityId/enabled'], { user: admin, params: { entityId: entity.id }, body: { enabled: true } });
+  const P = { suiteId: suite.id };
+
+  // Bulk-create 3 devices by prefix → SL001..SL003, all start at the Hive (in_stock).
+  const bulk = call(r['POST /api/eventops/suites/:suiteId/devices/bulk'], { user: owner, params: P, body: { count: 3, prefix: 'SL', pad: 3 } });
+  assert.equal(bulk.code, 201);
+  assert.equal(bulk.body.created, 3);
+  assert.ok(bulk.body.devices.every((d) => d.state === 'in_stock' && d.location === 'Hive'));
+
+  // Create a station.
+  const station = call(r['POST /api/eventops/suites/:suiteId/stations'], { user: owner, params: P, body: { name: 'Main Bar', kind: 'bar' } });
+  assert.equal(station.code, 201);
+  const stationId = station.body.station.id;
+
+  // Scan SL001 → resolves the device by its qr_code.
+  const scan = call(r['POST /api/eventops/suites/:suiteId/scan'], { user: owner, params: P, body: { code: 'SL001' } });
+  assert.equal(scan.code, 200);
+  const dev = scan.body.device;
+  assert.equal(dev.qrCode, 'SL001');
+
+  // Move it Hive → Main Bar: becomes deployed at that station.
+  const toBar = call(r['POST /api/eventops/suites/:suiteId/move'], { user: owner, params: P, body: { deviceId: dev.id, stationId } });
+  assert.equal(toBar.body.device.state, 'deployed');
+  assert.equal(toBar.body.device.stationId, stationId);
+  assert.equal(toBar.body.unusual, false);
+
+  // Station board now shows 1 deployed device there.
+  const board = call(r['GET /api/eventops/suites/:suiteId/overview'], { user: owner, params: P });
+  assert.equal(board.body.totals.deployed, 1);
+  assert.equal(board.body.stations.find((s) => s.id === stationId).deviceCount, 1);
+
+  // Move it back to the Hive.
+  const toHive = call(r['POST /api/eventops/suites/:suiteId/move'], { user: owner, params: P, body: { deviceId: dev.id, stationId: 'hive' } });
+  assert.equal(toHive.body.device.state, 'in_stock');
+  assert.equal(toHive.body.device.stationId, null);
+
+  // The append-only audit trail recorded: create, deploy(move), return(move).
+  const detail = call(r['GET /api/eventops/suites/:suiteId/devices/:id'], { user: owner, params: { ...P, id: dev.id } });
+  const kinds = detail.body.events.map((e) => e.kind);
+  assert.ok(kinds.includes('create') && kinds.filter((k) => k === 'move').length === 2);
+});
+
+test('a lost device scanned back into deployment is flagged unusual in the trail', () => {
+  const r = mount();
+  const { entity, suite, owner, admin } = seedEvent();
+  call(r['PUT /api/eventops/entities/:entityId/enabled'], { user: admin, params: { entityId: entity.id }, body: { enabled: true } });
+  const P = { suiteId: suite.id };
+  const made = call(r['POST /api/eventops/suites/:suiteId/devices'], { user: owner, params: P, body: { label: 'R1', qrCode: 'R1', type: 'radio' } }).body.device;
+  const station = call(r['POST /api/eventops/suites/:suiteId/stations'], { user: owner, params: P, body: { name: 'Gate 1', kind: 'gate' } }).body.station;
+
+  // Mark it lost, then redeploy it → the redeploy is flagged unusual.
+  call(r['POST /api/eventops/suites/:suiteId/move'], { user: owner, params: P, body: { deviceId: made.id, state: 'lost' } });
+  const back = call(r['POST /api/eventops/suites/:suiteId/move'], { user: owner, params: P, body: { deviceId: made.id, stationId: station.id } });
+  assert.equal(back.body.unusual, true);
+});
+
+test('liaison logs an issue on a device, then resolves it', () => {
+  const r = mount();
+  const { entity, suite, owner, admin } = seedEvent();
+  call(r['PUT /api/eventops/entities/:entityId/enabled'], { user: admin, params: { entityId: entity.id }, body: { enabled: true } });
+  const P = { suiteId: suite.id };
+  const dev = call(r['POST /api/eventops/suites/:suiteId/devices'], { user: owner, params: P, body: { label: 'H9', qrCode: 'H9' } }).body.device;
+
+  const logged = call(r['POST /api/eventops/suites/:suiteId/issues'], { user: owner, params: P, body: { deviceId: dev.id, category: 'battery', note: 'Won’t hold charge' } });
+  assert.equal(logged.code, 201);
+  assert.equal(logged.body.issue.status, 'open');
+
+  // Shows up in the open-issues list and bumps the overview count.
+  const open = call(r['GET /api/eventops/suites/:suiteId/issues'], { user: owner, params: P, query: { status: 'open' } });
+  assert.equal(open.body.issues.length, 1);
+  assert.equal(call(r['GET /api/eventops/suites/:suiteId/overview'], { user: owner, params: P }).body.totals.openIssues, 1);
+
+  // Resolve it.
+  const resolved = call(r['PATCH /api/eventops/suites/:suiteId/issues/:id'], { user: owner, params: { ...P, id: logged.body.issue.id }, body: { resolution: 'Swapped battery pack' } });
+  assert.equal(resolved.body.issue.status, 'resolved');
+  assert.equal(resolved.body.issue.resolution, 'Swapped battery pack');
+  assert.equal(call(r['GET /api/eventops/suites/:suiteId/overview'], { user: owner, params: P }).body.totals.openIssues, 0);
+});
+
+test('deleting a station sends its deployed devices back to the Hive', () => {
+  const r = mount();
+  const { entity, suite, owner, admin } = seedEvent();
+  call(r['PUT /api/eventops/entities/:entityId/enabled'], { user: admin, params: { entityId: entity.id }, body: { enabled: true } });
+  const P = { suiteId: suite.id };
+  const dev = call(r['POST /api/eventops/suites/:suiteId/devices'], { user: owner, params: P, body: { label: 'K1', qrCode: 'K1' } }).body.device;
+  const station = call(r['POST /api/eventops/suites/:suiteId/stations'], { user: owner, params: P, body: { name: 'Booth', kind: 'booth' } }).body.station;
+  call(r['POST /api/eventops/suites/:suiteId/move'], { user: owner, params: P, body: { deviceId: dev.id, stationId: station.id } });
+
+  const del = call(r['DELETE /api/eventops/suites/:suiteId/stations/:id'], { user: owner, params: { ...P, id: station.id } });
+  assert.equal(del.code, 204);
+  const after = call(r['GET /api/eventops/suites/:suiteId/devices/:id'], { user: owner, params: { ...P, id: dev.id } });
+  assert.equal(after.body.device.state, 'in_stock');
+  assert.equal(after.body.device.stationId, null);
+});

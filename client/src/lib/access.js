@@ -33,4 +33,5 @@ export const PERMS = {
   BRANDING_MANAGE: 'branding.manage',
   INTEGRATIONS_MANAGE: 'integrations.manage',
   TEAM_MANAGE: 'team.manage',
+  EVENTOPS_MANAGE: 'eventops.manage',
 };

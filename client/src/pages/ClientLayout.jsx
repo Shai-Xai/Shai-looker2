@@ -65,6 +65,10 @@ export default function ClientLayout() {
 
   useEffect(() => { api.mySuites().then(setSuites).catch(() => {}).finally(() => setLoading(false)); }, []);
   useEffect(() => { api.mySettlements().then(setSettlements).catch(() => {}); }, []);
+  // Event Ops is a per-client pilot: which of my entities have it switched on (gates the nav).
+  const [eopEntities, setEopEntities] = useState([]);
+  useEffect(() => { api.eventopsEnabled().then((r) => setEopEntities(r.entities || [])).catch(() => {}); }, []);
+  const onEventOps = location.pathname.startsWith('/event-ops');
   const onGoals = location.pathname.startsWith('/goals');
   const onAlerts = location.pathname.startsWith('/alerts');
   const onSocial = location.pathname.startsWith('/social');
@@ -183,6 +187,9 @@ export default function ClientLayout() {
     : profileEntityId;
   const visibleSuites = activeEntityId ? suites.filter((s) => s.entityId === activeEntityId) : suites;
   const visibleSettlements = activeEntityId ? settlements.filter((s) => s.entityId === activeEntityId) : settlements;
+  // Show the Event Ops nav only when the active client has the pilot switched on AND the
+  // user may operate it (admins always pass `can`). Server enforces the real boundary.
+  const eventopsOn = (activeEntityId ? eopEntities.includes(activeEntityId) : eopEntities.length > 0) && can(PERMS.EVENTOPS_MANAGE);
   // Scope options for the Owl picker: the clients (organisers) + events this user
   // can pick. Admins get all; a client gets their own entity/events.
   const owlClients = (() => {
@@ -377,6 +384,17 @@ export default function ClientLayout() {
             <span style={ellip}>Alerts</span>
           </button>
           )}
+          {eventopsOn && (
+          <button
+            ref={onEventOps ? activeRef : null}
+            className={`nav-row${onEventOps ? ' active' : ''}`}
+            style={{ ...rowBtn, fontWeight: onEventOps ? 600 : 500 }}
+            onClick={() => { if (!onEventOps) vtNavigate(navigate, '/event-ops'); if (isMobile) setNavOpen(false); }}
+          >
+            <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>📟</span>
+            <span style={ellip}>Event Ops</span>
+          </button>
+          )}
           {can(PERMS.DIGESTS_MANAGE) && (
           <button
             ref={onDigests ? activeRef : null}
@@ -546,6 +564,16 @@ export default function ClientLayout() {
                   >
                     <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>🔔</span>
                     <span style={ellip}>Alerts</span>
+                  </button>
+                  )}
+                  {eventopsOn && (
+                  <button
+                    className={`nav-row${onEventOps ? ' active' : ''}`}
+                    style={{ ...mRowSuite, fontWeight: onEventOps ? 700 : 500 }}
+                    onClick={() => { if (!onEventOps) vtNavigate(navigate, '/event-ops'); setNavOpen(false); }}
+                  >
+                    <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>📟</span>
+                    <span style={ellip}>Event Ops</span>
                   </button>
                   )}
                   {can(PERMS.DIGESTS_MANAGE) && (

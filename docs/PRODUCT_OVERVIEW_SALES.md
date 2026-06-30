@@ -490,6 +490,37 @@ you'll see exactly when it's fixed."
 
 ---
 
+## 12. Event Ops — know where every device is, live  🧪
+The on-the-ground layer for a live event: track the **physical kit** (handheld payment
+devices, scanners, radios, printers) and the **stations** (bars, gates, booths, top-up
+points) they're deployed to — so at any moment you can see **where every device is** and
+**what's wrong with any of them**. Replaces the clipboard, the spreadsheet and the
+WhatsApp thread with one phone-first console.
+- **Add your inventory** 🧪 — create devices one at a time or **bulk auto-number** a
+  whole batch (e.g. SL001…SL050) with a type and scannable code.
+- **Set up your stations** 🧪 — name the bars/gates/booths for the event; each shows a
+  **live count** of the devices deployed there.
+- **Scan to move** 🧪 — scan a device's QR/barcode (or type the code) and send it from
+  the **Hive** (your store) out to a station, station-to-station, or back again. Every
+  move is written to an **append-only audit trail** — nothing is ever lost to memory.
+- **Liaison checks & issues** 🧪 — scan a device, log an issue from a quick list
+  (damaged, battery, connectivity…) and record **how it was resolved**. Open issues
+  surface on the live overview.
+- **Live overview** 🧪 — device counts by state, per-station counts, open issues and a
+  recent-activity feed — the "where is everything right now" board.
+- **Dual-surface + per-client pilot** — Howler staff run it in **Admin → a client →
+  Event Ops**; the client can run it themselves from their own **Event Ops** area. It's
+  a **per-client opt-in** (off by default) so we switch it on only for pilot clients.
+
+**Pitch:** "Every device accounted for at event close — no 'missing' unknowns, no
+spreadsheet, and a full history of where each one went."
+
+**Status 🧪:** pilot. Camera scanning needs a phone with a camera on HTTPS (manual code
+entry always works as a fallback). v1 is device + station tracking; staffing, shifts and
+budgets are on the roadmap.
+
+---
+
 ## On the horizon (🔜 — not yet usable; for roadmap conversations only)
 Use these to set direction, **not** to promise dates.
 - **Conversational/agentic Owl** — chat that answers, analyses and *executes*
@@ -523,6 +554,13 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-30** — **Event Ops (pilot)** 🧪 — new §12: a phone-first console to track
+  **devices & stations live at an event**. Add inventory (single or bulk auto-numbered),
+  set up stations, **scan to move** devices between the Hive and stations (append-only
+  audit trail), and log **liaison checks/issues** with resolutions. Live overview shows
+  where everything is and what's open. **Per-client opt-in** (off by default), dual-surface
+  (Admin → client → Event Ops, and the client's own Event Ops area). Camera scanning with
+  manual-entry fallback. v1 is device/station tracking; staffing/shifts/budgets are roadmap.
 - **2026-06-30** — **Owl memory: now three layers + client self-service** 🧪: added **user**
   memory on top of client + event — this person's own preferences for how answers are shaped
   ("keep it short", "always lead with revenue"). All three layers now feed every answer (client

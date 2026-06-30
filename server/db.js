@@ -781,11 +781,12 @@ CREATE INDEX IF NOT EXISTS idx_tile_library_category ON tile_library(category);
 
 // ─── Entities ─────────────────────────────────────────────────────────────────
 function rowToEntity(r) {
+  if (!r) return r; // missing row → undefined (callers test `if (!entity)`); don't deref below
   // Howler support = the list column if set, else fall back to the legacy single
   // owner — so existing clients keep their creator as support until edited.
   const support = J(r.howler_support_ids, []);
   const howlerSupportIds = support.length ? support : (r.howler_owner_user_id ? [r.howler_owner_user_id] : []);
-  return r && { id: r.id, name: r.name, logo: r.logo || '', aiContext: r.ai_context || '', inventiveName: r.inventive_name || '', inventiveRefId: r.inventive_ref_id || '', howlerOwnerUserId: r.howler_owner_user_id || '', howlerSupportIds, lockedFilters: J(r.locked_filters, {}), scopeFields: J(r.scope_fields, {}), allOrganisers: !!r.all_organisers, createdAt: r.created_at };
+  return { id: r.id, name: r.name, logo: r.logo || '', aiContext: r.ai_context || '', inventiveName: r.inventive_name || '', inventiveRefId: r.inventive_ref_id || '', howlerOwnerUserId: r.howler_owner_user_id || '', howlerSupportIds, lockedFilters: J(r.locked_filters, {}), scopeFields: J(r.scope_fields, {}), allOrganisers: !!r.all_organisers, createdAt: r.created_at };
 }
 function listEntities() { return db.prepare('SELECT * FROM entities ORDER BY name').all().map(rowToEntity); }
 function getEntity(id) { return rowToEntity(db.prepare('SELECT * FROM entities WHERE id=?').get(id)); }

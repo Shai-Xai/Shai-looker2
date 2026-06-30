@@ -23,6 +23,7 @@ const PERMISSIONS = {
   BRANDING_MANAGE: 'branding.manage',        // edit branding / colours / logo
   INTEGRATIONS_MANAGE: 'integrations.manage',// edit Looker/Anthropic + CC-the-Owl
   TEAM_MANAGE: 'team.manage',                // manage this client's own logins + roles
+  EVENTOPS_MANAGE: 'eventops.manage',        // operate Event Ops — devices, stations, scans, issues
 };
 const ALL = Object.values(PERMISSIONS);
 const P = PERMISSIONS;
@@ -38,7 +39,7 @@ const ROLES = [
   {
     key: 'manager', label: 'Manager', lens: 'exec',
     description: 'All dashboards, digests and campaigns. No branding, integrations or team management.',
-    permissions: [P.DASHBOARDS_VIEW, P.CAMPAIGNS_VIEW, P.CAMPAIGNS_APPROVE, P.GOALS_MANAGE, P.ALERTS_MANAGE, P.DIGESTS_MANAGE, P.SETTLEMENTS_VIEW],
+    permissions: [P.DASHBOARDS_VIEW, P.CAMPAIGNS_VIEW, P.CAMPAIGNS_APPROVE, P.GOALS_MANAGE, P.ALERTS_MANAGE, P.DIGESTS_MANAGE, P.SETTLEMENTS_VIEW, P.EVENTOPS_MANAGE],
   },
   {
     key: 'marketing', label: 'Marketing', lens: 'marketing',

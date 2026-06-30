@@ -913,10 +913,10 @@ async function metricFilterValues({ model, view, field, user, suiteId, entitySco
 const alerts = require('./alerts').mount(app, { db, auth, resolveTileValue, resolveCustomMetric, metricCatalog, metricFilterValues, os, mailer, push, messaging, slack });
 
 // ── Status notices: human-authored platform incidents → server/notices.js ────────
-// Howler staff post a platform issue (global or per-client), update it, resolve it.
-// Distinct from alerts above (which watch data); this is a status-page timeline.
+// Howler staff post a platform issue, update it, resolve it (vs alerts, which watch data).
 require('./notices').mount(app, { db, auth, os, mailer, messaging });
 require('./vanity').mount(app, { db, auth, mailer }); // white-labelled /<slug> login per client → server/vanity.js
+require('./eventops').mount(app, { db, auth }); // pilot: device/station logistics, per-client opt-in → server/eventops.js
 
 // ── Pulse: the header "heartbeat" strip's merged feed → server/pulse.js ──────────
 // Merges alert fires (alerts.recentBeats) with live tile momentum (sampled here).
