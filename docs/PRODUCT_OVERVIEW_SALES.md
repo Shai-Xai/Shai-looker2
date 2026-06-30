@@ -120,6 +120,11 @@ approval needed.
   To respect WhatsApp’s rules, it’s sent free-form only while the customer is inside
   their **24-hour window** (they messaged the Owl in the last day); reaching everyone
   on a fixed schedule regardless will use an approved WhatsApp template (next step).
+- **Take action by reply button** — the Owl can **set up an alert** ("tell me when
+  tickets hit 1000") or **save a segment** straight from WhatsApp: it drafts it and
+  sends a **✅ Confirm** button (and, for an alert that could watch several events,
+  event-choice buttons). Tapping commits it through the same permission checks as the
+  app. (Campaigns stay in the Pulse app — they message buyers.)
 - **Status 🧪:** pilot. Howler links each phone number to its client in **Admin →
   WhatsApp Owl**, where a live activity log shows inbound messages end-to-end.
 
@@ -496,6 +501,11 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-06-30** — **WhatsApp Owl: take action by reply button** 🧪: the Owl can now set
+  up an **alert** or save a **segment** from WhatsApp — it drafts it and sends a ✅ Confirm
+  button (event-choice buttons when an alert could watch several events), committing through
+  the same permission checks as the app. Campaigns stay app-only. Also added delivery-receipt
+  capture (delivered/undelivered + reason) and a per-number test button.
 - **2026-06-30** — **Filters: a hand-added filter now actually filters the report** ✅: a
   dashboard filter added in the editor (not imported from Looker, so never wired into a
   tile's `listenTo`) now applies to every tile whose own query uses that filter's field —

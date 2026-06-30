@@ -191,8 +191,8 @@ export default function WhatsAppOwl() {
 // Colour the stage chip so the happy path (received → identified → replied) reads green
 // and the stop-points (rejected / unparsed / no-account / send-failed) read amber/red.
 function stageBadge(stage) {
-  const ok = stage === 'received' || stage === 'identified' || stage === 'replied' || stage === 'image-sent' || stage === 'image-link' || stage === 'followups-buttons' || stage === 'push-sent' || stage === 'delivered';
-  const bad = stage === 'rejected' || stage === 'send-failed' || stage === 'error' || stage === 'no-ai-key' || stage === 'image-failed' || stage === 'push-failed' || stage === 'undelivered';
+  const ok = stage === 'received' || stage === 'identified' || stage === 'replied' || stage === 'image-sent' || stage === 'image-link' || stage === 'followups-buttons' || stage === 'push-sent' || stage === 'delivered' || stage === 'action-done';
+  const bad = stage === 'rejected' || stage === 'send-failed' || stage === 'error' || stage === 'no-ai-key' || stage === 'image-failed' || stage === 'push-failed' || stage === 'undelivered' || stage === 'action-failed';
   const c = ok ? '#34c759' : bad ? '#ef4444' : '#b45309';
   return { fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.03em', color: c, background: `${c}1a`, padding: '2px 6px', borderRadius: 5, whiteSpace: 'nowrap', minWidth: 64, textAlign: 'center' };
 }

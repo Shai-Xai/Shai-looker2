@@ -522,7 +522,7 @@ function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, m
   require('./owlPin').mount(app, { db, auth });
   require('./owlGuidance').mount(app, { db, auth }); // resolveGuidance is required at top
   const owlFields = require('./owlFields').mount(app, { db, auth, getExploreFields }); // no-code field labels/synonyms/questions
-  require('./owlWhatsapp').mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthropicKeyForEntity, currencyNote, whatsappDigestFor }); // WhatsApp door onto the Owl (Clickatell)
+  require('./owlWhatsapp').mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthropicKeyForEntity, currencyNote, whatsappDigestFor, getAlertsApi, getSegmentsApi }); // WhatsApp door onto the Owl (Clickatell)
   console.log('[owlChat] agentic Owl chat module mounted');
 }
 

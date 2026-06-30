@@ -18,10 +18,10 @@ const chartImg = require('./owlChartImg');
 
 const WA_OVERRIDE = [
   'OVERRIDE — this conversation is over WhatsApp: reply in SHORT, plain text. No markdown tables. Use *single asterisks* for light emphasis. Lead with the answer in words. Express monetary amounts in the organiser\'s reporting currency (a Currency line below states it when it isn\'t South African Rand).',
-  'There is NO screen, panel, toggle, button or chart-type switcher here. NEVER tell the user to tap, switch or toggle anything, and never refer to something "below" or "on screen" — they are on WhatsApp.',
+  'There is no dashboard screen or chart-type toggle here — never tell the user to switch chart types or refer to on-screen panels (they are on WhatsApp). (Action confirmations are the one exception: those DO send a tappable button — see below.)',
   'Say NOTHING about chart delivery: never announce, point at, apologise for, or promise a chart/image — no "here\'s a chart", no 👇/👆, no "a fresh chart is on its way", no "re-sent". A chart link/image is attached automatically when useful; just answer with the figures in words.',
   'When the user wants to SEE data as a chart / line graph / bar chart / trend — EVEN data you just gave them — you MUST re-run it as ONE grouped askData query (a dimension such as day/month/event plus the measure) so a fresh chart image can be attached. Never reply "it\'s the same data" or refuse to re-pull, and never split a trend into many separate per-day lookups.',
-  'You CANNOT create alerts, save segments, or draft campaigns over WhatsApp (those actions need a confirm step that only works in the Pulse app). If the user asks to set up an alert/notification, build/save a segment, or draft/send a campaign, do NOT claim you\'ve drafted one or mention any button — say it has to be done in the Pulse app, and offer to answer the underlying data question instead.',
+  'You CAN set up an alert (createAlert) or save a segment (createSegment) over WhatsApp. When you draft one, briefly state what it will watch/do and the exact condition, then STOP — a Confirm button is attached automatically for the user to tap (and for an alert with several possible events, event-choice buttons). Do NOT invent your own button text, numbered steps, or say "tap Create alert below"; just describe the draft. You CANNOT draft or send campaigns over WhatsApp — if asked, say that\'s done in the Pulse app and offer the underlying data instead.',
   'End your reply with the <<<FOLLOWUPS>>> marker + a JSON array of 2-3 SHORT (≤6 words) next questions, exactly as instructed; the app turns them into tappable buttons.',
 ].join('\n');
 
@@ -36,7 +36,7 @@ function parseFollowups(out) {
   try { const a = JSON.parse(m[0]); return Array.isArray(a) ? a.filter((x) => typeof x === 'string' && x.trim()).slice(0, 3) : []; } catch { return []; }
 }
 
-function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthropicKeyForEntity, currencyNote, whatsappDigestFor }) {
+function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthropicKeyForEntity, currencyNote, whatsappDigestFor, getAlertsApi, getSegmentsApi }) {
   const sql = db.db;
   sql.exec(`
     CREATE TABLE IF NOT EXISTS owl_wa_msgs (
@@ -54,6 +54,9 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
     );
     CREATE TABLE IF NOT EXISTS owl_wa_sent (
       msisdn TEXT NOT NULL, day TEXT NOT NULL, at TEXT NOT NULL, PRIMARY KEY (msisdn, day)
+    );
+    CREATE TABLE IF NOT EXISTS owl_wa_pending (
+      msisdn TEXT PRIMARY KEY, payload TEXT NOT NULL, created_at TEXT NOT NULL
     );
   `);
   // Migration for DBs created before history was segmented by client (entity_id).
@@ -107,11 +110,25 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
     try { return JSON.parse(getSuggest.get(msisdn)?.items || '[]')[Number(m[1]) - 1] || null; } catch { return null; }
   };
 
-  // Act-tools DRAFT an action that needs a confirm CARD (a web-only UI that posts the
-  // draft to a commit endpoint). WhatsApp can't render that, so we don't offer them
-  // here — otherwise the Owl drafts an alert/segment and promises a button that can't
-  // appear. (Full reply-button confirmation over WhatsApp is a planned follow-up.)
-  const ACT_TOOLS = new Set(['createAlert', 'createSegment', 'draftCampaign']);
+  // ── Pending action confirmation ─────────────────────────────────────────────
+  // An act-tool (createAlert/createSegment) only DRAFTS; we stash the draft here, send
+  // the customer a Confirm button, and commit it when they tap (button postbackData
+  // comes back as the message text). Expires after an hour so a stale tap can't fire.
+  const upPending = sql.prepare('INSERT INTO owl_wa_pending (msisdn,payload,created_at) VALUES (?,?,?) ON CONFLICT(msisdn) DO UPDATE SET payload=excluded.payload, created_at=excluded.created_at');
+  const getPendingRow = sql.prepare('SELECT payload, created_at FROM owl_wa_pending WHERE msisdn=?');
+  const delPending = sql.prepare('DELETE FROM owl_wa_pending WHERE msisdn=?');
+  const storePending = (msisdn, p) => { try { upPending.run(msisdn, JSON.stringify(p), now()); } catch { /* ignore */ } };
+  const clearPending = (msisdn) => { try { delPending.run(msisdn); } catch { /* ignore */ } };
+  const getPending = (msisdn) => {
+    const r = getPendingRow.get(msisdn);
+    if (!r || (Date.now() - Date.parse(r.created_at)) > 60 * 60 * 1000) return null;
+    try { return JSON.parse(r.payload); } catch { return null; }
+  };
+
+  // createAlert + createSegment are confirmed over WhatsApp with a reply button (see
+  // the action flow below). draftCampaign stays app-only: it messages ticket buyers /
+  // spends, so its review-and-send belongs in Engage, not a one-tap WhatsApp confirm.
+  const ACT_TOOLS = new Set(['draftCampaign']);
   const toolEntries = Object.values(owlTools).filter((t) => t && t.schema && t.run && !ACT_TOOLS.has(t.schema.name));
   const toolMap = Object.fromEntries(toolEntries.map((t) => [t.schema.name, t]));
   const toolSchemas = toolEntries.map((t) => t.schema);
@@ -219,10 +236,75 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
     logEvent(msisdn, 'followups-text', `buttons unavailable (${btn.error || btn.reason || '?'}) — sent numbered`);
   }
 
+  // ── Action confirmation (alerts + segments over WhatsApp) ────────────────────
+  // The first drafted action in the loop's trail (an act-tool returns confirm+action).
+  const actionFromTrail = (trail) => ((trail || []).map((t) => t && t.result).find((r) => r && r.confirm && r.action) || {}).action || null;
+
+  // Offer the drafted action: a Confirm button, or — for an alert that could watch
+  // several events — event-choice buttons (picking one IS the confirm).
+  async function offerAction(msisdn, id, act) {
+    storePending(msisdn, { kind: act.kind, draft: act.draft, suiteId: act.suiteId || '', entityId: act.entityId || id.entityId || '', name: act.name || (act.draft && act.draft.name) || '', summary: act.summary || '', events: (act.events || []).slice(0, 3) });
+    if (act.kind === 'createAlert' && act.needsEvent && (act.events || []).length > 1) {
+      const evs = act.events.slice(0, 3); // WhatsApp allows max 3 reply buttons
+      const r = await messaging.sendWhatsappButtons({ to: msisdn, body: 'Which event should this alert watch?', buttons: evs.map((e) => ({ title: e.name, postbackData: `owlevt:${e.id}` })) });
+      if (!r.ok) await messaging.sendWhatsapp({ to: msisdn, text: `Which event should this alert watch? Reply with a number:\n${evs.map((e, i) => `${i + 1}. ${e.name}`).join('\n')}` });
+      logEvent(msisdn, 'action-draft', `alert — choose event${act.events.length > 3 ? ' (showing first 3)' : ''}`);
+      return;
+    }
+    const r = await messaging.sendWhatsappButtons({ to: msisdn, body: `Confirm — ${act.summary}?`, buttons: [{ title: '✅ Confirm', postbackData: 'owlok' }, { title: '✖ Cancel', postbackData: 'owlno' }] });
+    if (!r.ok) await messaging.sendWhatsapp({ to: msisdn, text: `Reply *YES* to confirm: ${act.summary} — or *NO* to cancel.` });
+    logEvent(msisdn, 'action-draft', `${act.kind}: ${act.summary}`);
+  }
+
+  // A reply to a pending action: confirm / cancel / pick event / a bare yes-no-number.
+  function isActionReply(t, msisdn) {
+    const s = String(t || '').trim();
+    if (/^(owlok|owlno)$/i.test(s) || /^owlevt:/i.test(s)) return true;
+    const pend = getPending(msisdn);
+    if (!pend) return false;
+    if (/^(yes|y|confirm|no|n|cancel)$/i.test(s)) return true;
+    // A bare number is an event pick ONLY when an alert is awaiting one.
+    return /^[1-3]$/.test(s) && Array.isArray(pend.events) && pend.events.length > 0;
+  }
+  async function handleActionReply(msisdn, t, user) {
+    const pend = getPending(msisdn);
+    if (!pend) { await messaging.sendWhatsapp({ to: msisdn, text: 'That request has expired — just ask me to set it up again.' }); return; }
+    const low = t.trim().toLowerCase();
+    if (low === 'owlno' || low === 'no' || low === 'n' || low === 'cancel') { clearPending(msisdn); logEvent(msisdn, 'action-cancelled', pend.kind); await messaging.sendWhatsapp({ to: msisdn, text: 'Okay — cancelled. Nothing was created.' }); return; }
+    let suiteId = pend.suiteId;
+    if (low.startsWith('owlevt:')) suiteId = t.trim().slice(7);
+    else if (/^[1-3]$/.test(low) && Array.isArray(pend.events)) suiteId = (pend.events[Number(low) - 1] || {}).id || suiteId; // numbered event fallback
+    await commitPending(msisdn, pend, suiteId, user);
+  }
+
+  // Commit the pending action through the SAME APIs the web confirm uses (which
+  // re-check permissions), so WhatsApp can never create something the user couldn't.
+  async function commitPending(msisdn, pend, suiteId, user) {
+    clearPending(msisdn);
+    try {
+      if (pend.kind === 'createAlert') {
+        if (!suiteId) { await messaging.sendWhatsapp({ to: msisdn, text: 'I need to know which event — please ask again and pick one.' }); return; }
+        if (user.role !== 'admin' && auth.canAccessSuite && !auth.canAccessSuite(user, suiteId)) { logEvent(msisdn, 'action-failed', 'no event access'); await messaging.sendWhatsapp({ to: msisdn, text: "You don't have access to that event." }); return; }
+        const api = getAlertsApi && getAlertsApi();
+        const r = api && api.createAlert ? api.createAlert({ suiteId, draft: pend.draft, user }) : { ok: false, error: 'Alerts unavailable' };
+        if (r.ok) { logEvent(msisdn, 'action-done', `alert ${r.alert.name}`); await messaging.sendWhatsapp({ to: msisdn, text: `✅ Done — alert *${r.alert.name}* is on. I'll let you know when it triggers.` }); }
+        else { logEvent(msisdn, 'action-failed', r.error || 'error'); await messaging.sendWhatsapp({ to: msisdn, text: `I couldn't switch that alert on: ${r.error || 'something went wrong'}.` }); }
+      } else if (pend.kind === 'createSegment') {
+        const api = getSegmentsApi && getSegmentsApi();
+        const r = api && api.createSegment ? api.createSegment({ entityId: pend.entityId, name: pend.name, definition: pend.draft, user }) : { ok: false, error: 'Segments unavailable' };
+        if (r.ok) { logEvent(msisdn, 'action-done', `segment ${r.segment.name}`); await messaging.sendWhatsapp({ to: msisdn, text: `✅ Saved the segment *${r.segment.name}*. You can use it for a campaign in the Pulse app.` }); }
+        else { logEvent(msisdn, 'action-failed', r.error || 'error'); await messaging.sendWhatsapp({ to: msisdn, text: `I couldn't save that segment: ${r.error || 'something went wrong'}.` }); }
+      } else { await messaging.sendWhatsapp({ to: msisdn, text: 'That action can only be completed in the Pulse app.' }); }
+    } catch (e) { logEvent(msisdn, 'action-failed', (e && e.message) || 'commit error'); await messaging.sendWhatsapp({ to: msisdn, text: 'Something went wrong completing that — please try again.' }); }
+  }
+
   async function handleInbound(msisdn, rawText) {
     const id = identify(msisdn);
     if (!id) { logEvent(msisdn, 'no-account', 'number not linked to any Pulse user'); await messaging.sendWhatsapp({ to: msisdn, text: 'Hi! This number isn\'t linked to a Howler account yet. Ask your Howler contact to connect it, then I can answer questions about your event data.' }); return; }
     logEvent(msisdn, 'identified', `${id.user.email || '?'} → ${id.entityId || '(no client)'}`);
+    // A tap on a Confirm / Cancel / event button (or a yes/no/number reply to a pending
+    // action) commits or cancels the drafted alert/segment — handle it before the Owl runs.
+    if (isActionReply(rawText, msisdn)) { await handleActionReply(msisdn, rawText, id.user); return; }
     const apiKey = anthropicKeyForEntity ? anthropicKeyForEntity(id.entityId || undefined) : undefined;
     if (!insights.isConfigured(apiKey)) { logEvent(msisdn, 'no-ai-key', 'Anthropic key not configured'); await messaging.sendWhatsapp({ to: msisdn, text: 'The Owl isn\'t available right now — please try again shortly.' }); return; }
     // Immediate "the Owl is on it" acknowledgement so the customer isn't left staring at
@@ -253,6 +335,10 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
     const sent = await messaging.sendWhatsapp({ to: msisdn, text: answer });
     logEvent(msisdn, sent && sent.ok ? 'replied' : 'send-failed', sent && sent.ok ? answer.slice(0, 120) : (sent && sent.error) || 'send error');
     if (chartImg.wantsChart(text)) await maybeSendChart(msisdn, trail);
+    // If the Owl drafted an alert/segment, send the Confirm (or event-choice) buttons —
+    // that's the call to action this turn, so skip the follow-up suggestions.
+    const act = actionFromTrail(trail);
+    if (act) { await offerAction(msisdn, id, act); return; }
     await sendFollowups(msisdn, followups);
   }
 
