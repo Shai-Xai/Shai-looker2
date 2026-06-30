@@ -19,7 +19,7 @@ const defaultCatalogue = require('./owlCatalogueSeed');
 // there and the Owl can immediately set + ask for it; no second list to keep in sync).
 const { OPERATORS: ALERT_OPERATORS, CHANNELS: ALERT_CHANNELS, PRIORITIES: ALERT_PRIORITIES } = require('./alerts');
 
-module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAlertsApi, getCampaignsApi, getUploadsApi, resolveTileValue, getExploreFields, getFieldOverrides, draftCampaignCopy, getSegmentsApi, catalogue = defaultCatalogue }) {
+module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAlertsApi, getCampaignsApi, getUploadsApi, resolveTileValue, getExploreFields, getFieldOverrides, draftCampaignCopy, getSegmentsApi, getEventOpsApi, catalogue = defaultCatalogue }) {
   if (!query || !query.applyScope || !query.runLookerQuery) {
     throw new Error('owlTools requires the query engine (applyScope + runLookerQuery).');
   }
@@ -833,8 +833,51 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     },
   };
 
+  // ── eventOps: read-only Event Ops state (devices / stations / staff / issues / checkpoints) ──
+  async function runEventOps(args = {}, ctx = {}) {
+    const { user, suiteId } = ctx;
+    if (!user) return refuse('no_user', 'No authenticated user in context.');
+    if (!suiteId) return refuse('no_event', 'Open or pick an event first — Event Ops answers are per event.');
+    if (user.role !== 'admin' && auth && auth.canAccessSuite && !auth.canAccessSuite(user, suiteId)) return refuse('no_access', 'No access to that event.');
+    const api = typeof getEventOpsApi === 'function' ? getEventOpsApi() : null;
+    if (!api || !api.suiteSummary) return refuse('unavailable', 'Event Ops isn\'t available right now.');
+    const su = db && db.getSuite ? db.getSuite(suiteId) : null;
+    if (su && api.entityEnabled && !api.entityEnabled(su.entityId)) return refuse('unavailable', 'Event Ops isn\'t switched on for this client.');
+    try {
+      const q = args.query || 'overview';
+      if (q === 'locate') {
+        if (!args.code) return refuse('error', 'Tell me the device code to locate (e.g. SL005).');
+        const device = api.locateDevice(suiteId, args.code);
+        return device ? { ok: true, device } : { ok: true, found: false, message: `No device matches "${args.code}" at this event.` };
+      }
+      if (q === 'devices') return { ok: true, devices: api.listDevices(suiteId, { state: args.state, stationName: args.station }) };
+      if (q === 'issues') return { ok: true, issues: api.listIssues(suiteId, args.status || 'open') };
+      if (q === 'staff') return { ok: true, staff: api.listStaff(suiteId, { stationName: args.station }) };
+      if (q === 'stations') return { ok: true, stations: api.listStations(suiteId) };
+      if (q === 'checkpoints') return { ok: true, checkpoints: api.listCheckpoints(suiteId, { stationName: args.station }) };
+      return { ok: true, summary: api.suiteSummary(suiteId) };
+    } catch (e) {
+      return refuse('error', `Couldn't read Event Ops: ${e.message}`);
+    }
+  }
+  const eventOpsSchema = {
+    name: 'eventOps',
+    description: 'Live EVENT OPS state for THIS event — physical devices (handhelds/scanners/radios), the STATIONS they\'re deployed to (bars/gates/booths/top-ups), the STAFF working it, device ISSUES, and station CHECKPOINTS. Use for: "where is device SL005", "how many devices are deployed vs at the Hive", "which devices are at <station>", "what open issues are there / how long open", "who is posted to <station> / how many staff", "were the checkpoints done at <station>". Read-only; returns structured data you then phrase + cite. The Hive = the store/warehouse (in stock).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', enum: ['overview', 'locate', 'devices', 'issues', 'staff', 'stations', 'checkpoints'], description: 'overview = totals + per-station device counts + open issues + recent checkpoints. locate = find ONE device by code. devices/issues/staff/stations/checkpoints = those lists (optionally filtered).' },
+        code: { type: 'string', description: 'For query="locate": the device QR code, serial or label (e.g. SL005).' },
+        state: { type: 'string', enum: ['in_stock', 'deployed', 'returned', 'lost', 'damaged'], description: 'For query="devices": filter by state (in_stock/returned = at the Hive).' },
+        station: { type: 'string', description: 'Filter by station name (for devices/staff/checkpoints), e.g. "Main Bar" or "Hive".' },
+        status: { type: 'string', enum: ['open', 'resolved', 'all'], description: 'For query="issues": which issues (default open).' },
+      },
+    },
+  };
+
   return {
     catalogue,
+    eventOps: { schema: eventOpsSchema, run: runEventOps, menu: { cmd: 'eventops', label: 'Event Ops', icon: '📟', example: 'Where is SL005, and any open issues?' } },
     askData: { schema: askDataSchema, run: runAskData, menu: { cmd: 'data', label: 'Ticket data', icon: '📊', example: 'How many tickets have I sold?' } },
     getGoals: { schema: getGoalsSchema, run: runGetGoals, menu: { cmd: 'goals', label: 'Goals', icon: '🎯', example: 'How are my goals tracking?' } },
     getDashboard: { schema: getDashboardSchema, run: runGetDashboard, menu: { cmd: 'dashboard', label: 'This dashboard', icon: '📋', example: 'Summarise what this dashboard is telling me.' } },

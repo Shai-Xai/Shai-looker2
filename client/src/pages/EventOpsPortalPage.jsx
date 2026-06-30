@@ -290,6 +290,7 @@ function CheckpointSheet({ suiteId, token, staffId, stations, checkpoints, mySta
   }
   async function submit() {
     if (!stationId) { alert('Pick a station.'); return; }
+    if (!photo) { alert('A photo is required — tap “Take / choose photo”.'); return; }
     setBusy(true);
     try { await api.eopPortalCheckpoint(suiteId, token, { stationId, checkpointId, comment, photo, staffId }); onDone(); }
     catch (e) { alert(e.message); setBusy(false); }
@@ -323,7 +324,7 @@ function CheckpointSheet({ suiteId, token, staffId, stations, checkpoints, mySta
             <textarea style={{ ...input, minHeight: 64 }} value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Anything to note?" />
           </div>
           <div>
-            <div style={lbl}>Photo (optional)</div>
+            <div style={lbl}>Photo <span style={{ color: 'var(--error)' }}>(required)</span></div>
             {photo ? (
               <div style={{ position: 'relative' }}>
                 <img src={photo} alt="" style={{ width: '100%', maxHeight: 220, objectFit: 'cover', borderRadius: 10 }} />
@@ -336,7 +337,7 @@ function CheckpointSheet({ suiteId, token, staffId, stations, checkpoints, mySta
               </label>
             )}
           </div>
-          <button onClick={submit} disabled={busy} style={bigBtn}>{busy ? 'Submitting…' : 'Submit checkpoint'}</button>
+          <button onClick={submit} disabled={busy || !stationId || !photo} style={bigBtn}>{busy ? 'Submitting…' : 'Submit checkpoint'}</button>
         </div>
       </div>
     </div>

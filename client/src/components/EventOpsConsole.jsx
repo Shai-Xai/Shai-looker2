@@ -888,6 +888,8 @@ function ChecksTab({ suiteId, canManage, flash, reloadKey }) {
   const [logs, setLogs] = useState(null);
   const [newName, setNewName] = useState('');
   const [photo, setPhoto] = useState(null);
+  const [stationF, setStationF] = useState('all');
+  const [staffF, setStaffF] = useState('all');
   const load = () => {
     api.eventopsCheckpoints(suiteId).then((r) => setCheckpoints(r.checkpoints || [])).catch(() => setCheckpoints([]));
     api.eventopsCheckpointLogs(suiteId).then((r) => setLogs(r.logs || [])).catch(() => setLogs([]));
@@ -921,10 +923,28 @@ function ChecksTab({ suiteId, canManage, flash, reloadKey }) {
           )}
         </div>
       )}
-      <Section title="Checkpoint log">
-        {logs.length === 0 ? <Empty>No checkpoints submitted yet — staff complete these from the scan portal.</Empty> : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {logs.map((l) => (
+      <Section title={`Checkpoint log (${logs.length})`}>
+        {logs.length === 0 ? <Empty>No checkpoints submitted yet — staff complete these from the scan portal.</Empty> : (() => {
+          const stationNames = [...new Set(logs.map((l) => l.stationLabel).filter(Boolean))].sort();
+          const staffNames = [...new Set(logs.map((l) => l.staffLabel).filter(Boolean))].sort();
+          const shown = logs.filter((l) => (stationF === 'all' || l.stationLabel === stationF) && (staffF === 'all' || l.staffLabel === staffF));
+          return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {stationNames.length > 1 && (
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', alignSelf: 'center' }}>STATION</span>
+                <Chip on={stationF === 'all'} onClick={() => setStationF('all')}>All</Chip>
+                {stationNames.map((n) => <Chip key={n} on={stationF === n} onClick={() => setStationF(n)}>📍 {n}</Chip>)}
+              </div>
+            )}
+            {staffNames.length > 1 && (
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', alignSelf: 'center' }}>STAFF</span>
+                <Chip on={staffF === 'all'} onClick={() => setStaffF('all')}>All</Chip>
+                {staffNames.map((n) => <Chip key={n} on={staffF === n} onClick={() => setStaffF(n)}>{n}</Chip>)}
+              </div>
+            )}
+            {shown.length === 0 ? <Empty>No checkpoints match this filter.</Empty> : shown.map((l) => (
               <div key={l.id} style={card}>
                 <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
                   {l.photo && <img src={l.photo} alt="" onClick={() => setPhoto(l.photo)} style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 8, cursor: 'pointer', flexShrink: 0 }} />}
@@ -937,7 +957,8 @@ function ChecksTab({ suiteId, canManage, flash, reloadKey }) {
               </div>
             ))}
           </div>
-        )}
+          );
+        })()}
       </Section>
       {photo && <div style={overlay} onClick={() => setPhoto(null)}><img src={photo} alt="" style={{ maxWidth: '92vw', maxHeight: '88vh', borderRadius: 12 }} /></div>}
     </div>

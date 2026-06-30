@@ -846,13 +846,72 @@ function mount(app, { db, auth }) {
     const b = req.body || {};
     const s = findStaff(su.id, b.staffId);
     if (!s) return res.status(403).json({ error: 'Log in with your staff number first.' });
-    if (b.photo && String(b.photo).length > PHOTO_MAX) return res.status(413).json({ error: 'Photo too large — please retake it.' });
-    if (!b.stationId && !b.checkpointId && !str(b.comment, 2000).trim() && !b.photo) return res.status(400).json({ error: 'Pick a station and checkpoint.' });
+    if (!b.stationId) return res.status(400).json({ error: 'Pick a station.' });
+    if (!b.photo) return res.status(400).json({ error: 'A photo is required for a checkpoint.' });
+    if (String(b.photo).length > PHOTO_MAX) return res.status(413).json({ error: 'Photo too large — please retake it.' });
     res.status(201).json({ checkpoint: recordCheckpoint(su, { stationId: b.stationId, checkpointId: b.checkpointId, comment: b.comment, photo: b.photo, staffId: s.id }) });
   });
 
+  // ── Read-only query API (for the Owl + any internal caller). All suite-scoped, no PII. ──
+  const ownApi = {
+    suiteSummary(suiteId) {
+      const su = db.getSuite(suiteId); if (!su) return null;
+      const devices = sql.prepare('SELECT * FROM eventops_devices WHERE suite_id=?').all(suiteId);
+      const byState = Object.fromEntries(STATES.map((s) => [s, 0]));
+      for (const d of devices) byState[d.state] = (byState[d.state] || 0) + 1;
+      const stations = sql.prepare('SELECT * FROM eventops_stations WHERE suite_id=? ORDER BY position, name').all(suiteId).map(stationRow);
+      const openIssues = sql.prepare("SELECT COUNT(*) c FROM eventops_issues WHERE suite_id=? AND status='open'").get(suiteId).c;
+      const staffCount = sql.prepare('SELECT COUNT(*) c FROM eventops_staff WHERE suite_id=?').get(suiteId).c;
+      const recent = sql.prepare('SELECT * FROM eventops_checkpoint_logs WHERE suite_id=? ORDER BY at DESC LIMIT 8').all(suiteId).map(cpLogRow);
+      return {
+        event: su.name,
+        devices: { total: devices.length, atHive: byState.in_stock + byState.returned, deployed: byState.deployed, lost: byState.lost, damaged: byState.damaged },
+        stations: stations.map((s) => ({ name: s.name, kind: s.kind, devices: s.deviceCount, openIssues: s.openIssues })),
+        openIssues, staffCount,
+        recentCheckpoints: recent.map((c) => ({ checkpoint: c.checkpointName, station: c.stationLabel, by: c.staffLabel, comment: c.comment, hasPhoto: !!c.photo, at: c.at })),
+      };
+    },
+    locateDevice(suiteId, code) {
+      const d = findDeviceByCode(suiteId, String(code || '').trim());
+      if (!d) return null;
+      const r = deviceRow(d);
+      const history = sql.prepare('SELECT * FROM eventops_device_events WHERE device_id=? ORDER BY at DESC LIMIT 6').all(d.id).map(eventRow)
+        .map((e) => ({ at: e.at, what: e.kind, to: e.toStation || STATE_LABEL_(e.toState), by: e.staffLabel || '', note: e.note }));
+      const openIssues = sql.prepare("SELECT COUNT(*) c FROM eventops_issues WHERE device_id=? AND status='open'").get(d.id).c;
+      return { label: r.label, code: r.qrCode || r.serialNumber, type: r.type, state: r.state, location: r.location, openIssues, history };
+    },
+    listDevices(suiteId, { state, stationName } = {}) {
+      let rows = sql.prepare('SELECT * FROM eventops_devices WHERE suite_id=?').all(suiteId).map(deviceRow);
+      if (state && STATES.includes(state)) rows = rows.filter((d) => d.state === state);
+      if (stationName) { const n = String(stationName).toLowerCase(); rows = rows.filter((d) => (n.includes('hive') ? !d.stationId : (d.stationName || '').toLowerCase().includes(n))); }
+      return rows.map((d) => ({ label: d.label, code: d.qrCode || d.serialNumber, type: d.type, state: d.state, location: d.location }));
+    },
+    listStations(suiteId) {
+      return sql.prepare('SELECT * FROM eventops_stations WHERE suite_id=? ORDER BY position, name').all(suiteId).map(stationRow)
+        .map((s) => ({ name: s.name, kind: s.kind, devices: s.deviceCount, openIssues: s.openIssues }));
+    },
+    listIssues(suiteId, status = 'open') {
+      const st = status === 'resolved' ? 'resolved' : status === 'all' ? null : 'open';
+      const rows = st
+        ? sql.prepare('SELECT * FROM eventops_issues WHERE suite_id=? AND status=? ORDER BY reported_at DESC').all(suiteId, st)
+        : sql.prepare('SELECT * FROM eventops_issues WHERE suite_id=? ORDER BY reported_at DESC').all(suiteId);
+      return rows.map((i) => { const r = issueRow(i); const d = deviceRow(getDevice(i.device_id)); return { device: d?.label || d?.qrCode || 'device', category: r.category, status: r.status, station: r.stationLabel, note: r.note, resolution: r.resolution, by: r.staffLabel, reportedAt: r.reportedAt, resolvedAt: r.resolvedAt }; });
+    },
+    listStaff(suiteId, { stationName } = {}) {
+      let rows = sql.prepare('SELECT * FROM eventops_staff WHERE suite_id=? ORDER BY number, name').all(suiteId).map(staffRow);
+      if (stationName) { const n = String(stationName).toLowerCase(); rows = rows.filter((s) => s.stations.some((x) => x.name.toLowerCase().includes(n))); }
+      return rows.map((s) => ({ number: s.number, name: s.name, role: s.role, stations: s.stations.map((x) => x.name) }));
+    },
+    listCheckpoints(suiteId, { limit = 20, stationName } = {}) {
+      let rows = sql.prepare('SELECT * FROM eventops_checkpoint_logs WHERE suite_id=? ORDER BY at DESC LIMIT ?').all(suiteId, Math.min(100, limit)).map(cpLogRow);
+      if (stationName) { const n = String(stationName).toLowerCase(); rows = rows.filter((c) => (c.stationLabel || '').toLowerCase().includes(n)); }
+      return rows.map((c) => ({ checkpoint: c.checkpointName, station: c.stationLabel, by: c.staffLabel, comment: c.comment, hasPhoto: !!c.photo, at: c.at }));
+    },
+  };
+  const STATE_LABEL_ = (s) => ({ in_stock: 'Hive', deployed: 'deployed', returned: 'Hive', lost: 'lost', damaged: 'damaged' }[s] || s);
+
   console.log('[eventops] mounted', enabled() ? '(enabled)' : '(disabled — set eventops_enabled=1)');
-  return { entityEnabled, setEntityEnabled };
+  return { entityEnabled, setEntityEnabled, ...ownApi };
 }
 
 module.exports = { mount, STATES, STATION_KINDS, DEVICE_TYPES, ISSUE_CATEGORIES, isUnusual };

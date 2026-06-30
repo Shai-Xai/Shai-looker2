@@ -289,7 +289,7 @@ test('checkpoints: define a type, submit one from the portal, and read it back i
   assert.equal(call(r['GET /api/eventops/portal/:suiteId/:token'], { params: KP }).body.checkpoints[0].name, 'Opening check');
 
   // Staff submits the checkpoint with a comment.
-  call(r['POST /api/eventops/portal/:suiteId/:token/checkpoint'], { params: KP, body: { stationId: station.id, checkpointId: cp.id, comment: 'All good', staffId: staff.id } });
+  call(r['POST /api/eventops/portal/:suiteId/:token/checkpoint'], { params: KP, body: { stationId: station.id, checkpointId: cp.id, comment: 'All good', staffId: staff.id, photo: 'data:image/jpeg;base64,abc' } });
   const logs = call(r['GET /api/eventops/suites/:suiteId/checkpoint-logs'], { user: owner, params: P }).body.logs;
   assert.equal(logs.length, 1);
   assert.equal(logs[0].checkpointName, 'Opening check');
@@ -314,6 +314,33 @@ test('portal: staff can list + resolve issues', () => {
   assert.equal(call(r['GET /api/eventops/portal/:suiteId/:token/issues'], { params: KP, query: { status: 'open' } }).body.issues.length, 0);
   const resolved = call(r['GET /api/eventops/portal/:suiteId/:token/issues'], { params: KP, query: { status: 'resolved' } }).body.issues;
   assert.equal(resolved[0].resolution, 'Swapped device');
+});
+
+test('owl read-only query API + a checkpoint requires a photo', () => {
+  const routes = {};
+  const reg = (m) => (p, ...h) => { routes[`${m} ${p}`] = h[h.length - 1]; };
+  const app = { get: reg('GET'), post: reg('POST'), put: reg('PUT'), patch: reg('PATCH'), delete: reg('DELETE') };
+  const eopApi = require('../server/eventops').mount(app, { db, auth });
+  const { entity, suite, owner, admin } = seedEvent();
+  call(routes['PUT /api/eventops/entities/:entityId/enabled'], { user: admin, params: { entityId: entity.id }, body: { enabled: true } });
+  const P = { suiteId: suite.id };
+  const station = call(routes['POST /api/eventops/suites/:suiteId/stations'], { user: owner, params: P, body: { name: 'Bar', kind: 'bar' } }).body.station;
+  call(routes['POST /api/eventops/suites/:suiteId/devices/bulk'], { user: owner, params: P, body: { count: 2, prefix: 'OW', pad: 3 } });
+
+  // Owl query API (what the eventOps Owl tool calls).
+  const sum = eopApi.suiteSummary(suite.id);
+  assert.equal(sum.devices.total, 2);
+  assert.equal(sum.devices.atHive, 2);
+  assert.equal(eopApi.locateDevice(suite.id, 'OW001').location, 'Hive');
+  assert.equal(eopApi.listDevices(suite.id, { state: 'in_stock' }).length, 2);
+  assert.equal(eopApi.locateDevice(suite.id, 'nope'), null);
+
+  // Checkpoint requires a photo.
+  const staff = call(routes['POST /api/eventops/suites/:suiteId/staff'], { user: owner, params: P, body: { name: 'Sam', number: '5' } }).body.staff;
+  const kiosk = call(routes['GET /api/eventops/suites/:suiteId/kiosk'], { user: owner, params: P }).body;
+  const KP = { suiteId: suite.id, token: kiosk.token };
+  assert.equal(call(routes['POST /api/eventops/portal/:suiteId/:token/checkpoint'], { params: KP, body: { stationId: station.id, staffId: staff.id, comment: 'x' } }).code, 400);
+  assert.equal(call(routes['POST /api/eventops/portal/:suiteId/:token/checkpoint'], { params: KP, body: { stationId: station.id, staffId: staff.id, photo: 'data:image/jpeg;base64,abc' } }).code, 201);
 });
 
 test('deleting a station sends its deployed devices back to the Hive', () => {
