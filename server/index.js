@@ -23,7 +23,7 @@ const rateLimit = require('./ratelimit');
 // unchanged. See server/query.js.
 const query = require('./query')({ looker, auth });
 const {
-  runLookerQuery, applyScope, stripAnyValue, ANY_VALUE, currentFirstEventSort,
+  runLookerQuery, applyScope, stripAnyValue, routeTicketIdFilters, ANY_VALUE, currentFirstEventSort,
   cleanFilterMap, expandLockMap, effectiveFilterValues, tileQueryBody, daysBeforeOverlayFor,
   primaryTileValue,
 } = query;
@@ -557,7 +557,7 @@ require('./clientModel').mount(app, { db, auth, store, looker, fetchDashboard, c
 require('./dashboards').mount(app, {
   store, db, auth, looker,
   convertDashboard, fetchDashboard, parseDrillUrl,
-  runLookerQuery, applyScope, stripAnyValue, currentFirstEventSort,
+  runLookerQuery, applyScope, stripAnyValue, currentFirstEventSort, routeTicketIdFilters,
 });
 
 // ─── Goals (the Results pillar) → server/goals.js ──────────────────────────────
@@ -1124,7 +1124,7 @@ app.post('/api/filter-suggest', auth.requireAuth, async (req, res) => {
     const t = (term || '').trim();
     if (t) {
       if (/^\d+$/.test(t)) {
-        q.filters = { [field]: t };
+        q.filters = { [comp && comp.endsWith('.id') ? comp : field]: t }; // a numeric term matches the id (search by id or name)
       } else {
         // Looker's `%x%` LIKE can be case-sensitive (depends on the dialect),
         // so OR a few case variants to make search effectively case-insensitive.
@@ -1163,7 +1163,7 @@ app.post('/api/filter-suggest', auth.requireAuth, async (req, res) => {
         const other = r[comp] == null ? '' : String(r[comp]);
         let label = isId ? `${s} — ${other}` : `${s}  (id: ${other})`;
         if (date) label += `  ·  ${date}`;
-        suggestions.push({ value: s, label });
+        suggestions.push({ value: (/^core_ticket_(categories|types)\.name$/.test(field) && /^\d+$/.test(t)) ? other : s, label }); // numeric search → select the unique id
       } else if (date) {
         suggestions.push({ value: s, label: `${s}  —  ${date}` });
       } else {

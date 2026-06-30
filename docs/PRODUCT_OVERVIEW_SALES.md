@@ -504,6 +504,10 @@ Use these to set direction, **not** to promise dates.
   missing); the id makes it unambiguous, and same-named entries now each appear as a
   distinct option. A filter pointed at the **id** dimension renders as *16244 — Loyalty
   Tickets* — uniquely selectable — so a report can be filtered to one exact category.
+  **Filter by id or name:** type/select an id (e.g. *16244*) and the report scopes to that
+  exact category even when the filter is wired to the name; plain names keep working, so the
+  same filter takes either — no dashboard rewiring. Searching the dropdown by a number now
+  matches the id too.
 - **2026-06-30** — **WhatsApp Owl: scheduled in-window updates** 🧪: a customer can be
   subscribed (per number, in **Admin → WhatsApp Owl**) to a daily **digest / goals /
   alerts** update on WhatsApp. Sent free-form only while they’re inside their 24-hour

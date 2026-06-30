@@ -66,6 +66,27 @@ module.exports = function createQueryEngine({ looker, auth }) {
     return out;
   }
 
+  // Ticket category/type NAMES collide (several "Loyalty Tickets" with different
+  // ids), so a name-keyed filter can't isolate one. When the value a user gave is
+  // purely numeric id(s) — typed, or picked from the id-labelled dropdown — retarget
+  // it to the matching `.id` dimension so the report filters to that EXACT category.
+  // Plain names stay on the name field; a mixed id+name value also stays put (two
+  // different fields would AND to nothing), so this only ever narrows correctly.
+  function routeTicketIdFilters(filters) {
+    if (!filters || typeof filters !== 'object') return filters;
+    const out = { ...filters };
+    for (const key of Object.keys(out)) {
+      const m = /^(core_ticket_(?:categories|types))\.name$/.exec(key);
+      if (!m) continue;
+      const parts = String(out[key] == null ? '' : out[key]).split(',').map((s) => s.trim()).filter(Boolean);
+      if (!parts.length || !parts.every((p) => /^\d+$/.test(p))) continue;
+      const idKey = `${m[1]}.id`;
+      out[idKey] = out[idKey] ? `${out[idKey]},${parts.join(',')}` : parts.join(',');
+      delete out[key];
+    }
+    return out;
+  }
+
   // Force the user's ENTITY (organiser) lock onto every query — the hard security
   // boundary. Uses the organiser field that belongs to the query's OWN explore
   // (so GA4 etc. don't get core_organisers.name injected, which Looker rejects).
@@ -194,7 +215,7 @@ module.exports = function createQueryEngine({ looker, auth }) {
       const v = fv[filterName];
       if (v && String(v).trim()) overrides[queryField] = String(v).trim();
     }
-    const body = { ...q, filters: stripAnyValue({ ...(q.filters || {}), ...overrides, ...extraOverrides }) };
+    const body = { ...q, filters: routeTicketIdFilters(stripAnyValue({ ...(q.filters || {}), ...overrides, ...extraOverrides })) };
     if (!(await applyScope(body, user, suiteId))) return null;
     return body;
   }
@@ -273,6 +294,7 @@ module.exports = function createQueryEngine({ looker, auth }) {
     applyScope,
     primaryTileValue,
     stripAnyValue,
+    routeTicketIdFilters,
     ANY_VALUE,
     currentFirstEventSort,
     cleanFilterMap,
