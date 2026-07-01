@@ -3,6 +3,7 @@ import { api } from '../lib/api.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import UploadHint from './UploadHint.jsx';
 import { languageList } from '../lib/language.js';
+import EmailBuilder from './EmailBuilder.jsx';
 
 // Format a money amount in the campaign's currency (ZAR → "R1,234.00").
 const money = (cur, n) => `${cur === 'ZAR' || !cur ? 'R' : `${cur} `}${Number(n || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -349,6 +350,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
     contentMode: cfg.contentMode || 'template',
     heroImage: cfg.heroImage || '',
     customHtml: cfg.customHtml || '',
+    blocks: cfg.blocks || [], // block-builder content (contentMode 'blocks')
     subject: cfg.subject || tp.subject || '',
     body: cfg.body || tp.body || '',
     smsBody: cfg.smsBody || '', // separate SMS copy when channel = 'both'
@@ -399,12 +401,12 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
   const applyTemplate = (id) => {
     const t = templates.find((x) => x.id === id);
     if (!t) return;
-    setF((s) => ({ ...s, contentMode: t.contentMode || 'template', subject: t.subject || s.subject, body: t.body || s.body, customHtml: t.customHtml || s.customHtml, heroImage: t.heroImage || s.heroImage, ctaText: t.ctaText || s.ctaText }));
+    setF((s) => ({ ...s, contentMode: t.contentMode || 'template', subject: t.subject || s.subject, body: t.body || s.body, customHtml: t.customHtml || s.customHtml, blocks: (t.blocks && t.blocks.length) ? t.blocks : s.blocks, heroImage: t.heroImage || s.heroImage, ctaText: t.ctaText || s.ctaText }));
   };
   const saveAsTemplate = async () => {
     const name = (window.prompt('Save this email as a template — name it:') || '').trim();
     if (!name) return;
-    try { await api.createCampaignTemplate(entityId, { name, subject: f.subject, contentMode: f.contentMode, body: f.body, customHtml: f.customHtml, heroImage: f.heroImage, ctaText: f.ctaText }); await loadTemplates(); alert('Saved to Templates ✓'); }
+    try { await api.createCampaignTemplate(entityId, { name, subject: f.subject, contentMode: f.contentMode, body: f.body, customHtml: f.customHtml, blocks: f.blocks, heroImage: f.heroImage, ctaText: f.ctaText }); await loadTemplates(); alert('Saved to Templates ✓'); }
     catch (e) { alert('Could not save template: ' + e.message); }
   };
   // Auto-select the event when there's exactly one and none is chosen yet — so
@@ -451,7 +453,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
     smsBody: f.smsBody,
     ctaText: f.campaignMode === 'sequence' ? (f.steps[0]?.ctaText || '') : f.ctaText,
     ctaUrl: f.ctaUrl, utm: f.utm, recurring: f.recurring,
-    eventSuiteId: f.eventSuiteId, language: f.language, contentMode: f.contentMode, heroImage: f.heroImage, customHtml: f.customHtml,
+    eventSuiteId: f.eventSuiteId, language: f.language, contentMode: f.contentMode, heroImage: f.heroImage, customHtml: f.customHtml, blocks: f.blocks,
     templateKey: f.templateKey, category: f.category, master: f.master, approvers: f.approvers,
     channel: f.channel,
     campaignMode: f.campaignMode, steps: f.steps,
@@ -476,7 +478,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
   const removeFilter = (i) => setF((s) => ({ ...s, filters: s.filters.filter((_, j) => j !== i) }));
   // Step helpers (sequence mode).
   const setStep = (i, patch) => setF((s) => ({ ...s, steps: s.steps.map((st, j) => (j === i ? { ...st, ...patch } : st)) }));
-  const addStep = (delayHours = 24) => setF((s) => ({ ...s, steps: [...s.steps, { delayHours, subject: '', body: '', smsBody: '', ctaText: s.steps[0]?.ctaText || '', contentMode: 'template', customHtml: '', heroImage: '' }] }));
+  const addStep = (delayHours = 24) => setF((s) => ({ ...s, steps: [...s.steps, { delayHours, subject: '', body: '', smsBody: '', ctaText: s.steps[0]?.ctaText || '', contentMode: 'template', customHtml: '', blocks: [], heroImage: '' }] }));
   const removeStep = (i) => setF((s) => ({ ...s, steps: s.steps.filter((_, j) => j !== i) }));
   const isSequence = f.campaignMode === 'sequence';
   // Columns available to pick the abandonment-time anchor from (tile fields or a list's headers).
@@ -529,11 +531,11 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
     debounce.current = setTimeout(() => {
       const base = payload();
       const st = isSequence ? (f.steps[activeStep] || f.steps[0]) : null;
-      const p = st ? { ...base, subject: st.subject, body: st.body, smsBody: st.smsBody || '', ctaText: st.ctaText, contentMode: st.contentMode || 'template', customHtml: st.customHtml || '', heroImage: st.heroImage || '' } : base;
+      const p = st ? { ...base, subject: st.subject, body: st.body, smsBody: st.smsBody || '', ctaText: st.ctaText, contentMode: st.contentMode || 'template', customHtml: st.customHtml || '', heroImage: st.heroImage || '', blocks: st.blocks || [] } : base;
       api.actionPreviewEmail(entityId, p).then((r) => { setPreview(r.html || ''); setPreviewSms(r.sms || ''); }).catch(() => {});
     }, 350);
     return () => clearTimeout(debounce.current);
-  }, [f.subject, f.body, f.smsBody, f.ctaText, f.ctaUrl, f.contentMode, f.customHtml, f.heroImage, f.campaignMode, f.eventSuiteId, activeStep, JSON.stringify(f.steps), JSON.stringify(f.promo), f.anchorField]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [f.subject, f.body, f.smsBody, f.ctaText, f.ctaUrl, f.contentMode, f.customHtml, f.heroImage, JSON.stringify(f.blocks), f.campaignMode, f.eventSuiteId, activeStep, JSON.stringify(f.steps), JSON.stringify(f.promo), f.anchorField]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Preview EVERY step of a sequence together (rendered each with its own copy).
   useEffect(() => {
@@ -1045,12 +1047,19 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
               )}
               <button type="button" style={mini} onClick={saveAsTemplate} title="Save this email as a reusable template">💾 Save as template</button>
             </div>
-            <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
               <Toggle on={f.contentMode === 'template'} onClick={() => set('contentMode', 'template')}>Built template</Toggle>
+              <Toggle on={f.contentMode === 'blocks'} onClick={() => set('contentMode', 'blocks')}>🧱 Builder</Toggle>
               <Toggle on={f.contentMode === 'html'} onClick={() => set('contentMode', 'html')}>Custom HTML</Toggle>
             </div>
 
-            {f.contentMode === 'template' ? (
+            {f.contentMode === 'blocks' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <input style={{ ...input, fontWeight: 700 }} value={f.subject} onChange={(e) => set('subject', e.target.value)} placeholder="Subject line" />
+                <EmailBuilder value={f.blocks} onChange={(v) => set('blocks', v)} />
+                <div style={hintS}>Stack blocks to build the email — it’s wrapped in the client’s branding (logo, colours, unsubscribe) automatically. Links in buttons/images are tracked; tokens <b>{'{{name}}'}</b>, <b>{'{{ticketType}}'}</b> work in text.</div>
+              </div>
+            ) : f.contentMode === 'template' ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <ImageField label="Hero image (optional)" value={f.heroImage} onChange={(v) => set('heroImage', v)} />
                 <button type="button" style={mini} onClick={draft} disabled={drafting}>{drafting ? 'Writing…' : '✨ Draft copy with AI'}</button>

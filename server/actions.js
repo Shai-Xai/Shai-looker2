@@ -20,6 +20,9 @@ const { parseContactLines, csvHeader, parseContactTable, fetchGoogleSheetCsv, go
 // Audience person-mapping (dedupe + per-channel consent + reach) lives in a shared
 // module so chat-created "query" segments reuse the SAME logic — see audienceMap.js.
 const { MAX_AUDIENCE, MAX_AUDIENCE_HARD, MAX_SMS_DEFAULT, clampSmsCap, EMAIL_RE, cellVal, isYes, buildRows, finalizeAudience } = require('./audienceMap');
+// Block-builder email content (Mailchimp-style stacked blocks → email-safe HTML).
+const emailBlocks = require('./emailBlocks');
+const cleanBlocks = emailBlocks.cleanBlocks;
 
 function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAudience, draftCopy, listEvents }) {
   const sql = db.db;
@@ -342,9 +345,10 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
         body: String(s.body || '').slice(0, 8000),
         smsBody: String(s.smsBody || '').slice(0, 2000), // separate SMS copy per step when channel = 'both'
         ctaText: String(s.ctaText || '').slice(0, 60),
-        // Per-step content parity with once-off: template vs custom HTML + hero image.
-        contentMode: s.contentMode === 'html' ? 'html' : 'template',
+        // Per-step content parity with once-off: template / custom HTML / block builder.
+        contentMode: ['html', 'blocks'].includes(s.contentMode) ? s.contentMode : 'template',
         customHtml: String(s.customHtml || '').slice(0, 100000),
+        blocks: cleanBlocks(s.blocks),
         heroImage: String(s.heroImage || '').slice(0, 1500000),
       })).sort((a, b) => a.delayHours - b.delayHours) : [],
       // Promo / discount codes. type 'promo' attaches to the ticket (can append
@@ -358,7 +362,8 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
         benefit: String((body.promo || {}).benefit || '').slice(0, 140),
         appendToLink: (body.promo || {}).type === 'discount' ? false : ((body.promo || {}).appendToLink !== false),
       },
-      contentMode: body.contentMode === 'html' ? 'html' : 'template',
+      contentMode: ['html', 'blocks'].includes(body.contentMode) ? body.contentMode : 'template',
+      blocks: cleanBlocks(body.blocks),   // block-builder content (contentMode 'blocks')
       eventSuiteId: String(body.eventSuiteId || ''),
       // AI copy language for THIS campaign: overrides the client default when set
       // (so a multi-language client can draft one audience in French, another in
@@ -454,7 +459,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
   function contentError(cfg) {
     const needsSubject = cfg.channel !== 'sms';
     // Custom-HTML emails keep content in customHtml, not body — count either as "a message".
-    const emailContent = (c) => (c?.contentMode === 'html' ? (c?.customHtml || '').trim() : (c?.body || '').trim());
+    const emailContent = (c) => (c?.contentMode === 'html' ? (c?.customHtml || '').trim() : c?.contentMode === 'blocks' ? ((c?.blocks || []).length ? 'blocks' : '') : (c?.body || '').trim());
     if (cfg.campaignMode === 'sequence') {
       const s0 = (cfg.steps || [])[0];
       if (!s0 || !emailContent(s0)) return 'Add at least one step with a message';
@@ -664,7 +669,21 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     const useBody = src.body || (step ? '' : cfg.body);
     const useCta = src.ctaText || cfg.ctaText;
     const useContentMode = src.contentMode || 'template';
-    const useHtml = src.customHtml || '';
+    // Block-builder content renders to HTML up front, then flows through the SAME
+    // token + link-tracking + unsubscribe path as custom HTML below.
+    let useHtml = src.customHtml || '';
+    if (useContentMode === 'blocks') {
+      // Host each block image (data-URLs get stripped by email clients) on real sends.
+      const blockPath = step ? `/mail-assets/campaign/${action.id}/${stepIndex}/blocks` : `/mail-assets/campaign/${action.id}/blocks`;
+      const blocks = realSend
+        ? emailBlocks.hostImages(src.blocks || [], (b, key) => `${mailer.baseUrl()}${blockPath}/${b.id}/${key}`)
+        : (src.blocks || []);
+      const branding = mailer.resolveBranding(action.entityId, action.config?.eventSuiteId || '');
+      const { html: innerHtml, text: innerText } = emailBlocks.render(blocks, { brand: branding.brandColor });
+      const rtok0 = unsubToken(action.entityId, recipient.email);
+      const built = mailer.campaignBlocksEmail({ branding, entityId: action.entityId, assetScope: (action.config?.eventSuiteId || action.entityId), subject: useSubject, innerHtml, innerText, unsubUrl: `${mailer.baseUrl()}/u/${rtok0}`, promo: promoForRecipient(action, recipient.email) });
+      useHtml = built.html;
+    }
     const firstName = (recipient.name || '').split(/\s+/)[0] || '';
     const ticket = recipient.ticket || '';
     // Per-recipient tracked link: the same signed token used for unsubscribe
@@ -686,7 +705,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
       .replace(/\{\{\s*unsubscribe\s*\}\}/gi, unsubUrl), recipient);
     const subject = tok(useSubject);
 
-    if (useContentMode === 'html' && useHtml.trim()) {
+    if ((useContentMode === 'html' || useContentMode === 'blocks') && useHtml.trim()) {
       let html = tok(useHtml);
       // Track + tag EVERY external link in custom HTML (full multi-link attribution):
       // route each external <a href> through the /c/ click redirect with the original
@@ -996,6 +1015,25 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
 
   // Public: serve a campaign's hero image (data-URL stored on the action) so
   // real sends reference a URL, not an embedded data-URL clients would strip.
+  // Serve a builder BLOCK's image: /mail-assets/campaign/:id/blocks/:blockId/:key
+  // (once-off) or /:id/:step/blocks/:blockId/:key (per drip step). key = url|thumb.
+  const serveDataUrl = (res, img) => {
+    if (!img) return res.status(404).end();
+    if (!img.startsWith('data:')) return res.redirect(302, img);
+    const m = img.match(/^data:([^;,]+)?(;base64)?,(.*)$/s);
+    if (!m) return res.status(404).end();
+    const buf = m[2] ? Buffer.from(m[3], 'base64') : Buffer.from(decodeURIComponent(m[3]), 'utf8');
+    res.set('Content-Type', m[1] || 'image/png');
+    res.set('Cache-Control', 'public, max-age=300');
+    res.send(buf);
+  };
+  const blockImg = (a, stepIdx, blockId, key) => {
+    const blocks = (stepIdx >= 0 ? a?.config?.steps?.[stepIdx]?.blocks : a?.config?.blocks) || [];
+    const b = blocks.find((x) => x.id === blockId);
+    return b ? (key === 'thumb' ? b.thumb : b.url) : '';
+  };
+  app.get('/mail-assets/campaign/:id/blocks/:blockId/:key', (req, res) => serveDataUrl(res, blockImg(getAction(req.params.id), -1, req.params.blockId, req.params.key)));
+  app.get('/mail-assets/campaign/:id/:step/blocks/:blockId/:key', (req, res) => serveDataUrl(res, blockImg(getAction(req.params.id), Number(req.params.step), req.params.blockId, req.params.key)));
   app.get('/mail-assets/campaign/:id/:step?', (req, res) => {
     const a = getAction(req.params.id);
     // Per-step hero for drip sequences (/:step), else the campaign-level hero.

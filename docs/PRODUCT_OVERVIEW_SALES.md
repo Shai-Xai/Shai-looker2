@@ -198,7 +198,8 @@ lists, subtract a suppression list, and it stays live."
 
 ### 5b. Campaigns — email & SMS  ✅
 - Send **email, SMS, or both** to a segment, tile or pasted list.
-- **AI-drafted copy** you can edit; branded template or custom HTML; hero image.
+- **AI-drafted copy** you can edit; branded template, **drag-to-order block builder**, or custom HTML; hero image.
+- **Email block builder** ✅ (🧪 new) — a Mailchimp-style content builder: stack **heading, text, image, button, video, social, divider and spacer** blocks, each with alignment/size options, reorder or delete them, and it's wrapped in the client's branding (logo, colours, unsubscribe) automatically. Button/image links are tracked; merge tokens work in text. Built emails can be **saved as reusable templates**.
 - **Merge fields** ✅ — personalise with `{{name}}`, `{{ticketType}}`, and **any
   column** from the audience (`{{City}}`, `{{Ticket Type}}`…). Preview renders with
   a real sample recipient.
@@ -558,6 +559,13 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-01** — **Email block builder** 🧪: campaigns get a Mailchimp-style content
+  builder alongside the built template + custom HTML modes. Stack **heading, text, image,
+  button, video, social, divider and spacer** blocks (each with alignment/size/link
+  options), reorder or delete them, and it renders to email-safe HTML wrapped in the
+  client's branding (logo, colours, unsubscribe) — button/image links tracked, merge
+  tokens in text, and the whole thing can be saved as a reusable template. Server render
+  is `server/emailBlocks.js` (unit-tested); the live email preview shows it as you build.
 - **2026-07-01** — **Report a bug or idea, from anywhere** 🧪: a **💬 Report button** now sits on
   every screen (for Howler staff *and* clients). Tap it to flag a **bug**, suggest an
   **improvement**, or float an **idea** — it automatically captures which screen you were on and
