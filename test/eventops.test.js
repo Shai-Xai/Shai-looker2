@@ -278,6 +278,34 @@ test('staff portal: token gates access; staff log in by number, then move + log 
   assert.equal(call(r['POST /api/eventops/portal/:suiteId/:token/login'], { params: KP, body: { number: '7' } }).code, 403);
 });
 
+test('portal reflects per-staff permissions: login returns canMove/canCheckpoint; move blocked when off', () => {
+  const r = mount();
+  const { entity, suite, owner, admin } = seedEvent();
+  call(r['PUT /api/eventops/entities/:entityId/enabled'], { user: admin, params: { entityId: entity.id }, body: { enabled: true } });
+  const P = { suiteId: suite.id };
+  const station = call(r['POST /api/eventops/suites/:suiteId/stations'], { user: owner, params: P, body: { name: 'Bar', kind: 'bar' } }).body.station;
+  // A staffer who may NOT move, but MAY checkpoint.
+  const staff = call(r['POST /api/eventops/suites/:suiteId/staff'], { user: owner, params: P, body: { name: 'Nomove', number: '20', canMove: false, canCheckpoint: true } }).body.staff;
+  assert.equal(staff.canMove, false);
+  assert.equal(staff.canCheckpoint, true);
+  const dev = call(r['POST /api/eventops/suites/:suiteId/devices'], { user: owner, params: P, body: { label: 'D9', qrCode: 'D9' } }).body.device;
+  const KP = { suiteId: suite.id, token: call(r['GET /api/eventops/suites/:suiteId/kiosk'], { user: owner, params: P }).body.token };
+
+  // The portal login pulls those flags through verbatim.
+  const login = call(r['POST /api/eventops/portal/:suiteId/:token/login'], { params: KP, body: { number: '20' } });
+  assert.equal(login.body.staff.canMove, false);
+  assert.equal(login.body.staff.canCheckpoint, true);
+
+  // And the server actually enforces canMove=false on the portal move endpoint.
+  const blocked = call(r['POST /api/eventops/portal/:suiteId/:token/move'], { params: KP, body: { deviceId: dev.id, stationId: station.id, staffId: staff.id } });
+  assert.equal(blocked.code, 403);
+
+  // Flip canMove on → the move now succeeds.
+  call(r['PUT /api/eventops/suites/:suiteId/staff/:id'], { user: owner, params: { ...P, id: staff.id }, body: { canMove: true } });
+  const ok = call(r['POST /api/eventops/portal/:suiteId/:token/move'], { params: KP, body: { deviceId: dev.id, stationId: station.id, staffId: staff.id } });
+  assert.equal(ok.code, 200);
+});
+
 test('map: stations carry scale/rotation + an open-issue marker count', () => {
   const r = mount();
   const { entity, suite, owner, admin } = seedEvent();

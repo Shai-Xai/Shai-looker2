@@ -28,6 +28,7 @@ export default function EventOpsConsole({ entityId, scope = 'admin' }) {
   const [canManage, setCanManage] = useState(false);
   const [tab, setTab] = useState('live');
   const [scan, setScan] = useState(null);        // null | { for: 'move' }
+  const [moveFlow, setMoveFlow] = useState(false); // station-first Single/Multiple batch move
   const [actionDevice, setActionDevice] = useState(null); // device shown in the action sheet
   const [stationView, setStationView] = useState(null);   // station whose devices are being viewed
   const [reloadKey, setReloadKey] = useState(0);  // bump → every tab refetches (auto-refresh after an action)
@@ -96,6 +97,11 @@ export default function EventOpsConsole({ entityId, scope = 'admin' }) {
               <span style={{ fontSize: 18 }}>📷</span> Scan
             </button>
           )}
+          {canManage && suiteId && (
+            <button onClick={() => setMoveFlow(true)} style={navMove} aria-label="Move devices">
+              <span style={{ fontSize: 18 }}>🔀</span> Move devices
+            </button>
+          )}
         </div>
         <div style={{ flex: 1, minWidth: 0, width: '100%' }}>
           {suiteId && tab === 'live' && <LiveTab suiteId={suiteId} isMobile={isMobile} reloadKey={reloadKey} onStation={setStationView} />}
@@ -115,6 +121,15 @@ export default function EventOpsConsole({ entityId, scope = 'admin' }) {
             <EventOpsScanner onCode={onScanned} onClose={() => setScan(null)} />
           </Suspense>
         </ScannerBoundary>
+      )}
+
+      {moveFlow && (
+        <ConsoleMoveFlow
+          suiteId={suiteId}
+          onClose={() => setMoveFlow(false)}
+          onDone={(msg) => { if (msg) flash(msg); refresh(); }}
+          flash={flash}
+        />
       )}
 
       {stationView && (
@@ -310,6 +325,7 @@ function AddDevicesModal({ suiteId, onClose, onDone }) {
   const [mode, setMode] = useState('single'); // single | bulk
   const [single, setSingle] = useState({ label: '', qrCode: '', serialNumber: '', type: 'handheld' });
   const [bulk, setBulk] = useState({ prefix: 'SL', start: 1, count: 10, pad: 3, type: 'handheld' });
+  const [scanning, setScanning] = useState(false); // scanning a QR to pair while adding
   const [busy, setBusy] = useState(false);
 
   async function submit() {
@@ -334,7 +350,12 @@ function AddDevicesModal({ suiteId, onClose, onDone }) {
       {mode === 'single' ? (
         <div style={fieldCol}>
           <Field label="Label"><input style={input} value={single.label} onChange={(e) => setSingle({ ...single, label: e.target.value })} placeholder="e.g. SL005" /></Field>
-          <Field label="QR code"><input style={input} value={single.qrCode} onChange={(e) => setSingle({ ...single, qrCode: e.target.value })} placeholder="Scannable code" /></Field>
+          <Field label="QR code">
+            <div style={{ display: 'flex', gap: 6 }}>
+              <input style={{ ...input, flex: 1 }} value={single.qrCode} onChange={(e) => setSingle({ ...single, qrCode: e.target.value })} placeholder="Scan or type a code" />
+              <button type="button" onClick={() => setScanning(true)} style={{ ...ghostBtn, whiteSpace: 'nowrap' }}>📷 Scan</button>
+            </div>
+          </Field>
           <Field label="Serial number"><input style={input} value={single.serialNumber} onChange={(e) => setSingle({ ...single, serialNumber: e.target.value })} /></Field>
           <Field label="Type"><TypeSelect value={single.type} onChange={(v) => setSingle({ ...single, type: v })} /></Field>
         </div>
@@ -356,6 +377,11 @@ function AddDevicesModal({ suiteId, onClose, onDone }) {
         <button onClick={onClose} style={ghostBtn}>Cancel</button>
         <button onClick={submit} disabled={busy} style={primaryBtn}>{busy ? 'Adding…' : 'Add'}</button>
       </div>
+      {scanning && (
+        <Suspense fallback={null}>
+          <EventOpsScanner onCode={(code) => { setScanning(false); const qr = String(code || '').trim(); if (qr) setSingle((s) => ({ ...s, qrCode: qr })); }} onClose={() => setScanning(false)} title="Scan the device's QR to pair" />
+        </Suspense>
+      )}
     </Modal>
   );
 }
@@ -634,6 +660,106 @@ function DeviceActionSheet({ suiteId, device, onClose, onDone }) {
         <Suspense fallback={null}>
           <EventOpsScanner onCode={pair} onClose={() => setPairing(false)} title="Scan the device's QR to pair" />
         </Suspense>
+      )}
+    </Modal>
+  );
+}
+
+// ─────────────────── Station-first batch move (client console only) ────────────
+// Pick the destination (a station or the Hive), optionally who's doing it, then choose
+// Single (scan one, done) or Multiple (scan several with a running tally, then finish).
+// This bulk flow lives here on the console — the staff portal keeps a simpler one-device move.
+function ConsoleMoveFlow({ suiteId, onClose, onDone, flash }) {
+  const [stations, setStations] = useState([]);
+  const [staff, setStaff] = useState([]);
+  const [staffId, setStaffId] = useState('');
+  const [dest, setDest] = useState(null);      // { id, name, kind } — id 'hive' = back to stock
+  const [mode, setMode] = useState(null);       // 'single' | 'multiple'
+  const [scanning, setScanning] = useState(false);
+  const [scanKey, setScanKey] = useState(0);    // bump to remount the one-shot scanner
+  const [moved, setMoved] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const destLabel = dest ? (dest.id === 'hive' ? 'Hive' : dest.name) : '';
+
+  useEffect(() => {
+    api.eventopsStations(suiteId).then((r) => setStations(r.stations || [])).catch(() => {});
+    api.eventopsStaff(suiteId).then((r) => setStaff(r.staff || [])).catch(() => {});
+  }, [suiteId]);
+
+  function chooseMode(m) { setMode(m); setScanning(true); setScanKey((k) => k + 1); }
+  function scanAgain() { setScanning(true); setScanKey((k) => k + 1); }
+
+  async function onScanned(code) {
+    if (!code) { setScanning(false); return; }
+    setBusy(true);
+    try {
+      const dev = (await api.eventopsScan(suiteId, code)).device;
+      const mv = await api.eventopsMove(suiteId, { deviceId: dev.id, stationId: dest.id, staffId });
+      const label = dev.label || dev.qrCode || 'Device';
+      setMoved((m) => [...m, label]);
+      onDone(`${label} → ${destLabel}${mv.unusual ? ' (⚑ unusual)' : ''}`);
+      if (mode === 'single') { setScanning(false); onClose(); return; }
+      setScanKey((k) => k + 1); // fresh scanner for the next device
+    } catch (e) {
+      flash(e.message || 'Could not move that device');
+      if (mode === 'single') { setScanning(false); return; }
+      setScanKey((k) => k + 1);
+    }
+    setBusy(false);
+  }
+
+  // Full-screen scanner while actively scanning.
+  if (scanning) {
+    return (
+      <ScannerBoundary onError={() => { setScanning(false); flash('Scanner had a hiccup — try again.'); }}>
+        <Suspense fallback={null}>
+          <EventOpsScanner key={scanKey} onCode={onScanned} onClose={() => setScanning(false)}
+            title={`Scan → ${destLabel}${mode === 'multiple' ? ` · ${moved.length} moved` : ''}`} />
+        </Suspense>
+      </ScannerBoundary>
+    );
+  }
+  return (
+    <Modal title="🔀 Move devices" subtitle={dest ? `To ${destLabel}` : 'Pick where the devices are going'} onClose={onClose}>
+      {!dest ? (
+        <div style={fieldCol}>
+          {staff.length > 0 && (
+            <Field label="Done by (optional)">
+              <select style={input} value={staffId} onChange={(e) => setStaffId(e.target.value)}>
+                <option value="">— no one in particular —</option>
+                {staff.map((s) => <option key={s.id} value={s.id}>{s.number ? `#${s.number} ` : ''}{s.name}</option>)}
+              </select>
+            </Field>
+          )}
+          <div>
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>Move devices to:</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <button onClick={() => setDest({ id: 'hive', name: 'Hive' })} style={destBtn}>🏠 Hive (in stock)</button>
+              {stations.map((s) => (
+                <button key={s.id} onClick={() => setDest(s)} style={destBtn}>{KIND_ICON[s.kind] || '📍'} {s.name} <span style={{ color: 'var(--muted)', fontSize: 12 }}>({s.deviceCount})</span></button>
+              ))}
+              {stations.length === 0 && <Empty>No stations — add one first to deploy devices.</Empty>}
+            </div>
+          </div>
+        </div>
+      ) : !mode ? (
+        <div style={fieldCol}>
+          <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>Moving to <strong style={{ color: 'var(--text)' }}>{destLabel}</strong>. How many devices?</div>
+          <button onClick={() => chooseMode('single')} style={destBtn}>1️⃣ Single — scan one device, done</button>
+          <button onClick={() => chooseMode('multiple')} style={destBtn}>🔢 Multiple — scan several, then finish</button>
+          <button onClick={() => setDest(null)} style={ghostBtn}>← Change destination</button>
+        </div>
+      ) : (
+        <div style={fieldCol}>
+          <div style={{ fontSize: 13 }}>{moved.length} device{moved.length === 1 ? '' : 's'} moved to <strong>{destLabel}</strong>.</div>
+          {moved.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {moved.map((m, i) => <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--hairline)', fontSize: 13 }}><span>{m}</span><span style={{ color: 'var(--success)' }}>✓</span></div>)}
+            </div>
+          )}
+          <button onClick={scanAgain} disabled={busy} style={primaryBtn}>📷 Scan another</button>
+          <button onClick={onClose} style={ghostBtn}>Done</button>
+        </div>
       )}
     </Modal>
   );
@@ -1194,6 +1320,7 @@ const tabBtn = (on) => ({ padding: '9px 14px', borderRadius: 10, border: 'none',
 const mobileTabs = { display: 'flex', gap: 6, flexWrap: 'wrap' };
 const leftNav = { display: 'flex', flexDirection: 'column', gap: 3, padding: 6, borderRadius: 14, border: '1px solid var(--hairline)', background: 'var(--card)' };
 const navScan = { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '13px', borderRadius: 12, border: 'none', cursor: 'pointer', fontSize: 16, fontWeight: 800, background: 'var(--brand)', color: '#fff', boxShadow: 'var(--shadow-sm)' };
+const navMove = { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '12px', borderRadius: 12, border: '1px solid var(--border)', cursor: 'pointer', fontSize: 15, fontWeight: 700, background: 'var(--card)', color: 'var(--text)' };
 const navItem = (on) => ({ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', padding: '10px 12px', borderRadius: 9, border: 'none', cursor: 'pointer', fontSize: 14, fontWeight: on ? 700 : 500, background: on ? 'var(--brand)' : 'transparent', color: on ? '#fff' : 'var(--text)' });
 const primaryBtn = { padding: '11px 16px', borderRadius: 10, border: 'none', background: 'var(--brand)', color: '#fff', fontWeight: 700, fontSize: 14, cursor: 'pointer' };
 const ghostBtn = { padding: '9px 14px', borderRadius: 10, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', fontWeight: 600, fontSize: 13, cursor: 'pointer' };
