@@ -12,6 +12,7 @@ export default function ApiKeysCard({ entityId, scope = 'my' }) {
   const revokeFn = scope === 'admin-client' ? (id) => api.revokeEntityApiKey(entityId, id) : (id) => api.revokeMyApiKey(entityId, id);
 
   const [keys, setKeys] = useState(null);
+  const [enabled, setEnabled] = useState(false); // per-client master switch (Howler-controlled)
   const [denied, setDenied] = useState(false);
   const [name, setName] = useState('');
   const [withRows, setWithRows] = useState(false);
@@ -21,11 +22,18 @@ export default function ApiKeysCard({ entityId, scope = 'my' }) {
 
   useEffect(() => {
     setFresh(null);
-    listFn().then((r) => setKeys(r.keys || [])).catch(() => { setKeys([]); setDenied(true); });
+    listFn().then((r) => { setKeys(r.keys || []); setEnabled(!!r.enabled); }).catch(() => { setKeys([]); setDenied(true); });
   }, [entityId, scope]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!keys) return null;
   if (denied) return null; // no integrations.manage on this client — keep the section quiet
+
+  const toggleAccess = async (on) => {
+    try {
+      const r = await api.setEntityApiAccess(entityId, on);
+      setEnabled(!!r.enabled);
+    } catch (e) { alert('Couldn’t update API access: ' + e.message); }
+  };
 
   const create = async () => {
     setCreating(true);
@@ -57,7 +65,23 @@ export default function ApiKeysCard({ entityId, scope = 'my' }) {
         Read this client’s Pulse data from other tools: a REST API (<code style={inline}>{base}/api/v1</code>) and an
         MCP server for AI agents like Claude (<code style={inline}>{base}/mcp</code>). Keys are read-only, scoped to
         this client only, and sent as <code style={inline}>Authorization: Bearer …</code>.
+        {' '}Full guide: <a href="/api-guide" target="_blank" rel="noreferrer" style={{ color: 'var(--brand)' }}>{base}/api-guide</a>
       </p>
+
+      {scope === 'admin-client' && (
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, cursor: 'pointer' }}>
+          <input type="checkbox" checked={enabled} onChange={(e) => toggleAccess(e.target.checked)} style={{ width: 16, height: 16 }} />
+          <span style={{ fontSize: 13, fontWeight: 600 }}>
+            API access enabled for this client
+            {!enabled && <span style={{ color: 'var(--muted)', fontWeight: 400 }}> — keys can be prepared but won’t work until this is on</span>}
+          </span>
+        </label>
+      )}
+      {scope === 'my' && !enabled && (
+        <p style={{ ...sub, fontWeight: 600 }}>
+          API access isn’t switched on for your account yet — ask your Howler contact to enable it.
+        </p>
+      )}
 
       {fresh && (
         <div style={freshBox}>
@@ -87,23 +111,27 @@ export default function ApiKeysCard({ entityId, scope = 'my' }) {
       )}
       {active.length === 0 && !fresh && <p style={{ ...sub, marginBottom: 12 }}>No active keys yet.</p>}
 
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <input
-          style={input}
-          placeholder="Key name (e.g. Reporting bot)"
-          value={name}
-          maxLength={80}
-          onChange={(e) => setName(e.target.value)}
-        />
-        <button style={btn} onClick={create} disabled={creating}>{creating ? 'Creating…' : '+ New read-only key'}</button>
-      </div>
-      <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginTop: 10, cursor: 'pointer' }}>
-        <input type="checkbox" checked={withRows} onChange={(e) => setWithRows(e.target.checked)} style={{ marginTop: 2, width: 16, height: 16 }} />
-        <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>
-          Also allow <b>row-level data</b> — the table behind a tile (e.g. customer &amp; ticketing records).
-          May include personal data; only grant this to tools that genuinely need it.
-        </span>
-      </label>
+      {(scope === 'admin-client' || enabled) && (
+        <>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <input
+              style={input}
+              placeholder="Key name (e.g. Reporting bot)"
+              value={name}
+              maxLength={80}
+              onChange={(e) => setName(e.target.value)}
+            />
+            <button style={btn} onClick={create} disabled={creating}>{creating ? 'Creating…' : '+ New read-only key'}</button>
+          </div>
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginTop: 10, cursor: 'pointer' }}>
+            <input type="checkbox" checked={withRows} onChange={(e) => setWithRows(e.target.checked)} style={{ marginTop: 2, width: 16, height: 16 }} />
+            <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+              Also allow <b>row-level data</b> — the table behind a tile (e.g. customer &amp; ticketing records).
+              May include personal data; only grant this to tools that genuinely need it.
+            </span>
+          </label>
+        </>
+      )}
     </div>
   );
 }

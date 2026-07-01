@@ -551,9 +551,14 @@ or point an AI agent (like Claude) at it and ask questions in plain language."
 - **MCP server (`/mcp`)** — the same data as curated tools any MCP-capable AI
   agent can use: "what does Total Tickets Sold show right now?", "how big is the
   VIP segment?", "how did the launch campaign do?".
-- **Self-service** — clients create and revoke their own keys in **Settings →
-  Integrations**; Howler can manage them per client in Admin. Every external
-  call is rate-limited and audited.
+- **Off by default, on per client** — Howler enables API access per client with
+  one switch (Admin → client → Integrations); flipping it off instantly cuts
+  every key that client has.
+- **Self-service** — once enabled, clients create and revoke their own keys in
+  **Settings → Integrations**; Howler can manage them per client in Admin.
+  Every external call is rate-limited and audited.
+- **Shareable guide** — send clients/developers to `<pulse-domain>/api-guide`
+  (a living page rendered from `docs/CLIENT_API_GUIDE.md`).
 - Writes (draft a segment/campaign via the API) are on the roadmap and will ride
   the existing approval + consent gates — nothing will ever send without a human.
 
@@ -597,6 +602,12 @@ Use these to set direction, **not** to promise dates.
   nothing keeps burning in the background). And long data pulls no longer look frozen — the
   thinking line keeps refreshing every few seconds and the connection is kept alive, so a heavy
   query (e.g. a big cashless breakdown) shows progress instead of hanging on "Thinking…".
+- **2026-07-01** — **API: per-client access switch + shareable developer guide** 🧪: API
+  access is now **off by default** and enabled per client by Howler (Admin → client →
+  Integrations — one toggle; off cuts all of that client's keys instantly, REST and MCP).
+  And there's a **client/developer guide at `<pulse-domain>/api-guide`** — a living page
+  (rendered from `docs/CLIENT_API_GUIDE.md`) covering keys, endpoints, connecting Claude
+  via MCP, row-level data responsibilities and troubleshooting. Share the link directly.
 - **2026-07-01** — **API: row-level tile data (opt-in scope)** 🧪: an API key can now be
   granted **row-level access** — the table behind a dashboard tile (customer & ticketing
   records) via `GET /api/v1/tiles/rows` or the `pulse_get_tile_rows` MCP tool — for clients

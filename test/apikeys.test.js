@@ -49,6 +49,12 @@ before(async () => {
     require('../server/mcp').mount(a, { apiKeys, core: apiV1.core, rateLimit });
     a.use(require('../server/http').errorMiddleware);
   });
+  // API access is OFF by default — switch it on for the two test clients via
+  // the real admin route (the per-client kill-switch test below exercises OFF).
+  for (const e of [entityA, entityB]) {
+    const r = await app.req('PUT', `/api/admin/entities/${e.id}/api-access`, { as: adminUser, body: { enabled: true } });
+    assert.equal(r.status, 200);
+  }
 });
 after(() => app.close());
 
@@ -153,6 +159,31 @@ test('client self-service: integrations.manage on YOUR entity only; secrets stay
 
   const rev = await app.req('POST', `/api/my/api-keys/${entityA.id}/${mine.body.key.id}/revoke`, { as: ownerA });
   assert.equal(rev.status, 200);
+});
+
+test('per-client switch: API access is off by default and the admin toggle gates everything', async () => {
+  const entityC = h.makeEntity('Client C', 'Org C');
+  const ownerC = h.makeClient('owner-c@test.local', [entityC.id], 'owner');
+
+  // Admin can pre-provision a key while access is off…
+  const { key, secret } = await issueKey(entityC.id, { name: 'pre-provisioned' });
+  assert.ok(key.id);
+  // …but the key doesn't work anywhere until the switch is on (REST + MCP).
+  assert.equal((await app.req('GET', '/api/v1/me', { headers: bearer(secret) })).status, 403);
+  assert.equal((await rpc({ jsonrpc: '2.0', id: 20, method: 'tools/list' }, secret)).status, 403);
+  // …and the client can't self-create keys while off.
+  assert.equal((await app.req('POST', `/api/my/api-keys/${entityC.id}`, { as: ownerC, body: { name: 'x' } })).status, 403);
+  // The client's list shows the switch state.
+  assert.equal((await app.req('GET', `/api/my/api-keys/${entityC.id}`, { as: ownerC })).body.enabled, false);
+
+  // Flip it on → everything opens up.
+  await app.req('PUT', `/api/admin/entities/${entityC.id}/api-access`, { as: adminUser, body: { enabled: true } });
+  assert.equal((await app.req('GET', '/api/v1/me', { headers: bearer(secret) })).status, 200);
+  assert.equal((await app.req('POST', `/api/my/api-keys/${entityC.id}`, { as: ownerC, body: { name: 'mine' } })).status, 201);
+
+  // Flip it off again → instant cut-off, existing keys included.
+  await app.req('PUT', `/api/admin/entities/${entityC.id}/api-access`, { as: adminUser, body: { enabled: false } });
+  assert.equal((await app.req('GET', '/api/v1/me', { headers: bearer(secret) })).status, 403);
 });
 
 test('audit: external calls land in the key’s audit trail', async () => {

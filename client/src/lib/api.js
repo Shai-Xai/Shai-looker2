@@ -480,6 +480,7 @@ export const api = {
   listEntityApiKeys: (id) => fetch(`/api/admin/entities/${id}/api-keys`).then(json),
   createEntityApiKey: (id, p) => fetch(`/api/admin/entities/${id}/api-keys`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),
   revokeEntityApiKey: (id, keyId) => fetch(`/api/admin/entities/${id}/api-keys/${keyId}/revoke`, { method: 'POST' }).then(json),
+  setEntityApiAccess: (id, enabled) => fetch(`/api/admin/entities/${id}/api-access`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }) }).then(json),
   listMyApiKeys: (entityId) => fetch(`/api/my/api-keys/${entityId}`).then(json),
   createMyApiKey: (entityId, p) => fetch(`/api/my/api-keys/${entityId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),
   revokeMyApiKey: (entityId, keyId) => fetch(`/api/my/api-keys/${entityId}/${keyId}/revoke`, { method: 'POST' }).then(json),

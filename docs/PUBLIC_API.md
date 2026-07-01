@@ -5,7 +5,14 @@ and a remote MCP server (`/mcp`) for AI agents. Both are thin adapters over the
 same scope-enforced service core the app uses (`docs/API_MCP_BRIEF.md`). v1 is
 **read-only**; writes arrive in P3 behind the existing approval/consent gates.
 
+> **Shareable version:** this guide's client-facing twin is served live at
+> `https://<pulse-host>/api-guide` (rendered from `docs/CLIENT_API_GUIDE.md`) —
+> that's the link to hand to clients and their developers.
+
 ## Auth — per-client API keys
+- **API access is OFF by default per client.** Howler switches it on in
+  Admin → client → Integrations (the toggle on the API access card). Flipping
+  it off instantly cuts every key that client has, across REST and MCP.
 - Get a key in **Settings → Integrations → API access** (client self-service) or
   **Admin → client → Integrations** (Howler). The secret (`pulse_sk_…`) is shown
   **once**; after that only a masked hint is visible. Revoke any time.
