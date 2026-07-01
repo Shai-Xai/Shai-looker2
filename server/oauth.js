@@ -121,7 +121,12 @@ button,a.btn{display:inline-block;background:#FF385C;color:#fff;border:none;bord
   const validAuthzParams = (req, res) => {
     const { client_id, redirect_uri, response_type, code_challenge, code_challenge_method } = req.method === 'GET' ? req.query : req.body || {};
     const client = getClient(client_id);
-    if (!client) { res.status(400).send(page('Connection error', '<h1>Unknown app</h1><p>This connection request came from an app Pulse doesn’t recognise. Close this tab and try connecting again.</p>')); return null; }
+    if (!client) {
+      res.status(400).send(page('Connection error', `<h1>Unknown app</h1>
+        <p>This connection request used a client ID Pulse doesn’t recognise. This usually means a Client ID/Secret was typed into the app’s <b>Advanced settings</b> by hand.</p>
+        <p><b>To fix:</b> delete the connector in the app, add it again with the same URL, and leave the OAuth Client ID and Client Secret fields <b>blank</b> — the app then registers with Pulse automatically and this page will show an Approve button instead.</p>`));
+      return null;
+    }
     if (!client.redirect_uris.includes(String(redirect_uri || ''))) { res.status(400).send(page('Connection error', '<h1>Bad redirect address</h1><p>The app asked us to send the connection somewhere it didn’t register. Refusing, to be safe.</p>')); return null; }
     if (String(response_type || 'code') !== 'code' || !code_challenge || String(code_challenge_method || 'S256') !== 'S256') {
       res.status(400).send(page('Connection error', '<h1>Unsupported request</h1><p>This app used an authorisation style Pulse doesn’t support (code + PKCE S256 only).</p>')); return null;
