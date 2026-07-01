@@ -105,6 +105,24 @@ function mount(app, { db, auth, apiKeys, rateLimit }) {
     return r ? { ...r, redirect_uris: JSON.parse(r.redirect_uris) } : null;
   };
 
+  // Trust-on-first-use for hand-typed client ids. Some connector UIs force the
+  // user to fill in a manual Client ID (which skips dynamic registration and
+  // arrives here unknown). If — and only if — the redirect target is a known
+  // agent platform's own official callback, accept the id as a first-use
+  // registration pinned to that redirect. Safe because: the redirect can't go
+  // anywhere an attacker controls (allowlist), the user still explicitly
+  // approves on our page, and PKCE binds the code to the requesting app.
+  const TRUSTED_REDIRECTS = [
+    /^https:\/\/claude\.ai\//, /^https:\/\/claude\.com\//, /^https:\/\/api\.anthropic\.com\//,
+  ];
+  const registerFirstUse = (clientId, redirectUri) => {
+    if (!clientId || String(clientId).length > 120) return null;
+    if (!TRUSTED_REDIRECTS.some((re) => re.test(String(redirectUri || '')))) return null;
+    sql.prepare('INSERT INTO oauth_clients (id, name, redirect_uris, created_at) VALUES (?,?,?,?)')
+      .run(String(clientId), 'Claude', JSON.stringify([String(redirectUri)]), new Date().toISOString());
+    return getClient(clientId);
+  };
+
   // ── the approval page ──
   // The user is normally already logged into Pulse in this browser (cookie —
   // attachUser runs globally). They pick which of their clients to connect and
@@ -120,14 +138,24 @@ button,a.btn{display:inline-block;background:#FF385C;color:#fff;border:none;bord
 
   const validAuthzParams = (req, res) => {
     const { client_id, redirect_uri, response_type, code_challenge, code_challenge_method } = req.method === 'GET' ? req.query : req.body || {};
-    const client = getClient(client_id);
+    const client = getClient(client_id) || registerFirstUse(client_id, redirect_uri);
     if (!client) {
       res.status(400).send(page('Connection error', `<h1>Unknown app</h1>
         <p>This connection request used a client ID Pulse doesn’t recognise. This usually means a Client ID/Secret was typed into the app’s <b>Advanced settings</b> by hand.</p>
         <p><b>To fix:</b> delete the connector in the app, add it again with the same URL, and leave the OAuth Client ID and Client Secret fields <b>blank</b> — the app then registers with Pulse automatically and this page will show an Approve button instead.</p>`));
       return null;
     }
-    if (!client.redirect_uris.includes(String(redirect_uri || ''))) { res.status(400).send(page('Connection error', '<h1>Bad redirect address</h1><p>The app asked us to send the connection somewhere it didn’t register. Refusing, to be safe.</p>')); return null; }
+    if (!client.redirect_uris.includes(String(redirect_uri || ''))) {
+      // A known client presenting a new redirect: allow it only if it's a
+      // trusted platform callback (same rule as first-use), and pin it.
+      if (TRUSTED_REDIRECTS.some((re) => re.test(String(redirect_uri || '')))) {
+        client.redirect_uris.push(String(redirect_uri));
+        sql.prepare('UPDATE oauth_clients SET redirect_uris=? WHERE id=?').run(JSON.stringify(client.redirect_uris), client.id);
+      } else {
+        res.status(400).send(page('Connection error', '<h1>Bad redirect address</h1><p>The app asked us to send the connection somewhere it didn’t register. Refusing, to be safe.</p>'));
+        return null;
+      }
+    }
     if (String(response_type || 'code') !== 'code' || !code_challenge || String(code_challenge_method || 'S256') !== 'S256') {
       res.status(400).send(page('Connection error', '<h1>Unsupported request</h1><p>This app used an authorisation style Pulse doesn’t support (code + PKCE S256 only).</p>')); return null;
     }

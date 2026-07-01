@@ -119,6 +119,30 @@ test('PKCE: a wrong verifier is rejected and the code is not burned by the attac
   assert.equal((await exchange(clientId, code, verifier)).status, 200);
 });
 
+test('hand-typed client id works when the redirect is Claude’s own callback (trust-on-first-use)', async () => {
+  const typedId = 'my-hand-typed-id';
+  const { verifier, challenge } = pkce();
+  // Never registered — but the redirect is claude.ai, so authorize accepts it…
+  const redir = await approve(typedId, challenge);
+  assert.equal(redir.status, 302, 'manual client id is accepted for a trusted callback');
+  const code = new URL(redir.headers.get('location')).searchParams.get('code');
+  const tok = await exchange(typedId, code, verifier);
+  assert.equal(tok.status, 200);
+  assert.ok((await tok.json()).access_token.startsWith('pulse_sk_'));
+
+  // …but an unknown id pointing anywhere else is still refused.
+  const evilForm = new URLSearchParams({
+    client_id: 'another-typed-id', redirect_uri: 'https://evil.example/cb', code_challenge: challenge,
+    code_challenge_method: 'S256', entityId: entityA.id,
+  });
+  const evil = await fetch(`${app.base}/oauth/approve`, {
+    method: 'POST', redirect: 'manual',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Cookie: cookieFor(ownerA) },
+    body: evilForm.toString(),
+  });
+  assert.equal(evil.status, 400);
+});
+
 test('unregistered redirect_uri is refused outright', async () => {
   const clientId = await registerClient();
   const { challenge } = pkce();
