@@ -971,7 +971,9 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     };
   }
   const extraTools = {};
-  for (const ex of (catalogue.extras || [])) { try { const t = makeExploreTool(ex); extraTools[t.schema.name] = t; } catch { /* skip a malformed explore */ } }
+  // exploreKey tags the tool with its source explore so the chat/WhatsApp doors can
+  // include or drop it PER CLIENT (Admin can switch an explore off for one client).
+  for (const ex of (catalogue.extras || [])) { try { const t = makeExploreTool(ex); extraTools[t.schema.name] = { ...t, exploreKey: `${ex.model}::${ex.explore}` }; } catch { /* skip a malformed explore */ } }
 
   return {
     catalogue,

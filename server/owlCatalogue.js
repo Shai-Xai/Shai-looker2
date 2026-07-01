@@ -17,6 +17,7 @@ const EXTRA_KEY = 'owl_catalogue_extra';        // primary explore: JSON [{ name
 const DISABLED_KEY = 'owl_catalogue_disabled';  // primary explore: JSON [name, …] (non-PII seed fields off)
 const EXPLORES_KEY = 'owl_catalogue_explores';  // registered EXTRA explores: JSON [{ model, view, label }]
 const EXPFIELDS_KEY = 'owl_catalogue_expfields'; // extra explores' enabled fields: JSON { key: [name, …] }
+const ACCESS_KEY = 'owl_catalogue_access';       // per-client on/off: JSON { key: { defaultOn, clients: { entityId: bool } } }
 
 const PRIMARY = { model: seed.model, view: seed.explore, label: seed.label };
 const keyOf = (model, view) => `${model}::${view}`;
@@ -30,6 +31,30 @@ const readExtra = (db) => { const v = J(db.getSetting(EXTRA_KEY, ''), []); retur
 const readDisabled = (db) => { const v = J(db.getSetting(DISABLED_KEY, ''), []); return Array.isArray(v) ? v : []; };
 const readExplores = (db) => { const v = J(db.getSetting(EXPLORES_KEY, ''), []); return Array.isArray(v) ? v.filter((e) => e && e.model && e.view && !isPrimary(e.model, e.view)) : []; };
 const readExpFields = (db) => { const v = J(db.getSetting(EXPFIELDS_KEY, ''), {}); return v && typeof v === 'object' ? v : {}; };
+const readAccess = (db) => { const v = J(db.getSetting(ACCESS_KEY, ''), {}); return v && typeof v === 'object' ? v : {}; };
+
+// Per-client on/off for an EXTRA explore. Each explore has a platform default
+// (on unless the admin flips it) plus per-client overrides. The primary explore is
+// always on for everyone. No entityId in context (e.g. a pure admin chat) → the
+// platform default applies. Checked PER TURN, so a flip applies immediately.
+function exploreEnabledFor(db, key, entityId) {
+  const a = readAccess(db)[key];
+  if (!a) return true; // nothing configured → on for everyone
+  const dflt = a.defaultOn !== false;
+  const o = a.clients && entityId != null && entityId !== '' ? a.clients[entityId] : undefined;
+  return typeof o === 'boolean' ? o : dflt;
+}
+
+// Persist one explore's access config: { defaultOn, clients: { entityId: bool } }.
+// Only boolean overrides are kept (anything else means "inherit the default").
+function setAccess(db, key, cfg) {
+  const all = readAccess(db);
+  const clients = {};
+  for (const [eid, v] of Object.entries((cfg && cfg.clients) || {})) if (typeof v === 'boolean' && eid) clients[eid] = v;
+  all[key] = { defaultOn: !(cfg && cfg.defaultOn === false), clients };
+  db.setSetting(ACCESS_KEY, JSON.stringify(all));
+  return { ok: true };
+}
 
 // A cheap cache key: when any of the selection settings change, this string changes →
 // owlTools rebuilds so admin edits take effect on the next Owl turn without a restart.
@@ -87,7 +112,9 @@ function effective(db) {
     const dateDim = ds.find((d) => d.type === 'date');
     return { model: e.model, explore: e.view, label: e.label, measures: ms, dimensions: ds, dateDimension: dateDim ? dateDim.name : '', notes: [] };
   }).filter(Boolean);
-  if (extraExplores.length) notes.push(`Besides ticketing you also have these data sources, EACH with its own tool named ask_<explore>: ${extraExplores.map((x) => `${x.label} (${x.explore})`).join(', ')}. Use the matching tool for questions about that source. To compare one with ticketing, call BOTH tools and combine the figures on a shared dimension (event or date) — you cannot join two explores in a single query.`);
+  // NB: no global "you also have these sources" note here — each extra explore's tool
+  // carries its own routing/combine guidance in its schema description, so a client
+  // with that explore switched OFF is never told they have it (the tool is absent).
   return { ...seed, measures, dimensions, notes, extras: extraExplores };
 }
 
@@ -160,6 +187,7 @@ function registerExplore(db, { model, view, label }) {
 function unregisterExplore(db, model, view) {
   db.setSetting(EXPLORES_KEY, JSON.stringify(readExplores(db).filter((e) => !(e.model === model && e.view === view))));
   const map = readExpFields(db); delete map[keyOf(model, view)]; db.setSetting(EXPFIELDS_KEY, JSON.stringify(map));
+  const acc = readAccess(db); delete acc[keyOf(model, view)]; db.setSetting(ACCESS_KEY, JSON.stringify(acc));
   return { ok: true };
 }
 
@@ -171,7 +199,15 @@ function mount(app, { db, auth, getExploreFields, listModels }) {
       const models = (typeof listModels === 'function' ? await listModels() : []) || [];
       for (const m of models) for (const e of (m.explores || [])) available.push({ model: m.name, view: e.name, label: e.label || e.name, description: e.description || '' });
     } catch { available = []; }
-    res.json({ primary: PRIMARY, registered: readExplores(db), available });
+    const access = readAccess(db);
+    res.json({ primary: PRIMARY, registered: readExplores(db).map((e) => ({ ...e, access: access[keyOf(e.model, e.view)] || { defaultOn: true, clients: {} } })), available });
+  });
+  // PUT — one explore's per-client access { model, view, defaultOn, clients: { entityId: bool } }.
+  app.put('/api/admin/owl/explores/access', auth.requireAdmin, (req, res) => {
+    const { model, view, defaultOn, clients } = req.body || {};
+    if (!model || !view || isPrimary(model, view)) return res.status(400).json({ error: 'Pick a registered extra explore.' });
+    if (!readExplores(db).some((e) => e.model === model && e.view === view)) return res.status(404).json({ error: 'That explore is not registered.' });
+    res.json(setAccess(db, keyOf(model, view), { defaultOn, clients }));
   });
   // POST — register an explore { model, view, label }.
   app.post('/api/admin/owl/explores', auth.requireAdmin, (req, res) => {
@@ -196,4 +232,4 @@ function mount(app, { db, auth, getExploreFields, listModels }) {
   console.log('[owlCatalogue] Owl data-catalogue editor mounted');
 }
 
-module.exports = { mount, effective, version, provider, explores, listFields, setEnabled, registerExplore, unregisterExplore, isPII };
+module.exports = { mount, effective, version, provider, explores, listFields, setEnabled, registerExplore, unregisterExplore, exploreEnabledFor, setAccess, isPII };

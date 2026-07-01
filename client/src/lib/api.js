@@ -173,6 +173,7 @@ export const api = {
   owlExplores: () => fetch('/api/admin/owl/explores').then(json),
   addOwlExplore: (model, view, label) => fetch('/api/admin/owl/explores', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model, view, label }) }).then(json),
   removeOwlExplore: (model, view) => fetch(`/api/admin/owl/explores?model=${encodeURIComponent(model)}&view=${encodeURIComponent(view)}`, { method: 'DELETE' }).then(json),
+  saveOwlExploreAccess: (model, view, defaultOn, clients) => fetch('/api/admin/owl/explores/access', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model, view, defaultOn, clients }) }).then(json),
   owlCatalogueFields: (model, view) => fetch(`/api/admin/owl/catalogue${model ? `?model=${encodeURIComponent(model)}&view=${encodeURIComponent(view)}` : ''}`).then(json),
   saveOwlCatalogue: (enabled, model, view) => fetch('/api/admin/owl/catalogue', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled, model, view }) }).then(json),
   owlStarters: (entityId) => fetch(`/api/owl/starters${entityId ? `?entityId=${encodeURIComponent(entityId)}` : ''}`).then(json),

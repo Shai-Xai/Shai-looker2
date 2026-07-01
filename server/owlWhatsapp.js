@@ -175,8 +175,11 @@ function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, ant
   // with a reply button (see the action flow below). draftCampaign only creates a DRAFT —
   // it never sends — so confirming it on WhatsApp is safe (a human still sends in Engage).
   // Resolved per turn so an admin's catalogue edits take effect without a restart.
-  const currentTools = () => {
-    const entries = [...Object.values(getOwlTools()).filter((t) => t && t.schema && t.run), owlMemory.tool];
+  // Extra-explore tools (exploreKey) are dropped when that explore is OFF for this client.
+  const owlCatalogueAccess = require('./owlCatalogue');
+  const currentTools = (entityId) => {
+    const entries = [...Object.values(getOwlTools()).filter((t) => t && t.schema && t.run), owlMemory.tool]
+      .filter((t) => !t.exploreKey || owlCatalogueAccess.exploreEnabledFor(db, t.exploreKey, entityId));
     return { toolMap: Object.fromEntries(entries.map((t) => [t.schema.name, t])), toolSchemas: entries.map((t) => t.schema) };
   };
   const norm = (n) => messaging.normaliseMsisdn(n);
@@ -446,7 +449,7 @@ function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, ant
     const uid = (id.user || {}).id || '';
     const instructions = waLayer ? `${instructionsFor(id.entityId, uid)}\n\n${waLayer}` : instructionsFor(id.entityId, uid);
     let out = ''; let trail = [];
-    const { toolMap, toolSchemas } = currentTools();
+    const { toolMap, toolSchemas } = currentTools(id.entityId);
     try {
       const r = await runOwlLoop({
         llmTurn: ({ messages: m, tools, onText }) => owlTurn(insights, { messages: m, tools, instructions, apiKey, onText, effort: persona.effort, maxTokens: persona.maxTokens }),
@@ -704,7 +707,7 @@ function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, ant
     if (!wants.length) return '';
     const ask = `Please give me my scheduled update covering: ${wants.join('; ')}.`;
     const instructions = `${instructionsFor(id.entityId, (id.user || {}).id || '')}\n\n${greeting ? SCHED_NOTE : SCHED_NOTE_ADD}`;
-    const { toolMap, toolSchemas } = currentTools();
+    const { toolMap, toolSchemas } = currentTools(id.entityId);
     try {
       const { text } = await runOwlLoop({
         llmTurn: ({ messages: m, tools, onText }) => owlTurn(insights, { messages: m, tools, instructions, apiKey, onText }),

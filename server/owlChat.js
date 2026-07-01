@@ -261,9 +261,13 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getExploreFields
   // stays a self-contained, removable module.
   // Tools are resolved PER TURN from getOwlTools() so an admin's catalogue edits (which
   // fields the Owl may use) take effect immediately — the schemas' field enums and the
-  // runtime validation both come from the current effective catalogue.
-  const currentTools = () => {
-    const entries = [...Object.values(getOwlTools()).filter((t) => t && t.schema && t.run), owlMemory.tool];
+  // runtime validation both come from the current effective catalogue. Extra-explore
+  // tools carry an exploreKey and are dropped when that explore is switched OFF for the
+  // client in context (per-client access, checked live so a flip applies immediately).
+  const owlCatalogue = require('./owlCatalogue');
+  const currentTools = (entityId) => {
+    const entries = [...Object.values(getOwlTools()).filter((t) => t && t.schema && t.run), owlMemory.tool]
+      .filter((t) => !t.exploreKey || owlCatalogue.exploreEnabledFor(db, t.exploreKey, entityId));
     return { toolMap: Object.fromEntries(entries.map((t) => [t.schema.name, t])), toolSchemas: entries.map((t) => t.schema) };
   };
 
@@ -424,7 +428,7 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getExploreFields
     res.setHeader('X-Owl-Thread', thread.id);
     res.setHeader('X-Owl-Persona', pKey);
     res.flushHeaders?.();
-    const { toolMap, toolSchemas } = currentTools();
+    const { toolMap, toolSchemas } = currentTools(scopeEntityId);
     try {
       const { text, trail } = await runOwlLoop({
         llmTurn: ({ messages: m, tools, onText }) => owlTurn(insights, { messages: m, tools, instructions, apiKey, onText, effort: persona.effort, maxTokens: persona.maxTokens }),

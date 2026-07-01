@@ -8,12 +8,13 @@ import { api } from '../lib/api.js';
 // Takes effect on the Owl's next answer — no restart.
 export default function OwlCatalogue() {
   const [ex, setEx] = useState(null); // { primary, registered:[], available:[] }
+  const [ents, setEnts] = useState([]); // clients, for the per-client access switches
   const [adding, setAdding] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
   const load = () => api.owlExplores().then((r) => { if (r && r.error) setErr(typeof r.error === 'string' ? r.error : 'Could not load explores'); setEx(r || {}); }).catch((e) => { setErr((e && e.message) || 'Could not reach Looker'); setEx({ primary: null, registered: [], available: [] }); });
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); api.adminListEntities().then((r) => setEnts(Array.isArray(r) ? r : (r.entities || []))).catch(() => setEnts([])); }, []);
 
   const registeredKeys = useMemo(() => new Set([...(ex?.registered || []).map((e) => `${e.model}::${e.view}`), ex?.primary ? `${ex.primary.model}::${ex.primary.view}` : '']), [ex]);
   const addable = useMemo(() => (ex?.available || []).filter((e) => !registeredKeys.has(`${e.model}::${e.view}`)), [ex, registeredKeys]);
@@ -53,15 +54,72 @@ export default function OwlCatalogue() {
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {ex.primary && <ExplorePanel explore={ex.primary} primary />}
-        {(ex.registered || []).map((e) => <ExplorePanel key={`${e.model}::${e.view}`} explore={e} onRemove={() => remove(e)} />)}
+        {(ex.registered || []).map((e) => <ExplorePanel key={`${e.model}::${e.view}`} explore={e} ents={ents} onRemove={() => remove(e)} />)}
         {(ex.registered || []).length === 0 && <p style={{ fontSize: 12, color: 'var(--muted)' }}>No extra explores yet — add one above (e.g. Cashless) to let the Owl answer from it too.</p>}
       </div>
     </div>
   );
 }
 
+// Per-client access for one EXTRA explore: a platform default (on/off for everyone)
+// plus per-client overrides (inherit / on / off). Applies on the Owl's next answer.
+function AccessEditor({ explore, ents }) {
+  const a = explore.access || { defaultOn: true, clients: {} };
+  const [defaultOn, setDefaultOn] = useState(a.defaultOn !== false);
+  const [clients, setClients] = useState(a.clients || {});
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [err, setErr] = useState('');
+  const [show, setShow] = useState(Object.keys(a.clients || {}).length > 0);
+  const setC = (eid, v) => setClients((m) => { const n = { ...m }; if (v === 'inherit') delete n[eid]; else n[eid] = v === 'on'; return n; });
+  const save = async () => {
+    setBusy(true); setErr(''); setSaved(false);
+    try {
+      const r = await api.saveOwlExploreAccess(explore.model, explore.view, defaultOn, clients);
+      if (r && r.error) throw new Error(typeof r.error === 'string' ? r.error : 'Save rejected');
+      setSaved(true); setTimeout(() => setSaved(false), 2500);
+    } catch (e) { setErr((e && e.message) || 'Save failed'); }
+    setBusy(false);
+  };
+  const overrides = Object.keys(clients).length;
+  return (
+    <div style={{ border: '1px solid var(--hairline)', borderRadius: 8, padding: '8px 10px', margin: '0 0 10px', background: 'var(--bg, transparent)' }}>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', color: 'var(--muted)' }}>Client access</span>
+        <select value={defaultOn ? 'on' : 'off'} onChange={(e) => setDefaultOn(e.target.value === 'on')} style={accSel}>
+          <option value="on">On for all clients (default)</option>
+          <option value="off">Off by default</option>
+        </select>
+        <button onClick={() => setShow((s) => !s)} style={{ ...accSel, cursor: 'pointer' }}>{show ? 'Hide per-client' : `Per-client overrides${overrides ? ` (${overrides})` : ''}…`}</button>
+        <button onClick={save} disabled={busy} style={{ border: 'none', background: 'var(--brand)', color: '#fff', borderRadius: 8, padding: '5px 12px', fontSize: 12, fontWeight: 600, cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.6 : 1 }}>{busy ? 'Saving…' : 'Save access'}</button>
+        {saved && <span style={{ fontSize: 12, color: '#34c759', fontWeight: 600 }}>Saved ✓</span>}
+        {err && <span style={{ fontSize: 12, color: '#e0414a', fontWeight: 600 }}>⚠ {err}</span>}
+      </div>
+      {show && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: 6, marginTop: 8 }}>
+          {ents.map((en) => {
+            const v = typeof clients[en.id] === 'boolean' ? (clients[en.id] ? 'on' : 'off') : 'inherit';
+            return (
+              <label key={en.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5 }}>
+                <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{en.name}</span>
+                <select value={v} onChange={(e) => setC(en.id, e.target.value)} style={{ ...accSel, ...(v !== 'inherit' ? { borderColor: 'var(--brand)', color: 'var(--brand)', fontWeight: 600 } : null) }}>
+                  <option value="inherit">Inherit ({defaultOn ? 'on' : 'off'})</option>
+                  <option value="on">On</option>
+                  <option value="off">Off</option>
+                </select>
+              </label>
+            );
+          })}
+          {ents.length === 0 && <span style={{ fontSize: 12, color: 'var(--muted)' }}>No clients found.</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+const accSel = { padding: '4px 8px', borderRadius: 7, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', fontSize: 12 };
+
 // One explore's field editor — collapsible; loads its fields on first open.
-function ExplorePanel({ explore, primary = false, defaultOpen = false, onRemove }) {
+function ExplorePanel({ explore, primary = false, defaultOpen = false, ents = [], onRemove }) {
   const [open, setOpen] = useState(defaultOpen);
   const [data, setData] = useState(null);
   const [enabled, setEnabled] = useState(null);
@@ -126,6 +184,7 @@ function ExplorePanel({ explore, primary = false, defaultOpen = false, onRemove 
       </div>
       {open && (
         <div style={{ padding: '0 12px 12px' }}>
+          {!primary && <AccessEditor explore={explore} ents={ents} />}
           {!data ? <p style={{ fontSize: 12.5, color: 'var(--muted)' }}>Loading fields…</p> : (
             <>
               <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>

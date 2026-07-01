@@ -566,12 +566,17 @@ Use these to set direction, **not** to promise dates.
   client's branding (logo, colours, unsubscribe) — button/image links tracked, merge
   tokens in text, and the whole thing can be saved as a reusable template. Server render
   is `server/emailBlocks.js` (unit-tested); the live email preview shows it as you build.
+- **2026-07-01** — **Extra explores: per-client on/off** 🧪: each added explore now has a
+  **Client access** control — a platform default (on/off for everyone) plus **per-client
+  overrides** (inherit / on / off), so e.g. Cashless can be live for one client and hidden for
+  another. Checked on every answer, so a flip applies immediately; a client with an explore off
+  is never even told it exists.
 - **2026-07-01** — **Owl can read more than ticketing (extra Looker explores)** 🧪: in **Admin →
   Owl data catalogue** you can now **add other Looker explores** (e.g. **Cashless**) from a live
   list and tick their fields — and the Owl gets a dedicated tool per explore, so it can answer
   cashless/top-up questions too. It combines an explore with ticketing by pulling both and
   aligning on a shared key (event/date). Every query runs through the same client-scoping gate,
-  and an explore that can't be scoped to a client is safely declined. (Per-client on/off next.)
+  and an explore that can't be scoped to a client is safely declined.
 - **2026-07-01** — **Report a bug or idea, from anywhere** 🧪: a **💬 Report button** now sits on
   every screen (for Howler staff *and* clients). Tap it to flag a **bug**, suggest an
   **improvement**, or float an **idea** — it automatically captures which screen you were on and
