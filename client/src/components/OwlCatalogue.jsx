@@ -52,7 +52,7 @@ export default function OwlCatalogue() {
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {ex.primary && <ExplorePanel explore={ex.primary} primary defaultOpen />}
+        {ex.primary && <ExplorePanel explore={ex.primary} primary />}
         {(ex.registered || []).map((e) => <ExplorePanel key={`${e.model}::${e.view}`} explore={e} onRemove={() => remove(e)} />)}
         {(ex.registered || []).length === 0 && <p style={{ fontSize: 12, color: 'var(--muted)' }}>No extra explores yet — add one above (e.g. Cashless) to let the Owl answer from it too.</p>}
       </div>
