@@ -50,15 +50,19 @@ function queryViews(query) {
   return views;
 }
 
-// Narrow blocks to the ones that apply to a tile's query (≥1 field in a joined
-// view, non-blank value), keeping only the applicable fields. Returns the blocks
-// to forward to the server, or [] — mirrors server blocksForQuery.
-export function combinedFiltersForTile(blocks, query, anyValue) {
+// Narrow blocks to the ones that apply to a tile (≥1 field the tile actually
+// filters on), keeping only the applicable fields. A field applies if its view is
+// in the tile's static query OR the tile is wired to it via listenTo (a real Looker
+// filter → field mapping, so the field is valid in the tile's explore). Returns the
+// blocks to forward to the server, or [] — mirrors server blocksForQuery.
+export function combinedFiltersForTile(blocks, query, anyValue, listenTo = {}) {
   const views = queryViews(query);
+  const wired = new Set(Object.values(listenTo || {}));
+  const applies = (f) => views.has(fieldView(f)) || wired.has(f);
   const out = [];
   for (const b of blocks || []) {
     if (b.value == null || b.value === '' || b.value === anyValue) continue;
-    const fields = (b.fields || []).filter((f) => views.has(fieldView(f)));
+    const fields = (b.fields || []).filter(applies);
     if (fields.length) out.push({ op: b.op, fields, value: b.value });
   }
   return out;

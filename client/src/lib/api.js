@@ -354,11 +354,11 @@ export const api = {
     }).then(json),
 
   // Drill-down: run a Looker drill link
-  drill: (url, suiteId) =>
+  drill: (url, suiteId, combinedFilters = []) =>
     fetch('/api/drill', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, suiteId }),
+      body: JSON.stringify({ url, suiteId, combinedFilters }),
     }).then(json),
 
   // Query execution (scoped to the current suite, if any)

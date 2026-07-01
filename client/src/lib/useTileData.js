@@ -67,7 +67,7 @@ export function useTileData(tile, filterValues) {
   // Combined-field OR locks that apply to THIS tile (≥1 of their fields is in a
   // view the tile's query joins). Forwarded to the server, which turns them into a
   // Looker filter_expression (AND-combined with the scoped filters map).
-  const myCombined = combinedFiltersForTile(combinedLocks, tile.query, ANY_VALUE);
+  const myCombined = combinedFiltersForTile(combinedLocks, tile.query, ANY_VALUE, tile.listenTo);
 
   const queryKey = JSON.stringify(tile.query);
   const overrideKey = JSON.stringify(overrides);

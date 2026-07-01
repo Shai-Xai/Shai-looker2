@@ -3706,16 +3706,26 @@ function LockedFilterEditor({ value, onChange, fields, categories, restrictTo = 
     seeded.current = s;
   }
 
+  // A picked option's key may be a filter NAME (byName filters, shown as "… — filter")
+  // whose real Looker field is in `suggestField`. The combined-OR expression needs the
+  // REAL field (${view.field}), so resolve names → fields when encoding a composite key.
+  // (Plain single-"is" locks keep the name key — the server resolves those via listenTo.)
+  const resolveField = (key) => { const f = fields.find((x) => x.field === key); return (f && f.suggestField) ? f.suggestField : key; };
   const push = (next) => {
     const cleaned = next.map((r) => ({ ...r, vals: uniqJoin(splitVals(r.vals)) }));
     setRows(cleaned);
     const map = {};
     for (const r of cleaned) {
       if (!r.field) continue;
-      // Single "is" field keeps the plain { field: vals } shape; extra OR fields or a
-      // non-"is" operator encode into a composite key the server turns into an OR expr.
-      const key = makeCombinedKey(r.op || 'is', [r.field, ...((r.orFields || []).filter(Boolean))]);
-      if (key) map[key] = r.vals || '';
+      const extra = (r.orFields || []).filter(Boolean);
+      // Combined (multi-field OR, or a non-"is" operator) → composite key of REAL fields.
+      // A plain single "is" field keeps its original key (byName name preserved).
+      if (extra.length || (r.op && r.op !== 'is')) {
+        const key = makeCombinedKey(r.op || 'is', [r.field, ...extra].map(resolveField));
+        if (key) map[key] = r.vals || '';
+      } else {
+        map[r.field] = r.vals || '';
+      }
     }
     onChange(map);
   };

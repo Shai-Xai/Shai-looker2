@@ -285,6 +285,10 @@ app.post('/api/drill', auth.requireAuth, async (req, res) => {
     if (!(await applyScope(query, req.user, req.body?.suiteId))) {
       return res.status(403).json({ error: 'No data access is configured for your account yet.' });
     }
+    // Combined-field OR locks constrain the drill too (narrowed to the fields the
+    // drill query joins), so drilling never reveals rows the lock excludes.
+    const combinedFilters = req.body?.combinedFilters;
+    if (Array.isArray(combinedFilters) && combinedFilters.length) fx.applyCombinedToBody(query, combinedFilters, query);
     const data = await runLookerQuery('/queries/run/json_detail', query);
     res.json({ query, data });
   } catch (err) {
