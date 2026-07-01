@@ -465,6 +465,11 @@ function mount(app, { db, auth }) {
     const d = getDevice(req.params.id);
     if (!d || d.suite_id !== su.id) return res.status(404).json({ error: 'Device not found' });
     const c = cleanDevice({ label: req.body?.label ?? d.label, type: req.body?.type ?? d.type, qrCode: req.body?.qrCode ?? d.qr_code, serialNumber: req.body?.serialNumber ?? d.serial_number });
+    // A QR pairs one device per event — reject if another device already carries this code.
+    if (c.qrCode) {
+      const clash = sql.prepare('SELECT id FROM eventops_devices WHERE suite_id=? AND qr_code=? COLLATE NOCASE AND id<>?').get(su.id, c.qrCode, d.id);
+      if (clash) return res.status(409).json({ error: 'That QR is already paired to another device.' });
+    }
     sql.prepare('UPDATE eventops_devices SET label=?, type=?, qr_code=?, serial_number=?, updated_at=? WHERE id=?')
       .run(c.label, c.type, c.qrCode, c.serialNumber, now(), d.id);
     res.json({ device: deviceRow(getDevice(d.id)) });

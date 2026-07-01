@@ -217,6 +217,7 @@ function DevicesTab({ suiteId, canManage, onAct, flash, reloadKey }) {
   const [devices, setDevices] = useState(null);
   const [filter, setFilter] = useState('all');         // state filter
   const [stationFilter, setStationFilter] = useState('all'); // location filter (hive | stationId)
+  const [pairFilter, setPairFilter] = useState('all'); // all | unpaired | paired
   const [q, setQ] = useState('');                      // search
   const [adding, setAdding] = useState(false);
 
@@ -224,8 +225,8 @@ function DevicesTab({ suiteId, canManage, onAct, flash, reloadKey }) {
   useEffect(() => { setDevices(null); load(); }, [suiteId, reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const counts = useMemo(() => {
-    const c = { all: devices?.length || 0 };
-    for (const d of devices || []) c[d.state] = (c[d.state] || 0) + 1;
+    const c = { all: devices?.length || 0, unpaired: 0 };
+    for (const d of devices || []) { c[d.state] = (c[d.state] || 0) + 1; if (!d.qrCode) c.unpaired++; }
     return c;
   }, [devices]);
   // Station pills are derived from the devices themselves (Hive = not deployed anywhere).
@@ -241,6 +242,7 @@ function DevicesTab({ suiteId, canManage, onAct, flash, reloadKey }) {
   const shown = (devices || []).filter((d) =>
     (filter === 'all' || d.state === filter)
     && (stationFilter === 'all' || (stationFilter === 'hive' ? !d.stationId : d.stationId === stationFilter))
+    && (pairFilter === 'all' || (pairFilter === 'unpaired' ? !d.qrCode : !!d.qrCode))
     && (!needle || [d.label, d.qrCode, d.serialNumber, d.stationName].some((v) => (v || '').toLowerCase().includes(needle))));
 
   if (devices === null) return <Loading />;
@@ -255,6 +257,9 @@ function DevicesTab({ suiteId, canManage, onAct, flash, reloadKey }) {
         {STATE_ORDER.filter((s) => counts[s]).map((s) => (
           <Chip key={s} on={filter === s} onClick={() => setFilter(s)}>{STATE_LABEL[s]} {counts[s]}</Chip>
         ))}
+        {counts.unpaired > 0 && (
+          <Chip on={pairFilter === 'unpaired'} onClick={() => setPairFilter(pairFilter === 'unpaired' ? 'all' : 'unpaired')}>🔗 Unpaired {counts.unpaired}</Chip>
+        )}
       </div>
       {/* Station/location filter pills */}
       {(locations.stations.length > 0 || locations.hive > 0) && (
@@ -275,7 +280,12 @@ function DevicesTab({ suiteId, canManage, onAct, flash, reloadKey }) {
                 <div style={{ fontWeight: 650, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {d.label || d.qrCode || d.serialNumber || 'Device'}
                 </div>
-                <div style={{ fontSize: 12, color: 'var(--muted)' }}>{d.type} · {d.qrCode || d.serialNumber || '—'}</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+                  {d.type} · {d.qrCode
+                    ? <span style={{ color: 'var(--brand)' }}>🔗 {d.qrCode}</span>
+                    : <span style={{ color: 'var(--muted)' }}>○ no QR paired</span>}
+                  {d.serialNumber ? ` · ${d.serialNumber}` : ''}
+                </div>
               </div>
               <LocationBadge device={d} />
             </button>
@@ -502,9 +512,11 @@ function DeviceActionSheet({ suiteId, device, onClose, onDone }) {
   const [stations, setStations] = useState([]);
   const [staff, setStaff] = useState([]);
   const [staffId, setStaffId] = useState(''); // optional attribution — who's doing this
-  const [view, setView] = useState('move'); // move | issue
+  const [view, setView] = useState('move'); // move | issue | pair
   const [issue, setIssue] = useState({ category: 'damaged', note: '', resolution: '' });
   const [statusForm, setStatusForm] = useState(null); // { state, comment } when marking lost/damaged
+  const [pairing, setPairing] = useState(false); // scanner open to pair a QR
+  const [manualQr, setManualQr] = useState('');
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -522,6 +534,19 @@ function DeviceActionSheet({ suiteId, device, onClose, onDone }) {
     try { await api.eventopsLogIssue(suiteId, { deviceId: device.id, staffId, ...issue }); onDone('Issue logged'); }
     catch (e) { alert(e.message); setBusy(false); }
   }
+  async function pair(code) {
+    setPairing(false);
+    const qr = String(code || '').trim();
+    if (!qr) return;
+    setBusy(true);
+    try { const r = await api.eventopsUpdateDevice(suiteId, device.id, { qrCode: qr }); onDone(`Paired to ${r.device?.qrCode || qr}`); }
+    catch (e) { alert(e.message); setBusy(false); }
+  }
+  async function unpair() {
+    setBusy(true);
+    try { await api.eventopsUpdateDevice(suiteId, device.id, { qrCode: '' }); onDone('QR unpaired'); }
+    catch (e) { alert(e.message); setBusy(false); }
+  }
 
   return (
     <Modal title={device.label || device.qrCode || 'Device'} onClose={onClose} subtitle={`${device.type} · now at ${device.state === 'deployed' ? (device.stationName || 'a station') : 'the Hive'}`}>
@@ -534,9 +559,10 @@ function DeviceActionSheet({ suiteId, device, onClose, onDone }) {
           </select>
         </Field>
       )}
-      <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
         <Chip on={view === 'move'} onClick={() => setView('move')}>Move</Chip>
         <Chip on={view === 'issue'} onClick={() => setView('issue')}>Log issue</Chip>
+        <Chip on={view === 'pair'} onClick={() => setView('pair')}>🔗 Pair QR</Chip>
       </div>
 
       {view === 'move' ? (
@@ -566,7 +592,7 @@ function DeviceActionSheet({ suiteId, device, onClose, onDone }) {
             </div>
           )}
         </div>
-      ) : (
+      ) : view === 'issue' ? (
         <div style={fieldCol}>
           <div>
             <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>Issue</div>
@@ -583,6 +609,31 @@ function DeviceActionSheet({ suiteId, device, onClose, onDone }) {
             <button onClick={logIssue} disabled={busy} style={primaryBtn}>{busy ? 'Saving…' : 'Log issue'}</button>
           </div>
         </div>
+      ) : (
+        <div style={fieldCol}>
+          <div style={{ fontSize: 13, color: 'var(--muted)' }}>
+            {device.qrCode
+              ? <>Paired to <strong style={{ color: 'var(--text)' }}>{device.qrCode}</strong>. Scan again to re-pair.</>
+              : 'No QR paired yet. Scan the sticker on the device to link it — scanning that code will then find this device.'}
+          </div>
+          <button onClick={() => setPairing(true)} disabled={busy} style={primaryBtn}>📷 Scan QR to pair</button>
+          <Field label="…or type the code">
+            <div style={{ display: 'flex', gap: 6 }}>
+              <input style={{ ...input, flex: 1 }} value={manualQr} onChange={(e) => setManualQr(e.target.value)} placeholder="e.g. QR-00421" />
+              <button onClick={() => { pair(manualQr); setManualQr(''); }} disabled={busy || !manualQr.trim()} style={primaryBtn}>Pair</button>
+            </div>
+          </Field>
+          {device.qrCode && (
+            <div style={modalActions}>
+              <button onClick={unpair} disabled={busy} style={dangerBtn}>{busy ? 'Saving…' : 'Unpair QR'}</button>
+            </div>
+          )}
+        </div>
+      )}
+      {pairing && (
+        <Suspense fallback={null}>
+          <EventOpsScanner onCode={pair} onClose={() => setPairing(false)} title="Scan the device's QR to pair" />
+        </Suspense>
       )}
     </Modal>
   );

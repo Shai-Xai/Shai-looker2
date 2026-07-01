@@ -179,6 +179,31 @@ test('liaison logs an issue on a device, then resolves it', () => {
   assert.equal(call(r['GET /api/eventops/suites/:suiteId/overview'], { user: owner, params: P }).body.totals.openIssues, 0);
 });
 
+test('pairing: a QR pairs one device per event; re-using it on another is rejected', () => {
+  const r = mount();
+  const { entity, suite, owner, admin } = seedEvent();
+  call(r['PUT /api/eventops/entities/:entityId/enabled'], { user: admin, params: { entityId: entity.id }, body: { enabled: true } });
+  const P = { suiteId: suite.id };
+
+  // Create two unpaired devices (no QR yet).
+  const a = call(r['POST /api/eventops/suites/:suiteId/devices'], { user: owner, params: P, body: { label: 'Alpha' } }).body.device;
+  const b = call(r['POST /api/eventops/suites/:suiteId/devices'], { user: owner, params: P, body: { label: 'Bravo' } }).body.device;
+  assert.equal(a.qrCode, '');
+
+  // Pair a QR to device A via the update endpoint.
+  const paired = call(r['PUT /api/eventops/suites/:suiteId/devices/:id'], { user: owner, params: { ...P, id: a.id }, body: { qrCode: 'QR-100' } });
+  assert.equal(paired.body.device.qrCode, 'QR-100');
+
+  // The same QR on device B is rejected (409).
+  const clash = call(r['PUT /api/eventops/suites/:suiteId/devices/:id'], { user: owner, params: { ...P, id: b.id }, body: { qrCode: 'qr-100' } });
+  assert.equal(clash.code, 409);
+
+  // Unpair A (clear the QR), then B can take it.
+  call(r['PUT /api/eventops/suites/:suiteId/devices/:id'], { user: owner, params: { ...P, id: a.id }, body: { qrCode: '' } });
+  const ok = call(r['PUT /api/eventops/suites/:suiteId/devices/:id'], { user: owner, params: { ...P, id: b.id }, body: { qrCode: 'QR-100' } });
+  assert.equal(ok.body.device.qrCode, 'QR-100');
+});
+
 test('staff: create + attribute a move and an issue to a staff member', () => {
   const r = mount();
   const { entity, suite, owner, admin } = seedEvent();
