@@ -99,8 +99,10 @@ export const api = {
   // Agentic Owl chat: POST a question, stream the grounded answer as plain text
   // (onText per delta), resolve with { threadId } (read from the X-Owl-Thread header
   // so a new conversation can be continued).
-  owlChat: async ({ suiteId, entityId, dashboardId, message, threadId, mode }, onText, onStatus) => {
-    const res = await fetch('/api/owl/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ suiteId, entityId, dashboardId, message, threadId, mode }) });
+  owlChat: async ({ suiteId, entityId, dashboardId, message, threadId, mode, signal }, onText, onStatus) => {
+    // `signal` (AbortController) powers the ⏹ Stop button — aborting closes the socket,
+    // which the server notices and bails out of the loop instead of finishing the answer.
+    const res = await fetch('/api/owl/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ suiteId, entityId, dashboardId, message, threadId, mode }), signal });
     if (!res.ok) return json(res); // pre-stream rejection (no scope / no API key) → throws
     const tid = res.headers.get('X-Owl-Thread') || threadId || null;
     const persona = res.headers.get('X-Owl-Persona') || mode || 'quick';

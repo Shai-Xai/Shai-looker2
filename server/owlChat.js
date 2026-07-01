@@ -36,7 +36,11 @@ const TOOL_STATUS = {
 };
 function statusForTools(toolUses) {
   const names = [...new Set((toolUses || []).map((t) => t.name))];
-  if (names.length === 1) return TOOL_STATUS[names[0]] || 'Working on it…';
+  if (names.length === 1) {
+    if (TOOL_STATUS[names[0]]) return TOOL_STATUS[names[0]];
+    if (names[0].startsWith('ask_')) return 'Reading that data source…'; // an extra explore (e.g. cashless)
+    return 'Working on it…';
+  }
   return 'Gathering your data…';
 }
 
@@ -151,11 +155,16 @@ async function owlTurn(insights, { messages, tools, instructions, apiKey, onText
 // llmTurn({ messages, tools, onText }) → final Message (content blocks, maybe tool_use)
 // toolMap: { [toolName]: { run(input, ctx) } }
 // Returns { text, trail, rounds }. `trail` is the audit ledger for this turn.
-async function runOwlLoop({ llmTurn, toolMap, tools, messages, ctx, onText, onStatus, maxRounds = 5 }) {
+// `shouldStop` (optional) is polled between rounds/tools — when it returns true (the
+// user tapped Stop, or the socket closed) the loop bails with what it has instead of
+// burning more model/Looker time on an answer nobody is waiting for.
+async function runOwlLoop({ llmTurn, toolMap, tools, messages, ctx, onText, onStatus, maxRounds = 5, shouldStop }) {
   const convo = [...messages];
   const trail = [];
   let rounds = 0;
+  const stopped = () => { try { return !!(shouldStop && shouldStop()); } catch { return false; } };
   for (; rounds < maxRounds; rounds++) {
+    if (stopped()) return { text: '', trail, rounds, stopped: true };
     // Tell the user we're working before each model turn (the silent pre-text gap).
     if (onStatus) onStatus(rounds === 0 ? 'Thinking…' : 'Working through it…');
     const final = await llmTurn({ messages: convo, tools, onText });
@@ -169,6 +178,7 @@ async function runOwlLoop({ llmTurn, toolMap, tools, messages, ctx, onText, onSt
     if (onStatus) onStatus(statusForTools(toolUses));
     const results = [];
     for (const tu of toolUses) {
+      if (stopped()) return { text: '', trail, rounds, stopped: true };
       const tool = toolMap[tu.name];
       const result = tool ? await tool.run(tu.input || {}, ctx) : { ok: false, reason: 'unknown_tool', message: `No such tool: ${tu.name}` };
       trail.push({ name: tu.name, input: tu.input || {}, result });
@@ -429,18 +439,30 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getExploreFields
     res.setHeader('X-Owl-Persona', pKey);
     res.flushHeaders?.();
     const { toolMap, toolSchemas } = currentTools(scopeEntityId);
+    // The user tapping ⏹ Stop aborts the fetch → the socket closes → we bail between
+    // rounds/tools instead of finishing an answer nobody is waiting for.
+    let clientGone = false;
+    req.on('close', () => { if (!res.writableEnded) clientGone = true; });
+    // Heartbeat: a long Looker/model call can sit silent for minutes (Looker's own
+    // timeout is 2 min), which reads as "stuck" and can trip idle-connection proxies.
+    // Re-send the latest status every 10s so the stream stays alive + visibly working.
+    let lastStatus = 'Thinking…';
+    const writeStatus = (label) => { lastStatus = String(label).replace(/[<>]/g, ''); try { res.write(STATUS_OPEN + lastStatus + STATUS_CLOSE); } catch { /* socket gone */ } };
+    const heartbeat = setInterval(() => { if (!clientGone && !res.writableEnded) { try { res.write(STATUS_OPEN + lastStatus + STATUS_CLOSE); } catch { /* socket gone */ } } }, 10000);
     try {
-      const { text, trail } = await runOwlLoop({
+      const { text, trail, stopped } = await runOwlLoop({
         llmTurn: ({ messages: m, tools, onText }) => owlTurn(insights, { messages: m, tools, instructions, apiKey, onText, effort: persona.effort, maxTokens: persona.maxTokens }),
         toolMap,
         tools: toolSchemas,
         messages,
         ctx: { user: req.user, suiteId, entityId, dashboardId },
         maxRounds: persona.maxRounds,
+        shouldStop: () => clientGone,
         onText: (t) => res.write(t),
         // Stream a status ping between turns; the client renders it as the thinking line.
-        onStatus: (label) => { try { res.write(STATUS_OPEN + String(label).replace(/[<>]/g, '') + STATUS_CLOSE); } catch { /* socket gone */ } },
+        onStatus: writeStatus,
       });
+      if (stopped) { logToolStop(thread.id, trail); res.end(); return; }
       // Persist the answer WITHOUT the follow-ups marker (the client strips it live).
       const cleanText = String(text || '').split('<<<FOLLOWUPS>>>')[0].replace(/\s+$/, '');
       insMsg.run(crypto.randomUUID(), thread.id, 'owl', cleanText, JSON.stringify(trail), now());
@@ -454,8 +476,12 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getExploreFields
       console.error('[POST /api/owl/chat]', err.message);
       if (!res.headersSent) res.status(500).json({ error: 'The Owl hit a problem answering that.' });
       else { res.write(`\n\n[error: the Owl hit a problem answering that.]`); res.end(); }
-    }
+    } finally { clearInterval(heartbeat); }
   });
+  // A stopped turn still records what ran (audit) — with a marker so history shows it.
+  function logToolStop(threadId, trail) {
+    try { insMsg.run(crypto.randomUUID(), threadId, 'owl', '⏹ Stopped before finishing.', JSON.stringify(trail || []), now()); } catch { /* best-effort */ }
+  }
 
   // GET /api/owl/capabilities — the slash-command palette, derived from the tool
   // registry (each read tool's `menu`). Sourced here so it can never drift from what

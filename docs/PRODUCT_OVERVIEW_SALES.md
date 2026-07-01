@@ -588,6 +588,11 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-01** — **Owl chat: ⏹ Stop button + no more silent stalls** 🧪: while the Owl is
+  working you can now **tap Stop** to cancel the answer (the server abandons the work too, so
+  nothing keeps burning in the background). And long data pulls no longer look frozen — the
+  thinking line keeps refreshing every few seconds and the connection is kept alive, so a heavy
+  query (e.g. a big cashless breakdown) shows progress instead of hanging on "Thinking…".
 - **2026-07-01** — **Pulse API & AI-agent access (MCP)** 🧪: per-client, read-only **API keys**
   (client self-service in Settings → Integrations, or managed by Howler in Admin) unlock a
   **REST API** (`/api/v1` — dashboards, live tile metrics, segments + reach, campaign results,
