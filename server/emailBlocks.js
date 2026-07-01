@@ -22,18 +22,28 @@ const SPACER = { sm: 12, md: 24, lg: 40 };
 // Social glyphs (text marks — image icons can't be bundled reliably across clients).
 const SOCIAL = { instagram: 'Instagram', facebook: 'Facebook', x: 'X', twitter: 'X', tiktok: 'TikTok', youtube: 'YouTube', linkedin: 'LinkedIn', website: 'Website', email: 'Email' };
 
-// One block → HTML. `brand` is the accent colour. Unknown/empty blocks render ''.
-function blockHtml(block, brand) {
+// Style tokens the blocks paint with. Derived from a resolved theme (emailTheme.js)
+// or, when none is given, from a plain accent colour (back-compat with { brand }).
+function ctxFrom(opts = {}) {
+  const t = opts.theme;
+  if (t) return { accent: t.accent, text: t.text, heading: t.heading, radius: t.radiusPx };
+  const accent = opts.brand || '#111111';
+  return { accent, text: '#3a3a3c', heading: '#111111', radius: '980px' };
+}
+
+// One block → HTML. `ctx` = { accent, text, heading, radius }. Empty blocks render ''.
+function blockHtml(block, ctx) {
   const b = block || {};
+  const { accent, text: textCol, heading: headCol, radius } = ctx;
   switch (b.type) {
     case 'heading': {
       if (!String(b.text || '').trim()) return '';
       const size = b.level === 3 ? 17 : b.level === 2 ? 21 : 26;
-      return `<div style="font-size:${size}px;font-weight:800;color:#111;line-height:1.3;letter-spacing:-0.01em;text-align:${ALIGN(b.align)};margin:0 0 6px;">${fmt(b.text)}</div>`;
+      return `<div style="font-size:${size}px;font-weight:800;color:${esc(headCol)};line-height:1.3;letter-spacing:-0.01em;text-align:${ALIGN(b.align)};margin:0 0 6px;">${fmt(b.text)}</div>`;
     }
     case 'text': {
       if (!String(b.text || '').trim()) return '';
-      return `<div style="font-size:14.5px;line-height:1.65;color:#3a3a3c;text-align:${ALIGN(b.align)};">${fmt(b.text)}</div>`;
+      return `<div style="font-size:14.5px;line-height:1.65;color:${esc(textCol)};text-align:${ALIGN(b.align)};">${fmt(b.text)}</div>`;
     }
     case 'image': {
       if (!String(b.url || '').trim()) return '';
@@ -45,7 +55,7 @@ function blockHtml(block, brand) {
       if (!String(b.text || '').trim()) return '';
       const href = String(b.href || '#');
       // Bulletproof table button (survives Outlook), wrapped for alignment.
-      return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:${ALIGN(b.align) === 'center' ? '0 auto' : ALIGN(b.align) === 'right' ? '0 0 0 auto' : '0'};"><tr><td align="center" style="border-radius:980px;background:${esc(brand)};"><a href="${esc(href)}" style="display:inline-block;padding:12px 26px;font-size:14px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:980px;">${esc(b.text)}</a></td></tr></table>`;
+      return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:${ALIGN(b.align) === 'center' ? '0 auto' : ALIGN(b.align) === 'right' ? '0 0 0 auto' : '0'};"><tr><td align="center" style="border-radius:${esc(radius)};background:${esc(accent)};"><a href="${esc(href)}" style="display:inline-block;padding:12px 26px;font-size:14px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:${esc(radius)};">${esc(b.text)}</a></td></tr></table>`;
     }
     case 'divider':
       return `<div style="border-top:1px solid #e8e8ec;line-height:0;font-size:0;">&nbsp;</div>`;
@@ -57,29 +67,29 @@ function blockHtml(block, brand) {
       const thumb = b.thumb
         ? `<img src="${esc(b.thumb)}" alt="${esc(b.alt || 'Watch the video')}" style="width:100%;max-width:100%;border-radius:10px;display:block;" />`
         : `<div style="width:100%;height:220px;background:#111;border-radius:10px;"></div>`;
-      return `<a href="${esc(b.href)}" style="display:block;position:relative;text-decoration:none;">${thumb}<div style="text-align:center;margin-top:8px;font-size:13px;font-weight:700;color:${esc(brand)};">▶ Watch the video</div></a>`;
+      return `<a href="${esc(b.href)}" style="display:block;position:relative;text-decoration:none;">${thumb}<div style="text-align:center;margin-top:8px;font-size:13px;font-weight:700;color:${esc(accent)};">▶ Watch the video</div></a>`;
     }
     case 'social': {
       const items = (b.items || []).filter((it) => it && it.url);
       if (!items.length) return '';
-      const links = items.map((it) => `<a href="${esc(it.url)}" style="display:inline-block;margin:0 8px;font-size:12.5px;font-weight:700;color:${esc(brand)};text-decoration:none;">${esc(SOCIAL[it.type] || it.type || 'Link')}</a>`).join('');
+      const links = items.map((it) => `<a href="${esc(it.url)}" style="display:inline-block;margin:0 8px;font-size:12.5px;font-weight:700;color:${esc(accent)};text-decoration:none;">${esc(SOCIAL[it.type] || it.type || 'Link')}</a>`).join('');
       return `<div style="text-align:center;">${links}</div>`;
     }
     case 'quote': {
       if (!String(b.text || '').trim()) return '';
-      return `<div style="border-left:3px solid ${esc(brand)};margin:0;padding:4px 0 4px 14px;font-size:15px;font-style:italic;color:#3a3a3c;line-height:1.6;text-align:${ALIGN(b.align)};">${fmt(b.text)}</div>`;
+      return `<div style="border-left:3px solid ${esc(accent)};margin:0;padding:4px 0 4px 14px;font-size:15px;font-style:italic;color:${esc(textCol)};line-height:1.6;text-align:${ALIGN(b.align)};">${fmt(b.text)}</div>`;
     }
     case 'list': {
       const lines = String(b.text || '').split('\n').map((s) => s.trim()).filter(Boolean);
       if (!lines.length) return '';
       const tag = b.ordered ? 'ol' : 'ul';
       const lis = lines.map((l) => `<li style="margin:0 0 4px;">${fmtInline(l)}</li>`).join('');
-      return `<${tag} style="margin:0;padding-left:22px;font-size:14.5px;color:#3a3a3c;line-height:1.6;text-align:${ALIGN(b.align)};">${lis}</${tag}>`;
+      return `<${tag} style="margin:0;padding-left:22px;font-size:14.5px;color:${esc(textCol)};line-height:1.6;text-align:${ALIGN(b.align)};">${lis}</${tag}>`;
     }
     case 'menu': {
       const links = (b.links || []).filter((l) => l && l.label && l.url);
       if (!links.length) return '';
-      const a = links.map((l) => `<a href="${esc(l.url)}" style="display:inline-block;margin:0 10px;font-size:13px;font-weight:600;color:${esc(brand)};text-decoration:none;">${esc(l.label)}</a>`).join('');
+      const a = links.map((l) => `<a href="${esc(l.url)}" style="display:inline-block;margin:0 10px;font-size:13px;font-weight:600;color:${esc(accent)};text-decoration:none;">${esc(l.label)}</a>`).join('');
       return `<div style="text-align:${ALIGN(b.align) === 'left' ? 'center' : ALIGN(b.align)};">${a}</div>`;
     }
     case 'html':
@@ -90,7 +100,7 @@ function blockHtml(block, brand) {
       // Fluid-hybrid columns: each is width:100% with a max-width sized to fit N
       // across on a wide screen; on a narrow screen the 100% forces them to stack —
       // no media queries (which many clients strip). font-size:0 kills inline gaps.
-      const cols = (Array.isArray(b.cols) ? b.cols : []).slice(0, 4).map((c) => render(c, { brand }).html.trim()).filter(Boolean);
+      const cols = (Array.isArray(b.cols) ? b.cols : []).slice(0, 4).map((c) => renderList(c, ctx).html.trim()).filter(Boolean);
       if (!cols.length) return '';
       if (cols.length === 1) return cols[0];
       const maxW = Math.max(90, Math.floor(548 / cols.length) - 12); // card ≈548px wide, 12px inter-col padding
@@ -123,13 +133,14 @@ function blockText(block) {
   }
 }
 
-// Render a block list. Returns { html, text }. `brand` accents buttons/links.
-// Each block gets consistent vertical rhythm (skips it for spacers/dividers).
-function render(blocks, { brand = '#111111' } = {}) {
+// Render a block list against pre-resolved style tokens (`ctx`). Each block gets
+// consistent vertical rhythm (tighter for spacers/dividers). Used by render() and
+// recursively by the columns block.
+function renderList(blocks, ctx) {
   const list = Array.isArray(blocks) ? blocks : [];
   const parts = [];
   for (const b of list) {
-    const inner = blockHtml(b, brand);
+    const inner = blockHtml(b, ctx);
     if (!inner) continue;
     const gap = (b.type === 'spacer' || b.type === 'divider') ? 8 : 16;
     parts.push(`<div style="margin-bottom:${gap}px;">${inner}</div>`);
@@ -137,6 +148,12 @@ function render(blocks, { brand = '#111111' } = {}) {
   const html = parts.join('\n');
   const text = list.map(blockText).filter(Boolean).join('\n\n');
   return { html, text };
+}
+
+// Public entry. opts: { brand } (an accent colour, back-compat) OR { theme } (a
+// resolved theme from emailTheme.resolve). Returns { html, text }.
+function render(blocks, opts = {}) {
+  return renderList(blocks, ctxFrom(opts));
 }
 
 // Swap each image/video/thumb data-URL for a hosted URL via hostFor(block, key) →

@@ -23,6 +23,7 @@ const { MAX_AUDIENCE, MAX_AUDIENCE_HARD, MAX_SMS_DEFAULT, clampSmsCap, EMAIL_RE,
 // Block-builder email content (Mailchimp-style stacked blocks → email-safe HTML).
 const emailBlocks = require('./emailBlocks');
 const cleanBlocks = emailBlocks.cleanBlocks;
+const emailTheme = require('./emailTheme'); // the campaign's visual "look" (Tier-1 design)
 // House-style copy normalisation: strip em dashes from client-authored (and
 // AI-drafted) campaign copy on save, so what sends reads professionally.
 const { deEmDash } = require('./textStyle');
@@ -367,6 +368,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
       },
       contentMode: ['html', 'blocks'].includes(body.contentMode) ? body.contentMode : 'template',
       blocks: cleanBlocks(body.blocks),   // block-builder content (contentMode 'blocks')
+      theme: emailTheme.clean(body.theme), // the builder email's visual look (Tier-1 design)
       eventSuiteId: String(body.eventSuiteId || ''),
       // AI copy language for THIS campaign: overrides the client default when set
       // (so a multi-language client can draft one audience in French, another in
@@ -682,9 +684,10 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
         ? emailBlocks.hostImages(src.blocks || [], (b, key) => `${mailer.baseUrl()}${blockPath}/${b.id}/${key}`)
         : (src.blocks || []);
       const branding = mailer.resolveBranding(action.entityId, action.config?.eventSuiteId || '');
-      const { html: innerHtml, text: innerText } = emailBlocks.render(blocks, { brand: branding.brandColor });
+      const theme = emailTheme.resolve(action.config?.theme, branding); // Tier-1 look, accent ← brand
+      const { html: innerHtml, text: innerText } = emailBlocks.render(blocks, { theme });
       const rtok0 = unsubToken(action.entityId, recipient.email);
-      const built = mailer.campaignBlocksEmail({ branding, entityId: action.entityId, assetScope: (action.config?.eventSuiteId || action.entityId), subject: useSubject, innerHtml, innerText, unsubUrl: `${mailer.baseUrl()}/u/${rtok0}`, promo: promoForRecipient(action, recipient.email) });
+      const built = mailer.campaignBlocksEmail({ branding, entityId: action.entityId, assetScope: (action.config?.eventSuiteId || action.entityId), subject: useSubject, innerHtml, innerText, unsubUrl: `${mailer.baseUrl()}/u/${rtok0}`, promo: promoForRecipient(action, recipient.email), theme });
       useHtml = built.html;
     }
     const firstName = (recipient.name || '').split(/\s+/)[0] || '';

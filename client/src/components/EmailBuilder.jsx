@@ -1,5 +1,54 @@
 import { useRef, useState } from 'react';
 import { useIsMobile } from '../lib/useIsMobile.js';
+import { THEME_PRESETS, THEME_FONTS, THEME_SHAPES } from '../lib/emailTheme.js';
+
+// Campaign email "theme" (Tier-1 visual design): a preset look + optional accent /
+// font / button shape. Applied server-side; the live preview shows it. Collapsed by
+// default to keep the builder tidy.
+export function ThemePicker({ value, onChange }) {
+  const t = value || { preset: 'clean' };
+  const [open, setOpen] = useState(false);
+  const set = (patch) => onChange({ ...t, ...patch });
+  const swatch = (colors) => (
+    <span style={{ display: 'inline-flex', borderRadius: 4, overflow: 'hidden', border: '1px solid var(--hairline)' }}>
+      {colors.map((c, i) => <span key={i} style={{ width: 10, height: 14, background: c }} />)}
+    </span>
+  );
+  return (
+    <div style={{ border: '1px solid var(--hairline)', borderRadius: 10, padding: 10, marginBottom: 10, background: 'var(--card)' }}>
+      <button type="button" onClick={() => setOpen((v) => !v)} style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text)', padding: 0 }}>
+        <span style={{ width: 12, fontSize: 10, transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</span>
+        <span style={{ fontWeight: 700, fontSize: 13, flex: 1, textAlign: 'left' }}>🎨 Theme <span style={{ color: 'var(--muted)', fontWeight: 500 }}>· {(THEME_PRESETS.find((p) => p.key === t.preset) || THEME_PRESETS[0]).label}</span></span>
+      </button>
+      {open && (
+        <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {THEME_PRESETS.map((p) => (
+              <button key={p.key} type="button" onClick={() => set({ preset: p.key })}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderRadius: 8, cursor: 'pointer', fontSize: 12.5, fontWeight: 600, border: t.preset === p.key ? '1.5px solid var(--brand)' : '1px solid var(--hairline)', background: t.preset === p.key ? 'rgba(var(--brand-rgb,255,56,92),0.08)' : 'var(--card)', color: 'var(--text)' }}>
+                {swatch(p.swatch)} {p.label}
+              </button>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: 'var(--muted)' }}>
+              Accent
+              <input type="color" value={t.accent || '#000000'} onChange={(e) => set({ accent: e.target.value })} style={{ width: 34, height: 26, padding: 0, border: '1px solid var(--hairline)', borderRadius: 6, background: 'none', cursor: 'pointer' }} title="Button/link colour (defaults to the client brand colour)" />
+              {t.accent && <button type="button" style={{ ...miniBtn, padding: '3px 8px' }} onClick={() => set({ accent: '' })}>Use brand</button>}
+            </label>
+            <label style={{ fontSize: 12.5, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 6 }}>Font
+              <select style={{ ...input, width: 'auto', padding: '5px 8px' }} value={t.font || 'system'} onChange={(e) => set({ font: e.target.value })}>{THEME_FONTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+            </label>
+            <label style={{ fontSize: 12.5, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 6 }}>Buttons
+              <select style={{ ...input, width: 'auto', padding: '5px 8px' }} value={t.radius || 'pill'} onChange={(e) => set({ radius: e.target.value })}>{THEME_SHAPES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+            </label>
+          </div>
+          <div style={hint}>The theme sets the whole email’s look — accent defaults to the client’s brand colour. The Owl can pick a theme for you when it designs the email.</div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ─── Email block builder (Mailchimp-style) ─────────────────────────────────────
 // Stack content blocks — heading, text, image, button, video, social, columns,

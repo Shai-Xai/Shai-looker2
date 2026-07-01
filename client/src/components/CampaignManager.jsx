@@ -3,7 +3,7 @@ import { api } from '../lib/api.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import UploadHint from './UploadHint.jsx';
 import { languageList } from '../lib/language.js';
-import EmailBuilder from './EmailBuilder.jsx';
+import EmailBuilder, { ThemePicker } from './EmailBuilder.jsx';
 
 // Format a money amount in the campaign's currency (ZAR → "R1,234.00").
 const money = (cur, n) => `${cur === 'ZAR' || !cur ? 'R' : `${cur} `}${Number(n || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -351,6 +351,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
     heroImage: cfg.heroImage || '',
     customHtml: cfg.customHtml || '',
     blocks: cfg.blocks || [], // block-builder content (contentMode 'blocks')
+    theme: cfg.theme || { preset: 'clean' }, // block-builder visual theme (Tier-1 design)
     subject: cfg.subject || tp.subject || '',
     body: cfg.body || tp.body || '',
     smsBody: cfg.smsBody || '', // separate SMS copy when channel = 'both'
@@ -401,12 +402,12 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
   const applyTemplate = (id) => {
     const t = templates.find((x) => x.id === id);
     if (!t) return;
-    setF((s) => ({ ...s, contentMode: t.contentMode || 'template', subject: t.subject || s.subject, body: t.body || s.body, customHtml: t.customHtml || s.customHtml, blocks: (t.blocks && t.blocks.length) ? t.blocks : s.blocks, heroImage: t.heroImage || s.heroImage, ctaText: t.ctaText || s.ctaText }));
+    setF((s) => ({ ...s, contentMode: t.contentMode || 'template', subject: t.subject || s.subject, body: t.body || s.body, customHtml: t.customHtml || s.customHtml, blocks: (t.blocks && t.blocks.length) ? t.blocks : s.blocks, theme: (t.theme && t.theme.preset) ? t.theme : s.theme, heroImage: t.heroImage || s.heroImage, ctaText: t.ctaText || s.ctaText }));
   };
   const saveAsTemplate = async () => {
     const name = (window.prompt('Save this email as a template — name it:') || '').trim();
     if (!name) return;
-    try { await api.createCampaignTemplate(entityId, { name, subject: f.subject, contentMode: f.contentMode, body: f.body, customHtml: f.customHtml, blocks: f.blocks, heroImage: f.heroImage, ctaText: f.ctaText }); await loadTemplates(); alert('Saved to Templates ✓'); }
+    try { await api.createCampaignTemplate(entityId, { name, subject: f.subject, contentMode: f.contentMode, body: f.body, customHtml: f.customHtml, blocks: f.blocks, theme: f.theme, heroImage: f.heroImage, ctaText: f.ctaText }); await loadTemplates(); alert('Saved to Templates ✓'); }
     catch (e) { alert('Could not save template: ' + e.message); }
   };
   // Auto-select the event when there's exactly one and none is chosen yet — so
@@ -453,7 +454,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
     smsBody: f.smsBody,
     ctaText: f.campaignMode === 'sequence' ? (f.steps[0]?.ctaText || '') : f.ctaText,
     ctaUrl: f.ctaUrl, utm: f.utm, recurring: f.recurring,
-    eventSuiteId: f.eventSuiteId, language: f.language, contentMode: f.contentMode, heroImage: f.heroImage, customHtml: f.customHtml, blocks: f.blocks,
+    eventSuiteId: f.eventSuiteId, language: f.language, contentMode: f.contentMode, heroImage: f.heroImage, customHtml: f.customHtml, blocks: f.blocks, theme: f.theme,
     templateKey: f.templateKey, category: f.category, master: f.master, approvers: f.approvers,
     channel: f.channel,
     campaignMode: f.campaignMode, steps: f.steps,
@@ -535,7 +536,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
       api.actionPreviewEmail(entityId, p).then((r) => { setPreview(r.html || ''); setPreviewSms(r.sms || ''); }).catch(() => {});
     }, 350);
     return () => clearTimeout(debounce.current);
-  }, [f.subject, f.body, f.smsBody, f.ctaText, f.ctaUrl, f.contentMode, f.customHtml, f.heroImage, JSON.stringify(f.blocks), f.campaignMode, f.eventSuiteId, activeStep, JSON.stringify(f.steps), JSON.stringify(f.promo), f.anchorField]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [f.subject, f.body, f.smsBody, f.ctaText, f.ctaUrl, f.contentMode, f.customHtml, f.heroImage, JSON.stringify(f.blocks), JSON.stringify(f.theme), f.campaignMode, f.eventSuiteId, activeStep, JSON.stringify(f.steps), JSON.stringify(f.promo), f.anchorField]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Preview EVERY step of a sequence together (rendered each with its own copy).
   useEffect(() => {
@@ -1056,6 +1057,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
             {f.contentMode === 'blocks' ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <input style={{ ...input, fontWeight: 700 }} value={f.subject} onChange={(e) => set('subject', e.target.value)} placeholder="Subject line" />
+                <ThemePicker value={f.theme} onChange={(v) => set('theme', v)} />
                 <EmailBuilder value={f.blocks} onChange={(v) => set('blocks', v)} />
                 <div style={hintS}>Stack blocks to build the email — it’s wrapped in the client’s branding (logo, colours, unsubscribe) automatically. Links in buttons/images are tracked; tokens <b>{'{{name}}'}</b>, <b>{'{{ticketType}}'}</b> work in text.</div>
               </div>

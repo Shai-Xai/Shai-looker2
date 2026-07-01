@@ -430,24 +430,28 @@ function campaignEmail({ branding, entityId, assetScope, subject, bodyText, ctaT
 // server/emailBlocks.js). Mirrors campaignEmail's chrome so a builder email and a
 // template email look like the same product; the caller runs token + link-tracking
 // over the returned html (same as custom HTML).
-function campaignBlocksEmail({ branding, entityId, assetScope, subject, innerHtml, innerText, unsubUrl, promo }) {
+function campaignBlocksEmail({ branding, entityId, assetScope, subject, innerHtml, innerText, unsubUrl, promo, theme }) {
   const b = branding || resolveBranding(entityId);
   const scope = assetScope || entityId;
+  // Theme tokens (resolved by emailTheme.resolve) style the page + card; fall back to
+  // the classic light look when no theme is set.
+  const th = theme || { bg: '#f5f5f7', card: '#ffffff', text: '#3a3a3c', heading: '#111111', accent: b.brandColor, fontStack: '-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif', flat: false };
+  const cardStyle = th.flat ? `background:${esc(th.card)};padding:8px 2px;` : `background:${esc(th.card)};border:1px solid rgba(128,128,128,0.16);border-radius:14px;padding:26px;`;
   const logoSrc = b.logo && b.logo.startsWith('data:') && scope ? `${baseUrl()}/mail-assets/logo/${scope}` : b.logo;
   const brandMark = logoSrc
     ? `<img src="${esc(logoSrc)}" alt="${esc(b.wordmark)}" style="max-height:40px;max-width:200px;display:block;" />`
-    : `<div style="font-size:15px;font-weight:800;letter-spacing:-0.02em;color:#111;">${esc(b.wordmark)}</div>`;
+    : `<div style="font-size:15px;font-weight:800;letter-spacing:-0.02em;color:${esc(th.heading)};">${esc(b.wordmark)}</div>`;
   const promoBox = (promo && promo.code) ? `
-      <div style="margin-top:20px;border:1.5px dashed ${esc(b.brandColor)};border-radius:12px;padding:16px;text-align:center;background:#fafafa;">
-        ${promo.benefit ? `<div style="font-size:13px;font-weight:700;color:#111;margin-bottom:6px;">${esc(promo.benefit)}</div>` : ''}
-        <div style="font-size:22px;font-weight:800;letter-spacing:1px;color:${esc(b.brandColor)};font-family:ui-monospace,Menlo,monospace;">${esc(promo.code)}</div>
+      <div style="margin-top:20px;border:1.5px dashed ${esc(th.accent)};border-radius:12px;padding:16px;text-align:center;background:rgba(128,128,128,0.06);">
+        ${promo.benefit ? `<div style="font-size:13px;font-weight:700;color:${esc(th.heading)};margin-bottom:6px;">${esc(promo.benefit)}</div>` : ''}
+        <div style="font-size:22px;font-weight:800;letter-spacing:1px;color:${esc(th.accent)};font-family:ui-monospace,Menlo,monospace;">${esc(promo.code)}</div>
         <div style="font-size:12px;color:#86868b;margin-top:6px;">${promo.type === 'discount' ? 'Enter this code at checkout.' : 'Applied automatically when you tap a button.'}</div>
       </div>` : '';
-  const html = `<!doctype html><html><body style="margin:0;padding:0;background:#f5f5f7;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
+  const html = `<!doctype html><html><body style="margin:0;padding:0;background:${esc(th.bg)};font-family:${th.fontStack};">
   <div style="display:none;max-height:0;overflow:hidden;">${esc((innerText || subject || '').slice(0, 140))}</div>
   <div style="max-width:600px;margin:0 auto;padding:28px 16px;">
     <div style="margin-bottom:14px;">${brandMark}</div>
-    <div style="background:#ffffff;border:1px solid #e8e8ec;border-radius:14px;padding:26px;">
+    <div style="${cardStyle}">
       ${innerHtml || ''}
       ${promoBox}
     </div>
