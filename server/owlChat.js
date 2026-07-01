@@ -205,7 +205,7 @@ function owlAllowed(user) {
   return !!email && OWL_ALLOW.split(',').map((s) => s.trim()).filter(Boolean).includes(email);
 }
 
-function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, messaging, getAlertsApi, getSegmentsApi, getActionsApi, anthropicKeyForSuite, anthropicKeyForEntity, currencyNote, languageNote, whatsappDigestFor }) {
+function mount(app, { db, auth, insights, getOwlTools, uploads, getExploreFields, messaging, getAlertsApi, getSegmentsApi, getActionsApi, anthropicKeyForSuite, anthropicKeyForEntity, currencyNote, languageNote, whatsappDigestFor }) {
   const sql = db.db;
   sql.exec(`
     CREATE TABLE IF NOT EXISTS owl_threads (
@@ -242,14 +242,18 @@ function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, m
   // Build the tool registry once: name → tool, plus the schemas for the model. The
   // rememberFact act-tool is added here (not in the shared owlTools factory) so memory
   // stays a self-contained, removable module.
-  const toolEntries = [...Object.values(owlTools).filter((t) => t && t.schema && t.run), owlMemory.tool];
-  const toolMap = Object.fromEntries(toolEntries.map((t) => [t.schema.name, t]));
-  const toolSchemas = toolEntries.map((t) => t.schema);
+  // Tools are resolved PER TURN from getOwlTools() so an admin's catalogue edits (which
+  // fields the Owl may use) take effect immediately — the schemas' field enums and the
+  // runtime validation both come from the current effective catalogue.
+  const currentTools = () => {
+    const entries = [...Object.values(getOwlTools()).filter((t) => t && t.schema && t.run), owlMemory.tool];
+    return { toolMap: Object.fromEntries(entries.map((t) => [t.schema.name, t])), toolSchemas: entries.map((t) => t.schema) };
+  };
 
   // ── Citation chips: turn an answer's tool TRAIL into human-readable "sources" the
   // client renders under the bubble (the grounding made visible). Reuses the curated
   // catalogue's labels. Streamed after the answer text behind SOURCES_MARK.
-  const cat = owlTools.catalogue || {};
+  const cat = getOwlTools().catalogue || {};
   // Live label maps — refreshed per request from the field dictionary (owlFields) so
   // admin renames show up in citations without a restart.
   let measLabel = new Map((cat.measures || []).map((m) => [m.name, m.label]));
@@ -403,6 +407,7 @@ function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, m
     res.setHeader('X-Owl-Thread', thread.id);
     res.setHeader('X-Owl-Persona', pKey);
     res.flushHeaders?.();
+    const { toolMap, toolSchemas } = currentTools();
     try {
       const { text, trail } = await runOwlLoop({
         llmTurn: ({ messages: m, tools, onText }) => owlTurn(insights, { messages: m, tools, instructions, apiKey, onText, effort: persona.effort, maxTokens: persona.maxTokens }),
@@ -434,10 +439,9 @@ function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, m
   // GET /api/owl/capabilities — the slash-command palette, derived from the tool
   // registry (each read tool's `menu`). Sourced here so it can never drift from what
   // the Owl can actually do; the client renders it as the "/" menu in the composer.
-  const owlCommands = Object.values(owlTools).filter((t) => t && t.menu).map((t) => t.menu);
   app.get('/api/owl/capabilities', auth.requireAuth, (req, res) => {
     if (!owlAllowed(req.user)) return res.status(403).json({ error: 'The native Owl isn\'t enabled for your account yet.' });
-    res.json({ commands: owlCommands });
+    res.json({ commands: Object.values(getOwlTools()).filter((t) => t && t.menu).map((t) => t.menu) });
   });
 
   // GET /api/owl/starters — "prompt starter" pills for the empty chat: the user's OWN
@@ -568,7 +572,7 @@ function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, m
     // A query-segment can only be built from the ticket-data catalogue (not a dashboard's
     // own explore, which the people-resolver can't scope) — reject clearly otherwise.
     if (draft.mode === 'query') {
-      const cat = owlTools && owlTools.catalogue;
+      const cat = getOwlTools().catalogue;
       if (cat && (draft.model !== cat.model || draft.view !== cat.explore)) {
         return res.status(400).json({ error: "I can only save a segment from your ticket data, not this dashboard's own data." });
       }
@@ -595,7 +599,7 @@ function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, m
     // that segment — so the audience is reusable and visibly the same one in Engage. The
     // curated-explore guard applies before we persist it (same as create-segment).
     if (audience.mode === 'query') {
-      const cat = owlTools && owlTools.catalogue;
+      const cat = getOwlTools().catalogue;
       if (cat && (audience.model !== cat.model || audience.view !== cat.explore)) {
         return res.status(400).json({ error: "I can only build an audience from your ticket data, not this dashboard's own data." });
       }
@@ -646,7 +650,7 @@ function mount(app, { db, auth, insights, owlTools, uploads, getExploreFields, m
     if (!item) return res.status(400).json({ error: 'Could not save that.' });
     res.status(201).json({ ok: true, item });
   });
-  require('./owlWhatsapp').mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthropicKeyForEntity, currencyNote, languageNote, whatsappDigestFor, getAlertsApi, getSegmentsApi, getActionsApi, memoryApi }); // WhatsApp door onto the Owl (Clickatell)
+  require('./owlWhatsapp').mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, anthropicKeyForEntity, currencyNote, languageNote, whatsappDigestFor, getAlertsApi, getSegmentsApi, getActionsApi, memoryApi }); // WhatsApp door onto the Owl (Clickatell)
   console.log('[owlChat] agentic Owl chat module mounted');
 }
 

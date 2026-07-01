@@ -54,7 +54,7 @@ function parseFollowups(out) {
   try { const a = JSON.parse(m[0]); return Array.isArray(a) ? a.filter((x) => typeof x === 'string' && x.trim()).slice(0, 3) : []; } catch { return []; }
 }
 
-function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthropicKeyForEntity, currencyNote, languageNote, whatsappDigestFor, getAlertsApi, getSegmentsApi, getActionsApi, memoryApi }) {
+function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, anthropicKeyForEntity, currencyNote, languageNote, whatsappDigestFor, getAlertsApi, getSegmentsApi, getActionsApi, memoryApi }) {
   const owlMemory = require('./owlMemory'); // memoryNote + rememberFact tool (durable client memory)
   const sql = db.db;
   sql.exec(`
@@ -174,9 +174,11 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
   // All act-tools (createAlert, createSegment, draftCampaign) are confirmed over WhatsApp
   // with a reply button (see the action flow below). draftCampaign only creates a DRAFT —
   // it never sends — so confirming it on WhatsApp is safe (a human still sends in Engage).
-  const toolEntries = [...Object.values(owlTools).filter((t) => t && t.schema && t.run), owlMemory.tool];
-  const toolMap = Object.fromEntries(toolEntries.map((t) => [t.schema.name, t]));
-  const toolSchemas = toolEntries.map((t) => t.schema);
+  // Resolved per turn so an admin's catalogue edits take effect without a restart.
+  const currentTools = () => {
+    const entries = [...Object.values(getOwlTools()).filter((t) => t && t.schema && t.run), owlMemory.tool];
+    return { toolMap: Object.fromEntries(entries.map((t) => [t.schema.name, t])), toolSchemas: entries.map((t) => t.schema) };
+  };
   const norm = (n) => messaging.normaliseMsisdn(n);
 
   const allowlist = () => J(db.getSetting('owl_whatsapp_numbers', '') || '{}', {});
@@ -230,7 +232,7 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
       const qs = fmeta.filter((f) => (f.questions || []).length).map((f) => `${f.label} → ${f.questions.join(' / ')}`);
       if (qs.length) parts.push(`Typical questions by field: ${qs.join(' | ')}.`);
     }
-    const cat = owlTools.catalogue || {};
+    const cat = getOwlTools().catalogue || {};
     if ((cat.notes || []).length) parts.push(`Rules:\n- ${cat.notes.join('\n- ')}`);
     try { const g = resolveGuidance(db, entityId); if (g) parts.push(g); } catch { /* ignore */ }
     // Durable client memory (facts confirmed over time) — same source as the web Owl.
@@ -246,7 +248,7 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
   // Friendly-label + dimension-type resolvers for chart axes, rebuilt per turn so admin
   // field renames apply without a restart (mirrors the web citation labels).
   function labelMaps() {
-    const cat = owlTools.catalogue || {};
+    const cat = getOwlTools().catalogue || {};
     const label = new Map();
     for (const m of (cat.measures || [])) label.set(m.name, m.label);
     for (const d of (cat.dimensions || [])) label.set(d.name, d.label);
@@ -376,7 +378,7 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
         // Mirror the web commit (/api/owl/act/draft-campaign): persist a chat cohort as a
         // reusable segment first, then create a DRAFT campaign (status 'draft' — never sent).
         let audience = pend.audience;
-        const cat = owlTools && owlTools.catalogue;
+        const cat = getOwlTools().catalogue;
         if (audience && audience.mode === 'query') {
           if (cat && (audience.model !== cat.model || audience.view !== cat.explore)) { logEvent(msisdn, 'action-failed', 'audience off-catalogue'); await messaging.sendWhatsapp({ to: msisdn, text: 'I can only build that audience from your ticket data — set it up in the Pulse app.' }); return; }
           const segApi = getSegmentsApi && getSegmentsApi();
@@ -444,6 +446,7 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
     const uid = (id.user || {}).id || '';
     const instructions = waLayer ? `${instructionsFor(id.entityId, uid)}\n\n${waLayer}` : instructionsFor(id.entityId, uid);
     let out = ''; let trail = [];
+    const { toolMap, toolSchemas } = currentTools();
     try {
       const r = await runOwlLoop({
         llmTurn: ({ messages: m, tools, onText }) => owlTurn(insights, { messages: m, tools, instructions, apiKey, onText, effort: persona.effort, maxTokens: persona.maxTokens }),
@@ -701,6 +704,7 @@ function mount(app, { db, auth, insights, messaging, owlTools, owlFields, anthro
     if (!wants.length) return '';
     const ask = `Please give me my scheduled update covering: ${wants.join('; ')}.`;
     const instructions = `${instructionsFor(id.entityId, (id.user || {}).id || '')}\n\n${greeting ? SCHED_NOTE : SCHED_NOTE_ADD}`;
+    const { toolMap, toolSchemas } = currentTools();
     try {
       const { text } = await runOwlLoop({
         llmTurn: ({ messages: m, tools, onText }) => owlTurn(insights, { messages: m, tools, instructions, apiKey, onText }),

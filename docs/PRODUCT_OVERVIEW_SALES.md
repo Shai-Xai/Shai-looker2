@@ -566,6 +566,11 @@ Use these to set direction, **not** to promise dates.
   a **"Copy for Claude"** hand-off that hands the whole ticket to the AI to develop. Clients can
   track their own reports under **Settings → My reports**, and get a heads-up when what they
   flagged ships. Closes Pulse's *insight → action → results* loop on the product itself.
+- **2026-06-30** — **Owl data catalogue is now editable in Pulse** 🧪: a new **Admin → Owl data
+  catalogue** screen lists **every field** in the Active Tickets explore (measures + dimensions,
+  incl. payments & orders if they're in the explore) with a **checkbox to include it for the
+  Owl**. Ticked fields become usable in chat/WhatsApp; contact fields stay locked (privacy-safe
+  lookup-only). Changes take effect on the Owl's next answer — no code change or restart.
 - **2026-06-30** — **Owl opens with quick prompt-starters** 🧪: the web Owl chat now greets an
   empty conversation with **tappable starter pills** — concrete prompts like *Today's sales ·
   Sales overview · Last 7 days · Goal tracking · Sales by hour* — and leads with **the user's

@@ -21,6 +21,7 @@ import OwlGuidanceEditor from '../components/OwlGuidanceEditor.jsx';
 import OwlFieldDictionary from '../components/OwlFieldDictionary.jsx';
 import OwlMemoryEditor from '../components/OwlMemoryEditor.jsx';
 import WhatsAppOwl from '../components/WhatsAppOwl.jsx';
+import OwlCatalogue from '../components/OwlCatalogue.jsx';
 import UploadHint from '../components/UploadHint.jsx';
 import { currencyList } from '../lib/currency.js';
 import { languageList } from '../lib/language.js';
@@ -4079,6 +4080,9 @@ function AISettings() {
       </Section>
       <Section title="Owl field dictionary">
         <OwlFieldDictionary />
+      </Section>
+      <Section title="Owl data catalogue (what the Owl can read)">
+        <OwlCatalogue />
       </Section>
       <Section title="Owl memory (per client)">
         <OwlMemoryEditor />
