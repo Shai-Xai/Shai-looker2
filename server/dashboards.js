@@ -9,6 +9,8 @@
 // boundary across the whole app (see server/query.js). collectFolderTree is
 // private to this module.
 
+const fx = require('./filterExpression'); // combined-field OR → Looker filter_expression
+
 function mount(app, {
   store, db, auth, looker,
   convertDashboard, fetchDashboard, parseDrillUrl,
@@ -241,7 +243,7 @@ app.get('/api/looker/explores/:model/:explore', auth.requireAdmin, async (req, r
 
 app.post('/api/run-query', auth.requireAuth, async (req, res) => {
   try {
-    const { query, filterOverrides = {}, suiteId, refresh = false } = req.body;
+    const { query, filterOverrides = {}, suiteId, refresh = false, combinedFilters = [] } = req.body;
     if (!query) return res.status(400).json({ error: 'query is required' });
     const queryBody = { ...query, filters: stripAnyValue({ ...(query.filters || {}), ...filterOverrides }) };
     if (!(await applyScope(queryBody, req.user, suiteId))) {
@@ -255,6 +257,10 @@ app.post('/api/run-query', auth.requireAuth, async (req, res) => {
       }
       return res.status(403).json({ error });
     }
+    // Combined-field OR locks (from the client's applicable-to-this-tile set) →
+    // filter_expression. Applied AFTER applyScope so the organiser scope in the
+    // filters map is already fixed; Looker AND-combines the two, so scope holds.
+    if (Array.isArray(combinedFilters) && combinedFilters.length) fx.applyCombinedToBody(queryBody, combinedFilters, queryBody);
     // Force current-event-first ordering for offset comparison tiles; fall back
     // to the original query if the explore doesn't expose the event date field.
     const altered = currentFirstEventSort(queryBody);

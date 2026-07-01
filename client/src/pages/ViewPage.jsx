@@ -15,6 +15,7 @@ import { useProfile } from '../lib/profile.jsx';
 import { useTheme } from '../lib/theme.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import { ScopeProvider } from '../lib/ScopeContext.jsx';
+import { combinedBlocksFromLockMap } from '../lib/combinedFilters.js';
 
 // Read-only render of a saved dashboard. When opened inside a Suite
 // (/suite/:suiteId/d/:id) the suite's locked filters are pre-filled + locked and
@@ -309,6 +310,10 @@ export default function ViewPage() {
     onUnlock: onUnlockFilter, onRelock: onRelockFilter, onLockHere: onLockHereFilter, onInherit: onInheritFilter,
     hasOverride, savingName: lockSavingName, status: lockStatus,
   } : null;
+  // Combined-field OR locks for this dashboard (suite-wide + this dashboard's own
+  // overrides). Skipped entirely when "keep imported filters" is on (the dashboard's
+  // own defaults are authoritative there — same rule as the value locks above).
+  const combinedLocks = keepImported ? [] : combinedBlocksFromLockMap({ ...(setInfo?.lockedFilters || {}), ...((setInfo?.dashboardLocks && setInfo.dashboardLocks[id]) || {}) });
   // Persist a single tile's per-client lock overrides (suite.tileLocks[tileId]),
   // updating the loaded suite so the tile re-queries immediately.
   const saveTileLock = async (tileId, map) => {
@@ -325,7 +330,7 @@ export default function ViewPage() {
 
   return (
     <ScopeProvider suiteId={suiteId || null} dashboardContext={def.aiContext || ''} entityId={scopeEntityId} dashboardId={id} refreshKey={refreshKey} softKey={softKey}
-      tileLocks={setInfo?.tileLocks || {}} lockFilters={def.filters || []} canLockTiles={isAdmin && !!suiteId && !keepImported} onSaveTileLock={saveTileLock}>
+      tileLocks={setInfo?.tileLocks || {}} lockFilters={def.filters || []} combinedLocks={combinedLocks} canLockTiles={isAdmin && !!suiteId && !keepImported} onSaveTileLock={saveTileLock}>
     <PinProvider dashboardId={id} entityId={previewEntityId || null} isAdmin={isAdmin} enabled={pinsEnabled}>
       <div style={shellStyle}>
         {/* On mobile inside a suite the sticky "☰ Menu" bar already shows the

@@ -639,6 +639,12 @@ Use these to set direction, **not** to promise dates.
   Owl creates something — an **alert**, a **segment** or a **draft campaign** — the
   confirmation now includes a **"View it →" link** straight to the right page (Alerts /
   Engage → Segments / Engage → Campaigns). Works the same on **web chat and WhatsApp**.
+- **2026-06-30** — **Combined-field filters (OR logic)** 🧪: a locked filter can now target
+  **several fields at once** and match a value across them with **OR** — e.g. "Ticket Category
+  OR Add-on Category = X" — with one operator (**Is / Is not / Contains**) and one value applying
+  to all. Set in Admin → the client → locked filters (per suite or per dashboard). Built on Looker
+  `filter_expression`, AND-combined with the client's data scope so it can never widen access.
+  (Beta — pending live-Looker verification; the Dashboard Editor's own filters are the next step.)
 - **2026-06-30** — **Per-campaign language override** ✅: any single email/SMS campaign
   can now pick its **own** AI copy language (in the campaign builder, next to the goal),
   overriding the client default — so a multi-language client can send one audience in

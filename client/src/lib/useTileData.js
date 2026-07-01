@@ -4,6 +4,7 @@ import { withLimit } from './limit.js';
 import { useScope } from './ScopeContext.jsx';
 import { ANY_VALUE } from './filterConstants.js';
 import { lockFieldFor } from './tileLockFields.js';
+import { combinedFiltersForTile } from './combinedFilters.js';
 
 // A query is only worth running once it has a model, an explore (view) and at
 // least one field — otherwise Looker returns a validation error.
@@ -15,7 +16,7 @@ export function isRunnableQuery(q) {
 // values change. Returns { data, loading, error }. Looker does the calculation;
 // we only receive json_detail rows.
 export function useTileData(tile, filterValues) {
-  const { suiteId, refreshKey = 0, softKey = 0, tileLocks = {}, lockFilters = [] } = useScope();
+  const { suiteId, refreshKey = 0, softKey = 0, tileLocks = {}, lockFilters = [], combinedLocks = [] } = useScope();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(tile.type !== 'text' && isRunnableQuery(tile.query));
   const [error, setError] = useState(null);
@@ -63,8 +64,14 @@ export function useTileData(tile, filterValues) {
     if (queryField) overrides[queryField] = String(locked).trim();
   }
 
+  // Combined-field OR locks that apply to THIS tile (≥1 of their fields is in a
+  // view the tile's query joins). Forwarded to the server, which turns them into a
+  // Looker filter_expression (AND-combined with the scoped filters map).
+  const myCombined = combinedFiltersForTile(combinedLocks, tile.query, ANY_VALUE);
+
   const queryKey = JSON.stringify(tile.query);
   const overrideKey = JSON.stringify(overrides);
+  const combinedKey = JSON.stringify(myCombined);
 
   useEffect(() => {
     if (tile.type === 'text' || !isRunnableQuery(tile.query)) {
@@ -83,13 +90,13 @@ export function useTileData(tile, filterValues) {
     const force = refreshKey !== p.refreshKey;
     // SOFT auto-refresh (focus / interval): only softKey changed, we already have
     // data → re-fetch quietly via the cache, no skeleton flash.
-    const softOnly = !force && p.queryKey === queryKey && p.overrideKey === overrideKey && p.suiteId === suiteId && softKey !== p.softKey && hasData.current;
-    prev.current = { queryKey, overrideKey, suiteId, refreshKey, softKey };
+    const softOnly = !force && p.queryKey === queryKey && p.overrideKey === overrideKey && p.combinedKey === combinedKey && p.suiteId === suiteId && softKey !== p.softKey && hasData.current;
+    prev.current = { queryKey, overrideKey, combinedKey, suiteId, refreshKey, softKey };
 
     if (!softOnly) setLoading(true);
     setError(null);
 
-    withLimit(() => api.runQuery(tile.query, overrides, controller.signal, suiteId, force))
+    withLimit(() => api.runQuery(tile.query, overrides, controller.signal, suiteId, force, myCombined))
       .then((d) => { setData(d); hasData.current = true; })
       .catch((err) => {
         if (err.name !== 'AbortError') setError(err.message);
@@ -100,7 +107,7 @@ export function useTileData(tile, filterValues) {
 
     return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tile.type, queryKey, overrideKey, suiteId, refreshKey, softKey]);
+  }, [tile.type, queryKey, overrideKey, combinedKey, suiteId, refreshKey, softKey]);
 
   return { data, loading, error };
 }

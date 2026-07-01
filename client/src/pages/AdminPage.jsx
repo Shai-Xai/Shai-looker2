@@ -25,6 +25,7 @@ import OwlCatalogue from '../components/OwlCatalogue.jsx';
 import UploadHint from '../components/UploadHint.jsx';
 import { currencyList } from '../lib/currency.js';
 import { languageList } from '../lib/language.js';
+import { makeCombinedKey, parseCombinedKey } from '../lib/combinedFilters.js';
 import { GUIDES } from '../lib/guides.js';
 
 // Icon control: an emoji, or an uploaded image (downscaled to a small data-URL).
@@ -3676,7 +3677,13 @@ function LockedFilterEditor({ value, onChange, fields, categories, restrictTo = 
   const fedBy = {};
   for (const p of presets) for (const tk of p.feedKeys) (fedBy[tk] = fedBy[tk] || []).push(p.title);
 
-  const [rows, setRows] = useState(() => Object.entries(value || {}).map(([field, vals]) => ({ field, vals })));
+  // A row is { field (primary), orFields[] (extra OR fields), op, vals }. A plain
+  // single-field "is" lock loads as one field with no OR fields; a combined key
+  // (__or__:op:f1|f2) unpacks into primary + OR fields + operator.
+  const [rows, setRows] = useState(() => Object.entries(value || {}).map(([key, vals]) => {
+    const c = parseCombinedKey(key);
+    return c ? { field: c.fields[0], orFields: c.fields.slice(1), op: c.op, vals } : { field: key, orFields: [], op: 'is', vals };
+  }));
   // Track which categories we've already seeded so we never disturb a suite
   // that's already configured; brand-new suites seed as their types appear.
   const seeded = useRef(null);
@@ -3690,7 +3697,13 @@ function LockedFilterEditor({ value, onChange, fields, categories, restrictTo = 
     const cleaned = next.map((r) => ({ ...r, vals: uniqJoin(splitVals(r.vals)) }));
     setRows(cleaned);
     const map = {};
-    for (const r of cleaned) if (r.field) map[r.field] = r.vals || '';
+    for (const r of cleaned) {
+      if (!r.field) continue;
+      // Single "is" field keeps the plain { field: vals } shape; extra OR fields or a
+      // non-"is" operator encode into a composite key the server turns into an OR expr.
+      const key = makeCombinedKey(r.op || 'is', [r.field, ...((r.orFields || []).filter(Boolean))]);
+      if (key) map[key] = r.vals || '';
+    }
     onChange(map);
   };
   const setRow = (i, patch) => {
@@ -3705,8 +3718,12 @@ function LockedFilterEditor({ value, onChange, fields, categories, restrictTo = 
     }
     push(next);
   };
-  const addRow = () => setRows([...rows, { field: '', vals: '' }]);
+  const addRow = () => setRows([...rows, { field: '', orFields: [], op: 'is', vals: '' }]);
   const removeRow = (i) => push(rows.filter((_, j) => j !== i));
+  // Combined-field OR helpers (one value matched across several fields).
+  const addOrField = (i) => setRow(i, { orFields: [...(rows[i].orFields || []), ''] });
+  const setOrField = (i, k, field) => setRow(i, { orFields: (rows[i].orFields || []).map((f, j) => (j === k ? field : f)) });
+  const removeOrField = (i, k) => setRow(i, { orFields: (rows[i].orFields || []).filter((_, j) => j !== k) });
   const seedDefaults = (cats, { force } = {}) => {
     const next = rows.slice(); let changed = false;
     for (const cat of cats) {
@@ -3737,6 +3754,11 @@ function LockedFilterEditor({ value, onChange, fields, categories, restrictTo = 
   const defExplore = fields.find((f) => f.explore)?.explore;
   const otherFields = restrictTo ? [] : fields.filter((f) => !presetKeys.has(f.field));
   const showCustom = !restrictTo;
+  // Selectable fields for the "OR another field" pickers (presets + other fields).
+  const orFieldOptions = [
+    ...presets.map((p) => ({ value: p.key, label: p.label || p.title })),
+    ...otherFields.map((f) => ({ value: f.field, label: f.byName ? `${f.title} — filter` : `${f.title} (${f.field})` })),
+  ];
   // Scope Event-category pickers to the chosen organiser: when Organiser Name has
   // a value, every other Event filter (Event Name, Current/Past/Comparison, Slug)
   // only suggests events for that organiser. Each explore has its own organiser
@@ -3815,6 +3837,30 @@ function LockedFilterEditor({ value, onChange, fields, categories, restrictTo = 
                     placeholder="Looker field, e.g. core_events.is_past"
                   />
                 )}
+                {/* Combined-field OR (not on preset/organiser rows — those have their
+                    own event-combo machinery). ONE operator + ONE value below apply
+                    to the primary field AND every OR field, matched with OR logic. */}
+                {!restrictTo && !preset && (
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <select style={{ ...input, minWidth: 96 }} value={r.op || 'is'} onChange={(e) => setRow(i, { op: e.target.value })} title="How the value is matched across the field(s)">
+                      <option value="is">Is</option>
+                      <option value="is_not">Is not</option>
+                      <option value="contains">Contains</option>
+                    </select>
+                    {(r.orFields || []).map((of, k) => (
+                      <span key={k} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        <span style={{ fontSize: 10.5, fontWeight: 800, color: 'var(--brand)' }}>OR</span>
+                        <select style={{ ...input, minWidth: 200 }} value={of} onChange={(e) => setOrField(i, k, e.target.value)}>
+                          <option value="">Choose a field…</option>
+                          {orFieldOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                        </select>
+                        <button style={{ ...delBtn, padding: '0 4px' }} onClick={() => removeOrField(i, k)} title="Remove this OR field">✕</button>
+                      </span>
+                    ))}
+                    <button style={miniBtn} onClick={() => addOrField(i)} title="Match this value across another field too (OR)">＋ OR field</button>
+                  </div>
+                )}
+                {(r.orFields || []).filter(Boolean).length > 0 && <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>↳ one value, matched across {1 + (r.orFields || []).filter(Boolean).length} fields (OR)</span>}
                 {fedBy[r.field] && <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>↳ auto-filled from {fedBy[r.field].join(' + ')} (editable)</span>}
                 {preset?.feeds && <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>also fills {preset.feeds.join(', ')}</span>}
                 {orgScope && <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>↳ showing only {orgVals.join(', ')} events</span>}

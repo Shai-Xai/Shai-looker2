@@ -12,6 +12,8 @@
 // change is that `looker`/`auth` arrive as injected deps instead of module
 // requires. The cache (qCache/qInflight) and the env-tunable windows live here.
 
+const fx = require('./filterExpression'); // combined-field OR → Looker filter_expression
+
 module.exports = function createQueryEngine({ looker, auth }) {
   // Cache windows (ms). fresh: serve from cache; stale: serve cached + refresh
   // behind; beyond stale: wait for live Looker data.
@@ -196,6 +198,11 @@ module.exports = function createQueryEngine({ looker, auth }) {
     }
     const body = { ...q, filters: stripAnyValue({ ...(q.filters || {}), ...overrides, ...extraOverrides }) };
     if (!(await applyScope(body, user, suiteId))) return null;
+    // Combined-field OR locks (one value across several fields) can't live in the
+    // per-field filters map — apply them as a filter_expression, which Looker
+    // AND-combines with `filters`, so the organiser scope above is never weakened.
+    const blocks = fx.combinedBlocksFromLockMap(lockMap);
+    if (blocks.length) fx.applyCombinedToBody(body, blocks, body, { anyValue: ANY_VALUE });
     return body;
   }
 
