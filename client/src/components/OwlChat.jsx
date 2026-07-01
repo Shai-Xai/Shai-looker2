@@ -815,7 +815,41 @@ function ActionCard({ action, suiteId }) {
   if (action.kind === 'createSegment') return <SegmentActionCard action={action} />;
   if (action.kind === 'draftCampaign') return <CampaignActionCard action={action} suiteId={suiteId} />;
   if (action.kind === 'rememberFact') return <MemoryActionCard action={action} />;
+  if (action.kind === 'draftReport') return <ReportActionCard action={action} />;
   return null;
+}
+// "File it" — the Owl drafted a product report (bug/idea) from the chat; tapping
+// files it to the product board (same path as the report widget), tagged source=owl.
+const REPORT_ICON = { bug: '🐞', improvement: '✨', idea: '💡' };
+function ReportActionCard({ action }) {
+  const [state, setState] = useState(''); // '' | 'busy' | 'done' | 'error'
+  const [err, setErr] = useState('');
+  const [url, setUrl] = useState('');
+  const d = action.draft || {};
+  const file = async () => {
+    setState('busy'); setErr('');
+    try { const r = await api.owlSubmitReport({ draft: d }); setUrl((r && r.url) || '/product'); setState('done'); }
+    catch (e) { setState('error'); setErr((e && e.message) || 'Could not file the report.'); }
+  };
+  return (
+    <div style={{ margin: '2px 0 10px', border: '1px solid var(--hairline)', borderRadius: 12, background: 'var(--card)', padding: '10px 12px', maxWidth: '85%' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 6 }}>
+        <span style={{ fontSize: 15 }}>{REPORT_ICON[d.type] || '🐞'}</span>
+        <strong style={{ fontSize: 12.5 }}>Report</strong>
+        <span style={{ fontSize: 11, color: 'var(--muted)', border: '1px solid var(--hairline)', borderRadius: 980, padding: '1px 7px', textTransform: 'capitalize' }}>{d.type || 'bug'}{d.type === 'bug' && d.urgency && d.urgency !== 'normal' ? ` · ${d.urgency}` : ''}</span>
+      </div>
+      {d.title && <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 3 }}>{d.title}</div>}
+      {d.description && <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 8, whiteSpace: 'pre-wrap' }}>{d.description}</div>}
+      {state === 'done' ? (
+        <div style={{ fontSize: 12.5, color: 'var(--brand)', fontWeight: 600 }}>✓ Filed — the team can see it. <ViewLink url={url} label="Track it →" /></div>
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <button onClick={file} disabled={state === 'busy'} style={{ border: 'none', borderRadius: 980, padding: '6px 16px', fontSize: 12.5, fontWeight: 700, cursor: state === 'busy' ? 'default' : 'pointer', background: state === 'busy' ? 'var(--elevated, rgba(128,128,128,0.18))' : 'var(--brand)', color: state === 'busy' ? 'var(--muted)' : '#fff' }}>{state === 'busy' ? 'Filing…' : '📮 File it'}</button>
+          {state === 'error' && <span style={{ fontSize: 12, color: '#e0414a' }}>{err}</span>}
+        </div>
+      )}
+    </div>
+  );
 }
 // "Remember this?" — the Owl proposes a durable client fact; tapping saves it to memory.
 function MemoryActionCard({ action }) {

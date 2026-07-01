@@ -119,6 +119,7 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
     add('github_issue_number', 'github_issue_number INTEGER NOT NULL DEFAULT 0');
     add('github_url', "github_url TEXT NOT NULL DEFAULT ''");
     add('decline_reason', "decline_reason TEXT NOT NULL DEFAULT ''");
+    add('source', "source TEXT NOT NULL DEFAULT 'widget'"); // entry point: 'widget' (form) | 'owl' (chat)
   } catch (e) { console.error('[tickets] ship-review migration skipped:', e.message); }
 
   const enabled = () => db.getSetting('tickets_enabled', '1') !== '0'; // on by default; kill switch
@@ -168,7 +169,7 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
       status: r.status, statusLabel: STATUS_LABELS[r.status] || r.status, priority: r.priority,
       reporterEmail: r.reporter_email, reporterName: r.reporter_name, reporterRole: r.reporter_role,
       entityId: r.entity_id, entityName: r.entity_id ? (db.getEntity(r.entity_id)?.name || '') : '',
-      assignee: r.assignee, aiTitle: r.ai_title, aiSummary: r.ai_summary, aiStatus: r.ai_status,
+      assignee: r.assignee, aiTitle: r.ai_title, aiSummary: r.ai_summary, aiStatus: r.ai_status, source: r.source || 'widget',
       shipNote: r.ship_note || '', testUrl: r.test_url || '',
       clientVerdict: r.client_verdict || '', clientVerdictNote: r.client_verdict_note || '', clientVerdictAt: r.client_verdict_at || '', declineReason: r.decline_reason || '',
       githubIssue: r.github_issue_number || 0, githubUrl: r.github_url || '',
@@ -283,29 +284,42 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
   // Any logged-in user can file. Reporter + entity are derived server-side from the
   // session (never trusted from the body) so a client can't file against another
   // client. entity_id: for a client, their (first) entity; an admin may name one.
-  app.post('/api/my/tickets', bigJson, auth.requireAuth, requireOn, (req, res) => {
-    const b = req.body || {};
-    const type = TYPES.includes(b.type) ? b.type : 'bug';
-    const urgency = URGENCIES.includes(b.urgency) ? b.urgency : 'normal';
-    const title = clamp(b.title, 200).trim();
-    const body = clamp(b.body, 8000).trim();
-    const screen = clamp(b.screen, 300).trim();
-    if (!body && !title) return res.status(400).json({ error: 'Add a title or a description.' });
-    const admin = isAdmin(req.user);
-    // Entity: an admin may target a specific client; a client is locked to one they own.
-    let entityId = '';
-    if (admin) entityId = b.entityId && db.getEntity(b.entityId) ? b.entityId : '';
-    else entityId = (req.user.entityIds || []).includes(b.entityId) ? b.entityId : (req.user.entityIds || [])[0] || '';
+  // Shared creation path — used by the report widget (POST below) and the Owl act
+  // layer. `source` tags the entry point ('widget' | 'owl') so we can compare what
+  // people prefer. Pre-drafted aiTitle/aiSummary (the Owl already structured it in
+  // chat) skip the background AI draft. Entity is derived from the reporter: an
+  // admin may target a client; a client is locked to one they own. Throws on empty.
+  function createTicket({ user, type, title, body, screen, urgency, entityId, attachments, source = 'widget', aiTitle, aiSummary }) {
+    const t = TYPES.includes(type) ? type : 'bug';
+    const urg = URGENCIES.includes(urgency) ? urgency : 'normal';
+    const ti = clamp(title, 200).trim();
+    const bo = clamp(body, 8000).trim();
+    const sc = clamp(screen, 300).trim();
+    if (!bo && !ti) { const e = new Error('Add a title or a description.'); e.code = 'EMPTY'; throw e; }
+    const admin = isAdmin(user);
+    const eid = admin
+      ? (entityId && db.getEntity(entityId) ? entityId : '')
+      : ((user.entityIds || []).includes(entityId) ? entityId : (user.entityIds || [])[0] || '');
     const id = uuid();
     const ts = now();
+    const preDrafted = !!(aiTitle || aiSummary);
     sql.prepare(`INSERT INTO tickets
-      (id, type, title, body, screen, urgency, status, priority, reporter_id, reporter_email, reporter_name, reporter_role, entity_id, ai_status, created_at, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-      .run(id, type, title, body, screen, urgency, 'inbox', 0, req.user.id, req.user.email, userName(req.user),
-        admin ? 'admin' : 'client', entityId, 'pending', ts, ts);
-    saveAttachments(id, b.attachments); // screenshots / images / short video
-    draftInBackground(id); // fire-and-forget; the row is already saved
-    res.status(201).json({ ticket: myTicketRow(getTicket(id)) });
+      (id, type, title, body, screen, urgency, status, priority, reporter_id, reporter_email, reporter_name, reporter_role, entity_id, source, ai_title, ai_summary, ai_status, created_at, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(id, t, ti, bo, sc, urg, 'inbox', 0, user.id, user.email, userName(user),
+        admin ? 'admin' : 'client', eid, source === 'owl' ? 'owl' : 'widget',
+        clamp(aiTitle || '', 200), String(aiSummary || '').slice(0, 20000), preDrafted ? 'ready' : 'pending', ts, ts);
+    saveAttachments(id, attachments); // screenshots / images / short video
+    if (!preDrafted) draftInBackground(id); // fire-and-forget; the row is already saved
+    return myTicketRow(getTicket(id));
+  }
+
+  app.post('/api/my/tickets', bigJson, auth.requireAuth, requireOn, (req, res) => {
+    const b = req.body || {};
+    try {
+      const ticket = createTicket({ user: req.user, type: b.type, title: b.title, body: b.body, screen: b.screen, urgency: b.urgency, entityId: b.entityId, attachments: b.attachments, source: 'widget' });
+      res.status(201).json({ ticket });
+    } catch (e) { res.status(400).json({ error: e.message }); }
   });
 
   // Client self-service: the tickets I reported (my content + live status).
@@ -510,7 +524,7 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
   });
 
   console.log('[tickets] Product board mounted', enabled() ? '(enabled)' : '(disabled — set tickets_enabled=1)');
-  return { draftInBackground };
+  return { draftInBackground, createTicket };
 }
 
 module.exports = { mount, TICKET_DRAFT_SYSTEM };

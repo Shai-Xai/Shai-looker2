@@ -64,6 +64,7 @@ WHICH TOOL TO USE (route every question to the right one — do not answer goal 
 - createAlert → when the user wants to be NOTIFIED / ALERTED / TOLD / REMINDED when a number reaches a level ("let me know when tickets hit 1000", "alert me if VIP sells out", "tell me when revenue passes R1m"). It DRAFTS the alert and the user confirms with a button — see ACTING below.
 - createSegment → when the user wants to BUILD or SAVE an AUDIENCE / cohort of people for later marketing ("make a segment of VIP buyers in Cape Town", "save these people as an audience", "build a guest list segment", "audience of 18-25 year olds"). The cohort is defined by curated dimensions (age, gender, buyer city/country, ticket type, ticket category, complimentary = guest list). It DRAFTS the segment + previews the size and reach; the user confirms with a button — see ACTING below. NEVER list or name individual people; only the count + reach. Contact fields (email/phone) cannot define a segment.
 - draftCampaign → when the user wants to MESSAGE or MARKET to a cohort ("draft a win-back email to lapsed VIP buyers", "send an offer to Cape Town 18-25s", "email my guest-list segment"). Give it the goal plus an audience that is EITHER a saved segment (pass segmentName when the user names one, or one was just created) OR a new cohort (pass filters). It drafts the email/SMS copy and previews the reach. It creates a DRAFT only — a human reviews, approves and SENDS it in Engage. You never send. See ACTING below.
+- draftReport → when the user reports a PROBLEM with the app/product or suggests a FEATURE/IMPROVEMENT ("there's a bug", "X is broken / not working", "this page is confusing", "it would be great if…", "can you add…", "I wish it could…"). This is about the PULSE APP ITSELF, not their ticketing data. It DRAFTS a bug/idea report the user confirms with a button — see ACTING below.
 
 - rememberFact → when the user tells you a DURABLE fact or preference about their business worth carrying into future chats (their priority tier, how they define revenue, naming conventions, what they focus on, their flagship event), OR you learn one. It DRAFTS a memory item the user confirms to save. Pick the scope: scope='event' for a fact true only of the CURRENT event (one festival sells add-ons heavily, another is single-day); scope='user' for THIS person's own answer-style preference ("keep it short", "always lead with revenue") — that shapes style, not data; scope='client' (default) for anything about the whole client/organiser. Use it sparingly and naturally — offer to remember the things that would make every future answer better; never store one-off question details, transient numbers, or any personal/contact data. Memory you already hold appears under "What you REMEMBER…" — don't re-offer what's already there.
 
@@ -77,6 +78,7 @@ ACTING (tools that DO something, not just read):
 - After calling createAlert, do NOT say the alert is on or active. Say you've DRAFTED it, state plainly what it will watch and the exact condition (e.g. "I've drafted an alert for when Tickets Sold reaches 1,000"), and tell them to tap "Create alert" below to switch it on. If no event is selected, the card has an event picker on it — tell them to pick the event there; NEVER tell them to go elsewhere to select an event first. If it returns ok:false, relay why and what to do.
 - An alert needs a measure, an operator (at/above, at/below, above, below) and a threshold. If the user's wish is missing one (e.g. they didn't give a number), ask one short clarifying question before drafting.
 - Delivery defaults to an in-app/push notification at normal priority (inbox is always on). Only set the channels or priority if the user actually says how they want to be told (e.g. "email me", "text me", "make it important") — otherwise leave the defaults and don't ask. Mention how they'll be notified when you confirm the draft.
+- After calling draftReport, do NOT say it's filed. Say you've drafted the report (its type + a one-line summary of what you captured) and they can tap "File it" to send it to the product team — and can add a screenshot in the report form if it's a visual bug. If it returns ok:false, relay why.
 
 CHARTS: Whenever you return a BREAKDOWN from askData (a measure grouped by a dimension), the app AUTOMATICALLY renders it as a real interactive chart below your reply, and the user can switch it between bar / line / pie / metric with a toggle on the chart. So:
 - You CAN show charts. NEVER say you can't generate a chart/image, and NEVER draw ASCII or text bar graphs.
@@ -205,7 +207,7 @@ function owlAllowed(user) {
   return !!email && OWL_ALLOW.split(',').map((s) => s.trim()).filter(Boolean).includes(email);
 }
 
-function mount(app, { db, auth, insights, getOwlTools, uploads, getExploreFields, messaging, getAlertsApi, getSegmentsApi, getActionsApi, anthropicKeyForSuite, anthropicKeyForEntity, currencyNote, languageNote, whatsappDigestFor }) {
+function mount(app, { db, auth, insights, getOwlTools, uploads, getExploreFields, messaging, getAlertsApi, getSegmentsApi, getActionsApi, getTicketsApi, anthropicKeyForSuite, anthropicKeyForEntity, currencyNote, languageNote, whatsappDigestFor }) {
   const sql = db.db;
   sql.exec(`
     CREATE TABLE IF NOT EXISTS owl_threads (
@@ -559,6 +561,22 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getExploreFields
     const r = alertsApi.createAlert({ suiteId, draft, user: req.user });
     if (!r.ok) return res.status(400).json({ error: r.error || 'Could not create the alert.' });
     res.status(201).json({ ok: true, alert: { id: r.alert.id, name: r.alert.name }, url: actionViewPath('createAlert') });
+  });
+
+  // POST /api/owl/act/submit-report — the user tapping "File it" on the card the
+  // draftReport tool produced. Files a product ticket via the tickets module's
+  // createTicket (the SAME path as the report widget), tagged source='owl'. The
+  // reporter + entity are derived server-side from the session, never the draft.
+  app.post('/api/owl/act/submit-report', auth.requireAuth, (req, res) => {
+    if (!owlAllowed(req.user)) return res.status(403).json({ error: 'The native Owl isn\'t enabled for your account yet.' });
+    const { draft } = req.body || {};
+    if (!draft || typeof draft !== 'object') return res.status(400).json({ error: 'draft is required.' });
+    const ticketsApi = typeof getTicketsApi === 'function' ? getTicketsApi() : null;
+    if (!ticketsApi || !ticketsApi.createTicket) return res.status(503).json({ error: 'Reporting isn\'t available right now.' });
+    try {
+      const ticket = ticketsApi.createTicket({ user: req.user, type: draft.type, title: draft.title, body: draft.description, urgency: draft.urgency, screen: draft.screen, source: 'owl' });
+      res.status(201).json({ ok: true, ticket: { id: ticket.id, title: ticket.aiTitle || ticket.title || ticket.type }, url: '/product' });
+    } catch (e) { res.status(400).json({ error: e.message || 'Could not file the report.' }); }
   });
 
   // POST /api/owl/act/create-segment — the user tapping "Create segment" on the card

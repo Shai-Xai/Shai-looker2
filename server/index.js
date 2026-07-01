@@ -126,7 +126,7 @@ let osApi, waDigestFor; // waDigestFor set when digests mount (used lazily by th
 const os = require('./os').mount(app, { db, auth, mailer, push, slack, onInbound: (p) => owlIngest.handle({ ...p, getAttachmentBuffer: osApi.getAttachmentBuffer }) });
 osApi = os;
 const owlUploads = require('./owlUploads').mount(app, { db, auth }); const owlCatalogue = require('./owlCatalogue'); owlCatalogue.mount(app, { db, auth, getExploreFields: (m, v) => getExploreFieldsCached(m, v) }); const getOwlTools = owlCatalogue.provider(db, () => require('./owlTools')({ query, auth, db, getGoalsApi: () => goalsApi, getAlertsApi: () => alerts, getCampaignsApi: () => actionsApi, getUploadsApi: () => owlUploads, resolveTileValue, getExploreFields: (m, v) => getExploreFieldsCached(m, v), getFieldOverrides: () => require('./owlFields').build(db).read(), draftCampaignCopy: (a) => actionsApi.draftCopy(a), getSegmentsApi: () => segmentsApi, getEventOpsApi: () => eventopsApi, catalogue: owlCatalogue.effective(db) })); // Owl data: uploads + admin-editable catalogue (getOwlTools rebuilds live on field-selection change)
-require('./owlChat').mount(app, { db, auth, insights, uploads: owlUploads, messaging, getAlertsApi: () => alerts, getSegmentsApi: () => segmentsApi, getActionsApi: () => actionsApi, getExploreFields: (m, v) => getExploreFieldsCached(m, v), getOwlTools, anthropicKeyForSuite, anthropicKeyForEntity, currencyNote: (entityId, suiteId) => currency.aiNote(mailer.resolveBranding(entityId, suiteId).currency), languageNote: (entityId, suiteId) => language.aiNote(mailer.resolveBranding(entityId, suiteId).aiLanguage), whatsappDigestFor: (eid, em) => (waDigestFor ? waDigestFor(eid, em) : Promise.resolve(null)) }); // agentic Owl (disposable; askData rides the scope gate)
+require('./owlChat').mount(app, { db, auth, insights, uploads: owlUploads, messaging, getAlertsApi: () => alerts, getSegmentsApi: () => segmentsApi, getActionsApi: () => actionsApi, getTicketsApi: () => ticketsApi, getExploreFields: (m, v) => getExploreFieldsCached(m, v), getOwlTools, anthropicKeyForSuite, anthropicKeyForEntity, currencyNote: (entityId, suiteId) => currency.aiNote(mailer.resolveBranding(entityId, suiteId).currency), languageNote: (entityId, suiteId) => language.aiNote(mailer.resolveBranding(entityId, suiteId).aiLanguage), whatsappDigestFor: (eid, em) => (waDigestFor ? waDigestFor(eid, em) : Promise.resolve(null)) }); // agentic Owl (disposable; askData rides the scope gate)
 // ─── Health ───────────────────────────────────────────────────────────────────
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
@@ -547,7 +547,7 @@ app.delete('/api/admin/sets/:id', auth.requireAdmin, (req, res) => { db.deleteSe
 // settings key 'release_notes_auto'). Remove this line + server/releaseNotes.js.
 require('./releaseNotes').mount(app, { db, auth, insights, adminAnthropicKey });
 const github = require('./github').mount(app, { db, auth }); // GitHub issue bridge → server/github.js
-require('./tickets').mount(app, { db, auth, insights, adminAnthropicKey, os, github, push }); // product board → server/tickets.js (kill switch: tickets_enabled)
+const ticketsApi = require('./tickets').mount(app, { db, auth, insights, adminAnthropicKey, os, github, push }); // product board → server/tickets.js (kill switch: tickets_enabled)
 
 // ─── Client content model & navigation → server/clientModel.js ─────────────────
 // Disposable module: suite/set/dashboard model, /api/my/suites navigation, saved

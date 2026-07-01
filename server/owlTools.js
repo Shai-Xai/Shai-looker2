@@ -875,8 +875,42 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     },
   };
 
+  // ── draftReport (ACT) ─────────────────────────────────────────────────────────
+  // DRAFT a product report (bug / improvement / idea) the user describes in chat.
+  // Nothing is filed until they tap "File it" — confirm pattern like the others.
+  // Committed via POST /api/owl/act/submit-report → tickets.createTicket.
+  async function runDraftReport(args = {}, ctx = {}) {
+    if (!ctx.user) return refuse('no_user', 'No authenticated user in context.');
+    const type = ['bug', 'improvement', 'idea'].includes(args.type) ? args.type : 'bug';
+    const title = String(args.title || '').trim().slice(0, 160);
+    const description = String(args.description || '').trim().slice(0, 6000);
+    const urgency = ['low', 'normal', 'high', 'urgent'].includes(args.urgency) ? args.urgency : 'normal';
+    if (!description && !title) return refuse('empty', "Tell me what to report first — what went wrong, or what you'd like.");
+    return {
+      ok: true,
+      confirm: true,
+      action: { kind: 'draftReport', draft: { type, title, description, urgency, screen: String(args.screen || '').trim().slice(0, 200) }, summary: title || description.slice(0, 80) },
+    };
+  }
+  const draftReportSchema = {
+    name: 'draftReport',
+    description: 'DRAFT a product report — a BUG (something broken/wrong), an IMPROVEMENT (make something better), or an IDEA (a new feature/capability) — for the user to confirm. You do NOT file it; they tap "File it" on the card. Use whenever the user reports a problem, a frustration, or a wish about the app itself ("there\'s a bug…", "X is broken", "it would be great if…", "can you add…", "I wish it could…"). Capture it conversationally: infer the type, write a short clear title, and a description (for a bug: what happened + what they expected; for an idea: the objective/outcome they want). Ask at most one or two SHORT follow-ups only if the description is too thin to act on — don\'t interrogate. If they named the screen/area, pass it. After calling it, tell them you\'ve drafted the report and they can tap "File it" to send it to the product team (and that they can add a screenshot in the report form if it\'s a visual bug). Do NOT say it\'s been filed until they confirm.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        type: { type: 'string', enum: ['bug', 'improvement', 'idea'], description: 'bug = broken/wrong; improvement = make something better; idea = a new capability/feature.' },
+        title: { type: 'string', description: 'A short, specific title (under ~12 words).' },
+        description: { type: 'string', description: 'The details. For a bug: what happened + what they expected. For an idea/improvement: the objective/outcome they want.' },
+        urgency: { type: 'string', enum: ['low', 'normal', 'high', 'urgent'], description: 'Only meaningful for bugs — how impactful/urgent. Default normal.' },
+        screen: { type: 'string', description: 'The screen/area it relates to, if the user said (e.g. "Alerts", "the sales dashboard").' },
+      },
+      required: ['type', 'description'],
+    },
+  };
+
   return {
     catalogue,
+    draftReport: { schema: draftReportSchema, run: runDraftReport, menu: { cmd: 'report', label: 'Report a bug or idea', icon: '🐞', example: 'I found a bug on the alerts page' } },
     eventOps: { schema: eventOpsSchema, run: runEventOps, menu: { cmd: 'eventops', label: 'Event Ops', icon: '📟', example: 'Where is SL005, and any open issues?' } },
     askData: { schema: askDataSchema, run: runAskData, menu: { cmd: 'data', label: 'Ticket data', icon: '📊', example: 'How many tickets have I sold?' } },
     getGoals: { schema: getGoalsSchema, run: runGetGoals, menu: { cmd: 'goals', label: 'Goals', icon: '🎯', example: 'How are my goals tracking?' } },
