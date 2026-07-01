@@ -1,12 +1,15 @@
 // Client self-service: "My reports" — the bugs, improvements and ideas this user
-// has submitted (via the floating Report widget), with their live status so they
-// can see what happened. Read-only tracking; new reports are filed from the widget.
-import { useState, useEffect } from 'react';
+// has submitted (via the floating Report widget), with their live status. When the
+// team ships one, the client reviews the overview + test link here and either
+// approves it or sends it back with a reason (which reopens it for the team).
+import { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api.js';
 
 const TYPE_ICON = { bug: '🐞', improvement: '✨', idea: '💡' };
 const STATUS_STYLE = {
   shipped: { color: '#fff', background: 'var(--brand)' },
+  approved: { color: '#fff', background: '#16a34a' },
+  rejected: { color: 'var(--brand)', background: 'rgba(var(--brand-rgb), 0.14)' },
   declined: { color: 'var(--muted)', background: 'rgba(128,128,128,0.14)' },
 };
 const statusStyle = (s) => STATUS_STYLE[s] || { color: 'var(--text)', background: 'rgba(var(--brand-rgb), 0.12)' };
@@ -16,9 +19,10 @@ export default function MyReports() {
   const [open, setOpen] = useState(null);
   const [error, setError] = useState('');
 
-  useEffect(() => {
+  const load = useCallback(() => {
     api.myTickets().then((r) => setTickets(r.tickets || [])).catch((e) => setError(e.message));
   }, []);
+  useEffect(() => { load(); }, [load]);
 
   return (
     <div style={{ maxWidth: 720 }}>
@@ -34,37 +38,100 @@ export default function MyReports() {
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {tickets.map((t) => (
-            <div key={t.id} style={{ border: '1px solid var(--hairline)', borderRadius: 12, padding: 14, background: 'var(--card)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 4 }}>
-                <span style={{ fontSize: 14, fontWeight: 600 }}>
-                  {TYPE_ICON[t.type] || '📝'} {t.aiTitle || t.title || '(untitled)'}
-                </span>
-                <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 7, ...statusStyle(t.status) }}>{t.statusLabel}</span>
-              </div>
-              <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
-                {t.screen || 'unknown screen'} · {new Date(t.createdAt).toLocaleDateString()}
-              </div>
-              {(t.body || t.aiSummary) && (
-                <button onClick={() => setOpen(open === t.id ? null : t.id)} style={{ background: 'none', border: 'none', color: 'var(--brand)', fontSize: 13, fontWeight: 600, cursor: 'pointer', padding: 0 }}>
-                  {open === t.id ? 'Hide details' : 'View details'}
-                </button>
-              )}
-              {open === t.id && (
-                <div style={{ marginTop: 10, fontSize: 13, lineHeight: 1.5 }}>
-                  <div style={{ fontWeight: 600, marginBottom: 4 }}>What you reported</div>
-                  <p style={{ whiteSpace: 'pre-wrap', marginBottom: t.aiSummary ? 10 : 0 }}>{t.body || '(no description)'}</p>
-                  {t.aiStatus === 'ready' && t.aiSummary && (
-                    <>
-                      <div style={{ fontWeight: 600, marginBottom: 4 }}>How we've framed it</div>
-                      <p style={{ whiteSpace: 'pre-wrap', color: 'var(--muted)' }}>{t.aiSummary}</p>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
+            <ReportCard key={t.id} t={t} open={open === t.id} onToggle={() => setOpen(open === t.id ? null : t.id)} onChange={load} />
           ))}
         </div>
       )}
     </div>
   );
 }
+
+function ReportCard({ t, open, onToggle, onChange }) {
+  const [rejecting, setRejecting] = useState(false);
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState('');
+  const [err, setErr] = useState('');
+
+  async function verdict(v, note) {
+    setBusy(v); setErr('');
+    try { await api.ticketVerdict(t.id, { verdict: v, note }); setRejecting(false); setReason(''); onChange?.(); }
+    catch (e) { setErr(e.message); } finally { setBusy(''); }
+  }
+
+  const awaitingReview = t.status === 'shipped';
+
+  return (
+    <div style={{ border: `1px solid ${awaitingReview ? 'var(--brand)' : 'var(--hairline)'}`, borderRadius: 12, padding: 14, background: 'var(--card)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 4 }}>
+        <span style={{ fontSize: 14, fontWeight: 600 }}>
+          {TYPE_ICON[t.type] || '📝'} {t.aiTitle || t.title || '(untitled)'}
+        </span>
+        <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 7, whiteSpace: 'nowrap', ...statusStyle(t.status) }}>{t.statusLabel}</span>
+      </div>
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
+        {t.screen || 'unknown screen'} · {new Date(t.createdAt).toLocaleDateString()}
+        {(t.attachments || []).length > 0 ? ` · 📎 ${t.attachments.length}` : ''}
+      </div>
+
+      {/* Ship review: the payoff — overview, test link, approve / reject */}
+      {awaitingReview && (
+        <div style={{ background: 'rgba(var(--brand-rgb), 0.06)', border: '1px solid rgba(var(--brand-rgb), 0.2)', borderRadius: 10, padding: 12, marginBottom: 8 }}>
+          <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>🎉 This shipped — does it work for you?</div>
+          {(t.shipNote || t.aiSummary) && <p style={{ whiteSpace: 'pre-wrap', fontSize: 13, lineHeight: 1.5, marginBottom: 8 }}>{t.shipNote || t.aiSummary}</p>}
+          {t.testUrl && <a href={t.testUrl} target="_blank" rel="noreferrer" style={{ display: 'inline-block', fontSize: 13, fontWeight: 600, color: 'var(--brand)', marginBottom: 10 }}>🔗 Open it to test →</a>}
+          {err && <p style={{ color: 'var(--brand)', fontSize: 13, marginBottom: 8 }}>{err}</p>}
+          {!rejecting ? (
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => verdict('approved')} disabled={!!busy} style={approveBtn}>{busy === 'approved' ? 'Saving…' : '✓ Approve'}</button>
+              <button onClick={() => setRejecting(true)} disabled={!!busy} style={rejectBtn}>Send back</button>
+            </div>
+          ) : (
+            <div>
+              <textarea className="fld" value={reason} onChange={(e) => setReason(e.target.value)} rows={3} autoFocus
+                placeholder="What still needs fixing? Be as specific as you can — this goes straight to the team."
+                style={{ width: '100%', boxSizing: 'border-box', fontSize: 13, resize: 'vertical', marginBottom: 8 }} />
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => verdict('rejected', reason.trim())} disabled={busy === 'rejected' || !reason.trim()} style={rejectBtn}>{busy === 'rejected' ? 'Sending…' : 'Send back to the team'}</button>
+                <button onClick={() => { setRejecting(false); setReason(''); }} style={ghostBtn}>Cancel</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {t.status === 'approved' && <p style={{ fontSize: 12.5, color: '#16a34a', marginBottom: 8 }}>✓ You approved this{t.clientVerdictAt ? ` on ${new Date(t.clientVerdictAt).toLocaleDateString()}` : ''}.</p>}
+      {t.status === 'rejected' && <p style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 8 }}>↩️ Sent back to the team{t.clientVerdictNote ? `: “${t.clientVerdictNote}”` : ''}.</p>}
+
+      {(t.body || t.aiSummary || (t.attachments || []).length > 0) && (
+        <button onClick={onToggle} style={{ background: 'none', border: 'none', color: 'var(--brand)', fontSize: 13, fontWeight: 600, cursor: 'pointer', padding: 0 }}>
+          {open ? 'Hide details' : 'View details'}
+        </button>
+      )}
+      {open && (
+        <div style={{ marginTop: 10, fontSize: 13, lineHeight: 1.5 }}>
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>What you reported</div>
+          <p style={{ whiteSpace: 'pre-wrap', marginBottom: 10 }}>{t.body || '(no description)'}</p>
+          {(t.attachments || []).length > 0 && (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+              {t.attachments.map((a) => (
+                a.mime?.startsWith('video/')
+                  ? <video key={a.id} src={a.url} controls style={{ width: 180, borderRadius: 8, border: '1px solid var(--hairline)' }} />
+                  : <a key={a.id} href={a.url} target="_blank" rel="noreferrer"><img src={a.url} alt={a.name} style={{ width: 90, height: 90, objectFit: 'cover', borderRadius: 8, border: '1px solid var(--hairline)' }} /></a>
+              ))}
+            </div>
+          )}
+          {t.aiStatus === 'ready' && t.aiSummary && (
+            <>
+              <div style={{ fontWeight: 600, marginBottom: 4 }}>How we've framed it</div>
+              <p style={{ whiteSpace: 'pre-wrap', color: 'var(--muted)' }}>{t.aiSummary}</p>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const approveBtn = { padding: '9px 16px', borderRadius: 10, border: 'none', background: '#16a34a', color: '#fff', fontWeight: 700, fontSize: 14, cursor: 'pointer' };
+const rejectBtn = { padding: '9px 16px', borderRadius: 10, border: '1px solid var(--brand)', background: 'transparent', color: 'var(--brand)', fontWeight: 600, fontSize: 14, cursor: 'pointer' };
+const ghostBtn = { padding: '9px 16px', borderRadius: 10, border: '1px solid var(--hairline)', background: 'transparent', color: 'var(--text)', fontWeight: 600, fontSize: 14, cursor: 'pointer' };

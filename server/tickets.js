@@ -19,6 +19,9 @@
 // surface it in the Admin AI audit without bloating insights.js (see owlChat).
 
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
+const express = require('express');
 
 // The one hardcoded system prompt this module owns. Kept here (not in insights.js)
 // so the feature stays self-contained + disposable; referenced by name from
@@ -47,6 +50,10 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os }) {
   const sql = db.db;                 // raw better-sqlite3 handle
   const now = () => new Date().toISOString();
   const uuid = () => crypto.randomUUID();
+  // Report attachments (screenshots / images / short videos) live on the persistent
+  // disk next to the DB, in their own folder so the feature stays self-removable.
+  const ATT_DIR = path.join(process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, 'data'), 'ticket-attachments');
+  fs.mkdirSync(ATT_DIR, { recursive: true });
 
   sql.exec(`
     CREATE TABLE IF NOT EXISTS tickets (
@@ -84,22 +91,72 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os }) {
       created_at   TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_ticket_comments ON ticket_comments(ticket_id, created_at);
+
+    -- Files attached to a report (screenshot / image / video). Bytes live on disk
+    -- (ATT_DIR/<id>); this row is the metadata + the scoping anchor (via ticket).
+    CREATE TABLE IF NOT EXISTS ticket_attachments (
+      id         TEXT PRIMARY KEY,
+      ticket_id  TEXT NOT NULL,
+      name       TEXT NOT NULL,
+      mime       TEXT NOT NULL DEFAULT 'application/octet-stream',
+      size       INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_ticket_attachments ON ticket_attachments(ticket_id);
   `);
+
+  // Ship → review columns (added after the first release, so ALTER for existing DBs).
+  // ship_note = the overview of what was built; test_url = where the reporter tests it;
+  // client_verdict = approved | rejected once they've reviewed the shipped work.
+  try {
+    const cols = sql.prepare('PRAGMA table_info(tickets)').all().map((c) => c.name);
+    const add = (name, ddl) => { if (!cols.includes(name)) sql.exec(`ALTER TABLE tickets ADD COLUMN ${ddl}`); };
+    add('ship_note', "ship_note TEXT NOT NULL DEFAULT ''");
+    add('test_url', "test_url TEXT NOT NULL DEFAULT ''");
+    add('client_verdict', "client_verdict TEXT NOT NULL DEFAULT ''");
+    add('client_verdict_note', "client_verdict_note TEXT NOT NULL DEFAULT ''");
+    add('client_verdict_at', "client_verdict_at TEXT NOT NULL DEFAULT ''");
+  } catch (e) { console.error('[tickets] ship-review migration skipped:', e.message); }
 
   const enabled = () => db.getSetting('tickets_enabled', '1') !== '0'; // on by default; kill switch
   const requireOn = (req, res, next) => (enabled() ? next() : res.status(404).json({ error: 'The product board is disabled' }));
+  // Reports can carry base64 screenshots/images/short videos — bigger than the
+  // app-wide 5mb JSON cap (index.js excludes /api/my/tickets from the global parser).
+  const bigJson = express.json({ limit: '150mb' });
   const isAdmin = (u) => u && u.role === 'admin';
 
   const TYPES = ['bug', 'improvement', 'idea'];
   const URGENCIES = ['low', 'normal', 'high', 'urgent'];
-  const STATUSES = ['inbox', 'triaged', 'accepted', 'in_progress', 'in_review', 'shipped', 'declined'];
+  const STATUSES = ['inbox', 'triaged', 'accepted', 'in_progress', 'in_review', 'shipped', 'approved', 'rejected', 'declined'];
   const STATUS_LABELS = {
     inbox: 'New', triaged: 'Triaged', accepted: 'Accepted', in_progress: 'In progress',
-    in_review: 'In review', shipped: 'Shipped', declined: 'Declined',
+    in_review: 'In review', shipped: 'Shipped — awaiting review', approved: 'Approved', rejected: 'Rejected — reopen', declined: 'Declined',
   };
   const clamp = (s, n) => String(s || '').slice(0, n);
 
   const userName = (u) => (u?.fullName || [u?.firstName, u?.lastName].filter(Boolean).join(' ') || u?.email || '').trim();
+
+  // ── attachments ──
+  // Persist base64 files for a report. Caps suit a screenshot or two plus a short
+  // screen recording; oversized/empty payloads are skipped, never fatal.
+  const MAX_FILES = 4, MAX_BYTES = 30 * 1024 * 1024; // 30MB each (base64 inflates ~33%)
+  function saveAttachments(ticketId, list) {
+    let n = 0;
+    for (const f of (Array.isArray(list) ? list : []).slice(0, MAX_FILES)) {
+      try {
+        const buf = Buffer.from(String(f.data || '').replace(/^data:[^,]*,/, ''), 'base64');
+        if (!buf.length || buf.length > MAX_BYTES) continue;
+        const id = uuid();
+        fs.writeFileSync(path.join(ATT_DIR, id), buf);
+        sql.prepare('INSERT INTO ticket_attachments (id, ticket_id, name, mime, size, created_at) VALUES (?,?,?,?,?,?)')
+          .run(id, ticketId, String(f.name || 'file').slice(0, 200), String(f.mime || 'application/octet-stream').slice(0, 100), buf.length, now());
+        n += 1;
+      } catch (e) { console.error('[tickets] attachment save failed:', e.message); }
+    }
+    return n;
+  }
+  const attList = (ticketId) => sql.prepare('SELECT id, name, mime, size FROM ticket_attachments WHERE ticket_id=? ORDER BY created_at').all(ticketId)
+    .map((a) => ({ id: a.id, name: a.name, mime: a.mime, size: a.size, url: `/api/tickets/attachments/${a.id}` }));
 
   // ── shapers ──
   function ticketRow(r) {
@@ -109,7 +166,9 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os }) {
       reporterEmail: r.reporter_email, reporterName: r.reporter_name, reporterRole: r.reporter_role,
       entityId: r.entity_id, entityName: r.entity_id ? (db.getEntity(r.entity_id)?.name || '') : '',
       assignee: r.assignee, aiTitle: r.ai_title, aiSummary: r.ai_summary, aiStatus: r.ai_status,
-      createdAt: r.created_at, updatedAt: r.updated_at,
+      shipNote: r.ship_note || '', testUrl: r.test_url || '',
+      clientVerdict: r.client_verdict || '', clientVerdictNote: r.client_verdict_note || '', clientVerdictAt: r.client_verdict_at || '',
+      attachments: attList(r.id), createdAt: r.created_at, updatedAt: r.updated_at,
     };
   }
   // The client's own view: their content + progress, none of the internal dev fields.
@@ -118,7 +177,9 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os }) {
       id: r.id, type: r.type, title: r.title, body: r.body, screen: r.screen, urgency: r.urgency,
       status: r.status, statusLabel: STATUS_LABELS[r.status] || r.status,
       aiTitle: r.ai_title, aiSummary: r.ai_summary, aiStatus: r.ai_status,
-      createdAt: r.created_at, updatedAt: r.updated_at,
+      shipNote: r.ship_note || '', testUrl: r.test_url || '',
+      clientVerdict: r.client_verdict || '', clientVerdictNote: r.client_verdict_note || '', clientVerdictAt: r.client_verdict_at || '',
+      attachments: attList(r.id), createdAt: r.created_at, updatedAt: r.updated_at,
     };
   }
   const getTicket = (id) => sql.prepare('SELECT * FROM tickets WHERE id=?').get(id);
@@ -184,6 +245,7 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os }) {
     const spec = (t.ai_status === 'ready' && t.ai_summary) ? t.ai_summary
       : `**${t.type} report (unstructured — AI draft unavailable):**\n\n${t.body || '(no description)'}`;
     const heading = t.ai_title || t.title || `${t.type} report`;
+    const atts = attList(t.id);
     return [
       `# Build ticket: ${heading}`,
       '',
@@ -192,7 +254,11 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os }) {
       `- **Urgency:** ${t.urgency}`,
       `- **Reported by:** ${t.reporter_name || t.reporter_email}${t.entity_id ? ` (client: ${db.getEntity(t.entity_id)?.name || t.entity_id})` : ''}`,
       `- **Ticket id:** ${t.id}`,
+      atts.length ? `- **Attachments:** ${atts.map((a) => a.name).join(', ')} (screenshots/video the reporter added — ask a human to view these; they aren't in this text).` : '',
       '',
+      // A ticket the client sent back after review: lead with what still needs fixing.
+      t.client_verdict === 'rejected' && t.client_verdict_note
+        ? `## ⚠️ Sent back by the reporter — fix this first\n\n${t.client_verdict_note}\n` : '',
       '## Spec',
       '',
       spec,
@@ -213,7 +279,7 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os }) {
   // Any logged-in user can file. Reporter + entity are derived server-side from the
   // session (never trusted from the body) so a client can't file against another
   // client. entity_id: for a client, their (first) entity; an admin may name one.
-  app.post('/api/my/tickets', auth.requireAuth, requireOn, (req, res) => {
+  app.post('/api/my/tickets', bigJson, auth.requireAuth, requireOn, (req, res) => {
     const b = req.body || {};
     const type = TYPES.includes(b.type) ? b.type : 'bug';
     const urgency = URGENCIES.includes(b.urgency) ? b.urgency : 'normal';
@@ -233,6 +299,7 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os }) {
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
       .run(id, type, title, body, screen, urgency, 'inbox', 0, req.user.id, req.user.email, userName(req.user),
         admin ? 'admin' : 'client', entityId, 'pending', ts, ts);
+    saveAttachments(id, b.attachments); // screenshots / images / short video
     draftInBackground(id); // fire-and-forget; the row is already saved
     res.status(201).json({ ticket: myTicketRow(getTicket(id)) });
   });
@@ -241,6 +308,20 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os }) {
   app.get('/api/my/tickets', auth.requireAuth, requireOn, (req, res) => {
     const rows = sql.prepare('SELECT * FROM tickets WHERE reporter_id=? ORDER BY created_at DESC LIMIT 200').all(req.user.id);
     res.json({ tickets: rows.map(myTicketRow) });
+  });
+
+  // Serve an attachment's bytes — scoped like its ticket: an admin, or the person
+  // who reported it. Inline by default (so images/video render); ?dl to download.
+  app.get('/api/tickets/attachments/:id', auth.requireAuth, requireOn, (req, res) => {
+    const a = sql.prepare('SELECT * FROM ticket_attachments WHERE id=?').get(req.params.id);
+    if (!a) return res.status(404).json({ error: 'Not found' });
+    const t = getTicket(a.ticket_id);
+    if (!t || !(isAdmin(req.user) || t.reporter_id === req.user.id)) return res.status(403).json({ error: 'Not allowed' });
+    const file = path.join(ATT_DIR, a.id);
+    if (!fs.existsSync(file)) return res.status(404).json({ error: 'File missing' });
+    res.set('Content-Type', a.mime);
+    res.set('Content-Disposition', `${req.query.dl ? 'attachment' : 'inline'}; filename="${encodeURIComponent(a.name)}"`);
+    res.sendFile(file);
   });
 
   // ── Admin board ────────────────────────────────────────────────────────────────
@@ -282,6 +363,8 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os }) {
     if (b.priority !== undefined) set('priority', Number(b.priority) || 0);
     if (b.aiSummary !== undefined) set('ai_summary', String(b.aiSummary).slice(0, 20000));
     if (b.aiTitle !== undefined) set('ai_title', clamp(b.aiTitle, 200));
+    if (b.shipNote !== undefined) set('ship_note', clamp(b.shipNote, 8000));
+    if (b.testUrl !== undefined) set('test_url', clamp(b.testUrl, 1000).trim());
     if (!sets.length) return res.status(400).json({ error: 'Nothing to update' });
     set('updated_at', now());
     sql.prepare(`UPDATE tickets SET ${sets.join(', ')} WHERE id=?`).run(...args, t.id);
@@ -324,29 +407,62 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os }) {
 
   // When a ticket ships (or is declined), tell the client who reported it — best
   // effort, only for client-filed tickets tied to an entity, only if the OS spine
-  // is wired. Keeps the report → result loop visible to the person who raised it.
+  // is wired. On ship the message carries the overview of what was built + a test
+  // link and asks them to approve/reject under Settings → My reports (needs_reply,
+  // so it nudges). Keeps the report → result loop visible to the person who raised it.
   function notifyReporterOnShip(t, prevStatus) {
     if (!t || !os?.announce) return;
     if (t.reporter_role !== 'client' || !t.entity_id) return;
     if (t.status === prevStatus) return;
     if (t.status !== 'shipped' && t.status !== 'declined') return;
     const label = t.ai_title || t.title || 'your report';
-    const body = t.status === 'shipped'
-      ? `Good news — the ${t.type} you reported ("${label}") has shipped. Thank you for flagging it.`
-      : `An update on the ${t.type} you reported ("${label}"): we've reviewed it and won't be taking it forward for now. Thanks for the suggestion.`;
+    let body, title, priority;
+    if (t.status === 'shipped') {
+      const overview = (t.ship_note || '').trim() || (t.ai_summary || '').trim() || `We've built the ${t.type} you reported.`;
+      const parts = [
+        `Good news — the ${t.type} you reported ("${label}") has shipped. Here's what we built:`,
+        '', overview, '',
+      ];
+      if (t.test_url) parts.push(`Try it here: ${t.test_url}`, '');
+      parts.push('Please review it under Settings → My reports and let us know if it works for you — approve it, or send it back with what still needs fixing.');
+      body = parts.join('\n');
+      title = 'Your feedback shipped — please review 🎉';
+      priority = 'needs_reply';
+    } else {
+      body = `An update on the ${t.type} you reported ("${label}"): we've reviewed it and won't be taking it forward for now. Thanks for the suggestion.`;
+      title = 'Update on your feedback';
+      priority = 'fyi';
+    }
     try {
-      os.announce({
-        entityId: t.entity_id,
-        title: t.status === 'shipped' ? 'Your feedback shipped 🎉' : 'Update on your feedback',
-        body,
-        priority: 'fyi',
-        createdBy: 'Product',
-        authorType: 'system',
-        subjectType: 'ticket',
-        subjectId: t.id,
-      });
+      os.announce({ entityId: t.entity_id, title, body, priority, createdBy: 'Product', authorType: 'system', subjectType: 'ticket', subjectId: t.id });
     } catch (e) { console.error('[tickets] reporter notify failed:', e.message); }
   }
+
+  // Notify the team (as a ticket comment) when the reporter approves or rejects a
+  // shipped ticket, so the board reflects the outcome without a webhook.
+  function notifyTeamOnVerdict(t) {
+    const who = t.reporter_name || t.reporter_email || 'The reporter';
+    if (t.client_verdict === 'approved') logComment(t.id, { authorEmail: t.reporter_email, authorRole: 'client', kind: 'status', body: `✅ ${who} approved the shipped work.` });
+    else if (t.client_verdict === 'rejected') logComment(t.id, { authorEmail: t.reporter_email, authorRole: 'client', kind: 'status', body: `↩️ ${who} sent it back: ${t.client_verdict_note || '(no reason given)'}` });
+  }
+
+  // Client self-service: approve or reject the SHIPPED work. Only the reporter, only
+  // while shipped. Approve → 'approved' (done). Reject → 'rejected' (dev reopens);
+  // a reason is required so the team knows what to fix.
+  app.post('/api/my/tickets/:id/verdict', auth.requireAuth, requireOn, (req, res) => {
+    const t = getTicket(req.params.id);
+    if (!t) return res.status(404).json({ error: 'Ticket not found' });
+    if (t.reporter_id !== req.user.id) return res.status(403).json({ error: 'Not allowed' });
+    if (t.status !== 'shipped') return res.status(400).json({ error: 'This report is not awaiting your review.' });
+    const verdict = (req.body || {}).verdict;
+    if (verdict !== 'approved' && verdict !== 'rejected') return res.status(400).json({ error: 'verdict must be approved or rejected' });
+    const note = clamp((req.body || {}).note, 4000).trim();
+    if (verdict === 'rejected' && !note) return res.status(400).json({ error: 'Please say what still needs fixing.' });
+    sql.prepare('UPDATE tickets SET status=?, client_verdict=?, client_verdict_note=?, client_verdict_at=?, updated_at=? WHERE id=?')
+      .run(verdict === 'approved' ? 'approved' : 'rejected', verdict, note, now(), now(), t.id);
+    notifyTeamOnVerdict(getTicket(t.id));
+    res.json({ ticket: myTicketRow(getTicket(t.id)) });
+  });
 
   console.log('[tickets] Product board mounted', enabled() ? '(enabled)' : '(disabled — set tickets_enabled=1)');
   return { draftInBackground };

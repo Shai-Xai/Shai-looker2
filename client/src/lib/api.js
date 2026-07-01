@@ -232,6 +232,7 @@ export const api = {
   // track your own, and (admin) run the live board + Copy-for-Claude hand-off.
   submitTicket: (b) => fetch('/api/my/tickets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   myTickets: () => fetch('/api/my/tickets').then(json),
+  ticketVerdict: (id, body) => fetch(`/api/my/tickets/${id}/verdict`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
   adminTickets: (params = {}) => fetch(`/api/admin/tickets?${new URLSearchParams(params)}`).then(json),
   adminTicket: (id) => fetch(`/api/admin/tickets/${id}`).then(json),
   adminUpdateTicket: (id, b) => fetch(`/api/admin/tickets/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),

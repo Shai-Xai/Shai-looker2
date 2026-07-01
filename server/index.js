@@ -58,7 +58,8 @@ const parsesOwnBody = (p) => p === '/api/admin/import' || p.startsWith('/api/adm
   // OS messenger attachment payloads (base64) need a bigger limit — os.js parses these itself.
   || /^\/api\/os\/threads\/[^/]+\/messages$/.test(p) || p === '/api/os/admin/announce'
   // Inbound email may carry attachment PDFs (base64) — os.js parses it with a bigger limit.
-  || p === '/api/inbound/email';
+  // Bug reports can carry a screenshot/image/video (base64) — tickets.js parses that too.
+  || p === '/api/inbound/email' || p === '/api/my/tickets';
 app.use((req, res, next) => (parsesOwnBody(req.path) ? next() : jsonParser(req, res, next)));
 // API responses are personal and live (suites, branding, icons…). Without an
 // explicit header some browsers (Safari especially) heuristically cache GETs,
@@ -2355,7 +2356,6 @@ const ROLE_LENSES = {
   finance: { label: 'Finance', focus: 'Revenue, fees and costs, settlements and reconciliation, refunds and cashflow. Precise and numbers-first; suggested actions are financial/operational.' },
   ops: { label: 'Operations', focus: 'Capacity and sell-through, entry/redemption and on-the-day readiness, staffing and logistics. Suggested actions are operational prep.' },
 };
-
 
 // Produce a role-lensed digest's structured content (links resolved). Throws if
 // AI/Looker isn't configured or there's no data — callers decide how to surface.

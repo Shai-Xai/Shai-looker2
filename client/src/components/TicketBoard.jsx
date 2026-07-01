@@ -14,9 +14,9 @@ const URGENCY_STYLE = {
   normal: { color: 'var(--muted)', background: 'rgba(128,128,128,0.12)' },
   low: { color: 'var(--muted)', background: 'rgba(128,128,128,0.08)' },
 };
-const BOARD_LANES = ['inbox', 'triaged', 'accepted', 'in_progress', 'in_review', 'shipped'];
-const ALL_STATUSES = ['inbox', 'triaged', 'accepted', 'in_progress', 'in_review', 'shipped', 'declined'];
-const STATUS_LABEL = { inbox: 'New', triaged: 'Triaged', accepted: 'Accepted', in_progress: 'In progress', in_review: 'In review', shipped: 'Shipped', declined: 'Declined' };
+const BOARD_LANES = ['inbox', 'triaged', 'accepted', 'in_progress', 'in_review', 'shipped', 'rejected'];
+const ALL_STATUSES = ['inbox', 'triaged', 'accepted', 'in_progress', 'in_review', 'shipped', 'approved', 'rejected', 'declined'];
+const STATUS_LABEL = { inbox: 'New', triaged: 'Triaged', accepted: 'Accepted', in_progress: 'In progress', in_review: 'In review', shipped: 'Shipped — awaiting review', approved: 'Approved', rejected: 'Rejected — reopen', declined: 'Declined' };
 
 export default function TicketBoard() {
   const isMobile = useIsMobile();
@@ -35,7 +35,9 @@ export default function TicketBoard() {
   const labels = data?.labels || {};
   const counts = data?.counts || {};
   const byLane = (l) => (data?.tickets || []).filter((t) => t.status === l);
-  const declinedCount = counts.declined || 0;
+  const terminal = [];
+  if (counts.approved) terminal.push(`${counts.approved} approved ✅`);
+  if (counts.declined) terminal.push(`${counts.declined} declined`);
 
   function afterChange() { load(); }
 
@@ -88,9 +90,9 @@ export default function TicketBoard() {
         )
       )}
 
-      {declinedCount > 0 && (
+      {terminal.length > 0 && (
         <p style={{ color: 'var(--muted)', fontSize: 12, marginTop: 12 }}>
-          {declinedCount} declined — filter isn't shown on the board.
+          {terminal.join(' · ')} — terminal, not shown on the board.
         </p>
       )}
 
@@ -128,13 +130,17 @@ function TicketDetail({ id, onClose, onChange }) {
   const isMobile = useIsMobile();
   const [d, setD] = useState(null);
   const [aiEdit, setAiEdit] = useState('');
+  const [shipNote, setShipNote] = useState('');
+  const [testUrl, setTestUrl] = useState('');
   const [note, setNote] = useState('');
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
 
   const load = useCallback(() => {
-    api.adminTicket(id).then((r) => { setD(r); setAiEdit(r.ticket.aiSummary || ''); }).catch((e) => setErr(e.message));
+    api.adminTicket(id).then((r) => {
+      setD(r); setAiEdit(r.ticket.aiSummary || ''); setShipNote(r.ticket.shipNote || ''); setTestUrl(r.ticket.testUrl || '');
+    }).catch((e) => setErr(e.message));
   }, [id]);
   useEffect(() => { load(); }, [load]);
 
@@ -186,6 +192,17 @@ function TicketDetail({ id, onClose, onChange }) {
               {t.entityName ? ` (${t.entityName})` : ''}
             </p>
 
+            {t.clientVerdict === 'rejected' && (
+              <div style={{ ...banner, background: 'rgba(var(--brand-rgb), 0.1)', border: '1px solid var(--brand)' }}>
+                <strong>↩️ Sent back by the reporter.</strong> They said: “{t.clientVerdictNote}”. Fix it and move it back through the board — the Copy-for-Claude brief leads with this.
+              </div>
+            )}
+            {t.clientVerdict === 'approved' && (
+              <div style={{ ...banner, background: 'rgba(128,128,128,0.1)', border: '1px solid var(--hairline)' }}>
+                ✅ <strong>Approved by the reporter</strong>{t.clientVerdictAt ? ` on ${new Date(t.clientVerdictAt).toLocaleDateString()}` : ''}.
+              </div>
+            )}
+
             {/* Status + assignee controls */}
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
               <label style={ctl}>
@@ -217,6 +234,23 @@ function TicketDetail({ id, onClose, onChange }) {
               <p style={{ whiteSpace: 'pre-wrap', fontSize: 13, lineHeight: 1.5 }}>{t.body || '(no description)'}</p>
             </Section>
 
+            {/* Attachments the reporter added (screenshot / image / video) */}
+            {(t.attachments || []).length > 0 && (
+              <Section title={`Attachments (${t.attachments.length})`}>
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                  {t.attachments.map((a) => (
+                    a.mime?.startsWith('video/') ? (
+                      <video key={a.id} src={a.url} controls style={{ width: 200, borderRadius: 8, border: '1px solid var(--hairline)' }} />
+                    ) : (
+                      <a key={a.id} href={a.url} target="_blank" rel="noreferrer" title={a.name}>
+                        <img src={a.url} alt={a.name} style={{ width: 100, height: 100, objectFit: 'cover', borderRadius: 8, border: '1px solid var(--hairline)' }} />
+                      </a>
+                    )
+                  ))}
+                </div>
+              </Section>
+            )}
+
             {/* AI-structured ticket (editable) */}
             <Section title={
               <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -239,6 +273,24 @@ function TicketDetail({ id, onClose, onChange }) {
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '4px 0 16px' }}>
               <button onClick={copyBrief} style={primaryBtn}>{copied ? '✓ Copied build brief' : '📋 Copy for Claude'}</button>
             </div>
+
+            {/* Ship to the reporter: the overview + test link that ride the "Shipped"
+                notification. Fill these, then set Status → Shipped to send it. */}
+            <Section title="Ship to the reporter">
+              <p style={{ fontSize: 12, color: 'var(--muted)', marginTop: -2, marginBottom: 8 }}>
+                Once built, fill this in and set <strong>Status → Shipped</strong>. The reporter is notified with this overview and can approve it or send it back.
+              </p>
+              <label style={ctlLbl}>What was built (overview)</label>
+              <textarea className="fld" value={shipNote} onChange={(e) => setShipNote(e.target.value)} rows={3}
+                placeholder="Plain-language summary of what you changed, for the reporter to check."
+                style={{ width: '100%', boxSizing: 'border-box', fontSize: 13, resize: 'vertical', marginBottom: 8 }} />
+              <label style={ctlLbl}>Test link</label>
+              <input className="fld" value={testUrl} onChange={(e) => setTestUrl(e.target.value)} placeholder="https://…"
+                style={{ width: '100%', boxSizing: 'border-box', marginBottom: 8 }} />
+              {(shipNote !== (t.shipNote || '') || testUrl !== (t.testUrl || '')) && (
+                <button onClick={() => patch({ shipNote, testUrl }, 'ship')} disabled={busy === 'ship'} style={miniBtn}>Save</button>
+              )}
+            </Section>
 
             {/* Activity */}
             <Section title="Activity">
@@ -276,6 +328,7 @@ function Section({ title, children }) {
 }
 
 const chip = { fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 6, textTransform: 'capitalize' };
+const banner = { fontSize: 13, lineHeight: 1.45, padding: '10px 12px', borderRadius: 10, marginBottom: 14 };
 const ctl = { display: 'flex', flexDirection: 'column', gap: 3 };
 const ctlLbl = { fontSize: 11, color: 'var(--muted)', fontWeight: 600 };
 const miniBtn = { padding: '5px 10px', borderRadius: 8, border: '1px solid var(--hairline)', background: 'transparent', color: 'var(--text)', fontSize: 12, fontWeight: 600, cursor: 'pointer' };
