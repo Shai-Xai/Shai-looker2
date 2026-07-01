@@ -75,6 +75,7 @@ export default function ClientLayout() {
   const onSettlements = location.pathname.startsWith('/settlements');
   const onInbox = location.pathname.startsWith('/inbox');
   const onDigests = location.pathname.startsWith('/digests');
+  const onProduct = location.pathname.startsWith('/product');
   // Engage hub tabs: Campaigns (/engage/campaigns, default /engage) + Segments.
   const onSegments = location.pathname.startsWith('/segments') || location.pathname.startsWith('/engage/segments');
   const onActions = (location.pathname.startsWith('/actions') || location.pathname.startsWith('/engage')) && !onSegments;
@@ -440,6 +441,16 @@ export default function ClientLayout() {
               {inbox.unread > 0 && <span style={{ ...countChip, background: 'var(--brand)', color: '#fff' }}>{inbox.unread}</span>}
             </button>
           )}
+          {/* Product — report bugs/ideas and track them (everyone, incl. ops-only). */}
+          <button
+            ref={onProduct ? activeRef : null}
+            className={`nav-row${onProduct ? ' active' : ''}`}
+            style={{ ...rowBtn, fontWeight: onProduct ? 600 : 500 }}
+            onClick={() => { if (!onProduct) vtNavigate(navigate, '/product'); if (isMobile) setNavOpen(false); }}
+          >
+            <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>🎟️</span>
+            <span style={ellip}>Product</span>
+          </button>
           {!opsOnly && (can(PERMS.CAMPAIGNS_VIEW)) && (
           <>
           <div style={{ borderTop: '1px solid var(--hairline)', margin: '12px 6px 10px' }} />
@@ -621,6 +632,14 @@ export default function ClientLayout() {
                       {inbox.unread > 0 && <span style={{ ...countChip, background: 'var(--brand)', color: '#fff' }}>{inbox.unread}</span>}
                     </button>
                   )}
+                  <button
+                    className={`nav-row${onProduct ? ' active' : ''}`}
+                    style={{ ...mRowSuite, fontWeight: onProduct ? 700 : 500 }}
+                    onClick={() => { if (!onProduct) vtNavigate(navigate, '/product'); setNavOpen(false); }}
+                  >
+                    <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>🎟️</span>
+                    <span style={ellip}>Product</span>
+                  </button>
                   {can(PERMS.CAMPAIGNS_VIEW) && (
                   <>
                   <div style={{ padding: '8px 8px 6px 14px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)' }}>Engage</div>

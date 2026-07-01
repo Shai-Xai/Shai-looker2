@@ -133,6 +133,7 @@ function TicketDetail({ id, onClose, onChange }) {
   const [shipNote, setShipNote] = useState('');
   const [testUrl, setTestUrl] = useState('');
   const [note, setNote] = useState('');
+  const [assignees, setAssignees] = useState([]);
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
@@ -143,6 +144,7 @@ function TicketDetail({ id, onClose, onChange }) {
     }).catch((e) => setErr(e.message));
   }, [id]);
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { api.adminTicketAssignees().then((r) => setAssignees(r.assignees || [])).catch(() => setAssignees([])); }, []);
 
   const t = d?.ticket;
 
@@ -216,8 +218,15 @@ function TicketDetail({ id, onClose, onChange }) {
               </label>
               <label style={ctl}>
                 <span style={ctlLbl}>Assignee</span>
-                <input className="fld" defaultValue={t.assignee} placeholder="dev@howler.co.za"
-                  onBlur={(e) => e.target.value !== t.assignee && patch({ assignee: e.target.value }, 'assignee')} style={{ minWidth: 150 }} />
+                <select className="fld" value={t.assignee || ''} disabled={busy === 'assignee'}
+                  onChange={(e) => patch({ assignee: e.target.value }, 'assignee')} style={{ minWidth: 170 }}>
+                  <option value="">Unassigned</option>
+                  {/* A previously-set assignee who is no longer a dev/admin still shows. */}
+                  {t.assignee && !assignees.some((a) => a.email === t.assignee) && <option value={t.assignee}>{t.assignee}</option>}
+                  {assignees.map((a) => (
+                    <option key={a.email} value={a.email}>{a.name || a.email}{a.isDev && !a.isAdmin ? ' (dev)' : ''}</option>
+                  ))}
+                </select>
               </label>
               {t.type === 'bug' && (
                 <label style={ctl}>

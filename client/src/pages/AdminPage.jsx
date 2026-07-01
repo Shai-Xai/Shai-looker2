@@ -2203,7 +2203,7 @@ function UserDetail({ userId, entities = [], roles = [], install = null, initial
 // Edit an existing user's identity, account type and client links. Per-client
 // roles stay on each client's Logins tab; this covers everything else in one place.
 function UserEditCard({ user, memberships, entities, roles, onCancel, onSaved }) { // eslint-disable-line no-unused-vars
-  const [form, setForm] = useState({ firstName: user.firstName || '', lastName: user.lastName || '', email: user.email, mobile: user.mobile || '', password: '', inventiveWorkspaceId: user.inventiveWorkspaceId || '', howlerRole: user.howlerRole || '' });
+  const [form, setForm] = useState({ firstName: user.firstName || '', lastName: user.lastName || '', email: user.email, mobile: user.mobile || '', password: '', inventiveWorkspaceId: user.inventiveWorkspaceId || '', howlerRole: user.howlerRole || '', roles: user.roles || [] });
   const [accountType, setAccountType] = useState(user.role === 'admin' ? 'admin' : 'client');
   const [entityIds, setEntityIds] = useState((memberships || []).map((m) => m.entityId));
   const [workspaces, setWorkspaces] = useState([]);
@@ -2215,7 +2215,7 @@ function UserEditCard({ user, memberships, entities, roles, onCancel, onSaved })
   const save = async () => {
     setError(''); setBusy(true);
     try {
-      const patch = { firstName: form.firstName, lastName: form.lastName, email: form.email.trim(), mobile: form.mobile, role: accountType, entityIds, inventiveWorkspaceId: form.inventiveWorkspaceId, howlerRole: form.howlerRole };
+      const patch = { firstName: form.firstName, lastName: form.lastName, email: form.email.trim(), mobile: form.mobile, role: accountType, entityIds, inventiveWorkspaceId: form.inventiveWorkspaceId, howlerRole: form.howlerRole, roles: form.roles };
       if (form.password) patch.password = form.password; // blank = keep current
       await api.adminUpdateUser(user.id, patch);
       onSaved();
@@ -2249,6 +2249,19 @@ function UserEditCard({ user, memberships, entities, roles, onCancel, onSaved })
             </select>
           </>
         )}
+        <L>Designations</L>
+        <p style={{ ...hint, marginTop: 2 }}>Extra roles this person holds — a user can have several. <b>Developer</b> makes them assignable to tickets on the product board.</p>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '4px 0 14px' }}>
+          {[['dev', 'Developer']].map(([key, label]) => {
+            const on = (form.roles || []).includes(key);
+            return (
+              <button key={key} onClick={() => setForm({ ...form, roles: on ? form.roles.filter((r) => r !== key) : [...(form.roles || []), key] })}
+                style={on ? { ...miniBtn, background: 'var(--brand)', color: '#fff', borderColor: 'var(--brand)' } : miniBtnOutline}>
+                {on ? '✓ ' : ''}{label}
+              </button>
+            );
+          })}
+        </div>
         <L>{accountType === 'admin' ? 'Also a customer of (optional)' : 'Clients'}</L>
         <div style={{ marginTop: 4 }}><ClientLinkPicker entities={entities} value={entityIds} onChange={setEntityIds} /></div>
         <p style={{ ...hint, marginTop: 8 }}>Per-client roles are set on each client's <b>Logins</b> tab; newly-linked clients default to Owner.</p>

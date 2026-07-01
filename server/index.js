@@ -352,6 +352,7 @@ app.get('/api/admin/users', auth.requireAdmin, (_req, res) => {
       entityIds: u.entityIds, memberships: u.memberships,
       inventiveWorkspaceId: u.inventiveWorkspaceId, inventiveWorkspaceName: wsName[u.inventiveWorkspaceId] || '',
       howlerRole: u.howlerRole, howlerRoleLabel: roles.howlerRoleLabel(u.howlerRole),
+      roles: u.roles || [],
       notifyEmail: u.notifyEmail, notifyPush: u.notifyPush,
       createdAt: u.createdAt, lastLogin: u.lastLogin || null, lastActiveAt,
       lastAction: la ? { action: la.action, label: la.label, at: la.at } : null,
@@ -2008,7 +2009,6 @@ function briefingInstructionsFor(user, entityId, suites) {
   if (tune) parts.push(`This reader's standing requests — always honour these:\n${tune}`);
   return parts.join('\n\n');
 }
-
 
 // Build a scoped query body for a tile within a dashboard. Mirrors the
 // dashboard view exactly: each dashboard filter resolves to its default OR the

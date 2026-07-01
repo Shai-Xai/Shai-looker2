@@ -235,6 +235,7 @@ export const api = {
   ticketVerdict: (id, body) => fetch(`/api/my/tickets/${id}/verdict`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
   adminTickets: (params = {}) => fetch(`/api/admin/tickets?${new URLSearchParams(params)}`).then(json),
   adminTicket: (id) => fetch(`/api/admin/tickets/${id}`).then(json),
+  adminTicketAssignees: () => fetch('/api/admin/tickets/assignees').then(json),
   adminUpdateTicket: (id, b) => fetch(`/api/admin/tickets/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   adminTicketComment: (id, body) => fetch(`/api/admin/tickets/${id}/comments`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body }) }).then(json),
   adminRedraftTicket: (id) => fetch(`/api/admin/tickets/${id}/redraft`, { method: 'POST' }).then(json),

@@ -16,6 +16,7 @@ import SettlementsPage from './pages/SettlementsPage.jsx';
 import InboxPage from './os/InboxPage.jsx';
 import GoalsPage from './pages/GoalsPage.jsx';
 import AlertsPage from './pages/AlertsPage.jsx';
+import MyReportsPage from './pages/MyReportsPage.jsx';
 // Code-split the heavy / admin-only / secondary screens out of the initial
 // bundle — they load on first navigation (and clients never download the admin +
 // editor surfaces at all). The common client path stays eager for instant paint.
@@ -289,6 +290,7 @@ function Shell() {
                 <Route path="/documents/:id" element={<DocumentViewPage />} />
                 <Route path="/inbox" element={<InboxPage />} />
                 <Route path="/digests" element={<DigestsPage />} />
+                <Route path="/product" element={<MyReportsPage />} />
                 <Route path="/engage" element={<EngagePage />} />
                 <Route path="/ask" element={<InventiveAskPage />} />
                 <Route path="/event-ops" element={<EventOpsPage />} />
@@ -318,6 +320,7 @@ function Shell() {
                 <Route path="/documents/:id" element={<DocumentViewPage />} />
                 <Route path="/inbox" element={<InboxPage />} />
                 <Route path="/digests" element={<DigestsPage />} />
+                <Route path="/product" element={<MyReportsPage />} />
                 <Route path="/engage" element={<EngagePage />} />
                 <Route path="/ask" element={<InventiveAskPage />} />
                 <Route path="/event-ops" element={<EventOpsPage />} />

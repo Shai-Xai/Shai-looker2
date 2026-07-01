@@ -338,6 +338,16 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os }) {
     res.json({ tickets: rows.map(ticketRow), counts, columns: STATUSES, labels: STATUS_LABELS });
   });
 
+  // Who a ticket can be assigned to: Howler admins + anyone tagged with the 'dev'
+  // role. Declared before the :id route so "assignees" isn't read as a ticket id.
+  app.get('/api/admin/tickets/assignees', auth.requireAdmin, requireOn, (_req, res) => {
+    const users = db.listUsers().filter((u) => u.role === 'admin' || (u.roles || []).includes('dev'));
+    const assignees = users
+      .map((u) => ({ email: u.email, name: userName(u), isAdmin: u.role === 'admin', isDev: (u.roles || []).includes('dev') }))
+      .sort((a, b) => (a.name || a.email).localeCompare(b.name || b.email));
+    res.json({ assignees });
+  });
+
   app.get('/api/admin/tickets/:id', auth.requireAdmin, requireOn, (req, res) => {
     const t = getTicket(req.params.id);
     if (!t) return res.status(404).json({ error: 'Ticket not found' });

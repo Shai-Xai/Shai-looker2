@@ -9,7 +9,6 @@ import OwlAddressCard from '../components/OwlAddressCard.jsx';
 import MailLogView from '../components/MailLogView.jsx';
 import NotificationPrefs from '../components/NotificationPrefs.jsx';
 import TeamManager from '../components/TeamManager.jsx';
-import MyReports from '../components/MyReports.jsx';
 import RateCard from '../components/RateCard.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import { useProfile } from '../lib/profile.jsx';
@@ -29,7 +28,6 @@ const SECTIONS = [
   ['sentmail', 'Sent emails', '📤', PERMS.INTEGRATIONS_MANAGE],
   ['inbox', 'CC the Owl', '📨', PERMS.INTEGRATIONS_MANAGE],
   ['owlmemory', 'Owl memory', '🧠', null],
-  ['tickets', 'My reports', '🎟️', null],
 ];
 
 export default function ClientIntegrationsPage() {
@@ -90,8 +88,6 @@ export default function ClientIntegrationsPage() {
           <p style={hint}>Choose how Howler reaches you. These apply to your login across all your profiles — the in-app inbox always receives messages regardless.</p>
           <NotificationPrefs />
         </div>
-      ) : section === 'tickets' ? (
-        <MyReports />
       ) : !items ? (
         <p style={{ color: 'var(--muted)' }}>Loading…</p>
       ) : items.length === 0 ? (
