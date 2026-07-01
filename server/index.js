@@ -546,8 +546,8 @@ app.delete('/api/admin/sets/:id', auth.requireAdmin, (req, res) => { db.deleteSe
 // Disposable module: own routes + the daily auto-draft tick (kill switch:
 // settings key 'release_notes_auto'). Remove this line + server/releaseNotes.js.
 require('./releaseNotes').mount(app, { db, auth, insights, adminAnthropicKey });
-// Product feedback board (bug/idea reports → AI ticket → board → Copy-for-Claude) → server/tickets.js (kill switch: setting tickets_enabled)
-require('./tickets').mount(app, { db, auth, insights, adminAnthropicKey, os });
+const github = require('./github').mount(app, { db, auth }); // GitHub issue bridge → server/github.js
+require('./tickets').mount(app, { db, auth, insights, adminAnthropicKey, os, github }); // product board → server/tickets.js (kill switch: tickets_enabled)
 
 // ─── Client content model & navigation → server/clientModel.js ─────────────────
 // Disposable module: suite/set/dashboard model, /api/my/suites navigation, saved

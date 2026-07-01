@@ -57,6 +57,8 @@ export default function TicketBoard() {
         </div>
       </div>
 
+      <GithubConfig />
+
       {error && <p style={{ color: 'var(--brand)', fontSize: 13 }}>{error}</p>}
       {!data ? <p style={{ color: 'var(--muted)' }}>Loading…</p> : (
         isMobile ? (
@@ -97,6 +99,52 @@ export default function TicketBoard() {
       )}
 
       {openId && <TicketDetail id={openId} onClose={() => setOpenId(null)} onChange={afterChange} />}
+    </div>
+  );
+}
+
+// Admin GitHub connection: shows status + a form to set the repo and a write-only
+// token. Without a token, "Send to GitHub" opens a prefilled new-issue page; with
+// one, the app creates + links the issue directly.
+function GithubConfig() {
+  const [cfg, setCfg] = useState(null);
+  const [openForm, setOpenForm] = useState(false);
+  const [repo, setRepo] = useState('');
+  const [token, setToken] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const refresh = () => api.getGithubConfig().then((c) => { setCfg(c); setRepo(c.repo || ''); }).catch(() => {});
+  useEffect(() => { refresh(); }, []);
+  async function save() {
+    setBusy(true); setMsg('');
+    try { const c = await api.saveGithubConfig({ repo, ...(token ? { token } : {}) }); setCfg(c); setToken(''); setMsg('Saved'); setTimeout(() => setMsg(''), 1500); }
+    catch (e) { setMsg(e.message); } finally { setBusy(false); }
+  }
+  if (!cfg) return null;
+  return (
+    <div style={{ border: '1px solid var(--hairline)', borderRadius: 10, padding: '8px 12px', marginBottom: 12, fontSize: 12.5 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <span style={{ fontWeight: 700 }}>🐙 GitHub</span>
+        {cfg.configured
+          ? <span style={{ color: '#16a34a', fontWeight: 600 }}>Connected · {cfg.repo}</span>
+          : <span style={{ color: 'var(--muted)' }}>{cfg.repo ? `${cfg.repo} · no token (issues open a prefilled page)` : 'not configured — issues open a prefilled page'}</span>}
+        <span style={{ flex: 1 }} />
+        <button onClick={() => setOpenForm((o) => !o)} style={miniBtn}>{openForm ? 'Close' : 'Configure'}</button>
+      </div>
+      {openForm && (
+        <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 7, maxWidth: 460 }}>
+          <label style={ctlLbl}>Repository (owner/name)</label>
+          <input className="fld" value={repo} onChange={(e) => setRepo(e.target.value)} placeholder="owner/repo" />
+          <label style={ctlLbl}>Access token {cfg.tokenSet ? `(set: ${cfg.tokenMask} — blank keeps it)` : '(fine-grained PAT · Issues: write)'}</label>
+          <input className="fld" type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder={cfg.tokenSet ? '•••• leave blank to keep' : 'github_pat_…'} autoComplete="off" />
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button onClick={save} disabled={busy} style={primaryBtn}>{busy ? 'Saving…' : 'Save'}</button>
+            {cfg.tokenSet && <button onClick={async () => { await api.saveGithubConfig({ clearToken: true }); refresh(); }} style={miniBtn}>Remove token</button>}
+            {msg && <span style={{ color: 'var(--muted)' }}>{msg}</span>}
+          </div>
+          <p style={{ color: 'var(--muted)', fontSize: 11.5, margin: 0 }}>No token → "Send to GitHub" opens a prefilled new-issue page in your browser. With a token → the app creates + links the issue automatically.</p>
+        </div>
+      )}
     </div>
   );
 }
@@ -169,6 +217,16 @@ function TicketDetail({ id, onClose, onChange }) {
     navigator.clipboard?.writeText(d.claudeBrief).then(() => {
       setCopied(true); setTimeout(() => setCopied(false), 2000);
     }).catch(() => setErr('Could not copy — select and copy manually.'));
+  }
+  async function sendToGithub() {
+    setBusy('gh'); setErr('');
+    try {
+      const r = await api.adminTicketGithubIssue(id);
+      if (r.needsConfig) {
+        if (r.prefillUrl) window.open(r.prefillUrl, '_blank', 'noopener');
+        else setErr('Set a GitHub repo in the GitHub panel (top of the board) to link issues.');
+      } else { await load(); onChange?.(); }
+    } catch (e) { setErr(e.message); } finally { setBusy(''); }
   }
 
   return (
@@ -278,9 +336,14 @@ function TicketDetail({ id, onClose, onChange }) {
               )}
             </Section>
 
-            {/* Copy for Claude */}
+            {/* Hand-off: copy the brief, or file it as a GitHub issue */}
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '4px 0 16px' }}>
               <button onClick={copyBrief} style={primaryBtn}>{copied ? '✓ Copied build brief' : '📋 Copy for Claude'}</button>
+              {t.githubUrl ? (
+                <a href={t.githubUrl} target="_blank" rel="noreferrer" style={{ ...ghBtn, textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}>🐙 Issue #{t.githubIssue} ↗</a>
+              ) : (
+                <button onClick={sendToGithub} disabled={busy === 'gh'} style={ghBtn}>{busy === 'gh' ? 'Creating…' : '🐙 Send to GitHub'}</button>
+              )}
             </div>
 
             {/* Ship to the reporter: the overview + test link that ride the "Shipped"
@@ -342,6 +405,7 @@ const ctl = { display: 'flex', flexDirection: 'column', gap: 3 };
 const ctlLbl = { fontSize: 11, color: 'var(--muted)', fontWeight: 600 };
 const miniBtn = { padding: '5px 10px', borderRadius: 8, border: '1px solid var(--hairline)', background: 'transparent', color: 'var(--text)', fontSize: 12, fontWeight: 600, cursor: 'pointer' };
 const primaryBtn = { padding: '9px 14px', borderRadius: 10, border: 'none', background: 'var(--brand)', color: '#fff', fontWeight: 600, fontSize: 14, cursor: 'pointer' };
+const ghBtn = { padding: '9px 14px', borderRadius: 10, border: '1px solid var(--hairline)', background: 'transparent', color: 'var(--text)', fontWeight: 600, fontSize: 14, cursor: 'pointer' };
 function pill(active) {
   return {
     padding: '6px 12px', borderRadius: 999, fontSize: 12, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',

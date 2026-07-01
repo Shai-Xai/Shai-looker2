@@ -46,7 +46,7 @@ Rules:
 - Keep it tight and skimmable — short sentences, bullets over prose. No preamble, no sign-off, no emojis.
 - Remember Pulse's principles: mobile-first, and every client-facing feature ships with both an admin surface and client self-service. Flag it in the ticket if the request would need both.`;
 
-function mount(app, { db, auth, insights, adminAnthropicKey, os }) {
+function mount(app, { db, auth, insights, adminAnthropicKey, os, github }) {
   const sql = db.db;                 // raw better-sqlite3 handle
   const now = () => new Date().toISOString();
   const uuid = () => crypto.randomUUID();
@@ -116,6 +116,8 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os }) {
     add('client_verdict', "client_verdict TEXT NOT NULL DEFAULT ''");
     add('client_verdict_note', "client_verdict_note TEXT NOT NULL DEFAULT ''");
     add('client_verdict_at', "client_verdict_at TEXT NOT NULL DEFAULT ''");
+    add('github_issue_number', 'github_issue_number INTEGER NOT NULL DEFAULT 0');
+    add('github_url', "github_url TEXT NOT NULL DEFAULT ''");
   } catch (e) { console.error('[tickets] ship-review migration skipped:', e.message); }
 
   const enabled = () => db.getSetting('tickets_enabled', '1') !== '0'; // on by default; kill switch
@@ -168,6 +170,7 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os }) {
       assignee: r.assignee, aiTitle: r.ai_title, aiSummary: r.ai_summary, aiStatus: r.ai_status,
       shipNote: r.ship_note || '', testUrl: r.test_url || '',
       clientVerdict: r.client_verdict || '', clientVerdictNote: r.client_verdict_note || '', clientVerdictAt: r.client_verdict_at || '',
+      githubIssue: r.github_issue_number || 0, githubUrl: r.github_url || '',
       attachments: attList(r.id), createdAt: r.created_at, updatedAt: r.updated_at,
     };
   }
@@ -352,6 +355,29 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os }) {
     const t = getTicket(req.params.id);
     if (!t) return res.status(404).json({ error: 'Ticket not found' });
     res.json({ ticket: ticketRow(t), comments: comments(t.id), claudeBrief: claudeBrief(t) });
+  });
+
+  // Create a GitHub issue from this ticket (the build brief becomes the issue body).
+  // If GitHub isn't configured, hand back a prefilled new-issue URL so the admin's
+  // browser can file it manually — the feature works with zero server credentials.
+  app.post('/api/admin/tickets/:id/github-issue', auth.requireAdmin, requireOn, async (req, res) => {
+    const t = getTicket(req.params.id);
+    if (!t) return res.status(404).json({ error: 'Ticket not found' });
+    if (t.github_url) return res.json({ ticket: ticketRow(t), alreadyLinked: true });
+    const title = t.ai_title || t.title || `${t.type} report`;
+    const body = `${claudeBrief(t)}\n\n---\n_Filed from Howler Pulse · ticket ${t.id}_`;
+    if (!github?.isConfigured?.()) {
+      return res.json({ needsConfig: true, prefillUrl: github?.newIssueUrl?.({ title, body }) || '' });
+    }
+    try {
+      const issue = await github.createIssue({ title, body });
+      sql.prepare('UPDATE tickets SET github_issue_number=?, github_url=?, updated_at=? WHERE id=?').run(issue.number, issue.url, now(), t.id);
+      logComment(t.id, { authorEmail: req.user.email, authorRole: 'admin', kind: 'system', body: `Created GitHub issue #${issue.number}: ${issue.url}` });
+      res.status(201).json({ ticket: ticketRow(getTicket(t.id)), issue });
+    } catch (e) {
+      console.error('[tickets] github issue failed:', e.message);
+      res.status(500).json({ error: e.message });
+    }
   });
 
   // Update a ticket: status / assignee / priority / type / urgency / edited AI ticket.
