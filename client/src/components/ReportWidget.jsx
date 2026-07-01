@@ -1,12 +1,17 @@
-// App-wide "Report" widget — a floating button on every screen (for staff AND
-// clients) that opens the shared report form. Because it's mounted globally it
-// auto-captures the screen the reporter was on. Bottom-LEFT so it never collides
-// with the Owl chat launcher (bottom-right). The form itself lives in ReportForm.
-import { useState } from 'react';
+// App-wide host for the "Report a bug/idea" modal. There's no floating button any
+// more — the entry points live in the LEFT NAV of each shell (ClientLayout +
+// AdminPage), which call openReport() to open this. Mounted globally so the form
+// (and the current-screen capture) works from anywhere. Form lives in ReportForm.
+import { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../lib/auth.jsx';
-import { useIsMobile } from '../lib/useIsMobile.js';
 import ReportForm from './ReportForm.jsx';
+
+const REPORT_EVENT = 'pulse:open-report';
+// Open the report modal from anywhere (e.g. a left-nav "Report an issue" item).
+export function openReport() {
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(REPORT_EVENT));
+}
 
 // A readable label for the current screen (strip ids so it reads as an area).
 function screenLabel(pathname) {
@@ -17,31 +22,15 @@ function screenLabel(pathname) {
 export default function ReportWidget() {
   const { user } = useAuth();
   const location = useLocation();
-  const isMobile = useIsMobile();
   const [open, setOpen] = useState(false);
+  useEffect(() => {
+    const onOpen = () => setOpen(true);
+    window.addEventListener(REPORT_EVENT, onOpen);
+    return () => window.removeEventListener(REPORT_EVENT, onOpen);
+  }, []);
 
   // Only for logged-in users; never on the login/recovery screens.
   if (!user) return null;
 
-  return (
-    <>
-      <button
-        onClick={() => setOpen(true)}
-        aria-label="Report a bug or idea"
-        title="Report a bug, improvement or idea"
-        style={{
-          // Desktop: the left side is a full-height sidebar (nav + pinned account
-          // footer), so ANY left position overlaps it. Sit bottom-RIGHT, stacked
-          // ABOVE the Owl launcher (bottom-right, ~54px tall at bottom:20). Mobile:
-          // the nav is a drawer (no fixed sidebar), so keep the low bottom-left spot.
-          position: 'fixed', zIndex: 54, bottom: isMobile ? 20 : 86,
-          ...(isMobile ? { left: 16 } : { right: 24 }),
-          width: 54, height: 54, borderRadius: '50%', border: '1px solid var(--hairline)',
-          background: 'var(--card)', boxShadow: '0 6px 22px rgba(0,0,0,0.3)', cursor: 'pointer',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22,
-        }}
-      >💬</button>
-      <ReportForm open={open} onClose={() => setOpen(false)} screen={screenLabel(location.pathname)} />
-    </>
-  );
+  return <ReportForm open={open} onClose={() => setOpen(false)} screen={screenLabel(location.pathname)} />;
 }

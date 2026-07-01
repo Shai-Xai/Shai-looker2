@@ -17,6 +17,7 @@ import RateCard from '../components/RateCard.jsx';
 import { BriefingConfigForm } from '../components/BriefingTuneModal.jsx';
 import StatusNoticesAdmin from '../components/StatusNoticesAdmin.jsx';
 import TicketBoard from '../components/TicketBoard.jsx';
+import { openReport } from '../components/ReportWidget.jsx';
 import OwlGuidanceEditor from '../components/OwlGuidanceEditor.jsx';
 import OwlFieldDictionary from '../components/OwlFieldDictionary.jsx';
 import OwlMemoryEditor from '../components/OwlMemoryEditor.jsx';
@@ -179,6 +180,7 @@ export default function AdminPage() {
         </div>
         <div style={{ display: 'flex', gap: 8, marginBottom: 18, overflowX: 'auto', paddingBottom: 4 }}>
           {ADMIN_NAV.map(([key, label]) => <Tab key={key} active={tab === key} onClick={() => setTab(key)}>{label}</Tab>)}
+          <Tab active={false} onClick={openReport}>💬 Report</Tab>
         </div>
         {content}
       </main>
@@ -206,6 +208,15 @@ export default function AdminPage() {
               {label}
             </button>
           ))}
+          {/* Report an issue — opens the report modal (replaces the old floating button). */}
+          <button onClick={openReport} style={{
+            display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', cursor: 'pointer',
+            padding: '9px 12px', borderRadius: 9, border: 'none', fontSize: 13.5, fontWeight: 500,
+            background: 'transparent', color: 'var(--text)', marginTop: 6,
+          }}>
+            <span style={{ fontSize: 15, width: 18, textAlign: 'center', opacity: 0.8 }}>💬</span>
+            Report an issue
+          </button>
           {/* Account (theme · Log out) pinned at the bottom of the rail, mirroring
               the client sidebar's bottom-left profile menu. */}
           <AdminProfileFooter />

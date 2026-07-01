@@ -13,6 +13,7 @@ import { FEATURES, owlNativeChatEnabled } from '../lib/features.js';
 import AnalystDrawer from '../components/AnalystDrawer.jsx';
 import OwlChat from '../components/OwlChat.jsx';
 import StatusNoticeBanner from '../components/StatusNoticeBanner.jsx';
+import { openReport } from '../components/ReportWidget.jsx';
 import AiMark from '../components/AiMark.jsx';
 
 // Persistent client shell: a left sidebar tree of Suites → Sets → Dashboards,
@@ -451,6 +452,15 @@ export default function ClientLayout() {
             <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>🎟️</span>
             <span style={ellip}>Product</span>
           </button>
+          {/* Report an issue — opens the report modal (replaces the old floating button). */}
+          <button
+            className="nav-row"
+            style={{ ...rowBtn, fontWeight: 500 }}
+            onClick={() => { openReport(); if (isMobile) setNavOpen(false); }}
+          >
+            <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>💬</span>
+            <span style={ellip}>Report an issue</span>
+          </button>
           {!opsOnly && (can(PERMS.CAMPAIGNS_VIEW)) && (
           <>
           <div style={{ borderTop: '1px solid var(--hairline)', margin: '12px 6px 10px' }} />
@@ -639,6 +649,14 @@ export default function ClientLayout() {
                   >
                     <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>🎟️</span>
                     <span style={ellip}>Product</span>
+                  </button>
+                  <button
+                    className="nav-row"
+                    style={{ ...mRowSuite, fontWeight: 500 }}
+                    onClick={() => { openReport(); setNavOpen(false); }}
+                  >
+                    <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>💬</span>
+                    <span style={ellip}>Report an issue</span>
                   </button>
                   {can(PERMS.CAMPAIGNS_VIEW) && (
                   <>
