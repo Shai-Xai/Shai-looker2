@@ -14,7 +14,7 @@ const URGENCY_STYLE = {
   normal: { color: 'var(--muted)', background: 'rgba(128,128,128,0.12)' },
   low: { color: 'var(--muted)', background: 'rgba(128,128,128,0.08)' },
 };
-const BOARD_LANES = ['inbox', 'triaged', 'accepted', 'in_progress', 'shipped', 'rejected'];
+const BOARD_LANES = ['inbox', 'triaged', 'accepted', 'in_progress', 'shipped', 'rejected', 'approved'];
 const ALL_STATUSES = ['inbox', 'triaged', 'accepted', 'in_progress', 'shipped', 'approved', 'rejected', 'declined'];
 const STATUS_LABEL = { inbox: 'New', triaged: 'Triaged', accepted: 'Accepted', in_progress: 'In progress', shipped: 'Shipped — awaiting review', approved: 'Approved', rejected: 'Rejected — reopen', declined: 'Declined' };
 
@@ -36,7 +36,6 @@ export default function TicketBoard() {
   const counts = data?.counts || {};
   const byLane = (l) => (data?.tickets || []).filter((t) => t.status === l);
   const terminal = [];
-  if (counts.approved) terminal.push(`${counts.approved} approved ✅`);
   if (counts.declined) terminal.push(`${counts.declined} declined`);
 
   function afterChange() { load(); }
