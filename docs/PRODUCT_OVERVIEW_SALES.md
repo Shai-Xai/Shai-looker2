@@ -200,12 +200,15 @@ lists, subtract a suppression list, and it stays live."
 - Send **email, SMS, or both** to a segment, tile or pasted list.
 - **AI-drafted copy** you can edit; branded template, **drag-to-order block builder**, or custom HTML; hero image.
 - **Email block builder** ✅ (🧪 new) — a Mailchimp-style content builder: stack **heading, text, list, quote, image, button, video, social, menu-links, HTML and spacer/divider** blocks plus **multi-column layouts (up to 4, side-by-side on desktop, auto-stacking on mobile)**. **Drag to reorder** (↑/↓ on touch), edit inline, delete. Everything is wrapped in the client's branding (logo, colours, unsubscribe) automatically; button/image/menu links are tracked; merge tokens work in text. Built emails can be **saved as reusable templates**.
-- **AI email design** ✅ (🧪 new) — two ways the Owl helps *design*, not just write:
-  **(1) Themes** — pick a look (Clean / Bold / Warm / Minimal) with optional accent, font
-  and button shape; the whole email restyles instantly (accent defaults to the client's
-  brand colour). **(2) AI banners** — on any image block, tap **✨ Design with AI**, describe
-  the banner ("sunset festival, headline *Last chance*"), and the Owl draws an on-brand
-  banner from the client's colours that drops straight in. Both stay editable and brand-safe.
+- **AI email design** ✅ (🧪 new) — the Owl helps *design*, not just write:
+  **(1) Full designed emails** — when the Owl drafts a campaign it now builds a complete
+  **themed, multi-block layout** (heading, copy, list/quote, columns, a button) — the same
+  building blocks a human uses — and lands it in the builder to tweak. **(2) Themes** —
+  pick a look (Clean / Bold / Warm / Minimal) with optional accent, font and button shape;
+  the whole email restyles instantly (accent defaults to the client's brand colour).
+  **(3) AI banners** — on any image block, tap **✨ Design with AI**, describe the banner
+  ("sunset festival, headline *Last chance*"), and the Owl draws an on-brand banner that
+  drops straight in. All stay fully editable and brand-safe.
 - **Merge fields** ✅ — personalise with `{{name}}`, `{{ticketType}}`, and **any
   column** from the audience (`{{City}}`, `{{Ticket Type}}`…). Preview renders with
   a real sample recipient.

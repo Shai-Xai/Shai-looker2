@@ -994,7 +994,7 @@ function CampaignActionCard({ action, suiteId }) {
   const create = async () => {
     setState('busy'); setErr('');
     try {
-      const r = await api.owlDraftCampaign({ entityId: action.entityId, name: action.name, channel: action.channel, goal: action.goal, audience: action.audience, audienceName: action.summary, subject: action.subject, body: action.body, ctaText: action.ctaText, ctaUrl: action.ctaUrl, customHtml: html || undefined, suiteId: suiteId || undefined });
+      const r = await api.owlDraftCampaign({ entityId: action.entityId, name: action.name, channel: action.channel, goal: action.goal, audience: action.audience, audienceName: action.summary, subject: action.subject, body: action.body, ctaText: action.ctaText, ctaUrl: action.ctaUrl, customHtml: html || undefined, contentMode: action.contentMode, blocks: action.blocks, theme: action.theme, suiteId: suiteId || undefined });
       setUrl((r && r.url) || '');
       setState('done');
     } catch (e) { setState('error'); setErr((e && e.message) || 'Could not create the campaign.'); }

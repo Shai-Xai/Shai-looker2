@@ -396,7 +396,9 @@ function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, ant
           ctaText: String(pend.ctaText || ''), ctaUrl: String(pend.ctaUrl || ''),
           goal: String(pend.goal || ''), eventSuiteId: String(pend.suiteId || ''), campaignMode: 'once',
           language: String(pend.language || '').slice(0, 5).toLowerCase(), // per-campaign AI language (blank → client default)
-          contentMode: 'template', customHtml: '', source: 'owl-whatsapp', // tag where it was drafted (for the Engage badge)
+          // A designed email arrives as block content (theme + blocks); cleanConfig sanitises.
+          contentMode: pend.contentMode === 'blocks' ? 'blocks' : 'template', blocks: Array.isArray(pend.blocks) ? pend.blocks : [], theme: pend.theme || {},
+          customHtml: '', source: 'owl-whatsapp', // tag where it was drafted (for the Engage badge)
         };
         const api = getActionsApi && getActionsApi();
         const r = api && api.createDraftCampaign ? api.createDraftCampaign({ entityId: pend.entityId, title: pend.name, config, user }) : { ok: false, error: 'Campaigns unavailable' };

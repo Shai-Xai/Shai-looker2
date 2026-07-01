@@ -19,7 +19,7 @@ const defaultCatalogue = require('./owlCatalogueSeed');
 // there and the Owl can immediately set + ask for it; no second list to keep in sync).
 const { OPERATORS: ALERT_OPERATORS, CHANNELS: ALERT_CHANNELS, PRIORITIES: ALERT_PRIORITIES } = require('./alerts');
 
-module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAlertsApi, getCampaignsApi, getUploadsApi, resolveTileValue, getExploreFields, getFieldOverrides, draftCampaignCopy, getSegmentsApi, getEventOpsApi, catalogue = defaultCatalogue }) {
+module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAlertsApi, getCampaignsApi, getUploadsApi, resolveTileValue, getExploreFields, getFieldOverrides, draftCampaignCopy, designEmailFn, getSegmentsApi, getEventOpsApi, catalogue = defaultCatalogue }) {
   if (!query || !query.applyScope || !query.runLookerQuery) {
     throw new Error('owlTools requires the query engine (applyScope + runLookerQuery).');
   }
@@ -798,18 +798,30 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
       const cap = smsCapFor(entityId);
       if ((reach.sms || 0) > cap) reach = { ...reach, sms: cap, smsCapped: true, smsCap: cap };
     }
-    // Draft the copy with the existing campaign copywriter (subject/body/cta).
+    // DESIGN the email like the builder does: a theme + content blocks. Falls back to
+    // plain subject/body copy if the designer is unavailable or returns nothing usable.
+    const audienceCount = (reach && reach.total) || 0;
+    const su = suiteId && db && db.getSuite ? db.getSuite(suiteId) : null;
+    let designed = null;
+    try { if (typeof designEmailFn === 'function') designed = await designEmailFn({ entityId, goal, audienceCount, eventSuiteId: suiteId || '', eventName: su?.name || '' }); } catch { designed = null; }
     let copy = {};
-    try { if (typeof draftCampaignCopy === 'function') copy = (await draftCampaignCopy({ entityId, goal, audienceCount: (reach && reach.total) || 0, eventSuiteId: suiteId || '', language: lang })) || {}; } catch { copy = {}; }
-    if (!copy.subject && !copy.body) return refuse('draft_failed', 'I couldn\'t draft the copy just now — try again in a moment, or build it in Engage.');
-    const name = String(args.name || '').trim().slice(0, 120) || (copy.subject ? String(copy.subject).slice(0, 80) : (summary || 'Campaign'));
+    if (!(designed && Array.isArray(designed.blocks) && designed.blocks.length)) {
+      try { if (typeof draftCampaignCopy === 'function') copy = (await draftCampaignCopy({ entityId, goal, audienceCount, eventSuiteId: suiteId || '', language: lang })) || {}; } catch { copy = {}; }
+    }
+    const subject = (designed && designed.subject) || copy.subject || '';
+    if (!designed && !subject && !copy.body) return refuse('draft_failed', 'I couldn\'t draft the email just now — try again in a moment, or build it in Engage.');
+    const name = String(args.name || '').trim().slice(0, 120) || (subject ? String(subject).slice(0, 80) : (summary || 'Campaign'));
     return {
       ok: true,
       confirm: true,
       action: {
         kind: 'draftCampaign', entityId, name, channel, goal, language: lang,
         audience, summary, reach,
-        subject: copy.subject || '', body: copy.body || '', ctaText: copy.ctaText || '',
+        // Designed → block builder (theme + blocks); else classic subject/body template.
+        contentMode: designed ? 'blocks' : 'template',
+        blocks: designed ? designed.blocks : [],
+        theme: designed ? designed.theme : null,
+        subject, body: copy.body || '', ctaText: copy.ctaText || '',
         ctaUrl: String(args.ctaUrl || '').slice(0, 500),
       },
     };

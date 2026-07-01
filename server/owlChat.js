@@ -642,7 +642,7 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getExploreFields
   // ownership + campaigns.approve inside createDraftCampaign.
   app.post('/api/owl/act/draft-campaign', auth.requireAuth, (req, res) => {
     if (!owlAllowed(req.user)) return res.status(403).json({ error: 'The native Owl isn\'t enabled for your account yet.' });
-    const { entityId, name, channel, goal, subject, body, ctaText, ctaUrl, suiteId, audienceName, customHtml, language: lang } = req.body || {};
+    const { entityId, name, channel, goal, subject, body, ctaText, ctaUrl, suiteId, audienceName, customHtml, language: lang, contentMode: cMode, blocks, theme } = req.body || {};
     let { audience } = req.body || {};
     if (!entityId || !audience || typeof audience !== 'object') return res.status(400).json({ error: 'entityId and audience are required.' });
     const actionsApi = typeof getActionsApi === 'function' ? getActionsApi() : null;
@@ -670,8 +670,10 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getExploreFields
       ctaUrl: String(ctaUrl || ''),
       goal: String(goal || ''), eventSuiteId: String(suiteId || ''), campaignMode: 'once',
       language: String(lang || '').slice(0, 5).toLowerCase(), // per-campaign AI language (blank → client default)
-      // Custom HTML body when the user uploaded one; otherwise the rendered template.
-      contentMode: html ? 'html' : 'template', customHtml: html,
+      // A designed email arrives as block-builder content (theme + blocks); else custom
+      // HTML (uploaded) or the classic template. cleanConfig sanitises blocks + theme.
+      contentMode: cMode === 'blocks' ? 'blocks' : html ? 'html' : 'template', customHtml: html,
+      blocks: Array.isArray(blocks) ? blocks : [], theme: theme || {},
     };
     const r = actionsApi.createDraftCampaign({ entityId, title: name, config, user: req.user });
     if (!r.ok) return res.status(r.error === 'Not allowed' ? 403 : 400).json({ error: r.error || 'Could not create the campaign.' });
