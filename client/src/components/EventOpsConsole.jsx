@@ -595,11 +595,10 @@ function DeviceActionSheet({ suiteId, device, onClose, onDone }) {
 function MapTab({ suiteId, canManage, isMobile, reloadKey, onStation }) {
   const [stations, setStations] = useState(null);
   const [drag, setDrag] = useState(null);      // { id, x, y } live position mid-drag
-  const [selected, setSelected] = useState(null); // selected station id (manage mode)
   const canvasRef = useRef(null);
 
   useEffect(() => {
-    setStations(null); setSelected(null);
+    setStations(null);
     api.eventopsStations(suiteId).then((r) => setStations(r.stations || [])).catch(() => setStations([]));
   }, [suiteId, reloadKey]);
 
@@ -637,8 +636,7 @@ function MapTab({ suiteId, canManage, isMobile, reloadKey, onStation }) {
       document.removeEventListener('pointerup', up);
       setDrag(null);
       if (moved) patch(s.id, { x: last.x, y: last.y });
-      else if (canManage) setSelected(s.id); // tap (no drag) selects → resize/rotate/open
-      else onStation?.(s);
+      else onStation?.(s); // a tap (no drag) opens the drawer
     };
     document.addEventListener('pointermove', move);
     document.addEventListener('pointerup', up);
@@ -646,50 +644,44 @@ function MapTab({ suiteId, canManage, isMobile, reloadKey, onStation }) {
 
   if (stations === null) return <Loading />;
   if (!stations.length) return <Empty>No stations yet — add stations first, then drag them onto the map.</Empty>;
-  const sel = (stations || []).find((s) => s.id === selected);
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>
-        {canManage ? 'Drag to move. Tap a station to select it, then resize · rotate · open. ' : 'Tap a station to see its devices & issues.'}
+        Tap a station to see its devices &amp; issues.{canManage ? ' Drag to move; use the ± and ↺↻ handles on a station to resize / rotate it.' : ''}
       </div>
-      {canManage && sel && (
-        <div style={mapToolbar}>
-          <span style={{ fontWeight: 700, fontSize: 13 }}>{sel.name}</span>
-          <button onClick={() => onStation?.(sel)} style={ghostBtn}>Open</button>
-          <span style={tbGroup}>
-            <button onClick={() => patch(sel.id, { scale: Math.max(0.4, +(sel.scale || 1) - 0.15) })} style={iconBtn}>－</button>
-            <span style={{ fontSize: 12, color: 'var(--muted)', minWidth: 36, textAlign: 'center' }}>{Math.round((sel.scale || 1) * 100)}%</span>
-            <button onClick={() => patch(sel.id, { scale: Math.min(3, +(sel.scale || 1) + 0.15) })} style={iconBtn}>＋</button>
-          </span>
-          <span style={tbGroup}>
-            <button onClick={() => patch(sel.id, { rotation: (((sel.rotation || 0) - 15) % 360 + 360) % 360 })} style={iconBtn}>↺</button>
-            <button onClick={() => patch(sel.id, { rotation: ((sel.rotation || 0) + 15) % 360 })} style={iconBtn}>↻</button>
-          </span>
-          <button onClick={() => setSelected(null)} style={ghostBtn}>Done</button>
-        </div>
-      )}
-      <div ref={canvasRef} style={{ ...mapCanvas, height: isMobile ? 440 : 600 }} onPointerDown={(e) => { if (e.target === e.currentTarget) setSelected(null); }}>
+      <div ref={canvasRef} style={{ ...mapCanvas, height: isMobile ? 440 : 600 }}>
         {placed.map((s) => {
           const live = drag && drag.id === s.id ? drag : { x: s._x, y: s._y };
-          const isSel = selected === s.id;
-          const border = isSel ? 'var(--brand)' : s.openIssues ? 'var(--error)' : s.deviceCount ? 'var(--brand)' : 'var(--border)';
+          const rot = s.rotation || 0; const sc = s.scale || 1;
+          const border = s.openIssues ? 'var(--error)' : s.deviceCount ? 'var(--brand)' : 'var(--border)';
+          const bump = (fields, ev) => { ev.stopPropagation(); patch(s.id, fields); };
           return (
-            <button
+            <div
               key={s.id}
-              onPointerDown={canManage ? (e) => { e.preventDefault(); startDrag(e, s); } : undefined}
-              onClick={canManage ? undefined : () => onStation?.(s)}
-              onDoubleClick={() => onStation?.(s)}
-              style={{ ...mapPin, left: `${live.x * 100}%`, top: `${live.y * 100}%`,
-                transform: `translate(-50%, -50%) rotate(${s.rotation || 0}deg) scale(${s.scale || 1})`,
-                cursor: canManage ? 'grab' : 'pointer', borderColor: border,
-                boxShadow: isSel ? '0 0 0 3px rgba(var(--brand-rgb),0.35)' : 'var(--shadow-sm)' }}
               title={s.name}
+              onPointerDown={canManage ? (e) => { if (e.target.closest('[data-ctrl]')) return; e.preventDefault(); startDrag(e, s); } : undefined}
+              onClick={canManage ? undefined : () => onStation?.(s)}
+              style={{ ...mapPin, left: `${live.x * 100}%`, top: `${live.y * 100}%`,
+                transform: `translate(-50%, -50%) rotate(${rot}deg) scale(${sc})`,
+                cursor: canManage ? 'grab' : 'pointer', borderColor: border }}
             >
               {s.openIssues > 0 && <span style={mapPinIssue}>⚠ {s.openIssues}</span>}
               <span style={{ fontSize: 18, lineHeight: 1 }}>{KIND_ICON[s.kind] || '📍'}</span>
               <span style={{ fontSize: 12, fontWeight: 700, marginTop: 2, maxWidth: 90, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</span>
               <span style={mapPinCount}>{s.deviceCount}</span>
-            </button>
+              {canManage && (
+                // Resize / rotate handles ON the tile. Counter-transform keeps them upright &
+                // a constant size regardless of the tile's own scale/rotation. stopPropagation
+                // so a handle tap never starts a drag or opens the drawer.
+                <div data-ctrl onPointerDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}
+                  style={{ ...pinCtrls, transform: `rotate(${-rot}deg) scale(${1 / sc})` }}>
+                  <button style={pinCtrlBtn} title="Smaller" onClick={(e) => bump({ scale: Math.max(0.4, +sc - 0.15) }, e)}>－</button>
+                  <button style={pinCtrlBtn} title="Bigger" onClick={(e) => bump({ scale: Math.min(3, +sc + 0.15) }, e)}>＋</button>
+                  <button style={pinCtrlBtn} title="Rotate left" onClick={(e) => bump({ rotation: ((rot - 15) % 360 + 360) % 360 }, e)}>↺</button>
+                  <button style={pinCtrlBtn} title="Rotate right" onClick={(e) => bump({ rotation: (rot + 15) % 360 }, e)}>↻</button>
+                </div>
+              )}
+            </div>
           );
         })}
       </div>
@@ -1157,10 +1149,10 @@ const mapCanvas = { position: 'relative', width: '100%', borderRadius: 14, borde
 const mapPin = { position: 'absolute', transform: 'translate(-50%, -50%)', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '8px 10px', borderRadius: 12, border: '2px solid var(--border)', background: 'var(--card)', color: 'var(--text)', boxShadow: 'var(--shadow-sm)', userSelect: 'none', touchAction: 'none' };
 const mapPinCount = { marginTop: 3, minWidth: 22, padding: '1px 7px', borderRadius: 10, background: 'var(--brand)', color: '#fff', fontSize: 12, fontWeight: 800 };
 const mapPinIssue = { position: 'absolute', top: -9, right: -9, padding: '1px 6px', borderRadius: 10, background: 'var(--error)', color: '#fff', fontSize: 11, fontWeight: 800, boxShadow: 'var(--shadow-sm)' };
-const mapToolbar = { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '8px 10px', borderRadius: 10, border: '1px solid var(--hairline)', background: 'var(--card)' };
-const chipStatic = { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderRadius: 20, border: '1px solid var(--border)', background: 'var(--card)', fontSize: 13, fontWeight: 600 };
+const pinCtrls = { position: 'absolute', top: 'calc(100% + 4px)', left: '50%', marginLeft: -46, display: 'flex', gap: 3, padding: 3, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--card)', boxShadow: 'var(--shadow-sm)' };
+const pinCtrlBtn = { width: 22, height: 22, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', cursor: 'pointer', fontSize: 12, lineHeight: 1, padding: 0 };
+const chipStatic ={ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderRadius: 20, border: '1px solid var(--border)', background: 'var(--card)', fontSize: 13, fontWeight: 600 };
 const miniIcon = { border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 12, padding: 0, lineHeight: 1 };
-const tbGroup = { display: 'flex', alignItems: 'center', gap: 2, padding: 2, borderRadius: 8, border: '1px solid var(--border)' };
 const sectionLabel = { fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.4, color: 'var(--muted)', margin: '0 0 8px' };
 const drawerOverlay = { position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'flex-end' };
 const drawerPanel = { width: 'min(440px, 92vw)', height: '100%', overflowY: 'auto', background: 'var(--card)', padding: 18, boxShadow: 'var(--shadow-pop)' };
