@@ -1,0 +1,53 @@
+name: Build-Value Tracker (daily)
+
+# Recompiles loc_data.csv + Build_Value_Tracker.xlsx every day. Runs on GitHub's
+# infra (not the ephemeral dev container, which doesn't persist). Output is
+# published to a dedicated `build-value-tracker` branch and as a downloadable
+# artifact — deliberately NOT to main, so it never triggers an app redeploy.
+on:
+  schedule:
+    - cron: '0 1 * * *'   # 01:00 UTC = 03:00 SAST, daily
+  workflow_dispatch: {}    # also runnable on demand from the Actions tab
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-value-tracker
+  cancel-in-progress: true
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install openpyxl
+
+      - name: Regenerate tracker
+        run: python3 update_tracker.py . --xlsx Build_Value_Tracker.xlsx
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-value-tracker
+          path: |
+            Build_Value_Tracker.xlsx
+            loc_data.csv
+          retention-days: 90
+
+      - name: Publish snapshot to the build-value-tracker branch
+        run: |
+          git config user.name "build-value-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B build-value-tracker
+          git add -f loc_data.csv Build_Value_Tracker.xlsx
+          git commit -m "Daily build-value tracker — $(date -u +%Y-%m-%d)" || { echo "Nothing to commit."; exit 0; }
+          git push -f origin build-value-tracker
