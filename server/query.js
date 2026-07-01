@@ -201,8 +201,14 @@ module.exports = function createQueryEngine({ looker, auth }) {
     // Combined-field OR locks (one value across several fields) can't live in the
     // per-field filters map — apply them as a filter_expression, which Looker
     // AND-combines with `filters`, so the organiser scope above is never weakened.
+    // A block field may be a filter NAME — resolve it to a real field via the tile's
+    // own listenTo wiring first (most accurate), then the platform name→field vote.
     const blocks = fx.combinedBlocksFromLockMap(lockMap);
-    if (blocks.length) fx.applyCombinedToBody(body, blocks, body, { anyValue: ANY_VALUE });
+    if (blocks.length) {
+      const nameField = (f) => (String(f).includes('.') ? f : ((tile.listenTo || {})[f] || (auth.filterNameToField && auth.filterNameToField(f)) || null));
+      const resolved = blocks.map((b) => ({ ...b, fields: (b.fields || []).map(nameField).filter(Boolean) }));
+      fx.applyCombinedToBody(body, resolved, body, { anyValue: ANY_VALUE });
+    }
     return body;
   }
 

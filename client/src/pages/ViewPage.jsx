@@ -312,14 +312,10 @@ export default function ViewPage() {
   } : null;
   // Combined-field OR locks for this dashboard (suite-wide + this dashboard's own
   // overrides). Skipped entirely when "keep imported filters" is on (the dashboard's
-  // own defaults are authoritative there — same rule as the value locks above).
-  // A block field may be a filter NAME (older configs) — resolve it to the real Looker
-  // field via this dashboard's filter defs so it matches a tile's query/listenTo.
-  const nameToField = {};
-  for (const f of def.filters || []) { const fld = f.field || f.dimension; if (f.name && fld) nameToField[f.name] = fld; }
-  const resolveLockField = (k) => (k && String(k).includes('.')) ? k : (nameToField[k] || k);
-  const combinedLocks = keepImported ? [] : combinedBlocksFromLockMap({ ...(setInfo?.lockedFilters || {}), ...((setInfo?.dashboardLocks && setInfo.dashboardLocks[id]) || {}) })
-    .map((b) => ({ ...b, fields: (b.fields || []).map(resolveLockField) }));
+  // own defaults are authoritative there — same rule as the value locks above). Block
+  // fields stay as saved (a real field or a filter name); each tile resolves a name to
+  // its own query field via listenTo in combinedFiltersForTile.
+  const combinedLocks = keepImported ? [] : combinedBlocksFromLockMap({ ...(setInfo?.lockedFilters || {}), ...((setInfo?.dashboardLocks && setInfo.dashboardLocks[id]) || {}) });
   // Persist a single tile's per-client lock overrides (suite.tileLocks[tileId]),
   // updating the loaded suite so the tile re-queries immediately.
   const saveTileLock = async (tileId, map) => {
