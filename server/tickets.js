@@ -46,7 +46,7 @@ Rules:
 - Keep it tight and skimmable — short sentences, bullets over prose. No preamble, no sign-off, no emojis.
 - Remember Pulse's principles: mobile-first, and every client-facing feature ships with both an admin surface and client self-service. Flag it in the ticket if the request would need both.`;
 
-function mount(app, { db, auth, insights, adminAnthropicKey, os, github }) {
+function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push }) {
   const sql = db.db;                 // raw better-sqlite3 handle
   const now = () => new Date().toISOString();
   const uuid = () => crypto.randomUUID();
@@ -118,6 +118,7 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github }) {
     add('client_verdict_at', "client_verdict_at TEXT NOT NULL DEFAULT ''");
     add('github_issue_number', 'github_issue_number INTEGER NOT NULL DEFAULT 0');
     add('github_url', "github_url TEXT NOT NULL DEFAULT ''");
+    add('decline_reason', "decline_reason TEXT NOT NULL DEFAULT ''");
   } catch (e) { console.error('[tickets] ship-review migration skipped:', e.message); }
 
   const enabled = () => db.getSetting('tickets_enabled', '1') !== '0'; // on by default; kill switch
@@ -129,10 +130,10 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github }) {
 
   const TYPES = ['bug', 'improvement', 'idea'];
   const URGENCIES = ['low', 'normal', 'high', 'urgent'];
-  const STATUSES = ['inbox', 'triaged', 'accepted', 'in_progress', 'in_review', 'shipped', 'approved', 'rejected', 'declined'];
+  const STATUSES = ['inbox', 'triaged', 'accepted', 'in_progress', 'shipped', 'approved', 'rejected', 'declined'];
   const STATUS_LABELS = {
     inbox: 'New', triaged: 'Triaged', accepted: 'Accepted', in_progress: 'In progress',
-    in_review: 'In review', shipped: 'Shipped — awaiting review', approved: 'Approved', rejected: 'Rejected — reopen', declined: 'Declined',
+    shipped: 'Shipped — awaiting review', approved: 'Approved', rejected: 'Rejected — reopen', declined: 'Declined',
   };
   const clamp = (s, n) => String(s || '').slice(0, n);
 
@@ -169,7 +170,7 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github }) {
       entityId: r.entity_id, entityName: r.entity_id ? (db.getEntity(r.entity_id)?.name || '') : '',
       assignee: r.assignee, aiTitle: r.ai_title, aiSummary: r.ai_summary, aiStatus: r.ai_status,
       shipNote: r.ship_note || '', testUrl: r.test_url || '',
-      clientVerdict: r.client_verdict || '', clientVerdictNote: r.client_verdict_note || '', clientVerdictAt: r.client_verdict_at || '',
+      clientVerdict: r.client_verdict || '', clientVerdictNote: r.client_verdict_note || '', clientVerdictAt: r.client_verdict_at || '', declineReason: r.decline_reason || '',
       githubIssue: r.github_issue_number || 0, githubUrl: r.github_url || '',
       attachments: attList(r.id), createdAt: r.created_at, updatedAt: r.updated_at,
     };
@@ -181,7 +182,7 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github }) {
       status: r.status, statusLabel: STATUS_LABELS[r.status] || r.status,
       aiTitle: r.ai_title, aiSummary: r.ai_summary, aiStatus: r.ai_status,
       shipNote: r.ship_note || '', testUrl: r.test_url || '',
-      clientVerdict: r.client_verdict || '', clientVerdictNote: r.client_verdict_note || '', clientVerdictAt: r.client_verdict_at || '',
+      clientVerdict: r.client_verdict || '', clientVerdictNote: r.client_verdict_note || '', clientVerdictAt: r.client_verdict_at || '', declineReason: r.decline_reason || '',
       attachments: attList(r.id), createdAt: r.created_at, updatedAt: r.updated_at,
     };
   }
@@ -392,6 +393,8 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github }) {
     if (b.status !== undefined) {
       if (!STATUSES.includes(b.status)) return res.status(400).json({ error: 'Unknown status' });
       set('status', b.status);
+      // Capture the admin's reason when declining (shown to the reporter).
+      if (b.status === 'declined' && b.declineReason !== undefined) set('decline_reason', clamp(b.declineReason, 4000).trim());
     }
     if (b.type !== undefined && TYPES.includes(b.type)) set('type', b.type);
     if (b.urgency !== undefined && URGENCIES.includes(b.urgency)) set('urgency', b.urgency);
@@ -406,7 +409,7 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github }) {
     sql.prepare(`UPDATE tickets SET ${sets.join(', ')} WHERE id=?`).run(...args, t.id);
     if (b.status !== undefined && b.status !== t.status) {
       logComment(t.id, { authorEmail: req.user.email, authorRole: 'admin', kind: 'status', body: `${STATUS_LABELS[t.status] || t.status} → ${STATUS_LABELS[b.status] || b.status}` });
-      notifyReporterOnShip(getTicket(t.id), t.status);
+      notifyReporter(getTicket(t.id), t.status);
     }
     res.json({ ticket: ticketRow(getTicket(t.id)) });
   });
@@ -441,37 +444,43 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github }) {
     }
   });
 
-  // When a ticket ships (or is declined), tell the client who reported it — best
-  // effort, only for client-filed tickets tied to an entity, only if the OS spine
-  // is wired. On ship the message carries the overview of what was built + a test
-  // link and asks them to approve/reject under Settings → My reports (needs_reply,
-  // so it nudges). Keeps the report → result loop visible to the person who raised it.
-  function notifyReporterOnShip(t, prevStatus) {
-    if (!t || !os?.announce) return;
-    if (t.reporter_role !== 'client' || !t.entity_id) return;
-    if (t.status === prevStatus) return;
-    if (t.status !== 'shipped' && t.status !== 'declined') return;
-    const label = t.ai_title || t.title || 'your report';
-    let body, title, priority;
-    if (t.status === 'shipped') {
-      const overview = (t.ship_note || '').trim() || (t.ai_summary || '').trim() || `We've built the ${t.type} you reported.`;
-      const parts = [
-        `Good news — the ${t.type} you reported ("${label}") has shipped. Here's what we built:`,
-        '', overview, '',
-      ];
-      if (t.test_url) parts.push(`Try it here: ${t.test_url}`, '');
-      parts.push('Please review it under Settings → My reports and let us know if it works for you — approve it, or send it back with what still needs fixing.');
-      body = parts.join('\n');
-      title = 'Your feedback shipped — please review 🎉';
-      priority = 'needs_reply';
-    } else {
-      body = `An update on the ${t.type} you reported ("${label}"): we've reviewed it and won't be taking it forward for now. Thanks for the suggestion.`;
-      title = 'Update on your feedback';
-      priority = 'fyi';
+  // Tell the reporter their ticket moved. Fires on every meaningful status change
+  // (not just shipped). Two channels: a web-push notification straight to the
+  // reporting USER (works for any role — this is what reaches staff who reported a
+  // bug, and drives the on-device banner), plus — for client reporters tied to an
+  // entity — an in-app Pulse inbox thread via the OS spine (with email/push fanout).
+  const label = (t) => t.ai_title || t.title || 'your report';
+  function shipBody(t) {
+    const overview = (t.ship_note || '').trim() || (t.ai_summary || '').trim() || `We've built the ${t.type} you reported.`;
+    const parts = [`Good news — "${label(t)}" has shipped. Here's what we built:`, '', overview, ''];
+    if (t.test_url) parts.push(`Try it: ${t.test_url}`, '');
+    parts.push('Review it under Product → My reports and let us know — approve it, or send it back with what still needs fixing.');
+    return parts.join('\n');
+  }
+  // Reporter-facing message per new status. Statuses not listed here don't notify
+  // (e.g. approved/rejected are the reporter's OWN actions; inbox is the start).
+  function reporterMessage(t) {
+    switch (t.status) {
+      case 'triaged': return { title: 'We’re reviewing your report', body: `Your ${t.type} “${label(t)}” has been logged and is being reviewed.` };
+      case 'accepted': return { title: 'Your report was accepted ✅', body: `Good news — we’ve accepted your ${t.type} “${label(t)}” and it’s queued to build.` };
+      case 'in_progress': return { title: 'We’ve started building 🔨', body: `Work has started on your ${t.type} “${label(t)}”.` };
+      case 'shipped': return { title: 'Shipped — please review 🎉', body: shipBody(t), priority: 'needs_reply' };
+      case 'declined': return { title: 'Update on your report', body: `We won’t be taking your ${t.type} “${label(t)}” forward${t.decline_reason ? `: ${t.decline_reason}` : ' for now.'}` };
+      default: return null;
     }
-    try {
-      os.announce({ entityId: t.entity_id, title, body, priority, createdBy: 'Product', authorType: 'system', subjectType: 'ticket', subjectId: t.id });
-    } catch (e) { console.error('[tickets] reporter notify failed:', e.message); }
+  }
+  function notifyReporter(t, prevStatus) {
+    if (!t || t.status === prevStatus) return;
+    const msg = reporterMessage(t);
+    if (!msg) return;
+    // 1) Direct push to the reporting user — the universal channel (any role).
+    try { push?.sendToUser?.(t.reporter_id, { title: msg.title, body: String(msg.body).slice(0, 180), url: '/product', tag: `ticket-${t.id}` }, 'messages'); } catch (e) { console.error('[tickets] push failed:', e.message); }
+    // 2) Client reporters (tied to an entity) also get an in-app inbox thread.
+    if (t.entity_id && os?.announce) {
+      try {
+        os.announce({ entityId: t.entity_id, title: msg.title, body: msg.body, priority: msg.priority || 'fyi', createdBy: 'Product', authorType: 'system', subjectType: 'ticket', subjectId: t.id });
+      } catch (e) { console.error('[tickets] reporter notify failed:', e.message); }
+    }
   }
 
   // Notify the team (as a ticket comment) when the reporter approves or rejects a

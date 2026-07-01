@@ -14,9 +14,9 @@ const URGENCY_STYLE = {
   normal: { color: 'var(--muted)', background: 'rgba(128,128,128,0.12)' },
   low: { color: 'var(--muted)', background: 'rgba(128,128,128,0.08)' },
 };
-const BOARD_LANES = ['inbox', 'triaged', 'accepted', 'in_progress', 'in_review', 'shipped', 'rejected'];
-const ALL_STATUSES = ['inbox', 'triaged', 'accepted', 'in_progress', 'in_review', 'shipped', 'approved', 'rejected', 'declined'];
-const STATUS_LABEL = { inbox: 'New', triaged: 'Triaged', accepted: 'Accepted', in_progress: 'In progress', in_review: 'In review', shipped: 'Shipped — awaiting review', approved: 'Approved', rejected: 'Rejected — reopen', declined: 'Declined' };
+const BOARD_LANES = ['inbox', 'triaged', 'accepted', 'in_progress', 'shipped', 'rejected'];
+const ALL_STATUSES = ['inbox', 'triaged', 'accepted', 'in_progress', 'shipped', 'approved', 'rejected', 'declined'];
+const STATUS_LABEL = { inbox: 'New', triaged: 'Triaged', accepted: 'Accepted', in_progress: 'In progress', shipped: 'Shipped — awaiting review', approved: 'Approved', rejected: 'Rejected — reopen', declined: 'Declined' };
 
 export default function TicketBoard() {
   const isMobile = useIsMobile();
@@ -183,6 +183,8 @@ function TicketDetail({ id, onClose, onChange }) {
   const [note, setNote] = useState('');
   const [assignees, setAssignees] = useState([]);
   const [copied, setCopied] = useState(false);
+  const [declining, setDeclining] = useState(false);
+  const [declineReason, setDeclineReason] = useState('');
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
 
@@ -262,13 +264,18 @@ function TicketDetail({ id, onClose, onChange }) {
                 ✅ <strong>Approved by the reporter</strong>{t.clientVerdictAt ? ` on ${new Date(t.clientVerdictAt).toLocaleDateString()}` : ''}.
               </div>
             )}
+            {t.status === 'declined' && (
+              <div style={{ ...banner, background: 'rgba(128,128,128,0.1)', border: '1px solid var(--hairline)' }}>
+                🚫 <strong>Declined.</strong>{t.declineReason ? ` ${t.declineReason}` : ''}
+              </div>
+            )}
 
             {/* Status + assignee controls */}
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
               <label style={ctl}>
                 <span style={ctlLbl}>Status</span>
                 <select className="fld" value={t.status} disabled={busy === 'status'}
-                  onChange={(e) => patch({ status: e.target.value }, 'status')} style={{ minWidth: 130 }}>
+                  onChange={(e) => { const v = e.target.value; if (v === 'declined') { setDeclineReason(t.declineReason || ''); setDeclining(true); } else patch({ status: v }, 'status'); }} style={{ minWidth: 130 }}>
                   {ALL_STATUSES.map((s) => (
                     <option key={s} value={s}>{STATUS_LABEL[s]}</option>
                   ))}
@@ -295,6 +302,19 @@ function TicketDetail({ id, onClose, onChange }) {
                 </label>
               )}
             </div>
+
+            {/* Decline needs a reason — the reporter is told why. */}
+            {declining && (
+              <div style={{ ...banner, background: 'rgba(var(--brand-rgb), 0.06)', border: '1px solid var(--hairline)' }}>
+                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>Decline this report — add a reason</div>
+                <textarea className="fld" value={declineReason} onChange={(e) => setDeclineReason(e.target.value)} rows={2} autoFocus
+                  placeholder="Why isn't this going forward? The reporter is notified with this." style={{ width: '100%', boxSizing: 'border-box', fontSize: 13, resize: 'vertical', marginBottom: 8 }} />
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={() => { patch({ status: 'declined', declineReason: declineReason.trim() }, 'status'); setDeclining(false); }} disabled={busy === 'status' || !declineReason.trim()} style={primaryBtn}>Decline & notify</button>
+                  <button onClick={() => setDeclining(false)} style={miniBtn}>Cancel</button>
+                </div>
+              </div>
+            )}
 
             {/* What the reporter wrote */}
             <Section title="Reported">
