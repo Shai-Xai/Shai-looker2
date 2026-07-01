@@ -367,7 +367,12 @@ export default function ClientLayout() {
       {(
         <>
           <div style={{ borderTop: '1px solid var(--hairline)', margin: '12px 6px 10px' }} />
-          <div style={{ padding: '0 8px 8px 14px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)' }}>Workspace</div>
+          <div style={{ display: 'flex', alignItems: 'center', padding: '0 8px 8px 14px' }}>
+            <span style={{ flex: 1, fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)' }}>Workspace</span>
+            {/* Ops-only role has no "Suites" header (where everyone else's collapse
+                arrow lives), so surface the collapse control here for them. */}
+            {opsOnly && !isMobile && <button onClick={toggleCollapsed} title="Collapse sidebar" style={iconBtn}>⟨</button>}
+          </div>
           {!opsOnly && (visibleSuites.length > 0 || isAdmin) && (
           <button
             ref={onGoals ? activeRef : null}
