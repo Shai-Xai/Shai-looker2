@@ -30,7 +30,10 @@ export default function ReportWidget() {
         aria-label="Report a bug or idea"
         title="Report a bug, improvement or idea"
         style={{
-          position: 'fixed', bottom: 20, left: isMobile ? 16 : 24, zIndex: 54,
+          // Bottom-left, but on desktop the persistent sidebar pins the account
+          // "ProfileFooter" here — sit ABOVE it so both stay visible/tappable. On
+          // mobile the nav is a drawer (no fixed footer), so keep it low.
+          position: 'fixed', bottom: isMobile ? 20 : 88, left: isMobile ? 16 : 24, zIndex: 54,
           width: 54, height: 54, borderRadius: '50%', border: '1px solid var(--hairline)',
           background: 'var(--card)', boxShadow: '0 6px 22px rgba(0,0,0,0.3)', cursor: 'pointer',
           display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22,
