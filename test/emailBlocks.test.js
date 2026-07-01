@@ -65,6 +65,27 @@ test('render: plain-text fallback covers each block', () => {
   assert.match(text, /Website: https:\/\/w/);
 });
 
+test('render: quote / list / menu / html blocks', () => {
+  const { html } = eb.render([
+    { type: 'quote', text: 'Great *event*' },
+    { type: 'list', text: 'One\nTwo\nThree', ordered: true },
+    { type: 'menu', links: [{ label: 'Home', url: 'https://h' }, { label: 'Buy', url: 'https://b' }] },
+    { type: 'html', html: '<span class="raw">hi</span>' },
+  ], { brand: '#f0f' });
+  assert.match(html, /border-left:3px solid #f0f/);          // quote
+  assert.match(html, /Great <em>event<\/em>/);
+  assert.match(html, /<ol[^>]*><li[^>]*>One<\/li><li[^>]*>Two<\/li>/); // ordered list
+  assert.match(html, /href="https:\/\/h"[^>]*>Home</);        // menu link
+  assert.match(html, /<span class="raw">hi<\/span>/);         // raw html passthrough
+});
+
+test('render: 4 columns size their cells to fit across', () => {
+  const cols = [[{ type: 'text', text: 'A' }], [{ type: 'text', text: 'B' }], [{ type: 'text', text: 'C' }], [{ type: 'text', text: 'D' }]];
+  const { html } = eb.render([{ type: 'columns', cols }]);
+  assert.match(html, /max-width:125px/); // floor(548/4)-12
+  assert.equal((html.match(/inline-block/g) || []).length, 4);
+});
+
 test('render: columns render two fluid-hybrid cells; one column falls back to a single', () => {
   const two = eb.render([{ type: 'columns', cols: [
     [{ type: 'text', text: 'Left' }],

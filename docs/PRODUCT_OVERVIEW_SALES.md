@@ -199,7 +199,7 @@ lists, subtract a suppression list, and it stays live."
 ### 5b. Campaigns — email & SMS  ✅
 - Send **email, SMS, or both** to a segment, tile or pasted list.
 - **AI-drafted copy** you can edit; branded template, **drag-to-order block builder**, or custom HTML; hero image.
-- **Email block builder** ✅ (🧪 new) — a Mailchimp-style content builder: stack **heading, text, image, button, video, social, divider and spacer** blocks, each with alignment/size options, reorder or delete them, and it's wrapped in the client's branding (logo, colours, unsubscribe) automatically. Button/image links are tracked; merge tokens work in text. Built emails can be **saved as reusable templates**.
+- **Email block builder** ✅ (🧪 new) — a Mailchimp-style content builder: stack **heading, text, list, quote, image, button, video, social, menu-links, HTML and spacer/divider** blocks plus **multi-column layouts (up to 4, side-by-side on desktop, auto-stacking on mobile)**. **Drag to reorder** (↑/↓ on touch), edit inline, delete. Everything is wrapped in the client's branding (logo, colours, unsubscribe) automatically; button/image/menu links are tracked; merge tokens work in text. Built emails can be **saved as reusable templates**.
 - **Merge fields** ✅ — personalise with `{{name}}`, `{{ticketType}}`, and **any
   column** from the audience (`{{City}}`, `{{Ticket Type}}`…). Preview renders with
   a real sample recipient.

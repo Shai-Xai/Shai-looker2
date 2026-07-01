@@ -10,11 +10,12 @@
 // (email clients strip data: images), so this uses block.url verbatim.
 
 const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-// Minimal inline formatting for author text: **bold**, *italic*, and newlines → <br>.
-const fmt = (s) => esc(s)
+// Minimal inline formatting for author text: **bold**, *italic* (no line breaks).
+const fmtInline = (s) => esc(s)
   .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-  .replace(/(^|[^*])\*([^*]+)\*(?!\*)/g, '$1<em>$2</em>')
-  .replace(/\n/g, '<br>');
+  .replace(/(^|[^*])\*([^*]+)\*(?!\*)/g, '$1<em>$2</em>');
+// …plus newlines → <br> for multi-line text/headings.
+const fmt = (s) => fmtInline(s).replace(/\n/g, '<br>');
 
 const ALIGN = (a) => (['left', 'center', 'right'].includes(a) ? a : 'left');
 const SPACER = { sm: 12, md: 24, lg: 40 };
@@ -64,14 +65,36 @@ function blockHtml(block, brand) {
       const links = items.map((it) => `<a href="${esc(it.url)}" style="display:inline-block;margin:0 8px;font-size:12.5px;font-weight:700;color:${esc(brand)};text-decoration:none;">${esc(SOCIAL[it.type] || it.type || 'Link')}</a>`).join('');
       return `<div style="text-align:center;">${links}</div>`;
     }
+    case 'quote': {
+      if (!String(b.text || '').trim()) return '';
+      return `<div style="border-left:3px solid ${esc(brand)};margin:0;padding:4px 0 4px 14px;font-size:15px;font-style:italic;color:#3a3a3c;line-height:1.6;text-align:${ALIGN(b.align)};">${fmt(b.text)}</div>`;
+    }
+    case 'list': {
+      const lines = String(b.text || '').split('\n').map((s) => s.trim()).filter(Boolean);
+      if (!lines.length) return '';
+      const tag = b.ordered ? 'ol' : 'ul';
+      const lis = lines.map((l) => `<li style="margin:0 0 4px;">${fmtInline(l)}</li>`).join('');
+      return `<${tag} style="margin:0;padding-left:22px;font-size:14.5px;color:#3a3a3c;line-height:1.6;text-align:${ALIGN(b.align)};">${lis}</${tag}>`;
+    }
+    case 'menu': {
+      const links = (b.links || []).filter((l) => l && l.label && l.url);
+      if (!links.length) return '';
+      const a = links.map((l) => `<a href="${esc(l.url)}" style="display:inline-block;margin:0 10px;font-size:13px;font-weight:600;color:${esc(brand)};text-decoration:none;">${esc(l.label)}</a>`).join('');
+      return `<div style="text-align:${ALIGN(b.align) === 'left' ? 'center' : ALIGN(b.align)};">${a}</div>`;
+    }
+    case 'html':
+      // Raw author HTML (an escape hatch, like a Mailchimp code block). It rides the
+      // SAME campaign-level token + link-tracking + unsubscribe pass as custom HTML.
+      return String(b.html || '').trim();
     case 'columns': {
-      // Fluid-hybrid two-column: each column is width:100% with a max-width, so the
-      // pair sits side-by-side on wide screens and stacks on narrow ones — no media
-      // queries (which many email clients strip). font-size:0 kills inline-block gaps.
-      const cols = (Array.isArray(b.cols) ? b.cols : []).slice(0, 2).map((c) => render(c, { brand }).html.trim()).filter(Boolean);
+      // Fluid-hybrid columns: each is width:100% with a max-width sized to fit N
+      // across on a wide screen; on a narrow screen the 100% forces them to stack —
+      // no media queries (which many clients strip). font-size:0 kills inline gaps.
+      const cols = (Array.isArray(b.cols) ? b.cols : []).slice(0, 4).map((c) => render(c, { brand }).html.trim()).filter(Boolean);
       if (!cols.length) return '';
       if (cols.length === 1) return cols[0];
-      const cell = (h) => `<div style="display:inline-block;width:100%;max-width:262px;vertical-align:top;text-align:left;padding:0 6px;box-sizing:border-box;">${h}</div>`;
+      const maxW = Math.max(90, Math.floor(548 / cols.length) - 12); // card ≈548px wide, 12px inter-col padding
+      const cell = (h) => `<div style="display:inline-block;width:100%;max-width:${maxW}px;vertical-align:top;text-align:left;padding:0 6px;box-sizing:border-box;">${h}</div>`;
       return `<div style="font-size:0;text-align:center;">${cols.map(cell).join('')}</div>`;
     }
     default:
@@ -90,6 +113,10 @@ function blockText(block) {
     case 'image': return b.href ? b.href : '';
     case 'video': return b.href ? `Watch: ${b.href}` : '';
     case 'social': return (b.items || []).filter((it) => it && it.url).map((it) => `${SOCIAL[it.type] || it.type}: ${it.url}`).join('  ');
+    case 'quote': return strip(b.text);
+    case 'list': return String(b.text || '').split('\n').map((s) => s.trim()).filter(Boolean).map((l) => `• ${strip(l)}`).join('\n');
+    case 'menu': return (b.links || []).filter((l) => l && l.label && l.url).map((l) => `${l.label}: ${l.url}`).join('  ');
+    case 'html': return String(b.html || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 2000);
     case 'columns': return (Array.isArray(b.cols) ? b.cols : []).map((c) => render(c).text).filter(Boolean).join('\n\n');
     case 'divider': return '—';
     default: return '';
@@ -143,7 +170,7 @@ function flattenBlocks(blocks) {
 // known types, and give each a stable id (used to host its images on real sends).
 // `columns` is allowed at the top level only (no nesting) and its two columns are
 // cleaned recursively as plain (non-column) block lists.
-const CHILD_TYPES = new Set(['heading', 'text', 'image', 'button', 'divider', 'spacer', 'video', 'social']);
+const CHILD_TYPES = new Set(['heading', 'text', 'image', 'button', 'divider', 'spacer', 'video', 'social', 'quote', 'list', 'menu', 'html']);
 const BLOCK_TYPES = new Set([...CHILD_TYPES, 'columns']);
 function cleanBlockList(arr, { allowColumns } = {}) {
   if (!Array.isArray(arr)) return [];
@@ -161,9 +188,12 @@ function cleanBlockList(arr, { allowColumns } = {}) {
       href: String(b.href || '').slice(0, 500),
       width: ['full', 'half', 'third'].includes(b.width) ? b.width : 'full',
       size: ['sm', 'md', 'lg'].includes(b.size) ? b.size : 'md',
+      ordered: !!b.ordered,                          // list: numbered vs bulleted
+      html: String(b.html || '').slice(0, 50000),    // html block: raw author markup
       items: Array.isArray(b.items) ? b.items.slice(0, 8).map((it) => ({ type: String(it?.type || '').slice(0, 20), url: String(it?.url || '').slice(0, 500) })) : [],
+      links: Array.isArray(b.links) ? b.links.slice(0, 8).map((l) => ({ label: String(l?.label || '').slice(0, 60), url: String(l?.url || '').slice(0, 500) })) : [], // menu links
     };
-    if (b.type === 'columns') out.cols = (Array.isArray(b.cols) ? b.cols : []).slice(0, 2).map((c) => cleanBlockList(c, { allowColumns: false }));
+    if (b.type === 'columns') out.cols = (Array.isArray(b.cols) ? b.cols : []).slice(0, 4).map((c) => cleanBlockList(c, { allowColumns: false }));
     return out;
   });
 }

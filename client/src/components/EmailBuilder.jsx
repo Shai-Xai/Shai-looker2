@@ -12,11 +12,15 @@ import { useIsMobile } from '../lib/useIsMobile.js';
 const BASE_MENU = [
   { type: 'heading', label: 'Heading', icon: 'H' },
   { type: 'text', label: 'Text', icon: '¶' },
+  { type: 'list', label: 'List', icon: '•' },
+  { type: 'quote', label: 'Quote', icon: '❝' },
   { type: 'image', label: 'Image', icon: '🖼' },
   { type: 'button', label: 'Button', icon: '🔘' },
   { type: 'video', label: 'Video', icon: '▶' },
   { type: 'social', label: 'Social', icon: '🔗' },
-  { type: 'columns', label: '2 columns', icon: '▥' },
+  { type: 'menu', label: 'Menu links', icon: '☰' },
+  { type: 'columns', label: 'Columns', icon: '▥' },
+  { type: 'html', label: 'HTML', icon: '</>' },
   { type: 'divider', label: 'Divider', icon: '―' },
   { type: 'spacer', label: 'Spacer', icon: '↕' },
 ];
@@ -31,6 +35,10 @@ function newBlock(type) {
   if (type === 'button') return { ...base, text: 'Buy tickets', href: '', align: 'center' };
   if (type === 'video') return { ...base, thumb: '', href: '', alt: '' };
   if (type === 'social') return { ...base, items: [] };
+  if (type === 'menu') return { ...base, links: [], align: 'center' };
+  if (type === 'quote') return { ...base, text: '', align: 'left' };
+  if (type === 'list') return { ...base, text: '', ordered: false, align: 'left' };
+  if (type === 'html') return { ...base, html: '' };
   if (type === 'columns') return { ...base, cols: [[], []] };
   if (type === 'spacer') return { ...base, size: 'md' };
   return base; // divider
@@ -151,6 +159,25 @@ function BlockEditor({ block: b, onChange }) {
           <div style={hint}>Emails can’t play video inline — this shows the thumbnail with a ▶ that opens the link.</div>
         </div>
       );
+    case 'quote':
+      return (
+        <div style={col}>
+          <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit' }} rows={3} value={b.text} onChange={(e) => set({ text: e.target.value })} placeholder="A quote or pull-out line…" />
+          <AlignPicker value={b.align} onChange={(v) => set({ align: v })} />
+        </div>
+      );
+    case 'list':
+      return (
+        <div style={col}>
+          <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit' }} rows={4} value={b.text} onChange={(e) => set({ text: e.target.value })} placeholder={'One item per line…\nDoors at 6pm\nBring your ticket QR'} />
+          <div style={row}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5 }}>
+              <input type="checkbox" checked={!!b.ordered} onChange={(e) => set({ ordered: e.target.checked })} /> Numbered
+            </label>
+            <AlignPicker value={b.align} onChange={(v) => set({ align: v })} />
+          </div>
+        </div>
+      );
     case 'social':
       return (
         <div style={col}>
@@ -164,21 +191,49 @@ function BlockEditor({ block: b, onChange }) {
           <button type="button" style={miniBtn} onClick={() => set({ items: [...(b.items || []), { type: 'instagram', url: '' }] })}>＋ Add link</button>
         </div>
       );
-    case 'columns':
+    case 'menu':
       return (
-        <div style={{ display: 'flex', gap: 8, flexDirection: isMobile ? 'column' : 'row' }}>
-          {[0, 1].map((ci) => (
-            <div key={ci} style={{ flex: 1, minWidth: 0, border: '1px dashed var(--hairline)', borderRadius: 8, padding: 8, background: 'rgba(128,128,128,0.03)' }}>
-              <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', marginBottom: 6 }}>Column {ci + 1}</div>
-              <BlockList
-                blocks={(b.cols && b.cols[ci]) || []}
-                allowColumns={false}
-                onChange={(next) => set({ cols: [ci === 0 ? next : ((b.cols && b.cols[0]) || []), ci === 1 ? next : ((b.cols && b.cols[1]) || [])] })}
-              />
+        <div style={col}>
+          {(b.links || []).map((l, k) => (
+            <div key={k} style={row}>
+              <input style={{ ...input, flex: 1 }} value={l.label} onChange={(e) => set({ links: b.links.map((x, j) => (j === k ? { ...x, label: e.target.value } : x)) })} placeholder="Label" />
+              <input style={{ ...input, flex: 2 }} value={l.url} onChange={(e) => set({ links: b.links.map((x, j) => (j === k ? { ...x, url: e.target.value } : x)) })} placeholder="https://…" />
+              <button type="button" style={{ ...iconBtn, color: 'var(--error,#ef4444)' }} onClick={() => set({ links: b.links.filter((_, j) => j !== k) })}>✕</button>
             </div>
           ))}
+          <div style={row}>
+            <button type="button" style={miniBtn} onClick={() => set({ links: [...(b.links || []), { label: '', url: '' }] })}>＋ Add link</button>
+            <AlignPicker value={b.align} onChange={(v) => set({ align: v })} />
+          </div>
         </div>
       );
+    case 'html':
+      return (
+        <div style={col}>
+          <textarea style={{ ...input, resize: 'vertical', fontFamily: 'ui-monospace,Menlo,monospace', fontSize: 12 }} rows={5} value={b.html} onChange={(e) => set({ html: e.target.value })} placeholder="<table>…your HTML…</table>" />
+          <div style={hint}>Pasted HTML is inserted as-is (an escape hatch). Tokens {'{{name}}'} and tracked links still work.</div>
+        </div>
+      );
+    case 'columns': {
+      const cols = Array.isArray(b.cols) && b.cols.length ? b.cols : [[], []];
+      const setCol = (ci, next) => set({ cols: cols.map((c, j) => (j === ci ? next : c)) });
+      return (
+        <div style={col}>
+          <div style={{ display: 'flex', gap: 8, flexDirection: isMobile ? 'column' : 'row' }}>
+            {cols.map((c, ci) => (
+              <div key={ci} style={{ flex: 1, minWidth: 0, border: '1px dashed var(--hairline)', borderRadius: 8, padding: 8, background: 'rgba(128,128,128,0.03)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', flex: 1 }}>Column {ci + 1}</span>
+                  {cols.length > 1 && <button type="button" style={{ ...iconBtn, width: 24, height: 24, fontSize: 11, color: 'var(--error,#ef4444)' }} title="Remove column" onClick={() => set({ cols: cols.filter((_, j) => j !== ci) })}>✕</button>}
+                </div>
+                <BlockList blocks={c} allowColumns={false} onChange={(next) => setCol(ci, next)} />
+              </div>
+            ))}
+          </div>
+          {cols.length < 4 && <button type="button" style={miniBtn} onClick={() => set({ cols: [...cols, []] })}>＋ Add column ({cols.length}/4)</button>}
+        </div>
+      );
+    }
     case 'spacer':
       return <Select value={b.size} onChange={(v) => set({ size: v })} options={[['sm', 'Small gap'], ['md', 'Medium gap'], ['lg', 'Large gap']]} />;
     case 'divider':
