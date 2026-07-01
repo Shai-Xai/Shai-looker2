@@ -22,7 +22,10 @@ const M0 = catalogue.measures[0].name; // the default "tickets sold" measure
 // The Owl catalogue queries combined/all_tickets; seed a shared org-scoped
 // dashboard on that explore so scopeForQuery can resolve the organiser field
 // WITHOUT calling Looker (mirrors a real imported dashboard).
-before(() => { h.seedOrganiserDashboard({ model: catalogue.model, explore: catalogue.explore }); });
+before(() => {
+  h.seedOrganiserDashboard({ model: catalogue.model, explore: catalogue.explore });
+  h.seedOrganiserDashboard({ model: catalogue.model, explore: 'cashless_x' }); // for the extra-explore test (before the scope index is first built)
+});
 
 // Stub Looker so a query never hits the network; count calls so refusal tests can
 // prove they fail closed BEFORE any query runs. (Scope content is asserted on the
@@ -187,6 +190,26 @@ test('a valid filter on a curated dimension is passed through under scope', asyn
   assert.equal(res.queryBody.filters[catalogue.dateDimension], 'last 7 days');
   assert.equal(res.queryBody.filters[h.ORG_FIELD], 'Ultra South Africa'); // scope still applied
   assert.deepEqual(res.queryBody.fields, ['core_ticket_types.name', M0]);
+});
+
+test('a registered extra explore gets its own scoped, validated read tool', async () => {
+  const cat = { ...catalogue, extras: [{ model: catalogue.model, explore: 'cashless_x', label: 'Cashless', dateDimension: '', measures: [{ name: 'cashless_x.revenue', label: 'Cashless Revenue', type: 'number' }], dimensions: [{ name: 'cashless_x.method', label: 'Method', type: 'string' }], notes: [] }] };
+  const t = createOwlTools({ query: queryEngine, auth: h.auth, db: h.db, catalogue: cat });
+  const tool = t.ask_cashless_x;
+  assert.ok(tool && tool.run && tool.schema, 'extra explore tool exists');
+  assert.deepEqual(tool.schema.input_schema.properties.measure.enum, ['cashless_x.revenue']);
+  const ent = h.makeEntity('Ultra CL', 'Ultra Cashless');
+  const user = h.makeClient('owl-cl@client.test', [ent.id]);
+  // off-catalogue measure (a ticketing field) refused before Looker is touched
+  lookerCalls = 0;
+  const bad = await tool.run({ measure: M0 }, ctx(user));
+  assert.equal(bad.ok, false);
+  assert.equal(lookerCalls, 0, 'failed closed before querying');
+  // a valid query runs and is scoped to the client's organiser
+  const res = await tool.run({ measure: 'cashless_x.revenue', dimensions: ['cashless_x.method'] }, ctx(user));
+  assert.equal(res.ok, true);
+  assert.equal(res.queryBody.view, 'cashless_x');
+  assert.equal(res.queryBody.filters[h.ORG_FIELD], 'Ultra Cashless');
 });
 
 // ── createAlert (the first act-tool): DRAFTS only — never writes, never queries ──

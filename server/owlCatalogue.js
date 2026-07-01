@@ -76,7 +76,19 @@ function effective(db) {
   }
   const notes = [...(seed.notes || [])];
   if (extraNames.length) notes.push(`Admin has enabled extra fields for you to use here: ${extraNames.join(', ')}. Treat them like any other curated field.`);
-  return { ...seed, measures, dimensions, notes };
+  // Registered EXTRA explores → each becomes its own catalogue (the Owl gets a separate
+  // read tool per explore). Built from the stored field metadata, so it's synchronous.
+  const expf = readExpFields(db);
+  const extraExplores = readExplores(db).map((e) => {
+    const raw = (expf[keyOf(e.model, e.view)] || []).map((f) => (typeof f === 'string' ? { name: f } : f)).filter((f) => f && f.name && !isPII(f.name));
+    const ms = raw.filter((f) => f.kind === 'measure').map((f) => ({ name: f.name, label: String(f.label || f.name), type: coarseType(f.type), default: false, aka: [] }));
+    const ds = raw.filter((f) => f.kind !== 'measure').map((f) => ({ name: f.name, label: String(f.label || f.name), type: coarseType(f.type), group: 'Custom', filter: true, aka: [] }));
+    if (!ms.length) return null; // need at least one measure to be queryable
+    const dateDim = ds.find((d) => d.type === 'date');
+    return { model: e.model, explore: e.view, label: e.label, measures: ms, dimensions: ds, dateDimension: dateDim ? dateDim.name : '', notes: [] };
+  }).filter(Boolean);
+  if (extraExplores.length) notes.push(`Besides ticketing you also have these data sources, EACH with its own tool named ask_<explore>: ${extraExplores.map((x) => `${x.label} (${x.explore})`).join(', ')}. Use the matching tool for questions about that source. To compare one with ticketing, call BOTH tools and combine the figures on a shared dimension (event or date) — you cannot join two explores in a single query.`);
+  return { ...seed, measures, dimensions, notes, extras: extraExplores };
 }
 
 // The full field list for ONE explore, annotated with enabled/inSeed/pii for the UI.
@@ -88,7 +100,9 @@ async function listFields(db, getExploreFields, model = seed.model, view = seed.
   const seedM = new Map(primary ? seed.measures.map((m) => [m.name, m]) : []);
   const seedD = new Map(primary ? seed.dimensions.map((d) => [d.name, d]) : []);
   const disabled = new Set(primary ? readDisabled(db) : []);
-  const extra = new Set(primary ? readExtra(db).map((e) => e && e.name).filter(Boolean) : (readExpFields(db)[keyOf(model, view)] || []));
+  const extra = new Set(primary
+    ? readExtra(db).map((e) => e && e.name).filter(Boolean)
+    : (readExpFields(db)[keyOf(model, view)] || []).map((f) => (typeof f === 'string' ? f : f && f.name)).filter(Boolean));
   const row = (fld, kind, seedMap) => {
     const name = fld.name;
     const inSeed = seedMap.has(name);
@@ -126,7 +140,9 @@ async function setEnabled(db, enabledNames, getExploreFields, model = seed.model
     db.setSetting(EXTRA_KEY, JSON.stringify(extras));
     db.setSetting(DISABLED_KEY, JSON.stringify(disabled));
   } else {
-    const on = all.filter((r) => !r.pii && wanted.has(r.name) && known.has(r.name)).map((r) => r.name);
+    // Store full field metadata (name/label/kind/type) so effective() can build the
+    // extra explore's catalogue synchronously (no Looker round-trip at query time).
+    const on = all.filter((r) => !r.pii && wanted.has(r.name) && known.has(r.name)).map((r) => ({ name: r.name, label: r.label, kind: r.kind, type: r.type }));
     const map = readExpFields(db); map[keyOf(model, view)] = on;
     db.setSetting(EXPFIELDS_KEY, JSON.stringify(map));
   }
