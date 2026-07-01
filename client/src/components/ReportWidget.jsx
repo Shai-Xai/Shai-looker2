@@ -30,10 +30,12 @@ export default function ReportWidget() {
         aria-label="Report a bug or idea"
         title="Report a bug, improvement or idea"
         style={{
-          // Bottom-left, but on desktop the persistent sidebar pins the account
-          // "ProfileFooter" here — sit ABOVE it so both stay visible/tappable. On
-          // mobile the nav is a drawer (no fixed footer), so keep it low.
-          position: 'fixed', bottom: isMobile ? 20 : 88, left: isMobile ? 16 : 24, zIndex: 54,
+          // Desktop: the left side is a full-height sidebar (nav + pinned account
+          // footer), so ANY left position overlaps it. Sit bottom-RIGHT, stacked
+          // ABOVE the Owl launcher (bottom-right, ~54px tall at bottom:20). Mobile:
+          // the nav is a drawer (no fixed sidebar), so keep the low bottom-left spot.
+          position: 'fixed', zIndex: 54, bottom: isMobile ? 20 : 86,
+          ...(isMobile ? { left: 16 } : { right: 24 }),
           width: 54, height: 54, borderRadius: '50%', border: '1px solid var(--hairline)',
           background: 'var(--card)', boxShadow: '0 6px 22px rgba(0,0,0,0.3)', cursor: 'pointer',
           display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22,
