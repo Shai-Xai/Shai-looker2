@@ -384,13 +384,20 @@ function mount(app, { db, auth }) {
     });
   });
 
-  // Full activity log (the recent-activity feed gets its own tab).
+  // Full activity log — the feed + a date-range report. Optional ?from & ?to (ISO or date).
   app.get('/api/eventops/suites/:suiteId/activity', auth.requireAuth, (req, res) => {
     const su = gateSuite(req, res); if (!su) return;
-    const limit = Math.min(300, Math.max(1, parseInt(req.query.limit, 10) || 100));
-    const rows = sql.prepare('SELECT * FROM eventops_device_events WHERE suite_id=? ORDER BY at DESC LIMIT ?').all(su.id, limit)
-      .map((e) => ({ ...eventRow(e), device: deviceRow(getDevice(e.device_id)) }));
-    res.json({ activity: rows });
+    const limit = Math.min(2000, Math.max(1, parseInt(req.query.limit, 10) || 200));
+    const from = req.query.from ? String(req.query.from) : '';
+    const to = req.query.to ? String(req.query.to) : '';
+    let q = 'SELECT * FROM eventops_device_events WHERE suite_id=?'; const args = [su.id];
+    if (from) { q += ' AND at>=?'; args.push(from); }
+    if (to) { q += ' AND at<=?'; args.push(to.length <= 10 ? to + 'T23:59:59.999Z' : to); }
+    q += ' ORDER BY at DESC LIMIT ?'; args.push(limit);
+    const rows = sql.prepare(q).all(...args).map((e) => ({ ...eventRow(e), device: deviceRow(getDevice(e.device_id)) }));
+    const summary = { total: rows.length, create: 0, move: 0, status: 0, check: 0 };
+    for (const r of rows) summary[r.kind] = (summary[r.kind] || 0) + 1;
+    res.json({ activity: rows, summary });
   });
 
   // ════════════════════════════ devices ════════════════════════════════════════════

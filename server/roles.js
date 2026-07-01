@@ -56,6 +56,11 @@ const ROLES = [
     description: 'Read-only access to the dashboards they’re given. No campaigns, settings or team.',
     permissions: [P.DASHBOARDS_VIEW],
   },
+  {
+    key: 'ops', label: 'Event Ops', lens: 'exec',
+    description: 'On-the-ground event operations ONLY — devices, stations, staff, issues & checkpoints. No dashboards, campaigns or settings.',
+    permissions: [P.EVENTOPS_MANAGE],
+  },
 ];
 
 const ROLE_KEYS = ROLES.map((r) => r.key);

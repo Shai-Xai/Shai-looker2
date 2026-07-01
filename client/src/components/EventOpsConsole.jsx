@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, useRef, lazy, Suspense, Component } from 'react';
+import ReactECharts from 'echarts-for-react';
 import { api } from '../lib/api.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
 
@@ -161,6 +162,14 @@ function LiveTab({ suiteId, isMobile, reloadKey, onStation }) {
         <Stat label="Open issues" value={t.openIssues} accent={t.openIssues ? 'var(--error)' : undefined} />
       </div>
 
+      {(data.stations.length > 0 || t.devices > 0) && (
+        <Section title="Devices by location">
+          <div style={card}>
+            <ReactECharts style={{ height: 240 }} opts={{ renderer: 'svg' }} option={devicesByStationOption(data)} notMerge lazyUpdate />
+          </div>
+        </Section>
+      )}
+
       <Section title="Stations">
         {data.stations.length === 0 ? <Empty>No stations yet.</Empty> : (
           <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(3,1fr)', gap: 10 }}>
@@ -178,6 +187,21 @@ function LiveTab({ suiteId, isMobile, reloadKey, onStation }) {
     </div>
   );
 }
+// Bar chart: deployed device count per station + the Hive (returns/in-stock).
+function devicesByStationOption(data) {
+  const cats = [...data.stations.map((s) => s.name), 'Hive'];
+  const values = [
+    ...data.stations.map((s) => ({ value: s.deviceCount, itemStyle: { color: '#4c8dff', borderRadius: [4, 4, 0, 0] } })),
+    { value: data.totals.atHive, itemStyle: { color: '#9aa4b2', borderRadius: [4, 4, 0, 0] } },
+  ];
+  return {
+    grid: { left: 6, right: 12, top: 16, bottom: 8, containLabel: true },
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+    xAxis: { type: 'category', data: cats, axisLabel: { color: '#8a94a6', fontSize: 11, interval: 0, rotate: cats.length > 6 ? 35 : 0 }, axisLine: { lineStyle: { color: '#8a94a6' } } },
+    yAxis: { type: 'value', minInterval: 1, axisLabel: { color: '#8a94a6', fontSize: 11 }, splitLine: { lineStyle: { color: 'rgba(138,148,166,0.15)' } } },
+    series: [{ type: 'bar', data: values, barMaxWidth: 44, label: { show: true, position: 'top', color: '#8a94a6', fontSize: 11 } }],
+  };
+}
 function feedText(e) {
   const by = e.staffLabel ? ` · ${e.staffLabel}` : '';
   if (e.kind === 'create') return '➕ Device added to inventory';
@@ -193,6 +217,7 @@ function DevicesTab({ suiteId, canManage, onAct, flash, reloadKey }) {
   const [devices, setDevices] = useState(null);
   const [filter, setFilter] = useState('all');         // state filter
   const [stationFilter, setStationFilter] = useState('all'); // location filter (hive | stationId)
+  const [q, setQ] = useState('');                      // search
   const [adding, setAdding] = useState(false);
 
   const load = () => api.eventopsDevices(suiteId).then((r) => setDevices(r.devices || [])).catch(() => setDevices([]));
@@ -212,18 +237,19 @@ function DevicesTab({ suiteId, canManage, onAct, flash, reloadKey }) {
     }
     return { hive, stations: [...m.entries()].map(([id, v]) => ({ id, ...v })).sort((a, b) => a.name.localeCompare(b.name)) };
   }, [devices]);
+  const needle = q.trim().toLowerCase();
   const shown = (devices || []).filter((d) =>
     (filter === 'all' || d.state === filter)
-    && (stationFilter === 'all' || (stationFilter === 'hive' ? !d.stationId : d.stationId === stationFilter)));
+    && (stationFilter === 'all' || (stationFilter === 'hive' ? !d.stationId : d.stationId === stationFilter))
+    && (!needle || [d.label, d.qrCode, d.serialNumber, d.stationName].some((v) => (v || '').toLowerCase().includes(needle))));
 
   if (devices === null) return <Loading />;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      {canManage && (
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={() => setAdding(true)} style={primaryBtn}>＋ Add devices</button>
-        </div>
-      )}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="🔍 Search devices (code, label, serial, station)…" style={{ ...input, flex: 1, minWidth: 200 }} />
+        {canManage && <button onClick={() => setAdding(true)} style={primaryBtn}>＋ Add devices</button>}
+      </div>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
         <Chip on={filter === 'all'} onClick={() => setFilter('all')}>All {counts.all}</Chip>
         {STATE_ORDER.filter((s) => counts[s]).map((s) => (
@@ -652,6 +678,7 @@ function MapTab({ suiteId, canManage, isMobile, reloadKey, onStation }) {
               key={s.id}
               onPointerDown={canManage ? (e) => { e.preventDefault(); startDrag(e, s); } : undefined}
               onClick={canManage ? undefined : () => onStation?.(s)}
+              onDoubleClick={() => onStation?.(s)}
               style={{ ...mapPin, left: `${live.x * 100}%`, top: `${live.y * 100}%`,
                 transform: `translate(-50%, -50%) rotate(${s.rotation || 0}deg) scale(${s.scale || 1})`,
                 cursor: canManage ? 'grab' : 'pointer', borderColor: border,
@@ -866,17 +893,46 @@ function Drawer({ title, subtitle, onClose, children }) {
 // ──────────────────────────────── Activity tab ────────────────────────────────
 function ActivityTab({ suiteId, reloadKey }) {
   const [acts, setActs] = useState(null);
-  useEffect(() => { setActs(null); api.eventopsActivity(suiteId, 150).then((r) => setActs(r.activity || [])).catch(() => setActs([])); }, [suiteId, reloadKey]);
-  if (acts === null) return <Loading />;
-  if (!acts.length) return <Empty>Nothing logged yet.</Empty>;
+  const [summary, setSummary] = useState(null);
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const load = () => { setActs(null); api.eventopsActivity(suiteId, { from, to, limit: 500 }).then((r) => { setActs(r.activity || []); setSummary(r.summary || null); }).catch(() => { setActs([]); setSummary(null); }); };
+  useEffect(() => { load(); }, [suiteId, reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const preset = (days) => { const now = new Date(); const f = new Date(now.getTime() - days * 86400000); setFrom(f.toISOString().slice(0, 10)); setTo(now.toISOString().slice(0, 10)); };
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-      {acts.map((e) => (
-        <div key={e.id} style={feedRow}>
-          <span style={{ fontSize: 13 }}>{e.device ? `${e.device.label || e.device.qrCode} · ` : ''}{feedText(e)}</span>
-          <span style={{ fontSize: 11, color: 'var(--muted)', whiteSpace: 'nowrap' }}>{timeAgo(e.at)}</span>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ ...card, display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ fontWeight: 700, fontSize: 14 }}>Report by period</div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+          <label style={{ fontSize: 12, color: 'var(--muted)' }}>From<br /><input type="date" value={from} onChange={(e) => setFrom(e.target.value)} style={{ ...input, padding: '8px 10px' }} /></label>
+          <label style={{ fontSize: 12, color: 'var(--muted)' }}>To<br /><input type="date" value={to} onChange={(e) => setTo(e.target.value)} style={{ ...input, padding: '8px 10px' }} /></label>
+          <button onClick={load} style={primaryBtn}>Apply</button>
+          {(from || to) && <button onClick={() => { setFrom(''); setTo(''); setTimeout(load, 0); }} style={ghostBtn}>Clear</button>}
+          <div style={{ display: 'flex', gap: 6 }}>
+            {[['24h', 1], ['7d', 7], ['30d', 30]].map(([l, d]) => <Chip key={l} on={false} onClick={() => { preset(d); setTimeout(load, 0); }}>{l}</Chip>)}
+          </div>
         </div>
-      ))}
+        {summary && (
+          <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 13 }}>
+            <span><b>{summary.total}</b> events</span>
+            <span style={{ color: 'var(--muted)' }}>{summary.move || 0} moves</span>
+            <span style={{ color: 'var(--muted)' }}>{summary.check || 0} issues/checks</span>
+            <span style={{ color: 'var(--muted)' }}>{summary.status || 0} status changes</span>
+            <span style={{ color: 'var(--muted)' }}>{summary.create || 0} added</span>
+          </div>
+        )}
+      </div>
+      {acts === null ? <Loading /> : acts.length === 0 ? <Empty>No activity in this period.</Empty> : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          {acts.map((e) => (
+            <div key={e.id} style={feedRow}>
+              <span style={{ fontSize: 13 }}>{e.device ? `${e.device.label || e.device.qrCode} · ` : ''}{feedText(e)}</span>
+              <span style={{ fontSize: 11, color: 'var(--muted)', whiteSpace: 'nowrap' }}>{timeAgo(e.at)}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -890,11 +946,28 @@ function ChecksTab({ suiteId, canManage, flash, reloadKey }) {
   const [photo, setPhoto] = useState(null);
   const [stationF, setStationF] = useState('all');
   const [staffF, setStaffF] = useState('all');
+  const [stations, setStations] = useState([]);
+  const [staff, setStaff] = useState([]);
   const load = () => {
     api.eventopsCheckpoints(suiteId).then((r) => setCheckpoints(r.checkpoints || [])).catch(() => setCheckpoints([]));
     api.eventopsCheckpointLogs(suiteId).then((r) => setLogs(r.logs || [])).catch(() => setLogs([]));
+    api.eventopsStations(suiteId).then((r) => setStations(r.stations || [])).catch(() => {});
+    api.eventopsStaff(suiteId).then((r) => setStaff(r.staff || [])).catch(() => {});
   };
   useEffect(() => { setCheckpoints(null); setLogs(null); load(); }, [suiteId, reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Coverage: who/where has submitted a checkpoint vs still missing.
+  const coverage = useMemo(() => {
+    const lastByStation = {}; const staffDone = new Set();
+    for (const l of logs || []) {
+      if (l.stationLabel && (!lastByStation[l.stationLabel] || l.at > lastByStation[l.stationLabel])) lastByStation[l.stationLabel] = l.at;
+      if (l.staffLabel) staffDone.add(l.staffLabel);
+    }
+    const stationRows = stations.map((s) => ({ name: s.name, last: lastByStation[s.name] || null }));
+    const staffLabel = (s) => [s.number ? `#${s.number}` : '', s.name].filter(Boolean).join(' ').trim();
+    const staffRows = staff.map((s) => ({ name: s.name || s.number, done: staffDone.has(staffLabel(s)) }));
+    return { stationRows, staffRows };
+  }, [logs, stations, staff]);
 
   async function add() { const name = newName.trim(); if (!name) return; try { await api.eventopsCreateCheckpoint(suiteId, name); setNewName(''); load(); flash('Checkpoint added'); } catch (e) { alert(e.message); } }
   async function rename(c) { const name = prompt('Rename checkpoint', c.name); if (name == null) return; try { await api.eventopsUpdateCheckpoint(suiteId, c.id, name); load(); } catch (e) { alert(e.message); } }
@@ -903,6 +976,33 @@ function ChecksTab({ suiteId, canManage, flash, reloadKey }) {
   if (checkpoints === null || logs === null) return <Loading />;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {(coverage.stationRows.length > 0 || coverage.staffRows.length > 0) && (
+        <div style={card}>
+          <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 8 }}>Coverage — checked in vs missing</div>
+          {coverage.stationRows.length > 0 && (
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', marginBottom: 6 }}>STATIONS ({coverage.stationRows.filter((s) => s.last).length}/{coverage.stationRows.length})</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {coverage.stationRows.map((s) => (
+                  <span key={s.name} style={{ ...chipStatic, borderColor: s.last ? 'var(--success)' : 'var(--error)', color: s.last ? 'var(--text)' : 'var(--error)' }}>
+                    {s.last ? '✅' : '⭕'} {s.name}{s.last ? ` · ${timeAgo(s.last)}` : ' · missing'}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+          {coverage.staffRows.length > 0 && (
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', marginBottom: 6 }}>STAFF ({coverage.staffRows.filter((s) => s.done).length}/{coverage.staffRows.length})</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {coverage.staffRows.map((s) => (
+                  <span key={s.name} style={{ ...chipStatic, borderColor: s.done ? 'var(--success)' : 'var(--border)', color: s.done ? 'var(--text)' : 'var(--muted)' }}>{s.done ? '✅' : '⭕'} {s.name}</span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
       {canManage && (
         <div style={card}>
           <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 6 }}>Checkpoint types</div>

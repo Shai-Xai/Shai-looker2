@@ -29,6 +29,9 @@ export default function ClientHome() {
   const isMobile = useIsMobile();
   const { user, isAdmin } = useAuth();
   const { can } = useAccess(); // role gates the campaign affordances on home
+  // The "Event Ops" role has no dashboards — send them straight to their only section.
+  const opsOnly = can(PERMS.EVENTOPS_MANAGE) && !can(PERMS.DASHBOARDS_VIEW) && !isAdmin;
+  useEffect(() => { if (opsOnly) navigate('/event-ops', { replace: true }); }, [opsOnly, navigate]);
   const { activeEntityId } = useProfile();
   const { previewEntityId } = useOutletContext() || {};
   const homeEntityId = previewEntityId || activeEntityId || (user?.entityIds || [])[0] || '';

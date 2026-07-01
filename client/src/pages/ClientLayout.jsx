@@ -190,6 +190,8 @@ export default function ClientLayout() {
   // Show the Event Ops nav only when the active client has the pilot switched on AND the
   // user may operate it (admins always pass `can`). Server enforces the real boundary.
   const eventopsOn = (activeEntityId ? eopEntities.includes(activeEntityId) : eopEntities.length > 0) && can(PERMS.EVENTOPS_MANAGE);
+  // The "Event Ops" role: can operate Event Ops but has no dashboards — show ONLY Event Ops.
+  const opsOnly = can(PERMS.EVENTOPS_MANAGE) && !can(PERMS.DASHBOARDS_VIEW) && !isAdmin;
   // Scope options for the Owl picker: the clients (organisers) + events this user
   // can pick. Admins get all; a client gets their own entity/events.
   const owlClients = (() => {
@@ -288,18 +290,22 @@ export default function ClientLayout() {
     <div className="howler-sidebar" style={{ ...sidebarShell, ...(isMobile ? mobileSidebar : null) }}>
     <nav ref={navRef} style={sidebarStyle}>
       <div className="nav-indicator" style={{ transform: `translateY(${indicator.y}px)`, height: indicator.h, opacity: indicator.show ? 1 : 0 }} />
+      {!opsOnly && (
       <div style={searchWrap}>
         <span style={{ color: 'var(--muted)', fontSize: 13, flexShrink: 0 }}>⌕</span>
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search dashboards…" style={searchInput} />
         {searching && <button onClick={() => setQ('')} style={searchClear} aria-label="Clear search">✕</button>}
       </div>
+      )}
+      {!opsOnly && (
       <div style={{ display: 'flex', alignItems: 'center', padding: '2px 8px 10px 14px' }}>
         <span style={{ flex: 1, fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)' }}>Suites</span>
         {!isMobile && <button onClick={toggleCollapsed} title="Collapse sidebar" style={iconBtn}>⟨</button>}
       </div>
+      )}
       {loading ? (
         <div style={{ padding: 14, color: 'var(--muted)', fontSize: 13 }}>Loading…</div>
-      ) : visibleSuites.length === 0 ? (
+      ) : opsOnly ? null : visibleSuites.length === 0 ? (
         <div style={{ padding: 14, color: 'var(--muted)', fontSize: 13 }}>No suites assigned.</div>
       ) : searching && shownSuites.length === 0 ? (
         <div style={{ padding: 14, color: 'var(--muted)', fontSize: 13 }}>No matches for “{q.trim()}”.</div>
@@ -362,7 +368,7 @@ export default function ClientLayout() {
         <>
           <div style={{ borderTop: '1px solid var(--hairline)', margin: '12px 6px 10px' }} />
           <div style={{ padding: '0 8px 8px 14px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)' }}>Workspace</div>
-          {(visibleSuites.length > 0 || isAdmin) && (
+          {!opsOnly && (visibleSuites.length > 0 || isAdmin) && (
           <button
             ref={onGoals ? activeRef : null}
             className={`nav-row${onGoals ? ' active' : ''}`}
@@ -373,7 +379,7 @@ export default function ClientLayout() {
             <span style={ellip}>Goals</span>
           </button>
           )}
-          {(visibleSuites.length > 0 || isAdmin) && (
+          {!opsOnly && (visibleSuites.length > 0 || isAdmin) && (
           <button
             ref={onAlerts ? activeRef : null}
             className={`nav-row${onAlerts ? ' active' : ''}`}
@@ -395,7 +401,7 @@ export default function ClientLayout() {
             <span style={ellip}>Event Ops</span>
           </button>
           )}
-          {can(PERMS.DIGESTS_MANAGE) && (
+          {!opsOnly && can(PERMS.DIGESTS_MANAGE) && (
           <button
             ref={onDigests ? activeRef : null}
             className={`nav-row${onDigests ? ' active' : ''}`}
@@ -406,7 +412,7 @@ export default function ClientLayout() {
             <span style={ellip}>Digests</span>
           </button>
           )}
-          {can(PERMS.SETTLEMENTS_VIEW) && (visibleSettlements.length > 0 || isAdmin) && (
+          {!opsOnly && can(PERMS.SETTLEMENTS_VIEW) && (visibleSettlements.length > 0 || isAdmin) && (
           <button
             ref={onSettlements ? activeRef : null}
             className={`nav-row${onSettlements ? ' active' : ''}`}
@@ -418,7 +424,7 @@ export default function ClientLayout() {
             {visibleSettlements.length > 0 && <span style={countChip}>{visibleSettlements.length}</span>}
           </button>
           )}
-          {inbox.enabled && (
+          {!opsOnly && inbox.enabled && (
             <button
               className={`nav-row${onInbox ? ' active' : ''}`}
               style={{ ...rowBtn, fontWeight: onInbox ? 600 : 500 }}
@@ -429,7 +435,7 @@ export default function ClientLayout() {
               {inbox.unread > 0 && <span style={{ ...countChip, background: 'var(--brand)', color: '#fff' }}>{inbox.unread}</span>}
             </button>
           )}
-          {(can(PERMS.CAMPAIGNS_VIEW)) && (
+          {!opsOnly && (can(PERMS.CAMPAIGNS_VIEW)) && (
           <>
           <div style={{ borderTop: '1px solid var(--hairline)', margin: '12px 6px 10px' }} />
           <div style={{ padding: '0 8px 8px 14px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)' }}>Engage</div>
@@ -487,6 +493,7 @@ export default function ClientLayout() {
         <div className="ai-overlay" style={{ position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'flex-end' }} onClick={() => setNavOpen(false)}>
           <div className="ai-sheet" style={{ ...navSheet, ...navDrag.style }} onClick={(e) => e.stopPropagation()}>
             <div className="sheet-grip" {...navDrag.handlers} style={{ marginTop: 10 }} />
+            {!opsOnly && (
             <div style={{ padding: '2px 14px 8px' }}>
               <div style={searchWrap}>
                 <span style={{ color: 'var(--muted)', fontSize: 13, flexShrink: 0 }}>⌕</span>
@@ -494,11 +501,12 @@ export default function ClientLayout() {
                 {searching && <button onClick={() => setQ('')} style={searchClear} aria-label="Clear search">✕</button>}
               </div>
             </div>
+            )}
             <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: '0 10px 8px' }}>
               {searching && shownSuites.length === 0 && (
                 <div style={{ padding: 14, color: 'var(--muted)', fontSize: 13 }}>No matches for “{q.trim()}”.</div>
               )}
-              {shownSuites.map((su) => {
+              {!opsOnly && shownSuites.map((su) => {
                 const sets = suiteSets(su);
                 const single = shownSuites.length === 1;
                 const suiteOpen = single || searching || !!openSuites[su.id];
@@ -546,7 +554,7 @@ export default function ClientLayout() {
               {(
                 <>
                   <div style={{ borderTop: '1px solid var(--hairline)', margin: '10px 4px' }} />
-                  {(visibleSuites.length > 0 || isAdmin) && (
+                  {!opsOnly && (visibleSuites.length > 0 || isAdmin) && (
                   <button
                     className={`nav-row${onGoals ? ' active' : ''}`}
                     style={{ ...mRowSuite, fontWeight: onGoals ? 700 : 500 }}
@@ -556,7 +564,7 @@ export default function ClientLayout() {
                     <span style={ellip}>Goals</span>
                   </button>
                   )}
-                  {(visibleSuites.length > 0 || isAdmin) && (
+                  {!opsOnly && (visibleSuites.length > 0 || isAdmin) && (
                   <button
                     className={`nav-row${onAlerts ? ' active' : ''}`}
                     style={{ ...mRowSuite, fontWeight: onAlerts ? 700 : 500 }}
@@ -576,7 +584,7 @@ export default function ClientLayout() {
                     <span style={ellip}>Event Ops</span>
                   </button>
                   )}
-                  {can(PERMS.DIGESTS_MANAGE) && (
+                  {!opsOnly && can(PERMS.DIGESTS_MANAGE) && (
                   <button
                     className={`nav-row${onDigests ? ' active' : ''}`}
                     style={{ ...mRowSuite, fontWeight: onDigests ? 700 : 500 }}
@@ -586,7 +594,7 @@ export default function ClientLayout() {
                     <span style={ellip}>Digests</span>
                   </button>
                   )}
-                  {can(PERMS.SETTLEMENTS_VIEW) && (visibleSettlements.length > 0 || isAdmin) && (
+                  {!opsOnly && can(PERMS.SETTLEMENTS_VIEW) && (visibleSettlements.length > 0 || isAdmin) && (
                   <button
                     className={`nav-row${onSettlements ? ' active' : ''}`}
                     style={{ ...mRowSuite, fontWeight: onSettlements ? 700 : 500 }}
@@ -597,7 +605,7 @@ export default function ClientLayout() {
                     {visibleSettlements.length > 0 && <span style={countChip}>{visibleSettlements.length}</span>}
                   </button>
                   )}
-                  {inbox.enabled && (
+                  {!opsOnly && inbox.enabled && (
                     <button
                       className={`nav-row${onInbox ? ' active' : ''}`}
                       style={{ ...mRowSuite, fontWeight: onInbox ? 700 : 500 }}
