@@ -1,20 +1,22 @@
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
+import { useIsMobile } from '../lib/useIsMobile.js';
 
 // ─── Email block builder (Mailchimp-style) ─────────────────────────────────────
-// Stack content blocks — heading, text, image, button, video, social, divider,
-// spacer — for a campaign email. Edits the `blocks` array; the live email preview
-// (rendered server-side, same as every content mode) shows the result. Mobile-first:
-// one column, each block a card with move/delete + its own fields. Rendering to
-// email-safe HTML happens on the server (server/emailBlocks.js) — keep the block
-// shapes in sync there.
+// Stack content blocks — heading, text, image, button, video, social, columns,
+// divider, spacer — for a campaign email. Reorder by DRAGGING the ⠿ handle (or the
+// ↑/↓ buttons on touch), edit inline, delete. A `columns` block holds two nested
+// lists (side-by-side on desktop, stacked on mobile). Edits the `blocks` array; the
+// live email preview (rendered server-side) shows the result. Email-safe rendering
+// happens on the server (server/emailBlocks.js) — keep the block shapes in sync.
 
-const BLOCK_MENU = [
+const BASE_MENU = [
   { type: 'heading', label: 'Heading', icon: 'H' },
   { type: 'text', label: 'Text', icon: '¶' },
   { type: 'image', label: 'Image', icon: '🖼' },
   { type: 'button', label: 'Button', icon: '🔘' },
   { type: 'video', label: 'Video', icon: '▶' },
   { type: 'social', label: 'Social', icon: '🔗' },
+  { type: 'columns', label: '2 columns', icon: '▥' },
   { type: 'divider', label: 'Divider', icon: '―' },
   { type: 'spacer', label: 'Spacer', icon: '↕' },
 ];
@@ -29,34 +31,53 @@ function newBlock(type) {
   if (type === 'button') return { ...base, text: 'Buy tickets', href: '', align: 'center' };
   if (type === 'video') return { ...base, thumb: '', href: '', alt: '' };
   if (type === 'social') return { ...base, items: [] };
+  if (type === 'columns') return { ...base, cols: [[], []] };
   if (type === 'spacer') return { ...base, size: 'md' };
   return base; // divider
 }
 
 export default function EmailBuilder({ value, onChange }) {
-  const blocks = Array.isArray(value) ? value : [];
+  return <BlockList blocks={Array.isArray(value) ? value : []} onChange={onChange} allowColumns />;
+}
+
+// A reusable, reorderable list of blocks — used at the top level AND inside each
+// column of a `columns` block (allowColumns=false there, so columns can't nest).
+function BlockList({ blocks, onChange, allowColumns = false }) {
+  const [dragI, setDragI] = useState(null);
+  const [overI, setOverI] = useState(null);
+  const menu = allowColumns ? BASE_MENU : BASE_MENU.filter((m) => m.type !== 'columns');
   const set = (next) => onChange(next);
   const add = (type) => set([...blocks, newBlock(type)]);
   const update = (i, patch) => set(blocks.map((b, j) => (j === i ? { ...b, ...patch } : b)));
   const remove = (i) => set(blocks.filter((_, j) => j !== i));
-  const move = (i, dir) => {
-    const j = i + dir; if (j < 0 || j >= blocks.length) return;
-    const next = blocks.slice(); [next[i], next[j]] = [next[j], next[i]]; set(next);
-  };
+  const move = (i, dir) => { const j = i + dir; if (j < 0 || j >= blocks.length) return; const next = blocks.slice(); [next[i], next[j]] = [next[j], next[i]]; set(next); };
+  const moveTo = (from, to) => { if (from === to || from == null) return; const next = blocks.slice(); const [b] = next.splice(from, 1); next.splice(to, 0, b); set(next); };
 
   return (
     <div>
       {blocks.length === 0 && (
-        <div style={{ fontSize: 12.5, color: 'var(--muted)', padding: '10px 12px', border: '1px dashed var(--hairline)', borderRadius: 10, marginBottom: 10 }}>
-          No blocks yet — add one below to start building your email.
+        <div style={{ fontSize: 12, color: 'var(--muted)', padding: '8px 10px', border: '1px dashed var(--hairline)', borderRadius: 8, marginBottom: 8 }}>
+          No blocks yet — add one below.
         </div>
       )}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {blocks.map((b, i) => (
-          <div key={b.id} style={card}>
+          <div
+            key={b.id}
+            onDragOver={(e) => { if (dragI != null) { e.preventDefault(); if (overI !== i) setOverI(i); } }}
+            onDrop={(e) => { e.preventDefault(); moveTo(dragI, i); setDragI(null); setOverI(null); }}
+            style={{ ...card, borderTop: overI === i && dragI != null && dragI !== i ? '2px solid var(--brand)' : card.border, opacity: dragI === i ? 0.5 : 1 }}
+          >
             <div style={cardHead}>
+              <span
+                draggable
+                onDragStart={() => setDragI(i)}
+                onDragEnd={() => { setDragI(null); setOverI(null); }}
+                title="Drag to reorder"
+                style={{ cursor: 'grab', color: 'var(--muted)', fontSize: 15, padding: '0 2px', userSelect: 'none' }}
+              >⠿</span>
               <span style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', flex: 1 }}>
-                {(BLOCK_MENU.find((m) => m.type === b.type) || {}).icon} {b.type}
+                {(BASE_MENU.find((m) => m.type === b.type) || {}).icon} {b.type}
               </span>
               <button type="button" style={iconBtn} onClick={() => move(i, -1)} disabled={i === 0} title="Move up">↑</button>
               <button type="button" style={iconBtn} onClick={() => move(i, 1)} disabled={i === blocks.length - 1} title="Move down">↓</button>
@@ -67,13 +88,12 @@ export default function EmailBuilder({ value, onChange }) {
         ))}
       </div>
 
-      {/* Add-block palette */}
-      <div style={{ marginTop: 10 }}>
-        <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', marginBottom: 6 }}>Add a block</div>
+      <div style={{ marginTop: 8 }}>
+        <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', marginBottom: 6 }}>Add a block</div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {BLOCK_MENU.map((m) => (
+          {menu.map((m) => (
             <button key={m.type} type="button" style={addBtn} onClick={() => add(m.type)}>
-              <span style={{ fontSize: 14 }}>{m.icon}</span> {m.label}
+              <span style={{ fontSize: 13 }}>{m.icon}</span> {m.label}
             </button>
           ))}
         </div>
@@ -83,6 +103,7 @@ export default function EmailBuilder({ value, onChange }) {
 }
 
 function BlockEditor({ block: b, onChange }) {
+  const isMobile = useIsMobile();
   const set = (patch) => onChange(patch);
   switch (b.type) {
     case 'heading':
@@ -143,6 +164,21 @@ function BlockEditor({ block: b, onChange }) {
           <button type="button" style={miniBtn} onClick={() => set({ items: [...(b.items || []), { type: 'instagram', url: '' }] })}>＋ Add link</button>
         </div>
       );
+    case 'columns':
+      return (
+        <div style={{ display: 'flex', gap: 8, flexDirection: isMobile ? 'column' : 'row' }}>
+          {[0, 1].map((ci) => (
+            <div key={ci} style={{ flex: 1, minWidth: 0, border: '1px dashed var(--hairline)', borderRadius: 8, padding: 8, background: 'rgba(128,128,128,0.03)' }}>
+              <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', marginBottom: 6 }}>Column {ci + 1}</div>
+              <BlockList
+                blocks={(b.cols && b.cols[ci]) || []}
+                allowColumns={false}
+                onChange={(next) => set({ cols: [ci === 0 ? next : ((b.cols && b.cols[0]) || []), ci === 1 ? next : ((b.cols && b.cols[1]) || [])] })}
+              />
+            </div>
+          ))}
+        </div>
+      );
     case 'spacer':
       return <Select value={b.size} onChange={(v) => set({ size: v })} options={[['sm', 'Small gap'], ['md', 'Medium gap'], ['lg', 'Large gap']]} />;
     case 'divider':
@@ -176,7 +212,7 @@ function BlockImage({ value, onChange, label }) {
   return (
     <div>
       <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-        <div style={{ width: 120, height: 56, border: '1px dashed var(--hairline)', borderRadius: 8, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fff', flexShrink: 0 }}>
+        <div style={{ width: 100, height: 50, border: '1px dashed var(--hairline)', borderRadius: 8, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fff', flexShrink: 0 }}>
           {value ? <img src={value} alt="" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'cover' }} /> : <span style={{ fontSize: 11, color: 'var(--muted)' }}>{label || 'None'}</span>}
         </div>
         <button type="button" style={miniBtn} onClick={() => ref.current?.click()}>Upload</button>

@@ -64,6 +64,16 @@ function blockHtml(block, brand) {
       const links = items.map((it) => `<a href="${esc(it.url)}" style="display:inline-block;margin:0 8px;font-size:12.5px;font-weight:700;color:${esc(brand)};text-decoration:none;">${esc(SOCIAL[it.type] || it.type || 'Link')}</a>`).join('');
       return `<div style="text-align:center;">${links}</div>`;
     }
+    case 'columns': {
+      // Fluid-hybrid two-column: each column is width:100% with a max-width, so the
+      // pair sits side-by-side on wide screens and stacks on narrow ones — no media
+      // queries (which many email clients strip). font-size:0 kills inline-block gaps.
+      const cols = (Array.isArray(b.cols) ? b.cols : []).slice(0, 2).map((c) => render(c, { brand }).html.trim()).filter(Boolean);
+      if (!cols.length) return '';
+      if (cols.length === 1) return cols[0];
+      const cell = (h) => `<div style="display:inline-block;width:100%;max-width:262px;vertical-align:top;text-align:left;padding:0 6px;box-sizing:border-box;">${h}</div>`;
+      return `<div style="font-size:0;text-align:center;">${cols.map(cell).join('')}</div>`;
+    }
     default:
       return '';
   }
@@ -80,6 +90,7 @@ function blockText(block) {
     case 'image': return b.href ? b.href : '';
     case 'video': return b.href ? `Watch: ${b.href}` : '';
     case 'social': return (b.items || []).filter((it) => it && it.url).map((it) => `${SOCIAL[it.type] || it.type}: ${it.url}`).join('  ');
+    case 'columns': return (Array.isArray(b.cols) ? b.cols : []).map((c) => render(c).text).filter(Boolean).join('\n\n');
     case 'divider': return '—';
     default: return '';
   }
@@ -103,7 +114,7 @@ function render(blocks, { brand = '#111111' } = {}) {
 
 // Swap each image/video/thumb data-URL for a hosted URL via hostFor(block, key) →
 // URL (or null to leave as-is). Used on real sends so clients don't strip data:.
-// Returns a NEW blocks array (never mutates the stored config).
+// Recurses into column children. Returns a NEW blocks array (never mutates config).
 function hostImages(blocks, hostFor) {
   const list = Array.isArray(blocks) ? blocks : [];
   return list.map((b) => {
@@ -111,29 +122,51 @@ function hostImages(blocks, hostFor) {
     const out = { ...b };
     if (b.type === 'image' && /^data:/.test(b.url || '')) { const u = hostFor(b, 'url'); if (u) out.url = u; }
     if (b.type === 'video' && /^data:/.test(b.thumb || '')) { const u = hostFor(b, 'thumb'); if (u) out.thumb = u; }
+    if (b.type === 'columns' && Array.isArray(b.cols)) out.cols = b.cols.map((c) => hostImages(c, hostFor));
     return out;
   });
 }
 
-// Sanitise a block list from client input: cap count + per-field lengths, keep only
-// known types, and give each a stable id (used to host its images on real sends).
-const BLOCK_TYPES = new Set(['heading', 'text', 'image', 'button', 'divider', 'spacer', 'video', 'social']);
-function cleanBlocks(arr) {
-  if (!Array.isArray(arr)) return [];
-  return arr.slice(0, 40).filter((b) => b && BLOCK_TYPES.has(b.type)).map((b, i) => ({
-    id: String(b.id || `b${i}`).slice(0, 40),
-    type: b.type,
-    text: String(b.text || '').slice(0, 8000),
-    level: [1, 2, 3].includes(Number(b.level)) ? Number(b.level) : 1,
-    align: ['left', 'center', 'right'].includes(b.align) ? b.align : 'left',
-    url: String(b.url || '').slice(0, 1500000),
-    thumb: String(b.thumb || '').slice(0, 1500000),
-    alt: String(b.alt || '').slice(0, 200),
-    href: String(b.href || '').slice(0, 500),
-    width: ['full', 'half', 'third'].includes(b.width) ? b.width : 'full',
-    size: ['sm', 'md', 'lg'].includes(b.size) ? b.size : 'md',
-    items: Array.isArray(b.items) ? b.items.slice(0, 8).map((it) => ({ type: String(it?.type || '').slice(0, 20), url: String(it?.url || '').slice(0, 500) })) : [],
-  }));
+// Flatten a block list to every block including column children — so an asset route
+// can find an image block by id whether it's top-level or inside a column.
+function flattenBlocks(blocks) {
+  const out = [];
+  for (const b of (Array.isArray(blocks) ? blocks : [])) {
+    if (!b) continue;
+    out.push(b);
+    if (b.type === 'columns' && Array.isArray(b.cols)) for (const c of b.cols) out.push(...flattenBlocks(c));
+  }
+  return out;
 }
 
-module.exports = { render, hostImages, cleanBlocks, blockHtml, blockText };
+// Sanitise a block list from client input: cap count + per-field lengths, keep only
+// known types, and give each a stable id (used to host its images on real sends).
+// `columns` is allowed at the top level only (no nesting) and its two columns are
+// cleaned recursively as plain (non-column) block lists.
+const CHILD_TYPES = new Set(['heading', 'text', 'image', 'button', 'divider', 'spacer', 'video', 'social']);
+const BLOCK_TYPES = new Set([...CHILD_TYPES, 'columns']);
+function cleanBlockList(arr, { allowColumns } = {}) {
+  if (!Array.isArray(arr)) return [];
+  const allowed = allowColumns ? BLOCK_TYPES : CHILD_TYPES;
+  return arr.slice(0, 40).filter((b) => b && allowed.has(b.type)).map((b, i) => {
+    const out = {
+      id: String(b.id || `b${i}`).slice(0, 40),
+      type: b.type,
+      text: String(b.text || '').slice(0, 8000),
+      level: [1, 2, 3].includes(Number(b.level)) ? Number(b.level) : 1,
+      align: ['left', 'center', 'right'].includes(b.align) ? b.align : 'left',
+      url: String(b.url || '').slice(0, 1500000),
+      thumb: String(b.thumb || '').slice(0, 1500000),
+      alt: String(b.alt || '').slice(0, 200),
+      href: String(b.href || '').slice(0, 500),
+      width: ['full', 'half', 'third'].includes(b.width) ? b.width : 'full',
+      size: ['sm', 'md', 'lg'].includes(b.size) ? b.size : 'md',
+      items: Array.isArray(b.items) ? b.items.slice(0, 8).map((it) => ({ type: String(it?.type || '').slice(0, 20), url: String(it?.url || '').slice(0, 500) })) : [],
+    };
+    if (b.type === 'columns') out.cols = (Array.isArray(b.cols) ? b.cols : []).slice(0, 2).map((c) => cleanBlockList(c, { allowColumns: false }));
+    return out;
+  });
+}
+const cleanBlocks = (arr) => cleanBlockList(arr, { allowColumns: true });
+
+module.exports = { render, hostImages, flattenBlocks, cleanBlocks, blockHtml, blockText };

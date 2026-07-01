@@ -1029,7 +1029,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
   };
   const blockImg = (a, stepIdx, blockId, key) => {
     const blocks = (stepIdx >= 0 ? a?.config?.steps?.[stepIdx]?.blocks : a?.config?.blocks) || [];
-    const b = blocks.find((x) => x.id === blockId);
+    const b = emailBlocks.flattenBlocks(blocks).find((x) => x.id === blockId); // incl. column children
     return b ? (key === 'thumb' ? b.thumb : b.url) : '';
   };
   app.get('/mail-assets/campaign/:id/blocks/:blockId/:key', (req, res) => serveDataUrl(res, blockImg(getAction(req.params.id), -1, req.params.blockId, req.params.key)));

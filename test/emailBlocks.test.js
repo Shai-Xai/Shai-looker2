@@ -65,6 +65,48 @@ test('render: plain-text fallback covers each block', () => {
   assert.match(text, /Website: https:\/\/w/);
 });
 
+test('render: columns render two fluid-hybrid cells; one column falls back to a single', () => {
+  const two = eb.render([{ type: 'columns', cols: [
+    [{ type: 'text', text: 'Left' }],
+    [{ type: 'text', text: 'Right' }],
+  ] }]);
+  assert.match(two.html, /display:inline-block/);
+  assert.match(two.html, /max-width:262px/);
+  assert.match(two.html, /Left/);
+  assert.match(two.html, /Right/);
+  assert.match(two.text, /Left\n\nRight/);
+  // A column that resolves to nothing → the other column renders full-width (no cell wrap).
+  const one = eb.render([{ type: 'columns', cols: [[{ type: 'text', text: 'Solo' }], []] }]);
+  assert.match(one.html, /Solo/);
+  assert.doesNotMatch(one.html, /inline-block/);
+});
+
+test('cleanBlocks: keeps columns at top level, cleans children, forbids nested columns', () => {
+  const cleaned = eb.cleanBlocks([
+    { type: 'columns', cols: [
+      [{ type: 'text', text: 'ok' }, { type: 'columns', cols: [[], []] }], // nested columns dropped
+      [{ type: 'button', text: 'Go', href: 'https://x' }],
+    ] },
+  ]);
+  assert.equal(cleaned[0].type, 'columns');
+  assert.equal(cleaned[0].cols[0].length, 1);          // nested-columns child removed
+  assert.equal(cleaned[0].cols[0][0].type, 'text');
+  assert.equal(cleaned[0].cols[1][0].type, 'button');
+});
+
+test('flattenBlocks: yields column children so their images are findable by id', () => {
+  const flat = eb.flattenBlocks([
+    { id: 'top', type: 'text', text: 'x' },
+    { id: 'col', type: 'columns', cols: [[{ id: 'c1', type: 'image', url: 'u' }], [{ id: 'c2', type: 'text' }]] },
+  ]);
+  assert.deepEqual(flat.map((b) => b.id), ['top', 'col', 'c1', 'c2']);
+});
+
+test('hostImages: recurses into column children', () => {
+  const out = eb.hostImages([{ id: 'col', type: 'columns', cols: [[{ id: 'c1', type: 'image', url: 'data:image/png;base64,AAA' }], []] }], (b, key) => `https://host/${b.id}/${key}`);
+  assert.equal(out[0].cols[0][0].url, 'https://host/c1/url');
+});
+
 test('hostImages: swaps only data-URL images/thumbs, leaves URLs + non-media alone', () => {
   const blocks = [
     { type: 'image', id: 'a', url: 'data:image/png;base64,AAA' },
