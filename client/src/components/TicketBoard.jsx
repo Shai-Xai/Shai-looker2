@@ -111,6 +111,7 @@ function GithubConfig() {
   const [openForm, setOpenForm] = useState(false);
   const [repo, setRepo] = useState('');
   const [token, setToken] = useState('');
+  const [webhookSecret, setWebhookSecret] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const refresh = () => api.getGithubConfig().then((c) => { setCfg(c); setRepo(c.repo || ''); }).catch(() => {});
@@ -151,6 +152,22 @@ function GithubConfig() {
               <span style={{ color: 'var(--muted)', display: 'block', fontSize: 11.5 }}>Adds an @claude mention to each issue so the Claude Code GitHub Action opens a PR. Requires the Claude GitHub App + ANTHROPIC_API_KEY secret + .github/workflows/claude.yml.</span>
             </span>
           </label>
+
+          {/* Webhook — so a merged PR auto-ships the ticket + notifies the reporter. */}
+          <div style={{ borderTop: '1px solid var(--hairline)', paddingTop: 10, marginTop: 4 }}>
+            <div style={{ fontWeight: 600, marginBottom: 4 }}>Auto-ship on merge {cfg.webhookSecretSet ? <span style={{ color: '#16a34a', fontWeight: 400 }}>· webhook connected</span> : <span style={{ color: 'var(--muted)', fontWeight: 400 }}>· not set up</span>}</div>
+            <p style={{ color: 'var(--muted)', fontSize: 11.5, margin: '0 0 6px' }}>
+              Add a GitHub webhook (repo Settings → Webhooks) for <b>Pull requests</b>, then paste its secret here. A merged PR then moves the ticket to Shipped and notifies the reporter.
+            </p>
+            <label style={ctlLbl}>Payload URL (into GitHub)</label>
+            <input className="fld" readOnly value={`${typeof window !== 'undefined' ? window.location.origin : ''}/api/github/webhook`} onFocus={(e) => e.target.select()} style={{ marginBottom: 6 }} />
+            <label style={ctlLbl}>Webhook secret {cfg.webhookSecretSet ? '(set — blank keeps it)' : ''}</label>
+            <input className="fld" type="password" value={webhookSecret} onChange={(e) => setWebhookSecret(e.target.value)} placeholder={cfg.webhookSecretSet ? '•••• leave blank to keep' : 'a long random string'} autoComplete="off" style={{ marginBottom: 6 }} />
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <button onClick={async () => { setBusy(true); try { const c = await api.saveGithubConfig(webhookSecret ? { webhookSecret } : {}); setCfg(c); setWebhookSecret(''); setMsg('Saved'); setTimeout(() => setMsg(''), 1500); } finally { setBusy(false); } }} disabled={busy || !webhookSecret} style={miniBtn}>Save secret</button>
+              {cfg.webhookSecretSet && <button onClick={async () => { await api.saveGithubConfig({ clearWebhookSecret: true }); refresh(); }} style={miniBtn}>Remove</button>}
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -372,6 +389,7 @@ function TicketDetail({ id, onClose, onChange }) {
               ) : (
                 <button onClick={sendToGithub} disabled={busy === 'gh'} style={ghBtn}>{busy === 'gh' ? 'Creating…' : '🐙 Send to GitHub'}</button>
               )}
+              {t.prUrl && <a href={t.prUrl} target="_blank" rel="noreferrer" style={{ ...ghBtn, textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}>🔀 PR #{t.prNumber} ↗</a>}
             </div>
 
             {/* Ship to the reporter: the overview + test link that ride the "Shipped"

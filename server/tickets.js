@@ -120,6 +120,8 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
     add('github_url', "github_url TEXT NOT NULL DEFAULT ''");
     add('decline_reason', "decline_reason TEXT NOT NULL DEFAULT ''");
     add('source', "source TEXT NOT NULL DEFAULT 'widget'"); // entry point: 'widget' (form) | 'owl' (chat)
+    add('github_pr_number', 'github_pr_number INTEGER NOT NULL DEFAULT 0');
+    add('github_pr_url', "github_pr_url TEXT NOT NULL DEFAULT ''");
   } catch (e) { console.error('[tickets] ship-review migration skipped:', e.message); }
 
   const enabled = () => db.getSetting('tickets_enabled', '1') !== '0'; // on by default; kill switch
@@ -172,7 +174,7 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
       assignee: r.assignee, aiTitle: r.ai_title, aiSummary: r.ai_summary, aiStatus: r.ai_status, source: r.source || 'widget',
       shipNote: r.ship_note || '', testUrl: r.test_url || '',
       clientVerdict: r.client_verdict || '', clientVerdictNote: r.client_verdict_note || '', clientVerdictAt: r.client_verdict_at || '', declineReason: r.decline_reason || '',
-      githubIssue: r.github_issue_number || 0, githubUrl: r.github_url || '',
+      githubIssue: r.github_issue_number || 0, githubUrl: r.github_url || '', prNumber: r.github_pr_number || 0, prUrl: r.github_pr_url || '',
       attachments: attList(r.id), createdAt: r.created_at, updatedAt: r.updated_at,
     };
   }
@@ -525,6 +527,58 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
       .run(verdict === 'approved' ? 'approved' : 'rejected', verdict, note, now(), now(), t.id);
     notifyTeamOnVerdict(getTicket(t.id));
     res.json({ ticket: myTicketRow(getTicket(t.id)) });
+  });
+
+  // ── GitHub webhook: PR events → auto-update the linked ticket ──────────────────
+  // A merged PR auto-Ships its ticket (and notifies the reporter); an opened PR
+  // links it + nudges the board forward. Verified by HMAC (github.verifyWebhook)
+  // over the RAW body (index.js excludes this path from the global JSON parser).
+  // PR → ticket link is by the issue number Pulse stored, found in the PR body
+  // ("Fixes #N") or the branch name (claude/issue-N-…).
+  const rawJson = express.raw({ type: '*/*', limit: '5mb' });
+  function issueNumbersFromPr(pr) {
+    const nums = new Set();
+    for (const m of String(pr.body || '').matchAll(/#(\d+)/g)) nums.add(Number(m[1]));
+    const bm = String(pr.head?.ref || '').match(/issue[-_/](\d+)/i);
+    if (bm) nums.add(Number(bm[1]));
+    return [...nums].filter(Boolean);
+  }
+  const ticketsForIssues = (nums) => nums.map((n) => sql.prepare('SELECT * FROM tickets WHERE github_issue_number=?').get(n)).filter(Boolean);
+  function handlePullRequest(payload) {
+    const pr = payload.pull_request;
+    if (!pr) return;
+    const action = payload.action;
+    for (const t of ticketsForIssues(issueNumbersFromPr(pr))) {
+      if (String(t.github_pr_url || '') !== String(pr.html_url || '')) {
+        sql.prepare('UPDATE tickets SET github_pr_number=?, github_pr_url=?, updated_at=? WHERE id=?').run(pr.number, pr.html_url, now(), t.id);
+      }
+      if (action === 'closed' && pr.merged) {
+        if (t.status === 'shipped' || t.status === 'approved') continue; // already done
+        const note = (t.ship_note || '').trim() || `Shipped via PR #${pr.number}: ${String(pr.title || '').trim()}`.slice(0, 8000);
+        sql.prepare('UPDATE tickets SET status=?, ship_note=?, updated_at=? WHERE id=?').run('shipped', note, now(), t.id);
+        logComment(t.id, { authorEmail: 'github', authorRole: 'system', kind: 'status', body: `PR #${pr.number} merged — auto-shipped.` });
+        notifyReporter(getTicket(t.id), t.status);
+      } else if (action === 'closed' && !pr.merged) {
+        logComment(t.id, { authorEmail: 'github', authorRole: 'system', kind: 'system', body: `PR #${pr.number} closed without merging.` });
+      } else if (['opened', 'reopened', 'ready_for_review'].includes(action)) {
+        logComment(t.id, { authorEmail: 'github', authorRole: 'system', kind: 'system', body: `PR #${pr.number} opened: ${pr.html_url}` });
+        if (['inbox', 'triaged', 'accepted'].includes(t.status)) {
+          const prev = t.status;
+          sql.prepare('UPDATE tickets SET status=?, updated_at=? WHERE id=?').run('in_progress', now(), t.id);
+          notifyReporter(getTicket(t.id), prev);
+        }
+      }
+    }
+  }
+  // NOT cookie-authed — GitHub signs each delivery; we verify the HMAC signature.
+  app.post('/api/github/webhook', rawJson, (req, res) => {
+    const raw = Buffer.isBuffer(req.body) ? req.body : Buffer.from('');
+    if (!github?.verifyWebhook?.(raw, req.get('x-hub-signature-256'))) return res.status(401).json({ error: 'bad signature' });
+    let payload; try { payload = JSON.parse(raw.toString('utf8')); } catch { return res.status(400).json({ error: 'bad json' }); }
+    if (req.get('x-github-event') === 'pull_request') {
+      try { handlePullRequest(payload); } catch (e) { console.error('[tickets] webhook error:', e.message); }
+    }
+    res.json({ ok: true });
   });
 
   console.log('[tickets] Product board mounted', enabled() ? '(enabled)' : '(disabled — set tickets_enabled=1)');

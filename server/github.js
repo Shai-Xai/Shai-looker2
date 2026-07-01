@@ -9,8 +9,11 @@
 // prefilled "new issue" URL so the browser (already logged into GitHub) can file
 // one manually — the feature stays useful with zero server credentials.
 
+const crypto = require('crypto');
+
 const TOKEN_KEY = 'github_token';
 const REPO_KEY = 'github_repo';
+const WEBHOOK_KEY = 'github_webhook_secret';
 const REPO_RE = /^[^/\s]+\/[^/\s]+$/; // owner/name
 
 function mount(app, { db, auth }) {
@@ -22,7 +25,16 @@ function mount(app, { db, auth }) {
   // Claude Code GitHub Action picks the ticket up and opens a PR. Off by default —
   // needs the Claude GitHub App + ANTHROPIC_API_KEY secret + the claude.yml workflow.
   const dispatchEnabled = () => db.getSetting('github_dispatch_claude', '0') === '1';
-  const config = () => ({ repo: repo(), tokenSet: !!token(), tokenMask: mask(token()), configured: isConfigured(), dispatchClaude: dispatchEnabled() });
+  // Webhook secret (write-only): lets Pulse verify GitHub PR events so a merged PR
+  // can auto-Ship the linked ticket. Verified with HMAC-SHA256 over the raw body.
+  const webhookSecret = () => (db.getSetting(WEBHOOK_KEY, '') || process.env.GITHUB_WEBHOOK_SECRET || '').trim();
+  function verifyWebhook(rawBuf, signature) {
+    const secret = webhookSecret();
+    if (!secret || !signature) return false;
+    const mac = `sha256=${crypto.createHmac('sha256', secret).update(rawBuf).digest('hex')}`;
+    try { return crypto.timingSafeEqual(Buffer.from(mac), Buffer.from(String(signature))); } catch { return false; }
+  }
+  const config = () => ({ repo: repo(), tokenSet: !!token(), tokenMask: mask(token()), configured: isConfigured(), dispatchClaude: dispatchEnabled(), webhookSecretSet: !!webhookSecret() });
 
   // Admin: read/write the connection (token is write-only — a blank token keeps the
   // existing one; { clearToken:true } removes it).
@@ -33,6 +45,8 @@ function mount(app, { db, auth }) {
     if (b.dispatchClaude !== undefined) db.setSetting('github_dispatch_claude', b.dispatchClaude ? '1' : '0');
     if (b.clearToken) db.setSetting(TOKEN_KEY, '');
     else if (b.token) db.setSetting(TOKEN_KEY, String(b.token).trim());
+    if (b.clearWebhookSecret) db.setSetting(WEBHOOK_KEY, '');
+    else if (b.webhookSecret) db.setSetting(WEBHOOK_KEY, String(b.webhookSecret).trim());
     res.json(config());
   });
 
@@ -72,7 +86,7 @@ function mount(app, { db, auth }) {
   }
 
   console.log('[github] issue bridge mounted', isConfigured() ? '(configured)' : '(needs token + repo)');
-  return { isConfigured, createIssue, newIssueUrl, repo, dispatchEnabled };
+  return { isConfigured, createIssue, newIssueUrl, repo, dispatchEnabled, verifyWebhook, webhookSecretSet: () => !!webhookSecret() };
 }
 
 module.exports = { mount };

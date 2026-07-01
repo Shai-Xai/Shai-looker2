@@ -59,7 +59,7 @@ const parsesOwnBody = (p) => p === '/api/admin/import' || p.startsWith('/api/adm
   || /^\/api\/os\/threads\/[^/]+\/messages$/.test(p) || p === '/api/os/admin/announce'
   // Inbound email may carry attachment PDFs (base64) — os.js parses it with a bigger limit.
   // Bug reports can carry a screenshot/image/video (base64) — tickets.js parses that too.
-  || p === '/api/inbound/email' || p === '/api/my/tickets';
+  || p === '/api/inbound/email' || p === '/api/my/tickets' || p === '/api/github/webhook';
 app.use((req, res, next) => (parsesOwnBody(req.path) ? next() : jsonParser(req, res, next)));
 // API responses are personal and live (suites, branding, icons…). Without an
 // explicit header some browsers (Safari especially) heuristically cache GETs,
