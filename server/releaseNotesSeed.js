@@ -17,9 +17,9 @@ const SEED = [
     date: '2026-06-22',
     title: 'Goals, alerts, per-event branding & multi-event briefings',
     summary: [
-      '- Goals gained two new types: a "composition" goal (mix/split — shares of a 100% whole) and a "healthy range" goal that flags when a number drifts too far either way.',
+      '- Goals gained two new types: a "composition" goal (mix/split, shares of a 100% whole) and a "healthy range" goal that flags when a number drifts too far either way.',
       '- Metric alerts (Wave 1): watch any tile or a custom metric and get alerted the moment it crosses the threshold you set.',
-      '- Per-event branding: give each event its own logo, colours and email sender, layered over your client look — and manage it yourself.',
+      '- Per-event branding: give each event its own logo, colours and email sender, layered over your client look, and manage it yourself.',
       '- Multi-event briefings & digests: a portfolio overview plus a clear section per event, with an event picker, so running several events at once is easier to read.',
       '- Release notes: this feed, so you can always see what shipped.',
     ].join('\n'),

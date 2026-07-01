@@ -15,7 +15,7 @@ const TEMPLATES = [
     key: 'abandoned_cart',
     category: 'Abandoned carts',
     label: 'Recover abandoned checkouts',
-    short: 'Email customers who started a ticket purchase but didn’t finish — nudge them to complete it.',
+    short: 'Email customers who started a ticket purchase but didn’t finish, and nudge them to complete it.',
     type: 'email_campaign',
     capability: 'email_campaign',
     recurringSuggested: true,
@@ -35,7 +35,7 @@ const TEMPLATES = [
     preset: {
       goal: 'Re-engage customers who abandoned their ticket checkout and get them to complete the purchase.',
       subject: 'You left something behind 🎟️',
-      body: 'Hi {{name}},\n\nYou were so close! Your {{ticketType}} is still waiting — complete your checkout before it’s gone.\n\nSee you there.',
+      body: 'Hi {{name}},\n\nYou were so close! Your {{ticketType}} is still waiting, so complete your checkout before it’s gone.\n\nSee you there.',
       ctaText: 'Complete my purchase',
       utm: { source: 'pulse', medium: 'email', campaign: 'abandoned-cart' },
     },

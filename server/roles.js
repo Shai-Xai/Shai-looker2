@@ -33,7 +33,7 @@ const P = PERMISSIONS;
 const ROLES = [
   {
     key: 'owner', label: 'Owner', lens: 'exec',
-    description: 'Full access to this client — dashboards, campaigns, settlements, branding, integrations and the team.',
+    description: 'Full access to this client - dashboards, campaigns, settlements, branding, integrations and the team.',
     permissions: ALL,
   },
   {
@@ -58,7 +58,7 @@ const ROLES = [
   },
   {
     key: 'ops', label: 'Event Ops', lens: 'exec',
-    description: 'On-the-ground event operations ONLY — devices, stations, staff, issues & checkpoints. No dashboards, campaigns or settings.',
+    description: 'On-the-ground event operations ONLY - devices, stations, staff, issues & checkpoints. No dashboards, campaigns or settings.',
     permissions: [P.EVENTOPS_MANAGE],
   },
 ];
