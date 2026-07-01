@@ -1,32 +1,43 @@
-// ─── Owl data catalogue — admin-editable field selection ───────────────────────
+// ─── Owl data catalogue — admin-editable explores + field selection ────────────
 // SELF-CONTAINED, DISPOSABLE MODULE. The Owl's askData tool queries a CURATED slice
-// of the Active Tickets explore (server/owlCatalogueSeed.js). This module lets an
-// admin, IN PULSE, see every field in that explore and TICK which ones the Owl may
-// use — extras are added on top of the seed, and non-PII seed fields can be turned
-// off. The effective catalogue is what owlTools actually runs on.
+// of the Active Tickets explore (server/owlCatalogueSeed.js — the "primary"). This
+// module lets an admin, IN PULSE:
+//   • see every field in an explore and TICK which ones the Owl may use, and
+//   • REGISTER additional Looker explores (chosen from a live list) for the Owl.
+// Slice 1 (this file) owns the platform-level selection + storage; the runtime wiring
+// (Owl querying the extra explores) and per-client on/off layer on top of it.
 //
 // Safety: contact/PII fields (email, phone, name, id, …) are NEVER selectable as
-// groupable data — they stay filter-only lookups exactly as the seed curates them.
-// Removing this file + its mount line reverts the Owl to the pure seed.
+// groupable data — they stay filter-only lookups. Removing this file + its mount line
+// reverts the Owl to the pure seed.
 
 const seed = require('./owlCatalogueSeed');
 
-const EXTRA_KEY = 'owl_catalogue_extra';       // JSON [{ name, label, kind, type }]
-const DISABLED_KEY = 'owl_catalogue_disabled'; // JSON [name, …] (non-PII seed fields turned off)
+const EXTRA_KEY = 'owl_catalogue_extra';        // primary explore: JSON [{ name, label, kind, type }]
+const DISABLED_KEY = 'owl_catalogue_disabled';  // primary explore: JSON [name, …] (non-PII seed fields off)
+const EXPLORES_KEY = 'owl_catalogue_explores';  // registered EXTRA explores: JSON [{ model, view, label }]
+const EXPFIELDS_KEY = 'owl_catalogue_expfields'; // extra explores' enabled fields: JSON { key: [name, …] }
+
+const PRIMARY = { model: seed.model, view: seed.explore, label: seed.label };
+const keyOf = (model, view) => `${model}::${view}`;
+const isPrimary = (model, view) => model === seed.model && view === seed.explore;
 
 const PII_PATTERNS = (seed.excluded && seed.excluded.patterns) || ['email', 'cellphone', 'phone', 'mobile', 'id_number', 'first_name', 'last_name', 'passport', 'street', 'postal_code', 'date_of_birth'];
 const isPII = (name) => PII_PATTERNS.some((p) => String(name).toLowerCase().includes(String(p).toLowerCase()));
 
 const J = (s, d) => { try { const v = JSON.parse(s); return v == null ? d : v; } catch { return d; } };
-const readExtra = (db) => (Array.isArray(J(db.getSetting(EXTRA_KEY, ''), [])) ? J(db.getSetting(EXTRA_KEY, ''), []) : []);
-const readDisabled = (db) => (Array.isArray(J(db.getSetting(DISABLED_KEY, ''), [])) ? J(db.getSetting(DISABLED_KEY, ''), []) : []);
+const readExtra = (db) => { const v = J(db.getSetting(EXTRA_KEY, ''), []); return Array.isArray(v) ? v : []; };
+const readDisabled = (db) => { const v = J(db.getSetting(DISABLED_KEY, ''), []); return Array.isArray(v) ? v : []; };
+const readExplores = (db) => { const v = J(db.getSetting(EXPLORES_KEY, ''), []); return Array.isArray(v) ? v.filter((e) => e && e.model && e.view && !isPrimary(e.model, e.view)) : []; };
+const readExpFields = (db) => { const v = J(db.getSetting(EXPFIELDS_KEY, ''), {}); return v && typeof v === 'object' ? v : {}; };
 
-// A cheap cache key: when either setting changes, the string changes → owlTools rebuilds.
-function version(db) { return `${db.getSetting(EXTRA_KEY, '')}|${db.getSetting(DISABLED_KEY, '')}`; }
+// A cheap cache key: when any of the selection settings change, this string changes →
+// owlTools rebuilds so admin edits take effect on the next Owl turn without a restart.
+function version(db) {
+  return [EXTRA_KEY, DISABLED_KEY, EXPLORES_KEY, EXPFIELDS_KEY].map((k) => db.getSetting(k, '')).join('|');
+}
 
-// A memoized owlTools provider: rebuilds via make() only when the catalogue changes, so
-// admin edits take effect on the next Owl turn without a restart. Used by the composition
-// root to hand owlChat/owlWhatsapp a live getOwlTools() without them knowing about this.
+// A memoized owlTools provider: rebuilds via make() only when the catalogue changes.
 function provider(db, make) {
   let inst = null; let ver = null;
   return () => { const v = version(db); if (!inst || v !== ver) { ver = v; inst = make(); } return inst; };
@@ -41,8 +52,11 @@ function coarseType(t) {
   return 'string';
 }
 
-// The EFFECTIVE catalogue = seed − disabled(non-PII seed fields) + extras(non-PII).
-// Identical to the seed when nothing is configured, so default behaviour is unchanged.
+// The registered explores (primary first). Labels come from the stored registration.
+function explores(db) { return [PRIMARY, ...readExplores(db)]; }
+
+// The EFFECTIVE PRIMARY catalogue = seed − disabled(non-PII) + extras(non-PII). Identical
+// to the seed when nothing is configured. (Slice 2 will fold the extra explores in here.)
 function effective(db) {
   const disabled = new Set(readDisabled(db).filter((n) => !isPII(n)));
   const extras = readExtra(db).filter((e) => e && e.name && !isPII(e.name));
@@ -52,7 +66,7 @@ function effective(db) {
   const seen = new Set(seedNames);
   const extraNames = [];
   for (const e of extras) {
-    if (seen.has(e.name)) continue; // don't duplicate a seed field
+    if (seen.has(e.name)) continue;
     seen.add(e.name);
     const label = String(e.label || e.name).slice(0, 80);
     const type = coarseType(e.type);
@@ -65,21 +79,21 @@ function effective(db) {
   return { ...seed, measures, dimensions, notes };
 }
 
-// The full explore field list for the admin UI, each annotated with enabled/inSeed/pii.
-async function listFields(db, getExploreFields) {
+// The full field list for ONE explore, annotated with enabled/inSeed/pii for the UI.
+// Defaults to the primary; pass model/view for a registered extra explore.
+async function listFields(db, getExploreFields, model = seed.model, view = seed.explore) {
   let f = { measures: [], dimensions: [] };
-  try { f = (await getExploreFields(seed.model, seed.explore)) || f; } catch { /* Looker unreachable → empty */ }
-  const disabled = new Set(readDisabled(db));
-  const extra = new Set(readExtra(db).map((e) => e && e.name).filter(Boolean));
-  const seedM = new Map(seed.measures.map((m) => [m.name, m]));
-  const seedD = new Map(seed.dimensions.map((d) => [d.name, d]));
+  try { f = (await getExploreFields(model, view)) || f; } catch { /* Looker unreachable → empty */ }
+  const primary = isPrimary(model, view);
+  const seedM = new Map(primary ? seed.measures.map((m) => [m.name, m]) : []);
+  const seedD = new Map(primary ? seed.dimensions.map((d) => [d.name, d]) : []);
+  const disabled = new Set(primary ? readDisabled(db) : []);
+  const extra = new Set(primary ? readExtra(db).map((e) => e && e.name).filter(Boolean) : (readExpFields(db)[keyOf(model, view)] || []));
   const row = (fld, kind, seedMap) => {
     const name = fld.name;
     const inSeed = seedMap.has(name);
     const seedFld = seedMap.get(name);
     const pii = isPII(name) || (seedFld && seedFld.filterOnly);
-    // PII stays lookup-only (never groupable) → not togglable here. Seed non-PII fields
-    // are on unless explicitly disabled; extras are on when present.
     const enabled = pii ? false : (inSeed ? !disabled.has(name) : extra.has(name));
     return {
       name, kind,
@@ -91,42 +105,79 @@ async function listFields(db, getExploreFields) {
   };
   const measures = (f.measures || []).filter((m) => !m.hidden).map((m) => row(m, 'measure', seedM));
   const dimensions = (f.dimensions || []).filter((d) => !d.hidden).map((d) => row(d, 'dimension', seedD));
-  return { model: seed.model, explore: seed.explore, label: seed.label, measures, dimensions };
+  return { model, view, primary, label: primary ? seed.label : (readExplores(db).find((e) => e.model === model && e.view === view) || {}).label || view, measures, dimensions };
 }
 
-// Persist the admin's ticked set: derive extras (enabled non-seed, non-PII) + disabled
-// (unticked non-PII seed fields) from the full field list. Ignores PII names entirely.
-async function setEnabled(db, enabledNames, getExploreFields) {
+// Persist the admin's ticked set for ONE explore. Primary → seed extras/disabled model;
+// an extra explore → just its enabled (non-PII) field names. Ignores PII names entirely.
+async function setEnabled(db, enabledNames, getExploreFields, model = seed.model, view = seed.explore) {
   const wanted = new Set((Array.isArray(enabledNames) ? enabledNames : []).map(String));
-  const { measures, dimensions } = await listFields(db, getExploreFields);
+  const { measures, dimensions } = await listFields(db, getExploreFields, model, view);
   const all = [...measures, ...dimensions];
-  const byName = new Map(all.map((r) => [r.name, r]));
-  const extras = [];
-  const disabled = [];
-  for (const r of all) {
-    if (r.pii) continue; // contact fields are never toggled here
-    const on = wanted.has(r.name);
-    if (r.inSeed) { if (!on) disabled.push(r.name); }
-    else if (on) extras.push({ name: r.name, label: r.label, kind: r.kind, type: r.type });
+  const known = new Set(all.map((r) => r.name));
+  if (isPrimary(model, view)) {
+    const extras = []; const disabled = [];
+    for (const r of all) {
+      if (r.pii) continue;
+      const on = wanted.has(r.name);
+      if (r.inSeed) { if (!on) disabled.push(r.name); }
+      else if (on) extras.push({ name: r.name, label: r.label, kind: r.kind, type: r.type });
+    }
+    db.setSetting(EXTRA_KEY, JSON.stringify(extras));
+    db.setSetting(DISABLED_KEY, JSON.stringify(disabled));
+  } else {
+    const on = all.filter((r) => !r.pii && wanted.has(r.name) && known.has(r.name)).map((r) => r.name);
+    const map = readExpFields(db); map[keyOf(model, view)] = on;
+    db.setSetting(EXPFIELDS_KEY, JSON.stringify(map));
   }
-  // Guard: only keep wanted names we actually know (ignore anything not in the explore).
-  db.setSetting(EXTRA_KEY, JSON.stringify(extras.filter((e) => byName.has(e.name))));
-  db.setSetting(DISABLED_KEY, JSON.stringify(disabled));
-  return { ok: true, version: version(db), extras: extras.length, disabled: disabled.length };
+  return { ok: true, version: version(db) };
 }
 
-function mount(app, { db, auth, getExploreFields }) {
-  // GET — the whole explore's fields, annotated, for the checkbox UI.
+// Register / unregister an EXTRA explore (the primary can't be removed).
+function registerExplore(db, { model, view, label }) {
+  if (!model || !view || isPrimary(model, view)) return { ok: false, error: 'That explore is already available.' };
+  const list = readExplores(db);
+  if (!list.some((e) => e.model === model && e.view === view)) list.push({ model, view, label: String(label || view).slice(0, 120) });
+  db.setSetting(EXPLORES_KEY, JSON.stringify(list));
+  return { ok: true };
+}
+function unregisterExplore(db, model, view) {
+  db.setSetting(EXPLORES_KEY, JSON.stringify(readExplores(db).filter((e) => !(e.model === model && e.view === view))));
+  const map = readExpFields(db); delete map[keyOf(model, view)]; db.setSetting(EXPFIELDS_KEY, JSON.stringify(map));
+  return { ok: true };
+}
+
+function mount(app, { db, auth, getExploreFields, listModels }) {
+  // GET — registered explores (primary + extras) + the full available list from Looker.
+  app.get('/api/admin/owl/explores', auth.requireAdmin, async (req, res) => {
+    let available = [];
+    try {
+      const models = (typeof listModels === 'function' ? await listModels() : []) || [];
+      for (const m of models) for (const e of (m.explores || [])) available.push({ model: m.name, view: e.name, label: e.label || e.name, description: e.description || '' });
+    } catch { available = []; }
+    res.json({ primary: PRIMARY, registered: readExplores(db), available });
+  });
+  // POST — register an explore { model, view, label }.
+  app.post('/api/admin/owl/explores', auth.requireAdmin, (req, res) => {
+    const { model, view, label } = req.body || {};
+    res.json(registerExplore(db, { model, view, label }));
+  });
+  // DELETE — unregister an explore (?model=&view=), clearing its field selection.
+  app.delete('/api/admin/owl/explores', auth.requireAdmin, (req, res) => {
+    res.json(unregisterExplore(db, String(req.query.model || ''), String(req.query.view || '')));
+  });
+  // GET — one explore's fields, annotated, for the checkbox UI (defaults to primary).
   app.get('/api/admin/owl/catalogue', auth.requireAdmin, async (req, res) => {
-    try { res.json(await listFields(db, getExploreFields)); }
+    try { res.json(await listFields(db, getExploreFields, req.query.model || seed.model, req.query.view || seed.explore)); }
     catch (e) { res.status(502).json({ error: 'Could not read the explore fields from Looker.' }); }
   });
-  // PUT — save the ticked set { enabled: [name, …] }. Takes effect on the next Owl turn.
+  // PUT — save the ticked set { model?, view?, enabled: [name, …] } for one explore.
   app.put('/api/admin/owl/catalogue', auth.requireAdmin, async (req, res) => {
-    try { res.json(await setEnabled(db, (req.body || {}).enabled, getExploreFields)); }
+    const b = req.body || {};
+    try { res.json(await setEnabled(db, b.enabled, getExploreFields, b.model || seed.model, b.view || seed.explore)); }
     catch (e) { res.status(500).json({ error: 'Could not save the catalogue selection.' }); }
   });
   console.log('[owlCatalogue] Owl data-catalogue editor mounted');
 }
 
-module.exports = { mount, effective, version, provider, listFields, setEnabled, isPII };
+module.exports = { mount, effective, version, provider, explores, listFields, setEnabled, registerExplore, unregisterExplore, isPII };

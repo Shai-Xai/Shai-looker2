@@ -169,9 +169,12 @@ export const api = {
   // Owl access (owner-only write): who can use the native Owl.
   getOwlAccess: () => fetch('/api/admin/owl-access').then(json),
   saveOwlAccess: (b) => fetch('/api/admin/owl-access', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
-  // Admin: the Owl data catalogue — list every explore field + which are enabled, and save.
-  owlCatalogueFields: () => fetch('/api/admin/owl/catalogue').then(json),
-  saveOwlCatalogue: (enabled) => fetch('/api/admin/owl/catalogue', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }) }).then(json),
+  // Admin: the Owl data catalogue — registered/available explores + per-explore fields.
+  owlExplores: () => fetch('/api/admin/owl/explores').then(json),
+  addOwlExplore: (model, view, label) => fetch('/api/admin/owl/explores', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model, view, label }) }).then(json),
+  removeOwlExplore: (model, view) => fetch(`/api/admin/owl/explores?model=${encodeURIComponent(model)}&view=${encodeURIComponent(view)}`, { method: 'DELETE' }).then(json),
+  owlCatalogueFields: (model, view) => fetch(`/api/admin/owl/catalogue${model ? `?model=${encodeURIComponent(model)}&view=${encodeURIComponent(view)}` : ''}`).then(json),
+  saveOwlCatalogue: (enabled, model, view) => fetch('/api/admin/owl/catalogue', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled, model, view }) }).then(json),
   owlStarters: (entityId) => fetch(`/api/owl/starters${entityId ? `?entityId=${encodeURIComponent(entityId)}` : ''}`).then(json),
   // Act layer: commit a drafted segment the Owl proposed (the "Create segment" tap),
   // or "Save as segment" from a chat answer's cohort. Never carries PII.
