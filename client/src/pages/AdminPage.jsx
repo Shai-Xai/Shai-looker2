@@ -140,7 +140,6 @@ const ADMIN_NAV = [
   ['email', 'Email', '✉️'],
   ['status', 'Status', '🚨'],
   ['product', 'Product', '📦'],
-  ['tickets', 'Tickets', '🎟️'],
   ['backup', 'Backup', '💾'],
 ];
 
@@ -165,7 +164,6 @@ export default function AdminPage() {
       {tab === 'email' && <MailLog />}
       {tab === 'status' && <StatusNoticesAdmin />}
       {tab === 'product' && <Product />}
-      {tab === 'tickets' && <TicketBoard />}
       {tab === 'backup' && <BackupRestore />}
     </>
   );
@@ -521,13 +519,28 @@ function StatusBadge({ status }) {
   );
 }
 
+// The Product section: everything about the product in one place, split into tabs —
+// the live Tickets board (bug/feature reports), the feature matrix + sales overview,
+// and the daily release notes.
+const PRODUCT_TABS = [['tickets', '🎟️ Tickets'], ['matrix', '🧩 Feature matrix'], ['releases', '📝 Release notes']];
 function Product() {
+  const [sub, setSub] = useState('tickets');
   return (
     <div>
-      <p style={hint}>Product collateral in one place — the living sales overview, the feature matrix, and the daily release notes the team posts.</p>
-      <ProductOverviewCard />
-      <ProductFeatureTable />
-      <ProductReleaseNotes />
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 16, borderBottom: '1px solid var(--hairline)', paddingBottom: 10 }}>
+        {PRODUCT_TABS.map(([k, label]) => (
+          <button key={k} onClick={() => setSub(k)} style={sub === k ? { ...miniBtn, background: 'var(--brand)', color: '#fff', borderColor: 'var(--brand)' } : miniBtnOutline}>{label}</button>
+        ))}
+      </div>
+      {sub === 'tickets' && <TicketBoard />}
+      {sub === 'matrix' && (
+        <>
+          <p style={hint}>What the product does today — the living sales overview and the feature matrix.</p>
+          <ProductOverviewCard />
+          <ProductFeatureTable />
+        </>
+      )}
+      {sub === 'releases' && <ProductReleaseNotes />}
     </div>
   );
 }
