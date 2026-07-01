@@ -1058,7 +1058,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <input style={{ ...input, fontWeight: 700 }} value={f.subject} onChange={(e) => set('subject', e.target.value)} placeholder="Subject line" />
                 <ThemePicker value={f.theme} onChange={(v) => set('theme', v)} />
-                <EmailBuilder value={f.blocks} onChange={(v) => set('blocks', v)} />
+                <EmailBuilder value={f.blocks} onChange={(v) => set('blocks', v)} entityId={entityId} eventSuiteId={f.eventSuiteId} />
                 <div style={hintS}>Stack blocks to build the email — it’s wrapped in the client’s branding (logo, colours, unsubscribe) automatically. Links in buttons/images are tracked; tokens <b>{'{{name}}'}</b>, <b>{'{{ticketType}}'}</b> work in text.</div>
               </div>
             ) : f.contentMode === 'template' ? (

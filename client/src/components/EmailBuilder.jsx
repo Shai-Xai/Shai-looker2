@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { useIsMobile } from '../lib/useIsMobile.js';
+import { api } from '../lib/api.js';
 import { THEME_PRESETS, THEME_FONTS, THEME_SHAPES } from '../lib/emailTheme.js';
 
 // Campaign email "theme" (Tier-1 visual design): a preset look + optional accent /
@@ -93,13 +94,15 @@ function newBlock(type) {
   return base; // divider
 }
 
-export default function EmailBuilder({ value, onChange }) {
-  return <BlockList blocks={Array.isArray(value) ? value : []} onChange={onChange} allowColumns />;
+export default function EmailBuilder({ value, onChange, entityId, eventSuiteId }) {
+  // `design` lets an image block call the AI banner designer (Tier-2). Absent → no button.
+  const design = entityId ? { entityId, eventSuiteId: eventSuiteId || '' } : null;
+  return <BlockList blocks={Array.isArray(value) ? value : []} onChange={onChange} allowColumns design={design} />;
 }
 
 // A reusable, reorderable list of blocks — used at the top level AND inside each
 // column of a `columns` block (allowColumns=false there, so columns can't nest).
-function BlockList({ blocks, onChange, allowColumns = false }) {
+function BlockList({ blocks, onChange, allowColumns = false, design = null }) {
   const [dragI, setDragI] = useState(null);
   const [overI, setOverI] = useState(null);
   const menu = allowColumns ? BASE_MENU : BASE_MENU.filter((m) => m.type !== 'columns');
@@ -140,7 +143,7 @@ function BlockList({ blocks, onChange, allowColumns = false }) {
               <button type="button" style={iconBtn} onClick={() => move(i, 1)} disabled={i === blocks.length - 1} title="Move down">↓</button>
               <button type="button" style={{ ...iconBtn, color: 'var(--error,#ef4444)' }} onClick={() => remove(i)} title="Delete">✕</button>
             </div>
-            <BlockEditor block={b} onChange={(patch) => update(i, patch)} />
+            <BlockEditor block={b} onChange={(patch) => update(i, patch)} design={design} />
           </div>
         ))}
       </div>
@@ -159,7 +162,7 @@ function BlockList({ blocks, onChange, allowColumns = false }) {
   );
 }
 
-function BlockEditor({ block: b, onChange }) {
+function BlockEditor({ block: b, onChange, design = null }) {
   const isMobile = useIsMobile();
   const set = (patch) => onChange(patch);
   switch (b.type) {
@@ -183,7 +186,7 @@ function BlockEditor({ block: b, onChange }) {
     case 'image':
       return (
         <div style={col}>
-          <BlockImage value={b.url} onChange={(v) => set({ url: v })} />
+          <BlockImage value={b.url} onChange={(v) => set({ url: v })} design={design} />
           <input style={input} value={b.href} onChange={(e) => set({ href: e.target.value })} placeholder="Link when clicked (optional) — https://…" />
           <input style={input} value={b.alt} onChange={(e) => set({ alt: e.target.value })} placeholder="Alt text (accessibility)" />
           <div style={row}>
@@ -203,7 +206,7 @@ function BlockEditor({ block: b, onChange }) {
     case 'video':
       return (
         <div style={col}>
-          <BlockImage value={b.thumb} onChange={(v) => set({ thumb: v })} label="Thumbnail" />
+          <BlockImage value={b.thumb} onChange={(v) => set({ thumb: v })} label="Thumbnail" design={design} />
           <input style={input} value={b.href} onChange={(e) => set({ href: e.target.value })} placeholder="Video link — YouTube/Vimeo URL" />
           <div style={hint}>Emails can’t play video inline — this shows the thumbnail with a ▶ that opens the link.</div>
         </div>
@@ -275,7 +278,7 @@ function BlockEditor({ block: b, onChange }) {
                   <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', flex: 1 }}>Column {ci + 1}</span>
                   {cols.length > 1 && <button type="button" style={{ ...iconBtn, width: 24, height: 24, fontSize: 11, color: 'var(--error,#ef4444)' }} title="Remove column" onClick={() => set({ cols: cols.filter((_, j) => j !== ci) })}>✕</button>}
                 </div>
-                <BlockList blocks={c} allowColumns={false} onChange={(next) => setCol(ci, next)} />
+                <BlockList blocks={c} allowColumns={false} design={design} onChange={(next) => setCol(ci, next)} />
               </div>
             ))}
           </div>
@@ -294,8 +297,20 @@ function BlockEditor({ block: b, onChange }) {
 
 // Compact image uploader: downscales to ≤1000px JPEG (keeps the data-URL small
 // enough for email), or paste a URL. Mirrors CampaignManager's ImageField.
-function BlockImage({ value, onChange, label }) {
+function BlockImage({ value, onChange, label, design = null }) {
   const ref = useRef(null);
+  const [briefing, setBriefing] = useState(false);
+  const [brief, setBrief] = useState('');
+  const [busy, setBusy] = useState(false);
+  const runDesign = async () => {
+    setBusy(true);
+    try {
+      const r = await api.designImage(design.entityId, { brief, eventSuiteId: design.eventSuiteId || '', width: 600, height: label === 'Thumbnail' ? 340 : 240 });
+      if (r.dataUrl) onChange(r.dataUrl);
+      setBriefing(false); setBrief('');
+    } catch (e) { alert('Design failed: ' + (e.message || e)); }
+    finally { setBusy(false); }
+  };
   const onFile = (e) => {
     const file = e.target.files?.[0]; if (!file) return;
     const reader = new FileReader();
@@ -321,8 +336,16 @@ function BlockImage({ value, onChange, label }) {
         </div>
         <button type="button" style={miniBtn} onClick={() => ref.current?.click()}>Upload</button>
         {value && <button type="button" style={{ ...miniBtn, color: 'var(--error,#ef4444)' }} onClick={() => onChange('')}>Remove</button>}
+        {design?.entityId && !briefing && <button type="button" style={{ ...miniBtn, borderColor: 'var(--brand)', color: 'var(--brand)' }} onClick={() => setBriefing(true)} title="Let the Owl design a banner">✨ Design with AI</button>}
         <input ref={ref} type="file" accept="image/*" style={{ display: 'none' }} onChange={onFile} />
       </div>
+      {design?.entityId && briefing && (
+        <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+          <input style={{ ...input, flex: 1, minWidth: 180 }} value={brief} onChange={(e) => setBrief(e.target.value)} placeholder="Describe the banner… e.g. 'sunset festival, headline Last chance'" onKeyDown={(e) => { if (e.key === 'Enter' && !busy) runDesign(); }} />
+          <button type="button" style={{ ...miniBtn, borderColor: 'var(--brand)', color: 'var(--brand)' }} disabled={busy} onClick={runDesign}>{busy ? 'Designing…' : 'Generate'}</button>
+          <button type="button" style={miniBtn} onClick={() => setBriefing(false)}>Cancel</button>
+        </div>
+      )}
       {!String(value || '').startsWith('data:') && <input value={value || ''} onChange={(e) => onChange(e.target.value)} placeholder="or paste an image URL" style={{ ...input, marginTop: 6 }} />}
     </div>
   );

@@ -575,6 +575,7 @@ export const api = {
   actionFieldValues: (entityId, b) => fetch(`/api/actions/${entityId}/field-values`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   actionDraftCopy: (entityId, b) => fetch(`/api/actions/${entityId}/draft-copy`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   actionPreviewEmail: (entityId, b) => fetch(`/api/actions/${entityId}/preview-email`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  designImage: (entityId, b) => fetch(`/api/actions/${entityId}/design-image`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b || {}) }).then(json),
   actionTestSend: (entityId, b) => fetch(`/api/actions/${entityId}/test-send`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   listCampaignEvents: (entityId) => fetch(`/api/actions/${entityId}/events`).then(json),
   actionReport: (entityId, id) => fetch(`/api/actions/${entityId}/${id}/report`).then(json),

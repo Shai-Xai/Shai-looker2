@@ -1123,6 +1123,7 @@ function promptRegistry() {
     { key: 'digest', label: 'Scheduled digest', scope: 'Role-lensed digest emails', text: DIGEST_SYSTEM },
     { key: 'digestMulti', label: 'Scheduled digest — multi-event', scope: 'Role-lensed digest for promoters running several events: portfolio overview + a section per event', text: DIGEST_MULTI_SYSTEM },
     { key: 'campaign', label: 'Campaign copy', scope: 'Marketing email drafting', text: CAMPAIGN_SYSTEM },
+    { key: 'designSvg', label: 'Email banner designer', scope: 'Author an SVG banner (→ PNG) for a campaign email from a brief + brand colours', text: require('./emailBanner').DESIGN_SVG_SYSTEM },
     { key: 'opportunity', label: 'Setup opportunity line', scope: 'One-line, value-led nudge about an outstanding setup item, grounded in a live metric', text: OPPORTUNITY_SYSTEM },
     { key: 'nudgeCopy', label: 'Setup nudge subject & opening', scope: 'Personalised subject line + one-sentence opening for a client setup-reminder email, tailored to their outstanding items', text: NUDGE_COPY_SYSTEM },
     { key: 'refine', label: 'Refine note', scope: 'The ✨ refine button', text: REFINE_SYSTEM },

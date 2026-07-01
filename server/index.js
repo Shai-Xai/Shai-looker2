@@ -2890,7 +2890,7 @@ const actionsApi = require('./actions').mount(app, {
     return insights.draftCampaign({ goal, clientName: ent?.name, clientContext: ent?.aiContext || '', audienceCount, apiKey, instructions: [aiInstructionsFor(eventSuiteId || null, entityId, langOverride), su ? `This campaign is for the event "${su.name}"${su.briefing?.instructions ? ` — ${String(su.briefing.instructions).trim()}` : ''}. Write for THIS event specifically.` : ''].filter(Boolean).join('\n\n') });
   },
 });
-
+require('./emailBanner').mount(app, { auth, insights, anthropicKeyForEntity, aiInstructionsFor, resolveBranding: mailer.resolveBranding }); // AI email-banner designer (SVG → PNG)
 // Materialise a built-in recipe (e.g. 'abandoned_cart') as a real audience source
 // by auto-resolving its tile from this client's data. Shared by segments + the
 // setup-nudge personalisation (the live abandoned-cart count).
