@@ -23,6 +23,9 @@ const { MAX_AUDIENCE, MAX_AUDIENCE_HARD, MAX_SMS_DEFAULT, clampSmsCap, EMAIL_RE,
 // Block-builder email content (Mailchimp-style stacked blocks → email-safe HTML).
 const emailBlocks = require('./emailBlocks');
 const cleanBlocks = emailBlocks.cleanBlocks;
+// House-style copy normalisation: strip em dashes from client-authored (and
+// AI-drafted) campaign copy on save, so what sends reads professionally.
+const { deEmDash } = require('./textStyle');
 
 function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAudience, draftCopy, listEvents }) {
   const sql = db.db;
@@ -341,10 +344,10 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
       // measured from the anchor (abandonment) time. Capped + sorted on save.
       steps: Array.isArray(body.steps) ? body.steps.slice(0, 12).map((s) => ({
         delayHours: Math.max(0, Number(s.delayHours) || 0),
-        subject: String(s.subject || '').slice(0, 200),
-        body: String(s.body || '').slice(0, 8000),
-        smsBody: String(s.smsBody || '').slice(0, 2000), // separate SMS copy per step when channel = 'both'
-        ctaText: String(s.ctaText || '').slice(0, 60),
+        subject: deEmDash(String(s.subject || '').slice(0, 200)),
+        body: deEmDash(String(s.body || '').slice(0, 8000)),
+        smsBody: deEmDash(String(s.smsBody || '').slice(0, 2000)), // separate SMS copy per step when channel = 'both'
+        ctaText: deEmDash(String(s.ctaText || '').slice(0, 60)),
         // Per-step content parity with once-off: template / custom HTML / block builder.
         contentMode: ['html', 'blocks'].includes(s.contentMode) ? s.contentMode : 'template',
         customHtml: String(s.customHtml || '').slice(0, 100000),
@@ -372,10 +375,10 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
       language: String(body.language || '').slice(0, 5).toLowerCase(),
       heroImage: String(body.heroImage || '').slice(0, 2000000),  // hero image data-URL/URL
       customHtml: String(body.customHtml || '').slice(0, 500000), // custom-HTML mode body
-      subject: String(body.subject || '').slice(0, 200),
-      body: String(body.body || '').slice(0, 8000),
-      smsBody: String(body.smsBody || '').slice(0, 2000), // separate SMS copy when channel = 'both'
-      ctaText: String(body.ctaText || '').slice(0, 60),
+      subject: deEmDash(String(body.subject || '').slice(0, 200)),
+      body: deEmDash(String(body.body || '').slice(0, 8000)),
+      smsBody: deEmDash(String(body.smsBody || '').slice(0, 2000)), // separate SMS copy when channel = 'both'
+      ctaText: deEmDash(String(body.ctaText || '').slice(0, 60)),
       ctaUrl: String(body.ctaUrl || '').slice(0, 500),
       utm: {
         source: String(body.utm?.source || '').slice(0, 100),
