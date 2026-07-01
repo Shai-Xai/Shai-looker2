@@ -18,7 +18,11 @@ function mount(app, { db, auth }) {
   const repo = () => (db.getSetting(REPO_KEY, '') || process.env.GITHUB_REPO || '').trim();
   const isConfigured = () => !!token() && REPO_RE.test(repo());
   const mask = (t) => (t ? `${'•'.repeat(Math.min(8, Math.max(0, t.length - 4)))}${t.slice(-4)}` : '');
-  const config = () => ({ repo: repo(), tokenSet: !!token(), tokenMask: mask(token()), configured: isConfigured() });
+  // Auto-dispatch: when on, issues Pulse creates include an @claude mention so the
+  // Claude Code GitHub Action picks the ticket up and opens a PR. Off by default —
+  // needs the Claude GitHub App + ANTHROPIC_API_KEY secret + the claude.yml workflow.
+  const dispatchEnabled = () => db.getSetting('github_dispatch_claude', '0') === '1';
+  const config = () => ({ repo: repo(), tokenSet: !!token(), tokenMask: mask(token()), configured: isConfigured(), dispatchClaude: dispatchEnabled() });
 
   // Admin: read/write the connection (token is write-only — a blank token keeps the
   // existing one; { clearToken:true } removes it).
@@ -26,6 +30,7 @@ function mount(app, { db, auth }) {
   app.put('/api/admin/github', auth.requireAdmin, (req, res) => {
     const b = req.body || {};
     if (b.repo !== undefined) db.setSetting(REPO_KEY, String(b.repo || '').trim());
+    if (b.dispatchClaude !== undefined) db.setSetting('github_dispatch_claude', b.dispatchClaude ? '1' : '0');
     if (b.clearToken) db.setSetting(TOKEN_KEY, '');
     else if (b.token) db.setSetting(TOKEN_KEY, String(b.token).trim());
     res.json(config());
@@ -67,7 +72,7 @@ function mount(app, { db, auth }) {
   }
 
   console.log('[github] issue bridge mounted', isConfigured() ? '(configured)' : '(needs token + repo)');
-  return { isConfigured, createIssue, newIssueUrl, repo };
+  return { isConfigured, createIssue, newIssueUrl, repo, dispatchEnabled };
 }
 
 module.exports = { mount };

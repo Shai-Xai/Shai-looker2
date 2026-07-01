@@ -143,6 +143,14 @@ function GithubConfig() {
             {msg && <span style={{ color: 'var(--muted)' }}>{msg}</span>}
           </div>
           <p style={{ color: 'var(--muted)', fontSize: 11.5, margin: 0 }}>No token → "Send to GitHub" opens a prefilled new-issue page in your browser. With a token → the app creates + links the issue automatically.</p>
+          {/* Auto-dispatch to Claude — needs the Claude GitHub App + ANTHROPIC_API_KEY + the claude.yml workflow. */}
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, cursor: busy ? 'default' : 'pointer', marginTop: 4 }}>
+            <input type="checkbox" checked={!!cfg.dispatchClaude} disabled={busy} onChange={async (e) => { setBusy(true); try { const c = await api.saveGithubConfig({ dispatchClaude: e.target.checked }); setCfg(c); } finally { setBusy(false); } }} style={{ marginTop: 2 }} />
+            <span>
+              <span style={{ fontWeight: 600 }}>Ask Claude to build it</span>
+              <span style={{ color: 'var(--muted)', display: 'block', fontSize: 11.5 }}>Adds an @claude mention to each issue so the Claude Code GitHub Action opens a PR. Requires the Claude GitHub App + ANTHROPIC_API_KEY secret + .github/workflows/claude.yml.</span>
+            </span>
+          </label>
         </div>
       )}
     </div>

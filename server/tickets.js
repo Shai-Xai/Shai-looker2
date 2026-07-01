@@ -380,15 +380,19 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
     if (!t) return res.status(404).json({ error: 'Ticket not found' });
     if (t.github_url) return res.json({ ticket: ticketRow(t), alreadyLinked: true });
     const title = t.ai_title || t.title || `${t.type} report`;
-    const body = `${claudeBrief(t)}\n\n---\n_Filed from Howler Pulse · ticket ${t.id}_`;
+    let body = `${claudeBrief(t)}\n\n---\n_Filed from Howler Pulse · ticket ${t.id}_`;
+    // Auto-dispatch: an @claude mention makes the Claude Code GitHub Action pick it
+    // up and open a PR (Pulse issues are created via a PAT, which does trigger it).
+    const dispatch = !!github?.dispatchEnabled?.();
+    if (dispatch) body += '\n\n@claude please implement this ticket and open a pull request.';
     if (!github?.isConfigured?.()) {
       return res.json({ needsConfig: true, prefillUrl: github?.newIssueUrl?.({ title, body }) || '' });
     }
     try {
       const issue = await github.createIssue({ title, body });
       sql.prepare('UPDATE tickets SET github_issue_number=?, github_url=?, updated_at=? WHERE id=?').run(issue.number, issue.url, now(), t.id);
-      logComment(t.id, { authorEmail: req.user.email, authorRole: 'admin', kind: 'system', body: `Created GitHub issue #${issue.number}: ${issue.url}` });
-      res.status(201).json({ ticket: ticketRow(getTicket(t.id)), issue });
+      logComment(t.id, { authorEmail: req.user.email, authorRole: 'admin', kind: 'system', body: `Created GitHub issue #${issue.number}${dispatch ? ' and asked Claude to build it' : ''}: ${issue.url}` });
+      res.status(201).json({ ticket: ticketRow(getTicket(t.id)), issue, dispatched: dispatch });
     } catch (e) {
       console.error('[tickets] github issue failed:', e.message);
       res.status(500).json({ error: e.message });
