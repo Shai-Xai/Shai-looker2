@@ -245,15 +245,21 @@ function TicketDetail({ id, onClose, onChange }) {
       setCopied(true); setTimeout(() => setCopied(false), 2000);
     }).catch(() => setErr('Could not copy — select and copy manually.'));
   }
-  async function sendToGithub() {
-    setBusy('gh'); setErr('');
+  async function sendToGithub(mode) {
+    setBusy(mode === 'plan' ? 'plan' : 'gh'); setErr('');
     try {
-      const r = await api.adminTicketGithubIssue(id);
+      const r = await api.adminTicketGithubIssue(id, mode);
       if (r.needsConfig) {
         if (r.prefillUrl) window.open(r.prefillUrl, '_blank', 'noopener');
         else setErr('Set a GitHub repo in the GitHub panel (top of the board) to link issues.');
       } else { await load(); onChange?.(); }
     } catch (e) { setErr(e.message); } finally { setBusy(''); }
+  }
+  async function del() {
+    if (!window.confirm('Delete this ticket permanently? This can’t be undone.')) return;
+    setBusy('del'); setErr('');
+    try { await api.adminDeleteTicket(id); onChange?.(); onClose(); }
+    catch (e) { setErr(e.message); setBusy(''); }
   }
 
   return (
@@ -387,7 +393,10 @@ function TicketDetail({ id, onClose, onChange }) {
               {t.githubUrl ? (
                 <a href={t.githubUrl} target="_blank" rel="noreferrer" style={{ ...ghBtn, textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}>🐙 Issue #{t.githubIssue} ↗</a>
               ) : (
-                <button onClick={sendToGithub} disabled={busy === 'gh'} style={ghBtn}>{busy === 'gh' ? 'Creating…' : '🐙 Send to GitHub'}</button>
+                <>
+                  <button onClick={() => sendToGithub()} disabled={!!busy} style={ghBtn}>{busy === 'gh' ? 'Creating…' : '🐙 Send to GitHub'}</button>
+                  <button onClick={() => sendToGithub('plan')} disabled={!!busy} style={ghBtn} title="Claude posts an implementation plan + questions first and waits for your go-ahead — good for big/fuzzy tickets">{busy === 'plan' ? 'Creating…' : '🧭 Plan with Claude first'}</button>
+                </>
               )}
               {t.prUrl && <a href={t.prUrl} target="_blank" rel="noreferrer" style={{ ...ghBtn, textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}>🔀 PR #{t.prNumber} ↗</a>}
             </div>
@@ -429,6 +438,10 @@ function TicketDetail({ id, onClose, onChange }) {
             </Section>
 
             {err && <p style={{ color: 'var(--brand)', fontSize: 13, marginTop: 10 }}>{err}</p>}
+
+            <div style={{ borderTop: '1px solid var(--hairline)', marginTop: 16, paddingTop: 12, display: 'flex', justifyContent: 'flex-end' }}>
+              <button onClick={del} disabled={busy === 'del'} style={{ ...miniBtn, color: 'var(--brand)', borderColor: 'var(--brand)' }}>{busy === 'del' ? 'Deleting…' : '🗑 Delete ticket'}</button>
+            </div>
           </div>
         )}
       </div>

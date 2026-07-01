@@ -383,22 +383,41 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
     if (t.github_url) return res.json({ ticket: ticketRow(t), alreadyLinked: true });
     const title = t.ai_title || t.title || `${t.type} report`;
     let body = `${claudeBrief(t)}\n\n---\n_Filed from Howler Pulse · ticket ${t.id}_`;
-    // Auto-dispatch: an @claude mention makes the Claude Code GitHub Action pick it
-    // up and open a PR (Pulse issues are created via a PAT, which does trigger it).
-    const dispatch = !!github?.dispatchEnabled?.();
-    if (dispatch) body += '\n\n@claude please implement this ticket and open a pull request.';
+    // Dispatch mode: 'build' → @claude builds + opens a PR; 'plan' → @claude posts a
+    // plan + questions and waits (good for big/fuzzy tickets); omitted → the global
+    // "Ask Claude to build it" toggle decides. Pulse issues are created via a PAT,
+    // which (unlike GITHUB_TOKEN) does trigger the Claude Code Action.
+    const mode = (req.body || {}).mode;
+    const doBuild = mode === 'build' || (!mode && !!github?.dispatchEnabled?.());
+    if (mode === 'plan') body += '\n\n@claude review this ticket and reply with a short implementation plan and any clarifying questions as a comment. Do NOT write code or open a pull request yet — wait for a follow-up "@claude go ahead" before building.';
+    else if (doBuild) body += '\n\n@claude please implement this ticket and open a pull request.';
+    const dispatched = doBuild || mode === 'plan';
     if (!github?.isConfigured?.()) {
       return res.json({ needsConfig: true, prefillUrl: github?.newIssueUrl?.({ title, body }) || '' });
     }
     try {
       const issue = await github.createIssue({ title, body });
       sql.prepare('UPDATE tickets SET github_issue_number=?, github_url=?, updated_at=? WHERE id=?').run(issue.number, issue.url, now(), t.id);
-      logComment(t.id, { authorEmail: req.user.email, authorRole: 'admin', kind: 'system', body: `Created GitHub issue #${issue.number}${dispatch ? ' and asked Claude to build it' : ''}: ${issue.url}` });
-      res.status(201).json({ ticket: ticketRow(getTicket(t.id)), issue, dispatched: dispatch });
+      logComment(t.id, { authorEmail: req.user.email, authorRole: 'admin', kind: 'system', body: `Created GitHub issue #${issue.number}${mode === 'plan' ? ' and asked Claude to plan it' : doBuild ? ' and asked Claude to build it' : ''}: ${issue.url}` });
+      res.status(201).json({ ticket: ticketRow(getTicket(t.id)), issue, dispatched, planned: mode === 'plan' });
     } catch (e) {
       console.error('[tickets] github issue failed:', e.message);
       res.status(500).json({ error: e.message });
     }
+  });
+
+  // Delete a ticket for good — its comments + attachment files too. (For clearing
+  // test tickets / spam; the reporter's My-reports view drops it as well.)
+  app.delete('/api/admin/tickets/:id', auth.requireAdmin, requireOn, (req, res) => {
+    const t = getTicket(req.params.id);
+    if (!t) return res.status(404).json({ error: 'Ticket not found' });
+    for (const a of sql.prepare('SELECT id FROM ticket_attachments WHERE ticket_id=?').all(t.id)) {
+      try { fs.unlinkSync(path.join(ATT_DIR, a.id)); } catch { /* file may already be gone */ }
+    }
+    sql.prepare('DELETE FROM ticket_attachments WHERE ticket_id=?').run(t.id);
+    sql.prepare('DELETE FROM ticket_comments WHERE ticket_id=?').run(t.id);
+    sql.prepare('DELETE FROM tickets WHERE id=?').run(t.id);
+    res.json({ ok: true });
   });
 
   // Update a ticket: status / assignee / priority / type / urgency / edited AI ticket.
