@@ -76,6 +76,12 @@ app.use(auth.attachUser);
 // deliberate views) for Admin → Users. Mounted here so it sees req.user and wraps
 // every route registered below. Disposable: remove this line + server/audit.js.
 require('./audit').mount(app, { db });
+// Internal ops alerts (Howler Slack) — background failures raise a human instead
+// of dying in the log stream. Disposable: remove these lines + server/ops.js.
+const ops = require('./ops'); ops.init({ db });
+// Nightly DB snapshots + off-box copy (R2/S3 when configured) — the disaster-
+// recovery floor. Disposable: remove this line + server/backup.js + backup_runs.
+require('./backup').mount(app, { db, auth, notifyOps: (msg) => ops.alert('backup', msg) });
 
 // Serve built React app (client/dist) if present, else raw client/
 const clientDist = path.join(__dirname, '../client/dist');

@@ -78,8 +78,27 @@ sudo systemctl reload caddy
 Now `https://pulse.howler.co.za` is reachable from **any browser**, gated by login.
 
 ### 6. Backups
-The whole database is one file: `$DATA_DIR/howler.db`. Nightly copy via cron, or
-use **Litestream** for continuous streaming backup to S3.
+The whole database is one file: `$DATA_DIR/howler.db` — and **backups are built
+in** (`server/backup.js`). Every night the server takes an online snapshot
+(safe under WAL — never copy the raw file by hand, you'd miss the `-wal`),
+gzips it to `$DATA_DIR/backups/`, and keeps the last `BACKUP_KEEP` (default 3).
+
+**That alone does NOT survive disk loss.** To get the snapshot off the box, set
+the S3-compatible credentials (Cloudflare R2 is the cheapest option — a free
+bucket is fine):
+
+```
+BACKUP_S3_ENDPOINT=https://<accountid>.r2.cloudflarestorage.com
+BACKUP_S3_BUCKET=pulse-backups
+BACKUP_S3_ACCESS_KEY=…
+BACKUP_S3_SECRET_KEY=…
+```
+
+Check status / take one now / download the latest from Admin (or curl):
+`GET /api/admin/backups`, `POST /api/admin/backups/run`,
+`GET /api/admin/backups/download`. Failures raise an ops alert (see
+`OPS_SLACK_WEBHOOK_URL`). To restore: gunzip the snapshot and point `DB_FILE`
+at it.
 
 ---
 
