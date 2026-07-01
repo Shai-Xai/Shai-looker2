@@ -4,6 +4,7 @@
 // approves it or sends it back with a reason (which reopens it for the team).
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api.js';
+import ReportForm from './ReportForm.jsx';
 
 const TYPE_ICON = { bug: '🐞', improvement: '✨', idea: '💡' };
 const STATUS_STYLE = {
@@ -14,9 +15,22 @@ const STATUS_STYLE = {
 };
 const statusStyle = (s) => STATUS_STYLE[s] || { color: 'var(--text)', background: 'rgba(var(--brand-rgb), 0.12)' };
 
+// The client-facing journey a report moves through (internal statuses mapped to
+// plain language). 'rejected' loops back to Building; 'declined' is off-path.
+const JOURNEY = [
+  ['inbox', 'Submitted'],
+  ['triaged', 'Reviewing'],
+  ['accepted', 'Accepted'],
+  ['in_progress', 'Building'],
+  ['in_review', 'Testing'],
+  ['shipped', 'Ready for you'],
+  ['approved', 'Done'],
+];
+
 export default function MyReports() {
   const [tickets, setTickets] = useState(null);
   const [open, setOpen] = useState(null);
+  const [formOpen, setFormOpen] = useState(false);
   const [error, setError] = useState('');
 
   const load = useCallback(() => {
@@ -26,15 +40,22 @@ export default function MyReports() {
 
   return (
     <div style={{ maxWidth: 720 }}>
-      <h2 style={{ fontSize: 17, fontWeight: 700, marginBottom: 4 }}>My reports</h2>
-      <p style={{ color: 'var(--muted)', fontSize: 14, marginBottom: 16 }}>
-        Bugs, improvements and ideas you've sent us — and where they are. Use the 💬 button
-        (bottom-left of any screen) to report something new.
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 4 }}>
+        <h2 style={{ fontSize: 17, fontWeight: 700 }}>My reports</h2>
+        <button onClick={() => setFormOpen(true)} style={newBtn}>＋ New report</button>
+      </div>
+      <p style={{ color: 'var(--muted)', fontSize: 14, marginBottom: 10 }}>
+        Bugs, improvements and ideas you've sent us — and where they are.
       </p>
+      {/* Status legend: the journey every report follows. */}
+      <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.6, background: 'rgba(128,128,128,0.06)', borderRadius: 10, padding: '10px 12px', marginBottom: 18 }}>
+        <strong style={{ color: 'var(--text)' }}>How your reports move:</strong>{' '}
+        {JOURNEY.map(([, label]) => label).join(' → ')}. When something's ready, you'll be asked to <b>approve</b> it or <b>send it back</b>.
+      </div>
 
       {error && <p style={{ color: 'var(--brand)', fontSize: 13 }}>{error}</p>}
       {!tickets ? <p style={{ color: 'var(--muted)' }}>Loading…</p> : tickets.length === 0 ? (
-        <p style={{ color: 'var(--muted)', fontSize: 14 }}>You haven't reported anything yet.</p>
+        <p style={{ color: 'var(--muted)', fontSize: 14 }}>You haven't reported anything yet — tap <b>＋ New report</b> to send us your first.</p>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {tickets.map((t) => (
@@ -42,6 +63,29 @@ export default function MyReports() {
           ))}
         </div>
       )}
+
+      <ReportForm open={formOpen} onClose={() => setFormOpen(false)} screen="Product" onSubmitted={load} />
+    </div>
+  );
+}
+
+// A compact progress bar showing where a report is in its journey.
+function StatusTrack({ status }) {
+  if (status === 'declined') return null;
+  const rejected = status === 'rejected';
+  const effective = rejected ? 'in_progress' : status;
+  const curIdx = Math.max(0, JOURNEY.findIndex(([k]) => k === effective));
+  const curLabel = (JOURNEY[curIdx] || [])[1] || '';
+  return (
+    <div style={{ margin: '2px 0 10px' }}>
+      <div style={{ display: 'flex', gap: 3, marginBottom: 5 }}>
+        {JOURNEY.map(([key], i) => (
+          <div key={key} title={JOURNEY[i][1]} style={{ flex: 1, height: 5, borderRadius: 3, background: i <= curIdx ? 'var(--brand)' : 'rgba(128,128,128,0.2)' }} />
+        ))}
+      </div>
+      <div style={{ fontSize: 11, fontWeight: 600, color: rejected ? 'var(--brand)' : 'var(--muted)' }}>
+        {rejected ? `Sent back — back to “${curLabel}”` : `Now: ${curLabel}`}{status === 'shipped' ? ' — please review below' : ''}
+      </div>
     </div>
   );
 }
@@ -72,6 +116,8 @@ function ReportCard({ t, open, onToggle, onChange }) {
         {t.screen || 'unknown screen'} · {new Date(t.createdAt).toLocaleDateString()}
         {(t.attachments || []).length > 0 ? ` · 📎 ${t.attachments.length}` : ''}
       </div>
+
+      <StatusTrack status={t.status} />
 
       {/* Ship review: the payoff — overview, test link, approve / reject */}
       {awaitingReview && (
@@ -132,6 +178,7 @@ function ReportCard({ t, open, onToggle, onChange }) {
   );
 }
 
+const newBtn = { padding: '8px 14px', borderRadius: 10, border: 'none', background: 'var(--brand)', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap' };
 const approveBtn = { padding: '9px 16px', borderRadius: 10, border: 'none', background: '#16a34a', color: '#fff', fontWeight: 700, fontSize: 14, cursor: 'pointer' };
 const rejectBtn = { padding: '9px 16px', borderRadius: 10, border: '1px solid var(--brand)', background: 'transparent', color: 'var(--brand)', fontWeight: 600, fontSize: 14, cursor: 'pointer' };
 const ghostBtn = { padding: '9px 16px', borderRadius: 10, border: '1px solid var(--hairline)', background: 'transparent', color: 'var(--text)', fontWeight: 600, fontSize: 14, cursor: 'pointer' };
