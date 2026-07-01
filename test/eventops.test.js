@@ -279,7 +279,7 @@ test('checkpoints: define a type, submit one from the portal, and read it back i
   call(r['PUT /api/eventops/entities/:entityId/enabled'], { user: admin, params: { entityId: entity.id }, body: { enabled: true } });
   const P = { suiteId: suite.id };
   const station = call(r['POST /api/eventops/suites/:suiteId/stations'], { user: owner, params: P, body: { name: 'Bar', kind: 'bar' } }).body.station;
-  const staff = call(r['POST /api/eventops/suites/:suiteId/staff'], { user: owner, params: P, body: { name: 'Sam', number: '5' } }).body.staff;
+  const staff = call(r['POST /api/eventops/suites/:suiteId/staff'], { user: owner, params: P, body: { name: 'Sam', number: '5', canCheckpoint: true } }).body.staff;
   const cp = call(r['POST /api/eventops/suites/:suiteId/checkpoints'], { user: owner, params: P, body: { name: 'Opening check' } }).body.checkpoint;
   assert.equal(cp.name, 'Opening check');
 
@@ -303,7 +303,7 @@ test('portal: staff can list + resolve issues', () => {
   const { entity, suite, owner, admin } = seedEvent();
   call(r['PUT /api/eventops/entities/:entityId/enabled'], { user: admin, params: { entityId: entity.id }, body: { enabled: true } });
   const P = { suiteId: suite.id };
-  const staff = call(r['POST /api/eventops/suites/:suiteId/staff'], { user: owner, params: P, body: { name: 'Sam', number: '5' } }).body.staff;
+  const staff = call(r['POST /api/eventops/suites/:suiteId/staff'], { user: owner, params: P, body: { name: 'Sam', number: '5', canCheckpoint: true } }).body.staff;
   const dev = call(r['POST /api/eventops/suites/:suiteId/devices'], { user: owner, params: P, body: { label: 'X1', qrCode: 'X1' } }).body.device;
   const issue = call(r['POST /api/eventops/suites/:suiteId/issues'], { user: owner, params: P, body: { deviceId: dev.id, category: 'battery' } }).body.issue;
   const kiosk = call(r['GET /api/eventops/suites/:suiteId/kiosk'], { user: owner, params: P }).body;
@@ -336,7 +336,7 @@ test('owl read-only query API + a checkpoint requires a photo', () => {
   assert.equal(eopApi.locateDevice(suite.id, 'nope'), null);
 
   // Checkpoint requires a photo.
-  const staff = call(routes['POST /api/eventops/suites/:suiteId/staff'], { user: owner, params: P, body: { name: 'Sam', number: '5' } }).body.staff;
+  const staff = call(routes['POST /api/eventops/suites/:suiteId/staff'], { user: owner, params: P, body: { name: 'Sam', number: '5', canCheckpoint: true } }).body.staff;
   const kiosk = call(routes['GET /api/eventops/suites/:suiteId/kiosk'], { user: owner, params: P }).body;
   const KP = { suiteId: suite.id, token: kiosk.token };
   assert.equal(call(routes['POST /api/eventops/portal/:suiteId/:token/checkpoint'], { params: KP, body: { stationId: station.id, staffId: staff.id, comment: 'x' } }).code, 400);

@@ -187,6 +187,9 @@ function mount(app, { db, auth }) {
   // Map markers can be resized + rotated (scale 1 = default, rotation in degrees).
   try { sql.exec('ALTER TABLE eventops_stations ADD COLUMN scale REAL NOT NULL DEFAULT 1'); } catch { /* already there */ }
   try { sql.exec('ALTER TABLE eventops_stations ADD COLUMN rotation REAL NOT NULL DEFAULT 0'); } catch { /* already there */ }
+  // Per-staff capabilities in the portal: move devices (default ON), do checkpoints (default OFF).
+  try { sql.exec('ALTER TABLE eventops_staff ADD COLUMN can_move INTEGER NOT NULL DEFAULT 1'); } catch { /* already there */ }
+  try { sql.exec('ALTER TABLE eventops_staff ADD COLUMN can_checkpoint INTEGER NOT NULL DEFAULT 0'); } catch { /* already there */ }
 
   // ── per-client toggle ──────────────────────────────────────────────────────────
   const entityEnabled = (entityId) => {
@@ -262,6 +265,7 @@ function mount(app, { db, auth }) {
       id: s.id, entityId: s.entity_id, suiteId: s.suite_id, name: s.name, number: s.number, role: s.role,
       stationIds: stations.map((x) => x.id), stations,
       stationId: stations[0]?.id || null, stationName: stations[0]?.name || '', // legacy single fields
+      canMove: s.can_move == null ? true : !!s.can_move, canCheckpoint: !!s.can_checkpoint,
       createdAt: s.created_at,
     };
   };
@@ -616,7 +620,9 @@ function mount(app, { db, auth }) {
     const raw = Array.isArray(b.stationIds) ? b.stationIds : (b.stationId ? [b.stationId] : []);
     const valid = sql.prepare('SELECT id FROM eventops_stations WHERE suite_id=?').all(su.id).map((r) => r.id);
     const stationIds = [...new Set(raw.map(String).filter((id) => valid.includes(id)))];
-    return { name: str(b.name, 120).trim(), number: str(b.number, 40).trim(), role: str(b.role, 60).trim(), stationIds };
+    const bool = (v, dflt) => (v == null ? dflt : v ? 1 : 0);
+    return { name: str(b.name, 120).trim(), number: str(b.number, 40).trim(), role: str(b.role, 60).trim(), stationIds,
+      canMove: bool(b.canMove, 1), canCheckpoint: bool(b.canCheckpoint, 0) };
   }
 
   app.post('/api/eventops/suites/:suiteId/staff', auth.requireAuth, (req, res) => {
@@ -624,8 +630,8 @@ function mount(app, { db, auth }) {
     const c = cleanStaff(req.body || {}, su);
     if (!c.name && !c.number) return res.status(400).json({ error: 'Give the staff member a name or number.' });
     const id = uuid();
-    sql.prepare('INSERT INTO eventops_staff (id, entity_id, suite_id, name, number, role, station_id, station_ids, created_at) VALUES (?,?,?,?,?,?,?,?,?)')
-      .run(id, su.entityId, su.id, c.name, c.number, c.role, c.stationIds[0] || '', JSON.stringify(c.stationIds), now());
+    sql.prepare('INSERT INTO eventops_staff (id, entity_id, suite_id, name, number, role, station_id, station_ids, can_move, can_checkpoint, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
+      .run(id, su.entityId, su.id, c.name, c.number, c.role, c.stationIds[0] || '', JSON.stringify(c.stationIds), c.canMove, c.canCheckpoint, now());
     res.status(201).json({ staff: staffRow(sql.prepare('SELECT * FROM eventops_staff WHERE id=?').get(id)) });
   });
 
@@ -634,9 +640,10 @@ function mount(app, { db, auth }) {
     const s = sql.prepare('SELECT * FROM eventops_staff WHERE id=?').get(req.params.id);
     if (!s || s.suite_id !== su.id) return res.status(404).json({ error: 'Staff member not found' });
     const cur = staffRow(s);
-    const c = cleanStaff({ name: req.body?.name ?? s.name, number: req.body?.number ?? s.number, role: req.body?.role ?? s.role, stationIds: req.body?.stationIds ?? cur.stationIds }, su);
-    sql.prepare('UPDATE eventops_staff SET name=?, number=?, role=?, station_id=?, station_ids=? WHERE id=?')
-      .run(c.name, c.number, c.role, c.stationIds[0] || '', JSON.stringify(c.stationIds), s.id);
+    const c = cleanStaff({ name: req.body?.name ?? s.name, number: req.body?.number ?? s.number, role: req.body?.role ?? s.role, stationIds: req.body?.stationIds ?? cur.stationIds,
+      canMove: req.body?.canMove ?? cur.canMove, canCheckpoint: req.body?.canCheckpoint ?? cur.canCheckpoint }, su);
+    sql.prepare('UPDATE eventops_staff SET name=?, number=?, role=?, station_id=?, station_ids=?, can_move=?, can_checkpoint=? WHERE id=?')
+      .run(c.name, c.number, c.role, c.stationIds[0] || '', JSON.stringify(c.stationIds), c.canMove, c.canCheckpoint, s.id);
     res.json({ staff: staffRow(sql.prepare('SELECT * FROM eventops_staff WHERE id=?').get(s.id)) });
   });
 
@@ -689,7 +696,7 @@ function mount(app, { db, auth }) {
     if (!k || !k.enabled || !k.token || k.token !== req.params.token) { res.status(403).json({ error: 'This staff link is invalid or has been turned off.' }); return null; }
     return su;
   }
-  const portalStaffRow = (s) => { const r = staffRow(s); return { id: r.id, name: r.name, number: r.number, role: r.role, stations: r.stations }; };
+  const portalStaffRow = (s) => { const r = staffRow(s); return { id: r.id, name: r.name, number: r.number, role: r.role, stations: r.stations, canMove: r.canMove, canCheckpoint: r.canCheckpoint }; };
   const findStaff = (suiteId, staffId) => sql.prepare('SELECT * FROM eventops_staff WHERE id=? AND suite_id=?').get(staffId, suiteId);
 
   // Event basics (name + stations) so the portal can show context before login.
@@ -745,6 +752,7 @@ function mount(app, { db, auth }) {
     const b = req.body || {};
     const s = findStaff(su.id, b.staffId);
     if (!s) return res.status(403).json({ error: 'Log in with your staff number first.' });
+    if (s.can_move != null && !s.can_move) return res.status(403).json({ error: 'You don’t have permission to move devices.' });
     const d = getDevice(b.deviceId);
     if (!d || d.suite_id !== su.id) return res.status(404).json({ error: 'Device not found' });
     const out = applyMove(su, d, { stationId: b.stationId, staffId: s.id, actor: `portal:${s.number || s.name}`, note: b.note });
@@ -853,6 +861,7 @@ function mount(app, { db, auth }) {
     const b = req.body || {};
     const s = findStaff(su.id, b.staffId);
     if (!s) return res.status(403).json({ error: 'Log in with your staff number first.' });
+    if (!s.can_checkpoint) return res.status(403).json({ error: 'You don’t have permission to submit checkpoints.' });
     if (!b.stationId) return res.status(400).json({ error: 'Pick a station.' });
     if (!b.photo) return res.status(400).json({ error: 'A photo is required for a checkpoint.' });
     if (String(b.photo).length > PHOTO_MAX) return res.status(413).json({ error: 'Photo too large — please retake it.' });

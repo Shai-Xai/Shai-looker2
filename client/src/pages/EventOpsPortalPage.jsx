@@ -18,8 +18,9 @@ export default function EventOpsPortalPage({ suiteId, token }) {
   const [number, setNumber] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
-  const [scanning, setScanning] = useState(false);
-  const [device, setDevice] = useState(null); // scanned device → action sheet
+  const [scanning, setScanning] = useState(false); // top-level scan — used to log an issue
+  const [device, setDevice] = useState(null); // scanned device → issue sheet
+  const [moving, setMoving] = useState(false); // station-first move flow open
   const [checking, setChecking] = useState(false); // checkpoint sheet open
   const [toast, setToast] = useState('');
   const storeKey = `eop_portal_${suiteId}`;
@@ -89,9 +90,14 @@ export default function EventOpsPortalPage({ suiteId, token }) {
               </div>
             </div>
 
-            <div style={{ display: 'flex', gap: 10, marginBottom: 18 }}>
-              <button onClick={() => setScanning(true)} style={{ ...bigBtn, fontSize: 17, padding: '15px' }}>📷 Scan</button>
-              <button onClick={() => setChecking(true)} style={{ ...bigBtn, fontSize: 17, padding: '15px', background: 'var(--card)', color: 'var(--text)', border: '1px solid var(--border)' }}>✅ Checkpoint</button>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 18 }}>
+              <button onClick={() => setScanning(true)} style={{ ...bigBtn, fontSize: 17, padding: '15px' }}>⚠️ Log an issue</button>
+              {staff.canMove !== false && (
+                <button onClick={() => setMoving(true)} style={secondaryBtn}>🔀 Move devices</button>
+              )}
+              {staff.canCheckpoint && (
+                <button onClick={() => setChecking(true)} style={secondaryBtn}>✅ Checkpoint</button>
+              )}
             </div>
 
             <div style={kicker}>My stations</div>
@@ -109,14 +115,22 @@ export default function EventOpsPortalPage({ suiteId, token }) {
 
       {scanning && (
         <Suspense fallback={null}>
-          <EventOpsScanner onCode={onScanned} onClose={() => setScanning(false)} title="Scan a device" />
+          <EventOpsScanner onCode={onScanned} onClose={() => setScanning(false)} title="Scan the device with the issue" />
         </Suspense>
       )}
       {device && (
-        <PortalActionSheet
-          suiteId={suiteId} token={token} staffId={staff.id} device={device} stations={info.stations}
+        <IssueSheet
+          suiteId={suiteId} token={token} staffId={staff.id} device={device}
           onClose={() => setDevice(null)}
           onDone={(msg) => { setDevice(null); if (msg) flash(msg); refreshMe(); }}
+        />
+      )}
+      {moving && (
+        <MoveFlow
+          suiteId={suiteId} token={token} staffId={staff.id} stations={info.stations}
+          onClose={() => setMoving(false)}
+          onDone={(msg) => { if (msg) flash(msg); refreshMe(); }}
+          flash={flash}
         />
       )}
       {checking && (
@@ -165,15 +179,10 @@ function StationCard({ station }) {
   );
 }
 
-function PortalActionSheet({ suiteId, token, staffId, device, stations, onClose, onDone }) {
-  const [view, setView] = useState('move');
+// Log an issue against a device the staffer just scanned. Issue-only — moves live in MoveFlow.
+function IssueSheet({ suiteId, token, staffId, device, onClose, onDone }) {
   const [issue, setIssue] = useState({ category: 'damaged', note: '', resolution: '' });
   const [busy, setBusy] = useState(false);
-  async function move(stationId, label) {
-    setBusy(true);
-    try { await api.eopPortalMove(suiteId, token, { deviceId: device.id, stationId, staffId }); onDone(`${device.label || 'Device'} → ${label}`); }
-    catch (e) { alert(e.message); setBusy(false); }
-  }
   async function log() {
     setBusy(true);
     try { await api.eopPortalIssue(suiteId, token, { deviceId: device.id, staffId, ...issue }); onDone('Issue logged'); }
@@ -187,27 +196,100 @@ function PortalActionSheet({ suiteId, token, staffId, device, stations, onClose,
           <button onClick={onClose} style={iconBtn}>✕</button>
         </div>
         <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 12 }}>now at {device.state === 'deployed' ? (device.stationName || 'a station') : 'the Hive'}</div>
-        <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
-          <Pill on={view === 'move'} onClick={() => setView('move')}>Move</Pill>
-          <Pill on={view === 'issue'} onClick={() => setView('issue')}>Log issue</Pill>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={lbl}>What&apos;s the issue?</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {ISSUE_CATEGORIES.map((c) => <Pill key={c} on={issue.category === c} onClick={() => setIssue({ ...issue, category: c })}>{CAT_LABEL[c]}</Pill>)}
+          </div>
+          <textarea style={{ ...input, minHeight: 64 }} placeholder="What's wrong?" value={issue.note} onChange={(e) => setIssue({ ...issue, note: e.target.value })} />
+          <input style={input} placeholder="Resolution (optional — if fixed now)" value={issue.resolution} onChange={(e) => setIssue({ ...issue, resolution: e.target.value })} />
+          <button onClick={log} disabled={busy} style={bigBtn}>{busy ? 'Saving…' : 'Log issue'}</button>
         </div>
-        {view === 'move' ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <button disabled={busy} onClick={() => move('hive', 'Hive')} style={destBtn}>🏠 Hive (in stock)</button>
-            {stations.map((s) => (
-              <button key={s.id} disabled={busy} onClick={() => move(s.id, s.name)} style={destBtn}>{KIND_ICON[s.kind] || '📍'} {s.name}</button>
-            ))}
-            {stations.length === 0 && <div style={{ color: 'var(--muted)', fontSize: 13 }}>No stations set up yet.</div>}
-          </div>
+      </div>
+    </div>
+  );
+}
+
+// Station-first move flow: pick the destination, choose Single or Multiple, then scan.
+// The logged-in staffer is the actor automatically — no name/number to pick here.
+function MoveFlow({ suiteId, token, staffId, stations, onClose, onDone, flash }) {
+  const [dest, setDest] = useState(null);   // { id, name, kind } — id 'hive' = back to stock
+  const [mode, setMode] = useState(null);   // 'single' | 'multiple'
+  const [scanning, setScanning] = useState(false);
+  const [scanKey, setScanKey] = useState(0); // bump to remount the one-shot scanner
+  const [moved, setMoved] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const destLabel = dest ? (dest.id === 'hive' ? 'Hive' : dest.name) : '';
+
+  function chooseMode(m) { setMode(m); setScanning(true); setScanKey((k) => k + 1); }
+  function scanAgain() { setScanning(true); setScanKey((k) => k + 1); }
+
+  async function onScanned(code) {
+    if (!code) { setScanning(false); return; }
+    setBusy(true);
+    try {
+      const r = await api.eopPortalScan(suiteId, token, code);
+      const dev = r.device;
+      await api.eopPortalMove(suiteId, token, { deviceId: dev.id, stationId: dest.id, staffId });
+      const label = dev.label || dev.qrCode || 'Device';
+      setMoved((m) => [...m, label]);
+      onDone(`${label} → ${destLabel}`);
+      if (mode === 'single') { setScanning(false); onClose(); return; }
+      setScanKey((k) => k + 1); // fresh scanner for the next device
+    } catch (e) {
+      flash(e.message || 'Could not move that device');
+      if (mode === 'single') { setScanning(false); return; }
+      setScanKey((k) => k + 1);
+    }
+    setBusy(false);
+  }
+
+  // Full-screen scanner while actively scanning.
+  if (scanning) {
+    return (
+      <Suspense fallback={null}>
+        <EventOpsScanner key={scanKey} onCode={onScanned} onClose={() => setScanning(false)}
+          title={`Scan → ${destLabel}${mode === 'multiple' ? ` · ${moved.length} moved` : ''}`} />
+      </Suspense>
+    );
+  }
+  return (
+    <div style={overlay} onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div style={sheet}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
+          <strong style={{ fontSize: 16 }}>🔀 Move devices</strong>
+          <button onClick={onClose} style={iconBtn}>✕</button>
+        </div>
+        {!dest ? (
+          <>
+            <div style={lbl}>Where are you moving devices to?</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <button onClick={() => setDest({ id: 'hive', name: 'Hive' })} style={destBtn}>🏠 Hive (in stock)</button>
+              {stations.map((s) => <button key={s.id} onClick={() => setDest(s)} style={destBtn}>{KIND_ICON[s.kind] || '📍'} {s.name}</button>)}
+              {stations.length === 0 && <div style={{ color: 'var(--muted)', fontSize: 13 }}>No stations set up yet.</div>}
+            </div>
+          </>
+        ) : !mode ? (
+          <>
+            <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 12 }}>Moving to <strong style={{ color: 'var(--text)' }}>{destLabel}</strong></div>
+            <div style={lbl}>How many devices?</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <button onClick={() => chooseMode('single')} style={destBtn}>1️⃣ Single — scan one device</button>
+              <button onClick={() => chooseMode('multiple')} style={destBtn}>🔢 Multiple — scan several, then finish</button>
+            </div>
+            <button onClick={() => setDest(null)} style={{ ...ghostBtn, marginTop: 12 }}>← Change destination</button>
+          </>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <select style={input} value={issue.category} onChange={(e) => setIssue({ ...issue, category: e.target.value })}>
-              {ISSUE_CATEGORIES.map((c) => <option key={c} value={c}>{CAT_LABEL[c]}</option>)}
-            </select>
-            <textarea style={{ ...input, minHeight: 64 }} placeholder="What's wrong?" value={issue.note} onChange={(e) => setIssue({ ...issue, note: e.target.value })} />
-            <input style={input} placeholder="Resolution (optional — if fixed now)" value={issue.resolution} onChange={(e) => setIssue({ ...issue, resolution: e.target.value })} />
-            <button onClick={log} disabled={busy} style={bigBtn}>{busy ? 'Saving…' : 'Log issue'}</button>
-          </div>
+          <>
+            <div style={{ fontSize: 13, marginBottom: 12 }}>{moved.length} device{moved.length === 1 ? '' : 's'} moved to <strong>{destLabel}</strong>.</div>
+            {moved.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
+                {moved.map((m, i) => <div key={i} style={miniRow}><span>{m}</span><span style={{ color: 'var(--success)' }}>✓</span></div>)}
+              </div>
+            )}
+            <button onClick={scanAgain} disabled={busy} style={{ ...bigBtn, marginBottom: 8 }}>📷 Scan another</button>
+            <button onClick={onClose} style={ghostBtn}>Done</button>
+          </>
         )}
       </div>
     </div>
@@ -372,6 +454,7 @@ const kicker = { fontSize: 11, fontWeight: 700, textTransform: 'uppercase', lett
 const lbl = { fontSize: 12, color: 'var(--muted)', marginBottom: 6 };
 const input = { width: '100%', boxSizing: 'border-box', padding: '12px 14px', fontSize: 15, borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)' };
 const bigBtn = { width: '100%', padding: '13px', borderRadius: 12, border: 'none', background: 'var(--brand)', color: '#fff', fontWeight: 800, fontSize: 16, cursor: 'pointer' };
+const secondaryBtn = { width: '100%', padding: '15px', borderRadius: 12, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--text)', fontWeight: 700, fontSize: 17, cursor: 'pointer' };
 const ghostBtn = { padding: '8px 14px', borderRadius: 10, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', fontWeight: 600, fontSize: 13, cursor: 'pointer' };
 const destBtn = { textAlign: 'left', padding: '13px 14px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 15, fontWeight: 600, cursor: 'pointer' };
 const iconBtn = { width: 34, height: 34, borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', cursor: 'pointer', fontSize: 14 };
