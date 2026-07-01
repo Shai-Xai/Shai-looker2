@@ -51,14 +51,14 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
   // events. We only apply locks valid in THIS explore (core_events.* or a curated
   // dimension) so we never inject a field Looker would reject, and never touch the
   // organiser field (left to applyScope). ANY_VALUE / blank locks are skipped.
-  function applySuiteEventLocks(filters, suiteId) {
+  function applySuiteEventLocks(filters, suiteId, dims = dimByName) {
     if (!suiteId || !auth || !auth.lockedFiltersForSuite) return;
     let locks; try { locks = auth.lockedFiltersForSuite(suiteId) || {}; } catch { return; }
     for (const [key, val] of Object.entries(locks)) {
       if (val == null || val === '' || val === ' __ANY_VALUE__') continue;
       const field = key.includes('.') ? key : (auth.filterNameToField ? auth.filterNameToField(key) : null);
       if (!field || field === ORG) continue; // organiser handled by applyScope
-      if ((/^core_events\./.test(field) || dimByName.has(field)) && filters[field] == null) {
+      if ((/^core_events\./.test(field) || dims.has(field)) && filters[field] == null) {
         filters[field] = String(val);
       }
     }
@@ -908,8 +908,74 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     },
   };
 
+  // ── Extra explores (admin-registered) — one scoped read tool each ────────────
+  // Mirrors askData for any additional explore the admin enabled. Same scope gate
+  // (applyScope is explore-aware + fails closed), so an explore that can't be bound
+  // to the client is refused, never leaked. Read-only; no PII (locked at selection).
+  function makeExploreTool(cat) {
+    const mByName = new Map((cat.measures || []).map((m) => [m.name, m]));
+    const groupable = new Set((cat.dimensions || []).map((d) => d.name));
+    const dByName = new Map((cat.dimensions || []).map((d) => [d.name, d]));
+    const toolName = `ask_${String(cat.explore).replace(/[^a-zA-Z0-9_]/g, '_').slice(0, 48)}`;
+    async function run(args = {}, ctx = {}) {
+      const { user, suiteId, entityId } = ctx;
+      if (!user) return refuse('no_user', 'No authenticated user in context.');
+      const measureList = [];
+      if (args.measure) measureList.push(args.measure);
+      for (const mm of (Array.isArray(args.measures) ? args.measures : [])) if (!measureList.includes(mm)) measureList.push(mm);
+      if (!measureList.length) return refuse('unknown_measure', 'No measure specified.');
+      for (const mm of measureList) if (!mByName.has(mm)) return refuse('unknown_measure', `"${mm}" is not a measure in ${cat.label}.`);
+      const measure = measureList[0];
+      const dimensions = Array.isArray(args.dimensions) ? args.dimensions : [];
+      for (const d of dimensions) if (!groupable.has(d)) return refuse('unknown_dimension', `"${d}" is not a groupable dimension in ${cat.label}.`);
+      const filters = {};
+      for (const [field, val] of Object.entries(args.filters || {})) {
+        if (!groupable.has(field)) return refuse('unfilterable', `I can't filter on "${field}" in ${cat.label}.`);
+        if (val == null || String(val).trim() === '') continue;
+        filters[field] = String(val);
+      }
+      if (args.dateRange && String(args.dateRange).trim() && cat.dateDimension) filters[cat.dateDimension] = String(args.dateRange).trim();
+      const body = { model: cat.model, view: cat.explore, fields: [...dimensions, ...measureList], filters, sorts: [`${measure} desc`], limit: Math.min(Math.max(Number(args.limit) || 500, 1), 5000) };
+      applySuiteEventLocks(body.filters, suiteId, dByName);
+      const allowed = await query.applyScope(body, user, suiteId);
+      if (allowed === false) return refuse('no_scope', `I can't scope ${cat.label} to a client here — this data source may not be linkable to your client, or open a client/event first.`);
+      if (entityId && auth && auth.accessibleOrgFilters) {
+        const locks = auth.accessibleOrgFilters(user, entityId);
+        if (locks && locks[ORG]) body.filters = { ...body.filters, ...locks };
+        else if (!body.filters[ORG]) return refuse('no_scope', `I can't tell which client's data to use for ${cat.label}.`);
+      } else if (!body.filters[ORG]) {
+        const locks = auth && auth.accessibleOrgFilters ? auth.accessibleOrgFilters(user, entityId) : null;
+        if (locks && locks[ORG]) body.filters = { ...body.filters, ...locks };
+        else return refuse('no_scope', `I can't tell which client's data to use for ${cat.label}.`);
+      }
+      let rows;
+      try { rows = await query.runLookerQuery('/queries/run/json', body); }
+      catch (e) { return refuse('query_failed', `I couldn't run that ${cat.label} query${e && e.message ? ` (${String(e.message).slice(0, 140)})` : ''}.`); }
+      return { ok: true, rows: Array.isArray(rows) ? rows : [], count: Array.isArray(rows) ? rows.length : 0, measure, dimensions, explore: cat.explore, queryBody: body };
+    }
+    const props = {
+      measure: { type: 'string', enum: cat.measures.map((m) => m.name), description: `The number to compute from ${cat.label}.` },
+      measures: { type: 'array', items: { type: 'string', enum: cat.measures.map((m) => m.name) }, description: 'Optional: 2+ measures side by side.' },
+      filters: { type: 'object', description: 'Optional {field: value} filters on this data.' },
+      limit: { type: 'number', description: 'Max rows (default 500).' },
+    };
+    if (cat.dimensions.length) props.dimensions = { type: 'array', items: { type: 'string', enum: cat.dimensions.map((d) => d.name) }, description: `Optional group-by fields in ${cat.label}.` };
+    if (cat.dateDimension) props.dateRange = { type: 'string', description: `Optional Looker date expression on ${cat.label}'s date (e.g. "last 7 days").` };
+    return {
+      schema: {
+        name: toolName,
+        description: `Answer a question from the client's own ${cat.label} data (Looker explore ${cat.model}::${cat.explore}) — a bounded, scoped, read-only query. Use this for ${cat.label} questions. To compare ${cat.label} with ticketing, also call askData and combine on a shared dimension (event or date). Returns rows; cite the figures.`,
+        input_schema: { type: 'object', properties: props, required: ['measure'] },
+      },
+      run,
+    };
+  }
+  const extraTools = {};
+  for (const ex of (catalogue.extras || [])) { try { const t = makeExploreTool(ex); extraTools[t.schema.name] = t; } catch { /* skip a malformed explore */ } }
+
   return {
     catalogue,
+    ...extraTools,
     draftReport: { schema: draftReportSchema, run: runDraftReport, menu: { cmd: 'report', label: 'Report a bug or idea', icon: '🐞', example: 'I found a bug on the alerts page' } },
     eventOps: { schema: eventOpsSchema, run: runEventOps, menu: { cmd: 'eventops', label: 'Event Ops', icon: '📟', example: 'Where is SL005, and any open issues?' } },
     askData: { schema: askDataSchema, run: runAskData, menu: { cmd: 'data', label: 'Ticket data', icon: '📊', example: 'How many tickets have I sold?' } },
