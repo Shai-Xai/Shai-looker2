@@ -30,8 +30,8 @@ async function startApp(mountFn) {
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
 
-  async function req(method, path, { as, body } = {}) {
-    const headers = { 'Content-Type': 'application/json' };
+  async function req(method, path, { as, body, headers: extraHeaders } = {}) {
+    const headers = { 'Content-Type': 'application/json', ...(extraHeaders || {}) };
     if (as) headers.Cookie = cookieFor(as);
     const r = await fetch(base + path, {
       method,

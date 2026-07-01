@@ -344,7 +344,11 @@ function mount(app, { db, auth, resolveAudience, resolveRecipe, meta, tiktok }) 
   function listSegmentsFor(entityId) {
     return sql.prepare('SELECT id, name FROM segments WHERE entity_id=? ORDER BY updated_at DESC LIMIT 200').all(entityId).map((r) => ({ id: r.id, name: r.name }));
   }
-  return { resolveSegment, getSegmentDefinition, createSegment: createSegmentFor, listSegments: listSegmentsFor };
+  // Full read shape (same rowToSeg the routes use) — for the public API surface.
+  function listSegmentsFull(entityId) {
+    return sql.prepare('SELECT * FROM segments WHERE entity_id=? ORDER BY updated_at DESC LIMIT 200').all(entityId).map(rowToSeg);
+  }
+  return { resolveSegment, getSegmentDefinition, createSegment: createSegmentFor, listSegments: listSegmentsFor, listSegmentsFull };
 }
 
 module.exports = { mount };

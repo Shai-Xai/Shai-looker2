@@ -532,6 +532,26 @@ budgets are on the roadmap.
 
 ---
 
+## 13. Pulse API & AI-agent access (MCP)  🧪
+**The pitch:** "Your Pulse data isn't locked in — read it from your own tools,
+or point an AI agent (like Claude) at it and ask questions in plain language."
+
+- **Read-only API keys, per client.** A key is scoped to exactly one client and
+  can never see another client's data — the same security boundary the app
+  itself enforces. Keys are named, revocable, and the secret is shown once.
+- **REST API (`/api/v1`)** — dashboards, live tile metrics, segments (with
+  contactable reach), campaign results and goals, as JSON.
+- **MCP server (`/mcp`)** — the same data as curated tools any MCP-capable AI
+  agent can use: "what does Total Tickets Sold show right now?", "how big is the
+  VIP segment?", "how did the launch campaign do?".
+- **Self-service** — clients create and revoke their own keys in **Settings →
+  Integrations**; Howler can manage them per client in Admin. Every external
+  call is rate-limited and audited.
+- Writes (draft a segment/campaign via the API) are on the roadmap and will ride
+  the existing approval + consent gates — nothing will ever send without a human.
+
+---
+
 ## On the horizon (🔜 — not yet usable; for roadmap conversations only)
 Use these to set direction, **not** to promise dates.
 - **Conversational/agentic Owl** — chat that answers, analyses and *executes*
@@ -565,6 +585,12 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-01** — **Pulse API & AI-agent access (MCP)** 🧪: per-client, read-only **API keys**
+  (client self-service in Settings → Integrations, or managed by Howler in Admin) unlock a
+  **REST API** (`/api/v1` — dashboards, live tile metrics, segments + reach, campaign results,
+  goals) and a **remote MCP server** (`/mcp`) so AI agents like Claude can query a client's
+  Pulse data conversationally. One key = one client, read-only, rate-limited, fully audited —
+  external callers ride the exact same scope boundary as the app. (See `docs/PUBLIC_API.md`.)
 - **2026-07-01** — **Email block builder** 🧪: campaigns get a Mailchimp-style content
   builder alongside the built template + custom HTML modes. Stack **heading, text, image,
   button, video, social, divider and spacer** blocks (each with alignment/size/link

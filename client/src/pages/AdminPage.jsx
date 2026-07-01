@@ -9,6 +9,7 @@ import IntegrationsForm from '../components/IntegrationsForm.jsx';
 import MailTemplateEditor from '../components/MailTemplateEditor.jsx';
 import MailLogView from '../components/MailLogView.jsx';
 import OwlAddressCard from '../components/OwlAddressCard.jsx';
+import ApiKeysCard from '../components/ApiKeysCard.jsx';
 import DigestManager from '../components/DigestManager.jsx';
 import CampaignManager from '../components/CampaignManager.jsx';
 import SegmentManager from '../components/SegmentManager.jsx';
@@ -4857,6 +4858,7 @@ function ClientIntegrations({ entity }) {
         onToggleLock={async (k, locked) => setValue(await api.setEntityIntegrationLock(entity.id, k, locked))}
         onSave={async (p) => setValue(await api.saveEntityIntegrations(entity.id, p))}
       />
+      <ApiKeysCard entityId={entity.id} scope="admin-client" />
     </div>
   );
 }

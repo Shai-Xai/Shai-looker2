@@ -474,6 +474,14 @@ export const api = {
   slackShare: (p) => fetch('/api/my/slack/share', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),
   setEntityIntegrationLock: (id, key, locked) => fetch(`/api/admin/entities/${id}/integrations/lock`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, locked }) }).then(json),
 
+  // API keys for the public surface (/api/v1 + MCP) — dual-surface management.
+  listEntityApiKeys: (id) => fetch(`/api/admin/entities/${id}/api-keys`).then(json),
+  createEntityApiKey: (id, p) => fetch(`/api/admin/entities/${id}/api-keys`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),
+  revokeEntityApiKey: (id, keyId) => fetch(`/api/admin/entities/${id}/api-keys/${keyId}/revoke`, { method: 'POST' }).then(json),
+  listMyApiKeys: (entityId) => fetch(`/api/my/api-keys/${entityId}`).then(json),
+  createMyApiKey: (entityId, p) => fetch(`/api/my/api-keys/${entityId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),
+  revokeMyApiKey: (entityId, keyId) => fetch(`/api/my/api-keys/${entityId}/${keyId}/revoke`, { method: 'POST' }).then(json),
+
   // Email templates / branding (platform default + per-client overrides)
   getMailTemplate: () => fetch('/api/admin/mail-template').then(json),
   saveMailTemplate: (p) => fetch('/api/admin/mail-template', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),

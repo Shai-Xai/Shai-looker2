@@ -6,6 +6,7 @@ import IntegrationsForm from '../components/IntegrationsForm.jsx';
 import MailTemplateEditor from '../components/MailTemplateEditor.jsx';
 import MyOwlMemory from '../components/MyOwlMemory.jsx';
 import OwlAddressCard from '../components/OwlAddressCard.jsx';
+import ApiKeysCard from '../components/ApiKeysCard.jsx';
 import MailLogView from '../components/MailLogView.jsx';
 import NotificationPrefs from '../components/NotificationPrefs.jsx';
 import TeamManager from '../components/TeamManager.jsx';
@@ -121,6 +122,7 @@ export default function ClientIntegrationsPage() {
                   setItems((arr) => arr.map((x) => (x.entityId === activeItem.entityId ? { ...x, ...v } : x)));
                 }}
               />
+              <ApiKeysCard entityId={activeItem.entityId} scope="my" />
             </div>
           )}
 

@@ -1,9 +1,18 @@
-# API_MCP_BRIEF.md — Pulse as a platform (GraphQL API + MCP)
+# API_MCP_BRIEF.md — Pulse as a platform (API + MCP)
 
 Working brief for opening Pulse up so other platforms (Howler's own, partners,
 and **AI agents**) can read and act on it. Companion to `EXPERIENCE_OS_BRIEF.md`,
-`ENGAGEMENT_ENGINE.md`, `GOALS_MERGED.md`. For review (Shai + Hermes). Decisions
-already taken are flagged **DECIDED**.
+`ENGAGEMENT_ENGINE.md`, `GOALS_MERGED.md`. Decisions already taken are flagged
+**DECIDED**. Revised after Hermes' review (`REVIEW_API_MCP_BRIEF_HERMES.md`) —
+its recommendations are folded in below.
+
+> **STATUS (2026-07-01): P1 + P2 are SHIPPED.** Per-entity API keys (issue /
+> scope / revoke, hashed + masked, dual-surface management, `api_audit` table,
+> per-key rate limits) in `server/apiKeys.js`; the read-only REST surface
+> (`/api/v1`) in `server/api.js`; the remote MCP server (`/mcp`, streamable
+> HTTP, curated read tools) in `server/mcp.js`. One shared `core` backs both
+> surfaces. Reference: `docs/PUBLIC_API.md`. Route-level tests:
+> `test/apikeys.test.js`. Next: P3 (writes + webhooks).
 
 ---
 
@@ -21,18 +30,23 @@ already powers the app); the public surfaces are thin adapters over it.
 
 ```
             ┌─ Web app          internal REST, cookie session   (today)
-Service ────┼─ Public GraphQL    API key, per-entity scope        ← partners / Howler platforms
- layer      └─ MCP server        API key, per-entity scope        ← AI agents
+Service ────┼─ Public REST /api/v1   API key, per-entity scope    ← partners / integrations  (SHIPPED)
+ layer      └─ MCP server /mcp       API key, per-entity scope    ← AI agents               (SHIPPED)
 (audienceFor, resolveScope, segment/metric resolvers, actions —
  scope-enforced, the single source of truth)
 ```
 
-- **DECIDED — GraphQL for the public API** (Howler is GraphQL): ecosystem fit,
-  typed/self-documenting, and Pulse can expose a **subgraph that federates into
-  Howler's graph** (one unified graph, not a bolted-on API).
+- **REVISED (per Hermes' P0) — GraphQL is a candidate, not decided.** The only
+  reason to pick GraphQL is federation into Howler's graph, and that decision is
+  still open (§10.1–2). The public wire format gets decided at **P4**, once
+  federation is genuinely committed. Near term, the actual differentiator — MCP —
+  doesn't care about wire format, and a thin REST read surface serves machine
+  access today. If federation lands, GraphQL is added as another thin adapter
+  over the same `core` (server/api.js) — additive, not a rewrite.
 - **MCP wraps the same service layer**, not a second implementation. A new source
   = a new adapter; callers never change (same lesson as the segment/metric
-  resolver).
+  resolver). Implemented: `server/api.js` exports a `core` of read functions;
+  the REST routes and every MCP tool are thin wrappers over it.
 - Web app keeps its internal REST — we *add*, we don't rewrite.
 
 ---
@@ -57,7 +71,22 @@ Everything hangs off this; build it first.
 
 ---
 
-## 4. The GraphQL surface (sketch — evolve)
+## 3b. What P1 actually had to build (named, per Hermes' review)
+The "reuse, don't rebuild" story in §9 held for scope enforcement, secret
+masking and rate limits — but three things were **new builds**, and were:
+- **A synthetic principal.** The service layer wants a `user` object
+  (`entityIds`, `memberships`). An API key has no user, so key auth constructs a
+  user-shaped principal pinned to the key's ONE entity (owner-role membership —
+  the same shape the segments auto-mirror already used). Tenancy lives in the
+  principal; capability lives in the key's scopes (`requireScope`) at the surface.
+- **The `api_audit` table.** "Everything audited" needed a real append-only
+  store: every REST call and MCP tool call lands there with key id, action and
+  outcome (`server/apiKeys.js`).
+- **Dormant schema for later granularity.** `api_keys.role` and
+  `api_keys.created_by` exist (nullable, unused) so role-narrowed or per-user
+  agent keys can light up later without a migration.
+
+## 4. The read surface (SHIPPED — /api/v1; wire-format sketch for P4 below)
 Backed entirely by existing service functions.
 
 **Queries (read):**
@@ -103,14 +132,16 @@ Read+write is in scope, but **nothing sends without a human**, exactly as in-app
 
 ---
 
-## 6. The MCP server
+## 6. The MCP server (SHIPPED)
 A thin **remote** MCP server (`server/mcp.js`, disposable module) exposing curated
 tools over the service layer, authed by the **same per-entity API key**.
 
-- **Transport:** remote (HTTP/streamable) so any agent platform (Claude, etc.)
-  can connect — not just local stdio.
-- **Read tools (P2):** `pulse_list_dashboards`, `pulse_get_metric`,
-  `pulse_list_segments`, `pulse_get_segment_reach`, `pulse_list_campaigns`,
+- **Transport:** remote (MCP streamable HTTP at `/mcp`, **stateless** — each POST
+  carries its own auth) so any agent platform (Claude, etc.) can connect — not
+  just local stdio.
+- **Read tools (P2, live):** `pulse_get_me`, `pulse_list_dashboards`,
+  `pulse_get_dashboard`, `pulse_get_metric`, `pulse_list_segments`,
+  `pulse_get_segment_reach`, `pulse_list_campaigns`,
   `pulse_get_campaign_report`, `pulse_get_goals`.
 - **Write tools (P3, gated):** `pulse_create_segment_from_tile`,
   `pulse_draft_campaign`, `pulse_request_send` (→ approval). Each tool's
@@ -128,15 +159,22 @@ retried: `campaign.sent`, `campaign.approved`, `segment.changed`,
 
 ---
 
-## 8. Phasing
-- **P1 — Keys + read graph.** Per-entity API-key system (issue/scope/revoke,
-  enforced via the resolver) + dual-surface key management + a **read-only
-  GraphQL** surface (dashboards, metric, segments+reach, campaigns+reports).
-- **P2 — MCP (read).** Remote MCP server wrapping the read graph as tools.
-- **P3 — Writes + webhooks.** Mutations (create/draft/requestSend) with the
-  approval/consent gates intact; outbound webhooks; write MCP tools.
-- **P4 — Federation + docs.** Expose as a **subgraph into Howler's graph**;
-  published schema/SDL + docs + partner onboarding; goals queries once goals ship.
+## 8. Phasing (revised per Hermes; P1–P2 shipped 2026-07-01)
+- **P1 — Keys + scope layer + read. ✅ SHIPPED.** Per-entity API keys
+  (issue/scope/revoke, hashed/masked, dual-surface management) · synthetic
+  principal so every existing gate applies · `api_audit` table · per-key rate
+  limits (reusing `ratelimit.js`) · read-only REST surface `/api/v1`
+  (dashboards, metric, segments+reach, campaigns+reports, goals).
+- **P2 — MCP (read). ✅ SHIPPED.** Remote MCP server at `/mcp` (streamable
+  HTTP, stateless) wrapping the same `core` as curated tools. *The
+  differentiator; needed no GraphQL.*
+- **P3 — Writes + webhooks.** `write`/`send`-scoped mutations
+  (create/draft/requestSend) with approval + consent gates intact — external
+  sends **always human-approved in v1** (decided, was §10.4); outbound webhooks
+  (signed/retried/DLQ — a real chunk, not a footnote); write MCP tools.
+- **P4 — Public-API wire format + federation + docs.** Decide GraphQL vs REST
+  **here**, once Howler federation is committed; subgraph/SDL if GraphQL;
+  partner onboarding.
 
 ---
 
@@ -152,16 +190,19 @@ retried: `campaign.sent`, `campaign.approved`, `segment.changed`,
 
 ---
 
-## 10. Open decisions (for review)
-1. **GraphQL server lib:** Apollo Server vs graphql-yoga vs Mercurius — pick for
-   easiest **federation into Howler's existing graph** (whatever Howler runs).
-2. **Federation model:** Pulse as an Apollo Federation **subgraph**, or a
-   standalone graph Howler stitches? (Depends on Howler's setup — needs their input.)
-3. **Key granularity:** entity-only (DECIDED) — but also per-*user* keys for
-   personal agents, or entity-only for v1?
-4. **`send` scope policy:** allow unattended sends at all, or *always* require
-   human approval for external-initiated sends in v1? (Lean: always require.)
-5. **Rate limits / quotas** per key tier.
+## 10. Open decisions
+1. **Is Howler federation committed, or aspirational?** (Hermes' hinge question —
+   needs a yes/no from Howler.) This gates the P4 wire-format decision; nothing
+   shipped so far is blocked on it.
+2. **If yes: federation model + server lib** (Apollo subgraph vs stitched;
+   Apollo Server vs graphql-yoga vs Mercurius — match whatever Howler runs).
+3. ~~Key granularity~~ **RESOLVED:** entity-only for v1, with dormant
+   `role`/`created_by` columns on `api_keys` so per-user/role-narrowed agent keys
+   need no migration later.
+4. ~~`send` scope policy~~ **RESOLVED:** external sends **always** require human
+   approval in v1; unattended send is a P3+ explicit per-client opt-in.
+5. **Rate limits / quotas** per key tier (shipped defaults: 120 req/min per key,
+   20/min for live resolves, 60/min MCP — revisit when real usage exists).
 6. **Does Pulse also *consume* Howler's GraphQL** for connectors (the inverse
    direction)? Out of scope here but flag the shape.
 
