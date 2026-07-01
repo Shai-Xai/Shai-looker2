@@ -166,6 +166,9 @@ export const api = {
   saveMyOwlUserMemory: (items) => fetch('/api/my/owl-user-memory', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }) }).then(json),
   // The "/" slash-command palette (derived from the Owl's tool registry).
   owlCapabilities: () => fetch('/api/owl/capabilities').then(json),
+  // Owl access (owner-only write): who can use the native Owl.
+  getOwlAccess: () => fetch('/api/admin/owl-access').then(json),
+  saveOwlAccess: (b) => fetch('/api/admin/owl-access', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   // Admin: the Owl data catalogue — list every explore field + which are enabled, and save.
   owlCatalogueFields: () => fetch('/api/admin/owl/catalogue').then(json),
   saveOwlCatalogue: (enabled) => fetch('/api/admin/owl/catalogue', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }) }).then(json),

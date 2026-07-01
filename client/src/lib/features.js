@@ -19,6 +19,7 @@ export const FEATURES = {
 const OWL_NATIVE_CHAT_ALLOW = ['shai.evian@howler.co.za'];
 export function owlNativeChatEnabled(user) {
   if (FEATURES.owlNativeChat) return true;
+  if (user?.owlEnabled) return true; // server-resolved (the owner can toggle this in Admin → AI)
   const email = String(user?.email || '').trim().toLowerCase();
   return !!email && OWL_NATIVE_CHAT_ALLOW.includes(email);
 }

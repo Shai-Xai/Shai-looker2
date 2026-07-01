@@ -4111,6 +4111,52 @@ function LibraryRow({ tile, aiEnabled, onSaved, onDeleted }) {
 // ─── Global AI instructions ───────────────────────────────────────────────────
 // One set of standing instructions appended to every AI prompt (tile insights,
 // dashboard summary, tile-library descriptions).
+// Owner-only control (Admin → AI) to switch the native Owl on for other users —
+// for everyone, or a specific allowlist. Renders nothing for anyone but the owner.
+function OwlAccessCard() {
+  const { user } = useAuth();
+  const [cfg, setCfg] = useState(null);
+  const [emailsText, setEmailsText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
+  useEffect(() => {
+    if (!user?.owlOwner) return;
+    api.getOwlAccess().then((c) => { setCfg(c); setEmailsText((c.emails || []).join('\n')); }).catch(() => {});
+  }, [user]);
+  if (!user?.owlOwner || !cfg) return null;
+  const setAccess = async (access) => {
+    setBusy(true);
+    try { const c = await api.saveOwlAccess({ access }); setCfg((p) => ({ ...p, ...c })); } catch { /* ignore */ } finally { setBusy(false); }
+  };
+  const saveEmails = async () => {
+    setBusy(true);
+    try {
+      const emails = emailsText.split(/[\n,]/).map((s) => s.trim()).filter(Boolean);
+      const c = await api.saveOwlAccess({ emails });
+      setCfg((p) => ({ ...p, ...c })); setEmailsText((c.emails || []).join('\n')); flash(setSaved);
+    } catch { /* ignore */ } finally { setBusy(false); }
+  };
+  const allOn = cfg.access === 'all';
+  return (
+    <Section title="🦉 Owl access (owner only)">
+      <p style={hint}>Control who can use the native Owl chat. Only you ({cfg.owner}) can change this. Switch it on for everyone, or list specific emails to roll it out to a test group first.</p>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '10px 0 14px', cursor: busy ? 'default' : 'pointer' }}>
+        <input type="checkbox" checked={allOn} disabled={busy} onChange={(e) => setAccess(e.target.checked ? 'all' : 'off')} />
+        <span style={{ fontSize: 14, fontWeight: 600 }}>Enable the Owl for everyone</span>
+      </label>
+      <div style={{ opacity: allOn ? 0.45 : 1 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>…or just these emails{allOn ? ' (ignored while it’s on for everyone)' : ''}</div>
+        <textarea value={emailsText} onChange={(e) => setEmailsText(e.target.value)} rows={4} placeholder={'one email per line\ne.g. sam@howler.co.za'}
+          style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 13, resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
+          <button style={saveBtn} onClick={saveEmails} disabled={busy}>Save list</button>
+          {saved && <SavedChip />}
+        </div>
+      </div>
+    </Section>
+  );
+}
+
 function AISettings() {
   const [text, setText] = useState('');
   const [orig, setOrig] = useState('');
@@ -4124,6 +4170,7 @@ function AISettings() {
   if (loading) return <Muted>Loading…</Muted>;
   return (
     <div>
+      <OwlAccessCard />
       <p style={hint}>Standing instructions added to every AI prompt — tile insights, the dashboard summary, and tile-library descriptions. Use it for terminology, tone, comparison rules, and anything the AI should always know or avoid.</p>
       {!aiEnabled && <p style={{ color: 'var(--warn, #b45309)', fontSize: 13, marginBottom: 10 }}>⚠ AI is not configured (set ANTHROPIC_API_KEY) — instructions are saved but won't be used until it is.</p>}
       <Section title="Global AI instructions">

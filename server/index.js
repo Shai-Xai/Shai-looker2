@@ -143,7 +143,7 @@ function meUser(user) {
     const { role, permissions } = auth.permissionsFor(user, id);
     return { id: e.id, name: e.name, logo: e.logo || '', role, permissions };
   }).filter(Boolean);
-  return { ...pub, entities };
+  return { ...pub, entities, owlEnabled: require('./owlChat').owlAllowed(user), owlOwner: require('./owlChat').owlOwner(user) };
 }
 // Brute-force guard: cap login attempts per IP (fixed 15-minute window). Fails
 // open if the limiter errors, so it can never lock out legitimate traffic.

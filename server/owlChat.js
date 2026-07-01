@@ -201,14 +201,29 @@ function textOf(blocks) {
 // single dogfooding account. The real data boundary is still applyScope — this just
 // limits who can reach the endpoint at all.
 const OWL_ALLOW = String(process.env.OWL_CHAT_ALLOW || 'shai.evian@howler.co.za').toLowerCase();
+// The single "owner" account allowed to toggle Owl access for everyone else in-app.
+const OWL_OWNER = String(process.env.OWL_OWNER || OWL_ALLOW.split(',')[0] || 'shai.evian@howler.co.za').trim().toLowerCase();
+let _accessDb = null; // set on mount so owlAllowed can also read the in-app allowlist
+function owlOwner(user) { return String(user?.email || '').trim().toLowerCase() === OWL_OWNER; }
 function owlAllowed(user) {
-  if (OWL_ALLOW === 'all') return true;
   const email = String(user?.email || '').trim().toLowerCase();
-  return !!email && OWL_ALLOW.split(',').map((s) => s.trim()).filter(Boolean).includes(email);
+  if (!email) return false;
+  if (OWL_ALLOW === 'all') return true;
+  if (OWL_ALLOW.split(',').map((s) => s.trim()).filter(Boolean).includes(email)) return true;
+  // In-app access the owner configures (Admin → AI): 'all', or a specific allowlist.
+  if (_accessDb) {
+    try {
+      if (_accessDb.getSetting('owl_access', 'off') === 'all') return true;
+      const list = JSON.parse(_accessDb.getSetting('owl_allow_emails', '[]') || '[]');
+      if (Array.isArray(list) && list.map((e) => String(e).toLowerCase()).includes(email)) return true;
+    } catch { /* fall through to deny */ }
+  }
+  return false;
 }
 
 function mount(app, { db, auth, insights, getOwlTools, uploads, getExploreFields, messaging, getAlertsApi, getSegmentsApi, getActionsApi, getTicketsApi, anthropicKeyForSuite, anthropicKeyForEntity, currencyNote, languageNote, whatsappDigestFor }) {
   const sql = db.db;
+  _accessDb = db; // let owlAllowed() read the owner-managed in-app allowlist
   sql.exec(`
     CREATE TABLE IF NOT EXISTS owl_threads (
       id TEXT PRIMARY KEY, entity_id TEXT NOT NULL DEFAULT '', user_id TEXT NOT NULL,
@@ -446,6 +461,21 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getExploreFields
     res.json({ commands: Object.values(getOwlTools()).filter((t) => t && t.menu).map((t) => t.menu) });
   });
 
+  // ── Owl access (owner-only) ───────────────────────────────────────────────────
+  // The Owl is allowlist-gated while it matures. The OWNER account (OWL_OWNER) can
+  // switch it on for everyone — or a specific set of emails — from Admin → AI, with
+  // no redeploy. Any admin may READ the state (to render the panel); only the owner
+  // may CHANGE it. owlAllowed() + the user's owlEnabled flag both honour these.
+  const owlAccessState = () => ({ access: db.getSetting('owl_access', 'off'), emails: J(db.getSetting('owl_allow_emails', '[]')) });
+  app.get('/api/admin/owl-access', auth.requireAdmin, (req, res) => res.json({ isOwner: owlOwner(req.user), owner: OWL_OWNER, ...owlAccessState() }));
+  app.put('/api/admin/owl-access', auth.requireAdmin, (req, res) => {
+    if (!owlOwner(req.user)) return res.status(403).json({ error: 'Only the Owl owner can change who can use it.' });
+    const b = req.body || {};
+    if (b.access !== undefined) db.setSetting('owl_access', b.access === 'all' ? 'all' : 'off');
+    if (Array.isArray(b.emails)) db.setSetting('owl_allow_emails', JSON.stringify([...new Set(b.emails.map((e) => String(e || '').trim().toLowerCase()).filter(Boolean))]));
+    res.json({ isOwner: true, owner: OWL_OWNER, ...owlAccessState() });
+  });
+
   // GET /api/owl/starters — "prompt starter" pills for the empty chat: the user's OWN
   // most-asked questions first (personalised quick pills), topped up with curated
   // defaults. Concrete prompts (tapping asks straight away), not tool names.
@@ -672,4 +702,4 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getExploreFields
   console.log('[owlChat] agentic Owl chat module mounted');
 }
 
-module.exports = { mount, runOwlLoop, owlTurn, textOf, OWL_CHAT_SYSTEM, OWL_ANALYST_LAYER, OWL_OPERATOR_LAYER, personaOf, owlAllowed };
+module.exports = { mount, runOwlLoop, owlTurn, textOf, OWL_CHAT_SYSTEM, OWL_ANALYST_LAYER, OWL_OPERATOR_LAYER, personaOf, owlAllowed, owlOwner };
