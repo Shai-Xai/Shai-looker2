@@ -14,7 +14,7 @@
 
 const { HttpError, asyncHandler } = require('./http');
 
-function mount(app, { db, auth, rateLimit, apiKeys, clientCatalogue, resolveTileValue, segmentsApi, actionsApi, goalsApi }) {
+function mount(app, { db, auth, rateLimit, apiKeys, clientCatalogue, resolveTileValue, resolveTileRows, segmentsApi, actionsApi, goalsApi }) {
   const entityOf = (user) => (user.entityIds || [])[0];
   const asOf = () => new Date().toISOString();
 
@@ -137,7 +137,21 @@ function mount(app, { db, auth, rateLimit, apiKeys, clientCatalogue, resolveTile
     return out;
   }
 
-  const core = { me, listDashboards, getDashboard, metric, listSegments, getSegment, segmentReach, listCampaigns, getCampaign, listGoals };
+  // Row-level: the table behind a tile (customer/ticketing rows — may include
+  // personal data). Gated behind the explicit `read_rows` key scope at the
+  // surface; same catalogue + scope enforcement as the KPI reader.
+  async function tileRows(user, { dashboardId, tileId, suiteId, limit }) {
+    if (!dashboardId || !tileId) throw new HttpError(400, 'dashboardId and tileId are required');
+    const entries = clientCatalogue(entityOf(user)).catalogue.filter((c) => c.dashboardId === dashboardId);
+    if (!entries.length) throw new HttpError(404, 'Dashboard not found for this client');
+    const entry = suiteId ? entries.find((c) => c.suiteId === suiteId) : entries[0];
+    if (!entry) throw new HttpError(404, 'That dashboard is not in that event (suite) for this client');
+    const r = await resolveTileRows({ dashboardId, tileId, user, suiteId: entry.suiteId, limit });
+    if (!r) throw new HttpError(404, 'No rows — unknown tile, non-queryable tile, or no data access');
+    return { dashboardId, tileId, suiteId: entry.suiteId, fields: r.fields, rowCount: r.rows.length, rows: r.rows, asOf: asOf() };
+  }
+
+  const core = { me, listDashboards, getDashboard, metric, listSegments, getSegment, segmentReach, listCampaigns, getCampaign, listGoals, tileRows };
 
   // ── REST routes — thin wrappers, key-authed, rate-limited, audited ──
   const perKey = (max, scope) => rateLimit({ windowMs: 60_000, max, by: (req) => `key:${req.apiKey?.id}`, scope });
@@ -158,6 +172,11 @@ function mount(app, { db, auth, rateLimit, apiKeys, clientCatalogue, resolveTile
   app.get('/api/v1/campaigns/:id', ...guard, asyncHandler(async (req, res) => res.json(getCampaign(req.user, req.params.id))));
   app.get('/api/v1/goals', ...guard, heavy, asyncHandler(async (req, res) => {
     res.json({ goals: await listGoals(req.user, { suiteId: req.query.suiteId, progress: req.query.progress === '1' || req.query.progress === 'true' }) });
+  }));
+  // Row-level tile data — requires the `read_rows` scope (explicit opt-in per
+  // key; rows can carry customer/ticketing personal data).
+  app.get('/api/v1/tiles/rows', apiKeys.bearerAuth, apiKeys.auditware('rest'), perKey(120, 'apiv1'), apiKeys.requireScope('read_rows'), heavy, asyncHandler(async (req, res) => {
+    res.json(await tileRows(req.user, { dashboardId: req.query.dashboardId, tileId: req.query.tileId, suiteId: req.query.suiteId, limit: req.query.limit }));
   }));
 
   console.log('[api] public /api/v1 read surface mounted');

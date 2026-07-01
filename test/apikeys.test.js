@@ -22,6 +22,8 @@ const stubs = {
       : [],
   }),
   resolveTileValue: async ({ dashboardId, tileId }) => (dashboardId === 'dash1' && tileId === 't1' ? 44806 : null),
+  resolveTileRows: async ({ dashboardId, tileId }) => (dashboardId === 'dash1' && tileId === 't1'
+    ? { fields: [{ name: 'buyers.email', label: 'Email' }], rows: [{ 'buyers.email': 'a@x' }, { 'buyers.email': 'b@x' }] } : null),
   segmentsApi: {
     listSegmentsFull: (entityId) => segmentsByEntity[entityId] || [],
     resolveSegment: async (entityId, id) => ((segmentsByEntity[entityId] || []).some((s) => s.id === id)
@@ -113,6 +115,29 @@ test('scopes: a key without `read` is rejected by the read surface', async () =>
   const { secret } = await issueKey(entityA.id, { scopes: ['write'] });
   const r = await app.req('GET', '/api/v1/me', { headers: bearer(secret) });
   assert.equal(r.status, 403);
+});
+
+test('row-level access: only a read_rows key can pull the table behind a tile', async () => {
+  const { secret: plain } = await issueKey(entityA.id); // read only
+  const { secret: rows } = await issueKey(entityA.id, { scopes: ['read', 'read_rows'] });
+  const url = '/api/v1/tiles/rows?dashboardId=dash1&tileId=t1';
+
+  assert.equal((await app.req('GET', url, { headers: bearer(plain) })).status, 403, 'plain read key is refused');
+  const ok = await app.req('GET', url, { headers: bearer(rows) });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.body.rowCount, 2);
+  assert.equal(ok.body.rows[0]['buyers.email'], 'a@x');
+
+  const { secret: rowsB } = await issueKey(entityB.id, { scopes: ['read', 'read_rows'] });
+  assert.equal((await app.req('GET', url, { headers: bearer(rowsB) })).status, 404, 'other client’s rows key can’t read A’s dashboard');
+
+  // MCP: the rows tool is invisible to a plain key, present + working for a rows key.
+  const plainTools = (await rpc({ jsonrpc: '2.0', id: 10, method: 'tools/list' }, plain)).body.result.tools.map((t) => t.name);
+  assert.ok(!plainTools.includes('pulse_get_tile_rows'), 'plain key never sees the rows tool');
+  const rowsTools = (await rpc({ jsonrpc: '2.0', id: 11, method: 'tools/list' }, rows)).body.result.tools.map((t) => t.name);
+  assert.ok(rowsTools.includes('pulse_get_tile_rows'));
+  const call = await rpc({ jsonrpc: '2.0', id: 12, method: 'tools/call', params: { name: 'pulse_get_tile_rows', arguments: { dashboardId: 'dash1', tileId: 't1' } } }, rows);
+  assert.equal(JSON.parse(call.body.result.content[0].text).rowCount, 2);
 });
 
 test('client self-service: integrations.manage on YOUR entity only; secrets stay write-only', async () => {

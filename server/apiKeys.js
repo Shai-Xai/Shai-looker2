@@ -23,7 +23,12 @@
 const crypto = require('crypto');
 const { HttpError, asyncHandler } = require('./http');
 
-const SCOPES = ['read', 'write', 'send'];
+// read       — aggregate reads: catalogue, KPI numbers, counts, results.
+// read_rows  — ROW-LEVEL reads: the table behind a tile (customer/ticketing
+//              rows, may include personal data). Explicit opt-in per key —
+//              never rides along with plain `read`.
+// write/send — reserved for P3 (drafts / approvals-gated sending).
+const SCOPES = ['read', 'read_rows', 'write', 'send'];
 const PREFIX = 'pulse_sk_';
 const MAX_ACTIVE_KEYS = 20; // per entity — plenty for real integrations, bounds abuse
 

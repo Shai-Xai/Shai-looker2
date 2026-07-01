@@ -76,6 +76,18 @@ function mount(app, { apiKeys, core, rateLimit }) {
       run: (u, a) => core.getCampaign(u, a.campaignId),
     },
     {
+      name: 'pulse_get_tile_rows',
+      scope: 'read_rows', // only registered for keys that explicitly carry it
+      description: 'ROW-LEVEL data: the table behind a dashboard tile — every column (including ones the tile hides for display) and up to `limit` rows, e.g. customer/ticketing records. Requires a key with the read_rows scope; rows may contain personal data, handle accordingly.',
+      input: {
+        dashboardId: z.string(),
+        tileId: z.string().describe('Tile id from pulse_get_dashboard'),
+        suiteId: z.string().optional().describe('Event (suite) id — which event\'s locks apply (defaults to the dashboard\'s first event)'),
+        limit: z.number().optional().describe('Max rows (default 500, cap 10000)'),
+      },
+      run: (u, a) => core.tileRows(u, a),
+    },
+    {
       name: 'pulse_get_goals',
       description: 'The goals set for one event (suite): targets, direction, deadline — and, when withProgress is true, live progress resolved through the same scoped readers the app uses (slower).',
       input: {
@@ -91,6 +103,9 @@ function mount(app, { apiKeys, core, rateLimit }) {
   function buildServer(req) {
     const server = new McpServer({ name: 'pulse', version: '1.0.0' });
     for (const t of TOOLS) {
+      // Scope-gated tools are invisible to keys that lack the scope — an agent
+      // is never offered a tool it can't use.
+      if (t.scope && !apiKeys.hasScope(req, t.scope)) continue;
       server.registerTool(t.name, { description: t.description, inputSchema: t.input }, async (args) => {
         try {
           const out = await t.run(req.user, args || {}, req.apiKey);

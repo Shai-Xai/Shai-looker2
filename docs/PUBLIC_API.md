@@ -10,7 +10,12 @@ same scope-enforced service core the app uses (`docs/API_MCP_BRIEF.md`). v1 is
   **Admin → client → Integrations** (Howler). The secret (`pulse_sk_…`) is shown
   **once**; after that only a masked hint is visible. Revoke any time.
 - A key is pinned to **one client** and cannot see any other client's data.
-- v1 keys carry the `read` scope. Send it on every request:
+- Scopes: every key carries `read` (aggregate reads — catalogue, KPI numbers,
+  counts, results). **`read_rows`** is an explicit opt-in at creation time and
+  unlocks row-level reads — the table behind a tile, e.g. customer/ticketing
+  records, which may include personal data. Grant it only to tools that
+  genuinely need rows; it never rides along with plain `read`.
+- Send the key on every request:
 
 ```
 Authorization: Bearer pulse_sk_…
@@ -33,6 +38,7 @@ goal progress; 60/min on MCP). Every call is audited (who/what/when/outcome).
 | `GET /api/v1/campaigns?status=` | Campaigns with results counters (sent, clicks, opens, CTR) |
 | `GET /api/v1/campaigns/:id` | One campaign's results (never the audience list) |
 | `GET /api/v1/goals?suiteId=&progress=1` | Goals for one event; `progress=1` resolves live progress |
+| `GET /api/v1/tiles/rows?dashboardId=&tileId=&suiteId=&limit=` | **`read_rows` scope only** — the table behind a tile: every column (incl. display-hidden ones) + rows (default 500, cap 10,000) |
 
 Errors are JSON `{ error }` with meaningful status codes (401 bad/missing key,
 403 missing scope, 404 not visible to this client, 429 rate-limited). Anything
@@ -46,7 +52,9 @@ MCP-capable agent platform at `https://<pulse-host>/mcp` with the header above
 Tools (all read-only): `pulse_get_me` · `pulse_list_dashboards` ·
 `pulse_get_dashboard` · `pulse_get_metric` · `pulse_list_segments` ·
 `pulse_get_segment_reach` · `pulse_list_campaigns` ·
-`pulse_get_campaign_report` · `pulse_get_goals`.
+`pulse_get_campaign_report` · `pulse_get_goals` · `pulse_get_tile_rows`
+(the last one only appears for keys with the `read_rows` scope — an agent on a
+plain read key is never even offered it).
 
 Start with `pulse_get_me` (suite ids), then `pulse_list_dashboards` →
 `pulse_get_dashboard` → `pulse_get_metric` for live numbers.

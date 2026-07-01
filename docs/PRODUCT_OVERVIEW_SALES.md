@@ -544,6 +544,10 @@ or point an AI agent (like Claude) at it and ask questions in plain language."
   itself enforces. Keys are named, revocable, and the secret is shown once.
 - **REST API (`/api/v1`)** — dashboards, live tile metrics, segments (with
   contactable reach), campaign results and goals, as JSON.
+- **Row-level data, opt-in per key** — a key can additionally be granted access
+  to the table behind a tile (customer & ticketing records) for clients who
+  need to pull that into their own systems. Explicitly enabled per key, never
+  included by default, and every pull is audited.
 - **MCP server (`/mcp`)** — the same data as curated tools any MCP-capable AI
   agent can use: "what does Total Tickets Sold show right now?", "how big is the
   VIP segment?", "how did the launch campaign do?".
@@ -593,6 +597,12 @@ Use these to set direction, **not** to promise dates.
   nothing keeps burning in the background). And long data pulls no longer look frozen — the
   thinking line keeps refreshing every few seconds and the connection is kept alive, so a heavy
   query (e.g. a big cashless breakdown) shows progress instead of hanging on "Thinking…".
+- **2026-07-01** — **API: row-level tile data (opt-in scope)** 🧪: an API key can now be
+  granted **row-level access** — the table behind a dashboard tile (customer & ticketing
+  records) via `GET /api/v1/tiles/rows` or the `pulse_get_tile_rows` MCP tool — for clients
+  pulling data into their own systems. Explicit per-key opt-in (never default), same
+  client-scoping gate, capped at 10k rows per pull, fully audited; AI agents on a plain
+  read key are never even offered the tool.
 - **2026-07-01** — **Pulse API & AI-agent access (MCP)** 🧪: per-client, read-only **API keys**
   (client self-service in Settings → Integrations, or managed by Howler in Admin) unlock a
   **REST API** (`/api/v1` — dashboards, live tile metrics, segments + reach, campaign results,

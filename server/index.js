@@ -30,7 +30,7 @@ const {
 // Shared scoped tile readers ("the number a tile shows") — lifted out of this
 // file into server/tileValues.js; used by goals, alerts, pulse, the Owl and the
 // public API surface. Must sit above the first consumer (the Owl tools provider).
-const { resolveTileValue, resolveTileSeries, resolveTileSeriesAll, resolveEventDate } = require('./tileValues')({ db, query });
+const { resolveTileValue, resolveTileRows, resolveTileSeries, resolveTileSeriesAll, resolveEventDate } = require('./tileValues')({ db, query });
 // Briefing/digest fact + phase engine (deterministic, AI-free) — lifted out of
 // this file into server/briefing.js; behaviour unchanged. Needs db, store and
 // the query engine. The AI-generation layer that sits on top stays here.
@@ -2714,7 +2714,7 @@ require('./setupNudge').mount(app, { db, auth, mailer, os, insights, resolveReci
 // remote MCP server for AI agents. Three disposable modules over the SAME
 // service core — external callers ride the app's own scope gates unchanged.
 const apiKeysApi = require('./apiKeys').mount(app, { db, auth, rateLimit });
-const apiV1 = require('./api').mount(app, { db, auth, rateLimit, apiKeys: apiKeysApi, clientCatalogue, resolveTileValue, segmentsApi, actionsApi, goalsApi });
+const apiV1 = require('./api').mount(app, { db, auth, rateLimit, apiKeys: apiKeysApi, clientCatalogue, resolveTileValue, resolveTileRows, segmentsApi, actionsApi, goalsApi });
 require('./mcp').mount(app, { apiKeys: apiKeysApi, core: apiV1.core, rateLimit });
 
 // ─── Briefing configuration ─────────────────────────────────────────────────────

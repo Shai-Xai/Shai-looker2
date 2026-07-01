@@ -14,6 +14,7 @@ export default function ApiKeysCard({ entityId, scope = 'my' }) {
   const [keys, setKeys] = useState(null);
   const [denied, setDenied] = useState(false);
   const [name, setName] = useState('');
+  const [withRows, setWithRows] = useState(false);
   const [creating, setCreating] = useState(false);
   const [fresh, setFresh] = useState(null); // { name, secret } — shown once
   const [copied, setCopied] = useState(false);
@@ -29,9 +30,10 @@ export default function ApiKeysCard({ entityId, scope = 'my' }) {
   const create = async () => {
     setCreating(true);
     try {
-      const r = await createFn({ name: name.trim() || 'Untitled key', scopes: ['read'] });
+      const r = await createFn({ name: name.trim() || 'Untitled key', scopes: withRows ? ['read', 'read_rows'] : ['read'] });
       setFresh({ name: r.key.name, secret: r.secret });
       setName('');
+      setWithRows(false);
       setKeys((await listFn()).keys || []);
     } catch (e) { alert('Couldn’t create the key: ' + e.message); }
     setCreating(false);
@@ -95,6 +97,13 @@ export default function ApiKeysCard({ entityId, scope = 'my' }) {
         />
         <button style={btn} onClick={create} disabled={creating}>{creating ? 'Creating…' : '+ New read-only key'}</button>
       </div>
+      <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginTop: 10, cursor: 'pointer' }}>
+        <input type="checkbox" checked={withRows} onChange={(e) => setWithRows(e.target.checked)} style={{ marginTop: 2, width: 16, height: 16 }} />
+        <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+          Also allow <b>row-level data</b> — the table behind a tile (e.g. customer &amp; ticketing records).
+          May include personal data; only grant this to tools that genuinely need it.
+        </span>
+      </label>
     </div>
   );
 }

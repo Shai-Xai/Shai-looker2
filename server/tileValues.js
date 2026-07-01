@@ -80,6 +80,49 @@ module.exports = function tileValues({ db, query }) {
     return value;
   }
 
+  // Row-level sibling of resolveTileValue: the TABLE behind a tile — every field
+  // (dimensions, measures, table calcs) and the rows, under the same scoped,
+  // suite-locked query the tile itself runs. Unlike the KPI reader it keeps the
+  // tile's filters as-is (rows should match the tile's view, not a stripped
+  // total) and includes hidden fields (the point IS the underlying data — e.g.
+  // an email column a table hides for display). Pivoted tiles flatten to one
+  // column per (measure × pivot value). Returns { fields, rows } or null.
+  async function resolveTileRows({ dashboardId, tileId, user, suiteId, limit }) {
+    const def = db.getDashboard(dashboardId);
+    if (!def) return null;
+    const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))];
+    const tile = tiles.find((t) => t.id === tileId);
+    if (!tile) return null;
+    const su = db.getSuite(suiteId);
+    const entityView = su?.entityId ? (db.getFilterView('entity', su.entityId, dashboardId) || {}) : {};
+    const lockMap = { ...expandLockMap(entityView), ...expandLockMap(db.lockedFiltersForSuite(suiteId, dashboardId)) };
+    const body = await tileQueryBody(tile, def, user, suiteId, lockMap, tileLockOverrides(su, tile, def));
+    if (!body) return null; // scope denied or non-queryable tile
+    body.limit = String(Math.min(Math.max(Number(limit) || 500, 1), 10000));
+    const data = await runLookerQuery('/queries/run/json_detail', body);
+    const f = data?.fields || {};
+    const dims = f.dimensions || [];
+    const measures = [...(f.measures || []), ...(f.table_calculations || [])];
+    const pivots = data?.pivots || [];
+    const cell = (c) => (c && c.value !== undefined ? c.value : null);
+    const fields = [
+      ...dims.map((d) => ({ name: d.name, label: d.label_short || d.label || d.name })),
+      ...(pivots.length
+        ? measures.flatMap((m) => pivots.map((pv) => ({ name: `${m.name}|${pv.key}`, label: `${m.label_short || m.label || m.name} — ${pv.key}` })))
+        : measures.map((m) => ({ name: m.name, label: m.label_short || m.label || m.name }))),
+    ];
+    const rows = (data?.data || []).map((row) => {
+      const out = {};
+      for (const d of dims) out[d.name] = cell(row[d.name]);
+      for (const m of measures) {
+        if (pivots.length) for (const pv of pivots) out[`${m.name}|${pv.key}`] = cell(row[m.name]?.[pv.key]);
+        else out[m.name] = cell(row[m.name]);
+      }
+      return out;
+    });
+    return { fields, rows };
+  }
+
   // Remove "Days Before Event" / days-to-go type filters from a built query body, so a
   // forecast curve reads last time's FULL sell-through to event day rather than the
   // to-date slice these comparison dashboards usually clip it to. Targets the field by
@@ -231,5 +274,5 @@ module.exports = function tileValues({ db, query }) {
     return null;
   }
 
-  return { resolveTileValue, resolveTileSeries, resolveTileSeriesAll, resolveEventDate, stripDaysBeforeFilters, tileLockOverrides };
+  return { resolveTileValue, resolveTileRows, resolveTileSeries, resolveTileSeriesAll, resolveEventDate, stripDaysBeforeFilters, tileLockOverrides };
 };
