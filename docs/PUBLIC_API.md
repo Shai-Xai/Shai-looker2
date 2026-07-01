@@ -52,9 +52,18 @@ Errors are JSON `{ error }` with meaningful status codes (401 bad/missing key,
 another client owns is a **404**, not a 403 — existence is not disclosed.
 
 ## MCP server (`/mcp`)
-Remote MCP over streamable HTTP (stateless), same Bearer key. Point any
-MCP-capable agent platform at `https://<pulse-host>/mcp` with the header above
-— e.g. in Claude, add a custom connector with that URL and the key.
+Remote MCP over streamable HTTP (stateless), same Bearer key.
+
+**Connecting Claude (or any OAuth-capable MCP client):** add a custom connector
+with the URL `https://<pulse-host>/mcp`, leave Client ID/Secret blank, and
+click Connect. Pulse implements the standard MCP auth flow (`server/oauth.js`:
+RFC 9728 + 8414 discovery, RFC 7591 dynamic client registration, PKCE S256) —
+the user approves on a Pulse page (logged-in cookie session, picks the client +
+row-level opt-in) and the token handed back **is a normal per-entity API key**,
+visible and revocable on the key card like any other.
+
+Clients that support static headers can skip OAuth entirely and send
+`Authorization: Bearer pulse_sk_…` directly.
 
 Tools (all read-only): `pulse_get_me` · `pulse_list_dashboards` ·
 `pulse_get_dashboard` · `pulse_get_metric` · `pulse_list_segments` ·

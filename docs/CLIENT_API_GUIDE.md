@@ -75,14 +75,26 @@ curl -H "Authorization: Bearer pulse_sk_…" https://your-pulse-domain/api/v1/me
 Pulse speaks **MCP** (Model Context Protocol), the standard AI assistants use
 to work with tools. To connect Claude:
 
-1. In Claude, add a **custom connector** (Settings → Connectors).
-2. URL: `https://your-pulse-domain/mcp`
-3. Authentication: Bearer token → paste your `pulse_sk_…` key.
+1. Make sure you're **logged into Pulse** in your browser.
+2. In Claude, add a **custom connector** (Settings → Connectors) with the URL
+   `https://your-pulse-domain/mcp`. Leave any *OAuth Client ID* /
+   *Client Secret* fields **blank** — Claude registers itself automatically.
+3. Click **Connect**. A Pulse approval page opens: pick **which client** to
+   connect and (optionally) whether to allow row-level data, then press
+   **Approve & connect**.
 
-That's it. Claude can now see tools like *list dashboards*, *get metric*,
+That's it — no keys to copy. Behind the scenes Pulse creates a named API key
+for the connection; you'll see it (e.g. *"Claude (connected 2026-07-01)"*) in
+Settings → Integrations, and revoking it there disconnects Claude instantly.
+
+Claude can now see tools like *list dashboards*, *get metric*,
 *get campaign report* — and will use them to answer questions about your data.
 Good first prompt: *"Use the Pulse tools to give me a snapshot of how my next
 event is selling."*
+
+> **Developer note:** tools that take a plain Bearer header (scripts, some MCP
+> clients) can still just send `Authorization: Bearer pulse_sk_…` — the OAuth
+> flow is optional sugar on top of the same keys.
 
 The assistant can only ever **look things up** — it can't send campaigns,
 change settings or spend money on your behalf.
@@ -124,6 +136,7 @@ pull is logged.
 | `403 — scope` | The key doesn't have that permission (e.g. row-level) | Create a key with the right option ticked |
 | `404` | That dashboard/tile/segment isn't in your account | Check the id via `/api/v1/dashboards` |
 | `429` | Too many requests | Wait for the number of seconds in `Retry-After`, then retry |
+| Claude's Connect button loops or fails | You're not logged into Pulse in that browser, or API access is off | Log into Pulse first, then Connect again; if the approval page says access is off, ask Howler |
 
 Still stuck? Your Howler contact can see the audit log and help you debug.
 

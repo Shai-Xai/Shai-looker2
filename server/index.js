@@ -2716,6 +2716,7 @@ require('./setupNudge').mount(app, { db, auth, mailer, os, insights, resolveReci
 const apiKeysApi = require('./apiKeys').mount(app, { db, auth, rateLimit });
 const apiV1 = require('./api').mount(app, { db, auth, rateLimit, apiKeys: apiKeysApi, clientCatalogue, resolveTileValue, resolveTileRows, segmentsApi, actionsApi, goalsApi });
 require('./mcp').mount(app, { apiKeys: apiKeysApi, core: apiV1.core, rateLimit });
+require('./oauth').mount(app, { db, auth, apiKeys: apiKeysApi, rateLimit }); // "Connect" flow for MCP clients (Claude): discovery + approve → mints a key
 
 // ─── Briefing configuration ─────────────────────────────────────────────────────
 // Admin: global briefing rules + editable phase defaults.

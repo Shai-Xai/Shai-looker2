@@ -602,6 +602,12 @@ Use these to set direction, **not** to promise dates.
   nothing keeps burning in the background). And long data pulls no longer look frozen — the
   thinking line keeps refreshing every few seconds and the connection is kept alive, so a heavy
   query (e.g. a big cashless breakdown) shows progress instead of hanging on "Thinking…".
+- **2026-07-01** — **Claude connects with one click (MCP OAuth)** 🧪: connecting an AI
+  assistant no longer involves copying keys. Add the connector URL in Claude, click
+  **Connect**, and a Pulse approval page opens — pick which client, optionally allow
+  row-level data, Approve. Pulse mints a named API key behind the scenes (visible &
+  revocable in Settings → Integrations like any other). Standard MCP auth (OAuth 2.1 +
+  PKCE + dynamic client registration), so other agent platforms get the same one-click flow.
 - **2026-07-01** — **API: per-client access switch + shareable developer guide** 🧪: API
   access is now **off by default** and enabled per client by Howler (Admin → client →
   Integrations — one toggle; off cuts all of that client's keys instantly, REST and MCP).

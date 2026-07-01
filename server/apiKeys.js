@@ -121,7 +121,9 @@ function mount(app, { db, auth, rateLimit }) {
   function bearerAuth(req, res, next) {
     const r = keyFromRequest(req);
     if (!r) {
-      res.set('WWW-Authenticate', 'Bearer realm="Pulse API"');
+      // resource_metadata points MCP clients at the OAuth discovery doc
+      // (server/oauth.js) so "Connect" can run the standard approval flow.
+      res.set('WWW-Authenticate', `Bearer realm="Pulse API", resource_metadata="${req.protocol}://${req.get('host')}/.well-known/oauth-protected-resource"`);
       return res.status(401).json({ error: 'A valid API key is required (Authorization: Bearer pulse_sk_…).' });
     }
     if (!apiEnabled(r.entity_id)) {
@@ -209,7 +211,7 @@ function mount(app, { db, auth, rateLimit }) {
   }));
 
   console.log('[apiKeys] per-entity API keys mounted');
-  return { bearerAuth, requireScope, hasScope, audit, auditware, createKey, listKeys, revokeKey };
+  return { bearerAuth, requireScope, hasScope, audit, auditware, createKey, listKeys, revokeKey, apiEnabled };
 }
 
 module.exports = { mount, SCOPES };
