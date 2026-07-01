@@ -4,6 +4,7 @@ import HomePage from './pages/HomePage.jsx';
 import ViewPage from './pages/ViewPage.jsx';
 import InboxNotifier from './components/InboxNotifier.jsx';
 import UpdateBanner from './components/UpdateBanner.jsx';
+import ReportWidget from './components/ReportWidget.jsx';
 import LivePulse from './components/LivePulse.jsx';
 import LoginPage from './pages/LoginPage.jsx';
 import ResetPasswordPage from './pages/ResetPasswordPage.jsx';
@@ -263,6 +264,7 @@ function Shell() {
           <Header />
           <UpdateBanner />
           <InboxNotifier entityId={mode === 'client' ? activeEntityId : undefined} />
+          <ReportWidget />
           <Suspense fallback={<ScreenFallback />}>
           {isAdmin && !actingAsClient ? (
             <Routes>

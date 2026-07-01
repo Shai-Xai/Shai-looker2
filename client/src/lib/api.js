@@ -228,6 +228,15 @@ export const api = {
   adminUpdateReleaseNote: (id, n) => fetch(`/api/admin/release-notes/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(n) }).then(json),
   adminDeleteReleaseNote: (id) => fetch(`/api/admin/release-notes/${id}`, { method: 'DELETE' }),
   adminGenerateReleaseNotes: (days) => fetch('/api/admin/release-notes/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ days }) }).then(json),
+  // Product feedback board — report a bug/improvement/idea (staff or client),
+  // track your own, and (admin) run the live board + Copy-for-Claude hand-off.
+  submitTicket: (b) => fetch('/api/my/tickets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  myTickets: () => fetch('/api/my/tickets').then(json),
+  adminTickets: (params = {}) => fetch(`/api/admin/tickets?${new URLSearchParams(params)}`).then(json),
+  adminTicket: (id) => fetch(`/api/admin/tickets/${id}`).then(json),
+  adminUpdateTicket: (id, b) => fetch(`/api/admin/tickets/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  adminTicketComment: (id, body) => fetch(`/api/admin/tickets/${id}/comments`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body }) }).then(json),
+  adminRedraftTicket: (id) => fetch(`/api/admin/tickets/${id}/redraft`, { method: 'POST' }).then(json),
   // Custom (client-owned) sets
   getRoles: () => fetch('/api/admin/roles').then(json),
   getEntityContentRoles: (entityId) => fetch(`/api/admin/entities/${entityId}/content-roles`).then(json),

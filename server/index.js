@@ -544,6 +544,8 @@ app.delete('/api/admin/sets/:id', auth.requireAdmin, (req, res) => { db.deleteSe
 // Disposable module: own routes + the daily auto-draft tick (kill switch:
 // settings key 'release_notes_auto'). Remove this line + server/releaseNotes.js.
 require('./releaseNotes').mount(app, { db, auth, insights, adminAnthropicKey });
+// Product feedback board (bug/idea reports → AI ticket → board → Copy-for-Claude) → server/tickets.js (kill switch: setting tickets_enabled)
+require('./tickets').mount(app, { db, auth, insights, adminAnthropicKey, os });
 
 // ─── Client content model & navigation → server/clientModel.js ─────────────────
 // Disposable module: suite/set/dashboard model, /api/my/suites navigation, saved
@@ -2020,8 +2022,6 @@ function briefingInstructionsFor(user, entityId, suites) {
 // dashboard — applied between the built-in default_value and the suite lock, so
 // it overrides the narrow defaults (e.g. a management board's event filter) but
 // a hard lock still wins.
-
-
 
 // In-memory snapshot cache (10 min). The briefing cache (memory + persisted disk +
 // the 15-min warmer) lives in server/briefingCache.js so it survives redeploys.

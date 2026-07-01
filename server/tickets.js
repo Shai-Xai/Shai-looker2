@@ -1,0 +1,355 @@
+// ─── Product feedback board: bugs · improvements · ideas → tickets ─────────────
+// SELF-CONTAINED, DISPOSABLE MODULE. Owns its own tables (all `ticket_` prefixed)
+// and all its routes. Mounted from index.js with a single
+// `require('./tickets').mount(app, { db, auth, insights, adminAnthropicKey, os })`.
+// To remove the whole feature: delete this file + that line, then drop the
+// ticket_* tables and the promptRegistry() reference in insights.js. A kill switch
+// (settings key `tickets_enabled`) hides/disables it in production without a deploy.
+//
+// The loop this closes (Pulse's own insight → action → results, pointed inward):
+//   1. Anyone in-app (staff OR a client) reports a bug, an improvement, or an idea
+//      from a global widget that captures the screen they were on.
+//   2. The AI turns the raw report into a clean, structured ticket (a mini-PRD for
+//      improvements/ideas; a structured bug report for bugs).
+//   3. It lands on a live board (Admin → Tickets). A dev triages, accepts, assigns.
+//   4. "Copy for Claude" assembles a self-contained build brief to hand to Claude.
+//   5. As the ticket moves to shipped, the reporter is notified — loop closed.
+//
+// The AI prompt (TICKET_DRAFT_SYSTEM) is exported so insights.promptRegistry() can
+// surface it in the Admin AI audit without bloating insights.js (see owlChat).
+
+const crypto = require('crypto');
+
+// The one hardcoded system prompt this module owns. Kept here (not in insights.js)
+// so the feature stays self-contained + disposable; referenced by name from
+// insights.promptRegistry() so the "Everything the AI is told" audit stays complete.
+const TICKET_DRAFT_SYSTEM = `You turn a rough, internal product report into a clean, actionable engineering ticket for Howler Pulse (a multi-tenant, white-label events analytics + client-engagement platform; Node/Express + SQLite backend, React SPA frontend; mobile-first).
+
+You are given a report's TYPE (bug | improvement | idea), the reporter's short title, the in-app SCREEN/area they were on, and what they wrote. Rewrite it into a crisp ticket a developer (or Claude) could pick up and build.
+
+Respond with ONLY strict JSON (no markdown fences) of the form:
+{
+  "title": "a crisp, specific ticket title, <12 words, no trailing period",
+  "ticket": "the ticket body as GitHub-flavoured markdown (see structure below)"
+}
+
+Structure the "ticket" markdown by type:
+- bug → sections: **Summary** (one line), **Steps to reproduce** (numbered; infer sensible steps if the reporter didn't spell them out, and say so), **Expected vs actual**, **Affected area** (the screen/route given), **Likely severity** (one of: low / medium / high / critical, with a one-line reason).
+- improvement or idea → a lightweight spec: **Objective** (the outcome the reporter wants, in their words, tightened), **Problem / why now** (the pain or opportunity), **Proposed approach** (1-3 concrete options or a recommended direction — keep it high-level, don't over-design), **Acceptance criteria** (a short bullet checklist of what "done" looks like), **Affected area** (screen/route + likely surfaces), **Effort** (rough t-shirt size: S / M / L, with a one-line reason).
+
+Rules:
+- Be concrete and specific; interpret the report, don't just restate it. Preserve the reporter's actual intent and any facts they gave — never invent product behaviour or claims you can't support.
+- Where you're inferring (repro steps, severity, effort), make it obvious it's an inference so a human can correct it.
+- Keep it tight and skimmable — short sentences, bullets over prose. No preamble, no sign-off, no emojis.
+- Remember Pulse's principles: mobile-first, and every client-facing feature ships with both an admin surface and client self-service. Flag it in the ticket if the request would need both.`;
+
+function mount(app, { db, auth, insights, adminAnthropicKey, os }) {
+  const sql = db.db;                 // raw better-sqlite3 handle
+  const now = () => new Date().toISOString();
+  const uuid = () => crypto.randomUUID();
+
+  sql.exec(`
+    CREATE TABLE IF NOT EXISTS tickets (
+      id            TEXT PRIMARY KEY,
+      type          TEXT NOT NULL DEFAULT 'bug',      -- bug | improvement | idea
+      title         TEXT NOT NULL DEFAULT '',         -- the reporter's short title
+      body          TEXT NOT NULL DEFAULT '',         -- what the reporter wrote (raw)
+      screen        TEXT NOT NULL DEFAULT '',         -- in-app route/screen they were on
+      urgency       TEXT NOT NULL DEFAULT 'normal',   -- low | normal | high | urgent
+      status        TEXT NOT NULL DEFAULT 'inbox',    -- inbox|triaged|accepted|in_progress|in_review|shipped|declined
+      priority      INTEGER NOT NULL DEFAULT 0,       -- dev-set ordering within a lane (higher = top)
+      reporter_id    TEXT NOT NULL DEFAULT '',
+      reporter_email TEXT NOT NULL DEFAULT '',
+      reporter_name  TEXT NOT NULL DEFAULT '',
+      reporter_role  TEXT NOT NULL DEFAULT 'client',  -- admin | client (who filed it)
+      entity_id     TEXT NOT NULL DEFAULT '',         -- the client this relates to (if any)
+      assignee      TEXT NOT NULL DEFAULT '',         -- dev who picked it up (email)
+      ai_title      TEXT NOT NULL DEFAULT '',         -- AI-suggested crisp title
+      ai_summary    TEXT NOT NULL DEFAULT '',         -- AI-structured ticket (markdown)
+      ai_status     TEXT NOT NULL DEFAULT 'pending',  -- pending | ready | error | skipped
+      created_at    TEXT NOT NULL,
+      updated_at    TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(status, priority, updated_at);
+    CREATE INDEX IF NOT EXISTS idx_tickets_reporter ON tickets(reporter_id, created_at);
+
+    -- Activity log: dev notes + status-change history for one ticket.
+    CREATE TABLE IF NOT EXISTS ticket_comments (
+      id           TEXT PRIMARY KEY,
+      ticket_id    TEXT NOT NULL,
+      author_email TEXT NOT NULL DEFAULT '',
+      author_role  TEXT NOT NULL DEFAULT 'admin',
+      kind         TEXT NOT NULL DEFAULT 'comment',  -- comment | status | system
+      body         TEXT NOT NULL DEFAULT '',
+      created_at   TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_ticket_comments ON ticket_comments(ticket_id, created_at);
+  `);
+
+  const enabled = () => db.getSetting('tickets_enabled', '1') !== '0'; // on by default; kill switch
+  const requireOn = (req, res, next) => (enabled() ? next() : res.status(404).json({ error: 'The product board is disabled' }));
+  const isAdmin = (u) => u && u.role === 'admin';
+
+  const TYPES = ['bug', 'improvement', 'idea'];
+  const URGENCIES = ['low', 'normal', 'high', 'urgent'];
+  const STATUSES = ['inbox', 'triaged', 'accepted', 'in_progress', 'in_review', 'shipped', 'declined'];
+  const STATUS_LABELS = {
+    inbox: 'New', triaged: 'Triaged', accepted: 'Accepted', in_progress: 'In progress',
+    in_review: 'In review', shipped: 'Shipped', declined: 'Declined',
+  };
+  const clamp = (s, n) => String(s || '').slice(0, n);
+
+  const userName = (u) => (u?.fullName || [u?.firstName, u?.lastName].filter(Boolean).join(' ') || u?.email || '').trim();
+
+  // ── shapers ──
+  function ticketRow(r) {
+    return {
+      id: r.id, type: r.type, title: r.title, body: r.body, screen: r.screen, urgency: r.urgency,
+      status: r.status, statusLabel: STATUS_LABELS[r.status] || r.status, priority: r.priority,
+      reporterEmail: r.reporter_email, reporterName: r.reporter_name, reporterRole: r.reporter_role,
+      entityId: r.entity_id, entityName: r.entity_id ? (db.getEntity(r.entity_id)?.name || '') : '',
+      assignee: r.assignee, aiTitle: r.ai_title, aiSummary: r.ai_summary, aiStatus: r.ai_status,
+      createdAt: r.created_at, updatedAt: r.updated_at,
+    };
+  }
+  // The client's own view: their content + progress, none of the internal dev fields.
+  function myTicketRow(r) {
+    return {
+      id: r.id, type: r.type, title: r.title, body: r.body, screen: r.screen, urgency: r.urgency,
+      status: r.status, statusLabel: STATUS_LABELS[r.status] || r.status,
+      aiTitle: r.ai_title, aiSummary: r.ai_summary, aiStatus: r.ai_status,
+      createdAt: r.created_at, updatedAt: r.updated_at,
+    };
+  }
+  const getTicket = (id) => sql.prepare('SELECT * FROM tickets WHERE id=?').get(id);
+  const touch = (id) => sql.prepare('UPDATE tickets SET updated_at=? WHERE id=?').run(now(), id);
+  function logComment(ticketId, { authorEmail = 'system', authorRole = 'system', kind = 'comment', body = '' }) {
+    sql.prepare('INSERT INTO ticket_comments (id, ticket_id, author_email, author_role, kind, body, created_at) VALUES (?,?,?,?,?,?,?)')
+      .run(uuid(), ticketId, authorEmail, authorRole, kind, clamp(body, 8000), now());
+  }
+  const comments = (id) => sql.prepare('SELECT * FROM ticket_comments WHERE ticket_id=? ORDER BY created_at').all(id)
+    .map((c) => ({ id: c.id, authorEmail: c.author_email, authorRole: c.author_role, kind: c.kind, body: c.body, createdAt: c.created_at }));
+
+  // ── AI drafting ───────────────────────────────────────────────────────────────
+  // Turn the raw report into a structured ticket. Uses the shared insights client +
+  // resilient JSON parser (no prompt in insights.js — see TICKET_DRAFT_SYSTEM above).
+  async function draftTicket({ type, title, body, screen }) {
+    const apiKey = adminAnthropicKey ? adminAnthropicKey() : (process.env.ANTHROPIC_API_KEY || '');
+    const c = insights.requireClient(apiKey); // throws NO_API_KEY when unset (caller handles)
+    const user = [
+      `Type: ${type}`,
+      `Reporter's title: ${title || '(none given)'}`,
+      `Screen / area: ${screen || '(unknown)'}`,
+      '',
+      'What they wrote:',
+      body || '(no description)',
+    ].join('\n');
+    const resp = await c.messages.create({
+      model: insights.MODEL,
+      max_tokens: 1400,
+      thinking: { type: 'adaptive' },
+      output_config: { effort: 'low' },
+      system: insights.systemWith(TICKET_DRAFT_SYSTEM, db.getSetting('ai_instructions')),
+      messages: [{ role: 'user', content: user }],
+    });
+    const text = (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
+    const parsed = await insights.parseModelJsonResilient(c, text, 'ticket');
+    return { title: clamp(parsed?.title || '', 160), summary: String(parsed?.ticket || parsed?.summary || '') };
+  }
+  // Draft in the background after a report is filed; write the result back. Never
+  // throws into the request path — a failed/absent AI just leaves the raw report.
+  function draftInBackground(id) {
+    const t = getTicket(id);
+    if (!t) return;
+    if (!insights.isConfigured(adminAnthropicKey ? adminAnthropicKey() : process.env.ANTHROPIC_API_KEY)) {
+      sql.prepare('UPDATE tickets SET ai_status=? WHERE id=?').run('skipped', id);
+      return;
+    }
+    draftTicket({ type: t.type, title: t.title, body: t.body, screen: t.screen })
+      .then(({ title, summary }) => {
+        sql.prepare('UPDATE tickets SET ai_title=?, ai_summary=?, ai_status=? WHERE id=?')
+          .run(title, summary, 'ready', id);
+      })
+      .catch((e) => {
+        console.error('[tickets] AI draft failed:', e.message);
+        sql.prepare('UPDATE tickets SET ai_status=? WHERE id=?').run('error', id);
+      });
+  }
+
+  // Assemble the self-contained "Copy for Claude" build brief. Everything a coding
+  // agent needs to pick the ticket up: the structured spec, where it lives, the
+  // acceptance bar, and the house rules (mobile-first, dual-surface, ratcheted
+  // module budgets, push to branch + main).
+  function claudeBrief(t) {
+    const spec = (t.ai_status === 'ready' && t.ai_summary) ? t.ai_summary
+      : `**${t.type} report (unstructured — AI draft unavailable):**\n\n${t.body || '(no description)'}`;
+    const heading = t.ai_title || t.title || `${t.type} report`;
+    return [
+      `# Build ticket: ${heading}`,
+      '',
+      `- **Type:** ${t.type}`,
+      `- **Screen / area:** ${t.screen || 'unknown'}`,
+      `- **Urgency:** ${t.urgency}`,
+      `- **Reported by:** ${t.reporter_name || t.reporter_email}${t.entity_id ? ` (client: ${db.getEntity(t.entity_id)?.name || t.entity_id})` : ''}`,
+      `- **Ticket id:** ${t.id}`,
+      '',
+      '## Spec',
+      '',
+      spec,
+      '',
+      '## How to build it',
+      '',
+      '1. Work in the Howler Pulse repo. Read `CLAUDE.md` + `PROJECT_OVERVIEW.md` first for conventions.',
+      '2. Keep it **mobile-first**; if it is client-facing, ship **both** an admin surface and client self-service (the dual-surface rule).',
+      '3. Prefer a small, self-contained module over growing a god-file; respect the server line budgets.',
+      '4. Implement the acceptance criteria above, then verify (tests / run the app).',
+      '5. Commit with a clear message and push to the working branch **and** `main` (Render deploys from `main`).',
+      '',
+      '_When done, mark this ticket **In review** (then **Shipped**) on the Pulse product board so the reporter is notified._',
+    ].join('\n');
+  }
+
+  // ── Submit (staff OR client) — the global report widget posts here ─────────────
+  // Any logged-in user can file. Reporter + entity are derived server-side from the
+  // session (never trusted from the body) so a client can't file against another
+  // client. entity_id: for a client, their (first) entity; an admin may name one.
+  app.post('/api/my/tickets', auth.requireAuth, requireOn, (req, res) => {
+    const b = req.body || {};
+    const type = TYPES.includes(b.type) ? b.type : 'bug';
+    const urgency = URGENCIES.includes(b.urgency) ? b.urgency : 'normal';
+    const title = clamp(b.title, 200).trim();
+    const body = clamp(b.body, 8000).trim();
+    const screen = clamp(b.screen, 300).trim();
+    if (!body && !title) return res.status(400).json({ error: 'Add a title or a description.' });
+    const admin = isAdmin(req.user);
+    // Entity: an admin may target a specific client; a client is locked to one they own.
+    let entityId = '';
+    if (admin) entityId = b.entityId && db.getEntity(b.entityId) ? b.entityId : '';
+    else entityId = (req.user.entityIds || []).includes(b.entityId) ? b.entityId : (req.user.entityIds || [])[0] || '';
+    const id = uuid();
+    const ts = now();
+    sql.prepare(`INSERT INTO tickets
+      (id, type, title, body, screen, urgency, status, priority, reporter_id, reporter_email, reporter_name, reporter_role, entity_id, ai_status, created_at, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(id, type, title, body, screen, urgency, 'inbox', 0, req.user.id, req.user.email, userName(req.user),
+        admin ? 'admin' : 'client', entityId, 'pending', ts, ts);
+    draftInBackground(id); // fire-and-forget; the row is already saved
+    res.status(201).json({ ticket: myTicketRow(getTicket(id)) });
+  });
+
+  // Client self-service: the tickets I reported (my content + live status).
+  app.get('/api/my/tickets', auth.requireAuth, requireOn, (req, res) => {
+    const rows = sql.prepare('SELECT * FROM tickets WHERE reporter_id=? ORDER BY created_at DESC LIMIT 200').all(req.user.id);
+    res.json({ tickets: rows.map(myTicketRow) });
+  });
+
+  // ── Admin board ────────────────────────────────────────────────────────────────
+  app.get('/api/admin/tickets', auth.requireAdmin, requireOn, (req, res) => {
+    const { type, status } = req.query || {};
+    const where = [], args = [];
+    if (TYPES.includes(type)) { where.push('type=?'); args.push(type); }
+    if (STATUSES.includes(status)) { where.push('status=?'); args.push(status); }
+    const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const rows = sql.prepare(`SELECT * FROM tickets ${clause} ORDER BY priority DESC, updated_at DESC LIMIT 500`).all(...args);
+    const counts = {};
+    for (const s of STATUSES) counts[s] = 0;
+    for (const r of sql.prepare('SELECT status, COUNT(*) n FROM tickets GROUP BY status').all()) counts[r.status] = r.n;
+    res.json({ tickets: rows.map(ticketRow), counts, columns: STATUSES, labels: STATUS_LABELS });
+  });
+
+  app.get('/api/admin/tickets/:id', auth.requireAdmin, requireOn, (req, res) => {
+    const t = getTicket(req.params.id);
+    if (!t) return res.status(404).json({ error: 'Ticket not found' });
+    res.json({ ticket: ticketRow(t), comments: comments(t.id), claudeBrief: claudeBrief(t) });
+  });
+
+  // Update a ticket: status / assignee / priority / type / urgency / edited AI ticket.
+  // A status change is logged to the activity trail; moving to a terminal state can
+  // notify the reporting client (results, closed loop).
+  app.patch('/api/admin/tickets/:id', auth.requireAdmin, requireOn, (req, res) => {
+    const t = getTicket(req.params.id);
+    if (!t) return res.status(404).json({ error: 'Ticket not found' });
+    const b = req.body || {};
+    const sets = [], args = [];
+    const set = (col, val) => { sets.push(`${col}=?`); args.push(val); };
+    if (b.status !== undefined) {
+      if (!STATUSES.includes(b.status)) return res.status(400).json({ error: 'Unknown status' });
+      set('status', b.status);
+    }
+    if (b.type !== undefined && TYPES.includes(b.type)) set('type', b.type);
+    if (b.urgency !== undefined && URGENCIES.includes(b.urgency)) set('urgency', b.urgency);
+    if (b.assignee !== undefined) set('assignee', clamp(b.assignee, 200));
+    if (b.priority !== undefined) set('priority', Number(b.priority) || 0);
+    if (b.aiSummary !== undefined) set('ai_summary', String(b.aiSummary).slice(0, 20000));
+    if (b.aiTitle !== undefined) set('ai_title', clamp(b.aiTitle, 200));
+    if (!sets.length) return res.status(400).json({ error: 'Nothing to update' });
+    set('updated_at', now());
+    sql.prepare(`UPDATE tickets SET ${sets.join(', ')} WHERE id=?`).run(...args, t.id);
+    if (b.status !== undefined && b.status !== t.status) {
+      logComment(t.id, { authorEmail: req.user.email, authorRole: 'admin', kind: 'status', body: `${STATUS_LABELS[t.status] || t.status} → ${STATUS_LABELS[b.status] || b.status}` });
+      notifyReporterOnShip(getTicket(t.id), t.status);
+    }
+    res.json({ ticket: ticketRow(getTicket(t.id)) });
+  });
+
+  // Add an internal dev note to a ticket's activity trail.
+  app.post('/api/admin/tickets/:id/comments', auth.requireAdmin, requireOn, (req, res) => {
+    const t = getTicket(req.params.id);
+    if (!t) return res.status(404).json({ error: 'Ticket not found' });
+    const body = clamp((req.body || {}).body, 8000).trim();
+    if (!body) return res.status(400).json({ error: 'Empty note' });
+    logComment(t.id, { authorEmail: req.user.email, authorRole: 'admin', kind: 'comment', body });
+    touch(t.id);
+    res.status(201).json({ comments: comments(t.id) });
+  });
+
+  // Re-run the AI draft (e.g. after editing the raw body, or first-time if AI was
+  // unconfigured when it was filed). Synchronous so the admin sees the result.
+  app.post('/api/admin/tickets/:id/redraft', auth.requireAdmin, requireOn, async (req, res) => {
+    const t = getTicket(req.params.id);
+    if (!t) return res.status(404).json({ error: 'Ticket not found' });
+    if (!insights.isConfigured(adminAnthropicKey ? adminAnthropicKey() : process.env.ANTHROPIC_API_KEY)) {
+      return res.status(400).json({ error: 'Set an Anthropic API key in Admin → Integrations to draft tickets.' });
+    }
+    try {
+      const { title, summary } = await draftTicket({ type: t.type, title: t.title, body: t.body, screen: t.screen });
+      sql.prepare('UPDATE tickets SET ai_title=?, ai_summary=?, ai_status=?, updated_at=? WHERE id=?')
+        .run(title, summary, 'ready', now(), t.id);
+      res.json({ ticket: ticketRow(getTicket(t.id)) });
+    } catch (e) {
+      console.error('[tickets] redraft failed:', e.message);
+      res.status(500).json({ error: 'Could not draft this ticket — please try again.' });
+    }
+  });
+
+  // When a ticket ships (or is declined), tell the client who reported it — best
+  // effort, only for client-filed tickets tied to an entity, only if the OS spine
+  // is wired. Keeps the report → result loop visible to the person who raised it.
+  function notifyReporterOnShip(t, prevStatus) {
+    if (!t || !os?.announce) return;
+    if (t.reporter_role !== 'client' || !t.entity_id) return;
+    if (t.status === prevStatus) return;
+    if (t.status !== 'shipped' && t.status !== 'declined') return;
+    const label = t.ai_title || t.title || 'your report';
+    const body = t.status === 'shipped'
+      ? `Good news — the ${t.type} you reported ("${label}") has shipped. Thank you for flagging it.`
+      : `An update on the ${t.type} you reported ("${label}"): we've reviewed it and won't be taking it forward for now. Thanks for the suggestion.`;
+    try {
+      os.announce({
+        entityId: t.entity_id,
+        title: t.status === 'shipped' ? 'Your feedback shipped 🎉' : 'Update on your feedback',
+        body,
+        priority: 'fyi',
+        createdBy: 'Product',
+        authorType: 'system',
+        subjectType: 'ticket',
+        subjectId: t.id,
+      });
+    } catch (e) { console.error('[tickets] reporter notify failed:', e.message); }
+  }
+
+  console.log('[tickets] Product board mounted', enabled() ? '(enabled)' : '(disabled — set tickets_enabled=1)');
+  return { draftInBackground };
+}
+
+module.exports = { mount, TICKET_DRAFT_SYSTEM };

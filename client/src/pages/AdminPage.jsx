@@ -16,6 +16,7 @@ import EventOpsAdmin from '../components/EventOpsAdmin.jsx';
 import RateCard from '../components/RateCard.jsx';
 import { BriefingConfigForm } from '../components/BriefingTuneModal.jsx';
 import StatusNoticesAdmin from '../components/StatusNoticesAdmin.jsx';
+import TicketBoard from '../components/TicketBoard.jsx';
 import OwlGuidanceEditor from '../components/OwlGuidanceEditor.jsx';
 import OwlFieldDictionary from '../components/OwlFieldDictionary.jsx';
 import OwlMemoryEditor from '../components/OwlMemoryEditor.jsx';
@@ -137,6 +138,7 @@ const ADMIN_NAV = [
   ['email', 'Email', '✉️'],
   ['status', 'Status', '🚨'],
   ['product', 'Product', '📦'],
+  ['tickets', 'Tickets', '🎟️'],
   ['backup', 'Backup', '💾'],
 ];
 
@@ -161,6 +163,7 @@ export default function AdminPage() {
       {tab === 'email' && <MailLog />}
       {tab === 'status' && <StatusNoticesAdmin />}
       {tab === 'product' && <Product />}
+      {tab === 'tickets' && <TicketBoard />}
       {tab === 'backup' && <BackupRestore />}
     </>
   );

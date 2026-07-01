@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-06-30 · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-01 · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -558,6 +558,14 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-01** — **Report a bug or idea, from anywhere** 🧪: a **💬 Report button** now sits on
+  every screen (for Howler staff *and* clients). Tap it to flag a **bug**, suggest an
+  **improvement**, or float an **idea** — it automatically captures which screen you were on and
+  who you are. The **AI turns a rough note into a clear, structured ticket**, and everything lands
+  on a live **product board** (Admin → Tickets) where the team triages, builds and ships it — with
+  a **"Copy for Claude"** hand-off that hands the whole ticket to the AI to develop. Clients can
+  track their own reports under **Settings → My reports**, and get a heads-up when what they
+  flagged ships. Closes Pulse's *insight → action → results* loop on the product itself.
 - **2026-06-30** — **Owl opens with quick prompt-starters** 🧪: the web Owl chat now greets an
   empty conversation with **tappable starter pills** — concrete prompts like *Today's sales ·
   Sales overview · Last 7 days · Goal tracking · Sales by hour* — and leads with **the user's
