@@ -33,6 +33,18 @@ const readExplores = (db) => { const v = J(db.getSetting(EXPLORES_KEY, ''), []);
 const readExpFields = (db) => { const v = J(db.getSetting(EXPFIELDS_KEY, ''), {}); return v && typeof v === 'object' ? v : {}; };
 const readAccess = (db) => { const v = J(db.getSetting(ACCESS_KEY, ''), {}); return v && typeof v === 'object' ? v : {}; };
 
+// An early build stored an extra explore's ticked fields as plain NAMES (no
+// measure/dimension kind), which made everything read as a dimension → zero measures
+// → the explore's tool was silently never generated. Normalise both shapes; for
+// legacy strings, guess the kind from the name (a wrong guess degrades gracefully —
+// the query refuses — and the next Save re-stores full metadata).
+const MEASURE_NAME_RE = /(^|[._])(count|sum|total|revenue|amount|value|spend|avg|average|fee|fees|qty|quantity|gmv|turnover)([._]|$)|_(count|sum|total|avg)$/i;
+function normalizeExpFields(list) {
+  return (Array.isArray(list) ? list : [])
+    .map((f) => (typeof f === 'string' ? { name: f, kind: MEASURE_NAME_RE.test(f) ? 'measure' : 'dimension' } : f))
+    .filter((f) => f && f.name && !isPII(f.name));
+}
+
 // Per-client on/off for an EXTRA explore. Each explore has a platform default
 // (on unless the admin flips it) plus per-client overrides. The primary explore is
 // always on for everyone. No entityId in context (e.g. a pure admin chat) → the
@@ -105,7 +117,7 @@ function effective(db) {
   // read tool per explore). Built from the stored field metadata, so it's synchronous.
   const expf = readExpFields(db);
   const extraExplores = readExplores(db).map((e) => {
-    const raw = (expf[keyOf(e.model, e.view)] || []).map((f) => (typeof f === 'string' ? { name: f } : f)).filter((f) => f && f.name && !isPII(f.name));
+    const raw = normalizeExpFields(expf[keyOf(e.model, e.view)]);
     const ms = raw.filter((f) => f.kind === 'measure').map((f) => ({ name: f.name, label: String(f.label || f.name), type: coarseType(f.type), default: false, aka: [] }));
     const ds = raw.filter((f) => f.kind !== 'measure').map((f) => ({ name: f.name, label: String(f.label || f.name), type: coarseType(f.type), group: 'Custom', filter: true, aka: [] }));
     if (!ms.length) return null; // need at least one measure to be queryable
@@ -200,7 +212,17 @@ function mount(app, { db, auth, getExploreFields, listModels }) {
       for (const m of models) for (const e of (m.explores || [])) available.push({ model: m.name, view: e.name, label: e.label || e.name, description: e.description || '' });
     } catch { available = []; }
     const access = readAccess(db);
-    res.json({ primary: PRIMARY, registered: readExplores(db).map((e) => ({ ...e, access: access[keyOf(e.model, e.view)] || { defaultOn: true, clients: {} } })), available });
+    const expf = readExpFields(db);
+    res.json({
+      primary: PRIMARY,
+      registered: readExplores(db).map((e) => {
+        const raw = normalizeExpFields(expf[keyOf(e.model, e.view)]);
+        const measures = raw.filter((f) => f.kind === 'measure').length;
+        // queryable = the Owl will actually get a tool for it (needs ≥1 ticked measure).
+        return { ...e, access: access[keyOf(e.model, e.view)] || { defaultOn: true, clients: {} }, status: { fields: raw.length, measures, queryable: measures > 0 } };
+      }),
+      available,
+    });
   });
   // PUT — one explore's per-client access { model, view, defaultOn, clients: { entityId: bool } }.
   app.put('/api/admin/owl/explores/access', auth.requireAdmin, (req, res) => {

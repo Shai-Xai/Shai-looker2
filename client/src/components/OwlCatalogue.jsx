@@ -179,6 +179,11 @@ function ExplorePanel({ explore, primary = false, defaultOpen = false, ents = []
         <span style={{ fontSize: 14, fontWeight: 700 }}>{explore.label}</span>
         <span style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'ui-monospace, monospace' }}>{explore.model}::{explore.view}</span>
         {primary ? <span style={badge('#3b5bfd')}>primary · always on</span> : <span style={badge('#8b8b93')}>extra</span>}
+        {/* Queryability at a glance: without at least one ticked MEASURE the Owl never
+            gets a tool for this explore — surface that instead of failing silently. */}
+        {!primary && explore.status && (explore.status.queryable
+          ? <span style={badge('#34c759')}>queryable · {explore.status.fields} field{explore.status.fields === 1 ? '' : 's'}</span>
+          : <span style={badge('#b45309')}>{explore.status.fields === 0 ? '⚠ no fields ticked — Owl can’t use it yet' : '⚠ no measure ticked — Owl can’t query it'}</span>)}
         {open && data && <span style={{ fontSize: 12, color: 'var(--muted)', marginLeft: 'auto' }}>{onCount} of {total} fields</span>}
         {!primary && <button onClick={(e) => { e.stopPropagation(); onRemove && onRemove(); }} title="Remove explore" style={{ marginLeft: primary ? 0 : (open ? 10 : 'auto'), border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 14 }}>🗑</button>}
       </div>
@@ -194,6 +199,9 @@ function ExplorePanel({ explore, primary = false, defaultOpen = false, ents = []
                 {err && <span style={{ fontSize: 12.5, color: '#e0414a', fontWeight: 600 }}>⚠ {err}</span>}
               </div>
               {total === 0 && !err && <p style={{ fontSize: 12.5, color: 'var(--muted)' }}>No fields returned for this explore.</p>}
+              {!primary && total > 0 && enabled && !(data.measures || []).some((m) => enabled.has(m.name)) && (
+                <p style={{ fontSize: 12.5, color: 'var(--warn, #b45309)', margin: '0 0 8px', fontWeight: 600 }}>⚠ Tick at least one <u>measure</u> (a number, e.g. revenue or a count) — without one the Owl can’t query this explore, so it won’t appear in chat.</p>
+              )}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 14 }}>
                 <div><div style={colHead}>Measures ({filtered.measures.length})</div><div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>{filtered.measures.map(Row)}</div></div>
                 <div><div style={colHead}>Dimensions ({filtered.dimensions.length})</div><div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>{filtered.dimensions.map(Row)}</div></div>

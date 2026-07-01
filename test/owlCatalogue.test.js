@@ -40,6 +40,22 @@ test('unregistering an explore clears its field selection AND access config', ()
   assert.equal(cat.explores(db).length, 1, 'only the primary remains');
 });
 
+test('legacy string field selections still yield a queryable extra explore', () => {
+  // An early build saved ticked fields as plain names (no measure/dimension kind),
+  // which silently produced zero measures → no tool. The normaliser now guesses the
+  // kind from the name, so a measure-like field keeps the explore queryable.
+  const db = fakeDb();
+  cat.registerExplore(db, { model: 'combined', view: 'cashless_x', label: 'Cashless' });
+  db.setSetting('owl_catalogue_expfields', JSON.stringify({ [KEY]: ['cashless_x.sum_revenue', 'cashless_x.method'] }));
+  const eff = cat.effective(db);
+  assert.equal(eff.extras.length, 1, 'the explore survives despite legacy string storage');
+  assert.deepEqual(eff.extras[0].measures.map((m) => m.name), ['cashless_x.sum_revenue']);
+  assert.deepEqual(eff.extras[0].dimensions.map((d) => d.name), ['cashless_x.method']);
+  // No measure-like name at all → still not queryable (needs a real measure ticked).
+  db.setSetting('owl_catalogue_expfields', JSON.stringify({ [KEY]: ['cashless_x.method'] }));
+  assert.equal(cat.effective(db).extras.length, 0);
+});
+
 test('the primary explore never appears as a registrable extra', () => {
   const db = fakeDb();
   const r = cat.registerExplore(db, { model: seed.model, view: seed.explore, label: 'dupe' });
