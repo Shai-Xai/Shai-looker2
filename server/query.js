@@ -26,8 +26,14 @@ module.exports = function createQueryEngine({ looker, auth }) {
   // are served but never stored (in-flight dedupe still coalesces callers).
   // Normal tile queries are ≤500 rows, so they're unaffected.
   const QCACHE_MAX_ROWS = Number(process.env.QUERY_CACHE_MAX_ROWS) || 2000;
-  const qCache = new Map();    // key -> { at, data }
+  // Byte guard: 500 entries × 2000 rows can still exceed the whole 512 MB
+  // instance. Track approximate bytes per entry (first row's JSON × row count)
+  // and evict oldest until under budget.
+  const QCACHE_MAX_BYTES = (Number(process.env.QUERY_CACHE_MAX_MB) || 48) * 1024 * 1024;
+  const qCache = new Map();    // key -> { at, data, bytes }
   const qInflight = new Map(); // key -> Promise
+  let qBytes = 0;
+  const qEvict = (key) => { const e = qCache.get(key); if (e) { qBytes -= e.bytes; qCache.delete(key); } };
 
   function stableKey(obj) {
     if (Array.isArray(obj)) return '[' + obj.map(stableKey).join(',') + ']';
@@ -41,8 +47,12 @@ module.exports = function createQueryEngine({ looker, auth }) {
         qInflight.delete(key);
         const rows = Array.isArray(data?.data) ? data.data.length : 0;
         if (rows <= QCACHE_MAX_ROWS) {
-          qCache.set(key, { at: Date.now(), data });
-          if (qCache.size > QCACHE_MAX) qCache.delete(qCache.keys().next().value);
+          let bytes = 4096;
+          try { bytes += rows ? JSON.stringify(data.data[0]).length * rows : 0; } catch { /* keep the floor */ }
+          qEvict(key); // replacing: release the old entry's bytes first
+          qCache.set(key, { at: Date.now(), data, bytes });
+          qBytes += bytes;
+          while ((qCache.size > QCACHE_MAX || qBytes > QCACHE_MAX_BYTES) && qCache.size > 1) qEvict(qCache.keys().next().value);
         }
         return data;
       })

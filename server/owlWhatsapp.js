@@ -93,10 +93,18 @@ function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, ant
   // Kept in-memory with a short TTL (charts are ephemeral; a restart just drops them).
   const imgStore = new Map(); // id -> { png, title, exp }
   const IMG_TTL = 2 * 60 * 60 * 1000; // 2 hours
+  const IMG_MAX = 50; // raw PNG buffers — expired ones must be DELETED, not just ignored, or they pile up until OOM
   let seenBase = ''; // the public host Clickatell hits us on (captured from the webhook)
   const publicBase = () => (process.env.PUBLIC_BASE_URL || process.env.RENDER_EXTERNAL_URL || seenBase || '').replace(/\/$/, '');
-  const storeImg = (png, title = 'Chart') => { const id = crypto.randomUUID(); imgStore.set(id, { png, title, exp: Date.now() + IMG_TTL }); return id; };
-  const getImg = (raw) => { const it = imgStore.get(String(raw || '').replace(/\.png$/, '')); return it && it.exp >= Date.now() ? it : null; };
+  const storeImg = (png, title = 'Chart') => {
+    const id = crypto.randomUUID();
+    const now = Date.now();
+    for (const [k, v] of imgStore) if (v.exp < now) imgStore.delete(k);
+    imgStore.set(id, { png, title, exp: now + IMG_TTL });
+    while (imgStore.size > IMG_MAX) imgStore.delete(imgStore.keys().next().value);
+    return id;
+  };
+  const getImg = (raw) => { const id = String(raw || '').replace(/\.png$/, ''); const it = imgStore.get(id); if (it && it.exp < Date.now()) { imgStore.delete(id); return null; } return it || null; };
   app.get('/api/whatsapp/img/:id', (req, res) => {
     const it = getImg(req.params.id);
     if (!it) return res.status(404).end();
