@@ -32,6 +32,9 @@ const TOOL_STATUS = {
   getAlerts: 'Checking your alerts…',
   getCampaigns: 'Checking your campaigns…',
   askUpload: 'Reading your attached data…',
+  searchDriveDocs: 'Searching your Drive files…',
+  readDriveDoc: 'Reading that document…',
+  getPaidPerformance: 'Checking your ad performance…',
   createAlert: 'Setting up that alert…',
 };
 function statusForTools(toolUses) {
@@ -65,6 +68,8 @@ WHICH TOOL TO USE (route every question to the right one — do not answer goal 
 - getAlerts → questions about ALERTS / alarms / thresholds / notifications: "what alerts are set", "has anything triggered", "what am I being notified about". Returns each alert's condition, whether it's active/paused and armed/triggered, its last value and last fire. Read-only.
 - getCampaigns → questions about email/SMS CAMPAIGNS / marketing sends: "what have we sent", "campaign performance", "open/click rates", "any campaigns running". Returns each campaign's status, channel, recipient count and results (sent/opens/clicks/conversions) — never individual contacts. Read-only.
 - askUpload → questions about a file or Google Sheet the user ATTACHED (listed under "Attached data sources" when present) — query/aggregate that table. To answer a question that spans the attachment AND the ticketing data (e.g. "uploaded target vs actual sold by event"), call BOTH askUpload and askData, then combine the figures in one answer/table. If no sources are attached, say so and point them to the 📎 attach button.
+- searchDriveDocs / readDriveDoc → questions about the client's connected Google Drive DOCUMENTS ("what does the budget say", "check the marketing plan", "what's in the sponsor deck / contract"). searchDriveDocs finds the file (by name or content), readDriveDoc reads its text in chunks — quote figures EXACTLY as written and cite the document name. Drive SHEETS are attached tables → use askUpload for those. To compare a document against live data (e.g. budgeted vs actual), call the drive tool AND askData, then combine. If nothing is connected, point them to Settings → Integrations → Google Drive.
+- getPaidPerformance → questions about PAID ADS / Meta advertising: "how are my ads doing", "what did we spend", "which campaign converts best", "what's my ROAS / cost per click". Returns spend, clicks, purchases + purchase value, CPC, cost-per-purchase and ROAS, totals and per-campaign. Be honest that purchases/values are Meta-attributed pixel conversions, not Howler ticket sales. This is about ADS the client runs on Meta; for Pulse email/SMS campaigns use getCampaigns.
 - createAlert → when the user wants to be NOTIFIED / ALERTED / TOLD / REMINDED when a number reaches a level ("let me know when tickets hit 1000", "alert me if VIP sells out", "tell me when revenue passes R1m"). It DRAFTS the alert and the user confirms with a button — see ACTING below.
 - createSegment → when the user wants to BUILD or SAVE an AUDIENCE / cohort of people for later marketing ("make a segment of VIP buyers in Cape Town", "save these people as an audience", "build a guest list segment", "audience of 18-25 year olds"). The cohort is defined by curated dimensions (age, gender, buyer city/country, ticket type, ticket category, complimentary = guest list). It DRAFTS the segment + previews the size and reach; the user confirms with a button — see ACTING below. NEVER list or name individual people; only the count + reach. Contact fields (email/phone) cannot define a segment.
 - draftCampaign → when the user wants to MESSAGE or MARKET to a cohort ("draft a win-back email to lapsed VIP buyers", "send an offer to Cape Town 18-25s", "email my guest-list segment"). Give it the goal plus an audience that is EITHER a saved segment (pass segmentName when the user names one, or one was just created) OR a new cohort (pass filters). It drafts the email/SMS copy and previews the reach. It creates a DRAFT only — a human reviews, approves and SENDS it in Engage. You never send. See ACTING below.
@@ -235,7 +240,7 @@ function owlAllowed(user) {
   return false;
 }
 
-function mount(app, { db, auth, insights, getOwlTools, uploads, getExploreFields, messaging, getAlertsApi, getSegmentsApi, getActionsApi, getTicketsApi, anthropicKeyForSuite, anthropicKeyForEntity, currencyNote, languageNote, whatsappDigestFor }) {
+function mount(app, { db, auth, insights, getOwlTools, uploads, getDriveApi, getExploreFields, messaging, getAlertsApi, getSegmentsApi, getActionsApi, getTicketsApi, anthropicKeyForSuite, anthropicKeyForEntity, currencyNote, languageNote, whatsappDigestFor }) {
   const sql = db.db;
   _accessDb = db; // let owlAllowed() read the owner-managed in-app allowlist
   sql.exec(`
@@ -413,6 +418,11 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getExploreFields
     try {
       const ups = uploads && uploads.listUploads && scopeEntityId ? uploads.listUploads(scopeEntityId) : [];
       if (ups.length) parts.push(`Attached data sources (query with askUpload; combine with askData to answer across sources): ${ups.map((u) => `"${u.name}" [${u.source}] columns: ${(u.columns || []).map((c) => `${c.name}(${c.type})`).join(', ')}`).join(' | ')}.`);
+    } catch { /* ignore */ }
+    // ...and which Drive documents are readable (so it routes to searchDriveDocs/readDriveDoc).
+    try {
+      const docs = getDriveApi && getDriveApi() && scopeEntityId ? getDriveApi().listDocs(scopeEntityId) : [];
+      if (docs.length) parts.push(`Connected Drive documents (read with searchDriveDocs/readDriveDoc; quote them by name): ${docs.slice(0, 20).map((d) => `"${d.name}"`).join(', ')}.`);
     } catch { /* ignore */ }
     // No-code steering layer: admin/client guidance (server/owlGuidance.js), injected
     // last so it can override the catalogue's defaults without a deploy.
