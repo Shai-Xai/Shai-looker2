@@ -415,6 +415,7 @@ export const api = {
   // Client navigation: Suites
   bustCache,
   mySuites: () => cachedGet('/api/my/suites'),
+  saveSuiteOrder: (entityId, order) => fetch(`/api/my/suite-order/${entityId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ order }) }).then(json),
   mySuite: (id) => fetch(`/api/my/suites/${id}`).then(json),
 
   // Social metrics (inbound organic stats). Admins pass the ownership check, so

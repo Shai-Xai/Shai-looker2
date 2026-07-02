@@ -329,11 +329,14 @@ export default function ClientHome() {
           <SectionHead icon="✨">Worth a look</SectionHead>
           <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : `repeat(${Math.min(brief.suggestions.length, 3)}, 1fr)`, gap: 12 }}>
             {brief.suggestions.map((s, i) => (
-              <button key={i} className="lift" style={cardBtn} onClick={() => go(s.link.suiteId, s.link.dashboardId)}>
+              // A portfolio suggestion may carry an ACTION but no resolvable dashboard
+              // (link null, or suiteId-only) — guard every s.link read so the card
+              // still renders (and never navigates to /suite/…/d/undefined).
+              <button key={i} className="lift" style={cardBtn} onClick={() => { if (s.link?.suiteId && s.link?.dashboardId) go(s.link.suiteId, s.link.dashboardId); }}>
                 <div style={{ fontSize: 13.5, fontWeight: 700, lineHeight: 1.4 }}>{s.title}</div>
                 {s.reason && <div style={{ fontSize: 12, color: 'var(--muted-2)', lineHeight: 1.5, marginTop: 4 }}>{s.reason}</div>}
                 <div style={{ marginTop: 9, display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--brand)' }}>{s.link.label} →</span>
+                  {s.link?.label && s.link?.dashboardId && <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--brand)' }}>{s.link.label} →</span>}
                   {/* Only when the suggestion maps to an EXECUTABLE capability
                       (validated server-side) — never a button we can't deliver. */}
                   {s.action && can(PERMS.CAMPAIGNS_APPROVE) && (

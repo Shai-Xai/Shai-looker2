@@ -146,9 +146,34 @@ export default function GoalsPage() {
       .catch((e) => setGap({ suiteId, goalName: goal.name, error: e.message || 'failed' }));
   };
   const launchGap = (plan) => {
+    const suiteId = gap?.suiteId;
     setGap(null);
     const text = plan?.campaignGoal || 'Re-engage the most likely buyers to lift sales before the deadline.';
-    vtNavigate(navigate, `/engage/campaigns?goal=${encodeURIComponent(text)}&type=email_campaign`);
+    // Carry the goal's EVENT (scopes the campaign's audience/tiles to it), the first
+    // nugget's dashboard (a concrete audience source) and the plan's segment name
+    // (pre-selects the saved segment) — a bare goal string lost all three.
+    const q = new URLSearchParams({ goal: text, type: 'email_campaign' });
+    if (suiteId) q.set('suite', suiteId);
+    const did = (plan?.nuggets || []).find((n) => n.dashboardId)?.dashboardId;
+    if (did) q.set('dashboard', did);
+    if (plan?.segmentName) q.set('segment', plan.segmentName);
+    vtNavigate(navigate, `/engage/campaigns?${q.toString()}`);
+  };
+
+  // Drag-to-reorder the event tabs: reorder locally for instant feedback, persist the
+  // entity's suite order server-side (shared by the whole client — the sidebar and
+  // every suites list follow it on their next load).
+  const reorderEvents = (fromId, toId) => {
+    setSuites((cur) => {
+      const list = [...cur];
+      const from = list.findIndex((s) => s.id === fromId);
+      const to = list.findIndex((s) => s.id === toId);
+      if (from < 0 || to < 0 || from === to) return cur;
+      const [moved] = list.splice(from, 1);
+      list.splice(to, 0, moved);
+      api.saveSuiteOrder(moved.entityId, list.filter((s) => s.entityId === moved.entityId).map((s) => s.id)).catch(() => {});
+      return list;
+    });
   };
 
   // One event at a time: a tab strip picks which event's goals show. Fall back to
@@ -201,7 +226,7 @@ export default function GoalsPage() {
       {/* One tab per event — view a single event's goals at a time instead of a long
           stacked list. Horizontally scrollable so it stays tidy on a phone. */}
       {rows.length > 1 && (
-        <EventTabs rows={rows} active={activeSuiteId} onPick={setActiveSuite} />
+        <EventTabs rows={rows} active={activeSuiteId} onPick={setActiveSuite} onReorder={reorderEvents} />
       )}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 26 }}>
@@ -370,19 +395,30 @@ function SectionSkeleton() {
 // Event picker — one pill per event, the selected one highlighted. Scrolls
 // horizontally (hidden scrollbar) so a long event list stays a single tidy row
 // on mobile. Shows a goal count once the event has loaded.
-function EventTabs({ rows, active, onPick }) {
+function EventTabs({ rows, active, onPick, onReorder }) {
+  // Drag a tab onto another to reorder (desktop pointer drag; taps still switch).
+  const [dragId, setDragId] = useState(null);
+  const [overId, setOverId] = useState(null);
   return (
     <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4, marginBottom: 18, scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' }}>
       {rows.map(({ suite, goals = [], personalGoals = [], loaded }) => {
         const n = (goals.length || 0) + (personalGoals.length || 0);
         const on = suite.id === active;
         return (
-          <button key={suite.id} type="button" onClick={() => onPick(suite.id)} style={{
-            flexShrink: 0, whiteSpace: 'nowrap', cursor: 'pointer', font: 'inherit',
-            border: `1px solid ${on ? 'var(--brand)' : 'var(--hairline)'}`,
-            background: on ? 'var(--brand)' : 'var(--card)', color: on ? '#fff' : 'var(--text)',
-            borderRadius: 980, padding: '8px 15px', fontSize: 13, fontWeight: on ? 800 : 600,
-          }}>
+          <button key={suite.id} type="button" onClick={() => onPick(suite.id)}
+            draggable={!!onReorder}
+            onDragStart={() => setDragId(suite.id)}
+            onDragEnd={() => { setDragId(null); setOverId(null); }}
+            onDragOver={(e) => { if (dragId && dragId !== suite.id) { e.preventDefault(); if (overId !== suite.id) setOverId(suite.id); } }}
+            onDrop={(e) => { e.preventDefault(); if (onReorder && dragId && dragId !== suite.id) onReorder(dragId, suite.id); setDragId(null); setOverId(null); }}
+            title={onReorder ? 'Drag to reorder your events' : undefined}
+            style={{
+              flexShrink: 0, whiteSpace: 'nowrap', cursor: dragId ? 'grabbing' : 'pointer', font: 'inherit',
+              border: `1px solid ${overId === suite.id && dragId ? 'var(--brand)' : on ? 'var(--brand)' : 'var(--hairline)'}`,
+              background: on ? 'var(--brand)' : 'var(--card)', color: on ? '#fff' : 'var(--text)',
+              borderRadius: 980, padding: '8px 15px', fontSize: 13, fontWeight: on ? 800 : 600,
+              opacity: dragId === suite.id ? 0.5 : 1,
+            }}>
             {suite.name}{loaded && n > 0 && <span style={{ marginLeft: 7, opacity: 0.75, fontWeight: 600 }}>{n}</span>}
           </button>
         );

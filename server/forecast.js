@@ -146,9 +146,21 @@ function recentRate(series, { days = 14 } = {}) {
 
 // Shape-scaled projection: where you'll land if you finish the curve like last time.
 // Prefer an explicit fNow (the real days-before fraction); else read it by index at r.
+// Raw current/f says "keep outperforming last time by today's ratio for the WHOLE
+// cycle" — explosive early on (5% observed × 5× ahead → 5× last time's total). So the
+// outperform ratio is only PARTIALLY believed: shrunk toward 1 by √f (the observed
+// share of the cycle, concave so early data counts some but never fully). At f→1 it
+// converges to the exact ratio (= the current value); with no readable total it
+// falls back to the raw scaling.
 function shapeForecast({ cum, currentValue, r, fNow = null }) {
   const f = fNow != null ? fNow : fractionAt(cum, r);
   if (f == null || f <= 0 || !Number.isFinite(currentValue)) return null;
+  const total = cum && cum.length ? cum[cum.length - 1] : null;
+  if (Number.isFinite(total) && total > 0) {
+    const ratio = currentValue / (total * f);            // vs last time, at this point
+    const believe = Math.sqrt(Math.max(0, Math.min(1, f)));
+    return total * (1 + (ratio - 1) * believe);
+  }
   return currentValue / f;
 }
 
