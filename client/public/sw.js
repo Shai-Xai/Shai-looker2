@@ -1,10 +1,44 @@
-/* Howler : Pulse service worker — PUSH ONLY.
-   Deliberately caches NOTHING: the app always loads fresh from the network, so
-   this never causes stale-deploy issues. It only turns push messages into
-   notifications, renders any action buttons, and routes clicks. */
+/* Howler : Pulse service worker — PUSH + a maintenance fallback.
+   Still network-first for everything (the app always loads fresh, so no stale-
+   deploy issues). The ONLY thing cached is a static maintenance page, shown when
+   the origin is unreachable — e.g. the brief window while Render swaps the disk
+   during a deploy. Normal loads are unaffected; users just see "Pulse is
+   updating…" (which auto-returns them) instead of a browser/gateway error. */
 
-self.addEventListener('install', () => self.skipWaiting());
-self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
+const MAINT_CACHE = 'pulse-maint-v1';
+const MAINT_PAGE = '/maintenance.html';
+
+self.addEventListener('install', (event) => {
+  event.waitUntil(caches.open(MAINT_CACHE).then((c) => c.add(MAINT_PAGE)).catch(() => {}));
+  self.skipWaiting();
+});
+self.addEventListener('activate', (event) => {
+  event.waitUntil((async () => {
+    const keys = await caches.keys();
+    await Promise.all(keys.filter((k) => k.startsWith('pulse-maint-') && k !== MAINT_CACHE).map((k) => caches.delete(k)));
+    await self.clients.claim();
+  })());
+});
+
+// Navigation fallback: full-page loads go to the network first (fresh app), but
+// if the origin is down or returns a gateway error (502/503/504 — Render's deploy
+// window), serve the cached maintenance page instead of a broken screen. Non-
+// navigation requests (assets, API calls) are left completely untouched.
+self.addEventListener('fetch', (event) => {
+  const req = event.request;
+  if (req.method !== 'GET' || req.mode !== 'navigate') return;
+  event.respondWith((async () => {
+    try {
+      const res = await fetch(req);
+      if (res && (res.status === 502 || res.status === 503 || res.status === 504)) {
+        return (await caches.match(MAINT_PAGE)) || res;
+      }
+      return res;
+    } catch {
+      return (await caches.match(MAINT_PAGE)) || Response.error();
+    }
+  })());
+});
 
 self.addEventListener('push', (event) => {
   let data = {};
