@@ -213,3 +213,18 @@ journeys → stuck on a sandbox branch). Cheap, visible wins live there.
 
 Hygiene: close PRs #1/#2 and issues #6/#7; update
 `PRODUCT_OVERVIEW_SALES.md`; keep the wizard in step with new integrations.
+
+---
+
+## Addendum (same day): two gaps Shai flagged on review
+
+1. **Google Drive integration — the Owl reads third-party files.** Today the
+   Owl only sees CSV uploads / publicly-published Sheet links
+   (`owlUploads.js`) and emailed PDFs (`owlIngest.js`); no Drive OAuth
+   anywhere. Now roadmap **4.8** — staged P1 private Sheets → P2 Docs/PDF
+   text into the recall corpus → P3 watched folders.
+2. **Deep Meta integration.** Today only audience-sync (pasted token) +
+   organic metrics; no paid performance, OAuth, lookalikes, CAPI or
+   publishing. Now roadmap **4.9** — P1 paid-performance ingestion (spend/
+   ROAS → tiles, goals `social_paid`, campaign reports) is the analytics win;
+   P2 OAuth is the moment to fix 4.6 multi ad-accounts.

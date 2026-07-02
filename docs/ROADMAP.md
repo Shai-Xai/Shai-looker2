@@ -237,6 +237,52 @@ the tree, enrol by `node_id`), J3 (evaluate decision nodes off existing
 open/click signals). True "bought" branching gated on the Howler integration
 (4.1). Effort: L (staged).
 
+### 4.8 💡 Google Drive integration — the Owl reads third-party files
+*"Google Drive integration so the Owl can read third-party files."* (Shai,
+2026-07-02)
+Let a client (or an AM on their behalf) connect Google Drive and point the Owl
+at the files their event actually runs on — budgets, marketing plans,
+sponsor decks, settlement sheets — so answers can ground on them alongside
+ticketing data. Today's nearest thing is `owlUploads.js` (CSV upload or a
+*publicly published* Sheet CSV link) + `owlIngest.js` (emailed PDFs); there is
+no Drive API/OAuth anywhere.
+**Shape:** per-entity Google OAuth connection (write-only tokens, dual-surface:
+Admin → client → Integrations *and* client Settings), a file/folder picker for
+what the Owl may see (explicit allow, never whole-Drive), then staged depth:
+- **P1 — private Sheets via the Drive API** (M): replace the publish-to-web
+  hack; a picked Sheet lands in the existing `owl_uploads` table machinery and
+  `askUpload` just works, now with live private data.
+- **P2 — Docs/PDF/Slides text extraction into the corpus** (M–L): extracted
+  text becomes Owl-recallable with per-file citations — this is a concrete
+  on-ramp to the brief's **Recall (6c)** layer.
+- **P3 — watched folders** (M): new files auto-ingest (e.g. a settlements
+  folder mirrors what CC-the-Owl email ingestion does today).
+Ties to `owlUploads.js`, `owlIngest.js`, `owlTools.js`, Extraction/Recall
+(1.1 remaining). Effort: L total, but P1 stands alone.
+
+### 4.9 💡 Deep Meta integration (paid performance, OAuth, CAPI, lookalikes)
+*"Deep Meta integration."* (Shai, 2026-07-02)
+Go beyond today's audience-sync + organic metrics to the full paid loop.
+Today: `meta.js` (Custom Audience sync via a hand-pasted long-lived token +
+ad-account id) and `socialMetrics.js` (organic page/IG insights). Missing, in
+value order:
+- **P1 — Paid performance ingestion** (M–L): ad-account insights (spend,
+  impressions, clicks, conversions, ROAS) per campaign/adset → dashboard
+  tiles, the Goals `social_paid` adapter (GOALS P4), and campaign reports —
+  closing the loop on the audiences we already push. The Owl answers "what's
+  my ROAS this week".
+- **P2 — Meta OAuth connect** (M): a proper app-login flow replacing pasted
+  tokens (token refresh, clearer client self-service); natural moment to do
+  **4.6 multi ad-accounts** (`ad_connections`) so multi-brand clients work.
+- **P3 — Lookalike audiences** (S–M): spawn lookalikes from synced Custom
+  Audiences in the Ad audiences hub.
+- **P4 — Conversions API** (M): send purchase/click events back (promo-code +
+  tracked-link signals now; full purchase signal once Howler 4.1 lands) so
+  Meta optimises toward real buyers.
+- **P5 — publishing** (posts/ads) — the act-layer end, behind approvals (4.3).
+Ties to `meta.js`, `socialMetrics.js`, `AudienceHub.jsx`, goals/forecast,
+campaign ROI. Effort: XL staged; P1 alone is the biggest analytics win.
+
 ### 4.4 💡 Chotu Links integration
 *"Integrate Chotu Links into the platform."*
 Integrate Chotu Links (link shortening / tracking) so campaign + share links are
@@ -358,6 +404,9 @@ Added in the 2026-07-02 reconcile (the 06-28→07-02 sprint):
 - **Attribution thread:** Goals P2 (campaign goals + contribution,
   `docs/GOALS_P2_P3_SPEC.md`) + promo-code ROI on campaign reports — natural
   partners.
+- **Owl reads the client's world:** 4.8 Google Drive (P1 private Sheets is a
+  standalone M) and 4.9 deep Meta (P1 paid-performance ingestion) — both
+  raised 2026-07-02 as the felt gaps.
 - **Quick wins:** 2.3 client backgrounds, 3.3 dashboard prefetch, Slack
   inbound (`/api/inbound/slack`), status `/status` page.
 - **Hygiene:** close stale PRs #1/#2 + GitHub issues #6/#7 (both shipped);
