@@ -25,14 +25,20 @@ const CATALOGUE = [
     ['dash.pwa', 'Mobile-first, installable PWA with push notifications', 'live'],
     ['dash.templates', 'Shared dashboard templates + per-client bespoke versions', 'live'],
   ] },
-  { id: 'owl', emoji: '🦉', title: 'The Owl — your AI analyst, everywhere', blurb: 'Ask your data anything, in plain language — in the app, on WhatsApp, in the organizer portal, even on the event’s own website.', features: [
-    ['owl.ask', 'Ask — conversational Data Analyst in-app', 'beta'],
-    ['owl.whatsapp', 'The Owl on WhatsApp (charts as images, reply buttons, scheduled updates)', 'beta'],
-    ['owl.actions', 'Owl actions — set an alert, save a segment, draft a campaign from chat', 'beta'],
-    ['owl.memory', 'Owl memory — client / event / personal layers, client self-service', 'beta'],
-    ['owl.portal', 'The Owl inside the Howler organizer portal (one-iframe embed)', 'beta'],
+  { id: 'owl', emoji: '🦉', title: 'The Owl — your AI analyst, everywhere', blurb: 'Two analysts, many doors: Pulse’s own native Owl — in the app, on WhatsApp, in the organizer portal, in Claude & ChatGPT — plus the embedded Inventive “Ask” analyst.', features: [
+    // Pulse's own, home-built Owl (server/owlChat.js + friends) — not Inventive.
+    ['owl.native', 'Native Pulse Owl — in-app chat analyst: charts, follow-up chips, “/” actions, prompt starters', 'beta'],
+    ['owl.actions', 'Native Owl actions — set an alert, save a segment, draft a campaign from chat', 'beta'],
+    ['owl.memory', 'Native Owl memory — client / event / personal layers, client self-service', 'beta'],
+    ['owl.catalogue', 'Owl data catalogue — admin-curated fields + extra Looker explores (e.g. Cashless)', 'beta'],
+    ['owl.whatsapp', 'Native Owl on WhatsApp — charts as images, reply buttons, scheduled updates', 'beta'],
+    ['owl.portal', 'Native Owl inside the Howler organizer portal (one-iframe embed)', 'beta'],
     ['owl.fan', 'Fan Owl — a booking guide on the event’s own website', 'beta'],
-    ['owl.catalogue', 'Admin-editable Owl data catalogue (extra Looker explores, e.g. Cashless)', 'beta'],
+    // The same native Owl reached through a connected AI assistant (MCP).
+    ['owl.claude', 'The Owl in Claude — one-click MCP connect; answers + drafts, never sends', 'beta'],
+    ['owl.chatgpt', 'The Owl in ChatGPT / OpenAI — custom connector, works with Deep Research', 'beta'],
+    // A different product entirely: the embedded third-party Inventive analyst.
+    ['owl.inventive', 'Inventive Owl (“Ask”) — separate embedded third-party analyst (needs Inventive key + per-client workspace)', 'beta'],
   ] },
   { id: 'digests', emoji: '✉️', title: 'Scheduled digests', blurb: 'A sharp, role-specific briefing in their inbox on schedule — they stay on top of the event without logging in.', features: [
     ['digest.roles', 'Role-written email digests (exec / marketing / finance / ops)', 'live'],
