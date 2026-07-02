@@ -204,6 +204,26 @@ test('pairing: a QR pairs one device per event; re-using it on another is reject
   assert.equal(ok.body.device.qrCode, 'QR-100');
 });
 
+test('deleting a device removes it and cascades its history + issues', () => {
+  const r = mount();
+  const { entity, suite, owner, admin } = seedEvent();
+  call(r['PUT /api/eventops/entities/:entityId/enabled'], { user: admin, params: { entityId: entity.id }, body: { enabled: true } });
+  const P = { suiteId: suite.id };
+  const station = call(r['POST /api/eventops/suites/:suiteId/stations'], { user: owner, params: P, body: { name: 'Bar', kind: 'bar' } }).body.station;
+  const dev = call(r['POST /api/eventops/suites/:suiteId/devices'], { user: owner, params: P, body: { label: 'Del1', qrCode: 'DEL1' } }).body.device;
+  // Give it some history + an open issue.
+  call(r['POST /api/eventops/suites/:suiteId/move'], { user: owner, params: P, body: { deviceId: dev.id, stationId: station.id } });
+  call(r['POST /api/eventops/suites/:suiteId/issues'], { user: owner, params: P, body: { deviceId: dev.id, category: 'battery' } });
+  assert.equal(call(r['GET /api/eventops/suites/:suiteId/overview'], { user: owner, params: P }).body.totals.openIssues, 1);
+
+  // Delete it → 204, gone from the list, detail 404s, and its issue no longer counts.
+  const delRes = call(r['DELETE /api/eventops/suites/:suiteId/devices/:id'], { user: owner, params: { ...P, id: dev.id } });
+  assert.equal(delRes.code, 204);
+  assert.equal(call(r['GET /api/eventops/suites/:suiteId/devices'], { user: owner, params: P }).body.devices.length, 0);
+  assert.equal(call(r['GET /api/eventops/suites/:suiteId/devices/:id'], { user: owner, params: { ...P, id: dev.id } }).code, 404);
+  assert.equal(call(r['GET /api/eventops/suites/:suiteId/overview'], { user: owner, params: P }).body.totals.openIssues, 0);
+});
+
 test('staff: create + attribute a move and an issue to a staff member', () => {
   const r = mount();
   const { entity, suite, owner, admin } = seedEvent();

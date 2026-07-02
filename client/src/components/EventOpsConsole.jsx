@@ -544,6 +544,7 @@ function DeviceActionSheet({ suiteId, device, onClose, onDone }) {
   const [statusForm, setStatusForm] = useState(null); // { state, comment } when marking lost/damaged
   const [pairing, setPairing] = useState(false); // scanner open to pair a QR
   const [manualQr, setManualQr] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -572,6 +573,11 @@ function DeviceActionSheet({ suiteId, device, onClose, onDone }) {
   async function unpair() {
     setBusy(true);
     try { await api.eventopsUpdateDevice(suiteId, device.id, { qrCode: '' }); onDone('QR unpaired'); }
+    catch (e) { alert(e.message); setBusy(false); }
+  }
+  async function del() {
+    setBusy(true);
+    try { await api.eventopsDeleteDevice(suiteId, device.id); onDone('Device deleted'); }
     catch (e) { alert(e.message); setBusy(false); }
   }
 
@@ -657,6 +663,20 @@ function DeviceActionSheet({ suiteId, device, onClose, onDone }) {
           )}
         </div>
       )}
+      {/* Danger zone — remove the device (and its history) from this event. */}
+      <div style={{ marginTop: 16, paddingTop: 12, borderTop: '1px solid var(--hairline)' }}>
+        {!confirmDelete ? (
+          <button onClick={() => setConfirmDelete(true)} disabled={busy} style={{ ...ghostBtn, color: 'var(--error)' }}>🗑 Delete device</button>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ fontSize: 12.5, color: 'var(--error)' }}>Delete this device and its full move/issue history? This can’t be undone.</div>
+            <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+              <button onClick={() => setConfirmDelete(false)} disabled={busy} style={ghostBtn}>Cancel</button>
+              <button onClick={del} disabled={busy} style={dangerBtn}>{busy ? 'Deleting…' : 'Delete permanently'}</button>
+            </div>
+          </div>
+        )}
+      </div>
       {pairing && (
         <Suspense fallback={null}>
           <EventOpsScanner onCode={pair} onClose={() => setPairing(false)} title="Scan the device's QR to pair" />
