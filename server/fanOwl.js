@@ -138,7 +138,7 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
   const sitesByEntity = sql.prepare('SELECT * FROM fan_sites WHERE entity_id = ? ORDER BY created_at');
   const catByEntity = sql.prepare('SELECT * FROM fan_catalogue WHERE entity_id = ? ORDER BY position, label');
   const knowByEntity = sql.prepare('SELECT * FROM fan_knowledge WHERE entity_id = ? ORDER BY position, question');
-  const pagesBySite = sql.prepare('SELECT * FROM fan_pages WHERE site_id = ?');
+  const pagesBySite = sql.prepare('SELECT * FROM fan_pages WHERE site_id = ? ORDER BY rowid'); // saves rewrite in array order → rowid = the promoter's ordering
   const getSession = sql.prepare('SELECT * FROM fan_sessions WHERE id = ?');
   const insEvent = sql.prepare('INSERT INTO fan_events (id,site_id,session_id,kind,payload,created_at) VALUES (?,?,?,?,?,?)');
   const insMsg = sql.prepare('INSERT INTO fan_messages (id,session_id,role,body,tool_calls,created_at) VALUES (?,?,?,?,?,?)');

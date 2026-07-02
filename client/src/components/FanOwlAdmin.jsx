@@ -52,6 +52,14 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
   const setCat = (i, patch) => set({ catalogue: cfg.catalogue.map((s, j) => (j === i ? { ...s, ...patch } : s)) });
   const setKnow = (i, patch) => set({ knowledge: cfg.knowledge.map((s, j) => (j === i ? { ...s, ...patch } : s)) });
   const setPage = (i, pi, patch) => setSite(i, { pages: cfg.sites[i].pages.map((x, xi) => (xi === pi ? { ...x, ...patch } : x)) });
+  const movePage = (i, pi, dir) => {
+    const pages = [...cfg.sites[i].pages];
+    const to = pi + dir;
+    if (to < 0 || to >= pages.length) return;
+    const [x] = pages.splice(pi, 1);
+    pages.splice(to, 0, x);
+    setSite(i, { pages });
+  };
 
   async function save() {
     setSaving(true);
@@ -198,7 +206,15 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
 
               {(s.pages || []).map((p, pi) => (
                 <details key={p.id || pi} style={{ borderTop: '1px dashed var(--hairline)' }} open={!p.urlPattern}>
-                  <summary style={summaryStyle}>{p.urlPattern || 'New page'} <span style={{ fontWeight: 400, color: 'var(--muted)' }}>· {p.pageType}{(p.itemIds || []).length ? ` · ${p.itemIds.length} item${p.itemIds.length === 1 ? '' : 's'}` : ''}{p.content ? ' · info ✓' : ''}{(p.starters || []).length ? ' · chips ✓' : ''}</span></summary>
+                  <summary style={{ ...summaryStyle, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      {p.urlPattern || 'New page'} <span style={{ fontWeight: 400, color: 'var(--muted)' }}>· {p.pageType}{(p.itemIds || []).length ? ` · ${p.itemIds.length} item${p.itemIds.length === 1 ? '' : 's'}` : ''}{p.content ? ' · info ✓' : ''}{(p.starters || []).length ? ' · chips ✓' : ''}</span>
+                    </span>
+                    <button type="button" aria-label="Move up" disabled={pi === 0} style={{ ...btn, minHeight: 28, padding: '2px 9px', fontSize: 11, opacity: pi === 0 ? 0.35 : 1 }}
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); movePage(i, pi, -1); }}>▲</button>
+                    <button type="button" aria-label="Move down" disabled={pi === (s.pages || []).length - 1} style={{ ...btn, minHeight: 28, padding: '2px 9px', fontSize: 11, opacity: pi === (s.pages || []).length - 1 ? 0.35 : 1 }}
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); movePage(i, pi, 1); }}>▼</button>
+                  </summary>
                   <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '2fr 1fr auto', gap: 8 }}>
                     <input style={input} value={p.urlPattern} placeholder="/accommodation or /artists/*" onChange={(e) => setPage(i, pi, { urlPattern: e.target.value })} />
                     <select style={input} value={p.pageType} onChange={(e) => setPage(i, pi, { pageType: e.target.value })}>
