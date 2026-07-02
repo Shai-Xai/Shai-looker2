@@ -5,7 +5,7 @@ Working spec for the next iteration of the Results pillar: replace the confusing
 to finish ~X; your target is Y; here's how you compare to last year."* Companion to
 `docs/GOALS_BRIEF.md` (the model) and `docs/GOALS_MERGED.md` (canonical spec).
 
-> **Status:** proposed (not built). **Last updated:** 2026-06-20.
+> **Status:** built (server/forecast.js + goals.computeProgress). **Last updated:** 2026-07-02.
 
 ## 1. Why
 Today a goal shows current vs target, a pace line ("expected ≈ 56,419 by now"), and
@@ -26,8 +26,15 @@ linked `curveRef` tile). Find the fraction of its final total reached **by this 
 in the cycle**, `f_now`, then:
 
 ```
-projectedFinal_shape = currentValue / f_now
+ratio   = currentValue / (lastTotal × f_now)          # vs last time, at this point
+believe = √f_now                                      # observed share of the cycle
+projectedFinal_shape = lastTotal × (1 + (ratio − 1) × believe)
 ```
+
+The raw `currentValue / f_now` says "keep outperforming by today's ratio for the WHOLE
+cycle" — explosive early on (5% observed × 5× ahead reads as 5× last time's total). So
+the outperform ratio is only **partially believed**, shrunk toward 1 by √f (early data
+counts some, never fully); it converges to the exact ratio as the cycle completes.
 
 e.g. 41,029 ÷ 0.68 ≈ **60,300**. Because it rides the historical *shape*, it inherently
 knows ticket sales are back-loaded (accelerate near the event) — so it won't
@@ -57,8 +64,12 @@ forecast = clamp blend, weighting momentum more as the event nears
 range = [ shape-only , momentum-adjusted ]   (ordered low→high)
 ```
 
-Headline shows the blended point; the band conveys honesty. Tunable weighting; start
-simple (e.g. linear shift from shape-weighted early → momentum-weighted late).
+Headline shows the blended point; the band conveys honesty. **Built weighting:** the
+momentum weight rides the EVENT CYCLE (position along the sell-curve's own countdown
+axis, the same anchor pace uses), clamped to **[0.25, 0.6]** — floored so the recent-
+14-day trading always tempers the projection, capped so the seasonal shape (which
+knows the late surge) stays the primary signal. Non-countdown curves fall back to the
+goal-window position, capped at 0.5.
 
 ## 4. What the card becomes (the simplification)
 Replace the pace block with a **forecast headline**:

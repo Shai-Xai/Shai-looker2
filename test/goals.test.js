@@ -472,11 +472,16 @@ test('a linked curve drives baseline + vs-last-time-at-this-point, with pace ove
   assert.ok(row.progress.lastAtNow > 1000 && row.progress.lastAtNow < 3000, 'last time read at a mid-window point of the curve');
   // expected-by-now rides the same curve fraction, scaled to the target (2× the curve total).
   assert.ok(Math.abs(row.progress.expected - 2 * row.progress.lastAtNow) <= 2, 'expected = target × the same curve fraction');
-  // Forecast: the SHAPE signal = current ÷ fraction of last time's shape reached at
-  // this point (current is the curve's this-year value; fraction = lastAtNow / total).
+  // Forecast: the SHAPE signal follows last time's curve, but the vs-last-time ratio
+  // is only PARTIALLY believed early on — shrunk toward 1 by √fraction-observed
+  // (raw current ÷ f explodes early: 5% observed × 5× ahead read as 5× the total).
   assert.ok(row.progress.forecast && row.progress.forecast.projected != null, 'a curve goal carries a forecast');
-  const expShape = Math.round(row.progress.value / (row.progress.lastAtNow / 3000));
-  assert.ok(Math.abs(row.progress.forecast.shape - expShape) <= 2, 'shape projection = current ÷ fraction of last time’s shape reached');
+  const fShape = row.progress.lastAtNow / 3000;
+  const ratio = row.progress.value / (3000 * fShape);
+  const expShape = Math.round(3000 * (1 + (ratio - 1) * Math.sqrt(fShape)));
+  assert.ok(Math.abs(row.progress.forecast.shape - expShape) <= 2, 'shape projection = √f-damped outperformance over last time’s total');
+  const rawShape = Math.round(row.progress.value / fShape);
+  assert.ok(ratio < 1 ? row.progress.forecast.shape >= rawShape : row.progress.forecast.shape <= rawShape, 'damping pulls the shape signal toward last time’s total');
   // projected blends shape with recent momentum, so it sits between the two signals.
   const lo = Math.min(row.progress.forecast.shape, row.progress.forecast.momentum);
   const hi = Math.max(row.progress.forecast.shape, row.progress.forecast.momentum);

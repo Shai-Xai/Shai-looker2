@@ -14,7 +14,7 @@ const money = (cur, n) => `${cur === 'ZAR' || !cur ? 'R' : `${cur} `}${Number(n 
 // APPROVE (explicit, shows the count) → running → done with results.
 // One component for both surfaces (admin + client self-service) — the server
 // enforces entity access on every call.
-export default function CampaignManager({ entityId, scope = 'admin', initialGoal = '', initialType = '', initialActionId = '', initialDashboardId = '', initialSuiteId = '' }) {
+export default function CampaignManager({ entityId, scope = 'admin', initialGoal = '', initialType = '', initialActionId = '', initialDashboardId = '', initialSuiteId = '', initialSegmentName = '' }) {
   const isAdmin = scope === 'admin';
   const [data, setData] = useState(null);
   const [editing, setEditing] = useState(null); // action object | 'new'
@@ -93,6 +93,7 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
 
   if (editing) {
     return <CampaignEditor entityId={entityId} isAdmin={isAdmin} action={editing === 'new' ? null : editing} initialGoal={editing === 'new' ? initialGoal : ''}
+      initialSuiteId={editing === 'new' ? initialSuiteId : ''} initialSegmentName={editing === 'new' ? initialSegmentName : ''}
       initialTemplate={editing === 'new' ? tpl : null} initialMaster={editing === 'new' ? presetMaster : ''} masterNames={masterNames}
       requireApproval={!!data.requireApproval} approverCandidates={data.approverCandidates || []}
       onClose={() => { setEditing(null); setTpl(null); setPresetMaster(''); }} onSaved={() => { setEditing(null); setTpl(null); setPresetMaster(''); load(); loadMasters(); }} />;
@@ -321,7 +322,7 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
   );
 }
 
-function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTemplate = null, initialMaster = '', masterNames = [], requireApproval = false, approverCandidates = [], onClose, onSaved }) {
+function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialSuiteId = '', initialSegmentName = '', initialTemplate = null, initialMaster = '', masterNames = [], requireApproval = false, approverCandidates = [], onClose, onSaved }) {
   const cfg = action?.config || {};
   const tpl = initialTemplate;           // a resolved template (recipe), when creating from one
   const tp = tpl?.preset || {};          // the template's copy/utm presets
@@ -347,7 +348,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
     filters: cfg.audience?.filters || [], // [{field, op:'in'|'between', values:[], min, max}]
     attrDashboardId: cfg.audience?.attrDashboardId || '', // optional 2nd source for targeting fields
     attrTileId: cfg.audience?.attrTileId || '',
-    eventSuiteId: cfg.eventSuiteId || ta.eventSuiteId || '',
+    eventSuiteId: cfg.eventSuiteId || ta.eventSuiteId || initialSuiteId || '', // deep links carry the event
     language: cfg.language || '', // per-campaign AI copy language ('' = client default)
     contentMode: cfg.contentMode || 'template',
     heroImage: cfg.heroImage || '',
@@ -446,6 +447,17 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
 
   useEffect(() => { (isAdmin ? api.getDigestTiles(entityId) : api.getMyDigestTiles(entityId)).then(setTiles).catch(() => setTiles({ dashboards: [] })); }, [entityId, isAdmin]);
   useEffect(() => { api.listSegments(entityId).then((r) => setSegments(r.segments || [])).catch(() => setSegments([])); }, [entityId]);
+  // A goal-gap launch names a saved segment (free text from the plan) — once the
+  // segments load, match it by name and pre-select it as the audience. New campaigns
+  // only (never rewires an existing one), and only until the user picks something.
+  const segPrefilled = useRef(false);
+  useEffect(() => {
+    if (segPrefilled.current || !initialSegmentName || action || !segments.length) return;
+    const lc = initialSegmentName.trim().toLowerCase();
+    const seg = segments.find((sg) => sg.name.toLowerCase() === lc)
+      || segments.find((sg) => sg.name.toLowerCase().includes(lc) || lc.includes(sg.name.toLowerCase()));
+    if (seg) { segPrefilled.current = true; setF((s) => ({ ...s, audienceMode: 'segment', segmentId: seg.id })); }
+  }, [segments, initialSegmentName, action]);
 
   const payload = () => ({
     // In sequence mode the top-level copy mirrors step 1 (drives the preview +

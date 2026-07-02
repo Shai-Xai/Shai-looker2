@@ -230,12 +230,23 @@ module.exports = function createBriefingEngine({ db, store, query }) {
     }
     // 1b) Explicit briefing focus tiles (reader-chosen, like a digest's curated
     //     tiles). tileId '*' = the whole dashboard. Prioritised like follows.
+    //     A pick may be scoped to a lifecycle PHASE: it feeds the briefing only
+    //     while its event is in that phase (a launch board leads during Launch,
+    //     the gates board on Event Day). The dashboard's own event decides; a
+    //     non-event dashboard matches when ANY of the client's events is in the
+    //     phase (that's what "a management board for event week" means).
     let focus = [];
     try { focus = JSON.parse(db.getUserPref(user.id, `briefing_tiles:${entityId}`) || '[]'); } catch { focus = []; }
+    const suitePhase = (sid) => { const su = sid && db.getSuite(sid); return su ? resolvePhase(su.briefing || {}).key : null; };
+    const entityPhases = new Set(db.listSuitesForEntity(entityId).map((su) => resolvePhase(su.briefing || {}).key).filter(Boolean));
     for (const fsel of Array.isArray(focus) ? focus : []) {
       if (picks.length >= maxTiles) break;
       const def = store.get(fsel.dashboardId);
       if (!def || !dashMeta[def.id]) continue; // must be in this client's catalogue
+      if (fsel.phase && PHASES.some((p) => p.key === fsel.phase)) {
+        const cur = suitePhase(dashMeta[def.id]?.suiteId);
+        if (cur ? cur !== fsel.phase : !entityPhases.has(fsel.phase)) continue; // out of phase right now
+      }
       const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))];
       const chosen = fsel.tileId === '*'
         ? tiles.filter((t) => t.type !== 'text' && t.query?.fields?.length)

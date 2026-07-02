@@ -116,9 +116,28 @@ module.exports.mount = function mountClientModel(app, { db, auth, store, looker,
   });
 
   // ─── Client navigation: Entity → Suite → Set → Dashboards ──────────────────────
+  // Client-chosen event order (drag-reordered on the Goals tabs; shared by the whole
+  // client): a per-entity list of suite ids in the KV settings. Suites not in the
+  // list keep their natural position after the ordered ones; the stable sort keeps
+  // entity grouping intact for multi-entity logins.
+  const suiteOrderFor = (entityId) => { try { const a = JSON.parse(db.getSetting(`suite_order:${entityId}`, '[]')); return Array.isArray(a) ? a : []; } catch { return []; } };
+  const applySuiteOrder = (list) => {
+    const orders = new Map();
+    for (const su of list) if (!orders.has(su.entityId)) orders.set(su.entityId, suiteOrderFor(su.entityId));
+    const rank = (su) => { const i = orders.get(su.entityId).indexOf(su.id); return i < 0 ? 1e9 : i; };
+    return [...list].sort((a, b) => (a.entityId === b.entityId ? rank(a) - rank(b) : 0));
+  };
+  app.put('/api/my/suite-order/:entityId', auth.requireAuth, (req, res) => {
+    const entityId = req.params.entityId;
+    if (req.user.role !== 'admin' && !(req.user.entityIds || []).includes(entityId)) return res.status(403).json({ error: 'Not allowed' });
+    const valid = new Set(db.listSuitesForEntity(entityId).map((s) => s.id));
+    const order = (Array.isArray(req.body?.order) ? req.body.order : []).map(String).filter((id) => valid.has(id)).slice(0, 200);
+    db.setSetting(`suite_order:${entityId}`, JSON.stringify(order));
+    res.json({ order });
+  });
   // The suites this user can open (each carries its entity name).
   app.get('/api/my/suites', auth.requireAuth, (req, res) => {
-    res.json(auth.suitesForUser(req.user).map((su) => {
+    res.json(applySuiteOrder(auth.suitesForUser(req.user)).map((su) => {
       const ent = db.getEntity(su.entityId);
       return {
         id: su.id, name: su.name, icon: su.icon || '', entityId: su.entityId,

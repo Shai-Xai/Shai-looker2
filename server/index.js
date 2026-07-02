@@ -924,6 +924,9 @@ const maskSecret = (v) => (v && v.length ? `••••••${String(v).slice(
 
 // Combined AI instructions: the global standing instructions, plus the
 // per-client context when the request is in a suite (client) context.
+// Clip AI copy at a word boundary + ellipsis — a hard .slice() cuts mid-word ("…cheaper phases c"), reading as a bug on the briefing cards.
+const clipWords = (s, n) => { const t = String(s || ''); if (t.length <= n) return t; const cut = t.slice(0, n); const i = cut.lastIndexOf(' '); return `${(i > n * 0.6 ? cut.slice(0, i) : cut).trimEnd()}…`; };
+
 function aiInstructionsFor(suiteId, entityId, langOverride) {
   const parts = [];
   const global = db.getSetting('ai_instructions');
@@ -1842,7 +1845,7 @@ async function generateOverall(user, entityId, segment, { force = false } = {}) 
     const out = {
       ...base,
       headline: String(raw.headline || '').slice(0, 600),
-      bullets: (raw.bullets || []).slice(0, 4).map((b) => ({ text: String(b.text || '').slice(0, 400) })).filter((b) => b.text),
+      bullets: (raw.bullets || []).slice(0, 4).map((b) => ({ text: clipWords(b.text, 400) })).filter((b) => b.text),
       // Cross-event "Worth a look" suggestions (so the portfolio home keeps them).
       suggestions: (raw.suggestions || []).slice(0, 3)
         .map((s) => {
@@ -1850,7 +1853,7 @@ async function generateOverall(user, entityId, segment, { force = false } = {}) 
           const evSuite = selSet.has(s.suiteId) ? s.suiteId : '';
           // The event the campaign should open against: the AI's, else the link's.
           const linkOut = lk ? { ...lk, suiteId: evSuite || lk.suiteId } : (evSuite ? { suiteId: evSuite } : null);
-          return { title: String(s.title || '').slice(0, 80), reason: String(s.reason || '').slice(0, 200), link: linkOut, action: CAPABILITY_KEYS.has(s.action) ? s.action : null };
+          return { title: clipWords(s.title, 80), reason: clipWords(s.reason, 200), link: linkOut, action: CAPABILITY_KEYS.has(s.action) ? s.action : null };
         })
         .filter((s) => s.title && (s.link || s.action)),
       _timing: { totalMs, factsMs, llmMs, facts: factTiming },
@@ -1973,10 +1976,10 @@ async function generateBriefing(user, entityId, segment, { force = false } = {})
       generatedAt: new Date().toISOString(),
       headline: String(raw.headline || '').slice(0, 600),
       bullets: (raw.bullets || []).slice(0, 4)
-        .map((b) => ({ text: String(b.text || '').slice(0, 400), link: link(b.dashboardId), threadId: msgIds.has(b.threadId) ? b.threadId : null }))
+        .map((b) => ({ text: clipWords(b.text, 400), link: link(b.dashboardId), threadId: msgIds.has(b.threadId) ? b.threadId : null }))
         .filter((b) => b.text),
       suggestions: (raw.suggestions || []).slice(0, 3)
-        .map((s) => ({ title: String(s.title || '').slice(0, 80), reason: String(s.reason || '').slice(0, 200), link: link(s.dashboardId), action: CAPABILITY_KEYS.has(s.action) ? s.action : null }))
+        .map((s) => ({ title: clipWords(s.title, 80), reason: clipWords(s.reason, 200), link: link(s.dashboardId), action: CAPABILITY_KEYS.has(s.action) ? s.action : null }))
         .filter((s) => s.title && s.link),
       _timing,
     };
@@ -2170,10 +2173,10 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
   // pre-filled "Make it happen" campaign editor (recipe auto-resolves the
   // audience + copy), scoped to its event; otherwise it links to the dashboard.
   const actionHref = (a, evSuite) => (CAPABILITY_KEYS.has(a.action)
-    ? `${mailer.baseUrl()}/engage/campaigns?type=${encodeURIComponent(a.action)}&goal=${encodeURIComponent(String(a.text || '').slice(0, 200))}${evSuite ? `&suite=${encodeURIComponent(evSuite)}` : ''}`
+    ? `${mailer.baseUrl()}/engage/campaigns?type=${encodeURIComponent(a.action)}&goal=${encodeURIComponent(clipWords(a.text, 200))}${evSuite ? `&suite=${encodeURIComponent(evSuite)}` : ''}${a.dashboardId && byId[a.dashboardId] ? `&dashboard=${encodeURIComponent(a.dashboardId)}` : ''}`
     : href(a.dashboardId, evSuite));
   const mapKpi = (k, evSuite) => ({ label: String(k.label || '').slice(0, 40), value: String(k.value || '').slice(0, 30), delta: String(k.delta || '').slice(0, 40), href: href(k.dashboardId, evSuite) });
-  const mapAction = (a, evSuite) => ({ text: String(a.text || '').slice(0, 200), href: actionHref(a, evSuite), action: CAPABILITY_KEYS.has(a.action) ? a.action : null });
+  const mapAction = (a, evSuite) => ({ text: clipWords(a.text, 200), href: actionHref(a, evSuite), action: CAPABILITY_KEYS.has(a.action) ? a.action : null });
   // Render a set of followed-tile facts as email visuals — chart tiles become a
   // PNG mail asset, single-value/table tiles become a metric chip. Best-effort.
   const renderFollowed = (facts) => {
@@ -2729,11 +2732,13 @@ app.put('/api/my/briefing-tune', auth.requireAuth, (req, res) => {
   if (!entityId) return res.status(400).json({ error: 'No client context' });
   const body = req.body || {};
   db.setUserPref(req.user.id, `briefing_tune:${entityId}`, String(body.tune || '').slice(0, 1500));
-  // Focus tiles (reader-chosen dashboards/tiles to always feed the briefing).
+  // Focus tiles (reader-chosen dashboards/tiles to always feed the briefing). Each
+  // pick may carry a lifecycle-phase scope — it then feeds the briefing only while
+  // its event is in that phase (blank/invalid → all phases).
   if (Array.isArray(body.tiles)) {
     const tiles = body.tiles.slice(0, 40)
       .filter((t) => t && t.dashboardId && t.tileId)
-      .map((t) => ({ dashboardId: String(t.dashboardId), tileId: String(t.tileId) }));
+      .map((t) => ({ dashboardId: String(t.dashboardId), tileId: String(t.tileId), ...(PHASES.some((p) => p.key === t.phase) ? { phase: t.phase } : {}) }));
     db.setUserPref(req.user.id, `briefing_tiles:${entityId}`, JSON.stringify(tiles));
   }
   // Always-include categories the reader has enabled (Tune → "What the briefing covers").

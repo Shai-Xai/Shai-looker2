@@ -584,10 +584,18 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
     if (at && goal.direction !== 'at_most' && !isRange && !Number.isNaN(end) && !Number.isNaN(start) && end > start) {
       const cum = fc.toCumulative((Array.isArray(curve) ? curve : []).map((p) => p.v));
       const r = Math.max(0, Math.min(1, (nowMs - start) / (end - start)));
-      // Blend last time's SHAPE with recent run-rate (momentum) so a hot/cold streak
-      // nudges the projection — but cap momentum at half so the seasonal shape (which
-      // captures a late surge a linear rate can't) stays the primary signal.
-      const f = cum.length >= 2 ? fc.forecast({ cum, currentValue: value, target: goal.targetValue, r, daysLeft, recentRatePerDay: opts.recentRatePerDay ?? null, weightMomentum: Math.min(0.5, r), fNow: at.fraction }) : null;
+      // Blend last time's SHAPE with the recent-14-day run-rate (momentum). The blend
+      // weight rides the EVENT CYCLE (position along the sell-curve's own axis), not
+      // the goal row's start/by dates (which can be wrong and zero momentum out) —
+      // floored at 25% so recent trading ALWAYS tempers the projection, capped at 60%
+      // so the seasonal shape (which knows the late surge) stays the primary signal.
+      let wMomentum = Math.min(0.5, r); // fallback: goal-window position (non-countdown curves)
+      if (at.basis === 'days-before' && numCurve.length >= 2 && Number.isFinite(daysLeft)) {
+        const ds = numCurve.map((p) => Number(p.t));
+        const span = Math.max(...ds) - Math.min(...ds);
+        if (span > 0) wMomentum = Math.min(0.6, Math.max(0.25, (Math.max(...ds) - daysLeft) / span));
+      }
+      const f = cum.length >= 2 ? fc.forecast({ cum, currentValue: value, target: goal.targetValue, r, daysLeft, recentRatePerDay: opts.recentRatePerDay ?? null, weightMomentum: wMomentum, fNow: at.fraction }) : null;
       if (f && Number.isFinite(f.projected)) forecast = { projected: f.projected, status: f.status, vsTargetPct: f.vsTargetPct, shape: f.shape, momentum: f.momentum };
     }
     return { value, pct, target: goal.targetValue, targetMax: goal.targetMax ?? null, over, inRange, direction: goal.direction, expected, onPace, status, band, milestones, nextMilestone, lastAtNow, baselineFinal, daysLeft, forecast };

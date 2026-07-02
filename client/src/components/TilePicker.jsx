@@ -4,7 +4,11 @@ import { useState, useEffect } from 'react';
 // briefing tuner. `load` returns { dashboards: [{ dashboardId, title, setName,
 // tiles: [{ tileId, title, visType }] }] }; `selected` is an array of
 // { dashboardId, tileId } where tileId '*' means the whole dashboard.
-export default function TilePicker({ load, catalogue, selected, onChange }) {
+// `phases` (optional, [{key,label}]): when given, every SELECTED pick gets a small
+// scope select — "All phases" or one lifecycle phase (stored as `phase` on the
+// selection). The briefing then feeds that pick only while its event is in that
+// phase, so a launch board can lead during Launch and a gates board on Event Day.
+export default function TilePicker({ load, catalogue, selected, onChange, phases = null }) {
   const [cat, setCat] = useState(catalogue || null);
   const [open, setOpen] = useState({});
   useEffect(() => {
@@ -27,6 +31,16 @@ export default function TilePicker({ load, catalogue, selected, onChange }) {
     else onChange([...selected.filter((x) => x.dashboardId !== dashId), { dashboardId: dashId, tileId: '*' }]); // replaces individual picks
   };
   const countIn = (dash) => whole(dash.dashboardId) ? dash.tiles.length : dash.tiles.filter((t) => sel.has(key(dash.dashboardId, t.tileId))).length;
+  const phaseOf = (d, t) => selected.find((x) => x.dashboardId === d && x.tileId === t)?.phase || '';
+  const setPhase = (d, t, phase) => onChange(selected.map((x) => (x.dashboardId === d && x.tileId === t ? { ...x, ...(phase ? { phase } : { phase: undefined }) } : x)));
+  const phaseSel = (d, t) => (phases && phases.length ? (
+    <select value={phaseOf(d, t)} onClick={(e) => e.stopPropagation()} onChange={(e) => setPhase(d, t, e.target.value)}
+      title="Only feed the briefing during this lifecycle phase"
+      style={{ flexShrink: 0, fontSize: 10.5, padding: '2px 4px', borderRadius: 6, border: '1px solid var(--hairline)', background: 'var(--card)', color: phaseOf(d, t) ? 'var(--ai, #7c3aed)' : 'var(--muted)', maxWidth: 120 }}>
+      <option value="">All phases</option>
+      {phases.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
+    </select>
+  ) : null);
 
   return (
     <div style={{ marginTop: 8, border: '1px solid var(--hairline)', borderRadius: 10, maxHeight: 300, overflowY: 'auto' }}>
@@ -49,6 +63,7 @@ export default function TilePicker({ load, catalogue, selected, onChange }) {
                 </span>
                 {n > 0 && <span style={{ ...roleChip, background: 'rgba(var(--brand-rgb), 0.12)', color: 'var(--brand)' }}>{whole(d.dashboardId) ? 'All' : n}</span>}
               </button>
+              {whole(d.dashboardId) && phaseSel(d.dashboardId, '*')}
               <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--muted)', cursor: 'pointer', flexShrink: 0 }} title="Include the whole dashboard">
                 <input type="checkbox" checked={whole(d.dashboardId)} onChange={() => toggleWhole(d.dashboardId)} /> Whole
               </label>
@@ -61,6 +76,7 @@ export default function TilePicker({ load, catalogue, selected, onChange }) {
                     <label key={t.tileId} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0', fontSize: 12.5, cursor: whole(d.dashboardId) ? 'default' : 'pointer' }}>
                       <input type="checkbox" checked={checked} disabled={whole(d.dashboardId)} onChange={() => toggle(d.dashboardId, t.tileId)} />
                       <span style={{ flex: 1 }}>{t.title}</span>
+                      {!whole(d.dashboardId) && checked && phaseSel(d.dashboardId, t.tileId)}
                       {t.visType && <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>{t.visType}</span>}
                     </label>
                   );

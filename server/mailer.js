@@ -297,9 +297,12 @@ function digestEmail({ branding, entityId, assetScope, content, roleLabel, custo
     const narrative = (part.narrative || []).map((p) => `<p style="font-size:14px;line-height:1.6;color:#3a3a3c;margin:0 0 12px;">${mdBold(p)}</p>`).join('');
     const actionsLis = (part.actions || []).filter((a) => a.text).map((a) => {
       const txt = `<span style="color:#111;font-weight:600;">${esc(a.text)}</span>`;
-      // "Make it happen" only when the action maps to an executable capability.
-      const makeIt = a.action ? `<a href="${baseUrl()}/actions?goal=${encodeURIComponent(a.text)}&type=${encodeURIComponent(a.action)}" style="color:#7c3aed;text-decoration:none;font-size:12px;font-weight:700;margin-left:8px;">⚡ Make it happen</a>` : '';
-      return `<li style="margin:0 0 8px;line-height:1.5;">${a.href ? `<a href="${esc(a.href)}" style="color:${esc(b.brandColor)};text-decoration:none;">${esc(a.text)} →</a>` : txt}${makeIt}</li>`;
+      // "Make it happen" only when the action maps to an executable capability. Use
+      // the SERVER-BUILT href (scoped to the action's event + dashboard) — a locally
+      // rebuilt /actions?goal=… link dropped that scope, so a multi-event client's
+      // campaign opened unscoped.
+      const makeIt = (a.action && a.href) ? `<a href="${esc(a.href)}" style="color:#7c3aed;text-decoration:none;font-size:12px;font-weight:700;margin-left:8px;">⚡ Make it happen</a>` : '';
+      return `<li style="margin:0 0 8px;line-height:1.5;">${a.href && !makeIt ? `<a href="${esc(a.href)}" style="color:${esc(b.brandColor)};text-decoration:none;">${esc(a.text)} →</a>` : txt}${makeIt}</li>`;
     }).join('');
     const actionsBlock = actionsLis ? `
       <div style="margin-top:18px;padding-top:16px;border-top:1px solid #ececf0;">
