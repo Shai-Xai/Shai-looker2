@@ -517,11 +517,14 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
     const forwardPeriodic = numCurve.length >= 2 && !fc.isCountdownAxis(numCurve);
     const eventAnchored = hasCurve && !forwardPeriodic;
     const end = eventAnchored ? ev.ms : (Number.isFinite(ownEnd) ? ownEnd : ev.ms);
-    const daysLeft = calendarDaysLeft(end, nowMs);
+    // Days-to-event for reading the curve: this year's OWN countdown axis knows where
+    // "now" is (opts.axisDaysLeft — its lowest days_before label), and beats a resolved
+    // deadline date that can be off (wrong byDate / unresolvable event date). Past the
+    // curve's span a wrong date CLAMPS the read to the curve's first point (≈1 ticket).
+    const calDaysLeft = calendarDaysLeft(end, nowMs);
+    const daysLeft = (eventAnchored && Number.isFinite(opts.axisDaysLeft)) ? opts.axisDaysLeft : calDaysLeft;
     // Align last time's curve to where we are now by its REAL axis (days-before-event),
     // not by row position — so "last time at this point" is the actual recorded value.
-    // Days-to-go is whole calendar days to the event day (the same anchor as last
-    // year's days_before axis), so the curve is read at the right point.
     const at = hasCurve ? fc.fractionAtNow(curve, { deadlineMs: end, nowMs, startMs: start, daysLeft }) : null;
     const baselineFinal = at ? Math.round(at.total) : (goal.baselineValue != null ? goal.baselineValue : null);
     if (value == null || !goal.targetValue) return { value, pct: null, status: null, band: goal.resultBand || null, milestones, nextMilestone, lastAtNow: null, baselineFinal };
@@ -616,7 +619,15 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
             const thisCum = fc.toCumulative((thisCol?.series || []).map((x) => x.v));
             const thisNow = thisCum.length ? thisCum[thisCum.length - 1] : null;
             const recentRatePerDay = fc.recentRate(thisCol?.series || []); // momentum from this year's tail
-            return { shape: shape.length >= 2 ? shape : null, thisNow, recentRatePerDay };
+            // TODAY's true days-before-event, read off this year's own countdown axis
+            // (its last/lowest label — Looker computes days_before per event, so the
+            // data says where "now" is). Beats a resolved deadline date, which can be
+            // off (wrong byDate/event date) and, past the curve's span, clamps the
+            // "last time by now" read to the curve's first point (the ≈1-ticket bug).
+            const tNums = (thisCol?.series || []).map((p) => Number(p.t)).filter(Number.isFinite);
+            const axisDaysLeft = (tNums.length >= 2 && tNums.length >= (thisCol?.series || []).length - 1 && tNums[0] > tNums[tNums.length - 1])
+              ? tNums[tNums.length - 1] : null;
+            return { shape: shape.length >= 2 ? shape : null, thisNow, recentRatePerDay, axisDaysLeft };
           }
         }
         if (typeof resolveTileSeries === 'function') {
@@ -662,7 +673,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
     const useCurveNow = curve && curve.thisNow != null;
     const value = useCurveNow ? curve.thisNow : m.value;
     const gp = (liveBaseline != null && Number.isFinite(Number(liveBaseline))) ? { ...g, baselineValue: Number(liveBaseline) } : g;
-    return { ...gp, progress: { ...computeProgress(gp, value, shape, { eventDateIso, recentRatePerDay: curve?.recentRatePerDay }), asOf: m.asOf, resolvedSource: useCurveNow ? 'curve-this-year' : m.source } };
+    return { ...gp, progress: { ...computeProgress(gp, value, shape, { eventDateIso, recentRatePerDay: curve?.recentRatePerDay, axisDaysLeft: curve?.axisDaysLeft }), asOf: m.asOf, resolvedSource: useCurveNow ? 'curve-this-year' : m.source } };
   }
 
   // ── Access guards (admin OR an entity member; writes need goals.manage) ──
