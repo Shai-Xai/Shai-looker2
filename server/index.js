@@ -174,12 +174,12 @@ function meUser(user) {
   }).filter(Boolean);
   return { ...pub, entities, owlEnabled: require('./owlChat').owlAllowed(user), owlOwner: require('./owlChat').owlOwner(user) };
 }
-// Brute-force guard: cap login attempts per IP (fixed 15-minute window). Fails
-// open if the limiter errors, so it can never lock out legitimate traffic.
-app.post('/api/auth/login', rateLimit({ windowMs: 15 * 60_000, max: 10, by: 'ip', scope: 'login' }), asyncHandler(async (req, res) => {
+// Brute-force guard (per-IP + per-account limiters + failed-attempt detector) → server/loginGuard.js.
+const loginGuard = require('./loginGuard')({ rateLimit, ops, db });
+app.post('/api/auth/login', loginGuard.perIp, loginGuard.perAccount, asyncHandler(async (req, res) => {
   const { email, password } = req.body || {};
   const user = await auth.verifyCredentials(email, password);
-  if (!user) return res.status(401).json({ error: 'Invalid email or password' });
+  if (!user) { loginGuard.onFailure(email); return res.status(401).json({ error: 'Invalid email or password' }); } // record+burst-detect; response stays generic (no enumeration)
   auth.issueCookie(res, user);
   db.touchLastLogin(user.id); // most recent login → Admin → Users
   db.recordAction({ userId: user.id, action: 'auth.login', label: 'Logged in', method: 'POST', path: '/api/auth/login' });
