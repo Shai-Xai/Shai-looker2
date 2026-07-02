@@ -399,6 +399,13 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
       const issue = await github.createIssue({ title, body });
       sql.prepare('UPDATE tickets SET github_issue_number=?, github_url=?, updated_at=? WHERE id=?').run(issue.number, issue.url, now(), t.id);
       logComment(t.id, { authorEmail: req.user.email, authorRole: 'admin', kind: 'system', body: `Created GitHub issue #${issue.number}${mode === 'plan' ? ' and asked Claude to plan it' : doBuild ? ' and asked Claude to build it' : ''}: ${issue.url}` });
+      // Sending to GitHub IS the acceptance act — advance early-stage tickets so the
+      // board reflects it (the reporter gets the "accepted" nudge). Later stages stay.
+      if (['inbox', 'triaged'].includes(t.status)) {
+        sql.prepare('UPDATE tickets SET status=?, updated_at=? WHERE id=?').run('accepted', now(), t.id);
+        logComment(t.id, { authorEmail: req.user.email, authorRole: 'admin', kind: 'status', body: `${STATUS_LABELS[t.status]} → ${STATUS_LABELS.accepted} (sent to GitHub)` });
+        notifyReporter(getTicket(t.id), t.status);
+      }
       res.status(201).json({ ticket: ticketRow(getTicket(t.id)), issue, dispatched, planned: mode === 'plan' });
     } catch (e) {
       console.error('[tickets] github issue failed:', e.message);
