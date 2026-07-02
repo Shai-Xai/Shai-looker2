@@ -132,7 +132,9 @@ function attachUser(req, _res, next) {
   const token = req.cookies?.[COOKIE];
   if (token) {
     try {
-      const { sub, tv } = jwt.verify(token, getSecret(), { algorithms: ['HS256'] });
+      const { sub, tv, stage } = jwt.verify(token, getSecret(), { algorithms: ['HS256'] });
+      // A 2FA step-up (pending) token is NOT a session — never let it authenticate.
+      if (stage) { req.user = null; return next(); }
       const user = cachedUser(sub) || null;
       // Reject a token minted before the user's current password epoch. Legacy
       // tokens (pre-tv, undefined) are accepted only against tokenVersion 0, so
@@ -154,6 +156,22 @@ function attachUser(req, _res, next) {
     }
   }
   next();
+}
+
+// Short-lived token issued after password/link succeeds but BEFORE the second
+// factor — the client sends it back to /api/auth/2fa with the code. Carries
+// stage:'2fa' so attachUser refuses it as a session, and tv so a password
+// change / 2FA reset invalidates it.
+function issue2faPending(user) {
+  return jwt.sign({ sub: user.id, tv: user.tokenVersion || 0, stage: '2fa' }, getSecret(), { algorithm: 'HS256', expiresIn: '10m' });
+}
+function verify2faPending(token) {
+  try {
+    const { sub, tv, stage } = jwt.verify(token, getSecret(), { algorithms: ['HS256'] });
+    if (stage !== '2fa') return null;
+    const user = db.getUser(sub);
+    return (user && (tv || 0) === (user.tokenVersion || 0)) ? user : null;
+  } catch { return null; }
 }
 function requireAuth(req, res, next) {
   if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
@@ -491,6 +509,7 @@ module.exports = {
   loadUsers, publicUser, createUser, updateUser, deleteUser, getUser, verifyCredentials,
   // session
   issueCookie, clearCookie, issueEmbedToken, attachUser, requireAuth, requireAdmin, invalidateUser,
+  issue2faPending, verify2faPending,
   // scoping
   scopeFiltersForUser, accessibleOrgFilters, canAccessDashboard,
   // suites / navigation

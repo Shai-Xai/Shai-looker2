@@ -8,12 +8,14 @@ import { useEffect, useRef, useState } from 'react';
 // the reliable fallback. The component is "dumb": it only resolves a code string via onCode.
 const REGION_ID = 'eventops-scan-region';
 
-export default function EventOpsScanner({ onCode, onClose, title = 'Scan a device' }) {
+export default function EventOpsScanner({ onCode, onClose, onDone, doneLabel = '✓ Done', title = 'Scan a device' }) {
   const [mode, setMode] = useState('scan'); // scan | ocr
   const [manual, setManual] = useState('');
   const [camState, setCamState] = useState('starting'); // starting | live | unavailable
+  const [camError, setCamError] = useState('');
   const scannerRef = useRef(null);
   const handledRef = useRef(false);
+  const runRef = useRef(0); // bumped each (re)start so stale async can't clobber newer state
 
   // OCR (Read label)
   const videoRef = useRef(null);
@@ -26,39 +28,62 @@ export default function EventOpsScanner({ onCode, onClose, title = 'Scan a devic
 
   // Start the right camera for the selected mode; stop everything on switch/unmount.
   useEffect(() => {
-    let cancelled = false;
-    if (mode === 'scan') {
-      (async () => {
-        try {
-          const mod = await import('html5-qrcode');
-          if (cancelled) return;
-          setCamState('starting');
-          const inst = new mod.Html5Qrcode(REGION_ID, { verbose: false });
-          scannerRef.current = inst;
-          await inst.start({ facingMode: 'environment' }, { fps: 10, qrbox: { width: 260, height: 170 } },
-            (decoded) => emit(decoded), () => {});
-          if (!cancelled) setCamState('live');
-        } catch { if (!cancelled) setCamState('unavailable'); }
-      })();
-    } else {
-      (async () => {
-        try {
-          setOcrCam('starting');
-          const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
-          if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
-          streamRef.current = stream;
-          if (videoRef.current) { videoRef.current.srcObject = stream; try { await videoRef.current.play(); } catch { /* autoplay */ } }
-          setOcrCam('live');
-        } catch { if (!cancelled) setOcrCam('unavailable'); }
-      })();
-    }
-    return () => { cancelled = true; stopCamera(); stopStream(); };
+    const runId = ++runRef.current;
+    if (mode === 'scan') startScan(runId); else startOcr(runId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => { runRef.current++; stopCamera(); stopStream(); };
   }, [mode]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Live QR / barcode scanning via html5-qrcode. Retryable (a fresh tap on "Try again" is a
+  // real user gesture, which iOS Safari needs to (re)grant camera access).
+  async function startScan(runId) {
+    setCamState('starting'); setCamError('');
+    try {
+      const mod = await import('html5-qrcode');
+      if (runRef.current !== runId) return;
+      await stopCamera(); // clear any prior instance before starting a fresh one
+      const inst = new mod.Html5Qrcode(REGION_ID, { verbose: false, useBarCodeDetectorIfSupported: true });
+      scannerRef.current = inst;
+      // A big SQUARE scan box (~80% of the viewfinder) so a QR doesn't have to be squeezed
+      // into a small rectangle — a common cause of "it won't read on my phone".
+      const qrbox = (vw, vh) => { const s = Math.round(Math.min(vw, vh) * 0.8); return { width: s, height: s }; };
+      const cfg = { fps: 15, qrbox, experimentalFeatures: { useBarCodeDetectorIfSupported: true } };
+      try {
+        await inst.start({ facingMode: 'environment' }, cfg, (d) => emit(d), () => {});
+      } catch (e1) {
+        // Some phones reject the facingMode hint — fall back to an explicit back camera.
+        let cams = [];
+        try { cams = await mod.Html5Qrcode.getCameras(); } catch { /* permission denied */ }
+        if (runRef.current !== runId) return;
+        const back = cams.find((c) => /back|rear|environment/i.test(c.label || '')) || cams[cams.length - 1];
+        if (!back) throw e1;
+        await inst.start(back.id, cfg, (d) => emit(d), () => {});
+      }
+      if (runRef.current === runId) setCamState('live');
+    } catch (e) {
+      if (runRef.current === runId) { setCamState('unavailable'); setCamError(camReason(e)); }
+    }
+  }
+
+  async function startOcr(runId) {
+    setOcrCam('starting');
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+      if (runRef.current !== runId) { stream.getTracks().forEach((t) => t.stop()); return; }
+      streamRef.current = stream;
+      if (videoRef.current) { videoRef.current.srcObject = stream; try { await videoRef.current.play(); } catch { /* autoplay */ } }
+      setOcrCam('live');
+    } catch { if (runRef.current === runId) setOcrCam('unavailable'); }
+  }
+
+  // Re-request the camera on an explicit tap — the fresh user gesture is what iOS needs.
+  function retryScan() { startScan(++runRef.current); }
 
   function stopCamera() {
     const inst = scannerRef.current;
     scannerRef.current = null;
-    if (inst) { try { inst.stop().then(() => inst.clear()).catch(() => {}); } catch { /* already stopped */ } }
+    if (!inst) return Promise.resolve();
+    try { return inst.stop().then(() => inst.clear()).catch(() => {}); } catch { return Promise.resolve(); }
   }
   function stopStream() {
     const s = streamRef.current; streamRef.current = null;
@@ -71,6 +96,7 @@ export default function EventOpsScanner({ onCode, onClose, title = 'Scan a devic
     onCode(String(code || '').trim());
   }
   function close() { stopCamera(); stopStream(); onClose?.(); }
+  function finish() { if (handledRef.current) return; handledRef.current = true; stopCamera(); stopStream(); onDone?.(); }
   function submitManual(e) { e.preventDefault(); if (manual.trim()) emit(manual.trim()); }
 
   // Grab the current camera frame and OCR it.
@@ -117,9 +143,16 @@ export default function EventOpsScanner({ onCode, onClose, title = 'Scan a devic
           <>
             <div style={regionWrap}>
               <div id={REGION_ID} style={region} />
-              {camState !== 'live' && <div style={regionMsg}>{camState === 'starting' ? 'Starting camera…' : '📷 Camera unavailable — type the code below.'}</div>}
+              {camState === 'starting' && <div style={regionMsg}>Starting camera…</div>}
+              {camState === 'unavailable' && (
+                <div style={{ ...regionMsg, flexDirection: 'column', gap: 12 }}>
+                  <div>📷 {camError || 'Camera unavailable.'}</div>
+                  <button onClick={retryScan} style={retryBtn}>↻ Try again</button>
+                  <div style={{ fontSize: 12, opacity: 0.8 }}>…or type the code below.</div>
+                </div>
+              )}
             </div>
-            {camState === 'live' && <p style={hintStyle}>Point at the QR code or barcode</p>}
+            {camState === 'live' && <p style={hintStyle}>Fill the box with the QR — hold steady ~15&nbsp;cm away. Can’t read it? Type the code below.</p>}
           </>
         ) : (
           <div>
@@ -162,9 +195,21 @@ export default function EventOpsScanner({ onCode, onClose, title = 'Scan a devic
           <input value={manual} onChange={(e) => setManual(e.target.value)} placeholder="Or type a code (e.g. SL006)" autoCapitalize="characters" style={input} />
           <button type="submit" style={goBtn} disabled={!manual.trim()}>Go</button>
         </form>
+
+        {onDone && <button onClick={finish} style={doneBtn}>{doneLabel}</button>}
       </div>
     </div>
   );
+}
+
+// Turn a getUserMedia / html5-qrcode failure into a short, actionable reason.
+function camReason(e) {
+  const n = `${(e && (e.name || e.message)) || ''}`;
+  if (/NotAllowed|Permission|denied/i.test(n)) return 'Camera access is blocked. In Safari tap “AA” in the address bar → Website Settings → Camera → Allow, then Try again.';
+  if (/NotFound|Overconstrained|Devices/i.test(n)) return 'No usable camera found on this device.';
+  if (/NotReadable|TrackStart|in use/i.test(n)) return 'The camera is busy in another app — close it, then Try again.';
+  if (/secure|https|SecurityError/i.test(n)) return 'The camera needs a secure (https) connection.';
+  return 'Couldn’t start the camera. Try again, or type the code below.';
 }
 
 function fileToDataUrl(file) {
@@ -195,4 +240,6 @@ const goBtn = { padding: '0 18px', borderRadius: 10, border: 'none', background:
 const primaryWide = { width: '100%', padding: '13px', borderRadius: 10, border: 'none', background: 'var(--brand)', color: '#fff', fontWeight: 800, fontSize: 16, cursor: 'pointer' };
 const modeBtn = (on) => ({ flex: 1, padding: '9px', borderRadius: 10, border: '1px solid ' + (on ? 'var(--brand)' : 'var(--border)'), background: on ? 'var(--brand)' : 'transparent', color: on ? '#fff' : 'var(--text)', fontWeight: on ? 700 : 500, fontSize: 13.5, cursor: 'pointer' });
 const secondaryBtn = { padding: '11px 14px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontWeight: 600, fontSize: 14 };
+const doneBtn = { width: '100%', marginTop: 10, padding: '13px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--text)', fontWeight: 800, fontSize: 16, cursor: 'pointer' };
+const retryBtn = { padding: '11px 20px', borderRadius: 10, border: 'none', background: 'var(--brand)', color: '#fff', fontWeight: 800, fontSize: 15, cursor: 'pointer' };
 const candChip = (on) => ({ padding: '8px 14px', borderRadius: 20, fontSize: 15, fontWeight: 700, cursor: 'pointer', border: '1px solid ' + (on ? 'var(--brand)' : 'var(--border)'), background: on ? 'var(--brand)' : 'transparent', color: on ? '#fff' : 'var(--text)' });

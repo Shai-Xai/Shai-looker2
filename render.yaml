@@ -35,6 +35,9 @@ services:
         value: /var/lib/pulse
       - key: SESSION_SECRET
         generateValue: true        # Render generates a strong secret once
+      - key: MASTER_KEY
+        generateValue: true        # encrypts integration secrets at rest (server/secretbox.js).
+                                    # KEEP A COPY: restoring a backup needs this exact value.
       - key: ADMIN_EMAIL
         sync: false                # set in dashboard (first-boot admin login)
       - key: ADMIN_PASSWORD

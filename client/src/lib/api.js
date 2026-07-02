@@ -209,6 +209,14 @@ export const api = {
   resetPassword: (token, password) => fetch('/api/auth/reset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token, password }) }).then(json),
   requestMagicLink: (email) => fetch('/api/auth/magic', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) }).then(json),
   consumeMagicLink: (token) => fetch('/api/auth/magic/consume', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) }).then(json),
+  // Two-factor auth. verify2fa completes a login step-up (pending token + code).
+  verify2fa: (pendingToken, code) => fetch('/api/auth/2fa', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pendingToken, code }) }).then(json),
+  twoFactorStatus: () => fetch('/api/my/2fa').then(json),
+  twoFactorSetup: () => fetch('/api/my/2fa/setup', { method: 'POST' }).then(json),
+  twoFactorEnable: (code) => fetch('/api/my/2fa/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }) }).then(json),
+  twoFactorDisable: (code) => fetch('/api/my/2fa/disable', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }) }).then(json),
+  twoFactorBackupCodes: (code) => fetch('/api/my/2fa/backup-codes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }) }).then(json),
+  adminResetUser2fa: (userId) => fetch(`/api/admin/users/${userId}/2fa/reset`, { method: 'POST' }).then(json),
 
   // Admin — Entities (clients), Sets (reusable collections), Suites (event ctx)
   adminListInventiveWorkspaces: () => fetch('/api/admin/inventive-workspaces').then(json),
@@ -370,6 +378,9 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     }).then(json),
+
+  // The running build's version stamp (shown in the profile footer).
+  version: () => fetch('/api/version').then(json),
 
   // Drill-down: run a Looker drill link
   drill: (url, suiteId, combinedFilters = []) =>
@@ -760,6 +771,14 @@ export const api = {
   eventopsBulkDevices: (suiteId, b) => fetch(`/api/eventops/suites/${suiteId}/devices/bulk`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   eventopsUpdateDevice: (suiteId, id, b) => fetch(`/api/eventops/suites/${suiteId}/devices/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   eventopsDeleteDevice: (suiteId, id) => fetch(`/api/eventops/suites/${suiteId}/devices/${id}`, { method: 'DELETE' }).then((r) => r.ok),
+  eventopsDeviceTypes: (suiteId) => fetch(`/api/eventops/suites/${suiteId}/device-types`).then(json),
+  eventopsCreateDeviceType: (suiteId, label) => fetch(`/api/eventops/suites/${suiteId}/device-types`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ label }) }).then(json),
+  eventopsUpdateDeviceType: (suiteId, id, label) => fetch(`/api/eventops/suites/${suiteId}/device-types/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ label }) }).then(json),
+  eventopsDeleteDeviceType: (suiteId, id) => fetch(`/api/eventops/suites/${suiteId}/device-types/${id}`, { method: 'DELETE' }).then(json),
+  eventopsIssueCategories: (suiteId) => fetch(`/api/eventops/suites/${suiteId}/issue-categories`).then(json),
+  eventopsCreateIssueCategory: (suiteId, b) => fetch(`/api/eventops/suites/${suiteId}/issue-categories`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  eventopsUpdateIssueCategory: (suiteId, id, b) => fetch(`/api/eventops/suites/${suiteId}/issue-categories/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  eventopsDeleteIssueCategory: (suiteId, id) => fetch(`/api/eventops/suites/${suiteId}/issue-categories/${id}`, { method: 'DELETE' }).then(json),
   eventopsStations: (suiteId) => fetch(`/api/eventops/suites/${suiteId}/stations`).then(json),
   eventopsCreateStation: (suiteId, b) => fetch(`/api/eventops/suites/${suiteId}/stations`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   eventopsUpdateStation: (suiteId, id, b) => fetch(`/api/eventops/suites/${suiteId}/stations/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
@@ -773,6 +792,7 @@ export const api = {
   eventopsKiosk: (suiteId) => fetch(`/api/eventops/suites/${suiteId}/kiosk`).then(json),
   eventopsRotateKiosk: (suiteId) => fetch(`/api/eventops/suites/${suiteId}/kiosk/rotate`, { method: 'POST' }).then(json),
   eventopsSetKiosk: (suiteId, enabled) => fetch(`/api/eventops/suites/${suiteId}/kiosk`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }) }).then(json),
+  eventopsSetKioskSlug: (suiteId, slug) => fetch(`/api/eventops/suites/${suiteId}/kiosk`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slug }) }).then(json),
   eopPortalInfo: (suiteId, token) => fetch(`/api/eventops/portal/${suiteId}/${token}`).then(json),
   eopPortalLogin: (suiteId, token, number) => fetch(`/api/eventops/portal/${suiteId}/${token}/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ number }) }).then(json),
   eopPortalMe: (suiteId, token, staffId) => fetch(`/api/eventops/portal/${suiteId}/${token}/me/${staffId}`).then(json),

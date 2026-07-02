@@ -124,6 +124,20 @@ unhandled errors then post to that channel (throttled to one per kind per
 15 min) instead of dying quietly in the Render log stream. Without it,
 everything still logs to stdout as before.
 
+### 9. Secrets at rest (`MASTER_KEY`)
+Integration credentials (Looker/Resend/Anthropic/Meta/TikTok/Clickatell/GitHub
+tokens, webhook secrets, per-client keys) are **encrypted at rest**
+(`server/secretbox.js`, AES-256-GCM) so a leaked DB export or off-box backup
+can't be read. The encryption key comes from **`MASTER_KEY`** (set it in Render —
+`render.yaml` generates one); if unset, a random key is persisted to
+`DATA_DIR/.master-key`.
+
+**Backup/restore implication:** a snapshot is useless without the key, which is
+the point — but it means **restoring a backup requires the same `MASTER_KEY`**
+(or the `.master-key` file). Keep a copy of `MASTER_KEY` somewhere safe (a
+password manager) alongside your other break-glass credentials. Existing
+plaintext secrets are sealed automatically on first boot after this ships.
+
 ## Pre-production checklist
 - [ ] **Rotate the Looker API3 secret** (it was shared in chat during dev) and set the new one.
 - [ ] Strong `SESSION_SECRET` and admin password.

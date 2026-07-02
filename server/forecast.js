@@ -87,7 +87,10 @@ function fractionAtNow(series, { deadlineMs, nowMs = Date.now(), startMs, daysLe
   // Points that carry a real numeric "days before event" label. Trend tiles append a
   // stray totals row (empty x); ignore it rather than letting it veto the whole axis.
   const numPts = cum.filter((p) => p.t !== '' && p.t != null && !isISO(p.t) && Number.isFinite(Number(p.t)));
-  const hasNumeric = numPts.length >= 2 && numPts.length >= cum.length - 2;
+  // Ratio gate, not an absolute one: a long curve with a few junk rows (totals rows,
+  // null buckets) is still a numeric axis — don't let strays veto it and drop pace to
+  // the window fallback (which reads the curve's very start early in a goal's life).
+  const hasNumeric = numPts.length >= 2 && numPts.length >= Math.max(2, Math.floor(cum.length * 0.8));
   const countdown = hasNumeric && isCountdownAxis(numPts);     // days-before-event
   const forward = hasNumeric && !countdown;                    // day-of-month, week #, …
   const dLeft = Number.isFinite(daysLeft) ? daysLeft

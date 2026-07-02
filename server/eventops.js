@@ -65,6 +65,31 @@ function mount(app, { db, auth }) {
     CREATE INDEX IF NOT EXISTS idx_eventops_devices_suite ON eventops_devices(suite_id);
     CREATE INDEX IF NOT EXISTS idx_eventops_devices_station ON eventops_devices(station_id);
 
+    -- Editable per-event catalogue of device types (drives the Type dropdown). Lazy-seeded
+    -- with sensible defaults the first time an event's list is read.
+    CREATE TABLE IF NOT EXISTS eventops_device_types (
+      id         TEXT PRIMARY KEY,
+      entity_id  TEXT NOT NULL,
+      suite_id   TEXT NOT NULL,
+      label      TEXT NOT NULL DEFAULT '',
+      position   INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_eventops_device_types_suite ON eventops_device_types(suite_id);
+
+    -- Editable per-event catalogue of issue categories (drives the Log-issue picker). One
+    -- may be flagged the default (pre-selected). Lazy-seeded the first time it's read.
+    CREATE TABLE IF NOT EXISTS eventops_issue_categories (
+      id         TEXT PRIMARY KEY,
+      entity_id  TEXT NOT NULL,
+      suite_id   TEXT NOT NULL,
+      label      TEXT NOT NULL DEFAULT '',
+      is_default INTEGER NOT NULL DEFAULT 0,
+      position   INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_eventops_issue_categories_suite ON eventops_issue_categories(suite_id);
+
     CREATE TABLE IF NOT EXISTS eventops_stations (
       id          TEXT PRIMARY KEY,
       entity_id   TEXT NOT NULL,
@@ -190,6 +215,10 @@ function mount(app, { db, auth }) {
   // Per-staff capabilities in the portal: move devices (default ON), do checkpoints (default OFF).
   try { sql.exec('ALTER TABLE eventops_staff ADD COLUMN can_move INTEGER NOT NULL DEFAULT 1'); } catch { /* already there */ }
   try { sql.exec('ALTER TABLE eventops_staff ADD COLUMN can_checkpoint INTEGER NOT NULL DEFAULT 0'); } catch { /* already there */ }
+  // A device can be handed to a staff member (custody) instead of a station; the event log
+  // records the recipient's label so past hand-offs survive a later staff delete.
+  try { sql.exec("ALTER TABLE eventops_devices ADD COLUMN holder_staff_id TEXT NOT NULL DEFAULT ''"); } catch { /* already there */ }
+  try { sql.exec("ALTER TABLE eventops_device_events ADD COLUMN to_holder TEXT NOT NULL DEFAULT ''"); } catch { /* already there */ }
 
   // ── per-client toggle ──────────────────────────────────────────────────────────
   const entityEnabled = (entityId) => {
@@ -231,11 +260,18 @@ function mount(app, { db, auth }) {
 
   // ── shapers ──────────────────────────────────────────────────────────────────
   const stationName = (id) => (id ? (sql.prepare('SELECT name FROM eventops_stations WHERE id=?').get(id) || {}).name || '' : '');
+  const staffName = (id) => {
+    if (!id) return '';
+    const s = sql.prepare('SELECT name, number FROM eventops_staff WHERE id=?').get(id);
+    if (!s) return '';
+    return [s.number ? `#${s.number}` : '', s.name].filter(Boolean).join(' ').trim() || s.number || s.name || '';
+  };
   const deviceRow = (d) => d && ({
     id: d.id, entityId: d.entity_id, suiteId: d.suite_id, label: d.label, type: d.type,
     qrCode: d.qr_code, serialNumber: d.serial_number, state: d.state,
     stationId: d.station_id || null, stationName: stationName(d.station_id),
-    location: d.station_id ? stationName(d.station_id) : 'Hive',
+    holderStaffId: d.holder_staff_id || null, holderName: staffName(d.holder_staff_id),
+    location: d.station_id ? stationName(d.station_id) : (d.holder_staff_id ? `With ${staffName(d.holder_staff_id) || 'staff'}` : 'Hive'),
     createdAt: d.created_at, updatedAt: d.updated_at,
   });
   const stationRow = (s) => s && ({
@@ -247,7 +283,7 @@ function mount(app, { db, auth }) {
   });
   const eventRow = (e) => ({
     id: e.id, deviceId: e.device_id, kind: e.kind, fromState: e.from_state, toState: e.to_state,
-    fromStation: stationName(e.from_station_id), toStation: stationName(e.to_station_id),
+    fromStation: stationName(e.from_station_id), toStation: stationName(e.to_station_id), toHolder: e.to_holder || '',
     actor: e.actor, staffLabel: e.staff_label || '', note: e.note, unusual: !!e.unusual, at: e.at,
   });
   const issueRow = (i) => ({
@@ -280,13 +316,13 @@ function mount(app, { db, auth }) {
     return { id: s.id, label };
   }
 
-  function logEvent(d, { kind, toState, toStation, note, actor, unusual, staff }) {
+  function logEvent(d, { kind, toState, toStation, toHolder, note, actor, unusual, staff }) {
     sql.prepare(`INSERT INTO eventops_device_events
-      (id, device_id, entity_id, suite_id, kind, from_state, to_state, from_station_id, to_station_id, actor, note, unusual, at, staff_id, staff_label)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      (id, device_id, entity_id, suite_id, kind, from_state, to_state, from_station_id, to_station_id, actor, note, unusual, at, staff_id, staff_label, to_holder)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
       .run(uuid(), d.id, d.entity_id, d.suite_id, kind, d.state, toState ?? d.state,
         d.station_id || '', toStation ?? (d.station_id || ''), actor || '', String(note || '').slice(0, 2000),
-        unusual ? 1 : 0, now(), staff?.id || '', staff?.label || '');
+        unusual ? 1 : 0, now(), staff?.id || '', staff?.label || '', str(toHolder, 120));
   }
   const str = (v, max = 200) => String(v == null ? '' : v).slice(0, max);
 
@@ -298,9 +334,15 @@ function mount(app, { db, auth }) {
     || sql.prepare('SELECT * FROM eventops_devices WHERE suite_id=? AND label=? COLLATE NOCASE').get(suiteId, code);
 
   // Apply a move/status change + write the audit row. Returns { device, unusual } or { error }.
-  function applyMove(su, d, { stationId, state, staffId, actor, note }) {
-    let toState; let toStation = '';
-    if (state && STATES.includes(state)) {
+  // A move can target a station, the Hive, a status (lost/damaged), or a staff member's custody
+  // (holderStaffId) — the last clears the station and records who now holds the device.
+  function applyMove(su, d, { stationId, state, holderStaffId, staffId, actor, note }) {
+    let toState; let toStation = ''; let toHolderId = ''; let toHolderLabel = '';
+    if (holderStaffId) {
+      const holder = resolveStaff(su.id, holderStaffId);
+      if (!holder) return { error: 'Unknown staff member.' };
+      toState = 'deployed'; toStation = ''; toHolderId = holder.id; toHolderLabel = holder.label;
+    } else if (state && STATES.includes(state)) {
       toState = state;
       toStation = state === 'deployed' ? str(stationId, 60) : '';
     } else {
@@ -313,14 +355,14 @@ function mount(app, { db, auth }) {
       }
     }
     const unusual = isUnusual(d.state, toState);
-    logEvent(d, { kind: state ? 'status' : 'move', toState, toStation, actor, note, unusual, staff: resolveStaff(su.id, staffId) });
-    sql.prepare('UPDATE eventops_devices SET state=?, station_id=?, updated_at=? WHERE id=?').run(toState, toStation, now(), d.id);
+    logEvent(d, { kind: state ? 'status' : 'move', toState, toStation, toHolder: toHolderLabel, actor, note, unusual, staff: resolveStaff(su.id, staffId) });
+    sql.prepare('UPDATE eventops_devices SET state=?, station_id=?, holder_staff_id=?, updated_at=? WHERE id=?').run(toState, toStation, toHolderId, now(), d.id);
     return { device: deviceRow(getDevice(d.id)), unusual };
   }
 
   // Log an issue / liaison check + its audit row. Returns the issue row.
   function applyIssue(su, d, { category, note, resolution, resolved, staffId, actor }) {
-    const cat = ISSUE_CATEGORIES.includes(category) ? category : (str(category, 40).trim() || 'other');
+    const cat = str(category, 40).trim() || defaultCategory(su);
     const n = str(note, 2000).trim();
     const res = str(resolution, 2000).trim();
     const resolvedNow = !!resolved || !!res;
@@ -414,7 +456,9 @@ function mount(app, { db, auth }) {
   function cleanDevice(b) {
     return {
       label: str(b.label, 120),
-      type: DEVICE_TYPES.includes(b.type) ? b.type : 'handheld',
+      // Type is a free label chosen from the event's editable catalogue (see device-types
+      // routes below); we accept whatever the UI sends and default to a sensible fallback.
+      type: str(b.type, 40).trim() || 'handheld',
       qrCode: str(b.qrCode, 120).trim(),
       serialNumber: str(b.serialNumber, 120).trim(),
     };
@@ -448,7 +492,7 @@ function mount(app, { db, auth }) {
       const prefix = str(b.prefix, 40).trim();
       const start = Math.max(0, parseInt(b.start, 10) || 1);
       const pad = Math.max(0, Math.min(8, parseInt(b.pad, 10) || 3));
-      const type = DEVICE_TYPES.includes(b.type) ? b.type : 'handheld';
+      const type = str(b.type, 40).trim() || 'handheld';
       for (let i = 0; i < count; i++) {
         const code = `${prefix}${String(start + i).padStart(pad, '0')}`;
         items.push({ label: code, type, qrCode: code, serialNumber: '' });
@@ -458,6 +502,107 @@ function mount(app, { db, auth }) {
     if (!items.length) return res.status(400).json({ error: 'Nothing to create — give a list, or a count + prefix.' });
     const made = sql.transaction(() => items.map((c) => insertDevice(su, c, req.user.email)))();
     res.status(201).json({ created: made.length, devices: made.map(deviceRow) });
+  });
+
+  // ── Device types: an editable per-event catalogue that drives the Type dropdown ──
+  const deviceTypeRow = (t) => ({ id: t.id, label: t.label });
+  const listTypes = (su) => sql.prepare('SELECT * FROM eventops_device_types WHERE suite_id=? ORDER BY position, created_at').all(su.id);
+  function deviceTypes(su) {
+    let rows = listTypes(su);
+    if (rows.length === 0) { // lazy-seed defaults the first time an event's list is read
+      const ts = now();
+      const ins = sql.prepare('INSERT INTO eventops_device_types (id, entity_id, suite_id, label, position, created_at) VALUES (?,?,?,?,?,?)');
+      sql.transaction(() => DEVICE_TYPES.forEach((label, i) => ins.run(uuid(), su.entityId, su.id, label, i, ts)))();
+      rows = listTypes(su);
+    }
+    return rows;
+  }
+
+  app.get('/api/eventops/suites/:suiteId/device-types', auth.requireAuth, (req, res) => {
+    const su = gateSuite(req, res); if (!su) return;
+    res.json({ types: deviceTypes(su).map(deviceTypeRow) });
+  });
+  app.post('/api/eventops/suites/:suiteId/device-types', auth.requireAuth, (req, res) => {
+    const su = gateSuite(req, res, { manage: true }); if (!su) return;
+    const label = str(req.body?.label, 40).trim();
+    if (!label) return res.status(400).json({ error: 'Give the type a name.' });
+    deviceTypes(su); // ensure seeded so positions stay contiguous
+    if (sql.prepare('SELECT id FROM eventops_device_types WHERE suite_id=? AND label=? COLLATE NOCASE').get(su.id, label)) return res.status(409).json({ error: 'That type already exists.' });
+    const pos = (sql.prepare('SELECT MAX(position) m FROM eventops_device_types WHERE suite_id=?').get(su.id).m ?? -1) + 1;
+    sql.prepare('INSERT INTO eventops_device_types (id, entity_id, suite_id, label, position, created_at) VALUES (?,?,?,?,?,?)').run(uuid(), su.entityId, su.id, label, pos, now());
+    res.status(201).json({ types: deviceTypes(su).map(deviceTypeRow) });
+  });
+  app.put('/api/eventops/suites/:suiteId/device-types/:id', auth.requireAuth, (req, res) => {
+    const su = gateSuite(req, res, { manage: true }); if (!su) return;
+    const t = sql.prepare('SELECT * FROM eventops_device_types WHERE id=? AND suite_id=?').get(req.params.id, su.id);
+    if (!t) return res.status(404).json({ error: 'Type not found' });
+    const label = str(req.body?.label, 40).trim();
+    if (!label) return res.status(400).json({ error: 'Give the type a name.' });
+    if (sql.prepare('SELECT id FROM eventops_device_types WHERE suite_id=? AND label=? COLLATE NOCASE AND id<>?').get(su.id, label, t.id)) return res.status(409).json({ error: 'That type already exists.' });
+    // Re-tag existing devices so a rename carries their type across.
+    sql.prepare('UPDATE eventops_devices SET type=? WHERE suite_id=? AND type=? COLLATE NOCASE').run(label, su.id, t.label);
+    sql.prepare('UPDATE eventops_device_types SET label=? WHERE id=?').run(label, t.id);
+    res.json({ types: deviceTypes(su).map(deviceTypeRow) });
+  });
+  app.delete('/api/eventops/suites/:suiteId/device-types/:id', auth.requireAuth, (req, res) => {
+    const su = gateSuite(req, res, { manage: true }); if (!su) return;
+    const t = sql.prepare('SELECT * FROM eventops_device_types WHERE id=? AND suite_id=?').get(req.params.id, su.id);
+    if (!t) return res.status(404).json({ error: 'Type not found' });
+    sql.prepare('DELETE FROM eventops_device_types WHERE id=?').run(t.id);
+    res.json({ types: deviceTypes(su).map(deviceTypeRow) });
+  });
+
+  // ── Issue categories: an editable per-event catalogue with one flagged as default ──
+  const issueCategoryRow = (c) => ({ id: c.id, label: c.label, isDefault: !!c.is_default });
+  const listCategories = (su) => sql.prepare('SELECT * FROM eventops_issue_categories WHERE suite_id=? ORDER BY position, created_at').all(su.id);
+  function issueCategories(su) {
+    let rows = listCategories(su);
+    if (rows.length === 0) { // lazy-seed the built-in categories; the first is the default
+      const ts = now();
+      const ins = sql.prepare('INSERT INTO eventops_issue_categories (id, entity_id, suite_id, label, is_default, position, created_at) VALUES (?,?,?,?,?,?,?)');
+      sql.transaction(() => ISSUE_CATEGORIES.forEach((label, i) => ins.run(uuid(), su.entityId, su.id, label, i === 0 ? 1 : 0, i, ts)))();
+      rows = listCategories(su);
+    }
+    return rows;
+  }
+  const defaultCategory = (su) => { const rows = issueCategories(su); return (rows.find((c) => c.is_default) || rows[0])?.label || 'other'; };
+
+  app.get('/api/eventops/suites/:suiteId/issue-categories', auth.requireAuth, (req, res) => {
+    const su = gateSuite(req, res); if (!su) return;
+    res.json({ categories: issueCategories(su).map(issueCategoryRow) });
+  });
+  app.post('/api/eventops/suites/:suiteId/issue-categories', auth.requireAuth, (req, res) => {
+    const su = gateSuite(req, res, { manage: true }); if (!su) return;
+    const label = str(req.body?.label, 40).trim();
+    if (!label) return res.status(400).json({ error: 'Give the category a name.' });
+    issueCategories(su); // ensure seeded
+    if (sql.prepare('SELECT id FROM eventops_issue_categories WHERE suite_id=? AND label=? COLLATE NOCASE').get(su.id, label)) return res.status(409).json({ error: 'That category already exists.' });
+    const pos = (sql.prepare('SELECT MAX(position) m FROM eventops_issue_categories WHERE suite_id=?').get(su.id).m ?? -1) + 1;
+    sql.prepare('INSERT INTO eventops_issue_categories (id, entity_id, suite_id, label, is_default, position, created_at) VALUES (?,?,?,?,?,?,?)').run(uuid(), su.entityId, su.id, label, req.body?.isDefault ? 1 : 0, pos, now());
+    res.status(201).json({ categories: issueCategories(su).map(issueCategoryRow) });
+  });
+  app.put('/api/eventops/suites/:suiteId/issue-categories/:id', auth.requireAuth, (req, res) => {
+    const su = gateSuite(req, res, { manage: true }); if (!su) return;
+    const c = sql.prepare('SELECT * FROM eventops_issue_categories WHERE id=? AND suite_id=?').get(req.params.id, su.id);
+    if (!c) return res.status(404).json({ error: 'Category not found' });
+    const label = req.body?.label != null ? str(req.body.label, 40).trim() : c.label;
+    if (!label) return res.status(400).json({ error: 'Give the category a name.' });
+    if (sql.prepare('SELECT id FROM eventops_issue_categories WHERE suite_id=? AND label=? COLLATE NOCASE AND id<>?').get(su.id, label, c.id)) return res.status(409).json({ error: 'That category already exists.' });
+    if (label !== c.label) sql.prepare('UPDATE eventops_issues SET category=? WHERE suite_id=? AND category=? COLLATE NOCASE').run(label, su.id, c.label); // re-tag existing issues
+    // Default is an independent flag — more than one category can be a default.
+    const isDefault = req.body?.isDefault === true ? 1 : req.body?.isDefault === false ? 0 : c.is_default;
+    sql.prepare('UPDATE eventops_issue_categories SET label=?, is_default=? WHERE id=?').run(label, isDefault, c.id);
+    res.json({ categories: issueCategories(su).map(issueCategoryRow) });
+  });
+  app.delete('/api/eventops/suites/:suiteId/issue-categories/:id', auth.requireAuth, (req, res) => {
+    const su = gateSuite(req, res, { manage: true }); if (!su) return;
+    const c = sql.prepare('SELECT * FROM eventops_issue_categories WHERE id=? AND suite_id=?').get(req.params.id, su.id);
+    if (!c) return res.status(404).json({ error: 'Category not found' });
+    sql.prepare('DELETE FROM eventops_issue_categories WHERE id=?').run(c.id);
+    // Keep at least one default alive: if none remain, promote the first.
+    const rest = listCategories(su);
+    if (rest.length && !rest.some((x) => x.is_default)) sql.prepare('UPDATE eventops_issue_categories SET is_default=1 WHERE id=?').run(rest[0].id);
+    res.json({ categories: issueCategories(su).map(issueCategoryRow) });
   });
 
   app.put('/api/eventops/suites/:suiteId/devices/:id', auth.requireAuth, (req, res) => {
@@ -571,7 +716,7 @@ function mount(app, { db, auth }) {
     const b = req.body || {};
     const d = getDevice(b.deviceId);
     if (!d || d.suite_id !== su.id) return res.status(404).json({ error: 'Device not found' });
-    const out = applyMove(su, d, { stationId: b.stationId, state: b.state, staffId: b.staffId, actor: req.user.email, note: b.note });
+    const out = applyMove(su, d, { stationId: b.stationId, state: b.state, holderStaffId: b.holderStaffId, staffId: b.staffId, actor: req.user.email, note: b.note });
     if (out.error) return res.status(400).json({ error: out.error });
     res.json(out);
   });
@@ -684,9 +829,16 @@ function mount(app, { db, auth }) {
   });
   app.put('/api/eventops/suites/:suiteId/kiosk', auth.requireAuth, (req, res) => {
     const su = gateSuite(req, res, { manage: true }); if (!su) return;
-    const k = kioskFor(su.id, { create: true });
-    sql.prepare('UPDATE eventops_kiosk SET enabled=?, updated_at=? WHERE suite_id=?').run((req.body || {}).enabled ? 1 : 0, now(), su.id);
-    res.json(kioskView(su.id, kioskFor(su.id) || k));
+    kioskFor(su.id, { create: true });
+    const b = req.body || {};
+    // Optional friendly slug for the link (…/portal/:suiteId/<slug>). URL-safe, ≥3 chars.
+    if (b.slug != null) {
+      const slug = String(b.slug).trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48);
+      if (slug.length < 3) return res.status(400).json({ error: 'Use at least 3 letters, numbers or hyphens for the link.' });
+      sql.prepare('UPDATE eventops_kiosk SET token=?, updated_at=? WHERE suite_id=?').run(slug, now(), su.id);
+    }
+    if (b.enabled != null) sql.prepare('UPDATE eventops_kiosk SET enabled=?, updated_at=? WHERE suite_id=?').run(b.enabled ? 1 : 0, now(), su.id);
+    res.json(kioskView(su.id, kioskFor(su.id)));
   });
 
   // ════════════════════════════ PUBLIC staff portal (token-gated, NO Pulse login) ═══
@@ -707,7 +859,14 @@ function mount(app, { db, auth }) {
   // Event basics (name + stations) so the portal can show context before login.
   app.get('/api/eventops/portal/:suiteId/:token', (req, res) => {
     const su = portalSuite(req, res); if (!su) return;
-    res.json({ suite: { id: su.id, name: su.name }, stations: sql.prepare('SELECT * FROM eventops_stations WHERE suite_id=? ORDER BY position, name').all(su.id).map(stationRow), checkpoints: listCheckpoints(su.id) });
+    res.json({
+      suite: { id: su.id, name: su.name },
+      stations: sql.prepare('SELECT * FROM eventops_stations WHERE suite_id=? ORDER BY position, name').all(su.id).map(stationRow),
+      checkpoints: listCheckpoints(su.id),
+      issueCategories: issueCategories(su).map(issueCategoryRow),
+      // Roster (name + number only) so a staffer can hand a device to a colleague.
+      staff: sql.prepare('SELECT id, name, number FROM eventops_staff WHERE suite_id=? ORDER BY number, name').all(su.id),
+    });
   });
 
   // Log in by staff number → the staff record (used to attribute their actions).
@@ -748,7 +907,8 @@ function mount(app, { db, auth }) {
     const d = findDeviceByCode(su.id, code);
     if (!d) return res.status(404).json({ error: `No device matches “${code}” at this event.`, code });
     const openIssues = sql.prepare("SELECT COUNT(*) c FROM eventops_issues WHERE device_id=? AND status='open'").get(d.id).c;
-    res.json({ device: deviceRow(d), openIssues });
+    const events = sql.prepare('SELECT * FROM eventops_device_events WHERE device_id=? ORDER BY at DESC LIMIT 20').all(d.id).map(eventRow);
+    res.json({ device: deviceRow(d), openIssues, events });
   });
 
   // A staff member moves a device (attributed to them). Requires their staffId.
@@ -760,7 +920,7 @@ function mount(app, { db, auth }) {
     if (s.can_move != null && !s.can_move) return res.status(403).json({ error: 'You don’t have permission to move devices.' });
     const d = getDevice(b.deviceId);
     if (!d || d.suite_id !== su.id) return res.status(404).json({ error: 'Device not found' });
-    const out = applyMove(su, d, { stationId: b.stationId, staffId: s.id, actor: `portal:${s.number || s.name}`, note: b.note });
+    const out = applyMove(su, d, { stationId: b.stationId, holderStaffId: b.holderStaffId, staffId: s.id, actor: `portal:${s.number || s.name}`, note: b.note });
     if (out.error) return res.status(400).json({ error: out.error });
     res.json(out);
   });

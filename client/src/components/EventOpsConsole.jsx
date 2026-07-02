@@ -223,6 +223,7 @@ function feedText(e) {
   if (e.kind === 'create') return '➕ Device added to inventory';
   if (e.kind === 'check') return `⚠️ ${e.note || 'Issue logged'}${by}`;
   if (e.kind === 'status') return `🔁 Marked ${STATE_LABEL[e.toState] || e.toState}${e.unusual ? ' ⚑' : ''}${by}`;
+  if (e.toHolder) return `🤝 Handed to ${e.toHolder}${e.unusual ? ' ⚑' : ''}${by}`;
   const dest = e.toStation || (e.toState === 'in_stock' ? 'Hive' : STATE_LABEL[e.toState] || e.toState);
   const from = e.fromStation || (e.fromState === 'in_stock' ? 'Hive' : STATE_LABEL[e.fromState] || '');
   return `↪️ Moved ${from ? from + ' → ' : ''}${dest}${e.unusual ? ' ⚑ unusual' : ''}${by}`;
@@ -236,9 +237,14 @@ function DevicesTab({ suiteId, canManage, onAct, flash, reloadKey }) {
   const [pairFilter, setPairFilter] = useState('all'); // all | unpaired | paired
   const [q, setQ] = useState('');                      // search
   const [adding, setAdding] = useState(false);
+  const [types, setTypes] = useState([]);              // editable device-type catalogue
+  const [managingTypes, setManagingTypes] = useState(false);
+  const [pairMode, setPairMode] = useState(false);     // tap a device → straight to QR scan
+  const [pairingDevice, setPairingDevice] = useState(null);
 
   const load = () => api.eventopsDevices(suiteId).then((r) => setDevices(r.devices || [])).catch(() => setDevices([]));
-  useEffect(() => { setDevices(null); load(); }, [suiteId, reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const loadTypes = () => api.eventopsDeviceTypes(suiteId).then((r) => setTypes(r.types || [])).catch(() => setTypes([]));
+  useEffect(() => { setDevices(null); load(); loadTypes(); }, [suiteId, reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const counts = useMemo(() => {
     const c = { all: devices?.length || 0, unpaired: 0 };
@@ -266,8 +272,15 @@ function DevicesTab({ suiteId, canManage, onAct, flash, reloadKey }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="🔍 Search devices (code, label, serial, station)…" style={{ ...input, flex: 1, minWidth: 200 }} />
+        {canManage && <button onClick={() => setPairMode((v) => !v)} style={pairMode ? primaryBtn : ghostBtn}>🔗 Pair mode{pairMode ? ' on' : ''}</button>}
+        {canManage && <button onClick={() => setManagingTypes(true)} style={ghostBtn}>🏷 Types</button>}
         {canManage && <button onClick={() => setAdding(true)} style={primaryBtn}>＋ Add devices</button>}
       </div>
+      {pairMode && (
+        <div style={{ ...card, background: 'rgba(var(--brand-rgb),0.10)', border: '1px solid var(--brand)', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+          🔗 <span><strong>Pair mode is on.</strong> Tap a device to scan &amp; pair its QR code. Turn it off to move/edit devices as usual.</span>
+        </div>
+      )}
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
         <Chip on={filter === 'all'} onClick={() => setFilter('all')}>All {counts.all}</Chip>
         {STATE_ORDER.filter((s) => counts[s]).map((s) => (
@@ -291,13 +304,13 @@ function DevicesTab({ suiteId, canManage, onAct, flash, reloadKey }) {
       {shown.length === 0 ? <Empty>No devices match this filter.</Empty> : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {shown.map((d) => (
-            <button key={d.id} onClick={() => canManage && onAct(d)} style={deviceRow(canManage)}>
+            <button key={d.id} onClick={() => canManage && (pairMode ? setPairingDevice(d) : onAct(d))} style={deviceRow(canManage)}>
               <div style={{ textAlign: 'left', minWidth: 0 }}>
                 <div style={{ fontWeight: 650, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {d.label || d.qrCode || d.serialNumber || 'Device'}
+                  {pairMode && <span style={{ marginRight: 6 }}>📷</span>}{d.label || d.qrCode || d.serialNumber || 'Device'}
                 </div>
                 <div style={{ fontSize: 12, color: 'var(--muted)' }}>
-                  {d.type} · {d.qrCode
+                  {titleCase(d.type)} · {d.qrCode
                     ? <span style={{ color: 'var(--brand)' }}>🔗 {d.qrCode}</span>
                     : <span style={{ color: 'var(--muted)' }}>○ no QR paired</span>}
                   {d.serialNumber ? ` · ${d.serialNumber}` : ''}
@@ -309,7 +322,23 @@ function DevicesTab({ suiteId, canManage, onAct, flash, reloadKey }) {
         </div>
       )}
 
-      {adding && <AddDevicesModal suiteId={suiteId} onClose={() => setAdding(false)} onDone={() => { setAdding(false); load(); flash('Devices added'); }} />}
+      {adding && <AddDevicesModal suiteId={suiteId} types={types} onClose={() => setAdding(false)} onDone={() => { setAdding(false); load(); flash('Devices added'); }} />}
+      {managingTypes && <ManageTypesModal suiteId={suiteId} types={types} onClose={() => setManagingTypes(false)} onChange={(t) => setTypes(t)} flash={flash} />}
+      {pairingDevice && (
+        <Suspense fallback={null}>
+          <EventOpsScanner
+            title={`Pair QR → ${pairingDevice.label || pairingDevice.qrCode || 'device'}`}
+            onClose={() => setPairingDevice(null)}
+            onCode={async (code) => {
+              const qr = String(code || '').trim();
+              setPairingDevice(null);
+              if (!qr) return;
+              try { await api.eventopsUpdateDevice(suiteId, pairingDevice.id, { qrCode: qr }); load(); flash(`Paired ${pairingDevice.label || 'device'} → ${qr}`); }
+              catch (e) { alert(e.message); }
+            }}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }
@@ -318,14 +347,17 @@ function LocationBadge({ device }) {
   const deployed = device.state === 'deployed';
   const bg = deployed ? 'rgba(var(--brand-rgb),0.14)' : device.state === 'lost' || device.state === 'damaged' ? 'rgba(220,60,60,0.14)' : 'var(--bg)';
   const color = deployed ? 'var(--brand)' : device.state === 'lost' || device.state === 'damaged' ? 'var(--error)' : 'var(--muted)';
-  const text = deployed ? device.stationName || 'Deployed' : device.state === 'in_stock' || device.state === 'returned' ? 'Hive' : STATE_LABEL[device.state];
+  const text = deployed
+    ? (device.stationName || (device.holderName ? `🤝 ${device.holderName}` : 'Deployed'))
+    : device.state === 'in_stock' || device.state === 'returned' ? 'Hive' : STATE_LABEL[device.state];
   return <span style={{ ...badge, background: bg, color, flexShrink: 0 }}>{text}</span>;
 }
 
-function AddDevicesModal({ suiteId, onClose, onDone }) {
+function AddDevicesModal({ suiteId, types = [], onClose, onDone }) {
+  const dflt = types[0]?.label || 'handheld';
   const [mode, setMode] = useState('single'); // single | bulk
-  const [single, setSingle] = useState({ label: '', qrCode: '', serialNumber: '', type: 'handheld' });
-  const [bulk, setBulk] = useState({ prefix: 'SL', start: 1, count: 10, pad: 3, type: 'handheld' });
+  const [single, setSingle] = useState({ label: '', qrCode: '', serialNumber: '', type: dflt });
+  const [bulk, setBulk] = useState({ prefix: 'SL', start: 1, count: 10, pad: 3, type: dflt });
   const [scanning, setScanning] = useState(false); // scanning a QR to pair while adding
   const [busy, setBusy] = useState(false);
 
@@ -358,7 +390,7 @@ function AddDevicesModal({ suiteId, onClose, onDone }) {
             </div>
           </Field>
           <Field label="Serial number"><input style={input} value={single.serialNumber} onChange={(e) => setSingle({ ...single, serialNumber: e.target.value })} /></Field>
-          <Field label="Type"><TypeSelect value={single.type} onChange={(v) => setSingle({ ...single, type: v })} /></Field>
+          <Field label="Type"><TypeSelect value={single.type} types={types} onChange={(v) => setSingle({ ...single, type: v })} /></Field>
         </div>
       ) : (
         <div style={fieldCol}>
@@ -368,7 +400,7 @@ function AddDevicesModal({ suiteId, onClose, onDone }) {
             <Field label="How many"><input style={input} type="number" value={bulk.count} onChange={(e) => setBulk({ ...bulk, count: e.target.value })} /></Field>
             <Field label="Digits"><input style={input} type="number" value={bulk.pad} onChange={(e) => setBulk({ ...bulk, pad: e.target.value })} /></Field>
           </div>
-          <Field label="Type"><TypeSelect value={bulk.type} onChange={(v) => setBulk({ ...bulk, type: v })} /></Field>
+          <Field label="Type"><TypeSelect value={bulk.type} types={types} onChange={(v) => setBulk({ ...bulk, type: v })} /></Field>
           <p style={{ fontSize: 12, color: 'var(--muted)', margin: 0 }}>
             Creates {bulk.count || 0} devices: {bulk.prefix}{String(bulk.start || 1).padStart(Number(bulk.pad) || 3, '0')} … {bulk.prefix}{String((Number(bulk.start) || 1) + (Number(bulk.count) || 0) - 1).padStart(Number(bulk.pad) || 3, '0')}
           </p>
@@ -386,11 +418,148 @@ function AddDevicesModal({ suiteId, onClose, onDone }) {
     </Modal>
   );
 }
-const TypeSelect = ({ value, onChange }) => (
-  <select style={input} value={value} onChange={(e) => onChange(e.target.value)}>
-    {DEVICE_TYPES.map((t) => <option key={t} value={t}>{t[0].toUpperCase() + t.slice(1)}</option>)}
-  </select>
-);
+// Type dropdown sourced from the event's editable catalogue. Falls back to the built-in
+// defaults if the catalogue hasn't loaded, and always keeps the current value selectable
+// (so a device whose type was renamed/removed still shows correctly).
+const TypeSelect = ({ value, types = [], onChange }) => {
+  const labels = types.length ? types.map((t) => t.label) : DEVICE_TYPES;
+  const opts = value && !labels.some((l) => l === value) ? [value, ...labels] : labels;
+  return (
+    <select style={input} value={value} onChange={(e) => onChange(e.target.value)}>
+      {opts.map((t) => <option key={t} value={t}>{titleCase(t)}</option>)}
+    </select>
+  );
+};
+const titleCase = (s) => String(s || '').replace(/\b\w/g, (c) => c.toUpperCase());
+const catLabel = (c) => CAT_LABEL[c] || titleCase(String(c || '').replace(/_/g, ' '));
+
+// Add / rename / remove the event's device types. Changes take effect immediately for the
+// Type dropdown; renaming re-tags existing devices (server-side) so their type carries over.
+function ManageTypesModal({ suiteId, types, onClose, onChange, flash }) {
+  const [list, setList] = useState(types);
+  const [adding, setAdding] = useState('');
+  const [editId, setEditId] = useState(null);
+  const [editVal, setEditVal] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function add() {
+    const label = adding.trim(); if (!label) return;
+    setBusy(true);
+    try { const r = await api.eventopsCreateDeviceType(suiteId, label); setList(r.types); onChange(r.types); setAdding(''); }
+    catch (e) { alert(e.message); }
+    setBusy(false);
+  }
+  async function saveEdit(id) {
+    const label = editVal.trim(); if (!label) { setEditId(null); return; }
+    setBusy(true);
+    try { const r = await api.eventopsUpdateDeviceType(suiteId, id, label); setList(r.types); onChange(r.types); setEditId(null); }
+    catch (e) { alert(e.message); }
+    setBusy(false);
+  }
+  async function remove(id) {
+    setBusy(true);
+    try { const r = await api.eventopsDeleteDeviceType(suiteId, id); setList(r.types); onChange(r.types); flash?.('Type removed'); }
+    catch (e) { alert(e.message); }
+    setBusy(false);
+  }
+
+  return (
+    <Modal title="Device types" subtitle="Used in the Type dropdown when adding devices" onClose={onClose}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {list.length === 0 && <Empty>No types yet — add one below.</Empty>}
+        {list.map((t) => (
+          <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {editId === t.id ? (
+              <>
+                <input style={{ ...input, flex: 1 }} value={editVal} autoFocus onChange={(e) => setEditVal(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && saveEdit(t.id)} />
+                <button onClick={() => saveEdit(t.id)} disabled={busy} style={primaryBtn}>Save</button>
+                <button onClick={() => setEditId(null)} style={iconBtn}>✕</button>
+              </>
+            ) : (
+              <>
+                <span style={{ flex: 1, fontSize: 14, fontWeight: 600 }}>{titleCase(t.label)}</span>
+                <button onClick={() => { setEditId(t.id); setEditVal(t.label); }} style={iconBtn}>✏️</button>
+                <button onClick={() => remove(t.id)} disabled={busy} style={iconBtn}>🗑️</button>
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+      <div style={{ display: 'flex', gap: 6, marginTop: 14 }}>
+        <input style={{ ...input, flex: 1 }} value={adding} onChange={(e) => setAdding(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()} placeholder="New type, e.g. Scanner" />
+        <button onClick={add} disabled={busy || !adding.trim()} style={primaryBtn}>＋ Add</button>
+      </div>
+    </Modal>
+  );
+}
+
+// Add / rename / remove issue categories and star defaults (⭐). More than one can be a
+// default; the first starred is pre-selected when logging. Renaming re-tags existing issues.
+function ManageCategoriesModal({ suiteId, categories, onClose, onChange, flash }) {
+  const [list, setList] = useState(categories);
+  const [adding, setAdding] = useState('');
+  const [editId, setEditId] = useState(null);
+  const [editVal, setEditVal] = useState('');
+  const [busy, setBusy] = useState(false);
+  const apply = (r) => { setList(r.categories); onChange(r.categories); };
+
+  async function add() {
+    const label = adding.trim(); if (!label) return;
+    setBusy(true);
+    try { apply(await api.eventopsCreateIssueCategory(suiteId, { label, isDefault: list.length === 0 })); setAdding(''); }
+    catch (e) { alert(e.message); }
+    setBusy(false);
+  }
+  async function saveEdit(id) {
+    const label = editVal.trim(); if (!label) { setEditId(null); return; }
+    setBusy(true);
+    try { apply(await api.eventopsUpdateIssueCategory(suiteId, id, { label })); setEditId(null); }
+    catch (e) { alert(e.message); }
+    setBusy(false);
+  }
+  async function toggleDefault(c) {
+    setBusy(true);
+    try { apply(await api.eventopsUpdateIssueCategory(suiteId, c.id, { isDefault: !c.isDefault })); }
+    catch (e) { alert(e.message); }
+    setBusy(false);
+  }
+  async function remove(id) {
+    setBusy(true);
+    try { apply(await api.eventopsDeleteIssueCategory(suiteId, id)); flash?.('Category removed'); }
+    catch (e) { alert(e.message); }
+    setBusy(false);
+  }
+
+  return (
+    <Modal title="Issue categories" subtitle="Shown when logging an issue · ⭐ = default (pick one or more)" onClose={onClose}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {list.length === 0 && <Empty>No categories yet — add one below.</Empty>}
+        {list.map((c) => (
+          <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {editId === c.id ? (
+              <>
+                <input style={{ ...input, flex: 1 }} value={editVal} autoFocus onChange={(e) => setEditVal(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && saveEdit(c.id)} />
+                <button onClick={() => saveEdit(c.id)} disabled={busy} style={primaryBtn}>Save</button>
+                <button onClick={() => setEditId(null)} style={iconBtn}>✕</button>
+              </>
+            ) : (
+              <>
+                <button onClick={() => toggleDefault(c)} disabled={busy} title={c.isDefault ? 'A default — tap to unset' : 'Set as a default'} style={{ ...iconBtn, border: 'none', fontSize: 16 }}>{c.isDefault ? '⭐' : '☆'}</button>
+                <span style={{ flex: 1, fontSize: 14, fontWeight: 600 }}>{catLabel(c.label)}</span>
+                <button onClick={() => { setEditId(c.id); setEditVal(c.label); }} style={iconBtn}>✏️</button>
+                <button onClick={() => remove(c.id)} disabled={busy} style={iconBtn}>🗑️</button>
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+      <div style={{ display: 'flex', gap: 6, marginTop: 14 }}>
+        <input style={{ ...input, flex: 1 }} value={adding} onChange={(e) => setAdding(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()} placeholder="New category, e.g. Overheating" />
+        <button onClick={add} disabled={busy || !adding.trim()} style={primaryBtn}>＋ Add</button>
+      </div>
+    </Modal>
+  );
+}
 
 // ─────────────────────────────── Stations tab ─────────────────────────────────
 function StationsTab({ suiteId, canManage, flash, reloadKey, onRefresh }) {
@@ -461,8 +630,12 @@ function IssuesTab({ suiteId, canManage, flash, reloadKey }) {
   const [status, setStatus] = useState('open');
   const [issues, setIssues] = useState(null);
   const [resolving, setResolving] = useState(null); // the issue being resolved
+  const [categories, setCategories] = useState([]);
+  const [managingCats, setManagingCats] = useState(false);
   const load = () => api.eventopsIssues(suiteId, status).then((r) => setIssues(r.issues || [])).catch(() => setIssues([]));
+  const loadCats = () => api.eventopsIssueCategories(suiteId).then((r) => setCategories(r.categories || [])).catch(() => setCategories([]));
   useEffect(() => { setIssues(null); load(); }, [suiteId, status, reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { loadCats(); }, [suiteId, reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function doResolve(resolution) {
     try { await api.eventopsResolveIssue(suiteId, resolving.id, { resolution }); setResolving(null); load(); flash('Issue resolved'); } catch (e) { alert(e.message); }
@@ -471,11 +644,13 @@ function IssuesTab({ suiteId, canManage, flash, reloadKey }) {
   if (issues === null) return <Loading />;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <div style={{ display: 'flex', gap: 6 }}>
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
         <Chip on={status === 'open'} onClick={() => setStatus('open')}>Open</Chip>
         <Chip on={status === 'resolved'} onClick={() => setStatus('resolved')}>Resolved</Chip>
         <Chip on={status === 'all'} onClick={() => setStatus('all')}>All</Chip>
+        {canManage && <button onClick={() => setManagingCats(true)} style={{ ...ghostBtn, marginLeft: 'auto' }}>🏷 Categories</button>}
       </div>
+      {managingCats && <ManageCategoriesModal suiteId={suiteId} categories={categories} onClose={() => setManagingCats(false)} onChange={setCategories} flash={flash} />}
       {issues.length === 0 ? <Empty>No {status === 'all' ? '' : status} issues.</Empty> : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {issues.map((i) => (
@@ -483,7 +658,7 @@ function IssuesTab({ suiteId, canManage, flash, reloadKey }) {
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontWeight: 650, fontSize: 14 }}>
-                    {i.device?.label || i.device?.qrCode || 'Device'} · <span style={{ color: 'var(--error)' }}>{CAT_LABEL[i.category] || i.category}</span>
+                    {i.device?.label || i.device?.qrCode || 'Device'} · <span style={{ color: 'var(--error)' }}>{catLabel(i.category)}</span>
                     {i.stationLabel && <span style={{ color: 'var(--muted)', fontWeight: 500 }}> · 📍 {i.stationLabel}</span>}
                   </div>
                   {i.note && <div style={{ fontSize: 13, color: 'var(--text)', marginTop: 2 }}>{i.note}</div>}
@@ -516,7 +691,7 @@ function ResolveModal({ issue, onClose, onResolve }) {
     setBusy(true); await onResolve(resolution || 'Resolved'); setBusy(false);
   };
   return (
-    <Modal title="Resolve issue" subtitle={`${issue.device?.label || issue.device?.qrCode || 'Device'} · ${CAT_LABEL[issue.category] || issue.category}`} onClose={onClose}>
+    <Modal title="Resolve issue" subtitle={`${issue.device?.label || issue.device?.qrCode || 'Device'} · ${catLabel(issue.category)}`} onClose={onClose}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div>
           <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>How was it resolved?</div>
@@ -539,17 +714,26 @@ function DeviceActionSheet({ suiteId, device, onClose, onDone }) {
   const [stations, setStations] = useState([]);
   const [staff, setStaff] = useState([]);
   const [staffId, setStaffId] = useState(''); // optional attribution — who's doing this
-  const [view, setView] = useState('move'); // move | issue | pair
-  const [issue, setIssue] = useState({ category: 'damaged', note: '', resolution: '' });
+  const [view, setView] = useState('move'); // move | issue | pair | log
+  const [categories, setCategories] = useState([]);
+  const [issue, setIssue] = useState({ category: '', note: '', resolution: '' });
   const [statusForm, setStatusForm] = useState(null); // { state, comment } when marking lost/damaged
   const [pairing, setPairing] = useState(false); // scanner open to pair a QR
   const [manualQr, setManualQr] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [events, setEvents] = useState(null); // this device's full activity log
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     api.eventopsStations(suiteId).then((r) => setStations(r.stations || [])).catch(() => {});
     api.eventopsStaff(suiteId).then((r) => setStaff(r.staff || [])).catch(() => {});
-  }, [suiteId]);
+    api.eventopsDevice(suiteId, device.id).then((r) => setEvents(r.events || [])).catch(() => setEvents([]));
+    api.eventopsIssueCategories(suiteId).then((r) => {
+      const cats = r.categories || [];
+      setCategories(cats);
+      setIssue((iss) => iss.category ? iss : { ...iss, category: (cats.find((c) => c.isDefault) || cats[0])?.label || 'damaged' });
+    }).catch(() => {});
+  }, [suiteId, device.id]);
 
   async function move(body, label) {
     setBusy(true);
@@ -574,6 +758,11 @@ function DeviceActionSheet({ suiteId, device, onClose, onDone }) {
     try { await api.eventopsUpdateDevice(suiteId, device.id, { qrCode: '' }); onDone('QR unpaired'); }
     catch (e) { alert(e.message); setBusy(false); }
   }
+  async function del() {
+    setBusy(true);
+    try { await api.eventopsDeleteDevice(suiteId, device.id); onDone('Device deleted'); }
+    catch (e) { alert(e.message); setBusy(false); }
+  }
 
   return (
     <Modal title={device.label || device.qrCode || 'Device'} onClose={onClose} subtitle={`${device.type} · now at ${device.state === 'deployed' ? (device.stationName || 'a station') : 'the Hive'}`}>
@@ -589,10 +778,13 @@ function DeviceActionSheet({ suiteId, device, onClose, onDone }) {
       <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
         <Chip on={view === 'move'} onClick={() => setView('move')}>Move</Chip>
         <Chip on={view === 'issue'} onClick={() => setView('issue')}>Log issue</Chip>
-        <Chip on={view === 'pair'} onClick={() => setView('pair')}>🔗 Pair QR</Chip>
+        <Chip on={view === 'pair'} onClick={() => { setView('pair'); setPairing(true); }}>🔗 Pair QR</Chip>
+        <Chip on={view === 'log'} onClick={() => setView('log')}>📋 Activity{events ? ` (${events.length})` : ''}</Chip>
       </div>
 
-      {view === 'move' ? (
+      {view === 'log' ? (
+        <DeviceActivity events={events} />
+      ) : view === 'move' ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{ fontSize: 12, color: 'var(--muted)' }}>Send to:</div>
           <button disabled={busy} onClick={() => move({ stationId: 'hive' }, 'Hive')} style={destBtn}>🏠 Hive (in stock)</button>
@@ -602,6 +794,17 @@ function DeviceActionSheet({ suiteId, device, onClose, onDone }) {
             </button>
           ))}
           {stations.length === 0 && <Empty>No stations — add one first to deploy devices.</Empty>}
+          {staff.length > 0 && (
+            <select
+              value=""
+              disabled={busy}
+              onChange={(e) => { const s = staff.find((x) => x.id === e.target.value); if (s) move({ holderStaffId: s.id }, `🤝 ${s.number ? `#${s.number} ` : ''}${s.name}`); }}
+              style={{ ...destBtn, cursor: 'pointer' }}
+            >
+              <option value="">🤝 Hand to a staff member…</option>
+              {staff.map((s) => <option key={s.id} value={s.id}>{s.number ? `#${s.number} ` : ''}{s.name}</option>)}
+            </select>
+          )}
           {!statusForm ? (
             <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
               <button disabled={busy} onClick={() => setStatusForm({ state: 'lost', comment: '' })} style={dangerBtn}>Mark lost</button>
@@ -624,8 +827,8 @@ function DeviceActionSheet({ suiteId, device, onClose, onDone }) {
           <div>
             <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>Issue</div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {ISSUE_CATEGORIES.map((c) => (
-                <Chip key={c} on={issue.category === c} onClick={() => setIssue({ ...issue, category: c })}>{CAT_LABEL[c]}</Chip>
+              {(categories.length ? categories.map((c) => c.label) : ISSUE_CATEGORIES).map((c) => (
+                <Chip key={c} on={issue.category === c} onClick={() => setIssue({ ...issue, category: c })}>{catLabel(c)}</Chip>
               ))}
             </div>
           </div>
@@ -657,12 +860,42 @@ function DeviceActionSheet({ suiteId, device, onClose, onDone }) {
           )}
         </div>
       )}
+      {/* Danger zone — remove the device (and its history) from this event. */}
+      <div style={{ marginTop: 16, paddingTop: 12, borderTop: '1px solid var(--hairline)' }}>
+        {!confirmDelete ? (
+          <button onClick={() => setConfirmDelete(true)} disabled={busy} style={{ ...ghostBtn, color: 'var(--error)' }}>🗑 Delete device</button>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ fontSize: 12.5, color: 'var(--error)' }}>Delete this device and its full move/issue history? This can’t be undone.</div>
+            <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+              <button onClick={() => setConfirmDelete(false)} disabled={busy} style={ghostBtn}>Cancel</button>
+              <button onClick={del} disabled={busy} style={dangerBtn}>{busy ? 'Deleting…' : 'Delete permanently'}</button>
+            </div>
+          </div>
+        )}
+      </div>
       {pairing && (
         <Suspense fallback={null}>
           <EventOpsScanner onCode={pair} onClose={() => setPairing(false)} title="Scan the device's QR to pair" />
         </Suspense>
       )}
     </Modal>
+  );
+}
+
+// A device's full activity log (moves, status changes, checks, creation) — newest first.
+function DeviceActivity({ events }) {
+  if (events === null) return <Loading />;
+  if (!events.length) return <Empty>No activity yet for this device.</Empty>;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+      {events.map((e) => (
+        <div key={e.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, padding: '9px 0', borderBottom: '1px solid var(--hairline)' }}>
+          <span style={{ fontSize: 13 }}>{feedText(e)}</span>
+          <span style={{ fontSize: 11, color: 'var(--muted)', whiteSpace: 'nowrap' }} title={new Date(e.at).toLocaleString()}>{timeAgo(e.at)}</span>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -695,7 +928,8 @@ function ConsoleMoveFlow({ suiteId, onClose, onDone, flash }) {
     setBusy(true);
     try {
       const dev = (await api.eventopsScan(suiteId, code)).device;
-      const mv = await api.eventopsMove(suiteId, { deviceId: dev.id, stationId: dest.id, staffId });
+      const moveBody = dest.staff ? { deviceId: dev.id, holderStaffId: dest.id, staffId } : { deviceId: dev.id, stationId: dest.id, staffId };
+      const mv = await api.eventopsMove(suiteId, moveBody);
       const label = dev.label || dev.qrCode || 'Device';
       setMoved((m) => [...m, label]);
       onDone(`${label} → ${destLabel}${mv.unusual ? ' (⚑ unusual)' : ''}`);
@@ -715,6 +949,8 @@ function ConsoleMoveFlow({ suiteId, onClose, onDone, flash }) {
       <ScannerBoundary onError={() => { setScanning(false); flash('Scanner had a hiccup — try again.'); }}>
         <Suspense fallback={null}>
           <EventOpsScanner key={scanKey} onCode={onScanned} onClose={() => setScanning(false)}
+            onDone={mode === 'multiple' ? () => { setScanning(false); onClose(); } : undefined}
+            doneLabel={`✓ Done${moved.length ? ` (${moved.length})` : ''}`}
             title={`Scan → ${destLabel}${mode === 'multiple' ? ` · ${moved.length} moved` : ''}`} />
         </Suspense>
       </ScannerBoundary>
@@ -739,6 +975,12 @@ function ConsoleMoveFlow({ suiteId, onClose, onDone, flash }) {
               {stations.map((s) => (
                 <button key={s.id} onClick={() => setDest(s)} style={destBtn}>{KIND_ICON[s.kind] || '📍'} {s.name} <span style={{ color: 'var(--muted)', fontSize: 12 }}>({s.deviceCount})</span></button>
               ))}
+              {staff.length > 0 && (
+                <select value="" onChange={(e) => { const s = staff.find((x) => x.id === e.target.value); if (s) setDest({ id: s.id, name: `${s.number ? `#${s.number} ` : ''}${s.name}`, staff: true }); }} style={{ ...destBtn, cursor: 'pointer' }}>
+                  <option value="">🤝 A staff member…</option>
+                  {staff.map((s) => <option key={s.id} value={s.id}>{s.number ? `#${s.number} ` : ''}{s.name}</option>)}
+                </select>
+              )}
               {stations.length === 0 && <Empty>No stations — add one first to deploy devices.</Empty>}
             </div>
           </div>
@@ -977,16 +1219,27 @@ function StaffTab({ suiteId, canManage, flash, reloadKey }) {
 // The shareable staff-portal link (token-gated). Staff open it, log in by number, and scan.
 function StaffPortalCard({ suiteId, flash }) {
   const [kiosk, setKiosk] = useState(null);
+  const [editing, setEditing] = useState(false);
+  const [slug, setSlug] = useState('');
+  const [busy, setBusy] = useState(false);
   useEffect(() => { api.eventopsKiosk(suiteId).then(setKiosk).catch(() => setKiosk({ error: true })); }, [suiteId]);
   if (!kiosk || kiosk.error) return null;
   const url = `${window.location.origin}${kiosk.path}`;
+  const base = `${window.location.origin}/eventops/portal/${suiteId}/`;
   const copy = () => { try { navigator.clipboard.writeText(url); flash('Portal link copied'); } catch { /* ignore */ } };
   async function rotate() {
-    if (!confirm('Generate a new link? The current one will stop working immediately.')) return;
+    if (!confirm('Generate a new random link? The current one will stop working immediately.')) return;
     try { setKiosk(await api.eventopsRotateKiosk(suiteId)); flash('New link generated'); } catch (e) { alert(e.message); }
   }
   async function toggle() {
     try { setKiosk(await api.eventopsSetKiosk(suiteId, !kiosk.enabled)); } catch (e) { alert(e.message); }
+  }
+  function startEdit() { setSlug(kiosk.token); setEditing(true); }
+  async function saveSlug() {
+    setBusy(true);
+    try { const k = await api.eventopsSetKioskSlug(suiteId, slug); setKiosk(k); setEditing(false); flash('Link updated'); }
+    catch (e) { alert(e.message); }
+    setBusy(false);
   }
   return (
     <div style={{ ...card, display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -997,11 +1250,27 @@ function StaffPortalCard({ suiteId, flash }) {
       <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>
         Share this link with on-the-ground staff — they log in with their <b>staff number</b> (no Pulse account), then scan to move devices &amp; log issues, and see their stations.
       </div>
-      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-        <input readOnly value={url} style={{ ...input, flex: 1, minWidth: 180, fontSize: 12.5, opacity: kiosk.enabled ? 1 : 0.5 }} onFocus={(e) => e.target.select()} />
-        <button onClick={copy} style={primaryBtn}>Copy</button>
-        <button onClick={rotate} style={ghostBtn}>New link</button>
-      </div>
+      {editing ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 12, color: 'var(--muted)', wordBreak: 'break-all' }}>{base}</span>
+            <input value={slug} autoFocus onChange={(e) => setSlug(e.target.value)} placeholder="e.g. summer-fest-2026"
+              style={{ ...input, flex: 1, minWidth: 140, fontSize: 13 }} onKeyDown={(e) => e.key === 'Enter' && saveSlug()} />
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--muted)' }}>Letters, numbers &amp; hyphens. Changing it stops the old link working.</div>
+          <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+            <button onClick={() => setEditing(false)} style={ghostBtn}>Cancel</button>
+            <button onClick={saveSlug} disabled={busy || slug.trim().length < 3} style={primaryBtn}>{busy ? 'Saving…' : 'Save link'}</button>
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+          <input readOnly value={url} style={{ ...input, flex: 1, minWidth: 180, fontSize: 12.5, opacity: kiosk.enabled ? 1 : 0.5 }} onFocus={(e) => e.target.select()} />
+          <button onClick={copy} style={primaryBtn}>Copy</button>
+          <button onClick={startEdit} style={ghostBtn}>Edit link</button>
+          <button onClick={rotate} style={ghostBtn}>Randomise</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -1039,7 +1308,7 @@ function StationDevicesModal({ suiteId, station, reloadKey, onClose, onDevice })
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {issues.map((i) => (
             <div key={i.id} style={card}>
-              <div style={{ fontWeight: 650, fontSize: 14 }}>{i.device?.label || i.device?.qrCode || 'Device'} · <span style={{ color: 'var(--error)' }}>{CAT_LABEL[i.category] || i.category}</span></div>
+              <div style={{ fontWeight: 650, fontSize: 14 }}>{i.device?.label || i.device?.qrCode || 'Device'} · <span style={{ color: 'var(--error)' }}>{catLabel(i.category)}</span></div>
               {i.note && <div style={{ fontSize: 13, marginTop: 2 }}>{i.note}</div>}
               <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>{i.staffLabel ? `${i.staffLabel} · ` : ''}⏱ {dur(i.reportedAt)}</div>
             </div>

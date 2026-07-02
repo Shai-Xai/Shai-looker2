@@ -183,13 +183,17 @@ module.exports = function tileValues({ db, query }) {
     if (pts.length < 2) return pts;
     const isISO = (t) => /^\d{4}-\d{2}/.test(String(t));
     if (pts.every((p) => isISO(p.t))) return [...pts].sort((a, b) => String(a.t).localeCompare(String(b.t)));
-    if (!pts.every((p) => p.t !== '' && p.t != null && Number.isFinite(Number(p.t)))) return pts;
-    const ns = pts.map((p) => Number(p.t));
+    // Predominantly-numeric axis (≥80%): sort the numeric points and DROP the strays —
+    // they're totals rows / null buckets, which have no place on the axis and would
+    // double-count once the curve is accumulated. Mixed/categorical stays in row order.
+    const numeric = pts.filter((p) => p.t !== '' && p.t != null && Number.isFinite(Number(p.t)));
+    if (numeric.length < Math.max(2, Math.ceil(pts.length * 0.8))) return pts;
+    const ns = numeric.map((p) => Number(p.t));
     const min = Math.min(...ns), max = Math.max(...ns);
     const name = String(dateFieldName || '');
     const countdown = /before|until|till|countdown|days?[ _-]?(out|left|to[ _-]?go|remaining)/i.test(name)
       || (/day/i.test(name) && min === 0 && max > 31);
-    return [...pts].sort((a, b) => (countdown ? Number(b.t) - Number(a.t) : Number(a.t) - Number(b.t)));
+    return [...numeric].sort((a, b) => (countdown ? Number(b.t) - Number(a.t) : Number(a.t) - Number(b.t)));
   }
 
   // Time-series version of resolveTileValue: run the SAME scoped query, but return
