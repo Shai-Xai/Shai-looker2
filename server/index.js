@@ -2929,22 +2929,10 @@ app.post('/api/recreate', auth.requireAdmin, async (req, res) => {
 });
 
 // ─── Living docs ──────────────────────────────────────────────────────────────
-// Serve the sales product-overview as a self-rendering HTML page that fetches its
-// own markdown source, so editing docs/PRODUCT_OVERVIEW_SALES.md updates the page.
-// Scoped to this single doc on purpose — the rest of docs/ is internal.
-const PRODUCT_OVERVIEW_HTML = path.join(__dirname, '../docs/product-overview-sales.html');
-const PRODUCT_OVERVIEW_MD = path.join(__dirname, '../docs/PRODUCT_OVERVIEW_SALES.md');
-
-app.get(['/product-overview-sales', '/product-overview-sales.html'], (_req, res) => {
-  res.setHeader('Cache-Control', 'no-cache, must-revalidate');
-  res.sendFile(PRODUCT_OVERVIEW_HTML);
-});
-
-app.get('/product-overview-sales.md', (_req, res) => {
-  res.setHeader('Cache-Control', 'no-cache, must-revalidate');
-  res.type('text/markdown; charset=utf-8');
-  res.sendFile(PRODUCT_OVERVIEW_MD);
-});
+// The sales product-overview page (+ admin-filtered markdown), the curated
+// feature matrix with admin include/exclude, and the public /sales site all
+// live in server/productSite.js.
+require('./productSite').mount(app, { db, auth });
 
 // The client/developer API guide — same living-doc pattern, shareable at
 // /api-guide (editing docs/CLIENT_API_GUIDE.md updates the page).

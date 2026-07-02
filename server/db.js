@@ -191,6 +191,9 @@ db.exec(`CREATE TABLE IF NOT EXISTS content_roles (
 // sidebar rows. The relation lives on the membership so the same dashboard can
 // be a tab in one set and standalone in another.
 addColumn('set_dashboards', 'parent_dashboard_id', 'TEXT');
+// Optional per-Set display-name override for a dashboard: renamed in the nav
+// (sidebar/top-nav) without touching the source dashboard. '' = use native name.
+addColumn('set_dashboards', 'display_name', "TEXT NOT NULL DEFAULT ''");
 // Per-event briefing config: { launchDate, eventStart, eventEnd, manualPhase,
 // instructions, phaseOverrides: {phaseKey: text} } — drives the home briefing.
 addColumn('suites', 'briefing', "TEXT NOT NULL DEFAULT '{}'");
@@ -1095,8 +1098,8 @@ function setDashboardIds(setId) {
 }
 // Ordered membership entries with the nesting relation: [{ id, parentId }].
 function setDashboardEntries(setId) {
-  return db.prepare('SELECT dashboard_id, parent_dashboard_id FROM set_dashboards WHERE set_id=? ORDER BY position').all(setId)
-    .map((r) => ({ id: r.dashboard_id, parentId: r.parent_dashboard_id || null }));
+  return db.prepare('SELECT dashboard_id, parent_dashboard_id, display_name FROM set_dashboards WHERE set_id=? ORDER BY position').all(setId)
+    .map((r) => ({ id: r.dashboard_id, parentId: r.parent_dashboard_id || null, displayName: r.display_name || '' }));
 }
 function rowToSet(r) { return r && { id: r.id, name: r.name, icon: r.icon || '', folder: r.folder || '', ownerEntityId: r.owner_entity_id || '', dashboardIds: setDashboardIds(r.id), dashboards: setDashboardEntries(r.id), createdAt: r.created_at }; }
 // Shared library only (custom client sets are hidden here).
@@ -1110,14 +1113,14 @@ function getSet(id) { return rowToSet(db.prepare('SELECT * FROM sets WHERE id=?'
 const setSetDashboards = db.transaction((setId, items) => {
   db.prepare('DELETE FROM set_dashboards WHERE set_id=?').run(setId);
   const norm = (items || [])
-    .map((x) => (typeof x === 'string' ? { id: x, parentId: null } : { id: x?.id, parentId: x?.parentId || null }))
+    .map((x) => (typeof x === 'string' ? { id: x, parentId: null, displayName: '' } : { id: x?.id, parentId: x?.parentId || null, displayName: String(x?.displayName || '').trim() }))
     .filter((x) => x.id);
   const inSet = new Set(norm.map((x) => x.id));
-  const ins = db.prepare('INSERT OR IGNORE INTO set_dashboards (set_id, dashboard_id, position, parent_dashboard_id) VALUES (?,?,?,?)');
+  const ins = db.prepare('INSERT OR IGNORE INTO set_dashboards (set_id, dashboard_id, position, parent_dashboard_id, display_name) VALUES (?,?,?,?,?)');
   norm.forEach((x, i) => {
     let p = x.parentId && x.parentId !== x.id && inSet.has(x.parentId) ? x.parentId : null;
     if (p && norm.find((n) => n.id === p)?.parentId) p = null; // parent is itself a child → flatten
-    ins.run(setId, x.id, i, p);
+    ins.run(setId, x.id, i, p, x.displayName || '');
   });
 });
 function createSet({ name, icon = '', folder = '', dashboardIds = [], ownerEntityId = '' }) {

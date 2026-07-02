@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-02 · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-02 (event-scoped segments fix) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -27,7 +27,7 @@ from *seeing* a cohort to *acting* on it in one place, scoped and branded to the
 
 ---
 
-## The continuous comms loop  ✅ (one-tap "Owl auto-pilot" 🔜)
+## The continuous comms loop  ✅ (one-tap "Owl auto-pilot" ✅)
 Pulse isn't a pile of separate tools — it's **one loop that never stops turning.**
 Every part feeds the next, so insight becomes action and results become the next
 insight:
@@ -52,9 +52,10 @@ notifications even when it's closed**, that flow reaches people on their phone
 without them having to log in — a nudge lands, they tap, they're in the right
 place to act.
 
-> Today Pulse **surfaces** the insight + suggested action and **measures** the
-> result. Closing the loop with a single tap — the **agentic Owl** drafting the
-> campaign straight from a suggestion — is the flagship roadmap item (🔜).
+> Pulse **surfaces** the insight + suggested action, **measures** the result —
+> and now closes the loop with a single tap: the **agentic Owl auto-pilot** ✅
+> drafts the campaign straight from a suggestion. The draft still rides the
+> normal review + approval gates before anything sends.
 
 **Pitch:** "It's not dashboards *and* email *and* reports — it's one living loop.
 Your data tells you what to do, you do it in the same place, the result makes the
@@ -236,9 +237,12 @@ with approvals and full tracking.
   uploaded 'already called' list"). Each source keeps its own filters.
 - **Always-live** — segments re-resolve at use/send time, so a linked Sheet stays
   current; counts and email/SMS reach show up front.
-- **Organise** ✅ — **link a segment to an event** and/or **file it in a folder**,
-  then filter the list by either. Keeps a long list tidy as it grows (e.g. all the
-  audiences for one festival together).
+- **Organise + scope to an event** ✅ — **link a segment to an event** and/or **file
+  it in a folder**, then filter the list by either. Keeps a long list tidy as it grows
+  (e.g. all the audiences for one festival together). Linking to an event also **scopes
+  the audience to that event** — the cohort resolves to that event only, every time
+  (reach checks *and* when a campaign sends from it), never silently widening across all
+  your events.
 
 **Pitch:** "Build the exact audience from your own data or a spreadsheet — combine
 lists, subtract a suppression list, and it stays live."
@@ -399,6 +403,12 @@ in one place that updates itself."
 - **Preview as a client** to see exactly what they see.
 - **AI audit** — every system prompt the AI is given is viewable ("Everything the
   AI is told").
+- **Product collateral you control** ✅ — Admin → Product holds the living **feature
+  matrix** and this overview, plus a shareable public **sales site** (`/sales`) built
+  from them. Every matrix section/feature and every section of this page has a
+  **Shown / Hidden toggle**, so anything still in the works (or not ready for
+  internal announcement) stays off the public pages until it's ready — admins
+  always see the full picture, dimmed.
 
 ## 8. Trust, security & scope  ✅
 - **Multi-tenant, server-side scoping** — every data query is force-filtered to
@@ -614,9 +624,11 @@ or point an AI agent (like Claude) at it and ask questions in plain language."
 ---
 
 ## On the horizon (🔜 — not yet usable; for roadmap conversations only)
-Use these to set direction, **not** to promise dates.
-- **Conversational/agentic Owl** — chat that answers, analyses and *executes*
-  (draft a campaign, remind an organiser…). The flagship.
+Use these to set direction, **not** to promise dates. *(The conversational/agentic
+Owl graduated off this list — the Owl chat is 🧪 and the one-tap auto-pilot is ✅,
+see "The continuous comms loop" above.)*
+- **Campaigns — conditional sequencing** — branch a journey on behaviour (opened /
+  clicked / purchased → a different next step), on top of today's linear drips.
 - **Portfolio / "all events" view** — roll up KPIs and audiences across a client's
   many events/profiles (today everything is per-event).
 - **Automations · Connections** tabs (shown as "SOON" in Engage). *(Templates is now live — see §5.)*
@@ -654,6 +666,30 @@ Use these to set direction, **not** to promise dates.
   and the reparent is **atomic** (one transaction) so a failure can't leave a half-moved
   tree. Folders are an admin-only organising layer — clients navigate via suites/sets — so
   there's no separate client surface to update.
+- **2026-07-02** — **Rename dashboards in the sidebar per Set** ✅: admins can now give
+  any dashboard a custom display name within a Set (in Admin → Sets, and in a client's
+  custom sets) without editing the underlying dashboard. The label shows in the client's
+  sidebar and top-nav; leave it blank to use the dashboard's native name, and clearing it
+  reverts. Because the override lives on the Set, the same dashboard can read differently
+  in different Sets — presentation is decoupled from source naming.
+- **2026-07-02** — **Event-scoped segments stay scoped** ✅ (fix): a segment linked to an
+  event now resolves to **that event only** on every live re-resolution — reach checks and
+  when a campaign sends from it — not just at creation. Previously an event-scoped cohort
+  (e.g. VIPs for one festival) could silently widen to *all* your events at send time, risking
+  an over-send. The AI-draft/segment tools also now return the **resolved event scope** so a
+  mismatch is visible before anyone approves a send.
+- **2026-07-02** — **Agentic Owl auto-pilot is live** ✅: the one-tap close of the loop —
+  the Owl drafts the campaign straight from an insight/suggested action. Drafts still
+  ride the normal review + approval gates; nothing sends without a human. (Roadmap's
+  flagship item, now shipped; the feature matrix Owl section also now separates the
+  **native Pulse Owl**, the **Owl in Claude / ChatGPT**, and the third-party
+  **Inventive "Ask"** analyst.)
+- **2026-07-02** — **Pulse sales site + admin-curated feature matrix** ✅: a shareable
+  public **sales website at `/sales`** built from the (freshly updated) feature matrix,
+  and the matrix itself moved server-side with **Shown / Hidden toggles** on every
+  section, feature and overview section (Admin → Product → Feature matrix). Hide
+  anything still being built or not ready for internal announcement and it vanishes
+  from the sales site and the public overview page; admins still see it, dimmed.
 - **2026-07-02** — **The Fan Owl: a booking guide on the event's own website** 🧪: the
   Owl's first **consumer-facing** surface — promoters drop one script tag on their public
   event site and every page gets a personal ticket guide: a no-AI ribbon (right offer for

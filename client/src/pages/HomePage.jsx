@@ -340,6 +340,7 @@ export default function HomePage() {
         <FolderImportModal
           preview={folderPreview}
           alreadyImported={new Set(dashboards.map((d) => d.source?.lookerDashboardId).filter(Boolean).map(String))}
+          existingFolders={allFolders}
           onImported={load}
           onClose={() => { setShowFolderModal(false); setLookerFolderId(''); setFolderPreview(null); }}
         />

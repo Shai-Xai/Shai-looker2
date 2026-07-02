@@ -113,13 +113,9 @@ Remember the wizard reuses the real editors (`ClientSuites`, `EntityLogins`,
 wizard automatically; the tour copy is the part that still needs a manual update.
 
 ## Git
-- Develop on the assigned `claude/*` branch; push to it AND to `main`
-  (`git push -u origin <branch> && git push origin <branch>:main`). Render
-  deploys from `main`.
-- ALSO always push your work to the Ecstatic session's branch
-  `claude/ecstatic-thompson-vUFsS`. That branch may carry unmerged work of its
-  own, so NEVER force-push it — merge instead: `git checkout -b tmp-ecstatic
-  origin/claude/ecstatic-thompson-vUFsS && git merge <your-branch> && npm test
-  && git push origin tmp-ecstatic:claude/ecstatic-thompson-vUFsS`, then switch
-  back and delete the temp branch. (Don't push that merged state to `main` —
-  Ecstatic's own work ships to main from its own session.)
+- **`main` is the single source of truth** — Render deploys from it, and ALL
+  work ships there. Develop on the assigned `claude/*` branch; push to it AND
+  to `main` (`git push -u origin <branch> && git push origin <branch>:main`).
+  If `main` has moved, fetch + rebase onto `origin/main` before pushing.
+- No other branch needs syncing. (The old rule about mirroring to the Ecstatic
+  session's branch is retired — that session ships to `main` like everyone else.)
