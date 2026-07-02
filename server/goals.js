@@ -280,7 +280,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
       // Checkpoint curve link (remembered for the editor): the value-over-time tile
       // used to suggest checkpoints + the cadence.
       curveRef: (cr.dashboardId && cr.tileId)
-        ? { dashboardId: String(cr.dashboardId).slice(0, 64), tileId: String(cr.tileId).slice(0, 64), cadence: cr.cadence === 'weekly' ? 'weekly' : 'monthly', ...(cr.compareKey ? { compareKey: String(cr.compareKey).slice(0, 32) } : {}) }
+        ? { dashboardId: String(cr.dashboardId).slice(0, 64), tileId: String(cr.tileId).slice(0, 64), cadence: cr.cadence === 'weekly' ? 'weekly' : 'monthly', ...(cr.compareKey ? { compareKey: String(cr.compareKey).slice(0, 120) } : {}), ...(cr.thisKey ? { thisKey: String(cr.thisKey).slice(0, 120) } : {}) }
         : null,
       // Baseline tile link (remembered for the editor + re-read live on the card): the
       // tile a picked "last time" number comes from.
@@ -335,7 +335,9 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
     }
     if (typeof resolveTileValue !== 'function' || !ctx.user) return { value: null, asOf: null, source: goal.source };
     try {
-      const value = await resolveTileValue({ dashboardId: ref.dashboardId, tileId: ref.tileId, field: ref.field, user: ctx.user, suiteId: goal.suiteId });
+      // A saved "this event" override (goal.curveRef.thisKey) pins which pivot column
+      // is read on a comparison tile — the value and the curve must agree on it.
+      const value = await resolveTileValue({ dashboardId: ref.dashboardId, tileId: ref.tileId, field: ref.field, user: ctx.user, suiteId: goal.suiteId, preferPivotKey: goal.curveRef?.thisKey });
       return { value: value == null ? null : Number(value), asOf: now(), source: goal.source };
     } catch (e) { console.error('[goals] tile resolve failed', goal.id, e.message); return { value: null, asOf: null, source: goal.source }; }
   }
@@ -445,6 +447,13 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
   // LAST year: with 2023/24/25/26 columns and 2026 current, "last time" is 2025 —
   // even if 2024 had a bigger total (picking by total gave the wrong year + a wrong
   // "vs last time" %).
+  // A goal's saved "this event" override (curveRef.thisKey) beats the auto-detected
+  // currentKey — but only when the key actually exists on the tile (else ignore it,
+  // e.g. the tile was re-pointed at different data). Mutates + returns data.
+  function applyThisKey(data, thisKey) {
+    if (data && thisKey && Array.isArray(data.columns) && data.columns.some((c) => String(c.key) === String(thisKey))) data.currentKey = String(thisKey);
+    return data;
+  }
   function pickLastYearColumn(data) {
     if (!data || !Array.isArray(data.columns) || !data.columns.length) return null;
     const totalOf = (c) => (c.series || []).reduce((s, p) => s + (Number(p.v) || 0), 0);
@@ -598,7 +607,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
         // All-columns resolver: last time's shape (chosen / most-recent prior column) +
         // this year's own running total, from the SAME tile. `shape` stays raw for align.
         if (typeof resolveTileSeriesAll === 'function') {
-          const data = await resolveTileSeriesAll({ dashboardId: cr.dashboardId, tileId: cr.tileId, user, suiteId: g.suiteId });
+          const data = applyThisKey(await resolveTileSeriesAll({ dashboardId: cr.dashboardId, tileId: cr.tileId, user, suiteId: g.suiteId }), cr.thisKey);
           if (data && Array.isArray(data.columns) && data.columns.length) {
             const cmp = pickCompareColumn(data, cr.compareKey);
             const shape = (cmp?.series || []).filter((p2) => p2 && Number.isFinite(Number(p2.v)));
@@ -845,15 +854,17 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
     const suiteId = req.params.suiteId;
     if (!db.getSuite(suiteId)) return res.status(404).json({ error: 'Event not found' });
     if (!canView(req.user, suiteId)) return res.status(403).json({ error: 'Not allowed' });
-    const { dashboardId, tileId, cadence, startDate, byDate, compareKey } = req.body || {};
+    const { dashboardId, tileId, cadence, startDate, byDate, compareKey, thisKey } = req.body || {};
     if (typeof resolveTileSeriesAll !== 'function' || !dashboardId || !tileId) return res.json({ series: [], checkpoints: [] });
-    let series = [], years = [], usedCompareKey = null;
+    let series = [], years = [], allKeys = [], usedCompareKey = null, usedThisKey = null;
     try {
-      const data = await resolveTileSeriesAll({ dashboardId, tileId, user: req.user, suiteId });
+      const data = applyThisKey(await resolveTileSeriesAll({ dashboardId, tileId, user: req.user, suiteId }), thisKey);
       const cmp = pickCompareColumn(data, compareKey);
       series = (cmp?.series || []).filter((p) => p && Number.isFinite(Number(p.v)));
       years = priorYearKeys(data); // choices for "compare against" (newest first)
+      allKeys = (data?.columns || []).map((c) => c.key); // choices for "this event"
       usedCompareKey = cmp?.key || null;
+      usedThisKey = data?.currentKey || null; // auto-detected (or the honoured override)
     } catch (e) { return res.json({ series: [], checkpoints: [], error: e.message }); }
     // Event-day anchor + window — identical inputs to the live pace engine.
     let lookerDate = null;
@@ -866,7 +877,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
     const startMs = startDate ? new Date(`${String(startDate).slice(0, 10)}T00:00:00`).getTime() : Date.now();
     const eventDate = Number.isFinite(endMs) ? new Date(endMs).toISOString().slice(0, 10) : null;
     if (series.length < 2 || !Number.isFinite(endMs) || !Number.isFinite(startMs) || !(endMs > startMs)) {
-      return res.json({ series, pointsRead: series.length, eventDate, checkpoints: [], years, compareKey: usedCompareKey });
+      return res.json({ series, pointsRead: series.length, eventDate, checkpoints: [], years, allKeys, compareKey: usedCompareKey, thisKey: usedThisKey });
     }
     // Lay out checkpoint dates by cadence from the start to the event day…
     const weekly = cadence !== 'monthly';
@@ -883,7 +894,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
         checkpoints.push({ byDate: dt.toISOString().slice(0, 10), fraction: Number(at.fraction.toFixed(6)), lastValue: Math.round(at.valueAtNow), basis: at.basis });
       }
     }
-    res.json({ series, pointsRead: series.length, eventDate, checkpoints, years, compareKey: usedCompareKey });
+    res.json({ series, pointsRead: series.length, eventDate, checkpoints, years, allKeys, compareKey: usedCompareKey, thisKey: usedThisKey });
   });
 
   // Forecast chart data for a goal — last time's full curve, this year's actual to date,
@@ -896,7 +907,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
     if (!g || g.suiteId !== req.params.suiteId) return res.json({ available: false });
     const cr = g.curveRef;
     if (!cr || !cr.dashboardId || !cr.tileId || typeof resolveTileSeriesAll !== 'function') return res.json({ available: false });
-    let data; try { data = await resolveTileSeriesAll({ dashboardId: cr.dashboardId, tileId: cr.tileId, user: req.user, suiteId: g.suiteId }); } catch { return res.json({ available: false }); }
+    let data; try { data = applyThisKey(await resolveTileSeriesAll({ dashboardId: cr.dashboardId, tileId: cr.tileId, user: req.user, suiteId: g.suiteId }), cr.thisKey); } catch { return res.json({ available: false }); }
     if (!data || !Array.isArray(data.columns) || !data.columns.length) return res.json({ available: false });
     const byKeyDesc = [...data.columns].sort((a, b) => String(b.key).localeCompare(String(a.key), undefined, { numeric: true }));
     const thisKey = data.currentKey || byKeyDesc[0]?.key;
@@ -950,7 +961,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
     const tileId = req.query.tileId || g?.curveRef?.tileId || g?.metricRef?.tileId;
     if (!dashboardId || !tileId) return res.status(400).json({ error: 'dashboardId and tileId are required (or pass goalId)' });
     let data;
-    try { data = await resolveTileSeriesAll({ dashboardId, tileId, user: req.user, suiteId }); }
+    try { data = applyThisKey(await resolveTileSeriesAll({ dashboardId, tileId, user: req.user, suiteId }), g?.curveRef?.thisKey); }
     catch (e) { return res.json({ error: e.message }); }
     if (!data || !data.columns.length) return res.json({ error: 'No series read from that tile', data });
 

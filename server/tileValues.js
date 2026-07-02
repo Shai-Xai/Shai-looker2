@@ -61,7 +61,9 @@ module.exports = function tileValues({ db, query }) {
     return views.has(String(field).split('.')[0]) ? field : null;
   }
 
-  async function resolveTileValue({ dashboardId, tileId, user, suiteId }) {
+  // `preferPivotKey` (optional) explicitly names which pivot column to read — a goal's
+  // saved "this event" override. It beats the Current-Event-lock auto-match below.
+  async function resolveTileValue({ dashboardId, tileId, user, suiteId, preferPivotKey }) {
     const def = db.getDashboard(dashboardId);
     if (!def) return null;
     const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))];
@@ -86,7 +88,7 @@ module.exports = function tileValues({ db, query }) {
     // column specifically — identified by the suite's Current Event lock — instead of
     // the latest/biggest pivot (which can be a prior edition). Falls back to the
     // default pick when the current event can't be matched, so nothing else changes.
-    const curKey = matchPivotKey(data.pivots || [], currentEventValue(db.lockedFiltersForSuite(suiteId, dashboardId)));
+    const curKey = matchPivotKey(data.pivots || [], preferPivotKey || '') || matchPivotKey(data.pivots || [], currentEventValue(db.lockedFiltersForSuite(suiteId, dashboardId)));
     // Use the number the tile actually SHOWS (honours hidden_fields, picks the
     // visible primary measure, reads the rendered value) so the goal == the dashboard.
     const value = primaryTileValue(data, tile.vis || {}, curKey);
