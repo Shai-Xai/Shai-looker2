@@ -256,7 +256,7 @@ the tree, enrol by `node_id`), J3 (evaluate decision nodes off existing
 open/click signals). True "bought" branching gated on the Howler integration
 (4.1). Effort: L (staged).
 
-### 4.8 💡 Google Drive integration — the Owl reads third-party files
+### 4.8 ✅ Google Drive integration — the Owl reads third-party files
 *"Google Drive integration so the Owl can read third-party files."* (Shai,
 2026-07-02)
 Let a client (or an AM on their behalf) connect Google Drive and point the Owl
@@ -278,6 +278,19 @@ what the Owl may see (explicit allow, never whole-Drive), then staged depth:
   folder mirrors what CC-the-Owl email ingestion does today).
 Ties to `owlUploads.js`, `owlIngest.js`, `owlTools.js`, Extraction/Recall
 (1.1 remaining). Effort: L total, but P1 stands alone.
+**Status:** ✅ — **P1+P2+P3 shipped 2026-07-02** as `server/googleDrive.js`
+(service-account JWT auth, dependency-free; per-client key write-only with a
+platform env fallback). Share-with-the-SA-email + paste-a-link flow;
+**Sheets/CSV → live `owl_uploads` tables** (askUpload just works), **Docs/
+Slides/text → searchable text**, **PDF → AI-transcribed text** (metered as
+`drive_ingest`, prompt `driveDocText` registered in the AI audit), **folders →
+all supported children, mirrored on re-sync, watched hourly** by a self-guarded
+tick (kill switch `drive_sync_enabled`). Two new Owl tools:
+`searchDriveDocs` + `readDriveDoc` (entity-scoped, chunked reads, cite-by-name).
+Dual-surface UI: `DriveSourcesCard` in Settings → Integrations and Admin →
+client → Integrations. 12 tests (`test/googleDrive.test.js`); full suite 421 green.
+**Remaining:** live verification with a real Google service account + key
+(GOOGLE_SERVICE_ACCOUNT_KEY env or per client), then it's self-service.
 
 ### 4.9 💡 Deep Meta integration (paid performance, OAuth, CAPI, lookalikes)
 *"Deep Meta integration."* (Shai, 2026-07-02)

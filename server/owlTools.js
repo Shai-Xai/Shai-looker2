@@ -19,7 +19,7 @@ const defaultCatalogue = require('./owlCatalogueSeed');
 // there and the Owl can immediately set + ask for it; no second list to keep in sync).
 const { OPERATORS: ALERT_OPERATORS, CHANNELS: ALERT_CHANNELS, PRIORITIES: ALERT_PRIORITIES } = require('./alerts');
 
-module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAlertsApi, getCampaignsApi, getUploadsApi, resolveTileValue, getExploreFields, getFieldOverrides, draftCampaignCopy, designEmailFn, getSegmentsApi, getEventOpsApi, catalogue = defaultCatalogue }) {
+module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAlertsApi, getCampaignsApi, getUploadsApi, getDriveApi, resolveTileValue, getExploreFields, getFieldOverrides, draftCampaignCopy, designEmailFn, getSegmentsApi, getEventOpsApi, catalogue = defaultCatalogue }) {
   if (!query || !query.applyScope || !query.runLookerQuery) {
     throw new Error('owlTools requires the query engine (applyScope + runLookerQuery).');
   }
@@ -599,6 +599,47 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     },
   };
 
+  // ── Drive documents (Google Drive connector) ───────────────────────────────────
+  // Read-only grounding over the client's OWN shared Drive files — the Docs/Slides/
+  // PDF text that server/googleDrive.js synced. (Drive Sheets/CSVs become attached
+  // TABLES and are queried via askUpload instead.) Entity-scoped: the drive API only
+  // ever returns this client's rows, and docId reads re-check ownership server-side.
+  function driveCtx(ctx) {
+    const { user, suiteId, entityId } = ctx;
+    if (!user) return { err: refuse('no_user', 'No authenticated user.') };
+    const eid = entityId || (suiteId && db && db.getSuite ? (db.getSuite(suiteId) || {}).entityId : null);
+    if (!eid) return { err: refuse('no_client', 'Open or pick a client first.') };
+    const api = typeof getDriveApi === 'function' ? getDriveApi() : null;
+    if (!api || !api.searchDocs) return { err: refuse('unavailable', 'Drive documents aren\'t available right now.') };
+    return { eid, api };
+  }
+  function runSearchDriveDocs(args = {}, ctx = {}) {
+    const { err, eid, api } = driveCtx(ctx); if (err) return err;
+    const results = api.searchDocs(eid, String(args.query || ''));
+    if (!results.length) return { ok: true, results: [], note: 'No Drive documents matched. Files are shared with the Owl under Settings → Integrations → Google Drive.' };
+    return { ok: true, results, note: 'Quote figures exactly as written and cite the document name.' };
+  }
+  const searchDriveDocsSchema = {
+    name: 'searchDriveDocs',
+    description: 'Search the client\'s connected Google Drive DOCUMENTS (Docs, Slides, PDFs synced as text) by name or content. Returns matching files with a snippet. Use readDriveDoc to read one. Drive SHEETS are attached tables — query those with askUpload. Read-only.',
+    input_schema: { type: 'object', properties: { query: { type: 'string', description: 'Word or phrase to find (matches file names and text). Empty lists all documents.' } } },
+  };
+  function runReadDriveDoc(args = {}, ctx = {}) {
+    const { err, eid, api } = driveCtx(ctx); if (err) return err;
+    const doc = api.readDoc(eid, { docId: args.docId, name: args.name, offset: Number(args.offset) || 0 });
+    if (!doc) return refuse('not_found', 'No Drive document matched — call searchDriveDocs to see what\'s connected.');
+    return { ok: true, ...doc, note: doc.more ? `Document continues — call readDriveDoc again with offset ${doc.nextOffset} for the next part.` : 'End of document.' };
+  }
+  const readDriveDocSchema = {
+    name: 'readDriveDoc',
+    description: 'Read the TEXT of one connected Drive document (Doc/Slides/PDF), in chunks. Ground your answer on this text and cite the document name; never invent content. Long documents: page through with offset.',
+    input_schema: { type: 'object', properties: {
+      name: { type: 'string', description: 'Document name (fuzzy match). Or pass docId from searchDriveDocs.' },
+      docId: { type: 'string', description: 'Exact document id from searchDriveDocs.' },
+      offset: { type: 'number', description: 'Character offset to continue from (default 0).' },
+    } },
+  };
+
   // ── createAlert (ACT) ─────────────────────────────────────────────────────────
   // The FIRST act-tool. It DRAFTS a metric alert for the user to confirm — it does
   // NOT create anything (no DB write here). Self-affecting only: an alert notifies the
@@ -1006,6 +1047,8 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     getAlerts: { schema: getAlertsSchema, run: runGetAlerts, menu: { cmd: 'alerts', label: 'Alerts', icon: '🔔', example: 'What alerts are set — or set up a new one?' } },
     getCampaigns: { schema: getCampaignsSchema, run: runGetCampaigns, menu: { cmd: 'campaigns', label: 'Campaigns', icon: '📣', example: 'How did recent campaigns do — or draft a new one?' } },
     askUpload: { schema: askUploadSchema, run: runAskUpload, menu: { cmd: 'uploads', label: 'Attached files', icon: '📎', example: "What's in my attached data?" } },
+    searchDriveDocs: { schema: searchDriveDocsSchema, run: runSearchDriveDocs, menu: { cmd: 'drive', label: 'Drive documents', icon: '📁', example: 'What does the marketing plan say about launch week?' } },
+    readDriveDoc: { schema: readDriveDocSchema, run: runReadDriveDoc },
     createAlert: { schema: createAlertSchema, run: runCreateAlert },
     createSegment: { schema: createSegmentSchema, run: runCreateSegment, menu: { cmd: 'segment', label: 'Build an audience', icon: '👥', example: 'Build a segment of my top customers' } },
     draftCampaign: { schema: draftCampaignSchema, run: runDraftCampaign },

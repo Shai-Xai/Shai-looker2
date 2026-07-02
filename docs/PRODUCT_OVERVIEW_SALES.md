@@ -155,6 +155,28 @@ about their ticket sales without leaving the back end they already use every day
 **Pitch:** "The analyst comes to where organizers already work — Howler's portal
 gets an AI data analyst pane, powered by Pulse."
 
+### The Owl reads your Google Drive  🟡 (needs connection)
+Share the files your event actually runs on — **budgets, marketing plans, sponsor
+decks, contracts, settlement sheets** — and the Owl answers questions from them
+alongside your live ticketing data ("what does the budget allow for stage hire, and
+what have we sold so far?").
+- **Explicit and safe:** you share specific files or folders with a dedicated
+  Google account (like sharing with a colleague) and paste the link into
+  **Settings → Integrations → Google Drive**. The Owl sees exactly those files —
+  never your whole Drive — and only your own team can ask about them.
+- **Every format does the right thing:** Google **Sheets and CSVs** become live
+  tables the Owl can filter and total; **Docs, Slides and PDFs** become searchable
+  text it quotes **by document name** (PDFs are transcribed by AI).
+- **Folders stay in sync:** share a folder and new or updated files are picked up
+  automatically every hour; remove a file from the folder and the Owl forgets it.
+- Manageable by the client (Settings → Integrations) **and** by Howler on their
+  behalf (Admin → client → Integrations) — the dual-surface rule.
+- **Status 🟡:** needs a one-time Google service-account key (platform-wide or
+  per client), then it's self-service.
+
+**Pitch:** "The Owl doesn't just know your ticket sales — share your budget or
+marketing plan and it reads those too."
+
 ### The Fan Owl — a booking guide on the event's own website  🧪
 The Owl's first **consumer-facing** surface: a widget the promoter drops onto their
 public event website with **one script tag**, where it guides fans to the right
@@ -660,6 +682,11 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-02** — **The Owl reads your Google Drive** 🟡: share budgets, plans,
+  decks or contracts (files or whole folders) with the Owl's Google account, paste
+  the link in Settings → Integrations, and ask questions across those files AND
+  live ticket data. Sheets become queryable tables; Docs/Slides/PDFs become
+  searchable, quotable text; watched folders re-sync hourly.
 - **2026-07-02** — **Pick a specific Howler approver** ✅ (Engage → campaigns): the
   approval picker now lists the Howler team members linked to the client account
   individually (name + role), alongside the generic "Howler (any of the account team)"

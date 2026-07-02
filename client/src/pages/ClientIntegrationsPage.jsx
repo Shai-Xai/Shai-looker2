@@ -8,6 +8,7 @@ import FanOwlAdmin from '../components/FanOwlAdmin.jsx';
 import MyOwlMemory from '../components/MyOwlMemory.jsx';
 import OwlAddressCard from '../components/OwlAddressCard.jsx';
 import ApiKeysCard from '../components/ApiKeysCard.jsx';
+import DriveSourcesCard from '../components/DriveSourcesCard.jsx';
 import MailLogView from '../components/MailLogView.jsx';
 import NotificationPrefs from '../components/NotificationPrefs.jsx';
 import TwoFactorCard from '../components/TwoFactorCard.jsx';
@@ -133,6 +134,7 @@ export default function ClientIntegrationsPage() {
                 }}
               />
               <ApiKeysCard entityId={activeItem.entityId} scope="my" />
+              <DriveSourcesCard entityId={activeItem.entityId} scope="my" />
             </div>
           )}
 
