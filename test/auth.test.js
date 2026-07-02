@@ -65,3 +65,49 @@ test('a viewer is read-only: dashboards yes, everything else no', () => {
   assert.equal(h.auth.hasPermission(user, ent.id, P.TEAM_MANAGE), false);
   assert.equal(h.auth.hasPermission(user, ent.id, P.DIGESTS_MANAGE), false);
 });
+
+// ── Session invalidation (token_version) ─────────────────────────────────────
+// A password change must evict every previously-issued session JWT — a captured
+// cookie can't outlive the reset meant to kill it. Exercised through the real
+// issueCookie → attachUser path (no reaching for the signing secret).
+function cookieFor(user) {
+  let jar = '';
+  h.auth.issueCookie({ cookie: (name, val) => { jar = `${name}=${val}`; } }, user);
+  return jar;
+}
+function userFromCookie(cookieStr) {
+  const name = h.auth.COOKIE;
+  const val = cookieStr.slice(name.length + 1);
+  const req = { cookies: { [name]: val } };
+  h.auth.attachUser(req, {}, () => {});
+  return req.user;
+}
+
+test('a password change bumps token_version and old session cookies stop authenticating', () => {
+  const pub = h.db.createUser({ email: 'session@test.local', password: 'first-pass-1', role: 'client' });
+  const user = h.db.getUser(pub.id);
+  assert.equal(user.tokenVersion, 0);
+
+  const oldCookie = cookieFor(user);
+  assert.equal(userFromCookie(oldCookie)?.id, pub.id, 'cookie authenticates before reset');
+
+  h.db.updateUser(pub.id, { password: 'second-pass-2' });
+  h.auth.invalidateUser(pub.id); // mirror the reset route (evict the 2s cache)
+  assert.equal(h.db.getUser(pub.id).tokenVersion, 1, 'token_version bumped');
+  assert.equal(userFromCookie(oldCookie), null, 'the old cookie no longer authenticates');
+
+  // A fresh cookie at the new epoch works; an unrelated edit doesn't churn it.
+  const freshCookie = cookieFor(h.db.getUser(pub.id));
+  assert.equal(userFromCookie(freshCookie)?.id, pub.id);
+  h.db.updateUser(pub.id, { firstName: 'Sam' });
+  h.auth.invalidateUser(pub.id);
+  assert.equal(h.db.getUser(pub.id).tokenVersion, 1, 'unrelated edit leaves token_version untouched');
+  assert.equal(userFromCookie(freshCookie)?.id, pub.id, 'fresh cookie still valid after unrelated edit');
+});
+
+test('a tampered / wrong-epoch cookie does not authenticate', () => {
+  const pub = h.db.createUser({ email: 'tamper@test.local', password: 'pw-123456', role: 'client' });
+  const good = cookieFor(h.db.getUser(pub.id));
+  const tampered = good.slice(0, -3) + 'zzz'; // corrupt the signature
+  assert.equal(userFromCookie(tampered), null);
+});

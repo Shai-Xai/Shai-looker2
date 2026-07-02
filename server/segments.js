@@ -40,11 +40,29 @@ function mount(app, { db, auth, resolveAudience, resolveRecipe, meta, tiktok }) 
   // Opt-in: keep this segment's Meta / TikTok Custom Audience mirrored automatically (~daily).
   try { sql.exec('ALTER TABLE segments ADD COLUMN meta_auto INTEGER NOT NULL DEFAULT 0'); } catch { /* exists */ }
   try { sql.exec('ALTER TABLE segments ADD COLUMN tiktok_auto INTEGER NOT NULL DEFAULT 0'); } catch { /* exists */ }
-  // Organisation: optionally link a segment to an EVENT (suite) and/or a custom FOLDER
-  // so the Segments list can be grouped/filtered. Both optional, organisational only —
-  // they never affect resolution or scope (the segment stays entity-scoped).
+  // Organisation + scope: optionally link a segment to an EVENT (suite) — this both
+  // groups it in the list AND scopes its resolution to that event (the same suite is
+  // mirrored into `definition.suiteId` so every live re-resolution honours it, not
+  // just creation). A custom FOLDER is a free-text label, organisational only.
   try { sql.exec("ALTER TABLE segments ADD COLUMN suite_id TEXT NOT NULL DEFAULT ''"); } catch { /* exists */ }
   try { sql.exec("ALTER TABLE segments ADD COLUMN folder TEXT NOT NULL DEFAULT ''"); } catch { /* exists */ }
+  // One-time backfill: earlier query-cohort segments stored the event link only as
+  // organisation and dropped it on live re-resolution — reach checks + campaign
+  // binding widened to every event in the entity (over-send risk). Bake the linked
+  // suite into the definition scope and invalidate the stale cached count.
+  try {
+    const legacy = sql.prepare("SELECT id, suite_id, definition FROM segments WHERE suite_id != ''").all();
+    for (const r of legacy) {
+      let d; try { d = JSON.parse(r.definition || '{}'); } catch { continue; }
+      if (d.mode === 'query' && !d.suiteId) {
+        d.suiteId = r.suite_id;
+        sql.prepare("UPDATE segments SET definition=?, last_count=-1, last_resolved_at='' WHERE id=?").run(JSON.stringify(d), r.id);
+      }
+    }
+  } catch { /* best-effort — never block boot */ }
+  // Provenance: which door created it — '' (in-app manual) | owl | whatsapp |
+  // claude | chatgpt | api — so the UI can badge AI/externally-made segments.
+  try { sql.exec("ALTER TABLE segments ADD COLUMN created_via TEXT NOT NULL DEFAULT ''"); } catch { /* exists */ }
 
   // Scope: admins see all; clients only their own entities (same boundary as
   // campaigns). Enforced server-side, so a segment can't reach another client.
@@ -60,6 +78,10 @@ function mount(app, { db, auth, resolveAudience, resolveRecipe, meta, tiktok }) 
     const mode = ['paste', 'gsheet', 'segment', 'query'].includes(d.mode) ? d.mode : 'tile';
     const out = {
       mode,
+      // Event (suite) the cohort is SCOPED to — baked into the definition so live
+      // re-resolution (reach checks, campaign binding) honours it, not just creation.
+      // Validated against the entity at the write site (cleanSuite); '' = entity-wide.
+      suiteId: String(d.suiteId || '').slice(0, 64),
       segmentId: String(d.segmentId || ''), // when mode='segment' (a block referencing another segment)
       gsheetUrl: String(d.gsheetUrl || '').slice(0, 1000), // linked Google Sheet (shared/published)
       // when mode='query' (a cohort the Owl built in chat) — the curated explore +
@@ -115,12 +137,15 @@ function mount(app, { db, auth, resolveAudience, resolveRecipe, meta, tiktok }) 
     suiteId: r.suite_id || '', folder: r.folder || '', // organisation: event link + custom folder
     metaAuto: !!r.meta_auto,
     tiktokAuto: !!r.tiktok_auto,
-    createdBy: r.created_by, createdAt: r.created_at, updatedAt: r.updated_at,
+    createdBy: r.created_by, createdVia: r.created_via || '', createdAt: r.created_at, updatedAt: r.updated_at,
   });
 
-  // Resolve a definition live (delegates to the campaign audience resolver).
+  // Resolve a definition live (delegates to the campaign audience resolver). The
+  // definition's own `suiteId` is passed as the event scope so live re-resolution
+  // (reach checks, member lists, sync) stays scoped to the segment's event — never
+  // silently widening to every event in the entity.
   async function resolveDefinition(entityId, definition, user) {
-    return resolveAudience(entityId, { audience: definition, channel: 'email' }, user);
+    return resolveAudience(entityId, { audience: definition, channel: 'email', eventSuiteId: (definition && definition.suiteId) || '' }, user);
   }
 
   // ── routes (dual-surface: same handlers for admin + client self-service) ──
@@ -152,7 +177,10 @@ function mount(app, { db, auth, resolveAudience, resolveRecipe, meta, tiktok }) 
     const name = String(req.body?.name || '').trim().slice(0, 120) || 'Untitled segment';
     const definition = cleanDef(req.body?.definition || {});
     const source = definition.sources && definition.sources.length ? 'mix' : (['paste', 'gsheet', 'query'].includes(definition.mode) ? definition.mode : 'tile');
-    const suiteId = cleanSuite(req.params.entityId, req.body?.suiteId);
+    // The event link doubles as the resolution scope — validate it and mirror it into
+    // the definition so every downstream resolve (reach, campaign) honours it.
+    const suiteId = cleanSuite(req.params.entityId, req.body?.suiteId ?? definition.suiteId);
+    definition.suiteId = suiteId;
     const folder = cleanFolder(req.body?.folder);
     const id = uuid(); const ts = now();
     sql.prepare('INSERT INTO segments (id, entity_id, name, source, definition, suite_id, folder, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
@@ -185,7 +213,9 @@ function mount(app, { db, auth, resolveAudience, resolveRecipe, meta, tiktok }) 
     const definition = req.body?.definition !== undefined ? cleanDef(req.body.definition) : JSON.parse(seg.definition || '{}');
     const source = definition.sources && definition.sources.length ? 'mix' : (['paste', 'gsheet', 'query'].includes(definition.mode) ? definition.mode : 'tile');
     // Event link + folder — only touched when supplied (so a content-only edit keeps them).
-    const suiteId = req.body?.suiteId !== undefined ? cleanSuite(req.params.entityId, req.body.suiteId) : (seg.suite_id || '');
+    // The event link is also the resolution scope, mirrored into the definition.
+    const suiteId = req.body?.suiteId !== undefined ? cleanSuite(req.params.entityId, req.body.suiteId) : (definition.suiteId ? cleanSuite(req.params.entityId, definition.suiteId) : (seg.suite_id || ''));
+    definition.suiteId = suiteId;
     const folder = req.body?.folder !== undefined ? cleanFolder(req.body.folder) : (seg.folder || '');
     // A changed definition invalidates the cached count.
     const changed = JSON.stringify(definition) !== seg.definition;
@@ -323,7 +353,7 @@ function mount(app, { db, auth, resolveAudience, resolveRecipe, meta, tiktok }) 
   // Programmatic create (the Owl's createSegment act-tool commit path). Runs the SAME
   // cleanDef + entity-ownership + campaigns.approve check the POST route uses, so an
   // Owl-made segment is identical to a hand-made one and obeys the permission model.
-  function createSegmentFor({ entityId, name, definition, user, suiteId, folder }) {
+  function createSegmentFor({ entityId, name, definition, user, suiteId, folder, via }) {
     if (!user || !entityId) return { ok: false, error: 'Missing user or client' };
     const isAdmin = user.role === 'admin';
     if (!(isAdmin || (user.entityIds || []).includes(entityId))) return { ok: false, error: 'Not allowed' };
@@ -333,11 +363,14 @@ function mount(app, { db, auth, resolveAudience, resolveRecipe, meta, tiktok }) 
     const def = cleanDef(definition || {});
     const nm = String(name || '').trim().slice(0, 120) || 'Untitled segment';
     const source = def.sources && def.sources.length ? 'mix' : (['paste', 'gsheet', 'query'].includes(def.mode) ? def.mode : 'tile');
-    const sid = cleanSuite(entityId, suiteId);
+    // Scope the cohort to the supplied event and bake it into the definition, so an
+    // Owl/API-made segment re-resolves scoped exactly like a hand-made one.
+    const sid = cleanSuite(entityId, suiteId ?? def.suiteId);
+    def.suiteId = sid;
     const fld = cleanFolder(folder);
     const id = uuid(); const ts = now();
-    sql.prepare('INSERT INTO segments (id, entity_id, name, source, definition, suite_id, folder, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
-      .run(id, entityId, nm, source, JSON.stringify(def), sid, fld, (user.email || 'owl'), ts, ts);
+    sql.prepare('INSERT INTO segments (id, entity_id, name, source, definition, suite_id, folder, created_by, created_via, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
+      .run(id, entityId, nm, source, JSON.stringify(def), sid, fld, (user.email || 'owl'), String(via || '').slice(0, 20), ts, ts);
     return { ok: true, segment: rowToSeg(getSeg(id)) };
   }
   // The client's saved segments (id + name) — so the Owl can target one by name.

@@ -87,7 +87,10 @@ function fractionAtNow(series, { deadlineMs, nowMs = Date.now(), startMs, daysLe
   // Points that carry a real numeric "days before event" label. Trend tiles append a
   // stray totals row (empty x); ignore it rather than letting it veto the whole axis.
   const numPts = cum.filter((p) => p.t !== '' && p.t != null && !isISO(p.t) && Number.isFinite(Number(p.t)));
-  const hasNumeric = numPts.length >= 2 && numPts.length >= cum.length - 2;
+  // Ratio gate, not an absolute one: a long curve with a few junk rows (totals rows,
+  // null buckets) is still a numeric axis — don't let strays veto it and drop pace to
+  // the window fallback (which reads the curve's very start early in a goal's life).
+  const hasNumeric = numPts.length >= 2 && numPts.length >= Math.max(2, Math.floor(cum.length * 0.8));
   const countdown = hasNumeric && isCountdownAxis(numPts);     // days-before-event
   const forward = hasNumeric && !countdown;                    // day-of-month, week #, …
   const dLeft = Number.isFinite(daysLeft) ? daysLeft
@@ -143,9 +146,21 @@ function recentRate(series, { days = 14 } = {}) {
 
 // Shape-scaled projection: where you'll land if you finish the curve like last time.
 // Prefer an explicit fNow (the real days-before fraction); else read it by index at r.
+// Raw current/f says "keep outperforming last time by today's ratio for the WHOLE
+// cycle" — explosive early on (5% observed × 5× ahead → 5× last time's total). So the
+// outperform ratio is only PARTIALLY believed: shrunk toward 1 by √f (the observed
+// share of the cycle, concave so early data counts some but never fully). At f→1 it
+// converges to the exact ratio (= the current value); with no readable total it
+// falls back to the raw scaling.
 function shapeForecast({ cum, currentValue, r, fNow = null }) {
   const f = fNow != null ? fNow : fractionAt(cum, r);
   if (f == null || f <= 0 || !Number.isFinite(currentValue)) return null;
+  const total = cum && cum.length ? cum[cum.length - 1] : null;
+  if (Number.isFinite(total) && total > 0) {
+    const ratio = currentValue / (total * f);            // vs last time, at this point
+    const believe = Math.sqrt(Math.max(0, Math.min(1, f)));
+    return total * (1 + (ratio - 1) * believe);
+  }
   return currentValue / f;
 }
 

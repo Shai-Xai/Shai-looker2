@@ -3,6 +3,17 @@
 Guidance for anyone (human or AI) building on this codebase. Keep it short and
 current.
 
+## Communicating with Shai
+When referencing any platform or page (Pulse itself, Claude, ChatGPT, Render,
+GitHub, docs pages…), **always include the actual clickable URL** for easy
+access — never just name the platform. Key ones: Pulse
+https://howler-pulse-v2.onrender.com · API guide
+https://howler-pulse-v2.onrender.com/api-guide · MCP
+`https://howler-pulse-v2.onrender.com/mcp` · Claude connectors
+https://claude.ai/settings/connectors · ChatGPT connectors
+https://chatgpt.com/#settings/Connectors · Render https://dashboard.render.com
+· repo https://github.com/Shai-Xai/Shai-looker2
+
 ## What Pulse is (read first)
 Pulse is the **Experience OS** for Howler's clients and internal teams — a
 data-driven system that turns data into **insight → action → results** and makes
@@ -102,6 +113,9 @@ Remember the wizard reuses the real editors (`ClientSuites`, `EntityLogins`,
 wizard automatically; the tour copy is the part that still needs a manual update.
 
 ## Git
-- Develop on the assigned `claude/*` branch; push to it AND to `main`
-  (`git push -u origin <branch> && git push origin <branch>:main`). Render
-  deploys from `main`.
+- **`main` is the single source of truth** — Render deploys from it, and ALL
+  work ships there. Develop on the assigned `claude/*` branch; push to it AND
+  to `main` (`git push -u origin <branch> && git push origin <branch>:main`).
+  If `main` has moved, fetch + rebase onto `origin/main` before pushing.
+- No other branch needs syncing. (The old rule about mirroring to the Ecstatic
+  session's branch is retired — that session ships to `main` like everyone else.)

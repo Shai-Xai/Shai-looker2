@@ -52,17 +52,17 @@ function tableFromCsv(text) {
   return { columns, rows };
 }
 
+const { safeGetText } = require('./safeFetch');
+
 async function fetchSheetCsv(url) {
   // Accept a Google Sheets "Publish to web → CSV" link (or any CSV URL). Normalise an
   // /edit link to its CSV export form when possible.
   let u = String(url || '').trim();
   const m = u.match(/docs\.google\.com\/spreadsheets\/d\/([\w-]+)/);
   if (m && !/output=csv|\/export/.test(u)) u = `https://docs.google.com/spreadsheets/d/${m[1]}/export?format=csv`;
-  const res = await fetch(u, { redirect: 'follow' });
-  if (!res.ok) throw new Error(`Sheet fetch failed (${res.status})`);
-  const text = await res.text();
-  if (text.length > TEXT_CAP) throw new Error('Sheet is too large.');
-  return text;
+  // SSRF-safe: https only, private/metadata IPs blocked, redirects re-validated,
+  // size-capped mid-stream. This is a USER-supplied URL — never a plain fetch.
+  return safeGetText(u, { timeoutMs: 15000, maxBytes: TEXT_CAP });
 }
 
 function mount(app, { db, auth }) {

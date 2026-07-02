@@ -66,7 +66,10 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
   const [curveTileId, setCurveTileId] = useState(goal?.curveRef?.tileId || '');
   const [curveCadence, setCurveCadence] = useState(goal?.curveRef?.cadence || 'monthly'); // 'weekly' | 'monthly'
   const [compareKey, setCompareKey] = useState(goal?.curveRef?.compareKey || ''); // '' = last year (auto)
+  const [thisKey, setThisKey] = useState(goal?.curveRef?.thisKey || ''); // '' = auto (Current Event lock / newest)
   const [curveYears, setCurveYears] = useState([]); // prior-period keys to compare against
+  const [curveAllKeys, setCurveAllKeys] = useState([]); // every pivot key (choices for "this event")
+  const [detectedThisKey, setDetectedThisKey] = useState(''); // what auto currently resolves to
   const [curveSeries, setCurveSeries] = useState(null); // { loading } | [{ t, v }]
   const [suggInfo, setSuggInfo] = useState(null); // server-computed { checkpoints:[{byDate,fraction,lastValue}] }
   // Personal-goal fields (Slice D): who can see it + which event goal it feeds.
@@ -136,7 +139,7 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
     name, source: track === 'tile' ? 'ticketing' : 'manual',
     metricRef: track === 'tile' && dashboardId && tileId ? refWithNames(dashboardId, tileId) : null,
     targetValue: Number(target) || 0, targetMax: direction === 'range' && targetMax !== '' ? Number(targetMax) : null, unit, tag, direction, display,
-    curveRef: (curveDashboardId && curveTileId) ? { ...refWithNames(curveDashboardId, curveTileId), cadence: curveCadence, ...(compareKey ? { compareKey } : {}) } : null,
+    curveRef: (curveDashboardId && curveTileId) ? { ...refWithNames(curveDashboardId, curveTileId), cadence: curveCadence, ...(compareKey ? { compareKey } : {}), ...(thisKey ? { thisKey } : {}) } : null,
     baselineRef: baselineMode === 'tile' && baselineDashboardId && baselineTileId ? refWithNames(baselineDashboardId, baselineTileId) : null,
   });
   const applyTemplate = (p) => {
@@ -153,6 +156,7 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
     if (p.curveRef) {
       if (p.curveRef.cadence) setCurveCadence(p.curveRef.cadence);
       if (p.curveRef.compareKey) setCompareKey(p.curveRef.compareKey);
+      if (p.curveRef.thisKey) setThisKey(p.curveRef.thisKey);
       if (p.curveRef.tileId || p.curveRef.tileName) { setCurveOpen(true); refs.curve = p.curveRef; }
     }
     if (p.baselineRef && (p.baselineRef.tileId || p.baselineRef.tileName)) { setBaselineMode('tile'); refs.baseline = p.baselineRef; }
@@ -196,11 +200,11 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
   useEffect(() => {
     if (!curveOpen || !curveDashboardId || !curveTileId || !curveSuiteId) { setCurveSeries(null); setSuggInfo(null); return undefined; }
     let alive = true; setCurveSeries({ loading: true });
-    api.goalCheckpointSuggestions(curveSuiteId, { dashboardId: curveDashboardId, tileId: curveTileId, cadence: curveCadence, startDate, byDate, compareKey })
-      .then((r) => { if (!alive) return; setCurveSeries(Array.isArray(r.series) ? r.series : []); setSuggInfo({ checkpoints: Array.isArray(r.checkpoints) ? r.checkpoints : [] }); setCurveYears(Array.isArray(r.years) ? r.years : []); })
+    api.goalCheckpointSuggestions(curveSuiteId, { dashboardId: curveDashboardId, tileId: curveTileId, cadence: curveCadence, startDate, byDate, compareKey, thisKey })
+      .then((r) => { if (!alive) return; setCurveSeries(Array.isArray(r.series) ? r.series : []); setSuggInfo({ checkpoints: Array.isArray(r.checkpoints) ? r.checkpoints : [] }); setCurveYears(Array.isArray(r.years) ? r.years : []); setCurveAllKeys(Array.isArray(r.allKeys) ? r.allKeys : []); setDetectedThisKey(r.thisKey || ''); })
       .catch(() => { if (alive) { setCurveSeries([]); setSuggInfo({ checkpoints: [] }); } });
     return () => { alive = false; };
-  }, [curveOpen, curveDashboardId, curveTileId, curveSuiteId, curveCadence, startDate, byDate, compareKey]);
+  }, [curveOpen, curveDashboardId, curveTileId, curveSuiteId, curveCadence, startDate, byDate, compareKey, thisKey]);
 
   // Live value of the chosen tile, so the target is set against the real number.
   useEffect(() => {
@@ -355,7 +359,7 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
         .map((m) => ({ byDate: m.byDate, targetValue: Number(m.targetValue), ...(m.lastValue != null && m.lastValue !== '' ? { lastValue: Number(m.lastValue) } : {}) }))
         .filter((m) => m.byDate && Number.isFinite(m.targetValue)),
       // Remember the linked checkpoint-curve tile so reopening restores it.
-      curveRef: (curveDashboardId && curveTileId) ? { dashboardId: curveDashboardId, tileId: curveTileId, cadence: curveCadence, ...(compareKey ? { compareKey } : {}) } : null,
+      curveRef: (curveDashboardId && curveTileId) ? { dashboardId: curveDashboardId, tileId: curveTileId, cadence: curveCadence, ...(compareKey ? { compareKey } : {}), ...(thisKey ? { thisKey } : {}) } : null,
     };
     try {
       let saved;
@@ -699,12 +703,24 @@ export default function GoalEditor({ entityId, suiteId, suites = [], goal, scope
                 <Seg active={curveCadence === 'weekly'} onClick={() => setCurveCadence('weekly')}>Weekly</Seg>
                 <Seg active={curveCadence === 'monthly'} onClick={() => setCurveCadence('monthly')}>Monthly</Seg>
               </div>
-              {/* Compare-against year — only when the tile carries more than one prior period. */}
+              {/* This event (actual) — which pivot column IS the current event. Auto follows
+                  the suite's Current Event lock; the override fixes a wrong auto-pick (e.g.
+                  a year-keyed pivot, or a smaller current edition mistaken for "last time"). */}
+              {curveAllKeys.length > 1 && (
+                <label style={{ display: 'block', marginTop: 8, fontSize: 12, color: 'var(--muted)' }}>
+                  This event (actual)
+                  <select value={thisKey} onChange={(e) => { setThisKey(e.target.value); if (e.target.value && e.target.value === compareKey) setCompareKey(''); }} style={{ ...inp, marginTop: 4 }}>
+                    <option value="">Auto{detectedThisKey ? ` (${detectedThisKey})` : ''}</option>
+                    {curveAllKeys.map((k) => <option key={k} value={k}>{k}</option>)}
+                  </select>
+                </label>
+              )}
+              {/* Compare-against (past event / year) — only when the tile carries more than one prior period. */}
               {curveYears.length > 1 && (
                 <label style={{ display: 'block', marginTop: 8, fontSize: 12, color: 'var(--muted)' }}>
-                  Compare against
+                  Compare against (past event)
                   <select value={compareKey} onChange={(e) => setCompareKey(e.target.value)} style={{ ...inp, marginTop: 4 }}>
-                    <option value="">Last year ({curveYears[0]})</option>
+                    <option value="">Last time ({curveYears[0]})</option>
                     {curveYears.map((y) => <option key={y} value={y}>{y}</option>)}
                   </select>
                 </label>

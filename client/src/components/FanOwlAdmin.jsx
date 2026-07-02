@@ -1,0 +1,421 @@
+import { useEffect, useMemo, useState } from 'react';
+import { useIsMobile } from '../lib/useIsMobile.js';
+
+// ─── Fan Owl config — dual-surface editor (docs/specs/FAN_OWL_SPEC.md §3B) ─────
+// The same component serves Admin → client detail (scope="admin-client") and the
+// client's own Settings (scope="my"), like MailTemplateEditor. Organised as four
+// sections: SITES & PAGES (embed key, domain allowlist, page mappings with their
+// per-page info + chips, the website reader), CATALOGUE (tickets/add-ons with
+// Howler-supplied buy links + images — the Owl's only price facts), FAQs
+// (event-wide knowledge the Owl may quote), and REPORTS (funnel, FAQ gaps,
+// captured fans).
+
+const PAGE_TYPES = ['home', 'lineup', 'artist', 'tickets', 'attraction', 'venue', 'accommodation', 'sponsors', 'faq', 'other'];
+const ITEM_KINDS = ['ticket', 'addon', 'bundle', 'accommodation', 'transport', 'merchandise'];
+const AVAILABILITY = ['', 'selling fast', 'last few', 'sold out'];
+const input = { width: '100%', boxSizing: 'border-box', padding: '9px 11px', border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 13, outline: 'none', fontFamily: 'inherit', background: 'var(--card, #fff)', color: 'var(--text)' };
+const small = { fontSize: 11.5, color: 'var(--muted)', margin: '2px 0 4px' };
+const btn = { padding: '8px 14px', borderRadius: 8, border: '1.5px solid var(--hairline)', background: 'transparent', color: 'var(--text)', fontSize: 12.5, cursor: 'pointer', minHeight: 36 };
+const primaryBtn = { ...btn, background: 'var(--text)', color: 'var(--bg, #fff)', border: 0, fontWeight: 700 };
+const card = { border: '1px solid var(--hairline)', borderRadius: 12, padding: 14, marginTop: 10 };
+const H = ({ children }) => <h3 style={{ fontSize: 14, fontWeight: 700, margin: '18px 0 2px' }}>{children}</h3>;
+const summaryStyle = { cursor: 'pointer', fontWeight: 700, fontSize: 13, padding: '8px 0', listStyle: 'none' };
+
+export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
+  const isMobile = useIsMobile();
+  const base = scope === 'my' ? `/api/my/fan-owl/${entityId}` : `/api/admin/entities/${entityId}/fan-owl`;
+  const [cfg, setCfg] = useState(null);
+  const [suites, setSuites] = useState([]);
+  const [stats, setStats] = useState(null);
+  const [leads, setLeads] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState(0);
+  const [ingestUrl, setIngestUrl] = useState('');
+  const [ingesting, setIngesting] = useState(false);
+  const [ingestNote, setIngestNote] = useState('');
+  const [tab, setTab] = useState('sites');
+  const TABS = [['sites', '🌐 Sites'], ['pages', '📄 Pages'], ['catalogue', '🎟️ Catalogue'], ['knowledge', '❓ FAQs'], ['reports', '📊 Reports']];
+
+  useEffect(() => {
+    let on = true;
+    fetch(base).then((r) => r.json()).then((c) => { if (on) setCfg(c); }).catch(() => {});
+    fetch(`${base}/insights`).then((r) => r.json()).then((s) => { if (on) setStats(s); }).catch(() => {});
+    const suitesUrl = scope === 'my' ? '/api/my/suites' : '/api/admin/suites';
+    fetch(suitesUrl).then((r) => r.json()).then((rows) => {
+      const list = Array.isArray(rows) ? rows : rows.suites || [];
+      if (on) setSuites(list.filter((s) => scope === 'my' || s.entityId === entityId).map((s) => ({ id: s.id, name: s.name })));
+    }).catch(() => {});
+    return () => { on = false; };
+  }, [base, scope, entityId]);
+
+  const set = (patch) => setCfg((c) => ({ ...c, ...patch }));
+  const setSite = (i, patch) => set({ sites: cfg.sites.map((s, j) => (j === i ? { ...s, ...patch } : s)) });
+  const setCat = (i, patch) => set({ catalogue: cfg.catalogue.map((s, j) => (j === i ? { ...s, ...patch } : s)) });
+  const setKnow = (i, patch) => set({ knowledge: cfg.knowledge.map((s, j) => (j === i ? { ...s, ...patch } : s)) });
+  const setPage = (i, pi, patch) => setSite(i, { pages: cfg.sites[i].pages.map((x, xi) => (xi === pi ? { ...x, ...patch } : x)) });
+  const movePage = (i, pi, dir) => {
+    const pages = [...cfg.sites[i].pages];
+    const to = pi + dir;
+    if (to < 0 || to >= pages.length) return;
+    const [x] = pages.splice(pi, 1);
+    pages.splice(to, 0, x);
+    setSite(i, { pages });
+  };
+
+  async function save() {
+    setSaving(true);
+    try {
+      const r = await fetch(base, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg) });
+      if (r.ok) { setCfg(await r.json()); setSavedAt(Date.now()); }
+    } finally { setSaving(false); }
+  }
+  const snippet = (siteKey) => `<script async src="${window.location.origin}/fan-owl.js" data-site-key="${siteKey}"></script>`;
+
+  // "Read the website": crawl → AI suggestions merged into the UNSAVED editor
+  // state (deduped; never overwriting promoter edits) — review, then Save.
+  // "Write sales pitches": one AI call drafts a salesy ribbon line per page from
+  // its info + ticked items; fills only EMPTY pitch fields (edits always win).
+  const [pitching, setPitching] = useState(false);
+  async function writePitches(siteIndex) {
+    const site = cfg.sites[siteIndex];
+    if (!site?.id) { setIngestNote('Save the site first, then draft pitches.'); return; }
+    setPitching(true); setIngestNote('Writing pitches from each page\'s info + items…');
+    try {
+      const r = await fetch(`${base}/pitches`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ siteId: site.id }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Pitch drafting failed — try again.');
+      const byPat = new Map((d.pitches || []).map((p) => [p.urlPattern.toLowerCase().trim(), p.pitch]));
+      setCfg((c) => ({
+        ...c,
+        sites: c.sites.map((s, j) => (j !== siteIndex ? s : {
+          ...s,
+          pages: (s.pages || []).map((p) => (String(p.pitch || '').trim() ? p : { ...p, pitch: byPat.get(p.urlPattern.toLowerCase().trim()) || '' })),
+        })),
+      }));
+      setIngestNote(`Drafted ${d.pitches.length} pitch${d.pitches.length === 1 ? '' : 'es'} — review each page's pitch line, edit freely, then Save.`);
+    } catch (e) { setIngestNote(`⚠️ ${e.message}`); }
+    finally { setPitching(false); }
+  }
+
+  async function ingest(siteIndex) {
+    const url = ingestUrl.trim();
+    if (!url) { setIngestNote('Enter the site URL first (https://…).'); return; }
+    setIngesting(true); setIngestNote('Reading the site — this takes ~30–60s…');
+    try {
+      const r = await fetch(`${base}/ingest`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: /^https?:\/\//i.test(url) ? url : `https://${url}` }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'The crawl failed — try again.');
+      setCfg((c) => {
+        const haveQ = new Set(c.knowledge.map((k) => (k.question || k.body).toLowerCase().trim()));
+        const newKnow = (d.knowledge || []).filter((k) => !haveQ.has((k.question || k.body).toLowerCase().trim()));
+        const sites = c.sites.map((s, j) => {
+          if (j !== siteIndex) return s;
+          const byPat = new Map((d.pages || []).map((p) => [p.urlPattern.toLowerCase().trim(), p]));
+          const merged = (s.pages || []).map((p) => {
+            const sug = byPat.get(p.urlPattern.toLowerCase().trim());
+            if (sug) byPat.delete(p.urlPattern.toLowerCase().trim());
+            if (!sug) return p;
+            return {
+              ...p,
+              content: String(p.content || '').trim() ? p.content : (sug.content || ''),
+              note: p.note || sug.note || '',
+              starters: (p.starters || []).length ? p.starters : (sug.starters || []),
+            };
+          });
+          const newPages = [...byPat.values()].map((p) => ({ ...p, itemIds: [] }));
+          return { ...s, pages: [...merged, ...newPages] };
+        });
+        setIngestNote(`Read ${d.crawled.length} page${d.crawled.length === 1 ? '' : 's'} → suggested ${newKnow.length} FAQ entries + ${(d.pages || []).length} pages (info + chips). Review, edit freely, then Save.`);
+        return { ...c, sites, knowledge: [...c.knowledge, ...newKnow] };
+      });
+    } catch (e) { setIngestNote(`⚠️ ${e.message}`); }
+    finally { setIngesting(false); }
+  }
+
+  if (!cfg) return <p style={small}>Loading the Fan Owl config…</p>;
+
+  const saveBar = (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 16 }}>
+      <button type="button" style={primaryBtn} disabled={saving} onClick={save}>{saving ? 'Saving…' : 'Save Fan Owl config'}</button>
+      {savedAt > 0 && Date.now() - savedAt < 4000 && <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>Saved ✓</span>}
+    </div>
+  );
+
+  return (
+    <div style={{ marginTop: 14 }}>
+      <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>🦉 Fan Owl — website booking guide</h2>
+      <p style={small}>The Owl on the event's public website: it guides fans to the right ticket, answers only from what you approve here, and hands out the buy links you supply. Nothing here is private — only publish what any fan may see.</p>
+
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', borderBottom: '1px solid var(--hairline)', padding: '10px 0', marginBottom: 4 }}>
+        {TABS.map(([key, label]) => (
+          <button key={key} type="button" onClick={() => setTab(key)}
+            style={{ ...btn, fontWeight: tab === key ? 700 : 500, background: tab === key ? 'var(--text)' : 'transparent', color: tab === key ? 'var(--bg, #fff)' : 'var(--text)', border: tab === key ? 0 : btn.border }}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'sites' && (
+        <>
+          <p style={small}>One site per website. Paste the embed snippet once, site-wide. Domains lock which websites may use the key (leave empty while testing).</p>
+          {cfg.sites.map((s, i) => (
+            <div key={s.id || i} style={card}>
+              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 8 }}>
+                <div>
+                  <div style={small}>Site name</div>
+                  <input style={input} value={s.name} onChange={(e) => setSite(i, { name: e.target.value })} placeholder="e.g. Retreat Yourself website" />
+                </div>
+                <div>
+                  <div style={small}>Event</div>
+                  <select style={input} value={s.suiteId || ''} onChange={(e) => setSite(i, { suiteId: e.target.value })}>
+                    <option value="">— whole client —</option>
+                    {suites.map((su) => <option key={su.id} value={su.id}>{su.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <div style={small}>Allowed domains (comma-separated, e.g. ry.howler.co.za)</div>
+                  <input style={input} value={(s.domains || []).join(', ')} onChange={(e) => setSite(i, { domains: e.target.value.split(',').map((d) => d.trim()).filter(Boolean) })} />
+                </div>
+                <div>
+                  <div style={small}>Teaser (the ribbon line when no page mapping matches)</div>
+                  <input style={input} value={s.teaser} onChange={(e) => setSite(i, { teaser: e.target.value })} placeholder="e.g. Tickets are live — ask me anything" />
+                </div>
+                <div>
+                  <div style={small}>Brand colour (hex)</div>
+                  <input style={input} value={s.brandColor} onChange={(e) => setSite(i, { brandColor: e.target.value })} placeholder="#111111" />
+                </div>
+                <div>
+                  <div style={small}>Daily chat budget (messages/day; over it the widget degrades to ribbon-only)</div>
+                  <input style={input} type="number" value={s.dailyBudget} onChange={(e) => setSite(i, { dailyBudget: e.target.value })} />
+                </div>
+              </div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, margin: '10px 0' }}>
+                <input type="checkbox" checked={!!s.enabled} onChange={(e) => setSite(i, { enabled: e.target.checked })} style={{ width: 16, height: 16 }} />
+                Enabled (fans can see the widget)
+              </label>
+              {s.siteKey && (
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <code style={{ fontSize: 11, background: 'var(--hairline)', padding: '6px 8px', borderRadius: 6, overflowX: 'auto', maxWidth: '100%' }}>{snippet(s.siteKey)}</code>
+                  <button type="button" style={btn} onClick={() => navigator.clipboard?.writeText(snippet(s.siteKey))}>Copy snippet</button>
+                  <a href={`/fan-owl-test?k=${s.siteKey}`} target="_blank" rel="noreferrer" style={{ ...btn, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', fontWeight: 700 }}>▶ Preview</a>
+                </div>
+              )}
+
+              <div style={{ textAlign: 'right', marginTop: 8 }}>
+                <button type="button" style={{ ...btn, color: 'var(--danger, #b3261e)' }} onClick={() => set({ sites: cfg.sites.filter((_, j) => j !== i) })}>Delete site</button>
+              </div>
+            </div>
+          ))}
+          <button type="button" style={{ ...btn, marginTop: 8 }} onClick={() => set({ sites: [...cfg.sites, { name: '', suiteId: '', domains: [], enabled: false, teaser: '', brandColor: '', dailyBudget: 400, pages: [] }] })}>+ Add site</button>
+          {saveBar}
+        </>
+      )}
+
+      {tab === 'pages' && (
+        <>
+          <p style={small}>What the Owl knows & sells on each page. When the page URL contains the pattern (* = wildcard), the Owl leads with the ticked items, answers from that page's info, and shows that page's chips. Longest match wins; unmatched pages get the whole catalogue. Page info is searchable from anywhere.</p>
+          {!cfg.sites.length && <p style={small}>Add a site first (Sites section) — pages belong to a site.</p>}
+          {cfg.sites.map((s, i) => (
+            <div key={s.id || i} style={card}>
+              {cfg.sites.length > 1 && <div style={{ fontWeight: 700, fontSize: 13.5, marginBottom: 4 }}>{s.name || 'Untitled site'}</div>}
+
+              <details style={{ marginBottom: 6 }}>
+                <summary style={summaryStyle}>🔮 Read the website — draft pages, info & chips automatically</summary>
+                <p style={small}>Point the Owl at the event site — it reads the pages and SUGGESTS page info, chips and FAQs. Nothing goes live until you review and Save.</p>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <input style={{ ...input, flex: '1 1 220px', width: 'auto' }} value={ingestUrl} placeholder={`https://${(s.domains || [])[0] || 'your-event-site.com'}`} onChange={(e) => setIngestUrl(e.target.value)} />
+                  <button type="button" style={{ ...btn, fontWeight: 700 }} disabled={ingesting} onClick={() => ingest(i)}>{ingesting ? 'Reading…' : 'Read & suggest'}</button>
+                </div>
+                {ingestNote && <p style={{ ...small, marginTop: 6 }}>{ingestNote}</p>}
+              </details>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', margin: '2px 0 6px' }}>
+                <button type="button" style={{ ...btn, fontWeight: 700 }} disabled={pitching} onClick={() => writePitches(i)}>{pitching ? 'Writing…' : '✨ Write sales pitches'}</button>
+                <span style={small}>Drafts the salesy ribbon line per page (fills empty pitch fields only).</span>
+              </div>
+
+              {(s.pages || []).map((p, pi) => (
+                <details key={p.id || pi} style={{ borderTop: '1px dashed var(--hairline)' }} open={!p.urlPattern}>
+                  <summary style={{ ...summaryStyle, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      {p.urlPattern || 'New page'} <span style={{ fontWeight: 400, color: 'var(--muted)' }}>· {p.pageType}{(p.itemIds || []).length ? ` · ${p.itemIds.length} item${p.itemIds.length === 1 ? '' : 's'}` : ''}{p.content ? ' · info ✓' : ''}{(p.starters || []).length ? ' · chips ✓' : ''}</span>
+                    </span>
+                    <button type="button" aria-label="Move up" disabled={pi === 0} style={{ ...btn, minHeight: 28, padding: '2px 9px', fontSize: 11, opacity: pi === 0 ? 0.35 : 1 }}
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); movePage(i, pi, -1); }}>▲</button>
+                    <button type="button" aria-label="Move down" disabled={pi === (s.pages || []).length - 1} style={{ ...btn, minHeight: 28, padding: '2px 9px', fontSize: 11, opacity: pi === (s.pages || []).length - 1 ? 0.35 : 1 }}
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); movePage(i, pi, 1); }}>▼</button>
+                  </summary>
+                  <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '2fr 1fr auto', gap: 8 }}>
+                    <input style={input} value={p.urlPattern} placeholder="/accommodation or /artists/*" onChange={(e) => setPage(i, pi, { urlPattern: e.target.value })} />
+                    <select style={input} value={p.pageType} onChange={(e) => setPage(i, pi, { pageType: e.target.value })}>
+                      {PAGE_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                    <button type="button" style={btn} onClick={() => setSite(i, { pages: s.pages.filter((_, xi) => xi !== pi) })}>Remove</button>
+                  </div>
+                  <input style={{ ...input, marginTop: 6 }} value={p.note} placeholder="One-liner: what is this page? (e.g. Luna X plays Saturday night)" onChange={(e) => setPage(i, pi, { note: e.target.value })} />
+                  <textarea style={{ ...input, marginTop: 6, resize: 'vertical' }} rows={3} value={p.content || ''}
+                    placeholder="Page info — everything the Owl may tell fans about this page's topic (e.g. all the accommodation options). Filled by “Read the website”; add or edit freely."
+                    onChange={(e) => setPage(i, pi, { content: e.target.value })} />
+                  <input style={{ ...input, marginTop: 6 }} value={(p.starters || []).join(', ')}
+                    placeholder="Suggested chips for this page, comma-separated (e.g. What are the glamping options?, Is bedding included?)"
+                    onChange={(e) => setPage(i, pi, { starters: e.target.value.split(',').map((t) => t.trim()).filter(Boolean).slice(0, 4) })} />
+                  <input style={{ ...input, marginTop: 6 }} value={p.pitch || ''} maxLength={160}
+                    placeholder="Sales pitch — the salesy teaser line fans see on this page (✨ drafts it; edit freely, e.g. Glamping pods from R1,500 — wake up at the festival 🌙)"
+                    onChange={(e) => setPage(i, pi, { pitch: e.target.value })} />
+                  <div style={{ ...small, marginTop: 6 }}>Lead with these catalogue items on this page:</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, paddingBottom: 8 }}>
+                    {cfg.catalogue.map((c) => {
+                      const on = (p.itemIds || []).includes(c.id);
+                      return (
+                        <button key={c.id} type="button"
+                          style={{ ...btn, minHeight: 32, padding: '5px 10px', fontSize: 12, background: on ? 'var(--text)' : 'transparent', color: on ? 'var(--bg, #fff)' : 'var(--text)' }}
+                          onClick={() => setPage(i, pi, { itemIds: on ? p.itemIds.filter((id) => id !== c.id) : [...(p.itemIds || []), c.id] })}>
+                          {c.label}
+                        </button>
+                      );
+                    })}
+                    {!cfg.catalogue.length && <span style={small}>No catalogue items yet — add them in the Catalogue section.</span>}
+                  </div>
+                </details>
+              ))}
+              <button type="button" style={{ ...btn, marginTop: 8 }} onClick={() => setSite(i, { pages: [...(s.pages || []), { urlPattern: '', pageType: 'other', itemIds: [], note: '', content: '', starters: [] }] })}>+ Page</button>
+            </div>
+          ))}
+          {cfg.sites.length > 0 && saveBar}
+        </>
+      )}
+
+      {tab === 'catalogue' && (
+        <>
+          <p style={small}>Tickets, add-ons & bundles — the Owl's ONLY price/product facts, and the only links it can hand out. Paste the Howler checkout link per item (Pulse adds tracking automatically). Images show as a scrollable strip on the offer card.</p>
+          {cfg.catalogue.map((c, i) => (
+            <details key={c.id || i} style={{ ...card, paddingTop: 4, paddingBottom: 8 }} open={!c.label}>
+              <summary style={summaryStyle}>
+                {c.label || 'New item'}{' '}
+                <span style={{ fontWeight: 400, color: 'var(--muted)' }}>
+                  · {c.kind}{c.price ? ` · ${c.currency} ${c.price}` : ''}{c.availability ? ` · ${c.availability}` : ''}{(c.images || []).length ? ' · 📷' : ''}{c.public === false ? ' · hidden' : ''}
+                </span>
+              </summary>
+              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : '2fr 1fr 1fr 1fr 1fr', gap: 8 }}>
+                <input style={input} value={c.label} placeholder="Label (e.g. Weekend Pass)" onChange={(e) => setCat(i, { label: e.target.value })} />
+                <select style={input} value={c.kind} onChange={(e) => setCat(i, { kind: e.target.value })}>
+                  {ITEM_KINDS.map((k) => <option key={k} value={k}>{k === 'addon' ? 'add-on' : k}</option>)}
+                </select>
+                <input style={input} value={c.price} placeholder="Price (e.g. 950)" onChange={(e) => setCat(i, { price: e.target.value })} />
+                <input style={input} value={c.currency} placeholder="ZAR" onChange={(e) => setCat(i, { currency: e.target.value })} />
+                <select style={input} value={c.availability} onChange={(e) => setCat(i, { availability: e.target.value })}>
+                  {AVAILABILITY.map((a) => <option key={a} value={a}>{a || '— availability —'}</option>)}
+                </select>
+              </div>
+              <input style={{ ...input, marginTop: 6 }} value={c.deepLink} placeholder="Howler checkout link (https://…)" onChange={(e) => setCat(i, { deepLink: e.target.value })} />
+              <input style={{ ...input, marginTop: 6 }} value={c.description} placeholder="One-liner the Owl can use (what's included, who it's for)" onChange={(e) => setCat(i, { description: e.target.value })} />
+              <input style={{ ...input, marginTop: 6 }} value={(c.images || []).join(', ')}
+                placeholder="Image URLs, comma-separated (https://… — fans scroll through them on the offer card)"
+                onChange={(e) => setCat(i, { images: e.target.value.split(',').map((u) => u.trim()).filter(Boolean).slice(0, 8) })} />
+              {(c.images || []).filter((u) => /^https?:\/\//i.test(u)).length > 0 && (
+                <div style={{ display: 'flex', gap: 6, overflowX: 'auto', marginTop: 6 }}>
+                  {c.images.filter((u) => /^https?:\/\//i.test(u)).map((u) => <img key={u} src={u} alt="" style={{ height: 54, borderRadius: 8, flex: '0 0 auto', objectFit: 'cover' }} />)}
+                </div>
+              )}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5 }}>
+                  <input type="checkbox" checked={c.public !== false} onChange={(e) => setCat(i, { public: e.target.checked })} style={{ width: 16, height: 16 }} />
+                  Visible to fans
+                </label>
+                <button type="button" style={{ ...btn, color: 'var(--danger, #b3261e)' }} onClick={() => set({ catalogue: cfg.catalogue.filter((_, j) => j !== i) })}>Remove</button>
+              </div>
+            </details>
+          ))}
+          <button type="button" style={{ ...btn, marginTop: 8 }} onClick={() => set({ catalogue: [...cfg.catalogue, { label: '', kind: 'ticket', price: '', currency: 'ZAR', deepLink: '', description: '', availability: '', public: true, images: [] }] })}>+ Add item</button>
+          {saveBar}
+        </>
+      )}
+
+      {tab === 'knowledge' && (
+        <>
+          <p style={small}>Event-wide FAQs & policies that apply everywhere (refunds, age limits, what's allowed in…). Page-specific detail belongs in that page's info box under Sites & pages. Together these are the ONLY sources the Owl may quote — anything not covered gets an honest "I don't know" and logs the gap in Reports.</p>
+          {cfg.knowledge.map((k, i) => (
+            <details key={k.id || i} style={{ ...card, paddingTop: 4, paddingBottom: 8 }} open={!k.question && !k.body}>
+              <summary style={summaryStyle}>
+                {k.question || (k.body ? `${k.body.slice(0, 60)}…` : 'New entry')}{' '}
+                <span style={{ fontWeight: 400, color: 'var(--muted)' }}>· {k.kind}</span>
+              </summary>
+              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 3fr', gap: 8 }}>
+                <select style={input} value={k.kind} onChange={(e) => setKnow(i, { kind: e.target.value })}>
+                  <option value="faq">FAQ</option><option value="policy">policy</option><option value="info">info</option>
+                </select>
+                <input style={input} value={k.question} placeholder="Question (e.g. What's the refund policy?)" onChange={(e) => setKnow(i, { question: e.target.value })} />
+              </div>
+              <textarea style={{ ...input, marginTop: 6, resize: 'vertical' }} rows={3} value={k.body} placeholder="The answer, in the organiser's words — the Owl sticks closely to this." onChange={(e) => setKnow(i, { body: e.target.value })} />
+              <div style={{ textAlign: 'right', marginTop: 6 }}>
+                <button type="button" style={{ ...btn, color: 'var(--danger, #b3261e)' }} onClick={() => set({ knowledge: cfg.knowledge.filter((_, j) => j !== i) })}>Remove</button>
+              </div>
+            </details>
+          ))}
+          <button type="button" style={{ ...btn, marginTop: 8 }} onClick={() => set({ knowledge: [...cfg.knowledge, { kind: 'faq', question: '', body: '' }] })}>+ Add entry</button>
+          {saveBar}
+        </>
+      )}
+
+      {tab === 'reports' && (
+        stats ? <Flywheel stats={stats} leads={leads} loadLeads={() => fetch(`${base}/leads`).then((r) => r.json()).then((d) => setLeads(d.leads || [])).catch(() => setLeads([]))} />
+          : <p style={small}>Loading reports…</p>
+      )}
+    </div>
+  );
+}
+
+function Flywheel({ stats, leads, loadLeads }) {
+  const total = useMemo(() => (stats.sites || []).reduce((acc, s) => {
+    for (const [k, v] of Object.entries(s.funnel || {})) acc[k] = (acc[k] || 0) + v;
+    return acc;
+  }, {}), [stats]);
+  const topics = useMemo(() => (stats.sites || []).flatMap((s) => s.topics || []).sort((a, b) => b.c - a.c).slice(0, 10), [stats]);
+  const stat = (label, v) => (
+    <div style={{ border: '1px solid var(--hairline)', borderRadius: 10, padding: '8px 12px', minWidth: 90 }}>
+      <div style={{ fontSize: 18, fontWeight: 700 }}>{v || 0}</div>
+      <div style={{ fontSize: 11, color: 'var(--muted)' }}>{label}</div>
+    </div>
+  );
+  return (
+    <div style={{ marginTop: 8 }}>
+      <H>Last 30 days</H>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
+        {stat('Ribbon views', total.ribbon_view)}
+        {stat('Chats opened', total.chat_open)}
+        {stat('Messages', total.chat_message)}
+        {stat('Buy clicks', total.deeplink_click)}
+        {stat('Leads', stats.leads?.total)}
+        {stat('Opted in', stats.leads?.optedIn)}
+      </div>
+      {topics.length > 0 && (
+        <>
+          <p style={{ ...small, marginTop: 10 }}>What fans asked about (interest + unanswered questions — your FAQ gaps):</p>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {topics.map((t) => <span key={t.topic} style={{ fontSize: 12, border: '1px solid var(--hairline)', borderRadius: 999, padding: '4px 10px' }}>{t.topic} · {t.c}</span>)}
+          </div>
+        </>
+      )}
+      <div style={{ marginTop: 10 }}>
+        {!leads && <button type="button" style={btn} onClick={loadLeads}>Show captured fans</button>}
+        {leads && (leads.length === 0 ? <p style={small}>No fans captured yet.</p> : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ borderCollapse: 'collapse', fontSize: 12.5, minWidth: 480 }}>
+              <thead><tr>{['Email', 'Name', 'Marketing opt-in', 'Interests', 'When'].map((h) => <th key={h} style={{ textAlign: 'left', padding: '6px 10px', borderBottom: '1px solid var(--hairline)', fontWeight: 700 }}>{h}</th>)}</tr></thead>
+              <tbody>
+                {leads.map((l) => (
+                  <tr key={l.id}>
+                    <td style={{ padding: '6px 10px' }}>{l.email}</td>
+                    <td style={{ padding: '6px 10px' }}>{l.name}</td>
+                    <td style={{ padding: '6px 10px' }}>{l.consentMarketing ? '✅' : '—'}</td>
+                    <td style={{ padding: '6px 10px' }}>{(l.preferences || []).join(', ')}</td>
+                    <td style={{ padding: '6px 10px', whiteSpace: 'nowrap' }}>{String(l.at || '').slice(0, 10)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}

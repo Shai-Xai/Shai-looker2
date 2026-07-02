@@ -13,12 +13,13 @@ const MODEL = 'claude-opus-4-8';
 const BRIEF_MODEL = 'claude-sonnet-4-6';
 const MAX_ROWS = 60; // cap rows sent to keep the prompt small and cheap
 
-// One Anthropic client per API key (admin default from env/DB, or a client's own).
-const clientsByKey = new Map();
+// One Anthropic client per API key (admin default from env/DB, or a client's own) — each wrapped by aiUsage so every call's token usage is metered (clientFor is the single chokepoint all modules get clients through).
+const aiUsage = require('./aiUsage'); const clientsByKey = new Map();
 function clientFor(apiKey) {
   const key = (apiKey || process.env.ANTHROPIC_API_KEY || '').trim();
   if (!key) return null;
-  if (!clientsByKey.has(key)) clientsByKey.set(key, new Anthropic({ apiKey: key }));
+  // timeout/maxRetries override the SDK's 10-min ×2 default (a hung call would otherwise pin the sequential scheduler tick for ~30 min).
+  if (!clientsByKey.has(key)) clientsByKey.set(key, aiUsage.wrapClient(new Anthropic({ apiKey: key, timeout: 120_000, maxRetries: 1 })));
   return clientsByKey.get(key);
 }
 
@@ -172,8 +173,7 @@ function parseModelJson(text, what = 'response') {
   const a = s.indexOf('{');
   if (a < 0) throw new Error(`AI did not return JSON for the ${what}`);
   const b = s.lastIndexOf('}');
-  // Prefer the full object; if it was truncated (no closing brace), keep from the
-  // first '{' so closeTruncatedJson can salvage it.
+  // Prefer the full object; if truncated (no closing brace), keep from the first '{' so closeTruncatedJson can salvage it.
   s = b > a ? s.slice(a, b + 1) : s.slice(a);
   const noTrailingCommas = (x) => x.replace(/,(\s*[}\]])/g, '$1');
   const missingCommas = (x) => x.replace(/(["\]}])\s*\n(\s*)(["{[])/g, '$1,\n$2$3'); // value\n value → value,\n value
@@ -1138,7 +1138,7 @@ function promptRegistry() {
     { key: 'owlChat', label: 'Owl chat (agentic)', scope: 'The conversational Owl: tool-using analyst that answers questions by calling askData (grounded, scoped)', text: require('./owlChat').OWL_CHAT_SYSTEM },
     { key: 'owlChatAnalyst', label: 'Owl chat — Analyst depth', scope: 'Extra brief layered on the Owl chat when the user picks Analyst (deep) mode — multi-cut analysis + recommendation', text: require('./owlChat').OWL_ANALYST_LAYER },
     { key: 'owlChatOperator', label: 'Owl chat — Operator mode', scope: 'Extra brief (on top of Analyst) when the user picks Operator mode — proactively proposes + drafts the single best next action', text: require('./owlChat').OWL_OPERATOR_LAYER },
-    { key: 'ticketDraft', label: 'Ticket drafting', scope: 'Turns a raw internal bug/feature report into a structured engineering ticket (Admin → Tickets)', text: require('./tickets').TICKET_DRAFT_SYSTEM },
+    { key: 'ticketDraft', label: 'Ticket drafting', scope: 'Turns a raw internal bug/feature report into a structured engineering ticket (Admin → Tickets)', text: require('./tickets').TICKET_DRAFT_SYSTEM }, { key: 'fanOwl', label: 'Fan Owl (booking guide)', scope: 'The consumer-facing Owl embedded on promoters\' public event sites — the persona + grounding rules every fan conversation runs under', text: require('./fanOwl').FAN_OWL_SYSTEM }, { key: 'fanIngest', label: 'Fan Owl — website reader', scope: 'Crawls the promoter\'s site and drafts SUGGESTED knowledge entries + page mappings for human review (nothing auto-saves)', text: require('./fanOwl').FAN_INGEST_SYSTEM }, { key: 'fanPitch', label: 'Fan Owl — pitch writer', scope: 'Drafts the per-page salesy ribbon line from each page\'s approved info + items (human reviews; served with zero AI cost)', text: require('./fanOwl').FAN_PITCH_SYSTEM },
     { key: 'jsonRepair', label: 'JSON repair', scope: 'Last-resort model repair of malformed AI JSON before parsing', text: JSON_REPAIR_SYSTEM },
   ];
 }

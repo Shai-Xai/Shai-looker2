@@ -90,10 +90,26 @@ const COOKIE_SECURE = process.env.COOKIE_SECURE != null
   : process.env.NODE_ENV === 'production';
 const COOKIE_OPTS = { httpOnly: true, sameSite: 'lax', secure: COOKIE_SECURE };
 function issueCookie(res, user) {
-  const token = jwt.sign({ sub: user.id }, getSecret(), { expiresIn: TOKEN_TTL });
+  // `tv` (token version) pins the session to the user's current password epoch —
+  // attachUser rejects a token whose tv is behind, so a password reset evicts
+  // every previously-issued session. HS256 pinned (see attachUser) as defence-
+  // in-depth against algorithm-confusion.
+  const token = jwt.sign({ sub: user.id, tv: user.tokenVersion || 0 }, getSecret(), { algorithm: 'HS256', expiresIn: TOKEN_TTL });
   res.cookie(COOKIE, token, { ...COOKIE_OPTS, maxAge: 7 * 24 * 60 * 60 * 1000 });
 }
 function clearCookie(res) { res.clearCookie(COOKIE, COOKIE_OPTS); }
+
+// ─── Embed session tokens (organizer-portal Owl — server/owlEmbed.js) ─────────
+// A short-lived bearer JWT (marked with an `emb` claim) that authenticates the
+// chromeless /embed/owl page WITHOUT a cookie: inside a cross-site iframe the
+// sameSite session cookie is never sent, so the embed page attaches this token
+// as an Authorization header on every API call instead. Minted only after the
+// portal's server-to-server handshake, for entity-scoped shadow client users —
+// attachUser accepts it below and marks the request `req.embedAuth`.
+const EMBED_TOKEN_TTL_S = 2 * 60 * 60; // one working session; the portal mints a fresh one per open
+function issueEmbedToken(user, ttlSeconds = EMBED_TOKEN_TTL_S) {
+  return jwt.sign({ sub: user.id, emb: 1 }, getSecret(), { expiresIn: ttlSeconds });
+}
 
 // Short-TTL cache of the authenticated user. A single screen fires 10-20 parallel
 // tile/data requests, and attachUser runs on each — without this, that's 10-20 ×
@@ -115,10 +131,47 @@ function invalidateUser(id) { userCache.delete(id); }
 function attachUser(req, _res, next) {
   const token = req.cookies?.[COOKIE];
   if (token) {
-    try { const { sub } = jwt.verify(token, getSecret()); req.user = cachedUser(sub) || null; }
-    catch { req.user = null; }
+    try {
+      const { sub, tv, stage } = jwt.verify(token, getSecret(), { algorithms: ['HS256'] });
+      // A 2FA step-up (pending) token is NOT a session — never let it authenticate.
+      if (stage) { req.user = null; return next(); }
+      const user = cachedUser(sub) || null;
+      // Reject a token minted before the user's current password epoch. Legacy
+      // tokens (pre-tv, undefined) are accepted only against tokenVersion 0, so
+      // the first reset after this ships still evicts them.
+      req.user = (user && (tv || 0) === (user.tokenVersion || 0)) ? user : null;
+    } catch { req.user = null; }
+  }
+  // No cookie? Accept an embed session token (issueEmbedToken) as a bearer. Only
+  // JWTs WE signed with the `emb` claim verify; anything else (a pulse_sk_ API
+  // key, a foreign token) falls through untouched — apiKeys.bearerAuth still owns
+  // its own routes.
+  if (!req.user) {
+    const m = /^Bearer\s+(\S+)$/i.exec(req.headers?.authorization || '');
+    if (m && m[1].split('.').length === 3) {
+      try {
+        const p = jwt.verify(m[1], getSecret());
+        if (p.emb) { req.user = cachedUser(p.sub) || null; req.embedAuth = !!req.user; }
+      } catch { /* not an embed token — ignore */ }
+    }
   }
   next();
+}
+
+// Short-lived token issued after password/link succeeds but BEFORE the second
+// factor — the client sends it back to /api/auth/2fa with the code. Carries
+// stage:'2fa' so attachUser refuses it as a session, and tv so a password
+// change / 2FA reset invalidates it.
+function issue2faPending(user) {
+  return jwt.sign({ sub: user.id, tv: user.tokenVersion || 0, stage: '2fa' }, getSecret(), { algorithm: 'HS256', expiresIn: '10m' });
+}
+function verify2faPending(token) {
+  try {
+    const { sub, tv, stage } = jwt.verify(token, getSecret(), { algorithms: ['HS256'] });
+    if (stage !== '2fa') return null;
+    const user = db.getUser(sub);
+    return (user && (tv || 0) === (user.tokenVersion || 0)) ? user : null;
+  } catch { return null; }
 }
 function requireAuth(req, res, next) {
   if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
@@ -455,7 +508,8 @@ module.exports = {
   // users
   loadUsers, publicUser, createUser, updateUser, deleteUser, getUser, verifyCredentials,
   // session
-  issueCookie, clearCookie, attachUser, requireAuth, requireAdmin,
+  issueCookie, clearCookie, issueEmbedToken, attachUser, requireAuth, requireAdmin, invalidateUser,
+  issue2faPending, verify2faPending,
   // scoping
   scopeFiltersForUser, accessibleOrgFilters, canAccessDashboard,
   // suites / navigation

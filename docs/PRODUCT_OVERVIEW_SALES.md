@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-01 · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-02 (named Howler approvers) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -27,7 +27,7 @@ from *seeing* a cohort to *acting* on it in one place, scoped and branded to the
 
 ---
 
-## The continuous comms loop  ✅ (one-tap "Owl auto-pilot" 🔜)
+## The continuous comms loop  ✅ (one-tap "Owl auto-pilot" ✅)
 Pulse isn't a pile of separate tools — it's **one loop that never stops turning.**
 Every part feeds the next, so insight becomes action and results become the next
 insight:
@@ -52,9 +52,10 @@ notifications even when it's closed**, that flow reaches people on their phone
 without them having to log in — a nudge lands, they tap, they're in the right
 place to act.
 
-> Today Pulse **surfaces** the insight + suggested action and **measures** the
-> result. Closing the loop with a single tap — the **agentic Owl** drafting the
-> campaign straight from a suggestion — is the flagship roadmap item (🔜).
+> Pulse **surfaces** the insight + suggested action, **measures** the result —
+> and now closes the loop with a single tap: the **agentic Owl auto-pilot** ✅
+> drafts the campaign straight from a suggestion. The draft still rides the
+> normal review + approval gates before anything sends.
 
 **Pitch:** "It's not dashboards *and* email *and* reports — it's one living loop.
 Your data tells you what to do, you do it in the same place, the result makes the
@@ -135,6 +136,53 @@ approval needed.
 - **Status 🧪:** pilot. Howler links each phone number to its client in **Admin →
   WhatsApp Owl**, where a live activity log shows inbound messages end-to-end.
 
+### The Owl in the Howler organizer portal  🧪
+The same Owl, embedded **inside Howler's own organizer portal** — organizers ask
+about their ticket sales without leaving the back end they already use every day.
+- **No extra login** — the portal signs the organizer in behind the scenes
+  (server-to-server handshake); their first question auto-creates their Pulse
+  identity, so saved chats and Owl memory carry across sessions.
+- **Same answers, same safety** — it's the identical Owl brain and the identical
+  server-side scope gate: an organizer sees **only their own organization's data**,
+  with charts, follow-up chips and saved threads, in a panel that works great on
+  mobile.
+- **Status 🧪:** pilot. Works today for organizations that exist as Pulse clients —
+  Howler links each Howler organization to its Pulse client in **Admin → AI →
+  Organizer portal Owl** and hands the portal team a one-iframe embed
+  (`docs/OWL_EMBED.md`). When the Howler→Pulse data integration ships, the same
+  embed lights up for every self-service organizer automatically.
+
+**Pitch:** "The analyst comes to where organizers already work — Howler's portal
+gets an AI data analyst pane, powered by Pulse."
+
+### The Fan Owl — a booking guide on the event's own website  🧪
+The Owl's first **consumer-facing** surface: a widget the promoter drops onto their
+public event website with **one script tag**, where it guides fans to the right
+ticket like a well-informed friend who's already going.
+- **Knows the page the fan is on** — on an artist page it leads with the ticket
+  that gets you to that artist; on the tickets page, the best options; plus a
+  no-AI "ribbon" teaser (offer + live availability tag) on every page.
+- **Answers like the organiser would** — FAQs, refund policy, what's included:
+  answered ONLY from the knowledge base the promoter writes (never invented), with
+  prices only ever from the configured catalogue. Urgency only from real
+  availability tags — no fake scarcity, ever.
+- **Sells with a buy button** — the Owl hands out the promoter's own Howler
+  checkout links (with tracking added), so every recommendation is one tap from
+  the official store. Purchases stay on Howler.
+- **Builds the promoter's fan base** — fans can opt in ("keep me posted") with an
+  explicit consent checkbox; captured names/emails/interests appear under the Fan
+  Owl config, ready for remarketing via Engage. Plus a live funnel (ribbon views →
+  chats → buy clicks) and a list of what fans asked that the FAQ couldn't answer.
+- **Self-service** — clients manage everything themselves under **Settings → Fan
+  Owl** (sites, catalogue, knowledge, page mappings); Howler can do it for them in
+  Admin → client → Fan Owl.
+- **Status 🧪:** beta. Deep-link checkout (in-widget checkout is on the roadmap);
+  catalogue and links are entered manually for now. Pilots: Retreat Yourself,
+  then Kappa Futur Festival (`docs/specs/FAN_OWL_SPEC.md`).
+
+**Pitch:** "Your website stays the story; the Owl turns it into the shop — every
+page gets a personal ticket guide that answers, recommends and sells."
+
 ## 2. Scheduled digests  ✅
 - Automated **email digests** (e.g. morning briefing) written for a **named role**
   (exec / marketing / finance / ops), with headline KPIs, a short narrative and
@@ -189,9 +237,12 @@ with approvals and full tracking.
   uploaded 'already called' list"). Each source keeps its own filters.
 - **Always-live** — segments re-resolve at use/send time, so a linked Sheet stays
   current; counts and email/SMS reach show up front.
-- **Organise** ✅ — **link a segment to an event** and/or **file it in a folder**,
-  then filter the list by either. Keeps a long list tidy as it grows (e.g. all the
-  audiences for one festival together).
+- **Organise + scope to an event** ✅ — **link a segment to an event** and/or **file
+  it in a folder**, then filter the list by either. Keeps a long list tidy as it grows
+  (e.g. all the audiences for one festival together). Linking to an event also **scopes
+  the audience to that event** — the cohort resolves to that event only, every time
+  (reach checks *and* when a campaign sends from it), never silently widening across all
+  your events.
 
 **Pitch:** "Build the exact audience from your own data or a spreadsheet — combine
 lists, subtract a suppression list, and it stays live."
@@ -220,7 +271,9 @@ lists, subtract a suppression list, and it stays live."
   preview and enforced at send; one-click unsubscribe; a transactional override
   for genuinely non-marketing messages.
 - **Approval workflow** ✅ — nothing sends without explicit approval; route to
-  named or "Howler" approvers, notified via inbox/push/email.
+  named client approvers, a **specific Howler team member on the account**, or the
+  generic "Howler" slot (any Howler member linked to the client) — notified via
+  inbox/push/email.
 - **Send caps (cost safety)** ✅ — a per-client **audience cap** limits how many
   recipients one campaign can reach, and a tighter **SMS sub-cap** stops a large
   email send from accidentally firing an equally-large (costly) SMS blast (set it
@@ -352,6 +405,12 @@ in one place that updates itself."
 - **Preview as a client** to see exactly what they see.
 - **AI audit** — every system prompt the AI is given is viewable ("Everything the
   AI is told").
+- **Product collateral you control** ✅ — Admin → Product holds the living **feature
+  matrix** and this overview, plus a shareable public **sales site** (`/sales`) built
+  from them. Every matrix section/feature and every section of this page has a
+  **Shown / Hidden toggle**, so anything still in the works (or not ready for
+  internal announcement) stays off the public pages until it's ready — admins
+  always see the full picture, dimmed.
 
 ## 8. Trust, security & scope  ✅
 - **Multi-tenant, server-side scoping** — every data query is force-filtered to
@@ -567,9 +626,11 @@ or point an AI agent (like Claude) at it and ask questions in plain language."
 ---
 
 ## On the horizon (🔜 — not yet usable; for roadmap conversations only)
-Use these to set direction, **not** to promise dates.
-- **Conversational/agentic Owl** — chat that answers, analyses and *executes*
-  (draft a campaign, remind an organiser…). The flagship.
+Use these to set direction, **not** to promise dates. *(The conversational/agentic
+Owl graduated off this list — the Owl chat is 🧪 and the one-tap auto-pilot is ✅,
+see "The continuous comms loop" above.)*
+- **Campaigns — conditional sequencing** — branch a journey on behaviour (opened /
+  clicked / purchased → a different next step), on top of today's linear drips.
 - **Portfolio / "all events" view** — roll up KPIs and audiences across a client's
   many events/profiles (today everything is per-event).
 - **Automations · Connections** tabs (shown as "SOON" in Engage). *(Templates is now live — see §5.)*
@@ -599,11 +660,100 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-02** — **Pick a specific Howler approver** ✅ (Engage → campaigns): the
+  approval picker now lists the Howler team members linked to the client account
+  individually (name + role), alongside the generic "Howler (any of the account team)"
+  slot — so a sign-off can go to your AM instead of pinging every Howler admin.
+- **2026-07-02** — **Move a whole subfolder in one action** ✅ (Dashboard Console): admins
+  can now reparent a subfolder — with **all** its nested subfolders and dashboards — in a
+  single move, instead of relocating dashboards one by one. Use the **↗ Move** button on any
+  folder (a mobile-friendly "Move to…" picker) or **drag a folder onto another** on desktop.
+  Moving a folder into itself or one of its own subfolders is blocked with a clear message,
+  and the reparent is **atomic** (one transaction) so a failure can't leave a half-moved
+  tree. Folders are an admin-only organising layer — clients navigate via suites/sets — so
+  there's no separate client surface to update.
+- **2026-07-02** — **Rename dashboards in the sidebar per Set** ✅: admins can now give
+  any dashboard a custom display name within a Set (in Admin → Sets, and in a client's
+  custom sets) without editing the underlying dashboard. The label shows in the client's
+  sidebar and top-nav; leave it blank to use the dashboard's native name, and clearing it
+  reverts. Because the override lives on the Set, the same dashboard can read differently
+  in different Sets — presentation is decoupled from source naming.
+- **2026-07-02** — **Event-scoped segments stay scoped** ✅ (fix): a segment linked to an
+  event now resolves to **that event only** on every live re-resolution — reach checks and
+  when a campaign sends from it — not just at creation. Previously an event-scoped cohort
+  (e.g. VIPs for one festival) could silently widen to *all* your events at send time, risking
+  an over-send. The AI-draft/segment tools also now return the **resolved event scope** so a
+  mismatch is visible before anyone approves a send.
+- **2026-07-02** — **Agentic Owl auto-pilot is live** ✅: the one-tap close of the loop —
+  the Owl drafts the campaign straight from an insight/suggested action. Drafts still
+  ride the normal review + approval gates; nothing sends without a human. (Roadmap's
+  flagship item, now shipped; the feature matrix Owl section also now separates the
+  **native Pulse Owl**, the **Owl in Claude / ChatGPT**, and the third-party
+  **Inventive "Ask"** analyst.)
+- **2026-07-02** — **Pulse sales site + admin-curated feature matrix** ✅: a shareable
+  public **sales website at `/sales`** built from the (freshly updated) feature matrix,
+  and the matrix itself moved server-side with **Shown / Hidden toggles** on every
+  section, feature and overview section (Admin → Product → Feature matrix). Hide
+  anything still being built or not ready for internal announcement and it vanishes
+  from the sales site and the public overview page; admins still see it, dimmed.
+- **2026-07-02** — **The Fan Owl: a booking guide on the event's own website** 🧪: the
+  Owl's first **consumer-facing** surface — promoters drop one script tag on their public
+  event site and every page gets a personal ticket guide: a no-AI ribbon (right offer for
+  the page + live availability tag), a chat that answers ONLY from the promoter's own
+  knowledge base and catalogue (no invented prices/policies, no fake scarcity), buy buttons
+  on the promoter's own Howler checkout links (tracked), consent-first "keep me posted"
+  lead capture, and a promoter-facing funnel + FAQ-gap report. Self-service under
+  Settings → Fan Owl; admin twin in the client's detail tab. Deep-link checkout v1;
+  pilots: Retreat Yourself → Kappa Futur Festival (`docs/specs/FAN_OWL_SPEC.md`).
+- **2026-07-02** — **The Owl inside the Howler organizer portal** 🧪: the Owl can now be
+  **embedded in Howler's own organizer portal** — the portal's backend does a secure
+  server-to-server handshake with Pulse and drops a one-iframe Owl panel into its UI.
+  Organizers get the full chat analyst (charts, follow-ups, saved threads, mobile-first)
+  with no extra login, always scoped to **their own organization's data**. Pilot: works for
+  organizations linked to a Pulse client (Admin → AI → Organizer portal Owl); widens to all
+  self-service organizers when the Howler→Pulse data integration ships.
 - **2026-07-01** — **Owl chat: ⏹ Stop button + no more silent stalls** 🧪: while the Owl is
   working you can now **tap Stop** to cancel the answer (the server abandons the work too, so
   nothing keeps burning in the background). And long data pulls no longer look frozen — the
   thinking line keeps refreshing every few seconds and the connection is kept alive, so a heavy
   query (e.g. a big cashless breakdown) shows progress instead of hanging on "Thinking…".
+- **2026-07-02** — **Grok (xAI) can connect too** 🧪: paid Grok users can add Pulse as a
+  custom connector (grok.com/connectors → New → Custom → our MCP URL) — same approval
+  page, keys and guarantees as Claude/ChatGPT/Gemini Enterprise. One server, four AI
+  platforms.
+- **2026-07-02** — **Google Gemini Enterprise can connect too** 🧪: organisations on
+  Google's **Gemini Enterprise** can add Pulse as a Custom MCP connector (same approval
+  page, same per-client keys and guarantees as Claude/ChatGPT). Honest limit: the
+  regular **Gemini app and Gems can't connect yet** — Google hasn't opened custom
+  connectors there; the moment they do, Pulse's existing flow slots in.
+- **2026-07-02** — **Provenance badges: see WHERE things were made** 🧪: segments,
+  campaigns and alerts created through an AI door now carry a badge in their lists —
+  **🦉 via Owl** (in-app chat), **💬 via WhatsApp**, **✨ via Claude**, **✨ via ChatGPT**,
+  **🔌 via API** — so a human reviewing a draft always knows which channel produced it.
+  Hand-made items stay unbadged.
+- **2026-07-02** — **The connected Owl can now DO things (drafts only)** 🧪: with the
+  "creating drafts" permission on a connection/key, the Owl in Claude or ChatGPT can
+  **build audience segments** and **draft campaigns** ("draft a win-back email to last
+  year's VIP buyers") — Pulse's own AI writes/designs the content, and everything lands
+  as a **draft in Engage awaiting human review and approval**. The connected Owl can
+  never send. It also now receives the client's stored AI context (same grounding as
+  in-app), so answers are business-aware.
+- **2026-07-02** — **API: Event Ops data (row-level keys)** 🧪: connected tools and AI
+  agents with the row-level scope can now pull **live Event Ops** per event — device
+  totals per station, locate a device by code, open issues, staff, checkpoints
+  (`GET /api/v1/event-ops` / the `pulse_event_ops` MCP tool). Honours the per-client
+  Event Ops switch; per-event only; same audit trail.
+- **2026-07-02** — **Connected AI assistants speak as the Owl** 🧪: connect Claude (or
+  ChatGPT) and it presents itself as **the Owl 🦉** — Pulse's data analyst — same persona
+  as in-app: warm, numbers-first, grounded in tool results, read-only. The connection
+  approval page and guide are Owl-branded; name the connector "The Owl" for the full effect.
+- **2026-07-02** — **API: query your data directly (no dashboard needed)** 🧪: connected
+  tools and AI agents can now run **their own breakdowns** — any curated measure by any
+  curated dimension, with filters and date ranges (`POST /api/v1/query` / the
+  `pulse_query_data` MCP tool) — e.g. "revenue by ticket type, last 30 days". Same engine
+  the Owl uses: admin-curated fields only, personal fields are filter-only, every query
+  forced to the client's own scope. Dashboards are no longer the only door; the curated
+  catalogue and the client boundary still are.
 - **2026-07-01** — **Works with ChatGPT / OpenAI too** 🧪: the MCP server now exposes the
   standard `search` + `fetch` tools OpenAI requires, so Pulse connects as a **ChatGPT
   custom connector** (Developer mode) and works with **ChatGPT Deep Research**, as well as

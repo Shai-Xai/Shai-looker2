@@ -23,3 +23,14 @@ export function owlNativeChatEnabled(user) {
   const email = String(user?.email || '').trim().toLowerCase();
   return !!email && OWL_NATIVE_CHAT_ALLOW.includes(email);
 }
+
+// Fan Owl SETTINGS (the config surfaces in Admin → client and Settings → Fan
+// Owl) while the feature is dogfooding: only these accounts see the tabs. The
+// server enforces the same gate on all /fan-owl config routes (FANOWL_ADMIN_ALLOW
+// env — comma-separated emails, or "all" to open it). The fan-facing widget
+// itself is public and unaffected by this.
+const FAN_OWL_SETTINGS_ALLOW = ['shai.evian@howler.co.za'];
+export function fanOwlSettingsEnabled(user) {
+  const email = String(user?.email || '').trim().toLowerCase();
+  return !!email && FAN_OWL_SETTINGS_ALLOW.includes(email);
+}

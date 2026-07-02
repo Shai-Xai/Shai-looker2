@@ -31,7 +31,7 @@ export default function GoalsPage() {
   const handled = useRef(false);
   const [suitesLoading, setSuitesLoading] = useState(true);
   const [tab, setTab] = useState('goals');        // 'goals' | 'templates'
-  const [activeSuite, setActiveSuite] = useState(''); // which event's goals are shown (one at a time)
+  const [activeSuite, setActiveSuite] = useState(''); // which event's goals are shown ('*' = all events)
   const [templates, setTemplates] = useState(null); // reusable templates for this client (+ global)
 
   const loadTemplates = useCallback(() => {
@@ -146,15 +146,44 @@ export default function GoalsPage() {
       .catch((e) => setGap({ suiteId, goalName: goal.name, error: e.message || 'failed' }));
   };
   const launchGap = (plan) => {
+    const suiteId = gap?.suiteId;
     setGap(null);
     const text = plan?.campaignGoal || 'Re-engage the most likely buyers to lift sales before the deadline.';
-    vtNavigate(navigate, `/engage/campaigns?goal=${encodeURIComponent(text)}&type=email_campaign`);
+    // Carry the goal's EVENT (scopes the campaign's audience/tiles to it), the first
+    // nugget's dashboard (a concrete audience source) and the plan's segment name
+    // (pre-selects the saved segment) — a bare goal string lost all three.
+    const q = new URLSearchParams({ goal: text, type: 'email_campaign' });
+    if (suiteId) q.set('suite', suiteId);
+    const did = (plan?.nuggets || []).find((n) => n.dashboardId)?.dashboardId;
+    if (did) q.set('dashboard', did);
+    if (plan?.segmentName) q.set('segment', plan.segmentName);
+    vtNavigate(navigate, `/engage/campaigns?${q.toString()}`);
+  };
+
+  // Drag-to-reorder the event tabs: reorder locally for instant feedback, persist the
+  // entity's suite order server-side (shared by the whole client — the sidebar and
+  // every suites list follow it on their next load).
+  const reorderEvents = (fromId, toId) => {
+    setSuites((cur) => {
+      const list = [...cur];
+      const from = list.findIndex((s) => s.id === fromId);
+      const to = list.findIndex((s) => s.id === toId);
+      if (from < 0 || to < 0 || from === to) return cur;
+      const [moved] = list.splice(from, 1);
+      list.splice(to, 0, moved);
+      api.saveSuiteOrder(moved.entityId, list.filter((s) => s.entityId === moved.entityId).map((s) => s.id)).catch(() => {});
+      return list;
+    });
   };
 
   // One event at a time: a tab strip picks which event's goals show. Fall back to
   // the first event when nothing's selected yet (or the selection went away).
-  const activeSuiteId = rows.some((r) => r.suite.id === activeSuite) ? activeSuite : (rows[0]?.suite.id || '');
-  const activeRow = rows.find((r) => r.suite.id === activeSuiteId) || null;
+  // '*' = the All tab — every event's goals on one page, split by event and type.
+  // Only events that actually HAVE goals show there (still-loading ones keep a
+  // skeleton until we know) — empty events would just clutter the page.
+  const showAll = activeSuite === '*' && rows.length > 1;
+  const activeSuiteId = showAll ? '*' : (rows.some((r) => r.suite.id === activeSuite) ? activeSuite : (rows[0]?.suite.id || ''));
+  const shownRows = showAll ? rows.filter((r) => !r.loaded || goalsIn(r).length > 0) : rows.filter((r) => r.suite.id === activeSuiteId);
 
   const suiteData = (detail && bySuite[detail.suiteId]) || {};
   const detailGoal = detail && [...(suiteData.goals || []), ...(suiteData.personalGoals || [])].find((g) => g.id === detail.goalId);
@@ -201,11 +230,18 @@ export default function GoalsPage() {
       {/* One tab per event — view a single event's goals at a time instead of a long
           stacked list. Horizontally scrollable so it stays tidy on a phone. */}
       {rows.length > 1 && (
-        <EventTabs rows={rows} active={activeSuiteId} onPick={setActiveSuite} />
+        <EventTabs rows={rows} active={activeSuiteId} onPick={setActiveSuite} onReorder={reorderEvents} />
+      )}
+
+      {/* All view with nothing to show — every event is goal-less. */}
+      {showAll && !shownRows.length && (
+        <div style={{ padding: '28px 18px', textAlign: 'center', color: 'var(--muted)', border: '1px dashed var(--hairline)', borderRadius: 14 }}>
+          No goals set yet — pick an event tab above to set its first goal.
+        </div>
       )}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 26 }}>
-        {(activeRow ? [activeRow] : []).map(({ suite, goals = [], personalGoals = [], canManage, loaded }) => (
+        {shownRows.map(({ suite, goals = [], personalGoals = [], canManage, loaded }) => (
           <section key={suite.id}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
               <h2 style={eventName}>{suite.name}</h2>
@@ -370,19 +406,42 @@ function SectionSkeleton() {
 // Event picker — one pill per event, the selected one highlighted. Scrolls
 // horizontally (hidden scrollbar) so a long event list stays a single tidy row
 // on mobile. Shows a goal count once the event has loaded.
-function EventTabs({ rows, active, onPick }) {
+function EventTabs({ rows, active, onPick, onReorder }) {
+  // Drag a tab onto another to reorder (desktop pointer drag; taps still switch).
+  const [dragId, setDragId] = useState(null);
+  const [overId, setOverId] = useState(null);
+  const allOn = active === '*';
+  const totalN = rows.reduce((n, r) => n + (r.goals?.length || 0) + (r.personalGoals?.length || 0), 0);
   return (
     <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4, marginBottom: 18, scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' }}>
+      {/* All — every event's goals on one page, split by event and type. */}
+      <button type="button" onClick={() => onPick('*')} title="All goals across your events on one page"
+        style={{
+          flexShrink: 0, whiteSpace: 'nowrap', cursor: 'pointer', font: 'inherit',
+          border: `1px solid ${allOn ? 'var(--brand)' : 'var(--hairline)'}`,
+          background: allOn ? 'var(--brand)' : 'var(--card)', color: allOn ? '#fff' : 'var(--text)',
+          borderRadius: 980, padding: '8px 15px', fontSize: 13, fontWeight: allOn ? 800 : 600,
+        }}>
+        All{totalN > 0 && <span style={{ marginLeft: 7, opacity: 0.75, fontWeight: 600 }}>{totalN}</span>}
+      </button>
       {rows.map(({ suite, goals = [], personalGoals = [], loaded }) => {
         const n = (goals.length || 0) + (personalGoals.length || 0);
         const on = suite.id === active;
         return (
-          <button key={suite.id} type="button" onClick={() => onPick(suite.id)} style={{
-            flexShrink: 0, whiteSpace: 'nowrap', cursor: 'pointer', font: 'inherit',
-            border: `1px solid ${on ? 'var(--brand)' : 'var(--hairline)'}`,
-            background: on ? 'var(--brand)' : 'var(--card)', color: on ? '#fff' : 'var(--text)',
-            borderRadius: 980, padding: '8px 15px', fontSize: 13, fontWeight: on ? 800 : 600,
-          }}>
+          <button key={suite.id} type="button" onClick={() => onPick(suite.id)}
+            draggable={!!onReorder}
+            onDragStart={() => setDragId(suite.id)}
+            onDragEnd={() => { setDragId(null); setOverId(null); }}
+            onDragOver={(e) => { if (dragId && dragId !== suite.id) { e.preventDefault(); if (overId !== suite.id) setOverId(suite.id); } }}
+            onDrop={(e) => { e.preventDefault(); if (onReorder && dragId && dragId !== suite.id) onReorder(dragId, suite.id); setDragId(null); setOverId(null); }}
+            title={onReorder ? 'Drag to reorder your events' : undefined}
+            style={{
+              flexShrink: 0, whiteSpace: 'nowrap', cursor: dragId ? 'grabbing' : 'pointer', font: 'inherit',
+              border: `1px solid ${overId === suite.id && dragId ? 'var(--brand)' : on ? 'var(--brand)' : 'var(--hairline)'}`,
+              background: on ? 'var(--brand)' : 'var(--card)', color: on ? '#fff' : 'var(--text)',
+              borderRadius: 980, padding: '8px 15px', fontSize: 13, fontWeight: on ? 800 : 600,
+              opacity: dragId === suite.id ? 0.5 : 1,
+            }}>
             {suite.name}{loaded && n > 0 && <span style={{ marginLeft: 7, opacity: 0.75, fontWeight: 600 }}>{n}</span>}
           </button>
         );

@@ -78,10 +78,86 @@ sudo systemctl reload caddy
 Now `https://pulse.howler.co.za` is reachable from **any browser**, gated by login.
 
 ### 6. Backups
-The whole database is one file: `$DATA_DIR/howler.db`. Nightly copy via cron, or
-use **Litestream** for continuous streaming backup to S3.
+The whole database is one file: `$DATA_DIR/howler.db` — and **backups are built
+in** (`server/backup.js`). Every night the server takes an online snapshot
+(safe under WAL — never copy the raw file by hand, you'd miss the `-wal`),
+gzips it to `$DATA_DIR/backups/`, and keeps the last `BACKUP_KEEP` (default 3).
+
+**That alone does NOT survive disk loss.** To get the snapshot off the box, set
+the S3-compatible credentials (Cloudflare R2 is the cheapest option — a free
+bucket is fine):
+
+```
+BACKUP_S3_ENDPOINT=https://<accountid>.r2.cloudflarestorage.com
+BACKUP_S3_BUCKET=pulse-backups
+BACKUP_S3_ACCESS_KEY=…
+BACKUP_S3_SECRET_KEY=…
+```
+
+Check status / take one now / download the latest from Admin (or curl):
+`GET /api/admin/backups`, `POST /api/admin/backups/run`,
+`GET /api/admin/backups/download`. Failures raise an ops alert (see
+`OPS_SLACK_WEBHOOK_URL`). To restore: gunzip the snapshot and point `DB_FILE`
+at it.
 
 ---
+
+### 7. CI-gated deploys (strongly recommended)
+Out of the box Render's **Auto-Deploy** redeploys the moment `main` is pushed —
+*before* GitHub Actions finishes, so broken code can go live with a red test
+suite. The CI workflow already contains a `deploy` job that triggers Render
+only after lint + tests + build are green. Activate it once (5 minutes):
+
+1. Render → `howler-pulse` → **Settings → Deploy Hook** → copy the URL.
+2. GitHub repo → **Settings → Secrets and variables → Actions** → new secret
+   `RENDER_DEPLOY_HOOK` = that URL.
+3. Render → **Settings** → turn **Auto-Deploy OFF**.
+
+From then on every push to `main` deploys only after CI passes. (Until the
+secret is set, the job skips harmlessly and Auto-Deploy keeps working as
+before.)
+
+### 8. Ops alerts (know when the night went wrong)
+Set `OPS_SLACK_WEBHOOK_URL` to a **Howler-internal** Slack incoming webhook.
+Backup failures, failed scheduled digests, email delivery failures and
+unhandled errors then post to that channel (throttled to one per kind per
+15 min) instead of dying quietly in the Render log stream. Without it,
+everything still logs to stdout as before.
+
+### 9. Secrets at rest (`MASTER_KEY`)
+Integration credentials (Looker/Resend/Anthropic/Meta/TikTok/Clickatell/GitHub
+tokens, webhook secrets, per-client keys) are **encrypted at rest**
+(`server/secretbox.js`, AES-256-GCM) so a leaked DB export or off-box backup
+can't be read. The encryption key comes from **`MASTER_KEY`** (set it in Render —
+`render.yaml` generates one); if unset, a random key is persisted to
+`DATA_DIR/.master-key`.
+
+**Backup/restore implication:** a snapshot is useless without the key, which is
+the point — but it means **restoring a backup requires the same `MASTER_KEY`**
+(or the `.master-key` file). Keep a copy of `MASTER_KEY` somewhere safe (a
+password manager) alongside your other break-glass credentials. Existing
+plaintext secrets are sealed automatically on first boot after this ships.
+
+### 10. Deploys & the "site is down for a minute" window
+Because the SQLite database lives on a single Render disk (which attaches to only
+one instance), a deploy has to stop the old instance and start the new one — a
+~30–90s gap. Two things soften this **today**, and one **removes** it later:
+
+- **Maintenance page (built in).** The service worker (`client/public/sw.js`)
+  caches `maintenance.html` and shows a branded "Pulse is updating…" page (which
+  auto-returns the user when the server is back) instead of a browser/gateway
+  error. Covers installed-PWA users and returning visitors. A **brand-new**
+  visitor arriving mid-deploy still hits Render's error page — see Cloudflare below
+  for full coverage.
+- **Deploy in a quiet hour** (or turn off Auto-Deploy and deploy manually) so the
+  fewest people see the blip.
+- **Full coverage (optional): Cloudflare in front.** Put the domain behind
+  Cloudflare (free) and add a Worker that serves a maintenance page when the origin
+  is down (502/503/522) — this covers *everyone*, including first-time visitors,
+  because Cloudflare stays up while Render restarts.
+- **The real fix:** move the DB off the disk (managed Postgres or libSQL/Turso),
+  which enables rolling zero-downtime deploys. Scoped in
+  `docs/POSTGRES_MIGRATION_SCOPE.md`.
 
 ## Pre-production checklist
 - [ ] **Rotate the Looker API3 secret** (it was shared in chat during dev) and set the new one.

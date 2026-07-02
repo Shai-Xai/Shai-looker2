@@ -227,3 +227,80 @@ test('ignoreConsent (transactional) bypasses both consent columns', async () => 
   assert.deepEqual(sent.email.sort(), ['a@x.com', 'b@x.com']);
   assert.deepEqual(sent.sms.sort(), ['0820000001', '0820000002']);
 });
+
+// ── 5. Public tracking routes (actionTracking.js) ────────────────────────────
+// Regression for the open-storm fix: /o and /c resolve the campaign via the
+// idx_actions_click_token expression index (point lookup, no table scan, no
+// audience parse) and the list API never ships the audience blob.
+test('open pixel and tracked click resolve by token, bump counters, and redirect with UTMs', async () => {
+  const ent = h.makeEntity('Track Co', 'track-org');
+  const owner = h.makeClient('track@test.local', [ent.id], 'owner');
+  const created = await app.req('POST', `/api/actions/${ent.id}`, {
+    as: owner,
+    body: { title: 'Tracked', channel: 'email', subject: 'S', body: 'B', ctaUrl: 'https://shop.example/buy?x=1', utm: { source: 'pulse', campaign: 'launch' }, audience: { mode: 'paste', pasted: 'a@x.com\nb@x.com' } },
+  });
+  const aid = created.body.action.id;
+  const token = JSON.parse(h.db.db.prepare('SELECT config FROM actions WHERE id=?').get(aid).config).clickToken;
+  assert.ok(token);
+
+  // The lookup must ride the expression index — not scan the table.
+  const plan = h.db.db.prepare(`EXPLAIN QUERY PLAN SELECT id FROM actions WHERE json_extract(config,'$.clickToken')=?`).all(token);
+  assert.match(JSON.stringify(plan), /idx_actions_click_token/);
+
+  const px = await app.req('GET', `/o/${token}`, {});
+  assert.equal(px.status, 200);
+  // Raw fetch with manual redirect — app.req would follow the 302 off-box.
+  const clk = await fetch(`${app.base}/c/${token}/x/e/0`, { redirect: 'manual' });
+  assert.equal(clk.status, 302);
+  const dest = new URL(clk.headers.get('location'));
+  assert.equal(dest.searchParams.get('utm_source'), 'pulse');
+  assert.equal(dest.searchParams.get('x'), '1'); // existing keys survive
+
+  const { body } = await app.req('GET', `/api/actions/${ent.id}`, { as: owner });
+  const a = body.actions.find((x) => x.id === aid);
+  assert.equal(a.results.opens, 1);
+  assert.equal(a.results.emailClicks, 1);
+});
+
+test('the campaign list carries audienceCount but NEVER the audience blob', async () => {
+  const ent = h.makeEntity('Lazy Co', 'lazy-org');
+  const owner = h.makeClient('lazy@test.local', [ent.id], 'owner');
+  const created = await app.req('POST', `/api/actions/${ent.id}`, {
+    as: owner, body: { title: 'Lazy', channel: 'email', subject: 'S', body: 'B', audience: { mode: 'paste', pasted: 'p1@x.com\np2@x.com\np3@x.com' } },
+  });
+  const aid = created.body.action.id;
+  // Approve snapshots the audience into the row (3 recipients).
+  await app.req('POST', `/api/actions/${ent.id}/${aid}/approve`, { as: owner });
+  await waitForStatus(ent.id, aid, 'done', owner);
+
+  const { body } = await app.req('GET', `/api/actions/${ent.id}`, { as: owner });
+  const a = body.actions.find((x) => x.id === aid);
+  assert.equal(a.audienceCount, 3);
+  assert.equal('audience' in a, false); // the blob never leaves the server on list
+});
+
+// ── 6. Crash-safe sends (action_sends ledger) ────────────────────────────────
+test('a resumed campaign skips recipients already in the send ledger — nobody is emailed twice', async () => {
+  const ent = h.makeEntity('Resume Co', 'resume-org');
+  const owner = h.makeClient('resume@test.local', [ent.id], 'owner');
+  const created = await app.req('POST', `/api/actions/${ent.id}`, {
+    as: owner, body: { title: 'Resumable', channel: 'email', subject: 'S', body: 'B', audience: { mode: 'paste', pasted: 'r1@x.com\nr2@x.com\nr3@x.com' } },
+  });
+  const aid = created.body.action.id;
+  // Simulate a blast that died after reaching r1: ledger row exists (written at
+  // delivery time), status left 'running' by the crash — this is exactly the
+  // state a mid-deploy kill leaves behind.
+  h.db.db.prepare('INSERT INTO action_sends (action_id, recipient, channel, at) VALUES (?,?,?,?)')
+    .run(aid, 'r1@x.com', 'email', '2026-06-01');
+
+  await app.req('POST', `/api/actions/${ent.id}/${aid}/approve`, { as: owner });
+  const a = await waitForStatus(ent.id, aid, 'done', owner);
+
+  // r1 was NOT re-sent; r2/r3 were; the counters still account for all three.
+  assert.deepEqual(sent.email.sort(), ['r2@x.com', 'r3@x.com']);
+  assert.equal(a.results.sent, 3);
+  assert.equal(a.results.emailSent, 3);
+  // Every delivery is ledgered for the next resume.
+  const rows = h.db.db.prepare('SELECT recipient FROM action_sends WHERE action_id=? ORDER BY recipient').all(aid).map((r) => r.recipient);
+  assert.deepEqual(rows, ['r1@x.com', 'r2@x.com', 'r3@x.com']);
+});

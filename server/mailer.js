@@ -19,9 +19,11 @@
 let db = null;
 let lastError = '';
 let lastSentAt = '';
+let notifyOps = null; // optional ops-alert hook (server/ops.js) — failures page a human
 
 function init(deps) {
   db = deps.db;
+  if (deps.notifyOps) notifyOps = deps.notifyOps;
   // System-wide send log: every email the mailer attempts (sent / failed /
   // skipped) with its kind + client, so admins get one place to audit all
   // outbound mail. Survives restarts. Owned by this module; drop mail_log to
@@ -140,6 +142,9 @@ async function send({ to, subject, html, text, fromName, kind = 'other', entity 
     lastError = err.message;
     log(recipients.join(', '), subject, 'failed', err.message, kind, entity);
     console.error(`[mailer] FAILED "${subject}" → ${recipients.join(', ')}: ${err.message}`);
+    // Raise ops (throttled per kind in ops.js) — a Resend outage during a digest
+    // window or campaign blast should page a human, not just fill mail_log.
+    if (notifyOps) try { notifyOps(`Email send failed (${kind}): ${err.message}`); } catch { /* never break a send */ }
     return { ok: false, error: err.message };
   }
 }
@@ -292,9 +297,12 @@ function digestEmail({ branding, entityId, assetScope, content, roleLabel, custo
     const narrative = (part.narrative || []).map((p) => `<p style="font-size:14px;line-height:1.6;color:#3a3a3c;margin:0 0 12px;">${mdBold(p)}</p>`).join('');
     const actionsLis = (part.actions || []).filter((a) => a.text).map((a) => {
       const txt = `<span style="color:#111;font-weight:600;">${esc(a.text)}</span>`;
-      // "Make it happen" only when the action maps to an executable capability.
-      const makeIt = a.action ? `<a href="${baseUrl()}/actions?goal=${encodeURIComponent(a.text)}&type=${encodeURIComponent(a.action)}" style="color:#7c3aed;text-decoration:none;font-size:12px;font-weight:700;margin-left:8px;">⚡ Make it happen</a>` : '';
-      return `<li style="margin:0 0 8px;line-height:1.5;">${a.href ? `<a href="${esc(a.href)}" style="color:${esc(b.brandColor)};text-decoration:none;">${esc(a.text)} →</a>` : txt}${makeIt}</li>`;
+      // "Make it happen" only when the action maps to an executable capability. Use
+      // the SERVER-BUILT href (scoped to the action's event + dashboard) — a locally
+      // rebuilt /actions?goal=… link dropped that scope, so a multi-event client's
+      // campaign opened unscoped.
+      const makeIt = (a.action && a.href) ? `<a href="${esc(a.href)}" style="color:#7c3aed;text-decoration:none;font-size:12px;font-weight:700;margin-left:8px;">⚡ Make it happen</a>` : '';
+      return `<li style="margin:0 0 8px;line-height:1.5;">${a.href && !makeIt ? `<a href="${esc(a.href)}" style="color:${esc(b.brandColor)};text-decoration:none;">${esc(a.text)} →</a>` : txt}${makeIt}</li>`;
     }).join('');
     const actionsBlock = actionsLis ? `
       <div style="margin-top:18px;padding-top:16px;border-top:1px solid #ececf0;">

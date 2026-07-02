@@ -119,7 +119,14 @@ async function _request(method, path, body = null, retry = true) {
   }
 
   const contentType = res.headers.get('content-type') || '';
-  return contentType.includes('application/json') ? res.json() : res.text();
+  try {
+    return contentType.includes('application/json') ? await res.json() : await res.text();
+  } catch (e) {
+    // A huge result (millions of rows / json_detail bloat) can exceed Node's max
+    // string length while reading the body — surface a fixable message instead.
+    if (/string longer than/i.test(e?.message || '')) throw new Error(`Looker result too large to load (${method} ${path}) — narrow the query's filters or lower its row limit.`);
+    throw e;
+  }
 }
 
 // ─── Dashboard fetch + query resolution ──────────────────────────────────────

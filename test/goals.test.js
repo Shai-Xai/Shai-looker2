@@ -472,11 +472,16 @@ test('a linked curve drives baseline + vs-last-time-at-this-point, with pace ove
   assert.ok(row.progress.lastAtNow > 1000 && row.progress.lastAtNow < 3000, 'last time read at a mid-window point of the curve');
   // expected-by-now rides the same curve fraction, scaled to the target (2× the curve total).
   assert.ok(Math.abs(row.progress.expected - 2 * row.progress.lastAtNow) <= 2, 'expected = target × the same curve fraction');
-  // Forecast: the SHAPE signal = current ÷ fraction of last time's shape reached at
-  // this point (current is the curve's this-year value; fraction = lastAtNow / total).
+  // Forecast: the SHAPE signal follows last time's curve, but the vs-last-time ratio
+  // is only PARTIALLY believed early on — shrunk toward 1 by √fraction-observed
+  // (raw current ÷ f explodes early: 5% observed × 5× ahead read as 5× the total).
   assert.ok(row.progress.forecast && row.progress.forecast.projected != null, 'a curve goal carries a forecast');
-  const expShape = Math.round(row.progress.value / (row.progress.lastAtNow / 3000));
-  assert.ok(Math.abs(row.progress.forecast.shape - expShape) <= 2, 'shape projection = current ÷ fraction of last time’s shape reached');
+  const fShape = row.progress.lastAtNow / 3000;
+  const ratio = row.progress.value / (3000 * fShape);
+  const expShape = Math.round(3000 * (1 + (ratio - 1) * Math.sqrt(fShape)));
+  assert.ok(Math.abs(row.progress.forecast.shape - expShape) <= 2, 'shape projection = √f-damped outperformance over last time’s total');
+  const rawShape = Math.round(row.progress.value / fShape);
+  assert.ok(ratio < 1 ? row.progress.forecast.shape >= rawShape : row.progress.forecast.shape <= rawShape, 'damping pulls the shape signal toward last time’s total');
   // projected blends shape with recent momentum, so it sits between the two signals.
   const lo = Math.min(row.progress.forecast.shape, row.progress.forecast.momentum);
   const hi = Math.max(row.progress.forecast.shape, row.progress.forecast.momentum);
@@ -503,4 +508,57 @@ test('a curve goal reads its CURRENT value from the curve tile (this-year), not 
   assert.equal(row.progress.value, 44810, 'current = the curve tile this-year total, not the 43 310 KPI tile');
   assert.equal(row.progress.resolvedSource, 'curve-this-year', 'source reflects the curve anchor');
   assert.equal(row.progress.baselineFinal, 55997, 'baseline still = last year’s curve total');
+});
+
+test('a wrong far-out deadline cannot clamp "last time by now" to the curve start (the ≈1-ticket bug)', async () => {
+  // Real shape of the Shimza bug: byDate resolves ~118d out while this year's own
+  // countdown axis says today is 65d before the event. Reading the 117d-span curve at
+  // daysLeft=118 clamps to its FIRST point (≈ one ticket). The axis anchor must win.
+  const day = 86400000;
+  const last = [], thisYr = [];
+  for (let d = 117; d >= 0; d--) last.push({ t: String(d), v: (d >= 65 ? 4 : 60) + (d % 3) });      // full 2025 curve
+  for (let d = 117; d >= 65; d--) thisYr.push({ t: String(d), v: 24 + (d % 3) });                    // 2026 stops at 65d (today)
+  const expectedByNow = last.filter((p) => Number(p.t) >= 65).reduce((s, p) => s + p.v, 0);          // 2025 cumulative at 65d out
+  tileColumns = { columns: [{ key: '2026', series: thisYr }, { key: '2025', series: last }] };
+  const g = (await create(owner, {
+    name: 'Axis anchor', source: 'tile', targetValue: 5500, unit: 'tickets',
+    startDate: new Date(Date.now() - 40 * day).toISOString().slice(0, 10),
+    byDate: new Date(Date.now() + 118 * day).toISOString().slice(0, 10), // the wrong, far anchor
+    metricRef: { dashboardId: 'd', tileId: 'kpi' },
+    curveRef: { dashboardId: 'd', tileId: 'trend' },
+  })).body.goal;
+  const row = (await list(owner)).body.goals.find((x) => x.id === g.id);
+  assert.equal(row.progress.daysLeft, 65, 'days-left anchored to this year’s own countdown axis');
+  assert.ok(Math.abs(row.progress.lastAtNow - expectedByNow) < 2, `lastAtNow ${row.progress.lastAtNow} ≈ ${expectedByNow}, not ≈1`);
+  const total = last.reduce((s, p) => s + p.v, 0);
+  const expectedPace = Math.round(5500 * (expectedByNow / total));
+  assert.ok(Math.abs(row.progress.expected - expectedPace) <= 2, `expected ${row.progress.expected} ≈ ${expectedPace}`);
+  assert.ok(row.progress.forecast.projected < 100000, `forecast ${row.progress.forecast.projected} is sane, not millions`);
+});
+
+test('zero-filled future days cannot drag "now" to event day (fraction-1 bug)', async () => {
+  // Same shape as the axis-anchor test, but Looker zero-fills this year's column all
+  // the way to event day (future days come back as 0, not null). Untrimmed, the axis
+  // bottoms at 0 → "now = event day" → expected = the FULL target and "last time by
+  // now" = last time's TOTAL. The no-activity tail must be trimmed first.
+  const day = 86400000;
+  const last = [], thisYr = [];
+  for (let d = 117; d >= 0; d--) last.push({ t: String(d), v: (d >= 65 ? 4 : 60) + (d % 3) });
+  for (let d = 117; d >= 0; d--) thisYr.push({ t: String(d), v: d >= 65 ? 24 + (d % 3) : 0 }); // zero-filled below 65d
+  const expectedByNow = last.filter((p) => Number(p.t) >= 65).reduce((s, p) => s + p.v, 0);
+  const total = last.reduce((s, p) => s + p.v, 0);
+  const thisNow = thisYr.reduce((s, p) => s + p.v, 0);
+  tileColumns = { columns: [{ key: '2026', series: thisYr }, { key: '2025', series: last }] };
+  const g = (await create(owner, {
+    name: 'Zero tail', source: 'tile', targetValue: 5500, unit: 'tickets',
+    startDate: new Date(Date.now() - 40 * day).toISOString().slice(0, 10),
+    byDate: new Date(Date.now() + 118 * day).toISOString().slice(0, 10),
+    metricRef: { dashboardId: 'd', tileId: 'kpi' },
+    curveRef: { dashboardId: 'd', tileId: 'trend' },
+  })).body.goal;
+  const row = (await list(owner)).body.goals.find((x) => x.id === g.id);
+  assert.equal(row.progress.daysLeft, 65, 'zero tail trimmed — now anchors at 65d, not event day');
+  assert.equal(row.progress.value, thisNow, 'current value unchanged by the trim');
+  assert.ok(Math.abs(row.progress.lastAtNow - expectedByNow) < 2, `lastAtNow ${row.progress.lastAtNow} ≈ ${expectedByNow}, not the ${total} total`);
+  assert.ok(row.progress.expected < 5500 * 0.2, `expected ${row.progress.expected} is the by-now pace, not the full target`);
 });

@@ -10,7 +10,15 @@ async function json(res) {
   if (res.status === 401 && typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('auth:unauthorized'));
   }
-  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+  if (!res.ok) {
+    // Gateway errors mean the server is briefly unavailable — almost always the
+    // ~1-minute window while a deploy swaps the instance. Show a reassuring
+    // "updating" message instead of a raw "Request failed (502)".
+    if (res.status === 502 || res.status === 503 || res.status === 504) {
+      throw new Error('Pulse is updating — this usually takes under a minute. Please wait a moment and try again.');
+    }
+    throw new Error(data.error || `Request failed (${res.status})`);
+  }
   return data;
 }
 
@@ -209,6 +217,14 @@ export const api = {
   resetPassword: (token, password) => fetch('/api/auth/reset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token, password }) }).then(json),
   requestMagicLink: (email) => fetch('/api/auth/magic', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) }).then(json),
   consumeMagicLink: (token) => fetch('/api/auth/magic/consume', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) }).then(json),
+  // Two-factor auth. verify2fa completes a login step-up (pending token + code).
+  verify2fa: (pendingToken, code) => fetch('/api/auth/2fa', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pendingToken, code }) }).then(json),
+  twoFactorStatus: () => fetch('/api/my/2fa').then(json),
+  twoFactorSetup: () => fetch('/api/my/2fa/setup', { method: 'POST' }).then(json),
+  twoFactorEnable: (code) => fetch('/api/my/2fa/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }) }).then(json),
+  twoFactorDisable: (code) => fetch('/api/my/2fa/disable', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }) }).then(json),
+  twoFactorBackupCodes: (code) => fetch('/api/my/2fa/backup-codes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }) }).then(json),
+  adminResetUser2fa: (userId) => fetch(`/api/admin/users/${userId}/2fa/reset`, { method: 'POST' }).then(json),
 
   // Admin — Entities (clients), Sets (reusable collections), Suites (event ctx)
   adminListInventiveWorkspaces: () => fetch('/api/admin/inventive-workspaces').then(json),
@@ -219,6 +235,9 @@ export const api = {
   adminCreateEntity: (e) => fetch('/api/admin/entities', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(e) }).then(json),
   adminUpdateEntity: (id, e) => fetch(`/api/admin/entities/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(e) }).then(json),
   adminDeleteEntity: (id) => fetch(`/api/admin/entities/${id}`, { method: 'DELETE' }),
+  // Organizer-portal Owl embed (admin config — server/owlEmbed.js).
+  getOwlEmbed: () => fetch('/api/admin/owl-embed').then(json),
+  saveOwlEmbed: (body) => fetch('/api/admin/owl-embed', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
   owlWhatsapp: () => fetch('/api/admin/owl-whatsapp').then(json),
   saveOwlWhatsapp: (body) => fetch('/api/admin/owl-whatsapp', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
   testOwlWhatsapp: (to, text) => fetch('/api/admin/owl-whatsapp/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to, text }) }).then(json),
@@ -236,6 +255,9 @@ export const api = {
   adminCreateSet: (s) => fetch('/api/admin/sets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(s) }).then(json),
   adminUpdateSet: (id, s) => fetch(`/api/admin/sets/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(s) }).then(json),
   adminDeleteSet: (id) => fetch(`/api/admin/sets/${id}`, { method: 'DELETE' }),
+  // Admin — Product: the feature matrix + what the public pages get to show
+  adminProductMatrix: () => fetch('/api/admin/product/matrix').then(json),
+  adminSetProductVisibility: (kind, id, hidden) => fetch('/api/admin/product/visibility', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, id, hidden }) }).then(json),
   // Admin — Product: daily release notes
   adminListReleaseNotes: () => fetch('/api/admin/release-notes').then(json),
   adminCreateReleaseNote: (n) => fetch('/api/admin/release-notes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(n) }).then(json),
@@ -255,7 +277,8 @@ export const api = {
   getGithubConfig: () => fetch('/api/admin/github').then(json),
   saveGithubConfig: (b) => fetch('/api/admin/github', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   adminUpdateTicket: (id, b) => fetch(`/api/admin/tickets/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
-  adminTicketComment: (id, body) => fetch(`/api/admin/tickets/${id}/comments`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body }) }).then(json),
+  adminTicketComment: (id, body, visibility) => fetch(`/api/admin/tickets/${id}/comments`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body, visibility }) }).then(json),
+  myTicketComment: (id, body) => fetch(`/api/my/tickets/${id}/comments`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body }) }).then(json),
   adminRedraftTicket: (id) => fetch(`/api/admin/tickets/${id}/redraft`, { method: 'POST' }).then(json),
   // Custom (client-owned) sets
   getRoles: () => fetch('/api/admin/roles').then(json),
@@ -368,6 +391,9 @@ export const api = {
       body: JSON.stringify(payload),
     }).then(json),
 
+  // The running build's version stamp (shown in the profile footer).
+  version: () => fetch('/api/version').then(json),
+
   // Drill-down: run a Looker drill link
   drill: (url, suiteId, combinedFilters = []) =>
     fetch('/api/drill', {
@@ -389,6 +415,8 @@ export const api = {
   adminFolders: () => fetch('/api/admin/folders').then(json),
   backfillFolders: () => fetch('/api/admin/backfill-folders', { method: 'POST' }).then(json),
   renameFolder: (from, to) => fetch('/api/admin/folders/rename', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from, to }) }).then(json),
+  // Reparent a folder (and all nested subfolders + dashboards) atomically. `parent` = '' → top level.
+  moveFolder: (from, parent) => fetch('/api/admin/folders/move', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from, parent }) }).then(json),
   deleteFolder: (path) => fetch('/api/admin/folders/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path }) }).then(json),
   // Looker folder import (files all its dashboards under a folder)
   lookerFolder: (id, includeSubfolders = true) => fetch(`/api/looker/folder/${encodeURIComponent(id)}?subfolders=${includeSubfolders ? 1 : 0}`).then(json),
@@ -401,6 +429,7 @@ export const api = {
   // Client navigation: Suites
   bustCache,
   mySuites: () => cachedGet('/api/my/suites'),
+  saveSuiteOrder: (entityId, order) => fetch(`/api/my/suite-order/${entityId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ order }) }).then(json),
   mySuite: (id) => fetch(`/api/my/suites/${id}`).then(json),
 
   // Social metrics (inbound organic stats). Admins pass the ownership check, so
@@ -446,6 +475,7 @@ export const api = {
   getAiInstructions: () => fetch('/api/admin/ai-instructions').then(json),
   saveAiInstructions: (instructions) => fetch('/api/admin/ai-instructions', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instructions }) }).then(json),
   getAiOverview: () => fetch('/api/admin/ai-overview').then(json),
+  getAiUsage: (days = 14) => fetch(`/api/admin/ai-usage?days=${days}`).then(json),
   getResolvedPrompt: ({ feature, entityId, role }) => fetch(`/api/admin/ai-resolved-prompt?feature=${encodeURIComponent(feature)}${entityId ? `&entityId=${encodeURIComponent(entityId)}` : ''}${role ? `&role=${encodeURIComponent(role)}` : ''}`).then(json),
 
   // Integrations
@@ -757,6 +787,14 @@ export const api = {
   eventopsBulkDevices: (suiteId, b) => fetch(`/api/eventops/suites/${suiteId}/devices/bulk`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   eventopsUpdateDevice: (suiteId, id, b) => fetch(`/api/eventops/suites/${suiteId}/devices/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   eventopsDeleteDevice: (suiteId, id) => fetch(`/api/eventops/suites/${suiteId}/devices/${id}`, { method: 'DELETE' }).then((r) => r.ok),
+  eventopsDeviceTypes: (suiteId) => fetch(`/api/eventops/suites/${suiteId}/device-types`).then(json),
+  eventopsCreateDeviceType: (suiteId, label) => fetch(`/api/eventops/suites/${suiteId}/device-types`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ label }) }).then(json),
+  eventopsUpdateDeviceType: (suiteId, id, label) => fetch(`/api/eventops/suites/${suiteId}/device-types/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ label }) }).then(json),
+  eventopsDeleteDeviceType: (suiteId, id) => fetch(`/api/eventops/suites/${suiteId}/device-types/${id}`, { method: 'DELETE' }).then(json),
+  eventopsIssueCategories: (suiteId) => fetch(`/api/eventops/suites/${suiteId}/issue-categories`).then(json),
+  eventopsCreateIssueCategory: (suiteId, b) => fetch(`/api/eventops/suites/${suiteId}/issue-categories`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  eventopsUpdateIssueCategory: (suiteId, id, b) => fetch(`/api/eventops/suites/${suiteId}/issue-categories/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  eventopsDeleteIssueCategory: (suiteId, id) => fetch(`/api/eventops/suites/${suiteId}/issue-categories/${id}`, { method: 'DELETE' }).then(json),
   eventopsStations: (suiteId) => fetch(`/api/eventops/suites/${suiteId}/stations`).then(json),
   eventopsCreateStation: (suiteId, b) => fetch(`/api/eventops/suites/${suiteId}/stations`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   eventopsUpdateStation: (suiteId, id, b) => fetch(`/api/eventops/suites/${suiteId}/stations/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
@@ -770,6 +808,7 @@ export const api = {
   eventopsKiosk: (suiteId) => fetch(`/api/eventops/suites/${suiteId}/kiosk`).then(json),
   eventopsRotateKiosk: (suiteId) => fetch(`/api/eventops/suites/${suiteId}/kiosk/rotate`, { method: 'POST' }).then(json),
   eventopsSetKiosk: (suiteId, enabled) => fetch(`/api/eventops/suites/${suiteId}/kiosk`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }) }).then(json),
+  eventopsSetKioskSlug: (suiteId, slug) => fetch(`/api/eventops/suites/${suiteId}/kiosk`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slug }) }).then(json),
   eopPortalInfo: (suiteId, token) => fetch(`/api/eventops/portal/${suiteId}/${token}`).then(json),
   eopPortalLogin: (suiteId, token, number) => fetch(`/api/eventops/portal/${suiteId}/${token}/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ number }) }).then(json),
   eopPortalMe: (suiteId, token, staffId) => fetch(`/api/eventops/portal/${suiteId}/${token}/me/${staffId}`).then(json),

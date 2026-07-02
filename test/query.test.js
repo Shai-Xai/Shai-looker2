@@ -95,3 +95,20 @@ test('tileQueryBody scopes the body, and returns null when scope is denied', asy
   const user2 = h.makeClient('tile2@test.local', [h.makeEntity('NoScope2', null).id]);
   assert.equal(await q.tileQueryBody(tile, def, user2, undefined), null);
 });
+
+test('oversized results (campaign audiences) are served but never cached', async () => {
+  // A 50k-row audience pull is ~25-100 MB parsed — caching a handful of those
+  // OOMs the 512 MB instance. Rows > QCACHE_MAX_ROWS must bypass the cache;
+  // small results still cache (second call = no Looker hit).
+  let calls = 0;
+  const bigRows = Array.from({ length: 2001 }, (_, i) => ({ n: i }));
+  const q = makeEngine({ lookerRequest: async (m, p) => { calls++; return { data: p.includes('big') ? bigRows : [{ n: 1 }] }; } });
+
+  await q.runLookerQuery('/big', { q: 1 });
+  await q.runLookerQuery('/big', { q: 1 });
+  assert.equal(calls, 2); // no cache hit — refetched
+
+  await q.runLookerQuery('/small', { q: 1 });
+  await q.runLookerQuery('/small', { q: 1 });
+  assert.equal(calls, 3); // cached — one Looker call
+});

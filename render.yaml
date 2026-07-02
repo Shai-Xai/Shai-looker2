@@ -35,6 +35,9 @@ services:
         value: /var/lib/pulse
       - key: SESSION_SECRET
         generateValue: true        # Render generates a strong secret once
+      - key: MASTER_KEY
+        generateValue: true        # encrypts integration secrets at rest (server/secretbox.js).
+                                    # KEEP A COPY: restoring a backup needs this exact value.
       - key: ADMIN_EMAIL
         sync: false                # set in dashboard (first-boot admin login)
       - key: ADMIN_PASSWORD
@@ -46,4 +49,20 @@ services:
       - key: LOOKER_CLIENT_SECRET
         sync: false
       - key: ANTHROPIC_API_KEY
+        sync: false
+      # Off-box DB backups (server/backup.js). Local nightly snapshots always run;
+      # set these to also copy them off the disk (Cloudflare R2 / S3 / B2) — the
+      # disk is a single point of failure until you do.
+      - key: BACKUP_S3_ENDPOINT
+        sync: false               # e.g. https://<accountid>.r2.cloudflarestorage.com
+      - key: BACKUP_S3_BUCKET
+        sync: false
+      - key: BACKUP_S3_ACCESS_KEY
+        sync: false
+      - key: BACKUP_S3_SECRET_KEY
+        sync: false
+      # Internal ops alerts (server/ops.js): a Howler-internal Slack incoming
+      # webhook — backup/digest/mailer failures page a human instead of only
+      # writing to the log stream.
+      - key: OPS_SLACK_WEBHOOK_URL
         sync: false

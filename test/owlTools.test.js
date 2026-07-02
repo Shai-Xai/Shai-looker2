@@ -383,6 +383,20 @@ test('createSegment drafts a query segment from a cohort of curated dimensions',
   assert.equal(res.action.draft.queryFilters['core_purchasers.city'], 'Cape Town');
 });
 
+test('createSegment bakes the event (suite) scope into the draft so it persists on re-resolution', async () => {
+  const ent = h.makeEntity('Ultra SA', 'Ultra South Africa');
+  const suite = h.db.createSuite({ entityId: ent.id, name: 'KFF 26' });
+  const user = h.makeClient('seg-scope@client.test', [ent.id]);
+  const res = await tools().createSegment.run({ filters: { 'core_ticket_types.name': 'VIP' } }, ctx(user, suite.id));
+  assert.equal(res.ok, true);
+  // The suite is carried on the saved definition, not just applied at creation — so
+  // reach checks + campaign binding re-resolve scoped to this event (regression: #18).
+  assert.equal(res.action.draft.suiteId, suite.id);
+  // No event in context → entity-wide (empty scope), unchanged behaviour.
+  const wide = await tools().createSegment.run({ filters: { 'core_ticket_types.name': 'VIP' } }, { user, entityId: ent.id });
+  assert.equal(wide.action.draft.suiteId, '');
+});
+
 test('createSegment supports guest list via the complimentary flag', async () => {
   const ent = h.makeEntity('Ultra SA', 'Ultra South Africa');
   const user = h.makeClient('seg-gl@client.test', [ent.id]);

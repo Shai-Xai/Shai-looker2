@@ -4,16 +4,20 @@ import { api } from '../lib/api.js';
 import HomeButton from '../components/HomeButton.jsx';
 import IntegrationsForm from '../components/IntegrationsForm.jsx';
 import MailTemplateEditor from '../components/MailTemplateEditor.jsx';
+import FanOwlAdmin from '../components/FanOwlAdmin.jsx';
 import MyOwlMemory from '../components/MyOwlMemory.jsx';
 import OwlAddressCard from '../components/OwlAddressCard.jsx';
 import ApiKeysCard from '../components/ApiKeysCard.jsx';
 import MailLogView from '../components/MailLogView.jsx';
 import NotificationPrefs from '../components/NotificationPrefs.jsx';
+import TwoFactorCard from '../components/TwoFactorCard.jsx';
 import TeamManager from '../components/TeamManager.jsx';
 import RateCard from '../components/RateCard.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import { useProfile } from '../lib/profile.jsx';
 import { useAccess, PERMS } from '../lib/access.js';
+import { useAuth } from '../lib/auth.jsx';
+import { fanOwlSettingsEnabled } from '../lib/features.js';
 
 // Client self-service Settings — one place for everything the client manages
 // themselves, organised by a section nav: Integrations, Branding, CC-the-Owl.
@@ -24,16 +28,19 @@ const SECTIONS = [
   ['team', 'Team', '👥', PERMS.TEAM_MANAGE],
   ['integrations', 'Integrations', '🔌', PERMS.INTEGRATIONS_MANAGE],
   ['notifications', 'Notifications', '🔔', null],
+  ['security', 'Security', '🔐', null],
   ['email', 'Branding', '🎨', PERMS.BRANDING_MANAGE],
   ['fees', 'Fees & billing', '💳', PERMS.CAMPAIGNS_VIEW],
   ['sentmail', 'Sent emails', '📤', PERMS.INTEGRATIONS_MANAGE],
   ['inbox', 'CC the Owl', '📨', PERMS.INTEGRATIONS_MANAGE],
+  ['fanowl', 'Fan Owl', '🦉', PERMS.INTEGRATIONS_MANAGE],
   ['owlmemory', 'Owl memory', '🧠', null],
 ];
 
 export default function ClientIntegrationsPage() {
   const isMobile = useIsMobile();
   const { can, role, isAdmin } = useAccess();
+  const { user: authUser } = useAuth();
   const { active } = useProfile(); // every section is scoped to the active client profile
   const ctx = useOutletContext() || {};
   const [items, setItems] = useState(null);
@@ -48,7 +55,8 @@ export default function ClientIntegrationsPage() {
   // derived from the resolved settings row.
   const ent = active || (activeItem ? { id: activeItem.entityId, name: activeItem.name } : null);
   // Only the sections this role can use (Notifications is personal, always on).
-  const sections = SECTIONS.filter(([, , , perm]) => !perm || can(perm));
+  // Fan Owl is dogfood-gated to allowlisted accounts (server enforces the same).
+  const sections = SECTIONS.filter(([key, , , perm]) => (!perm || can(perm)) && (key !== 'fanowl' || fanOwlSettingsEnabled(authUser)));
   // Deep link: /settings?section=integrations|team|notifications|email… opens that
   // section (used by the onboarding "Go" buttons). Falls back to the first allowed.
   const [params] = useSearchParams();
@@ -89,6 +97,8 @@ export default function ClientIntegrationsPage() {
           <p style={hint}>Choose how Howler reaches you. These apply to your login across all your profiles — the in-app inbox always receives messages regardless.</p>
           <NotificationPrefs />
         </div>
+      ) : section === 'security' ? (
+        <TwoFactorCard />
       ) : !items ? (
         <p style={{ color: 'var(--muted)' }}>Loading…</p>
       ) : items.length === 0 ? (
@@ -123,6 +133,12 @@ export default function ClientIntegrationsPage() {
                 }}
               />
               <ApiKeysCard entityId={activeItem.entityId} scope="my" />
+            </div>
+          )}
+
+          {section === 'fanowl' && (
+            <div style={{ maxWidth: 760 }}>
+              <FanOwlAdmin scope="my" entityId={activeItem.entityId} />
             </div>
           )}
 

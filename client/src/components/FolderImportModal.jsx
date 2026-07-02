@@ -1,9 +1,21 @@
 import { useState } from 'react';
 import { api } from '../lib/api.js';
+import { folderExists, suggestUniqueFolder, retargetRoot } from '../lib/folderImport.js';
 
 // Folder-import preview: a table of Looker folders → dashboards, each with an
 // Import button (plus per-folder and import-all), and a progress bar.
-export default function FolderImportModal({ preview, alreadyImported, onClose, onImported }) {
+//
+// `existingFolders` is the list of folder paths already used in Pulse. When the
+// import root name already exists there, we DON'T silently merge — we default to
+// creating a SEPARATE folder (auto-suggested modified name) and let the admin
+// opt into merging instead. Subfolders + dashboards follow the chosen root.
+export default function FolderImportModal({ preview, alreadyImported, existingFolders = [], onClose, onImported }) {
+  const rootName = preview.name || 'Imported folder';
+  const collides = folderExists(rootName, existingFolders);
+  // Default to keeping the import isolated (merge is the explicit opt-in).
+  const [mode, setMode] = useState(collides ? 'new' : 'merge'); // 'new' | 'merge'
+  const [destRoot, setDestRoot] = useState(() => suggestUniqueFolder(rootName, existingFolders));
+
   // status: dashboardId -> 'idle' | 'importing' | 'done' | 'error'
   const [status, setStatus] = useState(() => {
     const init = {};
@@ -14,7 +26,18 @@ export default function FolderImportModal({ preview, alreadyImported, onClose, o
   });
   const [busy, setBusy] = useState(false);
 
-  const all = preview.folders.flatMap((f) => f.dashboards.map((d) => ({ ...d, folderName: f.path || f.name })));
+  // Resolve a preview folder to its final Pulse destination path, applying the
+  // collision choice: on "new" we re-root the whole path onto the (unique) name;
+  // on "merge" the original Looker path is kept as-is.
+  const creatingNew = collides && mode === 'new';
+  const folderFor = (f) => {
+    const orig = f.path || f.name;
+    return creatingNew ? retargetRoot(orig, rootName, destRoot) : orig;
+  };
+  // Whether the currently-typed separate-folder name would ITSELF collide.
+  const destStillCollides = creatingNew && folderExists(destRoot, existingFolders);
+
+  const all = preview.folders.flatMap((f) => f.dashboards.map((d) => ({ ...d, folderName: folderFor(f) })));
   const total = all.length;
   const doneCount = all.filter((d) => status[d.id] === 'done').length;
   const pct = total ? Math.round((doneCount / total) * 100) : 0;
@@ -52,10 +75,51 @@ export default function FolderImportModal({ preview, alreadyImported, onClose, o
           <button style={closeBtn} onClick={onClose} aria-label="Close" disabled={busy}>✕</button>
         </div>
 
+        {/* Collision banner — the import root name already exists in Pulse. */}
+        {collides && (
+          <div style={collisionBanner}>
+            <div style={{ fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span>⚠️</span> A folder named “{rootName}” already exists
+            </div>
+            <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 4, lineHeight: 1.4 }}>
+              Choose whether to keep this import separate or merge it into the existing folder.
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 10 }}>
+              <label style={choiceRow(mode === 'new')}>
+                <input type="radio" name="collision" checked={mode === 'new'} onChange={() => setMode('new')} disabled={busy} style={{ marginTop: 2 }} />
+                <span style={{ flex: 1 }}>
+                  <b>Create a separate folder</b> <span style={{ color: 'var(--muted)' }}>(recommended)</span>
+                  <div style={{ marginTop: 6 }}>
+                    <input
+                      style={{ ...destInput, ...(destStillCollides ? { borderColor: 'var(--error)' } : null) }}
+                      value={destRoot}
+                      onChange={(e) => setDestRoot(e.target.value)}
+                      disabled={busy || mode !== 'new'}
+                      aria-label="New folder name"
+                      placeholder="New folder name"
+                    />
+                    {destStillCollides && <div style={{ fontSize: 11.5, color: 'var(--error)', marginTop: 4 }}>That name is also taken — pick another to avoid merging.</div>}
+                  </div>
+                </span>
+              </label>
+              <label style={choiceRow(mode === 'merge')}>
+                <input type="radio" name="collision" checked={mode === 'merge'} onChange={() => setMode('merge')} disabled={busy} style={{ marginTop: 2 }} />
+                <span style={{ flex: 1 }}>
+                  <b>Merge into “{rootName}”</b>
+                  <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>New dashboards are filed into the existing folder.</div>
+                </span>
+              </label>
+            </div>
+          </div>
+        )}
+
         {/* Progress bar */}
         <div style={{ padding: '10px 18px 4px' }}>
           <div style={progressTrack}><div style={{ ...progressFill, width: `${pct}%` }} /></div>
-          <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 5 }}>{doneCount} of {total} imported · {pct}%</div>
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 5 }}>
+            {doneCount} of {total} imported · {pct}%
+            {creatingNew && destRoot.trim() && <> · filing under <b style={{ color: 'var(--text)' }}>{destRoot.trim()}</b></>}
+          </div>
         </div>
 
         <div style={body}>
@@ -66,12 +130,12 @@ export default function FolderImportModal({ preview, alreadyImported, onClose, o
                 <div style={folderRow}>
                   <span style={{ paddingLeft: (f.depth || 0) * 14 }}>📁 <b>{f.name}</b> <span style={{ color: 'var(--muted)', fontWeight: 400 }}>({f.dashboards.length})</span></span>
                   <div style={{ flex: 1 }} />
-                  {remaining > 0 && <button style={miniBtn} onClick={() => importMany(f.dashboards.map((d) => ({ ...d, folderName: f.path || f.name })))} disabled={busy}>Import folder</button>}
+                  {remaining > 0 && <button style={miniBtn} onClick={() => importMany(f.dashboards.map((d) => ({ ...d, folderName: folderFor(f) })))} disabled={busy}>Import folder</button>}
                 </div>
                 {f.dashboards.map((d) => (
                   <div key={d.id} style={dashRow}>
                     <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', paddingLeft: (f.depth || 0) * 14 + 18 }}>{d.title}</span>
-                    <StatusButton status={status[d.id]} onClick={() => importOne(d, f.path || f.name)} busy={busy} />
+                    <StatusButton status={status[d.id]} onClick={() => importOne(d, folderFor(f))} busy={busy} />
                   </div>
                 ))}
                 {f.dashboards.length === 0 && <div style={{ ...dashRow, color: 'var(--muted)', paddingLeft: 18 }}>No dashboards</div>}
@@ -104,3 +168,6 @@ const btn = { padding: '8px 16px', background: 'var(--brand)', color: '#fff', bo
 const miniBtn = { padding: '5px 12px', background: 'rgba(0,0,0,0.05)', color: 'var(--text)', border: 'none', borderRadius: 980, fontSize: 12, fontWeight: 600, cursor: 'pointer' };
 const rowBtn = { padding: '5px 14px', background: 'var(--card)', color: 'var(--brand)', border: '1.5px solid var(--brand)', borderRadius: 980, fontSize: 12, fontWeight: 600, cursor: 'pointer' };
 const closeBtn = { border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 17, color: '#888' };
+const collisionBanner = { margin: '12px 18px 0', padding: '12px 14px', background: 'rgba(245,158,11,0.10)', border: '1px solid rgba(245,158,11,0.35)', borderRadius: 12 };
+const choiceRow = (on) => ({ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 12px', minHeight: 40, borderRadius: 10, cursor: 'pointer', fontSize: 13, lineHeight: 1.4, background: on ? 'var(--card)' : 'transparent', border: `1px solid ${on ? 'var(--brand)' : 'var(--hairline)'}` });
+const destInput = { width: '100%', boxSizing: 'border-box', padding: '9px 12px', border: '1px solid var(--hairline)', borderRadius: 10, fontSize: 13, outline: 'none', background: 'var(--card)' };

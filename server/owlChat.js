@@ -218,6 +218,10 @@ function owlOwner(user) { return String(user?.email || '').trim().toLowerCase() 
 function owlAllowed(user) {
   const email = String(user?.email || '').trim().toLowerCase();
   if (!email) return false;
+  // Organizer-portal embed users (server/owlEmbed.js): the admin-configured
+  // org→client link IS their enablement, so the shadow users it provisions
+  // (tagged 'portal') skip the email allowlist. Data scope is still applyScope.
+  if ((user.roles || []).includes('portal')) return true;
   if (OWL_ALLOW === 'all') return true;
   if (OWL_ALLOW.split(',').map((s) => s.trim()).filter(Boolean).includes(email)) return true;
   // In-app access the owner configures (Admin → AI): 'all', or a specific allowlist.
@@ -356,7 +360,11 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getExploreFields
     .map((m) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.body }));
 
   // POST /api/owl/chat — ask the Owl. Streams the grounded answer as plain text.
-  app.post('/api/owl/chat', auth.requireAuth, async (req, res) => {
+  // Rate-limited per user: this is the most expensive endpoint (agentic multi-tool
+  // LLM loop on a per-entity Anthropic key), so one account can't run up unbounded
+  // spend/load. Tunable via OWL_CHAT_MAX (default 20/min).
+  const owlChatLimit = require('./ratelimit')({ windowMs: 60_000, max: Number(process.env.OWL_CHAT_MAX) || 20, by: 'user', scope: 'owl-chat', message: 'You’re sending messages very fast — give the Owl a moment and try again.' });
+  app.post('/api/owl/chat', auth.requireAuth, owlChatLimit, async (req, res) => {
     if (!owlAllowed(req.user)) return res.status(403).json({ error: 'The native Owl isn\'t enabled for your account yet.' });
     const { suiteId, message, entityId, dashboardId, mode } = req.body || {};
     let { threadId } = req.body || {};
@@ -441,8 +449,12 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getExploreFields
     const { toolMap, toolSchemas } = currentTools(scopeEntityId);
     // The user tapping ⏹ Stop aborts the fetch → the socket closes → we bail between
     // rounds/tools instead of finishing an answer nobody is waiting for.
+    // Listen on the RESPONSE socket, not the request: on modern Node, req 'close'
+    // fires as soon as the request body is consumed (milliseconds in, client still
+    // connected) — that read as "user left" and could silently abort multi-round
+    // (tool-using) answers. res 'close' with writableEnded false = truly gone.
     let clientGone = false;
-    req.on('close', () => { if (!res.writableEnded) clientGone = true; });
+    res.on('close', () => { if (!res.writableEnded) clientGone = true; });
     // Heartbeat: a long Looker/model call can sit silent for minutes (Looker's own
     // timeout is 2 min), which reads as "stuck" and can trip idle-connection proxies.
     // Re-send the latest status every 10s so the stream stays alive + visibly working.
@@ -450,7 +462,7 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getExploreFields
     const writeStatus = (label) => { lastStatus = String(label).replace(/[<>]/g, ''); try { res.write(STATUS_OPEN + lastStatus + STATUS_CLOSE); } catch { /* socket gone */ } };
     const heartbeat = setInterval(() => { if (!clientGone && !res.writableEnded) { try { res.write(STATUS_OPEN + lastStatus + STATUS_CLOSE); } catch { /* socket gone */ } } }, 10000);
     try {
-      const { text, trail, stopped } = await runOwlLoop({
+      const { text, trail, stopped } = await require('./aiUsage').run({ entityId: scopeEntityId, kind: 'owl_chat' }, () => runOwlLoop({
         llmTurn: ({ messages: m, tools, onText }) => owlTurn(insights, { messages: m, tools, instructions, apiKey, onText, effort: persona.effort, maxTokens: persona.maxTokens }),
         toolMap,
         tools: toolSchemas,
@@ -461,7 +473,7 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getExploreFields
         onText: (t) => res.write(t),
         // Stream a status ping between turns; the client renders it as the thinking line.
         onStatus: writeStatus,
-      });
+      }));
       if (stopped) { logToolStop(thread.id, trail); res.end(); return; }
       // Persist the answer WITHOUT the follow-ups marker (the client strips it live).
       const cleanText = String(text || '').split('<<<FOLLOWUPS>>>')[0].replace(/\s+$/, '');
@@ -618,7 +630,7 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getExploreFields
     if (req.user.role !== 'admin' && !auth.canAccessSuite(req.user, suiteId)) return res.status(403).json({ error: 'Not allowed.' });
     const alertsApi = typeof getAlertsApi === 'function' ? getAlertsApi() : null;
     if (!alertsApi || !alertsApi.createAlert) return res.status(503).json({ error: 'Alerts aren\'t available right now.' });
-    const r = alertsApi.createAlert({ suiteId, draft, user: req.user });
+    const r = alertsApi.createAlert({ suiteId, draft, user: req.user, via: 'owl' });
     if (!r.ok) return res.status(400).json({ error: r.error || 'Could not create the alert.' });
     res.status(201).json({ ok: true, alert: { id: r.alert.id, name: r.alert.name }, url: actionViewPath('createAlert') });
   });
@@ -657,7 +669,7 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getExploreFields
     }
     const segmentsApi = typeof getSegmentsApi === 'function' ? getSegmentsApi() : null;
     if (!segmentsApi || !segmentsApi.createSegment) return res.status(503).json({ error: 'Segments aren\'t available right now.' });
-    const r = segmentsApi.createSegment({ entityId, name, definition: draft, user: req.user });
+    const r = segmentsApi.createSegment({ entityId, name, definition: draft, user: req.user, via: 'owl' });
     if (!r.ok) return res.status(r.error === 'Not allowed' ? 403 : 400).json({ error: r.error || 'Could not create the segment.' });
     res.status(201).json({ ok: true, segment: { id: r.segment.id, name: r.segment.name }, url: actionViewPath('createSegment') });
   });
@@ -684,7 +696,7 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getExploreFields
       const segmentsApi = typeof getSegmentsApi === 'function' ? getSegmentsApi() : null;
       if (segmentsApi && segmentsApi.createSegment) {
         const segName = String(audienceName || name || 'Campaign audience').slice(0, 120);
-        const sr = segmentsApi.createSegment({ entityId, name: segName, definition: audience, user: req.user, suiteId: suiteId || '' });
+        const sr = segmentsApi.createSegment({ entityId, name: segName, definition: audience, user: req.user, suiteId: suiteId || '', via: 'owl' });
         if (sr.ok) audience = { mode: 'segment', segmentId: sr.segment.id }; // reference the saved segment
         // (if the segment couldn't be saved, fall back to the inline query audience — the campaign still resolves)
       }
@@ -701,7 +713,7 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getExploreFields
       contentMode: cMode === 'blocks' ? 'blocks' : html ? 'html' : 'template', customHtml: html,
       blocks: Array.isArray(blocks) ? blocks : [], theme: theme || {},
     };
-    const r = actionsApi.createDraftCampaign({ entityId, title: name, config, user: req.user });
+    const r = actionsApi.createDraftCampaign({ entityId, title: name, config, user: req.user, via: 'owl' });
     if (!r.ok) return res.status(r.error === 'Not allowed' ? 403 : 400).json({ error: r.error || 'Could not create the campaign.' });
     res.status(201).json({ ok: true, campaign: { id: r.action.id, title: r.action.title }, url: actionViewPath('draftCampaign') });
   });

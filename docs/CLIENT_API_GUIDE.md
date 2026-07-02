@@ -62,7 +62,10 @@ What's available:
 | `/api/v1/campaigns` | Your campaigns with sent / clicks / opens / CTR |
 | `/api/v1/campaigns/{id}` | One campaign's results |
 | `/api/v1/goals?suiteId=…&progress=1` | Your goals for an event, with live progress |
+| `/api/v1/data-sources` | What you can query directly — measures, group-bys, filters |
+| `POST /api/v1/query` | Ask for any curated number with your own breakdown/filters/dates — no dashboard needed |
 | `/api/v1/tiles/rows?dashboardId=…&tileId=…` | *Row-level keys only* — the table behind a tile |
+| `/api/v1/event-ops?suiteId=…&query=…` | *Row-level keys only* — live Event Ops: devices, stations, staff, open issues, checkpoints |
 
 Everything comes back as JSON. A typical first call:
 
@@ -72,11 +75,14 @@ curl -H "Authorization: Bearer pulse_sk_…" https://your-pulse-domain/api/v1/me
 
 ### B. For AI assistants — the MCP connection
 
-Pulse speaks **MCP** (Model Context Protocol), the standard AI assistants use
-to work with tools. To connect Claude:
+Connecting an AI assistant puts **the Owl** — Pulse's data analyst — in your
+assistant: ask questions in plain language, get answers grounded in your live
+data. Pulse speaks **MCP** (Model Context Protocol), the standard AI
+assistants use to work with tools. To connect Claude:
 
 1. Make sure you're **logged into Pulse** in your browser.
-2. In Claude, add a **custom connector** (Settings → Connectors) with the URL
+2. In Claude, add a **custom connector** (Settings → Connectors). Name it
+   **The Owl 🦉** (that's who you'll be talking to), URL
    `https://your-pulse-domain/mcp`. Leave any *OAuth Client ID* /
    *Client Secret* fields **blank** — Claude registers itself automatically.
 3. Click **Connect**. A Pulse approval page opens: pick **which client** to
@@ -87,16 +93,20 @@ That's it — no keys to copy. Behind the scenes Pulse creates a named API key
 for the connection; you'll see it (e.g. *"Claude (connected 2026-07-01)"*) in
 Settings → Integrations, and revoking it there disconnects Claude instantly.
 
-Claude can now see tools like *list dashboards*, *get metric*,
-*get campaign report* — and will use them to answer questions about your data.
-Good first prompt: *"Use the Pulse tools to give me a snapshot of how my next
-event is selling."*
+Claude now speaks as the Owl, with tools like *list dashboards*, *get metric*
+and *query data*. Good first prompt: *"Owl, give me a snapshot of how my next
+event is selling."* Others to try: *"revenue by ticket type, last 30 days"* ·
+*"how big is my VIP segment?"* · *"are my goals on pace?"*
 
 > **Developer note:** tools that take a plain Bearer header (scripts, some MCP
 > clients) can still just send `Authorization: Bearer pulse_sk_…` — the OAuth
 > flow is optional sugar on top of the same keys.
 
-The assistant can only ever **look things up** — it can't send campaigns,
+By default the assistant can only ever **look things up**. If you tick
+**"Also allow creating drafts"** when connecting (or on a key), the Owl can
+also **build audience segments and draft campaigns for you** — e.g. *"draft a
+win-back email to last year's VIP buyers"*. Everything it creates lands as a
+**draft in Pulse** waiting for your review and approval; it can never send,
 change settings or spend money on your behalf.
 
 #### ChatGPT (and other OpenAI tools)
@@ -108,6 +118,32 @@ Pulse works with OpenAI too — it's the same MCP connection:
   `https://your-pulse-domain/mcp`, and approve on the Pulse page exactly like
   Claude. Pulse also exposes the standard `search` and `fetch` tools ChatGPT
   needs, so it works for Deep Research and "company knowledge" style questions.
+#### Grok (xAI)
+
+On a paid Grok plan: go to `grok.com/connectors` → **New Connector** →
+**Custom** → enter `https://your-pulse-domain/mcp` and complete the
+authentication step — the same Pulse approval page as Claude opens (be logged
+into Pulse first). Developers can also use Pulse from the xAI API's Remote
+MCP tools with a `pulse_sk_…` Bearer key.
+
+#### Google Gemini
+
+Honest status: the **regular Gemini app and Gems can't connect to custom
+tools yet** — Google hasn't opened custom connectors there (as of July 2026).
+What does work:
+
+- **Gemini Enterprise** (Google's paid enterprise agent platform): add Pulse
+  as a **Custom MCP server** connector — MCP Server URL
+  `https://your-pulse-domain/mcp`, Authorization URL
+  `https://your-pulse-domain/oauth/authorize`, Token URL
+  `https://your-pulse-domain/oauth/token`, any Client ID/Secret of your
+  choosing, scope `read`. Users then approve on the same Pulse page as Claude.
+- **Gemini CLI** (developers): add Pulse as an MCP server with your
+  `pulse_sk_…` key as a Bearer header.
+
+The moment Google opens custom connectors in the consumer Gemini app or Gems,
+Pulse's existing connection flow should slot straight in — no rebuild needed.
+
 - **OpenAI Responses API (developers):** point the built-in MCP tool at the
   same URL with your key as a Bearer header — no extra setup:
 

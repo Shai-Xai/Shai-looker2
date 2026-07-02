@@ -93,10 +93,18 @@ function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, ant
   // Kept in-memory with a short TTL (charts are ephemeral; a restart just drops them).
   const imgStore = new Map(); // id -> { png, title, exp }
   const IMG_TTL = 2 * 60 * 60 * 1000; // 2 hours
+  const IMG_MAX = 50; // raw PNG buffers — expired ones must be DELETED, not just ignored, or they pile up until OOM
   let seenBase = ''; // the public host Clickatell hits us on (captured from the webhook)
   const publicBase = () => (process.env.PUBLIC_BASE_URL || process.env.RENDER_EXTERNAL_URL || seenBase || '').replace(/\/$/, '');
-  const storeImg = (png, title = 'Chart') => { const id = crypto.randomUUID(); imgStore.set(id, { png, title, exp: Date.now() + IMG_TTL }); return id; };
-  const getImg = (raw) => { const it = imgStore.get(String(raw || '').replace(/\.png$/, '')); return it && it.exp >= Date.now() ? it : null; };
+  const storeImg = (png, title = 'Chart') => {
+    const id = crypto.randomUUID();
+    const now = Date.now();
+    for (const [k, v] of imgStore) if (v.exp < now) imgStore.delete(k);
+    imgStore.set(id, { png, title, exp: now + IMG_TTL });
+    while (imgStore.size > IMG_MAX) imgStore.delete(imgStore.keys().next().value);
+    return id;
+  };
+  const getImg = (raw) => { const id = String(raw || '').replace(/\.png$/, ''); const it = imgStore.get(id); if (it && it.exp < Date.now()) { imgStore.delete(id); return null; } return it || null; };
   app.get('/api/whatsapp/img/:id', (req, res) => {
     const it = getImg(req.params.id);
     if (!it) return res.status(404).end();
@@ -369,12 +377,12 @@ function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, ant
         if (!suiteId) { await messaging.sendWhatsapp({ to: msisdn, text: 'I need to know which event — please ask again and pick one.' }); return; }
         if (user.role !== 'admin' && auth.canAccessSuite && !auth.canAccessSuite(user, suiteId)) { logEvent(msisdn, 'action-failed', 'no event access'); await messaging.sendWhatsapp({ to: msisdn, text: "You don't have access to that event." }); return; }
         const api = getAlertsApi && getAlertsApi();
-        const r = api && api.createAlert ? api.createAlert({ suiteId, draft: pend.draft, user }) : { ok: false, error: 'Alerts unavailable' };
+        const r = api && api.createAlert ? api.createAlert({ suiteId, draft: pend.draft, user, via: 'whatsapp' }) : { ok: false, error: 'Alerts unavailable' };
         if (r.ok) { logEvent(msisdn, 'action-done', `alert ${r.alert.name}`); const link = actionViewUrl(publicBase(), 'createAlert'); await messaging.sendWhatsapp({ to: msisdn, text: `✅ Done — alert *${r.alert.name}* is on. I'll let you know when it triggers.${link ? `\nView it: ${link}` : ''}` }); }
         else { logEvent(msisdn, 'action-failed', r.error || 'error'); await messaging.sendWhatsapp({ to: msisdn, text: `I couldn't switch that alert on: ${r.error || 'something went wrong'}.` }); }
       } else if (pend.kind === 'createSegment') {
         const api = getSegmentsApi && getSegmentsApi();
-        const r = api && api.createSegment ? api.createSegment({ entityId: pend.entityId, name: pend.name, definition: pend.draft, user }) : { ok: false, error: 'Segments unavailable' };
+        const r = api && api.createSegment ? api.createSegment({ entityId: pend.entityId, name: pend.name, definition: pend.draft, user, via: 'whatsapp' }) : { ok: false, error: 'Segments unavailable' };
         if (r.ok) { logEvent(msisdn, 'action-done', `segment ${r.segment.name}`); const link = actionViewUrl(publicBase(), 'createSegment'); await messaging.sendWhatsapp({ to: msisdn, text: `✅ Saved the segment *${r.segment.name}*. You can use it for a campaign in the Pulse app.${link ? `\nView it: ${link}` : ''}` }); }
         else { logEvent(msisdn, 'action-failed', r.error || 'error'); await messaging.sendWhatsapp({ to: msisdn, text: `I couldn't save that segment: ${r.error || 'something went wrong'}.` }); }
       } else if (pend.kind === 'draftCampaign') {
@@ -386,7 +394,7 @@ function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, ant
           if (cat && (audience.model !== cat.model || audience.view !== cat.explore)) { logEvent(msisdn, 'action-failed', 'audience off-catalogue'); await messaging.sendWhatsapp({ to: msisdn, text: 'I can only build that audience from your ticket data — set it up in the Pulse app.' }); return; }
           const segApi = getSegmentsApi && getSegmentsApi();
           if (segApi && segApi.createSegment) {
-            const sr = segApi.createSegment({ entityId: pend.entityId, name: String(pend.name || 'Campaign audience').slice(0, 120), definition: audience, user });
+            const sr = segApi.createSegment({ entityId: pend.entityId, name: String(pend.name || 'Campaign audience').slice(0, 120), definition: audience, user, via: 'whatsapp' });
             if (sr.ok) audience = { mode: 'segment', segmentId: sr.segment.id };
           }
         }
@@ -401,7 +409,7 @@ function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, ant
           customHtml: '', source: 'owl-whatsapp', // tag where it was drafted (for the Engage badge)
         };
         const api = getActionsApi && getActionsApi();
-        const r = api && api.createDraftCampaign ? api.createDraftCampaign({ entityId: pend.entityId, title: pend.name, config, user }) : { ok: false, error: 'Campaigns unavailable' };
+        const r = api && api.createDraftCampaign ? api.createDraftCampaign({ entityId: pend.entityId, title: pend.name, config, user, via: 'whatsapp' }) : { ok: false, error: 'Campaigns unavailable' };
         if (r.ok) { logEvent(msisdn, 'action-done', `campaign draft ${r.action.title}`); const link = actionViewUrl(publicBase(), 'draftCampaign'); await messaging.sendWhatsapp({ to: msisdn, text: `✅ Drafted the campaign *${r.action.title}*. It's a DRAFT — review, approve and send it in the Pulse app (Engage). I never send anything to customers.${link ? `\nReview it: ${link}` : ''}` }); }
         else { logEvent(msisdn, 'action-failed', r.error || 'error'); await messaging.sendWhatsapp({ to: msisdn, text: `I couldn't create that draft: ${r.error || 'something went wrong'}.` }); }
       } else if (pend.kind === 'rememberFact') {
@@ -453,12 +461,12 @@ function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, ant
     let out = ''; let trail = [];
     const { toolMap, toolSchemas } = currentTools(id.entityId);
     try {
-      const r = await runOwlLoop({
+      const r = await require('./aiUsage').run({ entityId: id.entityId, kind: 'whatsapp' }, () => runOwlLoop({
         llmTurn: ({ messages: m, tools, onText }) => owlTurn(insights, { messages: m, tools, instructions, apiKey, onText, effort: persona.effort, maxTokens: persona.maxTokens }),
         toolMap, tools: toolSchemas, messages: history,
         ctx: { user: id.user, entityId: id.entityId },
         maxRounds: persona.maxRounds,
-      });
+      }));
       out = r.text; trail = r.trail || [];
     } catch { out = ''; }
     const answer = String(out || '').split(FU_MARK)[0].replace(/\s+$/, '').trim() || 'Sorry — I couldn\'t answer that just now. Try rephrasing?';
@@ -584,7 +592,15 @@ function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, ant
   // turn never times the webhook out. Optional shared secret (?key= or x-webhook-secret).
   app.post('/api/whatsapp/inbound', (req, res) => {
     const secret = (db.getSetting('whatsapp_webhook_secret', '') || '').trim();
-    if (secret && req.query.key !== secret && req.get('x-webhook-secret') !== secret) {
+    // The sender is identified purely by the (spoofable) MSISDN, which then drives
+    // a scoped Owl turn — so transport auth is MANDATORY, not optional. With no
+    // secret configured the endpoint is closed (fail closed): set
+    // whatsapp_webhook_secret and put ?key=<secret> on the Clickatell webhook URL.
+    if (!secret) {
+      logEvent('', 'rejected', 'inbound WhatsApp disabled — set whatsapp_webhook_secret to enable');
+      return res.status(503).json({ error: 'not configured' });
+    }
+    if (req.query.key !== secret && req.get('x-webhook-secret') !== secret) {
       logEvent('', 'rejected', 'bad/missing webhook secret — Clickatell URL is missing ?key=');
       return res.status(401).json({ error: 'bad secret' });
     }
@@ -711,11 +727,11 @@ function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, ant
     const instructions = `${instructionsFor(id.entityId, (id.user || {}).id || '')}\n\n${greeting ? SCHED_NOTE : SCHED_NOTE_ADD}`;
     const { toolMap, toolSchemas } = currentTools(id.entityId);
     try {
-      const { text } = await runOwlLoop({
+      const { text } = await require('./aiUsage').run({ entityId: id.entityId, kind: 'whatsapp' }, () => runOwlLoop({
         llmTurn: ({ messages: m, tools, onText }) => owlTurn(insights, { messages: m, tools, instructions, apiKey, onText }),
         toolMap, tools: toolSchemas, messages: [{ role: 'user', content: ask }],
         ctx: { user: id.user, entityId: id.entityId },
-      });
+      }));
       return String(text || '').split(FU_MARK)[0].replace(/\s+$/, '').trim();
     } catch { return ''; }
   }

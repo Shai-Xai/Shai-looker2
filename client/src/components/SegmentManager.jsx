@@ -3,6 +3,7 @@ import { api } from '../lib/api.js';
 import PlatformIcon from './PlatformIcon.jsx';
 import { AudienceFilters } from './CampaignManager.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
+import { viaBadge, viaChipStyle } from '../lib/createdVia.js';
 
 // Built-in recipes we can materialise into a real segment right now by
 // auto-resolving the source from the client's data (key = actionTemplates key).
@@ -86,7 +87,15 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
       onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />;
   }
 
-  const refresh = (s) => { setBusyId(s.id); api.previewSegment(entityId, s.id).then(load).catch(() => {}).finally(() => setBusyId(null)); };
+  // A failed count must SAY so — swallowing the error made a broken segment's
+  // Refresh look like the button did nothing.
+  const refresh = (s) => {
+    setBusyId(s.id);
+    setSyncMsg((m) => ({ ...m, [s.id]: '' }));
+    api.previewSegment(entityId, s.id).then(load)
+      .catch((e) => setSyncMsg((m) => ({ ...m, [s.id]: `✗ Couldn’t count this segment — ${e.message || 'something went wrong'}. Open Edit to check its source tile/filters.` })))
+      .finally(() => setBusyId(null));
+  };
   const del = (s) => { if (confirm(`Delete segment “${s.name}”?`)) api.deleteSegment(entityId, s.id).then(load); };
   const viewPeople = (s) => { setViewing({ segment: s, data: null }); api.segmentMembers(entityId, s.id).then((d) => setViewing({ segment: s, data: d })).catch((e) => setViewing({ segment: s, data: { error: e.message } })); };
   const syncMeta = async (s) => {
@@ -146,6 +155,7 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <span style={{ fontWeight: 700, fontSize: isMobile ? 17 : 15 }}>{s.name}</span>
             <span style={{ fontSize: 10.5, fontWeight: 700, borderRadius: 980, padding: '2px 9px', background: 'rgba(128,128,128,0.14)', color: 'var(--muted)' }}>{s.source === 'mix' ? 'Combined' : s.source === 'paste' ? 'Uploaded / pasted' : s.source === 'gsheet' ? 'Google Sheet' : 'Dashboard tile'}</span>
+            {viaBadge(s.createdVia) && <span style={viaChipStyle}>{viaBadge(s.createdVia).icon} via {viaBadge(s.createdVia).label}</span>}
           </div>
           {lbl.event && <div style={{ fontSize: 12.5, color: 'var(--text)', marginTop: 5, fontWeight: 600 }}>🗓 {lbl.event}</div>}
           {lbl.detail && <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lbl.detail}</div>}

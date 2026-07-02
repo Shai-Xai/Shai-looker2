@@ -118,16 +118,20 @@ export default function ClientHome() {
   };
 
   // Multi-event: choose which events the briefing covers (persisted per user).
-  // Re-pulls the overall + per-event sections for the new selection.
+  // The chip flips instantly and the current summary STAYS on screen (no
+  // full-card reload); only the per-event sections show their own loading
+  // state, and the regenerated summary swaps in quietly when it arrives.
   const toggleEventSuite = (id) => {
     const cur = (brief?.suites || []).filter((s) => s.selected).map((s) => s.id);
     const next = cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id];
     if (!next.length) return; // keep at least one event
     setSavingSuites(true);
+    setBrief((b) => (b ? { ...b, suites: (b.suites || []).map((s) => ({ ...s, selected: next.includes(s.id) })) } : b));
+    setEvents(null);
     api.setBriefingSuites(homeEntityId, next)
-      .then(() => { setBrief(null); setEvents(null); return api.myBriefing(homeEntityId, true); })
-      .then((b) => { setBrief(b); if (b?.multi) { api.myBriefingEvents(homeEntityId, true).then((r) => setEvents(r.events || [])).catch(() => setEvents([])); } })
-      .catch(() => {})
+      .then(() => api.myBriefing(homeEntityId, true))
+      .then((b) => { setBrief(b); if (b?.multi) { api.myBriefingEvents(homeEntityId, true).then((r) => setEvents(r.events || [])).catch(() => setEvents([])); } else setEvents([]); })
+      .catch(() => setEvents([]))
       .finally(() => setSavingSuites(false));
   };
 
@@ -183,6 +187,9 @@ export default function ClientHome() {
             </div>
           ) : (
             <>
+              {/* While an event toggle regenerates, the old summary stays visible
+                  but dimmed — the card never blanks out under the reader. */}
+              <div style={{ opacity: savingSuites ? 0.45 : 1, transition: 'opacity .2s' }}>
               <p style={{ fontSize: isMobile ? 14 : 14.5, lineHeight: 1.65 }}>{bold(brief.headline)}</p>
               {(brief.bullets || []).length > 0 && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 7, marginTop: 10 }}>
@@ -201,6 +208,7 @@ export default function ClientHome() {
                   ))}
                 </div>
               )}
+              </div>
               <FeedbackRow brief={brief} entityId={homeEntityId} />
               {brief.multi && (
                 <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--hairline)' }}>
@@ -329,11 +337,14 @@ export default function ClientHome() {
           <SectionHead icon="✨">Worth a look</SectionHead>
           <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : `repeat(${Math.min(brief.suggestions.length, 3)}, 1fr)`, gap: 12 }}>
             {brief.suggestions.map((s, i) => (
-              <button key={i} className="lift" style={cardBtn} onClick={() => go(s.link.suiteId, s.link.dashboardId)}>
+              // A portfolio suggestion may carry an ACTION but no resolvable dashboard
+              // (link null, or suiteId-only) — guard every s.link read so the card
+              // still renders (and never navigates to /suite/…/d/undefined).
+              <button key={i} className="lift" style={cardBtn} onClick={() => { if (s.link?.suiteId && s.link?.dashboardId) go(s.link.suiteId, s.link.dashboardId); }}>
                 <div style={{ fontSize: 13.5, fontWeight: 700, lineHeight: 1.4 }}>{s.title}</div>
                 {s.reason && <div style={{ fontSize: 12, color: 'var(--muted-2)', lineHeight: 1.5, marginTop: 4 }}>{s.reason}</div>}
                 <div style={{ marginTop: 9, display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--brand)' }}>{s.link.label} →</span>
+                  {s.link?.label && s.link?.dashboardId && <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--brand)' }}>{s.link.label} →</span>}
                   {/* Only when the suggestion maps to an EXECUTABLE capability
                       (validated server-side) — never a button we can't deliver. */}
                   {s.action && can(PERMS.CAMPAIGNS_APPROVE) && (

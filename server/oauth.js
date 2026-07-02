@@ -114,6 +114,12 @@ function mount(app, { db, auth, apiKeys, rateLimit }) {
   // approves on our page, and PKCE binds the code to the requesting app.
   const TRUSTED_REDIRECTS = [
     /^https:\/\/claude\.ai\//, /^https:\/\/claude\.com\//, /^https:\/\/api\.anthropic\.com\//,
+    // Gemini Enterprise custom-MCP connectors (no dynamic registration — the
+    // admin types a client id/secret; Google's fixed OAuth callback):
+    /^https:\/\/vertexaisearch\.cloud\.google\.com\//,
+    // Grok custom connectors (grok.com/connectors) — normally self-registers
+    // via DCR; these cover a hand-typed client id, same as Claude/Gemini:
+    /^https:\/\/grok\.com\//, /^https:\/\/x\.ai\//, /^https:\/\/api\.x\.ai\//,
   ];
   const registerFirstUse = (clientId, redirectUri) => {
     if (!clientId || String(clientId).length > 120) return null;
@@ -188,13 +194,15 @@ button,a.btn{display:inline-block;background:#FF385C;color:#fff;border:none;bord
     const options = entities.map((e) => `<option value="${esc(e.id)}" ${e.enabled ? '' : 'disabled'}>${esc(e.name)}${e.enabled ? '' : ' — API access off (ask Howler)'}</option>`).join('');
     const hidden = ['client_id', 'redirect_uri', 'state', 'code_challenge', 'code_challenge_method', 'scope']
       .map((k) => `<input type="hidden" name="${k}" value="${esc(req.query[k] || '')}">`).join('');
-    res.send(page('Connect to Pulse', `<h1>Connect “${esc(v.client.name)}” to Pulse?</h1>
-      <p>It will be able to <b>read</b> the chosen client’s Pulse data — dashboards, live metrics, audience sizes, campaign results and goals. It can’t send campaigns or change anything.</p>
+    res.send(page('Meet your Owl', `<h1>🦉 Connect “${esc(v.client.name)}” to your Owl?</h1>
+      <p>Your AI assistant becomes <b>the Owl</b> for the chosen client — it can <b>read</b> that client’s Pulse data (dashboards, live metrics, audience sizes, campaign results and goals) and answer questions about it. It can’t send campaigns or change anything.</p>
       ${anyEnabled ? '' : '<p><b>API access is switched off for all your clients</b> — ask your Howler contact to enable it, then try again.</p>'}
       <form method="POST" action="/oauth/approve">${hidden}
         <label>Which client?</label><select name="entityId">${options}</select>
         <label class="chk"><input type="checkbox" name="rows" value="1" style="margin-top:2px">
           Also allow <b>row-level data</b> — the tables behind tiles (may include personal data). Leave off unless this tool truly needs it.</label>
+        <label class="chk"><input type="checkbox" name="drafts" value="1" style="margin-top:2px">
+          Also allow <b>creating drafts</b> — the Owl can build audience segments and draft campaigns for you. Drafts always await your review &amp; approval in Pulse; it can never send.</label>
         <p><button type="submit" ${anyEnabled ? '' : 'disabled'}>Approve &amp; connect</button></p>
       </form>
       <p style="font-size:12px">This creates a named API key you can see and revoke any time in Settings → Integrations.</p>`));
@@ -210,7 +218,7 @@ button,a.btn{display:inline-block;background:#FF385C;color:#fff;border:none;bord
       const allowed = connectableEntities(req.user).find((e) => e.id === entityId);
       if (!allowed) return res.status(403).send(page('Not allowed', '<h1>Not allowed</h1><p>You can’t connect that client.</p>'));
       if (!allowed.enabled) return res.status(403).send(page('Switched off', '<h1>API access is off</h1><p>Ask your Howler contact to enable API access for this client, then try again.</p>'));
-      const scopes = req.body.rows === '1' ? ['read', 'read_rows'] : ['read'];
+      const scopes = ['read', ...(req.body.rows === '1' ? ['read_rows'] : []), ...(req.body.drafts === '1' ? ['write'] : [])];
       const { secret } = apiKeys.createKey({ entityId, name: `${v.client.name} (connected ${new Date().toISOString().slice(0, 10)})`, scopes });
       const code = crypto.randomBytes(32).toString('base64url');
       sql.prepare('INSERT INTO oauth_codes (code, client_id, redirect_uri, key_secret, scope, code_challenge, expires_at) VALUES (?,?,?,?,?,?,?)')

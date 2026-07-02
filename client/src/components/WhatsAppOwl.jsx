@@ -97,12 +97,14 @@ export default function WhatsAppOwl() {
       <span style={lbl}>3 · WhatsApp ‘from’ number (optional — One API usually infers it; digits only)</span>
       <input value={cfg.from} onChange={(e) => setCfg((c) => ({ ...c, from: e.target.value }))} placeholder="e.g. 27XXXXXXXXX (or leave blank)" style={{ ...fld, width: 220 }} />
 
-      <span style={lbl}>4 · Optional webhook secret {cfg.hasSecret ? '(SET — the webhook URL above already includes it)' : ''}</span>
+      <span style={lbl}>4 · Webhook secret — REQUIRED {cfg.hasSecret ? '(SET — the webhook URL above already includes it)' : '(NOT SET — inbound WhatsApp is OFF until you set one)'}</span>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-        <input value={secret} onChange={(e) => setSecret(e.target.value)} placeholder={cfg.hasSecret ? '•••••• (unchanged)' : 'leave blank for no auth'} style={{ ...fld, width: 260 }} />
-        {cfg.hasSecret && <button onClick={async () => { await api.saveOwlWhatsapp({ secret: '' }); const r = await api.owlWhatsapp(); setCfg((c) => ({ ...c, hasSecret: r.hasSecret, webhookPath: r.webhookPath })); }} style={{ ...fld, cursor: 'pointer' }}>Remove secret</button>}
+        <input value={secret} onChange={(e) => setSecret(e.target.value)} placeholder={cfg.hasSecret ? '•••••• (unchanged)' : 'any long random string'} style={{ ...fld, width: 260 }} />
+        {cfg.hasSecret && <button onClick={async () => { if (!window.confirm('Removing the secret DISABLES inbound WhatsApp (the endpoint fails closed). Remove it?')) return; await api.saveOwlWhatsapp({ secret: '' }); const r = await api.owlWhatsapp(); setCfg((c) => ({ ...c, hasSecret: r.hasSecret, webhookPath: r.webhookPath })); }} style={{ ...fld, cursor: 'pointer' }}>Remove secret</button>}
       </div>
-      {cfg.hasSecret && <div style={{ fontSize: 11.5, color: 'var(--warn, #b45309)', marginTop: 2 }}>A secret is set, so Clickatell must call the URL above (with <code>?key=…</code>). Re-copy the webhook URL into Clickatell, or remove the secret for the pilot.</div>}
+      {cfg.hasSecret
+        ? <div style={{ fontSize: 11.5, color: 'var(--warn, #b45309)', marginTop: 2 }}>A secret is set, so Clickatell must call the URL above (with <code>?key=…</code>). Re-copy the webhook URL into Clickatell after changing it.</div>
+        : <div style={{ fontSize: 11.5, color: 'var(--error, #b91c1c)', marginTop: 2 }}>Inbound messages are being rejected right now (“inbound WhatsApp disabled”). Set a secret, save, then re-copy the webhook URL (it will include <code>?key=…</code>) into Clickatell’s Reply Callbacks.</div>}
 
       <span style={lbl}>5 · Linked numbers (which phone → which client)</span>
       {cfg.numbers.length === 0 && <div style={{ fontSize: 12.5, color: 'var(--muted)', margin: '2px 0' }}>No numbers linked yet — add one below.</div>}

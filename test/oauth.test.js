@@ -47,10 +47,10 @@ const pkce = () => {
   return { verifier, challenge: crypto.createHash('sha256').update(verifier).digest('base64url') };
 };
 // Drive the approve form like the browser would (cookie-authed POST, no redirect-follow).
-async function approve(clientId, challenge, { entityId = entityA.id, rows = false, as = ownerA } = {}) {
+async function approve(clientId, challenge, { entityId = entityA.id, rows = false, drafts = false, as = ownerA } = {}) {
   const form = new URLSearchParams({
     client_id: clientId, redirect_uri: REDIRECT, state: 'st4te', code_challenge: challenge,
-    code_challenge_method: 'S256', entityId, ...(rows ? { rows: '1' } : {}),
+    code_challenge_method: 'S256', entityId, ...(rows ? { rows: '1' } : {}), ...(drafts ? { drafts: '1' } : {}),
   });
   return fetch(`${app.base}/oauth/approve`, {
     method: 'POST', redirect: 'manual',
@@ -119,6 +119,30 @@ test('PKCE: a wrong verifier is rejected and the code is not burned by the attac
   assert.equal((await exchange(clientId, code, verifier)).status, 200);
 });
 
+test('Gemini Enterprise: hand-typed client id + Google’s fixed OAuth callback is accepted', async () => {
+  const { verifier, challenge } = pkce();
+  const GOOGLE_CB = 'https://vertexaisearch.cloud.google.com/oauth-redirect';
+  const form = new URLSearchParams({
+    client_id: 'gemini-enterprise-client', redirect_uri: GOOGLE_CB, code_challenge: challenge,
+    code_challenge_method: 'S256', entityId: entityA.id,
+  });
+  const redir = await fetch(`${app.base}/oauth/approve`, {
+    method: 'POST', redirect: 'manual',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Cookie: cookieFor(ownerA) },
+    body: form.toString(),
+  });
+  assert.equal(redir.status, 302);
+  const code = new URL(redir.headers.get('location')).searchParams.get('code');
+  // Gemini's token call includes a client_secret (auth method client_secret_post);
+  // our token endpoint tolerates and ignores it — the exchange must still work.
+  const tok = await fetch(`${app.base}/oauth/token`, {
+    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ grant_type: 'authorization_code', code, code_verifier: verifier, redirect_uri: GOOGLE_CB, client_id: 'gemini-enterprise-client', client_secret: 'whatever-the-admin-typed' }).toString(),
+  });
+  assert.equal(tok.status, 200);
+  assert.ok((await tok.json()).access_token.startsWith('pulse_sk_'));
+});
+
 test('hand-typed client id works when the redirect is Claude’s own callback (trust-on-first-use)', async () => {
   const typedId = 'my-hand-typed-id';
   const { verifier, challenge } = pkce();
@@ -166,4 +190,13 @@ test('rows opt-in on the approval form yields a read_rows key', async () => {
   const body = await (await exchange(clientId, code, verifier)).json();
   const me = await app.req('GET', '/api/v1/me', { headers: { Authorization: `Bearer ${body.access_token}` } });
   assert.deepEqual(me.body.key.scopes, ['read', 'read_rows']);
+});
+
+test('drafts opt-in on the approval form yields a write key', async () => {
+  const clientId = await registerClient();
+  const { verifier, challenge } = pkce();
+  const code = new URL((await approve(clientId, challenge, { drafts: true })).headers.get('location')).searchParams.get('code');
+  const body = await (await exchange(clientId, code, verifier)).json();
+  const me = await app.req('GET', '/api/v1/me', { headers: { Authorization: `Bearer ${body.access_token}` } });
+  assert.deepEqual(me.body.key.scopes, ['read', 'write']);
 });

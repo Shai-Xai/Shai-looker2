@@ -123,6 +123,9 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
     add('github_pr_number', 'github_pr_number INTEGER NOT NULL DEFAULT 0');
     add('github_pr_url', "github_pr_url TEXT NOT NULL DEFAULT ''");
   } catch (e) { console.error('[tickets] ship-review migration skipped:', e.message); }
+  // Comments gained a visibility flag (internal dev note vs public reply the
+  // reporter sees + gets notified about) after launch — ALTER for existing DBs.
+  try { sql.exec("ALTER TABLE ticket_comments ADD COLUMN visibility TEXT NOT NULL DEFAULT 'internal'"); } catch { /* already present */ }
 
   const enabled = () => db.getSetting('tickets_enabled', '1') !== '0'; // on by default; kill switch
   const requireOn = (req, res, next) => (enabled() ? next() : res.status(404).json({ error: 'The product board is disabled' }));
@@ -186,17 +189,21 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
       aiTitle: r.ai_title, aiSummary: r.ai_summary, aiStatus: r.ai_status,
       shipNote: r.ship_note || '', testUrl: r.test_url || '',
       clientVerdict: r.client_verdict || '', clientVerdictNote: r.client_verdict_note || '', clientVerdictAt: r.client_verdict_at || '', declineReason: r.decline_reason || '',
-      attachments: attList(r.id), createdAt: r.created_at, updatedAt: r.updated_at,
+      attachments: attList(r.id), comments: comments(r.id, { publicOnly: true }), createdAt: r.created_at, updatedAt: r.updated_at,
     };
   }
   const getTicket = (id) => sql.prepare('SELECT * FROM tickets WHERE id=?').get(id);
   const touch = (id) => sql.prepare('UPDATE tickets SET updated_at=? WHERE id=?').run(now(), id);
-  function logComment(ticketId, { authorEmail = 'system', authorRole = 'system', kind = 'comment', body = '' }) {
-    sql.prepare('INSERT INTO ticket_comments (id, ticket_id, author_email, author_role, kind, body, created_at) VALUES (?,?,?,?,?,?,?)')
-      .run(uuid(), ticketId, authorEmail, authorRole, kind, clamp(body, 8000), now());
+  function logComment(ticketId, { authorEmail = 'system', authorRole = 'system', kind = 'comment', body = '', visibility = 'internal' }) {
+    sql.prepare('INSERT INTO ticket_comments (id, ticket_id, author_email, author_role, kind, body, visibility, created_at) VALUES (?,?,?,?,?,?,?,?)')
+      .run(uuid(), ticketId, authorEmail, authorRole, kind, clamp(body, 8000), visibility === 'public' ? 'public' : 'internal', now());
   }
-  const comments = (id) => sql.prepare('SELECT * FROM ticket_comments WHERE ticket_id=? ORDER BY created_at').all(id)
-    .map((c) => ({ id: c.id, authorEmail: c.author_email, authorRole: c.author_role, kind: c.kind, body: c.body, createdAt: c.created_at }));
+  // All comments for the admin trail; publicOnly = the reporter-facing conversation
+  // (public replies only — status/system lines and internal dev notes stay internal).
+  const comments = (id, { publicOnly = false } = {}) => sql.prepare(
+    `SELECT * FROM ticket_comments WHERE ticket_id=?${publicOnly ? " AND visibility='public' AND kind='comment'" : ''} ORDER BY created_at`,
+  ).all(id)
+    .map((c) => ({ id: c.id, authorEmail: c.author_email, authorRole: c.author_role, kind: c.kind, visibility: c.visibility || 'internal', body: c.body, createdAt: c.created_at }));
 
   // ── AI drafting ───────────────────────────────────────────────────────────────
   // Turn the raw report into a structured ticket. Uses the shared insights client +
@@ -399,6 +406,13 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
       const issue = await github.createIssue({ title, body });
       sql.prepare('UPDATE tickets SET github_issue_number=?, github_url=?, updated_at=? WHERE id=?').run(issue.number, issue.url, now(), t.id);
       logComment(t.id, { authorEmail: req.user.email, authorRole: 'admin', kind: 'system', body: `Created GitHub issue #${issue.number}${mode === 'plan' ? ' and asked Claude to plan it' : doBuild ? ' and asked Claude to build it' : ''}: ${issue.url}` });
+      // Sending to GitHub IS the acceptance act — advance early-stage tickets so the
+      // board reflects it (the reporter gets the "accepted" nudge). Later stages stay.
+      if (['inbox', 'triaged'].includes(t.status)) {
+        sql.prepare('UPDATE tickets SET status=?, updated_at=? WHERE id=?').run('accepted', now(), t.id);
+        logComment(t.id, { authorEmail: req.user.email, authorRole: 'admin', kind: 'status', body: `${STATUS_LABELS[t.status]} → ${STATUS_LABELS.accepted} (sent to GitHub)` });
+        notifyReporter(getTicket(t.id), t.status);
+      }
       res.status(201).json({ ticket: ticketRow(getTicket(t.id)), issue, dispatched, planned: mode === 'plan' });
     } catch (e) {
       console.error('[tickets] github issue failed:', e.message);
@@ -453,15 +467,33 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
     res.json({ ticket: ticketRow(getTicket(t.id)) });
   });
 
-  // Add an internal dev note to a ticket's activity trail.
+  // Add a comment: an internal dev note (default), or a PUBLIC reply the reporter
+  // sees in their conversation and gets notified about (push + inbox mirror).
   app.post('/api/admin/tickets/:id/comments', auth.requireAdmin, requireOn, (req, res) => {
     const t = getTicket(req.params.id);
     if (!t) return res.status(404).json({ error: 'Ticket not found' });
     const body = clamp((req.body || {}).body, 8000).trim();
     if (!body) return res.status(400).json({ error: 'Empty note' });
-    logComment(t.id, { authorEmail: req.user.email, authorRole: 'admin', kind: 'comment', body });
+    const visibility = (req.body || {}).visibility === 'public' ? 'public' : 'internal';
+    logComment(t.id, { authorEmail: req.user.email, authorRole: 'admin', kind: 'comment', body, visibility });
     touch(t.id);
+    if (visibility === 'public') notifyReporterComment(t, body);
     res.status(201).json({ comments: comments(t.id) });
+  });
+
+  // Reporter side of the conversation: reply on your own ticket (always public).
+  // The assignee (if any) gets a push nudge; the board shows it in the trail.
+  app.post('/api/my/tickets/:id/comments', auth.requireAuth, requireOn, (req, res) => {
+    const t = getTicket(req.params.id);
+    if (!t) return res.status(404).json({ error: 'Ticket not found' });
+    if (t.reporter_id !== req.user.id) return res.status(403).json({ error: 'Not allowed' });
+    const body = clamp((req.body || {}).body, 8000).trim();
+    if (!body) return res.status(400).json({ error: 'Empty message' });
+    logComment(t.id, { authorEmail: req.user.email, authorRole: 'reporter', kind: 'comment', body, visibility: 'public' });
+    touch(t.id);
+    const assignee = t.assignee ? db.getUserByEmail(t.assignee) : null;
+    if (assignee) { try { push?.sendToUser?.(assignee.id, { title: `💬 Reporter replied on “${label(t)}”`, body: body.slice(0, 180), url: '/admin', tag: `ticket-${t.id}` }, 'messages'); } catch (e) { console.error('[tickets] assignee nudge failed:', e.message); } }
+    res.status(201).json({ comments: comments(t.id, { publicOnly: true }) });
   });
 
   // Re-run the AI draft (e.g. after editing the raw body, or first-time if AI was
@@ -518,6 +550,18 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
     if (t.entity_id && os?.announce) {
       try {
         os.announce({ entityId: t.entity_id, title: msg.title, body: msg.body, priority: msg.priority || 'fyi', createdBy: 'Product', authorType: 'system', subjectType: 'ticket', subjectId: t.id });
+      } catch (e) { console.error('[tickets] reporter notify failed:', e.message); }
+    }
+  }
+  // A public admin reply → tell the reporter: push (any role), plus — for client
+  // reporters — mirrored into the SAME inbox thread as their status updates. The
+  // ticket's conversation (Product → My reports) is the canonical place to reply.
+  function notifyReporterComment(t, body) {
+    const title = `💬 New reply on “${label(t)}”`;
+    try { push?.sendToUser?.(t.reporter_id, { title, body: String(body).slice(0, 180), url: '/product', tag: `ticket-${t.id}` }, 'messages'); } catch (e) { console.error('[tickets] push failed:', e.message); }
+    if (t.entity_id && os?.announce) {
+      try {
+        os.announce({ entityId: t.entity_id, title, body: `${body}\n\nReply under Product → My reports.`, priority: 'normal', createdBy: 'Product', authorType: 'howler', subjectType: 'ticket', subjectId: t.id });
       } catch (e) { console.error('[tickets] reporter notify failed:', e.message); }
     }
   }

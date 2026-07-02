@@ -205,6 +205,52 @@ app.post('/api/admin/folders/rename', auth.requireAdmin, (req, res) => {
   res.json({ updated });
 });
 
+// Move a whole folder (and everything nested beneath it) under a new parent —
+// an ATOMIC reparent. `from` is the folder path to move; `parent` is the
+// destination parent folder path ('' = top level). Blocks moving a folder into
+// itself or one of its own descendants, and blocks a name collision at the
+// destination — both with a clear message. The actual rewrite runs in a single
+// SQLite transaction, so a failure never leaves a half-moved tree.
+app.post('/api/admin/folders/move', auth.requireAdmin, (req, res) => {
+  const from = String((req.body || {}).from || '').replace(/^\/+|\/+$/g, '');
+  const parent = String((req.body || {}).parent || '').replace(/^\/+|\/+$/g, '');
+  if (!from) return res.status(400).json({ error: 'from is required' });
+  const leaf = from.split('/').pop();
+  const newPath = parent ? `${parent}/${leaf}` : leaf;
+  // Can't drop a folder inside itself or any of its own subfolders.
+  if (parent === from || parent.startsWith(from + '/')) {
+    return res.status(400).json({ error: 'Cannot move a folder into itself or one of its own subfolders.' });
+  }
+  if (newPath === from) return res.json({ moved: 0, newPath, unchanged: true });
+  // Collision: a DIFFERENT folder with the same leaf already lives at the target.
+  const collision = db.listDashboards().some((d) => {
+    const f = d.folder || '';
+    const inSrc = f === from || f.startsWith(from + '/');
+    const inDest = f === newPath || f.startsWith(newPath + '/');
+    return inDest && !inSrc;
+  });
+  if (collision) return res.status(409).json({ error: `A folder named "${leaf}" already exists in that location.` });
+  // Atomic reparent: rewrite the folder prefix on every dashboard under `from`,
+  // and carry any folder-level "📌 Imported filters" pins along, all in one SQLite
+  // transaction so a failure can't leave a half-moved tree.
+  const move = db.db.transaction(() => {
+    let moved = 0;
+    for (const d of db.listDashboards()) {
+      const f = d.folder || '';
+      if (f === from || f.startsWith(from + '/')) { db.updateDashboard(d.id, { folder: newPath + f.slice(from.length) }); moved++; }
+    }
+    for (const r of db.db.prepare('SELECT folder, keep_imported FROM folder_settings').all()) {
+      const f = r.folder;
+      if (f === from || f.startsWith(from + '/')) {
+        db.db.prepare('DELETE FROM folder_settings WHERE folder=?').run(f);
+        db.db.prepare('INSERT INTO folder_settings (folder, keep_imported, updated_at) VALUES (?,?,?) ON CONFLICT(folder) DO UPDATE SET keep_imported=excluded.keep_imported, updated_at=excluded.updated_at').run(newPath + f.slice(from.length), r.keep_imported, new Date().toISOString());
+      }
+    }
+    return moved;
+  });
+  res.json({ moved: move(), newPath });
+});
+
 // Delete a folder (and subfolders): removes every dashboard filed under it.
 app.post('/api/admin/folders/delete', auth.requireAdmin, (req, res) => {
   const path = String((req.body || {}).path || '').replace(/\/+$/, '');

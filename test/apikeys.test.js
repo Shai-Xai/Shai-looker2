@@ -28,10 +28,38 @@ const stubs = {
     listSegmentsFull: (entityId) => segmentsByEntity[entityId] || [],
     resolveSegment: async (entityId, id) => ((segmentsByEntity[entityId] || []).some((s) => s.id === id)
       ? { list: [{ email: 'a@x' }], reach: { email: 1, sms: 0 } } : null),
+    createSegment: ({ entityId, name, definition, user, via }) => {
+      created.segments.push({ entityId, name, definition, by: user.email, via });
+      return { ok: true, segment: { id: 'new-seg', name } };
+    },
   },
-  actionsApi: { listForEntity: (entityId) => (entityId === (entityA && entityA.id) ? [{ id: 'c1', title: 'Launch', type: 'campaign', status: 'done', audienceCount: 10, results: { sent: 10, clicks: 5 }, config: { channel: 'email', subject: 'Go' }, createdAt: '', updatedAt: '' }] : []) },
+  actionsApi: {
+    listForEntity: (entityId) => (entityId === (entityA && entityA.id) ? [{ id: 'c1', title: 'Launch', type: 'campaign', status: 'done', audienceCount: 10, results: { sent: 10, clicks: 5 }, config: { channel: 'email', subject: 'Go' }, createdAt: '', updatedAt: '' }] : []),
+    createDraftCampaign: ({ entityId, title, config, user, via }) => {
+      created.campaigns.push({ entityId, title, config, by: user.email, via });
+      return { ok: true, action: { id: 'new-camp', title, status: 'draft' } };
+    },
+  },
   goalsApi: { listGoals: () => [], attachProgress: async (g) => g },
+  // Owl catalogue engine stub — records the ctx the runner receives so the tests
+  // can assert the synthetic principal + entity binding reach it intact.
+  getOwlTools: () => ({
+    catalogue: { model: 'ticketing', explore: 'core', label: 'All Tickets', dateDimension: 'core.date', measures: [{ name: 'core.count', label: 'Tickets' }], dimensions: [{ name: 'core.type', label: 'Type' }, { name: 'core.email', label: 'Email', filterOnly: true }], extras: [] },
+    askData: { run: async (args, ctx) => (args.measure === 'core.count'
+      ? { ok: true, rows: [{ 'core.type': 'VIP', 'core.count': 7 }], count: 1, measure: args.measure, dimensions: args.dimensions || [], ctxEntity: ctx.entityId }
+      : { ok: false, reason: 'unknown_measure', message: `"${args.measure}" is not a measure I can read.` }) },
+    eventOps: { run: async (args, ctx) => ({ ok: true, query: args.query || 'overview', devices: 3, openIssues: 1, ctxSuite: ctx.suiteId }) },
+    createSegment: { run: async (args) => (Object.keys(args.filters || {}).length
+      ? { ok: true, action: { name: args.name || 'VIP cohort', draft: { mode: 'query', queryFilters: args.filters }, summary: 'Type = VIP', count: 42, reach: { email: 40, sms: 12 } } }
+      : { ok: false, reason: 'no_cohort', message: 'Tell me the cohort to capture.' }) },
+    draftCampaign: { run: async (args) => (args.goal
+      ? { ok: true, action: { name: 'Win-back', channel: args.channel || 'email', goal: args.goal, audience: { mode: 'segment', segmentId: 'segA' }, summary: 'VIPs', reach: { email: 40 }, contentMode: 'template', subject: 'Come back!', body: 'Hi', ctaText: '', ctaUrl: '', language: '', blocks: [], theme: null } }
+      : { ok: false, reason: 'no_goal', message: 'Tell me the goal.' }) },
+  }),
+  owlCatalogue: { exploreEnabledFor: () => true },
+  clientContextFor: () => 'Client: Client A.\nBackground: sells festival tickets.',
 };
+const created = { segments: [], campaigns: [] }; // captured by the write stubs
 
 before(async () => {
   entityA = h.makeEntity('Client A', 'Org A');
@@ -46,7 +74,7 @@ before(async () => {
   app = await startApp((a) => {
     const apiKeys = require('../server/apiKeys').mount(a, { db: h.db, auth: h.auth, rateLimit });
     const apiV1 = require('../server/api').mount(a, { db: h.db, auth: h.auth, rateLimit, apiKeys, ...stubs });
-    require('../server/mcp').mount(a, { apiKeys, core: apiV1.core, rateLimit });
+    require('../server/mcp').mount(a, { apiKeys, core: apiV1.core, rateLimit, clientContextFor: stubs.clientContextFor });
     a.use(require('../server/http').errorMiddleware);
   });
   // API access is OFF by default — switch it on for the two test clients via
@@ -199,11 +227,19 @@ const rpc = (body, secret) => app.req('POST', '/mcp', {
   headers: { ...bearer(secret), Accept: 'application/json, text/event-stream' }, body,
 });
 
-test('MCP: initialize handshake works and identifies the pulse server', async () => {
+test('MCP: initialize handshake works, identifies pulse, and sends efficiency instructions', async () => {
   const { secret } = await issueKey(entityA.id);
   const r = await rpc({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 't', version: '0' } } }, secret);
   assert.equal(r.status, 200);
   assert.equal(r.body.result.serverInfo.name, 'pulse');
+  // Server-level guidance is delivered so the model plans the fast path up front,
+  // and speaks as the Owl (the product persona), not "the Pulse API".
+  assert.match(r.body.result.instructions || '', /pulse_get_me ONCE/);
+  assert.match(r.body.result.instructions || '', /You are the Owl/);
+  // The client's stored AI context rides along (same grounding as in-app).
+  assert.match(r.body.result.instructions || '', /sells festival tickets/);
+  // Read-only key → no write guidance (its tools are absent too).
+  assert.ok(!/DRAFT-creation/.test(r.body.result.instructions || ''));
 });
 
 test('MCP: tools are listed and a tool call returns THIS key’s entity', async () => {
@@ -218,6 +254,52 @@ test('MCP: tools are listed and a tool call returns THIS key’s entity', async 
   assert.equal(call.status, 200);
   const payload = JSON.parse(call.body.result.content[0].text);
   assert.equal(payload.entity.id, entityA.id);
+});
+
+test('direct data queries: discovery + a scoped query, REST and MCP', async () => {
+  const { secret } = await issueKey(entityA.id);
+  // Discovery lists the curated fields (PII stays filter-only).
+  const src = await app.req('GET', '/api/v1/data-sources', { headers: bearer(secret) });
+  assert.equal(src.status, 200);
+  assert.equal(src.body.sources[0].key, 'primary');
+  assert.ok(src.body.sources[0].measures.some((m) => m.name === 'core.count'));
+  assert.ok(src.body.sources[0].filterOnly.some((d) => d.name === 'core.email'), 'PII field is listed as filter-only');
+  assert.ok(!src.body.sources[0].dimensions.some((d) => d.name === 'core.email'), 'PII field is not groupable');
+
+  // A valid query runs; the engine sees the key's entity as its binding context.
+  const q = await app.req('POST', '/api/v1/query', { headers: bearer(secret), body: { measure: 'core.count', dimensions: ['core.type'] } });
+  assert.equal(q.status, 200);
+  assert.equal(q.body.rows[0]['core.count'], 7);
+
+  // The engine's own refusal surfaces as a clean, safe 400.
+  const bad = await app.req('POST', '/api/v1/query', { headers: bearer(secret), body: { measure: 'not.a.measure' } });
+  assert.equal(bad.status, 400);
+  assert.match(bad.body.error, /not a measure/);
+
+  // Same via MCP.
+  const call = await rpc({ jsonrpc: '2.0', id: 40, method: 'tools/call', params: { name: 'pulse_query_data', arguments: { measure: 'core.count', dimensions: ['core.type'] } } }, secret);
+  assert.equal(JSON.parse(call.body.result.content[0].text).count, 1);
+});
+
+test('event ops: read_rows scope only, per-event, suite-tenancy enforced', async () => {
+  const suiteA = h.db.createSuite({ entityId: entityA.id, name: 'Event A1' });
+  const suiteB = h.db.createSuite({ entityId: entityB.id, name: 'Event B1' });
+  const { secret: plain } = await issueKey(entityA.id); // read only
+  const { secret: rows } = await issueKey(entityA.id, { scopes: ['read', 'read_rows'] });
+
+  assert.equal((await app.req('GET', `/api/v1/event-ops?suiteId=${suiteA.id}`, { headers: bearer(plain) })).status, 403, 'plain read key is refused');
+  const ok = await app.req('GET', `/api/v1/event-ops?suiteId=${suiteA.id}`, { headers: bearer(rows) });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.body.devices, 3);
+  assert.equal(ok.body.ctxSuite, suiteA.id, 'runner receives the validated suite');
+
+  assert.equal((await app.req('GET', '/api/v1/event-ops', { headers: bearer(rows) })).status, 400, 'suiteId required');
+  assert.equal((await app.req('GET', `/api/v1/event-ops?suiteId=${suiteB.id}`, { headers: bearer(rows) })).status, 403, 'another client’s event is refused');
+
+  const plainTools = (await rpc({ jsonrpc: '2.0', id: 50, method: 'tools/list' }, plain)).body.result.tools.map((t) => t.name);
+  assert.ok(!plainTools.includes('pulse_event_ops'), 'plain key never sees the tool');
+  const call = await rpc({ jsonrpc: '2.0', id: 51, method: 'tools/call', params: { name: 'pulse_event_ops', arguments: { suiteId: suiteA.id, query: 'overview' } } }, rows);
+  assert.equal(JSON.parse(call.body.result.content[0].text).openIssues, 1);
 });
 
 test('MCP: OpenAI-compatible search + fetch tools (structuredContent shape)', async () => {
@@ -244,6 +326,47 @@ test('MCP: OpenAI-compatible search + fetch tools (structuredContent shape)', as
   const { secret: secretB } = await issueKey(entityB.id);
   const fb = await rpc({ jsonrpc: '2.0', id: 33, method: 'tools/call', params: { name: 'fetch', arguments: { id: 'segment:segA' } } }, secretB);
   assert.ok(fb.body.result.isError, 'cross-tenant fetch fails closed');
+});
+
+test('writes: `write` scope creates drafts only; plain keys refused; tools scope-gated', async () => {
+  const { secret: plain } = await issueKey(entityA.id);
+  const { secret: writer } = await issueKey(entityA.id, { scopes: ['read', 'write'] });
+
+  // REST: refused without the scope.
+  assert.equal((await app.req('POST', '/api/v1/segments', { headers: bearer(plain), body: { filters: { t: 'VIP' } } })).status, 403);
+  assert.equal((await app.req('POST', '/api/v1/campaigns/draft', { headers: bearer(plain), body: { goal: 'x' } })).status, 403);
+
+  // Segment: created via the Owl's validated cohort path.
+  const seg = await app.req('POST', '/api/v1/segments', { headers: bearer(writer), body: { name: 'API VIPs', filters: { 'core.type': 'VIP' } } });
+  assert.equal(seg.status, 201);
+  assert.equal(seg.body.count, 42);
+  assert.equal(created.segments.at(-1).entityId, entityA.id);
+  assert.equal((await app.req('POST', '/api/v1/segments', { headers: bearer(writer), body: {} })).status, 400, 'empty cohort → clean refusal');
+
+  // Campaign: lands as a DRAFT, never anything else.
+  const camp = await app.req('POST', '/api/v1/campaigns/draft', { headers: bearer(writer), body: { goal: 'win back VIPs', segmentName: 'VIPs' } });
+  assert.equal(camp.status, 201);
+  assert.equal(camp.body.campaign.status, 'draft');
+  assert.match(camp.body.note, /human reviews/);
+  assert.equal(created.campaigns.at(-1).config.audience.mode, 'segment');
+
+  // Provenance: hand-named key → 'api'; a Claude-named key stamps 'claude'.
+  assert.equal(created.segments.at(-1).via, 'api');
+  assert.equal(created.campaigns.at(-1).via, 'api');
+  const { secret: claudeKey } = await issueKey(entityA.id, { name: 'Claude (connected 2026-07-02)', scopes: ['read', 'write'] });
+  await app.req('POST', '/api/v1/segments', { headers: bearer(claudeKey), body: { filters: { 'core.type': 'VIP' } } });
+  assert.equal(created.segments.at(-1).via, 'claude');
+
+  // MCP: write tools invisible to a read key, present + working for a writer,
+  // and the write guidance ships in the writer's instructions.
+  const plainTools = (await rpc({ jsonrpc: '2.0', id: 60, method: 'tools/list' }, plain)).body.result.tools.map((t) => t.name);
+  assert.ok(!plainTools.includes('pulse_create_segment') && !plainTools.includes('pulse_draft_campaign'));
+  const wTools = (await rpc({ jsonrpc: '2.0', id: 61, method: 'tools/list' }, writer)).body.result.tools.map((t) => t.name);
+  assert.ok(wTools.includes('pulse_create_segment') && wTools.includes('pulse_draft_campaign'));
+  const init = await rpc({ jsonrpc: '2.0', id: 62, method: 'initialize', params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 't', version: '0' } } }, writer);
+  assert.match(init.body.result.instructions, /DRAFT-creation/);
+  const call = await rpc({ jsonrpc: '2.0', id: 63, method: 'tools/call', params: { name: 'pulse_draft_campaign', arguments: { goal: 'sell out early-bird' } } }, writer);
+  assert.equal(JSON.parse(call.body.result.content[0].text).campaign.status, 'draft');
 });
 
 test('MCP: no key → 401 with WWW-Authenticate', async () => {

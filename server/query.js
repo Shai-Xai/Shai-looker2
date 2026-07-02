@@ -20,8 +20,20 @@ module.exports = function createQueryEngine({ looker, auth }) {
   const QCACHE_TTL = (Number(process.env.QUERY_CACHE_TTL) || 300) * 1000;
   const QCACHE_STALE = (Number(process.env.QUERY_CACHE_STALE) || 1800) * 1000;
   const QCACHE_MAX = Number(process.env.QUERY_CACHE_MAX) || 500;
-  const qCache = new Map();    // key -> { at, data }
+  // Entry-size guard: QCACHE_MAX bounds the COUNT, not the bytes. A campaign
+  // audience pull can be 50k+ rows (~25-100 MB parsed) — on a 512 MB instance a
+  // handful of those pinned in the cache is an OOM. Results over this row count
+  // are served but never stored (in-flight dedupe still coalesces callers).
+  // Normal tile queries are ≤500 rows, so they're unaffected.
+  const QCACHE_MAX_ROWS = Number(process.env.QUERY_CACHE_MAX_ROWS) || 2000;
+  // Byte guard: 500 entries × 2000 rows can still exceed the whole 512 MB
+  // instance. Track approximate bytes per entry (first row's JSON × row count)
+  // and evict oldest until under budget.
+  const QCACHE_MAX_BYTES = (Number(process.env.QUERY_CACHE_MAX_MB) || 48) * 1024 * 1024;
+  const qCache = new Map();    // key -> { at, data, bytes }
   const qInflight = new Map(); // key -> Promise
+  let qBytes = 0;
+  const qEvict = (key) => { const e = qCache.get(key); if (e) { qBytes -= e.bytes; qCache.delete(key); } };
 
   function stableKey(obj) {
     if (Array.isArray(obj)) return '[' + obj.map(stableKey).join(',') + ']';
@@ -33,8 +45,17 @@ module.exports = function createQueryEngine({ looker, auth }) {
     const p = looker.lookerRequest('POST', path, body)
       .then((data) => {
         qInflight.delete(key);
-        qCache.set(key, { at: Date.now(), data });
-        if (qCache.size > QCACHE_MAX) qCache.delete(qCache.keys().next().value);
+        // Row list: json_detail wraps rows in .data; the compact /json format IS the array.
+        const list = Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : null);
+        const rows = list ? list.length : 0;
+        if (rows <= QCACHE_MAX_ROWS) {
+          let bytes = 4096;
+          try { bytes += rows ? JSON.stringify(list[0]).length * rows : 0; } catch { /* keep the floor */ }
+          qEvict(key); // replacing: release the old entry's bytes first
+          qCache.set(key, { at: Date.now(), data, bytes });
+          qBytes += bytes;
+          while ((qCache.size > QCACHE_MAX || qBytes > QCACHE_MAX_BYTES) && qCache.size > 1) qEvict(qCache.keys().next().value);
+        }
         return data;
       })
       .catch((e) => { qInflight.delete(key); throw e; });
@@ -253,8 +274,11 @@ module.exports = function createQueryEngine({ looker, auth }) {
   // visible measure/table-calc (else first visible field), resolve the latest
   // pivot column, and use the RENDERED value so the magnitude matches the
   // dashboard ("64%" → 64, not the hidden count 20976, and not the ratio 0.64).
-  function resolvePivotCellSrv(cell, pivots) {
+  // `preferKey` (when given) pins a specific pivot column — e.g. the CURRENT event on
+  // a current-vs-past comparison tile — rather than defaulting to the latest column.
+  function resolvePivotCellSrv(cell, pivots, preferKey) {
     if (!cell || cell.value !== undefined || cell.rendered !== undefined) return cell;
+    if (preferKey && cell[preferKey] && (cell[preferKey].value != null || (cell[preferKey].rendered != null && cell[preferKey].rendered !== ''))) return cell[preferKey];
     const keys = (pivots && pivots.length) ? pivots.map((p) => p.key) : Object.keys(cell);
     for (let i = keys.length - 1; i >= 0; i--) { const c = cell[keys[i]]; if (c && (c.value != null || (c.rendered != null && c.rendered !== ''))) return c; }
     return cell[keys[keys.length - 1]] || null;
@@ -269,7 +293,7 @@ module.exports = function createQueryEngine({ looker, auth }) {
     const v = Number(cell.value);
     return Number.isFinite(v) ? v : null;
   }
-  function primaryTileValue(data, visConfig = {}) {
+  function primaryTileValue(data, visConfig = {}, preferKey) {
     const fields = data?.fields || {};
     const rows = data?.data || [];
     if (!rows.length) return null;
@@ -278,7 +302,7 @@ module.exports = function createQueryEngine({ looker, auth }) {
     const dims = (fields.dimensions || []).filter((f) => !hidden.has(f.name));
     const primary = measures[0] || [...measures, ...dims][0];
     if (!primary) return null;
-    return numFromCell(resolvePivotCellSrv(rows[0][primary.name], data.pivots || []));
+    return numFromCell(resolvePivotCellSrv(rows[0][primary.name], data.pivots || [], preferKey));
   }
 
   return {

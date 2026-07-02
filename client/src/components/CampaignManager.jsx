@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { api } from '../lib/api.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
+import { viaBadge, viaChipStyle } from '../lib/createdVia.js';
 import UploadHint from './UploadHint.jsx';
 import { languageList } from '../lib/language.js';
 import EmailBuilder, { ThemePicker } from './EmailBuilder.jsx';
@@ -13,7 +14,7 @@ const money = (cur, n) => `${cur === 'ZAR' || !cur ? 'R' : `${cur} `}${Number(n 
 // APPROVE (explicit, shows the count) → running → done with results.
 // One component for both surfaces (admin + client self-service) — the server
 // enforces entity access on every call.
-export default function CampaignManager({ entityId, scope = 'admin', initialGoal = '', initialType = '', initialActionId = '', initialDashboardId = '', initialSuiteId = '' }) {
+export default function CampaignManager({ entityId, scope = 'admin', initialGoal = '', initialType = '', initialActionId = '', initialDashboardId = '', initialSuiteId = '', initialSegmentName = '' }) {
   const isAdmin = scope === 'admin';
   const [data, setData] = useState(null);
   const [editing, setEditing] = useState(null); // action object | 'new'
@@ -92,8 +93,9 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
 
   if (editing) {
     return <CampaignEditor entityId={entityId} isAdmin={isAdmin} action={editing === 'new' ? null : editing} initialGoal={editing === 'new' ? initialGoal : ''}
+      initialSuiteId={editing === 'new' ? initialSuiteId : ''} initialSegmentName={editing === 'new' ? initialSegmentName : ''}
       initialTemplate={editing === 'new' ? tpl : null} initialMaster={editing === 'new' ? presetMaster : ''} masterNames={masterNames}
-      requireApproval={!!data.requireApproval} approverCandidates={data.approverCandidates || []}
+      requireApproval={!!data.requireApproval} approverCandidates={data.approverCandidates || []} howlerCandidates={data.howlerCandidates || []}
       onClose={() => { setEditing(null); setTpl(null); setPresetMaster(''); }} onSaved={() => { setEditing(null); setTpl(null); setPresetMaster(''); load(); loadMasters(); }} />;
   }
   if (reporting) {
@@ -121,6 +123,7 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
           <ChannelChip channel={a.config?.channel} />
           {a.config?.category && <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 980, color: 'var(--brand)', background: 'rgba(var(--brand-rgb,255,56,92),0.10)' }}>{a.config.category}</span>}
           {a.config?.source === 'owl-whatsapp' && <span title="Drafted by the Owl from a WhatsApp chat" style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 980, color: '#1d8a4f', background: 'rgba(37,211,102,0.14)' }}>💬 via WhatsApp</span>}
+          {viaBadge(a.createdVia) && a.config?.source !== 'owl-whatsapp' && <span title="Where this draft was created" style={viaChipStyle}>{viaBadge(a.createdVia).icon} via {viaBadge(a.createdVia).label}</span>}
           <StatusChip status={a.status} />
         </div>
         <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 3 }}>
@@ -319,7 +322,7 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
   );
 }
 
-function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTemplate = null, initialMaster = '', masterNames = [], requireApproval = false, approverCandidates = [], onClose, onSaved }) {
+function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialSuiteId = '', initialSegmentName = '', initialTemplate = null, initialMaster = '', masterNames = [], requireApproval = false, approverCandidates = [], howlerCandidates = [], onClose, onSaved }) {
   const cfg = action?.config || {};
   const tpl = initialTemplate;           // a resolved template (recipe), when creating from one
   const tp = tpl?.preset || {};          // the template's copy/utm presets
@@ -345,7 +348,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
     filters: cfg.audience?.filters || [], // [{field, op:'in'|'between', values:[], min, max}]
     attrDashboardId: cfg.audience?.attrDashboardId || '', // optional 2nd source for targeting fields
     attrTileId: cfg.audience?.attrTileId || '',
-    eventSuiteId: cfg.eventSuiteId || ta.eventSuiteId || '',
+    eventSuiteId: cfg.eventSuiteId || ta.eventSuiteId || initialSuiteId || '', // deep links carry the event
     language: cfg.language || '', // per-campaign AI copy language ('' = client default)
     contentMode: cfg.contentMode || 'template',
     heroImage: cfg.heroImage || '',
@@ -444,6 +447,17 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
 
   useEffect(() => { (isAdmin ? api.getDigestTiles(entityId) : api.getMyDigestTiles(entityId)).then(setTiles).catch(() => setTiles({ dashboards: [] })); }, [entityId, isAdmin]);
   useEffect(() => { api.listSegments(entityId).then((r) => setSegments(r.segments || [])).catch(() => setSegments([])); }, [entityId]);
+  // A goal-gap launch names a saved segment (free text from the plan) — once the
+  // segments load, match it by name and pre-select it as the audience. New campaigns
+  // only (never rewires an existing one), and only until the user picks something.
+  const segPrefilled = useRef(false);
+  useEffect(() => {
+    if (segPrefilled.current || !initialSegmentName || action || !segments.length) return;
+    const lc = initialSegmentName.trim().toLowerCase();
+    const seg = segments.find((sg) => sg.name.toLowerCase() === lc)
+      || segments.find((sg) => sg.name.toLowerCase().includes(lc) || lc.includes(sg.name.toLowerCase()));
+    if (seg) { segPrefilled.current = true; setF((s) => ({ ...s, audienceMode: 'segment', segmentId: seg.id })); }
+  }, [segments, initialSegmentName, action]);
 
   const payload = () => ({
     // In sequence mode the top-level copy mirrors step 1 (drives the preview +
@@ -1155,16 +1169,21 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialTe
           <Accordion title={`Approval${requireApproval ? ' (required for this client)' : ''}`} {...acc('approval')}>
             <div style={hintS}>Pick who must sign off before this sends. Each approver gets an inbox message + notification with a link to approve. {requireApproval ? 'This client requires approval, so a campaign can only send once everyone approves.' : 'Optional — leave empty to send directly, or add approvers to route it.'}</div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
-              {[...approverCandidates.map((c) => ({ type: 'user', userId: c.userId, email: c.email, name: c.email })), { type: 'howler', name: 'Howler' }].map((c) => {
+              {/* Named approvers: the client's own approvers, then the Howler team
+                  members LINKED to this account (a specific AM), then the generic
+                  'Howler' slot = any of the account's Howler team. */}
+              {[...approverCandidates.map((c) => ({ type: 'user', userId: c.userId, email: c.email, name: c.email, label: c.email })),
+                ...howlerCandidates.map((c) => ({ type: 'user', userId: c.userId, email: c.email, name: c.name || c.email, label: `🦉 ${c.name || c.email}${c.howlerRole ? ` · ${c.howlerRole}` : ''}` })),
+                { type: 'howler', name: 'Howler', label: `🦉 Howler (any${howlerCandidates.length ? ' of the account team' : ''})` }].map((c) => {
                 const on = f.approvers.some((a) => (c.type === 'howler' ? a.type === 'howler' : a.userId === c.userId));
                 return (
-                  <button key={c.userId || 'howler'} type="button" onClick={() => toggleApprover(c)}
+                  <button key={c.userId || 'howler'} type="button" onClick={() => toggleApprover(c)} title={c.type === 'user' ? c.email : 'Any Howler member on this account can sign this slot'}
                     style={{ fontSize: 12, fontWeight: on ? 700 : 500, padding: '4px 10px', borderRadius: 980, cursor: 'pointer', border: `1px solid ${on ? 'var(--brand)' : 'var(--hairline)'}`, color: on ? 'var(--brand)' : 'var(--text)', background: on ? 'rgba(var(--brand-rgb,255,56,92),0.08)' : 'transparent' }}>
-                    {on ? '✓ ' : ''}{c.type === 'howler' ? '🦉 Howler' : c.email}
+                    {on ? '✓ ' : ''}{c.label}
                   </button>
                 );
               })}
-              {approverCandidates.length === 0 && <span style={{ fontSize: 12, color: 'var(--muted)' }}>No client approvers yet — you can still require Howler.</span>}
+              {approverCandidates.length === 0 && howlerCandidates.length === 0 && <span style={{ fontSize: 12, color: 'var(--muted)' }}>No client approvers yet — you can still require Howler.</span>}
             </div>
             <div style={{ marginTop: 12 }}>
               <div style={hintLbl}>Message to approvers (optional)</div>

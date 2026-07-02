@@ -5,13 +5,16 @@ import { applyBrand } from '../lib/brand.js';
 import Logo from '../components/Logo.jsx';
 
 export default function LoginPage({ slug = '' }) {
-  const { login } = useAuth();
+  const { login, complete2fa } = useAuth();
   const [mode, setMode] = useState('password'); // 'password' | 'forgot' | 'magic'
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState(null);
   const [sent, setSent] = useState(false);
   const [busy, setBusy] = useState(false);
+  // 2FA step-up: set to the server's pending token when a login needs a code.
+  const [pendingToken, setPendingToken] = useState(null);
+  const [code, setCode] = useState('');
   // Vanity login: a /<slug> URL paints the client's brand (logo, colours,
   // background) before sign-in. Unknown slug → the standard Howler login.
   const [brand, setBrand] = useState(null);
@@ -30,7 +33,8 @@ export default function LoginPage({ slug = '' }) {
     setError(null);
     try {
       if (mode === 'password') {
-        await login(email.trim(), password);
+        const r = await login(email.trim(), password);
+        if (r && r.twofa) { setPendingToken(r.pendingToken); setError(null); } // → code-entry screen
       } else if (mode === 'forgot') {
         await api.forgotPassword(email.trim());
         setSent(true);
@@ -46,6 +50,36 @@ export default function LoginPage({ slug = '' }) {
   }
 
   const go = (m) => { setMode(m); setError(null); setSent(false); };
+
+  async function submitCode(e) {
+    e.preventDefault();
+    setBusy(true); setError(null);
+    try { await complete2fa(pendingToken, code.trim()); }
+    catch (err) { setError(err.message || 'That code didn’t match.'); }
+    finally { setBusy(false); }
+  }
+
+  // 2FA step-up: password was accepted, now ask for the authenticator/backup code.
+  if (pendingToken) {
+    return (
+      <Frame bg={brand?.loginBackground} poweredBy={!!brand}>
+        <form onSubmit={submitCode}>
+          <div style={{ textAlign: 'center', marginBottom: 6 }}><div style={{ fontSize: 30 }}>🔐</div></div>
+          <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4, textAlign: 'center' }}>Enter your 2FA code</div>
+          <p style={{ fontSize: 13, color: 'var(--muted)', lineHeight: 1.5, margin: '0 0 6px', textAlign: 'center' }}>
+            Open your authenticator app and enter the 6-digit code — or use one of your backup codes.
+          </p>
+          <input style={{ ...input, textAlign: 'center', letterSpacing: '0.3em', fontSize: 20 }} inputMode="text" autoComplete="one-time-code"
+            value={code} onChange={(e) => setCode(e.target.value)} autoFocus placeholder="123456" />
+          {error && <div style={{ color: 'var(--error)', fontSize: 13, marginTop: 10 }}>{error}</div>}
+          <button type="submit" disabled={busy || !code.trim()} className="btn-key liquid-btn" style={btn}>{busy ? 'Verifying…' : 'Verify & sign in'}</button>
+          <div style={{ marginTop: 16, textAlign: 'center' }}>
+            <button type="button" style={linkBtn} onClick={() => { setPendingToken(null); setCode(''); setError(null); }}>← Back to sign in</button>
+          </div>
+        </form>
+      </Frame>
+    );
+  }
 
   // After requesting a reset / magic link we always show the same neutral
   // confirmation (the server never reveals whether the email has a login).

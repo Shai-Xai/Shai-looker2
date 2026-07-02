@@ -49,11 +49,23 @@ const app = express();
 // behaviour there (the platform restarts; SQLite is on a persistent disk).
 process.on('unhandledRejection', (reason) => {
   console.error('[unhandledRejection]', (reason && reason.stack) || reason);
+  // Raise ops (throttled) — these used to die invisibly in the log stream.
+  try { require('./ops').alert('process', `unhandledRejection: ${(reason && reason.message) || reason}`); } catch { /* never crash the net */ }
 });
 
 // Behind a reverse proxy (Caddy/Nginx) in production so Secure cookies + the
 // real client IP/protocol are honoured.
 if (process.env.NODE_ENV === 'production' || process.env.TRUST_PROXY === '1') app.set('trust proxy', 1);
+// Security headers (dependency-free, helmet essentials): frame-ancestors 'none'
+// (clickjacking), nosniff, Referrer-Policy, HSTS in prod. Full script-src CSP deferred.
+app.use((req, res, next) => {
+  res.set('X-Content-Type-Options', 'nosniff');
+  res.set('X-Frame-Options', 'DENY');
+  res.set('Content-Security-Policy', "frame-ancestors 'none'");
+  res.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+  if (process.env.NODE_ENV === 'production') res.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  next();
+});
 // Global JSON parser at a modest limit, EXCEPT routes that take large bodies
 // (backup import, settlement PDF uploads) — those parse themselves with a
 // higher limit.
@@ -76,6 +88,11 @@ app.use(auth.attachUser);
 // deliberate views) for Admin → Users. Mounted here so it sees req.user and wraps
 // every route registered below. Disposable: remove this line + server/audit.js.
 require('./audit').mount(app, { db });
+// Internal ops alerts (Howler Slack) — background failures raise a human instead
+// of dying in the log stream. Disposable: remove these lines + server/ops.js.
+const ops = require('./ops'); ops.init({ db });
+// Nightly DB snapshots + off-box copy (R2/S3) — DR floor → server/backup.js.
+require('./backup').mount(app, { db, auth, notifyOps: (msg) => ops.alert('backup', msg) });
 
 // Serve built React app (client/dist) if present, else raw client/
 const clientDist = path.join(__dirname, '../client/dist');
@@ -99,7 +116,7 @@ auth.seedAdmin();
 // git history to summarise). Idempotent — each entry is applied exactly once.
 require('./releaseNotesSeed').applySeed(db);
 // Outbound email (Resend) — disposable module; senders no-op when unconfigured.
-mailer.init({ db });
+mailer.init({ db, notifyOps: (m) => ops.alert('mailer', m) });
 // SMS (Clickatell One API) — second channel; no-ops when unconfigured.
 messaging.init({ db });
 // Meta (FB/IG) audience-sync — push a segment to a Custom Audience; per-client.
@@ -129,10 +146,15 @@ const owlIngest = require('./owlIngest').mount({ db, insights, anthropicKeyForEn
 let osApi, waDigestFor; // waDigestFor set when digests mount (used lazily by the WhatsApp Owl scheduler)
 const os = require('./os').mount(app, { db, auth, mailer, push, slack, onInbound: (p) => owlIngest.handle({ ...p, getAttachmentBuffer: osApi.getAttachmentBuffer }) });
 osApi = os;
-const owlUploads = require('./owlUploads').mount(app, { db, auth }); const owlCatalogue = require('./owlCatalogue'); owlCatalogue.mount(app, { db, auth, getExploreFields: (m, v) => getExploreFieldsCached(m, v), listModels: () => looker.listModels() }); const getOwlTools = owlCatalogue.provider(db, () => require('./owlTools')({ query, auth, db, getGoalsApi: () => goalsApi, getAlertsApi: () => alerts, getCampaignsApi: () => actionsApi, getUploadsApi: () => owlUploads, resolveTileValue, getExploreFields: (m, v) => getExploreFieldsCached(m, v), getFieldOverrides: () => require('./owlFields').build(db).read(), draftCampaignCopy: (a) => actionsApi.draftCopy(a), designEmailFn: (a) => require('./emailDesign').designEmail({ ...a, apiKey: anthropicKeyForEntity(a.entityId), brandColor: mailer.resolveBranding(a.entityId, a.eventSuiteId || '').brandColor, instructions: aiInstructionsFor(a.eventSuiteId || null, a.entityId) }), getSegmentsApi: () => segmentsApi, getEventOpsApi: () => eventopsApi, catalogue: owlCatalogue.effective(db) })); // Owl data: uploads + admin-editable catalogue (getOwlTools rebuilds live on field-selection change)
+const owlUploads = require('./owlUploads').mount(app, { db, auth }); const owlCatalogue = require('./owlCatalogue'); owlCatalogue.mount(app, { db, auth, getExploreFields: (m, v) => getExploreFieldsCached(m, v), listModels: () => looker.listModels() }); const getOwlTools = owlCatalogue.provider(db, () => require('./owlTools')({ query, auth, db, getGoalsApi: () => goalsApi, getAlertsApi: () => alerts, getCampaignsApi: () => actionsApi, getUploadsApi: () => owlUploads, resolveTileValue, getExploreFields: (m, v) => getExploreFieldsCached(m, v), getFieldOverrides: () => require('./owlFields').build(db).read(), draftCampaignCopy: (a) => actionsApi.draftCopy(a), designEmailFn: (a) => require('./aiUsage').run({ entityId: a.entityId, kind: 'email_design' }, () => require('./emailDesign').designEmail({ ...a, apiKey: anthropicKeyForEntity(a.entityId), brandColor: mailer.resolveBranding(a.entityId, a.eventSuiteId || '').brandColor, instructions: aiInstructionsFor(a.eventSuiteId || null, a.entityId) })), getSegmentsApi: () => segmentsApi, getEventOpsApi: () => eventopsApi, catalogue: owlCatalogue.effective(db) })); // Owl data: uploads + admin-editable catalogue (getOwlTools rebuilds live on field-selection change)
 require('./owlChat').mount(app, { db, auth, insights, uploads: owlUploads, messaging, getAlertsApi: () => alerts, getSegmentsApi: () => segmentsApi, getActionsApi: () => actionsApi, getTicketsApi: () => ticketsApi, getExploreFields: (m, v) => getExploreFieldsCached(m, v), getOwlTools, anthropicKeyForSuite, anthropicKeyForEntity, currencyNote: (entityId, suiteId) => currency.aiNote(mailer.resolveBranding(entityId, suiteId).currency), languageNote: (entityId, suiteId) => language.aiNote(mailer.resolveBranding(entityId, suiteId).aiLanguage), whatsappDigestFor: (eid, em) => (waDigestFor ? waDigestFor(eid, em) : Promise.resolve(null)) }); // agentic Owl (disposable; askData rides the scope gate)
+require('./owlEmbed').mount(app, { db, auth, rateLimit }); require('./fanOwl').mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }); // Owl embeds: the organizer-portal Owl (docs/OWL_EMBED.md) + the fan-facing booking guide on promoters' public sites (docs/specs/FAN_OWL_SPEC.md)
 // ─── Health ───────────────────────────────────────────────────────────────────
-app.get('/health', (_req, res) => res.json({ status: 'ok' }));
+// Health touches SQLite so a wedged DB/disk fails the check (→ Render restarts).
+app.get('/health', (_req, res) => {
+  try { db.db.prepare('SELECT 1').get(); res.json({ status: 'ok' }); }
+  catch (e) { res.status(500).json({ status: 'db_error', error: e.message }); }
+});
 
 // ─── Auth ───────────────────────────────────────────────────────────────────
 // publicUser + the user's client(s) (name + logo) for header branding.
@@ -149,100 +171,9 @@ function meUser(user) {
   }).filter(Boolean);
   return { ...pub, entities, owlEnabled: require('./owlChat').owlAllowed(user), owlOwner: require('./owlChat').owlOwner(user) };
 }
-// Brute-force guard: cap login attempts per IP (fixed 15-minute window). Fails
-// open if the limiter errors, so it can never lock out legitimate traffic.
-app.post('/api/auth/login', rateLimit({ windowMs: 15 * 60_000, max: 10, by: 'ip', scope: 'login' }), asyncHandler(async (req, res) => {
-  const { email, password } = req.body || {};
-  const user = await auth.verifyCredentials(email, password);
-  if (!user) return res.status(401).json({ error: 'Invalid email or password' });
-  auth.issueCookie(res, user);
-  db.touchLastLogin(user.id); // most recent login → Admin → Users
-  db.recordAction({ userId: user.id, action: 'auth.login', label: 'Logged in', method: 'POST', path: '/api/auth/login' });
-  res.json({ user: meUser(user) });
-}));
-
-app.post('/api/auth/logout', (req, res) => {
-  if (req.user) db.recordAction({ userId: req.user.id, action: 'auth.logout', label: 'Logged out', method: 'POST', path: '/api/auth/logout' });
-  auth.clearCookie(res);
-  res.json({ ok: true });
-});
-
-// Current user (200 with null when not logged in, so the client can decide).
-app.get('/api/auth/me', (req, res) => {
-  res.json({ user: meUser(req.user) });
-});
-
-// ─── Passwordless / recovery sign-in (reset link + magic link) ─────────────────
-// Both flows email a one-time link. We always answer 200 {ok:true} to a request
-// so an attacker can't probe which emails have logins (no user enumeration).
-// Tokens are single-use, time-boxed, and stored only as a hash (see db.js).
-function sendAuthLink(user, kind, ttlMs, { subject, title, body, ctaText, path }) {
-  const token = db.createAuthToken(user.id, kind, ttlMs);
-  const url = `${mailer.baseUrl()}${path}?token=${encodeURIComponent(token)}`;
-  const { html, text } = mailer.notificationEmail({
-    title, body: `${body}\n\nThis link expires in ${Math.round(ttlMs / 60000)} minutes and can be used once. If you didn't request it, you can ignore this email.`,
-    ctaText, ctaPath: `${path}?token=${encodeURIComponent(token)}`,
-  });
-  // notificationEmail builds the CTA from baseUrl()+ctaPath, so the button points
-  // at the tokenised link above. Best-effort send (auth still works if email lags).
-  mailer.send({ to: user.email, subject, html, text, kind: 'auth' }).catch((e) => console.error('[auth-link]', e.message));
-  return url;
-}
-
-// Request a password-reset email.
-app.post('/api/auth/forgot', rateLimit({ windowMs: 15 * 60_000, max: 5, by: 'ip', scope: 'forgot' }), (req, res) => {
-  const email = String((req.body || {}).email || '').trim().toLowerCase();
-  const user = email ? db.getUserByEmail(email) : null;
-  if (user && mailer.isConfigured()) {
-    sendAuthLink(user, 'reset', 60 * 60_000, {
-      subject: 'Reset your Howler : Pulse password',
-      title: 'Reset your password',
-      body: 'Tap the button below to set a new password for your Howler : Pulse login.',
-      ctaText: 'Set a new password', path: '/reset',
-    });
-  }
-  res.json({ ok: true });
-});
-
-// Complete a password reset: consume the token, set the new password, sign in.
-app.post('/api/auth/reset', rateLimit({ windowMs: 15 * 60_000, max: 10, by: 'ip', scope: 'reset' }), (req, res) => {
-  const { token, password } = req.body || {};
-  if (!password || String(password).length < 8) return res.status(400).json({ error: 'Choose a password of at least 8 characters.' });
-  const userId = db.consumeAuthToken(token, 'reset');
-  if (!userId) return res.status(400).json({ error: 'This reset link is invalid or has expired. Request a new one.' });
-  db.updateUser(userId, { password });
-  db.clearAuthTokens(userId, 'reset'); // any other outstanding reset links are now dead
-  const user = db.getUser(userId);
-  auth.issueCookie(res, user);
-  db.recordAction({ userId, action: 'auth.reset', label: 'Reset password', method: 'POST', path: '/api/auth/reset' });
-  res.json({ user: meUser(user) });
-});
-
-// Request a magic sign-in link.
-app.post('/api/auth/magic', rateLimit({ windowMs: 15 * 60_000, max: 5, by: 'ip', scope: 'magic' }), (req, res) => {
-  const email = String((req.body || {}).email || '').trim().toLowerCase();
-  const user = email ? db.getUserByEmail(email) : null;
-  if (user && mailer.isConfigured()) {
-    sendAuthLink(user, 'magic', 15 * 60_000, {
-      subject: 'Your Howler : Pulse sign-in link',
-      title: 'Sign in to Pulse',
-      body: 'Tap the button below to sign in — no password needed.',
-      ctaText: 'Sign in to Pulse', path: '/magic',
-    });
-  }
-  res.json({ ok: true });
-});
-
-// Consume a magic link: issue the session cookie.
-app.post('/api/auth/magic/consume', rateLimit({ windowMs: 15 * 60_000, max: 10, by: 'ip', scope: 'magic-consume' }), (req, res) => {
-  const userId = db.consumeAuthToken((req.body || {}).token, 'magic');
-  if (!userId) return res.status(400).json({ error: 'This sign-in link is invalid or has expired. Request a new one.' });
-  const user = db.getUser(userId);
-  auth.issueCookie(res, user);
-  db.touchLastLogin(user.id);
-  db.recordAction({ userId, action: 'auth.magic', label: 'Signed in via magic link', method: 'POST', path: '/api/auth/magic/consume' });
-  res.json({ user: meUser(user) });
-});
+// Auth routes (login/logout/me/forgot/reset/magic + brute-force guard + 2FA
+// step-up) → server/authRoutes.js. Owns loginGuard + mounts twofactor.
+require('./authRoutes').mount(app, { auth, db, mailer, rateLimit, ops, meUser });
 
 // Per-user notification channel preferences (self-service).
 app.get('/api/my/notification-prefs', auth.requireAuth, (req, res) => {
@@ -550,6 +481,7 @@ app.delete('/api/admin/sets/:id', auth.requireAdmin, (req, res) => { db.deleteSe
 // Disposable module: own routes + the daily auto-draft tick (kill switch:
 // settings key 'release_notes_auto'). Remove this line + server/releaseNotes.js.
 require('./releaseNotes').mount(app, { db, auth, insights, adminAnthropicKey });
+require('./version').mount(app, { auth }); // build stamp for the profile footer → server/version.js
 const github = require('./github').mount(app, { db, auth }); // GitHub issue bridge → server/github.js
 const ticketsApi = require('./tickets').mount(app, { db, auth, insights, adminAnthropicKey, os, github, push }); // product board → server/tickets.js (kill switch: tickets_enabled)
 
@@ -815,7 +747,7 @@ app.post('/api/goals/suites/:suiteId/brief', auth.requireAuth, rateLimit({ windo
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('X-Accel-Buffering', 'no'); // don't let a reverse proxy buffer the stream
     res.flushHeaders?.();
-    await insights.streamGoalsBrief({ eventName: su.name, goals, instructions: aiInstructionsFor(suiteId), apiKey }, (t) => res.write(t));
+    await aiUsage.run({ entityId: su.entityId, kind: 'goals' }, () => insights.streamGoalsBrief({ eventName: su.name, goals, instructions: aiInstructionsFor(suiteId), apiKey }, (t) => res.write(t)));
     res.end();
   } catch (err) {
     console.error('[POST /api/goals/:suiteId/brief]', err.message);
@@ -840,10 +772,10 @@ app.post('/api/goals/:id/gap-plan', auth.requireAuth, rateLimit({ windowMs: 60_0
     const { tiles, catalogue } = await buildFacts(req.user, entityId, false, true);
     let segments = [];
     try { segments = db.db.prepare('SELECT name, last_count FROM segments WHERE entity_id=? ORDER BY updated_at DESC LIMIT 50').all(entityId).map((s) => ({ name: s.name, count: s.last_count })); } catch { /* segments table may be empty */ }
-    const plan = await insights.goalGapPlan({
+    const plan = await aiUsage.run({ entityId, kind: 'goals' }, () => insights.goalGapPlan({
       goal: withProgress, progress: withProgress.progress, tiles, segments, catalogue,
       clientName: db.getEntity(entityId)?.name || '', instructions: aiInstructionsFor(suiteId), today: todayLabel(), apiKey,
-    });
+    }));
     res.json({ plan });
   } catch (err) {
     console.error('[POST /api/goals/:id/gap-plan]', err.message);
@@ -992,6 +924,9 @@ const maskSecret = (v) => (v && v.length ? `••••••${String(v).slice(
 
 // Combined AI instructions: the global standing instructions, plus the
 // per-client context when the request is in a suite (client) context.
+// Clip AI copy at a word boundary + ellipsis — a hard .slice() cuts mid-word ("…cheaper phases c"), reading as a bug on the briefing cards.
+const clipWords = (s, n) => { const t = String(s || ''); if (t.length <= n) return t; const cut = t.slice(0, n); const i = cut.lastIndexOf(' '); return `${(i > n * 0.6 ? cut.slice(0, i) : cut).trimEnd()}…`; };
+
 function aiInstructionsFor(suiteId, entityId, langOverride) {
   const parts = [];
   const global = db.getSetting('ai_instructions');
@@ -1655,7 +1590,7 @@ app.post('/api/insight', auth.requireAuth, rateLimit({ windowMs: 60_000, max: 30
       dashboardContext && dashboardContext.trim() ? `Context for this dashboard:\n${dashboardContext.trim()}` : '',
       tileContext && tileContext.trim() ? `Context for this tile:\n${tileContext.trim()}` : '',
     ].filter(Boolean).join('\n\n');
-    await insights.streamInsight({ title, visType, fields, rows, filters, userContext, history, instructions, apiKey }, (text) => res.write(text));
+    await aiUsage.run({ entityId: db.getSuite(suiteId)?.entityId || '', kind: 'tile_insight' }, () => insights.streamInsight({ title, visType, fields, rows, filters, userContext, history, instructions, apiKey }, (text) => res.write(text)));
     res.end();
   } catch (err) {
     console.error('[POST /api/insight]', err.message);
@@ -1719,7 +1654,7 @@ app.post('/api/dashboard-insight', auth.requireAuth, rateLimit({ windowMs: 60_00
       aiInstructionsFor(suiteId),
       def.aiContext && def.aiContext.trim() ? `Context for this dashboard:\n${def.aiContext.trim()}` : '',
     ].filter(Boolean).join('\n\n');
-    await insights.streamDashboardInsight({ title: def.title, filters: filterValues, tiles, instructions, apiKey }, (t) => res.write(t));
+    await aiUsage.run({ entityId: db.getSuite(suiteId)?.entityId || '', kind: 'tile_insight' }, () => insights.streamDashboardInsight({ title: def.title, filters: filterValues, tiles, instructions, apiKey }, (t) => res.write(t)));
     res.end();
   } catch (err) {
     console.error('[POST /api/dashboard-insight]', err.message);
@@ -1898,7 +1833,7 @@ async function generateOverall(user, entityId, segment, { force = false } = {}) 
     if (!groups.length) return { ...base, headline: '', bullets: [] };
     const { catalogue } = clientCatalogue(entityId);
     const tLlm = Date.now();
-    const raw = await insights.briefHomeOverall({ groups, catalogue, capabilities: ACTION_CAPABILITIES, actions: actionsSummaryFor(entityId), today: todayLabel(), instructions: briefInstructions(user, entityId, segment), apiKey });
+    const raw = await aiUsage.run({ entityId, kind: 'briefing' }, () => insights.briefHomeOverall({ groups, catalogue, capabilities: ACTION_CAPABILITIES, actions: actionsSummaryFor(entityId), today: todayLabel(), instructions: briefInstructions(user, entityId, segment), apiKey }));
     const llmMs = Date.now() - tLlm;
     const totalMs = Date.now() - tStart;
     console.log(`[briefing-timing] overall entity=${entityId} force=${!!force} events=${selected.length} total=${totalMs}ms facts=${factsMs}ms llm=${llmMs}ms`);
@@ -1910,7 +1845,7 @@ async function generateOverall(user, entityId, segment, { force = false } = {}) 
     const out = {
       ...base,
       headline: String(raw.headline || '').slice(0, 600),
-      bullets: (raw.bullets || []).slice(0, 4).map((b) => ({ text: String(b.text || '').slice(0, 400) })).filter((b) => b.text),
+      bullets: (raw.bullets || []).slice(0, 4).map((b) => ({ text: clipWords(b.text, 400) })).filter((b) => b.text),
       // Cross-event "Worth a look" suggestions (so the portfolio home keeps them).
       suggestions: (raw.suggestions || []).slice(0, 3)
         .map((s) => {
@@ -1918,7 +1853,7 @@ async function generateOverall(user, entityId, segment, { force = false } = {}) 
           const evSuite = selSet.has(s.suiteId) ? s.suiteId : '';
           // The event the campaign should open against: the AI's, else the link's.
           const linkOut = lk ? { ...lk, suiteId: evSuite || lk.suiteId } : (evSuite ? { suiteId: evSuite } : null);
-          return { title: String(s.title || '').slice(0, 80), reason: String(s.reason || '').slice(0, 200), link: linkOut, action: CAPABILITY_KEYS.has(s.action) ? s.action : null };
+          return { title: clipWords(s.title, 80), reason: clipWords(s.reason, 200), link: linkOut, action: CAPABILITY_KEYS.has(s.action) ? s.action : null };
         })
         .filter((s) => s.title && (s.link || s.action)),
       _timing: { totalMs, factsMs, llmMs, facts: factTiming },
@@ -1960,7 +1895,7 @@ async function generateEvents(user, entityId, segment, { force = false, debug = 
     const factsMs = Date.now() - tStart;
     const nameById = Object.fromEntries(suites.map((s) => [s.id, s.name]));
     const tLlm = Date.now();
-    const raw = groups.length ? await insights.briefHomeEvents({ groups, today: todayLabel(), instructions: briefInstructions(user, entityId, segment), apiKey }) : { events: [] };
+    const raw = groups.length ? await aiUsage.run({ entityId, kind: 'briefing' }, () => insights.briefHomeEvents({ groups, today: todayLabel(), instructions: briefInstructions(user, entityId, segment), apiKey })) : { events: [] };
     console.log(`[briefing-timing] events entity=${entityId} force=${!!force} events=${selected.length} total=${Date.now() - tStart}ms facts=${factsMs}ms llm=${Date.now() - tLlm}ms`);
     const link = (id) => (id && byId[id] ? { dashboardId: id, suiteId: byId[id].suiteId, label: `${byId[id].setName} → ${byId[id].title}` } : null);
     const aiById = Object.fromEntries((raw.events || []).filter((e) => nameById[e.suiteId]).map((e) => [e.suiteId, e]));
@@ -2029,7 +1964,7 @@ async function generateBriefing(user, entityId, segment, { force = false } = {})
     const goals = await goalsP;
     const goalsWaitMs = Date.now() - tGoals;
     const tLlm = Date.now();
-    const raw = await insights.briefHome({ tiles, profile: profileForAi, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), messages: msgs, capabilities: ACTION_CAPABILITIES, goals, today: todayLabel() });
+    const raw = await aiUsage.run({ entityId, kind: 'briefing' }, () => insights.briefHome({ tiles, profile: profileForAi, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), messages: msgs, capabilities: ACTION_CAPABILITIES, goals, today: todayLabel() }));
     const llmMs = Date.now() - tLlm;
     const totalMs = Date.now() - tStart;
     const _timing = { totalMs, factsMs, goalsWaitMs, llmMs, facts: factTiming };
@@ -2041,10 +1976,10 @@ async function generateBriefing(user, entityId, segment, { force = false } = {})
       generatedAt: new Date().toISOString(),
       headline: String(raw.headline || '').slice(0, 600),
       bullets: (raw.bullets || []).slice(0, 4)
-        .map((b) => ({ text: String(b.text || '').slice(0, 400), link: link(b.dashboardId), threadId: msgIds.has(b.threadId) ? b.threadId : null }))
+        .map((b) => ({ text: clipWords(b.text, 400), link: link(b.dashboardId), threadId: msgIds.has(b.threadId) ? b.threadId : null }))
         .filter((b) => b.text),
       suggestions: (raw.suggestions || []).slice(0, 3)
-        .map((s) => ({ title: String(s.title || '').slice(0, 80), reason: String(s.reason || '').slice(0, 200), link: link(s.dashboardId), action: CAPABILITY_KEYS.has(s.action) ? s.action : null }))
+        .map((s) => ({ title: clipWords(s.title, 80), reason: clipWords(s.reason, 200), link: link(s.dashboardId), action: CAPABILITY_KEYS.has(s.action) ? s.action : null }))
         .filter((s) => s.title && s.link),
       _timing,
     };
@@ -2238,10 +2173,10 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
   // pre-filled "Make it happen" campaign editor (recipe auto-resolves the
   // audience + copy), scoped to its event; otherwise it links to the dashboard.
   const actionHref = (a, evSuite) => (CAPABILITY_KEYS.has(a.action)
-    ? `${mailer.baseUrl()}/engage/campaigns?type=${encodeURIComponent(a.action)}&goal=${encodeURIComponent(String(a.text || '').slice(0, 200))}${evSuite ? `&suite=${encodeURIComponent(evSuite)}` : ''}`
+    ? `${mailer.baseUrl()}/engage/campaigns?type=${encodeURIComponent(a.action)}&goal=${encodeURIComponent(clipWords(a.text, 200))}${evSuite ? `&suite=${encodeURIComponent(evSuite)}` : ''}${a.dashboardId && byId[a.dashboardId] ? `&dashboard=${encodeURIComponent(a.dashboardId)}` : ''}`
     : href(a.dashboardId, evSuite));
   const mapKpi = (k, evSuite) => ({ label: String(k.label || '').slice(0, 40), value: String(k.value || '').slice(0, 30), delta: String(k.delta || '').slice(0, 40), href: href(k.dashboardId, evSuite) });
-  const mapAction = (a, evSuite) => ({ text: String(a.text || '').slice(0, 200), href: actionHref(a, evSuite), action: CAPABILITY_KEYS.has(a.action) ? a.action : null });
+  const mapAction = (a, evSuite) => ({ text: clipWords(a.text, 200), href: actionHref(a, evSuite), action: CAPABILITY_KEYS.has(a.action) ? a.action : null });
   // Render a set of followed-tile facts as email visuals — chart tiles become a
   // PNG mail asset, single-value/table tiles become a metric chip. Best-effort.
   const renderFollowed = (facts) => {
@@ -2268,7 +2203,7 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
   // The single-pass (flat) digest over all the facts — used for single-event
   // clients, and as the safety net if the multi-event pass can't be produced.
   const buildFlat = async () => {
-    const raw = await insights.digestBrief({ tiles: factTilesAll, roleLabel: lens.label, roleFocus: effectiveFocus, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), capabilities: ACTION_CAPABILITIES, goals, today: todayLabel() });
+    const raw = await aiUsage.run({ entityId, kind: 'digest' }, () => insights.digestBrief({ tiles: factTilesAll, roleLabel: lens.label, roleFocus: effectiveFocus, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), capabilities: ACTION_CAPABILITIES, goals, today: todayLabel() }));
     // A single-event digest scopes all its links/actions to that one event; the
     // multi-event fallback (flat over several) has no single event to assert.
     const flatSuite = selSuiteIds.length === 1 ? selSuiteIds[0] : '';
@@ -2308,12 +2243,12 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
         for (const ft of followedFacts) { (visualsBySuite[ft.suiteId] = visualsBySuite[ft.suiteId] || []).push(ft); }
         for (const id of Object.keys(visualsBySuite)) visualsBySuite[id] = renderFollowed(visualsBySuite[id]);
       }
-      const [ovRaw, evRaws] = await Promise.all([
+      const [ovRaw, evRaws] = await aiUsage.run({ entityId, kind: 'digest' }, () => Promise.all([
         insights.digestBriefMulti({ groups, roleLabel: lens.label, roleFocus: effectiveFocus, catalogue, instructions, apiKey, actions: acts, capabilities: ACTION_CAPABILITIES, goals, today }),
         Promise.all(groups.map((g) => insights.digestBrief({ tiles: g.tiles, roleLabel: lens.label, roleFocus: effectiveFocus, catalogue, instructions, apiKey, actions: acts, capabilities: ACTION_CAPABILITIES, goals: [], today })
           .then((r) => ({ g, r }))
           .catch((e) => { console.error(`[digest] event section failed (${g.suiteName}):`, e.message); return { g, r: null }; }))),
-      ]);
+      ]));
       const events = evRaws.map(({ g, r }) => {
         const e = r || {};
         const sect = {
@@ -2619,7 +2554,7 @@ function recentMessages(entityId, userId, limit = 6) {
 // Disposable module: /df feedback pages, in-app digest archive, the preference-
 // learning loop, and the scheduler mount (recurring digest delivery). Mounted
 // here, after its content builder (buildDigestContent) + role lenses exist.
-waDigestFor = (require('./digests').mount(app, { db, auth, mailer, messaging, push, insights, buildDigestContent, ROLE_LENSES, anthropicKeyForEntity, inboxView }) || {}).whatsappDigestFor;
+waDigestFor = (require('./digests').mount(app, { db, auth, mailer, messaging, push, insights, buildDigestContent, ROLE_LENSES, anthropicKeyForEntity, inboxView, notifyOps: (m) => ops.alert('digest', m) }) || {}).whatsappDigestFor;
 
 // Onboarding checklist — light-touch "Getting started" guide (auto-detect + manual).
 require('./onboarding').mount(app, { db, auth });
@@ -2664,10 +2599,11 @@ const actionsApi = require('./actions').mount(app, {
     const lockMap = expandLockMap(db.lockedFiltersForSuite(meta.suiteId));
     const qBody = await tileQueryBody(tile, def, user, meta.suiteId, lockMap, filterOverrides);
     if (!qBody) throw new Error('No data access for that tile');
-    const data = await runLookerQuery('/queries/run/json_detail', { ...qBody, limit: String(Math.min(Math.max(Number(limit) || 50000, 1000), 500000)) }, undefined, true);
-    const fields = [...(data.fields?.dimensions || []), ...(data.fields?.measures || []), ...(data.fields?.table_calculations || [])]
-      .map((f) => ({ name: f.name, label: f.label_short || f.label }));
-    return { rows: data.data || [], fields };
+    // Fields via a cached 1-row json_detail probe; bulk rows via the compact `json` format (same field-name keys, plain values — cellVal copes) because json_detail's per-cell metadata at 50k+ rows can exceed Node's max string length.
+    const probe = await runLookerQuery('/queries/run/json_detail', { ...qBody, limit: '1' });
+    const fields = [...(probe.fields?.dimensions || []), ...(probe.fields?.measures || []), ...(probe.fields?.table_calculations || [])].map((f) => ({ name: f.name, label: f.label_short || f.label }));
+    const rows = await runLookerQuery('/queries/run/json', { ...qBody, limit: String(Math.min(Math.max(Number(limit) || 50000, 1000), 500000)) }, undefined, true);
+    return { rows: Array.isArray(rows) ? rows : [], fields };
   },
   // The client's events (suites) — for optionally linking a campaign to one.
   listEvents: (entityId) => db.listSuitesForEntity(entityId).map((s) => ({ id: s.id, name: s.name, url: s.eventUrl || '' })),
@@ -2676,10 +2612,11 @@ const actionsApi = require('./actions').mount(app, {
     const apiKey = anthropicKeyForEntity(entityId);
     if (!insights.isConfigured(apiKey)) throw new Error('AI is not configured for this client');
     const ent = db.getEntity(entityId); const su = eventSuiteId ? db.getSuite(eventSuiteId) : null;
-    return insights.draftCampaign({ goal, clientName: ent?.name, clientContext: ent?.aiContext || '', audienceCount, apiKey, instructions: [aiInstructionsFor(eventSuiteId || null, entityId, langOverride), su ? `This campaign is for the event "${su.name}"${su.briefing?.instructions ? ` — ${String(su.briefing.instructions).trim()}` : ''}. Write for THIS event specifically.` : ''].filter(Boolean).join('\n\n') });
+    return aiUsage.run({ entityId, kind: 'campaign_draft' }, () => insights.draftCampaign({ goal, clientName: ent?.name, clientContext: ent?.aiContext || '', audienceCount, apiKey, instructions: [aiInstructionsFor(eventSuiteId || null, entityId, langOverride), su ? `This campaign is for the event "${su.name}"${su.briefing?.instructions ? ` — ${String(su.briefing.instructions).trim()}` : ''}. Write for THIS event specifically.` : ''].filter(Boolean).join('\n\n') }));
   },
 });
 require('./emailBanner').mount(app, { auth, insights, anthropicKeyForEntity, aiInstructionsFor, resolveBranding: mailer.resolveBranding }); // AI email-banner designer (SVG → PNG)
+const aiUsage = require('./aiUsage'); aiUsage.mount(app, { auth, db: db.db }); // AI token metering per client/feature (Admin → AI → Usage)
 // Materialise a built-in recipe (e.g. 'abandoned_cart') as a real audience source
 // by auto-resolving its tile from this client's data. Shared by segments + the
 // setup-nudge personalisation (the live abandoned-cart count).
@@ -2709,14 +2646,13 @@ const segmentsApi = require('./segments').mount(app, {
 // (the abandoned-cart count) can reuse the campaign audience resolver.
 require('./setupNudge').mount(app, { db, auth, mailer, os, insights, resolveRecipe, audienceFor: actionsApi.audienceFor, anthropicKeyForEntity, aiInstructionsFor });
 
-// ─── Public platform surface (docs/API_MCP_BRIEF.md) ───────────────────────────
-// Per-entity API keys (the security foundation) + the /api/v1 read API + the
-// remote MCP server for AI agents. Three disposable modules over the SAME
-// service core — external callers ride the app's own scope gates unchanged.
-const apiKeysApi = require('./apiKeys').mount(app, { db, auth, rateLimit });
-const apiV1 = require('./api').mount(app, { db, auth, rateLimit, apiKeys: apiKeysApi, clientCatalogue, resolveTileValue, resolveTileRows, segmentsApi, actionsApi, goalsApi });
-require('./mcp').mount(app, { apiKeys: apiKeysApi, core: apiV1.core, rateLimit });
-require('./oauth').mount(app, { db, auth, apiKeys: apiKeysApi, rateLimit }); // "Connect" flow for MCP clients (Claude): discovery + approve → mints a key
+// ─── Public platform surface → server/publicSurface.js ─────────────────────────
+// API keys + /api/v1 (read + drafts) + remote MCP server + OAuth connect flow —
+// thin adapters over the SAME service core; the app's scope gates apply.
+require('./publicSurface').mount(app, {
+  db, auth, rateLimit, mailer, currency, language, clientCatalogue,
+  resolveTileValue, resolveTileRows, segmentsApi, actionsApi, goalsApi, getOwlTools, owlCatalogue,
+});
 
 // ─── Briefing configuration ─────────────────────────────────────────────────────
 // Admin: global briefing rules + editable phase defaults.
@@ -2789,7 +2725,7 @@ app.post('/api/my/refine-text', auth.requireAuth, async (req, res) => {
   const apiKey = anthropicKeyForEntity(entityId);
   if (!insights.isConfigured(apiKey)) return res.status(400).json({ error: 'AI is not configured for this client.' });
   try {
-    const refined = await insights.refineText({ text, purpose: String(req.body?.purpose || '').slice(0, 120), instructions: aiInstructionsFor(null), apiKey });
+    const refined = await aiUsage.run({ entityId, kind: 'refine' }, () => insights.refineText({ text, purpose: String(req.body?.purpose || '').slice(0, 120), instructions: aiInstructionsFor(null), apiKey }));
     res.json({ text: refined });
   } catch (e) { console.error('[POST /api/my/refine-text]', e.message); res.status(500).json({ error: e.message }); }
 });
@@ -2798,11 +2734,13 @@ app.put('/api/my/briefing-tune', auth.requireAuth, (req, res) => {
   if (!entityId) return res.status(400).json({ error: 'No client context' });
   const body = req.body || {};
   db.setUserPref(req.user.id, `briefing_tune:${entityId}`, String(body.tune || '').slice(0, 1500));
-  // Focus tiles (reader-chosen dashboards/tiles to always feed the briefing).
+  // Focus tiles (reader-chosen dashboards/tiles to always feed the briefing). Each
+  // pick may carry a lifecycle-phase scope — it then feeds the briefing only while
+  // its event is in that phase (blank/invalid → all phases).
   if (Array.isArray(body.tiles)) {
     const tiles = body.tiles.slice(0, 40)
       .filter((t) => t && t.dashboardId && t.tileId)
-      .map((t) => ({ dashboardId: String(t.dashboardId), tileId: String(t.tileId) }));
+      .map((t) => ({ dashboardId: String(t.dashboardId), tileId: String(t.tileId), ...(PHASES.some((p) => p.key === t.phase) ? { phase: t.phase } : {}) }));
     db.setUserPref(req.user.id, `briefing_tiles:${entityId}`, JSON.stringify(tiles));
   }
   // Always-include categories the reader has enabled (Tune → "What the briefing covers").
@@ -2993,22 +2931,10 @@ app.post('/api/recreate', auth.requireAdmin, async (req, res) => {
 });
 
 // ─── Living docs ──────────────────────────────────────────────────────────────
-// Serve the sales product-overview as a self-rendering HTML page that fetches its
-// own markdown source, so editing docs/PRODUCT_OVERVIEW_SALES.md updates the page.
-// Scoped to this single doc on purpose — the rest of docs/ is internal.
-const PRODUCT_OVERVIEW_HTML = path.join(__dirname, '../docs/product-overview-sales.html');
-const PRODUCT_OVERVIEW_MD = path.join(__dirname, '../docs/PRODUCT_OVERVIEW_SALES.md');
-
-app.get(['/product-overview-sales', '/product-overview-sales.html'], (_req, res) => {
-  res.setHeader('Cache-Control', 'no-cache, must-revalidate');
-  res.sendFile(PRODUCT_OVERVIEW_HTML);
-});
-
-app.get('/product-overview-sales.md', (_req, res) => {
-  res.setHeader('Cache-Control', 'no-cache, must-revalidate');
-  res.type('text/markdown; charset=utf-8');
-  res.sendFile(PRODUCT_OVERVIEW_MD);
-});
+// The sales product-overview page (+ admin-filtered markdown), the curated
+// feature matrix with admin include/exclude, and the public /sales site all
+// live in server/productSite.js.
+require('./productSite').mount(app, { db, auth });
 
 // The client/developer API guide — same living-doc pattern, shareable at
 // /api-guide (editing docs/CLIENT_API_GUIDE.md updates the page).
@@ -3053,9 +2979,21 @@ app.get('*', (_req, res) => {
 app.use(errorMiddleware);
 
 const PORT = process.env.PORT || 3045;
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Howler Looker Tool running on http://localhost:${PORT}`);
   console.log(`Looker instance: ${looker.lookerBaseUrl() || '(not configured — set in Admin → Integrations)'}`);
   // Pull organic social stats once a day for every connected client (best-effort).
   socialMetrics.startDailySync({ listEntities: () => db.listEntities() });
+});
+
+// Graceful shutdown — Render sends SIGTERM on EVERY deploy. Stop accepting new
+// connections and give in-flight requests a moment to drain, then exit. Work
+// interrupted anyway is designed to survive the kill: campaign blasts resume
+// from the action_sends ledger on next boot, and digest/alert run-slots are
+// claimed before sending, so a killed send is missed (and visible), never
+// double-delivered.
+process.on('SIGTERM', () => {
+  console.log('[shutdown] SIGTERM received — draining connections');
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(0), 8000).unref();
 });
