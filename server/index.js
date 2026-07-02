@@ -2737,9 +2737,8 @@ const segmentsApi = require('./segments').mount(app, {
 require('./setupNudge').mount(app, { db, auth, mailer, os, insights, resolveRecipe, audienceFor: actionsApi.audienceFor, anthropicKeyForEntity, aiInstructionsFor });
 
 // ─── Public platform surface (docs/API_MCP_BRIEF.md) ───────────────────────────
-// Per-entity API keys (the security foundation) + the /api/v1 read API + the
-// remote MCP server for AI agents. Three disposable modules over the SAME
-// service core — external callers ride the app's own scope gates unchanged.
+// Per-entity API keys + /api/v1 read API + remote MCP server for AI agents —
+// disposable modules over the SAME service core; the app's scope gates apply.
 const apiKeysApi = require('./apiKeys').mount(app, { db, auth, rateLimit });
 const apiV1 = require('./api').mount(app, { db, auth, rateLimit, apiKeys: apiKeysApi, clientCatalogue, resolveTileValue, resolveTileRows, segmentsApi, actionsApi, goalsApi, getOwlTools, owlCatalogue });
 require('./mcp').mount(app, { apiKeys: apiKeysApi, core: apiV1.core, rateLimit });

@@ -145,7 +145,7 @@ function attachUser(req, _res, next) {
   // key, a foreign token) falls through untouched — apiKeys.bearerAuth still owns
   // its own routes.
   if (!req.user) {
-    const m = /^Bearer\s+(\S+)$/i.exec(req.headers.authorization || '');
+    const m = /^Bearer\s+(\S+)$/i.exec(req.headers?.authorization || '');
     if (m && m[1].split('.').length === 3) {
       try {
         const p = jwt.verify(m[1], getSecret());
