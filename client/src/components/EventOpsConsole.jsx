@@ -236,9 +236,12 @@ function DevicesTab({ suiteId, canManage, onAct, flash, reloadKey }) {
   const [pairFilter, setPairFilter] = useState('all'); // all | unpaired | paired
   const [q, setQ] = useState('');                      // search
   const [adding, setAdding] = useState(false);
+  const [types, setTypes] = useState([]);              // editable device-type catalogue
+  const [managingTypes, setManagingTypes] = useState(false);
 
   const load = () => api.eventopsDevices(suiteId).then((r) => setDevices(r.devices || [])).catch(() => setDevices([]));
-  useEffect(() => { setDevices(null); load(); }, [suiteId, reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const loadTypes = () => api.eventopsDeviceTypes(suiteId).then((r) => setTypes(r.types || [])).catch(() => setTypes([]));
+  useEffect(() => { setDevices(null); load(); loadTypes(); }, [suiteId, reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const counts = useMemo(() => {
     const c = { all: devices?.length || 0, unpaired: 0 };
@@ -266,6 +269,7 @@ function DevicesTab({ suiteId, canManage, onAct, flash, reloadKey }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="🔍 Search devices (code, label, serial, station)…" style={{ ...input, flex: 1, minWidth: 200 }} />
+        {canManage && <button onClick={() => setManagingTypes(true)} style={ghostBtn}>🏷 Types</button>}
         {canManage && <button onClick={() => setAdding(true)} style={primaryBtn}>＋ Add devices</button>}
       </div>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -297,7 +301,7 @@ function DevicesTab({ suiteId, canManage, onAct, flash, reloadKey }) {
                   {d.label || d.qrCode || d.serialNumber || 'Device'}
                 </div>
                 <div style={{ fontSize: 12, color: 'var(--muted)' }}>
-                  {d.type} · {d.qrCode
+                  {titleCase(d.type)} · {d.qrCode
                     ? <span style={{ color: 'var(--brand)' }}>🔗 {d.qrCode}</span>
                     : <span style={{ color: 'var(--muted)' }}>○ no QR paired</span>}
                   {d.serialNumber ? ` · ${d.serialNumber}` : ''}
@@ -309,7 +313,8 @@ function DevicesTab({ suiteId, canManage, onAct, flash, reloadKey }) {
         </div>
       )}
 
-      {adding && <AddDevicesModal suiteId={suiteId} onClose={() => setAdding(false)} onDone={() => { setAdding(false); load(); flash('Devices added'); }} />}
+      {adding && <AddDevicesModal suiteId={suiteId} types={types} onClose={() => setAdding(false)} onDone={() => { setAdding(false); load(); flash('Devices added'); }} />}
+      {managingTypes && <ManageTypesModal suiteId={suiteId} types={types} onClose={() => setManagingTypes(false)} onChange={(t) => setTypes(t)} flash={flash} />}
     </div>
   );
 }
@@ -322,10 +327,11 @@ function LocationBadge({ device }) {
   return <span style={{ ...badge, background: bg, color, flexShrink: 0 }}>{text}</span>;
 }
 
-function AddDevicesModal({ suiteId, onClose, onDone }) {
+function AddDevicesModal({ suiteId, types = [], onClose, onDone }) {
+  const dflt = types[0]?.label || 'handheld';
   const [mode, setMode] = useState('single'); // single | bulk
-  const [single, setSingle] = useState({ label: '', qrCode: '', serialNumber: '', type: 'handheld' });
-  const [bulk, setBulk] = useState({ prefix: 'SL', start: 1, count: 10, pad: 3, type: 'handheld' });
+  const [single, setSingle] = useState({ label: '', qrCode: '', serialNumber: '', type: dflt });
+  const [bulk, setBulk] = useState({ prefix: 'SL', start: 1, count: 10, pad: 3, type: dflt });
   const [scanning, setScanning] = useState(false); // scanning a QR to pair while adding
   const [busy, setBusy] = useState(false);
 
@@ -358,7 +364,7 @@ function AddDevicesModal({ suiteId, onClose, onDone }) {
             </div>
           </Field>
           <Field label="Serial number"><input style={input} value={single.serialNumber} onChange={(e) => setSingle({ ...single, serialNumber: e.target.value })} /></Field>
-          <Field label="Type"><TypeSelect value={single.type} onChange={(v) => setSingle({ ...single, type: v })} /></Field>
+          <Field label="Type"><TypeSelect value={single.type} types={types} onChange={(v) => setSingle({ ...single, type: v })} /></Field>
         </div>
       ) : (
         <div style={fieldCol}>
@@ -368,7 +374,7 @@ function AddDevicesModal({ suiteId, onClose, onDone }) {
             <Field label="How many"><input style={input} type="number" value={bulk.count} onChange={(e) => setBulk({ ...bulk, count: e.target.value })} /></Field>
             <Field label="Digits"><input style={input} type="number" value={bulk.pad} onChange={(e) => setBulk({ ...bulk, pad: e.target.value })} /></Field>
           </div>
-          <Field label="Type"><TypeSelect value={bulk.type} onChange={(v) => setBulk({ ...bulk, type: v })} /></Field>
+          <Field label="Type"><TypeSelect value={bulk.type} types={types} onChange={(v) => setBulk({ ...bulk, type: v })} /></Field>
           <p style={{ fontSize: 12, color: 'var(--muted)', margin: 0 }}>
             Creates {bulk.count || 0} devices: {bulk.prefix}{String(bulk.start || 1).padStart(Number(bulk.pad) || 3, '0')} … {bulk.prefix}{String((Number(bulk.start) || 1) + (Number(bulk.count) || 0) - 1).padStart(Number(bulk.pad) || 3, '0')}
           </p>
@@ -386,11 +392,79 @@ function AddDevicesModal({ suiteId, onClose, onDone }) {
     </Modal>
   );
 }
-const TypeSelect = ({ value, onChange }) => (
-  <select style={input} value={value} onChange={(e) => onChange(e.target.value)}>
-    {DEVICE_TYPES.map((t) => <option key={t} value={t}>{t[0].toUpperCase() + t.slice(1)}</option>)}
-  </select>
-);
+// Type dropdown sourced from the event's editable catalogue. Falls back to the built-in
+// defaults if the catalogue hasn't loaded, and always keeps the current value selectable
+// (so a device whose type was renamed/removed still shows correctly).
+const TypeSelect = ({ value, types = [], onChange }) => {
+  const labels = types.length ? types.map((t) => t.label) : DEVICE_TYPES;
+  const opts = value && !labels.some((l) => l === value) ? [value, ...labels] : labels;
+  return (
+    <select style={input} value={value} onChange={(e) => onChange(e.target.value)}>
+      {opts.map((t) => <option key={t} value={t}>{titleCase(t)}</option>)}
+    </select>
+  );
+};
+const titleCase = (s) => String(s || '').replace(/\b\w/g, (c) => c.toUpperCase());
+
+// Add / rename / remove the event's device types. Changes take effect immediately for the
+// Type dropdown; renaming re-tags existing devices (server-side) so their type carries over.
+function ManageTypesModal({ suiteId, types, onClose, onChange, flash }) {
+  const [list, setList] = useState(types);
+  const [adding, setAdding] = useState('');
+  const [editId, setEditId] = useState(null);
+  const [editVal, setEditVal] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function add() {
+    const label = adding.trim(); if (!label) return;
+    setBusy(true);
+    try { const r = await api.eventopsCreateDeviceType(suiteId, label); setList(r.types); onChange(r.types); setAdding(''); }
+    catch (e) { alert(e.message); }
+    setBusy(false);
+  }
+  async function saveEdit(id) {
+    const label = editVal.trim(); if (!label) { setEditId(null); return; }
+    setBusy(true);
+    try { const r = await api.eventopsUpdateDeviceType(suiteId, id, label); setList(r.types); onChange(r.types); setEditId(null); }
+    catch (e) { alert(e.message); }
+    setBusy(false);
+  }
+  async function remove(id) {
+    setBusy(true);
+    try { const r = await api.eventopsDeleteDeviceType(suiteId, id); setList(r.types); onChange(r.types); flash?.('Type removed'); }
+    catch (e) { alert(e.message); }
+    setBusy(false);
+  }
+
+  return (
+    <Modal title="Device types" subtitle="Used in the Type dropdown when adding devices" onClose={onClose}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {list.length === 0 && <Empty>No types yet — add one below.</Empty>}
+        {list.map((t) => (
+          <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {editId === t.id ? (
+              <>
+                <input style={{ ...input, flex: 1 }} value={editVal} autoFocus onChange={(e) => setEditVal(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && saveEdit(t.id)} />
+                <button onClick={() => saveEdit(t.id)} disabled={busy} style={primaryBtn}>Save</button>
+                <button onClick={() => setEditId(null)} style={iconBtn}>✕</button>
+              </>
+            ) : (
+              <>
+                <span style={{ flex: 1, fontSize: 14, fontWeight: 600 }}>{titleCase(t.label)}</span>
+                <button onClick={() => { setEditId(t.id); setEditVal(t.label); }} style={iconBtn}>✏️</button>
+                <button onClick={() => remove(t.id)} disabled={busy} style={iconBtn}>🗑️</button>
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+      <div style={{ display: 'flex', gap: 6, marginTop: 14 }}>
+        <input style={{ ...input, flex: 1 }} value={adding} onChange={(e) => setAdding(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()} placeholder="New type, e.g. Scanner" />
+        <button onClick={add} disabled={busy || !adding.trim()} style={primaryBtn}>＋ Add</button>
+      </div>
+    </Modal>
+  );
+}
 
 // ─────────────────────────────── Stations tab ─────────────────────────────────
 function StationsTab({ suiteId, canManage, flash, reloadKey, onRefresh }) {

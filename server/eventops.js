@@ -65,6 +65,18 @@ function mount(app, { db, auth }) {
     CREATE INDEX IF NOT EXISTS idx_eventops_devices_suite ON eventops_devices(suite_id);
     CREATE INDEX IF NOT EXISTS idx_eventops_devices_station ON eventops_devices(station_id);
 
+    -- Editable per-event catalogue of device types (drives the Type dropdown). Lazy-seeded
+    -- with sensible defaults the first time an event's list is read.
+    CREATE TABLE IF NOT EXISTS eventops_device_types (
+      id         TEXT PRIMARY KEY,
+      entity_id  TEXT NOT NULL,
+      suite_id   TEXT NOT NULL,
+      label      TEXT NOT NULL DEFAULT '',
+      position   INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_eventops_device_types_suite ON eventops_device_types(suite_id);
+
     CREATE TABLE IF NOT EXISTS eventops_stations (
       id          TEXT PRIMARY KEY,
       entity_id   TEXT NOT NULL,
@@ -414,7 +426,9 @@ function mount(app, { db, auth }) {
   function cleanDevice(b) {
     return {
       label: str(b.label, 120),
-      type: DEVICE_TYPES.includes(b.type) ? b.type : 'handheld',
+      // Type is a free label chosen from the event's editable catalogue (see device-types
+      // routes below); we accept whatever the UI sends and default to a sensible fallback.
+      type: str(b.type, 40).trim() || 'handheld',
       qrCode: str(b.qrCode, 120).trim(),
       serialNumber: str(b.serialNumber, 120).trim(),
     };
@@ -448,7 +462,7 @@ function mount(app, { db, auth }) {
       const prefix = str(b.prefix, 40).trim();
       const start = Math.max(0, parseInt(b.start, 10) || 1);
       const pad = Math.max(0, Math.min(8, parseInt(b.pad, 10) || 3));
-      const type = DEVICE_TYPES.includes(b.type) ? b.type : 'handheld';
+      const type = str(b.type, 40).trim() || 'handheld';
       for (let i = 0; i < count; i++) {
         const code = `${prefix}${String(start + i).padStart(pad, '0')}`;
         items.push({ label: code, type, qrCode: code, serialNumber: '' });
@@ -458,6 +472,54 @@ function mount(app, { db, auth }) {
     if (!items.length) return res.status(400).json({ error: 'Nothing to create — give a list, or a count + prefix.' });
     const made = sql.transaction(() => items.map((c) => insertDevice(su, c, req.user.email)))();
     res.status(201).json({ created: made.length, devices: made.map(deviceRow) });
+  });
+
+  // ── Device types: an editable per-event catalogue that drives the Type dropdown ──
+  const deviceTypeRow = (t) => ({ id: t.id, label: t.label });
+  const listTypes = (su) => sql.prepare('SELECT * FROM eventops_device_types WHERE suite_id=? ORDER BY position, created_at').all(su.id);
+  function deviceTypes(su) {
+    let rows = listTypes(su);
+    if (rows.length === 0) { // lazy-seed defaults the first time an event's list is read
+      const ts = now();
+      const ins = sql.prepare('INSERT INTO eventops_device_types (id, entity_id, suite_id, label, position, created_at) VALUES (?,?,?,?,?,?)');
+      sql.transaction(() => DEVICE_TYPES.forEach((label, i) => ins.run(uuid(), su.entityId, su.id, label, i, ts)))();
+      rows = listTypes(su);
+    }
+    return rows;
+  }
+
+  app.get('/api/eventops/suites/:suiteId/device-types', auth.requireAuth, (req, res) => {
+    const su = gateSuite(req, res); if (!su) return;
+    res.json({ types: deviceTypes(su).map(deviceTypeRow) });
+  });
+  app.post('/api/eventops/suites/:suiteId/device-types', auth.requireAuth, (req, res) => {
+    const su = gateSuite(req, res, { manage: true }); if (!su) return;
+    const label = str(req.body?.label, 40).trim();
+    if (!label) return res.status(400).json({ error: 'Give the type a name.' });
+    deviceTypes(su); // ensure seeded so positions stay contiguous
+    if (sql.prepare('SELECT id FROM eventops_device_types WHERE suite_id=? AND label=? COLLATE NOCASE').get(su.id, label)) return res.status(409).json({ error: 'That type already exists.' });
+    const pos = (sql.prepare('SELECT MAX(position) m FROM eventops_device_types WHERE suite_id=?').get(su.id).m ?? -1) + 1;
+    sql.prepare('INSERT INTO eventops_device_types (id, entity_id, suite_id, label, position, created_at) VALUES (?,?,?,?,?,?)').run(uuid(), su.entityId, su.id, label, pos, now());
+    res.status(201).json({ types: deviceTypes(su).map(deviceTypeRow) });
+  });
+  app.put('/api/eventops/suites/:suiteId/device-types/:id', auth.requireAuth, (req, res) => {
+    const su = gateSuite(req, res, { manage: true }); if (!su) return;
+    const t = sql.prepare('SELECT * FROM eventops_device_types WHERE id=? AND suite_id=?').get(req.params.id, su.id);
+    if (!t) return res.status(404).json({ error: 'Type not found' });
+    const label = str(req.body?.label, 40).trim();
+    if (!label) return res.status(400).json({ error: 'Give the type a name.' });
+    if (sql.prepare('SELECT id FROM eventops_device_types WHERE suite_id=? AND label=? COLLATE NOCASE AND id<>?').get(su.id, label, t.id)) return res.status(409).json({ error: 'That type already exists.' });
+    // Re-tag existing devices so a rename carries their type across.
+    sql.prepare('UPDATE eventops_devices SET type=? WHERE suite_id=? AND type=? COLLATE NOCASE').run(label, su.id, t.label);
+    sql.prepare('UPDATE eventops_device_types SET label=? WHERE id=?').run(label, t.id);
+    res.json({ types: deviceTypes(su).map(deviceTypeRow) });
+  });
+  app.delete('/api/eventops/suites/:suiteId/device-types/:id', auth.requireAuth, (req, res) => {
+    const su = gateSuite(req, res, { manage: true }); if (!su) return;
+    const t = sql.prepare('SELECT * FROM eventops_device_types WHERE id=? AND suite_id=?').get(req.params.id, su.id);
+    if (!t) return res.status(404).json({ error: 'Type not found' });
+    sql.prepare('DELETE FROM eventops_device_types WHERE id=?').run(t.id);
+    res.json({ types: deviceTypes(su).map(deviceTypeRow) });
   });
 
   app.put('/api/eventops/suites/:suiteId/devices/:id', auth.requireAuth, (req, res) => {

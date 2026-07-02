@@ -204,6 +204,35 @@ test('pairing: a QR pairs one device per event; re-using it on another is reject
   assert.equal(ok.body.device.qrCode, 'QR-100');
 });
 
+test('device types: lazy-seeded defaults, add/rename/delete; rename re-tags devices', () => {
+  const r = mount();
+  const { entity, suite, owner, admin } = seedEvent();
+  call(r['PUT /api/eventops/entities/:entityId/enabled'], { user: admin, params: { entityId: entity.id }, body: { enabled: true } });
+  const P = { suiteId: suite.id };
+
+  // First read lazy-seeds the defaults.
+  const seeded = call(r['GET /api/eventops/suites/:suiteId/device-types'], { user: owner, params: P }).body.types;
+  assert.ok(seeded.length >= 5 && seeded.some((t) => t.label === 'handheld'));
+
+  // Add a custom type.
+  const added = call(r['POST /api/eventops/suites/:suiteId/device-types'], { user: owner, params: P, body: { label: 'Scanner' } });
+  assert.equal(added.code, 201);
+  assert.ok(added.body.types.some((t) => t.label === 'Scanner'));
+  // Duplicate (case-insensitive) is rejected.
+  assert.equal(call(r['POST /api/eventops/suites/:suiteId/device-types'], { user: owner, params: P, body: { label: 'scanner' } }).code, 409);
+
+  // A device on that type, then rename the type → the device is re-tagged.
+  const dev = call(r['POST /api/eventops/suites/:suiteId/devices'], { user: owner, params: P, body: { label: 'S1', type: 'Scanner' } }).body.device;
+  assert.equal(dev.type, 'Scanner');
+  const scanner = added.body.types.find((t) => t.label === 'Scanner');
+  call(r['PUT /api/eventops/suites/:suiteId/device-types/:id'], { user: owner, params: { ...P, id: scanner.id }, body: { label: 'Barcode gun' } });
+  assert.equal(call(r['GET /api/eventops/suites/:suiteId/devices/:id'], { user: owner, params: { ...P, id: dev.id } }).body.device.type, 'Barcode gun');
+
+  // Delete a type → gone from the catalogue (the device keeps its stored label).
+  call(r['DELETE /api/eventops/suites/:suiteId/device-types/:id'], { user: owner, params: { ...P, id: scanner.id } });
+  assert.ok(!call(r['GET /api/eventops/suites/:suiteId/device-types'], { user: owner, params: P }).body.types.some((t) => t.id === scanner.id));
+});
+
 test('deleting a device removes it and cascades its history + issues', () => {
   const r = mount();
   const { entity, suite, owner, admin } = seedEvent();
