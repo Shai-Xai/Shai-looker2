@@ -711,6 +711,11 @@ see "The continuous comms loop" above.)*
   nothing keeps burning in the background). And long data pulls no longer look frozen — the
   thinking line keeps refreshing every few seconds and the connection is kept alive, so a heavy
   query (e.g. a big cashless breakdown) shows progress instead of hanging on "Thinking…".
+- **2026-07-02** — **Google Gemini Enterprise can connect too** 🧪: organisations on
+  Google's **Gemini Enterprise** can add Pulse as a Custom MCP connector (same approval
+  page, same per-client keys and guarantees as Claude/ChatGPT). Honest limit: the
+  regular **Gemini app and Gems can't connect yet** — Google hasn't opened custom
+  connectors there; the moment they do, Pulse's existing flow slots in.
 - **2026-07-02** — **Provenance badges: see WHERE things were made** 🧪: segments,
   campaigns and alerts created through an AI door now carry a badge in their lists —
   **🦉 via Owl** (in-app chat), **💬 via WhatsApp**, **✨ via Claude**, **✨ via ChatGPT**,

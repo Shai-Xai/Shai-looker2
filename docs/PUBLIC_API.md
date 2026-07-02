@@ -70,6 +70,15 @@ visible and revocable on the key card like any other.
 Clients that support static headers can skip OAuth entirely and send
 `Authorization: Bearer pulse_sk_…` directly.
 
+**Google Gemini:** the consumer Gemini app + Gems have no custom-connector
+support (as of 2026-07). **Gemini Enterprise** connects via its Custom MCP
+server connector: it requires pre-typed OAuth client credentials (no dynamic
+registration) against our authorize/token endpoints — its fixed callback
+(`vertexaisearch.cloud.google.com`) is on the trusted-redirect allowlist, so
+any admin-chosen client id works (trust-on-first-use, same as hand-typed
+Claude ids); the token endpoint ignores the client_secret (auth method none).
+Gemini CLI works with a plain Bearer key.
+
 **OpenAI / ChatGPT:** the same `/mcp` server works with OpenAI. The Responses
 API's built-in MCP tool takes `server_url` + a Bearer `headers` entry. ChatGPT
 custom connectors additionally require the MCP server to expose `search` and
