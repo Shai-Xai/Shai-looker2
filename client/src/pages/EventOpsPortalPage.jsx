@@ -19,7 +19,7 @@ function feedText(e) {
   if (e.kind === 'create') return '➕ Added to inventory';
   if (e.kind === 'check') return `⚠️ ${e.note || 'Issue logged'}${by}`;
   if (e.kind === 'status') return `🔁 Marked ${STATE_LABEL[e.toState] || e.toState}${e.unusual ? ' ⚑' : ''}${by}`;
-  if (e.toHolder) return `🤝 To ${e.toHolder}${e.unusual ? ' ⚑' : ''}${by}`;
+  if (e.toHolder) return `🤝 To ${e.toHolder}${e.toStation ? ` @ ${e.toStation}` : ''}${e.unusual ? ' ⚑' : ''}${by}`;
   const dest = e.toStation || (e.toState === 'in_stock' ? 'Hive' : STATE_LABEL[e.toState] || e.toState);
   const from = e.fromStation || (e.fromState === 'in_stock' ? 'Hive' : STATE_LABEL[e.fromState] || '');
   return `↪️ ${from ? from + ' → ' : ''}${dest}${e.unusual ? ' ⚑' : ''}${by}`;
@@ -273,6 +273,7 @@ function IssueSheet({ suiteId, token, staffId, device, categories = [], events =
 // (The bulk Single/Multiple station-first flow lives on the client console, not here.)
 function PortalMoveSheet({ suiteId, token, staffId, device, stations, roster = [], events = [], onClose, onDone }) {
   const [busy, setBusy] = useState(false);
+  const [pending, setPending] = useState(null); // colleague chosen, awaiting station decision
   async function move(body, label) {
     setBusy(true);
     try { await api.eopPortalMove(suiteId, token, { deviceId: device.id, staffId, ...body }); onDone(`${device.label || 'Device'} → ${label}`); }
@@ -286,6 +287,18 @@ function PortalMoveSheet({ suiteId, token, staffId, device, stations, roster = [
           <strong style={{ fontSize: 16 }}>{device.label || device.qrCode || 'Device'}</strong>
           <button onClick={onClose} style={iconBtn}>✕</button>
         </div>
+        {pending ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+            <div style={{ fontWeight: 700, fontSize: 15 }}>🤝 Hand to {pending.label}</div>
+            <div style={lbl}>Are they at a station? Pick one, or hand it over without a station.</div>
+            {stations.map((s) => (
+              <button key={s.id} disabled={busy} onClick={() => move({ holderStaffId: pending.id, stationId: s.id }, `🤝 ${pending.label} @ ${s.name}`)} style={destBtn}>{KIND_ICON[s.kind] || '📍'} {s.name}</button>
+            ))}
+            <button disabled={busy} onClick={() => move({ holderStaffId: pending.id }, `🤝 ${pending.label}`)} style={bigBtn}>{busy ? 'Saving…' : 'No station — hand it over'}</button>
+            <button disabled={busy} onClick={() => setPending(null)} style={ghostBtn}>Back</button>
+          </div>
+        ) : (
+        <>
         <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 12 }}>now at {whereText(device)} · send to:</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
           <button disabled={busy} onClick={() => move({ stationId: 'hive' }, 'Hive')} style={destBtn}>🏠 Hive (in stock)</button>
@@ -293,7 +306,7 @@ function PortalMoveSheet({ suiteId, token, staffId, device, stations, roster = [
             <button key={s.id} disabled={busy} onClick={() => move({ stationId: s.id }, s.name)} style={destBtn}>{KIND_ICON[s.kind] || '📍'} {s.name}</button>
           ))}
           {colleagues.length > 0 && (
-            <select value="" disabled={busy} onChange={(e) => { const s = colleagues.find((x) => x.id === e.target.value); if (s) move({ holderStaffId: s.id }, `🤝 ${s.number ? `#${s.number} ` : ''}${s.name}`); }} style={{ ...destBtn, cursor: 'pointer' }}>
+            <select value="" disabled={busy} onChange={(e) => { const s = colleagues.find((x) => x.id === e.target.value); if (s) setPending({ id: s.id, label: `${s.number ? `#${s.number} ` : ''}${s.name}` }); }} style={{ ...destBtn, cursor: 'pointer' }}>
               <option value="">🤝 Hand to a colleague…</option>
               {colleagues.map((s) => <option key={s.id} value={s.id}>{s.number ? `#${s.number} ` : ''}{s.name}</option>)}
             </select>
@@ -301,6 +314,8 @@ function PortalMoveSheet({ suiteId, token, staffId, device, stations, roster = [
           {stations.length === 0 && <div style={{ color: 'var(--muted)', fontSize: 13 }}>No stations set up yet.</div>}
         </div>
         <PortalActivity events={events} />
+        </>
+        )}
       </div>
     </div>
   );

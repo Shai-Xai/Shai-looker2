@@ -319,6 +319,29 @@ test('move to a staff member: device is held by them, logged, and reversible', (
   assert.equal(back.body.device.state, 'in_stock');
 });
 
+test('hand to staff can also sit at a station; overview groups held-with-no-station only', () => {
+  const r = mount();
+  const { entity, suite, owner, admin } = seedEvent();
+  call(r['PUT /api/eventops/entities/:entityId/enabled'], { user: admin, params: { entityId: entity.id }, body: { enabled: true } });
+  const P = { suiteId: suite.id };
+  const station = call(r['POST /api/eventops/suites/:suiteId/stations'], { user: owner, params: P, body: { name: 'Gate', kind: 'gate' } }).body.station;
+  const jane = call(r['POST /api/eventops/suites/:suiteId/staff'], { user: owner, params: P, body: { name: 'Jane', number: '101' } }).body.staff;
+  const atStation = call(r['POST /api/eventops/suites/:suiteId/devices'], { user: owner, params: P, body: { label: 'A', qrCode: 'A' } }).body.device;
+  const noStation = call(r['POST /api/eventops/suites/:suiteId/devices'], { user: owner, params: P, body: { label: 'B', qrCode: 'B' } }).body.device;
+
+  // A: handed to Jane AND placed at the Gate → counts on the station, not the "with staff" group.
+  const a = call(r['POST /api/eventops/suites/:suiteId/move'], { user: owner, params: P, body: { deviceId: atStation.id, holderStaffId: jane.id, stationId: station.id } });
+  assert.equal(a.body.device.stationId, station.id);
+  assert.equal(a.body.device.holderStaffId, jane.id);
+  // B: handed to Jane with no station.
+  call(r['POST /api/eventops/suites/:suiteId/move'], { user: owner, params: P, body: { deviceId: noStation.id, holderStaffId: jane.id } });
+
+  const ov = call(r['GET /api/eventops/suites/:suiteId/overview'], { user: owner, params: P }).body;
+  assert.equal(ov.stations.find((s) => s.id === station.id).deviceCount, 1); // A shows at the station
+  const held = ov.heldByStaff.find((h) => h.staffId === jane.id);
+  assert.equal(held.count, 1); // only B (held, no station)
+});
+
 test('deleting a device removes it and cascades its history + issues', () => {
   const r = mount();
   const { entity, suite, owner, admin } = seedEvent();

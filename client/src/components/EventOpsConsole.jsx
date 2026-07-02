@@ -32,6 +32,7 @@ export default function EventOpsConsole({ entityId, scope = 'admin' }) {
   const [moveFlow, setMoveFlow] = useState(false); // station-first Single/Multiple batch move
   const [actionDevice, setActionDevice] = useState(null); // device shown in the action sheet
   const [stationView, setStationView] = useState(null);   // station whose devices are being viewed
+  const [heldStaffView, setHeldStaffView] = useState(null); // { staffId, staffLabel } → devices held
   const [reloadKey, setReloadKey] = useState(0);  // bump → every tab refetches (auto-refresh after an action)
   const [toast, setToast] = useState('');
   const refresh = () => setReloadKey((k) => k + 1);
@@ -105,11 +106,11 @@ export default function EventOpsConsole({ entityId, scope = 'admin' }) {
           )}
         </div>
         <div style={{ flex: 1, minWidth: 0, width: '100%' }}>
-          {suiteId && tab === 'live' && <LiveTab suiteId={suiteId} isMobile={isMobile} reloadKey={reloadKey} onStation={setStationView} />}
+          {suiteId && tab === 'live' && <LiveTab suiteId={suiteId} isMobile={isMobile} reloadKey={reloadKey} onStation={setStationView} onHeldStaff={setHeldStaffView} />}
           {suiteId && tab === 'devices' && <DevicesTab suiteId={suiteId} canManage={canManage} onAct={setActionDevice} flash={flash} reloadKey={reloadKey} />}
           {suiteId && tab === 'stations' && <StationsTab suiteId={suiteId} canManage={canManage} flash={flash} reloadKey={reloadKey} onRefresh={refresh} />}
           {suiteId && tab === 'map' && <MapTab suiteId={suiteId} canManage={canManage} isMobile={isMobile} reloadKey={reloadKey} onStation={setStationView} />}
-          {suiteId && tab === 'staff' && <StaffTab suiteId={suiteId} canManage={canManage} flash={flash} reloadKey={reloadKey} />}
+          {suiteId && tab === 'staff' && <StaffTab suiteId={suiteId} canManage={canManage} flash={flash} reloadKey={reloadKey} onDevice={setActionDevice} />}
           {suiteId && tab === 'checks' && <ChecksTab suiteId={suiteId} canManage={canManage} flash={flash} reloadKey={reloadKey} />}
           {suiteId && tab === 'issues' && <IssuesTab suiteId={suiteId} canManage={canManage} flash={flash} reloadKey={reloadKey} />}
           {suiteId && tab === 'activity' && <ActivityTab suiteId={suiteId} reloadKey={reloadKey} />}
@@ -143,6 +144,18 @@ export default function EventOpsConsole({ entityId, scope = 'admin' }) {
         />
       )}
 
+      {heldStaffView && (
+        <HeldDevicesModal
+          suiteId={suiteId}
+          staffId={heldStaffView.staffId}
+          label={heldStaffView.staffLabel}
+          noStationOnly
+          reloadKey={reloadKey}
+          onClose={() => setHeldStaffView(null)}
+          onDevice={(d) => { setHeldStaffView(null); setActionDevice(d); }}
+        />
+      )}
+
       {actionDevice && (
         <DeviceActionSheet
           suiteId={suiteId}
@@ -158,7 +171,7 @@ export default function EventOpsConsole({ entityId, scope = 'admin' }) {
 }
 
 // ───────────────────────────────── Live tab ──────────────────────────────────
-function LiveTab({ suiteId, isMobile, reloadKey, onStation }) {
+function LiveTab({ suiteId, isMobile, reloadKey, onStation, onHeldStaff }) {
   const [data, setData] = useState(null);
   useEffect(() => {
     let alive = true;
@@ -200,6 +213,21 @@ function LiveTab({ suiteId, isMobile, reloadKey, onStation }) {
           </div>
         )}
       </Section>
+
+      {data.heldByStaff?.length > 0 && (
+        <Section title="With staff">
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(3,1fr)', gap: 10 }}>
+            {data.heldByStaff.map((h) => (
+              <button key={h.staffId} onClick={() => onHeldStaff?.(h)} style={{ ...stationCard, cursor: 'pointer' }} title="See devices held">
+                <div style={{ fontSize: 20 }}>🤝</div>
+                <div style={{ fontWeight: 650, fontSize: 14 }}>{h.staffLabel}</div>
+                <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--brand)' }}>{h.count}</div>
+                <div style={{ fontSize: 11, color: 'var(--muted)' }}>held (no station) ›</div>
+              </button>
+            ))}
+          </div>
+        </Section>
+      )}
     </div>
   );
 }
@@ -223,7 +251,7 @@ function feedText(e) {
   if (e.kind === 'create') return '➕ Device added to inventory';
   if (e.kind === 'check') return `⚠️ ${e.note || 'Issue logged'}${by}`;
   if (e.kind === 'status') return `🔁 Marked ${STATE_LABEL[e.toState] || e.toState}${e.unusual ? ' ⚑' : ''}${by}`;
-  if (e.toHolder) return `🤝 Handed to ${e.toHolder}${e.unusual ? ' ⚑' : ''}${by}`;
+  if (e.toHolder) return `🤝 Handed to ${e.toHolder}${e.toStation ? ` @ ${e.toStation}` : ''}${e.unusual ? ' ⚑' : ''}${by}`;
   const dest = e.toStation || (e.toState === 'in_stock' ? 'Hive' : STATE_LABEL[e.toState] || e.toState);
   const from = e.fromStation || (e.fromState === 'in_stock' ? 'Hive' : STATE_LABEL[e.fromState] || '');
   return `↪️ Moved ${from ? from + ' → ' : ''}${dest}${e.unusual ? ' ⚑ unusual' : ''}${by}`;
@@ -251,21 +279,22 @@ function DevicesTab({ suiteId, canManage, onAct, flash, reloadKey }) {
     for (const d of devices || []) { c[d.state] = (c[d.state] || 0) + 1; if (!d.qrCode) c.unpaired++; }
     return c;
   }, [devices]);
-  // Station pills are derived from the devices themselves (Hive = not deployed anywhere).
+  // Location pills derived from the devices: at a station, held by staff (no station), or Hive.
   const locations = useMemo(() => {
-    const m = new Map(); let hive = 0;
+    const m = new Map(); let hive = 0; let withStaff = 0;
     for (const d of devices || []) {
       if (d.stationId) { const e = m.get(d.stationId) || { name: d.stationName, count: 0 }; e.count++; m.set(d.stationId, e); }
+      else if (d.holderStaffId) withStaff++;
       else hive++;
     }
-    return { hive, stations: [...m.entries()].map(([id, v]) => ({ id, ...v })).sort((a, b) => a.name.localeCompare(b.name)) };
+    return { hive, withStaff, stations: [...m.entries()].map(([id, v]) => ({ id, ...v })).sort((a, b) => a.name.localeCompare(b.name)) };
   }, [devices]);
   const needle = q.trim().toLowerCase();
   const shown = (devices || []).filter((d) =>
     (filter === 'all' || d.state === filter)
-    && (stationFilter === 'all' || (stationFilter === 'hive' ? !d.stationId : d.stationId === stationFilter))
+    && (stationFilter === 'all' || (stationFilter === 'hive' ? (!d.stationId && !d.holderStaffId) : stationFilter === 'staff' ? (!d.stationId && d.holderStaffId) : d.stationId === stationFilter))
     && (pairFilter === 'all' || (pairFilter === 'unpaired' ? !d.qrCode : !!d.qrCode))
-    && (!needle || [d.label, d.qrCode, d.serialNumber, d.stationName].some((v) => (v || '').toLowerCase().includes(needle))));
+    && (!needle || [d.label, d.qrCode, d.serialNumber, d.stationName, d.holderName].some((v) => (v || '').toLowerCase().includes(needle))));
 
   if (devices === null) return <Loading />;
   return (
@@ -291,10 +320,11 @@ function DevicesTab({ suiteId, canManage, onAct, flash, reloadKey }) {
         )}
       </div>
       {/* Station/location filter pills */}
-      {(locations.stations.length > 0 || locations.hive > 0) && (
+      {(locations.stations.length > 0 || locations.hive > 0 || locations.withStaff > 0) && (
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           <Chip on={stationFilter === 'all'} onClick={() => setStationFilter('all')}>All stations</Chip>
           {locations.hive > 0 && <Chip on={stationFilter === 'hive'} onClick={() => setStationFilter('hive')}>🏠 Hive {locations.hive}</Chip>}
+          {locations.withStaff > 0 && <Chip on={stationFilter === 'staff'} onClick={() => setStationFilter('staff')}>🤝 With staff {locations.withStaff}</Chip>}
           {locations.stations.map((s) => (
             <Chip key={s.id} on={stationFilter === s.id} onClick={() => setStationFilter(s.id)}>{s.name} {s.count}</Chip>
           ))}
@@ -718,6 +748,7 @@ function DeviceActionSheet({ suiteId, device, onClose, onDone }) {
   const [categories, setCategories] = useState([]);
   const [issue, setIssue] = useState({ category: '', note: '', resolution: '' });
   const [statusForm, setStatusForm] = useState(null); // { state, comment } when marking lost/damaged
+  const [holderPick, setHolderPick] = useState(null); // { id, label } staff chosen, awaiting station choice
   const [pairing, setPairing] = useState(false); // scanner open to pair a QR
   const [manualQr, setManualQr] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -785,6 +816,21 @@ function DeviceActionSheet({ suiteId, device, onClose, onDone }) {
       {view === 'log' ? (
         <DeviceActivity events={events} />
       ) : view === 'move' ? (
+        holderPick ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ fontWeight: 700, fontSize: 14 }}>🤝 Hand to {holderPick.label}</div>
+            <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>Are they at a station? Pick one, or hand it over without a station.</div>
+            {stations.map((s) => (
+              <button key={s.id} disabled={busy} onClick={() => move({ holderStaffId: holderPick.id, stationId: s.id }, `🤝 ${holderPick.label} @ ${s.name}`)} style={destBtn}>
+                {KIND_ICON[s.kind] || '📍'} {s.name}
+              </button>
+            ))}
+            <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+              <button disabled={busy} onClick={() => move({ holderStaffId: holderPick.id }, `🤝 ${holderPick.label}`)} style={primaryBtn}>{busy ? 'Saving…' : 'No station — hand it over'}</button>
+              <button disabled={busy} onClick={() => setHolderPick(null)} style={ghostBtn}>Back</button>
+            </div>
+          </div>
+        ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{ fontSize: 12, color: 'var(--muted)' }}>Send to:</div>
           <button disabled={busy} onClick={() => move({ stationId: 'hive' }, 'Hive')} style={destBtn}>🏠 Hive (in stock)</button>
@@ -798,7 +844,7 @@ function DeviceActionSheet({ suiteId, device, onClose, onDone }) {
             <select
               value=""
               disabled={busy}
-              onChange={(e) => { const s = staff.find((x) => x.id === e.target.value); if (s) move({ holderStaffId: s.id }, `🤝 ${s.number ? `#${s.number} ` : ''}${s.name}`); }}
+              onChange={(e) => { const s = staff.find((x) => x.id === e.target.value); if (s) setHolderPick({ id: s.id, label: `${s.number ? `#${s.number} ` : ''}${s.name}` }); }}
               style={{ ...destBtn, cursor: 'pointer' }}
             >
               <option value="">🤝 Hand to a staff member…</option>
@@ -822,6 +868,7 @@ function DeviceActionSheet({ suiteId, device, onClose, onDone }) {
             </div>
           )}
         </div>
+        )
       ) : view === 'issue' ? (
         <div style={fieldCol}>
           <div>
@@ -907,7 +954,8 @@ function ConsoleMoveFlow({ suiteId, onClose, onDone, flash }) {
   const [stations, setStations] = useState([]);
   const [staff, setStaff] = useState([]);
   const [staffId, setStaffId] = useState('');
-  const [dest, setDest] = useState(null);      // { id, name, kind } — id 'hive' = back to stock
+  const [dest, setDest] = useState(null);      // { id, name, kind, staff?, stationId? } — id 'hive' = back to stock
+  const [pendingStaff, setPendingStaff] = useState(null); // staff chosen, awaiting station decision
   const [mode, setMode] = useState(null);       // 'single' | 'multiple'
   const [scanning, setScanning] = useState(false);
   const [scanKey, setScanKey] = useState(0);    // bump to remount the one-shot scanner
@@ -928,7 +976,7 @@ function ConsoleMoveFlow({ suiteId, onClose, onDone, flash }) {
     setBusy(true);
     try {
       const dev = (await api.eventopsScan(suiteId, code)).device;
-      const moveBody = dest.staff ? { deviceId: dev.id, holderStaffId: dest.id, staffId } : { deviceId: dev.id, stationId: dest.id, staffId };
+      const moveBody = dest.staff ? { deviceId: dev.id, holderStaffId: dest.id, stationId: dest.stationId, staffId } : { deviceId: dev.id, stationId: dest.id, staffId };
       const mv = await api.eventopsMove(suiteId, moveBody);
       const label = dev.label || dev.qrCode || 'Device';
       setMoved((m) => [...m, label]);
@@ -959,6 +1007,19 @@ function ConsoleMoveFlow({ suiteId, onClose, onDone, flash }) {
   return (
     <Modal title="🔀 Move devices" subtitle={dest ? `To ${destLabel}` : 'Pick where the devices are going'} onClose={onClose}>
       {!dest ? (
+        pendingStaff ? (
+          <div style={fieldCol}>
+            <div style={{ fontWeight: 700, fontSize: 14 }}>🤝 Hand to {pendingStaff.name}</div>
+            <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>Are they at a station? Pick one, or hand it over without a station.</div>
+            {stations.map((s) => (
+              <button key={s.id} onClick={() => setDest({ id: pendingStaff.id, name: `${pendingStaff.name} @ ${s.name}`, staff: true, stationId: s.id })} style={destBtn}>{KIND_ICON[s.kind] || '📍'} {s.name}</button>
+            ))}
+            <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+              <button onClick={() => setDest({ id: pendingStaff.id, name: pendingStaff.name, staff: true })} style={primaryBtn}>No station — just hand it over</button>
+              <button onClick={() => setPendingStaff(null)} style={ghostBtn}>Back</button>
+            </div>
+          </div>
+        ) : (
         <div style={fieldCol}>
           {staff.length > 0 && (
             <Field label="Done by (optional)">
@@ -976,7 +1037,7 @@ function ConsoleMoveFlow({ suiteId, onClose, onDone, flash }) {
                 <button key={s.id} onClick={() => setDest(s)} style={destBtn}>{KIND_ICON[s.kind] || '📍'} {s.name} <span style={{ color: 'var(--muted)', fontSize: 12 }}>({s.deviceCount})</span></button>
               ))}
               {staff.length > 0 && (
-                <select value="" onChange={(e) => { const s = staff.find((x) => x.id === e.target.value); if (s) setDest({ id: s.id, name: `${s.number ? `#${s.number} ` : ''}${s.name}`, staff: true }); }} style={{ ...destBtn, cursor: 'pointer' }}>
+                <select value="" onChange={(e) => { const s = staff.find((x) => x.id === e.target.value); if (s) setPendingStaff({ id: s.id, name: `${s.number ? `#${s.number} ` : ''}${s.name}` }); }} style={{ ...destBtn, cursor: 'pointer' }}>
                   <option value="">🤝 A staff member…</option>
                   {staff.map((s) => <option key={s.id} value={s.id}>{s.number ? `#${s.number} ` : ''}{s.name}</option>)}
                 </select>
@@ -985,12 +1046,13 @@ function ConsoleMoveFlow({ suiteId, onClose, onDone, flash }) {
             </div>
           </div>
         </div>
+        )
       ) : !mode ? (
         <div style={fieldCol}>
           <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>Moving to <strong style={{ color: 'var(--text)' }}>{destLabel}</strong>. How many devices?</div>
           <button onClick={() => chooseMode('single')} style={destBtn}>1️⃣ Single — scan one device, done</button>
           <button onClick={() => chooseMode('multiple')} style={destBtn}>🔢 Multiple — scan several, then finish</button>
-          <button onClick={() => setDest(null)} style={ghostBtn}>← Change destination</button>
+          <button onClick={() => { setDest(null); setPendingStaff(null); }} style={ghostBtn}>← Change destination</button>
         </div>
       ) : (
         <div style={fieldCol}>
@@ -1110,13 +1172,16 @@ function MapTab({ suiteId, canManage, isMobile, reloadKey, onStation }) {
 }
 
 // ───────────────────────────────── Staff tab ──────────────────────────────────
-function StaffTab({ suiteId, canManage, flash, reloadKey }) {
+function StaffTab({ suiteId, canManage, flash, reloadKey, onDevice }) {
   const [staff, setStaff] = useState(null);
   const [stations, setStations] = useState([]);
+  const [devices, setDevices] = useState([]);
   const [stationFilter, setStationFilter] = useState('all'); // all | unassigned | stationId
   const [form, setForm] = useState(null); // null | { id?, name, number, role, stationIds:[] }
+  const [heldFor, setHeldFor] = useState(null); // staff whose held devices are being viewed
   const load = () => api.eventopsStaff(suiteId).then((r) => setStaff(r.staff || [])).catch(() => setStaff([]));
-  useEffect(() => { setStaff(null); load(); api.eventopsStations(suiteId).then((r) => setStations(r.stations || [])).catch(() => {}); }, [suiteId, reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setStaff(null); load(); api.eventopsStations(suiteId).then((r) => setStations(r.stations || [])).catch(() => {}); api.eventopsDevices(suiteId).then((r) => setDevices(r.devices || [])).catch(() => {}); }, [suiteId, reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const heldCount = useMemo(() => { const m = {}; for (const d of devices) if (d.holderStaffId) m[d.holderStaffId] = (m[d.holderStaffId] || 0) + 1; return m; }, [devices]);
 
   async function save() {
     try {
@@ -1169,12 +1234,17 @@ function StaffTab({ suiteId, canManage, flash, reloadKey }) {
                   <div style={{ fontSize: 12, color: 'var(--muted)' }}>{[s.role, s.stations.map((x) => x.name).join(', ')].filter(Boolean).join(' · ') || 'Unassigned'}</div>
                 </div>
               </div>
-              {canManage && (
-                <div style={{ display: 'flex', gap: 6 }}>
-                  <button onClick={() => setForm({ id: s.id, name: s.name, number: s.number, role: s.role, stationIds: s.stationIds || [], canMove: s.canMove !== false, canCheckpoint: !!s.canCheckpoint })} style={iconBtn}>✏️</button>
-                  <button onClick={() => remove(s)} style={iconBtn}>🗑️</button>
-                </div>
-              )}
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                {heldCount[s.id] > 0 && (
+                  <button onClick={() => setHeldFor(s)} style={{ ...badge, background: 'rgba(var(--brand-rgb),0.14)', color: 'var(--brand)', border: 'none', cursor: 'pointer' }} title="Devices held by this person">🤝 {heldCount[s.id]}</button>
+                )}
+                {canManage && (
+                  <>
+                    <button onClick={() => setForm({ id: s.id, name: s.name, number: s.number, role: s.role, stationIds: s.stationIds || [], canMove: s.canMove !== false, canCheckpoint: !!s.canCheckpoint })} style={iconBtn}>✏️</button>
+                    <button onClick={() => remove(s)} style={iconBtn}>🗑️</button>
+                  </>
+                )}
+              </div>
             </div>
           ))}
         </div>
@@ -1211,6 +1281,16 @@ function StaffTab({ suiteId, canManage, flash, reloadKey }) {
             <button onClick={save} disabled={!form.name.trim() && !form.number.trim()} style={primaryBtn}>Save</button>
           </div>
         </Modal>
+      )}
+      {heldFor && (
+        <HeldDevicesModal
+          suiteId={suiteId}
+          staffId={heldFor.id}
+          label={`${heldFor.number ? `#${heldFor.number} ` : ''}${heldFor.name || 'Staff'}`}
+          reloadKey={reloadKey}
+          onClose={() => setHeldFor(null)}
+          onDevice={(d) => { setHeldFor(null); onDevice?.(d); }}
+        />
       )}
     </div>
   );
@@ -1312,6 +1392,35 @@ function StationDevicesModal({ suiteId, station, reloadKey, onClose, onDevice })
               {i.note && <div style={{ fontSize: 13, marginTop: 2 }}>{i.note}</div>}
               <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>{i.staffLabel ? `${i.staffLabel} · ` : ''}⏱ {dur(i.reportedAt)}</div>
             </div>
+          ))}
+        </div>
+      )}
+    </Drawer>
+  );
+}
+
+// Drill-down: the devices a staff member is currently holding (optionally only those not
+// placed at a station). Used from the Live "With staff" grouping and the staff record.
+function HeldDevicesModal({ suiteId, staffId, label, noStationOnly, reloadKey, onClose, onDevice }) {
+  const [devices, setDevices] = useState(null);
+  useEffect(() => {
+    api.eventopsDevices(suiteId)
+      .then((r) => setDevices((r.devices || []).filter((d) => d.holderStaffId === staffId && (!noStationOnly || !d.stationId))))
+      .catch(() => setDevices([]));
+  }, [suiteId, staffId, noStationOnly, reloadKey]);
+  return (
+    <Drawer title={`🤝 ${label}`} subtitle="Devices in their hands" onClose={onClose}>
+      <div style={sectionLabel}>Held ({devices?.length ?? '…'})</div>
+      {devices === null ? <Loading /> : devices.length === 0 ? <Empty>No devices held right now.</Empty> : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {devices.map((d) => (
+            <button key={d.id} onClick={() => onDevice(d)} style={deviceRow(true)}>
+              <div style={{ textAlign: 'left', minWidth: 0 }}>
+                <div style={{ fontWeight: 650, fontSize: 14 }}>{d.label || d.qrCode || 'Device'}</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)' }}>{titleCase(d.type)} · {d.stationName ? `📍 ${d.stationName}` : 'no station'}</div>
+              </div>
+              <span style={{ fontSize: 12, color: 'var(--brand)', fontWeight: 700, whiteSpace: 'nowrap' }}>Move ›</span>
+            </button>
           ))}
         </div>
       )}
