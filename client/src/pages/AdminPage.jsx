@@ -23,6 +23,7 @@ import OwlGuidanceEditor from '../components/OwlGuidanceEditor.jsx';
 import OwlFieldDictionary from '../components/OwlFieldDictionary.jsx';
 import OwlMemoryEditor from '../components/OwlMemoryEditor.jsx';
 import WhatsAppOwl from '../components/WhatsAppOwl.jsx';
+import OwlEmbedAdmin from '../components/OwlEmbedAdmin.jsx';
 import OwlCatalogue from '../components/OwlCatalogue.jsx';
 import UploadHint from '../components/UploadHint.jsx';
 import { currencyList } from '../lib/currency.js';
@@ -4214,6 +4215,9 @@ function AISettings() {
       </Section>
       <Section title="WhatsApp Owl (beta)">
         <WhatsAppOwl />
+      </Section>
+      <Section title="Organizer portal Owl (pilot)">
+        <OwlEmbedAdmin />
       </Section>
       <Section title="Home briefing"><BriefingSettings /></Section>
       <Section title="Reader feedback"><BriefingFeedback /></Section>

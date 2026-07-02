@@ -76,6 +76,20 @@ function mount(app, { apiKeys, core, rateLimit }) {
       run: (u, a) => core.getCampaign(u, a.campaignId),
     },
     {
+      name: 'pulse_event_ops',
+      scope: 'read_rows', // operational row-level data (staff names, device movements)
+      description: 'LIVE, per event. On-the-ground Event Ops: query=overview (device totals per station + open issues + recent checkpoints), locate (find ONE device by its code), or the devices / issues / staff / stations / checkpoints lists. Requires a suiteId (event) from pulse_get_me and a key with the read_rows scope.',
+      input: {
+        suiteId: z.string().describe('Event (suite) id from pulse_get_me'),
+        query: z.enum(['overview', 'locate', 'devices', 'issues', 'staff', 'stations', 'checkpoints']).optional().describe('What to fetch (default overview)'),
+        code: z.string().optional().describe('For locate: the device QR code / serial / label (e.g. SL005)'),
+        state: z.enum(['in_stock', 'deployed', 'returned', 'lost', 'damaged']).optional().describe('For devices: filter by state'),
+        station: z.string().optional().describe('Filter by station name (devices/staff/checkpoints)'),
+        status: z.enum(['open', 'resolved', 'all']).optional().describe('For issues: which ones (default open)'),
+      },
+      run: (u, a) => core.eventOps(u, a),
+    },
+    {
       name: 'pulse_get_tile_rows',
       scope: 'read_rows', // only registered for keys that explicitly carry it
       description: 'ROW-LEVEL data, LIVE (one query; payload can be large — keep `limit` as small as the task allows). The table behind a tile, every column incl. display-hidden ones, e.g. customer/ticketing records. Requires the read_rows scope; rows may contain personal data.',

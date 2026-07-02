@@ -29,6 +29,7 @@ const DocumentViewPage = lazy(() => import('./pages/DocumentViewPage.jsx'));
 const DigestsPage = lazy(() => import('./pages/DigestsPage.jsx'));
 const SocialPage = lazy(() => import('./pages/SocialPage.jsx'));
 const InventiveAskPage = lazy(() => import('./pages/InventiveAskPage.jsx'));
+const OwlEmbedPage = lazy(() => import('./pages/OwlEmbedPage.jsx'));
 const EventOpsPage = lazy(() => import('./pages/EventOpsPage.jsx'));
 const EventOpsPortalPage = lazy(() => import('./pages/EventOpsPortalPage.jsx'));
 import Logo from './components/Logo.jsx';
@@ -339,6 +340,20 @@ function Shell() {
 }
 
 export default function App() {
+  // The organizer-portal Owl (docs/OWL_EMBED.md): a chromeless page with its own
+  // token auth. It mounts OUTSIDE AuthProvider/router — there's no cookie session
+  // in a cross-site iframe, and those would bounce the visitor to the login screen.
+  if (window.location.pathname === '/embed/owl') {
+    return (
+      <RootErrorBoundary>
+        <ThemeProvider>
+          <Suspense fallback={<ScreenFallback />}>
+            <OwlEmbedPage />
+          </Suspense>
+        </ThemeProvider>
+      </RootErrorBoundary>
+    );
+  }
   return (
     <RootErrorBoundary>
       <ThemeProvider>

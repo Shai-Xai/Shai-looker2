@@ -223,6 +223,22 @@ function mount(app, { db, auth, rateLimit, apiKeys, clientCatalogue, resolveTile
     return { source: t.cat?.key || 'primary', measure: out.measure, dimensions: out.dimensions, count: out.count, rows: out.rows, asOf: asOf() };
   }
 
+  // ── Event Ops (per event: devices, stations, staff, issues, checkpoints) ──
+  // Delegates to the Owl's eventOps runner, which enforces suite access + the
+  // per-client "Event Ops enabled" switch and refuses cleanly. Gated behind the
+  // read_rows scope at the surface (staff names + device movements are
+  // operational row-level data, not aggregates).
+  async function eventOps(user, { suiteId, ...args } = {}) {
+    if (!suiteId) throw new HttpError(400, 'suiteId is required — Event Ops answers are per event (see /api/v1/me)');
+    if (!auth.canAccessSuite(user, suiteId)) throw new HttpError(403, 'No access to that suite');
+    const t = getOwlTools().eventOps;
+    if (!t) throw new HttpError(404, 'Event Ops isn’t available');
+    const out = await t.run(args, { user, suiteId, entityId: entityOf(user) });
+    if (!out || out.ok !== true) throw new HttpError(400, (out && out.message) || 'Event Ops couldn’t answer that.');
+    const { ok, ...data } = out;
+    return { suiteId, ...data, asOf: asOf() };
+  }
+
   // ── OpenAI/ChatGPT-compatible search + fetch (over the same read core) ──
   // ChatGPT connectors require an MCP server to expose `search` and `fetch`.
   // A "document" here is any addressable read item — a dashboard, segment,
@@ -293,7 +309,7 @@ function mount(app, { db, auth, rateLimit, apiKeys, clientCatalogue, resolveTile
     throw new HttpError(404, 'Unknown document id');
   }
 
-  const core = { me, listDashboards, getDashboard, metric, listSegments, getSegment, segmentReach, listCampaigns, getCampaign, listGoals, tileRows, search, fetchDoc, listDataSources, queryData };
+  const core = { me, listDashboards, getDashboard, metric, listSegments, getSegment, segmentReach, listCampaigns, getCampaign, listGoals, tileRows, search, fetchDoc, listDataSources, queryData, eventOps };
 
   // ── REST routes — thin wrappers, key-authed, rate-limited, audited ──
   const perKey = (max, scope) => rateLimit({ windowMs: 60_000, max, by: (req) => `key:${req.apiKey?.id}`, scope });
@@ -319,6 +335,11 @@ function mount(app, { db, auth, rateLimit, apiKeys, clientCatalogue, resolveTile
   app.get('/api/v1/data-sources', ...guard, (req, res) => res.json({ sources: listDataSources(req.user) }));
   app.post('/api/v1/query', ...guard, heavy, asyncHandler(async (req, res) => {
     res.json(await queryData(req.user, req.body || {}));
+  }));
+  // Event Ops — read_rows scope (operational row-level data: staff, devices).
+  app.get('/api/v1/event-ops', apiKeys.bearerAuth, apiKeys.auditware('rest'), perKey(120, 'apiv1'), apiKeys.requireScope('read_rows'), heavy, asyncHandler(async (req, res) => {
+    const { suiteId, query, code, state, station, status } = req.query;
+    res.json(await eventOps(req.user, { suiteId, query, code, state, station, status }));
   }));
   // Row-level tile data — requires the `read_rows` scope (explicit opt-in per
   // key; rows can carry customer/ticketing personal data).

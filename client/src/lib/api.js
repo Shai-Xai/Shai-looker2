@@ -219,6 +219,9 @@ export const api = {
   adminCreateEntity: (e) => fetch('/api/admin/entities', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(e) }).then(json),
   adminUpdateEntity: (id, e) => fetch(`/api/admin/entities/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(e) }).then(json),
   adminDeleteEntity: (id) => fetch(`/api/admin/entities/${id}`, { method: 'DELETE' }),
+  // Organizer-portal Owl embed (admin config — server/owlEmbed.js).
+  getOwlEmbed: () => fetch('/api/admin/owl-embed').then(json),
+  saveOwlEmbed: (body) => fetch('/api/admin/owl-embed', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
   owlWhatsapp: () => fetch('/api/admin/owl-whatsapp').then(json),
   saveOwlWhatsapp: (body) => fetch('/api/admin/owl-whatsapp', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
   testOwlWhatsapp: (to, text) => fetch('/api/admin/owl-whatsapp/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to, text }) }).then(json),

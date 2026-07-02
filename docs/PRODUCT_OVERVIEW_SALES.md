@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-01 · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-02 · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -134,6 +134,25 @@ approval needed.
   to buyers from WhatsApp.
 - **Status 🧪:** pilot. Howler links each phone number to its client in **Admin →
   WhatsApp Owl**, where a live activity log shows inbound messages end-to-end.
+
+### The Owl in the Howler organizer portal  🧪
+The same Owl, embedded **inside Howler's own organizer portal** — organizers ask
+about their ticket sales without leaving the back end they already use every day.
+- **No extra login** — the portal signs the organizer in behind the scenes
+  (server-to-server handshake); their first question auto-creates their Pulse
+  identity, so saved chats and Owl memory carry across sessions.
+- **Same answers, same safety** — it's the identical Owl brain and the identical
+  server-side scope gate: an organizer sees **only their own organization's data**,
+  with charts, follow-up chips and saved threads, in a panel that works great on
+  mobile.
+- **Status 🧪:** pilot. Works today for organizations that exist as Pulse clients —
+  Howler links each Howler organization to its Pulse client in **Admin → AI →
+  Organizer portal Owl** and hands the portal team a one-iframe embed
+  (`docs/OWL_EMBED.md`). When the Howler→Pulse data integration ships, the same
+  embed lights up for every self-service organizer automatically.
+
+**Pitch:** "The analyst comes to where organizers already work — Howler's portal
+gets an AI data analyst pane, powered by Pulse."
 
 ## 2. Scheduled digests  ✅
 - Automated **email digests** (e.g. morning briefing) written for a **named role**
@@ -599,11 +618,23 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-02** — **The Owl inside the Howler organizer portal** 🧪: the Owl can now be
+  **embedded in Howler's own organizer portal** — the portal's backend does a secure
+  server-to-server handshake with Pulse and drops a one-iframe Owl panel into its UI.
+  Organizers get the full chat analyst (charts, follow-ups, saved threads, mobile-first)
+  with no extra login, always scoped to **their own organization's data**. Pilot: works for
+  organizations linked to a Pulse client (Admin → AI → Organizer portal Owl); widens to all
+  self-service organizers when the Howler→Pulse data integration ships.
 - **2026-07-01** — **Owl chat: ⏹ Stop button + no more silent stalls** 🧪: while the Owl is
   working you can now **tap Stop** to cancel the answer (the server abandons the work too, so
   nothing keeps burning in the background). And long data pulls no longer look frozen — the
   thinking line keeps refreshing every few seconds and the connection is kept alive, so a heavy
   query (e.g. a big cashless breakdown) shows progress instead of hanging on "Thinking…".
+- **2026-07-02** — **API: Event Ops data (row-level keys)** 🧪: connected tools and AI
+  agents with the row-level scope can now pull **live Event Ops** per event — device
+  totals per station, locate a device by code, open issues, staff, checkpoints
+  (`GET /api/v1/event-ops` / the `pulse_event_ops` MCP tool). Honours the per-client
+  Event Ops switch; per-event only; same audit trail.
 - **2026-07-02** — **Connected AI assistants speak as the Owl** 🧪: connect Claude (or
   ChatGPT) and it presents itself as **the Owl 🦉** — Pulse's data analyst — same persona
   as in-app: warm, numbers-first, grounded in tool results, read-only. The connection
