@@ -107,6 +107,14 @@ test('public context: bad key 404s, wrong origin 403s, allowed origin mints a se
   assert.equal(r4.body.offer.label, 'Weekend Pass');
 });
 
+test('a matched page with NO ticked items still leads with what fits the page type', async () => {
+  const { e, admin, site } = await provision('ptype');
+  await app.req('PUT', `/api/admin/entities/${e.id}/fan-owl`, { as: admin, body: { sites: [{ ...site, pages: [{ urlPattern: '/venue', pageType: 'venue', itemIds: [], note: '' }] }] } });
+  const r = await app.req('POST', '/api/fan/context', { body: { siteKey: site.siteKey, url: 'https://fest.example/venue' }, headers: ORIGIN });
+  assert.equal(r.body.pageType, 'venue');
+  assert.equal(r.body.offer.label, 'Camping'); // add-on first on venue/attraction pages
+});
+
 test('disabled site serves nothing, and non-public items never reach fans', async () => {
   const { e, admin, site } = await provision('off');
   const r = await app.req('POST', '/api/fan/context', { body: { siteKey: site.siteKey, url: 'https://fest.example/' }, headers: ORIGIN });
@@ -171,6 +179,7 @@ test('preview page: serves the widget for a valid key, hints on off/unknown, rej
   const html = await fetch(`${app.base}/fan-owl-test?k=${site.siteKey}`).then((r) => r.text());
   assert.ok(html.includes(`data-site-key="${site.siteKey}"`), 'widget script wired to the key');
   assert.ok(!html.includes('⚠️'), 'no warning for an enabled site');
+  assert.ok(html.includes('path=/artists/'), 'nav links generated from the site’s real page mappings');
   await app.req('PUT', `/api/admin/entities/${e.id}/fan-owl`, { as: admin, body: { sites: [{ ...site, enabled: false }] } });
   assert.ok((await fetch(`${app.base}/fan-owl-test?k=${site.siteKey}`).then((r) => r.text())).includes('switched OFF'));
   assert.equal((await fetch(`${app.base}/fan-owl-test?k=<script>alert(1)</script>`)).status, 400);

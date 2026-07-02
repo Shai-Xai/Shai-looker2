@@ -352,19 +352,28 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
     const site = siteByKey.get(k);
     const hint = !site ? 'That site key doesn’t exist — check it in Pulse → Fan Owl.'
       : (!site.enabled ? 'This site is switched OFF — tick “Enabled” in Pulse → Fan Owl and save, then refresh.' : '');
+    // The nav links come from the site's REAL page mappings: each link embeds the
+    // mapping's pattern in the URL, so clicking it genuinely matches that mapping
+    // and the ribbon/chat switch context — an honest preview, not a mock.
+    const navLinks = (site ? pagesBySite.all(site.id) : []).slice(0, 10).map((p) => {
+      const frag = p.url_pattern.replace(/\*/g, '').replace(/[^\w/\-.:]/g, '').trim();
+      return frag ? `<a href="?k=${k}&path=${frag}">${p.page_type}: ${frag}</a>` : '';
+    }).filter(Boolean).join('');
     res.set('Content-Type', 'text/html; charset=utf-8').send(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Fan Owl preview</title>
-<style>body{font-family:-apple-system,system-ui,sans-serif;margin:0;color:#222}header{background:#1a1a2e;color:#fff;padding:56px 24px;text-align:center}h1{margin:0 0 8px;font-size:32px}main{max-width:680px;margin:0 auto;padding:24px;line-height:1.6}nav a{margin-right:14px}.warn{background:#fff3cd;border:1px solid #eedca6;border-radius:10px;padding:10px 14px;font-size:14px}</style>
+<style>body{font-family:-apple-system,system-ui,sans-serif;margin:0;color:#222}header{background:#1a1a2e;color:#fff;padding:56px 24px;text-align:center}h1{margin:0 0 8px;font-size:32px}main{max-width:680px;margin:0 auto;padding:24px;line-height:1.6}nav a{margin-right:14px}.warn{background:#fff3cd;border:1px solid #eedca6;border-radius:10px;padding:10px 14px;font-size:14px}.note{background:#eef4ff;border:1px solid #d5e3fb;border-radius:10px;padding:10px 14px;font-size:14px}</style>
 </head><body>
 <header><h1>🎪 ${site && (site.name || '') ? String(site.name).replace(/[<>&]/g, '') : 'Preview event site'}</h1><p>A pretend event page for previewing the Fan Owl widget.</p></header>
 <main>
 ${hint ? `<p class="warn">⚠️ ${hint}</p>` : ''}
-<nav><a href="?k=${k}&p=artist">Artist page</a><a href="?k=${k}&p=tickets">Tickets page</a><a href="?k=${k}&p=venue">Venue page</a></nav>
+${navLinks ? `<p><strong>Your page mappings</strong> — click through and watch the ribbon + chat context switch:</p><nav>${navLinks}</nav>`
+    : '<p class="note">💡 No page mappings yet — add them in Pulse → Fan Owl (or run “Read the website”), tick the catalogue items each page should lead with, Save, then refresh: they appear here as clickable test links.</p>'}
 <h2>About the festival</h2>
 <p>This copy is set dressing — the thing you're previewing is the 🦉 button
-bottom-right and the teaser bubble above it. The links above change the page URL,
-so you can watch your page mappings change the ribbon.</p>
+bottom-right and the teaser bubble above it. The ribbon only differs per page
+where a page mapping matches AND has catalogue items ticked (or a page type,
+like attraction/venue, that reorders the offer).</p>
 <p>Try in the chat: “Which ticket do I need?” · “What's the refund policy?” ·
 something NOT in your knowledge base (it should honestly say it doesn't know) ·
 “I'll take one” (→ buy button) · tap 🔔 for the consent form.</p>
@@ -398,7 +407,13 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
     const page = matchPage(site, url);
     const mappedIds = page ? J(page.item_ids, []) : [];
     const mapped = mappedIds.map((id) => all.find((c) => c.id === id)).filter(Boolean);
-    const items = mapped.length ? mapped : all;
+    let items = mapped.length ? mapped : all;
+    // A matched page with NO ticked items still leads with what fits the page
+    // type (attraction/venue → add-ons first), so pages differ sensibly even
+    // before the promoter curates per-page items.
+    if (!mapped.length && page && (page.page_type === 'attraction' || page.page_type === 'venue')) {
+      items = [...items.filter((c) => c.kind === 'addon'), ...items.filter((c) => c.kind !== 'addon')];
+    }
     return { page, items, primary: items[0] || null, all };
   }
 
