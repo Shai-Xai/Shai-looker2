@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState, useLayoutEffect } from 'react';
-import ReactECharts from 'echarts-for-react';
-import * as echarts from 'echarts';
+import ReactECharts from 'echarts-for-react/lib/core';
+import echarts from '../../lib/echarts.js';
 import { cellText, formatNumber, formatAxis } from '../../lib/format.js';
 import { useDrill } from '../../lib/DrillContext.jsx';
 import { useTheme } from '../../lib/theme.jsx';
@@ -102,6 +102,7 @@ export default function ChartTile({ data, visConfig = {} }) {
   return (
     <div ref={boxRef} style={{ width: '100%', height: '100%', padding: 6 }}>
       <ReactECharts
+        echarts={echarts}
         option={option}
         notMerge
         style={{ width: '100%', height: '100%' }}

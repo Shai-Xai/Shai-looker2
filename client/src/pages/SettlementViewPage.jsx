@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import ReactECharts from 'echarts-for-react';
+import ReactECharts from 'echarts-for-react/lib/core';
+import echarts from '../lib/echarts.js';
 import { api } from '../lib/api.js';
 import { chartPalette } from '../lib/brand.js';
 import { useAuth } from '../lib/auth.jsx';
@@ -334,7 +335,7 @@ function Waterfall({ d, dark, isMobile }) {
       ],
     };
   }, [d, dark, isMobile]);
-  return <ReactECharts option={option} style={{ height: isMobile ? 240 : 320 }} notMerge />;
+  return <ReactECharts echarts={echarts} option={option} style={{ height: isMobile ? 240 : 320 }} notMerge />;
 }
 
 // ─── Commission mix donut ─────────────────────────────────────────────────────
@@ -349,7 +350,7 @@ function CommissionDonut({ groups, dark }) {
       data: groups.map((g, i) => ({ name: shortName(g.name), value: Math.abs(g.subtotal?.total || 0), itemStyle: { color: chartPalette()[i % 4] } })),
     }],
   }), [groups, dark]);
-  return <ReactECharts option={option} style={{ height: 230 }} notMerge />;
+  return <ReactECharts echarts={echarts} option={option} style={{ height: 230 }} notMerge />;
 }
 
 // ─── Payments over time ───────────────────────────────────────────────────────
@@ -373,7 +374,7 @@ function PaymentsChart({ d, dark, isMobile }) {
       ],
     };
   }, [d, dark]);
-  return <ReactECharts option={option} style={{ height: isMobile ? 200 : 240 }} notMerge />;
+  return <ReactECharts echarts={echarts} option={option} style={{ height: isMobile ? 200 : 240 }} notMerge />;
 }
 
 // ─── Sales table: flat or grouped-by-category, with search ────────────────────

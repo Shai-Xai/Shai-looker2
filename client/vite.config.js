@@ -27,6 +27,12 @@ export default defineConfig({
         manualChunks(id) {
           if (!id.includes('node_modules')) return undefined;
           if (id.includes('echarts')) return 'echarts';
+          // These are dynamically imported (SegmentManager xlsx export, EventOps
+          // OCR/QR scanner) and only on admin/EventOps flows. Returning undefined
+          // keeps them OUT of the eagerly-loaded `vendor` chunk so they follow
+          // their dynamic importers into lazy chunks — otherwise every client
+          // phone downloads ~430KB of spreadsheet/OCR/camera code at first paint.
+          if (/[\\/]node_modules[\\/](xlsx|tesseract\.js|html5-qrcode)[\\/]/.test(id)) return undefined;
           return 'vendor';
         },
       },

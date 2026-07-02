@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, useRef, lazy, Suspense, Component } from 'react';
-import ReactECharts from 'echarts-for-react';
+import ReactECharts from 'echarts-for-react/lib/core';
+import echarts from '../lib/echarts.js';
 import { api } from '../lib/api.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
 
@@ -180,7 +181,7 @@ function LiveTab({ suiteId, isMobile, reloadKey, onStation }) {
       {(data.stations.length > 0 || t.devices > 0) && (
         <Section title="Devices by location">
           <div style={card}>
-            <ReactECharts style={{ height: 240 }} opts={{ renderer: 'svg' }} option={devicesByStationOption(data)} notMerge lazyUpdate />
+            <ReactECharts echarts={echarts} style={{ height: 240 }} opts={{ renderer: 'svg' }} option={devicesByStationOption(data)} notMerge lazyUpdate />
           </div>
         </Section>
       )}
