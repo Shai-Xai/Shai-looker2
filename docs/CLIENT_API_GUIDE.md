@@ -99,6 +99,28 @@ event is selling."*
 The assistant can only ever **look things up** — it can't send campaigns,
 change settings or spend money on your behalf.
 
+#### ChatGPT (and other OpenAI tools)
+
+Pulse works with OpenAI too — it's the same MCP connection:
+
+- **ChatGPT:** with a Plus/Pro/Business/Enterprise plan, turn on **Developer
+  mode** (Settings → Connectors), add a custom connector pointing at
+  `https://your-pulse-domain/mcp`, and approve on the Pulse page exactly like
+  Claude. Pulse also exposes the standard `search` and `fetch` tools ChatGPT
+  needs, so it works for Deep Research and "company knowledge" style questions.
+- **OpenAI Responses API (developers):** point the built-in MCP tool at the
+  same URL with your key as a Bearer header — no extra setup:
+
+  ```python
+  client.responses.create(
+    model="gpt-5",
+    tools=[{"type": "mcp", "server_label": "pulse",
+            "server_url": "https://your-pulse-domain/mcp",
+            "headers": {"Authorization": "Bearer pulse_sk_…"},
+            "require_approval": "never"}],
+    input="How is my next event selling?")
+  ```
+
 ## 3. Row-level data (optional)
 
 By default, keys read **numbers only** — counts, totals, rates. No personal

@@ -87,6 +87,24 @@ function mount(app, { apiKeys, core, rateLimit }) {
       },
       run: (u, a) => core.tileRows(u, a),
     },
+    // OpenAI/ChatGPT compatibility: connectors require `search` + `fetch`.
+    // They return structuredContent (results / a document) per OpenAI's schema;
+    // aggregate data only, so any read key has them. Generic names on purpose —
+    // that's what ChatGPT looks for.
+    {
+      name: 'search',
+      openai: true,
+      description: 'Search this client\'s Pulse data — dashboards, segments, campaigns and goals — by keyword. Returns matching items with ids to pass to `fetch`. (ChatGPT/OpenAI deep-research compatible.)',
+      input: { query: z.string().describe('Keywords, e.g. a dashboard, segment, campaign or goal name') },
+      run: (u, a) => core.search(u, a.query),
+    },
+    {
+      name: 'fetch',
+      openai: true,
+      description: 'Fetch one Pulse item by an id from `search`: a dashboard (with its live tile numbers), a segment, a campaign report, or a goal — returned as readable text. (ChatGPT/OpenAI deep-research compatible.)',
+      input: { id: z.string().describe('An id returned by search, e.g. "segment:…" or "dashboard:…"') },
+      run: (u, a) => core.fetchDoc(u, a.id),
+    },
     {
       name: 'pulse_get_goals',
       description: 'The goals set for one event (suite): targets, direction, deadline — and, when withProgress is true, live progress resolved through the same scoped readers the app uses (slower).',
@@ -102,6 +120,13 @@ function mount(app, { apiKeys, core, rateLimit }) {
   // principal, so nothing user-scoped outlives the response.
   function buildServer(req) {
     const server = new McpServer({ name: 'pulse', version: '1.0.0' });
+    const base = `${req.protocol}://${req.get('host')}`;
+    // OpenAI's search/fetch want a `url` on every result/document (ChatGPT only
+    // builds a citation when url is a non-empty string). We don't have per-item
+    // deep links, so cite the Pulse app itself — a valid, resolving URL.
+    const withUrls = (name, out) => (name === 'search'
+      ? { results: (out.results || []).map((r) => ({ ...r, url: base })) }
+      : { ...out, url: out.url || base });
     for (const t of TOOLS) {
       // Scope-gated tools are invisible to keys that lack the scope — an agent
       // is never offered a tool it can't use.
@@ -110,6 +135,12 @@ function mount(app, { apiKeys, core, rateLimit }) {
         try {
           const out = await t.run(req.user, args || {}, req.apiKey);
           apiKeys.audit(req, 'mcp', `tool:${t.name}`, 200);
+          if (t.openai) {
+            // Return structuredContent AND a JSON-encoded string copy in content
+            // (OpenAI's compatibility contract).
+            const structured = withUrls(t.name, out);
+            return { structuredContent: structured, content: [{ type: 'text', text: JSON.stringify(structured) }] };
+          }
           return { content: [{ type: 'text', text: JSON.stringify(out) }] };
         } catch (e) {
           const status = Number.isInteger(e?.status) ? e.status : 500;

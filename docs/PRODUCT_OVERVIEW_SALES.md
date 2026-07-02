@@ -550,7 +550,9 @@ or point an AI agent (like Claude) at it and ask questions in plain language."
   included by default, and every pull is audited.
 - **MCP server (`/mcp`)** — the same data as curated tools any MCP-capable AI
   agent can use: "what does Total Tickets Sold show right now?", "how big is the
-  VIP segment?", "how did the launch campaign do?".
+  VIP segment?", "how did the launch campaign do?". Works with **Claude** *and*
+  **ChatGPT / OpenAI** (it exposes the `search` + `fetch` tools ChatGPT needs,
+  so it also works with ChatGPT Deep Research).
 - **Off by default, on per client** — Howler enables API access per client with
   one switch (Admin → client → Integrations); flipping it off instantly cuts
   every key that client has.
@@ -602,6 +604,11 @@ Use these to set direction, **not** to promise dates.
   nothing keeps burning in the background). And long data pulls no longer look frozen — the
   thinking line keeps refreshing every few seconds and the connection is kept alive, so a heavy
   query (e.g. a big cashless breakdown) shows progress instead of hanging on "Thinking…".
+- **2026-07-01** — **Works with ChatGPT / OpenAI too** 🧪: the MCP server now exposes the
+  standard `search` + `fetch` tools OpenAI requires, so Pulse connects as a **ChatGPT
+  custom connector** (Developer mode) and works with **ChatGPT Deep Research**, as well as
+  the **OpenAI Responses API** for developers — same URL, same per-client keys, same
+  scope/audit guarantees as the Claude connection.
 - **2026-07-01** — **Claude connects with one click (MCP OAuth)** 🧪: connecting an AI
   assistant no longer involves copying keys. Add the connector URL in Claude, click
   **Connect**, and a Pulse approval page opens — pick which client, optionally allow

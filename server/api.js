@@ -151,7 +151,77 @@ function mount(app, { db, auth, rateLimit, apiKeys, clientCatalogue, resolveTile
     return { dashboardId, tileId, suiteId: entry.suiteId, fields: r.fields, rowCount: r.rows.length, rows: r.rows, asOf: asOf() };
   }
 
-  const core = { me, listDashboards, getDashboard, metric, listSegments, getSegment, segmentReach, listCampaigns, getCampaign, listGoals, tileRows };
+  // ── OpenAI/ChatGPT-compatible search + fetch (over the same read core) ──
+  // ChatGPT connectors require an MCP server to expose `search` and `fetch`.
+  // A "document" here is any addressable read item — a dashboard, segment,
+  // campaign or goal; its id encodes the type so fetch() can resolve it.
+  // Aggregate only — never row-level (that stays behind read_rows). URLs are
+  // added by the transport layer (it knows the host).
+  function search(user, query) {
+    const q = String(query || '').trim().toLowerCase();
+    const match = (s) => !q || String(s || '').toLowerCase().includes(q);
+    const results = [];
+    for (const d of listDashboards(user)) {
+      if (match(d.title) || match(d.suiteName) || match(d.setName)) {
+        results.push({ id: `dashboard:${d.id}:${d.suiteId}`, title: `Dashboard — ${d.title} (${d.suiteName})` });
+      }
+    }
+    for (const s of listSegments(user)) {
+      if (match(s.name)) results.push({ id: `segment:${s.id}`, title: `Segment — ${s.name}` });
+    }
+    for (const c of listCampaigns(user, {})) {
+      if (match(c.title) || match(c.subject)) results.push({ id: `campaign:${c.id}`, title: `Campaign — ${c.title || c.subject}` });
+    }
+    for (const su of db.listSuitesForEntity(entityOf(user))) {
+      let goals = [];
+      try { goals = goalsApi.listGoals(su.id) || []; } catch { goals = []; }
+      for (const g of goals) if (match(g.name)) results.push({ id: `goal:${su.id}:${g.id}`, title: `Goal — ${g.name} (${su.name})` });
+    }
+    return { results: results.slice(0, 50) };
+  }
+
+  async function fetchDoc(user, id) {
+    const parts = String(id || '').split(':');
+    const type = parts[0];
+    if (type === 'dashboard') {
+      const [, dashId, suiteId] = parts;
+      const d = getDashboard(user, dashId); // 404s if not visible to this client
+      const CAP = 12;
+      const lines = [`Dashboard: ${d.title}`, 'Live tile values:'];
+      let n = 0;
+      for (const t of d.tiles) {
+        if (n >= CAP) { lines.push(`… and ${d.tiles.length - CAP} more tiles`); break; }
+        let v = null;
+        try { v = (await metric(user, { dashboardId: dashId, tileId: t.id, suiteId })).value; } catch { v = null; }
+        lines.push(v == null ? `- ${t.title || t.id}` : `- ${t.title || t.id}: ${v}`);
+        n += 1;
+      }
+      return { id, title: `Dashboard — ${d.title}`, text: lines.join('\n'), metadata: { type: 'dashboard', suiteId: suiteId || '' } };
+    }
+    if (type === 'segment') {
+      const s = getSegment(user, parts[1]);
+      const text = `Segment "${s.name}"\nSize: ${s.count}\nContactable — email: ${s.reach?.email ?? 'n/a'}, SMS: ${s.reach?.sms ?? 'n/a'}\nSource: ${s.source}`;
+      return { id, title: `Segment — ${s.name}`, text, metadata: { type: 'segment' } };
+    }
+    if (type === 'campaign') {
+      const c = getCampaign(user, parts[1]);
+      const r = c.results || {};
+      const text = `Campaign "${c.title}" (${c.channel}, status: ${c.status})\nSent: ${r.sent}, Clicks: ${r.clicks}, Opens: ${r.opens}, CTR: ${c.ctr}%, Converted: ${r.converted}`;
+      return { id, title: `Campaign — ${c.title}`, text, metadata: { type: 'campaign' } };
+    }
+    if (type === 'goal') {
+      const [, suiteId, goalId] = parts;
+      const goals = await listGoals(user, { suiteId, progress: true });
+      const g = goals.find((x) => x.id === goalId);
+      if (!g) throw new HttpError(404, 'Goal not found');
+      const p = g.progress || {};
+      const text = `Goal "${g.name}"\nTarget: ${g.targetValue}${g.unit ? ' ' + g.unit : ''}${g.byDate ? ' by ' + g.byDate : ''}\nCurrent: ${p.value ?? 'n/a'}`;
+      return { id, title: `Goal — ${g.name}`, text, metadata: { type: 'goal', suiteId } };
+    }
+    throw new HttpError(404, 'Unknown document id');
+  }
+
+  const core = { me, listDashboards, getDashboard, metric, listSegments, getSegment, segmentReach, listCampaigns, getCampaign, listGoals, tileRows, search, fetchDoc };
 
   // ── REST routes — thin wrappers, key-authed, rate-limited, audited ──
   const perKey = (max, scope) => rateLimit({ windowMs: 60_000, max, by: (req) => `key:${req.apiKey?.id}`, scope });

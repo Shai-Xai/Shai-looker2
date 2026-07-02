@@ -65,10 +65,19 @@ visible and revocable on the key card like any other.
 Clients that support static headers can skip OAuth entirely and send
 `Authorization: Bearer pulse_sk_…` directly.
 
+**OpenAI / ChatGPT:** the same `/mcp` server works with OpenAI. The Responses
+API's built-in MCP tool takes `server_url` + a Bearer `headers` entry. ChatGPT
+custom connectors additionally require the MCP server to expose `search` and
+`fetch` tools — Pulse does (server/mcp.js, OpenAI's structuredContent schema:
+`search(query)`→`{results:[{id,title,url}]}`, `fetch(id)`→`{id,title,text,url,
+metadata}`), so Pulse works as a ChatGPT connector and for Deep Research. Those
+two tools are aggregate-only (never row-level) and available to any `read` key.
+
 Tools (all read-only): `pulse_get_me` · `pulse_list_dashboards` ·
 `pulse_get_dashboard` · `pulse_get_metric` · `pulse_list_segments` ·
 `pulse_get_segment_reach` · `pulse_list_campaigns` ·
-`pulse_get_campaign_report` · `pulse_get_goals` · `pulse_get_tile_rows`
+`pulse_get_campaign_report` · `pulse_get_goals` · `search` · `fetch`
+(the OpenAI-compatible pair) · `pulse_get_tile_rows`
 (the last one only appears for keys with the `read_rows` scope — an agent on a
 plain read key is never even offered it).
 

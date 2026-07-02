@@ -220,6 +220,32 @@ test('MCP: tools are listed and a tool call returns THIS key’s entity', async 
   assert.equal(payload.entity.id, entityA.id);
 });
 
+test('MCP: OpenAI-compatible search + fetch tools (structuredContent shape)', async () => {
+  const { secret } = await issueKey(entityA.id);
+  const names = (await rpc({ jsonrpc: '2.0', id: 30, method: 'tools/list' }, secret)).body.result.tools.map((t) => t.name);
+  assert.ok(names.includes('search') && names.includes('fetch'), 'ChatGPT-required search + fetch are present');
+
+  // search → structuredContent.results with id/title/url, mirrored in content text.
+  const s = await rpc({ jsonrpc: '2.0', id: 31, method: 'tools/call', params: { name: 'search', arguments: { query: 'VIP' } } }, secret);
+  assert.equal(s.status, 200);
+  const sc = s.body.result.structuredContent;
+  assert.ok(Array.isArray(sc.results) && sc.results.length >= 1);
+  const seg = sc.results.find((r) => r.id === 'segment:segA');
+  assert.ok(seg && seg.title.includes('VIPs') && typeof seg.url === 'string' && seg.url.length, 'result carries id/title/non-empty url for citation');
+  assert.deepEqual(JSON.parse(s.body.result.content[0].text), sc, 'content mirrors structuredContent');
+
+  // fetch a segment → structuredContent document with id/title/text/url.
+  const f = await rpc({ jsonrpc: '2.0', id: 32, method: 'tools/call', params: { name: 'fetch', arguments: { id: 'segment:segA' } } }, secret);
+  const doc = f.body.result.structuredContent;
+  assert.equal(doc.id, 'segment:segA');
+  assert.ok(doc.text.includes('VIPs') && doc.url.length);
+
+  // fetch respects tenancy — B's key can't fetch A's segment.
+  const { secret: secretB } = await issueKey(entityB.id);
+  const fb = await rpc({ jsonrpc: '2.0', id: 33, method: 'tools/call', params: { name: 'fetch', arguments: { id: 'segment:segA' } } }, secretB);
+  assert.ok(fb.body.result.isError, 'cross-tenant fetch fails closed');
+});
+
 test('MCP: no key → 401 with WWW-Authenticate', async () => {
   const r = await app.req('POST', '/mcp', { headers: { Accept: 'application/json, text/event-stream' }, body: { jsonrpc: '2.0', id: 4, method: 'tools/list' } });
   assert.equal(r.status, 401);
