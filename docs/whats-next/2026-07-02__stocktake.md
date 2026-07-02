@@ -228,3 +228,34 @@ Hygiene: close PRs #1/#2 and issues #6/#7; update
    publishing. Now roadmap **4.9** — P1 paid-performance ingestion (spend/
    ROAS → tiles, goals `social_paid`, campaign reports) is the analytics win;
    P2 OAuth is the moment to fix 4.6 multi ad-accounts.
+
+## Addendum 2 (same day): a parallel session landed a big batch on main
+
+Merged in while this stocktake was being written — several items above are
+now DONE or moved:
+
+- **5.3 AI cost per client — SHIPPED** (`aiUsage.js`: every Anthropic call
+  metered per client + feature, Admin → AI Usage report). Was listed above as
+  a ~1-day next-up; it's done. Roadmap updated to ✅.
+- **Fan-facing Owl (new 1.4)** — phase 1 shipped: embeddable booking-guide
+  widget for promoters' event sites (`fanOwl.js`, `FAN_OWL_SPEC.md`), the
+  Owl's third door. Next: pilot on Retreat Yourself.
+- **Owl embed in the Howler organiser portal** (`owlEmbed.js`) — a concrete
+  first step toward the Howler integration (4.1).
+- **Technical-review remediation** (`docs/TECHNICAL_REVIEW_2026-07.md`):
+  secrets encrypted at rest, 2FA (TOTP + backup codes), login throttling +
+  audit, SSRF guard/timeouts, nightly DB backups + off-box copy, crash-safe
+  campaign sends, CI-gated Render deploys, maintenance page, bundle split,
+  Postgres migration scoped (`POSTGRES_MIGRATION_SCOPE.md`).
+- **Sales surfaces** — public sales site at `/sales` + admin-curated feature
+  matrix; `PRODUCT_OVERVIEW_SALES.md` refreshed (the hygiene item above is
+  now largely addressed).
+- **API/MCP widened** — direct data queries over the curated catalogue,
+  Event Ops behind `read_rows`, Grok + Gemini connector paths.
+
+Net effect on the "what's next" ranking: theme 6's commercial next-up is now
+**5.2 tiers** (cost data exists to price against); theme 5 gains "pilot the
+organiser-portal Owl embed"; theme 1 gains the Fan Owl pilot. The two
+North-Star gaps — **event tasks (5.1)** and the client surfaces (What's new,
+journeys, social tiles) — remain untouched and still top the list, now joined
+by **4.8 Drive** and **4.9 deep Meta** from Addendum 1.

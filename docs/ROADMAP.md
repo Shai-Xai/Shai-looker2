@@ -340,17 +340,15 @@ permission model. Effort: M–L. Unlocks commercial packaging.
 *(2026-07-02: still unbuilt; now also relevant to gating the public API/MCP
 surface (4.2) and the Owl per plan.)*
 
-### 5.3 💡 API costs per client (backend)
+### 5.3 ✅ API costs per client (backend)
 *"Ability to see the API costs per client in the backend."*
 Attribute AI (Anthropic) + other metered API usage to each client and show
-cost/usage in the admin console — per client, per period. Log tokens/cost at each
-`insights.js` / assistant call keyed by entity; aggregate for an admin report.
-Effort: M. Informs tier pricing (5.2) and margins.
-*(2026-07-02: most raw data now exists — `owl_messages` already logs
-tokens/cost per turn and `billing.js` has the rate/rollup machinery; remaining
-work is per-entity logging across the other `insights.js` call sites +
-an admin aggregation report. Now a ~1-day build, and more urgent: the Owl and
-digests burn real Anthropic spend daily.)*
+cost/usage in the admin console — per client, per period. Effort: M.
+**Status:** ✅ — shipped 2026-07-02 (parallel session): `server/aiUsage.js`
+wraps EVERY Anthropic client via `insights.clientFor` (no call site can forget
+to meter), attributes each call to entity + feature via AsyncLocalStorage, and
+serves the Admin → AI **Usage** report (per day / client / feature / model
+with estimated cost + metering start date). Informs tier pricing (5.2).
 
 ---
 
@@ -413,8 +411,8 @@ Added in the 2026-07-02 reconcile (the 06-28→07-02 sprint):
 - **Ship the engine's missing client surfaces (cheap, visible):** 2.1 client
   "What's new" (bell + `/api/my/release-notes` + weekly email), social metrics
   as dashboard tiles (4.3), promote the journey builder off its sandbox (4.7).
-- **Commercial:** 5.3 (AI cost per client — now ~1 day on existing data) then
-  5.2 (tiers/entitlements).
+- **Commercial:** 5.2 (tiers/entitlements) — 5.3 cost visibility shipped
+  2026-07-02, so pricing now has real per-client cost data behind it.
 - **The flagship's distribution, not just its build:** 1.1 rollout — widen the
   Owl allowlist, first client A/B, Inventive cutover; then the Skills runtime
   (SKILLS_BRIEF P1) and Extraction/Recall (brief 6b/6c).
