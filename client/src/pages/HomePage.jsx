@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/auth.jsx';
 import FolderImportModal from '../components/FolderImportModal.jsx';
+import FolderMoveModal from '../components/FolderMoveModal.jsx';
 import BackButton from '../components/BackButton.jsx';
 
 export default function HomePage() {
@@ -23,6 +24,9 @@ export default function HomePage() {
   const [folderBusy, setFolderBusy] = useState(false);
   const [includeSubfolders, setIncludeSubfolders] = useState(true);
   const [showFolderModal, setShowFolderModal] = useState(false);
+  const [moveFolderPath, setMoveFolderPath] = useState(null); // folder being reparented via the "Move to…" picker
+  const [dragFolder, setDragFolder] = useState(null); // folder path being dragged (desktop drag-and-drop)
+  const [dropTarget, setDropTarget] = useState(null); // folder path currently hovered as a drop destination
   const [folderSettings, setFolderSettings] = useState({}); // { "<path>": { keepImported } } — persistent, cascading
   const [view, setView] = useState(() => localStorage.getItem('howler_lib_view') || 'list'); // 'tile' | 'list'
   const setViewMode = (v) => { setView(v); localStorage.setItem('howler_lib_view', v); };
@@ -134,6 +138,31 @@ export default function HomePage() {
       load();
     } catch (err) { alert('Delete failed: ' + err.message); }
   }
+  // Reparent a folder (with ALL its nested subfolders + dashboards) in one atomic
+  // move. `from` moves under `parent` ('' = top level). Keeps the breadcrumb in
+  // sync if you're standing inside the folder that just moved. Throws on failure
+  // so callers (the picker modal) can surface the server's message.
+  async function doMoveFolder(from, parent) {
+    const leaf = from.split('/').pop();
+    const newPath = parent ? `${parent}/${leaf}` : leaf;
+    await api.moveFolder(from, parent);
+    if (path === from || path.startsWith(from + '/')) setPath(newPath + path.slice(from.length));
+    setMoveFolderPath(null);
+    load();
+  }
+  // Drag-and-drop (desktop): dropping a folder card onto another folder moves it
+  // inside. Invalid drops (onto itself / a descendant) are ignored; the server is
+  // the final guard and any error is surfaced.
+  function canDropInto(from, target) {
+    return from && from !== target && !(target || '').startsWith(from + '/') && target !== (from.includes('/') ? from.slice(0, from.lastIndexOf('/')) : '');
+  }
+  async function handleFolderDrop(target) {
+    const from = dragFolder;
+    setDragFolder(null); setDropTarget(null);
+    if (!from || !canDropInto(from, target)) return;
+    try { await doMoveFolder(from, target); }
+    catch (err) { alert('Move failed: ' + (err.message || err)); }
+  }
 
   return (
     <main style={{ flex: 1, padding: '32px 24px', maxWidth: 1100, margin: '0 auto', width: '100%' }}>
@@ -199,6 +228,7 @@ export default function HomePage() {
         {isAdmin && path && (
           <>
             <button style={{ ...miniBtnOutline, fontSize: 12 }} onClick={(e) => renameFolder(path, e)} title="Rename this folder">✎ Rename</button>
+            <button style={{ ...miniBtnOutline, fontSize: 12 }} onClick={() => setMoveFolderPath(path)} title="Move this folder (with everything inside) elsewhere">↗ Move</button>
             <button
               style={{ ...miniBtnOutline, fontSize: 12, ...(folderKeepOn ? { background: 'var(--success,#10b981)', borderColor: 'var(--success,#10b981)', color: '#fff' } : null) }}
               onClick={toggleFolderKeepImported}
@@ -232,12 +262,21 @@ export default function HomePage() {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 16 }}>
               {childSegments.map((seg) => {
                 const fp = fullChild(seg);
+                const isDropOk = isAdmin && dragFolder && canDropInto(dragFolder, fp);
                 return (
-                  <div key={seg} className="lift" style={{ ...folderCard, position: 'relative' }} onClick={() => setPath(fp)}>
+                  <div key={seg} className="lift" style={{ ...folderCard, position: 'relative', ...(dropTarget === fp && isDropOk ? dropHighlight : null), ...(dragFolder === fp ? { opacity: 0.5 } : null) }}
+                    onClick={() => setPath(fp)}
+                    draggable={isAdmin}
+                    onDragStart={(e) => { if (!isAdmin) return; setDragFolder(fp); e.dataTransfer.effectAllowed = 'move'; }}
+                    onDragEnd={() => { setDragFolder(null); setDropTarget(null); }}
+                    onDragOver={(e) => { if (isDropOk) { e.preventDefault(); setDropTarget(fp); } }}
+                    onDragLeave={() => setDropTarget((t) => (t === fp ? null : t))}
+                    onDrop={(e) => { e.preventDefault(); e.stopPropagation(); handleFolderDrop(fp); }}>
                     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 4 }}>
                       <div style={{ fontSize: 28, flex: 1 }}>📁</div>
                       {isAdmin && (
                         <>
+                          <button style={folderEditBtn} title="Move folder" onClick={(e) => { e.stopPropagation(); setMoveFolderPath(fp); }}>↗</button>
                           <button style={folderEditBtn} title="Rename folder" onClick={(e) => renameFolder(fp, e)}>✎</button>
                           <button style={{ ...folderEditBtn, color: 'var(--error)' }} title="Delete folder" onClick={(e) => deleteFolderAction(fp, e)}>🗑</button>
                         </>
@@ -305,6 +344,15 @@ export default function HomePage() {
           onClose={() => { setShowFolderModal(false); setLookerFolderId(''); setFolderPreview(null); }}
         />
       )}
+
+      {moveFolderPath && (
+        <FolderMoveModal
+          folder={moveFolderPath}
+          allFolders={allFolders}
+          onMove={(parent) => doMoveFolder(moveFolderPath, parent)}
+          onClose={() => setMoveFolderPath(null)}
+        />
+      )}
     </main>
   );
 }
@@ -320,6 +368,7 @@ const viewToggleBtn = { padding: '6px 12px', background: 'var(--card)', color: '
 const viewToggleOn = { background: 'var(--brand)', color: '#fff' };
 const deleteBtn = { border: 'none', background: 'transparent', color: '#bbb', cursor: 'pointer', fontSize: 14, padding: 2 };
 const folderEditBtn = { border: 'none', background: 'rgba(0,0,0,0.05)', color: 'var(--muted)', cursor: 'pointer', fontSize: 13, borderRadius: 8, width: 28, height: 28, flexShrink: 0 };
+const dropHighlight = { outline: '2px dashed var(--brand)', outlineOffset: 2, background: 'rgba(79,70,229,0.06)' };
 const crumbBtn = { border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 18, fontWeight: 700, color: 'var(--text)', padding: 0 };
 const homeBackBtn = { flexShrink: 0, width: 34, height: 34, borderRadius: '50%', background: 'rgba(128,128,128,0.15)', color: 'var(--text)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer' };
 const folderTag = { fontSize: 11, fontWeight: 600, background: '#eef2ff', color: '#4f46e5', padding: '2px 8px', borderRadius: 980 };

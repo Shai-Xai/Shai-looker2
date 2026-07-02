@@ -646,6 +646,14 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-02** — **Move a whole subfolder in one action** ✅ (Dashboard Console): admins
+  can now reparent a subfolder — with **all** its nested subfolders and dashboards — in a
+  single move, instead of relocating dashboards one by one. Use the **↗ Move** button on any
+  folder (a mobile-friendly "Move to…" picker) or **drag a folder onto another** on desktop.
+  Moving a folder into itself or one of its own subfolders is blocked with a clear message,
+  and the reparent is **atomic** (one transaction) so a failure can't leave a half-moved
+  tree. Folders are an admin-only organising layer — clients navigate via suites/sets — so
+  there's no separate client surface to update.
 - **2026-07-02** — **The Fan Owl: a booking guide on the event's own website** 🧪: the
   Owl's first **consumer-facing** surface — promoters drop one script tag on their public
   event site and every page gets a personal ticket guide: a no-AI ribbon (right offer for

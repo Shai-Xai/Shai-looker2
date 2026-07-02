@@ -412,6 +412,8 @@ export const api = {
   adminFolders: () => fetch('/api/admin/folders').then(json),
   backfillFolders: () => fetch('/api/admin/backfill-folders', { method: 'POST' }).then(json),
   renameFolder: (from, to) => fetch('/api/admin/folders/rename', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from, to }) }).then(json),
+  // Reparent a folder (and all nested subfolders + dashboards) atomically. `parent` = '' → top level.
+  moveFolder: (from, parent) => fetch('/api/admin/folders/move', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from, parent }) }).then(json),
   deleteFolder: (path) => fetch('/api/admin/folders/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path }) }).then(json),
   // Looker folder import (files all its dashboards under a folder)
   lookerFolder: (id, includeSubfolders = true) => fetch(`/api/looker/folder/${encodeURIComponent(id)}?subfolders=${includeSubfolders ? 1 : 0}`).then(json),
