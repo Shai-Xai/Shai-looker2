@@ -102,7 +102,11 @@ event is selling."* Others to try: *"revenue by ticket type, last 30 days"* ·
 > clients) can still just send `Authorization: Bearer pulse_sk_…` — the OAuth
 > flow is optional sugar on top of the same keys.
 
-The assistant can only ever **look things up** — it can't send campaigns,
+By default the assistant can only ever **look things up**. If you tick
+**"Also allow creating drafts"** when connecting (or on a key), the Owl can
+also **build audience segments and draft campaigns for you** — e.g. *"draft a
+win-back email to last year's VIP buyers"*. Everything it creates lands as a
+**draft in Pulse** waiting for your review and approval; it can never send,
 change settings or spend money on your behalf.
 
 #### ChatGPT (and other OpenAI tools)

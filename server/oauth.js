@@ -195,6 +195,8 @@ button,a.btn{display:inline-block;background:#FF385C;color:#fff;border:none;bord
         <label>Which client?</label><select name="entityId">${options}</select>
         <label class="chk"><input type="checkbox" name="rows" value="1" style="margin-top:2px">
           Also allow <b>row-level data</b> — the tables behind tiles (may include personal data). Leave off unless this tool truly needs it.</label>
+        <label class="chk"><input type="checkbox" name="drafts" value="1" style="margin-top:2px">
+          Also allow <b>creating drafts</b> — the Owl can build audience segments and draft campaigns for you. Drafts always await your review &amp; approval in Pulse; it can never send.</label>
         <p><button type="submit" ${anyEnabled ? '' : 'disabled'}>Approve &amp; connect</button></p>
       </form>
       <p style="font-size:12px">This creates a named API key you can see and revoke any time in Settings → Integrations.</p>`));
@@ -210,7 +212,7 @@ button,a.btn{display:inline-block;background:#FF385C;color:#fff;border:none;bord
       const allowed = connectableEntities(req.user).find((e) => e.id === entityId);
       if (!allowed) return res.status(403).send(page('Not allowed', '<h1>Not allowed</h1><p>You can’t connect that client.</p>'));
       if (!allowed.enabled) return res.status(403).send(page('Switched off', '<h1>API access is off</h1><p>Ask your Howler contact to enable API access for this client, then try again.</p>'));
-      const scopes = req.body.rows === '1' ? ['read', 'read_rows'] : ['read'];
+      const scopes = ['read', ...(req.body.rows === '1' ? ['read_rows'] : []), ...(req.body.drafts === '1' ? ['write'] : [])];
       const { secret } = apiKeys.createKey({ entityId, name: `${v.client.name} (connected ${new Date().toISOString().slice(0, 10)})`, scopes });
       const code = crypto.randomBytes(32).toString('base64url');
       sql.prepare('INSERT INTO oauth_codes (code, client_id, redirect_uri, key_secret, scope, code_challenge, expires_at) VALUES (?,?,?,?,?,?,?)')
