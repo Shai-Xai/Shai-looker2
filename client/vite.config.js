@@ -32,7 +32,7 @@ export default defineConfig({
           // keeps them OUT of the eagerly-loaded `vendor` chunk so they follow
           // their dynamic importers into lazy chunks — otherwise every client
           // phone downloads ~430KB of spreadsheet/OCR/camera code at first paint.
-          if (/[\\/]node_modules[\\/](xlsx|tesseract\.js|html5-qrcode)[\\/]/.test(id)) return undefined;
+          if (/[\\/]node_modules[\\/](xlsx|tesseract\.js|html5-qrcode|qrcode)[\\/]/.test(id)) return undefined;
           return 'vendor';
         },
       },

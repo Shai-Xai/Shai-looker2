@@ -12,11 +12,24 @@ export default function TwoFactorCard() {
   const [setup, setSetup] = useState(null);    // { secret, otpauthUri }
   const [code, setCode] = useState('');
   const [backupCodes, setBackupCodes] = useState(null);
+  const [qr, setQr] = useState(null); // data-URL of the otpauth QR (lazy-generated)
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
 
   const load = () => api.twoFactorStatus().then(setStatus).catch(() => setStatus({ enabled: false }));
   useEffect(() => { load(); }, []);
+
+  // Render the QR from the otpauth URI once we're enrolling. The QR library is
+  // dynamically imported so it never weighs down the main app bundle.
+  useEffect(() => {
+    if (stage !== 'enrolling' || !setup?.otpauthUri) return;
+    let alive = true;
+    import('qrcode')
+      .then((m) => m.toDataURL(setup.otpauthUri, { margin: 1, width: 200 }))
+      .then((url) => { if (alive) setQr(url); })
+      .catch(() => { if (alive) setQr(null); }); // fall back to the manual key
+    return () => { alive = false; };
+  }, [stage, setup]);
 
   async function begin() {
     setBusy(true); setError(null);
@@ -64,7 +77,9 @@ export default function TwoFactorCard() {
       {stage === 'enrolling' && setup && (
         <form onSubmit={confirm} style={box}>
           <div style={{ fontWeight: 700, marginBottom: 6 }}>1. Add Pulse to your authenticator</div>
-          <p style={hint}>Open <a href={setup.otpauthUri} style={{ color: 'var(--brand)' }}>this link</a> on this device, or add a new account manually and paste this key:</p>
+          <p style={hint}>Scan this QR with your authenticator app, or open <a href={setup.otpauthUri} style={{ color: 'var(--brand)' }}>this link</a> on this device.</p>
+          {qr && <div style={{ textAlign: 'center', margin: '10px 0' }}><img src={qr} alt="2FA QR code" width={200} height={200} style={{ borderRadius: 8, background: '#fff', padding: 6 }} /></div>}
+          <p style={{ ...hint, marginBottom: 4 }}>Can’t scan? Add an account manually and paste this key:</p>
           <code style={secretBox}>{setup.secret}</code>
           <div style={{ fontWeight: 700, margin: '14px 0 6px' }}>2. Enter the 6-digit code it shows</div>
           <input style={{ ...input, textAlign: 'center', letterSpacing: '0.3em', fontSize: 18 }} inputMode="numeric" autoComplete="one-time-code"
