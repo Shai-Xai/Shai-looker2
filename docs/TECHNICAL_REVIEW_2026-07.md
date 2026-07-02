@@ -16,6 +16,25 @@ None of the fixes require re-architecting. Postgres is *not* the next move; gett
 
 ---
 
+## Remediation status (updated 2026-07-02)
+
+**P0 — all shipped** on `claude/code-review-technical-2o1kzc`:
+1. ✅ Off-box DB backups (`server/backup.js`) + ops-alert module (`server/ops.js`)
+2. ✅ Campaign tracking indexed + lazy audience + qCache byte guard
+3. ✅ Crash-safe sends (claim-before-send, campaign ledger, SIGTERM drain)
+4. ✅ Ops alerts on silent failures + CI-gated deploy job + DB-touching `/health`
+
+**P1 — all shipped**:
+- ✅ SSRF-safe fetch for Owl uploads (`server/safeFetch.js`); security headers; mandatory WhatsApp secret; Owl-chat rate limit; JWT HS256 pin
+- ✅ Session invalidation on password reset (`token_version`)
+- ✅ External-call timeouts (Anthropic, web-push, GitHub)
+- ✅ `user_views` index+prune, `listUsers` N+1 fix, `listDashboards` cache; activity cluster extracted to `server/activity.js`
+- ✅ Client bundle: lazy libs split out of vendor + modular echarts (first-paint JS ~965KB→~514KB gz)
+
+**Still open (P1 remainder / P2)** — the `asyncHandler` sweep (49 routes + raw `err.message` leaks), non-atomic multi-statement writes (os.js/tickets.js/goals.js), schema versioning, digest-scheduler concurrency, synchronous PNG rendering → worker, `xlsx` client vuln, `AdminPage.jsx` split, and the worker-process move remain as documented below.
+
+---
+
 ## P0 — Do this week
 
 ### 1. Continuous off-box database backup (Critical)
