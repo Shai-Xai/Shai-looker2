@@ -16,6 +16,7 @@ export default function ApiKeysCard({ entityId, scope = 'my' }) {
   const [denied, setDenied] = useState(false);
   const [name, setName] = useState('');
   const [withRows, setWithRows] = useState(false);
+  const [withDrafts, setWithDrafts] = useState(false);
   const [creating, setCreating] = useState(false);
   const [fresh, setFresh] = useState(null); // { name, secret } — shown once
   const [copied, setCopied] = useState(false);
@@ -38,10 +39,12 @@ export default function ApiKeysCard({ entityId, scope = 'my' }) {
   const create = async () => {
     setCreating(true);
     try {
-      const r = await createFn({ name: name.trim() || 'Untitled key', scopes: withRows ? ['read', 'read_rows'] : ['read'] });
+      const scopes = ['read', ...(withRows ? ['read_rows'] : []), ...(withDrafts ? ['write'] : [])];
+      const r = await createFn({ name: name.trim() || 'Untitled key', scopes });
       setFresh({ name: r.key.name, secret: r.secret });
       setName('');
       setWithRows(false);
+      setWithDrafts(false);
       setKeys((await listFn()).keys || []);
     } catch (e) { alert('Couldn’t create the key: ' + e.message); }
     setCreating(false);
@@ -128,6 +131,13 @@ export default function ApiKeysCard({ entityId, scope = 'my' }) {
             <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>
               Also allow <b>row-level data</b> — the table behind a tile (e.g. customer &amp; ticketing records).
               May include personal data; only grant this to tools that genuinely need it.
+            </span>
+          </label>
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginTop: 8, cursor: 'pointer' }}>
+            <input type="checkbox" checked={withDrafts} onChange={(e) => setWithDrafts(e.target.checked)} style={{ marginTop: 2, width: 16, height: 16 }} />
+            <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+              Also allow <b>creating drafts</b> — build audience segments and draft campaigns.
+              Drafts always await human review &amp; approval in Pulse; connected tools can never send.
             </span>
           </label>
         </>

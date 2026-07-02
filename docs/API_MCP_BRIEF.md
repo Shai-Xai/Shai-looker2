@@ -170,10 +170,14 @@ retried: `campaign.sent`, `campaign.approved`, `segment.changed`,
 - **P2 — MCP (read). ✅ SHIPPED.** Remote MCP server at `/mcp` (streamable
   HTTP, stateless) wrapping the same `core` as curated tools. *The
   differentiator; needed no GraphQL.*
-- **P3 — Writes + webhooks.** `write`/`send`-scoped mutations
-  (create/draft/requestSend) with approval + consent gates intact — external
-  sends **always human-approved in v1** (decided, was §10.4); outbound webhooks
-  (signed/retried/DLQ — a real chunk, not a footnote); write MCP tools.
+- **P3 — Writes + webhooks. 🟡 PARTIALLY SHIPPED (2026-07-02).** Shipped:
+  `write`-scoped **draft creation** — `POST /api/v1/segments` +
+  `POST /api/v1/campaigns/draft` and the `pulse_create_segment` /
+  `pulse_draft_campaign` MCP tools, delegating to the Owl's act runners
+  (cohort validation, PII refused) and the same commit functions the in-app
+  confirm buttons call; campaigns land status `draft`, always. No send surface
+  exists — `requestSend` (→ approval workflow) and outbound webhooks
+  (signed/retried/DLQ — a real chunk, not a footnote) remain.
 - **P4 — Public-API wire format + federation + docs.** Decide GraphQL vs REST
   **here**, once Howler federation is committed; subgraph/SDL if GraphQL;
   partner onboarding.

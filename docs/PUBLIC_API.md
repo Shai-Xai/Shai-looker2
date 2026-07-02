@@ -49,6 +49,8 @@ goal progress; 60/min on MCP). Every call is audited (who/what/when/outcome).
 | `POST /api/v1/query` | Direct aggregate query — `{source?, measure, measures?, dimensions?, filters?, dateRange?, suiteId?, limit?}` — no dashboard/tile needed |
 | `GET /api/v1/tiles/rows?dashboardId=&tileId=&suiteId=&limit=` | **`read_rows` scope only** — the table behind a tile: every column (incl. display-hidden ones) + rows (default 500, cap 10,000) |
 | `GET /api/v1/event-ops?suiteId=&query=` | **`read_rows` scope only** — per-event ops: `overview` \| `locate` (`&code=`) \| `devices` \| `issues` \| `staff` \| `stations` \| `checkpoints`; honours the per-client Event Ops switch |
+| `POST /api/v1/segments` | **`write` scope only** — create a saved segment from a curated cohort `{name?, filters, suiteId?, folder?}`; PII fields can never define a cohort |
+| `POST /api/v1/campaigns/draft` | **`write` scope only** — draft a campaign `{goal, channel?, segmentName? \| filters?, name?, ctaUrl?, language?, suiteId?}`; Pulse's AI writes the content; **always lands status `draft`** for human approval in Engage — this surface cannot send |
 
 Errors are JSON `{ error }` with meaningful status codes (401 bad/missing key,
 403 missing scope, 404 not visible to this client, 429 rate-limited). Anything
@@ -81,8 +83,12 @@ Tools (all read-only): `pulse_get_me` · `pulse_list_dashboards` ·
 `pulse_query_data` · `pulse_list_segments` · `pulse_get_segment_reach` ·
 `pulse_list_campaigns` · `pulse_get_campaign_report` · `pulse_get_goals` ·
 `search` · `fetch` (the OpenAI-compatible pair) · `pulse_get_tile_rows` ·
-`pulse_event_ops` (the last two only appear for keys with the `read_rows`
-scope — an agent on a plain read key is never even offered them).
+`pulse_event_ops` (`read_rows` keys only) · `pulse_create_segment` ·
+`pulse_draft_campaign` (`write` keys only — drafts land behind the approval
+flow; the MCP surface cannot send). Scope-gated tools are invisible to keys
+without the scope. Connect-time instructions carry the Owl persona, the
+client's stored AI context (same grounding as in-app), and — for write keys —
+confirm-in-chat-first guidance.
 
 **Direct queries (no dashboard needed):** `pulse_query_data` / `POST
 /api/v1/query` run bounded aggregate queries straight against the curated data

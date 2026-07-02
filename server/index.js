@@ -2736,13 +2736,13 @@ const segmentsApi = require('./segments').mount(app, {
 // (the abandoned-cart count) can reuse the campaign audience resolver.
 require('./setupNudge').mount(app, { db, auth, mailer, os, insights, resolveRecipe, audienceFor: actionsApi.audienceFor, anthropicKeyForEntity, aiInstructionsFor });
 
-// ─── Public platform surface (docs/API_MCP_BRIEF.md) ───────────────────────────
-// Per-entity API keys + /api/v1 read API + remote MCP server for AI agents —
-// disposable modules over the SAME service core; the app's scope gates apply.
-const apiKeysApi = require('./apiKeys').mount(app, { db, auth, rateLimit });
-const apiV1 = require('./api').mount(app, { db, auth, rateLimit, apiKeys: apiKeysApi, clientCatalogue, resolveTileValue, resolveTileRows, segmentsApi, actionsApi, goalsApi, getOwlTools, owlCatalogue });
-require('./mcp').mount(app, { apiKeys: apiKeysApi, core: apiV1.core, rateLimit });
-require('./oauth').mount(app, { db, auth, apiKeys: apiKeysApi, rateLimit }); // "Connect" flow for MCP clients (Claude): discovery + approve → mints a key
+// ─── Public platform surface → server/publicSurface.js ─────────────────────────
+// API keys + /api/v1 (read + drafts) + remote MCP server + OAuth connect flow —
+// thin adapters over the SAME service core; the app's scope gates apply.
+require('./publicSurface').mount(app, {
+  db, auth, rateLimit, mailer, currency, language, clientCatalogue,
+  resolveTileValue, resolveTileRows, segmentsApi, actionsApi, goalsApi, getOwlTools, owlCatalogue,
+});
 
 // ─── Briefing configuration ─────────────────────────────────────────────────────
 // Admin: global briefing rules + editable phase defaults.

@@ -19,7 +19,7 @@ const { StreamableHTTPServerTransport } = require('@modelcontextprotocol/sdk/ser
 const { z } = require('zod');
 const { asyncHandler } = require('./http');
 
-function mount(app, { apiKeys, core, rateLimit }) {
+function mount(app, { apiKeys, core, rateLimit, clientContextFor }) {
   // One tool table so the list stays curated and auditable. Every handler gets
   // the request's synthetic principal — scope enforcement happens in `core`.
   const TOOLS = [
@@ -122,6 +122,36 @@ function mount(app, { apiKeys, core, rateLimit }) {
       },
       run: (u, a) => core.queryData(u, a),
     },
+    // Writes (P3) — `write` scope only, DRAFTS only. Both delegate to the same
+    // validated commit paths the in-app Owl uses; nothing on MCP can send.
+    {
+      name: 'pulse_create_segment',
+      scope: 'write',
+      description: 'CREATE a saved audience segment from a cohort (e.g. {"ticket type": "VIP", "city": "Cape Town"} using dimension names from pulse_list_data_sources). It saves an audience DEFINITION — no message is sent, consent applies if it is ever messaged. Contact fields (email/phone/name) can never define a cohort. Confirm the cohort with the user in chat BEFORE calling. Returns the saved segment + its size/reach.',
+      input: {
+        name: z.string().optional().describe('Segment name (auto-generated from the cohort if omitted)'),
+        filters: z.record(z.string(), z.string()).describe('{dimension: value} cohort filters — curated dimensions only'),
+        suiteId: z.string().optional().describe('Optional event (suite) id to scope the cohort to one event'),
+        folder: z.string().optional().describe('Optional folder label for organisation'),
+      },
+      run: (u, a) => core.createSegment(u, a),
+    },
+    {
+      name: 'pulse_draft_campaign',
+      scope: 'write',
+      description: 'DRAFT an email/SMS campaign — it lands as a DRAFT in Pulse for a human to review, approve and send; this tool CANNOT send anything. Audience = a saved segment (segmentName) OR a cohort (filters). Pulse\'s own AI writes/designs the content server-side from your goal. Confirm goal + audience with the user in chat BEFORE calling. Tell the user afterwards it is a draft awaiting their approval in Pulse.',
+      input: {
+        goal: z.string().describe('Who to reach and what to get them to do, e.g. "win back last year\'s VIP buyers who haven\'t rebooked"'),
+        channel: z.enum(['email', 'sms', 'both']).optional().describe('Default email'),
+        segmentName: z.string().optional().describe('Use a saved segment by name (see pulse_list_segments)'),
+        filters: z.record(z.string(), z.string()).optional().describe('OR a cohort: {dimension: value} filters (curated dimensions only)'),
+        name: z.string().optional().describe('Campaign name (defaults from the drafted subject)'),
+        ctaUrl: z.string().optional().describe('Optional call-to-action link'),
+        language: z.string().optional().describe('Optional 2-letter language override for the copy'),
+        suiteId: z.string().optional().describe('Optional event (suite) id this campaign is for'),
+      },
+      run: (u, a) => core.draftCampaign(u, a),
+    },
     // OpenAI/ChatGPT compatibility: connectors require `search` + `fetch`.
     // They return structuredContent (results / a document) per OpenAI's schema;
     // aggregate data only, so any read key has them. Generic names on purpose —
@@ -168,9 +198,24 @@ function mount(app, { apiKeys, core, rateLimit }) {
     '6. Make independent lookups in parallel. Answer from the data you have rather than re-fetching.',
   ].join('\n');
 
+  // Per-connection instructions: the shared guidance + THIS client's stored AI
+  // context (the same grounding the in-app Owl gets — business background,
+  // terminology, currency/language), + write guidance only when the key can write.
+  function instructionsFor(req) {
+    const parts = [INSTRUCTIONS];
+    try {
+      const note = clientContextFor ? clientContextFor(req.apiKey.entityId) : '';
+      if (note) parts.push(`Client context (from Pulse — treat as background truth):\n${note}`);
+    } catch { /* context is enrichment, never a blocker */ }
+    if (apiKeys.hasScope(req, 'write')) {
+      parts.push('You also have DRAFT-creation tools (segments, campaigns). Anything you create is a DRAFT a human must review, approve and send in Pulse — you cannot send. ALWAYS confirm the cohort/goal with the user in chat before calling a write tool, and afterwards tell them it awaits their approval in Pulse.');
+    }
+    return parts.join('\n\n');
+  }
+
   function buildServer(req) {
     // `name` stays the stable machine id; `title` is what connector UIs display.
-    const server = new McpServer({ name: 'pulse', title: 'The Owl — Howler Pulse', version: '1.0.0' }, { instructions: INSTRUCTIONS });
+    const server = new McpServer({ name: 'pulse', title: 'The Owl — Howler Pulse', version: '1.0.0' }, { instructions: instructionsFor(req) });
     const base = `${req.protocol}://${req.get('host')}`;
     // OpenAI's search/fetch want a `url` on every result/document (ChatGPT only
     // builds a citation when url is a non-empty string). We don't have per-item
