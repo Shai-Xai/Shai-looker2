@@ -118,6 +118,32 @@ Pulse works with OpenAI too — it's the same MCP connection:
   `https://your-pulse-domain/mcp`, and approve on the Pulse page exactly like
   Claude. Pulse also exposes the standard `search` and `fetch` tools ChatGPT
   needs, so it works for Deep Research and "company knowledge" style questions.
+#### Grok (xAI)
+
+On a paid Grok plan: go to `grok.com/connectors` → **New Connector** →
+**Custom** → enter `https://your-pulse-domain/mcp` and complete the
+authentication step — the same Pulse approval page as Claude opens (be logged
+into Pulse first). Developers can also use Pulse from the xAI API's Remote
+MCP tools with a `pulse_sk_…` Bearer key.
+
+#### Google Gemini
+
+Honest status: the **regular Gemini app and Gems can't connect to custom
+tools yet** — Google hasn't opened custom connectors there (as of July 2026).
+What does work:
+
+- **Gemini Enterprise** (Google's paid enterprise agent platform): add Pulse
+  as a **Custom MCP server** connector — MCP Server URL
+  `https://your-pulse-domain/mcp`, Authorization URL
+  `https://your-pulse-domain/oauth/authorize`, Token URL
+  `https://your-pulse-domain/oauth/token`, any Client ID/Secret of your
+  choosing, scope `read`. Users then approve on the same Pulse page as Claude.
+- **Gemini CLI** (developers): add Pulse as an MCP server with your
+  `pulse_sk_…` key as a Bearer header.
+
+The moment Google opens custom connectors in the consumer Gemini app or Gems,
+Pulse's existing connection flow should slot straight in — no rebuild needed.
+
 - **OpenAI Responses API (developers):** point the built-in MCP tool at the
   same URL with your key as a Bearer header — no extra setup:
 

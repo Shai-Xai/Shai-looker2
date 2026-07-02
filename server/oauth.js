@@ -114,6 +114,12 @@ function mount(app, { db, auth, apiKeys, rateLimit }) {
   // approves on our page, and PKCE binds the code to the requesting app.
   const TRUSTED_REDIRECTS = [
     /^https:\/\/claude\.ai\//, /^https:\/\/claude\.com\//, /^https:\/\/api\.anthropic\.com\//,
+    // Gemini Enterprise custom-MCP connectors (no dynamic registration — the
+    // admin types a client id/secret; Google's fixed OAuth callback):
+    /^https:\/\/vertexaisearch\.cloud\.google\.com\//,
+    // Grok custom connectors (grok.com/connectors) — normally self-registers
+    // via DCR; these cover a hand-typed client id, same as Claude/Gemini:
+    /^https:\/\/grok\.com\//, /^https:\/\/x\.ai\//, /^https:\/\/api\.x\.ai\//,
   ];
   const registerFirstUse = (clientId, redirectUri) => {
     if (!clientId || String(clientId).length > 120) return null;
