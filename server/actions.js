@@ -560,9 +560,8 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     if (cfg.audience && Array.isArray(cfg.audience.sources) && cfg.audience.sources.length) {
       return combineSources(entityId, cfg, user, depth);
     }
-    // Event scope: a segment's OWN event (`audience.suiteId`, baked in at create) beats
-    // the campaign's, so a segment scoped to one event never widens when bound to a
-    // campaign that didn't pin one. Falls back to the campaign's event (query + tile).
+    // Event scope: a segment's OWN event (`audience.suiteId`, baked in at create) beats the
+    // campaign's — a scoped segment never widens. Falls back to the campaign's event (query + tile).
     const scopeSuite = (cfg.audience && cfg.audience.suiteId) || cfg.eventSuiteId || '';
     if (cfg.audience && cfg.audience.mode === 'query') {
       const { raw } = await resolveQueryAudience({ entityId, definition: cfg.audience, user, suiteId: scopeSuite, limit: capFor(entityId) * 2 });
