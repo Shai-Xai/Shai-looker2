@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { api } from '../lib/api.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
+import { viaBadge, viaChipStyle } from '../lib/createdVia.js';
 import UploadHint from './UploadHint.jsx';
 import { languageList } from '../lib/language.js';
 import EmailBuilder, { ThemePicker } from './EmailBuilder.jsx';
@@ -121,6 +122,7 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
           <ChannelChip channel={a.config?.channel} />
           {a.config?.category && <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 980, color: 'var(--brand)', background: 'rgba(var(--brand-rgb,255,56,92),0.10)' }}>{a.config.category}</span>}
           {a.config?.source === 'owl-whatsapp' && <span title="Drafted by the Owl from a WhatsApp chat" style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 980, color: '#1d8a4f', background: 'rgba(37,211,102,0.14)' }}>💬 via WhatsApp</span>}
+          {viaBadge(a.createdVia) && a.config?.source !== 'owl-whatsapp' && <span title="Where this draft was created" style={viaChipStyle}>{viaBadge(a.createdVia).icon} via {viaBadge(a.createdVia).label}</span>}
           <StatusChip status={a.status} />
         </div>
         <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 3 }}>
