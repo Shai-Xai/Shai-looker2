@@ -449,8 +449,12 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getExploreFields
     const { toolMap, toolSchemas } = currentTools(scopeEntityId);
     // The user tapping ⏹ Stop aborts the fetch → the socket closes → we bail between
     // rounds/tools instead of finishing an answer nobody is waiting for.
+    // Listen on the RESPONSE socket, not the request: on modern Node, req 'close'
+    // fires as soon as the request body is consumed (milliseconds in, client still
+    // connected) — that read as "user left" and could silently abort multi-round
+    // (tool-using) answers. res 'close' with writableEnded false = truly gone.
     let clientGone = false;
-    req.on('close', () => { if (!res.writableEnded) clientGone = true; });
+    res.on('close', () => { if (!res.writableEnded) clientGone = true; });
     // Heartbeat: a long Looker/model call can sit silent for minutes (Looker's own
     // timeout is 2 min), which reads as "stuck" and can trip idle-connection proxies.
     // Re-send the latest status every 10s so the stream stays alive + visibly working.

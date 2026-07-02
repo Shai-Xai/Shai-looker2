@@ -578,7 +578,11 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
     res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders?.();
     let clientGone = false;
-    req.on('close', () => { if (!res.writableEnded) clientGone = true; });
+    // Detect the fan leaving via the RESPONSE socket, not the request: on modern
+    // Node, req 'close' fires the moment the request body is consumed (~ms in),
+    // which read as "user left" and made every tool round bail out empty. res
+    // 'close' with writableEnded still false = the connection truly died early.
+    res.on('close', () => { if (!res.writableEnded) clientGone = true; });
     // Heartbeat (same as the organiser Owl): a tool round can sit silent for many
     // seconds; re-sending the last status keeps proxies from killing the stream
     // and keeps the typing indicator honest.
