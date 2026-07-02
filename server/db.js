@@ -223,7 +223,7 @@ if (tableExists('event_documents')) addColumn('event_documents', 'data', "TEXT N
 // read/report over them). Injected collaborators are hoisted db.js functions /
 // the shared now+J helpers; re-exported below under their original names.
 const activity = require('./activity')({ sql: db, now, J, getSuite, getEntity, getDashboard, getUser, listUsers, listEntities });
-const { recordView, viewProfile, recentViewsForUser, usageByClientForUser, lastViewForUsers, recentUsageForUser, adminActivityReport, inactivity, recordAction, listActionsForUser, lastActionsForUsers } = activity;
+const { recordView, viewProfile, recentViewsForUser, usageByClientForUser, lastViewForUsers, recentUsageForUser, adminActivityReport, dailyEngagement, inactivity, recordAction, listActionsForUser, lastActionsForUsers } = activity;
 
 // ─── Share links ──────────────────────────────────────────────────────────────
 // Short links to a dashboard + filter snapshot. NEVER an auth bypass: the
@@ -1672,7 +1672,7 @@ module.exports = {
   // event documents (invoices etc.)
   listDocuments, getDocument, getDocumentFile, createDocument, updateDocument, deleteDocument, documentExistsForSource,
   // view tracking
-  recordView, viewProfile, recentViewsForUser, lastViewForUsers, recentUsageForUser, usageByClientForUser, adminActivityReport, inactivity,
+  recordView, viewProfile, recentViewsForUser, lastViewForUsers, recentUsageForUser, usageByClientForUser, adminActivityReport, dailyEngagement, inactivity,
   // user action audit log
   recordAction, listActionsForUser, lastActionsForUsers,
   // tile marks (pins + follows)
