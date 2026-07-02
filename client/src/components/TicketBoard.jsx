@@ -205,6 +205,7 @@ function TicketDetail({ id, onClose, onChange }) {
   const [shipNote, setShipNote] = useState('');
   const [testUrl, setTestUrl] = useState('');
   const [note, setNote] = useState('');
+  const [noteToReporter, setNoteToReporter] = useState(false);
   const [assignees, setAssignees] = useState([]);
   const [copied, setCopied] = useState(false);
   const [declining, setDeclining] = useState(false);
@@ -230,7 +231,7 @@ function TicketDetail({ id, onClose, onChange }) {
   async function addNote() {
     if (!note.trim()) return;
     setBusy('note');
-    try { await api.adminTicketComment(id, note.trim()); setNote(''); await load(); }
+    try { await api.adminTicketComment(id, note.trim(), noteToReporter ? 'public' : 'internal'); setNote(''); await load(); }
     catch (e) { setErr(e.message); } finally { setBusy(''); }
   }
   async function redraft() {
@@ -418,22 +419,35 @@ function TicketDetail({ id, onClose, onChange }) {
               )}
             </Section>
 
-            {/* Activity */}
+            {/* Activity: full trail. Comments are internal notes by default; ticking
+                "reply to reporter" makes it public — it lands in their conversation
+                (Product → My reports) and notifies them (push + inbox mirror). */}
             <Section title="Activity">
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10 }}>
                 {(d.comments || []).length === 0 && <p style={{ color: 'var(--muted)', fontSize: 12 }}>No activity yet.</p>}
                 {(d.comments || []).map((c) => (
                   <div key={c.id} style={{ fontSize: 12 }}>
-                    <span style={{ color: 'var(--muted)' }}>{c.kind === 'status' ? '↪' : '💬'} {c.authorEmail} · {new Date(c.createdAt).toLocaleString()}</span>
+                    <span style={{ color: 'var(--muted)' }}>
+                      {c.kind === 'status' ? '↪' : '💬'} {c.authorRole === 'reporter' ? `${c.authorEmail} (reporter)` : c.authorEmail} · {new Date(c.createdAt).toLocaleString()}
+                      {c.kind === 'comment' && (
+                        <span style={{ ...chip, marginLeft: 6, ...(c.visibility === 'public' ? { color: 'var(--brand)', background: 'rgba(var(--brand-rgb), 0.12)' } : { color: 'var(--muted)', background: 'rgba(128,128,128,0.12)' }) }}>
+                          {c.visibility === 'public' ? '👁 reporter sees this' : 'internal'}
+                        </span>
+                      )}
+                    </span>
                     <div style={{ whiteSpace: 'pre-wrap' }}>{c.body}</div>
                   </div>
                 ))}
               </div>
               <div style={{ display: 'flex', gap: 6 }}>
-                <input className="fld" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Add a note…" style={{ flex: 1 }}
+                <input className="fld" value={note} onChange={(e) => setNote(e.target.value)} placeholder={noteToReporter ? 'Reply to the reporter…' : 'Add an internal note…'} style={{ flex: 1 }}
                   onKeyDown={(e) => e.key === 'Enter' && addNote()} />
-                <button onClick={addNote} disabled={busy === 'note' || !note.trim()} style={miniBtn}>Add</button>
+                <button onClick={addNote} disabled={busy === 'note' || !note.trim()} style={miniBtn}>{noteToReporter ? 'Send' : 'Add'}</button>
               </div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6, fontSize: 12, color: 'var(--muted)', cursor: 'pointer' }}>
+                <input type="checkbox" checked={noteToReporter} onChange={(e) => setNoteToReporter(e.target.checked)} />
+                Reply to the reporter (they'll see it and get notified) — unticked = internal note
+              </label>
             </Section>
 
             {err && <p style={{ color: 'var(--brand)', fontSize: 13, marginTop: 10 }}>{err}</p>}
