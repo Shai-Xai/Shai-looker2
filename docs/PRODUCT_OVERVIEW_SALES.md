@@ -544,12 +544,23 @@ or point an AI agent (like Claude) at it and ask questions in plain language."
   itself enforces. Keys are named, revocable, and the secret is shown once.
 - **REST API (`/api/v1`)** — dashboards, live tile metrics, segments (with
   contactable reach), campaign results and goals, as JSON.
+- **Row-level data, opt-in per key** — a key can additionally be granted access
+  to the table behind a tile (customer & ticketing records) for clients who
+  need to pull that into their own systems. Explicitly enabled per key, never
+  included by default, and every pull is audited.
 - **MCP server (`/mcp`)** — the same data as curated tools any MCP-capable AI
   agent can use: "what does Total Tickets Sold show right now?", "how big is the
-  VIP segment?", "how did the launch campaign do?".
-- **Self-service** — clients create and revoke their own keys in **Settings →
-  Integrations**; Howler can manage them per client in Admin. Every external
-  call is rate-limited and audited.
+  VIP segment?", "how did the launch campaign do?". Works with **Claude** *and*
+  **ChatGPT / OpenAI** (it exposes the `search` + `fetch` tools ChatGPT needs,
+  so it also works with ChatGPT Deep Research).
+- **Off by default, on per client** — Howler enables API access per client with
+  one switch (Admin → client → Integrations); flipping it off instantly cuts
+  every key that client has.
+- **Self-service** — once enabled, clients create and revoke their own keys in
+  **Settings → Integrations**; Howler can manage them per client in Admin.
+  Every external call is rate-limited and audited.
+- **Shareable guide** — send clients/developers to `<pulse-domain>/api-guide`
+  (a living page rendered from `docs/CLIENT_API_GUIDE.md`).
 - Writes (draft a segment/campaign via the API) are on the roadmap and will ride
   the existing approval + consent gates — nothing will ever send without a human.
 
@@ -593,6 +604,40 @@ Use these to set direction, **not** to promise dates.
   nothing keeps burning in the background). And long data pulls no longer look frozen — the
   thinking line keeps refreshing every few seconds and the connection is kept alive, so a heavy
   query (e.g. a big cashless breakdown) shows progress instead of hanging on "Thinking…".
+- **2026-07-02** — **Connected AI assistants speak as the Owl** 🧪: connect Claude (or
+  ChatGPT) and it presents itself as **the Owl 🦉** — Pulse's data analyst — same persona
+  as in-app: warm, numbers-first, grounded in tool results, read-only. The connection
+  approval page and guide are Owl-branded; name the connector "The Owl" for the full effect.
+- **2026-07-02** — **API: query your data directly (no dashboard needed)** 🧪: connected
+  tools and AI agents can now run **their own breakdowns** — any curated measure by any
+  curated dimension, with filters and date ranges (`POST /api/v1/query` / the
+  `pulse_query_data` MCP tool) — e.g. "revenue by ticket type, last 30 days". Same engine
+  the Owl uses: admin-curated fields only, personal fields are filter-only, every query
+  forced to the client's own scope. Dashboards are no longer the only door; the curated
+  catalogue and the client boundary still are.
+- **2026-07-01** — **Works with ChatGPT / OpenAI too** 🧪: the MCP server now exposes the
+  standard `search` + `fetch` tools OpenAI requires, so Pulse connects as a **ChatGPT
+  custom connector** (Developer mode) and works with **ChatGPT Deep Research**, as well as
+  the **OpenAI Responses API** for developers — same URL, same per-client keys, same
+  scope/audit guarantees as the Claude connection.
+- **2026-07-01** — **Claude connects with one click (MCP OAuth)** 🧪: connecting an AI
+  assistant no longer involves copying keys. Add the connector URL in Claude, click
+  **Connect**, and a Pulse approval page opens — pick which client, optionally allow
+  row-level data, Approve. Pulse mints a named API key behind the scenes (visible &
+  revocable in Settings → Integrations like any other). Standard MCP auth (OAuth 2.1 +
+  PKCE + dynamic client registration), so other agent platforms get the same one-click flow.
+- **2026-07-01** — **API: per-client access switch + shareable developer guide** 🧪: API
+  access is now **off by default** and enabled per client by Howler (Admin → client →
+  Integrations — one toggle; off cuts all of that client's keys instantly, REST and MCP).
+  And there's a **client/developer guide at `<pulse-domain>/api-guide`** — a living page
+  (rendered from `docs/CLIENT_API_GUIDE.md`) covering keys, endpoints, connecting Claude
+  via MCP, row-level data responsibilities and troubleshooting. Share the link directly.
+- **2026-07-01** — **API: row-level tile data (opt-in scope)** 🧪: an API key can now be
+  granted **row-level access** — the table behind a dashboard tile (customer & ticketing
+  records) via `GET /api/v1/tiles/rows` or the `pulse_get_tile_rows` MCP tool — for clients
+  pulling data into their own systems. Explicit per-key opt-in (never default), same
+  client-scoping gate, capped at 10k rows per pull, fully audited; AI agents on a plain
+  read key are never even offered the tool.
 - **2026-07-01** — **Pulse API & AI-agent access (MCP)** 🧪: per-client, read-only **API keys**
   (client self-service in Settings → Integrations, or managed by Howler in Admin) unlock a
   **REST API** (`/api/v1` — dashboards, live tile metrics, segments + reach, campaign results,

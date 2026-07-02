@@ -23,7 +23,12 @@
 const crypto = require('crypto');
 const { HttpError, asyncHandler } = require('./http');
 
-const SCOPES = ['read', 'write', 'send'];
+// read       — aggregate reads: catalogue, KPI numbers, counts, results.
+// read_rows  — ROW-LEVEL reads: the table behind a tile (customer/ticketing
+//              rows, may include personal data). Explicit opt-in per key —
+//              never rides along with plain `read`.
+// write/send — reserved for P3 (drafts / approvals-gated sending).
+const SCOPES = ['read', 'read_rows', 'write', 'send'];
 const PREFIX = 'pulse_sk_';
 const MAX_ACTIVE_KEYS = 20; // per entity — plenty for real integrations, bounds abuse
 
@@ -57,6 +62,12 @@ function mount(app, { db, auth, rateLimit }) {
     );
     CREATE INDEX IF NOT EXISTS idx_api_audit_key ON api_audit(key_id, at);
   `);
+
+  // Master per-client switch (default OFF): Howler enables API access per
+  // client, deliberately. Enforced in bearerAuth — the one gate every external
+  // call (REST + MCP) passes through — so flipping it off cuts a client's
+  // entire external surface instantly, keys and all.
+  const apiEnabled = (entityId) => db.getSetting(`api_enabled:${entityId}`, '0') === '1';
 
   const hash = (secret) => crypto.createHash('sha256').update(secret).digest('hex');
   const maskHint = (hint) => `••••••${hint}`;
@@ -110,8 +121,13 @@ function mount(app, { db, auth, rateLimit }) {
   function bearerAuth(req, res, next) {
     const r = keyFromRequest(req);
     if (!r) {
-      res.set('WWW-Authenticate', 'Bearer realm="Pulse API"');
+      // resource_metadata points MCP clients at the OAuth discovery doc
+      // (server/oauth.js) so "Connect" can run the standard approval flow.
+      res.set('WWW-Authenticate', `Bearer realm="Pulse API", resource_metadata="${req.protocol}://${req.get('host')}/.well-known/oauth-protected-resource"`);
       return res.status(401).json({ error: 'A valid API key is required (Authorization: Bearer pulse_sk_…).' });
+    }
+    if (!apiEnabled(r.entity_id)) {
+      return res.status(403).json({ error: 'API access is switched off for this client — ask Howler to enable it.' });
     }
     // last_used_at is a coarse "is this key alive?" signal — throttle the write.
     if (!r.last_used_at || Date.now() - new Date(r.last_used_at).getTime() > 60_000) {
@@ -145,9 +161,14 @@ function mount(app, { db, auth, rateLimit }) {
     sql.prepare('SELECT surface, action, status, at FROM api_audit WHERE key_id=? ORDER BY id DESC LIMIT ?').all(keyId, limit);
 
   // ── management routes (dual-surface, same underlying functions) ──
-  // Admin: manage any client's keys (Admin → client → Integrations).
+  // Admin: manage any client's keys (Admin → client → Integrations) + the
+  // per-client access switch.
   app.get('/api/admin/entities/:id/api-keys', auth.requireAdmin, (req, res) => {
-    res.json({ keys: listKeys(req.params.id) });
+    res.json({ keys: listKeys(req.params.id), enabled: apiEnabled(req.params.id) });
+  });
+  app.put('/api/admin/entities/:id/api-access', auth.requireAdmin, (req, res) => {
+    db.setSetting(`api_enabled:${req.params.id}`, req.body?.enabled ? '1' : '0');
+    res.json({ enabled: apiEnabled(req.params.id) });
   });
   app.post('/api/admin/entities/:id/api-keys', auth.requireAdmin, asyncHandler(async (req, res) => {
     res.status(201).json(createKey({ entityId: req.params.id, name: req.body?.name, scopes: req.body?.scopes }));
@@ -168,12 +189,16 @@ function mount(app, { db, auth, rateLimit }) {
   };
   const canManage = auth.requirePermission('integrations.manage', (req) => req.params.entityId || req.query.entityId);
   app.get('/api/my/api-keys/:entityId', auth.requireAuth, canManage, asyncHandler(async (req, res) => {
-    res.json({ keys: listKeys(myEntity(req)) });
+    const entityId = myEntity(req);
+    res.json({ keys: listKeys(entityId), enabled: apiEnabled(entityId) });
   }));
   app.post('/api/my/api-keys/:entityId', auth.requireAuth, canManage,
     rateLimit({ windowMs: 60_000, max: 10, by: 'user', scope: 'apikey-create' }),
     asyncHandler(async (req, res) => {
-      res.status(201).json(createKey({ entityId: myEntity(req), name: req.body?.name, scopes: req.body?.scopes }));
+      const entityId = myEntity(req);
+      // Admins can pre-provision keys while access is off; clients can't.
+      if (!apiEnabled(entityId)) throw new HttpError(403, 'API access is switched off for your account — ask your Howler contact to enable it.');
+      res.status(201).json(createKey({ entityId, name: req.body?.name, scopes: req.body?.scopes }));
     }));
   app.post('/api/my/api-keys/:entityId/:keyId/revoke', auth.requireAuth, canManage, asyncHandler(async (req, res) => {
     res.json({ key: revokeKey(myEntity(req), req.params.keyId) });
@@ -186,7 +211,7 @@ function mount(app, { db, auth, rateLimit }) {
   }));
 
   console.log('[apiKeys] per-entity API keys mounted');
-  return { bearerAuth, requireScope, hasScope, audit, auditware, createKey, listKeys, revokeKey };
+  return { bearerAuth, requireScope, hasScope, audit, auditware, createKey, listKeys, revokeKey, apiEnabled };
 }
 
 module.exports = { mount, SCOPES };

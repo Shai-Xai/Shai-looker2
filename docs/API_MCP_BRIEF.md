@@ -57,9 +57,11 @@ Everything hangs off this; build it first.
 - **DECIDED — per-entity API keys.** A key is scoped to exactly **one client
   (entity)**. Issued, named, revocable; secret shown **once**, stored hashed,
   reported write-only/masked (same pattern as Looker/Anthropic creds).
-- **Scopes on a key:** `read` · `write` · `send` (granular; least-privilege).
-  An agent key can be `read` only; an integration `read+write`; `send` is opt-in
-  and rare.
+- **Scopes on a key:** `read` · `read_rows` · `write` · `send` (granular;
+  least-privilege). An agent key can be `read` only; `read_rows` (row-level
+  tile data — customer/ticketing rows, may include personal data) is an
+  explicit per-key opt-in that never rides along with plain `read`; an
+  integration can be `read+write`; `send` is opt-in and rare.
 - **Scope gate is the resolver, not a convention.** Every external call resolves
   the entity from the key and runs the **same `resolveScope` / `audienceFor`
   enforcement** as in-app. A key **cannot** reach another client's data or widen

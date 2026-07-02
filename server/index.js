@@ -30,7 +30,7 @@ const {
 // Shared scoped tile readers ("the number a tile shows") — lifted out of this
 // file into server/tileValues.js; used by goals, alerts, pulse, the Owl and the
 // public API surface. Must sit above the first consumer (the Owl tools provider).
-const { resolveTileValue, resolveTileSeries, resolveTileSeriesAll, resolveEventDate } = require('./tileValues')({ db, query });
+const { resolveTileValue, resolveTileRows, resolveTileSeries, resolveTileSeriesAll, resolveEventDate } = require('./tileValues')({ db, query });
 // Briefing/digest fact + phase engine (deterministic, AI-free) — lifted out of
 // this file into server/briefing.js; behaviour unchanged. Needs db, store and
 // the query engine. The AI-generation layer that sits on top stays here.
@@ -2745,8 +2745,9 @@ require('./setupNudge').mount(app, { db, auth, mailer, os, insights, resolveReci
 // remote MCP server for AI agents. Three disposable modules over the SAME
 // service core — external callers ride the app's own scope gates unchanged.
 const apiKeysApi = require('./apiKeys').mount(app, { db, auth, rateLimit });
-const apiV1 = require('./api').mount(app, { db, auth, rateLimit, apiKeys: apiKeysApi, clientCatalogue, resolveTileValue, segmentsApi, actionsApi, goalsApi });
+const apiV1 = require('./api').mount(app, { db, auth, rateLimit, apiKeys: apiKeysApi, clientCatalogue, resolveTileValue, resolveTileRows, segmentsApi, actionsApi, goalsApi, getOwlTools, owlCatalogue });
 require('./mcp').mount(app, { apiKeys: apiKeysApi, core: apiV1.core, rateLimit });
+require('./oauth').mount(app, { db, auth, apiKeys: apiKeysApi, rateLimit }); // "Connect" flow for MCP clients (Claude): discovery + approve → mints a key
 
 // ─── Briefing configuration ─────────────────────────────────────────────────────
 // Admin: global briefing rules + editable phase defaults.
@@ -3038,6 +3039,20 @@ app.get('/product-overview-sales.md', (_req, res) => {
   res.setHeader('Cache-Control', 'no-cache, must-revalidate');
   res.type('text/markdown; charset=utf-8');
   res.sendFile(PRODUCT_OVERVIEW_MD);
+});
+
+// The client/developer API guide — same living-doc pattern, shareable at
+// /api-guide (editing docs/CLIENT_API_GUIDE.md updates the page).
+const API_GUIDE_HTML = path.join(__dirname, '../docs/client-api-guide.html');
+const API_GUIDE_MD = path.join(__dirname, '../docs/CLIENT_API_GUIDE.md');
+app.get(['/api-guide', '/client-api-guide', '/client-api-guide.html'], (_req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+  res.sendFile(API_GUIDE_HTML);
+});
+app.get('/client-api-guide.md', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+  res.type('text/markdown; charset=utf-8');
+  res.sendFile(API_GUIDE_MD);
 });
 
 // The Experience OS pitch — a self-contained HTML deck. Served at a clean URL so

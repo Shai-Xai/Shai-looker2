@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pulse API — Client &amp; Developer Guide</title>
+<meta name="description" content="How to connect your systems and AI assistants to your Pulse data — API keys, REST endpoints and the MCP server.">
+<style>
+:root{
+  --brand:#FF385C;
+  --g:linear-gradient(120deg,#FF385C 0%,#FF6B35 45%,#7C3AED 100%);
+  --ink:#1d1d1f; --muted:#6e6e73; --line:#ececef; --bg:#fff; --soft:#f7f7f9;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+html{scroll-behavior:smooth;}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  color:var(--ink);background:var(--bg);line-height:1.65;-webkit-font-smoothing:antialiased;
+}
+
+/* sticky header */
+header.bar{
+  position:sticky;top:0;z-index:10;background:rgba(255,255,255,.82);
+  backdrop-filter:saturate(180%) blur(14px);border-bottom:1px solid var(--line);
+}
+.bar .wrap{display:flex;align-items:center;gap:14px;max-width:880px;margin:0 auto;padding:14px 24px;}
+.mark{width:34px;height:34px;border-radius:10px;background:var(--g);box-shadow:0 8px 22px -8px rgba(124,58,237,.55);flex:none;}
+.bar b{font-size:16px;font-weight:800;letter-spacing:-.02em;}
+.bar .sub{font-size:12px;color:var(--muted);font-weight:600;}
+.live{margin-left:auto;display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:700;color:var(--muted);}
+.dot{width:8px;height:8px;border-radius:50%;background:#34c759;box-shadow:0 0 0 0 rgba(52,199,89,.5);animation:pulse 2.2s infinite;}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(52,199,89,.5);}70%{box-shadow:0 0 0 7px rgba(52,199,89,0);}100%{box-shadow:0 0 0 0 rgba(52,199,89,0);}}
+
+/* reading column */
+main{max-width:880px;margin:0 auto;padding:46px 24px 120px;}
+.doc h1{font-size:clamp(30px,5vw,46px);line-height:1.08;letter-spacing:-.03em;font-weight:850;margin:8px 0 18px;}
+.doc h1 .grad{background:var(--g);-webkit-background-clip:text;background-clip:text;color:transparent;}
+.doc h2{font-size:clamp(22px,3vw,30px);letter-spacing:-.02em;font-weight:820;margin:54px 0 14px;padding-top:18px;border-top:1px solid var(--line);}
+.doc h3{font-size:19px;font-weight:760;letter-spacing:-.01em;margin:30px 0 8px;}
+.doc p{margin:12px 0;color:#2c2c30;}
+.doc a{color:var(--brand);text-decoration:none;border-bottom:1px solid rgba(255,56,92,.25);}
+.doc a:hover{border-bottom-color:var(--brand);}
+.doc strong{font-weight:750;}
+.doc ul{margin:12px 0 12px 4px;padding-left:22px;}
+.doc li{margin:7px 0;}
+.doc li::marker{color:var(--brand);}
+.doc hr{border:none;border-top:1px solid var(--line);margin:46px 0;}
+.doc code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.88em;background:var(--soft);padding:2px 7px;border-radius:6px;color:#9a1145;}
+.doc blockquote{
+  margin:22px 0;padding:16px 20px;background:var(--soft);border-left:4px solid var(--brand);
+  border-radius:0 12px 12px 0;color:#3a3a3e;font-size:15px;
+}
+.doc blockquote p{margin:6px 0;}
+
+/* status legend */
+.legend{display:flex;flex-wrap:wrap;gap:10px 18px;margin:18px 0 0;padding:14px 18px;background:var(--soft);border-radius:14px;font-size:13px;font-weight:600;color:var(--muted);}
+.legend span{white-space:nowrap;}
+
+/* states */
+.state{display:flex;align-items:center;justify-content:center;min-height:60vh;flex-direction:column;gap:14px;color:var(--muted);}
+.spinner{width:30px;height:30px;border:3px solid var(--line);border-top-color:var(--brand);border-radius:50%;animation:spin .8s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg);}}
+.err{max-width:520px;text-align:center;}
+.err code{background:var(--soft);padding:2px 7px;border-radius:6px;}
+</style>
+</head>
+<body>
+<header class="bar">
+  <div class="wrap">
+    <div class="mark"></div>
+    <div>
+      <b>Pulse</b>
+      <div class="sub">API Guide · Clients &amp; Developers</div>
+    </div>
+    <span class="live"><span class="dot"></span><span id="liveLabel">live</span></span>
+  </div>
+</header>
+
+<main>
+  <div id="legend" class="legend" hidden>
+    
+  </div>
+  <article id="doc" class="doc">
+    <div class="state"><div class="spinner"></div><div>Loading the guide…</div></div>
+  </article>
+</main>
+
+<!-- Markdown renderer. Pinned version; falls back gracefully if the CDN is blocked. -->
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<script>
+(async function () {
+  const docEl = document.getElementById('doc');
+  const liveLabel = document.getElementById('liveLabel');
+  // Absolute path so it resolves the same with or without a trailing slash.
+  const SRC = '/client-api-guide.md';
+
+  function showError(msg, detail) {
+    docEl.innerHTML =
+      '<div class="state err"><h3>Couldn’t load the overview</h3>' +
+      '<p>' + msg + '</p>' + (detail ? '<p><code>' + detail + '</code></p>' : '') + '</div>';
+    liveLabel.textContent = 'offline';
+    document.querySelector('.dot').style.background = '#ff3b30';
+  }
+
+  if (typeof marked === 'undefined') {
+    return showError('The markdown renderer didn’t load (CDN blocked?). The page needs network access to <code>cdn.jsdelivr.net</code>.');
+  }
+
+  try {
+    const res = await fetch(SRC, { cache: 'no-store' });
+    if (!res.ok) return showError('The source document responded with ' + res.status + '.', SRC);
+    const md = await res.text();
+
+    marked.setOptions({ gfm: true, breaks: false });
+    docEl.innerHTML = marked.parse(md);
+    
+
+    // Reflect when the source was last touched, if the server tells us.
+    const lastMod = res.headers.get('last-modified');
+    if (lastMod) {
+      const d = new Date(lastMod);
+      if (!isNaN(d)) liveLabel.textContent = 'updated ' + d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+    }
+    // Keep the document title in sync with the doc's <h1>.
+    const h1 = docEl.querySelector('h1');
+    if (h1) document.title = h1.textContent.trim() + ' — Pulse';
+
+    // Wrap the gradient on the first h1's product name for a touch of brand.
+    if (h1 && !h1.querySelector('.grad')) {
+      h1.innerHTML = h1.innerHTML.replace(/^(\s*)(Pulse|Howler)\b/i, '$1<span class="grad">$2</span>');
+    }
+  } catch (e) {
+    showError('Network error while fetching the document.', (e && e.message) || String(e));
+  }
+})();
+</script>
+</body>
+</html>
