@@ -608,10 +608,29 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
     const suite = site.suite_id ? db.getSuite(site.suite_id) : null;
     const { page, items } = offerFor(site, session.page_url);
     const catLine = (c) => `${c.label} [id:${c.id}] — ${c.price ? `${c.currency} ${c.price}` : 'price on the tickets page'}${c.availability ? ` (${c.availability})` : ''}${c.description ? ` — ${c.description}` : ''}`;
+    // Returning-fan memory: what this fan told us (profile) + what they showed
+    // interest in across THEIR OWN sessions (matched by their anon browser id).
+    // Only ever their own data — never another fan's.
+    let memory = '';
+    try {
+      const profile = session.profile_id ? sql.prepare('SELECT * FROM fan_profiles WHERE id = ?').get(session.profile_id) : null;
+      const topics = session.anon_id ? sql.prepare(
+        `SELECT DISTINCT json_extract(e.payload,'$.topic') AS t FROM fan_events e
+           JOIN fan_sessions s ON s.id = e.session_id
+          WHERE s.anon_id = ? AND s.site_id = ? AND e.kind = 'interest' AND t IS NOT NULL LIMIT 6`,
+      ).all(session.anon_id, site.id).map((r) => r.t) : [];
+      const prefs = profile ? J(profile.preferences, []) : [];
+      const bits = [];
+      if (profile && profile.name) bits.push(`their name is ${profile.name.split(' ')[0]} (use it naturally, sparingly)`);
+      const all = [...new Set([...prefs, ...topics])].slice(0, 6);
+      if (all.length) bits.push(`they've shown interest in: ${all.join(', ')}`);
+      if (bits.length) memory = `WHAT YOU REMEMBER about THIS fan (from their own past visits/messages — never mention "data" or "records", just be a friend who remembers): ${bits.join('; ')}.`;
+    } catch { /* memory is best-effort */ }
     const instructions = [
       `EVENT CONTEXT: ${site.name || suite?.name || 'this event'}${suite?.name && site.name && suite.name !== site.name ? ` (event: ${suite.name})` : ''}. Today's date is ${new Date().toISOString().slice(0, 10)}.`,
       `THE FAN IS ON: ${session.page_url || 'the event website'}${page ? ` — a "${page.page_type}" page${page.note ? ` (${page.note})` : ''}` : ''}.`,
       page && page.content ? `ABOUT THIS PAGE (organiser-approved info — answer from it directly): ${String(page.content).slice(0, 4000)}` : '',
+      memory,
       `CATALOGUE (your ONLY price/product facts — most relevant to this page first):\n- ${items.map(catLine).join('\n- ')}`,
       'When the fan seems ready to buy (or asks how/where), call getCheckoutLink with the item id — the app shows a buy button under your reply.',
     ].filter(Boolean).join('\n\n');

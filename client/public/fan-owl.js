@@ -20,12 +20,17 @@
   try { base = new URL(script.src).origin; } catch (e) { return; }
 
   var LS_ANON = 'howler_fan_anon';
+  // The session lives in LOCAL storage (not per-tab): a returning fan continues
+  // the SAME conversation — the Owl remembers what you talked about last visit.
   var SS_SESSION = 'howler_fan_session_' + siteKey.slice(-8);
   var SS_TEASED = 'howler_fan_teased_' + siteKey.slice(-8);
   function store(get, key, val) {
     try { return get ? window.localStorage.getItem(key) : window.localStorage.setItem(key, val); } catch (e) { return null; }
   }
   function sstore(get, key, val) {
+    // Session id → localStorage (persists across visits); teaser flag stays
+    // per-tab so a new visit gets its teaser again.
+    if (key === SS_SESSION) return store(get, key, val);
     try { return get ? window.sessionStorage.getItem(key) : window.sessionStorage.setItem(key, val); } catch (e) { return null; }
   }
   var anonId = store(true, LS_ANON);
