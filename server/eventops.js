@@ -77,6 +77,19 @@ function mount(app, { db, auth }) {
     );
     CREATE INDEX IF NOT EXISTS idx_eventops_device_types_suite ON eventops_device_types(suite_id);
 
+    -- Editable per-event catalogue of issue categories (drives the Log-issue picker). One
+    -- may be flagged the default (pre-selected). Lazy-seeded the first time it's read.
+    CREATE TABLE IF NOT EXISTS eventops_issue_categories (
+      id         TEXT PRIMARY KEY,
+      entity_id  TEXT NOT NULL,
+      suite_id   TEXT NOT NULL,
+      label      TEXT NOT NULL DEFAULT '',
+      is_default INTEGER NOT NULL DEFAULT 0,
+      position   INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_eventops_issue_categories_suite ON eventops_issue_categories(suite_id);
+
     CREATE TABLE IF NOT EXISTS eventops_stations (
       id          TEXT PRIMARY KEY,
       entity_id   TEXT NOT NULL,
@@ -332,7 +345,7 @@ function mount(app, { db, auth }) {
 
   // Log an issue / liaison check + its audit row. Returns the issue row.
   function applyIssue(su, d, { category, note, resolution, resolved, staffId, actor }) {
-    const cat = ISSUE_CATEGORIES.includes(category) ? category : (str(category, 40).trim() || 'other');
+    const cat = str(category, 40).trim() || defaultCategory(su);
     const n = str(note, 2000).trim();
     const res = str(resolution, 2000).trim();
     const resolvedNow = !!resolved || !!res;
@@ -520,6 +533,60 @@ function mount(app, { db, auth }) {
     if (!t) return res.status(404).json({ error: 'Type not found' });
     sql.prepare('DELETE FROM eventops_device_types WHERE id=?').run(t.id);
     res.json({ types: deviceTypes(su).map(deviceTypeRow) });
+  });
+
+  // ── Issue categories: an editable per-event catalogue with one flagged as default ──
+  const issueCategoryRow = (c) => ({ id: c.id, label: c.label, isDefault: !!c.is_default });
+  const listCategories = (su) => sql.prepare('SELECT * FROM eventops_issue_categories WHERE suite_id=? ORDER BY position, created_at').all(su.id);
+  function issueCategories(su) {
+    let rows = listCategories(su);
+    if (rows.length === 0) { // lazy-seed the built-in categories; the first is the default
+      const ts = now();
+      const ins = sql.prepare('INSERT INTO eventops_issue_categories (id, entity_id, suite_id, label, is_default, position, created_at) VALUES (?,?,?,?,?,?,?)');
+      sql.transaction(() => ISSUE_CATEGORIES.forEach((label, i) => ins.run(uuid(), su.entityId, su.id, label, i === 0 ? 1 : 0, i, ts)))();
+      rows = listCategories(su);
+    }
+    return rows;
+  }
+  const defaultCategory = (su) => { const rows = issueCategories(su); return (rows.find((c) => c.is_default) || rows[0])?.label || 'other'; };
+  const clearDefault = (su) => sql.prepare('UPDATE eventops_issue_categories SET is_default=0 WHERE suite_id=?').run(su.id);
+
+  app.get('/api/eventops/suites/:suiteId/issue-categories', auth.requireAuth, (req, res) => {
+    const su = gateSuite(req, res); if (!su) return;
+    res.json({ categories: issueCategories(su).map(issueCategoryRow) });
+  });
+  app.post('/api/eventops/suites/:suiteId/issue-categories', auth.requireAuth, (req, res) => {
+    const su = gateSuite(req, res, { manage: true }); if (!su) return;
+    const label = str(req.body?.label, 40).trim();
+    if (!label) return res.status(400).json({ error: 'Give the category a name.' });
+    issueCategories(su); // ensure seeded
+    if (sql.prepare('SELECT id FROM eventops_issue_categories WHERE suite_id=? AND label=? COLLATE NOCASE').get(su.id, label)) return res.status(409).json({ error: 'That category already exists.' });
+    const pos = (sql.prepare('SELECT MAX(position) m FROM eventops_issue_categories WHERE suite_id=?').get(su.id).m ?? -1) + 1;
+    if (req.body?.isDefault) clearDefault(su);
+    sql.prepare('INSERT INTO eventops_issue_categories (id, entity_id, suite_id, label, is_default, position, created_at) VALUES (?,?,?,?,?,?,?)').run(uuid(), su.entityId, su.id, label, req.body?.isDefault ? 1 : 0, pos, now());
+    res.status(201).json({ categories: issueCategories(su).map(issueCategoryRow) });
+  });
+  app.put('/api/eventops/suites/:suiteId/issue-categories/:id', auth.requireAuth, (req, res) => {
+    const su = gateSuite(req, res, { manage: true }); if (!su) return;
+    const c = sql.prepare('SELECT * FROM eventops_issue_categories WHERE id=? AND suite_id=?').get(req.params.id, su.id);
+    if (!c) return res.status(404).json({ error: 'Category not found' });
+    const label = req.body?.label != null ? str(req.body.label, 40).trim() : c.label;
+    if (!label) return res.status(400).json({ error: 'Give the category a name.' });
+    if (sql.prepare('SELECT id FROM eventops_issue_categories WHERE suite_id=? AND label=? COLLATE NOCASE AND id<>?').get(su.id, label, c.id)) return res.status(409).json({ error: 'That category already exists.' });
+    if (label !== c.label) sql.prepare('UPDATE eventops_issues SET category=? WHERE suite_id=? AND category=? COLLATE NOCASE').run(label, su.id, c.label); // re-tag existing issues
+    if (req.body?.isDefault === true) clearDefault(su);
+    const isDefault = req.body?.isDefault === true ? 1 : req.body?.isDefault === false ? 0 : c.is_default;
+    sql.prepare('UPDATE eventops_issue_categories SET label=?, is_default=? WHERE id=?').run(label, isDefault, c.id);
+    res.json({ categories: issueCategories(su).map(issueCategoryRow) });
+  });
+  app.delete('/api/eventops/suites/:suiteId/issue-categories/:id', auth.requireAuth, (req, res) => {
+    const su = gateSuite(req, res, { manage: true }); if (!su) return;
+    const c = sql.prepare('SELECT * FROM eventops_issue_categories WHERE id=? AND suite_id=?').get(req.params.id, su.id);
+    if (!c) return res.status(404).json({ error: 'Category not found' });
+    sql.prepare('DELETE FROM eventops_issue_categories WHERE id=?').run(c.id);
+    // Keep a default alive: if we removed the default, promote the first remaining one.
+    if (c.is_default) { const first = listCategories(su)[0]; if (first) sql.prepare('UPDATE eventops_issue_categories SET is_default=1 WHERE id=?').run(first.id); }
+    res.json({ categories: issueCategories(su).map(issueCategoryRow) });
   });
 
   app.put('/api/eventops/suites/:suiteId/devices/:id', auth.requireAuth, (req, res) => {
@@ -746,9 +813,16 @@ function mount(app, { db, auth }) {
   });
   app.put('/api/eventops/suites/:suiteId/kiosk', auth.requireAuth, (req, res) => {
     const su = gateSuite(req, res, { manage: true }); if (!su) return;
-    const k = kioskFor(su.id, { create: true });
-    sql.prepare('UPDATE eventops_kiosk SET enabled=?, updated_at=? WHERE suite_id=?').run((req.body || {}).enabled ? 1 : 0, now(), su.id);
-    res.json(kioskView(su.id, kioskFor(su.id) || k));
+    kioskFor(su.id, { create: true });
+    const b = req.body || {};
+    // Optional friendly slug for the link (…/portal/:suiteId/<slug>). URL-safe, ≥3 chars.
+    if (b.slug != null) {
+      const slug = String(b.slug).trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48);
+      if (slug.length < 3) return res.status(400).json({ error: 'Use at least 3 letters, numbers or hyphens for the link.' });
+      sql.prepare('UPDATE eventops_kiosk SET token=?, updated_at=? WHERE suite_id=?').run(slug, now(), su.id);
+    }
+    if (b.enabled != null) sql.prepare('UPDATE eventops_kiosk SET enabled=?, updated_at=? WHERE suite_id=?').run(b.enabled ? 1 : 0, now(), su.id);
+    res.json(kioskView(su.id, kioskFor(su.id)));
   });
 
   // ════════════════════════════ PUBLIC staff portal (token-gated, NO Pulse login) ═══
@@ -769,7 +843,7 @@ function mount(app, { db, auth }) {
   // Event basics (name + stations) so the portal can show context before login.
   app.get('/api/eventops/portal/:suiteId/:token', (req, res) => {
     const su = portalSuite(req, res); if (!su) return;
-    res.json({ suite: { id: su.id, name: su.name }, stations: sql.prepare('SELECT * FROM eventops_stations WHERE suite_id=? ORDER BY position, name').all(su.id).map(stationRow), checkpoints: listCheckpoints(su.id) });
+    res.json({ suite: { id: su.id, name: su.name }, stations: sql.prepare('SELECT * FROM eventops_stations WHERE suite_id=? ORDER BY position, name').all(su.id).map(stationRow), checkpoints: listCheckpoints(su.id), issueCategories: issueCategories(su).map(issueCategoryRow) });
   });
 
   // Log in by staff number → the staff record (used to attribute their actions).

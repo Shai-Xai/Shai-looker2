@@ -8,7 +8,7 @@ import { useEffect, useRef, useState } from 'react';
 // the reliable fallback. The component is "dumb": it only resolves a code string via onCode.
 const REGION_ID = 'eventops-scan-region';
 
-export default function EventOpsScanner({ onCode, onClose, title = 'Scan a device' }) {
+export default function EventOpsScanner({ onCode, onClose, onDone, doneLabel = '✓ Done', title = 'Scan a device' }) {
   const [mode, setMode] = useState('scan'); // scan | ocr
   const [manual, setManual] = useState('');
   const [camState, setCamState] = useState('starting'); // starting | live | unavailable
@@ -71,6 +71,7 @@ export default function EventOpsScanner({ onCode, onClose, title = 'Scan a devic
     onCode(String(code || '').trim());
   }
   function close() { stopCamera(); stopStream(); onClose?.(); }
+  function finish() { if (handledRef.current) return; handledRef.current = true; stopCamera(); stopStream(); onDone?.(); }
   function submitManual(e) { e.preventDefault(); if (manual.trim()) emit(manual.trim()); }
 
   // Grab the current camera frame and OCR it.
@@ -162,6 +163,8 @@ export default function EventOpsScanner({ onCode, onClose, title = 'Scan a devic
           <input value={manual} onChange={(e) => setManual(e.target.value)} placeholder="Or type a code (e.g. SL006)" autoCapitalize="characters" style={input} />
           <button type="submit" style={goBtn} disabled={!manual.trim()}>Go</button>
         </form>
+
+        {onDone && <button onClick={finish} style={doneBtn}>{doneLabel}</button>}
       </div>
     </div>
   );
@@ -195,4 +198,5 @@ const goBtn = { padding: '0 18px', borderRadius: 10, border: 'none', background:
 const primaryWide = { width: '100%', padding: '13px', borderRadius: 10, border: 'none', background: 'var(--brand)', color: '#fff', fontWeight: 800, fontSize: 16, cursor: 'pointer' };
 const modeBtn = (on) => ({ flex: 1, padding: '9px', borderRadius: 10, border: '1px solid ' + (on ? 'var(--brand)' : 'var(--border)'), background: on ? 'var(--brand)' : 'transparent', color: on ? '#fff' : 'var(--text)', fontWeight: on ? 700 : 500, fontSize: 13.5, cursor: 'pointer' });
 const secondaryBtn = { padding: '11px 14px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontWeight: 600, fontSize: 14 };
+const doneBtn = { width: '100%', marginTop: 10, padding: '13px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--text)', fontWeight: 800, fontSize: 16, cursor: 'pointer' };
 const candChip = (on) => ({ padding: '8px 14px', borderRadius: 20, fontSize: 15, fontWeight: 700, cursor: 'pointer', border: '1px solid ' + (on ? 'var(--brand)' : 'var(--border)'), background: on ? 'var(--brand)' : 'transparent', color: on ? '#fff' : 'var(--text)' });

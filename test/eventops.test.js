@@ -233,6 +233,62 @@ test('device types: lazy-seeded defaults, add/rename/delete; rename re-tags devi
   assert.ok(!call(r['GET /api/eventops/suites/:suiteId/device-types'], { user: owner, params: P }).body.types.some((t) => t.id === scanner.id));
 });
 
+test('issue categories: seed + default, add/rename (re-tags issues)/set-default/delete promotes', () => {
+  const r = mount();
+  const { entity, suite, owner, admin } = seedEvent();
+  call(r['PUT /api/eventops/entities/:entityId/enabled'], { user: admin, params: { entityId: entity.id }, body: { enabled: true } });
+  const P = { suiteId: suite.id };
+
+  // Seeds with the built-ins; the first is the default.
+  const seeded = call(r['GET /api/eventops/suites/:suiteId/issue-categories'], { user: owner, params: P }).body.categories;
+  assert.ok(seeded.length >= 5);
+  assert.equal(seeded.filter((c) => c.isDefault).length, 1);
+
+  // Add a custom category as the new default.
+  const added = call(r['POST /api/eventops/suites/:suiteId/issue-categories'], { user: owner, params: P, body: { label: 'Overheating', isDefault: true } });
+  assert.equal(added.code, 201);
+  const over = added.body.categories.find((c) => c.label === 'Overheating');
+  assert.equal(over.isDefault, true);
+  assert.equal(added.body.categories.filter((c) => c.isDefault).length, 1); // exactly one default
+  // Case-insensitive duplicate rejected.
+  assert.equal(call(r['POST /api/eventops/suites/:suiteId/issue-categories'], { user: owner, params: P, body: { label: 'overheating' } }).code, 409);
+
+  // Log an issue on it, then rename the category → the issue is re-tagged.
+  const dev = call(r['POST /api/eventops/suites/:suiteId/devices'], { user: owner, params: P, body: { label: 'D1', qrCode: 'D1' } }).body.device;
+  const iss = call(r['POST /api/eventops/suites/:suiteId/issues'], { user: owner, params: P, body: { deviceId: dev.id, category: 'Overheating' } }).body.issue;
+  assert.equal(iss.category, 'Overheating');
+  call(r['PUT /api/eventops/suites/:suiteId/issue-categories/:id'], { user: owner, params: { ...P, id: over.id }, body: { label: 'Too hot' } });
+  const issues = call(r['GET /api/eventops/suites/:suiteId/issues'], { user: owner, params: P, query: { status: 'all' } }).body.issues;
+  assert.equal(issues[0].category, 'Too hot');
+
+  // Deleting the default promotes another so there's always a default.
+  call(r['DELETE /api/eventops/suites/:suiteId/issue-categories/:id'], { user: owner, params: { ...P, id: over.id } });
+  const after = call(r['GET /api/eventops/suites/:suiteId/issue-categories'], { user: owner, params: P }).body.categories;
+  assert.ok(!after.some((c) => c.id === over.id));
+  assert.equal(after.filter((c) => c.isDefault).length, 1);
+});
+
+test('staff link: a custom slug works and the old token is revoked', () => {
+  const r = mount();
+  const { entity, suite, owner, admin } = seedEvent();
+  call(r['PUT /api/eventops/entities/:entityId/enabled'], { user: admin, params: { entityId: entity.id }, body: { enabled: true } });
+  const P = { suiteId: suite.id };
+  call(r['POST /api/eventops/suites/:suiteId/staff'], { user: owner, params: P, body: { name: 'Sam', number: '7' } });
+  const old = call(r['GET /api/eventops/suites/:suiteId/kiosk'], { user: owner, params: P }).body.token;
+
+  // Set a friendly slug (sanitised).
+  const set = call(r['PUT /api/eventops/suites/:suiteId/kiosk'], { user: owner, params: P, body: { slug: 'Summer Fest 2026!' } });
+  assert.equal(set.body.token, 'summer-fest-2026');
+  assert.ok(set.body.path.endsWith('/summer-fest-2026'));
+
+  // The new slug gates the portal; the old token no longer works.
+  assert.equal(call(r['POST /api/eventops/portal/:suiteId/:token/login'], { params: { suiteId: suite.id, token: 'summer-fest-2026' }, body: { number: '7' } }).code, 200);
+  assert.equal(call(r['POST /api/eventops/portal/:suiteId/:token/login'], { params: { suiteId: suite.id, token: old }, body: { number: '7' } }).code, 403);
+
+  // Too-short slugs are rejected.
+  assert.equal(call(r['PUT /api/eventops/suites/:suiteId/kiosk'], { user: owner, params: P, body: { slug: 'ab' } }).code, 400);
+});
+
 test('deleting a device removes it and cascades its history + issues', () => {
   const r = mount();
   const { entity, suite, owner, admin } = seedEvent();

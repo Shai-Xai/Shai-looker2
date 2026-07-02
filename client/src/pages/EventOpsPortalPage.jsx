@@ -10,6 +10,7 @@ const KIND_ICON = { bar: '🍺', gate: '🛂', booth: '🏪', topup: '💳', ven
 const ISSUE_CATEGORIES = ['damaged', 'battery', 'connectivity', 'missing_parts', 'frozen', 'wrong_config', 'other'];
 const RESOLUTIONS = ['Swapped device', 'Rebooted', 'Battery replaced', 'Reconnected', 'Replaced part', 'Reconfigured', 'Cleared error', 'False alarm'];
 const CAT_LABEL = { damaged: 'Damaged', battery: 'Battery', connectivity: 'Connectivity', missing_parts: 'Missing parts', frozen: 'Frozen', wrong_config: 'Wrong config', other: 'Other' };
+const catLabel = (c) => CAT_LABEL[c] || String(c || '').replace(/_/g, ' ').replace(/\b\w/g, (x) => x.toUpperCase());
 
 export default function EventOpsPortalPage({ suiteId, token }) {
   const [info, setInfo] = useState(null);     // { suite, stations } | { error }
@@ -127,7 +128,7 @@ export default function EventOpsPortalPage({ suiteId, token }) {
       )}
       {device && (
         <IssueSheet
-          suiteId={suiteId} token={token} staffId={staff.id} device={device}
+          suiteId={suiteId} token={token} staffId={staff.id} device={device} categories={info.issueCategories || []}
           onClose={() => setDevice(null)}
           onDone={(msg) => { setDevice(null); if (msg) flash(msg); refreshMe(); }}
         />
@@ -180,7 +181,7 @@ function StationCard({ station }) {
           {station.issues.length > 0 && <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', marginTop: 6 }}>OPEN ISSUES</div>}
           {station.issues.map((i) => (
             <div key={i.id} style={{ ...miniRow, color: 'var(--error)' }}>
-              <span>{i.device?.label || i.device?.qrCode} · {CAT_LABEL[i.category] || i.category}</span>
+              <span>{i.device?.label || i.device?.qrCode} · {catLabel(i.category)}</span>
               <span style={{ fontSize: 11, color: 'var(--muted)' }}>{i.note || ''}</span>
             </div>
           ))}
@@ -191,8 +192,10 @@ function StationCard({ station }) {
 }
 
 // Log an issue against a device the staffer just scanned. Issue-only — moves live in MoveFlow.
-function IssueSheet({ suiteId, token, staffId, device, onClose, onDone }) {
-  const [issue, setIssue] = useState({ category: 'damaged', note: '', resolution: '' });
+function IssueSheet({ suiteId, token, staffId, device, categories = [], onClose, onDone }) {
+  const cats = categories.length ? categories.map((c) => c.label) : ISSUE_CATEGORIES;
+  const dflt = (categories.find((c) => c.isDefault) || categories[0])?.label || 'damaged';
+  const [issue, setIssue] = useState({ category: dflt, note: '', resolution: '' });
   const [busy, setBusy] = useState(false);
   async function log() {
     setBusy(true);
@@ -210,7 +213,7 @@ function IssueSheet({ suiteId, token, staffId, device, onClose, onDone }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <div style={lbl}>What&apos;s the issue?</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {ISSUE_CATEGORIES.map((c) => <Pill key={c} on={issue.category === c} onClick={() => setIssue({ ...issue, category: c })}>{CAT_LABEL[c]}</Pill>)}
+            {cats.map((c) => <Pill key={c} on={issue.category === c} onClick={() => setIssue({ ...issue, category: c })}>{catLabel(c)}</Pill>)}
           </div>
           <textarea style={{ ...input, minHeight: 64 }} placeholder="What's wrong?" value={issue.note} onChange={(e) => setIssue({ ...issue, note: e.target.value })} />
           <input style={input} placeholder="Resolution (optional — if fixed now)" value={issue.resolution} onChange={(e) => setIssue({ ...issue, resolution: e.target.value })} />
@@ -274,7 +277,7 @@ function PortalIssues({ suiteId, token, staffId, onChange, flash }) {
                 <div key={i.id} style={card}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
                     <div style={{ minWidth: 0 }}>
-                      <div style={{ fontWeight: 650, fontSize: 14 }}>{i.device?.label || i.device?.qrCode || 'Device'} · <span style={{ color: 'var(--error)' }}>{CAT_LABEL[i.category] || i.category}</span>{i.stationLabel ? <span style={{ color: 'var(--muted)', fontWeight: 500 }}> · 📍 {i.stationLabel}</span> : ''}</div>
+                      <div style={{ fontWeight: 650, fontSize: 14 }}>{i.device?.label || i.device?.qrCode || 'Device'} · <span style={{ color: 'var(--error)' }}>{catLabel(i.category)}</span>{i.stationLabel ? <span style={{ color: 'var(--muted)', fontWeight: 500 }}> · 📍 {i.stationLabel}</span> : ''}</div>
                       {i.note && <div style={{ fontSize: 13, marginTop: 2 }}>{i.note}</div>}
                       <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>{i.staffLabel ? `${i.staffLabel} · ` : ''}{i.status}</div>
                       {i.status === 'resolved' && i.resolution && <div style={{ fontSize: 12, color: 'var(--success)', marginTop: 4 }}>✓ {i.resolution}</div>}
@@ -301,7 +304,7 @@ function ResolveSheet({ issue, onClose, onResolve }) {
           <strong style={{ fontSize: 16 }}>Resolve issue</strong>
           <button onClick={onClose} style={iconBtn}>✕</button>
         </div>
-        <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 12 }}>{issue.device?.label || issue.device?.qrCode} · {CAT_LABEL[issue.category] || issue.category}</div>
+        <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 12 }}>{issue.device?.label || issue.device?.qrCode} · {catLabel(issue.category)}</div>
         <div style={lbl}>How was it resolved?</div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
           {RESOLUTIONS.map((r) => <Pill key={r} on={picked === r} onClick={() => setPicked(picked === r ? '' : r)}>{r}</Pill>)}
