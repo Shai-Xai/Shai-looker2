@@ -711,6 +711,10 @@ see "The continuous comms loop" above.)*
   nothing keeps burning in the background). And long data pulls no longer look frozen — the
   thinking line keeps refreshing every few seconds and the connection is kept alive, so a heavy
   query (e.g. a big cashless breakdown) shows progress instead of hanging on "Thinking…".
+- **2026-07-02** — **Grok (xAI) can connect too** 🧪: paid Grok users can add Pulse as a
+  custom connector (grok.com/connectors → New → Custom → our MCP URL) — same approval
+  page, keys and guarantees as Claude/ChatGPT/Gemini Enterprise. One server, four AI
+  platforms.
 - **2026-07-02** — **Google Gemini Enterprise can connect too** 🧪: organisations on
   Google's **Gemini Enterprise** can add Pulse as a Custom MCP connector (same approval
   page, same per-client keys and guarantees as Claude/ChatGPT). Honest limit: the
