@@ -218,6 +218,10 @@ function owlOwner(user) { return String(user?.email || '').trim().toLowerCase() 
 function owlAllowed(user) {
   const email = String(user?.email || '').trim().toLowerCase();
   if (!email) return false;
+  // Organizer-portal embed users (server/owlEmbed.js): the admin-configured
+  // org→client link IS their enablement, so the shadow users it provisions
+  // (tagged 'portal') skip the email allowlist. Data scope is still applyScope.
+  if ((user.roles || []).includes('portal')) return true;
   if (OWL_ALLOW === 'all') return true;
   if (OWL_ALLOW.split(',').map((s) => s.trim()).filter(Boolean).includes(email)) return true;
   // In-app access the owner configures (Admin → AI): 'all', or a specific allowlist.

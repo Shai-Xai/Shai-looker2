@@ -95,6 +95,18 @@ function issueCookie(res, user) {
 }
 function clearCookie(res) { res.clearCookie(COOKIE, COOKIE_OPTS); }
 
+// ─── Embed session tokens (organizer-portal Owl — server/owlEmbed.js) ─────────
+// A short-lived bearer JWT (marked with an `emb` claim) that authenticates the
+// chromeless /embed/owl page WITHOUT a cookie: inside a cross-site iframe the
+// sameSite session cookie is never sent, so the embed page attaches this token
+// as an Authorization header on every API call instead. Minted only after the
+// portal's server-to-server handshake, for entity-scoped shadow client users —
+// attachUser accepts it below and marks the request `req.embedAuth`.
+const EMBED_TOKEN_TTL_S = 2 * 60 * 60; // one working session; the portal mints a fresh one per open
+function issueEmbedToken(user, ttlSeconds = EMBED_TOKEN_TTL_S) {
+  return jwt.sign({ sub: user.id, emb: 1 }, getSecret(), { expiresIn: ttlSeconds });
+}
+
 // Short-TTL cache of the authenticated user. A single screen fires 10-20 parallel
 // tile/data requests, and attachUser runs on each — without this, that's 10-20 ×
 // getUser() (2 SQLite queries each) for the SAME user per navigation. 2s collapses
@@ -117,6 +129,19 @@ function attachUser(req, _res, next) {
   if (token) {
     try { const { sub } = jwt.verify(token, getSecret()); req.user = cachedUser(sub) || null; }
     catch { req.user = null; }
+  }
+  // No cookie? Accept an embed session token (issueEmbedToken) as a bearer. Only
+  // JWTs WE signed with the `emb` claim verify; anything else (a pulse_sk_ API
+  // key, a foreign token) falls through untouched — apiKeys.bearerAuth still owns
+  // its own routes.
+  if (!req.user) {
+    const m = /^Bearer\s+(\S+)$/i.exec(req.headers.authorization || '');
+    if (m && m[1].split('.').length === 3) {
+      try {
+        const p = jwt.verify(m[1], getSecret());
+        if (p.emb) { req.user = cachedUser(p.sub) || null; req.embedAuth = !!req.user; }
+      } catch { /* not an embed token — ignore */ }
+    }
   }
   next();
 }
@@ -455,7 +480,7 @@ module.exports = {
   // users
   loadUsers, publicUser, createUser, updateUser, deleteUser, getUser, verifyCredentials,
   // session
-  issueCookie, clearCookie, attachUser, requireAuth, requireAdmin,
+  issueCookie, clearCookie, issueEmbedToken, attachUser, requireAuth, requireAdmin,
   // scoping
   scopeFiltersForUser, accessibleOrgFilters, canAccessDashboard,
   // suites / navigation

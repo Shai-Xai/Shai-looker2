@@ -21,7 +21,10 @@ const FALLBACK_STARTERS = [
 // is fetched + scoped server-side, so nothing here can reach another client's data.
 //
 // Mobile-first: single column, full-width panel on phones.
-export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId, clients = [], events = [], isAdmin = false }) {
+//
+// `embed` renders the panel full-bleed with no close/dock chrome — the chromeless
+// shell used by the organizer-portal iframe (pages/OwlEmbedPage.jsx, docs/OWL_EMBED.md).
+export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId, clients = [], events = [], isAdmin = false, embed = false }) {
   const isMobile = useIsMobile();
   const [messages, setMessages] = useState([]); // [{ role:'user'|'owl', text }]
   const [input, setInput] = useState('');
@@ -384,13 +387,13 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
           <button onClick={() => bumpZoom(-0.1)} aria-label="Smaller" style={{ ...hdrBtn, fontSize: 11.5, fontWeight: 700, padding: '4px 6px' }}>A−</button>
           <button onClick={() => bumpZoom(0.1)} aria-label="Larger" style={{ ...hdrBtn, fontSize: 14.5, fontWeight: 700, padding: '4px 6px' }}>A+</button>
         </div>
-        {!isMobile && (
+        {!isMobile && !embed && (
           <div style={{ display: 'inline-flex', gap: 2, padding: 2, background: 'var(--elevated, rgba(128,128,128,0.12))', borderRadius: 980, marginRight: 2 }} title="How the Owl opens">
             <button onClick={() => pickDock('overlay')} style={segBtn(!docked)}>Overlay</button>
             <button onClick={() => pickDock('docked')} style={segBtn(docked)}>In-app</button>
           </div>
         )}
-        <button onClick={onClose} title="Close" aria-label="Close the Owl" style={{ ...hdrBtn, fontSize: 20, padding: '2px 6px' }}>✕</button>
+        {!embed && <button onClick={onClose} title="Close" aria-label="Close the Owl" style={{ ...hdrBtn, fontSize: 20, padding: '2px 6px' }}>✕</button>}
       </div>
 
       {showPicker && (
@@ -538,6 +541,10 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
       {isMobile && sidebar}
     </div>
   );
+
+  // Embed (organizer-portal iframe): the panel IS the page — full-bleed, no
+  // overlay scrim, no dock animation. The host portal owns the surrounding chrome.
+  if (embed) return <div style={{ position: 'fixed', inset: 0 }}>{panel}</div>;
 
   if (docked) {
     const w = sidebarOpen && !isMobile ? 'min(800px, 58vw)' : 'min(560px, 44vw)';
