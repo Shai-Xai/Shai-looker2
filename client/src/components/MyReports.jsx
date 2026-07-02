@@ -92,12 +92,19 @@ function StatusTrack({ status }) {
 function ReportCard({ t, open, onToggle, onChange }) {
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState('');
+  const [reply, setReply] = useState('');
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
 
   async function verdict(v, note) {
     setBusy(v); setErr('');
     try { await api.ticketVerdict(t.id, { verdict: v, note }); setRejecting(false); setReason(''); onChange?.(); }
+    catch (e) { setErr(e.message); } finally { setBusy(''); }
+  }
+  async function sendReply() {
+    if (!reply.trim()) return;
+    setBusy('reply'); setErr('');
+    try { await api.myTicketComment(t.id, reply.trim()); setReply(''); onChange?.(); }
     catch (e) { setErr(e.message); } finally { setBusy(''); }
   }
 
@@ -114,6 +121,7 @@ function ReportCard({ t, open, onToggle, onChange }) {
       <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
         {t.screen || 'unknown screen'} · {new Date(t.createdAt).toLocaleDateString()}
         {(t.attachments || []).length > 0 ? ` · 📎 ${t.attachments.length}` : ''}
+        {(t.comments || []).length > 0 ? ` · 💬 ${t.comments.length}` : ''}
       </div>
 
       <StatusTrack status={t.status} />
@@ -147,6 +155,28 @@ function ReportCard({ t, open, onToggle, onChange }) {
       {t.status === 'approved' && <p style={{ fontSize: 12.5, color: '#16a34a', marginBottom: 8 }}>✓ You approved this{t.clientVerdictAt ? ` on ${new Date(t.clientVerdictAt).toLocaleDateString()}` : ''}.</p>}
       {t.status === 'rejected' && <p style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 8 }}>↩️ Sent back to the team{t.clientVerdictNote ? `: “${t.clientVerdictNote}”` : ''}.</p>}
       {t.status === 'declined' && <p style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 8 }}>🚫 Not going forward{t.declineReason ? `: “${t.declineReason}”` : '.'}</p>}
+
+      {/* Conversation with the team — the team's replies + yours, with a reply box. */}
+      {(t.comments || []).length > 0 && (
+        <div style={{ marginBottom: 8 }}>
+          {t.comments.map((c) => (
+            <div key={c.id} style={{ marginBottom: 6, padding: '8px 10px', borderRadius: 10, fontSize: 13, lineHeight: 1.45, background: c.authorRole === 'reporter' ? 'rgba(var(--brand-rgb), 0.07)' : 'rgba(128,128,128,0.08)' }}>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 2 }}>{c.authorRole === 'reporter' ? 'You' : 'Howler team'} · {new Date(c.createdAt).toLocaleString()}</div>
+              <div style={{ whiteSpace: 'pre-wrap' }}>{c.body}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {!['approved', 'declined'].includes(t.status) && (
+        <div style={{ marginBottom: 8 }}>
+          {err && !awaitingReview && <p style={{ color: 'var(--brand)', fontSize: 12.5, marginBottom: 6 }}>{err}</p>}
+          <div style={{ display: 'flex', gap: 6 }}>
+            <input className="fld" value={reply} onChange={(e) => setReply(e.target.value)} placeholder="Message the team about this report…" style={{ flex: 1, fontSize: 13 }}
+              onKeyDown={(e) => e.key === 'Enter' && sendReply()} />
+            <button onClick={sendReply} disabled={busy === 'reply' || !reply.trim()} style={{ ...ghostBtn, padding: '8px 14px', fontSize: 13 }}>{busy === 'reply' ? '…' : 'Send'}</button>
+          </div>
+        </div>
+      )}
 
       {(t.body || t.aiSummary || (t.attachments || []).length > 0) && (
         <button onClick={onToggle} style={{ background: 'none', border: 'none', color: 'var(--brand)', fontSize: 13, fontWeight: 600, cursor: 'pointer', padding: 0 }}>

@@ -73,3 +73,56 @@ test('creating a dashboard is admin-only', async () => {
   const created = await app.req('POST', '/api/dashboards', { as: h.makeAdmin('dash-admin@test.local'), body: { title: 'X', tiles: [] } });
   assert.equal(created.status, 201);
 });
+
+// ─── Folder move (atomic reparent of a subfolder + all nested contents) ─────────
+const folderOf = (id) => store.get(id).folder;
+
+test('moving a folder reparents it AND every nested subfolder/dashboard in one call', async () => {
+  const admin = h.makeAdmin('mv-admin@test.local');
+  // Tree: Festivals/MTNB, Festivals/MTNB/Cashless, plus a sibling Concerts.
+  const top = h.db.createDashboard({ title: 'Overview', folder: 'Festivals/MTNB' });
+  const nested = h.db.createDashboard({ title: 'Wallet', folder: 'Festivals/MTNB/Cashless' });
+  const other = h.db.createDashboard({ title: 'Untouched', folder: 'Concerts' });
+
+  const res = await app.req('POST', '/api/admin/folders/move', { as: admin, body: { from: 'Festivals/MTNB', parent: 'Concerts' } });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.moved, 2, 'both dashboards under the folder moved');
+  assert.equal(res.body.newPath, 'Concerts/MTNB');
+  assert.equal(folderOf(top.id), 'Concerts/MTNB', 'folder itself reparented');
+  assert.equal(folderOf(nested.id), 'Concerts/MTNB/Cashless', 'nested structure preserved under new parent');
+  assert.equal(folderOf(other.id), 'Concerts', 'unrelated folder untouched');
+});
+
+test('moving a folder to the top level works', async () => {
+  const admin = h.makeAdmin('mv-admin2@test.local');
+  const d = h.db.createDashboard({ title: 'Deep', folder: 'A/B/Target' });
+  const res = await app.req('POST', '/api/admin/folders/move', { as: admin, body: { from: 'A/B/Target', parent: '' } });
+  assert.equal(res.status, 200);
+  assert.equal(folderOf(d.id), 'Target', 'lands at the top level under its own leaf name');
+});
+
+test('moving a folder into itself or a descendant is blocked with a clear message', async () => {
+  const admin = h.makeAdmin('mv-admin3@test.local');
+  h.db.createDashboard({ title: 'X', folder: 'Parent/Child' });
+  const intoDesc = await app.req('POST', '/api/admin/folders/move', { as: admin, body: { from: 'Parent', parent: 'Parent/Child' } });
+  assert.equal(intoDesc.status, 400);
+  assert.match(intoDesc.body.error, /itself or one of its own subfolders/);
+  const intoSelf = await app.req('POST', '/api/admin/folders/move', { as: admin, body: { from: 'Parent', parent: 'Parent' } });
+  assert.equal(intoSelf.status, 400);
+});
+
+test('moving a folder onto a colliding name is blocked (409)', async () => {
+  const admin = h.makeAdmin('mv-admin4@test.local');
+  h.db.createDashboard({ title: 'S', folder: 'Src/Shared' });
+  h.db.createDashboard({ title: 'D', folder: 'Dest/Shared' }); // destination already has a "Shared"
+  const res = await app.req('POST', '/api/admin/folders/move', { as: admin, body: { from: 'Src/Shared', parent: 'Dest' } });
+  assert.equal(res.status, 409);
+  assert.match(res.body.error, /already exists/);
+});
+
+test('folder move is admin-only', async () => {
+  const client = h.makeClient('mv-client@test.local', [h.makeEntity('MV Co', 'mv-org').id], 'owner');
+  h.db.createDashboard({ title: 'Y', folder: 'Foo' });
+  const res = await app.req('POST', '/api/admin/folders/move', { as: client, body: { from: 'Foo', parent: '' } });
+  assert.equal(res.status, 403);
+});

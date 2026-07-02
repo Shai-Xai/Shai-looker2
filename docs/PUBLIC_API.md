@@ -49,8 +49,8 @@ goal progress; 60/min on MCP). Every call is audited (who/what/when/outcome).
 | `POST /api/v1/query` | Direct aggregate query — `{source?, measure, measures?, dimensions?, filters?, dateRange?, suiteId?, limit?}` — no dashboard/tile needed |
 | `GET /api/v1/tiles/rows?dashboardId=&tileId=&suiteId=&limit=` | **`read_rows` scope only** — the table behind a tile: every column (incl. display-hidden ones) + rows (default 500, cap 10,000) |
 | `GET /api/v1/event-ops?suiteId=&query=` | **`read_rows` scope only** — per-event ops: `overview` \| `locate` (`&code=`) \| `devices` \| `issues` \| `staff` \| `stations` \| `checkpoints`; honours the per-client Event Ops switch |
-| `POST /api/v1/segments` | **`write` scope only** — create a saved segment from a curated cohort `{name?, filters, suiteId?, folder?}`; PII fields can never define a cohort |
-| `POST /api/v1/campaigns/draft` | **`write` scope only** — draft a campaign `{goal, channel?, segmentName? \| filters?, name?, ctaUrl?, language?, suiteId?}`; Pulse's AI writes the content; **always lands status `draft`** for human approval in Engage — this surface cannot send |
+| `POST /api/v1/segments` | **`write` scope only** — create a saved segment from a curated cohort `{name?, filters, suiteId?, folder?}`; PII fields can never define a cohort. `suiteId` **scopes** the cohort to one event — persisted, so every later resolve (reach, campaigns) honours it. Response echoes the resolved `scope` |
+| `POST /api/v1/campaigns/draft` | **`write` scope only** — draft a campaign `{goal, channel?, segmentName? \| filters?, name?, ctaUrl?, language?, suiteId?}`; Pulse's AI writes the content; **always lands status `draft`** for human approval in Engage — this surface cannot send. Response includes the resolved event `scope` (or `null` = entity-wide) so a mismatch is visible before approval |
 
 Errors are JSON `{ error }` with meaningful status codes (401 bad/missing key,
 403 missing scope, 404 not visible to this client, 429 rate-limited). Anything
