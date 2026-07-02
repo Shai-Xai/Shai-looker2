@@ -138,6 +138,27 @@ the point — but it means **restoring a backup requires the same `MASTER_KEY`**
 password manager) alongside your other break-glass credentials. Existing
 plaintext secrets are sealed automatically on first boot after this ships.
 
+### 10. Deploys & the "site is down for a minute" window
+Because the SQLite database lives on a single Render disk (which attaches to only
+one instance), a deploy has to stop the old instance and start the new one — a
+~30–90s gap. Two things soften this **today**, and one **removes** it later:
+
+- **Maintenance page (built in).** The service worker (`client/public/sw.js`)
+  caches `maintenance.html` and shows a branded "Pulse is updating…" page (which
+  auto-returns the user when the server is back) instead of a browser/gateway
+  error. Covers installed-PWA users and returning visitors. A **brand-new**
+  visitor arriving mid-deploy still hits Render's error page — see Cloudflare below
+  for full coverage.
+- **Deploy in a quiet hour** (or turn off Auto-Deploy and deploy manually) so the
+  fewest people see the blip.
+- **Full coverage (optional): Cloudflare in front.** Put the domain behind
+  Cloudflare (free) and add a Worker that serves a maintenance page when the origin
+  is down (502/503/522) — this covers *everyone*, including first-time visitors,
+  because Cloudflare stays up while Render restarts.
+- **The real fix:** move the DB off the disk (managed Postgres or libSQL/Turso),
+  which enables rolling zero-downtime deploys. Scoped in
+  `docs/POSTGRES_MIGRATION_SCOPE.md`.
+
 ## Pre-production checklist
 - [ ] **Rotate the Looker API3 secret** (it was shared in chat during dev) and set the new one.
 - [ ] Strong `SESSION_SECRET` and admin password.
