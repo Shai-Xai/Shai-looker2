@@ -450,7 +450,9 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
     const totalOf = (c) => (c.series || []).reduce((s, p) => s + (Number(p.v) || 0), 0);
     const okPts = (c) => (c.series || []).filter((p) => p && Number.isFinite(Number(p.v))).length >= 2;
     const byKeyDesc = [...data.columns].sort((a, b) => String(b.key).localeCompare(String(a.key), undefined, { numeric: true }));
-    const thisKey = byKeyDesc[0]?.key;
+    // "This event" = the column matched to the suite's Current Event lock when known
+    // (reliable), else the newest-sorting key (fallback). Everything else = prior.
+    const thisKey = data.currentKey || byKeyDesc[0]?.key;
     const prior = byKeyDesc.filter((c) => c.key !== thisKey);
     return prior.find((c) => totalOf(c) > 0 && okPts(c)) || prior[0] || byKeyDesc[0] || null;
   }
@@ -471,7 +473,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
   function priorYearKeys(data) {
     if (!data || !Array.isArray(data.columns) || !data.columns.length) return [];
     const byKeyDesc = [...data.columns].sort((a, b) => String(b.key).localeCompare(String(a.key), undefined, { numeric: true }));
-    const thisKey = byKeyDesc[0]?.key;
+    const thisKey = data.currentKey || byKeyDesc[0]?.key;
     return byKeyDesc.filter((c) => c.key !== thisKey).map((c) => c.key);
   }
   // Progress = resolved value vs target, with honest PACE. Pace is measured over the
@@ -601,7 +603,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
             const cmp = pickCompareColumn(data, cr.compareKey);
             const shape = (cmp?.series || []).filter((p2) => p2 && Number.isFinite(Number(p2.v)));
             const byKeyDesc = [...data.columns].sort((a, b) => String(b.key).localeCompare(String(a.key), undefined, { numeric: true }));
-            const thisCol = data.columns.find((c) => c.key === byKeyDesc[0]?.key);
+            const thisCol = data.columns.find((c) => c.key === (data.currentKey || byKeyDesc[0]?.key));
             const thisCum = fc.toCumulative((thisCol?.series || []).map((x) => x.v));
             const thisNow = thisCum.length ? thisCum[thisCum.length - 1] : null;
             const recentRatePerDay = fc.recentRate(thisCol?.series || []); // momentum from this year's tail
@@ -897,7 +899,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
     let data; try { data = await resolveTileSeriesAll({ dashboardId: cr.dashboardId, tileId: cr.tileId, user: req.user, suiteId: g.suiteId }); } catch { return res.json({ available: false }); }
     if (!data || !Array.isArray(data.columns) || !data.columns.length) return res.json({ available: false });
     const byKeyDesc = [...data.columns].sort((a, b) => String(b.key).localeCompare(String(a.key), undefined, { numeric: true }));
-    const thisKey = byKeyDesc[0]?.key;
+    const thisKey = data.currentKey || byKeyDesc[0]?.key;
     const lastCol = pickCompareColumn(data, cr.compareKey); // chosen year, else most recent prior
     const thisCol = data.columns.find((c) => c.key === thisKey);
     const toXY = (series) => (fc.cumulativeWithAxis(series) || []).map((p) => ({ x: p.t, y: Math.round(p.c) }));
@@ -956,7 +958,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
     const cols = data.columns.map((c) => ({ key: c.key, n: c.series.length, total: Math.round(totalOf(c)), last: c.series[c.series.length - 1]?.v }));
     // this-year = highest key (current period); last-year = the most recent PRIOR year.
     const byKeyDesc = [...data.columns].sort((a, b) => String(b.key).localeCompare(String(a.key), undefined, { numeric: true }));
-    const thisKey = req.query.thisKey || byKeyDesc[0]?.key;
+    const thisKey = req.query.thisKey || data.currentKey || byKeyDesc[0]?.key;
     const lastCol = req.query.lastKey ? data.columns.find((c) => c.key === req.query.lastKey)
       : pickLastYearColumn(data);
     const thisCol = data.columns.find((c) => c.key === thisKey);

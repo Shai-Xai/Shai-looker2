@@ -25,6 +25,26 @@ module.exports = function tileValues({ db, query }) {
     }
     return o;
   }
+  // The suite's CURRENT event value — the "Current Event" lock (by name; else "Event
+  // Name"). On a current-vs-past COMPARISON tile the measure is pivoted by event, and
+  // this pins which pivot column is THIS event — far more reliable than guessing by
+  // largest total or newest-sorting key (both of which pick the wrong column when this
+  // year is smaller than, or sorts below, a prior edition — the actual/last-time swap).
+  function currentEventValue(rawLocks) {
+    if (!rawLocks || typeof rawLocks !== 'object') return '';
+    const keys = Object.keys(rawLocks);
+    const k = keys.find((x) => /current\s*event/i.test(x)) || keys.find((x) => /^\s*event\s*name\s*$/i.test(x));
+    return String((k ? rawLocks[k] : '') || '').split(',')[0].trim();
+  }
+  // The pivot key equal to `val` (case/space-insensitive), or null — so a pivot column
+  // can be matched to the current event by its value.
+  function matchPivotKey(pivots, val) {
+    if (!val || !Array.isArray(pivots)) return null;
+    const n = (s) => String(s == null ? '' : s).trim().toLowerCase();
+    const hit = pivots.find((pv) => n(pv.key) === n(val));
+    return hit ? hit.key : null;
+  }
+
   // The query field a per-tile lock on `filterName` writes to: the tile's listenTo
   // wiring if present, else the dashboard filter's own field when the tile's query
   // already uses that field's view (mirrors client lib/tileLockFields.js).
@@ -62,9 +82,14 @@ module.exports = function tileValues({ db, query }) {
     // filter (date ranges and other filters are untouched).
     body.filters = stripDaysBeforeFilters(body.filters, def, tile).filters;
     const data = await runLookerQuery('/queries/run/json_detail', body);
+    // On a current-vs-past comparison (measure pivoted by event), read THIS event's
+    // column specifically — identified by the suite's Current Event lock — instead of
+    // the latest/biggest pivot (which can be a prior edition). Falls back to the
+    // default pick when the current event can't be matched, so nothing else changes.
+    const curKey = matchPivotKey(data.pivots || [], currentEventValue(db.lockedFiltersForSuite(suiteId, dashboardId)));
     // Use the number the tile actually SHOWS (honours hidden_fields, picks the
     // visible primary measure, reads the rendered value) so the goal == the dashboard.
-    const value = primaryTileValue(data, tile.vis || {});
+    const value = primaryTileValue(data, tile.vis || {}, curKey);
     // Diagnostic for "tile reads 0" (e.g. GA4): log the scoped query + fields + first
     // row so we can see WHY it resolved to nothing (wrong scope field? empty rows?).
     if (value == null || value === 0) {
@@ -236,7 +261,10 @@ module.exports = function tileValues({ db, query }) {
     } else {
       columns.push({ key: measure.label || measure.name, series: rows.map((row, i) => ({ t: x[i], v: num(row[measure.name]) })).filter((p) => p.v != null) });
     }
-    return { dateField: dateDim.name, measureField: measure.name, strippedFilters: stripResult.stripped, columns: columns.filter((c) => c.series.length) };
+    // Which column is THIS event — matched to the suite's Current Event lock — so the
+    // goal chart/pace uses the real current event, not the newest-sorting pivot key.
+    const currentKey = matchPivotKey(pivots, currentEventValue(db.lockedFiltersForSuite(suiteId, dashboardId)));
+    return { dateField: dateDim.name, measureField: measure.name, strippedFilters: stripResult.stripped, currentKey, columns: columns.filter((c) => c.series.length) };
   }
 
   // The event's start date straight from Looker (core_events.start_date), scoped to
@@ -274,5 +302,5 @@ module.exports = function tileValues({ db, query }) {
     return null;
   }
 
-  return { resolveTileValue, resolveTileRows, resolveTileSeries, resolveTileSeriesAll, resolveEventDate, stripDaysBeforeFilters, tileLockOverrides };
+  return { resolveTileValue, resolveTileRows, resolveTileSeries, resolveTileSeriesAll, resolveEventDate, stripDaysBeforeFilters, tileLockOverrides, currentEventValue, matchPivotKey };
 };
