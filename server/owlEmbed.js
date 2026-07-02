@@ -37,6 +37,13 @@ const { HttpError, asyncHandler } = require('./http');
 const TOKEN_TTL_S = 2 * 60 * 60; // matches auth.issueEmbedToken's default
 
 function mount(app, { db, auth, rateLimit }) {
+  // The /embed/owl document is DESIGNED to be iframed by the portal — undo the
+  // global anti-clickjack headers (index.js) for that one path. There is no cookie
+  // session inside the iframe to clickjack; its gate is the short-lived embed token.
+  app.use((req, res, next) => {
+    if (req.path === '/embed/owl') { res.removeHeader('X-Frame-Options'); res.set('Content-Security-Policy', 'frame-ancestors *'); }
+    next();
+  });
   const enabled = () => db.getSetting('owl_embed_enabled', '0') === '1';
   // Secret is write-only (set in Admin → AI, or OWL_EMBED_SECRET in .env as a
   // fallback) — responses only ever report set + a mask, never the value.

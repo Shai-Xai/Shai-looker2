@@ -1,6 +1,8 @@
 # Spec — The Fan Owl (HowlerOne Smart Commerce Assistant)
 
-> Status: **draft — workshopped 2026-07-02** · Owner: (tbd) · Roadmap: **1.4**
+> Status: **phase 1 BUILT (2026-07-02)** — `server/fanOwl.js` + `client/public/fan-owl.js`
+> + `/embed/fan` + `FanOwlAdmin` (both surfaces); phases 2–4 remain design ·
+> Owner: (tbd) · Roadmap: **1.4**
 > · North Star: `docs/EXPERIENCE_OS_BRIEF.md` · Companions:
 > `docs/specs/AGENTIC_OWL_SPEC.md` (the loop this rides), `docs/OWL_EMBED.md`
 > (the embed handshake this extends), `docs/ENGAGEMENT_ENGINE.md` (where the

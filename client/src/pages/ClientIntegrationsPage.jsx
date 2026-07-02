@@ -4,6 +4,7 @@ import { api } from '../lib/api.js';
 import HomeButton from '../components/HomeButton.jsx';
 import IntegrationsForm from '../components/IntegrationsForm.jsx';
 import MailTemplateEditor from '../components/MailTemplateEditor.jsx';
+import FanOwlAdmin from '../components/FanOwlAdmin.jsx';
 import MyOwlMemory from '../components/MyOwlMemory.jsx';
 import OwlAddressCard from '../components/OwlAddressCard.jsx';
 import ApiKeysCard from '../components/ApiKeysCard.jsx';
@@ -30,6 +31,7 @@ const SECTIONS = [
   ['fees', 'Fees & billing', '💳', PERMS.CAMPAIGNS_VIEW],
   ['sentmail', 'Sent emails', '📤', PERMS.INTEGRATIONS_MANAGE],
   ['inbox', 'CC the Owl', '📨', PERMS.INTEGRATIONS_MANAGE],
+  ['fanowl', 'Fan Owl', '🦉', PERMS.INTEGRATIONS_MANAGE],
   ['owlmemory', 'Owl memory', '🧠', null],
 ];
 
@@ -127,6 +129,12 @@ export default function ClientIntegrationsPage() {
                 }}
               />
               <ApiKeysCard entityId={activeItem.entityId} scope="my" />
+            </div>
+          )}
+
+          {section === 'fanowl' && (
+            <div style={{ maxWidth: 760 }}>
+              <FanOwlAdmin scope="my" entityId={activeItem.entityId} />
             </div>
           )}
 

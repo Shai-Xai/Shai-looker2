@@ -1,0 +1,154 @@
+// Route-level pins for the fan-facing Owl (server/fanOwl.js): the dual-surface
+// config gates (admin + /api/my with entity ownership), the public widget boot
+// (site key + origin allowlist + session mint), page→offer mapping, the
+// consent-first lead capture rules, and the event funnel. The chat loop itself is
+// pinned only up to its gates (no live model in tests).
+
+const { test, before, after } = require('node:test');
+const assert = require('node:assert/strict');
+const h = require('./helpers');
+const { startApp } = require('./http');
+const rateLimit = require('../server/ratelimit');
+const { errorMiddleware } = require('../server/http');
+
+delete process.env.ANTHROPIC_API_KEY; // chat must 503 (unconfigured), never call out
+
+let app;
+before(async () => {
+  app = await startApp((expressApp) => {
+    require('../server/fanOwl').mount(expressApp, {
+      db: h.db, auth: h.auth, insights: require('../server/insights'), rateLimit,
+      anthropicKeyForEntity: () => '',
+    });
+    expressApp.use(errorMiddleware);
+  });
+});
+after(async () => { if (app) await app.close(); });
+
+const CONFIG = (site = {}) => ({
+  sites: [{ name: 'Test site', enabled: true, domains: ['fest.example'], teaser: 'Tickets are live', pages: [
+    { urlPattern: '/artists/*', pageType: 'artist', itemIds: [], note: 'artist pages' },
+  ], ...site }],
+  catalogue: [
+    { label: 'Weekend Pass', kind: 'ticket', price: '950', currency: 'ZAR', deepLink: 'https://fest.example/buy?t=wk', availability: 'selling fast', public: true },
+    { label: 'Camping', kind: 'addon', price: '300', currency: 'ZAR', deepLink: 'https://fest.example/buy?t=camp', public: true },
+    { label: 'Crew comp', kind: 'ticket', price: '0', currency: 'ZAR', deepLink: '', public: false },
+  ],
+  knowledge: [
+    { kind: 'policy', question: 'What is the refund policy?', body: 'Tickets are refundable until 30 days before the event.' },
+    { kind: 'faq', question: 'Can I bring kids?', body: 'Under-12s enter free with a ticketed adult.' },
+  ],
+});
+
+test('config routes: admin-only on /api/admin, entity-ownership on /api/my', async () => {
+  const e = h.makeEntity('FanCfg Co', 'fancfg-org');
+  const other = h.makeEntity('FanOther Co', 'fanother-org');
+  const client = h.makeClient('fan-cfg@test.local', [e.id], 'owner');
+  assert.equal((await app.req('GET', `/api/admin/entities/${e.id}/fan-owl`)).status, 401);
+  assert.equal((await app.req('GET', `/api/admin/entities/${e.id}/fan-owl`, { as: client })).status, 403);
+  assert.equal((await app.req('GET', `/api/my/fan-owl/${e.id}`, { as: client })).status, 200);
+  assert.equal((await app.req('GET', `/api/my/fan-owl/${other.id}`, { as: client })).status, 403);
+  assert.equal((await app.req('PUT', `/api/my/fan-owl/${other.id}`, { as: client, body: CONFIG() })).status, 403);
+});
+
+test('save: site key minted server-side, domains normalised, public flag + non-public items kept', async () => {
+  const e = h.makeEntity('FanSave Co', 'fansave-org');
+  const admin = h.makeAdmin('fan-admin@test.local');
+  const body = CONFIG({ domains: ['https://Fest.Example/some/path', 'fest.example'] });
+  const r = await app.req('PUT', `/api/admin/entities/${e.id}/fan-owl`, { as: admin, body });
+  assert.equal(r.status, 200);
+  const site = r.body.sites[0];
+  assert.match(site.siteKey, /^fw_[0-9a-f]{24}$/);
+  assert.deepEqual(site.domains, ['fest.example']); // scheme/path stripped, deduped
+  assert.equal(site.pages.length, 1);
+  assert.equal(r.body.catalogue.length, 3);
+  assert.equal(r.body.catalogue.find((c) => c.label === 'Crew comp').public, false);
+  assert.equal(r.body.knowledge.length, 2);
+  // Saving again with the same site id keeps the key stable.
+  const r2 = await app.req('PUT', `/api/admin/entities/${e.id}/fan-owl`, { as: admin, body: { sites: [{ ...site, name: 'Renamed' }] } });
+  assert.equal(r2.body.sites[0].siteKey, site.siteKey);
+  assert.equal(r2.body.sites[0].name, 'Renamed');
+});
+
+async function provision(orgSuffix, siteOverrides = {}) {
+  const e = h.makeEntity(`FanProv${orgSuffix} Co`, `fanprov-${orgSuffix}`);
+  const admin = h.makeAdmin(`fan-prov-${orgSuffix}@test.local`);
+  const saved = await app.req('PUT', `/api/admin/entities/${e.id}/fan-owl`, { as: admin, body: CONFIG(siteOverrides) });
+  const site = saved.body.sites[0];
+  // Map the artist page to Camping so page-mapping precedence is observable.
+  const campingId = saved.body.catalogue.find((c) => c.label === 'Camping').id;
+  const withMap = { ...site, pages: [{ ...site.pages[0], itemIds: [campingId] }] };
+  await app.req('PUT', `/api/admin/entities/${e.id}/fan-owl`, { as: admin, body: { sites: [withMap] } });
+  return { e, admin, site, campingId };
+}
+const ORIGIN = { Origin: 'https://fest.example' };
+
+test('public context: bad key 404s, wrong origin 403s, allowed origin mints a session + ribbon offer', async () => {
+  const { site } = await provision('ctx');
+  assert.equal((await app.req('POST', '/api/fan/context', { body: { siteKey: 'fw_nope', url: 'https://fest.example/' } })).status, 404);
+  assert.equal((await app.req('POST', '/api/fan/context', { body: { siteKey: site.siteKey, url: 'https://x.example/' }, headers: { Origin: 'https://evil.example' } })).status, 403);
+  const r = await app.req('POST', '/api/fan/context', { body: { siteKey: site.siteKey, url: 'https://fest.example/tickets', anonId: 'a1' }, headers: ORIGIN });
+  assert.equal(r.status, 200);
+  assert.ok(r.body.sessionId);
+  assert.equal(r.body.offer.label, 'Weekend Pass'); // unmapped page → catalogue order, public only
+  assert.equal(r.body.site.teaser, 'Tickets are live');
+  // Page mapping wins on a matching URL (and the wildcard matches).
+  const r2 = await app.req('POST', '/api/fan/context', { body: { siteKey: site.siteKey, url: 'https://fest.example/artists/luna-x' }, headers: ORIGIN });
+  assert.equal(r2.body.pageType, 'artist');
+  assert.equal(r2.body.offer.label, 'Camping');
+});
+
+test('disabled site serves nothing, and non-public items never reach fans', async () => {
+  const { e, admin, site } = await provision('off');
+  const r = await app.req('POST', '/api/fan/context', { body: { siteKey: site.siteKey, url: 'https://fest.example/' }, headers: ORIGIN });
+  const boot = await app.req('GET', `/api/fan/boot?sid=${r.body.sessionId}`);
+  assert.equal(boot.status, 200);
+  assert.ok(!JSON.stringify(boot.body.items).includes('Crew comp'), 'non-public items must never be served');
+  await app.req('PUT', `/api/admin/entities/${e.id}/fan-owl`, { as: admin, body: { sites: [{ ...site, enabled: false }] } });
+  assert.equal((await app.req('POST', '/api/fan/context', { body: { siteKey: site.siteKey, url: 'https://fest.example/' }, headers: ORIGIN })).status, 404);
+  assert.equal((await app.req('GET', `/api/fan/boot?sid=${r.body.sessionId}`)).status, 404);
+});
+
+test('chat gate: no session 404s; unconfigured AI degrades with 503 (never a crash)', async () => {
+  const { site } = await provision('chat');
+  assert.equal((await app.req('POST', '/api/fan/chat', { body: { sessionId: 'nope', message: 'hi' } })).status, 404);
+  const ctx = await app.req('POST', '/api/fan/context', { body: { siteKey: site.siteKey, url: 'https://fest.example/' }, headers: ORIGIN });
+  assert.equal((await app.req('POST', '/api/fan/chat', { body: { sessionId: ctx.body.sessionId, message: '' } })).status, 400);
+  assert.equal((await app.req('POST', '/api/fan/chat', { body: { sessionId: ctx.body.sessionId, message: 'Which ticket do I need?' } })).status, 503);
+});
+
+test('lead capture: consent is explicit, sticky, and surfaces on the admin lead list', async () => {
+  const { e, admin, site } = await provision('lead');
+  const ctx = await app.req('POST', '/api/fan/context', { body: { siteKey: site.siteKey, url: 'https://fest.example/' }, headers: ORIGIN });
+  const sid = ctx.body.sessionId;
+  assert.equal((await app.req('POST', '/api/fan/lead', { body: { sessionId: sid, email: 'not-an-email' } })).status, 400);
+  // Saved without consent → stored, NOT opted in.
+  const r1 = await app.req('POST', '/api/fan/lead', { body: { sessionId: sid, email: 'Fan@Example.com', name: 'Fan One' } });
+  assert.equal(r1.status, 200);
+  assert.equal(r1.body.optedIn, false);
+  // Explicit consent turns it on…
+  const r2 = await app.req('POST', '/api/fan/lead', { body: { sessionId: sid, email: 'fan@example.com', marketingConsent: true } });
+  assert.equal(r2.body.optedIn, true);
+  // …and a later save WITHOUT the flag (and with no name) never silently revokes
+  // the consent, nor wipes the stored name to ''.
+  const r3 = await app.req('POST', '/api/fan/lead', { body: { sessionId: sid, email: 'fan@example.com' } });
+  assert.equal(r3.body.optedIn, true);
+  const leads = await app.req('GET', `/api/admin/entities/${e.id}/fan-owl/leads`, { as: admin });
+  assert.equal(leads.body.leads.length, 1); // same email upserts, never duplicates
+  assert.equal(leads.body.leads[0].email, 'fan@example.com');
+  assert.equal(leads.body.leads[0].consentMarketing, true);
+  assert.equal(leads.body.leads[0].name, 'Fan One'); // a later blank/name change never wipes the name to ''
+});
+
+test('funnel: beacons are whitelisted and roll up in the insights view', async () => {
+  const { e, admin, site } = await provision('funnel');
+  const ctx = await app.req('POST', '/api/fan/context', { body: { siteKey: site.siteKey, url: 'https://fest.example/' }, headers: ORIGIN });
+  const sid = ctx.body.sessionId;
+  await app.req('POST', '/api/fan/event', { body: { sessionId: sid, kind: 'deeplink_click', payload: { itemId: 'x' } } });
+  await app.req('POST', '/api/fan/event', { body: { sessionId: sid, kind: 'drop_table', payload: {} } }); // not whitelisted → ignored
+  const s = await app.req('GET', `/api/admin/entities/${e.id}/fan-owl/insights`, { as: admin });
+  const funnel = s.body.sites[0].funnel;
+  assert.equal(funnel.ribbon_view, 1);
+  assert.equal(funnel.deeplink_click, 1);
+  assert.equal(funnel.drop_table, undefined);
+});

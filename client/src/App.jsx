@@ -30,6 +30,7 @@ const DigestsPage = lazy(() => import('./pages/DigestsPage.jsx'));
 const SocialPage = lazy(() => import('./pages/SocialPage.jsx'));
 const InventiveAskPage = lazy(() => import('./pages/InventiveAskPage.jsx'));
 const OwlEmbedPage = lazy(() => import('./pages/OwlEmbedPage.jsx'));
+const FanOwlEmbedPage = lazy(() => import('./pages/FanOwlEmbedPage.jsx'));
 const EventOpsPage = lazy(() => import('./pages/EventOpsPage.jsx'));
 const EventOpsPortalPage = lazy(() => import('./pages/EventOpsPortalPage.jsx'));
 import Logo from './components/Logo.jsx';
@@ -343,6 +344,18 @@ export default function App() {
   // The organizer-portal Owl (docs/OWL_EMBED.md): a chromeless page with its own
   // token auth. It mounts OUTSIDE AuthProvider/router — there's no cookie session
   // in a cross-site iframe, and those would bounce the visitor to the login screen.
+  // The fan-facing Owl widget (docs/specs/FAN_OWL_SPEC.md): a public, auth-less
+  // chat iframed on promoters' event sites. No providers at all — no session, no
+  // profile; the URL-fragment session id is its only credential.
+  if (window.location.pathname === '/embed/fan') {
+    return (
+      <RootErrorBoundary>
+        <Suspense fallback={<ScreenFallback />}>
+          <FanOwlEmbedPage />
+        </Suspense>
+      </RootErrorBoundary>
+    );
+  }
   if (window.location.pathname === '/embed/owl') {
     return (
       <RootErrorBoundary>

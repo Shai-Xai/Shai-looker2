@@ -3,6 +3,17 @@
 Guidance for anyone (human or AI) building on this codebase. Keep it short and
 current.
 
+## Communicating with Shai
+When referencing any platform or page (Pulse itself, Claude, ChatGPT, Render,
+GitHub, docs pages…), **always include the actual clickable URL** for easy
+access — never just name the platform. Key ones: Pulse
+https://howler-pulse-v2.onrender.com · API guide
+https://howler-pulse-v2.onrender.com/api-guide · MCP
+`https://howler-pulse-v2.onrender.com/mcp` · Claude connectors
+https://claude.ai/settings/connectors · ChatGPT connectors
+https://chatgpt.com/#settings/Connectors · Render https://dashboard.render.com
+· repo https://github.com/Shai-Xai/Shai-looker2
+
 ## What Pulse is (read first)
 Pulse is the **Experience OS** for Howler's clients and internal teams — a
 data-driven system that turns data into **insight → action → results** and makes
