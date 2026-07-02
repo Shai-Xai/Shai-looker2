@@ -18,7 +18,8 @@ const clientsByKey = new Map();
 function clientFor(apiKey) {
   const key = (apiKey || process.env.ANTHROPIC_API_KEY || '').trim();
   if (!key) return null;
-  if (!clientsByKey.has(key)) clientsByKey.set(key, new Anthropic({ apiKey: key }));
+  // timeout/maxRetries override the SDK's 10-min ×2 default (a hung call would otherwise pin the sequential scheduler tick for ~30 min).
+  if (!clientsByKey.has(key)) clientsByKey.set(key, new Anthropic({ apiKey: key, timeout: 120_000, maxRetries: 1 }));
   return clientsByKey.get(key);
 }
 
@@ -172,8 +173,7 @@ function parseModelJson(text, what = 'response') {
   const a = s.indexOf('{');
   if (a < 0) throw new Error(`AI did not return JSON for the ${what}`);
   const b = s.lastIndexOf('}');
-  // Prefer the full object; if it was truncated (no closing brace), keep from the
-  // first '{' so closeTruncatedJson can salvage it.
+  // Prefer the full object; if truncated (no closing brace), keep from the first '{' so closeTruncatedJson can salvage it.
   s = b > a ? s.slice(a, b + 1) : s.slice(a);
   const noTrailingCommas = (x) => x.replace(/,(\s*[}\]])/g, '$1');
   const missingCommas = (x) => x.replace(/(["\]}])\s*\n(\s*)(["{[])/g, '$1,\n$2$3'); // value\n value → value,\n value

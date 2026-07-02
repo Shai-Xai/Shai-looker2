@@ -87,13 +87,21 @@ function mount(app, { db, auth }) {
 }
 
 // ── send helpers (used by os.js and any other notification point) ─────────────
+// Bound a single push send so one unresponsive endpoint can't hang the batch.
+const withTimeout = (p, ms) => Promise.race([
+  p,
+  new Promise((_, reject) => { const t = setTimeout(() => reject(new Error('push timeout')), ms); if (t.unref) t.unref(); }),
+]);
+
 async function deliver(rows, payload) {
   if (!enabled() || !rows.length) return 0;
   const data = JSON.stringify(payload);
   let sent = 0;
-  await Promise.all(rows.map(async (r) => {
+  // allSettled (not all) + a per-send timeout: one unresponsive push endpoint must
+  // not stall the whole fan-out (these fire from the scheduler + OS notifications).
+  await Promise.allSettled(rows.map(async (r) => {
     try {
-      await webpush.sendNotification({ endpoint: r.endpoint, keys: { p256dh: r.p256dh, auth: r.auth } }, data);
+      await withTimeout(webpush.sendNotification({ endpoint: r.endpoint, keys: { p256dh: r.p256dh, auth: r.auth } }, data), 10_000);
       sent++;
     } catch (err) {
       // 404/410 = the subscription is dead (app uninstalled, permission revoked).

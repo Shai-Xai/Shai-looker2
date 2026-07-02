@@ -68,6 +68,7 @@ function mount(app, { db, auth }) {
         body: String(body || ''),
         ...(Array.isArray(labels) && labels.length ? { labels } : {}),
       }),
+      signal: AbortSignal.timeout(15_000), // never let a stuck socket hang the ticket→issue route
     });
     if (!resp.ok) {
       const txt = await resp.text().catch(() => '');
