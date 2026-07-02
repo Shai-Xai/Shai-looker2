@@ -646,6 +646,12 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-02** — **Rename dashboards in the sidebar per Set** ✅: admins can now give
+  any dashboard a custom display name within a Set (in Admin → Sets, and in a client's
+  custom sets) without editing the underlying dashboard. The label shows in the client's
+  sidebar and top-nav; leave it blank to use the dashboard's native name, and clearing it
+  reverts. Because the override lives on the Set, the same dashboard can read differently
+  in different Sets — presentation is decoupled from source naming.
 - **2026-07-02** — **The Fan Owl: a booking guide on the event's own website** 🧪: the
   Owl's first **consumer-facing** surface — promoters drop one script tag on their public
   event site and every page gets a personal ticket guide: a no-AI ribbon (right offer for

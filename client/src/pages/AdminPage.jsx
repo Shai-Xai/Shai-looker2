@@ -3256,6 +3256,17 @@ function SetCard({ set, dashboards, onChange, folders = [], showFolder = false }
     for (const e of set.dashboards || []) if (e.parentId) m[e.id] = e.parentId;
     return m;
   });
+  // Per-dashboard display-name override in this set (id -> label). Blank = native name.
+  const [displayNames, setDisplayNames] = useState(() => {
+    const m = {};
+    for (const e of set.dashboards || []) if (e.displayName) m[e.id] = e.displayName;
+    return m;
+  });
+  const setDisplayName = (id, label) => setDisplayNames((cur) => {
+    const next = { ...cur };
+    if (label.trim()) next[id] = label; else delete next[id];
+    return next;
+  });
   const [fpath, setFpath] = useState(''); // current folder path in the picker; '' = top
   const [saved, setSaved] = useState(false);
   const toggle = (id) => setIds((cur) => cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]);
@@ -3267,7 +3278,7 @@ function SetCard({ set, dashboards, onChange, folders = [], showFolder = false }
     return next;
   });
   const save = async () => {
-    const patch = { name, icon, dashboards: ids.map((id) => ({ id, parentId: parents[id] || null })) };
+    const patch = { name, icon, dashboards: ids.map((id) => ({ id, parentId: parents[id] || null, displayName: displayNames[id] || '' })) };
     if (showFolder) patch.folder = folder.trim();
     await api.adminUpdateSet(set.id, patch);
     flash(setSaved); onChange();
@@ -3309,6 +3320,7 @@ function SetCard({ set, dashboards, onChange, folders = [], showFolder = false }
       for (const k of Object.keys(next)) if (next[k] === id) delete next[k]; // children go top-level
       return next;
     });
+    setDisplayNames((cur) => { const next = { ...cur }; delete next[id]; return next; });
   };
   const [open, setOpen] = useState(false);
 
@@ -3372,7 +3384,7 @@ function SetCard({ set, dashboards, onChange, folders = [], showFolder = false }
       </div>
       </Section>
       {ids.length > 0 && (
-        <Section title="Order in this set (drag to reorder · nest a dashboard as a tab of another)">
+        <Section title="Order & names in this set (drag to reorder · rename to override the sidebar label · nest a dashboard as a tab of another)">
           <div style={orderList}>
             {ids.map((id, i) => {
               const parentId = parents[id] || '';
@@ -3390,7 +3402,17 @@ function SetCard({ set, dashboards, onChange, folders = [], showFolder = false }
                 >
                   <span style={{ color: '#c4c4c8', flexShrink: 0, fontSize: 15, lineHeight: 1 }} title="Drag to reorder">⠿</span>
                   <span style={{ color: 'var(--muted)', width: 20, textAlign: 'right', flexShrink: 0 }}>{parentId ? '↳' : `${i + 1}.`}</span>
-                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{byId[id] ? byId[id].title : '(dashboard not found)'}</span>
+                  {byId[id] ? (
+                    <input
+                      style={{ ...input, flex: 1, minWidth: 100, padding: '4px 8px', fontSize: 13 }}
+                      value={displayNames[id] || ''}
+                      onChange={(e) => setDisplayName(id, e.target.value)}
+                      placeholder={byId[id].title}
+                      title={`Display name in the sidebar/top-nav — blank uses the native name “${byId[id].title}”`}
+                    />
+                  ) : (
+                    <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--muted)' }}>(dashboard not found)</span>
+                  )}
                   <select
                     value={parentId}
                     onChange={(e) => setParent(id, e.target.value)}
