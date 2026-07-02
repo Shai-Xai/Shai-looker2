@@ -252,22 +252,28 @@ function mount(app, { db, auth, mailer, messaging, push, generateContent, roleLe
       } catch (e) { result = { status: 'error', detail: e.message }; }
     }
     if (!manual) {
-      const next = job.cadence === 'once' ? null : computeNextRun(job);
-      const newStatus = job.cadence === 'once' ? 'done' : job.status;
-      sql.prepare('UPDATE scheduled_jobs SET last_run_at=?, last_status=?, next_run_at=?, status=?, updated_at=? WHERE id=?')
-        .run(now(), `${result.status}: ${result.detail}`.slice(0, 300), next ? next.toISOString() : null, newStatus, now(), job.id);
+      // The run-slot was already claimed by tick() BEFORE the send (next_run_at
+      // advanced / 'once' retired) — here we only record the outcome.
+      sql.prepare('UPDATE scheduled_jobs SET last_run_at=?, last_status=?, updated_at=? WHERE id=?')
+        .run(now(), `${result.status}: ${result.detail}`.slice(0, 300), now(), job.id);
     }
     return result;
   }
 
   // ── the tick ──
   // Re-entrancy guard: a digest render does a live Looker pull + AI write that
-  // can take 30-60s (see render()). The tick fires every 60s, so without this
-  // guard a slow run would still be in-flight when the next tick starts, both
-  // ticks would re-select the same still-due job (next_run_at only advances
-  // AFTER runJob finishes, below), and the real recipients would be emailed
-  // twice. The flag makes an overlapping tick a no-op until the current one
-  // drains. Single-instance deployment, so an in-process flag is sufficient.
+  // can take 30-60s (see render()), and the tick fires every 60s — the flag
+  // makes an overlapping tick a no-op until the current one drains.
+  // Single-instance deployment, so an in-process flag is sufficient.
+  //
+  // CRASH SAFETY: each job's run-slot is CLAIMED (next_run_at advanced, 'once'
+  // retired) BEFORE the send starts. Deploys restart this process routinely
+  // (autoDeploy on push); if the claim happened after the send — the old shape —
+  // a restart between "emails delivered" and "row updated" re-selected the job
+  // on boot and re-sent the whole digest to every real recipient. Claim-first
+  // means a crash mid-send can only MISS one run (visible in last_status as a
+  // stuck 'started …'), never double-send. Same convention as owlWhatsapp/
+  // goalNudge: mark before send.
   let ticking = false;
   async function tick() {
     if (!enabled()) return;
@@ -275,7 +281,15 @@ function mount(app, { db, auth, mailer, messaging, push, generateContent, roleLe
     ticking = true;
     try {
       const due = sql.prepare("SELECT * FROM scheduled_jobs WHERE status='active' AND next_run_at IS NOT NULL AND next_run_at <= ?").all(now());
-      for (const r of due) { try { await runJob(rowToJob(r)); } catch (e) { console.error('[scheduler] job failed', r.id, e.message); } }
+      for (const r of due) {
+        const job = rowToJob(r);
+        try {
+          const next = job.cadence === 'once' ? null : computeNextRun(job);
+          sql.prepare('UPDATE scheduled_jobs SET next_run_at=?, status=?, last_status=?, updated_at=? WHERE id=?')
+            .run(next ? next.toISOString() : null, job.cadence === 'once' ? 'done' : job.status, `started: ${now()}`, now(), job.id);
+          await runJob(job);
+        } catch (e) { console.error('[scheduler] job failed', r.id, e.message); }
+      }
     } finally {
       ticking = false;
     }
@@ -416,7 +430,7 @@ function mount(app, { db, auth, mailer, messaging, push, generateContent, roleLe
   }
 
   console.log('[scheduler] mounted', enabled() ? '(enabled)' : '(disabled — set scheduler_enabled=1)');
-  return { whatsappDigestFor };
+  return { whatsappDigestFor, _tick: tick, _runJob: runJob }; // _-prefixed: exposed for tests only
 }
 
 // Squeeze a (flat or multi-event) digest into a short WhatsApp message: headline,

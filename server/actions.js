@@ -117,6 +117,16 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
       PRIMARY KEY (root_id, email)
     );
 
+    -- Per-recipient ledger for one campaign run (crash-safe sends): a row lands at
+    -- delivery; resume skips anyone ledgered — a mid-blast deploy never re-emails.
+    CREATE TABLE IF NOT EXISTS action_sends (
+      action_id TEXT NOT NULL,
+      recipient TEXT NOT NULL,  -- email (email channel) or phone (sms channel)
+      channel   TEXT NOT NULL,  -- email | sms
+      at        TEXT NOT NULL,
+      PRIMARY KEY (action_id, recipient, channel)
+    );
+
     -- Drip sequences: one row per enrolled recipient, tracking where they are in
     -- the sequence and when the next step is due. They drop out (status flips)
     -- the moment they buy (re-checked against the abandoned audience each step).
@@ -812,7 +822,14 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     // SMS sub-cap: a tighter ceiling than the audience cap so a big email blast can't
     // also fire a big (costly) SMS blast. Once hit, remaining recipients still get email.
     const smsCap = smsCapFor(a.entityId);
-    const results = { sent: 0, failed: 0, clicks: a.results.clicks || 0, total: a.audience.length, startedAt: now(), emailSent: a.results.emailSent || 0, smsSent: a.results.smsSent || 0 };
+    // Crash-safe resume: the action_sends ledger says who this campaign already
+    // reached (a deploy/crash mid-blast kills the loop; boot resumes it). Counters
+    // re-derive from the ledger so a restart can't under-count billing.
+    const ledger = sql.prepare('SELECT recipient, channel FROM action_sends WHERE action_id=?').all(a.id);
+    const doneEmail = new Set(ledger.filter((l) => l.channel === 'email').map((l) => l.recipient));
+    const doneSms = new Set(ledger.filter((l) => l.channel === 'sms').map((l) => l.recipient));
+    const markSent = sql.prepare('INSERT OR IGNORE INTO action_sends (action_id, recipient, channel, at) VALUES (?,?,?,?)');
+    const results = { sent: 0, failed: 0, clicks: a.results.clicks || 0, total: a.audience.length, startedAt: a.results.startedAt || now(), emailSent: doneEmail.size, smsSent: doneSms.size };
     saveResults(a.id, results);
     let processed = 0;
     for (const recipient of a.audience) {
@@ -831,26 +848,30 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
       // counts as sent; only count failed if every attempted channel failed.
       // We also track per-channel delivered counts so the report can compute an
       // honest per-channel CTR (clicks/delivered) on both-channel campaigns.
-      let ok = false, attempted = false, lastErr = '';
+      const emailKey = String(recipient.email || '').toLowerCase();
+      const emailDone = !!emailKey && doneEmail.has(emailKey);
+      const smsDone = !!recipient.phone && doneSms.has(String(recipient.phone));
+      let ok = emailDone || smsDone; // reached on a previous (interrupted) run
+      let attempted = false, lastErr = '';
       try {
         // Per-channel consent enforced here (emailOk/smsOk set at resolution;
         // undefined on legacy audiences = allowed). The transactional toggle
         // sets both true at resolution, so this stays a simple per-channel check.
-        if (wantsEmail && recipient.email && recipient.emailOk !== false) {
+        if (wantsEmail && recipient.email && recipient.emailOk !== false && !emailDone) {
           attempted = true;
           const { html, text, subject } = renderFor(a, recipient);
           const r = await mailer.send({ to: recipient.email, subject: subject || a.title || 'An update from your event', html, text, fromName: branding.senderName, kind: 'campaign', entity: a.entityId });
-          if (r.ok) { ok = true; results.emailSent += 1; } else lastErr = r.error || r.reason || 'email failed';
+          if (r.ok) { ok = true; results.emailSent += 1; markSent.run(a.id, emailKey, 'email', now()); } else lastErr = r.error || r.reason || 'email failed';
         }
-        if (wantsSms && recipient.phone && recipient.smsOk !== false && results.smsSent < smsCap) {
+        if (wantsSms && recipient.phone && recipient.smsOk !== false && !smsDone && results.smsSent < smsCap) {
           attempted = true;
           const r = await messaging.sendSms({ to: recipient.phone, text: renderSmsFor(a, recipient) });
-          if (r.ok) { ok = true; results.smsSent += 1; } else lastErr = r.error || r.reason || 'SMS failed';
+          if (r.ok) { ok = true; results.smsSent += 1; markSent.run(a.id, String(recipient.phone), 'sms', now()); } else lastErr = r.error || r.reason || 'SMS failed';
         }
       } catch (e) { lastErr = e.message; }
       if (ok) results.sent += 1; else if (attempted) { results.failed += 1; results.lastError = lastErr; }
       if ((results.sent + results.failed) % 20 === 0) saveResults(a.id, results);
-      await new Promise((res) => setTimeout(res, 120)); // gentle rate (~8/sec)
+      if (attempted) await new Promise((res) => setTimeout(res, 120)); // gentle rate (~8/sec); resumes skip the wait
     }
     results.finishedAt = now();
     saveResults(a.id, results);
@@ -1808,6 +1829,16 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
   const convTimer = setInterval(() => checkConversions().catch(() => {}), 30 * 60000);
   if (convTimer.unref) convTimer.unref();
   setTimeout(() => checkConversions().catch(() => {}), 45000);
+
+  // Crash recovery: a deploy mid-blast leaves campaigns stuck 'running' with no
+  // loop attached. Resume shortly after boot — the action_sends ledger skips
+  // everyone already reached, so the blast finishes and nobody is emailed twice.
+  setTimeout(() => {
+    for (const r of sql.prepare("SELECT id FROM actions WHERE status='running'").all()) {
+      console.log('[actions] resuming campaign interrupted by restart:', r.id);
+      runCampaign(r.id).catch((e) => { console.error('[actions] resume failed', r.id, e.message); setStatus(r.id, 'failed'); });
+    }
+  }, 12000).unref?.();
 
   // ── public routes (no auth; registered before the SPA fallback) ──
   // Open pixel /o, tracked click /c, SMS short link /k, unsubscribe /u — the

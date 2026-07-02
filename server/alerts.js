@@ -364,6 +364,12 @@ function mount(app, { db, auth, resolveTileValue, resolveCustomMetric, metricCat
         const cooled = !a.lastFiredAt || (Date.now() - new Date(a.lastFiredAt).getTime()) >= a.cooldownMin * 60000;
         message = buildMessage(a, value);
         if (cooled) {
+          // Claim BEFORE delivering (mark-before-send): if the process dies
+          // mid-delivery the cooldown stops the next tick re-firing this alert —
+          // a crash can drop one notification, never spam repeats. The final
+          // UPDATE below re-writes the same values, so this stays idempotent.
+          sql.prepare('UPDATE alerts SET state=?, last_fired_at=?, fire_count=? WHERE id=?')
+            .run('triggered', ts, a.fireCount + 1, a.id);
           const channels = deliver(a, value, message);
           recordEvent(a, value, message, channels, 'fired');
           fired = true;

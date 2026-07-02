@@ -3044,9 +3044,21 @@ app.get('*', (_req, res) => {
 app.use(errorMiddleware);
 
 const PORT = process.env.PORT || 3045;
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Howler Looker Tool running on http://localhost:${PORT}`);
   console.log(`Looker instance: ${looker.lookerBaseUrl() || '(not configured — set in Admin → Integrations)'}`);
   // Pull organic social stats once a day for every connected client (best-effort).
   socialMetrics.startDailySync({ listEntities: () => db.listEntities() });
+});
+
+// Graceful shutdown — Render sends SIGTERM on EVERY deploy. Stop accepting new
+// connections and give in-flight requests a moment to drain, then exit. Work
+// interrupted anyway is designed to survive the kill: campaign blasts resume
+// from the action_sends ledger on next boot, and digest/alert run-slots are
+// claimed before sending, so a killed send is missed (and visible), never
+// double-delivered.
+process.on('SIGTERM', () => {
+  console.log('[shutdown] SIGTERM received — draining connections');
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(0), 8000).unref();
 });

@@ -278,3 +278,29 @@ test('the campaign list carries audienceCount but NEVER the audience blob', asyn
   assert.equal(a.audienceCount, 3);
   assert.equal('audience' in a, false); // the blob never leaves the server on list
 });
+
+// ── 6. Crash-safe sends (action_sends ledger) ────────────────────────────────
+test('a resumed campaign skips recipients already in the send ledger — nobody is emailed twice', async () => {
+  const ent = h.makeEntity('Resume Co', 'resume-org');
+  const owner = h.makeClient('resume@test.local', [ent.id], 'owner');
+  const created = await app.req('POST', `/api/actions/${ent.id}`, {
+    as: owner, body: { title: 'Resumable', channel: 'email', subject: 'S', body: 'B', audience: { mode: 'paste', pasted: 'r1@x.com\nr2@x.com\nr3@x.com' } },
+  });
+  const aid = created.body.action.id;
+  // Simulate a blast that died after reaching r1: ledger row exists (written at
+  // delivery time), status left 'running' by the crash — this is exactly the
+  // state a mid-deploy kill leaves behind.
+  h.db.db.prepare('INSERT INTO action_sends (action_id, recipient, channel, at) VALUES (?,?,?,?)')
+    .run(aid, 'r1@x.com', 'email', '2026-06-01');
+
+  await app.req('POST', `/api/actions/${ent.id}/${aid}/approve`, { as: owner });
+  const a = await waitForStatus(ent.id, aid, 'done', owner);
+
+  // r1 was NOT re-sent; r2/r3 were; the counters still account for all three.
+  assert.deepEqual(sent.email.sort(), ['r2@x.com', 'r3@x.com']);
+  assert.equal(a.results.sent, 3);
+  assert.equal(a.results.emailSent, 3);
+  // Every delivery is ledgered for the next resume.
+  const rows = h.db.db.prepare('SELECT recipient FROM action_sends WHERE action_id=? ORDER BY recipient').all(aid).map((r) => r.recipient);
+  assert.deepEqual(rows, ['r1@x.com', 'r2@x.com', 'r3@x.com']);
+});
